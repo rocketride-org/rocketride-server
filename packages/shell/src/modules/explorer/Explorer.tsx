@@ -10,7 +10,8 @@
  *   - Directory expand/collapse
  *   - File selection and active highlight
  *   - Optional child items under files (sources, layers, tracks, etc.)
- *   - Status dots per entry/child (running/error/warning)
+ *   - Status indicators per entry/child: a green dot = running NOW (liveness
+ *     only), error/warning COUNT CHIPS = the last run's diagnostics
  *   - Inline rename and create (when onFileManage provided)
  *   - Context menus (rename/delete)
  *   - Tree/flat view toggle
@@ -289,12 +290,40 @@ function entryStatus(entry: ExplorerEntry, statuses: Map<string, ExplorerStatus>
 	return { running, errorCount, warningCount };
 }
 
-/** Returns status dot color based on aggregate state. */
+/**
+ * Returns the status dot color for an aggregate state — LIVENESS ONLY.
+ *
+ * Indicator semantics (design decision 2026-08-07): the dot means exactly one
+ * thing everywhere it appears — "running right now". Diagnostics render as
+ * explicit count chips (see the error/warning badges), never as a recolored
+ * dot, so a tree dot can no longer be mistaken for a dirty marker or a
+ * warning state.
+ */
 function statusDotColor(status: { running: boolean; errorCount: number; warningCount: number }): string | null {
-	if (status.errorCount > 0) return 'var(--rr-color-error)';
-	if (status.warningCount > 0) return 'var(--rr-color-warning)';
-	if (status.running) return 'var(--rr-color-success)';
-	return null;
+	return status.running ? 'var(--rr-color-success)' : null;
+}
+
+/**
+ * Builds a file/directory row tooltip: the path plus a diagnostics summary.
+ *
+ * Diagnostics survive the end of the run that produced them (they reset when
+ * the NEXT run begins), so the tooltip phrases them as "Last run" — a stale
+ * chip reads as history, not a live condition.
+ *
+ * @param path - The row's file or directory path (always the first line).
+ * @param status - Aggregate running/error/warning state for the row.
+ * @returns The multi-line tooltip text.
+ */
+function entryTooltip(path: string, status: { running: boolean; errorCount: number; warningCount: number }): string {
+	const lines: string[] = [path];
+	if (status.running) lines.push('Running');
+	if (status.errorCount > 0 || status.warningCount > 0) {
+		const parts: string[] = [];
+		if (status.errorCount > 0) parts.push(`${status.errorCount} error${status.errorCount === 1 ? '' : 's'}`);
+		if (status.warningCount > 0) parts.push(`${status.warningCount} warning${status.warningCount === 1 ? '' : 's'}`);
+		lines.push(`Last run: ${parts.join(', ')}`);
+	}
+	return lines.join('\n');
 }
 
 /** Returns aggregate status for all descendant files under a directory. */
@@ -565,7 +594,11 @@ export const Explorer: React.FC<IExplorerProps> = ({ config, entries, statuses =
 					const isExpanded = expandedDirs.has(dir.path);
 					const isSelected = hasFileManage && selectedPath === dir.path;
 					const rowKey = `dir:${dir.path}`;
-					const dirDot = !isExpanded ? statusDotColor(dirStatus(dir.path, entries, statuses)) : null;
+					// Roll-up indicators only while COLLAPSED — expanded, the
+					// children speak for themselves. Dot = liveness; chips carry
+					// the descendant error/warning counts.
+					const dirStat = !isExpanded ? dirStatus(dir.path, entries, statuses) : null;
+					const dirDot = dirStat ? statusDotColor(dirStat) : null;
 					const isRenaming = renamePath === dir.path;
 
 					nodes.push(
@@ -603,6 +636,8 @@ export const Explorer: React.FC<IExplorerProps> = ({ config, entries, statuses =
 							) : (
 								<span style={S.rowName}>{dir.name}</span>
 							)}
+							{dirStat && dirStat.errorCount > 0 && <span style={S.badge('var(--rr-color-error)')}>&#10006; {dirStat.errorCount}</span>}
+							{dirStat && dirStat.warningCount > 0 && <span style={S.badge('var(--rr-color-warning)')}>&#9888; {dirStat.warningCount}</span>}
 							{dirDot && <div style={S.dot(dirDot)} />}
 							{hasFileManage && (hoveredRow === rowKey || menuPath === dir.path) && !isRenaming && (
 								<button
@@ -669,7 +704,7 @@ export const Explorer: React.FC<IExplorerProps> = ({ config, entries, statuses =
 								if (hasChildren) toggleFile(file.path);
 								if (hasFileManage) setSelectedPath(file.path);
 							}}
-							title={file.path}
+							title={entryTooltip(file.path, status)}
 							draggable={canDrag}
 							onDragStart={(e) => handleDragStart(e, file.path)}
 							onDragEnd={handleDragEnd}
@@ -692,6 +727,8 @@ export const Explorer: React.FC<IExplorerProps> = ({ config, entries, statuses =
 							) : (
 								<span style={S.rowName}>{displayName}</span>
 							)}
+							{status.errorCount > 0 && <span style={S.badge('var(--rr-color-error)')}>&#10006; {status.errorCount}</span>}
+							{status.warningCount > 0 && <span style={S.badge('var(--rr-color-warning)')}>&#9888; {status.warningCount}</span>}
 							{dotColor && <div style={S.dot(dotColor)} />}
 							{hasFileManage && (hoveredRow === rowKey || menuPath === file.path) && !isRenaming && (
 								<button
@@ -811,7 +848,10 @@ export const Explorer: React.FC<IExplorerProps> = ({ config, entries, statuses =
 
 							nodes.push(
 								<div key={chRowKey} style={{ ...S.row, paddingLeft: indent + 20, ...hoverBg(chRowKey) }} onMouseEnter={() => setHoveredRow(chRowKey)} onMouseLeave={() => setHoveredRow(null)} onClick={() => onOpenFile(file.path)} title={childTooltip(ch, taskState)}>
-									<div style={S.dot(chRunning ? 'var(--rr-color-success)' : 'var(--rr-text-secondary)')} />
+									{/* Liveness dot only while running — idle is the default
+								    state and gets no marker; the fixed-width slot keeps
+								    the name column aligned either way. */}
+								{chRunning ? <div style={S.dot('var(--rr-color-success)')} /> : <span style={{ width: 8, flexShrink: 0 }} />}
 									<span style={S.rowName}>{ch.name}</span>
 									{errCount > 0 && <span style={S.badge('var(--rr-color-error)')}>&#10006; {errCount}</span>}
 									{warnCount > 0 && <span style={S.badge('var(--rr-color-warning)')}>&#9888; {warnCount}</span>}

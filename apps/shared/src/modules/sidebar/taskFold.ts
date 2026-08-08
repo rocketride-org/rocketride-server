@@ -83,9 +83,11 @@ export function foldTaskEvent(
 	switch (action) {
 		case 'begin':
 		case 'restart': {
-			// Preserve accumulated errors/warnings across a restart.
-			const existing = nextActive.get(key);
-			nextActive.set(key, { running: true, errors: existing?.errors ?? [], warnings: existing?.warnings ?? [] });
+			// A begin/restart is a NEW run: stale diagnostics from the previous
+			// run reset here, so a lingering warning chip always describes the
+			// run the user is looking at (indicator-semantics decision: dots =
+			// liveness, chips = the LAST run's diagnostics).
+			nextActive.set(key, { running: true, errors: [], warnings: [] });
 			if (projectId && sourceId && !isKnownTask(projectId, sourceId)) {
 				if (!unknownTasks.some((ut) => ut.projectId === projectId && ut.sourceId === sourceId)) {
 					nextUnknown = [
