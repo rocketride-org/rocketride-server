@@ -777,11 +777,16 @@ class TaskServer(DAPBase):
         """
         Allocate an available port from the managed pool.
 
-        Returns the first port in the configured window that is neither already
-        handed out nor rejected by a bind probe, so the child process that
-        receives the number on its command line can actually listen on it.
-        Ports the operating system forbids are remembered and skipped without
-        probing again; ports held by another socket are re-probed on every call.
+        Returns the first port in the window that is neither already handed out
+        nor rejected by a bind probe, so the child that receives the number on
+        its command line can actually listen on it. OS-forbidden ports are
+        cached; ports merely held by another socket are re-probed every call.
+
+        Two consequences of probing without SO_REUSEADDR: on POSIX a port still
+        in TIME_WAIT reads as in-use even though the child could bind it, so a
+        just-released port is not handed straight back; and the sweep runs
+        synchronously on the event loop, one socket()/bind()/close() per
+        candidate. Both are acceptable at this window size.
 
         Returns:
             int: An available port number inside the configured window.
@@ -792,52 +797,86 @@ class TaskServer(DAPBase):
         """
         base_port = self._config.get('base_port', 20000)
 
-        # Port 0 means "any ephemeral port" to bind(), so it always probes free
-        # and would leave the child choosing its own port while the parent dials
-        # zero. The upper bound keeps the scan inside the valid range: bind()
-        # raises OverflowError, not OSError, above 65535.
+        # Port 0 means "any ephemeral port" to bind(), so it always probes free.
+        # Above 65535 bind() raises OverflowError, not OSError.
         first_port = max(base_port, 1)
         last_port = min(base_port + 9999, 65535)
 
-        tallies = {'allocated': 0, 'occupied': 0, 'reserved': 0, 'unexpected': 0}
-        unexpected_errno = None
+        # Windows exclusion ranges come and go with Hyper-V, WSL and Docker, so
+        # a cached verdict can outlive the reservation. Without a retry the
+        # usable window could only ever shrink. One retry, never more.
+        for attempt in range(2):
+            num_allocated = num_occupied = num_reserved = num_unexpected = 0
+            unexpected_errno = None
 
-        # Membership snapshot. `_allocated_ports` stays a list — release_port and
-        # the pool assertions read it as one — but a linear scan per candidate
-        # makes a full window quadratic, and this method blocks the event loop.
-        # Nothing awaits inside the loop, so the snapshot cannot go stale.
-        already_allocated = set(self._allocated_ports)
+            # Skipped on a cached verdict rather than a live probe: only these
+            # can be stale, so only these justify a retry.
+            trusted_cache = 0
 
-        for port in range(first_port, last_port + 1):
-            if port in already_allocated:
-                tallies['allocated'] += 1
-                continue
+            # Snapshot: the list stays authoritative for release_port, but a
+            # linear scan per candidate would make a full window quadratic.
+            already_allocated = set(self._allocated_ports)
 
-            if port in self._reserved_ports:
-                tallies['reserved'] += 1
-                continue
+            for port in range(first_port, last_port + 1):
+                if port in already_allocated:
+                    num_allocated += 1
+                    continue
 
-            failure = self._probe_port(port)
+                if port in self._reserved_ports:
+                    num_reserved += 1
+                    trusted_cache += 1
+                    continue
 
-            if failure is None:
-                self._allocated_ports.append(port)
-                skipped = tallies['occupied'] + tallies['reserved'] + tallies['unexpected']
-                if skipped:
+                failure = self._probe_port(port)
+
+                if failure is None:
+                    self._allocated_ports.append(port)
+                    if num_occupied or num_reserved or num_unexpected:
+                        self.debug_message(
+                            f'Assigned port {port}, having skipped {num_occupied} in use, '
+                            f'{num_reserved} reserved and {num_unexpected} unexpected'
+                        )
+                    return port
+
+                if failure == errno.EACCES:
+                    self._reserved_ports.add(port)
+                    num_reserved += 1
+                elif failure == errno.EADDRINUSE:
+                    num_occupied += 1
+                else:
+                    num_unexpected += 1
+                    unexpected_errno = failure
+
+            # A window exhausted by live probes has nothing stale to forget.
+            if attempt or not trusted_cache:
+                break
+
+            self.debug_message(
+                f'No port free in {first_port}-{last_port}; dropping {len(self._reserved_ports)} '
+                f'cached OS reservations and probing again'
+            )
+            self._reserved_ports.clear()
+
+        # Every failure was ours, not the pool's — an fd ceiling, say. Nothing
+        # was learned about these ports, and the child has its own fd table, so
+        # degrade to the old behaviour rather than refuse to launch.
+        if num_unexpected and not num_occupied and not num_reserved:
+            name = errno.errorcode.get(unexpected_errno, str(unexpected_errno))
+            for port in range(first_port, last_port + 1):
+                if port not in already_allocated:
+                    self._allocated_ports.append(port)
                     self.debug_message(
-                        f'Assigned port {port}, having skipped {tallies["occupied"]} in use, '
-                        f'{tallies["reserved"]} reserved and {tallies["unexpected"]} unexpected'
+                        f'Could not probe any port in {first_port}-{last_port} (errno '
+                        f'{unexpected_errno} / {name}); assigning {port} unverified'
                     )
-                return port
+                    return port
 
-            if failure == errno.EACCES:
-                self._reserved_ports.add(port)
-                tallies['reserved'] += 1
-            elif failure == errno.EADDRINUSE:
-                tallies['occupied'] += 1
-            else:
-                tallies['unexpected'] += 1
-                unexpected_errno = failure
-
+        tallies = {
+            'allocated': num_allocated,
+            'occupied': num_occupied,
+            'reserved': num_reserved,
+            'unexpected': num_unexpected,
+        }
         raise RuntimeError(self._no_ports_message(base_port, first_port, last_port, tallies, unexpected_errno))
 
     def release_port(self, port: int) -> None:
@@ -1714,41 +1753,29 @@ class TaskServer(DAPBase):
         """
         Test whether a TCP port can be bound right now.
 
-        Binds a throwaway socket to IPv4 loopback and closes it again — the
-        address both consumers of an assigned port use: the data WebServer is
-        started on '127.0.0.1', and pydevd's listener opens an AF_INET socket
-        on the '--debug_host' it is handed.
+        IPv4 loopback is what both consumers bind: the data WebServer on
+        '127.0.0.1', and pydevd's AF_INET listener on the given '--debug_host'.
 
-        No socket options are set, deliberately. On Windows SO_REUSEADDR makes
-        a busy port report EACCES instead of EADDRINUSE, and EACCES is the
-        verdict assign_port caches for the life of the process — so the option
-        would have the allocator permanently blacklist ports that are merely
-        busy. Anyone adding socket options here has to revisit that cache.
-        bind() alone proves ownership, so the socket never listens and cannot
-        accept a stray connection.
+        No socket options, deliberately: on Windows SO_REUSEADDR turns a busy
+        port's EADDRINUSE into EACCES, which assign_port caches for the life of
+        the process — the allocator would blacklist ports that are merely busy.
+        Adding options here means revisiting that cache.
 
         Args:
             port (int): TCP port number to test.
 
         Returns:
-            Optional[int]: None when the port binds, otherwise the errno of the
-                failure: EACCES when the operating system forbids the port,
-                EADDRINUSE when another socket holds it. Never None for a
-                failure — an OSError carrying no errno falls back to
-                EADDRINUSE, so a port that failed to bind can never read as
-                free.
+            Optional[int]: None when the port binds, otherwise the failure's
+                errno — EACCES when the OS forbids the port, EADDRINUSE when
+                another socket holds it. Never None for a failure.
         """
         try:
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+                sock.bind(('127.0.0.1', port))
         except OSError as e:
+            # None is the success sentinel and an OSError may carry no errno,
+            # so fail closed.
             return e.errno or errno.EADDRINUSE
-
-        try:
-            sock.bind(('127.0.0.1', port))
-        except OSError as e:
-            return e.errno or errno.EADDRINUSE
-        finally:
-            sock.close()
 
         return None
 
@@ -1763,11 +1790,9 @@ class TaskServer(DAPBase):
         """
         Build the error message for an exhausted port window.
 
-        Names whichever cause accounts for most of the window, so nobody is
-        sent hunting a foreign process when the ports are held by this server
-        or when probing itself was failing. Only the two causes that point
-        outward — other processes, operating-system reservations — carry a
-        platform command.
+        Names whichever cause accounts for most of the window, so nobody hunts
+        a foreign process for ports this server holds. Only the two outward
+        causes carry a platform command.
 
         Args:
             base_port (int): The configured base port, before clamping.
@@ -1784,7 +1809,10 @@ class TaskServer(DAPBase):
         if first_port > last_port:
             return f'No available ports: configured base_port {base_port} leaves no ports at or below 65535.'
 
-        kind = max(tallies, key=lambda name: tallies[name])
+        # On a tie, dict order would silently always pick the same cause.
+        highest = max(tallies.values())
+        leaders = [name for name, count in tallies.items() if count == highest]
+        kind = leaders[0]
 
         if kind == 'allocated':
             cause = 'most of the range is already allocated by this server'
@@ -1815,9 +1843,28 @@ class TaskServer(DAPBase):
             else:
                 hint = 'List current listeners with `ss -ltn`.'
 
+        # The hint can only speak for one cause, so name the other.
+        if len(leaders) > 1:
+            labels = {
+                'allocated': 'ports this server holds',
+                'occupied': 'ports other processes hold',
+                'reserved': 'ports the operating system reserves',
+                'unexpected': 'probes that failed unexpectedly',
+            }
+            also = ', '.join(labels[name] for name in leaders[1:])
+            cause += f' — tied with {also}, so this hint covers only one of them'
+
+        # Otherwise "widen its window" is advice that cannot be followed upward.
+        clamped = ''
+        if last_port < base_port + 9999:
+            clamped = (
+                f' The window is {last_port - first_port + 1} ports, not 10000: base_port {base_port} '
+                f'would run past 65535, so it was clamped.'
+            )
+
         return (
             f'No available ports in the range {first_port}-{last_port}: {cause} '
             f'({tallies["allocated"]} allocated by this server, {tallies["occupied"]} in use by other processes, '
             f'{tallies["reserved"]} reserved by the operating system, '
-            f'{tallies["unexpected"]} unexpected probe failures). {hint}'
+            f'{tallies["unexpected"]} unexpected probe failures). {hint}{clamped}'
         )

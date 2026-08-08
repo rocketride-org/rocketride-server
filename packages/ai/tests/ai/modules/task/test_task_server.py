@@ -306,10 +306,86 @@ def test_assign_port_exhausted_blames_other_processes(monkeypatch):
 
 
 def test_assign_port_exhausted_reports_unexpected_errno(monkeypatch):
-    """A probe failing for our own reasons is reported as itself, not as 'in use'."""
-    _patch_probe(monkeypatch, lambda port: errno.EMFILE)
+    """A probe failing for our own reasons is reported as itself, not as 'in use'.
+
+    One port reports a genuine conflict, so the our-fault fallback below does
+    not apply and the window really is refused.
+    """
+    _patch_probe(monkeypatch, lambda port: errno.EADDRINUSE if port == 20000 else errno.EMFILE)
     ts = _make_server()
     with pytest.raises(RuntimeError, match=f'most probes failed unexpectedly, last with errno {errno.EMFILE}'):
+        ts.assign_port()
+
+
+def test_assign_port_falls_back_when_every_probe_fails_for_our_own_reasons(monkeypatch):
+    """An fd ceiling must not become a refusal to launch.
+
+    When every probe fails for a reason of ours rather than the pool's, nothing
+    was learned about the ports. The child is a separate process with its own
+    descriptor table and would very likely bind, so degrade to what the old
+    allocator did instead of failing the task.
+    """
+    _patch_probe(monkeypatch, lambda port: errno.EMFILE)
+    ts = _make_server()
+    assert ts.assign_port() == 20000
+    assert ts._allocated_ports == [20000]
+
+
+def test_assign_port_drops_stale_reservations_before_giving_up(monkeypatch):
+    """A window that looks fully reserved is re-probed once with a clean cache.
+
+    Windows exclusion ranges come and go as Hyper-V, WSL and Docker start and
+    stop, so a cached EACCES can outlive the reservation. Without this the
+    usable window could only shrink, and a long-lived engine would end up
+    refusing every task while `netsh` reported no exclusions at all.
+    """
+    _patch_probe(monkeypatch, lambda port: None)
+    ts = _make_server()
+    # Cached earlier, when the range really was excluded. The OS has since let
+    # it go, but nothing re-probes a cached port, so the pool looks empty.
+    ts._reserved_ports = set(range(20000, 30000))
+
+    assert ts.assign_port() == 20000
+    assert ts._reserved_ports == set(), 'the stale cache must not survive the retry'
+
+
+def test_assign_port_does_not_resweep_when_the_cache_was_not_consulted(monkeypatch):
+    """A window exhausted by live probes has nothing stale to forget.
+
+    Re-probing it would spend a second full sweep of syscalls on the event loop
+    for nothing, so the retry is gated on cached verdicts actually being used.
+    """
+    probed = []
+
+    def _probe(port):
+        probed.append(port)
+        return errno.EADDRINUSE
+
+    _patch_probe(monkeypatch, _probe)
+    ts = _make_server()
+
+    with pytest.raises(RuntimeError, match='in use by other processes'):
+        ts.assign_port()
+
+    assert len(probed) == 10000, f'expected one sweep of the window, got {len(probed)} probes'
+
+
+def test_assign_port_exhausted_says_the_window_was_clamped(monkeypatch):
+    """A base high enough to run past 65535 gets a short window; say so.
+
+    Otherwise the message advises widening a window that cannot widen upward.
+    """
+    _patch_probe(monkeypatch, lambda port: errno.EADDRINUSE)
+    ts = _make_server(config={'base_port': 60000})
+    with pytest.raises(RuntimeError, match='was clamped'):
+        ts.assign_port()
+
+
+def test_assign_port_exhausted_names_a_tied_cause(monkeypatch):
+    """On a tie the message must not silently pick one of two very different paths."""
+    _patch_probe(monkeypatch, lambda port: errno.EACCES if port < 25000 else errno.EADDRINUSE)
+    ts = _make_server()
+    with pytest.raises(RuntimeError, match='tied with'):
         ts.assign_port()
 
 
@@ -370,11 +446,16 @@ def test_probe_port_never_reports_a_failed_bind_as_free(monkeypatch):
     """An OSError carrying no errno must not read as 'port is free'."""
 
     class _NoErrnoSocket:
+        # _probe_port opens the socket with `with`, so the stub is a context
+        # manager rather than something with a close().
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc_info):
+            return False
+
         def bind(self, address):
             raise OSError()
-
-        def close(self):
-            pass
 
     monkeypatch.setattr(task_server_module.socket, 'socket', lambda *a, **kw: _NoErrnoSocket())
     assert TaskServer._probe_port(20000) == errno.EADDRINUSE

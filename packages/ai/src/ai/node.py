@@ -14,7 +14,7 @@ if sys.path and (sys.path[0].endswith('ai') or sys.path[0].endswith('ai\\') or s
 os.environ['PYDEVD_DISABLE_FILE_VALIDATION'] = '1'
 
 # Import directly from C++
-from engLib import debug
+from engLib import debug, warning
 
 # Total budget for the shared WebServer to come up: the startup callback plus
 # the wait for a bound listener share this one deadline, so a slow start cannot
@@ -128,9 +128,8 @@ def _setup_shared_web_server() -> Tuple[Optional[Any], Optional[Any]]:
 
     from ai.web import WebServer
 
-    # Event the on_startup callback sets. It marks uvicorn entering its serve
-    # loop, which happens before the socket is bound, so it is a liveness hint
-    # rather than proof of a listener. The poll below carries that guarantee.
+    # Set when uvicorn enters its serve loop — which happens before the socket
+    # is bound, so this is a liveness hint, not proof of a listener.
     startup_ready = threading.Event()
 
     async def _on_startup() -> None:
@@ -146,15 +145,12 @@ def _setup_shared_web_server() -> Tuple[Optional[Any], Optional[Any]]:
 
     future = asyncio.run_coroutine_threadsafe(server.serve(), server_loop)
 
-    # Read the constant here, at call time: tests override it on the module.
+    # Read at call time: tests override the constant on the module.
     timeout = _SHARED_SERVER_STARTUP_TIMEOUT_SECONDS
     deadline = time.monotonic() + timeout
 
-    # Wait for the lifespan startup callback in slices, so a serve() that dies
-    # before ever firing it is noticed now instead of at the deadline. uvicorn
-    # runs that hook before it binds, so a bind failure normally sets the event
-    # first and is caught by the poll below; this covers the earlier failures,
-    # such as the lifespan handler itself raising.
+    # In slices, so a serve() that dies before ever firing the callback is
+    # noticed now rather than at the deadline.
     while not startup_ready.is_set():
         if future.done():
             future.result()
@@ -168,28 +164,32 @@ def _setup_shared_web_server() -> Tuple[Optional[Any], Optional[Any]]:
 
     signalled = startup_ready.is_set()
 
-    # Then wait for a listener to actually exist. uvicorn sets Server.started
-    # only after create_server() returns, which is the first moment the port is
-    # ours. `future.done()` is checked first on every pass, so a child that has
-    # already died wins over a stale readiness flag.
+    # Now wait for a listener to exist: uvicorn sets Server.started only after
+    # create_server() returns. future.done() goes first on every pass so a child
+    # that already died beats a stale readiness flag.
     while True:
         if future.done():
-            # Re-raises a bind error, permission denied or port-already-in-use
-            # out of serve(). A future that finished cleanly just ends the wait.
+            # Re-raises a bind error, permission denied or port-already-in-use.
             future.result()
+
+            # It returned instead: serve() ended on its own, so /task/data would
+            # stay unreachable for the rest of this subprocess.
+            if not getattr(getattr(server, 'server', None), 'started', False):
+                warning(f'shared WebServer stopped before it began listening on {data_host}:{data_port}')
             break
 
         if getattr(getattr(server, 'server', None), 'started', False):
             break
 
-        if time.monotonic() >= deadline:
-            debug(
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            warning(
                 f'shared WebServer never began listening on {data_host}:{data_port} '
                 f'within {timeout}s; proceeding anyway'
             )
             break
 
-        time.sleep(_SHARED_SERVER_POLL_INTERVAL_SECONDS)
+        time.sleep(min(_SHARED_SERVER_POLL_INTERVAL_SECONDS, remaining))
 
     if not signalled:
         debug(f'shared WebServer startup did not signal within {timeout}s; proceeding anyway')
@@ -309,11 +309,11 @@ def run():
                 debugpy.wait_for_client()
 
         except Exception as e:
-            # Non-fatal: debugging is optional and must not take the task down.
-            # Named, though — a debug port inside an OS exclusion range fails
-            # here, and that is indistinguishable from "debugging is off" unless
-            # the host and port are said out loud.
-            debug(f'failed to initialize debugpy on {parsed_args.debug_host}:{parsed_args.debug_port}: {e}')
+            # Non-fatal: debugging is optional. Named, though — a debug port in
+            # an OS exclusion range fails here and otherwise looks like
+            # "debugging is off". `warning`, not `debug`: engLib's debug() is
+            # gated on the DebugOut level, which is off by default.
+            warning(f'failed to initialize debugpy on {parsed_args.debug_host}:{parsed_args.debug_port}: {e}')
 
     # Start the global event loop for async operations
     _start_event_loop()
