@@ -44,26 +44,40 @@ def make_files(tmp_path, count):
     return paths
 
 
-def fake_pipes(client, fail_on=None):
+def fake_pipes(client, fail_open=None, fail_write=None):
     """Point client.pipe at fakes and return the stats they record."""
     stats = {'opened': 0, 'active': 0, 'peak': 0}
 
     class FakePipe:
+        """Mimics DataPipe's open/close bookkeeping, including the double-close guard."""
+
         def __init__(self, name):
             self.name = name
             self.pipe_id = stats['opened']
+            self._opened = False
+            self._closed = False
+
+        @property
+        def is_opened(self):
+            return self._opened
 
         async def open(self):
-            if self.name == fail_on:
+            if self.name == fail_open:
                 raise RuntimeError('pipe rejected')
+            self._opened = True
             stats['active'] += 1
             stats['peak'] = max(stats['peak'], stats['active'])
 
         async def write(self, buffer):
             # Yield, so overlapping uploads are observable
             await asyncio.sleep(0)
+            if self.name == fail_write:
+                raise RuntimeError('write rejected')
 
         async def close(self):
+            if not self._opened or self._closed:
+                return {}
+            self._closed = True
             await asyncio.sleep(0.01)
             stats['active'] -= 1
             return {}
@@ -105,7 +119,7 @@ async def test_default_limit(client, tmp_path):
 
 async def test_failed_file_does_not_stop_batch(client, tmp_path):
     """One bad file fails on its own and results stay in input order."""
-    fake_pipes(client, fail_on='file-1.txt')
+    fake_pipes(client, fail_open='file-1.txt')
     files = make_files(tmp_path, 4)
 
     results = await client.send_files(files, 'task-token', 2)
@@ -113,6 +127,18 @@ async def test_failed_file_does_not_stop_batch(client, tmp_path):
     assert [r['filepath'] for r in results] == files
     assert [r['action'] for r in results] == ['complete', 'error', 'complete', 'complete']
     assert 'pipe rejected' in results[1]['error']
+
+
+async def test_failed_write_releases_its_pipe(client, tmp_path):
+    """A file that fails mid-transfer closes its pipe instead of holding a slot."""
+    stats = fake_pipes(client, fail_write='file-1.txt')
+    files = make_files(tmp_path, 4)
+
+    results = await client.send_files(files, 'task-token', 2)
+
+    assert stats['active'] == 0
+    assert results[1]['action'] == 'error'
+    assert [r['action'] for r in results] == ['complete', 'error', 'complete', 'complete']
 
 
 @pytest.mark.parametrize('max_concurrent', [0, -1, 2.5, True, 'five'])

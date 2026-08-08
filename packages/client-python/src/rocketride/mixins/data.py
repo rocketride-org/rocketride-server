@@ -694,6 +694,14 @@ class DataMixin(DAPClient):
                 file_exception = e
                 self.debug_message(f'Error uploading {filepath}: {e}')
 
+                # Release the pipe, or a file that failed mid-transfer keeps it
+                # open on the server while the worker moves on to the next one
+                if pipe is not None and pipe.is_opened:
+                    try:
+                        await pipe.close()
+                    except Exception:
+                        pass  # Ignore cleanup errors
+
             # Calculate upload time
             upload_time = time.time() - start_time
 
