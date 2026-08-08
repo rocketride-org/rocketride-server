@@ -634,6 +634,7 @@ class DataMixin(DAPClient):
             """
             start_time = time.time()
             bytes_sent = 0
+            file_size = 0
             pipe = None
             file_exception = None
             close_result = None
@@ -694,13 +695,11 @@ class DataMixin(DAPClient):
                 file_exception = e
                 self.debug_message(f'Error uploading {filepath}: {e}')
 
-                # Release the pipe, or a file that failed mid-transfer keeps it
-                # open on the server while the worker moves on to the next one
-                if pipe is not None and pipe.is_opened:
-                    try:
-                        await pipe.close()
-                    except Exception:
-                        pass  # Ignore cleanup errors
+                # The pipe is deliberately left open. close() is the finalize call:
+                # it flushes whatever was written and commits it as a finished
+                # object, so closing a half-sent file would ingest a truncated one.
+                # There is no abort subcommand, so an interrupted pipe is left to
+                # the server's zombie reaper, which drops it without processing.
 
             # Calculate upload time
             upload_time = time.time() - start_time
@@ -710,7 +709,7 @@ class DataMixin(DAPClient):
                 'action': 'complete' if file_exception is None else 'error',
                 'filepath': filepath,
                 'bytes_sent': bytes_sent,
-                'file_size': os.path.getsize(filepath) if os.path.exists(filepath) else 0,
+                'file_size': file_size,
                 'upload_time': upload_time,
                 'result': close_result,
             }
@@ -731,32 +730,24 @@ class DataMixin(DAPClient):
             else:
                 self.debug_message(f'Upload completed: {filepath} ({bytes_sent} bytes, {upload_time:.2f}s)')
 
-        # Fixed pool of workers, so at most max_concurrent pipes are open at once
         self.debug_message(
             f'Starting upload of {len(normalized_files)} files (max_concurrent={max_concurrent}, token={token})'
         )
 
-        next_index = 0
+        semaphore = asyncio.Semaphore(max_concurrent)
 
-        async def upload_worker() -> None:
-            """Claim files one at a time until the batch is exhausted."""
-            nonlocal next_index
+        async def upload_bounded(index: int, filepath: str, objinfo: Dict[str, Any], mimetype: str) -> None:
+            """Hold a slot for one file's whole open/write/close cycle."""
+            async with semaphore:
+                await upload_file(index, filepath, objinfo, mimetype)
 
-            while next_index < len(normalized_files):
-                # Claim the index without awaiting, so no two workers take the same file
-                index = next_index
-                next_index += 1
-                filepath, objinfo, mimetype = normalized_files[index]
-
-                try:
-                    await upload_file(index, filepath, objinfo, mimetype)
-                except Exception as e:
-                    # One bad file must not take down the rest of the batch
-                    self.debug_message(f'Upload failed for {filepath}: {e}')
+        upload_tasks = [
+            upload_bounded(index, filepath, objinfo, mimetype)
+            for index, (filepath, objinfo, mimetype) in enumerate(normalized_files)
+        ]
 
         # Wait for all uploads to complete
-        workers = [upload_worker() for _ in range(min(max_concurrent, len(normalized_files)))]
-        await asyncio.gather(*workers)
+        await asyncio.gather(*upload_tasks, return_exceptions=True)
 
         # Log summary
         successful_uploads = sum(1 for r in results if r and r.get('action') == 'complete')

@@ -28,6 +28,7 @@ pipes are open at the same time.
 """
 
 import asyncio
+import os
 
 import pytest
 
@@ -46,7 +47,7 @@ def make_files(tmp_path, count):
 
 def fake_pipes(client, fail_open=None, fail_write=None):
     """Point client.pipe at fakes and return the stats they record."""
-    stats = {'opened': 0, 'active': 0, 'peak': 0}
+    stats = {'opened': 0, 'active': 0, 'peak': 0, 'closed': []}
 
     class FakePipe:
         """Mimics DataPipe's open/close bookkeeping, including the double-close guard."""
@@ -78,6 +79,7 @@ def fake_pipes(client, fail_open=None, fail_write=None):
             if not self._opened or self._closed:
                 return {}
             self._closed = True
+            stats['closed'].append(self.name)
             await asyncio.sleep(0.01)
             stats['active'] -= 1
             return {}
@@ -119,27 +121,51 @@ async def test_default_limit(client, tmp_path):
 
 async def test_failed_file_does_not_stop_batch(client, tmp_path):
     """One bad file fails on its own and results stay in input order."""
-    fake_pipes(client, fail_open='file-1.txt')
-    files = make_files(tmp_path, 4)
-
-    results = await client.send_files(files, 'task-token', 2)
-
-    assert [r['filepath'] for r in results] == files
-    assert [r['action'] for r in results] == ['complete', 'error', 'complete', 'complete']
-    assert 'pipe rejected' in results[1]['error']
-
-
-async def test_failed_write_releases_its_pipe(client, tmp_path):
-    """A file that fails mid-transfer closes its pipe instead of holding a slot."""
-    stats = fake_pipes(client, fail_write='file-1.txt')
+    stats = fake_pipes(client, fail_open='file-1.txt')
     files = make_files(tmp_path, 4)
 
     results = await client.send_files(files, 'task-token', 2)
 
     assert stats['peak'] <= 2
-    assert stats['active'] == 0
-    assert results[1]['action'] == 'error'
+    assert [r['filepath'] for r in results] == files
     assert [r['action'] for r in results] == ['complete', 'error', 'complete', 'complete']
+    assert 'pipe rejected' in results[1]['error']
+
+
+async def test_failed_write_does_not_finalize_its_pipe(client, tmp_path):
+    """A file that fails mid-transfer is left for the server to reap, not closed.
+
+    close() finalizes the object, so closing here would ingest the bytes that
+    did land as if they were the whole file.
+    """
+    stats = fake_pipes(client, fail_write='file-1.txt')
+    files = make_files(tmp_path, 4)
+
+    results = await client.send_files(files, 'task-token', 2)
+
+    assert 'file-1.txt' not in stats['closed']
+    assert sorted(stats['closed']) == ['file-0.txt', 'file-2.txt', 'file-3.txt']
+    assert [r['action'] for r in results] == ['complete', 'error', 'complete', 'complete']
+
+
+async def test_file_lost_mid_batch_still_gets_a_result(client, tmp_path, monkeypatch):
+    """A file that goes away after the batch starts reports an error, not a None hole."""
+    fake_pipes(client)
+    files = make_files(tmp_path, 4)
+    real_getsize = os.path.getsize
+
+    def vanishing_getsize(path):
+        if str(path).endswith('file-1.txt'):
+            raise OSError('file vanished mid-batch')
+        return real_getsize(path)
+
+    monkeypatch.setattr(os.path, 'getsize', vanishing_getsize)
+
+    results = await client.send_files(files, 'task-token', 2)
+
+    assert all(isinstance(r, dict) for r in results)
+    assert [r['action'] for r in results] == ['complete', 'error', 'complete', 'complete']
+    assert 'vanished' in results[1]['error']
 
 
 @pytest.mark.parametrize('max_concurrent', [0, -1, 2.5, True, 'five'])
