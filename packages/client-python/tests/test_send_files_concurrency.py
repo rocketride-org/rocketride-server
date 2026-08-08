@@ -136,6 +136,7 @@ async def test_failed_write_releases_its_pipe(client, tmp_path):
 
     results = await client.send_files(files, 'task-token', 2)
 
+    assert stats['peak'] <= 2
     assert stats['active'] == 0
     assert results[1]['action'] == 'error'
     assert [r['action'] for r in results] == ['complete', 'error', 'complete', 'complete']
