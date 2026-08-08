@@ -409,7 +409,7 @@ class RocketRideCLI:
             '--threads',
             type=int,
             default=4,
-            help='Number of threads (default: %(default)s)',
+            help='Files uploaded at a time, and pipeline threads when starting one (default: %(default)s)',
         )
 
         # Files to upload - supports multiple files, wildcards, directories
