@@ -128,7 +128,7 @@ export function foldTaskEvent(
 			// contract. Unknown tasks leave the view with their row, so their
 			// entry is dropped rather than retained.
 			const existing = nextActive.get(key);
-			if (existing && isKnownTask(projectId, sourceId)) {
+			if (existing && projectId && sourceId && isKnownTask(projectId, sourceId)) {
 				nextActive.set(key, { running: false, errors: existing.errors, warnings: existing.warnings });
 			} else {
 				nextActive.delete(key);
