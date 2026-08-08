@@ -304,6 +304,11 @@ class TaskCommands(DAPConn):
         Raises:
             Exception: If task termination or cleanup fails
         """
+        # Bound before the try so the failure log below can reference it even
+        # when get_task_token itself raises — otherwise the UnboundLocalError
+        # would replace the real error.
+        token = '<unresolved>'
+
         try:
             token = self.get_task_token(request)
 
