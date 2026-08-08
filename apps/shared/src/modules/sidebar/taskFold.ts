@@ -121,10 +121,21 @@ export function foldTaskEvent(
 			break;
 		}
 
-		case 'end':
-			nextActive.delete(key);
+		case 'end': {
+			// Liveness ends; the LAST run's diagnostics stay on the entry
+			// (running: false) so chips keep describing the finished run until
+			// the next begin/restart resets them — the tooltip's "Last run"
+			// contract. Unknown tasks leave the view with their row, so their
+			// entry is dropped rather than retained.
+			const existing = nextActive.get(key);
+			if (existing && isKnownTask(projectId, sourceId)) {
+				nextActive.set(key, { running: false, errors: existing.errors, warnings: existing.warnings });
+			} else {
+				nextActive.delete(key);
+			}
 			nextUnknown = unknownTasks.filter((ut) => !(ut.projectId === projectId && ut.sourceId === sourceId));
 			break;
+		}
 
 		default:
 			return null;

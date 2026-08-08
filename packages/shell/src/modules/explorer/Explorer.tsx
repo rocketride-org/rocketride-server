@@ -611,6 +611,7 @@ export const Explorer: React.FC<IExplorerProps> = ({ config, entries, statuses =
 								toggleDir(dir.path);
 								if (hasFileManage) setSelectedPath(dir.path);
 							}}
+							title={dirStat ? entryTooltip(dir.path, dirStat) : dir.path}
 							draggable={canDrag}
 							onDragStart={(e) => handleDragStart(e, dir.path)}
 							onDragOver={(e) => handleDragOver(e, dir.path)}

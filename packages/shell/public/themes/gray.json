@@ -5,7 +5,7 @@
 	"--rr-bg-paper": "#454545",
 	"--rr-bg-surface-alt": "#525252",
 	"--rr-fg-titleBar-active": "#ececec",
-	"--rr-fg-titleBar-inactive": "#b4b4b4",
+	"--rr-fg-titleBar-inactive": "#d0d0d0",
 	"--rr-bg-titleBar-active": "#626262",
 	"--rr-bg-titleBar-inactive": "#575757",
 	"--rr-bg-widget": "#454545",
