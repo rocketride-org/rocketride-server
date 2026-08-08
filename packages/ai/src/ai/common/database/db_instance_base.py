@@ -575,35 +575,56 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
         try:
             # Ask the LLM to translate the natural-language question into SQL.
             query_json = self._buildSQLQuery(question_text)
-            is_valid_query = parse_bool(query_json.get('isValid', False))
             sql_query = query_json.get('query')
+            is_valid_query = parse_bool(query_json.get('isValid', False))
 
-            # Execute the query only when the LLM flagged it as valid SQL and
-            # the safety check passes; otherwise return the LLM's text response.
-            # When EXPLAIN rejected the query on every attempt, prefer the real
-            # database error over the rejected SQL text, which reads as prose
-            # and would be indistinguishable from a genuine off-topic answer.
-            if is_valid_query and sql_query and is_sql_safe(sql_query):
-                result = self._executeSQLQuery(sql_query)
-            else:
-                result = query_json.get('error') or sql_query
+            # The EXPLAIN repair loop gave up: `query` still holds the rejected
+            # SQL, not an answer. Emit the error instead of printing it as prose.
+            if query_json.get('error'):
+                self._emitError(query_json['error'], lanes)
+                return
+            # The LLM claimed valid SQL but it fails the safety gate: same rule
+            # -- surface the rejection, never emit the unsafe SQL as prose/data.
+            if is_valid_query and sql_query and not is_sql_safe(sql_query):
+                self._emitError('Generated query contains unsafe SQL', lanes)
+                return
 
-            if 'text' in lanes:
-                self.instance.writeText(str(result))
+            executed = is_valid_query and bool(sql_query)
+            # When the LLM decides it isn't a DB question, `sql_query` holds its prose answer.
+            result = self._executeSQLQuery(sql_query) if executed else sql_query
 
-            if 'table' in lanes and is_valid_query and result:
-                self.instance.writeTable(self._formatResultAsMarkdown(result))
-
-            if 'answers' in lanes:
-                answer = Answer()
-                if is_valid_query and result:
-                    answer.setAnswer(self._formatResultAsMarkdown(result))
-                else:
-                    answer.setAnswer(str(result))
-                self.instance.writeAnswers(answer)
+            self._emit(result, lanes, executed=executed)
 
         except Exception as e:
             error(f'Error handling question: {e}')
+
+    def _emitError(self, message: str, lanes) -> None:
+        """Emit a validation/safety error to the wired lanes, never a rejected query as prose."""
+        if 'text' in lanes:
+            self.instance.writeText(message)
+        if 'answers' in lanes:
+            answer = Answer()
+            answer.setAnswer(message)
+            self.instance.writeAnswers(answer)
+
+    def _emit(self, result, lanes, *, executed: bool) -> None:
+        """Write a query result to whichever of the text/table/answers lanes are wired.
+
+        ``executed`` distinguishes real query results from a rejected/prose
+        fallback -- the table lane and the answers lane's markdown formatting
+        must key off whether the query actually ran, not just whether the LLM
+        claimed the SQL was valid.
+        """
+        if 'text' in lanes:
+            self.instance.writeText(str(result))
+
+        if 'table' in lanes and executed and result:
+            self.instance.writeTable(self._formatResultAsMarkdown(result))
+
+        if 'answers' in lanes:
+            answer = Answer()
+            answer.setAnswer(self._formatResultAsMarkdown(result) if executed and result else str(result))
+            self.instance.writeAnswers(answer)
 
     def writeTable(self, markdown: str) -> None:
         """Handle incoming markdown table data — parse and insert into the database."""

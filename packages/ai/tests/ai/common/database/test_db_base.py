@@ -391,6 +391,34 @@ def test_write_questions_executes_query_when_valid(is_valid_value):
     assert fake_instance.text_written == str([{'answer': 42}])
 
 
+def test_write_questions_emits_error_for_unsafe_sql_not_as_data():
+    """writeQuestions() must emit unsafe SQL as an error, not as formatted table/answer data.
+
+    Regression for the partial mirror caught in review: is_valid_query alone
+    doesn't mean the query ran. When the LLM claims isValid=true but the SQL
+    fails the safety gate, the old code still let the rejected SQL fall
+    through to _formatResultAsMarkdown on the table/answers lanes -- keyed off
+    is_valid_query rather than whether anything was actually executed -- so
+    the rejected SQL went out dressed up as a one-cell table of "data".
+    """
+    fake_global = _FakeGlobal()
+    inst = _sql_instance(fake_global)
+    inst._buildSQLQueryOnce = lambda question_text, *, limit, previous_sql, error: {
+        'isValid': 'true',
+        'query': 'DELETE FROM users',
+    }
+    fake_instance = _FakeInstance(lanes=['text', 'table', 'answers'])
+    inst.instance = fake_instance
+
+    question = Question()
+    question.addQuestion('delete all users')
+
+    inst.writeQuestions(question)
+
+    assert fake_instance.text_written == 'Generated query contains unsafe SQL'
+    assert fake_instance.answer_written.getText() == 'Generated query contains unsafe SQL'
+
+
 # ---------------------------------------------------------------------------
 # _tableExists (engine-backed)
 # ---------------------------------------------------------------------------
