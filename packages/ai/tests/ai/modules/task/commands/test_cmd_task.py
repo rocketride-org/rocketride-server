@@ -379,6 +379,26 @@ async def test_on_terminate_stops_task_with_request_token():
     assert response['type'] == 'response'
 
 
+@pytest.mark.asyncio
+async def test_on_terminate_denied_does_not_stop_the_task():
+    """A failed authorization must stop the handler before stop_task runs.
+
+    get_task is what enforces task.control ownership here, so a caller
+    without it must not be able to terminate someone else's task — the
+    refusal has to happen before any side effect.
+    """
+    server = MagicMock()
+    server.stop_task = AsyncMock()
+    conn = _make_conn(account_info=_account_info(), server=server)
+    conn.get_task_token = MagicMock(return_value='tk_foreign')
+    conn.get_task = MagicMock(side_effect=PermissionError("Permission 'task.control' denied"))
+
+    with pytest.raises(PermissionError, match='denied'):
+        await TaskCommands.on_terminate(conn, {'token': 'tk_foreign', 'arguments': {}})
+
+    server.stop_task.assert_not_awaited()
+
+
 # ---------------------------------------------------------------------------
 # on_restart
 # ---------------------------------------------------------------------------
