@@ -333,7 +333,7 @@ client = RocketRideClient(auth='your-api-key', on_event=handle_events)
 
 await client.connect()
 
-# Simple file list (all files uploaded concurrently)
+# Simple file list (5 uploaded at a time by default)
 files = ['doc1.pdf', 'data.csv', 'report.docx']
 results = await client.send_files(files, token)
 
@@ -1110,8 +1110,8 @@ Both import paths work; the top-level form is convenient when you also import `R
 
 ## Performance Considerations
 
-- File uploads are parallelized (all files uploaded concurrently)
-- The server handles queuing and rate limiting automatically
+- File uploads run concurrently, capped by `send_files`' `max_concurrent` (default 5)
+- Raise `max_concurrent` for many small files, lower it for large ones
 - Use pipes for streaming large datasets to avoid memory issues
 - Event system provides real-time feedback without polling overhead
 - Connection persistence reduces reconnection overhead in long-running applications
