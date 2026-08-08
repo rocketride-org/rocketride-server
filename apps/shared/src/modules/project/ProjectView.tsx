@@ -46,6 +46,7 @@ import type { SchedulePreviewResult } from '../../components/deploy-panel/Deploy
 import type { TaskEventMessage, TaskEventSession, TaskTimeline } from './hooks/useTaskEvents';
 import { createLiveEventStore, type LiveEventStore } from './hooks/liveEventSession';
 import type { ProjectViewMode, ViewState, TaskStatus, TraceEvent } from './types';
+import { TASK_STATE } from './types';
 
 // =============================================================================
 // PROPS
@@ -487,9 +488,17 @@ const ProjectView: React.FC<IProjectViewProps> = ({ project, documentTitle, serv
 	);
 
 	// --- Aggregated error/warning counts -------------------------------------
-
-	const totalErrors = Object.values(statusMap).reduce((sum, ts) => sum + (ts.errors?.length ?? 0), 0);
-	const totalWarnings = Object.values(statusMap).reduce((sum, ts) => sum + (ts.warnings?.length ?? 0), 0);
+	// A source's errors/warnings are LIVE facts only while its run is in flight.
+	// Once the run ends, each SourcePanel's Errors pane clears its items (the
+	// deliberate "dead zone = cleared" rule), so the DEVELOPMENT badge must
+	// clear in lockstep — a badge that outlives its pane advertises a problem
+	// the user can open the page for but never see (statusMap retains the
+	// finished run's final errors). Count issues only for sources whose task is
+	// still in an active run state (STARTING..STOPPING); NONE/COMPLETED/CANCELLED
+	// contribute nothing, matching what the panes show.
+	const isLiveRun = (ts: TaskStatus): boolean => ts.state >= TASK_STATE.STARTING && ts.state <= TASK_STATE.STOPPING;
+	const totalErrors = Object.values(statusMap).reduce((sum, ts) => sum + (isLiveRun(ts) ? (ts.errors?.length ?? 0) : 0), 0);
+	const totalWarnings = Object.values(statusMap).reduce((sum, ts) => sum + (isLiveRun(ts) ? (ts.warnings?.length ?? 0) : 0), 0);
 
 	// --- ViewMenu declaration (rendered by this view's own TabControl) ---
 	// Strip = DESIGN | DEVELOPMENT | DEPLOY (UI direction v5). The Development
