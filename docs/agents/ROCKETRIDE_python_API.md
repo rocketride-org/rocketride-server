@@ -527,16 +527,17 @@ Send data directly to a pipeline.
 
 **Important:** Use this method with pipelines that have `webhook` or `dropper` as the source component. For chat/Q&A systems, use `chat()` method instead with a `chat` source component.
 
-##### `async send_files(files: List, token: str) -> List[Dict[str, Any]]`
+##### `async send_files(files: List, token: str, max_concurrent: int = 5) -> List[Dict[str, Any]]`
 
-Upload multiple files in parallel.
+Upload multiple files in parallel, with a bounded number of uploads in flight at a time.
 
 **Parameters:**
 
 - `files` (list): List of file paths or tuples `(filepath, objinfo)` or `(filepath, objinfo, mimetype)`
 - `token` (str): Task token of the pipeline
+- `max_concurrent` (int, optional): Maximum files uploaded at the same time. Must be a positive integer; raises `ValueError` otherwise (default: 5)
 
-**Returns:** List of upload result dictionaries
+**Returns:** List of upload result dictionaries, in the same order as `files`
 
 **Important:** Use this method with pipelines that have `webhook` or `dropper` as the source component for document processing. For chat/Q&A systems, use `chat()` method with a `chat` source component instead.
 
