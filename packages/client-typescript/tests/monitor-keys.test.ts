@@ -54,6 +54,20 @@ function makeClientShell(): { client: RocketRideClient; calls: Array<{ args?: un
 	return { client, calls };
 }
 
+/**
+ * Register a minimal lifecycle operation as the client's current one.
+ *
+ * `_resubscribeAllMonitors` aborts when its operation is no longer current, so a
+ * white-box caller has to supply the operation the reconnect would have owned.
+ */
+function makeCurrentOperation(client: RocketRideClient): unknown {
+	const operation = { generation: 1, authRequestSent: true, settled: false, accepted: true };
+	const internals = client as unknown as { _lifecycleOperation: unknown; _lifecycleGeneration: number };
+	internals._lifecycleOperation = operation;
+	internals._lifecycleGeneration = operation.generation;
+	return operation;
+}
+
 /** Round-trip a key through the private encode/decode pair. */
 function roundTrip(key: MonitorKey): MonitorKey | null {
 	const proto = RocketRideClient.prototype as unknown as {
@@ -121,7 +135,8 @@ describe('monitor key scope', () => {
 		const { client, calls } = makeClientShell();
 		await client.addMonitor({ projectId: 'proj-1', source: 'src-1', teamId: 'team-1' }, ['summary']);
 		calls.length = 0;
-		await (client as unknown as { _resubscribeAllMonitors: () => Promise<void> })._resubscribeAllMonitors();
+		await (client as unknown as { _resubscribeAllMonitors: (operation: unknown) => Promise<void> })
+			._resubscribeAllMonitors(makeCurrentOperation(client));
 		expect(calls).toHaveLength(1);
 		expect((calls[0].args as Record<string, unknown>).teamId).toBe('team-1');
 	});

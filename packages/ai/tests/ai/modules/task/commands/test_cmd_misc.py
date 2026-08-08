@@ -142,9 +142,13 @@ def test_build_monitors_list_resolves_keys_and_flag_names():
 
 @pytest.mark.asyncio
 async def test_on_rrext_services_returns_specific_service(monkeypatch):
-    """When `arguments.service` is set, return that single definition."""
+    """When `arguments.service` is set, return that single full entry."""
     schema = {'name': 'ocr', 'fields': []}
-    monkeypatch.setattr(cmd_misc, 'getServiceDefinition', lambda name: schema if name == 'ocr' else None)
+
+    async def fake_get_service(name):
+        return schema if name == 'ocr' else None
+
+    monkeypatch.setattr(cmd_misc.services_catalog, 'get_service', fake_get_service)
 
     conn = _make_conn()
     result = await MiscCommands.on_rrext_services(conn, {'arguments': {'service': 'ocr'}})
@@ -155,7 +159,11 @@ async def test_on_rrext_services_returns_specific_service(monkeypatch):
 @pytest.mark.asyncio
 async def test_on_rrext_services_unknown_service_raises(monkeypatch):
     """An unknown service id raises ValueError (re-raised after debug log)."""
-    monkeypatch.setattr(cmd_misc, 'getServiceDefinition', lambda name: None)
+
+    async def fake_get_service(name):
+        return None
+
+    monkeypatch.setattr(cmd_misc.services_catalog, 'get_service', fake_get_service)
 
     conn = _make_conn()
     with pytest.raises(ValueError, match="Service 'unknown' not found"):
@@ -164,14 +172,18 @@ async def test_on_rrext_services_unknown_service_raises(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_on_rrext_services_no_service_returns_all(monkeypatch):
-    """Without a `service` arg, getServiceDefinitions() is returned."""
-    all_schemas = [{'name': 'a'}, {'name': 'b'}]
-    monkeypatch.setattr(cmd_misc, 'getServiceDefinitions', lambda: all_schemas)
+async def test_on_rrext_services_no_service_returns_summary(monkeypatch):
+    """Without a `service` arg, the cached summary body is returned."""
+    summary = {'services': {'a': {'title': 'A'}}, 'version': 7}
+
+    async def fake_get_summary():
+        return summary
+
+    monkeypatch.setattr(cmd_misc.services_catalog, 'get_summary', fake_get_summary)
 
     conn = _make_conn()
     result = await MiscCommands.on_rrext_services(conn, {})
-    assert result['body'] == all_schemas
+    assert result['body'] == summary
 
 
 # ---------------------------------------------------------------------------

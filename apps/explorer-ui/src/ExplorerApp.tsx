@@ -34,12 +34,12 @@
 //            (images, PDF, docx, spreadsheets)
 // =============================================================================
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
-import type { ShellAppProps } from 'shell-ui';
-import { commonStyles } from 'shared/themes/styles';
-import { useShellConnection, useWorkspace, DocTabs, DocSplitLayout } from 'shell-ui';
-import type { Documents } from 'shell-ui';
+import type { ShellAppProps } from 'shell';
+import { commonStyles } from 'shell';
+import { useShellConnection, useWorkspace, DocTabs, DocSplitLayout, AppLayout } from 'shell';
+import type { Documents } from 'shell';
 import { createDocs, destroyDocs, getDocs } from './docs';
 import { createStoreVfs, isFileLoadError } from './store';
 import { getMediaInfo } from './mediaTypes';
@@ -133,7 +133,7 @@ const styles = {
 // =============================================================================
 
 const ExplorerApp: React.FC<ShellAppProps> = () => {
-	const { client, isConnected } = useShellConnection();
+	const { client } = useShellConnection();
 	const { loaded, appState, updateAppState } = useWorkspace();
 	const [ready, setReady] = useState(false);
 
@@ -147,8 +147,18 @@ const ExplorerApp: React.FC<ShellAppProps> = () => {
 		return () => { destroyDocs(); setReady(false); };
 	}, [client, loaded]);
 
-	if (!ready) return <div style={styles.welcome}>Initialising...</div>;
-	return <ExplorerAppReady docs={getDocs()!} />;
+	// Sidebar node memoized once: ExplorerSidebar takes no props and reads all
+	// its state from the shared singletons, so the slot registration is stable.
+	const sidebar = useMemo(() => <ExplorerSidebar />, []);
+
+	// Two-column app: the file-tree Explorer sidebar mounts once Documents is
+	// ready (it shares the singleton with the editor surface).
+	if (!ready) return <AppLayout showStatus><div style={styles.welcome}>Initialising...</div></AppLayout>;
+	return (
+		<AppLayout sidebar={sidebar} showStatus>
+			<ExplorerAppReady docs={getDocs()!} />
+		</AppLayout>
+	);
 };
 
 // =============================================================================
@@ -178,10 +188,6 @@ const ExplorerAppReady: React.FC<{ docs: Documents }> = ({ docs }) => {
 
 	return (
 		<div style={styles.container}>
-			{/* Register the file-tree Explorer into the shell sidebar frame.
-			    Renders null; mounted here so it shares the ready Documents
-			    singleton (active-file highlight, file actions). */}
-			<ExplorerSidebar />
 			<DocSplitLayout
 				docs={docs}
 				renderPane={(groupId: string) => {

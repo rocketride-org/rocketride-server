@@ -27,7 +27,7 @@
 # =============================================================================
 
 from dataclasses import dataclass
-from typing import Optional, TypedDict
+from typing import NotRequired, Optional, TypedDict
 
 from pydantic import BaseModel
 
@@ -58,6 +58,9 @@ class OrgInfo(TypedDict):
     name: str
     permissions: list[str]
     teams: list[TeamInfo]
+    # Public developer slug — the app publisher identity. Absent/None on OSS
+    # and task-scoped synthetic orgs, and on orgs not registered as developers.
+    developerId: NotRequired[Optional[str]]
 
 
 # =============================================================================

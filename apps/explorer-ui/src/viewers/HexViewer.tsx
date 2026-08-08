@@ -266,6 +266,8 @@ class RangeDataSource {
 	private _getUrl: () => Promise<string>;
 	private _getStat: () => Promise<number>;
 	private _onUpdate: () => void;
+	/** Aborts in-flight range fetches on dispose. */
+	private _abort = new AbortController();
 
 	/** Resident chunk ceiling (256 × 64 KB ≈ 16 MB) — far more than any viewport needs. */
 	private static readonly MAX_CACHED_CHUNKS = 256;
@@ -369,16 +371,26 @@ class RangeDataSource {
 		const start = chunkIndex * CHUNK_SIZE;
 		const end = Math.min(start + CHUNK_SIZE - 1, this._fileSize - 1);
 
-		let response = await fetch(this._url, {
-			headers: { Range: `bytes=${start}-${end}` },
-		});
-
-		// If the URL expired, refresh it and retry once
-		if (response.status === 403 || response.status === 401) {
-			this._url = await this._getUrl();
+		let response: Response;
+		try {
 			response = await fetch(this._url, {
 				headers: { Range: `bytes=${start}-${end}` },
+				signal: this._abort.signal,
 			});
+
+			// If the URL expired, refresh it and retry once
+			if (response.status === 403 || response.status === 401) {
+				this._url = await this._getUrl();
+				response = await fetch(this._url, {
+					headers: { Range: `bytes=${start}-${end}` },
+					signal: this._abort.signal,
+				});
+			}
+		} catch (err) {
+			// A dispose-abort is not a chunk failure; the fire-and-forget
+			// _fetchChunk caller must not see the rejection.
+			if (this._abort.signal.aborted) return;
+			throw err;
 		}
 
 		if (response.status !== HTTP_PARTIAL_CONTENT) {
@@ -449,6 +461,7 @@ class RangeDataSource {
 	}
 
 	dispose(): void {
+		this._abort.abort();
 		this._chunks.clear();
 		this._pending.clear();
 		this._failures.clear();

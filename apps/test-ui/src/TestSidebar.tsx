@@ -26,8 +26,7 @@
 
 import React, { useCallback } from 'react';
 import type { CSSProperties } from 'react';
-import type { ShellSidebarProps } from 'shell-ui';
-import { NavButton, BxGridAlt, BxDesktop, BxCog, BxListUl, BxStop, BxPlay } from 'shell-ui';
+import { NavButton, BxGridAlt, BxDesktop, BxCog, BxListUl, BxStop, BxPlay, useSidebarCollapsed } from 'shell';
 import { useSavedConnections, type SavedConnection } from './connections';
 import { getDocs } from './docs';
 import { openConnection } from './TestApp';
@@ -165,7 +164,10 @@ const styles = {
 // COMPONENT
 // =============================================================================
 
-const TestSidebar: React.FC<ShellSidebarProps> = ({ collapsed }) => {
+const TestSidebar: React.FC = () => {
+	// Collapse flag from the sidebar context (the node renders inside the
+	// shell sidebar's collapse provider).
+	const collapsed = useSidebarCollapsed();
 	const connections = useSavedConnections();
 	const currentView = useView();
 	const hasActiveTab = useHasActiveTab();

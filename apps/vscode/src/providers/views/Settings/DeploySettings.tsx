@@ -42,7 +42,7 @@ interface DeploySettingsProps {
 	cloudUserName?: string;
 	onCloudSignIn?: () => void;
 	onCloudSignOut?: () => void;
-	onProbeCloudServer?: () => void;
+	onProbeCloudServer?: (cloudUrl: string) => void;
 	isSaas?: boolean;
 	/** Whether the user has an active subscription. */
 	isSubscribed?: boolean;

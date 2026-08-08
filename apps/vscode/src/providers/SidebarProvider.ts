@@ -33,6 +33,23 @@ import { isDeployRunBody } from '../shared/util/runClassification';
 import { checkMissingEnvVars } from '../shared/util/envVarCheck';
 import { getLogger } from '../shared/util/output';
 import { getProjectProvider } from '../extension';
+import { scanWorkspaceApps, appIconDataUri } from '../appdev/appScan';
+import type { ScannedApp } from '../appdev/appScan';
+
+// =============================================================================
+// TYPES — App Builder sidebar rows (structural mirror of shared AppListItem)
+// =============================================================================
+
+/** One MY APPS row sent to the webview (shared AppListItem shape). */
+interface AppRowDTO {
+	id: string;
+	name: string;
+	status: 'local' | 'dev' | 'draft' | 'pending' | 'approved' | 'rejected' | 'live';
+	folder?: string;
+	/** Host-resolved icon (a data: URI here — loadable under the webview CSP
+	 * regardless of localResourceRoots, which only cover the extension dir). */
+	iconUrl?: string;
+}
 
 // =============================================================================
 // TYPES — serialisable ProjectEntry sent to webview
@@ -64,6 +81,24 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 	// ── Pipeline file state ──────────────────────────────────────────────────
 	private parsedFiles = new Map<string, ParsedPipelineFile>();
 
+	// ── App Builder state ────────────────────────────────────────────────────
+	// Cached workspace scan (re-run on package.json events) and the current
+	// sidebar mode (session-scoped; the webview restores it from updates).
+	private scannedApps: ScannedApp[] = [];
+	// Cached MY APPS rows — sendFullUpdate must not await the catalog RPC
+	// (it would stall every webview update on a slow server); rescans
+	// refresh this cache out-of-band and push appsUpdate when it lands.
+	private appRows: AppRowDTO[] = [];
+	/** Coalesces package.json event bursts into one workspace rescan. */
+	private rescanTimer?: NodeJS.Timeout;
+	/**
+	 * Monotonic rescan counter (the fetchSeq pattern): connect/auth/watcher
+	 * rescans overlap, and only the NEWEST run may commit its scan/rows —
+	 * a slower earlier run must not overwrite fresher state.
+	 */
+	private rescanSeq = 0;
+	private sidebarMode: 'pipelines' | 'apps' | 'nodes' = 'pipelines';
+
 	private logger = getLogger();
 
 	/**
@@ -74,6 +109,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 		this.setupFileWatching();
 		this.setupEventListeners();
 		this.loadPipelineFiles();
+		void this.rescanApps();
 	}
 
 	// =========================================================================
@@ -134,6 +170,14 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 					case 'openUnknownTask':
 						vscode.commands.executeCommand('rocketride.page.status.open', message.projectId, message.sourceId, message.displayName);
 						break;
+					case 'openApp':
+						vscode.commands.executeCommand('rocketride.app.open', message.appId);
+						break;
+					case 'setSidebarMode':
+						// Session-scoped persistence: included in every full update
+						// so a reloaded webview restores the user's last mode.
+						this.sidebarMode = message.mode;
+						break;
 					case 'setDevelopmentMode':
 						await this.configManager.updateConnectionMode('development', message.mode);
 						this.sendFullUpdate();
@@ -180,6 +224,79 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 			watcherPipeJson.onDidDelete((uri) => this.handleFileDeleted(uri)),
 			watcherPipeJson.onDidChange((uri) => this.handleFileChanged(uri))
 		);
+
+		// App bindings live in package.json appManifest blocks — any
+		// package.json event can add/remove/rename an app. node_modules is
+		// excluded (its package.json churn is enormous and never a binding).
+		const watcherPkg = vscode.workspace.createFileSystemWatcher('**/package.json');
+		const onPkgEvent = (uri: vscode.Uri): void => {
+			if (uri.fsPath.includes('node_modules')) return;
+			// Debounced: installs and branch switches touch many package.json
+			// files at once — one rescan after the burst settles.
+			if (this.rescanTimer) clearTimeout(this.rescanTimer);
+			this.rescanTimer = setTimeout(() => {
+				this.rescanTimer = undefined;
+				void this.rescanApps();
+			}, 500);
+		};
+		this.disposables.push(watcherPkg, watcherPkg.onDidCreate(onPkgEvent), watcherPkg.onDidDelete(onPkgEvent), watcherPkg.onDidChange(onPkgEvent), {
+			dispose: () => { if (this.rescanTimer) clearTimeout(this.rescanTimer); },
+		});
+	}
+
+	// =========================================================================
+	// APP BUILDER (MY APPS)
+	// =========================================================================
+
+	/** Re-scans the workspace for app bindings and pushes the merged list. */
+	private async rescanApps(): Promise<void> {
+		// Capture this run's sequence; a newer rescan supersedes it at every
+		// await point below.
+		const mine = ++this.rescanSeq;
+		const scanned = await scanWorkspaceApps();
+		if (mine !== this.rescanSeq) return;
+		this.scannedApps = scanned;
+		const rows = await this.buildAppRows();
+		if (mine !== this.rescanSeq) return;
+		this.appRows = rows;
+		if (this._view) {
+			this._view.webview.postMessage({ type: 'appsUpdate', apps: this.appRows });
+		}
+	}
+
+	/**
+	 * Builds the MY APPS rows: the workspace scan merged with the server's
+	 * list_mine statuses when cloud-signed-in. Merge key is the app id
+	 * (bind, don't sync). Local-only rows read 'local'; server statuses win
+	 * for bound apps; server-only apps appear without a folder.
+	 */
+	private async buildAppRows(): Promise<AppRowDTO[]> {
+		const rows = new Map<string, AppRowDTO>();
+		for (const app of this.scannedApps) {
+			rows.set(app.id, { id: app.id, name: app.name, status: 'local', folder: app.folder, iconUrl: await appIconDataUri(app.icon) });
+		}
+
+		// Server statuses — best-effort: OSS engines reject the marketplace
+		// command (NotImplementedError) and signed-out sessions have no org.
+		try {
+			const client = this.connectionManager.getClient();
+			if (client && this.connectionManager.isConnected() && isCloudConnected()) {
+				const res = (await client.call('rrext_app_catalog', { subcommand: 'list_mine' })) as { apps?: Array<{ id: string; name?: string; status?: string }> };
+				for (const server of res?.apps ?? []) {
+					const status = (server.status ?? 'draft') as AppRowDTO['status'];
+					const bound = rows.get(server.id);
+					if (bound) {
+						bound.status = status;
+					} else {
+						rows.set(server.id, { id: server.id, name: server.name ?? server.id, status });
+					}
+				}
+			}
+		} catch {
+			/* marketplace unavailable (OSS / signed out) — workspace rows stand */
+		}
+
+		return [...rows.values()];
 	}
 
 	/** Handles a newly created .pipe file — assigns a project_id if missing. */
@@ -277,10 +394,15 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
 	/** Subscribes to connection, deploy, config, and cloud-auth events. */
 	private setupEventListeners(): void {
-		const connState = this.connectionManager.on('shell:statusChange', () => {
+		// connectionManager.on()/deployManager.on() return the SHARED manager
+		// (a Node EventEmitter), and ITS dispose() tears down the whole
+		// extension's connection — disposal must wrap off() with the named
+		// handler instead of disposing the return value.
+		const connStateHandler = () => {
 			this.sendFullUpdate();
-		});
-		const connected = this.connectionManager.on('shell:connected', async () => {
+		};
+		this.connectionManager.on('shell:statusChange', connStateHandler);
+		const connectedHandler = async () => {
 			// Subscribe to task lifecycle events
 			const client = this.connectionManager.getClient();
 			if (client) {
@@ -293,13 +415,19 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 			}
 			// Teams come from ConnectResult — no fetch needed, just update the webview
 			this.sendFullUpdate();
-		});
-		const disconnected = this.connectionManager.on('shell:disconnected', () => {
+			// Server app statuses arrive out-of-band: sendFullUpdate posts the
+			// cached rows, so refresh the cache now that the server answers.
+			void this.rescanApps();
+		};
+		this.connectionManager.on('shell:connected', connectedHandler);
+		const disconnectedHandler = () => {
 			this.sendFullUpdate();
-		});
-		const error = this.connectionManager.on('shell:error', () => {
+		};
+		this.connectionManager.on('shell:disconnected', disconnectedHandler);
+		const errorHandler = () => {
 			this.sendFullUpdate();
-		});
+		};
+		this.connectionManager.on('shell:error', errorHandler);
 		const configChange = vscode.workspace.onDidChangeConfiguration((e) => {
 			if (e.affectsConfiguration('rocketride')) {
 				this.sendFullUpdate();
@@ -307,31 +435,46 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 		});
 
 		// Re-parse when service definitions arrive
-		const servicesUpdated = this.connectionManager.on('shell:servicesUpdated', () => {
+		const servicesUpdatedHandler = () => {
 			this.loadPipelineFiles();
-		});
+		};
+		this.connectionManager.on('shell:servicesUpdated', servicesUpdatedHandler);
 
 		// Re-fetch teams when cloud auth state changes (sign-in/sign-out)
 		const cloudAuth = CloudAuthProvider.getInstance();
 		const cloudAuthHandler = async () => {
 			this.sendFullUpdate();
+			// Sign-in/sign-out changes which server statuses list_mine returns
+			void this.rescanApps();
 		};
 		cloudAuth.onDidChange.on('changed', cloudAuthHandler);
 
 		// ── Deploy manager events ────────────────────────────────────────────
-		const deployConnState = this.deployManager.on('shell:statusChange', () => {
+		const deployConnStateHandler = () => {
 			this.sendFullUpdate();
-		});
-		const deployConnected = this.deployManager.on('shell:connected', async () => {
+		};
+		this.deployManager.on('shell:statusChange', deployConnStateHandler);
+		const deployConnectedHandler = async () => {
 			this.sendFullUpdate();
-		});
-		const deployDisconnected = this.deployManager.on('shell:disconnected', () => {
+		};
+		this.deployManager.on('shell:connected', deployConnectedHandler);
+		const deployDisconnectedHandler = () => {
 			this.sendFullUpdate();
-		});
+		};
+		this.deployManager.on('shell:disconnected', deployDisconnectedHandler);
 
-		this.disposables.push(connState, connected, disconnected, error, configChange, servicesUpdated, deployConnState, deployConnected, deployDisconnected, {
-			dispose: () => cloudAuth.onDidChange.removeListener('changed', cloudAuthHandler),
-		});
+		this.disposables.push(
+			{ dispose: () => this.connectionManager.off('shell:statusChange', connStateHandler) },
+			{ dispose: () => this.connectionManager.off('shell:connected', connectedHandler) },
+			{ dispose: () => this.connectionManager.off('shell:disconnected', disconnectedHandler) },
+			{ dispose: () => this.connectionManager.off('shell:error', errorHandler) },
+			configChange,
+			{ dispose: () => this.connectionManager.off('shell:servicesUpdated', servicesUpdatedHandler) },
+			{ dispose: () => this.deployManager.off('shell:statusChange', deployConnStateHandler) },
+			{ dispose: () => this.deployManager.off('shell:connected', deployConnectedHandler) },
+			{ dispose: () => this.deployManager.off('shell:disconnected', deployDisconnectedHandler) },
+			{ dispose: () => cloudAuth.onDidChange.removeListener('changed', cloudAuthHandler) }
+		);
 
 		// Forward server events to webview
 		this.connectionManager.on('shell:event', (event: GenericEvent) => {
@@ -413,6 +556,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 				// Pipeline data
 				entries: this.buildEntries(),
 				unknownTasks: [],
+				// App Builder (MY APPS) — the cached rows; rescanApps refreshes
+				// them out-of-band so this update never awaits the catalog RPC
+				apps: this.appRows,
+				sidebarMode: this.sidebarMode,
 			},
 		});
 	}
@@ -654,12 +801,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
 	/** Generates a 32-character random nonce for Content Security Policy. */
 	private generateNonce(): string {
-		let text = '';
-		const possible = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-		for (let i = 0; i < 32; i++) {
-			text += possible.charAt(Math.floor(Math.random() * possible.length));
-		}
-		return text;
+		// Cryptographic source — a CSP nonce must be unpredictable.
+		return crypto.randomBytes(24).toString('base64url');
 	}
 
 	// =========================================================================

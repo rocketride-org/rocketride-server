@@ -271,6 +271,7 @@ Read, write, and manage files in your account's server-side store. All paths are
 | Method       | Signature                                                              | Returns | Description                                                                                                                                                     |
 | ------------ | --------------------------------------------------------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `fs_get_url` | `async def fs_get_url(self, path: str, expires_in: int = 3600, download_name: str = None) -> str` | `str`   | Time-limited HTTP(S) URL for direct browser access. Cloud backends (S3/Azure) return a presigned/SAS URL; the local filesystem backend returns a JWT-signed `/task/fetch` URL. Served **inline** by default (for streaming / `<img>`/`<video>` sources). Pass `download_name` to force a download with that filename via `Content-Disposition: attachment` — the only reliable way to set the download filename for cross-origin cloud URLs (where the browser `<a download>` hint is ignored). `expires_in` is in seconds (default 3600). |
+| `fs_read_many` | `async def fs_read_many(self, paths: List[str]) -> List[Dict[str, Any]]` | `List[Dict]` | Batch-read many small files in ONE round trip (max 256 paths / 32 MiB total per call) — for many-small-file access patterns where per-file open/read/close is too chatty. Missing/unreadable files are per-entry results (`ok: False` + `error`), never a call failure; results come back in request order with `data` as `bytes`. |
 
 **Examples:**
 
@@ -302,6 +303,21 @@ stream_url = await client.fs_get_url('uploads/video.mp4', expires_in=600)
 # Force a download with a friendly filename (works cross-origin on S3/Azure too)
 download_url = await client.fs_get_url('uploads/video.mp4', download_name='my video.mp4')
 ```
+
+
+### App publish ladder
+
+Typed wrappers over `rrext_app_deploy` — the publish ladder for RocketRide apps.
+**Publish** snapshots an immutable version (never activates anything); **Deploy**
+pins a rung (`@user`, `@team/<name>`, `@org`) to a version — first publish,
+update, promote, and rollback are all this one verb.
+
+| Method | Signature | Description |
+| ------ | --------- | ----------- |
+| `app_publish` | `async def app_publish(self, app_id, version, bundle, message='', module_id=None, name=None) -> dict` | Publish an immutable version to the org registry (single-file `remoteEntry.js` bundle; commit-style `message` shows on the version card). |
+| `app_versions` | `async def app_versions(self, app_id) -> list[dict]` | The version rail, newest first; each entry carries `rungs` naming the rungs currently pinned to it. |
+| `app_deploy` | `async def app_deploy(self, app_id, registry_version, target) -> dict` | Pin a rung to a version. Personal deploys resolve into your own manifest immediately. |
+| `app_where` | `async def app_where(self, app_id) -> list[dict]` | The reverse index: `{rung, handle, version, appVersion, state, deployedAt}` per rung. |
 
 ### Events
 

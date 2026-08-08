@@ -58,7 +58,7 @@ the surrounding graph is unchanged.
 
 ## The catalog
  
- Every available provider (50+ nodes across 13+ LLM providers, 8 vector
+ Every available provider (100+ nodes across 15+ LLM providers, 9 vector
  databases, OCR, NER, PII anonymization, transcription, and web tools) is
  documented with its config, inputs, and outputs in
  **[Nodes](/nodes)**.

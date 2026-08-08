@@ -1,0 +1,143 @@
+# =============================================================================
+# Release stall check
+#
+# The release train fails silently. `Release` only fires on a push to `main`,
+# and the `stage -> main` cut is a manual pull request. If nobody opens it,
+# nothing breaks and nothing complains: `develop -> stage` keeps flowing and
+# prereleases keep publishing off `develop`, so from the outside the project
+# looks like it is shipping. In July 2026 that state ran for 15 days with 445
+# commits sitting on `stage` before anyone noticed.
+#
+# This job makes the silence audible: once a weekday it measures how far `main`
+# trails `stage` and, past either threshold, opens (or refreshes) a single
+# tracking issue. It never opens a second one.
+# =============================================================================
+
+name: Release stall check
+
+on:
+  schedule:
+    # 15:00 UTC on weekdays — after EU standup, before US midday.
+    - cron: '0 15 * * 1-5'
+  workflow_dispatch:
+    inputs:
+      max_age_days:
+        description: 'Days main may trail stage before this is a stall'
+        required: false
+        default: '7'
+      max_commits:
+        description: 'Commits main may trail stage before this is a stall'
+        required: false
+        default: '50'
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  check:
+    name: Is main trailing stage?
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (full history — we compare branches)
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          fetch-depth: 0
+
+      - name: Measure the gap
+        id: gap
+        env:
+          MAX_AGE_DAYS: ${{ inputs.max_age_days || '7' }}
+          MAX_COMMITS: ${{ inputs.max_commits || '50' }}
+        run: |
+          set -euo pipefail
+          git fetch --quiet origin main stage
+
+          BEHIND=$(git rev-list --count origin/main..origin/stage)
+          LAST_RELEASE_TS=$(git log -1 --format=%ct origin/main)
+          AGE_DAYS=$(( ( $(date -u +%s) - LAST_RELEASE_TS ) / 86400 ))
+          LAST_RELEASE_DATE=$(git log -1 --format=%cs origin/main)
+
+          echo "behind=$BEHIND"       >> "$GITHUB_OUTPUT"
+          echo "age_days=$AGE_DAYS"   >> "$GITHUB_OUTPUT"
+          echo "last_date=$LAST_RELEASE_DATE" >> "$GITHUB_OUTPUT"
+
+          if [ "$BEHIND" -gt "$MAX_COMMITS" ] || [ "$AGE_DAYS" -gt "$MAX_AGE_DAYS" ]; then
+            echo "stalled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "stalled=false" >> "$GITHUB_OUTPUT"
+          fi
+
+          {
+            echo "### Release train"
+            echo ""
+            echo "| | |"
+            echo "|---|---|"
+            echo "| \`main\` last moved | $LAST_RELEASE_DATE (${AGE_DAYS}d ago) |"
+            echo "| Commits on \`stage\` not in \`main\` | $BEHIND |"
+            echo "| Thresholds | ${MAX_AGE_DAYS}d / ${MAX_COMMITS} commits |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Open or refresh the tracking issue
+        if: steps.gap.outputs.stalled == 'true'
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea
+        with:
+          script: |
+            const behind  = '${{ steps.gap.outputs.behind }}';
+            const ageDays = '${{ steps.gap.outputs.age_days }}';
+            const lastDate = '${{ steps.gap.outputs.last_date }}';
+            const marker = '<!-- release-stall-check -->';
+
+            const body = [
+              marker,
+              `\`main\` last moved on **${lastDate}** — **${ageDays} days ago** — and **${behind} commits** are sitting on \`stage\` unreleased.`,
+              '',
+              'Nothing is broken. `Release` only fires on a push to `main`, and the `stage → main` cut is a manual pull request — so a stalled train looks identical to a healthy one from the outside.',
+              '',
+              'To cut a release, see `RELEASE.md` → *How to release a new version*.',
+              '',
+              '_This issue is opened and refreshed automatically by `release-stall-check`. It closes itself once `main` catches up._',
+            ].join('\n');
+
+            const existing = await github.paginate(github.rest.issues.listForRepo, {
+              owner: context.repo.owner, repo: context.repo.repo,
+              state: 'open', labels: 'release-stall',
+            });
+            const issue = existing.find(i => (i.body || '').includes(marker));
+
+            if (issue) {
+              await github.rest.issues.update({
+                owner: context.repo.owner, repo: context.repo.repo,
+                issue_number: issue.number, body,
+              });
+              core.notice(`Refreshed #${issue.number} — main is ${ageDays}d / ${behind} commits behind stage.`);
+            } else {
+              const created = await github.rest.issues.create({
+                owner: context.repo.owner, repo: context.repo.repo,
+                title: `Release train stalled — main is ${ageDays} days behind stage`,
+                body, labels: ['release-stall'],
+              });
+              core.notice(`Opened #${created.data.number}.`);
+            }
+
+      - name: Close the tracking issue once main catches up
+        if: steps.gap.outputs.stalled == 'false'
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea
+        with:
+          script: |
+            const marker = '<!-- release-stall-check -->';
+            const open = await github.paginate(github.rest.issues.listForRepo, {
+              owner: context.repo.owner, repo: context.repo.repo,
+              state: 'open', labels: 'release-stall',
+            });
+            for (const i of open.filter(i => (i.body || '').includes(marker))) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner, repo: context.repo.repo,
+                issue_number: i.number,
+                body: '`main` has caught up with `stage`. Closing.',
+              });
+              await github.rest.issues.update({
+                owner: context.repo.owner, repo: context.repo.repo,
+                issue_number: i.number, state: 'closed',
+              });
+            }

@@ -43,6 +43,8 @@ import { SDK_VERSION } from '../constants.js';
  * @extends DAPBase
  */
 export class DAPClient extends DAPBase {
+	private _eventTransportEpochs = new WeakMap<DAPMessage, number>();
+
 	/**
 	 * Map of outstanding requests awaiting a server response.
 	 * Keyed by the message sequence number assigned at send time.
@@ -54,6 +56,8 @@ export class DAPClient extends DAPBase {
 		{
 			resolve: (value: DAPMessage) => void;
 			reject: (reason: unknown) => void;
+			transport: TransportBase;
+			epoch: number;
 			timer?: ReturnType<typeof setTimeout>;
 		}
 	>();
@@ -140,6 +144,33 @@ export class DAPClient extends DAPBase {
 	}
 
 	/**
+	 * Reject exactly the requests registered against an invalidated transport
+	 * epoch. Requests on a replacement transport remain untouched.
+	 */
+	protected _onTransportEpochInvalidated(epoch: number, reason: Error): void {
+		for (const [seq, request] of this._pendingRequests) {
+			if (request.epoch !== epoch) continue;
+			if (request.timer) clearTimeout(request.timer);
+			this._pendingRequests.delete(seq);
+			request.reject(reason);
+		}
+	}
+
+	/**
+	 * Return the transport epoch that owns an event currently being dispatched.
+	 */
+	protected _eventTransportEpoch(message: DAPMessage): number | undefined {
+		return this._eventTransportEpochs.get(message);
+	}
+
+	/**
+	 * Revalidate an event owner after an asynchronous handler boundary.
+	 */
+	protected _isCurrentEventTransportEpoch(epoch: number | undefined): boolean {
+		return epoch === undefined || epoch === this._transportEpoch;
+	}
+
+	/**
 	 * Handle connection established event.
 	 *
 	 * Chains to the parent DAPBase implementation which clears any
@@ -175,23 +206,6 @@ export class DAPClient extends DAPBase {
 	 * @param hasError - Whether the disconnection was caused by an error condition
 	 */
 	async onDisconnected(reason?: string, hasError = false): Promise<void> {
-		// Create a single error object reused for rejecting all pending requests,
-		// preserving the disconnect reason as the error message
-		const connectionError = new Error(reason || 'Connection lost');
-
-		// Cancel all pending requests: clear their timers and reject the promises
-		// so callers receive a prompt error instead of hanging indefinitely
-		for (const [, request] of this._pendingRequests) {
-			// Clear the per-request timeout handle to avoid a stale timer firing
-			if (request.timer) clearTimeout(request.timer);
-			// Reject with the connection-lost error
-			request.reject(connectionError);
-		}
-
-		// Remove all entries now that every promise has been settled
-		this._pendingRequests.clear();
-
-		// Propagate to DAPBase / RocketRideClient for additional cleanup
 		await super.onDisconnected(reason, hasError);
 	}
 
@@ -206,6 +220,14 @@ export class DAPClient extends DAPBase {
 	 * @param message - The DAP message received from the server
 	 */
 	async onReceive(message: DAPMessage): Promise<void> {
+		await this._receiveForEpoch(message, this._transportEpoch);
+	}
+
+	protected async _onTransportReceive(message: DAPMessage, epoch: number): Promise<void> {
+		await this._receiveForEpoch(message, epoch);
+	}
+
+	private async _receiveForEpoch(message: DAPMessage, epoch: number): Promise<void> {
 		const messageType = message.type;
 
 		if (messageType === 'response') {
@@ -214,9 +236,9 @@ export class DAPClient extends DAPBase {
 			// The server echoes back the client's sequence number in request_seq
 			const requestSeq = message.request_seq;
 
-			if (requestSeq !== undefined && this._pendingRequests.has(requestSeq)) {
+			const pendingRequest = requestSeq === undefined ? undefined : this._pendingRequests.get(requestSeq);
+			if (requestSeq !== undefined && pendingRequest?.epoch === epoch) {
 				// Retrieve and remove the pending entry atomically to avoid double-resolve
-				const pendingRequest = this._pendingRequests.get(requestSeq)!;
 				this._pendingRequests.delete(requestSeq);
 
 				// Cancel the per-request timeout now that the response has arrived
@@ -226,15 +248,22 @@ export class DAPClient extends DAPBase {
 				pendingRequest.resolve(message);
 			} else {
 				// Response arrived for a request we no longer track (timed out, or spurious)
-				this.debugMessage(`Response received for unknown request: ${JSON.stringify(message)}`);
+				this.debugMessage(`Response received for unknown request: ${requestSeq ?? 'missing request_seq'}`);
 			}
 		} else if (messageType === 'event') {
 			// --- Event path: server-pushed notifications (status updates, pipeline events) ---
 			// Delegate to the virtual onEvent handler (overridden by RocketRideClient)
-			await this.onEvent(message);
+			if (epoch === this._transportEpoch) {
+				this._eventTransportEpochs.set(message, epoch);
+				try {
+					await this.onEvent(message);
+				} finally {
+					this._eventTransportEpochs.delete(message);
+				}
+			}
 		} else {
 			// --- Unknown message type: log for diagnostics ---
-			this.debugMessage(`Unhandled message type: ${JSON.stringify(message)}`);
+			this.debugMessage(`Unhandled message type: ${String(messageType)}`);
 		}
 	}
 
@@ -260,8 +289,11 @@ export class DAPClient extends DAPBase {
 			this.raiseException(new Error("Request message must include a 'type' field"));
 		}
 
-		// Guard: refuse to queue a request when the transport is not connected
-		if (!this._transport?.isConnected()) {
+		const transport = this._transport;
+		const epoch = this._transportEpoch;
+
+		// Guard: refuse to queue a request when the captured transport is not connected
+		if (!transport?.isConnected()) {
 			this.raiseException(new Error('Server is not connected'));
 		}
 
@@ -273,7 +305,13 @@ export class DAPClient extends DAPBase {
 		// Return a promise whose resolve/reject are stored in _pendingRequests
 		// and will be called when a matching response arrives (or on timeout/error)
 		return new Promise((resolve, reject) => {
-			const entry: { resolve: typeof resolve; reject: typeof reject; timer?: ReturnType<typeof setTimeout> } = { resolve, reject };
+			const entry: {
+				resolve: typeof resolve;
+				reject: typeof reject;
+				transport: TransportBase;
+				epoch: number;
+				timer?: ReturnType<typeof setTimeout>;
+			} = { resolve, reject, transport, epoch };
 
 			// Determine the effective timeout: per-call override takes priority over
 			// the instance-level default; undefined means no timeout.
@@ -284,7 +322,7 @@ export class DAPClient extends DAPBase {
 			if (effectiveTimeout !== undefined) {
 				// Schedule automatic rejection after the timeout expires
 				entry.timer = setTimeout(() => {
-					if (this._pendingRequests.has(seq)) {
+					if (this._pendingRequests.get(seq) === entry) {
 						// Remove the entry so the response (if it ever arrives) is silently ignored
 						this._pendingRequests.delete(seq);
 						reject(new Error(`Request timed out after ${effectiveTimeout}ms`));
@@ -296,17 +334,16 @@ export class DAPClient extends DAPBase {
 			this._pendingRequests.set(seq, entry);
 
 			// Asynchronously transmit the message; on send failure, clean up immediately
-			this._send(message).catch((_error) => {
+			transport.send(message).catch((_error) => {
 				this.debugMessage(`Clearing request due to error: ${seq}`);
 
 				// If the entry is still present (hasn't already timed out or been resolved),
 				// cancel its timer and reject the promise with a send-failure error
-				if (this._pendingRequests.has(seq)) {
-					const pending = this._pendingRequests.get(seq)!;
-					if (pending.timer) clearTimeout(pending.timer);
+				if (this._pendingRequests.get(seq) === entry) {
+					if (entry.timer) clearTimeout(entry.timer);
 					this._pendingRequests.delete(seq);
+					reject(new Error('Could not send request'));
 				}
-				reject(new Error('Could not send request'));
 			});
 		});
 	}
@@ -319,10 +356,15 @@ export class DAPClient extends DAPBase {
 	 * @throws Error if the transport is not configured or the connection times out.
 	 */
 	async _dapConnect(timeout?: number): Promise<void> {
-		if (!this._transport) {
+		const transport = this._transport;
+		const epoch = this._transportEpoch;
+		if (!transport) {
 			throw new Error('Transport not configured');
 		}
-		await this._transport.connect(timeout);
+		await transport.connect(timeout);
+		if (!this._isCurrentTransport(transport, epoch)) {
+			throw new Error('Transport replaced during connect');
+		}
 	}
 
 	/**
@@ -333,8 +375,10 @@ export class DAPClient extends DAPBase {
 	 */
 	async disconnect(): Promise<void> {
 		// Request the transport to close the connection gracefully
-		if (this._transport) {
-			await this._transport.disconnect();
+		const transport = this._transport;
+		if (transport) {
+			this._invalidateBoundTransport(transport, new Error('Disconnected'));
+			await transport.disconnect();
 		}
 	}
 

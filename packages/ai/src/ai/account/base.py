@@ -597,13 +597,30 @@ class AccountBase(ABC):
         """
         Dispatch an ``rrext_app_*`` DAP command to the app/marketplace handler.
 
-        OSS raises NotImplementedError — the app marketplace requires SaaS.
-        The SaaS implementation delegates to ``app_handler.handle()``.
+        OSS raises NotImplementedError for marketplace commands — EXCEPT the
+        dev overlay (``rrext_app_submission.register_dev``), which is platform
+        infrastructure: local app development must work on the OSS engine
+        without SaaS. The SaaS implementation overrides this method entirely
+        and delegates to ``app_handler.handle()`` (which routes register_dev
+        to the same shared handler).
 
         Args:
             conn:    ``TaskConn`` instance.
             request: Raw DAP request dict.
         """
+        # Dev overlay: shared platform capability, not marketplace
+        if request.get('command') == 'rrext_app_submission':
+            args = request.get('arguments', {}) or {}
+            if args.get('subcommand') == 'register_dev':
+                from ai.account.dev_overlay import handle_register_dev
+
+                return await handle_register_dev(conn, request)
+        # The publish ladder (rung deployments) is platform infrastructure —
+        # it rides the shared deployments registry on OSS and SaaS alike.
+        if request.get('command') == 'rrext_app_deploy':
+            from ai.account.app_deploy import handle_app_deploy
+
+            return await handle_app_deploy(conn, request)
         raise NotImplementedError('App marketplace requires SaaS mode')
 
     async def handle_public(self, conn, request):

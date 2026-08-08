@@ -40,7 +40,7 @@
 // =============================================================================
 
 import { RocketRideClient, Question } from 'rocketride';
-import { getClient } from 'shell-ui';
+import { getClient } from 'shell';
 import { API_METHODS } from './apiMethods';
 import {
 	getEchoPipeline,
@@ -126,7 +126,7 @@ function randomBytes(byteLength: number): Uint8Array {
 /**
  * Generate a test payload of the requested size and type.
  *
- * Sizes:  tiny=100B, medium=10KB, large=1MB, huge=10MB
+ * Sizes:  tiny=100B, medium=10KB, large=1MB, huge=100MB
  * Types:  text, binary, mixed, malformed, empty
  *
  * Text payloads use realistic NLP content (business/tech/medical words)
@@ -216,6 +216,11 @@ export function createTestEngine(): TestEngine {
 		wsConnections: 0,
 		queuedOps: 0,
 	};
+
+	// Pool members whose connect succeeded and incremented the wsConnections
+	// gauge — destroyPool subtracts exactly this set, so a member dropped
+	// mid-phase (isConnected() now false) still brings the gauge back down.
+	const countedClients = new WeakSet<RocketRideClient>();
 
 	// =========================================================================
 	// INTERNAL UTILITIES
@@ -412,6 +417,9 @@ export function createTestEngine(): TestEngine {
 				running = false;
 				await loop;
 				await client.disconnect().catch(() => {});
+				// Mirror createClient's increment — the dedicated heartbeat
+				// connection is gone, so the gauge must come back down.
+				metrics.wsConnections = Math.max(0, metrics.wsConnections - 1);
 			},
 		};
 	}
@@ -489,6 +497,9 @@ export function createTestEngine(): TestEngine {
 					.connect()
 					.then(() => {
 						metrics.wsConnections++;
+						// Mark the member as counted: destroyPool subtracts by
+						// this membership, not by isConnected() at teardown.
+						countedClients.add(pool[i]);
 						pool[i].identify(`Test - ${label}`).catch(() => {});
 						pushEvent(
 							makeEvent('pass', label, `WS-${i} connected`),
@@ -523,11 +534,16 @@ export function createTestEngine(): TestEngine {
 
 	/** Disconnect and destroy a pool of clients. */
 	async function destroyPool(pool: RocketRideClient[]): Promise<void> {
+		// Subtract what was INCREMENTED: countedClients marks the members
+		// whose connect succeeded and bumped the gauge. A member dropped
+		// mid-phase (isConnected() now false) must still come back down,
+		// and members whose connect failed never went up.
+		const countedInPool = pool.filter((c) => countedClients.has(c)).length;
 		const disconnectPromises = pool.map((c) =>
 			c.disconnect().catch(() => {}),
 		);
 		await Promise.allSettled(disconnectPromises);
-		metrics.wsConnections = Math.max(0, metrics.wsConnections - pool.length);
+		metrics.wsConnections = Math.max(0, metrics.wsConnections - countedInPool);
 	}
 
 	/**
@@ -612,7 +628,9 @@ export function createTestEngine(): TestEngine {
 		const ctx: SweepContext = {};
 
 		for (const def of API_METHODS) {
-			if (signal.aborted) return;
+			// break, not return: the post-loop cleanup (terminate the sweep
+			// pipeline + disconnect the sweep client) must still run on abort.
+			if (signal.aborted) break;
 			await waitIfPaused(signal);
 
 			// Seed the monitor entry so skipped methods appear in the table
@@ -1424,11 +1442,9 @@ export function createTestEngine(): TestEngine {
 
 			const t0 = performance.now();
 			try {
-				const payloadStr =
-					typeof payload === 'string'
-						? payload
-						: new TextDecoder().decode(payload);
-				const result = await client.send(token, payloadStr);
+				// client.send accepts string | Uint8Array — pass binary
+				// payloads through untranslated.
+				const result = await client.send(token, payload);
 				const latency = performance.now() - t0;
 				dataTransferred += payloadSize(payload);
 				pipelines[idx].opsCompleted++;
@@ -1496,7 +1512,9 @@ export function createTestEngine(): TestEngine {
 		// Each client gets its own echo pipeline
 		const clientTokens: string[] = [];
 		for (let i = 0; i < connected.length; i++) {
-			if (signal.aborted) return;
+			// break, not return: the post-loop cleanup (terminate the flood
+			// pipelines already created) must still run on abort.
+			if (signal.aborted) break;
 			try {
 				const pipe = getEchoPipeline();
 				const r = await connected[i].use({
@@ -1525,11 +1543,9 @@ export function createTestEngine(): TestEngine {
 
 					const payload = generatePayload('medium', 'text');
 					try {
-						const payloadStr =
-							typeof payload === 'string'
-								? payload
-								: new TextDecoder().decode(payload);
-						await client.send(token, payloadStr);
+						// client.send accepts string | Uint8Array — pass binary
+						// payloads through untranslated.
+						await client.send(token, payload);
 						dataTransferred += payloadSize(payload);
 						recordOp(true);
 					} catch (err) {
@@ -2234,7 +2250,9 @@ export function createTestEngine(): TestEngine {
 		 * backpressure flood, pipe streaming, chaos, and concurrent hammer.
 		 */
 		start(cfg: TestConfig, selectedPhases?: Set<string>) {
-			if (state === 'running') return;
+			// Only an idle engine may start: a paused/aborting run still owns
+			// metrics, clientPool, and abortController.
+			if (state !== 'idle') return;
 			state = 'running';
 			startTime = Date.now();
 			abortController = new AbortController();
@@ -2341,7 +2359,10 @@ export function createTestEngine(): TestEngine {
 
 		/** Clear all run data. Settings are view-owned and unaffected. */
 		clear() {
-			if (state === 'running' || state === 'paused') return;
+			// Only an idle engine may clear: aborting still owns clientPool
+			// and metrics — clearing mid-cleanup strands undisconnected
+			// sockets (destroyPool would tear down an emptied pool).
+			if (state !== 'idle') return;
 			opsCounter = 0;
 			opsWindow = [];
 			dataTransferred = 0;
