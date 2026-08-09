@@ -407,6 +407,16 @@
 				"category": "RocketRide Pipeline"
 			},
 			{
+				"command": "rocketride.pipeline.new",
+				"title": "RocketRide Pipeline",
+				"category": "RocketRide Pipeline"
+			},
+			{
+				"command": "rocketride.pipeline.save",
+				"title": "Save Pipeline",
+				"category": "RocketRide Pipeline"
+			},
+			{
 				"command": "rocketride.sidebar.files.runPipeline",
 				"title": "Run",
 				"icon": "$(play)",
@@ -458,7 +468,21 @@
 				"category": "RocketRide"
 			}
 		],
+		"keybindings": [
+			{
+				"command": "rocketride.pipeline.save",
+				"key": "ctrl+s",
+				"mac": "cmd+s",
+				"when": "activeCustomEditorId == 'rocketride.PageProject'"
+			}
+		],
 		"menus": {
+			"file/newFile": [
+				{
+					"command": "rocketride.pipeline.new",
+					"group": "file"
+				}
+			],
 			"commandPalette": [
 				{
 					"command": "rocketride.sidebar.files.openStatus",
@@ -514,6 +538,14 @@
 				},
 				{
 					"command": "rocketride.sidebar.files.createFile",
+					"when": "false"
+				},
+				{
+					"command": "rocketride.pipeline.new",
+					"when": "false"
+				},
+				{
+					"command": "rocketride.pipeline.save",
 					"when": "false"
 				},
 				{
