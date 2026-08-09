@@ -393,9 +393,14 @@ async def test_on_terminate_denied_does_not_stop_the_task():
     conn.get_task_token = MagicMock(return_value='tk_foreign')
     conn.get_task = MagicMock(side_effect=PermissionError("Permission 'task.control' denied"))
 
+    request = {'token': 'tk_foreign', 'arguments': {}}
     with pytest.raises(PermissionError, match='denied'):
-        await TaskCommands.on_terminate(conn, {'token': 'tk_foreign', 'arguments': {}})
+        await TaskCommands.on_terminate(conn, request)
 
+    # Pin the permission itself, not just that some check ran — the mock
+    # raises on any call, so without this the test would pass even if
+    # on_terminate asked for the wrong right.
+    conn.get_task.assert_called_once_with(request, 'task.control')
     server.stop_task.assert_not_awaited()
 
 
