@@ -75,6 +75,33 @@ __all__ = [
 ]
 
 
+# Keyword arguments consumed by this constructor or by the DAP client base
+# chain (ConnectionMixin, EventMixin, DAPClient, DAPBase). Anything else is a
+# misspelling or an option this SDK version does not know; it is rejected
+# rather than silently dropped (#1837).
+_KNOWN_CONSTRUCTOR_KWARGS = frozenset(
+    {
+        'env',
+        'ws_path',
+        'client_name',
+        'client_version',
+        'on_trace',
+        'public',
+        'module',
+        'persist',
+        'max_retry_time',
+        'on_event',
+        'on_connected',
+        'on_disconnected',
+        'on_connect_error',
+        'on_protocol_message',
+        'on_debug_message',
+        'request_timeout',
+        'transport',
+    }
+)
+
+
 class RocketRideClient(
     ConnectionMixin,
     ExecutionMixin,
@@ -113,6 +140,8 @@ class RocketRideClient(
     Raises:
         ValueError: If auth is not provided and ROCKETRIDE_APIKEY env var is not set
         ConnectionError: If unable to connect to the specified server
+        TypeError: If an unrecognized keyword argument is passed — a misspelled
+            or unsupported option is rejected instead of silently ignored
 
     Example:
         # Explicit connection management
@@ -253,6 +282,15 @@ class RocketRideClient(
         kwargs.pop('public', None)
         kwargs.pop('on_trace', None)
         kwargs.pop('env', None)
+
+        # Reject keys nothing in this constructor or the DAP client base chain
+        # consumed. A misspelled option used to be silently discarded — the
+        # same default as if it had never been passed, with nothing connecting
+        # the later symptom to the call site (#1837).
+        unknown = set(kwargs) - _KNOWN_CONSTRUCTOR_KWARGS
+        if unknown:
+            names = ', '.join(sorted(unknown))
+            raise TypeError(f'RocketRideClient.__init__() got unexpected keyword argument(s): {names}')
 
         # Initialize the underlying DAP client; transport is created in _internal_connect
         super().__init__(transport=None, module=module, **kwargs)
