@@ -94,6 +94,26 @@ test('foldTaskEvent: end removes an UNKNOWN task and its unknown entry', () => {
 	assert.equal(result.unknownTasks.length, 0);
 });
 
+test('foldTaskEvent: the bulk running snapshot retains completed entries it does not mention', () => {
+	// Pinned: the snapshot enumerates what is RUNNING — it says nothing about
+	// history, so a completed entry's last-run chips survive it.
+	const active = new Map([['proj-1.src-1', { running: false, errors: ['boom'], warnings: [] }]]);
+	const event: TaskLifecycleEvent = { action: 'running', tasks: [] };
+	const result = foldTaskEvent(event, active, NO_UNKNOWN, isKnown);
+	assert.ok(result);
+	assert.deepEqual(result.activeTasks.get('proj-1.src-1'), { running: false, errors: ['boom'], warnings: [] });
+});
+
+test('foldTaskEvent: the bulk running snapshot resets a completed entry it reports running again', () => {
+	// Pinned: completed -> running via snapshot is a NEW run — diagnostics
+	// reset, same rule as begin/restart.
+	const active = new Map([['proj-1.src-1', { running: false, errors: ['boom'], warnings: ['careful'] }]]);
+	const event: TaskLifecycleEvent = { action: 'running', tasks: [{ projectId: 'proj-1', source: 'src-1' }] };
+	const result = foldTaskEvent(event, active, NO_UNKNOWN, isKnown);
+	assert.ok(result);
+	assert.deepEqual(result.activeTasks.get('proj-1.src-1'), { running: true, errors: [], warnings: [] });
+});
+
 test('foldTaskEvent: end keeps a KNOWN task\'s last-run diagnostics until the next begin', () => {
 	// Pinned: chips = the LAST run's diagnostics (dots = liveness). end flips
 	// running off but retains errors/warnings; the next begin resets them.
