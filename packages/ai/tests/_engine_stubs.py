@@ -7,9 +7,7 @@ from types import ModuleType
 from typing import Any, Optional
 
 
-def import_with_engine_stubs(
-    module_name: str, rocketlib_attrs: Optional[dict[str, Any]] = None
-) -> ModuleType:
+def import_with_engine_stubs(module_name: str, rocketlib_attrs: Optional[dict[str, Any]] = None) -> ModuleType:
     """Import a module with temporary stubs and restore the import state."""
     stubs: dict[str, ModuleType] = {
         'depends': types.ModuleType('depends'),

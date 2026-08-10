@@ -21,6 +21,7 @@ import pytest
 
 from tests._engine_stubs import import_with_engine_stubs
 
+
 @pytest.fixture
 def pv():
     """Import the validator with engine dependencies stubbed per test."""
@@ -28,8 +29,6 @@ def pv():
         'ai.common.account.pipeline_validation',
         {'getServiceDefinition': lambda _provider_id: None},
     )
-
-
 
 
 # ---------------------------------------------------------------------------
