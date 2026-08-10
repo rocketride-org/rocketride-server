@@ -34,6 +34,17 @@ endif()
 
 rocketride_set_common_target_options(engineMod)
 
+# The module places itself in dist/server. This belongs here rather than on the
+# engine executable's POST_BUILD: changing only engineMod's implementation
+# leaves its import library untouched, so engine.exe does not relink and a copy
+# hanging off that target never runs - leaving a stale module in dist.
+if(ROCKETRIDE_CMAKE_KIST)
+    add_custom_command(TARGET engineMod POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${ROCKETRIDE_PROJECT_ROOT}/dist/server"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:engineMod> "${ROCKETRIDE_PROJECT_ROOT}/dist/server/"
+        COMMENT "Copying $<TARGET_FILE_NAME:engineMod> to dist/server")
+endif()
+
 rocketride_configure_jvm_linkage(engineMod)
 
 # This module carries the NEEDED entry for libjvm.so, and GNU ld resolves a

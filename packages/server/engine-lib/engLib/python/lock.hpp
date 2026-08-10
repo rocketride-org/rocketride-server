@@ -26,7 +26,9 @@
 namespace engine::python {
 namespace py = pybind11;
 
-extern thread_local bool tls_thread_state_ref;
+// The GIL thread state reference flag. Behind an accessor as thread_local
+// storage cannot cross a dynamic library boundary
+ROCKETRIDE_CORE_API bool &threadStateRef() noexcept;
 
 //-------------------------------------------------------------------------
 /// @details
@@ -39,9 +41,9 @@ class LockPython : public py::gil_scoped_acquire {
 public:
     LockPython() : py::gil_scoped_acquire() {
         // If we have not already incremented the thread state reference
-        if (!tls_thread_state_ref) {
+        if (!threadStateRef()) {
             // Do it now
-            tls_thread_state_ref = true;
+            threadStateRef() = true;
             inc_ref();
 
             // Get the current thread ID

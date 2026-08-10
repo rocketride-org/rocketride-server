@@ -78,36 +78,15 @@ public:
     }
 
     // This function returns a pointer to the this thread context
-    static auto thisCtx(TextView name = "External",
-                        bool markReady = false) noexcept {
-        return _visit(
-            overloaded{// Caller of the thread supplied a context ptr on start
-                       [](ThreadCtx *ctx) noexcept { return ctx; },
-                       // We already implicitly instantiated a thread context
-                       [](ThreadCtx &ctx) noexcept { return &ctx; },
-                       // No context was set by a spawning thread, implicitly
-                       // instantiate one
-                       // using the variant to hold it
-                       [&](std::monostate) noexcept {
-                           return &m_thisCtx.emplace<ThreadCtx>(_location, name,
-                                                                markReady);
-                       }},
-            m_thisCtx);
-    }
+    static ROCKETRIDE_CORE_SHARED ThreadCtx *thisCtx(
+        TextView name = "External", bool markReady = false) noexcept;
 
-    static bool hasCtx() noexcept {
-        return _visit(
-            overloaded{[](ThreadCtx *ctx) noexcept { return ctx->isReady(); },
-                       [](ThreadCtx &ctx) noexcept { return ctx.isReady(); },
-                       [&](std::monostate) noexcept { return false; }},
-            m_thisCtx);
-    }
+    static ROCKETRIDE_CORE_SHARED bool hasCtx() noexcept;
 
 private:
     // Sets the this context ptr, called internally in Thread startup
-    static auto setThisCtx(Variant<std::monostate, ThreadCtx *> ctx) noexcept {
-        _visit([&](auto &ctx) noexcept { m_thisCtx = ctx; }, ctx);
-    }
+    static ROCKETRIDE_CORE_SHARED void setThisCtx(
+        Variant<std::monostate, ThreadCtx *> ctx) noexcept;
 
     // Internal method, called when a thread entry completes
     static auto threadExit() noexcept {
@@ -125,14 +104,6 @@ private:
         return util::Guard{[&]() noexcept { ThreadApi::threadExit(); }};
     }
 
-    // Every thread has a thread context, the context holds the thread
-    // name, and its cancellation flag. Thread context live within thread
-    // objects. 3rd party threads will get their own context implicitly
-    // instantiated if needed.
-    // Defined in api.cpp to avoid duplicate thread-local init routines when
-    // the header is included in multiple TUs (e.g. classify wrapper + engLib).
-    static thread_local Variant<std::monostate, ThreadCtx *, ThreadCtx>
-        m_thisCtx;
 };
 
 }  // namespace ap::async

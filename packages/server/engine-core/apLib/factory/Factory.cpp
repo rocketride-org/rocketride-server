@@ -46,9 +46,148 @@ ErrorOr<FACTORY> Factory::findFactory(iTextView type,
                                       iTextView name) noexcept {
     if (auto iter = factories().find({type, name}); iter != factories().end())
         return *iter;
+
+    // Not registered, so map the node declaring it and look again
+    if (loadNode(name)) {
+        if (auto iter = factories().find({type, name});
+            iter != factories().end())
+            return *iter;
+    }
+
     return APERRL(Error, Ec::FactoryNotFound,
                   "Could not find a factory for type:", string::enclose(type),
                   "name:", string::enclose(name));
+}
+
+//-------------------------------------------------------------------------
+/// @details
+///		The declared node modules for the process
+//-------------------------------------------------------------------------
+Factory::Nodes &Factory::nodes() noexcept {
+    static Nodes nodeSet;
+    return nodeSet;
+}
+
+//-------------------------------------------------------------------------
+/// @details
+///		Whether this process can host node modules
+//-------------------------------------------------------------------------
+bool &Factory::nodeModulesSupported() noexcept {
+    static bool supported = true;
+    return supported;
+}
+
+//-------------------------------------------------------------------------
+/// @details
+///		Serializes node loading. findFactory misses on any thread, while
+///		loading mutates both the node set and the factory registry
+//-------------------------------------------------------------------------
+static async::MutexLock &nodeLock() noexcept {
+    static async::MutexLock lock;
+    return lock;
+}
+
+//-------------------------------------------------------------------------
+/// @details
+///		Declares a node module, to be loaded when a factory of the same
+///		name is first looked up
+///	@param[in]	name
+///		The factory name the node provides
+///	@param[in]	libPath
+///		The node's shared library
+//-------------------------------------------------------------------------
+Error Factory::registerNode(iTextView name,
+                            const file::Path &libPath) noexcept {
+    auto guard = nodeLock().acquire();
+
+    auto [iter, inserted] = nodes().insert({(iText) name, NODE{libPath}});
+    if (!inserted)
+        return APERRL(Error, Ec::InvalidParam, "Node already registered",
+                      string::enclose(name));
+
+    LOG(Factory, "Register node", string::enclose(name), libPath);
+    return Error{};
+}
+
+//-------------------------------------------------------------------------
+/// @details
+///		Maps the node module declaring a factory name and lets its
+///		initializeNode register what it provides
+///	@returns
+///		Whether a node was loaded, so the caller looks the factory up again
+//-------------------------------------------------------------------------
+bool Factory::loadNode(iTextView name) noexcept {
+    auto guard = nodeLock().acquire();
+
+    auto found = nodes().find(name);
+    if (found == nodes().end()) return false;
+
+    auto &node = found->second;
+    if (node.loadAttempted) return false;
+    node.loadAttempted = true;
+
+    // Skipped where the host does not share the engine module
+    if (!nodeModulesSupported()) {
+        LOG(Factory, "Node", string::enclose(name),
+            "skipped, this host does not share the engine module");
+        return false;
+    }
+
+    LOG(Factory, "Loading node", string::enclose(name), node.libPath);
+
+    // Logged, not returned - findFactory raises the FactoryNotFound
+    if (!file::exists(node.libPath)) {
+        LOG(Factory, "The node library", node.libPath, "was not found");
+        return false;
+    }
+
+    // Bound before either runs, so a node missing one is not half-registered
+    auto initNode =
+        plat::dynamicBind<bool()>(node.libPath, ROCKETRIDE_NODE_INIT);
+    if (!initNode) {
+        LOG(Factory, "The node", node.libPath, "has no", ROCKETRIDE_NODE_INIT,
+            initNode.ccode());
+        return false;
+    }
+
+    auto deinitNode =
+        plat::dynamicBind<void()>(node.libPath, ROCKETRIDE_NODE_DEINIT);
+    if (!deinitNode) {
+        LOG(Factory, "The node", node.libPath, "has no",
+            ROCKETRIDE_NODE_DEINIT, deinitNode.ccode());
+        return false;
+    }
+
+    // Let the node register its factories
+    if (!(*initNode)()) {
+        LOG(Factory, "The node", node.libPath, "failed to initialize");
+        return false;
+    }
+
+    // Remember how to unregister them again
+    node.deinit = *deinitNode;
+
+    LOG(Factory, "Loaded node", string::enclose(name));
+    return true;
+}
+
+//-------------------------------------------------------------------------
+/// @details
+///		Lets every loaded node pull its factories back out of the registry.
+///		They point into the node modules, so this has to run while those
+///		are still mapped.
+//-------------------------------------------------------------------------
+void Factory::unloadNodes() noexcept {
+    auto guard = nodeLock().acquire();
+
+    for (auto &[name, node] : nodes()) {
+        if (!node.deinit) continue;
+        LOG(Factory, "Unloading node", string::enclose(name));
+        node.deinit();
+        node.deinit = nullptr;
+    }
+
+    nodes().clear();
 }
 
 //-------------------------------------------------------------------------

@@ -44,6 +44,11 @@ bool &bugCheck() noexcept {
     return check;
 }
 
+bool &fatalityExecuting() noexcept {
+    static bool flag = false;
+    return flag;
+}
+
 size_t registerFatalityHandler(FatalityHandler &&handler) noexcept {
     auto slot = g_nextSlot++;
     g_fatalityHandlers[slot] = _mv(handler);

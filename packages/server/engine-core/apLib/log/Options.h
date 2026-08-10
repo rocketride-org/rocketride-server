@@ -98,6 +98,6 @@ struct Options {
     std::atomic<size_t> additionalMemoryUsed = 0;
 };
 
-Options &options() noexcept;
+ROCKETRIDE_CORE_SHARED Options &options() noexcept;
 
 }  // namespace ap::log

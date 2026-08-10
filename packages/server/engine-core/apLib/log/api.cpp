@@ -25,6 +25,21 @@
 
 namespace ap::log {
 
+LvlStateArray &LvlState() noexcept {
+    static LvlStateArray states = {};
+    return states;
+}
+
+Options &options() noexcept {
+    static Options options = {};
+    return options;
+}
+
+async::MutexLock::Guard consoleLock() noexcept {
+    static async::MutexLock lock;
+    return lock.acquire();
+}
+
 Atomic<bool> &initialized() noexcept {
     // Start out initialized as we are mostly concerned with tear down guards
     static Atomic<bool> init = {true};

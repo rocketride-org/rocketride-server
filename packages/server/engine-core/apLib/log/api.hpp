@@ -28,13 +28,6 @@
 
 namespace ap::log {
 
-// This function stores the static instantiation for the Level states
-// array, each level state is indexed by its corresponding level id
-inline LvlStateArray &LvlState() noexcept {
-    static LvlStateArray states = {};
-    return states;
-}
-
 // Maps a level from a Lvl enum, a TextView, or a uint32_t level id
 // if a valid level is encountered the Lvl enum will be returned
 // any invalid ones a lvl value of Lvl::_begin will be returned.

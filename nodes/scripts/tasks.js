@@ -34,9 +34,13 @@ const os = require('os');
 const {
     exists,
     syncDir,
+    syncFile,
+    readDirSafe,
+    readFile,
     formatSyncStats,
     removeDir,
-    PROJECT_ROOT, DIST_ROOT,
+    isWindows, isMac,
+    PROJECT_ROOT, BUILD_ROOT, DIST_ROOT,
     startServer,
     stopServer,
     execCommand,
@@ -51,8 +55,16 @@ const SRC_DIR = path.join(PACKAGE_DIR, 'src', 'nodes');
 const TEST_DIR = path.join(PACKAGE_DIR, 'test');
 const DIST_DIR = path.join(DIST_ROOT, 'server', 'nodes');
 
+// Build inputs of the c++ and java nodes, not copied into dist
+const IGNORE = ['**/CMakeLists.txt', '**/src/**', '**/lib/**', '**/scripts/**', '**/target/**'];
+
 // Engine (built by server:build; execCommand resolves extension on Windows)
 const ENGINE = path.join(DIST_ROOT, 'server', 'engine');
+
+// Where cmake leaves the c++ node binaries, and how they are named there
+const BUILD_NODES_DIR = path.join(BUILD_ROOT, 'nodes');
+const NODE_LIB_PREFIX = isWindows() ? '' : 'lib';
+const NODE_LIB_EXTS = isWindows() ? ['.dll', '.pdb'] : [isMac() ? '.dylib' : '.so'];
 
 // ============================================================================
 // Action Factories
@@ -64,18 +76,41 @@ function makeSyncNodesAction(options = {}) {
             task.output = 'Scanning for changes...';
 
             const stats = {};
-            await syncDir(SRC_DIR, DIST_DIR, { mirror: false, package: true }, stats);
+            await syncDir(SRC_DIR, DIST_DIR, { mirror: false, package: true, ignore: IGNORE }, stats);
 
             if (options.overlayRoot) {
                 const overlaySrcDir = path.join(options.overlayRoot, 'nodes', 'src', 'nodes');
                 if (await exists(overlaySrcDir)) {
-                    await syncDir(overlaySrcDir, DIST_DIR, { mirror: false, package: true }, stats);
+                    await syncDir(overlaySrcDir, DIST_DIR, { mirror: false, package: true, ignore: IGNORE }, stats);
                 }
             }
+
+            await syncNodeBinaries(stats);
 
             task.output = formatSyncStats(stats);
         }
     };
+}
+
+async function syncNodeBinaries(stats) {
+    for (const nodeDir of await readDirSafe(BUILD_NODES_DIR)) {
+        const servicesFile = path.join(SRC_DIR, nodeDir, 'services.json');
+        if (!await exists(servicesFile)) continue;
+
+        // services.json allows comments, so the fields are matched rather than parsed
+        const services = await readFile(servicesFile);
+        if (!/"node"\s*:\s*"cpp"/.test(services)) continue;
+        const libName = services.match(/"path"\s*:\s*"([^"]+)"/);
+        if (!libName) continue;
+
+        for (const ext of NODE_LIB_EXTS) {
+            const fileName = `${NODE_LIB_PREFIX}${libName[1]}${ext}`;
+            const source = path.join(BUILD_NODES_DIR, nodeDir, fileName);
+            if (await exists(source))
+                await syncFile(source, path.join(DIST_DIR, nodeDir, fileName),
+                               { package: true }, stats);
+        }
+    }
 }
 
 function makeStartTestServerAction(options = {}) {
@@ -312,7 +347,7 @@ module.exports = {
         // Public actions (have descriptions)
         { name: 'nodes:build', action: () => ({
             description: 'Build nodes',
-            steps: ['server:build', 'nodes:sync', 'nodes:docs-generate', 'nodes:credentials-generate']
+            steps: ['server:build', 'parse:submodule-build', 'nodes:sync', 'nodes:docs-generate', 'nodes:credentials-generate']
         })},
         { name: 'nodes:test', action: (options) => makeTestAction({ ...options, test_full: false }) },
         { name: 'nodes:test-full', action: (options) => makeTestAction({ ...options, test_full: true }) },
@@ -322,10 +357,15 @@ module.exports = {
         })},
         { name: 'nodes:clean', action: () => ({
             description: 'Cleaning nodes',
-            run: async (ctx, task) => {
-                await removeDir(DIST_DIR);
-                task.output = 'Cleaned nodes';
-            }
+            steps: ['parse:submodule-clean', {
+                name: 'nodes:clean-dist',
+                action: () => ({
+                    run: async (ctx, task) => {
+                        await removeDir(DIST_DIR);
+                        task.output = 'Cleaned nodes';
+                    }
+                })
+            }]
         })}
     ]
 };
