@@ -45,6 +45,21 @@ class SentenceTransformerLoader(BaseLoader):
     _REQUIREMENTS_FILE = os.path.join(os.path.dirname(__file__), 'requirements_sentence_transformers.txt')
     _DEFAULTS: dict = {}  # SentenceTransformers typically only vary by model_name
 
+    # Per-model locks for thread safety. A single torch module cannot run
+    # concurrent forward passes safely, so the GPU pass below is serialized
+    # per model instance. Tokenization and postprocess stay outside the lock
+    # and are free to overlap.
+    _model_locks: Dict[int, threading.Lock] = {}
+    _locks_lock = threading.Lock()
+
+    @classmethod
+    def _get_model_lock(cls, model_id: int) -> threading.Lock:
+        """Get or create a lock for a specific model instance."""
+        with cls._locks_lock:
+            if model_id not in cls._model_locks:
+                cls._model_locks[model_id] = threading.Lock()
+            return cls._model_locks[model_id]
+
     @staticmethod
     def load(
         model_name: str,
@@ -188,7 +203,13 @@ class SentenceTransformerLoader(BaseLoader):
         encoded = preprocessed['encoded']
         transformer_model = actual_model[0].auto_model
 
-        with torch.no_grad():
+        # Serialize the forward pass per model instance. Callers that share one
+        # model across threads (local wrapper and model server alike) would
+        # otherwise interleave forward passes on the same module and read back
+        # embeddings computed for another thread's batch.
+        model_lock = SentenceTransformerLoader._get_model_lock(id(actual_model))
+
+        with model_lock, torch.no_grad():
             inputs_gpu = {k: v.to(device) for k, v in encoded.items()}
             outputs = transformer_model(**inputs_gpu)
 
@@ -295,7 +316,6 @@ class SentenceTransformer:
         self.output_fields = output_fields or ['$embeddings']
         self.device = device
         self.kwargs = kwargs
-        self._encode_lock = threading.Lock()
 
         # Check if we should proxy to server
         server_addr = get_model_server_address()
@@ -378,30 +398,31 @@ class SentenceTransformer:
         t_gpu = 0.0
         t_post = 0.0
 
-        with self._encode_lock:
-            # Process in batches
-            for i in range(0, len(sentences), batch_size):
-                batch = sentences[i : i + batch_size]
+        # Process in batches. Serialization of the shared model happens inside
+        # SentenceTransformerLoader.inference(), so tokenization and postprocess
+        # here stay concurrent across threads.
+        for i in range(0, len(sentences), batch_size):
+            batch = sentences[i : i + batch_size]
 
-                # Preprocess phase
-                t0 = time.perf_counter()
-                preprocessed = SentenceTransformerLoader.preprocess(self._model, batch, self._metadata)
-                t_pre += (time.perf_counter() - t0) * 1000
+            # Preprocess phase
+            t0 = time.perf_counter()
+            preprocessed = SentenceTransformerLoader.preprocess(self._model, batch, self._metadata)
+            t_pre += (time.perf_counter() - t0) * 1000
 
-                # GPU inference phase
-                t0 = time.perf_counter()
-                raw_output = SentenceTransformerLoader.inference(self._model, preprocessed, self._metadata)
-                t_gpu += (time.perf_counter() - t0) * 1000
+            # GPU inference phase
+            t0 = time.perf_counter()
+            raw_output = SentenceTransformerLoader.inference(self._model, preprocessed, self._metadata)
+            t_gpu += (time.perf_counter() - t0) * 1000
 
-                # Postprocess phase
-                t0 = time.perf_counter()
-                results = SentenceTransformerLoader.postprocess(self._model, raw_output, len(batch), self.output_fields)
-                t_post += (time.perf_counter() - t0) * 1000
+            # Postprocess phase
+            t0 = time.perf_counter()
+            results = SentenceTransformerLoader.postprocess(self._model, raw_output, len(batch), self.output_fields)
+            t_post += (time.perf_counter() - t0) * 1000
 
-                # Extract embeddings from results (handles both 'embeddings' and '$embeddings')
-                for result in results:
-                    emb = result.get('$embeddings') or result.get('embeddings') or result
-                    all_embeddings.append(emb)
+            # Extract embeddings from results (handles both 'embeddings' and '$embeddings')
+            for result in results:
+                emb = result.get('$embeddings') or result.get('embeddings') or result
+                all_embeddings.append(emb)
 
         # Report all perf counters — same keys as model server response
         inference_sec = (t_pre + t_gpu + t_post) / 1000.0
