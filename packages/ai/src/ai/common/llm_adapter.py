@@ -15,8 +15,9 @@ from typing import Any, Callable, Iterator, Optional, Protocol, runtime_checkabl
 
 from ai.common.utils import flatten_content_blocks
 
-# Last LLM call's token usage for the current execution context. report_llm_tokens
-# publishes it here so the node can hang it on the Answer (shown in the Trace).
+# Accumulated LLM token usage for the current turn. report_llm_tokens sums every
+# model call here so the node can hang the turn total on the Answer (Trace grid);
+# llm_base clears it per turn so one answer can't inherit the previous turn's sum.
 LAST_LLM_USAGE_VAR: ContextVar[Optional[dict]] = ContextVar('last_llm_usage', default=None)
 
 
@@ -200,10 +201,29 @@ def report_llm_tokens(
             metrics.counter('llm_cache_read_tokens', cr)
         if cc:
             metrics.counter('llm_cache_creation_tokens', cc)
-        usage = {'input': it, 'output': ot, 'cache_read': cr, 'cache_creation': cc, 'model': model}
-        metrics.event({'llm_tokens': usage})
-        # Publish for the node to attach to the Answer (Trace "Tokens" grid); same context.
-        LAST_LLM_USAGE_VAR.set(usage)
+        # Per-call: the event and counters fire once per model call, so an agentic
+        # turn that calls the model N times bills and traces every call.
+        call = {'input': it, 'output': ot, 'cache_read': cr, 'cache_creation': cc, 'model': model}
+        metrics.event({'llm_tokens': call})
+        # Per-turn: accumulate onto the context so the Answer's Trace "Tokens" grid
+        # shows the whole turn's total plus every call's cost, not just the last call
+        # of a many-call loop. ``breakdown`` lists each call so the action history can
+        # show the agent and what each of its model calls cost (in tokens).
+        prev = LAST_LLM_USAGE_VAR.get()
+        if prev:
+            LAST_LLM_USAGE_VAR.set(
+                {
+                    'input': int(prev.get('input', 0)) + it,
+                    'output': int(prev.get('output', 0)) + ot,
+                    'cache_read': int(prev.get('cache_read', 0)) + cr,
+                    'cache_creation': int(prev.get('cache_creation', 0)) + cc,
+                    'model': model or prev.get('model', ''),
+                    'calls': int(prev.get('calls', 1)) + 1,
+                    'breakdown': [*prev.get('breakdown', []), call],
+                }
+            )
+        else:
+            LAST_LLM_USAGE_VAR.set({**call, 'calls': 1, 'breakdown': [call]})
     except Exception as exc:
         # Best-effort accounting: keep the chat turn alive, but leave an operational trace.
         try:

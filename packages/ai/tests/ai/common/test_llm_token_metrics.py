@@ -208,16 +208,31 @@ def test_collect_reports_usage_from_the_invoke_result():
     _assert_four_counters()
 
 
-def test_publishes_last_usage_on_the_contextvar():
+def test_publishes_usage_on_the_contextvar():
     # The node reads this to hang the usage on the Answer (Trace "Tokens" grid).
     LAST_LLM_USAGE_VAR.set(None)
     report_llm_tokens(14, 81, model='claude-haiku-4-5', cache_read_tokens=2, cache_creation_tokens=3)
+    call = {'input': 14, 'output': 81, 'cache_read': 2, 'cache_creation': 3, 'model': 'claude-haiku-4-5'}
+    assert LAST_LLM_USAGE_VAR.get() == {**call, 'calls': 1, 'breakdown': [call]}
+
+
+def test_contextvar_accumulates_across_a_many_call_turn():
+    # An agentic turn calls the model repeatedly; the Trace must show the turn total
+    # AND every call's cost, not just the last call. Counters/events stay per-call
+    # (billing unchanged) — only this display accumulator sums the turn.
+    LAST_LLM_USAGE_VAR.set(None)
+    report_llm_tokens(10, 5, model='m1', cache_read_tokens=1, cache_creation_tokens=2)
+    report_llm_tokens(30, 7, model='m2', cache_read_tokens=3, cache_creation_tokens=4)
+    c1 = {'input': 10, 'output': 5, 'cache_read': 1, 'cache_creation': 2, 'model': 'm1'}
+    c2 = {'input': 30, 'output': 7, 'cache_read': 3, 'cache_creation': 4, 'model': 'm2'}
     assert LAST_LLM_USAGE_VAR.get() == {
-        'input': 14,
-        'output': 81,
-        'cache_read': 2,
-        'cache_creation': 3,
-        'model': 'claude-haiku-4-5',
+        'input': 40,
+        'output': 12,
+        'cache_read': 4,
+        'cache_creation': 6,
+        'model': 'm2',  # last model that actually reported usage
+        'calls': 2,
+        'breakdown': [c1, c2],  # each call's cost, in order, for the action history
     }
 
 

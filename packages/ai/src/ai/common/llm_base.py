@@ -98,7 +98,7 @@ class LLMBase(IInstanceBase):
             return
 
         _flush_reasoning(force=True)  # emit any trailing partial line
-        usage = LAST_LLM_USAGE_VAR.get()
+        usage = LAST_LLM_USAGE_VAR.get()  # turn total: summed across every model call this turn
         if usage:
             answer.tokens = usage  # shown in the Trace "Tokens" grid on the answers lane
         self.instance.writeAnswers(answer)
