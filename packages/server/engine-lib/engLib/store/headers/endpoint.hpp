@@ -166,7 +166,7 @@ using IPipeConnections = std::vector<json::Value>;
 /// @details
 ///		Define the service endpoint
 //-------------------------------------------------------------------------
-class IServiceEndpoint {
+class ROCKETRIDE_CORE_API IServiceEndpoint {
 public:
     //-----------------------------------------------------------------
     // Explicitly delete the default constructor

@@ -72,30 +72,46 @@ async function readFile(filePath, options = 'utf8') {
     return fsp.readFile(filePath, options);
 }
 
+
+
 /**
- * Read a JSON file
+ * Read a JSON file. Every caller reads a definition file - a services*.json, a
+ * package.json, a manifest - so anything but an object is broken data, and the
+ * path goes in the error since the contents alone cannot say which file it was.
+ * @param {string} filePath - Path to JSON file
+ * @returns {any}
+ */
+function readJsonSync(filePath) {
+    const text = fs.readFileSync(filePath, 'utf8');
+
+    let data;
+    try {
+        data = parseJson(text);
+    } catch (err) {
+        if (!err.jsoncErrors) throw err;
+
+        // Only this side knows the path, and an offset alone cannot be acted on
+        const { offset } = err.jsoncErrors[0];
+        const lines = text.slice(0, offset).split('\n');
+        const column = lines[lines.length - 1].length + 1;
+        throw new SyntaxError(
+            `${filePath}:${lines.length}:${column}: ${err.message}`);
+    }
+
+    if (!data || typeof data !== 'object' || Array.isArray(data))
+        throw new Error(`${filePath}: expected a JSON object`);
+
+    return data;
+}
+
+/**
+ * Read a JSON file, for the async callers. Reads synchronously - definition
+ * files are small, and this keeps one reader
  * @param {string} filePath - Path to JSON file
  * @returns {Promise<any>}
  */
 async function readJson(filePath) {
-    const content = await fsp.readFile(filePath, 'utf8');
-    return JSON.parse(content);
-}
-
-/**
- * Read a JSON file, returning default value if it doesn't exist
- * @param {string} filePath - Path to JSON file
- * @param {any} defaultValue - Value to return if file doesn't exist
- * @returns {Promise<any>}
- */
-async function readJsonSafe(filePath, defaultValue = null) {
-    try {
-        const content = await fsp.readFile(filePath, 'utf8');
-        return JSON.parse(content);
-    } catch (err) {
-        if (err.code === 'ENOENT') return defaultValue;
-        throw err;
-    }
+    return readJsonSync(filePath);
 }
 
 /**
@@ -496,7 +512,7 @@ async function move(oldPath, newPath) {
 }
 
 // =============================================================================
-// Utility Functions
+// Utilities
 // =============================================================================
 
 /**
@@ -545,6 +561,34 @@ async function touch(filePath) {
             throw err;
         }
     }
+}
+
+/**
+ * Parse JSONC text - the comments and trailing commas that services*.json and
+ * the vscode configs are written with. Throws on anything JSON.parse would
+ * reject, including a truncated comment or two values run together; the thrown
+ * error carries jsonc-parser's raw errors as `jsoncErrors` so a caller that
+ * knows the file can say where the problem is.
+ * @param {string} text - JSONC source
+ * @returns {any}
+ */
+function parseJson(text) {
+    // Required inline: deps-tasks.js pulls this file in before the builder has
+    // run pnpm install (scripts/build.js requires it ahead of
+    // checkDependencies), so a top-level import would break a fresh clone
+    const { parse, printParseErrorCode } = require('jsonc-parser');
+
+    // parse is lenient by contract - it reports problems instead of throwing,
+    // so the errors are what makes malformed data fail here
+    const errors = [];
+    const data = parse(text, errors, { allowTrailingComma: true });
+    if (errors.length) {
+        const err = new SyntaxError(printParseErrorCode(errors[0].error));
+        err.jsoncErrors = errors;
+        throw err;
+    }
+
+    return data;
 }
 
 // =============================================================================
@@ -769,6 +813,7 @@ async function hasBuildInputChanged(stateKey, dirs, files = []) {
     return { changed: currentHash !== savedHash, hash: currentHash };
 }
 
+
 module.exports = {
     // Existence
     exists,
@@ -778,7 +823,7 @@ module.exports = {
     // Reading
     readFile,
     readJson,
-    readJsonSafe,
+    readJsonSync,
     readDir,
     readDirSafe,
     
@@ -825,6 +870,7 @@ module.exports = {
     truncate,
     utimes,
     touch,
+    parseJson,
     
     // Fingerprinting
     fingerprint,

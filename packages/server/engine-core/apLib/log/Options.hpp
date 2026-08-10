@@ -115,10 +115,4 @@ inline void Options::__toString(Buffer &_buff,
     if (!opts.noColors()) _buff << Color::Reset;
 }
 
-// Host log options in a static local accessor
-inline Options &options() noexcept {
-    static Options options = {};
-    return options;
-}
-
 }  // namespace ap::log

@@ -46,6 +46,7 @@ import { existsSync, statSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { readJson } from './lib/fs.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, '..');
@@ -101,15 +102,6 @@ function rel(p) {
 	return path.relative(REPO_ROOT, p).split(path.sep).join('/');
 }
 
-/** Strip JSONC-style comments and trailing commas; matches what nodes/ uses. */
-function parseJsonc(text) {
-	const stripped = text
-		.replace(/\/\*[\s\S]*?\*\//g, '')
-		.replace(/(^|[^:"'])\/\/[^\n]*/g, '$1')
-		.replace(/,(\s*[}\]])/g, '$1');
-	return JSON.parse(stripped);
-}
-
 function collectIcons(node, into) {
 	if (!node || typeof node !== 'object') return;
 	if (typeof node.icon === 'string') into.push(node.icon);
@@ -133,9 +125,9 @@ const serviceJsonFiles = await findFiles(
 const referencedIcons = new Map();
 
 for (const jsonFile of serviceJsonFiles) {
-	let parsed;
+	let data;
 	try {
-		parsed = parseJsonc(await readFile(jsonFile, 'utf8'));
+		data = await readJson(jsonFile);
 	} catch (e) {
 		errors.push(`invalid JSON in ${rel(jsonFile)}: ${e.message}`);
 		continue;
@@ -143,7 +135,7 @@ for (const jsonFile of serviceJsonFiles) {
 
 	const dir = path.dirname(jsonFile);
 	const icons = [];
-	collectIcons(parsed, icons);
+	collectIcons(data, icons);
 
 	for (const iconValue of icons) {
 		// Skip remote URLs — those are resolved at runtime, not by the build.

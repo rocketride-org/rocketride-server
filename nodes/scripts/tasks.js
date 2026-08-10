@@ -34,9 +34,14 @@ const os = require('os');
 const {
     exists,
     syncDir,
+    syncFile,
+    readDirSafe,
+    readJson,
     formatSyncStats,
     removeDir,
-    PROJECT_ROOT, DIST_ROOT,
+    getSharedName,
+    getSymName,
+    PROJECT_ROOT, BUILD_ROOT, DIST_ROOT,
     startServer,
     stopServer,
     execCommand,
@@ -51,8 +56,14 @@ const SRC_DIR = path.join(PACKAGE_DIR, 'src', 'nodes');
 const TEST_DIR = path.join(PACKAGE_DIR, 'test');
 const DIST_DIR = path.join(DIST_ROOT, 'server', 'nodes');
 
+// Build inputs of the c++ and java nodes, not copied into dist
+const IGNORE = ['**/CMakeLists.txt', '**/src/**', '**/lib/**', '**/scripts/**', '**/target/**'];
+
 // Engine (built by server:build; execCommand resolves extension on Windows)
 const ENGINE = path.join(DIST_ROOT, 'server', 'engine');
+
+// Where cmake leaves the c++ node binaries
+const BUILD_NODES_DIR = path.join(BUILD_ROOT, 'nodes');
 
 // ============================================================================
 // Action Factories
@@ -64,18 +75,60 @@ function makeSyncNodesAction(options = {}) {
             task.output = 'Scanning for changes...';
 
             const stats = {};
-            await syncDir(SRC_DIR, DIST_DIR, { mirror: false, package: true }, stats);
+            await syncDir(SRC_DIR, DIST_DIR, { mirror: false, package: true, ignore: IGNORE }, stats);
 
             if (options.overlayRoot) {
                 const overlaySrcDir = path.join(options.overlayRoot, 'nodes', 'src', 'nodes');
                 if (await exists(overlaySrcDir)) {
-                    await syncDir(overlaySrcDir, DIST_DIR, { mirror: false, package: true }, stats);
+                    await syncDir(overlaySrcDir, DIST_DIR, { mirror: false, package: true, ignore: IGNORE }, stats);
                 }
             }
+
+            await syncNodeBinaries(stats);
 
             task.output = formatSyncStats(stats);
         }
     };
+}
+
+// A node folder builds exactly one library, which its services*.json name in
+// their "path". Several services may share it, so they are read as a group
+async function nodeLibrary(nodeDir) {
+    const srcDir = path.join(SRC_DIR, nodeDir);
+    const libs = new Set();
+
+    for (const file of await readDirSafe(srcDir)) {
+        if (!/^services.*\.json$/.test(file)) continue;
+
+        const services = await readJson(path.join(srcDir, file));
+        if (services.node !== 'cpp') continue;
+
+        if (typeof services.path !== 'string' || !services.path)
+            throw new Error(`${path.join(srcDir, file)}: `
+                            + 'a cpp service needs a library name in "path"');
+
+        libs.add(services.path);
+    }
+
+    if (libs.size > 1)
+        throw new Error(`The node ${nodeDir} names more than one library: `
+                        + [...libs].join(', '));
+
+    const [lib] = libs;
+    return lib ?? null;
+}
+
+async function syncNodeBinaries(stats) {
+    for (const nodeDir of await readDirSafe(BUILD_NODES_DIR)) {
+        const lib = await nodeLibrary(nodeDir);
+        if (!lib) continue;
+
+        for (const name of [getSharedName(lib), getSymName(lib)].filter(Boolean)) {
+            await syncFile(path.join(BUILD_NODES_DIR, nodeDir, name),
+                           path.join(DIST_DIR, nodeDir, name),
+                           { package: true }, stats);
+        }
+    }
 }
 
 function makeStartTestServerAction(options = {}) {

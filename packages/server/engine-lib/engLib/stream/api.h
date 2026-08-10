@@ -28,9 +28,9 @@ namespace engine::stream {
 ErrorOr<StreamPtr> makeStream(const Url& url) noexcept;
 
 // Open a stream based on its url and provider
-ErrorOr<StreamPtr> openStream(const Url& url, stream::Mode mode) noexcept;
+ROCKETRIDE_CORE_API ErrorOr<StreamPtr> openStream(const Url& url, stream::Mode mode) noexcept;
 
 // Open a buffered stream based on its url and provider
-ErrorOr<StreamPtr> openBufferedStream(const Url& url,
+ROCKETRIDE_CORE_API ErrorOr<StreamPtr> openBufferedStream(const Url& url,
                                       stream::Mode mode) noexcept;
 }  // namespace engine::stream

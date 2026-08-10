@@ -8,7 +8,7 @@
  * - All state access is protected by an in-memory mutex
  */
 const path = require('path');
-const { readJsonSafe, writeJson, mkdir } = require('./fs');
+const { exists, readJson, writeJson, mkdir } = require('./fs');
 const { BUILD_ROOT } = require('./paths');
 
 const STATE_FILE = path.join(BUILD_ROOT, 'state.json');
@@ -48,10 +48,14 @@ let stateCache = null;  // null = not loaded yet
  */
 async function ensureLoaded() {
     if (stateCache === null) {
-        try {
-            stateCache = await readJsonSafe(STATE_FILE, {});
-        } catch {
-            stateCache = {};
+        if (!await exists(STATE_FILE)) stateCache = {};
+        else {
+            try {
+                stateCache = await readJson(STATE_FILE);
+            } catch (err) {
+                console.warn(`Warning: ${STATE_FILE} is unreadable (${err.message}) - starting from empty state`);
+                stateCache = {};
+            }
         }
     }
     return stateCache;

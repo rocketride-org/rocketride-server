@@ -28,6 +28,11 @@
 
 namespace ap::application {
 
-ErrorCode Main() { return TestMain(); }
+ErrorCode Main() {
+    // This binary links apLib statically - a node would load a 2nd engine
+    Factory::nodeModulesSupported() = false;
+
+    return TestMain();
+}
 
 }  // namespace ap::application

@@ -25,7 +25,8 @@
 
 namespace ap::time {
 
-Text formatDateTime(SystemStamp time, const Text &fmt = DEF_FMT) noexcept;
-ErrorOr<SystemStamp> parseDateTime(const Text &date, const Text &fmt) noexcept;
+ROCKETRIDE_CORE_API Text formatDateTime(SystemStamp time, const Text &fmt = DEF_FMT) noexcept;
+ROCKETRIDE_CORE_API ErrorOr<SystemStamp> parseDateTime(const Text &date,
+                                                       const Text &fmt) noexcept;
 
 }  // namespace ap::time

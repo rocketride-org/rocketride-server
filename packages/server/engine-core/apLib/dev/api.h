@@ -43,7 +43,8 @@ using FatalityHandler =
     FatalityHandler&& handler) noexcept;
 void deRegisterFatalityHandler(size_t slot) noexcept;
 
-void onFatality(Location location, std::string_view reason) noexcept;
-bool& bugCheck() noexcept;
+ROCKETRIDE_CORE_API void onFatality(Location location, std::string_view reason) noexcept;
+ROCKETRIDE_CORE_API bool& bugCheck() noexcept;
+ROCKETRIDE_CORE_API bool& fatalityExecuting() noexcept;
 
 }  // namespace ap::dev
