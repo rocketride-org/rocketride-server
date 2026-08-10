@@ -229,6 +229,23 @@ jobs:
         run: node scripts/build.js docs:check
 
   # ---------------------------------------------------------------------------
+  #  node-docs — node README schema validation (docs/internal/
+  #  node-readme-schema.md). ADVISORY while the node corpus is migrated to the
+  #  schema: continue-on-error keeps it from blocking merges and it is
+  #  deliberately NOT in the ci-ok needs list. Once all node READMEs conform,
+  #  drop continue-on-error and add the job to ci-ok to make it a hard gate.
+  # ---------------------------------------------------------------------------
+  node-docs:
+    name: Node README schema (advisory)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Validate node READMEs
+        run: python3 scripts/validate-node-readme.py --all nodes/src/nodes
+
+  # ---------------------------------------------------------------------------
   #  gitleaks — secret scan. Installs the binary directly because the upstream
   #  gitleaks-action v2 requires a paid GITLEAKS_LICENSE for org-owned repos;
   #  the binary itself is MIT-licensed and free. Mirrors the local lefthook hook.
