@@ -67,15 +67,29 @@
 		"anonymize": {
 			"hidden": false
 		},
+		"text_output.server": {
+			"type": "string",
+			"title": "Server Name",
+			"description": "Host name or IP address of the SMB server hosting the share, e.g. files.example.com or 10.0.0.12."
+		},
+		"text_output.username": {
+			"type": "string",
+			"title": "User Name",
+			"description": "User name used to authenticate against the SMB share. Leave the user name and password empty to connect with the engine's own credentials.",
+			"optional": true
+		},
+		"text_output.password": {
+			"type": "string",
+			"title": "Password",
+			"description": "Password for the SMB user name above.",
+			"secure": true,
+			"optional": true,
+			"maxLength": 127,
+			"ui:widget": "password"
+		},
 		"text_output.target.parameters": {
 			"object": "parameters",
-			"properties": [
-				"smb.storePath",
-				"smb.server",
-				"smb.username",
-				"smb.password",
-				"anonymize"
-			]
+			"properties": ["storePath", "text_output.server", "text_output.username", "text_output.password", "anonymize"]
 		}
 	},
 	//
@@ -87,11 +101,7 @@
 		{
 			"section": "Transform",
 			"title": "Text Output",
-			"properties": [
-				"type",
-				"text_output.target.parameters",
-				"target.mode"
-			]
+			"properties": ["type", "text_output.target.parameters", "target.mode"]
 		}
 	]
 }
