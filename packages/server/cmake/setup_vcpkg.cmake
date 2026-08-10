@@ -26,7 +26,9 @@ if(NOT DEFINED VCPKG_TARGET_TRIPLET OR VCPKG_TARGET_TRIPLET STREQUAL "")
     if(WIN32)
         set(VCPKG_TARGET_TRIPLET "x64-windows-msvc-rocketride" CACHE STRING "" FORCE)
     elseif("${CMAKE_SYSTEM_NAME}" STREQUAL "Darwin")
-        if(CMAKE_OSX_ARCHITECTURES MATCHES "^(arm64)$")
+        if(CMAKE_OSX_ARCHITECTURES MATCHES "^(arm64)$"
+           OR (NOT CMAKE_OSX_ARCHITECTURES
+               AND CMAKE_SYSTEM_PROCESSOR MATCHES "^(arm64|aarch64)$"))
             set(VCPKG_TARGET_TRIPLET "arm64-osx-appleclang-rocketride" CACHE STRING "" FORCE)
         else()
             set(VCPKG_TARGET_TRIPLET "x64-osx-appleclang-rocketride" CACHE STRING "" FORCE)

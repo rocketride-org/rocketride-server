@@ -1005,7 +1005,7 @@ private:
     Value& resolveReference(const char* key);
     Value& resolveReference(const char* key, const char* end);
 
-    struct CommentInfo {
+    struct JSON_API CommentInfo {
         CommentInfo();
         ~CommentInfo();
 

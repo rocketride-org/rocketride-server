@@ -1613,6 +1613,47 @@ void IServices::resolveDescriptions(json::Value &node) noexcept {
 
 //-------------------------------------------------------------------------
 /// @details
+///		Declares the C++ node a service is implemented by, so the factory
+///		maps its library the first time one of its factories is looked up
+///	@param[in]	def
+///		The service definition carrying "node": "cpp"
+//-------------------------------------------------------------------------
+Error IServices::declareNode(const ServiceDefinition &def) noexcept {
+    // The library base name is required - without it there is nothing to load
+    if (!def.nodePath)
+        return APERR(Ec::InvalidParam,
+                     "A cpp node requires a path to its shared library in",
+                     def.definitionPath);
+
+    // The node directory is the one holding the definition we just read.
+    // Kept as a named local rather than chaining .fileName() off the
+    // parent() temporary directly.
+    const auto nodeParent = def.definitionPath.parent();
+    const auto nodeDir = nodeParent.fileName();
+
+    // Compose the platform's library file name from the base name
+#if ROCKETRIDE_PLAT_WIN
+    const auto libName = _ts(def.nodePath, ".dll");
+#elif ROCKETRIDE_PLAT_MAC
+    const auto libName = _ts("lib", def.nodePath, ".dylib");
+#else
+    const auto libName = _ts("lib", def.nodePath, ".so");
+#endif
+
+    // Nodes are always resolved against the executable. In a repo build the
+    // definitions come from nodes/src/nodes while the libraries are built
+    // into dist/server/nodes - the two halves of a node do not share a
+    // directory, which is why this is not relative to definitionPath.
+    const auto libPath = application::execDir() / "nodes" / nodeDir / libName;
+
+    LOG(Services, "    Node library  :", libPath);
+
+    // Declared under the logical type its factories register with
+    return Factory::registerNode(def.logicalType, libPath);
+}
+
+//-------------------------------------------------------------------------
+/// @details
 ///		Loads all the service definitions
 //-------------------------------------------------------------------------
 Error IServices::init() noexcept {
@@ -1935,6 +1976,14 @@ Error IServices::init() noexcept {
             // Save it
             m_services[logicalType] = _mv(def);
 
+            // A C++ node brings its own factories, so it is only declared
+            // here - the "register" field does not apply
+            if (m_services[logicalType].physicalType == "cpp") {
+                if (auto ccode = declareNode(m_services[logicalType]))
+                    return ccode;
+                continue;
+            }
+
             // Register the factories if needed
             if (registerType == "filter") {
                 LOG(Services, "    Register      : Filter");
@@ -1944,7 +1993,6 @@ Error IServices::init() noexcept {
                     m_services[logicalType].logicalType);
 
                 Factory::registerFactory(factoryGlobal);
-                m_dynamicFactories.push_back(_mv(factoryGlobal));
 
                 auto factoryInstance = Factory::makeFactory<
                     engine::store::filter::python::IFilterInstance,
@@ -1952,7 +2000,6 @@ Error IServices::init() noexcept {
                     m_services[logicalType].logicalType);
 
                 Factory::registerFactory(factoryInstance);
-                m_dynamicFactories.push_back(_mv(factoryInstance));
             }
 
             if (registerType == "endpoint") {
@@ -1963,7 +2010,6 @@ Error IServices::init() noexcept {
                     m_services[logicalType].logicalType);
 
                 Factory::registerFactory(factoryEndpoint);
-                m_dynamicFactories.push_back(_mv(factoryEndpoint));
 
                 auto factoryGlobal = Factory::makeFactory<
                     engine::store::filter::python::IFilterGlobal,
@@ -1971,7 +2017,6 @@ Error IServices::init() noexcept {
                     m_services[logicalType].logicalType);
 
                 Factory::registerFactory(factoryGlobal);
-                m_dynamicFactories.push_back(_mv(factoryGlobal));
 
                 auto factoryInstance = Factory::makeFactory<
                     engine::store::filter::python::IFilterInstance,
@@ -1979,7 +2024,6 @@ Error IServices::init() noexcept {
                     m_services[logicalType].logicalType);
 
                 Factory::registerFactory(factoryInstance);
-                m_dynamicFactories.push_back(_mv(factoryInstance));
             }
         }
 
@@ -2029,7 +2073,13 @@ Error IServices::init() noexcept {
 /// @details
 ///		Deinits the service definitions
 //-------------------------------------------------------------------------
-Error IServices::deinit() noexcept { return {}; }
+Error IServices::deinit() noexcept {
+    // Let every C++ node pull its factories back out of the registry, while
+    // the node modules are still mapped
+    Factory::unloadNodes();
+
+    return {};
+}
 
 //-------------------------------------------------------------------------
 /// @details

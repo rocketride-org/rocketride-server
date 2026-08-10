@@ -81,18 +81,18 @@ public:
     Glob(Text expression, uint32_t flags,
          bool caseAware = plat::PathCaseMode) noexcept;
 
-    Mode mode() const noexcept;
+    ROCKETRIDE_CORE_API Mode mode() const noexcept;
     Error ccode() const noexcept;
 
     TextView pattern() const noexcept;
     uint32_t flags() const noexcept;
     bool caseAware() const noexcept;
 
-    bool failed() const noexcept;
-    bool valid() const noexcept;
+    ROCKETRIDE_CORE_API bool failed() const noexcept;
+    ROCKETRIDE_CORE_API bool valid() const noexcept;
 
     explicit operator bool() const noexcept;
-    bool operator==(const Glob &matcher) const noexcept;
+    ROCKETRIDE_CORE_API bool operator==(const Glob &matcher) const noexcept;
 
     // Checks for a match against a subject string
     bool matches(TextView subject, uint32_t &flags) const noexcept {

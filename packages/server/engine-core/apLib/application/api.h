@@ -35,7 +35,7 @@ const std::vector<Text> &args() noexcept;
 bool elevated() noexcept;
 
 int detectExecPath() noexcept;
-file::Path execPath(bool stripExec = false) noexcept;
+ROCKETRIDE_CORE_API file::Path execPath(bool stripExec = false) noexcept;
 inline auto execDir() noexcept { return execPath(true); }
 const file::Path &projectDir() noexcept;
 

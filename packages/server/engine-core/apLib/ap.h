@@ -53,6 +53,60 @@ using namespace ap;
 // Use JSON exceptions
 #define JSON_USE_EXCEPTION 1
 
+// Exports the node DLL ABI from engineMod - ROCKETRIDE_CORE_BUILD is defined
+// building apLib/engLib into engineMod. Everything else, a node module included,
+// gets a plain symbol and resolves it through engineMod's import library.
+//
+// The consuming side deliberately does NOT say __declspec(dllimport). Marking a
+// whole class dll-interface makes MSVC define every member it can reach, and
+// the engine's headers hold members that have never been instantiated and do
+// not survive it - implicit copy assignment for a class holding unique_ptr, a
+// /permissive- conformance bug in a member template that nothing calls. Import
+// thunks cost an indirection on the call and give up none of that. It does mean
+// only functions can cross this boundary: exported data would need the real
+// dllimport, so the ABI exposes accessors instead (see Factory::factories).
+#ifdef _WIN32
+    #ifdef ROCKETRIDE_CORE_BUILD
+        #define ROCKETRIDE_CORE_API __declspec(dllexport)
+    #else
+        #define ROCKETRIDE_CORE_API
+    #endif
+#else
+    #ifdef ROCKETRIDE_CORE_BUILD
+        #define ROCKETRIDE_CORE_API __attribute__((visibility("default")))
+    #else
+        #define ROCKETRIDE_CORE_API
+    #endif
+#endif
+
+// For the singletons the engine and its nodes MUST share - the factory
+// registry, the url mappers, the enabled trace levels. These hide their state
+// in a function-local static, and some of those functions are inline, so a node
+// that compiles one gets a private copy and silently stops sharing: its
+// factories become invisible, its trace output disappears. An inline definition
+// always wins over an import, so the header has to withhold the definition on
+// the consuming side and name the engine's copy explicitly - which is the one
+// thing plain import thunks cannot do.
+//
+// Use this ONLY on free/static functions. At class scope it makes MSVC define
+// every member it can reach, which the engine's headers do not survive - see
+// ROCKETRIDE_CORE_API above.
+#ifdef _WIN32
+    #ifdef ROCKETRIDE_CORE_BUILD
+        #define ROCKETRIDE_CORE_SHARED __declspec(dllexport)
+    #elif defined(ROCKETRIDE_CORE_IMPORT)
+        #define ROCKETRIDE_CORE_SHARED __declspec(dllimport)
+    #else
+        #define ROCKETRIDE_CORE_SHARED
+    #endif
+#else
+    #ifdef ROCKETRIDE_CORE_BUILD
+        #define ROCKETRIDE_CORE_SHARED __attribute__((visibility("default")))
+    #else
+        #define ROCKETRIDE_CORE_SHARED
+    #endif
+#endif
+
 // Include the basic system headers
 #include <apLib/headers.h>
 
@@ -400,6 +454,8 @@ typedef Text Backtrace;
 #include <apLib/string/icu/Normalizer.hpp>
 #include <apLib/string/icu/BoundaryIterator.hpp>
 #include <apLib/string/icu/iterTypes.h>
+// Node module C abi
+#include <node_api.h>
 #include <apLib/factory/Factory.h>
 #include <apLib/string/transform.hpp>
 #include <apLib/memory/ViewAllocator.hpp>

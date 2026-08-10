@@ -30,8 +30,8 @@ namespace ap::async {
 
 void globalCancel() noexcept;
 
-Atomic<bool> &globalCancelFlag() noexcept;
-Atomic<time::Duration> &globalCancelFailsafe() noexcept;
+ROCKETRIDE_CORE_SHARED Atomic<bool> &globalCancelFlag() noexcept;
+ROCKETRIDE_CORE_SHARED Atomic<time::Duration> &globalCancelFailsafe() noexcept;
 
 void sleep(time::Duration wait) noexcept;
 void yield() noexcept;
@@ -50,7 +50,6 @@ void init() noexcept;
 void deinit() noexcept;
 
 void setCurrentThreadName(TextView name) noexcept;
-bool isMainThread() noexcept;
 bool hasCtx() noexcept;
 
 }  // namespace ap::async

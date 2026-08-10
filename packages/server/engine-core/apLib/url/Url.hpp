@@ -106,20 +106,20 @@ public:
     /// @details
     /// 	Adds a new protocol type - usually a static declaration
     //-----------------------------------------------------------------
-    UrlConfig(const Mapper &mapper);
+    ROCKETRIDE_CORE_API UrlConfig(const Mapper &mapper);
 
-    static Error registerMapper(UrlConfig::Mapper &mapper);
+    ROCKETRIDE_CORE_API static Error registerMapper(UrlConfig::Mapper &mapper);
 
     //-----------------------------------------------------------------
     // Public API
     //-----------------------------------------------------------------
     static Error getCaps(const iTextView protocol, uint32_t &caps);
-    static Error toPath(const Url &fromUrl, file::Path &toPath);
-    static Error toUrl(const iTextView fromProtocol, const file::Path &fromPath,
+    ROCKETRIDE_CORE_API static ErrorOr<UrlConfig::MapperPtr> getMapper(const iTextView type);
+    ROCKETRIDE_CORE_API static Error toPath(const Url &fromUrl, file::Path &toPath);
+    ROCKETRIDE_CORE_API static Error toUrl(const iTextView fromProtocol, const file::Path &fromPath,
                        Url &toUrl);
     static Error osPath(const Url &fromUrl, Text &toPath);
-    static Error validate(const Url &url);
-    static ErrorOr<UrlConfig::MapperPtr> getMapper(const iTextView type);
+    ROCKETRIDE_CORE_API static Error validate(const Url &url);
 
 private:
     //-----------------------------------------------------------------
