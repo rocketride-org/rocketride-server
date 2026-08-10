@@ -45,14 +45,7 @@ Windows store, but won't pick up corporate CAs.
 import os
 
 from depends import depends
-
-try:
-    from engLib import debug as _debug
-except Exception:  # pragma: no cover - engLib is only present in the engine runtime
-
-    def _debug(*_args, **_kwargs):
-        """No-op fallback when the engine logging helper is unavailable."""
-
+from engLib import debug
 
 # Process-global one-shot guard: injection mutates the default SSL context for
 # the whole interpreter, so it must run exactly once per process.
@@ -92,4 +85,4 @@ def ensure() -> None:
             # Both truststore and certifi fallback failed. Leave the default SSL
             # context untouched — downstream HTTPS calls will surface their own
             # error with a real traceback if validation fails.
-            _debug(f'ai.common.ssl: trust store injection unavailable: {exc}')
+            debug(f'ai.common.ssl: trust store injection unavailable: {exc}')

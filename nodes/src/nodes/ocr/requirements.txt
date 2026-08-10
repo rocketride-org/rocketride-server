@@ -7,15 +7,6 @@
 # numpy and pillow are base engine dependencies - don't reinstall them here
 # as that can corrupt already-loaded modules in the server process.
 #
-# Request polars-lts-cpu on x86_64: the default `polars` wheel needs AVX2/FMA
-# and crashes (SEH 0xc000001d / SIGILL) on hosts without them. Same import
-# name, drop-in API. Marker scopes the pin to x86_64 only.
-#
-# NOTE: listing it here does NOT prevent a transitive plain `polars` (e.g. via
-# img2table) from also being installed — they are separate distributions that
-# share the `polars` import namespace. ai.common.polars performs the runtime
-# uninstall/force-reinstall that actually makes lts-cpu authoritative on disk.
-polars-lts-cpu; platform_machine == "x86_64" or platform_machine == "AMD64"
 img2table
 pillow
 numpy
