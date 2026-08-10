@@ -21,6 +21,8 @@ def test_documented_constructor_kwargs_still_accepted():
         auth='x',
         ws_path='/task/service',
         client_name='my-app',
+        client_version='2.0',
+        module='my-module',
         persist=True,
         max_retry_time=5.0,
         request_timeout=5000,
@@ -35,4 +37,13 @@ def test_documented_constructor_kwargs_still_accepted():
         public=True,
     )
     assert client._client_display_name == 'my-app'
+    assert client._client_display_version == '2.0'
     assert client._public is True
+
+
+def test_transport_kwarg_rejected():
+    # RocketRideClient always creates its own transport in _internal_connect;
+    # the DAP base chain never consumes a caller-supplied transport, so passing
+    # one must be rejected rather than silently forwarded (#1901).
+    with pytest.raises(TypeError, match='transport'):
+        RocketRideClient(auth='x', transport=None)

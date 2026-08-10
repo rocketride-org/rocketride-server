@@ -97,7 +97,6 @@ _KNOWN_CONSTRUCTOR_KWARGS = frozenset(
         'on_protocol_message',
         'on_debug_message',
         'request_timeout',
-        'transport',
     }
 )
 
@@ -183,11 +182,23 @@ class RocketRideClient(
                 - request_timeout: Default timeout in ms for individual requests (default: no timeout)
                 - max_retry_time: Max total time in ms to keep retrying connections (default: forever)
                 - persist: Enable automatic reconnection with exponential backoff (default: False)
+                - client_name: Custom display name sent in the auth handshake
+                    (default: 'Python SDK')
+                - client_version: Custom display version sent in the auth handshake
+                    (default: the installed SDK version)
+                - public: Run in permanently unauthenticated public mode (default: False)
+                - on_trace: Callable[[int, DAPMessage], None] observing all call() traffic
+                - on_event: Callable for protocol events
+                - on_connected: Callable invoked when the connection is established
+                - on_disconnected: Callable invoked when the connection is closed
+                - on_connect_error: Callable invoked when a connection attempt fails
                 - on_protocol_message: Callable[[str], None] for logging raw DAP messages
                 - on_debug_message: Callable[[str], None] for debug output
 
         Raises:
             ValueError: If URI is empty or not a string
+            TypeError: If an unrecognized keyword argument is passed - a misspelled
+                or unsupported option is rejected instead of silently ignored
         """
         global client_id
 
