@@ -42,7 +42,7 @@ using WordVector = std::vector<StackText>;
 ///		This is the filter driver which all filters/targets/sources must
 ///		implement
 //-------------------------------------------------------------------------
-class IServiceFilterInstance {
+class ROCKETRIDE_CORE_API IServiceFilterInstance {
 public:
     //-----------------------------------------------------------------
     // Delete copy constructor and copy assignment operator. If you
@@ -534,7 +534,7 @@ protected:
 ///		contains two classes, the first, this one, contains the global
 ///		data shared among all instances of a filter
 //-------------------------------------------------------------------------
-class IServiceFilterGlobal {
+class ROCKETRIDE_CORE_API IServiceFilterGlobal {
 public:
     using Path = ap::file::Path;
 

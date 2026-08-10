@@ -30,6 +30,16 @@ public:
     using Parent = Singleton<Options>;
     using Parent::Parent;
 
+    //-----------------------------------------------------------------
+    /// @details
+    ///		The option registry for the process. Singleton::get() would
+    ///		hold a static per module, and every Opt an executable and the
+    ///		engine module each declare would then register with a
+    ///		different one - and the second to be torn down frees a
+    ///		registry the first already destroyed
+    //-----------------------------------------------------------------
+    static ROCKETRIDE_CORE_SHARED Options &get() noexcept;
+
     void init() noexcept;
 
     friend class Opt;

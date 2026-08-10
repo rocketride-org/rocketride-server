@@ -171,6 +171,14 @@ public:
 private:
     //-----------------------------------------------------------------
     ///	@details
+    ///		Declares the C++ node a service is implemented by, so the
+    ///		factory maps its library the first time one of the node's
+    ///		factories is looked up
+    //-----------------------------------------------------------------
+    static Error declareNode(const ServiceDefinition &def) noexcept;
+
+    //-----------------------------------------------------------------
+    ///	@details
     ///		Define the structures we use to keep track of the field
     ///		definitions
     //-----------------------------------------------------------------
@@ -243,15 +251,10 @@ private:
     inline static ServiceDefinitions m_services{};
 
     //-----------------------------------------------------------------
-    ///	@details
-    ///		Define the dynamic factories we registered
-    //-----------------------------------------------------------------
-    inline static std::vector<FACTORY> m_dynamicFactories;
-
-    //-----------------------------------------------------------------
     /// @details
     ///		Our list of global field defintions
     //-----------------------------------------------------------------
     inline static ServiceFields m_fields{};
 };
+
 }  // namespace engine::store

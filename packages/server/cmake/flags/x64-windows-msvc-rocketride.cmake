@@ -52,7 +52,7 @@ set(MSVC_TOOLCHAIN_DEFAULT_CXX_DEFINITIONS
 
 # Platform options and settings
 set(ROCKETRIDE_TOOLCHAIN_DEFINITIONS
-	"-D_SCL_SECURE_NO_WARNINGS=1 -DNOMINMAX=1 -DWINVER=0x0A00 -D_WIN32_WINNT=0x0A00 /bigobj /W4 /WX /wd4251 /wd4996 /wd4250 /wd4065 /wd4100 /wd4456 /EHsc -DWIN32 /Zc:wchar_t /MP"
+	"-D_SCL_SECURE_NO_WARNINGS=1 -DNOMINMAX=1 -DWINVER=0x0A00 -D_WIN32_WINNT=0x0A00 /bigobj /W4 /WX /wd4251 /wd4275 /wd4996 /wd4250 /wd4065 /wd4100 /wd4456 /EHsc -DWIN32 /Zc:wchar_t /MP"
 )
 
 # Enable errors for if (val = 1), force use of new c++ 20 "if statement with initializer" feature instead if (val = 1; val)
