@@ -20,13 +20,17 @@ docs stay co-located with their nodes.
   rules files, etc.).
 - **`internal/`** — contributor/internal docs: builder, engine internals, node
   schema/testing, n8n, pre-commit hooks, plus `internal/engine-protocol/` for the
-  WebSocket (5565) protocol surface.
+  WebSocket (5565) protocol surface. Documentation contracts live here too:
+  `internal/node-readme-schema.md` (node READMEs) and
+  `internal/client-readme-schema.md` (client readmes).
 
 ## Rules
 
 - Hand-written only. Nothing generated is committed under `docs/`.
 - Node docs stay with their nodes: `nodes/src/nodes/<name>/README.md` (generated
-  params between markers via `nodes:docs-generate`).
+  params between markers via `nodes:docs-generate`), following
+  `internal/node-readme-schema.md` — check with
+  `python3 scripts/validate-node-readme.py <node-dir>`.
 - A `readme.md` in a client (or `mcp/`) section is that package's README export
   source — after editing it, run `./builder docs:export` to regenerate the committed
   package `README.md`. Never hand-edit the package `README.md` directly.
