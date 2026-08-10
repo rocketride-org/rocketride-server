@@ -127,14 +127,18 @@ class EasyOCRLoader(BaseLoader):
                 torch_device = 'cuda:0'
                 use_gpu = True
 
-        # Probing only gpu_index is sufficient here: the DataParallel unwrap below
-        # pins the detector and recognizer to this one device, so EasyOCR never
-        # scatters work onto another card whose kernels went untested.
-        if use_gpu and not probe_cuda(gpu_index):
-            logger.warning(f'CUDA device {gpu_index} kernel probe failed, falling back to CPU for EasyOCR')
-            use_gpu = False
-            gpu_index = -1
-            torch_device = 'cpu'
+            # Local mode only, matching the other torch loaders. In server mode the
+            # allocator owns device selection and tracks the reservation, so falling
+            # back to CPU here would leave it holding a GPU nothing is using.
+            #
+            # Probing only gpu_index is sufficient: the DataParallel unwrap below
+            # pins the detector and recognizer to this one device, so EasyOCR never
+            # scatters work onto another card whose kernels went untested.
+            if use_gpu and not probe_cuda(gpu_index):
+                logger.warning(f'CUDA device {gpu_index} kernel probe failed, falling back to CPU for EasyOCR')
+                use_gpu = False
+                gpu_index = -1
+                torch_device = 'cpu'
 
         logger.info(f'Loading EasyOCR with languages {languages} on {torch_device}')
 
