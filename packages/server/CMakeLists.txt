@@ -127,6 +127,7 @@ include(cmake/setup_vcpkg.cmake)
 # -----------------------------------------------------------------------------
 include(cmake/setup.cmake)
 include(cmake/rocketride.cmake)
+include(cmake/rocketride-node.cmake)
 
 # -----------------------------------------------------------------------------
 # Compiler information
@@ -165,6 +166,12 @@ add_subdirectory(engine-mod)
 
 # Main engine executable
 add_subdirectory(engine)
+
+# C++ nodes - each builds a shared library loaded by the engine at startup.
+# They live beside the python nodes, under nodes/src/nodes, and their build
+# output is mirrored into build/nodes/<name> to keep it off the engine's own
+# artifacts.
+add_subdirectory(${ROCKETRIDE_PROJECT_ROOT}/nodes/src/nodes/cpp-example ${CMAKE_BINARY_DIR}/nodes/cpp-example)
 
 # -----------------------------------------------------------------------------
 # Testing configuration

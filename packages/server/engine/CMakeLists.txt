@@ -29,13 +29,8 @@ add_custom_command(TARGET engine POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:engineMod> $<TARGET_FILE_DIR:engine>
     COMMENT "Copying $<TARGET_FILE_NAME:engineMod> next to $<TARGET_FILE_NAME:engine>")
 
-# Mirror the exe -> dist/server copy that rocketride_add_executable performs
-if(ROCKETRIDE_CMAKE_KIST)
-    add_custom_command(TARGET engine POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E make_directory "${ROCKETRIDE_PROJECT_ROOT}/dist/server"
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:engineMod> "${ROCKETRIDE_PROJECT_ROOT}/dist/server/"
-        COMMENT "Copying $<TARGET_FILE_NAME:engineMod> to dist/server")
-endif()
+# The module's own dist/server copy lives on the engineMod target, so that it
+# still happens when only engineMod changes and this executable does not relink
 
 # Generate version.rc on Windows
 if(ROCKETRIDE_PLAT_WIN)

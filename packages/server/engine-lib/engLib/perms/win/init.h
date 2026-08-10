@@ -26,6 +26,6 @@
 namespace engine::perms {
 
 Error init() noexcept;
-const Sid& machineSid() noexcept;
+ROCKETRIDE_CORE_API const Sid& machineSid() noexcept;
 
 }  // namespace engine::perms
