@@ -275,7 +275,10 @@ namespace py = pybind11;
 using namespace pybind11::literals;
 
 // This is used by the GIL locking mechanism
-thread_local bool tls_thread_state_ref;
+bool &threadStateRef() noexcept {
+    thread_local bool ref = false;
+    return ref;
+}
 
 // These are debugger support variables
 thread_local bool tls_debug_attached = false;

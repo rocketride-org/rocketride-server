@@ -116,7 +116,7 @@ public:
     const Text &type() const noexcept;
 
     virtual Error execute() noexcept;
-    static Text buildType(json::Value &cmd) noexcept;
+    ROCKETRIDE_CORE_API static Text buildType(json::Value &cmd) noexcept;
 
     //-----------------------------------------------------------------
     /// @details

@@ -40,6 +40,7 @@ _const auto Type = "zipnet"_itv;
 // Register the protocol config with the Url system. This
 // allows call Url::toPath(...), Url::toUrl(...), etc
 //-------------------------------------------------------------------------
+#ifndef ROCKETRIDE_CORE_IMPORT
 static url::UrlConfig urlConfig{
     {//------------------------------------------------------------
      /// @details
@@ -97,6 +98,7 @@ static url::UrlConfig urlConfig{
 
          return {};
      }}};
+#endif
 
 //-------------------------------------------------------------------------
 /// @details

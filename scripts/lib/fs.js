@@ -72,30 +72,30 @@ async function readFile(filePath, options = 'utf8') {
     return fsp.readFile(filePath, options);
 }
 
+
+
 /**
- * Read a JSON file
+ * Read a JSON file. Every caller reads a definition file - a services*.json, a
+ * package.json, a manifest - so anything but an object is broken data, and the
+ * path goes in the error since the contents alone cannot say which file it was.
+ * @param {string} filePath - Path to JSON file
+ * @returns {any}
+ */
+function readJsonSync(filePath) {
+    const data = parseJson(fs.readFileSync(filePath, 'utf8'));
+    if (!data || typeof data !== 'object')
+        throw new Error(`${filePath}: expected a JSON object`);
+    return data;
+}
+
+/**
+ * Read a JSON file, for the async callers. Reads synchronously - definition
+ * files are small, and this keeps one reader
  * @param {string} filePath - Path to JSON file
  * @returns {Promise<any>}
  */
 async function readJson(filePath) {
-    const content = await fsp.readFile(filePath, 'utf8');
-    return JSON.parse(content);
-}
-
-/**
- * Read a JSON file, returning default value if it doesn't exist
- * @param {string} filePath - Path to JSON file
- * @param {any} defaultValue - Value to return if file doesn't exist
- * @returns {Promise<any>}
- */
-async function readJsonSafe(filePath, defaultValue = null) {
-    try {
-        const content = await fsp.readFile(filePath, 'utf8');
-        return JSON.parse(content);
-    } catch (err) {
-        if (err.code === 'ENOENT') return defaultValue;
-        throw err;
-    }
+    return readJsonSync(filePath);
 }
 
 /**
@@ -496,7 +496,7 @@ async function move(oldPath, newPath) {
 }
 
 // =============================================================================
-// Utility Functions
+// Utilities
 // =============================================================================
 
 /**
@@ -545,6 +545,65 @@ async function touch(filePath) {
             throw err;
         }
     }
+}
+
+/**
+ * Parse JSONC text, dropping the comments and trailing commas JSON.parse
+ * rejects. services*.json and the vscode configs are written that way.
+ * Throws like JSON.parse.
+ * @param {string} text - JSONC source
+ * @returns {any}
+ */
+function parseJson(text) {
+    let out = '';
+    // Index in out of a comma we have not decided on yet: it is dropped if the
+    // next real token closes the object or array
+    let comma = -1;
+
+    for (let i = 0; i < text.length; i++) {
+        const c = text[i];
+
+        // Copied through untouched - a value may hold // or /* legitimately
+        if (c === '"') {
+            comma = -1;
+            out += c;
+            while (++i < text.length) {
+                out += text[i];
+                if (text[i] === '\\') out += text[++i] ?? '';
+                else if (text[i] === '"') break;
+            }
+            continue;
+        }
+
+        if (c === '/' && text[i + 1] === '/') {
+            while (i + 1 < text.length && text[i + 1] !== '\n') i++;
+            continue;
+        }
+
+        if (c === '/' && text[i + 1] === '*') {
+            for (i += 2; i < text.length; i++)
+                if (text[i] === '*' && text[i + 1] === '/') { i++; break; }
+            continue;
+        }
+
+        if (c === ',') {
+            comma = out.length;
+            out += c;
+            continue;
+        }
+
+        // Whitespace leaves a pending comma pending, so comments or newlines
+        // between it and a closing brace do not hide it
+        if (comma >= 0 && !/\s/.test(c)) {
+            if (c === '}' || c === ']')
+                out = out.slice(0, comma) + out.slice(comma + 1);
+            comma = -1;
+        }
+
+        out += c;
+    }
+
+    return JSON.parse(out);
 }
 
 // =============================================================================
@@ -769,6 +828,7 @@ async function hasBuildInputChanged(stateKey, dirs, files = []) {
     return { changed: currentHash !== savedHash, hash: currentHash };
 }
 
+
 module.exports = {
     // Existence
     exists,
@@ -778,7 +838,7 @@ module.exports = {
     // Reading
     readFile,
     readJson,
-    readJsonSafe,
+    readJsonSync,
     readDir,
     readDirSafe,
     
@@ -825,6 +885,7 @@ module.exports = {
     truncate,
     utimes,
     touch,
+    parseJson,
     
     // Fingerprinting
     fingerprint,
