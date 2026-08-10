@@ -23,6 +23,13 @@ def probe_cuda(device_index: int = 0) -> bool:
     Pascal sm_61 on a Quadro P620).  The probe executes a tiny GEMM and then
     calls synchronize() so any async CUDA error is raised here rather than
     silently deferred to the first real inference call.
+
+    Scope: this is a torch-level probe, so it speaks only for loaders that run
+    their kernels through torch. Runtimes with their own kernel builds need
+    their own check; Whisper has one in WhisperLoader._check_gpu_compatible(),
+    which probes ctranslate2 in a subprocess because a mismatch there aborts
+    the process rather than raising. In practice an sm_* mismatch breaks the
+    whole torch build, so a passing probe is good evidence for torch loaders.
     """
     if not torch.cuda.is_available():
         return False

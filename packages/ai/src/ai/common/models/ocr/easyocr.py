@@ -127,6 +127,9 @@ class EasyOCRLoader(BaseLoader):
                 torch_device = 'cuda:0'
                 use_gpu = True
 
+        # Probing only gpu_index is sufficient here: the DataParallel unwrap below
+        # pins the detector and recognizer to this one device, so EasyOCR never
+        # scatters work onto another card whose kernels went untested.
         if use_gpu and not probe_cuda(gpu_index):
             logger.warning(f'CUDA device {gpu_index} kernel probe failed, falling back to CPU for EasyOCR')
             use_gpu = False
@@ -143,7 +146,11 @@ class EasyOCRLoader(BaseLoader):
             )
         except Exception as e:
             if use_gpu:
+                # The probe above clears kernel incompatibility, so a failure here is
+                # something it cannot see (driver state, VRAM exhaustion, a backend
+                # EasyOCR loads on its own). Retry on CPU rather than fail the load.
                 logger.warning(f'EasyOCR GPU load failed ({e}), falling back to CPU')
+                use_gpu = False
                 gpu_index = -1
                 torch_device = 'cpu'
                 try:
