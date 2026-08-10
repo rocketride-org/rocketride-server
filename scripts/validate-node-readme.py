@@ -253,9 +253,16 @@ def validate(node_dir: Path):
             f"missing lane-in: {sorted(want - got)}" if not want <= got else "")
     profs = real_profiles(svc)
     if len(profs) >= 2 and "Profiles" in seen:
-        want = {(v.get("title") or k) for k, v in profs.items() if isinstance(v, dict)}
-        got = set(table_col(hand, "Profiles"))
-        missing = {w for w in want if not any(w in g or g in w for g in got)}
+        # Rows may lead with either the profile key or its display title
+        # (checked across the first two columns).
+        got = set(table_col(hand, "Profiles")) | set(table_col(hand, "Profiles", 1))
+        missing = set()
+        for k, v in profs.items():
+            if not isinstance(v, dict):
+                continue
+            title = v.get("title") or k
+            if k not in got and not any(title in g or g in title for g in got):
+                missing.add(title)
         add("PASS" if not missing else "FAIL", "Profiles rows match preconfig",
             f"missing: {sorted(missing)}" if missing else "")
 
@@ -277,8 +284,17 @@ def validate(node_dir: Path):
     conf = re.search(r"^## Configuration.*?$(.*?)(?=^## |\Z)", hand, re.M | re.S)
     if conf:
         subs = re.findall(r"^### (.+)$", conf.group(1), re.M)
+
+        def tokens(s):
+            return {t for t in re.findall(r"[a-z0-9]+", s.lower()) if len(t) > 2}
+
         for title in complex_fields(svc):
+            # Covered when a subsection heading contains the title (or vice
+            # versa), or contains all of the title's significant words —
+            # grouped subsections like "Detection / Recognition Architecture"
+            # cover both grouped fields.
             covered = any(title.lower() in s.lower() or s.lower() in title.lower()
+                          or tokens(title) <= tokens(s)
                           for s in subs)
             if not covered:
                 add("WARN", "complex field has a detail subsection",

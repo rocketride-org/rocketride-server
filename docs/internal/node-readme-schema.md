@@ -144,7 +144,10 @@ grouped subsection.
 
 **Multi-service directories** (more than one `services*.json` with a
 `protocol`): split `## Connections` and `## Configuration` content by
-`###`-per-service, primary service first.
+`###`-per-service, primary service first. Exception: when the services are
+presets of the same implementation with identical wiring (e.g. a branded
+variant), document them once and describe the preset differences under
+`## Notes`.
 
 ## 8. `## Authentication` — OPTIONAL
 
