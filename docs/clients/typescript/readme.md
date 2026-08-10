@@ -248,7 +248,7 @@ const result = await pipe.close();
 
 | Method           | Signature                                                                                                                            | Returns      | Description                                                                                                                                                                                         |
 | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------ | ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `withConnection` | `RocketRideClient.withConnection<T>(config: RocketRideClientConfig, callback: (client: RocketRideClient) => Promise<T>): Promise<T>` | `Promise<T>` | Creates a client, calls `connect()`, runs `callback(client)`, then `disconnect()` in a `finally` block. Returns the callback result. **Use** for one-off scripts so you never forget to disconnect. |
+| `withConnection` | `RocketRideClient.withConnection<T>(config: RocketRideClientConfig, callback: (client: RocketRideClient) => Promise<T>): Promise<T>` | `Promise<T>` | Creates a client, calls `connect()`, runs `callback(client)`, then `disconnect()` in a `finally` block. Returns the callback result. **Use** for one-off scripts so you never forget to disconnect. In Python, use `async with RocketRideClient(...)` instead. <!-- language-specific --> |
 
 ---
 
@@ -296,6 +296,7 @@ constructor(options?: {
 | `addHistory`     | `addHistory(item: QuestionHistory): void`                             | Adds a history item (`{ role, content }`) for multi-turn chat.   |
 | `addQuestion`    | `addQuestion(question: string): void`                                 | Appends the main question text.                                  |
 | `addDocuments`   | `addDocuments(documents: Doc \| Doc[]): void`                         | Adds documents for the AI to reference.                          |
+| `addGoal`        | `addGoal(goal: string): void`                                         | Adds a goal statement for the AI.                                |
 | `getPrompt`      | `getPrompt(hasPreviousJsonFailed?: boolean): string`                  | Returns the full prompt (internal use).                          |
 
 ---
