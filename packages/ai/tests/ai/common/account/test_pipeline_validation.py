@@ -19,12 +19,17 @@ from types import SimpleNamespace
 
 import pytest
 
-from _engine_stubs import import_with_engine_stubs
+from tests._engine_stubs import import_with_engine_stubs
 
-pv = import_with_engine_stubs(
-    'ai.common.account.pipeline_validation',
-    {'getServiceDefinition': lambda _provider_id: None},
-)
+@pytest.fixture
+def pv():
+    """Import the validator with engine dependencies stubbed per test."""
+    return import_with_engine_stubs(
+        'ai.common.account.pipeline_validation',
+        {'getServiceDefinition': lambda _provider_id: None},
+    )
+
+
 
 
 # ---------------------------------------------------------------------------
@@ -47,7 +52,7 @@ def _account(plans):
 
 
 @pytest.fixture
-def patch_service_definitions(monkeypatch):
+def patch_service_definitions(monkeypatch, pv):
     """
     Patch ``rocketlib.getServiceDefinition`` with a mapping-driven fake.
 
@@ -75,20 +80,20 @@ def patch_service_definitions(monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def test_validate_empty_pipeline_passes(patch_service_definitions):
+def test_validate_empty_pipeline_passes(patch_service_definitions, pv):
     """A pipeline with no source / components requires no plans, so any account passes."""
     validator = pv.AccountPipelineValidation()
     assert validator.validate(_account([]), {}) is True
 
 
-def test_validate_pipeline_without_components_passes(patch_service_definitions):
+def test_validate_pipeline_without_components_passes(patch_service_definitions, pv):
     """Source without components yields no required plans."""
     validator = pv.AccountPipelineValidation()
     pipeline = {'source': 'src', 'components': []}
     assert validator.validate(_account([]), pipeline) is True
 
 
-def test_validate_passes_when_account_has_all_required_plans(patch_service_definitions):
+def test_validate_passes_when_account_has_all_required_plans(patch_service_definitions, pv):
     """Account with all the required plans passes."""
     patch_service_definitions['providerA'] = {'plans': ['pro']}
     patch_service_definitions['providerB'] = {'plans': ['enterprise']}
@@ -109,7 +114,7 @@ def test_validate_passes_when_account_has_all_required_plans(patch_service_defin
 # ---------------------------------------------------------------------------
 
 
-def test_validate_rejects_when_missing_required_plan(patch_service_definitions):
+def test_validate_rejects_when_missing_required_plan(patch_service_definitions, pv):
     """Missing one required plan is enough to reject."""
     patch_service_definitions['providerA'] = {'plans': ['pro']}
     patch_service_definitions['providerB'] = {'plans': ['enterprise']}
@@ -125,7 +130,7 @@ def test_validate_rejects_when_missing_required_plan(patch_service_definitions):
     assert validator.validate(_account(['pro']), pipeline) is False
 
 
-def test_validate_rejects_when_account_has_no_plans(patch_service_definitions):
+def test_validate_rejects_when_account_has_no_plans(patch_service_definitions, pv):
     """An empty account.plans list cannot satisfy any required plan."""
     patch_service_definitions['providerA'] = {'plans': ['pro']}
     pipeline = {
@@ -136,7 +141,7 @@ def test_validate_rejects_when_account_has_no_plans(patch_service_definitions):
     assert validator.validate(_account([]), pipeline) is False
 
 
-def test_validate_rejects_account_without_plans_field(patch_service_definitions):
+def test_validate_rejects_account_without_plans_field(patch_service_definitions, pv):
     """An account object without plans should deny required plans, not crash."""
     patch_service_definitions['providerA'] = {'plans': ['pro']}
     pipeline = {
@@ -147,7 +152,7 @@ def test_validate_rejects_account_without_plans_field(patch_service_definitions)
     assert validator.validate(SimpleNamespace(), pipeline) is False
 
 
-def test_validate_rejects_account_with_none_plans(patch_service_definitions):
+def test_validate_rejects_account_with_none_plans(patch_service_definitions, pv):
     """An account with plans=None should deny required plans, not crash."""
     patch_service_definitions['providerA'] = {'plans': ['pro']}
     pipeline = {
@@ -163,7 +168,7 @@ def test_validate_rejects_account_with_none_plans(patch_service_definitions):
 # ---------------------------------------------------------------------------
 
 
-def test_required_plans_only_includes_reachable_nodes(patch_service_definitions):
+def test_required_plans_only_includes_reachable_nodes(patch_service_definitions, pv):
     """BFS starts from ``source``; nodes outside the source's reach are ignored."""
     patch_service_definitions['providerA'] = {'plans': ['plan-a']}
     patch_service_definitions['providerB'] = {'plans': ['plan-b']}
@@ -184,7 +189,7 @@ def test_required_plans_only_includes_reachable_nodes(patch_service_definitions)
     assert plans == {'plan-a', 'plan-b'}
 
 
-def test_required_plans_handles_branching_graph(patch_service_definitions):
+def test_required_plans_handles_branching_graph(patch_service_definitions, pv):
     """A diamond graph (a -> b, a -> c, b/c -> d) collects every node's plans once."""
     patch_service_definitions['pA'] = {'plans': ['a']}
     patch_service_definitions['pB'] = {'plans': ['b', 'shared']}
@@ -205,7 +210,7 @@ def test_required_plans_handles_branching_graph(patch_service_definitions):
     assert plans == {'a', 'b', 'c', 'd', 'shared'}
 
 
-def test_required_plans_handles_unknown_node_id(patch_service_definitions):
+def test_required_plans_handles_unknown_node_id(patch_service_definitions, pv):
     """A child reference whose target id is missing from `nodes` is silently skipped."""
     patch_service_definitions['pA'] = {'plans': ['a']}
     pipeline = {
@@ -222,7 +227,7 @@ def test_required_plans_handles_unknown_node_id(patch_service_definitions):
     assert plans == {'a'}
 
 
-def test_required_plans_handles_provider_without_plans_key(patch_service_definitions):
+def test_required_plans_handles_provider_without_plans_key(patch_service_definitions, pv):
     """A schema with no 'plans' key is treated as contributing nothing (not crashing)."""
     patch_service_definitions['pA'] = {}  # no 'plans' field at all
     pipeline = {
@@ -234,14 +239,14 @@ def test_required_plans_handles_provider_without_plans_key(patch_service_definit
     assert plans == set()
 
 
-def test_required_plans_no_source_returns_empty(patch_service_definitions):
+def test_required_plans_no_source_returns_empty(patch_service_definitions, pv):
     """Without a 'source' field there are no required plans."""
     pipeline = {'components': [{'id': 'x', 'provider': 'pA'}]}
     validator = pv.AccountPipelineValidation()
     assert validator._get_pipeline_required_plans(pipeline) == set()
 
 
-def test_required_plans_visited_set_prevents_revisit(monkeypatch):
+def test_required_plans_visited_set_prevents_revisit(monkeypatch, pv):
     """A node referenced from multiple parents is only visited once (cycle/dup safety)."""
     schemas = {'pA': {'plans': ['pA']}, 'pB': {'plans': ['pB']}}
     call_count: dict = {}
