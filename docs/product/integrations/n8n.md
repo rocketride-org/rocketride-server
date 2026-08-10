@@ -1,29 +1,32 @@
-# n8n ↔ RocketRide Integration
+---
+title: n8n
+sidebar_position: 4
+---
+
+# n8n
 
 RocketRide and [n8n](https://n8n.io) connect in both directions:
 
-- **RocketRide → n8n:** the [`tool_n8n` node](../nodes/src/nodes/tool_n8n/README.md) triggers n8n
+- **RocketRide → n8n:** the [`tool_n8n` node](https://github.com/rocketride-org/rocketride-server/blob/develop/nodes/src/nodes/tool_n8n/README.md) triggers n8n
   workflows from a pipeline step or an agent tool.
 - **n8n → RocketRide:** any n8n workflow calls a RocketRide pipeline through the pipeline's
   webhook endpoint, using n8n's built-in **HTTP Request** node.
 
 Combining the two gives **round-trips**: RocketRide → n8n → RocketRide.
 
-> Templates: [`examples/n8n-roundtrip.pipe`](../examples/n8n-roundtrip.pipe) (RR side) and
-> [`examples/n8n-call-rocketride.workflow.json`](../examples/n8n-call-rocketride.workflow.json)
+> Templates: [`examples/n8n-roundtrip.pipe`](https://github.com/rocketride-org/rocketride-server/blob/develop/examples/n8n-roundtrip.pipe) (RocketRide side) and
+> [`examples/n8n-call-rocketride.workflow.json`](https://github.com/rocketride-org/rocketride-server/blob/develop/examples/n8n-call-rocketride.workflow.json)
 > (n8n side, importable).
 >
-> **Runnable test pipes** that exercise every mode (sync / async / sequential / agent / round-trip)
-> live in [`examples/n8n/`](../examples/n8n/) — open them in the IDE. They pair with the local
-> test harness in `.context/n8n-test/` (`run.sh --keep` seeds the `rr-echo` / `rr-slow` / `rr-upper`
-> / `rr-callback` workflows); see that folder's `WALKTHROUGH.md` for the step-by-step.
+> **Runnable pipelines** that exercise every mode (sync / async / sequential / agent / round-trip)
+> live in [`examples/n8n/`](https://github.com/rocketride-org/rocketride-server/tree/develop/examples/n8n) — open them in the IDE.
 
 ---
 
 ## RocketRide → n8n (the `tool_n8n` node)
 
 Drop the **n8n** node into a pipeline (wired by lanes) or attach it to an agent (tool channel).
-Full reference: [`nodes/src/nodes/tool_n8n/README.md`](../nodes/src/nodes/tool_n8n/README.md).
+Full reference: [`tool_n8n` node](https://github.com/rocketride-org/rocketride-server/blob/develop/nodes/src/nodes/tool_n8n/README.md).
 
 The essentials:
 
@@ -61,8 +64,8 @@ n8n dispatcher: [Webhook] → [Execute Sub-Workflow → target] → [Respond to 
 ```
 
 1. On the **target** workflow, add an **"Execute Sub-Workflow Trigger"** ("When Executed by Another Workflow") as an entry point.
-2. Import [`examples/n8n/n8n-dispatch.workflow.json`](../examples/n8n/n8n-dispatch.workflow.json), point its **Execute Workflow** node at the target, and **activate** it.
-3. Set `tool_n8n`'s **Workflow** to the dispatcher's webhook path (`my-dispatch`); it's triggered like any webhook and the target's output flows back. (Verified end-to-end in the test harness: `rr-dispatch` → `rr-sub`.)
+2. Import [`examples/n8n/n8n-dispatch.workflow.json`](https://github.com/rocketride-org/rocketride-server/blob/develop/examples/n8n/n8n-dispatch.workflow.json), point its **Execute Workflow** node at the target, and **activate** it.
+3. Set `tool_n8n`'s **Workflow** to the dispatcher's webhook path (`my-dispatch`); it's triggered like any webhook and the target's output flows back.
 
 ## n8n → RocketRide
 
@@ -81,7 +84,7 @@ In n8n, add an **HTTP Request** node:
 | Body    | JSON payload for the pipeline |
 
 The pipeline's `response_*` node determines what comes back to n8n. Import
-[`examples/n8n-call-rocketride.workflow.json`](../examples/n8n-call-rocketride.workflow.json)
+[`examples/n8n-call-rocketride.workflow.json`](https://github.com/rocketride-org/rocketride-server/blob/develop/examples/n8n-call-rocketride.workflow.json)
 for a ready-made Webhook → HTTP Request → Respond to Webhook workflow.
 
 ## Round-trips (RocketRide → n8n → RocketRide)
@@ -98,7 +101,7 @@ RR pipeline B: [webhook] → … → [response]   — its result returns to n8n,
 
 Pipeline A's `tool_n8n` step waits for n8n's response, which itself contains pipeline B's
 response — synchronous nesting across both systems. Start from
-[`examples/n8n-roundtrip.pipe`](../examples/n8n-roundtrip.pipe) for the A side.
+[`examples/n8n-roundtrip.pipe`](https://github.com/rocketride-org/rocketride-server/blob/develop/examples/n8n-roundtrip.pipe) for the A side.
 
 ---
 

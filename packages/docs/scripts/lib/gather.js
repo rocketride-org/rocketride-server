@@ -30,8 +30,8 @@ const DOCS_ROOT_MOUNTS = [
 	{ source: 'docs/clients/typescript', mount: 'develop/typescript' },
 	{ source: 'docs/clients/python', mount: 'develop/python' },
 	{ source: 'docs/clients/vscode', mount: 'ide-extensions/vscode' },
-	{ source: 'docs/mcp', mount: 'protocols/mcp' },
-	{ source: 'docs/internal/engine-protocol', mount: 'protocols/websocket' },
+	{ source: 'docs/protocols/mcp', mount: 'protocols/mcp' },
+	{ source: 'docs/protocols/websocket', mount: 'protocols/websocket' },
 ];
 // Node sources and node tests are excluded from the package-mount pass: node
 // markdown is the nodes contributor's domain (staged when the node's top-level
@@ -560,7 +560,7 @@ async function gather({ projectRoot, contentStaticDir, contentDir, staticDir, mo
 		DOCS_ROOT_MOUNTS.map((m) => ({ sourceDir: path.join(projectRoot, m.source), mount: m.mount, module: 'docs' }))
 	);
 	const packageDocsFiles = await glob(DOCS_GLOB, { cwd: projectRoot, nodir: true, ignore: IGNORE });
-	const rootDocsFiles = await glob('docs/{clients,mcp,internal/engine-protocol}/**/*.{md,mdx}', { cwd: projectRoot, nodir: true, ignore: ['**/readme.md'] });
+	const rootDocsFiles = await glob('docs/{clients,protocols}/**/*.{md,mdx}', { cwd: projectRoot, nodir: true, ignore: ['**/readme.md'] });
 	const allDocsFiles = [...packageDocsFiles, ...rootDocsFiles];
 	for (const rel of allDocsFiles) {
 		const abs = path.join(projectRoot, rel);

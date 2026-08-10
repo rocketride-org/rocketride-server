@@ -9,7 +9,7 @@ this schema. Validate with:
 python3 scripts/validate-client-docs.py
 ```
 
-The MCP readme (`docs/mcp/readme.md`) is a different product surface and is
+The MCP readme (`docs/protocols/mcp/readme.md`) is a different product surface and is
 **not** covered by this schema.
 
 ## Section order

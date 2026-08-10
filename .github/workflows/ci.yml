@@ -229,7 +229,7 @@ jobs:
         run: node scripts/build.js docs:check
 
   # ---------------------------------------------------------------------------
-  #  node-docs — node README schema validation (docs/internal/
+  #  node-docs — node README schema validation (docs/development/
   #  node-readme-schema.md). ADVISORY while the node corpus is migrated to the
   #  schema: continue-on-error keeps it from blocking merges and it is
   #  deliberately NOT in the ci-ok needs list. Once all node READMEs conform,

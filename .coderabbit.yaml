@@ -37,7 +37,7 @@ reviews:
         memory safety, thread safety, and performance.
     - path: 'nodes/src/nodes/**/README.md'
       instructions: |
-        Node READMEs follow docs/internal/node-readme-schema.md (structure is
+        Node READMEs follow docs/development/node-readme-schema.md (structure is
         machine-checked by scripts/validate-node-readme.py; focus review on
         accuracy). Verify the prose matches the node's code and services*.json:
         the "As a tool" table must list exactly the functions the node exposes
@@ -48,7 +48,7 @@ reviews:
         README, flag it.
     - path: 'docs/clients/**/*.md'
       instructions: |
-        Client docs follow docs/internal/client-readme-schema.md. The Python
+        Client docs follow docs/development/client-readme-schema.md. The Python
         and TypeScript readmes must stay in parity: an API method, type, or
         exception documented in one must be documented in the other or be
         explicitly marked language-specific. Package READMEs are generated
