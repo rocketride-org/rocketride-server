@@ -40,6 +40,7 @@ _const auto Type = "zipfile"_itv;
 // Register the protocol config with the Url system. This
 // allows call Url::toPath(...), Url::toUrl(...), etc
 //-------------------------------------------------------------------------
+#ifndef ROCKETRIDE_CORE_IMPORT
 static url::UrlConfig urlConfig{
     {//------------------------------------------------------------
      /// @details
@@ -108,6 +109,7 @@ static url::UrlConfig urlConfig{
                            "zipfile jailbreak from path detected:", path);
          return {};
      }}};
+#endif
 
 //-------------------------------------------------------------------------
 /// @details
