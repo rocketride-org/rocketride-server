@@ -45,6 +45,7 @@ jobs:
       pull-requests: read
     outputs:
       code: ${{ steps.filter.outputs.code }}
+      docs: ${{ steps.filter.outputs.docs }}
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - uses: dorny/paths-filter@d1c1ffe0248fe513906c8e24db8ea791d46f8590 # v3
@@ -60,6 +61,14 @@ jobs:
               - 'builder.cmd'
               - '.github/workflows/**'
               - 'package.json'
+            docs:
+              - 'docs/**'
+              - 'packages/docs/**'
+              - 'nodes/src/nodes/**/README.md'
+              - 'packages/*/docs/**'
+              - 'packages/client-typescript/README.md'
+              - 'packages/client-python/README.md'
+              - 'packages/client-mcp/README.md'
 
   # ---------------------------------------------------------------------------
   #  Helm lint + schema validation (only on PRs touching deploy/helm/**)
@@ -229,14 +238,16 @@ jobs:
         run: node scripts/build.js docs:check
 
   # ---------------------------------------------------------------------------
-  #  node-docs — node README schema validation (docs/development/
-  #  node-readme-schema.md). ADVISORY while the node corpus is migrated to the
-  #  schema: continue-on-error keeps it from blocking merges and it is
-  #  deliberately NOT in the ci-ok needs list. Once all node READMEs conform,
-  #  drop continue-on-error and add the job to ci-ok to make it a hard gate.
+  #  node-docs — documentation schema validation. Two deterministic checkers:
+  #  node READMEs against docs/development/node-readme-schema.md, and client
+  #  doc parity against docs/development/client-readme-schema.md. ADVISORY
+  #  while the node corpus is migrated to the schema: continue-on-error keeps
+  #  it from blocking merges and it is deliberately NOT in the ci-ok needs
+  #  list. Once all node READMEs conform, drop continue-on-error and add the
+  #  job to ci-ok to make it a hard gate.
   # ---------------------------------------------------------------------------
   node-docs:
-    name: Node README schema (advisory)
+    name: Doc schemas (advisory)
     runs-on: ubuntu-latest
     timeout-minutes: 5
     continue-on-error: true
@@ -244,6 +255,44 @@ jobs:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - name: Validate node READMEs
         run: python3 scripts/validate-node-readme.py --all nodes/src/nodes
+      - name: Validate client doc parity
+        if: always()
+        run: python3 scripts/validate-client-docs.py
+
+  # ---------------------------------------------------------------------------
+  #  docs-build — stage and compile the docs site on PRs that touch any doc
+  #  source. Catches what only a full build can: broken internal links,
+  #  files under docs/ not covered by a mount, and spine entries with no
+  #  backing page. Without this gate those failures surface after merge, in
+  #  docs.yml's build-and-deploy on develop. Blocking (via ci-ok) because
+  #  every failure mode is deterministic; skipped entirely on PRs that touch
+  #  no doc sources. docs:test guards the gather/export logic itself.
+  # ---------------------------------------------------------------------------
+  docs-build:
+    name: Docs site build
+    needs: [changes]
+    permissions:
+      contents: read
+    if: >-
+      always() &&
+      github.event_name == 'pull_request' &&
+      needs.changes.outputs.docs == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Docs unit tests
+        run: node scripts/build.js docs:test
+      - name: Build docs site
+        run: node scripts/build.js docs:build
 
   # ---------------------------------------------------------------------------
   #  gitleaks — secret scan. Installs the binary directly because the upstream
@@ -326,7 +375,7 @@ jobs:
   # ---------------------------------------------------------------------------
   ci-ok:
     name: CI OK
-    needs: [init, changes, build, helm-changes, helm-lint, ruff-check, gitleaks, shell-contract]
+    needs: [init, changes, build, helm-changes, helm-lint, ruff-check, docs-build, gitleaks, shell-contract]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -334,11 +383,11 @@ jobs:
         run: |
           if [[ "${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}" == "true" ]]; then
             echo "❌ One or more CI jobs failed or were cancelled."
-            echo "Results: init=${{ needs.init.result }}, changes=${{ needs.changes.result }}, build=${{ needs.build.result }}, helm-changes=${{ needs.helm-changes.result }}, helm-lint=${{ needs.helm-lint.result }}, ruff-check=${{ needs['ruff-check'].result }}, gitleaks=${{ needs.gitleaks.result }}, shell-contract=${{ needs['shell-contract'].result }}"
+            echo "Results: init=${{ needs.init.result }}, changes=${{ needs.changes.result }}, build=${{ needs.build.result }}, helm-changes=${{ needs.helm-changes.result }}, helm-lint=${{ needs.helm-lint.result }}, ruff-check=${{ needs['ruff-check'].result }}, docs-build=${{ needs['docs-build'].result }}, gitleaks=${{ needs.gitleaks.result }}, shell-contract=${{ needs['shell-contract'].result }}"
             exit 1
           fi
           echo "✅ All CI checks passed (or were correctly skipped)."
-          echo "Results: init=${{ needs.init.result }}, changes=${{ needs.changes.result }}, build=${{ needs.build.result }}, helm-changes=${{ needs.helm-changes.result }}, helm-lint=${{ needs.helm-lint.result }}, ruff-check=${{ needs['ruff-check'].result }}, gitleaks=${{ needs.gitleaks.result }}, shell-contract=${{ needs['shell-contract'].result }}"
+          echo "Results: init=${{ needs.init.result }}, changes=${{ needs.changes.result }}, build=${{ needs.build.result }}, helm-changes=${{ needs.helm-changes.result }}, helm-lint=${{ needs.helm-lint.result }}, ruff-check=${{ needs['ruff-check'].result }}, docs-build=${{ needs['docs-build'].result }}, gitleaks=${{ needs.gitleaks.result }}, shell-contract=${{ needs['shell-contract'].result }}"
 
   # ---------------------------------------------------------------------------
   #  Discord — update PR embed with final check counts after CI completes.
