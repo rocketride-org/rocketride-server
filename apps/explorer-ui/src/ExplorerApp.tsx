@@ -38,7 +38,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import type { ShellAppProps } from 'shell';
 import { commonStyles } from 'shell';
-import { useShellConnection, useWorkspace, DocTabs, DocSplitLayout, AppLayout } from 'shell';
+import { useShellConnection, useWorkspace, DocTabs, DocSplitLayout, AppLayout, EmptyState, BxFolderOpen } from 'shell';
 import type { Documents } from 'shell';
 import { createDocs, destroyDocs, getDocs } from './docs';
 import { createStoreVfs, isFileLoadError } from './store';
@@ -106,11 +106,6 @@ const styles = {
 		fontSize: 14,
 		flexDirection: 'column',
 		gap: 12,
-	} as CSSProperties,
-	/** Title line inside the empty-group welcome message. */
-	welcomeTitle: {
-		fontSize: 16,
-		fontWeight: 600,
 	} as CSSProperties,
 	/** Per-tab file pane — kept mounted so per-viewer state survives tab switches. */
 	tabPane: {
@@ -211,8 +206,11 @@ const ExplorerAppReady: React.FC<{ docs: Documents }> = ({ docs }) => {
 							<div style={styles.content}>
 								{group.editorIds.length === 0 ? (
 									<div style={styles.welcome}>
-										<div style={styles.welcomeTitle}>File Explorer</div>
-										<div>Open a file from the sidebar to view its contents.</div>
+										<EmptyState
+											icon={<BxFolderOpen size={40} />}
+											title="No file open"
+											description="Select a file from the sidebar to view or edit it."
+										/>
 									</div>
 								) : (
 									group.editorIds.map((editorId, idx) => {
