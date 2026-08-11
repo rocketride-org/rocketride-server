@@ -9,10 +9,9 @@ Primary Responsibilities:
 -------------------------
 1. Acts as the mid-tier of the pipeline stack, bridging the frontend ALB layer with backend engine nodes.
 2. Accepts incoming WebSocket connections on `/task/service`.
-3. On receiving a 'launch' command, it initiates a new backend engine with the appropriate pipeline configuration.
-4. On receiving an 'attach' command, it attaches the client to an existing backend engine session.
-5. On 'disconnect', it terminates the session and tears down associated WebSocket connections.
-6. For all other DAP commands, it transparently proxies requests and responses.
+3. On receiving a 'launch' or 'execute' command, it initiates a new backend engine with the appropriate pipeline configuration.
+4. On 'terminate', it stops the task and tears down associated WebSocket connections.
+5. Commands with no handler on the connection are refused explicitly rather than silently accepted.
 
 Modules:
 --------
