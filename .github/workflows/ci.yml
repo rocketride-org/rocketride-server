@@ -280,17 +280,19 @@ jobs:
         # contract check. Nonzero exit fails the PR.
         run: node scripts/build.js shell:check
       - name: shell contract floors are un-tampered — regen must be a no-op
-        # Regenerate the barrels + per-version floors from the immutable frozen
-        # versions, then fail on any diff. A nonzero diff means the committed
-        # contract-check.generated.ts (or a contract barrel) was hand-edited —
-        # e.g. a `_floor_vN` line dropped so a removed export slips past tsc. The
-        # SDK/tsc prereqs are already warm from the step above.
+        # Regenerate the barrels + per-version floors + apiver from the immutable
+        # frozen versions, then fail on any diff. A nonzero diff means a committed
+        # derived file was hand-edited — e.g. a `_floor_vN` line dropped so a
+        # removed export slips past tsc. shell:regen-derived reads ONLY the frozen
+        # versions/*.d.ts (never the live surface, never a reset), so legitimate
+        # freezes of new versions pass here untouched.
         run: |
-          node scripts/build.js shell:regen
+          node scripts/build.js shell:regen-derived
           git diff --exit-code -- \
             packages/shell/src/contract-check.generated.ts \
             packages/shell/contract/index.ts \
-            packages/shell/contract/latest.ts
+            packages/shell/contract/latest.ts \
+            packages/shell/src/apiver.ts
       - name: client SDK contract floors are un-tampered — regen must be a no-op
         # Same guarantee for the rocketride TypeScript SDK: regenerate its
         # contract barrels + conformance file from the immutable frozen floors
