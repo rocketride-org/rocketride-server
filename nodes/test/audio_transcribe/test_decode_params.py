@@ -41,7 +41,7 @@ _VAD_FIELD_TO_DECODE_KEY = {
     'vad_speech_pad_ms': 'speech_pad_ms',
     'vad_max_speech_duration_s': 'max_speech_duration_s',
 }
-_NEW_FIELDS = ['beam_size', 'vad_filter', 'chunk_duration', 'max_chunk_duration', *_VAD_FIELD_TO_DECODE_KEY]
+_NEW_FIELDS = ['beam_size', 'vad_filter', 'chunk_duration', *_VAD_FIELD_TO_DECODE_KEY]
 
 # Read by nothing; superseded by the vad_* fields or by fixed buffering constants.
 _DEAD_FIELDS = ['silence_threshold', 'min_seconds', 'max_seconds', 'vad_level']
@@ -242,7 +242,6 @@ def test_services_json_defaults_match_the_python_fallbacks():
     fields = _parse_services_json()['fields']
     expected = {
         'transcribe.chunk_duration': 60,
-        'transcribe.max_chunk_duration': 120,
         'transcribe.beam_size': 5,
         'transcribe.vad_filter': True,
         'transcribe.vad_threshold': 0.5,
@@ -270,14 +269,13 @@ def _class_attrs(path, class_name):
 
 def test_iglobal_reads_buffering_from_config():
     IGlobal, holder = _load_iglobal()
-    holder['raw'] = {'chunk_duration': 30, 'max_chunk_duration': 90}
+    holder['raw'] = {'chunk_duration': 30}
 
     ig = IGlobal.__new__(IGlobal)
     ig.glb = types.SimpleNamespace(logicalType='audio_transcribe://', connConfig={})
     ig.beginGlobal()
 
     assert ig.chunk_duration == 30
-    assert ig.max_chunk_duration == 90
 
 
 def test_buffering_defaults_reproduce_transcribe_constants():
@@ -286,7 +284,6 @@ def test_buffering_defaults_reproduce_transcribe_constants():
     fields = _parse_services_json()['fields']
 
     assert fields['transcribe.chunk_duration']['default'] == consts['CHUNK_DURATION']
-    assert fields['transcribe.max_chunk_duration']['default'] == consts['MAX_CHUNK_DURATION']
 
 
 def test_iinstance_passes_buffering_to_transcribe():
@@ -303,7 +300,98 @@ def test_iinstance_passes_buffering_to_transcribe():
     )
     passed = {kw.arg for kw in call.keywords}
 
-    assert {'chunk_duration', 'max_chunk_duration'} <= passed, f'Transcribe() only gets {sorted(passed)}'
+    assert 'chunk_duration' in passed, f'Transcribe() only gets {sorted(passed)}'
+
+
+def _load_transcribe():
+    """Load transcribe.py behind stubs.
+
+    It does `from .IGlobal import IGlobal`, so the module must be loaded inside a
+    package; a synthetic one pointed at the node directory is enough.
+    """
+    saved = {}
+    pkg_name = '_audio_transcribe_pkg'
+
+    class FakeAudioReader:
+        def __init__(self, **kwargs):
+            pass
+
+        def start(self):
+            pass
+
+        def getTimestamp(self):
+            return 0.0
+
+    pkg = types.ModuleType(pkg_name)
+    pkg.__path__ = [_NODE_DIR]
+    iglobal_stub = types.ModuleType(f'{pkg_name}.IGlobal')
+    iglobal_stub.IGlobal = object
+
+    stubs = {
+        pkg_name: pkg,
+        f'{pkg_name}.IGlobal': iglobal_stub,
+        'ai': types.ModuleType('ai'),
+        'ai.common': types.ModuleType('ai.common'),
+        'ai.common.avi': types.ModuleType('ai.common.avi'),
+        'ai.common.avi.audio': types.ModuleType('ai.common.avi.audio'),
+        'rocketlib': types.ModuleType('rocketlib'),
+    }
+    stubs['ai.common.avi.audio'].AudioReader = FakeAudioReader
+    stubs['rocketlib'].debug = lambda *a, **kw: None
+
+    for name, stub in stubs.items():
+        saved[name] = sys.modules.get(name)
+        sys.modules[name] = stub
+
+    mod_name = f'{pkg_name}.transcribe'
+    try:
+        spec = importlib.util.spec_from_file_location(mod_name, os.path.join(_NODE_DIR, 'transcribe.py'))
+        mod = importlib.util.module_from_spec(spec)
+        sys.modules[mod_name] = mod
+        spec.loader.exec_module(mod)
+        return mod.Transcribe
+    finally:
+        sys.modules.pop(mod_name, None)
+        for name in stubs:
+            if saved[name] is None:
+                sys.modules.pop(name, None)
+            else:
+                sys.modules[name] = saved[name]
+
+
+def test_audio_is_flushed_once_chunk_duration_is_reached():
+    """The behavioural gap the checks above leave open.
+
+    Nothing here used to observe an actual flush, which is how a second, unreachable
+    threshold survived: any buffer long enough to hit it has already hit this one, so
+    `elif` never ran and its config field was inert. Feeding real bytes catches that.
+    """
+    Transcribe = _load_transcribe()
+    flushed = []
+
+    node = Transcribe(
+        segment_callback=lambda segments: None,
+        transcribe=lambda audio: flushed.append(len(audio)) or [],
+        chunk_duration=2,
+    )
+    node.start()
+
+    one_second = b'\x00\x01' * Transcribe.SAMPLE_RATE  # int16 mono
+
+    node.onData(one_second)
+    assert flushed == [], 'flushed before reaching chunk_duration'
+
+    node.onData(one_second)
+    assert len(flushed) == 1, 'no flush at chunk_duration'
+    assert flushed[0] == 2 * Transcribe.SAMPLE_RATE * 2  # 2 s of int16
+
+    # _flush_audio() zeroes the counter, so the next second starts a fresh chunk.
+    node.onData(one_second)
+    assert len(flushed) == 1
+
+    # There is deliberately no higher threshold: without a "cut here, it is quiet"
+    # test between the two it can never fire, and this class has no silence detection.
+    assert not hasattr(Transcribe, 'MAX_CHUNK_DURATION')
 
 
 def test_dead_fields_are_gone():

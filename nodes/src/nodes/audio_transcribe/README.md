@@ -4,7 +4,7 @@ A RocketRide audio filter node that transcribes spoken audio or video to text us
 
 ## What it does
 
-Receives an audio or video stream, extracts the audio track as 16 kHz mono PCM, buffers it in 60-second chunks (forced flush at 120 seconds, both configurable — see `chunk_duration` and `max_chunk_duration`), and runs Whisper with built-in voice activity detection (VAD). Segments are merged until they end in terminal punctuation (`.`, `?`, `!`), so output arrives as whole sentences, each carrying the timestamp of its first segment.
+Receives an audio or video stream, extracts the audio track as 16 kHz mono PCM, buffers it in 60-second chunks (configurable — see `chunk_duration`), and runs Whisper with built-in voice activity detection (VAD). Segments are merged until they end in terminal punctuation (`.`, `?`, `!`), so output arrives as whole sentences, each carrying the timestamp of its first segment.
 
 Uses `ai.common.models.Whisper`: transcription routes to the model server when the engine is started with `--modelserver`, otherwise it runs locally via `faster-whisper`. No API key is required either way. Decoding and VAD are configurable per request — see `beam_size` and the `vad_*` fields below; the defaults reproduce the behaviour this node had before they were exposed. Transcription calls are serialized through a global lock so a single loaded model is shared safely across instances.
 
@@ -29,7 +29,6 @@ When a `documents` listener is attached, the node also emits one document per me
 |---|---|---|
 | `model` | string | Default "base". The Whisper model to use for transcription |
 | `chunk_duration` | number | Default 60. Seconds of audio to buffer before sending a chunk to Whisper |
-| `max_chunk_duration` | number | Default 120. Hard limit before a chunk is flushed even without a pause |
 | `beam_size` | number | Default 5. Beam size for decoding. 1 is greedy (fastest); higher is slower and usually more accurate |
 | `vad_filter` | boolean | Default true. Use Whisper's built-in Silero VAD to drop non-speech before transcribing |
 | `vad_threshold` | number | Default 0.5. Silero speech probability above which audio counts as speech (0-1) |
@@ -53,7 +52,7 @@ Silero VAD:
 |---|---|
 | `vad_level` (webrtcvad 0-3 aggressiveness) | `vad_threshold` (Silero 0-1 speech probability) |
 | `silence_threshold` (seconds) | `vad_min_silence_duration_ms` |
-| `min_seconds` / `max_seconds` | `chunk_duration` / `max_chunk_duration`, which are actually wired up |
+| `min_seconds` / `max_seconds` | `chunk_duration`, which is actually wired up. There is no second, higher threshold: it would only mean something with a silence test between the two, and pause handling belongs to Whisper's VAD |
 
 Configs that still carry them keep working: nothing validates node config keys, so the
 unknown values are ignored. There is no automatic translation to the replacements, since
