@@ -5,8 +5,10 @@
  * A general-purpose, --rr-*-themed JSON tree used wherever the product shows a
  * raw JSON payload (trace detail, event bodies, tool I/O). A peer component, not
  * owned by any one feature. All styling is inline CSSProperties on --rr-* tokens
- * (no external CSS); leaf strings and child counts are capped so a large or
- * base64 payload can never dump megabytes / thousands of nodes into the DOM.
+ * (no external CSS). DOM size is bounded per node, not globally: leaf strings
+ * are capped at 200 chars and each node renders at most MAX_CHILDREN child
+ * rows, while collapsed subtrees render nothing — so DOM growth is driven by
+ * explicit user expansion, not by payload size; there is no recursion-depth cap.
  */
 import React, { useState, CSSProperties } from 'react';
 import { commonStyles } from 'shell';
