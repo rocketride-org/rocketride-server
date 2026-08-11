@@ -1,0 +1,16 @@
+#include <stdio.h>
+
+int main() {
+    int num1, num2, sum;
+    
+    printf("Enter two integers: ");
+    // %d specifies integer data type; & delivers the variable address
+    scanf("%d %d", &num1, &num2); 
+    
+    sum = num1 + num2;
+    
+    // Printing the calculated sum
+    printf("Sum: %d\n", sum);
+    
+    return 0;
+}
