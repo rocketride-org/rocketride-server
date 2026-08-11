@@ -1,3 +1,5 @@
+[![MCP Toplist](https://mcptoplist.com/badge/glama%2Frocketride-org%2Frocketride-server.svg)](https://mcptoplist.com/server/glama%2Frocketride-org%2Frocketride-server)
+
 <div align="center">
 
 <a href="https://rocketride.org">
