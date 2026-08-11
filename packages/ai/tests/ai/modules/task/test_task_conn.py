@@ -624,7 +624,6 @@ def test_debug_handlers_are_gone():
     """
     for name in (
         'request',
-        'on_command',
         'on_initialize',
         'on_attach',
         'on_pause',
@@ -634,6 +633,22 @@ def test_debug_handlers_are_gone():
         'on_disconnect',
     ):
         assert not hasattr(TaskConn, name), f'TaskConn still exposes {name}'
+
+
+@pytest.mark.asyncio
+async def test_unhandled_command_is_refused_not_silently_accepted():
+    """A command with no handler must come back as an explicit failure.
+
+    DAPConn's own fallback builds a default SUCCESS response, so without
+    on_command a misspelled rrext_* — or a stale client still sending the
+    removed debugger commands — would read as "it worked".
+    """
+    conn = _make_conn()
+
+    for command in ('setBreakpoints', 'pause', 'rrext_bogus_xyz'):
+        response = await TaskConn.on_command(conn, {'command': command})
+        assert response['success'] is False, f'{command} was not refused'
+        assert command in response['message']
 
 
 def test_rrext_handlers_still_dispatch_by_name():

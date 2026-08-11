@@ -625,6 +625,25 @@ class TaskConn(
         """
         return self._connection_id
 
+    async def on_command(self, request: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Reject any DAP command this connection has no handler for.
+
+        DAPConn dispatches ``on_{command}`` first and falls back here. Without
+        this method the fallback in ``dap_conn.on_receive`` builds a default
+        SUCCESS response, so a command that went nowhere would look like it
+        worked — a misspelled ``rrext_*`` in a script, or a stale client still
+        sending the removed debugger commands, would both get ``success: true``.
+
+        Args:
+            request (Dict[str, Any]): The unhandled DAP request
+
+        Returns:
+            Dict[str, Any]: An error response naming the command
+        """
+        command = request.get('command', '')
+        return self.build_error(request, f'Unsupported command: {command}')
+
     async def on_rrext_identify(self, request: Dict[str, Any]) -> Dict[str, Any]:
         """Update the client display name for this connection.
 
