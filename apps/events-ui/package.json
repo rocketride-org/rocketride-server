@@ -9,6 +9,7 @@
     "publisher": "Aparavi Software AG",
     "name": "Event Monitor",
     "description": "Real-time event stream viewer with JSON inspection and export",
+    "readme": "../../docs/modules/events-ui/README.md",
     "categories": [
       "tools"
     ],

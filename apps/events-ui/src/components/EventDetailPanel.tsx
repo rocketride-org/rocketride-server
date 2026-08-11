@@ -27,9 +27,10 @@
 import React from 'react';
 import type { CSSProperties } from 'react';
 import { DetailPanel, LabelValue, Section } from 'shell';
-// The shared token-themed JSON tree (deep import, matching this app's existing
-// `shared/themes/styles` import) — the one JSON viewer, not a per-app copy.
-import { JsonTree } from './JsonTree';
+// The platform's standard JSON presentation layer — the shared JsonTree, now a
+// first-class peer component (shared/components/json-tree). One JSON viewer
+// everywhere, never a per-app copy.
+import { JsonTree } from 'shared/components/json-tree';
 import type { EventRow } from '../types';
 import { eventColor } from '../styles';
 import { formatTime } from '../format';
@@ -81,11 +82,10 @@ const styles = {
  * @returns The detail drawer (renders nothing while closed).
  */
 export const EventDetailPanel: React.FC<IEventDetailPanelProps> = ({ event, onClose }) => {
-	// Closed state: DetailPanel renders nothing when `open` is false. Guard the
-	// body derivations too, since `event` is null while closed.
-	if (!event) {
-		return <DetailPanel open={false} onClose={onClose} title="" children={null} />;
-	}
+	// No selection → render nothing. This mirrors the shell's own record panels
+	// (ApiKeysPanel, MembersPanel, …), which mount DetailPanel only while a
+	// record is in view and always pass `open`.
+	if (!event) return null;
 
 	return (
 		<DetailPanel
