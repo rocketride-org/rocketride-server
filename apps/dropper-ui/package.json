@@ -15,9 +15,10 @@
 		"react-markdown": "^10.1.0",
 		"react-syntax-highlighter": "^15.6.6",
 		"recharts": "^2.8.0",
+		"rocketride": "workspace:*",
+		"shell": "file:../../.rocketride/shell/shell.tgz",
 		"rehype-raw": "^7.0.0",
 		"remark-gfm": "^4.0.1",
-		"rocketride": "workspace:*",
 		"web-vitals": "^5.2.0",
 		"ws": "^8.20.1"
 	},

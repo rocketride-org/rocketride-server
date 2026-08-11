@@ -55,7 +55,7 @@ interface ConnectionSettingsProps {
 	cloudUserName?: string;
 	onCloudSignIn?: () => void;
 	onCloudSignOut?: () => void;
-	onProbeCloudServer?: () => void;
+	onProbeCloudServer?: (cloudUrl: string) => void;
 	/** Whether the probed server supports SaaS/OAuth. */
 	isSaas?: boolean;
 	/** Whether the user has an active subscription. */

@@ -78,12 +78,15 @@ class AccountOrganization(TypedDict, total=False):
     Attributes:
         id: Unique identifier for the organization.
         name: Display name of the organization.
+        developerId: Public developer slug — the org's app publisher identity.
+            None/absent until the org registers as a marketplace developer.
         permissions: Permissions the user holds at the organization level.
         teams: Teams the user belongs to within this organization.
     """
 
     id: str
     name: str
+    developerId: str | None
     permissions: list[str]
     teams: list[AccountOrgTeam]
 

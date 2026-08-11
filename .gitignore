@@ -225,3 +225,9 @@ downloads/maven-3.9.6.tar.gz
 # One of the python modules keeps installing this
 include/python3.12/greenlet/greenlet.h
 .rocketride/
+
+
+# The n8n community node package ships credential *type definitions* (schema only,
+# no secrets); they must be tracked despite the global credentials/ ignore above.
+!packages/n8n-nodes/credentials/
+!packages/n8n-nodes/credentials/**

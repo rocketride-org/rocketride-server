@@ -36,7 +36,7 @@
 // =============================================================================
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useClient, useShellEvent } from 'shell-ui';
+import { useClient, useShellEvent } from 'shell';
 import type { CaptureSnapshot, CapturedEvent, EventRow, MonitorConfig } from '../types';
 import { EVENT_TYPE_NAMES, FLUSH_INTERVAL_MS, MAX_EVENTS } from '../types';
 import { summarize } from '../format';
@@ -183,9 +183,6 @@ export function useEventCapture(): IUseEventCaptureResult {
 		if (!config.active) return;
 		// Only DAP events carry a capturable body.
 		if (event.type !== 'event') return;
-		// Token filter: a concrete token must match; '*' captures every task.
-		if (config.token !== '*' && event.token !== config.token) return;
-
 		// Record the event into the ring buffer and the metric accumulators.
 		const captured: CapturedEvent = {
 			id: nextIdRef.current++,

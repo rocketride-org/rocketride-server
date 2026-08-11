@@ -20,12 +20,15 @@ Focus areas:
 
 from __future__ import annotations
 
+import errno
+import socket
 import sys
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from ai.modules.task import task_server as task_server_module
 from ai.modules.task.task_server import TaskServer
 
 
@@ -50,6 +53,7 @@ def _make_server(*, config=None, web_server=None):
     ts._connection_id = 0
     ts._unauthed_by_ip = {}
     ts._allocated_ports = []
+    ts._reserved_ports = set()
     ts._store_instance = None
     ts._config = config if config is not None else {}
     ts._server = web_server or MagicMock()
@@ -137,20 +141,71 @@ def test_next_connection_id_starts_at_one_and_monotonic():
 # ---------------------------------------------------------------------------
 
 
-def test_assign_port_uses_default_base_port():
+def _patch_probe(monkeypatch, probe):
+    """
+    Install a stand-in for the port probe.
+
+    _probe_port is a staticmethod, so a bare function assigned to the class
+    would be bound and receive self; the wrapping lives here rather than in
+    every test.
+
+    Args:
+        monkeypatch (pytest.MonkeyPatch): fixture performing the swap.
+        probe (Callable[[int], Optional[int]]): verdict for a given port.
+
+    Returns:
+        None
+    """
+    monkeypatch.setattr(TaskServer, '_probe_port', staticmethod(probe))
+
+
+@pytest.fixture
+def all_ports_bindable(monkeypatch):
+    """
+    Report every port as bindable.
+
+    Keeps the pool-bookkeeping tests independent of whatever the host machine
+    happens to have bound or reserved — on a developer box the default 20000 is
+    routinely held by another engine.
+
+    Args:
+        monkeypatch (pytest.MonkeyPatch): fixture used to swap the probe.
+
+    Returns:
+        None
+    """
+    _patch_probe(monkeypatch, lambda port: None)
+
+
+def _probe_returning(**by_port):
+    """
+    Build a probe stub with a per-port verdict.
+
+    Args:
+        **by_port: mapping of ``p<port>`` to the errno that port should report;
+            any port not named is reported bindable.
+
+    Returns:
+        Callable[[int], Optional[int]]: stand-in for ``_probe_port``.
+    """
+    table = {int(k[1:]): v for k, v in by_port.items()}
+    return lambda port: table.get(port)
+
+
+def test_assign_port_uses_default_base_port(all_ports_bindable):
     """Without a configured base_port, allocation starts at 20000."""
     ts = _make_server()
     assert ts.assign_port() == 20000
     assert ts._allocated_ports == [20000]
 
 
-def test_assign_port_respects_configured_base_port():
+def test_assign_port_respects_configured_base_port(all_ports_bindable):
     """`_config['base_port']` overrides the default starting port."""
     ts = _make_server(config={'base_port': 30000})
     assert ts.assign_port() == 30000
 
 
-def test_assign_port_returns_next_free_in_range():
+def test_assign_port_returns_next_free_in_range(all_ports_bindable):
     """Allocations skip already-taken ports and return the next free one."""
     ts = _make_server()
     ts._allocated_ports = [20000, 20001, 20002]
@@ -173,12 +228,237 @@ def test_release_port_unknown_is_noop():
     assert ts._allocated_ports == [20000]
 
 
-def test_assign_port_exhausts_after_10000():
+def test_assign_port_exhausts_after_10000(all_ports_bindable):
     """When every port in the 10000-wide window is taken, allocation raises."""
     ts = _make_server()
     ts._allocated_ports = list(range(20000, 30000))
     with pytest.raises(RuntimeError, match='No available ports'):
         ts.assign_port()
+
+
+def test_assign_port_skips_unbindable_port(monkeypatch):
+    """A port the probe rejects is passed over for the next one."""
+    _patch_probe(monkeypatch, _probe_returning(p20000=errno.EADDRINUSE))
+    ts = _make_server()
+    assert ts.assign_port() == 20001
+    assert ts._allocated_ports == [20001]
+
+
+def test_assign_port_reprobes_ports_in_use(monkeypatch):
+    """An occupied port is probed again next time, because its owner can exit."""
+    probed = []
+
+    def _probe(port):
+        probed.append(port)
+        return errno.EADDRINUSE if port == 20000 else None
+
+    _patch_probe(monkeypatch, _probe)
+    ts = _make_server()
+    ts.assign_port()
+    ts.assign_port()
+    assert probed.count(20000) == 2
+    assert ts._reserved_ports == set()
+
+
+def test_assign_port_does_not_hand_back_a_released_but_still_held_port(monkeypatch):
+    """A released port whose old owner still holds the socket is skipped.
+
+    Teardown returns ports to the pool without waiting for the child to exit,
+    so the next allocation would otherwise be handed a port that is still bound.
+    """
+    _patch_probe(monkeypatch, _probe_returning(p20000=errno.EADDRINUSE))
+    ts = _make_server()
+    ts._allocated_ports = [20000]
+    ts.release_port(20000)
+    assert ts.assign_port() == 20001
+
+
+def test_assign_port_caches_system_reserved_ports(monkeypatch):
+    """An EACCES port is remembered and never probed a second time."""
+    probed = []
+
+    def _probe(port):
+        probed.append(port)
+        return errno.EACCES if port == 20000 else None
+
+    _patch_probe(monkeypatch, _probe)
+    ts = _make_server()
+    assert ts.assign_port() == 20001
+    assert ts.assign_port() == 20002
+    assert probed.count(20000) == 1
+    assert ts._reserved_ports == {20000}
+
+
+def test_assign_port_exhausted_blames_system_reservations(monkeypatch):
+    """When every candidate is forbidden, the message names the OS reservation."""
+    _patch_probe(monkeypatch, lambda port: errno.EACCES)
+    ts = _make_server(config={'base_port': 30000})
+    with pytest.raises(RuntimeError, match='reserved by the operating system'):
+        ts.assign_port()
+
+
+def test_assign_port_exhausted_blames_other_processes(monkeypatch):
+    """When every candidate is occupied, the message names other processes."""
+    _patch_probe(monkeypatch, lambda port: errno.EADDRINUSE)
+    ts = _make_server()
+    with pytest.raises(RuntimeError, match='in use by other processes'):
+        ts.assign_port()
+
+
+def test_assign_port_exhausted_reports_unexpected_errno(monkeypatch):
+    """A probe failing for our own reasons is reported as itself, not as 'in use'.
+
+    One port reports a genuine conflict, so the our-fault fallback below does
+    not apply and the window really is refused.
+    """
+    _patch_probe(monkeypatch, lambda port: errno.EADDRINUSE if port == 20000 else errno.EMFILE)
+    ts = _make_server()
+    with pytest.raises(RuntimeError, match=f'most probes failed unexpectedly, last with errno {errno.EMFILE}'):
+        ts.assign_port()
+
+
+def test_assign_port_falls_back_when_every_probe_fails_for_our_own_reasons(monkeypatch):
+    """An fd ceiling must not become a refusal to launch.
+
+    When every probe fails for a reason of ours rather than the pool's, nothing
+    was learned about the ports. The child is a separate process with its own
+    descriptor table and would very likely bind, so degrade to what the old
+    allocator did instead of failing the task.
+    """
+    _patch_probe(monkeypatch, lambda port: errno.EMFILE)
+    ts = _make_server()
+    assert ts.assign_port() == 20000
+    assert ts._allocated_ports == [20000]
+
+
+def test_assign_port_drops_stale_reservations_before_giving_up(monkeypatch):
+    """A window that looks fully reserved is re-probed once with a clean cache.
+
+    Windows exclusion ranges come and go as Hyper-V, WSL and Docker start and
+    stop, so a cached EACCES can outlive the reservation. Without this the
+    usable window could only shrink, and a long-lived engine would end up
+    refusing every task while `netsh` reported no exclusions at all.
+    """
+    _patch_probe(monkeypatch, lambda port: None)
+    ts = _make_server()
+    # Cached earlier, when the range really was excluded. The OS has since let
+    # it go, but nothing re-probes a cached port, so the pool looks empty.
+    ts._reserved_ports = set(range(20000, 30000))
+
+    assert ts.assign_port() == 20000
+    assert ts._reserved_ports == set(), 'the stale cache must not survive the retry'
+
+
+def test_assign_port_does_not_resweep_when_the_cache_was_not_consulted(monkeypatch):
+    """A window exhausted by live probes has nothing stale to forget.
+
+    Re-probing it would spend a second full sweep of syscalls on the event loop
+    for nothing, so the retry is gated on cached verdicts actually being used.
+    """
+    probed = []
+
+    def _probe(port):
+        probed.append(port)
+        return errno.EADDRINUSE
+
+    _patch_probe(monkeypatch, _probe)
+    ts = _make_server()
+
+    with pytest.raises(RuntimeError, match='in use by other processes'):
+        ts.assign_port()
+
+    assert len(probed) == 10000, f'expected one sweep of the window, got {len(probed)} probes'
+
+
+def test_assign_port_exhausted_says_the_window_was_clamped(monkeypatch):
+    """A base high enough to run past 65535 gets a short window; say so.
+
+    Otherwise the message advises widening a window that cannot widen upward.
+    """
+    _patch_probe(monkeypatch, lambda port: errno.EADDRINUSE)
+    ts = _make_server(config={'base_port': 60000})
+    with pytest.raises(RuntimeError, match='was clamped'):
+        ts.assign_port()
+
+
+def test_assign_port_exhausted_names_a_tied_cause(monkeypatch):
+    """On a tie the message must not silently pick one of two very different paths."""
+    _patch_probe(monkeypatch, lambda port: errno.EACCES if port < 25000 else errno.EADDRINUSE)
+    ts = _make_server()
+    with pytest.raises(RuntimeError, match='tied with'):
+        ts.assign_port()
+
+
+def test_assign_port_exhausted_by_self_does_not_blame_other_processes(all_ports_bindable):
+    """The self-allocated message must not send the reader hunting other processes."""
+    ts = _make_server()
+    ts._allocated_ports = list(range(20000, 30000))
+    with pytest.raises(RuntimeError) as excinfo:
+        ts.assign_port()
+    message = str(excinfo.value)
+    assert 'already allocated by this server' in message
+    assert 'ss -ltn' not in message
+    assert 'netsh' not in message
+    assert 'lsof' not in message
+
+
+def test_assign_port_rejects_window_past_the_last_valid_port(monkeypatch):
+    """A base_port above 65535 leaves an empty window and never reaches a probe."""
+    probed = []
+    _patch_probe(monkeypatch, lambda port: probed.append(port))
+    ts = _make_server(config={'base_port': 70000})
+    with pytest.raises(RuntimeError, match='leaves no ports at or below 65535'):
+        ts.assign_port()
+    assert probed == []
+
+
+def test_assign_port_never_returns_port_zero(all_ports_bindable):
+    """base_port 0 must not yield port 0, which means 'any port' to bind()."""
+    ts = _make_server(config={'base_port': 0})
+    assert ts.assign_port() == 1
+
+
+def test_assign_port_returns_a_bindable_port():
+    """The unpatched allocator returns a port the caller can really bind."""
+    ts = _make_server()
+    port = ts.assign_port()
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        sock.bind(('127.0.0.1', port))
+    finally:
+        sock.close()
+
+
+def test_probe_port_detects_a_held_port():
+    """_probe_port reports EADDRINUSE while a socket holds the port, None after."""
+    holder = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        holder.bind(('127.0.0.1', 0))
+        port = holder.getsockname()[1]
+        assert TaskServer._probe_port(port) == errno.EADDRINUSE
+    finally:
+        holder.close()
+
+    assert TaskServer._probe_port(port) is None
+
+
+def test_probe_port_never_reports_a_failed_bind_as_free(monkeypatch):
+    """An OSError carrying no errno must not read as 'port is free'."""
+
+    class _NoErrnoSocket:
+        # _probe_port opens the socket with `with`, so the stub is a context
+        # manager rather than something with a close().
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc_info):
+            return False
+
+        def bind(self, address):
+            raise OSError()
+
+    monkeypatch.setattr(task_server_module.socket, 'socket', lambda *a, **kw: _NoErrnoSocket())
+    assert TaskServer._probe_port(20000) == errno.EADDRINUSE
 
 
 # ---------------------------------------------------------------------------

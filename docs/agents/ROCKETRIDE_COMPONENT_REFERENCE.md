@@ -438,7 +438,7 @@ Any string value in `config` can use `${ROCKETRIDE_<name>}` to inject values fro
    ROCKETRIDE_QDRANT_PORT=6333
    ```
 
-2. **Update `env.example`** with the same variable names but placeholder values. This file can be safely committed to the repo so other developers know what to configure:
+2. **Update `.env.example`** with the same variable names but placeholder values. Unlike `.env` — which holds the real key and must stay gitignored — this file is safe to commit so other developers know what to configure:
    ```env
    ROCKETRIDE_OPENAI_KEY=your-openai-api-key-here
    ROCKETRIDE_QDRANT_HOST=localhost

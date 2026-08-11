@@ -26,7 +26,7 @@
 
 import React, { useMemo } from 'react';
 import type { CSSProperties } from 'react';
-import { Button, BxPlay, BxStop, Card, InputField, ToggleGroup } from 'shared';
+import { Button, BxPlay, BxStop, Card, InputField, ToggleGroup } from 'shell';
 import type { MonitorConfig } from '../types';
 import { EVENT_TYPE_NAMES } from '../types';
 

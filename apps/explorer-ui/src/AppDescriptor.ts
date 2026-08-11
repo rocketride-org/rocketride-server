@@ -24,7 +24,7 @@
 // APP DESCRIPTOR — explorer-ui MF remote entry point (File Explorer)
 // =============================================================================
 
-import type { AppDescriptor } from 'shell-ui';
+import type { AppDescriptor } from 'shell';
 import ExplorerApp from './ExplorerApp';
 
 /**
@@ -32,11 +32,7 @@ import ExplorerApp from './ExplorerApp';
  *
  * Browse, view, and edit files stored on the RocketRide server.
  * Multi-tab + split-pane support via Documents library.
- * The sidebar is no longer a `components.Sidebar` slot: ExplorerApp mounts
- * ExplorerSidebar, which registers its file-tree content through the shell
- * frame via useSidebarContent, so it composes with the shell's fixed
- * header/footer (rocket-ui / models-ui pattern). Requires authentication
- * (authenticated: true in manifest).
+ * Requires authentication (authenticated: true in manifest).
  */
 const EXPLORER_APP: AppDescriptor = {
 	id: 'rocketride.explorer',
@@ -44,9 +40,9 @@ const EXPLORER_APP: AppDescriptor = {
 	branding: {
 		appName: 'File Explorer',
 	},
-	components: {
-		App: ExplorerApp,
-	},
+	// Two-column app: ExplorerApp's root AppLayout declares the file-tree
+	// Explorer sidebar and the status bar.
+	app: ExplorerApp,
 };
 
 export default EXPLORER_APP;

@@ -8,7 +8,7 @@
  *
  * Combines the former PageEditorProvider (canvas editing, file I/O, undo/redo)
  * and StatusProvider (status, trace, flow monitoring) into a single provider
- * that renders the shared-ui ProjectView component.
+ * that renders the shared ProjectView component.
  *
  * Uses the ProjectViewIncoming / ProjectViewOutgoing message protocol to
  * communicate with the Project webview.
@@ -28,8 +28,8 @@ import { isSubscribed } from '../shared/util/subscriptionGate';
 import { isDeployRunBody } from '../shared/util/runClassification';
 import { handleMissingEnvVars } from '../shared/util/envVarCheck';
 import { resolveDeployTeams, mapVersionCards, mapHistoryRows, mapTeamDeploymentRows, mapScheduleRows, teamNameOf, mapDeploymentInfo } from '../shared/util/deployMapping';
-import type { DeploymentWebviewToHost, DeploymentLoadPayload } from './views/deployTypes';
-import type { LogSessionWebviewToHost } from './views/logTypes';
+import type { DeploymentWebviewToHost, DeploymentLoadPayload } from './types/deployTypes';
+import type { LogSessionWebviewToHost } from './types/logTypes';
 
 // =============================================================================
 // CONSTANTS
@@ -140,7 +140,7 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 			}
 		});
 
-		const servicesUpdatedListener = this.connectionManager.on('shell:servicesUpdated', (payload: { services: Record<string, unknown>; servicesError?: string }) => {
+		const servicesUpdatedListener = this.connectionManager.on('shell:servicesUpdated', (payload: { services: Record<string, unknown>; icons?: Record<string, string>; servicesError?: string }) => {
 			this.broadcastServicesToAllEditors(payload);
 		});
 
@@ -199,13 +199,14 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 	// BROADCASTING
 	// =========================================================================
 
-	private broadcastServicesToAllEditors(payload: { services: Record<string, unknown>; servicesError?: string }): void {
+	private broadcastServicesToAllEditors(payload: { services: Record<string, unknown>; icons?: Record<string, string>; servicesError?: string }): void {
 		for (const editorState of this.editorStates.values()) {
 			if (editorState.isReady && !editorState.isDisposed && editorState.webviewPanel.webview) {
 				editorState.webviewPanel.webview
 					.postMessage({
 						type: 'project:services',
 						services: payload.services,
+						icons: payload.icons ?? {},
 					})
 					.then(undefined, (err: unknown) => {
 						this.logger.error(`Failed to post services to webview: ${err}`);
@@ -526,6 +527,7 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 						viewState: { mode: 'design', ...layout },
 						prefs: storedPrefs,
 						services: cached.services,
+						icons: cached.icons,
 						isConnected: this.connectionManager.isConnected(),
 						isSubscribed: isSubscribed(client, PIPE_BUILDER_APP_ID),
 						statuses: editorState.cachedStatuses,
@@ -593,6 +595,23 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 						const msg = error instanceof Error ? error.message : String(error);
 						this.logger.output(`${icons.error} Pipeline validation failed: ${msg}`);
 						webview.postMessage({ type: 'project:validateResponse', requestId: data.requestId, result: { errors: [], warnings: [] }, error: msg });
+					}
+					break;
+				}
+
+				case 'project:getNodeSchema': {
+					// The bulk services payload is summary-only; the canvas requests
+					// one provider's FULL definition (config schema) on demand and
+					// caches it webview-side, so this fires once per provider.
+					try {
+						const client = this.connectionManager.getClient();
+						if (!client) throw new Error('Not connected to server');
+						const service = await client.getService(data.provider);
+						webview.postMessage({ type: 'project:nodeSchemaResponse', requestId: data.requestId, service });
+					} catch (error) {
+						const msg = error instanceof Error ? error.message : String(error);
+						this.logger.error(`Fetching service definition for '${data.provider}': ${msg}`);
+						webview.postMessage({ type: 'project:nodeSchemaResponse', requestId: data.requestId, error: msg });
 					}
 					break;
 				}

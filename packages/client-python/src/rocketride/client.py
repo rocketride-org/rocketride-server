@@ -59,6 +59,7 @@ from .mixins.services import ServicesMixin
 from .mixins.dashboard import DashboardMixin
 from .mixins.cprofile import CProfileMixin
 from .mixins.store import StoreMixin
+from .mixins.apps import AppsMixin
 from typing import Any, Callable, TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -85,6 +86,7 @@ class RocketRideClient(
     DashboardMixin,
     CProfileMixin,
     StoreMixin,
+    AppsMixin,
     DAPClient,
 ):
     """
