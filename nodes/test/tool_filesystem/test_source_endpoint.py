@@ -319,6 +319,10 @@ def test_recursive_scan_bounds_directory_cycles(monkeypatch):
             return {'exists': True, 'type': 'dir'}
 
         async def list_dir(self, path=''):
+            # Self-limiting: if the folder cap ever regresses, fail fast here
+            # instead of walking this fake forever.
+            self.calls = getattr(self, 'calls', 0) + 1
+            assert self.calls <= 50, 'scan not bounded: cycling list_dir called past the cap'
             return {'entries': [{'name': 'loop', 'type': 'dir'}], 'count': 1}
 
     mod.Store = MagicMock()

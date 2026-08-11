@@ -45,6 +45,7 @@ finite source, not a long-running server.
 from __future__ import annotations
 
 import asyncio
+from collections import deque
 from typing import Any, Callable, Dict
 
 from ai.account.store import Store
@@ -69,10 +70,10 @@ async def _collect(store, rel: str, recursive: bool) -> list[tuple[str, int]]:
         return [(rel, int(st.get('size', 0)))]
 
     out: list[tuple[str, int]] = []
-    folders = [rel]
+    folders = deque([rel])
     walked = 0
     while folders:
-        folder = folders.pop(0)
+        folder = folders.popleft()
         walked += 1
         if walked > _MAX_SCAN_FOLDERS:
             # A backend that reports symlinked directories can present an
