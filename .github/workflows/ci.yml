@@ -293,6 +293,19 @@ jobs:
             packages/shell/contract/index.ts \
             packages/shell/contract/latest.ts \
             packages/shell/src/apiver.ts
+          # `git diff` sees tracked changes only: a derived file DELETED from
+          # the commit is recreated by the regen as untracked and would sail
+          # through the diff above.
+          untracked=$(git ls-files --others --exclude-standard -- \
+            packages/shell/src/contract-check.generated.ts \
+            packages/shell/contract/index.ts \
+            packages/shell/contract/latest.ts \
+            packages/shell/src/apiver.ts)
+          if [ -n "$untracked" ]; then
+            echo "Derived contract file(s) missing from the commit (recreated by regen):"
+            echo "$untracked"
+            exit 1
+          fi
       - name: client SDK contract floors are un-tampered — regen must be a no-op
         # Same guarantee for the rocketride TypeScript SDK: regenerate its
         # contract barrels + conformance file from the immutable frozen floors
