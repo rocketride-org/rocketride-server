@@ -1,0 +1,125 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <sys/wait.h>
+
+#define MAX_LINE 1024
+#define MAX_ARGS 64
+#define DELIMITERS " \t\r\n\a"
+
+// Function to read a line of input from user
+char *shell_read_line(void) {
+    char *line = NULL;
+    size_t bufsize = 0;
+    if (getline(&line, &bufsize, stdin) == -1) {
+        if (feof(stdin)) {
+            exit(EXIT_SUCCESS); // Handle Ctrl+D
+        } else {
+            perror("shell: read line");
+            exit(EXIT_FAILURE);
+        }
+    }
+    return line;
+}
+
+// Function to split a line into unique arguments (tokens)
+char **shell_split_line(char *line) {
+    int bufsize = MAX_ARGS, position = 0;
+    char **tokens = malloc(bufsize * sizeof(char*));
+    char *token;
+
+    if (!tokens) {
+        fprintf(stderr, "shell: allocation error\n");
+        exit(EXIT_FAILURE);
+    }
+
+    token = strtok(line, DELIMITERS);
+    while (token != NULL) {
+        tokens[position] = token;
+        position++;
+
+        if (position >= bufsize) {
+            bufsize += MAX_ARGS;
+            tokens = realloc(tokens, bufsize * sizeof(char*));
+            if (!tokens) {
+                fprintf(stderr, "shell: allocation error\n");
+                exit(EXIT_FAILURE);
+            }
+        }
+        token = strtok(NULL, DELIMITERS);
+    }
+    tokens[position] = NULL;
+    return tokens;
+}
+
+// Function to launch a system process
+int shell_launch(char **args) {
+    pid_t pid, wpid;
+    int status;
+
+    pid = fork();
+    if (pid == 0) {
+        // Child process execution
+        if (execvp(args[0], args) == -1) {
+            perror("shell error");
+        }
+        exit(EXIT_FAILURE);
+    } else if (pid < 0) {
+        // Error forking
+        perror("shell: fork error");
+    } else {
+        // Parent process waits for child to finish execution
+        do {
+            wpid = waitpid(pid, &status, WUNTRACED);
+        } while (!WIFEXITED(status) && !WIFSIGNALED(status));
+    }
+    return 1;
+}
+
+// Execute built-in shell commands or launch programs
+int shell_execute(char **args) {
+    if (args[0] == NULL) {
+        return 1; // Empty command entered
+    }
+
+    // Built-in command: exit
+    if (strcmp(args[0], "exit") == 0) {
+        return 0;
+    }
+    
+    // Built-in command: cd
+    if (strcmp(args[0], "cd") == 0) {
+        if (args[1] == NULL) {
+            fprintf(stderr, "shell: expected argument to \"cd\"\n");
+        } else {
+            if (chdir(args[1]) != 0) {
+                perror("shell");
+            }
+        }
+        return 1;
+    }
+
+    return shell_launch(args);
+}
+
+int main(int argc, char **argv) {
+    char *line;
+    char **args;
+    int status;
+
+    printf("--- Custom C-Shell Terminal Initialized ---\n");
+    printf("Type commands (e.g., 'ls -l', 'mkdir test', 'cd ..') or 'exit'.\n");
+
+    do {
+        printf("c_shell> ");
+        line = shell_read_line();
+        args = shell_split_line(line);
+        status = shell_execute(args);
+
+        free(line);
+        free(args);
+    } while (status);
+
+    return EXIT_SUCCESS;
+}
