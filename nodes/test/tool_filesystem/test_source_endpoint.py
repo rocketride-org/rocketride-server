@@ -306,3 +306,26 @@ def test_render_survives_pydevd_settrace_failure(monkeypatch):
     assert inst.renderObject(types.SimpleNamespace(name='a.txt')) == 'PREVENT_DEFAULT'
     inst.renderObject(types.SimpleNamespace(name='b.txt'))
     fake_pydevd.settrace.assert_called_once()
+
+
+def test_recursive_scan_bounds_directory_cycles(monkeypatch):
+    # A backend reporting symlinked dirs yields endless distinct paths; the
+    # scan must abort with a clear error instead of hanging.
+    mod = _load_endpoint_module()
+    monkeypatch.setattr(mod, '_MAX_SCAN_FOLDERS', 5)
+
+    class _CycleStore(_FakeStore):
+        async def stat(self, path):
+            return {'exists': True, 'type': 'dir'}
+
+        async def list_dir(self, path=''):
+            return {'entries': [{'name': 'loop', 'type': 'dir'}], 'count': 1}
+
+    mod.Store = MagicMock()
+    mod.Store.engine_file_store.return_value = _CycleStore({})
+    ep = mod.IEndpoint()
+    ep.endpoint = types.SimpleNamespace(
+        serviceConfig={'parameters': {'path': 'inbox', 'recursive': True}},
+    )
+    with pytest.raises(ValueError, match='exceeded 5 folders'):
+        ep.scanObjects('', lambda e: 0)

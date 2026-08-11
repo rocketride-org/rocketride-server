@@ -51,6 +51,11 @@ from ai.account.store import Store
 from rocketlib import IEndpointBase
 
 
+# Upper bound on folders visited by one recursive scan. Backends that surface
+# symlinked directories can otherwise present an endless tree of distinct paths.
+_MAX_SCAN_FOLDERS = 10_000
+
+
 async def _collect(store, rel: str, recursive: bool) -> list[tuple[str, int]]:
     """Resolve ``rel`` to a sorted list of ``(path, size)`` files to process.
 
@@ -65,8 +70,18 @@ async def _collect(store, rel: str, recursive: bool) -> list[tuple[str, int]]:
 
     out: list[tuple[str, int]] = []
     folders = [rel]
+    walked = 0
     while folders:
         folder = folders.pop(0)
+        walked += 1
+        if walked > _MAX_SCAN_FOLDERS:
+            # A backend that reports symlinked directories can present an
+            # unbounded tree of distinct paths — fail the scan loudly instead
+            # of hanging it.
+            raise ValueError(
+                f'File Store Source: scan exceeded {_MAX_SCAN_FOLDERS} folders under {rel!r}; '
+                'aborting (possible directory cycle in the store backend)'
+            )
         listing = await store.list_dir(folder)
         for entry in listing.get('entries', []):
             child = f'{folder}/{entry["name"]}' if folder else entry['name']

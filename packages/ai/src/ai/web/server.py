@@ -103,14 +103,33 @@ def _ensure_signing_key() -> None:
     """Provision an ephemeral ``RR_SIGNING_KEY`` if the operator set none.
 
     The key signs FileStore fetch URLs (``FileStore.get_url`` -> ``/task/fetch``)
-    on the local filesystem backend; cloud backends presign natively and never
-    read it. An operator-provided value always wins. The generated key lives
-    only in this process environment (inherited by task subprocesses), so
-    signed URLs stop verifying after a server restart — acceptable at the
-    1-hour URL TTL cap, and it means zero configuration for local use.
+    and the JWT is the capability — nothing is re-resolved at serve time — so
+    self-provisioning is deliberately narrow:
+
+    - An operator-provided value always wins (and is never logged).
+    - Provision only when the filesystem storage backend is in use
+      (``RR_STORE_URL`` unset or ``filesystem://``). Cloud backends presign
+      natively and never read the key, and a deployment on another backend
+      that left the key unset keeps signed fetch URLs switched off, as
+      before.
+    - The generated key lives only in this process environment (inherited
+      by task subprocesses): signed URLs stop verifying after a restart and
+      are not valid across replicas — each process mints its own. The log
+      line below is what turns "signed URL 401s on the other replica" into
+      a one-line diagnosis.
     """
-    if not os.environ.get('RR_SIGNING_KEY'):
-        os.environ['RR_SIGNING_KEY'] = secrets.token_hex(32)
+    if os.environ.get('RR_SIGNING_KEY'):
+        return
+    store_url = os.environ.get('RR_STORE_URL', '').strip()
+    if store_url and not store_url.startswith('filesystem://'):
+        return
+    os.environ['RR_SIGNING_KEY'] = secrets.token_hex(32)
+    debug(
+        'RR_SIGNING_KEY not configured; generated an ephemeral per-process key '
+        '(filesystem storage backend). Signed fetch URLs will not survive a '
+        'restart and are not valid across replicas; set RR_SIGNING_KEY to '
+        'share one key.'
+    )
 
 
 def _build_signal_safe_capture(server: uvicorn.Server):
