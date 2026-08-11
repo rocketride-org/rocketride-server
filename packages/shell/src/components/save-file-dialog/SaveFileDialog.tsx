@@ -167,16 +167,18 @@ async function listRecursive(vfs: IVirtualFileSystem, rel: string): Promise<Save
 		if (a.type !== b.type) return a.type === 'dir' ? -1 : 1;
 		return a.name.localeCompare(b.name, undefined, { sensitivity: 'base' });
 	});
-	const nodes: SaveTreeNode[] = [];
-	for (const entry of sorted) {
-		const childPath = joinPath(rel, entry.name);
-		if (entry.type === 'dir') {
-			nodes.push({ type: 'dir', name: entry.name, path: childPath, ghost: false, children: await listRecursive(vfs, childPath) });
-		} else {
-			nodes.push({ type: 'file', name: entry.name, path: childPath });
-		}
-	}
-	return nodes;
+	// Fan out sibling directories in parallel — each list is a server round
+	// trip in the browser host, so a sequential walk would hold the dialog in
+	// "Loading folders..." for the sum of every directory's latency.
+	return Promise.all(
+		sorted.map(async (entry): Promise<SaveTreeNode> => {
+			const childPath = joinPath(rel, entry.name);
+			if (entry.type === 'dir') {
+				return { type: 'dir', name: entry.name, path: childPath, ghost: false, children: await listRecursive(vfs, childPath) };
+			}
+			return { type: 'file', name: entry.name, path: childPath };
+		})
+	);
 }
 
 /**
@@ -465,13 +467,16 @@ interface FolderTreeProps {
  */
 const FolderTree: React.FC<FolderTreeProps> = ({ nodes, depth, activeExtension, selectedDir, expandedDirs, creatingIn, newFolderEditor, onSelect, onToggle }) => {
 	const indent = 8 + depth * 16;
+	// Extension matching is case-insensitive (mirrors stripExtension): a file
+	// stored as "flow.PIPE" still counts as the active type.
+	const lowerExt = activeExtension.toLowerCase();
 
 	return (
 		<>
 			{nodes.map((node) => {
 				// Context files: dimmed, non-interactive, filtered to the active type.
 				if (node.type === 'file') {
-					if (!node.name.endsWith(activeExtension)) return null;
+					if (!node.name.toLowerCase().endsWith(lowerExt)) return null;
 					return (
 						<div key={node.path} style={styles.fileRow(indent + 14 + 4)}>
 							<span style={styles.rowIcon(false)}>
@@ -484,28 +489,48 @@ const FolderTree: React.FC<FolderTreeProps> = ({ nodes, depth, activeExtension, 
 
 				const isExpanded = expandedDirs.has(node.path);
 				const isSelected = selectedDir === node.path;
-				const hasChildren = node.children.some((c) => c.type === 'dir' || c.name.endsWith(activeExtension));
+				const hasChildren = node.children.some((c) => c.type === 'dir' || c.name.toLowerCase().endsWith(lowerExt));
 				return (
 					<React.Fragment key={node.path}>
 						<div
 							style={styles.row(isSelected, indent)}
 							onClick={() => onSelect(node.path)}
-							// Keyboard access: rows act as buttons (Enter/Space = select).
+							// Keyboard access: rows act as buttons (Enter/Space = select,
+							// ArrowRight/ArrowLeft = expand/collapse — the tree-view keys).
 							role="button"
 							tabIndex={0}
 							onKeyDown={(e) => {
 								if (e.key === 'Enter' || e.key === ' ') {
 									e.preventDefault();
 									onSelect(node.path);
+								} else if (e.key === 'ArrowRight' && hasChildren && !isExpanded) {
+									e.preventDefault();
+									onToggle(node.path);
+								} else if (e.key === 'ArrowLeft' && hasChildren && isExpanded) {
+									e.preventDefault();
+									onToggle(node.path);
 								}
 							}}
 						>
-							{/* Chevron is its own hit target: expanding never re-selects. */}
+							{/* Chevron is its own hit target: expanding never re-selects.
+							    Focusable in its own right so expansion is reachable by
+							    keyboard even when tabbing straight to it. */}
 							<span
 								style={styles.chevron(hasChildren, isExpanded)}
+								role="button"
+								tabIndex={hasChildren ? 0 : -1}
+								aria-label={isExpanded ? `Collapse ${node.name}` : `Expand ${node.name}`}
+								aria-expanded={isExpanded}
 								onClick={(e) => {
 									e.stopPropagation();
 									onToggle(node.path);
+								}}
+								onKeyDown={(e) => {
+									if (e.key === 'Enter' || e.key === ' ') {
+										e.preventDefault();
+										e.stopPropagation();
+										onToggle(node.path);
+									}
 								}}
 							>
 								<BxChevronRight size={12} />
@@ -568,6 +593,9 @@ export function SaveFileDialog({ title, vfs, fileTypes, rootLabel = '$/', defaul
 	const [newFolderName, setNewFolderName] = useState('');
 	// Inline failure line (mkdir/list errors) under the form.
 	const [actionError, setActionError] = useState<string | null>(null);
+	// True while a confirm's ensureDir round trip is in flight — blocks the
+	// Save button AND the name input's Enter key from re-entering the save.
+	const [saving, setSaving] = useState(false);
 
 	const nameInputRef = useRef<HTMLInputElement>(null);
 	const newFolderInputRef = useRef<HTMLInputElement>(null);
@@ -607,7 +635,10 @@ export function SaveFileDialog({ title, vfs, fileTypes, rootLabel = '$/', defaul
 	}, [creatingIn]);
 
 	// --- Derived data ----------------------------------------------------------
-	const activeType = fileTypes[Math.min(typeIndex, fileTypes.length - 1)];
+	// A host may pass an empty fileTypes list (nothing stops it at the shell
+	// API boundary) — fall back to an extension-less type instead of crashing
+	// on `activeType.extension`.
+	const activeType: ISaveFileType = fileTypes[Math.min(typeIndex, fileTypes.length - 1)] ?? { label: 'All Files', extension: '' };
 	const rawName = name.trim();
 	// A typed name is valid on characters alone; the base (after stripping any
 	// redundant active extension) must still be non-empty, so a bare ".pipe"
@@ -618,7 +649,10 @@ export function SaveFileDialog({ title, vfs, fileTypes, rootLabel = '$/', defaul
 	// The tree with the (possibly missing) default chain ghosted in.
 	const displayTree = useMemo(() => withGhostChain(tree, defaultDir), [tree, defaultDir]);
 	const realDirs = useMemo(() => collectRealDirs(tree, new Set<string>()), [tree]);
-	const existingFiles = useMemo(() => collectFiles(tree, new Set<string>()), [tree]);
+	// Lower-cased: on a case-insensitive store "flow.PIPE" IS "flow.pipe", so
+	// the overwrite confirm must catch the match regardless of typed casing (a
+	// false warning on a case-sensitive store beats a silent overwrite).
+	const existingFiles = useMemo(() => new Set(Array.from(collectFiles(tree, new Set<string>()), (p) => p.toLowerCase())), [tree]);
 	// The one source of truth for what Save writes.
 	const fileName = `${baseName}${activeType.extension}`;
 	const resultPath = selectedDir ? `${selectedDir}/${fileName}` : fileName;
@@ -664,15 +698,17 @@ export function SaveFileDialog({ title, vfs, fileTypes, rootLabel = '$/', defaul
 
 	/** Validates + routes the save: overwrite confirm or direct confirm. */
 	const handleConfirm = useCallback(() => {
-		if (!nameValid) return;
-		if (existingFiles.has(resultPath)) {
+		if (!nameValid || saving) return;
+		if (existingFiles.has(resultPath.toLowerCase())) {
 			setOverwritePath(resultPath);
 			return;
 		}
+		setSaving(true);
 		ensureDir(selectedDir)
 			.then(() => onConfirm(resultPath))
-			.catch((err) => setActionError(`Could not create folder: ${err instanceof Error ? err.message : String(err)}`));
-	}, [nameValid, existingFiles, resultPath, ensureDir, selectedDir, onConfirm]);
+			.catch((err) => setActionError(`Could not create folder: ${err instanceof Error ? err.message : String(err)}`))
+			.finally(() => setSaving(false));
+	}, [nameValid, saving, existingFiles, resultPath, ensureDir, selectedDir, onConfirm]);
 
 	/** Commits the inline new-folder editor: mkdir, refresh, select. */
 	const commitNewFolder = useCallback(() => {
@@ -772,7 +808,7 @@ export function SaveFileDialog({ title, vfs, fileTypes, rootLabel = '$/', defaul
 						<button type="button" style={commonStyles.buttonSecondary} onClick={onCancel}>
 							Cancel
 						</button>
-						<button type="button" style={styles.saveButton(nameValid)} disabled={!nameValid} onClick={handleConfirm}>
+						<button type="button" style={styles.saveButton(nameValid && !saving)} disabled={!nameValid || saving} onClick={handleConfirm}>
 							Save
 						</button>
 					</>

@@ -45,12 +45,14 @@ export function createProjectVfs(client: RocketRideClient | null): IVirtualFileS
 			const entries: { name: string; type: string }[] = result?.entries ?? [];
 			return entries.map((e) => ({ name: e.name, type: e.type === 'dir' ? ('dir' as const) : ('file' as const) }));
 		},
-		read: (path: string) => loadProject(requireClient(), path),
-		write: (path: string, content: unknown) => saveProject(requireClient(), path, content),
-		rename: (oldPath: string, newPath: string) => renameProject(requireClient(), oldPath, newPath),
+		// async so a requireClient() failure REJECTS (the documented contract)
+		// instead of throwing synchronously out of a plain arrow function.
+		read: async (path: string) => loadProject(requireClient(), path),
+		write: async (path: string, content: unknown) => saveProject(requireClient(), path, content),
+		rename: async (oldPath: string, newPath: string) => renameProject(requireClient(), oldPath, newPath),
 		// File deletion only — directory removal goes through rmdirProject,
 		// which no VFS consumer needs today.
-		delete: (path: string) => deleteProject(requireClient(), path),
-		mkdir: (path: string) => mkdirProject(requireClient(), path),
+		delete: async (path: string) => deleteProject(requireClient(), path),
+		mkdir: async (path: string) => mkdirProject(requireClient(), path),
 	};
 }

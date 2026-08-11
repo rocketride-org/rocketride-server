@@ -32,14 +32,25 @@ import { ConfigManager } from '../../config';
  * The setting's default carries a `${workspaceFolder}/` prefix, stripped here
  * because callers root the value at the workspace folder. An empty string means
  * "the workspace root itself".
+ *
+ * The setting is CONTRACTUALLY workspace-relative, so values that could escape
+ * the workspace — absolute paths, Windows drive-qualified paths, or `..`
+ * segments — fall back to the documented default instead of letting
+ * {@link savePipelineDocument} create directories outside the workspace.
  */
 export function resolveDefaultPipelineDir(): string {
 	// Fall back to the documented default when the setting is unset/empty.
 	const raw = ConfigManager.getInstance().getConfig()?.defaultPipelinePath || 'pipelines';
-	return raw
+	// step: normalize to a '/'-separated path with the documented prefix gone.
+	const normalized = raw
 		.replace(/^\$\{workspaceFolder\}[/\\]?/, '')
 		.replace(/\\/g, '/')
 		.replace(/\/+$/, '');
+	// step: reject workspace escapes (absolute / drive-qualified / '..'),
+	// dropping empty and '.' segments so "./pipelines//" still resolves.
+	const segments = normalized.split('/').filter((s) => s !== '' && s !== '.');
+	const escapesWorkspace = /^([a-zA-Z]:|\/)/.test(normalized) || segments.includes('..');
+	return escapesWorkspace ? 'pipelines' : segments.join('/');
 }
 
 // =============================================================================
@@ -57,18 +68,21 @@ export function resolveDefaultPipelineDir(): string {
  * dirty untitled document open.
  *
  * @param document - The pipeline document backing the active grid editor.
+ * @returns The URI the document was saved to, or undefined when nothing was
+ *          saved (dialog cancelled, no workspace, or the in-place save failed)
+ *          — callers gating work on "saved first" (e.g. run) key off this.
  */
-export async function savePipelineDocument(document: vscode.TextDocument): Promise<void> {
+export async function savePipelineDocument(document: vscode.TextDocument): Promise<vscode.Uri | undefined> {
 	// step: titled files are plain native in-place saves.
 	if (!document.isUntitled) {
-		await document.save();
-		return;
+		const saved = await document.save();
+		return saved ? document.uri : undefined;
 	}
 
 	const folder = vscode.workspace.workspaceFolders?.[0];
 	if (!folder) {
 		vscode.window.showErrorMessage('Cannot save pipeline: no workspace folder open');
-		return;
+		return undefined;
 	}
 
 	// step: ensure the configured pipelines directory exists so the Save dialog
@@ -89,7 +103,7 @@ export async function savePipelineDocument(document: vscode.TextDocument): Promi
 	});
 	if (!target) {
 		// User cancelled — keep the dirty untitled document open.
-		return;
+		return undefined;
 	}
 
 	// step: write the content, drop the untitled buffer without a discard
@@ -98,4 +112,5 @@ export async function savePipelineDocument(document: vscode.TextDocument): Promi
 	await vscode.workspace.fs.writeFile(target, Buffer.from(document.getText(), 'utf8'));
 	await vscode.commands.executeCommand('workbench.action.revertAndCloseActiveEditor');
 	await vscode.commands.executeCommand('vscode.openWith', target, 'rocketride.PageProject');
+	return target;
 }

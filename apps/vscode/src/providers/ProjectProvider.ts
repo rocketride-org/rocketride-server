@@ -687,10 +687,28 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 						const uriKey = document.uri.toString();
 						this.savesForRun.add(uriKey);
 						try {
-							await this.saveDocument(document, document.getText());
-							const parsed = JSON.parse(document.getText());
-							const pipeName = path.basename(document.uri.fsPath, '.pipe');
-							await this.runPipeline({ pipeline: { ...parsed, source: source ?? parsed.source } }, pipeName);
+							// Capture the text up front: the untitled save flow below
+							// closes the buffer, after which the document is disposed.
+							const text = document.getText();
+							let runTarget: vscode.Uri | undefined = document.uri;
+							if (document.isUntitled) {
+								// saveDocument() cannot name an untitled buffer (identical
+								// content is a no-op), which would let the pipeline run
+								// nameless and unsaved. Drive the full untitled save flow
+								// (OS Save dialog) and run ONLY once it succeeded — a
+								// cancelled dialog cancels the run. Reveal first so the
+								// revert-and-close inside targets this editor (same rule
+								// as project:requestSave).
+								webviewPanel.reveal(undefined, false);
+								runTarget = await savePipelineDocument(document);
+							} else {
+								await this.saveDocument(document, text);
+							}
+							if (runTarget) {
+								const parsed = JSON.parse(text);
+								const pipeName = path.basename(runTarget.fsPath, '.pipe');
+								await this.runPipeline({ pipeline: { ...parsed, source: source ?? parsed.source } }, pipeName);
+							}
 						} catch (error: unknown) {
 							const message = error instanceof Error ? error.message : String(error);
 							vscode.window.showErrorMessage(`Failed to run pipeline: ${message}`);
