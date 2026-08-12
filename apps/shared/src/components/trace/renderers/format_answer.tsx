@@ -59,9 +59,9 @@ export function renderAnswerFields(a: AnswerFields | null | undefined): ReactEle
 	}
 	const isJson = parsedJson !== null;
 
-	// Split the per-call breakdown out of the scalar totals: the totals render as
-	// chips, the breakdown (an array, not a scalar) as one row per model call.
-	const tokenBreakdown = Array.isArray(a.tokens?.breakdown) ? a.tokens.breakdown : [];
+	// Only the scalar totals render here. Each model call carries its own usage on
+	// its own invoke row, so repeating the whole breakdown under the answer is noise
+	// (an 11-call agent run listed 11 blocks). `breakdown` is dropped, not rendered.
 	const tokenScalars = a.tokens ? Object.entries(a.tokens).filter(([k]) => k !== 'breakdown') : [];
 
 	return (
@@ -96,21 +96,6 @@ export function renderAnswerFields(a: AnswerFields | null | undefined): ReactEle
 								</div>
 							))}
 						</div>
-						{tokenBreakdown.length > 0 && (
-							<div style={{ marginTop: 6 }}>
-								<div style={{ fontSize: 8, color: 'var(--rr-text-secondary)', textTransform: 'uppercase', marginBottom: 2 }}>Per call ({tokenBreakdown.length})</div>
-								{tokenBreakdown.map((c, i) => (
-									<div key={i} style={{ display: 'flex', gap: 8, flexWrap: 'wrap', fontFamily: 'monospace', fontSize: 11, color: 'var(--rr-text-secondary)', padding: '1px 0' }}>
-										<span style={{ color: 'var(--rr-brand)' }}>#{i + 1}</span>
-										{Object.entries(c).map(([k, v]) => (
-											<span key={k}>
-												{k.replace(/_/g, ' ')}: {typeof v === 'number' ? v.toLocaleString() : String(v)}
-											</span>
-										))}
-									</div>
-								))}
-							</div>
-						)}
 					</div>
 				</div>
 			)}

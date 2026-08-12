@@ -6,7 +6,7 @@ from typing import Callable, List, Optional
 from rocketlib import IInstanceBase, invoke_function, warning
 from ai.common.schema import Question, Answer
 from ai.common.llm_native_stream import STOP_SEQUENCES_VAR
-from ai.common.llm_adapter import LAST_LLM_USAGE_VAR
+from ai.common.llm_adapter import LAST_LLM_USAGE_VAR, usage_since
 
 
 class LLMBase(IInstanceBase):
@@ -117,4 +117,11 @@ class LLMBase(IInstanceBase):
 
     @invoke_function
     def ask(self, param):
-        return self._question(param.question, stop=getattr(param, 'stop', None))
+        # report_llm_tokens only ever appends, so the entries added while this call
+        # ran are this invoke's own cost — the whole-turn total stays on the answer.
+        seen = len((LAST_LLM_USAGE_VAR.get() or {}).get('breakdown', []))
+        answer = self._question(param.question, stop=getattr(param, 'stop', None))
+        usage = usage_since(seen)
+        if usage:
+            answer.tokens = usage  # shown in the Trace "Tokens" grid on this invoke's row
+        return answer

@@ -234,6 +234,22 @@ def report_llm_tokens(
             pass
 
 
+def usage_since(seen: int) -> Optional[dict]:
+    """Usage of the model calls reported after the first ``seen`` of this turn.
+
+    ``breakdown`` is append-only, so a caller that records its length beforehand
+    gets exactly its own calls back. One call returns that call unchanged, so a
+    single-call invoke renders as plain totals with no redundant breakdown.
+    """
+    calls = (LAST_LLM_USAGE_VAR.get() or {}).get('breakdown', [])[seen:]
+    if not calls:
+        return None
+    if len(calls) == 1:
+        return dict(calls[0])
+    total = {k: sum(int(c.get(k, 0)) for c in calls) for k in ('input', 'output', 'cache_read', 'cache_creation')}
+    return {**total, 'model': calls[-1].get('model', ''), 'calls': len(calls), 'breakdown': list(calls)}
+
+
 def _split_input_cache(um: dict) -> tuple[int, int, int, int]:
     """From a LangChain ``usage_metadata`` dict, return
     ``(fresh_input, output, cache_read, cache_creation)``. LangChain reports

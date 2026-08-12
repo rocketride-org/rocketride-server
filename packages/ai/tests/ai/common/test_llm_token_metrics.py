@@ -7,7 +7,13 @@
 
 import pytest
 
-from ai.common.llm_adapter import LAST_LLM_USAGE_VAR, LangChainAdapter, _split_input_cache, report_llm_tokens
+from ai.common.llm_adapter import (
+    LAST_LLM_USAGE_VAR,
+    LangChainAdapter,
+    _split_input_cache,
+    report_llm_tokens,
+    usage_since,
+)
 
 # Same singleton report_llm_tokens reports into; imported from the module (not the
 # package) to avoid pulling the taskhook side of ai.web.metrics into the test.
@@ -241,3 +247,66 @@ def test_all_zero_usage_leaves_the_contextvar_unset():
     LAST_LLM_USAGE_VAR.set(None)
     report_llm_tokens(0, 0)
     assert LAST_LLM_USAGE_VAR.get() is None
+
+
+# ---------------------------------------------------------------------------
+# usage_since — one invoke row's own slice of the turn
+# ---------------------------------------------------------------------------
+
+
+def test_usage_since_returns_only_the_calls_made_after_the_mark():
+    # An agent's 7th invoke must show its own cost, not the running turn total.
+    LAST_LLM_USAGE_VAR.set(None)
+    report_llm_tokens(10, 5, model='m1')
+    mark = len(LAST_LLM_USAGE_VAR.get()['breakdown'])
+    report_llm_tokens(30, 7, model='m2')
+
+    assert usage_since(mark) == {'input': 30, 'output': 7, 'cache_read': 0, 'cache_creation': 0, 'model': 'm2'}
+
+
+def test_usage_since_a_single_call_has_no_redundant_breakdown():
+    # One call renders as plain chips; a breakdown of itself would be noise.
+    LAST_LLM_USAGE_VAR.set(None)
+    report_llm_tokens(10, 5, model='m1')
+
+    assert 'breakdown' not in usage_since(0)
+    assert 'calls' not in usage_since(0)
+
+
+def test_usage_since_sums_when_one_invoke_made_several_calls():
+    LAST_LLM_USAGE_VAR.set(None)
+    report_llm_tokens(10, 5, model='m1', cache_read_tokens=1)
+    report_llm_tokens(30, 7, model='m2', cache_creation_tokens=2)
+
+    assert usage_since(0) == {
+        'input': 40,
+        'output': 12,
+        'cache_read': 1,
+        'cache_creation': 2,
+        'model': 'm2',
+        'calls': 2,
+        'breakdown': [
+            {'input': 10, 'output': 5, 'cache_read': 1, 'cache_creation': 0, 'model': 'm1'},
+            {'input': 30, 'output': 7, 'cache_read': 0, 'cache_creation': 2, 'model': 'm2'},
+        ],
+    }
+
+
+def test_usage_since_is_none_when_the_call_reported_nothing():
+    # A cached/failed call adds no entry, so the invoke row shows no grid at all.
+    LAST_LLM_USAGE_VAR.set(None)
+    report_llm_tokens(10, 5, model='m1')
+    mark = len(LAST_LLM_USAGE_VAR.get()['breakdown'])
+
+    assert usage_since(mark) is None
+
+
+def test_usage_since_does_not_disturb_the_turn_total():
+    # The answer still gets the whole turn; usage_since only reads.
+    LAST_LLM_USAGE_VAR.set(None)
+    report_llm_tokens(10, 5, model='m1')
+    report_llm_tokens(30, 7, model='m2')
+    usage_since(1)
+
+    assert LAST_LLM_USAGE_VAR.get()['calls'] == 2
+    assert LAST_LLM_USAGE_VAR.get()['input'] == 40
