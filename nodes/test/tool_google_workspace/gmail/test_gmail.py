@@ -615,6 +615,21 @@ def test_check_connection_ok_with_full_scope(monkeypatch):
     assert result['authType'] == 'user'
 
 
+def test_check_connection_settings_sharing_uses_settings_probe(monkeypatch):
+    """A settings-sharing token is checked through a settings API, not getProfile."""
+    mocks = Path(__file__).resolve().parents[2] / 'mocks'
+    monkeypatch.syspath_prepend(str(mocks))
+    inst = _inst_with_token(
+        'settings_sharing',
+        {'access_token': 'tok', 'scope': 'https://www.googleapis.com/auth/gmail.settings.basic https://www.googleapis.com/auth/gmail.settings.sharing'},
+    )
+    _patch_config(monkeypatch, inst)
+    result = inst.check_connection({})
+    assert result['connection_ok']
+    assert inst.IGlobal.service.call_for('list')['userId'] == 'me'
+    assert not any(name == 'getProfile' for name, _ in inst.IGlobal.service.calls)
+
+
 def test_check_connection_reports_gmail_api_probe_failure(monkeypatch):
     """check_connection reports disabled/unreachable Gmail API as not OK."""
     mocks = Path(__file__).resolve().parents[2] / 'mocks'

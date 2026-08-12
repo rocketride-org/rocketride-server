@@ -148,7 +148,10 @@ class IInstance(GoogleToolInstanceBase):
         """Check Gmail connection status and whether granted OAuth scopes cover the configured access tier. Read-only."""
 
         def probe(s):
-            if _GMAIL_SETTINGS_SCOPE in self._access().scopes:
+            scopes = set(self._access().scopes)
+            if _GMAIL_SETTINGS_SHARING_SCOPE in scopes:
+                return execute(s.users().settings().sendAs().list(userId=USER_ID))
+            if _GMAIL_SETTINGS_SCOPE in scopes:
                 return execute(s.users().settings().getPop(userId=USER_ID))
             return execute(s.users().getProfile(userId=USER_ID))
 
