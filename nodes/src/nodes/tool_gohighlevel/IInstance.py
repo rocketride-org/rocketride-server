@@ -38,6 +38,7 @@ there is no registry to keep in sync with the tool definitions.
 
 from __future__ import annotations
 
+import posixpath
 import re
 
 from typing import Callable
@@ -220,9 +221,12 @@ class IInstance(
             # cannot be recalled, and this tool must not be a way around that: without
             # the group, a write under /conversations/messages (message_send and both
             # schedule cancels) is refused. GET stays open, reading messages is default.
-            # Compared case-insensitively with slash runs collapsed so spellings like
-            # //conversations//Messages cannot slip past the prefix check.
-            normalized = re.sub(r'/+', '/', path).lstrip('/').lower()
+            # Compared against the path the request will actually carry, not the spelling
+            # given: requests resolves dot segments before sending, so `./conversations
+            # /messages` reaches the send endpoint while matching no prefix. Collapse slash
+            # runs first (normpath keeps a leading '//'), resolve the dots, then compare
+            # case-insensitively.
+            normalized = posixpath.normpath(re.sub(r'/+', '/', '/' + path)).lstrip('/').lower()
             if 'message_sending' not in self.IGlobal.tool_groups and normalized.startswith('conversations/messages'):
                 raise ValueError(
                     'This operation is not permitted: writes under /conversations/messages require the '

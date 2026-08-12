@@ -1192,6 +1192,33 @@ class TestGroupGating:
         mock_request.assert_not_called()
 
     @patch(_CLIENT)
+    def test_the_raw_request_tool_refuses_a_dot_segment_route_to_the_send_endpoint(self, mock_request):
+        """A gate that reads the spelling must resolve what requests resolves.
+
+        ``requests`` collapses dot segments before the request leaves the process, so
+        every path below arrives at GoHighLevel as ``/conversations/messages`` — the
+        real send endpoint — while matching no literal prefix. Comparing the given
+        spelling alone let all four through and originated a message the opt-in group
+        exists to hold back.
+        """
+        inst = _instance()  # DEFAULT_GROUPS: message_sending is absent
+        for path in (
+            'conversations/./messages',
+            './conversations/messages',
+            'x/../conversations/messages',
+            '../../conversations/messages',
+        ):
+            with pytest.raises(ValueError, match='message_sending'):
+                inst.request({'method': 'POST', 'path': path, 'body': {'type': 'SMS'}})
+        mock_request.assert_not_called()
+
+    @patch(_CLIENT)
+    def test_dot_segments_elsewhere_are_still_allowed(self, mock_request):
+        """Only the send prefix is gated — normalizing must not refuse other routes."""
+        mock_request.return_value = _ok({'contacts': []})
+        assert _instance().request({'method': 'GET', 'path': 'conversations/./search'}) == {'contacts': []}
+
+    @patch(_CLIENT)
     def test_the_raw_request_tool_sends_messages_with_the_group_enabled(self, mock_request):
         mock_request.return_value = _ok({'messageId': RECORD_ID})
         inst = _instance(tool_groups=normalize_groups(['messages', 'message_sending']))
