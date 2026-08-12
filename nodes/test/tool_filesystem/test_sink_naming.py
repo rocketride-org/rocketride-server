@@ -278,17 +278,17 @@ def _fs(exists_paths=()):
     fs.streams = {}
     counter = {'n': 0}
 
-    async def _open_write(path, connection_id):
+    async def _open_write(path):
         counter['n'] += 1
         handle = f'h{counter["n"]}'
         fs.streams[handle] = {'path': path, 'chunks': []}
         return handle
 
-    async def _write_chunk(handle, data, connection_id=0):
+    async def _write_chunk(handle, data):
         fs.streams[handle]['chunks'].append(bytes(data))
         return len(data)
 
-    async def _close_write(handle, connection_id=0):
+    async def _close_write(handle):
         return None
 
     fs.open_write = AsyncMock(side_effect=_open_write)
@@ -487,3 +487,62 @@ class TestSinkWrite:
         with pytest.raises(ValueError, match='does not match any allowed path pattern'):
             inst._sink_write(b'd', 'secret.pdf')
         fs.write.assert_not_awaited()
+
+
+# ---------------------------------------------------------------------------
+# Per-stream naming from the BEGIN descriptor
+# ---------------------------------------------------------------------------
+
+
+class _Descriptor:
+    """Stand-in for a parsed stream descriptor carrying only a name."""
+
+    def __init__(self, name):
+        self.metadata = types.SimpleNamespace(name=name)
+
+
+class TestStreamFilename:
+    """A stream's own name wins over the source object's, so fan-out stays distinguishable."""
+
+    def test_descriptor_name_is_preferred(self):
+        inst = _sink_instance(_fs(), name='1.jpg')
+        assert inst._stream_filename(_Descriptor('1.crop0.jpg'), 'image/jpeg') == '1.crop0.jpg'
+
+    def test_falls_back_to_the_object_name(self):
+        """No descriptor, or no name on it, keeps the previous behaviour."""
+        inst = _sink_instance(_fs(), name='report.pdf')
+        assert inst._stream_filename(None, 'image/jpeg') == 'report.jpg'
+        assert inst._stream_filename(_Descriptor(None), 'image/jpeg') == 'report.jpg'
+
+    def test_extension_appended_when_the_name_has_none(self):
+        """
+        A producer names a stream without necessarily giving it an extension.
+
+        os.path.splitext cannot answer this: it splits at the last dot, so `1.crop0` looks
+        like stem `1` with extension `.crop0` and the file would be stored with nothing
+        identifying its type. The stream's mime decides instead.
+        """
+        inst = _sink_instance(_fs(), name='1.jpg')
+        assert inst._stream_filename(_Descriptor('1.crop0'), 'image/jpeg') == '1.crop0.jpg'
+
+    def test_extension_is_not_doubled(self):
+        """A name that already ends in the stream's extension is left alone."""
+        inst = _sink_instance(_fs(), name='1.jpg')
+        assert inst._stream_filename(_Descriptor('1.crop0.jpg'), 'image/jpeg') == '1.crop0.jpg'
+        assert inst._stream_filename(_Descriptor('1.crop0.JPG'), 'image/jpeg') == '1.crop0.JPG'
+
+    def test_path_separators_are_stripped(self):
+        """
+        The name is untrusted: it comes from whatever node is upstream.
+
+        Backslashes are checked explicitly because os.path.basename on a POSIX host leaves
+        a Windows-style traversal completely untouched. The stored name also picks up the
+        stream's real extension, so a payload cannot masquerade as another type.
+        """
+        inst = _sink_instance(_fs(), name='report.pdf')
+        assert inst._stream_filename(_Descriptor('../../secrets/key.pem'), 'image/jpeg') == 'key.pem.jpg'
+        assert inst._stream_filename(_Descriptor(r'..\..\secrets\key.pem'), 'image/jpeg') == 'key.pem.jpg'
+
+    def test_name_that_reduces_to_nothing_falls_back(self):
+        inst = _sink_instance(_fs(), name='report.pdf')
+        assert inst._stream_filename(_Descriptor('../'), 'image/jpeg') == 'report.jpg'

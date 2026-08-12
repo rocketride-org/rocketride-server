@@ -56,6 +56,7 @@ if TYPE_CHECKING:
     # ``rocketlib`` (which predate ``Entry``) importable at runtime.
     from rocketlib import Entry
 
+from ai.common.avi.descriptor import descriptor_from_payload
 from ai.common.utils import optional_str, require_dict, require_str
 
 from .IGlobal import IGlobal
@@ -66,11 +67,6 @@ from .IGlobal import IGlobal
 # more than MAX_READ_LIMIT in one shot must use a streaming approach.
 DEFAULT_READ_LIMIT = 256 * 1024  # 256 KB
 MAX_READ_LIMIT = 4 * 1024 * 1024  # 4 MB
-
-# Connection id used for the sink's streaming-media write handles. The FileStore
-# caps handles per connection id; a single constant is fine because sink handles
-# are opened and closed within one object's media stream (only a few open at once).
-_SINK_CONNECTION_ID = 0
 
 # Upper bound on the `_1`, `_2`, … collision suffixes the sink will try before
 # giving up. Bounds the probe loop so a store that keeps reporting a path as
@@ -542,13 +538,40 @@ class IInstance(IInstanceBase):
             # Best-effort close, then best-effort delete — separately, so a
             # failed close never strands the partial file in the store.
             try:
-                _run_on_stream_loop(self.IGlobal.file_store.close_write(st['handle'], _SINK_CONNECTION_ID))
+                _run_on_stream_loop(self.IGlobal.file_store.close_write(st['handle']))
             except Exception:
                 pass
             try:
                 _run_on_stream_loop(self.IGlobal.file_store.delete(st['path']))
             except Exception:
                 pass
+
+    def _stream_filename(self, descriptor, mime: str) -> str:
+        """Filename for one media stream, preferring the name the stream carries.
+
+        A producer that fans one object out into several streams (frame_grabber's
+        frames, a cropper's crops) names each one in the BEGIN descriptor. Using it
+        is what keeps those distinguishable: derived from ``currentObject`` alone
+        they would all collide on the source object's name.
+
+        The name is untrusted — it comes from whatever node is upstream and is used
+        to build a store path — so it is reduced to a bare filename here. Both
+        separators are checked explicitly: ``os.path.basename`` on a POSIX host
+        leaves ``..\\..\\x`` untouched, and the store's own ``..`` rejection is a
+        second wall, not the only one.
+        """
+        name = getattr(getattr(descriptor, 'metadata', None), 'name', None) if descriptor else None
+        if name:
+            name = os.path.basename(str(name).replace('\\', '/'))
+        if not name or '/' in name or '\\' in name:
+            name = None
+        ext = self._media_ext(mime)
+        if not name:
+            return f'{self._sink_base_name()}{ext}'
+        # A stream can legitimately arrive named without an extension, and splitext cannot tell:
+        # it reads `1.crop0` as extension `.crop0`. The mime is authoritative for media, so
+        # append it unless it is already there.
+        return name if name.lower().endswith(ext.lower()) else f'{name}{ext}'
 
     def _sink_media(self, kind: str, aviAction, mimeType: str, data: bytes) -> None:
         """Stream media chunks straight to the store with bounded memory.
@@ -565,7 +588,14 @@ class IInstance(IInstanceBase):
 
         if aviAction == AVI_ACTION.BEGIN:
             self._media_abort(kind)
-            streams[kind] = {'handle': None, 'path': None, 'mime': mimeType}
+            # BEGIN carries the stream descriptor, which is the only place the stream's
+            # own name appears; keep it for _stream_filename.
+            streams[kind] = {
+                'handle': None,
+                'path': None,
+                'mime': mimeType,
+                'descriptor': descriptor_from_payload(data),
+            }
         elif aviAction == AVI_ACTION.WRITE:
             st = streams.get(kind)
             if st is None or not data:
@@ -574,16 +604,16 @@ class IInstance(IInstanceBase):
                 self._check_ready()
                 if not self.IGlobal.allow_write:
                     raise ValueError('write access is not enabled for this filesystem tool')
-                path = self._sink_target_path(f'{self._sink_base_name()}{self._media_ext(st["mime"])}')
-                st['handle'] = _run_on_stream_loop(self.IGlobal.file_store.open_write(path, _SINK_CONNECTION_ID))
+                path = self._sink_target_path(self._stream_filename(st.get('descriptor'), st['mime']))
+                st['handle'] = _run_on_stream_loop(self.IGlobal.file_store.open_write(path))
                 st['path'] = path
-            _run_on_stream_loop(self.IGlobal.file_store.write_chunk(st['handle'], bytes(data), _SINK_CONNECTION_ID))
+            _run_on_stream_loop(self.IGlobal.file_store.write_chunk(st['handle'], bytes(data)))
         elif aviAction == AVI_ACTION.END:
             st = streams.pop(kind, None)
             if st is None or st['handle'] is None:
                 return
             try:
-                _run_on_stream_loop(self.IGlobal.file_store.close_write(st['handle'], _SINK_CONNECTION_ID))
+                _run_on_stream_loop(self.IGlobal.file_store.close_write(st['handle']))
             except Exception:
                 # A failed commit leaves an incomplete file: remove it before
                 # propagating, so downstream never sees a truncated object.

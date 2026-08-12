@@ -265,17 +265,17 @@ def test_media_stream_ops_share_one_live_event_loop():
     fs = _fs()
     seen = []
 
-    async def _open_write(path, connection_id):
+    async def _open_write(path):
         seen.append(('open', asyncio.get_running_loop()))
         fs.streams['h1'] = {'path': path, 'chunks': []}
         return 'h1'
 
-    async def _write_chunk(handle, data, connection_id=0):
+    async def _write_chunk(handle, data):
         seen.append(('chunk', asyncio.get_running_loop()))
         fs.streams[handle]['chunks'].append(bytes(data))
         return len(data)
 
-    async def _close_write(handle, connection_id=0):
+    async def _close_write(handle):
         seen.append(('close', asyncio.get_running_loop()))
         return None
 
