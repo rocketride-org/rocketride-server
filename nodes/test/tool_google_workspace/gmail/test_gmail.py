@@ -624,6 +624,7 @@ def test_check_connection_settings_sharing_uses_settings_probe(monkeypatch):
         {
             'access_token': 'tok',
             'scope': (
+                'https://www.googleapis.com/auth/gmail.modify '
                 'https://www.googleapis.com/auth/gmail.settings.basic '
                 'https://www.googleapis.com/auth/gmail.settings.sharing'
             ),
