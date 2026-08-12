@@ -50,6 +50,7 @@ class IInstance(IInstanceBase):
         """
         engine = self.IGlobal.engine
         if engine is None:
+            self.preventDefault()
             self.instance.writeQuestions(question)
             return
 
@@ -64,6 +65,7 @@ class IInstance(IInstanceBase):
 
         if not full_text.strip():
             # Nothing to check, forward as-is
+            self.preventDefault()
             self.instance.writeQuestions(question)
             return
 
@@ -80,7 +82,11 @@ class IInstance(IInstanceBase):
             for violation in result['violations']:
                 warning(f'Guardrails input warning: {violation["rule"]} \u2014 {violation["details"]}')
 
-        # Forward the question downstream
+        # Forward the question downstream. We forward it ourselves (rather than
+        # letting the engine's post-override default forward run), so we must
+        # call preventDefault() to suppress that automatic second forward \u2014
+        # otherwise every question is delivered twice.
+        self.preventDefault()
         self.instance.writeQuestions(question)
 
     def writeAnswers(self, answer: Answer):
@@ -95,6 +101,7 @@ class IInstance(IInstanceBase):
         """
         engine = self.IGlobal.engine
         if engine is None:
+            self.preventDefault()
             self.instance.writeAnswers(answer)
             return
 
@@ -103,6 +110,7 @@ class IInstance(IInstanceBase):
 
         if not text.strip():
             # Nothing to check, forward as-is
+            self.preventDefault()
             self.instance.writeAnswers(answer)
             return
 
@@ -124,7 +132,11 @@ class IInstance(IInstanceBase):
             for violation in result['violations']:
                 warning(f'Guardrails output warning: {violation["rule"]} \u2014 {violation["details"]}')
 
-        # Forward the answer downstream
+        # Forward the answer downstream. We forward it ourselves (rather than
+        # letting the engine's post-override default forward run), so we must
+        # call preventDefault() to suppress that automatic second forward \u2014
+        # otherwise every answer is delivered twice.
+        self.preventDefault()
         self.instance.writeAnswers(answer)
 
     def writeDocuments(self, documents):
