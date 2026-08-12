@@ -599,12 +599,18 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
             error(f'Error handling question: {e}')
 
     def _emitError(self, message: str, lanes) -> None:
-        """Emit a validation/safety error to the wired lanes, never a rejected query as prose."""
+        """Emit a validation/safety error to the wired lanes, never a rejected query as prose.
+
+        The answers lane wraps the message as ``{'error': message}`` JSON (matching
+        graph_instance_base.py), so a real prose answer and an error are structurally
+        distinguishable one lane down -- both would otherwise be indistinguishable
+        plain strings.
+        """
         if 'text' in lanes:
             self.instance.writeText(message)
         if 'answers' in lanes:
             answer = Answer()
-            answer.setAnswer(message)
+            answer.setAnswer(json.dumps({'error': message}))
             self.instance.writeAnswers(answer)
 
     def _emit(self, result, lanes, *, executed: bool) -> None:

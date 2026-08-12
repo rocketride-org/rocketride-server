@@ -317,6 +317,7 @@ class _FakeInstance:
     def __init__(self, lanes):
         self._lanes = lanes
         self.text_written = None
+        self.table_written = None
         self.answer_written = None
 
     def getListeners(self):
@@ -326,7 +327,7 @@ class _FakeInstance:
         self.text_written = text
 
     def writeTable(self, markdown):
-        pass
+        self.table_written = markdown
 
     def writeAnswers(self, answer):
         self.answer_written = answer
@@ -357,7 +358,7 @@ def test_write_questions_surfaces_explain_error_not_rejected_sql(is_valid_value)
     inst.writeQuestions(question)
 
     assert fake_instance.text_written == 'syntax error near FROM'
-    assert fake_instance.answer_written.getText() == 'syntax error near FROM'
+    assert fake_instance.answer_written.getJson() == {'error': 'syntax error near FROM'}
 
 
 @pytest.mark.parametrize('is_valid_value', [True, 'true'])
@@ -399,7 +400,10 @@ def test_write_questions_emits_error_for_unsafe_sql_not_as_data():
     fails the safety gate, the old code still let the rejected SQL fall
     through to _formatResultAsMarkdown on the table/answers lanes -- keyed off
     is_valid_query rather than whether anything was actually executed -- so
-    the rejected SQL went out dressed up as a one-cell table of "data".
+    the rejected SQL went out dressed up as a one-cell table of "data". Also
+    asserts the table lane stayed silent -- the test name promises that, but
+    _FakeInstance.writeTable() previously discarded its argument instead of
+    recording it, so a regression here would have passed unnoticed.
     """
     fake_global = _FakeGlobal()
     inst = _sql_instance(fake_global)
@@ -416,7 +420,8 @@ def test_write_questions_emits_error_for_unsafe_sql_not_as_data():
     inst.writeQuestions(question)
 
     assert fake_instance.text_written == 'Generated query contains unsafe SQL'
-    assert fake_instance.answer_written.getText() == 'Generated query contains unsafe SQL'
+    assert fake_instance.answer_written.getJson() == {'error': 'Generated query contains unsafe SQL'}
+    assert fake_instance.table_written is None
 
 
 # ---------------------------------------------------------------------------
