@@ -207,9 +207,7 @@ class RocketRideClient(
         unknown = set(kwargs) - _KNOWN_CONSTRUCTOR_KWARGS
         if unknown:
             names = ', '.join(sorted(unknown))
-            raise TypeError(
-                f'RocketRideClient.__init__() got unexpected keyword argument(s): {names}'
-            )
+            raise TypeError(f'RocketRideClient.__init__() got unexpected keyword argument(s): {names}')
 
         # Get or load environment variables
         env = kwargs.get('env', None)
