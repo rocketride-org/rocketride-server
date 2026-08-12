@@ -578,24 +578,69 @@ class IInstance(IInstanceBase):
                 pass
             self._discard_partial(st)
 
+    def _staging_path(self, path: str) -> str:
+        """A sibling path to stream into before it replaces ``path``.
+
+        Args:
+            path: The final destination.
+
+        Returns:
+            The staging path.
+
+        Raises:
+            ValueError: If the whitelist admits the destination but not the sibling.
+        """
+        staged = f'{path}.part-{self.instance.currentObject.objectId}'
+        self._check_path(staged)
+        return staged
+
+    def _write_path_for(self, path: str) -> str:
+        """Where the stream's bytes actually go.
+
+        Only ``overwrite`` needs staging. Under ``unique`` and ``skip`` the destination was
+        probed free, so there is nothing at risk and the stream writes straight to it.
+
+        Under ``overwrite`` the destination holds the operator's file, and opening it is
+        already destructive — the filesystem backend truncates at ``open_write``, and the
+        object stores commit over it at ``close_write``. Writing to a sibling and renaming
+        on success keeps the original intact until there is a complete file to replace it
+        with, and makes the failure cleanup unambiguous: the staging file is always ours.
+
+        Args:
+            path: The final destination.
+
+        Returns:
+            The path to open for writing — the destination itself, or a staging sibling.
+        """
+        if self.IGlobal.on_conflict != OnConflict.OVERWRITE:
+            return path
+        try:
+            return self._staging_path(path)
+        except ValueError:
+            # A whitelist that admits the destination but not a sibling of it. Failing here
+            # would break a pipeline that worked before this staging existed, so fall back
+            # to writing in place — with the exposure this method exists to avoid.
+            warning(
+                f'tool_filesystem: the path whitelist rejects a staging file beside {path!r}; '
+                'writing in place, so an interrupted stream will leave it incomplete'
+            )
+            return path
+
     def _discard_partial(self, st: dict) -> None:
-        """Remove a half-written stream's file, but only one this stream created.
+        """Remove what a half-written stream produced.
 
-        Under ``unique`` and ``skip`` the path was probed free before the handle opened,
-        so whatever is there now is this stream's own partial output and deleting it is
-        the cleanup it was written for.
-
-        Under ``overwrite`` the path is the user's existing file. Deleting it would turn
-        an interrupted stream into the loss of a file the node never created — worse than
-        the truncation ``overwrite`` already implies, and not what the README warns about.
+        Always safe to delete: under ``unique`` and ``skip`` the path was probed free before
+        the handle opened, and under ``overwrite`` the bytes went to a staging sibling. Either
+        way the file removed here is one this stream created.
 
         Args:
             st: The stream state being discarded.
         """
-        if not st.get('created'):
+        write_path = st.get('write_path')
+        if not write_path:
             return
         try:
-            _run_on_stream_loop(self.IGlobal.file_store.delete(st['path']))
+            _run_on_stream_loop(self.IGlobal.file_store.delete(write_path))
         except Exception:
             pass
 
@@ -664,11 +709,10 @@ class IInstance(IInstanceBase):
                     # find nothing and become no-ops.
                     streams.pop(kind, None)
                     return
-                # Under overwrite the path was not probed, so the file may be the user's
-                # rather than ours; _discard_partial must not remove it.
-                st['created'] = self.IGlobal.on_conflict != OnConflict.OVERWRITE
-                st['handle'] = _run_on_stream_loop(self.IGlobal.file_store.open_write(path))
+                write_path = self._write_path_for(path)
+                st['handle'] = _run_on_stream_loop(self.IGlobal.file_store.open_write(write_path))
                 st['path'] = path
+                st['write_path'] = write_path
             _run_on_stream_loop(self.IGlobal.file_store.write_chunk(st['handle'], bytes(data)))
         elif aviAction == AVI_ACTION.END:
             st = streams.pop(kind, None)
@@ -676,6 +720,10 @@ class IInstance(IInstanceBase):
                 return
             try:
                 _run_on_stream_loop(self.IGlobal.file_store.close_write(st['handle']))
+                if st['write_path'] != st['path']:
+                    # Staged under overwrite: the destination is replaced only now, with a
+                    # complete file, so everything up to this point left it untouched.
+                    _run_on_stream_loop(self.IGlobal.file_store.rename(st['write_path'], st['path'], overwrite=True))
             except Exception:
                 # A failed commit leaves an incomplete file: remove it before
                 # propagating, so downstream never sees a truncated object.

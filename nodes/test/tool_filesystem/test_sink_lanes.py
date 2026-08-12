@@ -330,48 +330,34 @@ def test_end_close_failure_deletes_partial_and_raises():
 
 
 # ---------------------------------------------------------------------------
-# Cleanup must not remove a file this node did not create
+# overwrite stages the stream and swaps it in only when it is complete
+#
+# Opening the destination is itself destructive — the filesystem backend truncates at
+# open_write, the object stores commit over it at close_write — so a stream that fails
+# part-way would leave the operator's file neither old nor new.
 # ---------------------------------------------------------------------------
 
 
-def test_abort_does_not_delete_under_overwrite():
-    """The user's own file is at that path — an interrupted stream must not remove it.
-
-    Under unique/skip the path was probed free, so whatever sits there is this stream's
-    partial output and deleting it is the intended cleanup. Under overwrite it is the file
-    the operator asked to replace, and losing it entirely to a transient failure is worse
-    than the truncation overwrite already implies.
-    """
+def test_overwrite_streams_to_a_sibling_and_renames_on_success():
     fs = _fs()
     inst = _sink_instance(fs, has_name=False, object_id='o1', on_conflict='overwrite')
     from rocketlib import AVI_ACTION
 
     inst.writeImage(AVI_ACTION.BEGIN, 'image/png', b'')
-    inst.writeImage(AVI_ACTION.WRITE, 'image/png', b'partial')
-    inst.writeImage(AVI_ACTION.BEGIN, 'image/png', b'')  # abort the first stream
+    inst.writeImage(AVI_ACTION.WRITE, 'image/png', b'bytes')
+    inst.writeImage(AVI_ACTION.END, 'image/png', b'')
 
-    fs.close_write.assert_awaited()  # handle still released
-    fs.delete.assert_not_awaited()  # but the existing file is left alone
-
-
-def test_abort_still_deletes_under_unique():
-    """Unchanged where the path was probed free: the partial is ours to remove."""
-    fs = _fs()
-    inst = _sink_instance(fs, has_name=False, object_id='o2')
-    from rocketlib import AVI_ACTION
-
-    inst.writeImage(AVI_ACTION.BEGIN, 'image/png', b'')
-    inst.writeImage(AVI_ACTION.WRITE, 'image/png', b'partial')
-    inst.writeImage(AVI_ACTION.BEGIN, 'image/png', b'')
-
-    fs.delete.assert_awaited()
+    (opened,), _ = fs.open_write.await_args
+    assert opened == 'output/o1.png.part-o1', 'the destination must not be opened directly'
+    (src, dst), kwargs = fs.rename.await_args
+    assert (src, dst) == ('output/o1.png.part-o1', 'output/o1.png') and kwargs == {'overwrite': True}
 
 
-def test_failed_commit_does_not_delete_under_overwrite():
-    """Same rule on the END path, where close_write raising triggers the cleanup."""
+def test_overwrite_leaves_the_destination_alone_when_the_stream_fails():
+    """The whole point: a failed replacement must not damage what was already there."""
     fs = _fs()
     fs.close_write.side_effect = RuntimeError('commit failed')
-    inst = _sink_instance(fs, has_name=False, object_id='o3', on_conflict='overwrite')
+    inst = _sink_instance(fs, has_name=False, object_id='o2', on_conflict='overwrite')
     from rocketlib import AVI_ACTION
 
     inst.writeImage(AVI_ACTION.BEGIN, 'image/png', b'')
@@ -379,4 +365,71 @@ def test_failed_commit_does_not_delete_under_overwrite():
     with pytest.raises(RuntimeError, match='commit failed'):
         inst.writeImage(AVI_ACTION.END, 'image/png', b'')
 
-    fs.delete.assert_not_awaited()
+    fs.rename.assert_not_awaited()  # nothing was swapped in
+    (deleted,), _ = fs.delete.await_args
+    assert deleted == 'output/o2.png.part-o2', 'only the staging file may be removed'
+
+
+def test_overwrite_abort_removes_only_the_staging_file():
+    fs = _fs()
+    inst = _sink_instance(fs, has_name=False, object_id='o3', on_conflict='overwrite')
+    from rocketlib import AVI_ACTION
+
+    inst.writeImage(AVI_ACTION.BEGIN, 'image/png', b'')
+    inst.writeImage(AVI_ACTION.WRITE, 'image/png', b'partial')
+    inst.writeImage(AVI_ACTION.BEGIN, 'image/png', b'')  # abort the first stream
+
+    (deleted,), _ = fs.delete.await_args
+    assert deleted == 'output/o3.png.part-o3'
+    fs.rename.assert_not_awaited()
+
+
+def test_unique_writes_straight_to_the_destination():
+    """No staging where the path was probed free — there is nothing to protect."""
+    fs = _fs()
+    inst = _sink_instance(fs, has_name=False, object_id='o4')
+    from rocketlib import AVI_ACTION
+
+    inst.writeImage(AVI_ACTION.BEGIN, 'image/png', b'')
+    inst.writeImage(AVI_ACTION.WRITE, 'image/png', b'bytes')
+    inst.writeImage(AVI_ACTION.END, 'image/png', b'')
+
+    (opened,), _ = fs.open_write.await_args
+    assert opened == 'output/o4.png'
+    fs.rename.assert_not_awaited()
+
+
+def test_unique_abort_still_deletes_its_own_partial():
+    fs = _fs()
+    inst = _sink_instance(fs, has_name=False, object_id='o5')
+    from rocketlib import AVI_ACTION
+
+    inst.writeImage(AVI_ACTION.BEGIN, 'image/png', b'')
+    inst.writeImage(AVI_ACTION.WRITE, 'image/png', b'partial')
+    inst.writeImage(AVI_ACTION.BEGIN, 'image/png', b'')
+
+    (deleted,), _ = fs.delete.await_args
+    assert deleted == 'output/o5.png'
+
+
+def test_whitelist_rejecting_the_sibling_falls_back_to_writing_in_place():
+    """A tight whitelist must not fail a pipeline that worked before staging existed."""
+    import re
+
+    fs = _fs()
+    inst = _sink_instance(
+        fs,
+        has_name=False,
+        object_id='o6',
+        on_conflict='overwrite',
+        path_patterns=[re.compile(r'^output/o6\.png$')],
+    )
+    from rocketlib import AVI_ACTION
+
+    inst.writeImage(AVI_ACTION.BEGIN, 'image/png', b'')
+    inst.writeImage(AVI_ACTION.WRITE, 'image/png', b'bytes')
+    inst.writeImage(AVI_ACTION.END, 'image/png', b'')
+
+    (opened,), _ = fs.open_write.await_args
+    assert opened == 'output/o6.png'
+    fs.rename.assert_not_awaited()
