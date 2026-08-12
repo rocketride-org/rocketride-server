@@ -65,6 +65,10 @@ class TestServicesContract:
         assert f['filesystem.urlExpiresIn']['default'] == 3600
         assert f['filesystem.urlExpiresIn']['minimum'] == 1
         assert f['filesystem.urlExpiresIn']['maximum'] == 3600
+        assert f['filesystem.onConflict']['type'] == 'string'
+        assert f['filesystem.onConflict']['default'] == 'unique', 'the safe outcome must be the default'
+        assert [c[0] for c in f['filesystem.onConflict']['enum']] == ['unique', 'overwrite', 'skip']
+        assert 'filesystem.onConflict' in d['shape'][0]['properties']
         # No agent-tool toggles on the store surface.
         assert not any(k.startswith('filesystem.allow') for k in f)
 
@@ -205,15 +209,38 @@ def _load_real_iglobal():
 class TestSinkConfig:
     def test_defaults_when_missing(self):
         IG = _load_real_iglobal()
-        assert IG._sink_config({}) == ('output/', False, 3600)
+        assert IG._sink_config({}) == ('output/', False, 3600, IG.OnConflict.UNIQUE)
 
     def test_explicit_values(self):
         IG = _load_real_iglobal()
-        assert IG._sink_config({'targetDir': 'out2/', 'emitUrl': True, 'urlExpiresIn': 120}) == (
+        assert IG._sink_config({'targetDir': 'out2/', 'emitUrl': True, 'urlExpiresIn': 120, 'onConflict': 'skip'}) == (
             'out2/',
             True,
             120,
+            IG.OnConflict.SKIP,
         )
+
+    def test_conflict_policy_defaults_to_the_non_destructive_choice(self):
+        """A mistyped or missing policy degrades to `unique`, never to overwriting."""
+        IG = _load_real_iglobal()
+        assert IG._sink_config({})[3] is IG.OnConflict.UNIQUE
+        assert IG._sink_config({'onConflict': 'nonsense'})[3] is IG.OnConflict.UNIQUE
+        assert IG._sink_config({'onConflict': None})[3] is IG.OnConflict.UNIQUE
+        assert IG._sink_config({'onConflict': '  skip  '})[3] is IG.OnConflict.SKIP
+        assert IG._sink_config({'onConflict': 'OVERWRITE'})[3] is IG.OnConflict.OVERWRITE
+
+    def test_overwriting_is_never_reached_by_accident(self):
+        """The destructive outcome has to be named exactly; nothing else degrades into it."""
+        IG = _load_real_iglobal()
+        for junk in ({}, {'onConflict': ''}, {'onConflict': 'true'}, {'onConflict': True}):
+            assert IG._sink_config(junk)[3] is IG.OnConflict.UNIQUE
+
+    def test_members_cover_exactly_the_services_json_enum(self):
+        """Member names are what resolves the dropdown value, so a new choice needs a member."""
+        IG = _load_real_iglobal()
+        fields = _load_services('services.store.json')['fields']
+        choices = [c[0] for c in fields['filesystem.onConflict']['enum']]
+        assert sorted(m.name.lower() for m in IG.OnConflict) == sorted(choices)
 
     def test_url_expires_clamped_to_ceiling(self):
         IG = _load_real_iglobal()
@@ -257,6 +284,16 @@ def _install_iinstance_stubs():
 
         ig.IGlobal = _IGlobalStub
         sys.modules['tool_filesystem.IGlobal'] = ig
+
+    # test_read_size_cap installs its own IGlobal stub over this key, so patch whichever one
+    # is current rather than only the one built above. Every other attribute the sink reads is
+    # set per-instance by _sink_instance; OnConflict is the one it reads off the class, and it
+    # comes from the real IGlobal so a stub cannot drift from the members IInstance compares
+    # against.
+    stub = sys.modules['tool_filesystem.IGlobal'].IGlobal
+    if not hasattr(stub, 'OnConflict'):
+        stub.OnConflict = _load_real_iglobal().OnConflict
+        stub.on_conflict = stub.OnConflict.UNIQUE
 
 
 def _fs(exists_paths=()):
@@ -309,6 +346,7 @@ def _sink_instance(
     allow_write=True,
     path_patterns=None,
     listeners=('json',),
+    on_conflict='unique',
 ):
     """Build an IInstance wired to a stub IGlobal + mocked engine ``instance``."""
     _install_iinstance_stubs()
@@ -323,6 +361,7 @@ def _sink_instance(
     g.target_dir = target_dir
     g.emit_url = emit_url
     g.url_expires_in = url_expires_in
+    g.on_conflict = IGlobal.OnConflict[on_conflict.upper()]
     inst.IGlobal = g
     inst.instance = MagicMock()
     inst.instance.getListeners.return_value = list(listeners)
@@ -546,3 +585,49 @@ class TestStreamFilename:
     def test_name_that_reduces_to_nothing_falls_back(self):
         inst = _sink_instance(_fs(), name='report.pdf')
         assert inst._stream_filename(_Descriptor('../'), 'image/jpeg') == 'report.jpg'
+
+
+class TestConflictPolicy:
+    def test_unique_suffixes_rather_than_replacing(self):
+        """The default: never destructive, never silent."""
+        fs = _fs(exists_paths={'output/report.pdf'})
+        inst = _sink_instance(fs, object_id='obj-123')
+        assert inst._sink_target_path('report.pdf') == 'output/report_1.pdf'
+
+    def test_overwrite_returns_the_plain_path(self):
+        """Overwriting replaces in place rather than finding a free name."""
+        fs = _fs(exists_paths={'output/report.pdf'})
+        inst = _sink_instance(fs, object_id='obj-123', on_conflict='overwrite')
+        assert inst._sink_target_path('report.pdf') == 'output/report.pdf'
+
+    def test_overwrite_does_not_probe_the_store(self):
+        """
+        No stat() at all when overwriting.
+
+        Worth asserting rather than assuming: the probe is a network round-trip per stream
+        on S3 or Azure, and skipping it is half the point of the setting.
+        """
+        fs = _fs(exists_paths={'output/report.pdf'})
+        inst = _sink_instance(fs, object_id='obj-123', on_conflict='overwrite')
+        inst._sink_target_path('report.pdf')
+        fs.stat.assert_not_awaited()
+
+    def test_skip_returns_none_when_taken(self):
+        """`None` means "leave it alone" — it is a decision, not a failure."""
+        fs = _fs(exists_paths={'output/report.pdf'})
+        inst = _sink_instance(fs, object_id='obj-123', on_conflict='skip')
+        assert inst._sink_target_path('report.pdf') is None
+
+    def test_skip_writes_normally_when_free(self):
+        fs = _fs()
+        inst = _sink_instance(fs, object_id='obj-123', on_conflict='skip')
+        assert inst._sink_target_path('report.pdf') == 'output/report.pdf'
+
+    def test_skipped_write_touches_nothing_and_emits_no_ref(self):
+        """A skipped one-shot write must not create a file or claim it did."""
+        fs = _fs(exists_paths={'output/report.md'})
+        inst = _sink_instance(fs, name='report.pdf', on_conflict='skip')
+        assert inst._sink_write(b'data', 'report.md') is None
+        fs.write.assert_not_awaited()
+        inst._sink_emit([None])
+        inst.instance.writeJson.assert_not_called()

@@ -387,16 +387,26 @@ class IInstance(IInstanceBase):
             return os.path.splitext(os.path.basename(name))[1]
         return ''
 
-    def _sink_target_path(self, filename: str, *, index: int | None = None) -> str:
-        """Resolve a free store path under targetDir, suffixing on collision.
-
-        Keeps the object's own name (``output/report.pdf``) and only falls back
-        to ``_1``, ``_2``, … when that name is already taken. The search is
-        bounded by ``MAX_COLLISION_SUFFIX`` and raises past it, rather than
-        probing forever if the store keeps reporting the path as existing.
+    def _sink_target_path(self, filename: str, *, index: int | None = None) -> str | None:
+        """Resolve the store path to write to under targetDir, per the conflict policy.
 
         Each candidate is whitelist-checked *before* it is probed, so a path the
         whitelist would reject never reveals whether files exist in the store.
+
+        Returns:
+            The path to write, or ``None`` when ``onConflict`` is ``skip`` and the
+            path is already taken — callers must treat that as "leave it alone",
+            not as an error.
+
+        The three policies:
+
+        * ``overwrite`` — write straight over whatever is there. No ``stat()`` at
+          all, which also saves a store round-trip per stream.
+        * ``skip`` — leave an existing file alone.
+        * ``unique`` (default) — keep the object's own name (``output/report.pdf``)
+          and fall back to ``_1``, ``_2``, … when it is taken. Bounded by
+          ``MAX_COLLISION_SUFFIX`` and raises past it, rather than probing forever
+          if the store keeps reporting the path as existing.
         """
         target_dir = (self.IGlobal.target_dir or '').strip()
         if target_dir and not target_dir.endswith('/'):
@@ -407,6 +417,17 @@ class IInstance(IInstanceBase):
 
         candidate = f'{target_dir}{stem}{ext}'
         self._check_path(candidate)
+
+        if self.IGlobal.on_conflict == self.IGlobal.OnConflict.OVERWRITE:
+            # FilesystemStore.open_write opens 'wb' and FileStore.write is
+            # last-write-wins, so replacing needs no explicit truncate here.
+            return candidate
+
+        if self.IGlobal.on_conflict == self.IGlobal.OnConflict.SKIP:
+            if _run_async(self.IGlobal.file_store.stat(candidate)).get('exists'):
+                return None
+            return candidate
+
         n = 0
         while _run_async(self.IGlobal.file_store.stat(candidate)).get('exists'):
             n += 1
@@ -426,16 +447,22 @@ class IInstance(IInstanceBase):
             url = _run_async(self.IGlobal.file_store.get_url(path, expires_in=self.IGlobal.url_expires_in))
         return {'storePath': path, 'url': url, 'name': os.path.basename(path), 'mime': mime}
 
-    def _sink_write(self, data: bytes, filename: str, *, index: int | None = None) -> dict:
+    def _sink_write(self, data: bytes, filename: str, *, index: int | None = None) -> dict | None:
         """Persist ``data`` in one shot (documents/text/table) and return a ref.
 
         Enforces ``allow_write``; ``_sink_target_path`` applies the whitelist to
         every candidate before probing, so a rejected path never touches the store.
+
+        Returns:
+            The reference, or ``None`` when the conflict policy skipped the write.
         """
         self._check_ready()
         if not self.IGlobal.allow_write:
             raise ValueError('write access is not enabled for this filesystem tool')
         path = self._sink_target_path(filename, index=index)
+        if path is None:
+            warning(f'tool_filesystem: {filename!r} already exists and onConflict is skip; not written')
+            return None
         _run_async(self.IGlobal.file_store.write(path, data))
         return self._sink_ref(path)
 
@@ -447,6 +474,9 @@ class IInstance(IInstanceBase):
         no Doc/chunkId semantics — so downstream JSON consumers get the refs
         without vector-store metadata riding along.
         """
+        # A skipped write yields None rather than a ref; those are dropped here so a
+        # reference is only ever emitted for a file this node actually created.
+        refs = [ref for ref in refs if ref]
         if not refs:
             return
         if 'json' not in self.instance.getListeners():
@@ -604,7 +634,14 @@ class IInstance(IInstanceBase):
                 self._check_ready()
                 if not self.IGlobal.allow_write:
                     raise ValueError('write access is not enabled for this filesystem tool')
-                path = self._sink_target_path(self._stream_filename(st.get('descriptor'), st['mime']))
+                name = self._stream_filename(st.get('descriptor'), st['mime'])
+                path = self._sink_target_path(name)
+                if path is None:
+                    # Drop the stream, so the remaining chunks and the END that follows
+                    # find nothing and become no-ops.
+                    streams.pop(kind, None)
+                    warning(f'tool_filesystem: {name!r} already exists and onConflict is skip; not written')
+                    return
                 st['handle'] = _run_on_stream_loop(self.IGlobal.file_store.open_write(path))
                 st['path'] = path
             _run_on_stream_loop(self.IGlobal.file_store.write_chunk(st['handle'], bytes(data)))
