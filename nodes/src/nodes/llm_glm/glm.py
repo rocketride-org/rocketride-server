@@ -71,6 +71,8 @@ class Chat(ChatBase):
         # formats exist, so only presence is enforced (the llm_baidu_qianfan
         # lesson: don't over-validate key format).
         apikey = config.get('apikey')
+        if isinstance(apikey, str):
+            apikey = apikey.strip()
         if ('api.z.ai' in serverbase or 'bigmodel.cn' in serverbase) and not apikey:
             raise ValueError('GLM API key is required for cloud profiles.')
 

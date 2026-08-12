@@ -128,3 +128,10 @@ def test_self_hosted_profile_without_key_is_allowed(monkeypatch):
     """A local vLLM/SGLang serverbase builds fine with no apikey (dummy token)."""
     module = _load_glm(monkeypatch, '', config_overrides={'apikey': '', 'serverbase': 'http://localhost:8000/v1'})
     module.Chat('llm_glm', {}, {})
+
+
+def test_cloud_profile_with_whitespace_key_raises(monkeypatch):
+    """A whitespace-only apikey is treated as missing, not sent as credentials."""
+    module = _load_glm(monkeypatch, '', config_overrides={'apikey': '   '})
+    with pytest.raises(ValueError, match='API key is required'):
+        module.Chat('llm_glm', {}, {})
