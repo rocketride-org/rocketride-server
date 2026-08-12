@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
+import pytest
 from test_sink_naming import _fs, _sink_instance
 
 
@@ -326,3 +327,56 @@ def test_end_close_failure_deletes_partial_and_raises():
         inst.writeImage(AVI_ACTION.END, 'image/png', b'')
     fs.delete.assert_awaited_once_with('output/s3.png')
     inst.instance.writeJson.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Cleanup must not remove a file this node did not create
+# ---------------------------------------------------------------------------
+
+
+def test_abort_does_not_delete_under_overwrite():
+    """The user's own file is at that path — an interrupted stream must not remove it.
+
+    Under unique/skip the path was probed free, so whatever sits there is this stream's
+    partial output and deleting it is the intended cleanup. Under overwrite it is the file
+    the operator asked to replace, and losing it entirely to a transient failure is worse
+    than the truncation overwrite already implies.
+    """
+    fs = _fs()
+    inst = _sink_instance(fs, has_name=False, object_id='o1', on_conflict='overwrite')
+    from rocketlib import AVI_ACTION
+
+    inst.writeImage(AVI_ACTION.BEGIN, 'image/png', b'')
+    inst.writeImage(AVI_ACTION.WRITE, 'image/png', b'partial')
+    inst.writeImage(AVI_ACTION.BEGIN, 'image/png', b'')  # abort the first stream
+
+    fs.close_write.assert_awaited()  # handle still released
+    fs.delete.assert_not_awaited()  # but the existing file is left alone
+
+
+def test_abort_still_deletes_under_unique():
+    """Unchanged where the path was probed free: the partial is ours to remove."""
+    fs = _fs()
+    inst = _sink_instance(fs, has_name=False, object_id='o2')
+    from rocketlib import AVI_ACTION
+
+    inst.writeImage(AVI_ACTION.BEGIN, 'image/png', b'')
+    inst.writeImage(AVI_ACTION.WRITE, 'image/png', b'partial')
+    inst.writeImage(AVI_ACTION.BEGIN, 'image/png', b'')
+
+    fs.delete.assert_awaited()
+
+
+def test_failed_commit_does_not_delete_under_overwrite():
+    """Same rule on the END path, where close_write raising triggers the cleanup."""
+    fs = _fs()
+    fs.close_write.side_effect = RuntimeError('commit failed')
+    inst = _sink_instance(fs, has_name=False, object_id='o3', on_conflict='overwrite')
+    from rocketlib import AVI_ACTION
+
+    inst.writeImage(AVI_ACTION.BEGIN, 'image/png', b'')
+    inst.writeImage(AVI_ACTION.WRITE, 'image/png', b'bytes')
+    with pytest.raises(RuntimeError, match='commit failed'):
+        inst.writeImage(AVI_ACTION.END, 'image/png', b'')
+
+    fs.delete.assert_not_awaited()

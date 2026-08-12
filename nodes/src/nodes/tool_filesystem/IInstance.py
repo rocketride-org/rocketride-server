@@ -59,7 +59,7 @@ if TYPE_CHECKING:
 from ai.common.avi.descriptor import descriptor_from_payload
 from ai.common.utils import optional_str, require_dict, require_str
 
-from .IGlobal import IGlobal
+from .IGlobal import IGlobal, OnConflict
 
 # Cap on bytes returned by a single read_file call. The underlying FileStore
 # defaults to 100 MB, which can blow the agent's context window or OOM the
@@ -396,13 +396,16 @@ class IInstance(IInstanceBase):
         Returns:
             The path to write, or ``None`` when ``onConflict`` is ``skip`` and the
             path is already taken — callers must treat that as "leave it alone",
-            not as an error.
+            not as an error. The reason is logged here, so the message lives in one
+            place rather than at each caller.
 
         The three policies:
 
         * ``overwrite`` — write straight over whatever is there. No ``stat()`` at
           all, which also saves a store round-trip per stream.
-        * ``skip`` — leave an existing file alone.
+        * ``skip`` — leave an existing *file* alone. A directory at the candidate
+          name is not a file to preserve, so it does not trigger a skip; the write
+          proceeds and the store rejects it if it cannot hold both.
         * ``unique`` (default) — keep the object's own name (``output/report.pdf``)
           and fall back to ``_1``, ``_2``, … when it is taken. Bounded by
           ``MAX_COLLISION_SUFFIX`` and raises past it, rather than probing forever
@@ -418,13 +421,16 @@ class IInstance(IInstanceBase):
         candidate = f'{target_dir}{stem}{ext}'
         self._check_path(candidate)
 
-        if self.IGlobal.on_conflict == self.IGlobal.OnConflict.OVERWRITE:
+        if self.IGlobal.on_conflict == OnConflict.OVERWRITE:
             # FilesystemStore.open_write opens 'wb' and FileStore.write is
             # last-write-wins, so replacing needs no explicit truncate here.
             return candidate
 
-        if self.IGlobal.on_conflict == self.IGlobal.OnConflict.SKIP:
-            if _run_async(self.IGlobal.file_store.stat(candidate)).get('exists'):
+        if self.IGlobal.on_conflict == OnConflict.SKIP:
+            # 'both' means a file and a same-named directory co-exist, which an object
+            # store allows; there is still a file to leave alone.
+            if _run_async(self.IGlobal.file_store.stat(candidate)).get('type') in ('file', 'both'):
+                warning(f'tool_filesystem: {filename!r} already exists and onConflict is skip; not written')
                 return None
             return candidate
 
@@ -461,7 +467,6 @@ class IInstance(IInstanceBase):
             raise ValueError('write access is not enabled for this filesystem tool')
         path = self._sink_target_path(filename, index=index)
         if path is None:
-            warning(f'tool_filesystem: {filename!r} already exists and onConflict is skip; not written')
             return None
         _run_async(self.IGlobal.file_store.write(path, data))
         return self._sink_ref(path)
@@ -571,10 +576,28 @@ class IInstance(IInstanceBase):
                 _run_on_stream_loop(self.IGlobal.file_store.close_write(st['handle']))
             except Exception:
                 pass
-            try:
-                _run_on_stream_loop(self.IGlobal.file_store.delete(st['path']))
-            except Exception:
-                pass
+            self._discard_partial(st)
+
+    def _discard_partial(self, st: dict) -> None:
+        """Remove a half-written stream's file, but only one this stream created.
+
+        Under ``unique`` and ``skip`` the path was probed free before the handle opened,
+        so whatever is there now is this stream's own partial output and deleting it is
+        the cleanup it was written for.
+
+        Under ``overwrite`` the path is the user's existing file. Deleting it would turn
+        an interrupted stream into the loss of a file the node never created — worse than
+        the truncation ``overwrite`` already implies, and not what the README warns about.
+
+        Args:
+            st: The stream state being discarded.
+        """
+        if not st.get('created'):
+            return
+        try:
+            _run_on_stream_loop(self.IGlobal.file_store.delete(st['path']))
+        except Exception:
+            pass
 
     def _stream_filename(self, descriptor, mime: str) -> str:
         """Filename for one media stream, preferring the name the stream carries.
@@ -640,8 +663,10 @@ class IInstance(IInstanceBase):
                     # Drop the stream, so the remaining chunks and the END that follows
                     # find nothing and become no-ops.
                     streams.pop(kind, None)
-                    warning(f'tool_filesystem: {name!r} already exists and onConflict is skip; not written')
                     return
+                # Under overwrite the path was not probed, so the file may be the user's
+                # rather than ours; _discard_partial must not remove it.
+                st['created'] = self.IGlobal.on_conflict != OnConflict.OVERWRITE
                 st['handle'] = _run_on_stream_loop(self.IGlobal.file_store.open_write(path))
                 st['path'] = path
             _run_on_stream_loop(self.IGlobal.file_store.write_chunk(st['handle'], bytes(data)))
@@ -654,10 +679,7 @@ class IInstance(IInstanceBase):
             except Exception:
                 # A failed commit leaves an incomplete file: remove it before
                 # propagating, so downstream never sees a truncated object.
-                try:
-                    _run_on_stream_loop(self.IGlobal.file_store.delete(st['path']))
-                except Exception:
-                    pass
+                self._discard_partial(st)
                 raise
             self._sink_emit([self._sink_ref(st['path'], st['mime'])])
 

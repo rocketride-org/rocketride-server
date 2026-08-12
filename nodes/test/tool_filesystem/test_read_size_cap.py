@@ -109,7 +109,32 @@ def _install_tool_filesystem_pkg_stub() -> None:
         path_patterns: list | None = None
 
     iglobal_mod.IGlobal = _IGlobalStub
+    # ``IInstance`` imports OnConflict from this module, so the stub has to export it too.
+    # Loaded from the production source rather than restated: the sink resolves the config
+    # value by member name, so a copy that drifted would be a silent divergence.
+    iglobal_mod.OnConflict = _load_production_on_conflict()
     sys.modules['tool_filesystem.IGlobal'] = iglobal_mod
+
+
+def _load_production_on_conflict():
+    """The real ``OnConflict`` enum, read straight out of ``IGlobal.py``.
+
+    Executing that module needs ``ai``/``rocketlib``, which this suite deliberately avoids
+    importing; the enum itself is stdlib-only, so it is compiled on its own instead.
+    """
+    import ast
+    from enum import IntEnum
+
+    tree = ast.parse((_NODE_DIR / 'IGlobal.py').read_text(encoding='utf-8'))
+    for node in tree.body:
+        if isinstance(node, ast.ClassDef) and node.name == 'OnConflict':
+            members = {
+                stmt.targets[0].id: ast.literal_eval(stmt.value)
+                for stmt in node.body
+                if isinstance(stmt, ast.Assign) and isinstance(stmt.targets[0], ast.Name)
+            }
+            return IntEnum('OnConflict', members)
+    raise AssertionError('OnConflict not found in IGlobal.py')
 
 
 # Stub rocketlib only while importing the node, then restore so it never leaks.

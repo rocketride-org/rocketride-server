@@ -48,20 +48,21 @@ from ai.common.config import Config
 from rocketlib import IGlobalBase, OPEN_MODE, warning
 
 
+class OnConflict(IntEnum):
+    """What to do when the sink's target path is already taken.
+
+    Member names are the services.store.json enum values uppercased, which is what lets
+    :meth:`IGlobal._sink_config` resolve one to the other by name. Resolved once at config
+    time, so each write compares ints.
+    """
+
+    UNIQUE = 0
+    OVERWRITE = 1
+    SKIP = 2
+
+
 class IGlobal(IGlobalBase):
     """Global state for tool_filesystem."""
-
-    class OnConflict(IntEnum):
-        """What to do when the sink's target path is already taken.
-
-        Member names are the services.store.json enum values uppercased, which is what lets
-        :meth:`_sink_config` resolve one to the other by name. Resolved once at config time,
-        so each write compares ints.
-        """
-
-        UNIQUE = 0
-        OVERWRITE = 1
-        SKIP = 2
 
     client_id: str | None = None
     file_store: object | None = None  # ai.account.file_store.FileStore
@@ -168,9 +169,9 @@ class IGlobal(IGlobalBase):
             raw_expires = 3600
         url_expires_in = min(raw_expires, 3600) if raw_expires > 0 else 3600
         try:
-            on_conflict = IGlobal.OnConflict[str(cfg.get('onConflict', '')).strip().upper()]
+            on_conflict = OnConflict[str(cfg.get('onConflict', '')).strip().upper()]
         except KeyError:
-            on_conflict = IGlobal.OnConflict.UNIQUE
+            on_conflict = OnConflict.UNIQUE
         return target_dir, emit_url, url_expires_in, on_conflict
 
     def validateConfig(self) -> None:
@@ -187,4 +188,4 @@ class IGlobal(IGlobalBase):
         self.target_dir = 'output/'
         self.emit_url = False
         self.url_expires_in = 3600
-        self.on_conflict = IGlobal.OnConflict.UNIQUE
+        self.on_conflict = OnConflict.UNIQUE
