@@ -14,13 +14,16 @@ import sys
 import types
 from pathlib import Path
 
+import pytest
 
-def _load_glm(monkeypatch, response_content: str):
+
+def _load_glm(monkeypatch, response_content: str, config_overrides: dict | None = None):
     """Load glm.py from source with stubbed dependencies.
 
     Installs fake ai.common.chat / ai.common.config / langchain_openai
     modules in sys.modules, with the stubbed LLM's invoke() returning
     ``response_content``, then imports the node module for testing.
+    ``config_overrides`` is merged over the default cloud-profile config.
     """
     ai_module = types.ModuleType('ai')
     common_module = types.ModuleType('ai.common')
@@ -41,12 +44,15 @@ def _load_glm(monkeypatch, response_content: str):
     class Config:
         @staticmethod
         def getNodeConfig(_logical_type, _conn_config):
-            """Return a fixed cloud-profile node config (key/model/serverbase)."""
-            return {
+            """Return the default cloud-profile config, with overrides applied."""
+            config = {
                 'apikey': 'test-glm-key',
                 'model': 'glm-5.2',
                 'serverbase': 'https://api.z.ai/api/paas/v4',
             }
+            if config_overrides:
+                config.update(config_overrides)
+            return config
 
     class ChatOpenAI:
         def __init__(self, **_kwargs):
@@ -109,3 +115,16 @@ def test_multiple_think_blocks_are_stripped(monkeypatch):
     """Every think block is removed when several appear in one response."""
     answer = _chat(monkeypatch, '<think>a</think>First. <think>b</think>Second.')
     assert answer == 'First. Second.'
+
+
+def test_cloud_profile_without_key_raises(monkeypatch):
+    """A cloud serverbase with no apikey fails fast instead of sending a keyless request."""
+    module = _load_glm(monkeypatch, '', config_overrides={'apikey': ''})
+    with pytest.raises(ValueError, match='API key is required'):
+        module.Chat('llm_glm', {}, {})
+
+
+def test_self_hosted_profile_without_key_is_allowed(monkeypatch):
+    """A local vLLM/SGLang serverbase builds fine with no apikey (dummy token)."""
+    module = _load_glm(monkeypatch, '', config_overrides={'apikey': '', 'serverbase': 'http://localhost:8000/v1'})
+    module.Chat('llm_glm', {}, {})

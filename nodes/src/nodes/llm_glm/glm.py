@@ -65,18 +65,18 @@ class Chat(ChatBase):
         # accepts the same "no explicit serverbase" config that validateConfig does
         serverbase = config.get('serverbase') or 'https://api.z.ai/api/paas/v4'
 
-        # Get the api key, use a dummy key if not provided. Local profiles
-        # (vLLM / SGLang) intentionally have no apikey property — local
-        # OpenAI-compatible servers accept any token. Mirrors the llm_minimax pattern.
-        apikey = config.get('apikey') or 'sk-local-dummy-key'
-
         # API key is only required when calling the Z.ai / Zhipu cloud API.
         # Matches both api.z.ai (international) and open.bigmodel.cn (mainland
         # China) by substring. Zhipu keys use an 'id.secret' shape but other
         # formats exist, so only presence is enforced (the llm_baidu_qianfan
         # lesson: don't over-validate key format).
-        if ('api.z.ai' in serverbase or 'bigmodel.cn' in serverbase) and apikey == 'sk-local-dummy-key':
+        apikey = config.get('apikey')
+        if ('api.z.ai' in serverbase or 'bigmodel.cn' in serverbase) and not apikey:
             raise ValueError('GLM API key is required for cloud profiles.')
+
+        # Self-hosted / custom OpenAI-compatible endpoints accept any token,
+        # so fall back to a dummy key. Mirrors the llm_minimax pattern.
+        apikey = apikey or 'sk-local-dummy-key'
 
         # Get the llm via the OpenAI-compatible client
         self._llm = ChatOpenAI(
