@@ -21,6 +21,7 @@ from typing import Any, Dict, List, Optional, Union
 from rocketlib import debug, error
 from ai.common.schema import Answer, Question
 from ai.common.config import Config
+from ai.common.llm_adapter import LAST_LLM_USAGE_VAR
 
 from ai.common.utils import parse_bool, safe_str
 
@@ -300,6 +301,11 @@ class AgentBase(ABC):
             )
             answer = Answer(expectJson=False)
             answer.setAnswer(answer_payload.get('content', ''))
+            # report_llm_tokens accumulates every model call of the run onto the
+            # context, so this is the whole turn's total plus its per-call breakdown.
+            usage = LAST_LLM_USAGE_VAR.get()
+            if usage:
+                answer.tokens = usage  # shown in the Trace "Tokens" grid on the answers lane
             iInstance.instance.writeAnswers(answer)
 
         return answer_payload

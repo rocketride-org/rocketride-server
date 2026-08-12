@@ -32,6 +32,7 @@ from typing import Any, Callable, Dict, List, Tuple
 import pytest
 
 from ai.common.agent import AgentBase, AgentContext
+from ai.common.llm_adapter import LAST_LLM_USAGE_VAR
 from ai.common.utils import parse_bool
 
 
@@ -210,6 +211,54 @@ def test_guard_answer_is_emitted_on_the_answers_lane():
 
     # Even a tripped guard still emits exactly one answer downstream.
     assert len(ii.instance.written) == 1
+
+
+# ---------------------------------------------------------------------------
+# Token usage on the emitted answer
+# ---------------------------------------------------------------------------
+
+
+def test_answer_carries_the_turn_token_usage():
+    """An agentic turn calls the model N times; the answer must carry the total.
+
+    Without this the Trace "Tokens" grid renders for a plain LLM node but never
+    for an agent, because the agent emits its own Answer here rather than going
+    through the LLM node's questions lane.
+    """
+    usage = {
+        'input': 30,
+        'output': 12,
+        'cache_read': 0,
+        'cache_creation': 0,
+        'model': 'claude-haiku-4-5',
+        'calls': 2,
+        'breakdown': [
+            {'input': 10, 'output': 4, 'cache_read': 0, 'cache_creation': 0, 'model': 'claude-haiku-4-5'},
+            {'input': 20, 'output': 8, 'cache_read': 0, 'cache_creation': 0, 'model': 'claude-haiku-4-5'},
+        ],
+    }
+    token = LAST_LLM_USAGE_VAR.set(usage)
+    try:
+        ii = _FakeIInstance()
+        driver = _make_driver(_call_one_tool, require_tool_call=False)
+        driver.run_agent(ii, _FakeQuestion(), emit_answers_lane=True)
+    finally:
+        LAST_LLM_USAGE_VAR.reset(token)
+
+    assert ii.instance.written[0].tokens == usage
+
+
+def test_answer_has_no_tokens_when_none_were_reported():
+    """A run with no model call must not invent an empty grid."""
+    token = LAST_LLM_USAGE_VAR.set(None)
+    try:
+        ii = _FakeIInstance()
+        driver = _make_driver(_call_one_tool, require_tool_call=False)
+        driver.run_agent(ii, _FakeQuestion(), emit_answers_lane=True)
+    finally:
+        LAST_LLM_USAGE_VAR.reset(token)
+
+    assert ii.instance.written[0].tokens is None
 
 
 # ---------------------------------------------------------------------------
