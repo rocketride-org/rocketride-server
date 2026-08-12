@@ -621,7 +621,13 @@ def test_check_connection_settings_sharing_uses_settings_probe(monkeypatch):
     monkeypatch.syspath_prepend(str(mocks))
     inst = _inst_with_token(
         'settings_sharing',
-        {'access_token': 'tok', 'scope': 'https://www.googleapis.com/auth/gmail.settings.basic https://www.googleapis.com/auth/gmail.settings.sharing'},
+        {
+            'access_token': 'tok',
+            'scope': (
+                'https://www.googleapis.com/auth/gmail.settings.basic '
+                'https://www.googleapis.com/auth/gmail.settings.sharing'
+            ),
+        },
     )
     _patch_config(monkeypatch, inst)
     result = inst.check_connection({})
