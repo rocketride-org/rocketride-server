@@ -202,6 +202,15 @@ class RocketRideClient(
         """
         global client_id
 
+        # Reject unknown arguments before touching environment, URI, or client
+        # state so an invalid call has no observable side effects.
+        unknown = set(kwargs) - _KNOWN_CONSTRUCTOR_KWARGS
+        if unknown:
+            names = ', '.join(sorted(unknown))
+            raise TypeError(
+                f'RocketRideClient.__init__() got unexpected keyword argument(s): {names}'
+            )
+
         # Get or load environment variables
         env = kwargs.get('env', None)
         if env is None:
@@ -293,15 +302,6 @@ class RocketRideClient(
         kwargs.pop('public', None)
         kwargs.pop('on_trace', None)
         kwargs.pop('env', None)
-
-        # Reject keys nothing in this constructor or the DAP client base chain
-        # consumed. A misspelled option used to be silently discarded — the
-        # same default as if it had never been passed, with nothing connecting
-        # the later symptom to the call site (#1837).
-        unknown = set(kwargs) - _KNOWN_CONSTRUCTOR_KWARGS
-        if unknown:
-            names = ', '.join(sorted(unknown))
-            raise TypeError(f'RocketRideClient.__init__() got unexpected keyword argument(s): {names}')
 
         # Initialize the underlying DAP client; transport is created in _internal_connect
         super().__init__(transport=None, module=module, **kwargs)
