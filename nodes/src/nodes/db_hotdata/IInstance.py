@@ -797,17 +797,25 @@ class IInstance(IInstanceBase):
                 fingerprint = hashlib.sha256(f'{schema}.{table}|'.encode('utf-8') + payload).hexdigest()
                 prior = glb.seen_load(fingerprint)
                 if prior is not None:
+                    out = {'table': table, 'schema': schema, 'mode': mode}
+                    if prior == 'pending':
+                        # Another call is mid-flight with this exact payload. It
+                        # may still fail and release the reservation, so claiming
+                        # success here would report rows that never landed.
+                        warning(f'db_hotdata: identical append to {schema}.{table} is already in flight')
+                        out['in_progress'] = True
+                        out['note'] = (
+                            'An identical append to this table is already running in this pipeline. '
+                            'It was NOT sent again, because append is not idempotent. Wait for that '
+                            'load to finish and query the table to confirm what landed - this call '
+                            'makes no claim about the rows being present.'
+                        )
+                        return out
                     warning(f'db_hotdata: identical append to {schema}.{table} already ran this session; skipping')
-                    out = {
-                        'table': table,
-                        'schema': schema,
-                        'mode': mode,
-                        'row_count': len(rows),
-                        'deduplicated': True,
-                    }
+                    out['deduplicated'] = True
                     if prior == 'partial':
-                        # Reporting this as a clean duplicate would claim the table
-                        # holds all the rows, which a partial load contradicts.
+                        # The landed subset is unknown, so no row_count: reporting
+                        # the full input size would overstate what is in the table.
                         out['partial'] = True
                         out['note'] = (
                             'This exact payload was already attempted during this run and only '
@@ -817,6 +825,7 @@ class IInstance(IInstanceBase):
                             'and load only what is missing.'
                         )
                     else:
+                        out['row_count'] = len(rows)
                         out['note'] = (
                             'This exact payload was already appended to this table during this run, '
                             'so it was not loaded again. The table already contains these rows.'

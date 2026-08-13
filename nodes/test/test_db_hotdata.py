@@ -1563,5 +1563,92 @@ def test_a_repeated_partial_append_keeps_reporting_partial():
     second = inst.load_data({'table': 'orders', 'rows': rows, 'mode': 'append'})
     assert second.get('deduplicated') is True
     assert second.get('partial') is True, 'the repeat must still be reported as partial'
+    assert 'row_count' not in second, 'the landed subset is unknown - do not claim the full count'
     assert 'only what is missing' in second['note']
     assert len(calls) == 1, 'the repeat must not reach the server'
+
+
+# ---------------------------------------------------------------------------
+# Reservation states must stay distinct
+#
+# seen_load() returns 'pending' while a load is still in flight. Treating that
+# as a completed dedup told a concurrent caller the rows were already present
+# before the original load had finished - and if that original then failed and
+# released the reservation, the rows never landed at all.
+# ---------------------------------------------------------------------------
+
+
+def _blocking_load_global(gate, calls):
+    g = _global()
+    g._loaded = {}
+
+    def _load(**_kw):
+        calls.append(1)
+        gate.wait(timeout=5)
+        return {'row_count': 1}
+
+    g.client = SimpleNamespace(
+        create_database=lambda **_kw: {'id': 'db-1', 'default_schema': 'main'},
+        create_table=lambda **_kw: {},
+        information_schema=lambda **_kw: {'tables': []},
+        upload_bytes=lambda *_a, **_k: 'upl-1',
+        load_table=_load,
+    )
+    g.database = {'id': 'db-1', 'default_schema': 'main'}
+    return g
+
+
+def test_concurrent_identical_append_gets_in_progress_not_false_success():
+    gate = threading.Event()
+    calls = []
+    inst = _instance(_blocking_load_global(gate, calls))
+    rows = [{'a': 1}]
+    results = {}
+
+    first = threading.Thread(
+        target=lambda: results.update(first=inst.load_data({'table': 'orders', 'rows': rows, 'mode': 'append'}))
+    )
+    first.start()
+    while not calls:  # wait until the first call is genuinely mid-flight
+        time.sleep(0.01)
+
+    second = inst.load_data({'table': 'orders', 'rows': rows, 'mode': 'append'})
+    assert second.get('in_progress') is True, 'a mid-flight duplicate must not report completion'
+    assert 'deduplicated' not in second, 'in-flight is not a completed dedup'
+    assert 'row_count' not in second, 'nothing has landed yet - claim no count'
+
+    gate.set()
+    first.join(timeout=5)
+    assert calls == [1], 'the concurrent call must not have reached the server'
+
+
+def test_pending_then_failure_lets_a_retry_through():
+    """A caller that saw 'pending' was told nothing landed. When the original
+    load then fails, the reservation is released so a genuine retry can run.
+    """
+    calls = []
+
+    def _load(**_kw):
+        calls.append(1)
+        raise RuntimeError('hotdata: POST /loads failed with HTTP 503')
+
+    g = _global()
+    g._loaded = {}
+    g.client = SimpleNamespace(
+        create_database=lambda **_kw: {'id': 'db-1', 'default_schema': 'main'},
+        create_table=lambda **_kw: {},
+        information_schema=lambda **_kw: {'tables': []},
+        upload_bytes=lambda *_a, **_k: 'upl-1',
+        load_table=_load,
+    )
+    g.database = {'id': 'db-1', 'default_schema': 'main'}
+    inst = _instance(g)
+    rows = [{'a': 1}]
+
+    with pytest.raises(RuntimeError):
+        inst.load_data({'table': 'orders', 'rows': rows, 'mode': 'append'})
+    assert g._loaded == {}, 'a failed load must not leave a reservation behind'
+
+    with pytest.raises(RuntimeError):
+        inst.load_data({'table': 'orders', 'rows': rows, 'mode': 'append'})
+    assert len(calls) == 2, 'the retry must reach the server, not be swallowed as a duplicate'
