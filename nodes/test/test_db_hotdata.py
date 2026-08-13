@@ -170,9 +170,14 @@ _PKG = 'db_hotdata_under_test'
 
 def _load_modules():
     stubs = _build_import_stubs()
-    added = [name for name in stubs if name not in sys.modules]
-    for name in added:
-        sys.modules[name] = stubs[name]
+    # Force the stubs in, remembering whatever was there. Installing only when a
+    # name is absent works in isolation but not under `builder nodes:test`, where
+    # the real rocketlib/ai.common/requests are already imported by other nodes'
+    # tests - the module under test would then bind the real objects and every
+    # assertion about captured warnings or normalize_tool_input would fail.
+    saved = {name: sys.modules.get(name) for name in stubs}
+    for name, module in stubs.items():
+        sys.modules[name] = module
 
     pkg = types.ModuleType(_PKG)
     pkg.__path__ = [str(_NODE_DIR)]
@@ -193,8 +198,12 @@ def _load_modules():
     finally:
         for name in loaded:
             sys.modules.pop(name, None)
-        for name in added:
-            sys.modules.pop(name, None)
+        # Restore exactly what was there so nothing leaks into other nodes' tests.
+        for name, original in saved.items():
+            if original is None:
+                sys.modules.pop(name, None)
+            else:
+                sys.modules[name] = original
 
 
 _MODS, _REQUESTS_STUB = _load_modules()

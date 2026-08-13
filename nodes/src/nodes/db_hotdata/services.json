@@ -127,6 +127,7 @@
 		}
 	},
 	"test": {
+		"requires": ["ROCKETRIDE_HOTDATA_API_KEY", "ROCKETRIDE_HOTDATA_WORKSPACE"],
 		"profiles": ["default"],
 		"outputs": [],
 		"cases": [
