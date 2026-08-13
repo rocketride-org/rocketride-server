@@ -73,3 +73,8 @@ class Configure:
         def hnsw(distance_metric: VectorDistances = VectorDistances.COSINE):
             """HNSW vector index configuration."""
             return {'type': 'hnsw', 'distance_metric': distance_metric}
+
+        @staticmethod
+        def hfresh(distance_metric: VectorDistances = VectorDistances.COSINE):
+            """HFRESH vector index configuration (weaviate-client 4.20+)."""
+            return {'type': 'hfresh', 'distance_metric': distance_metric}

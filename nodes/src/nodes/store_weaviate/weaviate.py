@@ -78,6 +78,15 @@ class Store(DocumentStoreBase):
         'hamming': VectorDistances.HAMMING,
         'manhattan': VectorDistances.MANHATTAN,
     }
+    # Distance metrics the hfresh vector index supports. hnsw takes every metric
+    # in similarityDict above, hfresh does not, so the Cloud fallback in
+    # _createCollection is only attempted for these two.
+    HFRESH_DISTANCES: frozenset = frozenset(
+        {
+            VectorDistances.COSINE,
+            VectorDistances.L2_SQUARED,
+        }
+    )
 
     def __init__(self, provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any]):
         """
@@ -198,31 +207,48 @@ class Store(DocumentStoreBase):
             wc.Property(name='modelName', data_type=wc.DataType.TEXT),
         ]
 
+        # Shared across both index types; only vector_index_config differs.
+        createArgs = {
+            'name': self.collection,
+            'properties': properties,
+            # Define the vectorizer module (none, as we will add our own vectors)
+            'vectorizer_config': wc.Configure.Vectorizer.none(),
+        }
+
         try:
             self.collectionObj = self.client.collections.create(
-                name=self.collection,
-                properties=properties,
-                # Define the vectorizer module (none, as we will add our own vectors)
-                vectorizer_config=wc.Configure.Vectorizer.none(),
+                **createArgs,
                 vector_index_config=wc.Configure.VectorIndex.hnsw(
                     distance_metric=self.similarity,
                 ),
             )
-        except UnexpectedStatusCodeError as e:
+        except UnexpectedStatusCodeError as hnswError:
             # Newer Weaviate Cloud clusters restrict the vector index type and
             # reject hnsw with 422 CONFIG_NOT_ALLOWED (only their hfresh index
             # is allowed). Retry with hfresh, keeping the distance metric.
             hfresh = getattr(wc.Configure.VectorIndex, 'hfresh', None)
-            if e.status_code != 422 or hfresh is None:
+            if hnswError.status_code != 422 or hfresh is None:
                 raise
-            self.collectionObj = self.client.collections.create(
-                name=self.collection,
-                properties=properties,
-                vectorizer_config=wc.Configure.Vectorizer.none(),
-                vector_index_config=hfresh(
-                    distance_metric=self.similarity,
-                ),
-            )
+
+            # hfresh accepts fewer distance metrics than hnsw. Retrying with one
+            # it cannot take would bury the actionable "hnsw not allowed" error
+            # under a second, more confusing rejection, so stop here instead.
+            if self.similarity not in self.HFRESH_DISTANCES:
+                raise
+
+            try:
+                self.collectionObj = self.client.collections.create(
+                    **createArgs,
+                    vector_index_config=hfresh(
+                        distance_metric=self.similarity,
+                    ),
+                )
+            except UnexpectedStatusCodeError as hfreshError:
+                # The hfresh attempt is the workaround, not the diagnosis. A 422
+                # that was never about the index type (a rejected property, say)
+                # fails both calls, and the first error is the one that explains
+                # why, so report it and keep this one as context.
+                raise hnswError from hfreshError
 
     def _convertFilter(self, docFilter: DocFilter) -> Filter:
         """
