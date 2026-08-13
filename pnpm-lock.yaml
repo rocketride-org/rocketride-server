@@ -51,8 +51,8 @@ importers:
         specifier: ~18.3.7
         version: 18.3.7(@types/react@18.3.31)
       adm-zip:
-        specifier: ^0.5.17
-        version: 0.5.17
+        specifier: ^0.6.0
+        version: 0.6.0
       concurrently:
         specifier: ^8.2.2
         version: 8.2.2
@@ -972,8 +972,8 @@ importers:
         specifier: ^22.0.1
         version: 22.0.1
       adm-zip:
-        specifier: ^0.5.17
-        version: 0.5.17
+        specifier: ^0.6.0
+        version: 0.6.0
       chart.js:
         specifier: ^4.4.0
         version: 4.5.1
@@ -5196,9 +5196,9 @@ packages:
     resolution: {integrity: sha512-x0HvcHqVJNTPk/Bw8JbLWlWoo6Wwnsug0fnYYro1HBrjxZ3G7/AZk7Ahv8JwDe1uIcz8eBqvu86FuF1POiG7vQ==}
     engines: {node: '>=6.0'}
 
-  adm-zip@0.5.17:
-    resolution: {integrity: sha512-+Ut8d9LLqwEvHHJl1+PIHqoyDxFgVN847JTVM3Izi3xHDWPE4UtzzXysMZQs64DMcrJfBeS/uoEP4AD3HQHnQQ==}
-    engines: {node: '>=12.0'}
+  adm-zip@0.6.0:
+    resolution: {integrity: sha512-XleryMhbuksdKtofnWZ9Sk+4CUTbms4Mb/EU32SZwToAyZ5RgVos/ki8n+yr0LWHOGKuakbXTuuYNHLQjhddgg==}
+    engines: {node: '>=14.0'}
 
   agent-base@7.1.4:
     resolution: {integrity: sha512-MnA+YT8fwfJPgBx3m60MNqakm30XOkyIoH1y6huTQvC0PwZG7ki8NacLBcrPbNoo8vEZy7Jpuk7+jMO+CUovTQ==}
@@ -17759,7 +17759,7 @@ snapshots:
 
   adm-zip@0.5.10: {}
 
-  adm-zip@0.5.17: {}
+  adm-zip@0.6.0: {}
 
   agent-base@7.1.4: {}
 
