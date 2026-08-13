@@ -43,32 +43,52 @@ Windows store, but won't pick up corporate CAs.
 """
 
 import os
+import threading
 
 from depends import depends
 from engLib import debug
 
 # Process-global one-shot guard: injection mutates the default SSL context for
-# the whole interpreter, so it must run exactly once per process.
-_injected = False
+# the whole interpreter, so it must run exactly once per process. The lock makes
+# a concurrent caller wait for the first injection to finish instead of racing
+# ahead and downloading weights through a context that is not patched yet.
+_lock = threading.Lock()
+_attempted = False
 
 
 def ensure() -> None:
     """Patch Python's default SSL context to use the OS trust store.
 
     Idempotent and safe to call on every model load: the work runs once per
-    process, guarded by the module-level ``_injected`` flag.
+    process. Callers arriving while the first injection is still in flight block
+    until it completes, so none of them proceeds on a half-patched context.
     """
-    global _injected
-    if _injected:
+    global _attempted
+    if _attempted:
         return
-    # Set the guard up front so a failure below is not retried (and re-run
-    # through the install lock) on every subsequent load().
-    _injected = True
 
+    with _lock:
+        # Re-check under the lock: another thread may have finished the
+        # injection while this one was waiting for it.
+        if _attempted:
+            return
+        try:
+            _install_and_inject()
+        finally:
+            # Record the attempt even when it failed, so a broken environment
+            # is not re-run through the install lock on every later load().
+            _attempted = True
+
+
+def _install_and_inject() -> None:
+    """Install truststore and patch the SSL context, or fall back to certifi."""
     requirements = os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt'
-    depends(requirements)
 
     try:
+        # Inside the guarded block on purpose: a failed install has to reach the
+        # certifi fallback below rather than propagate out of ensure().
+        depends(requirements)
+
         import truststore
 
         truststore.inject_into_ssl()
