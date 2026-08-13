@@ -87,8 +87,20 @@ Failed objects record the exception as their completion code instead of writing 
 Authentication is optional, leave `username` and `password` blank for shares that allow
 anonymous/guest access. When credentials are provided, both fields are required and the
 username must use the domain format `DOMAIN\user`. Credentials are registered with the SMB
-client globally at connection time; the connection (and reachability of the share) is
-tested when the action starts, not during configuration validation.
+client globally at connection time.
+
+Configuration validation probes the target as well, and treats the two failure kinds
+differently:
+
+- A rejected credential, a share the account may not enter, or a share name that does not
+  exist fails validation, because each is a configuration mistake the user has to fix.
+- A share that is merely unreachable (no route, refused connection, timeout) is reported as
+  a warning and does not reject the configuration. Validation also runs on the Platform
+  host, which often has no network path to the customer's share, so a correct configuration
+  must not be rejected just because the validating machine cannot see the server.
+
+The store path itself is exempt: it is created on first write, so validation does not
+require it to exist yet.
 
 ---
 

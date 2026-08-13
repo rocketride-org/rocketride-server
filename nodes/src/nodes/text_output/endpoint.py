@@ -77,8 +77,24 @@ class Endpoint:
 
         except ValueError as e:
             engLib.error(e)
+        except OSError as e:
+            # A rejected credential, a share the user cannot enter, or a share
+            # that does not exist is a configuration problem, so it has to fail
+            # validation. connect() already tolerates ENOENT on the store path
+            # itself (that subdirectory is created later), so an ENOENT arriving
+            # here came from the share root and means the share name is wrong.
+            if e.errno in (errno.EACCES, errno.EPERM, errno.ENOENT):
+                engLib.error(e)
+            else:
+                # Anything else here is a reachability problem, not bad config.
+                # Validation also runs on the Platform host, which frequently
+                # has no route to the customer's SMB share, so failing here
+                # would reject configurations that are actually correct.
+                engLib.warning(f'Could not verify SMB target (config not rejected): {e}')
         except Exception as e:
-            engLib.warning(e)
+            # Same reasoning as above: the probe is advisory, so an unexpected
+            # failure is reported without rejecting the configuration.
+            engLib.warning(f'Could not verify SMB target (config not rejected): {e}')
 
     def getConfigSubKey(self):
         """Call from engLib, target service uniqueness key."""

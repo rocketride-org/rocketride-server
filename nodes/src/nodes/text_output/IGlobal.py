@@ -32,7 +32,18 @@ from rocketlib import IGlobalBase
 # ----------------------------------
 class IGlobal(IGlobalBase):
     def beginGlobal(self):
+        """Call from engLib, task startup hook.
+
+        Intentionally a no-op: `endpoint.py` resolves this node's dependencies
+        with `depends()` at module import time, so there is nothing left to
+        prepare once the task begins.
+        """
         pass
 
     def endGlobal(self):
+        """Call from engLib, task teardown hook.
+
+        Intentionally a no-op: the SMB client owns its own connection state and
+        `beginGlobal` allocates nothing that needs releasing here.
+        """
         pass
