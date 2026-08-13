@@ -20,9 +20,9 @@ URIs: clients accept `http`/`https` or `ws`/`wss` and convert to WebSocket (`htt
 
 | Client         | Package          | Document                                                   |
 | -------------- | ---------------- | ---------------------------------------------------------- |
-| **TypeScript** | `rocketride`     | [clients/typescript/readme.md](../clients/typescript/readme.md) |
-| **Python**     | `rocketride`     | [clients/python/readme.md](../clients/python/readme.md)         |
-| **MCP**        | `rocketride-mcp` | [mcp/readme.md](../mcp/readme.md)               |
+| **TypeScript** | `rocketride`     | [public/typescript/README.md](../public/typescript/README.md) |
+| **Python**     | `rocketride`     | [public/python/README.md](../public/python/README.md)         |
+| **MCP**        | `rocketride-mcp` | [public/mcp/README.md](../public/mcp/README.md)               |
 
 Each document lists every constructor option, method, type, and usage example for that client.
 

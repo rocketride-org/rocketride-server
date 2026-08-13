@@ -1,7 +1,7 @@
 # Client README schema
 
-The Python and TypeScript client readmes (`docs/clients/python/readme.md`,
-`docs/clients/typescript/readme.md`) are the sources for the published PyPI
+The Python and TypeScript client readmes (`docs/public/python/README.md`,
+`docs/public/typescript/README.md`) are the sources for the published PyPI
 and npm package READMEs (exported by `./builder docs:export`). They follow
 this schema. Validate with:
 
@@ -9,7 +9,7 @@ this schema. Validate with:
 python3 scripts/validate-client-docs.py
 ```
 
-The MCP readme (`docs/protocols/mcp/readme.md`) is a different product surface and is
+The MCP readme (`docs/public/mcp/README.md`) is a different product surface and is
 **not** covered by this schema.
 
 ## Section order
