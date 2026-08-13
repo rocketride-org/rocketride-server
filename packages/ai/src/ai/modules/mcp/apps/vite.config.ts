@@ -14,6 +14,20 @@ const widget = process.env.WIDGET ?? 'pipelines-table';
 
 export default defineConfig({
 	root: resolve(__dirname, 'src', widget),
+	resolve: {
+		alias: [
+			// Bare 'shell' → 3-symbol shim (the real barrel drags in ~85 modules
+			// incl. auth + Module Federation — see shell/src/api.ts).
+			{ find: /^shell$/, replacement: resolve(__dirname, 'src/trace-viewer/shell-shim.ts') },
+			// Deep shell imports (used only by the shim + theme CSS).
+			{ find: /^shell\/src\//, replacement: resolve(__dirname, '../../../../../../../apps/shared/node_modules/shell/src') + '/' },
+			// The shared app source tree (trace components).
+			{ find: /^@app-shared\//, replacement: resolve(__dirname, '../../../../../../../apps/shared/src') + '/' },
+		],
+		// apps/shared and shell each have their own node_modules copy of react;
+		// force a single copy or hooks break at runtime.
+		dedupe: ['react', 'react-dom'],
+	},
 	plugins: [viteSingleFile()],
 	build: {
 		outDir: resolve(__dirname, 'dist'),

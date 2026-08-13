@@ -12,6 +12,7 @@ and console still exist, but traces come back empty.
 import asyncio
 from typing import Any, Dict
 
+from ..apps import TRACE_VIEWER_URI
 from ..engine import LogNotFound
 from ..errors import _bad, _timeout
 from ..tooling import ToolRegistry
@@ -53,6 +54,14 @@ def _require_key(args: Dict[str, Any]):
         missing = 'projectId' if not project_id else 'source'
         return None, _bad(f'{missing} is required', _ADDRESSING_HINT)
     return (project_id, source, args.get('teamId') or ''), None
+
+
+def _context(project_id: str, source: str, team_id: str) -> Dict[str, Any]:
+    """Echo the log-keying identity so UI widgets can key follow-up calls."""
+    ctx: Dict[str, Any] = {'projectId': project_id, 'source': source}
+    if team_id:
+        ctx['teamId'] = team_id
+    return ctx
 
 
 async def _log_chapters(client, tasks, args: Dict[str, Any]) -> dict:
@@ -169,7 +178,7 @@ async def _log_traces(client, tasks, args: Dict[str, Any]) -> dict:
     result = result or {}
     closed = result.get('closed') or []
     open_traces = result.get('open') or []
-    payload = {'ok': True, 'traces': closed, 'open': open_traces}
+    payload = {'ok': True, 'traces': closed, 'open': open_traces, 'context': _context(project_id, source, team_id)}
     if not closed and not open_traces:
         payload['note'] = (
             'no traces recorded — the run may have been submitted with '
@@ -210,6 +219,7 @@ async def _log_trace(client, tasks, args: Dict[str, Any]) -> dict:
         'beginSeq': int(begin_seq),
         'summary': result.get('summary'),
         'events': result.get('events') or [],
+        'context': _context(project_id, source, team_id),
     }
 
 
@@ -267,6 +277,7 @@ def register(registry: ToolRegistry) -> None:
             },
             'required': ['projectId', 'source'],
         },
+        ui_resource_uri=TRACE_VIEWER_URI,
     )(_log_traces)
     registry.register(
         'log_trace',
@@ -280,4 +291,5 @@ def register(registry: ToolRegistry) -> None:
             },
             'required': ['projectId', 'source', 'beginSeq'],
         },
+        ui_resource_uri=TRACE_VIEWER_URI,
     )(_log_trace)

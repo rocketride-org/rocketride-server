@@ -21,6 +21,7 @@ UI_EXTENSION_ID = 'io.modelcontextprotocol/ui'
 
 PIPELINES_TABLE_URI = 'ui://rocketride/pipelines-table.html'
 DROPPER_URI = 'ui://rocketride/dropper.html'
+TRACE_VIEWER_URI = 'ui://rocketride/trace-viewer.html'
 
 _APPS_DIST = Path(__file__).parent / 'apps' / 'dist'
 
@@ -44,6 +45,11 @@ APPS: List[AppSpec] = [
         filename='dropper.html',
         title='Drop files',
         needs_engine_origin=True,
+    ),
+    AppSpec(
+        uri=TRACE_VIEWER_URI,
+        filename='trace-viewer.html',
+        title='Pipeline trace',
     ),
 ]
 
