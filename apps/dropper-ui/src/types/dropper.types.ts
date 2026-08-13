@@ -116,7 +116,7 @@ export interface UploadedFile {
  * setActiveTab('images');
  * ```
  */
-export type TabType = 'results' | 'text' | 'documents' | 'tables' | 'images' | 'audio' | 'video' | 'questions' | 'answers';
+export type TabType = 'results' | 'text' | 'documents' | 'tables' | 'images' | 'audio' | 'video' | 'questions' | 'answers' | 'hashes';
 
 // ============================================================================
 // CONTENT TYPES
@@ -277,6 +277,9 @@ export interface ProcessedResults {
 
 	/** Extracted answers grouped by filename */
 	answers: GroupedContent[];
+
+	/** Content fingerprints grouped by filename */
+	hashes: GroupedContent[];
 }
 
 // ============================================================================

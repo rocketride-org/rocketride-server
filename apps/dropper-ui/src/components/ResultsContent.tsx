@@ -16,6 +16,7 @@ import { JsonView } from './Views/JsonView';
 import { DocumentsView } from './Views/DocumentsView';
 import { QuestionsView } from './Views/QuestionsView';
 import { AnswersView } from './Views/AnswersView';
+import { HashView } from './Views/HashView';
 
 interface ResultsContentProps {
 	activeTab: TabType;
@@ -128,6 +129,15 @@ export const ResultsContent: React.FC<ResultsContentProps> = ({
 			return (
 				<AnswersView
 					answers={results.answers}
+					compareMode={compareMode}
+					setRef={setRef}
+				/>
+			);
+
+		case 'hashes':
+			return (
+				<HashView
+					hashes={results.hashes}
 					compareMode={compareMode}
 					setRef={setRef}
 				/>
