@@ -292,3 +292,15 @@ async def test_log_trace_echoes_keying_context_with_team(fake_engine):
         fake_engine, None, {'projectId': 'p1', 'source': 's1', 'teamId': 't1', 'beginSeq': 5}
     )
     assert result['context'] == {'projectId': 'p1', 'source': 's1', 'teamId': 't1'}
+
+
+def test_trace_tools_link_the_trace_viewer_widget():
+    from ai.modules.mcp.apps import TRACE_VIEWER_URI
+
+    tools = {t.name: t for t in _registry().tools()}
+    expected = {'ui': {'resourceUri': TRACE_VIEWER_URI}}
+    assert tools['log_traces'].meta == expected
+    assert tools['log_trace'].meta == expected
+    # The list/read tools stay plain JSON.
+    assert tools['log_chapters'].meta is None
+    assert tools['log_read'].meta is None

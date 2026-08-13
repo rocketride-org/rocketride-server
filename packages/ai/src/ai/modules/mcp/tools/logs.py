@@ -12,6 +12,7 @@ and console still exist, but traces come back empty.
 import asyncio
 from typing import Any, Dict
 
+from ..apps import TRACE_VIEWER_URI
 from ..engine import LogNotFound
 from ..errors import _bad, _timeout
 from ..tooling import ToolRegistry
@@ -276,6 +277,7 @@ def register(registry: ToolRegistry) -> None:
             },
             'required': ['projectId', 'source'],
         },
+        ui_resource_uri=TRACE_VIEWER_URI,
     )(_log_traces)
     registry.register(
         'log_trace',
@@ -289,4 +291,5 @@ def register(registry: ToolRegistry) -> None:
             },
             'required': ['projectId', 'source', 'beginSeq'],
         },
+        ui_resource_uri=TRACE_VIEWER_URI,
     )(_log_trace)

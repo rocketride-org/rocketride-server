@@ -36,6 +36,7 @@ def test_registry_emits_ui_meta_only_when_linked():
 @pytest.fixture
 def apps_dir(tmp_path):
     (tmp_path / 'pipelines-table.html').write_text('<!doctype html><html><body>widget</body></html>', encoding='utf-8')
+    (tmp_path / 'trace-viewer.html').write_text('<!doctype html><html><body>trace</body></html>', encoding='utf-8')
     return tmp_path
 
 
@@ -145,3 +146,10 @@ def test_read_ui_resource_unknown_uri_returns_none(apps_dir):
 
 def test_read_ui_resource_missing_bundle_returns_none(tmp_path):
     assert apps.read_ui_resource(apps.PIPELINES_TABLE_URI, tmp_path) is None
+
+
+def test_trace_viewer_spec_registered():
+    spec = next(s for s in apps.APPS if s.uri == apps.TRACE_VIEWER_URI)
+    assert spec.filename == 'trace-viewer.html'
+    # All data flows over the tool bridge — no engine-origin CSP needed.
+    assert spec.needs_engine_origin is False
