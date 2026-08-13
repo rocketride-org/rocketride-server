@@ -149,7 +149,11 @@ class EasyOCRLoader(BaseLoader):
                 verbose=False,
             )
         except Exception as e:
-            if use_gpu:
+            # Only local mode may degrade to CPU. In server mode allocate_gpu()
+            # holds a reservation for this model, and silently switching to CPU
+            # would leave the allocator lending out a GPU nothing runs on, so the
+            # failure has to surface and let the caller release the reservation.
+            if use_gpu and allocate_gpu is None:
                 # The probe above clears kernel incompatibility, so a failure here is
                 # something it cannot see (driver state, VRAM exhaustion, a backend
                 # EasyOCR loads on its own). Retry on CPU rather than fail the load.
@@ -161,10 +165,10 @@ class EasyOCRLoader(BaseLoader):
                     reader = easyocr.Reader(languages, gpu=False, verbose=False)
                 except Exception as cpu_e:
                     logger.error(f'Failed to load EasyOCR: {cpu_e}')
-                    raise Exception(f'Failed to load EasyOCR: {cpu_e}')
+                    raise Exception(f'Failed to load EasyOCR: {cpu_e}') from cpu_e
             else:
                 logger.error(f'Failed to load EasyOCR: {e}')
-                raise Exception(f'Failed to load EasyOCR: {e}')
+                raise Exception(f'Failed to load EasyOCR: {e}') from e
 
         # EasyOCR wraps its detector and recognizer in DataParallel, which
         # scatters every batch across ALL visible GPUs via parallel_apply().

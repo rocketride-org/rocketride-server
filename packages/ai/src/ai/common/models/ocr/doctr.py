@@ -101,7 +101,11 @@ class DocTRLoader(BaseLoader):
                 pretrained=pretrained,
             )
             if torch_device != 'cpu':
-                predictor = predictor.cuda()
+                # Move to the device that was probed/allocated. Bare .cuda()
+                # would land on torch's current device (usually GPU 0), which
+                # for 'cuda:1' is an ordinal the probe above never checked, and
+                # in server mode is not the GPU the allocator reserved.
+                predictor = predictor.to(torch_device)
         except Exception as e:
             logger.error(f'Failed to load docTR: {e}')
             raise
