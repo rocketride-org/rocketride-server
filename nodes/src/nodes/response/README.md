@@ -14,6 +14,7 @@ Data handling per lane:
 - **table**, **documents**, **questions** - appended as-is; documents and questions are serialized to plain dicts.
 - **json** - appended as-is (one entry per write).
 - **answers** - appended as parsed JSON when the answer is JSON, otherwise as plain text.
+- **hash** - unlike the others, this is not lane data: **Return Fingerprint** reads the object's own `componentId` when the object completes and appends it under the configured key, whether or not the pipeline set one. Its `tags` lane (shown as **data** in the UI) only places the component in the pipeline; nothing arriving on it is read.
 - **image**, **audio**, **video** - the three multimedia lanes are handled identically: streamed chunks are buffered via AVI_ACTION signals (BEGIN / WRITE / END), then the complete stream is base64-encoded and appended as `{"mime_type": ..., "<lane>": ...}`, where `<lane>` is the payload key (`image` / `audio` / `video`). When the stream's BEGIN carries a stream descriptor, a sanitized projection of it is added as a `metadata` object (source provenance: mime, size, dimensions/duration, codec, and any nested `source` chain; the identity/security backlink is stripped). The `metadata` key is omitted when no descriptor arrived.
 
 The node has no Python dependencies of its own (`requirements.txt` is empty); it relies on the separately installed AI module for document, question, and answer schemas and for image processing.
@@ -22,20 +23,21 @@ The node has no Python dependencies of its own (`requirements.txt` is empty); it
 
 ## Service variants
 
-The same implementation is registered as ten services. The generic **HTTP Results** service (`response://`) accepts all nine lane types and lets you map each lane to its own result key. Nine single-lane variants accept exactly one lane each and expose a single `laneName` field:
+The same implementation is registered as eleven services. The generic **HTTP Results** service (`response://`) accepts all nine lane types and lets you map each lane to its own result key. Ten single-lane variants accept exactly one lane each and expose a single `laneName` field:
 
-| Service title    | Protocol                  | Lane        | Default result key |
-|------------------|---------------------------|-------------|--------------------|
-| HTTP Results     | `response://`             | all nine    | the lane type name |
-| Return Answers   | `response_answers://`     | `answers`   | `answers`          |
-| Return Audio     | `response_audio://`       | `audio`     | `audio`            |
-| Return Documents | `response_documents://`   | `documents` | `documents`        |
-| Return Image     | `response_image://`       | `image`     | `image`            |
-| Return JSON      | `response_json://`        | `json`      | `json`             |
-| Return Questions | `response_questions://`   | `questions` | `questions`        |
-| Return Table     | `response_table://`       | `table`     | `table`            |
-| Return Text      | `response_text://`        | `text`      | `text`             |
-| Return Video     | `response_video://`       | `video`     | `video`            |
+| Service title      | Protocol                  | Lane        | Default result key |
+|--------------------|---------------------------|-------------|--------------------|
+| HTTP Results       | `response://`             | all nine    | the lane type name |
+| Return Answers     | `response_answers://`     | `answers`   | `answers`          |
+| Return Audio       | `response_audio://`       | `audio`     | `audio`            |
+| Return Documents   | `response_documents://`   | `documents` | `documents`        |
+| Return Fingerprint | `response_hash://`        | `tags`      | `hash`             |
+| Return Image       | `response_image://`       | `image`     | `image`            |
+| Return JSON        | `response_json://`        | `json`      | `json`             |
+| Return Questions   | `response_questions://`   | `questions` | `questions`        |
+| Return Table       | `response_table://`       | `table`     | `table`            |
+| Return Text        | `response_text://`        | `text`      | `text`             |
+| Return Video       | `response_video://`       | `video`     | `video`            |
 
 All variants are `classType: infrastructure` and register as a `filter`. The generic `response://` service additionally carries the `internal` capability.
 
@@ -58,6 +60,7 @@ All lanes are inputs; the node produces no output lanes.
 | `audio`     | -        | Captured under the configured key (base64-encoded stream + descriptor `metadata`) |
 | `video`     | -        | Captured under the configured key (base64-encoded stream + descriptor `metadata`) |
 | `image`     | -        | Captured under the configured key (base64-encoded stream + descriptor `metadata`) |
+| `tags`      | -        | **Return Fingerprint** only; the payload is ignored - the object's `componentId` is captured under the configured key |
 
 ### HTTP Results (generic service)
 

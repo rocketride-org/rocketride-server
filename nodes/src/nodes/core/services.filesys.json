@@ -19,7 +19,7 @@
 	//		Capabilities are flags that change the behavior of the underlying
 	//		engine
 	//
-	"capabilities": ["filesystem", "noremote", "security", "nosaas"],
+	"capabilities": ["filesystem", "noremote", "security", "nosaas", "catalog"],
 	//
 	// Optional:
 	//		Supported actions - if not specified, no actions are supported
