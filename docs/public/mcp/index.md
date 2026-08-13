@@ -3,7 +3,7 @@ title: "MCP Server"
 ---
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/rocketride-org/rocketride-server/main/docs/images/banner-mcp.png" alt="RocketRide MCP Server" width="900" />
+  <img src="https://raw.githubusercontent.com/rocketride-org/rocketride-server/main/docs/public/mcp/assets/banner-mcp.png" alt="RocketRide MCP Server" width="900" />
 </p>
 
 <p align="center">
