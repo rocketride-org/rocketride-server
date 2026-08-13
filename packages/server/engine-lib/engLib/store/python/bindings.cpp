@@ -519,8 +519,15 @@ PYBIND11_EMBEDDED_MODULE(engLib, engLib) {
         // file/function names are bounded by its Python sources, so the pool stays small;
         // it is never pruned, which is what makes the views permanently safe. unordered_set
         // is node-based, so inserting never moves an element another view already points at.
-        static std::mutex internLock;
-        static std::unordered_set<std::string> internPool;
+        //
+        // The pool and its lock are leaked on purpose rather than left as ordinary
+        // function-local statics. Those are destroyed in reverse order of construction, and
+        // engine::config::monitor() (config/global.hpp) is constructed first - so the pool
+        // would be gone while the monitor still holds Errors viewing into it, putting the
+        // same dangling read back at shutdown. Leaking is what makes "life of the process"
+        // exact; the memory is reclaimed by the OS when the process ends.
+        static auto &internLock = *new std::mutex();
+        static auto &internPool = *new std::unordered_set<std::string>();
         const auto intern = [](std::string value) -> std::string_view {
             const std::lock_guard<std::mutex> guard(internLock);
             return *internPool.insert(std::move(value)).first;
