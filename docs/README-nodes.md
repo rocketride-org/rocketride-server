@@ -121,6 +121,7 @@ channel; they have no data lanes and **bind to an agent** (see
 | `tool_oura`         | Oura Ring health data (sleep, readiness, activity, heart rate), read-only |
 | `tool_xtrace_memory`| Long-term shared agent memory, backed by xTrace Memory Manager   |
 | `tool_mem0`         | Long-term shared agent memory, backed by the hosted Mem0 Platform |
+| `tool_gohighlevel`  | GoHighLevel (LeadConnector) v2 sub-account operations: contacts, opportunities, conversations, calendars |
 
 ### Embeddings
 

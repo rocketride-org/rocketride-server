@@ -2,7 +2,7 @@
 # MIT License
 # Copyright (c) 2026 Aparavi Software AG
 # =============================================================================
-"""Tests for the tool_filesystem sink: services.json contract, config, and the
+"""Tests for the tool_filesystem sink: services*.json contracts, config, and the
 per-lane naming/path helpers.
 """
 
@@ -20,29 +20,43 @@ import pytest
 _NODE_DIR = Path(__file__).resolve().parent.parent.parent / 'src' / 'nodes' / 'tool_filesystem'
 
 
-def _load_services():
-    return json.loads((_NODE_DIR / 'services.json').read_text())
+def _load_services(name='services.tool.json'):
+    return json.loads((_NODE_DIR / name).read_text())
 
 
 class TestServicesContract:
-    def test_classtype_is_store_and_tool(self):
-        # Convention across the codebase is domain-first, "tool" last.
+    def test_tool_variant_reverted_to_tool_only(self):
         d = _load_services()
-        assert d['classType'] == ['store', 'tool']
+        assert d['classType'] == ['tool']
+        assert d['lanes'] == {}
+        assert d['protocol'] == 'tool_filesystem://'
+        # Sink config must be gone from the tool surface.
+        for key in ('filesystem.targetDir', 'filesystem.emitUrl', 'filesystem.urlExpiresIn'):
+            assert key not in d['fields']
+            assert key not in d['shape'][0]['properties']
 
-    def test_all_input_lanes_emit_documents(self):
-        d = _load_services()
+    def test_store_variant_identity(self):
+        d = _load_services('services.store.json')
+        assert d['protocol'] == 'filestore://'
+        assert d['title'] == 'File Store'
+        assert d['classType'] == ['store']
+        assert d['register'] == 'filter'
+        assert d['path'] == 'nodes.tool_filesystem'
+
+    def test_store_variant_lanes_all_emit_json(self):
+        d = _load_services('services.store.json')
         assert d['lanes'] == {
-            'documents': ['documents'],
-            'text': ['documents'],
-            'table': ['documents'],
-            'image': ['documents'],
-            'audio': ['documents'],
-            'video': ['documents'],
+            'documents': ['json'],
+            'text': ['json'],
+            'table': ['json'],
+            'image': ['json'],
+            'audio': ['json'],
+            'video': ['json'],
         }
 
-    def test_new_config_fields_present_with_defaults(self):
-        f = _load_services()['fields']
+    def test_store_variant_fields(self):
+        d = _load_services('services.store.json')
+        f = d['fields']
         assert f['filesystem.targetDir']['type'] == 'string'
         assert f['filesystem.targetDir']['default'] == 'output/'
         assert f['filesystem.emitUrl']['type'] == 'boolean'
@@ -51,6 +65,36 @@ class TestServicesContract:
         assert f['filesystem.urlExpiresIn']['default'] == 3600
         assert f['filesystem.urlExpiresIn']['minimum'] == 1
         assert f['filesystem.urlExpiresIn']['maximum'] == 3600
+        # No agent-tool toggles on the store surface.
+        assert not any(k.startswith('filesystem.allow') for k in f)
+
+    def test_source_variant_identity(self):
+        d = _load_services('services.source.json')
+        assert d['protocol'] == 'filestore_source://'
+        assert d['title'] == 'File Store Source'
+        assert d['classType'] == ['source']
+        assert d['register'] == 'endpoint'
+        assert d['capabilities'] == ['noinclude']
+        assert d['path'] == 'nodes.tool_filesystem'
+        # Raw objects go out on the tags lane for a downstream Parser.
+        assert d['lanes'] == {'_source': ['tags']}
+        # The shape must route the declared fields through the source-parameters
+        # wrapper (telegram/dropper convention) — fields listed directly in the
+        # Pipe section never reach serviceConfig['parameters'] at runtime.
+        assert d['shape'][0]['properties'] == ['type', 'Pipe.source.parameters']
+
+    def test_source_variant_fields(self):
+        d = _load_services('services.source.json')
+        f = d['fields']
+        assert f['filesystem.path']['type'] == 'string'
+        assert f['filesystem.recursive']['type'] == 'boolean'
+        assert f['filesystem.recursive']['default'] is False
+        # Source-parameters wrapper: the engine strips the 'filesystem.' prefix
+        # and delivers these flat under serviceConfig['parameters'].
+        assert f['Pipe.source.parameters'] == {
+            'section': 'parameters',
+            'properties': ['filesystem.path', 'filesystem.recursive'],
+        }
 
 
 def _install_stubs():
@@ -234,17 +278,17 @@ def _fs(exists_paths=()):
     fs.streams = {}
     counter = {'n': 0}
 
-    async def _open_write(path, connection_id):
+    async def _open_write(path):
         counter['n'] += 1
         handle = f'h{counter["n"]}'
         fs.streams[handle] = {'path': path, 'chunks': []}
         return handle
 
-    async def _write_chunk(handle, data, connection_id=0):
+    async def _write_chunk(handle, data):
         fs.streams[handle]['chunks'].append(bytes(data))
         return len(data)
 
-    async def _close_write(handle, connection_id=0):
+    async def _close_write(handle):
         return None
 
     fs.open_write = AsyncMock(side_effect=_open_write)
@@ -264,7 +308,7 @@ def _sink_instance(
     url_expires_in=3600,
     allow_write=True,
     path_patterns=None,
-    listeners=('documents',),
+    listeners=('json',),
 ):
     """Build an IInstance wired to a stub IGlobal + mocked engine ``instance``."""
     _install_iinstance_stubs()
@@ -443,3 +487,62 @@ class TestSinkWrite:
         with pytest.raises(ValueError, match='does not match any allowed path pattern'):
             inst._sink_write(b'd', 'secret.pdf')
         fs.write.assert_not_awaited()
+
+
+# ---------------------------------------------------------------------------
+# Per-stream naming from the BEGIN descriptor
+# ---------------------------------------------------------------------------
+
+
+class _Descriptor:
+    """Stand-in for a parsed stream descriptor carrying only a name."""
+
+    def __init__(self, name):
+        self.metadata = types.SimpleNamespace(name=name)
+
+
+class TestStreamFilename:
+    """A stream's own name wins over the source object's, so fan-out stays distinguishable."""
+
+    def test_descriptor_name_is_preferred(self):
+        inst = _sink_instance(_fs(), name='1.jpg')
+        assert inst._stream_filename(_Descriptor('1.crop0.jpg'), 'image/jpeg') == '1.crop0.jpg'
+
+    def test_falls_back_to_the_object_name(self):
+        """No descriptor, or no name on it, keeps the previous behaviour."""
+        inst = _sink_instance(_fs(), name='report.pdf')
+        assert inst._stream_filename(None, 'image/jpeg') == 'report.jpg'
+        assert inst._stream_filename(_Descriptor(None), 'image/jpeg') == 'report.jpg'
+
+    def test_extension_appended_when_the_name_has_none(self):
+        """
+        A producer names a stream without necessarily giving it an extension.
+
+        os.path.splitext cannot answer this: it splits at the last dot, so `1.crop0` looks
+        like stem `1` with extension `.crop0` and the file would be stored with nothing
+        identifying its type. The stream's mime decides instead.
+        """
+        inst = _sink_instance(_fs(), name='1.jpg')
+        assert inst._stream_filename(_Descriptor('1.crop0'), 'image/jpeg') == '1.crop0.jpg'
+
+    def test_extension_is_not_doubled(self):
+        """A name that already ends in the stream's extension is left alone."""
+        inst = _sink_instance(_fs(), name='1.jpg')
+        assert inst._stream_filename(_Descriptor('1.crop0.jpg'), 'image/jpeg') == '1.crop0.jpg'
+        assert inst._stream_filename(_Descriptor('1.crop0.JPG'), 'image/jpeg') == '1.crop0.JPG'
+
+    def test_path_separators_are_stripped(self):
+        """
+        The name is untrusted: it comes from whatever node is upstream.
+
+        Backslashes are checked explicitly because os.path.basename on a POSIX host leaves
+        a Windows-style traversal completely untouched. The stored name also picks up the
+        stream's real extension, so a payload cannot masquerade as another type.
+        """
+        inst = _sink_instance(_fs(), name='report.pdf')
+        assert inst._stream_filename(_Descriptor('../../secrets/key.pem'), 'image/jpeg') == 'key.pem.jpg'
+        assert inst._stream_filename(_Descriptor(r'..\..\secrets\key.pem'), 'image/jpeg') == 'key.pem.jpg'
+
+    def test_name_that_reduces_to_nothing_falls_back(self):
+        inst = _sink_instance(_fs(), name='report.pdf')
+        assert inst._stream_filename(_Descriptor('../'), 'image/jpeg') == 'report.jpg'

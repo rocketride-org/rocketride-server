@@ -45,15 +45,18 @@ from __future__ import annotations
 import asyncio
 import mimetypes
 import os
+import sys
+import threading
 from typing import TYPE_CHECKING, Any
 
-from rocketlib import IInstanceBase, tool_function
+from rocketlib import IInstanceBase, tool_function, warning
 
 if TYPE_CHECKING:
     # Annotation-only (PEP 563 lazy annotations): keeps minimal test stubs of
     # ``rocketlib`` (which predate ``Entry``) importable at runtime.
     from rocketlib import Entry
 
+from ai.common.avi.descriptor import descriptor_from_payload
 from ai.common.utils import optional_str, require_dict, require_str
 
 from .IGlobal import IGlobal
@@ -64,11 +67,6 @@ from .IGlobal import IGlobal
 # more than MAX_READ_LIMIT in one shot must use a streaming approach.
 DEFAULT_READ_LIMIT = 256 * 1024  # 256 KB
 MAX_READ_LIMIT = 4 * 1024 * 1024  # 4 MB
-
-# Connection id used for the sink's streaming-media write handles. The FileStore
-# caps handles per connection id; a single constant is fine because sink handles
-# are opened and closed within one object's media stream (only a few open at once).
-_SINK_CONNECTION_ID = 0
 
 # Upper bound on the `_1`, `_2`, … collision suffixes the sink will try before
 # giving up. Bounds the probe loop so a store that keeps reporting a path as
@@ -281,7 +279,7 @@ class IInstance(IInstanceBase):
         return {name: m for name, m in methods.items() if self._is_method_allowed(name)}
 
     def _is_method_allowed(self, name: str) -> bool:
-        # When FileStore couldn't be initialised (e.g. ROCKETRIDE_CLIENT_ID
+        # When FileStore couldn't be initialised (e.g. no running task identity
         # missing), hide every tool method so the LLM never sees something it
         # can't successfully invoke. ``beginGlobal()`` already logged a warning
         # with the reason.
@@ -354,7 +352,7 @@ class IInstance(IInstanceBase):
         """Verify the FileStore was successfully initialised in beginGlobal()."""
         if self.IGlobal.file_store is None:
             raise ValueError(
-                'filesystem tool is not available: ROCKETRIDE_CLIENT_ID is missing or the account store failed to initialise (check pipeline logs)'
+                'filesystem tool is not available: no running task identity (rocketlib.getTask) or the account store failed to initialise (check pipeline logs)'
             )
 
     def _check_path(self, path: str) -> None:
@@ -367,7 +365,7 @@ class IInstance(IInstanceBase):
     # Pipeline sink (lanes)
     #
     # The node doubles as a pipeline sink: data arriving on a lane is written to
-    # the account-scoped FileStore and a reference Doc is emitted downstream.
+    # the account-scoped FileStore and a JSON reference is emitted downstream.
     # Each lane owns its own filename rule — text/table are markdown, documents
     # keep the source extension, media derive from the mime — instead of one
     # tangled precedence chain.
@@ -442,40 +440,55 @@ class IInstance(IInstanceBase):
         return self._sink_ref(path)
 
     def _sink_emit(self, refs: list[dict]) -> None:
-        """Emit persisted-file references as ``Doc``s on the documents lane.
+        """Emit one JSON reference per persisted file on the ``json`` lane.
 
-        Metadata is built via ``DocMetadata(self, ...)`` so objectId, nodeId,
-        permissionId, and signature are inherited from the current object. Each
-        ref gets a distinct, monotonically increasing chunkId so downstream
-        vector stores (keyed on objectId+chunkId) never overwrite one another.
+        The payload is ``{'path': <store-relative path>}`` plus a ``'url'`` key
+        when a signed download URL was resolved (``emitUrl`` on). Plain JSON —
+        no Doc/chunkId semantics — so downstream JSON consumers get the refs
+        without vector-store metadata riding along.
         """
         if not refs:
             return
-        if 'documents' not in self.instance.getListeners():
+        if 'json' not in self.instance.getListeners():
             return
-        from ai.common.schema import Doc, DocMetadata
-
-        if not hasattr(self, '_sink_chunk_id'):
-            self._sink_chunk_id = 0
-        docs = []
         for ref in refs:
-            overrides = {'chunkId': self._sink_chunk_id, 'parent': ref['storePath']}
+            payload = {'path': ref['storePath']}
             if ref.get('url'):
-                overrides['url'] = ref['url']
-            docs.append(Doc(page_content=ref['storePath'], metadata=DocMetadata(self, **overrides)))
-            self._sink_chunk_id += 1
-        self.instance.writeDocuments(docs)
+                payload['url'] = ref['url']
+            self.instance.writeJson(payload)
+
+    # -- source render (File Store Source variant) ---------------------
+
+    def renderObject(self, object: Entry):
+        """Deliver one scanned file for the ``filestore_source://`` variant.
+
+        In the engine's DIRECT pipeline mode, ``IEndpoint.scanObjects`` reports
+        entries through the scan callback and the engine calls back here per
+        entry with the target pipe already open. Delegates the read + raw tag
+        stream to :meth:`IEndpoint.renderStoreObject`, then prevents the C++
+        default render (which would try to re-read the object through the
+        endpoint stream API this node does not implement).
+
+        The sink/tool variants of this folder never receive ``renderObject``
+        (it is only invoked on pipeline-source pipes), but guard anyway so a
+        non-source endpoint falls through to the engine default.
+        """
+        _register_debugger_thread()
+        render = getattr(self.IEndpoint, 'renderStoreObject', None)
+        if render is None:
+            return
+        render(object, self.instance)
+        return self.preventDefault()
 
     # -- lane handlers -------------------------------------------------
 
     def open(self, object: Entry):
-        """Per-object reset: chunkIds restart at 0 and stale streams are dropped.
+        """Per-object reset: stale media streams are dropped.
 
         A stream aborted before END (upstream error, dropped object) would
         otherwise keep its write handle and half-written file alive, and the
         next object's chunks would land in it.
         """
-        self._sink_chunk_id = 0
         for kind in list(getattr(self, '_media_streams', None) or {}):
             self._media_abort(kind)
 
@@ -522,11 +535,43 @@ class IInstance(IInstanceBase):
             return
         st = streams.pop(kind, None)
         if st and st.get('handle') is not None:
+            # Best-effort close, then best-effort delete — separately, so a
+            # failed close never strands the partial file in the store.
             try:
-                _run_async(self.IGlobal.file_store.close_write(st['handle'], _SINK_CONNECTION_ID))
-                _run_async(self.IGlobal.file_store.delete(st['path']))
+                _run_on_stream_loop(self.IGlobal.file_store.close_write(st['handle']))
             except Exception:
                 pass
+            try:
+                _run_on_stream_loop(self.IGlobal.file_store.delete(st['path']))
+            except Exception:
+                pass
+
+    def _stream_filename(self, descriptor, mime: str) -> str:
+        """Filename for one media stream, preferring the name the stream carries.
+
+        A producer that fans one object out into several streams (frame_grabber's
+        frames, a cropper's crops) names each one in the BEGIN descriptor. Using it
+        is what keeps those distinguishable: derived from ``currentObject`` alone
+        they would all collide on the source object's name.
+
+        The name is untrusted — it comes from whatever node is upstream and is used
+        to build a store path — so it is reduced to a bare filename here. Both
+        separators are checked explicitly: ``os.path.basename`` on a POSIX host
+        leaves ``..\\..\\x`` untouched, and the store's own ``..`` rejection is a
+        second wall, not the only one.
+        """
+        name = getattr(getattr(descriptor, 'metadata', None), 'name', None) if descriptor else None
+        if name:
+            name = os.path.basename(str(name).replace('\\', '/'))
+        if not name or '/' in name or '\\' in name:
+            name = None
+        ext = self._media_ext(mime)
+        if not name:
+            return f'{self._sink_base_name()}{ext}'
+        # A stream can legitimately arrive named without an extension, and splitext cannot tell:
+        # it reads `1.crop0` as extension `.crop0`. The mime is authoritative for media, so
+        # append it unless it is already there.
+        return name if name.lower().endswith(ext.lower()) else f'{name}{ext}'
 
     def _sink_media(self, kind: str, aviAction, mimeType: str, data: bytes) -> None:
         """Stream media chunks straight to the store with bounded memory.
@@ -543,7 +588,14 @@ class IInstance(IInstanceBase):
 
         if aviAction == AVI_ACTION.BEGIN:
             self._media_abort(kind)
-            streams[kind] = {'handle': None, 'path': None, 'mime': mimeType}
+            # BEGIN carries the stream descriptor, which is the only place the stream's
+            # own name appears; keep it for _stream_filename.
+            streams[kind] = {
+                'handle': None,
+                'path': None,
+                'mime': mimeType,
+                'descriptor': descriptor_from_payload(data),
+            }
         elif aviAction == AVI_ACTION.WRITE:
             st = streams.get(kind)
             if st is None or not data:
@@ -552,15 +604,24 @@ class IInstance(IInstanceBase):
                 self._check_ready()
                 if not self.IGlobal.allow_write:
                     raise ValueError('write access is not enabled for this filesystem tool')
-                path = self._sink_target_path(f'{self._sink_base_name()}{self._media_ext(st["mime"])}')
-                st['handle'] = _run_async(self.IGlobal.file_store.open_write(path, _SINK_CONNECTION_ID))
+                path = self._sink_target_path(self._stream_filename(st.get('descriptor'), st['mime']))
+                st['handle'] = _run_on_stream_loop(self.IGlobal.file_store.open_write(path))
                 st['path'] = path
-            _run_async(self.IGlobal.file_store.write_chunk(st['handle'], bytes(data), _SINK_CONNECTION_ID))
+            _run_on_stream_loop(self.IGlobal.file_store.write_chunk(st['handle'], bytes(data)))
         elif aviAction == AVI_ACTION.END:
             st = streams.pop(kind, None)
             if st is None or st['handle'] is None:
                 return
-            _run_async(self.IGlobal.file_store.close_write(st['handle'], _SINK_CONNECTION_ID))
+            try:
+                _run_on_stream_loop(self.IGlobal.file_store.close_write(st['handle']))
+            except Exception:
+                # A failed commit leaves an incomplete file: remove it before
+                # propagating, so downstream never sees a truncated object.
+                try:
+                    _run_on_stream_loop(self.IGlobal.file_store.delete(st['path']))
+                except Exception:
+                    pass
+                raise
             self._sink_emit([self._sink_ref(st['path'], st['mime'])])
 
     def writeImage(self, aviAction, mimeType: str, buffer: bytes):
@@ -617,6 +678,63 @@ def _ext_from_mime(mime: str | None) -> str:
     if not subtype or subtype.startswith('vnd.'):
         return ''
     return f'.{subtype}'
+
+
+# Thread idents already registered with a loaded debugger (see
+# ``_register_debugger_thread``). Failed registrations are recorded too, so a
+# broken debugger produces one warning instead of one per rendered object.
+_DEBUGGER_THREADS: set[int] = set()
+
+
+def _register_debugger_thread() -> None:
+    """Register an engine-spawned thread with pydevd before traced code runs.
+
+    The designer launches dev-mode tasks under debugpy, and ``renderObject``
+    executes on the engine's C++ ThreadedQueue thread — a thread pydevd never
+    saw get created. When line instrumentation fires on such an unregistered
+    foreign thread, pydevd livelocks on its internal lock and the render
+    wedges mid-object (objects stuck PROCESSING in the designer trace).
+    Registering through the official ``settrace`` API happens outside the
+    instrumentation callback, making the thread known to the debugger first.
+
+    No-op when no debugger is loaded (task mode) — ``pydevd`` is only in
+    ``sys.modules`` when debugpy/pydevd attached to this process.
+    """
+    pydevd = sys.modules.get('pydevd')
+    if pydevd is None:
+        return
+    ident = threading.get_ident()
+    if ident in _DEBUGGER_THREADS:
+        return
+    _DEBUGGER_THREADS.add(ident)
+    try:
+        pydevd.settrace(suspend=False)
+    except Exception as e:
+        warning(f'tool_filesystem: pydevd thread registration failed (continuing untraced): {e}')
+
+
+_STREAM_LOOP: asyncio.AbstractEventLoop | None = None
+_STREAM_LOOP_LOCK = threading.Lock()
+
+
+def _run_on_stream_loop(coro):
+    """Run a store-handle coroutine on one persistent event loop.
+
+    aiofiles handles bind to the loop that opened them, so ``open_write``,
+    every ``write_chunk``, and ``close_write`` of a media stream must all run
+    on the same still-running loop. ``_run_async`` spins up a fresh loop per
+    call (fine for one-shot ops), which left the handle bound to a closed
+    loop and aborted streams with 'Event loop is closed' after the first
+    chunk. All handle-based ops therefore go through this dedicated
+    long-lived loop thread instead.
+    """
+    global _STREAM_LOOP
+    with _STREAM_LOOP_LOCK:
+        if _STREAM_LOOP is None or _STREAM_LOOP.is_closed():
+            loop = asyncio.new_event_loop()
+            threading.Thread(target=loop.run_forever, name='tool_filesystem-stream-io', daemon=True).start()
+            _STREAM_LOOP = loop
+    return asyncio.run_coroutine_threadsafe(coro, _STREAM_LOOP).result()
 
 
 def _run_async(coro):

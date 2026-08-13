@@ -27,6 +27,7 @@ import { PipelineFileParser } from '../shared/util/pipelineParser';
 import { isSubscribed } from '../shared/util/subscriptionGate';
 import { isDeployRunBody } from '../shared/util/runClassification';
 import { handleMissingEnvVars } from '../shared/util/envVarCheck';
+import { savePipelineDocument } from '../shared/util/pipelineSave';
 import { resolveDeployTeams, mapVersionCards, mapHistoryRows, mapTeamDeploymentRows, mapScheduleRows, teamNameOf, mapDeploymentInfo } from '../shared/util/deployMapping';
 import type { DeploymentWebviewToHost, DeploymentLoadPayload } from './types/deployTypes';
 import type { LogSessionWebviewToHost } from './types/logTypes';
@@ -37,6 +38,11 @@ import type { LogSessionWebviewToHost } from './types/logTypes';
 
 const PREFS_KEY = 'rocketride.prefs';
 const LAYOUTS_KEY = 'rocketride.layouts';
+// workspaceState key prefix for the auto-backup of an untitled pipeline's
+// content. VS Code does not hot-exit-back-up a custom-editor untitled document,
+// so we persist it ourselves (keyed by the untitled URI) and restore it when
+// the editor re-resolves empty after a restart. Cleared when the editor closes.
+const UNTITLED_BACKUP_PREFIX = 'rocketride.untitledBackup:';
 
 // How long undelivered OAuth tokens are kept for redelivery after a webview
 // reload. Long enough to cover a slow consent flow, short enough that stale
@@ -81,6 +87,17 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 	constructor(private readonly context: vscode.ExtensionContext) {
 		this.registerCommands();
 		this.setupEventListeners();
+		// Drop an untitled pipeline's auto-backup once its editor closes: an
+		// explicit save reverts-and-closes it, and a discard just closes it, so
+		// only a full VS Code exit leaves the backup behind — which is exactly
+		// the case we want to restore on the next launch.
+		this.context.subscriptions.push(
+			vscode.workspace.onDidCloseTextDocument((closed) => {
+				if (closed.isUntitled) {
+					void this.context.workspaceState.update(`${UNTITLED_BACKUP_PREFIX}${closed.uri.toString()}`, undefined);
+				}
+			})
+		);
 	}
 
 	// =========================================================================
@@ -445,6 +462,19 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 	public async resolveCustomTextEditor(document: vscode.TextDocument, webviewPanel: vscode.WebviewPanel, _token: vscode.CancellationToken): Promise<void> {
 		const webview = webviewPanel.webview;
 
+		// A hot-exit restored untitled pipeline comes back with empty content
+		// (VS Code does not preserve the programmatically-seeded text), which
+		// would parse to no project and render a blank canvas. Restore our own
+		// auto-backup of the in-progress pipeline if there is one; otherwise
+		// seed the empty-pipeline template so the starting-point wizard shows.
+		if (document.isUntitled && document.getText().trim() === '') {
+			const backup = this.context.workspaceState.get<string>(`${UNTITLED_BACKUP_PREFIX}${document.uri.toString()}`);
+			const seedText = backup && backup.trim() !== '' ? backup : JSON.stringify({ components: [] }, null, 2);
+			const seed = new vscode.WorkspaceEdit();
+			seed.insert(document.uri, new vscode.Position(0, 0), seedText);
+			await vscode.workspace.applyEdit(seed);
+		}
+
 		const fileName = document.uri.fsPath.split(/[\\/]/).pop() ?? document.uri.fsPath;
 		webviewPanel.title = fileName.replace(/\.pipe(\.json)?$/i, '');
 
@@ -571,6 +601,12 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 					if (data.project) {
 						const content = typeof data.project === 'string' ? data.project : JSON.stringify(data.project);
 						const { applied } = await this.applyDocumentEdit(document, content);
+						// Auto-backup untitled pipelines so in-progress work survives
+						// a VS Code restart (hot exit does not preserve custom-editor
+						// untitled documents). Cleared when the editor closes.
+						if (document.isUntitled) {
+							void this.context.workspaceState.update(`${UNTITLED_BACKUP_PREFIX}${document.uri.toString()}`, document.getText());
+						}
 						// One-shot save after an OAuth token apply: tokens must reach
 						// the .pipe on disk without requiring a manual save.
 						if (editorState.saveAfterOAuthApply) {
@@ -617,7 +653,17 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 				}
 
 				case 'project:requestSave': {
-					await document.save();
+					// Same save flow as the Ctrl+S keybinding: in place for
+					// titled files, the native OS Save dialog (defaulted into the
+					// pipelines directory, .pipe filter) for untitled ones.
+					// Reveal first so the revert-and-close inside the untitled
+					// branch targets this editor.
+					try {
+						webviewPanel.reveal(undefined, false);
+						await savePipelineDocument(document);
+					} catch (error) {
+						vscode.window.showErrorMessage(`Failed to save pipeline: ${error instanceof Error ? error.message : String(error)}`);
+					}
 					break;
 				}
 
@@ -641,10 +687,28 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 						const uriKey = document.uri.toString();
 						this.savesForRun.add(uriKey);
 						try {
-							await this.saveDocument(document, document.getText());
-							const parsed = JSON.parse(document.getText());
-							const pipeName = path.basename(document.uri.fsPath, '.pipe');
-							await this.runPipeline({ pipeline: { ...parsed, source: source ?? parsed.source } }, pipeName);
+							// Capture the text up front: the untitled save flow below
+							// closes the buffer, after which the document is disposed.
+							const text = document.getText();
+							let runTarget: vscode.Uri | undefined = document.uri;
+							if (document.isUntitled) {
+								// saveDocument() cannot name an untitled buffer (identical
+								// content is a no-op), which would let the pipeline run
+								// nameless and unsaved. Drive the full untitled save flow
+								// (OS Save dialog) and run ONLY once it succeeded — a
+								// cancelled dialog cancels the run. Reveal first so the
+								// revert-and-close inside targets this editor (same rule
+								// as project:requestSave).
+								webviewPanel.reveal(undefined, false);
+								runTarget = await savePipelineDocument(document);
+							} else {
+								await this.saveDocument(document, text);
+							}
+							if (runTarget) {
+								const parsed = JSON.parse(text);
+								const pipeName = path.basename(runTarget.fsPath, '.pipe');
+								await this.runPipeline({ pipeline: { ...parsed, source: source ?? parsed.source } }, pipeName);
+							}
 						} catch (error: unknown) {
 							const message = error instanceof Error ? error.message : String(error);
 							vscode.window.showErrorMessage(`Failed to run pipeline: ${message}`);

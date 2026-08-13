@@ -38,15 +38,20 @@
 // ever appends). This file also pins each exported TYPE against the earliest
 // version that froze it (contract-check.generated.ts).
 //
-// Usage:  node freeze-shell-api.js [--check | --regen]
+// Usage:  node freeze-shell-api.js [--check | --regen | --regen-derived]
 //   (no flag)  full freeze — appends the next version + re-accumulates the contract.
 //   --check    CI mode — nonzero exit if the live surface differs from the newest
 //              frozen version (no freeze committed).
 //   --regen    RESET to a fresh v0 — drops every frozen version and re-mints v0
 //              from the CURRENT live surface (pre-1.0 policy: breaking surface
 //              changes collapse the history; no external consumers hold floors
-//              yet). CI pairs it with `git diff --exit-code`, so a committed
-//              contract that disagrees with the live surface fails the diff.
+//              yet). A deliberate, local-only action.
+//   --regen-derived
+//              Rebuild the derived files (contract barrels, conformance floors,
+//              apiver) from the immutable versions/*.d.ts — no reset, no new
+//              freeze, nothing read from the live surface. CI pairs it with
+//              `git diff --exit-code`, so a hand-edited floor or barrel fails
+//              the diff while legitimately frozen versions pass untouched.
 // =============================================================================
 
 const path = require('path');
@@ -745,14 +750,33 @@ function generateConformance(maxN) {
 function main() {
 	const checkMode = process.argv.includes('--check');
 	const regenMode = process.argv.includes('--regen');
+	const regenDerivedMode = process.argv.includes('--regen-derived');
+
+	// --regen-derived: rebuild the derived files (barrels, conformance floors,
+	// apiver) from the immutable frozen versions — nothing is dropped, re-minted,
+	// or read from the live surface. Backs the CI tamper guard: regenerating on
+	// a clean tree is a byte-level no-op, so a hand-edited floor or barrel (e.g.
+	// a `_floor_vN` line dropped to launder a removed export past the tsc
+	// floors) fails the paired `git diff --exit-code`.
+	if (regenDerivedMode) {
+		const { prev } = determineVersions();
+		if (prev < 0) {
+			console.error('[shell:freeze --regen-derived] No frozen version exists. The shell contract baseline is missing — restore packages/shell/contract/versions/.');
+			process.exit(1);
+		}
+		regenerateBarrels(prev);
+		generateConformance(prev);
+		writeApiVersion(prev);
+		log(`Regenerated barrels + conformance + apiver from the frozen versions v0..v${prev}.`);
+		return;
+	}
 
 	// --regen: RESET the contract to a single fresh v0 frozen from the CURRENT
 	// live surface. Pre-1.0 policy: while the platform iterates, intentional
 	// breaking surface changes are absorbed by collapsing the accumulated
 	// history back to one v0 (no external consumers hold the old floors yet).
-	// CI still pairs this with `git diff --exit-code`: a committed freeze that
-	// disagrees with the live surface — including a hand-edited floor or
-	// version file — regenerates differently and fails the diff.
+	// A deliberate, local-only action — CI's tamper guard runs --regen-derived,
+	// which never drops a frozen version.
 	//
 	// ORDER MATTERS: the old floors/barrels must be stubbed out BEFORE the tsc
 	// pre-check — after a breaking surface change they are precisely what no
