@@ -16,13 +16,5 @@
 			"@app-shared/*": ["../../../../../../../apps/shared/src/*"]
 		}
 	},
-	"include": ["src", "vite.config.ts", "vitest.config.ts"],
-	// vitest.config.ts and *.test.ts pull in vitest's own type declarations,
-	// which bundle vite@^5 as a hard (non-peer) dependency — incompatible
-	// with this workspace's vite@^6 (see vite.config.ts + the "vite/client"
-	// types entry above) when both land in the same tsc program: duplicate
-	// ImportMeta/ViteHotContext declarations (TS2430). `vitest run`
-	// transforms tests with esbuild and doesn't need this program to
-	// type-check them.
-	"exclude": ["src/**/*.test.ts", "vitest.config.ts"]
+	"include": ["src", "vite.config.ts", "vitest.config.ts"]
 }
