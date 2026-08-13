@@ -554,7 +554,11 @@ function registerUtilityCommands(context: vscode.ExtensionContext): void {
 				uri = vscode.Uri.file(filePath);
 			} else {
 				const folders = vscode.workspace.workspaceFolders;
-				uri = folders?.length ? vscode.Uri.joinPath(folders[0].uri, filePath) : vscode.Uri.file(filePath);
+				if (folders?.length) {
+					uri = vscode.Uri.file(path.resolve(folders[0].uri.fsPath, filePath));
+				} else {
+					uri = vscode.Uri.file(filePath);
+				}
 			}
 			try {
 				const doc = await vscode.workspace.openTextDocument(uri);

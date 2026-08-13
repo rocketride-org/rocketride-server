@@ -717,7 +717,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 	private resolveFileUri(filePath: string): vscode.Uri {
 		if (path.isAbsolute(filePath)) return vscode.Uri.file(filePath);
 		const folders = vscode.workspace.workspaceFolders;
-		if (folders?.length) return vscode.Uri.joinPath(folders[0].uri, filePath);
+		if (folders?.length) {
+			const absolutePath = path.resolve(folders[0].uri.fsPath, filePath);
+			return vscode.Uri.file(absolutePath);
+		}
 		return vscode.Uri.file(filePath);
 	}
 
