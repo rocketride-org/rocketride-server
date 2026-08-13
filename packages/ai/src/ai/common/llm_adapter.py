@@ -370,12 +370,12 @@ class LangChainAdapter:
         except StopIteration:
             gen, piece = None, None
         except Exception as e:
-            # Retry without the usage flag only for the failure it causes: a 400 from an
-            # old vLLM/strict proxy that rejects stream_options.include_usage. Re-raise a
-            # 401/429/etc. so a bad key or rate limit surfaces without a second round trip;
-            # a provider whose exception carries no status_code keeps the broad retry.
-            status = getattr(e, 'status_code', None)
-            if not ask_usage or (status is not None and status != 400):
+            # Retry without the usage flag ONLY for the failure it causes: a 400 that rejects
+            # stream_options.include_usage (an old vLLM/strict proxy; the openai SDK raises
+            # BadRequestError with status_code 400). Re-raise everything else — a 401/429
+            # surfaces without a second round trip, and a transient connection/timeout (no
+            # status_code) is not mistaken for a flag rejection and silently retried unmetered.
+            if not ask_usage or getattr(e, 'status_code', None) != 400:
                 raise
             from rocketlib import warning
 

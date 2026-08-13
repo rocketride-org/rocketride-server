@@ -341,13 +341,13 @@ def try_openai_compat_reasoning_stream(
         _drain(kwargs)
     except Exception as e:
         # This handler is wired ONLY for custom base URLs (ChatBase returns early unless
-        # openai_api_base is set), which is exactly where include_usage can 400. If the
-        # endpoint rejected it before emitting anything, retry once without it: nothing has
-        # reached on_chunk yet, so the retry cannot duplicate visible output — we just forgo
-        # the usage chunk (that endpoint goes unmetered) and keep reasoning streaming alive.
-        # A failure AFTER the first chunk can't be safely re-run: fall back to the
-        # non-streaming path, which meters itself.
-        if emitted == 0 and 'stream_options' in kwargs:
+        # openai_api_base is set), which is exactly where include_usage can 400. Retry once
+        # without it ONLY on a 400 (the flag rejection) before any chunk: nothing has reached
+        # on_chunk yet, so the retry cannot duplicate visible output — we just forgo the usage
+        # chunk (that endpoint goes unmetered) and keep reasoning streaming alive. A 401/429 or
+        # a mid-stream failure is not retried here — it falls straight through to the
+        # non-streaming path (which meters itself), so a rate limit stays at two round trips.
+        if emitted == 0 and 'stream_options' in kwargs and getattr(e, 'status_code', None) == 400:
             warning(
                 f'llm_native_stream openai_compat_reasoning: endpoint rejected stream_options '
                 f'({type(e).__name__}); retrying without include_usage (this call is unmetered).'
@@ -368,10 +368,9 @@ def try_openai_compat_reasoning_stream(
             )
             return None
 
-    if not parts:
-        return None
-    # Report on success only. A mid-stream failure returns None above and falls back to
-    # the non-streaming path, which reports its own usage — reporting here too would double-count.
+    # The stream drained to completion (no exception escaped above). Report the usage it
+    # carried, once, on this success path — a mid-stream failure returned None in the except
+    # and falls back to the non-streaming path, which meters itself.
     if usage is not None:
         cached = int(getattr(getattr(usage, 'prompt_tokens_details', None), 'cached_tokens', 0) or 0)
         report_llm_tokens(
@@ -380,6 +379,13 @@ def try_openai_compat_reasoning_stream(
             model=str(getattr(chat, '_model', '') or ''),
             cache_read_tokens=cached,
         )
+    # A reasoning-only turn (budget spent on reasoning, empty content) is a real completion: it
+    # streamed its reasoning live and carries usage. Return the (possibly empty) answer so the
+    # caller keeps it, instead of discarding the captured usage and re-issuing the whole request
+    # via the non-streaming fallback — which would bill the provider twice. Only a stream that
+    # produced nothing at all (no content, no reasoning, no usage) falls back.
+    if not parts and emitted == 0 and usage is None:
+        return None
     if on_finish is not None:
         on_finish(finish_reason or 'stop')
     return ''.join(parts)

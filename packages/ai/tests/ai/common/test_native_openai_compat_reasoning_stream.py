@@ -56,19 +56,22 @@ class _Usage:
 
 class _Completions:
     """Fake ``client.chat.completions``. Records each create() call's kwargs; optionally
-    raises when asked with ``stream_options`` and serves a different chunk set on retry.
+    raises (with a status_code) when asked with ``stream_options`` and serves a different
+    chunk set on retry.
     """
 
-    def __init__(self, chunks, *, raise_on_stream_options=False, retry_chunks=None):
+    def __init__(self, chunks, *, raise_status=None, retry_chunks=None):
         self._chunks = chunks
-        self._raise_on_stream_options = raise_on_stream_options
+        self._raise_status = raise_status
         self._retry_chunks = retry_chunks
         self.calls: list = []
 
     def create(self, **kwargs):
         self.calls.append(kwargs)
-        if self._raise_on_stream_options and 'stream_options' in kwargs:
-            raise RuntimeError('400 stream_options.include_usage unsupported')
+        if self._raise_status is not None and 'stream_options' in kwargs:
+            err = RuntimeError(f'{self._raise_status} stream error')
+            err.status_code = self._raise_status
+            raise err
         chunks = self._chunks if 'stream_options' in kwargs else (self._retry_chunks or self._chunks)
         return iter(chunks)
 
@@ -142,10 +145,10 @@ def test_a_stream_without_usage_reports_nothing():
     assert _counters() == {}
 
 
-def test_retries_without_stream_options_when_the_endpoint_rejects_it():
+def test_retries_without_stream_options_on_a_400():
     comp = _Completions(
         [],  # never served: the flagged call raises
-        raise_on_stream_options=True,
+        raise_status=400,
         retry_chunks=[_Chunk([_Choice(content='hi', finish_reason='stop')])],
     )
     result, text, _, finish = _run(_Chat(comp))
@@ -159,3 +162,43 @@ def test_retries_without_stream_options_when_the_endpoint_rejects_it():
     assert 'stream_options' not in comp.calls[1]
     # No usage without the flag: that endpoint goes unmetered.
     assert _counters() == {}
+
+
+def test_does_not_retry_a_429():
+    # A rate limit is not the flag rejection: don't retry without the flag (that would cost a
+    # third+fourth provider round trip via the non-streaming fallback). Fall straight through.
+    comp = _Completions([], raise_status=429)
+    result, *_ = _run(_Chat(comp))
+
+    assert result is None  # falls back to non-streaming, which meters itself
+    assert len(comp.calls) == 1  # one attempt only — no retry_drain
+    assert 'stream_options' in comp.calls[0]
+
+
+def test_reasoning_only_stream_reports_usage_and_returns_empty_not_none():
+    # A turn that spends its budget on reasoning (no content) is a real completion: usage is
+    # reported and the empty answer returned, so the caller keeps it instead of re-issuing the
+    # whole request via fallback — which would bill the provider twice.
+    comp = _Completions(
+        [
+            _Chunk([_Choice(reasoning_content='thinking hard', finish_reason='length')]),
+            _Chunk(choices=[], usage=_Usage(prompt_tokens=40, completion_tokens=100)),
+        ]
+    )
+    result, text, reasoning, finish = _run(_Chat(comp))
+
+    assert result == ''  # returned, NOT None -> no fallback, no double bill
+    assert text == ''
+    assert reasoning == 'thinking hard'
+    assert finish == ['length']
+    c = _counters()
+    assert c['llm_input_tokens'] == 40
+    assert c['llm_output_tokens'] == 100
+
+
+def test_truly_empty_stream_falls_back():
+    # No content, no reasoning, no usage: nothing to keep or meter, so fall back.
+    comp = _Completions([_Chunk(choices=[])])
+    result, *_ = _run(_Chat(comp))
+
+    assert result is None

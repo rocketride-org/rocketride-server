@@ -154,7 +154,9 @@ class _FakeRejectsUsageFlag(_FakeChatOpenAI):
     def stream(self, messages, **kwargs):
         self.kwargs = kwargs
         if kwargs.get('stream_usage'):
-            raise RuntimeError('400 stream_options.include_usage unsupported')
+            err = RuntimeError('stream_options.include_usage unsupported')
+            err.status_code = 400  # the openai SDK's BadRequestError shape
+            raise err
         yield from self._chunks
 
 
@@ -169,6 +171,19 @@ class _FakeRaises401(_FakeChatOpenAI):
         err.status_code = 401
         raise err
         yield  # unreachable — makes this a generator so the raise fires on first next()
+
+
+class _FakeRaisesTransient(_FakeChatOpenAI):
+    """A connection error/timeout: no status_code, so it must NOT be mistaken for a flag
+    rejection and retried unmetered — it re-raises.
+    """
+
+    model = 'gpt-transient'
+
+    def stream(self, messages, **kwargs):
+        self.kwargs = kwargs
+        raise RuntimeError('connection reset')
+        yield  # unreachable — generator so the raise fires on first next()
 
 
 def _assert_four_counters():
@@ -225,6 +240,17 @@ def test_stream_does_not_retry_a_non_400_failure():
         list(LangChainAdapter(llm).stream('q'))
 
     assert llm.kwargs == {'stream_usage': True}  # one attempt only; the flag was not stripped
+
+
+def test_stream_does_not_retry_a_transient_error_without_a_status_code():
+    # A connection error/timeout carries no status_code; the old broad retry would drop the
+    # flag and succeed unmetered with a misleading warning. It must re-raise instead.
+    llm = _FakeRaisesTransient([_Chunk('x')])
+
+    with pytest.raises(RuntimeError):
+        list(LangChainAdapter(llm).stream('q'))
+
+    assert llm.kwargs == {'stream_usage': True}  # not stripped, not retried
 
 
 def test_stream_keeps_the_final_total_not_the_sum_of_chunks():
