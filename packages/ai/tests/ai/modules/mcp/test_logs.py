@@ -276,3 +276,19 @@ async def test_log_read_log_not_found_maps_to_not_found(fake_engine):
     assert result['ok'] is False
     assert result['error_type'] == 'NotFound'
     assert 'expired' in result['message']
+
+
+@pytest.mark.asyncio
+async def test_log_traces_echoes_keying_context(fake_engine):
+    fake_engine.log_traces_result = {'open': [], 'closed': []}
+    result = await logs._log_traces(fake_engine, None, {'projectId': 'p1', 'source': 's1'})
+    assert result['context'] == {'projectId': 'p1', 'source': 's1'}
+
+
+@pytest.mark.asyncio
+async def test_log_trace_echoes_keying_context_with_team(fake_engine):
+    fake_engine.log_trace_result = {'summary': {}, 'events': []}
+    result = await logs._log_trace(
+        fake_engine, None, {'projectId': 'p1', 'source': 's1', 'teamId': 't1', 'beginSeq': 5}
+    )
+    assert result['context'] == {'projectId': 'p1', 'source': 's1', 'teamId': 't1'}

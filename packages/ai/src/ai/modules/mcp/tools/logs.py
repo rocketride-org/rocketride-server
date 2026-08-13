@@ -55,6 +55,14 @@ def _require_key(args: Dict[str, Any]):
     return (project_id, source, args.get('teamId') or ''), None
 
 
+def _context(project_id: str, source: str, team_id: str) -> Dict[str, Any]:
+    """Echo the log-keying identity so UI widgets can key follow-up calls."""
+    ctx: Dict[str, Any] = {'projectId': project_id, 'source': source}
+    if team_id:
+        ctx['teamId'] = team_id
+    return ctx
+
+
 async def _log_chapters(client, tasks, args: Dict[str, Any]) -> dict:
     key, err = _require_key(args)
     if err:
@@ -169,7 +177,7 @@ async def _log_traces(client, tasks, args: Dict[str, Any]) -> dict:
     result = result or {}
     closed = result.get('closed') or []
     open_traces = result.get('open') or []
-    payload = {'ok': True, 'traces': closed, 'open': open_traces}
+    payload = {'ok': True, 'traces': closed, 'open': open_traces, 'context': _context(project_id, source, team_id)}
     if not closed and not open_traces:
         payload['note'] = (
             'no traces recorded — the run may have been submitted with '
@@ -210,6 +218,7 @@ async def _log_trace(client, tasks, args: Dict[str, Any]) -> dict:
         'beginSeq': int(begin_seq),
         'summary': result.get('summary'),
         'events': result.get('events') or [],
+        'context': _context(project_id, source, team_id),
     }
 
 
