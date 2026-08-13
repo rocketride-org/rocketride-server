@@ -55,25 +55,32 @@ def _record_usage(call: dict) -> None:
 def turn_usage():
     """Scope one Answer's model calls; yields a reader for the usage they produced.
 
-    Nesting-safe: an agent can drive sub-agents (or per-call ``ask`` invokes), each its
-    own nested scope. A nested scope reuses the turn's list and reads only the calls
-    appended after it opened (a ``seen`` slice), so it sees its own sub-calls while the
-    outer scope still sees the whole turn.
+    Every scope owns its OWN list and, on exit, extends its parent's list under the lock.
+    A reader therefore sees exactly the calls made in its own scope, and nothing else:
 
-    Concurrency-safe: each top-level turn opens its own list (the ContextVar default is
-    None outside any scope), so two turns overlapping in time never read each other. The
-    list is reachable only through this scope, so it is freed when the scope exits — no
+    - Nesting-safe: an agent drives sub-agents (or per-call ``ask`` invokes), each a nested
+      scope. The nested reader sees only its own calls; the parent, which reads after the
+      child has exited and folded its calls in, sees the whole turn.
+    - Concurrency-safe two ways: two independent turns never share a list (the ContextVar
+      default is None outside any scope), AND two sibling scopes inside one turn — a
+      parallel tool wave where each tool drives an LLM invoke — each get their own list, so
+      neither per-invoke reader shows the other's tokens. A shared turn list sliced by an
+      offset could not tell concurrent siblings apart (both would open at offset 0).
+
+    The list is reachable only through its scope, so it is freed when the scope exits — no
     global clear and no depth counter.
     """
     parent = _TURN_CALLS.get()
-    calls = parent if parent is not None else []
+    calls: list = []
     token = _TURN_CALLS.set(calls)
-    with _USAGE_LOCK:
-        seen = len(calls)
     try:
-        yield lambda: usage_since(seen, calls)
+        yield lambda: usage_since(0, calls)
     finally:
         _TURN_CALLS.reset(token)
+        # Fold this scope's calls into the parent so the outer turn still sees them.
+        if parent is not None:
+            with _USAGE_LOCK:
+                parent.extend(calls)
 
 
 @dataclass
@@ -362,9 +369,20 @@ class LangChainAdapter:
             gen, piece = _open(skw)
         except StopIteration:
             gen, piece = None, None
-        except Exception:
-            if not ask_usage:
+        except Exception as e:
+            # Retry without the usage flag only for the failure it causes: a 400 from an
+            # old vLLM/strict proxy that rejects stream_options.include_usage. Re-raise a
+            # 401/429/etc. so a bad key or rate limit surfaces without a second round trip;
+            # a provider whose exception carries no status_code keeps the broad retry.
+            status = getattr(e, 'status_code', None)
+            if not ask_usage or (status is not None and status != 400):
                 raise
+            from rocketlib import warning
+
+            warning(
+                f'LangChain stream rejected stream_usage ({type(e).__name__}); '
+                'retrying without include_usage (this call is unmetered).'
+            )
             skw.pop('stream_usage', None)
             try:
                 gen, piece = _open(skw)

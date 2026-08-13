@@ -158,6 +158,19 @@ class _FakeRejectsUsageFlag(_FakeChatOpenAI):
         yield from self._chunks
 
 
+class _FakeRaises401(_FakeChatOpenAI):
+    """A bad key: the failure carries status_code 401, so the flag retry must NOT fire."""
+
+    model = 'gpt-401'
+
+    def stream(self, messages, **kwargs):
+        self.kwargs = kwargs
+        err = RuntimeError('401 unauthorized')
+        err.status_code = 401
+        raise err
+        yield  # unreachable — makes this a generator so the raise fires on first next()
+
+
 def _assert_four_counters():
     c = _counters()
     assert c['llm_input_tokens'] == 60
@@ -201,6 +214,17 @@ def test_stream_retries_without_the_usage_flag_when_the_endpoint_rejects_it():
     # chunk without the flag) but reasoning/text still flows.
     assert ''.join(e.text for e in events if e.type == 'text') == 'Hi there'
     assert 'stream_usage' not in llm.kwargs
+
+
+def test_stream_does_not_retry_a_non_400_failure():
+    # A 401/429/etc. is not the usage-flag rejection: it must surface without a second
+    # identical round trip. The flag stays on and the error propagates.
+    llm = _FakeRaises401([_Chunk('x')])
+
+    with pytest.raises(RuntimeError):
+        list(LangChainAdapter(llm).stream('q'))
+
+    assert llm.kwargs == {'stream_usage': True}  # one attempt only; the flag was not stripped
 
 
 def test_stream_keeps_the_final_total_not_the_sum_of_chunks():
@@ -355,6 +379,43 @@ def test_two_overlapping_turns_do_not_read_each_others_calls():
 
     assert results['A'] == {'input': 10, 'output': 10, 'cache_read': 0, 'cache_creation': 0, 'model': 'A'}
     assert results['B'] == {'input': 9000, 'output': 9000, 'cache_read': 0, 'cache_creation': 0, 'model': 'B'}
+
+
+def test_two_sibling_scopes_in_one_turn_do_not_read_each_others_calls():
+    # A parallel tool wave: two invokes open nested scopes inside ONE turn (each worker runs
+    # under copy_context().run, so both carry this turn's list). Each per-invoke reader must
+    # show only its own call — a single turn list sliced by an offset could not, since both
+    # siblings open at offset 0 — while the outer turn, after the wave joins, sees both.
+    import threading
+    from contextvars import copy_context
+
+    results: dict = {}
+    both_open = threading.Barrier(2)
+
+    with turn_usage() as outer:
+
+        def make_worker(name, n):
+            ctx = copy_context()  # snapshots the outer turn as this worker's parent
+
+            def body():
+                with turn_usage() as read_invoke:
+                    both_open.wait()  # force both nested scopes open before either reports
+                    report_llm_tokens(n, n, model=name)
+                    results[name] = read_invoke()
+
+            return lambda: ctx.run(body)
+
+        ta = threading.Thread(target=make_worker('A', 10))
+        tb = threading.Thread(target=make_worker('B', 9000))
+        ta.start()
+        tb.start()
+        ta.join()
+        tb.join()
+
+        assert results['A'] == {'input': 10, 'output': 10, 'cache_read': 0, 'cache_creation': 0, 'model': 'A'}
+        assert results['B'] == {'input': 9000, 'output': 9000, 'cache_read': 0, 'cache_creation': 0, 'model': 'B'}
+        total = outer()
+        assert total['calls'] == 2 and total['input'] == 9010
 
 
 # ---------------------------------------------------------------------------
