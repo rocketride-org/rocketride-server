@@ -7,7 +7,8 @@
 	"type": "module",
 	"scripts": {
 		"build": "vite build",
-		"typecheck": "tsc --noEmit"
+		"typecheck": "tsc --noEmit",
+		"test": "vitest run"
 	},
 	"dependencies": {
 		"@modelcontextprotocol/ext-apps": "^1.7.0",
@@ -20,6 +21,7 @@
 		"@types/react-dom": "^18.3.0",
 		"typescript": "^5.5.0",
 		"vite": "^6.0.0",
-		"vite-plugin-singlefile": "^2.0.0"
+		"vite-plugin-singlefile": "^2.0.0",
+		"vitest": "^2.1.0"
 	}
 }
