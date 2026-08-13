@@ -20,6 +20,28 @@ directly for save-time validation. The configured `modelOutputTokens` is passed 
 the model as `max_tokens`. Token counts for budgeting are estimated at roughly
 4 characters per token.
 
+## Example pipelines
+
+**LLM for an agent**
+
+`webhook → agent_rocketride → response`, with this node connected to the
+agent's `llm` channel. The agent uses Claude for its reasoning and tool
+calling; swap profiles to trade cost against capability without touching the
+pipeline.
+
+**Direct question answering**
+
+`webhook → llm_anthropic → response`
+
+Questions arrive on the `questions` lane and Claude's answers stream back on
+`answers` — the minimal chat-over-API pipeline.
+
+**SQL generation for a database node**
+
+`webhook → db_postgres → response`, with this node on the database node's
+`llm` channel. Claude translates natural-language questions into SQL that the
+database node validates and executes.
+
 ## Lanes
 
 | Lane in     | Lane out  | Description                                           |
@@ -83,28 +105,6 @@ startup: it must be non-empty and start with `sk-ant` (covers both standard
 `sk-ant-...` and newer `sk-ant-api03-...` formats). If the key fails this check,
 the node raises `Invalid Anthropic API key format, please check your API key.`
 The key is read at construction time and not stored by the node.
-
-## Example pipelines
-
-**LLM for an agent**
-
-`webhook → agent_rocketride → response`, with this node connected to the
-agent's `llm` channel. The agent uses Claude for its reasoning and tool
-calling; swap profiles to trade cost against capability without touching the
-pipeline.
-
-**Direct question answering**
-
-`webhook → llm_anthropic → response`
-
-Questions arrive on the `questions` lane and Claude's answers stream back on
-`answers` — the minimal chat-over-API pipeline.
-
-**SQL generation for a database node**
-
-`webhook → db_postgres → response`, with this node on the database node's
-`llm` channel. Claude translates natural-language questions into SQL that the
-database node validates and executes.
 
 ## Notes
 

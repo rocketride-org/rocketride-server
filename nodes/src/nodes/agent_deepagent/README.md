@@ -18,6 +18,31 @@ Runs an agent loop via `deepagents.create_deep_agent` (built on LangChain/LangGr
 
 Sub-agents are optional: with none connected, the Deep Agent behaves as a standard single-agent node. Inference is routed through the host LLM channel using a JSON envelope protocol, so any LLM that can follow JSON instructions works; native function-calling support is not required. Agent lifecycle progress (tool calls, LLM calls, agent steps) is streamed as SSE `thinking` events.
 
+## Example pipelines
+
+**Research assistant**
+
+`webhook → agent_deepagent → response`, with `llm_anthropic` on the `llm`
+channel and `tool_tavily` on `tool`. A research question arrives, the agent
+plans its searches, runs them, and returns a cited answer — the planning step
+is what separates this from a single search-and-summarize pass.
+
+**Hierarchical team with specialists**
+
+`webhook → agent_deepagent → response`, plus two Deep Agent Subagents on the
+`deepagent` channel: a researcher (tools: `tool_exa_search`) and a coder
+(tools: `tool_python`, `tool_github`), each with its own `llm`. The
+orchestrator breaks the task apart and delegates each piece to the sub-agent
+whose Description matches, and the plural `tool_calls` envelope lets it
+delegate to several sub-agents in parallel in a single turn.
+
+**Agent-callable research service**
+
+A parent agent (e.g. `agent_rocketride`) with this Deep Agent connected as a
+tool. With a filled-in Agent description, the parent invokes
+`<nodeId>.run_agent` when it hits a question needing deep multi-step
+research rather than attempting it in its own loop.
+
 ## Connections
 
 ### Deep Agent
@@ -98,31 +123,6 @@ produces an answer without invoking at least one tool fails with a
 Off by default; enable it for determinism-critical pipelines. The guard
 counts real tool invocations only — internal/local reads (for example the
 wave agent's `memory.peek`) do not satisfy it.
-
-## Example pipelines
-
-**Research assistant**
-
-`webhook → agent_deepagent → response`, with `llm_anthropic` on the `llm`
-channel and `tool_tavily` on `tool`. A research question arrives, the agent
-plans its searches, runs them, and returns a cited answer — the planning step
-is what separates this from a single search-and-summarize pass.
-
-**Hierarchical team with specialists**
-
-`webhook → agent_deepagent → response`, plus two Deep Agent Subagents on the
-`deepagent` channel: a researcher (tools: `tool_exa_search`) and a coder
-(tools: `tool_python`, `tool_github`), each with its own `llm`. The
-orchestrator breaks the task apart and delegates each piece to the sub-agent
-whose Description matches, and the plural `tool_calls` envelope lets it
-delegate to several sub-agents in parallel in a single turn.
-
-**Agent-callable research service**
-
-A parent agent (e.g. `agent_rocketride`) with this Deep Agent connected as a
-tool. With a filled-in Agent description, the parent invokes
-`<nodeId>.run_agent` when it hits a question needing deep multi-step
-research rather than attempting it in its own loop.
 
 ## Notes
 

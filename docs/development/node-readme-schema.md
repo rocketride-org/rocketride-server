@@ -69,84 +69,7 @@ PostgreSQL — as a pipeline node via lanes or as an agent tool.
   sibling nodes.
 - RocketRide's perspective only — vendor background belongs in `## About`.
 
-## 3. `## Connections` — CONDITIONAL
-
-**Trigger:** a service entry declares an `invoke` object.
-
-| Connection | Required | Description |
-|---|---|---|
-
-- Exactly one row per key in `invoke`. Required = "yes" when `min ≥ 1`.
-- Connection names must match the `invoke` keys.
-
-## 4. `## Lanes` — CONDITIONAL
-
-**Trigger:** a service entry declares a non-empty `lanes` object.
-
-| Lane in | Lane out | Description |
-|---|---|---|
-
-- One row per in→out pair declared in `lanes` (an input with multiple
-  outputs gets one row per output; an input with no output gets `—`).
-- Lane names must match `services*.json` exactly.
-
-## 5. `## As a tool` — CONDITIONAL
-
-**Trigger:** `"tool"` ∈ `classType`.
-
-What an agent sees when this node is connected as a tool: the tool server
-name and one row per exposed function.
-
-| Function | Description |
-|---|---|
-
-- Describe arguments and return values beneath the table when non-obvious.
-- This section is the agent-facing contract — it has the highest accuracy
-  bar in the file.
-
-## 6. `## Profiles` — CONDITIONAL
-
-**Trigger:** `preconfig.profiles` contains ≥ 2 entries other than `custom`.
-
-| Profile | Model | Context |
-|---|---|---|
-
-- List exactly the declared profiles, default marked `*(default)*`. Column
-  names after the first may be adapted to the node.
-
-## 7. `## Configuration` — CORE
-
-Usage guidance for the configuration panel. The generated `## Schema` table
-already lists every field — do not repeat it. This section contains:
-
-- A short paragraph on how to approach configuring the node (what the
-  profile gives you, what most users can ignore).
-- A `###` subsection per **complex field**, named after the field's title,
-  covering: what the field controls, valid values and what the default
-  gives you, when and why to change it, interactions with other fields, and
-  a concrete example of a good value where applicable.
-
-A field is complex when any of these is true: its behavior isn't obvious
-from its name, it interacts with other fields, wrong values fail silently
-or expensively, or its value takes skill to write (prompts, descriptions,
-connection strings). Fields that only make sense together may share one
-grouped subsection.
-
-**Multi-service directories** (more than one `services*.json` with a
-`protocol`): split `## Connections` and `## Configuration` content by
-`###`-per-service, primary service first. Exception: when the services are
-presets of the same implementation with identical wiring (e.g. a branded
-variant), document them once and describe the preset differences under
-`## Notes`.
-
-## 8. `## Authentication` — OPTIONAL
-
-Credentials setup: which key/token the node needs, required scopes, where
-to obtain it, and the expected format. Keep instructions structural
-(scopes, format) rather than duplicating vendor UI walkthroughs that go
-stale.
-
-## 9. `## Example pipelines` — CORE
+## 3. `## Example pipelines` — CORE
 
 At least one example. The **first example is the shipped example**: a
 small working pipeline committed with the node, so a reader can see the
@@ -195,6 +118,83 @@ Rules:
 
 Examples must be real, runnable shapes using nodes that exist — no
 hypothetical node names.
+
+## 4. `## Connections` — CONDITIONAL
+
+**Trigger:** a service entry declares an `invoke` object.
+
+| Connection | Required | Description |
+|---|---|---|
+
+- Exactly one row per key in `invoke`. Required = "yes" when `min ≥ 1`.
+- Connection names must match the `invoke` keys.
+
+## 5. `## Lanes` — CONDITIONAL
+
+**Trigger:** a service entry declares a non-empty `lanes` object.
+
+| Lane in | Lane out | Description |
+|---|---|---|
+
+- One row per in→out pair declared in `lanes` (an input with multiple
+  outputs gets one row per output; an input with no output gets `—`).
+- Lane names must match `services*.json` exactly.
+
+## 6. `## As a tool` — CONDITIONAL
+
+**Trigger:** `"tool"` ∈ `classType`.
+
+What an agent sees when this node is connected as a tool: the tool server
+name and one row per exposed function.
+
+| Function | Description |
+|---|---|
+
+- Describe arguments and return values beneath the table when non-obvious.
+- This section is the agent-facing contract — it has the highest accuracy
+  bar in the file.
+
+## 7. `## Profiles` — CONDITIONAL
+
+**Trigger:** `preconfig.profiles` contains ≥ 2 entries other than `custom`.
+
+| Profile | Model | Context |
+|---|---|---|
+
+- List exactly the declared profiles, default marked `*(default)*`. Column
+  names after the first may be adapted to the node.
+
+## 8. `## Configuration` — CORE
+
+Usage guidance for the configuration panel. The generated `## Schema` table
+already lists every field — do not repeat it. This section contains:
+
+- A short paragraph on how to approach configuring the node (what the
+  profile gives you, what most users can ignore).
+- A `###` subsection per **complex field**, named after the field's title,
+  covering: what the field controls, valid values and what the default
+  gives you, when and why to change it, interactions with other fields, and
+  a concrete example of a good value where applicable.
+
+A field is complex when any of these is true: its behavior isn't obvious
+from its name, it interacts with other fields, wrong values fail silently
+or expensively, or its value takes skill to write (prompts, descriptions,
+connection strings). Fields that only make sense together may share one
+grouped subsection.
+
+**Multi-service directories** (more than one `services*.json` with a
+`protocol`): split `## Connections` and `## Configuration` content by
+`###`-per-service, primary service first. Exception: when the services are
+presets of the same implementation with identical wiring (e.g. a branded
+variant), document them once and describe the preset differences under
+`## Notes`.
+
+## 9. `## Authentication` — OPTIONAL
+
+Credentials setup: which key/token the node needs, required scopes, where
+to obtain it, and the expected format. Keep instructions structural
+(scopes, format) rather than duplicating vendor UI walkthroughs that go
+stale.
 
 ## 10. `## Requirements` — CONDITIONAL
 

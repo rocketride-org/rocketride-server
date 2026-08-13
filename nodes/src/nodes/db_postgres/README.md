@@ -12,6 +12,29 @@ Safety defaults: only `SELECT` statements are permitted for queries (whitelist c
 
 The same implementation also ships as a Supabase preset (`services.supabase.json`, protocol `db_supabase://`): Supabase is managed Postgres, so it is a branded configuration, not separate code.
 
+## Example pipelines
+
+**Chat with your database**
+
+`webhook → db_postgres → response`, with an LLM (e.g. `llm_anthropic`) on the
+`llm` channel. Natural-language questions come in, validated SQL runs against
+Postgres, and results return as a table, text, or answers depending on the
+connected output lane.
+
+**Structured extraction into a table**
+
+`webhook → ocr → extract_data → db_postgres`
+
+Scanned documents are OCR'd, `extract_data` structures the fields, and the
+rows arrive on this node's `answers` lane — the table is auto-created on
+first insert.
+
+**Agent with database access**
+
+An agent (e.g. `agent_deepagent`) with this node connected as a tool. The
+agent calls `get_schema` to learn the shape of the data, then `get_data` to
+answer questions — with the SELECT-only whitelist keeping it read-safe.
+
 ## Connections
 
 | Connection | Required | Description                                    |
@@ -92,29 +115,6 @@ Gates raw SQL execution (`QuestionType.EXECUTE` and the transaction tools).
 Off by default — leave it off unless a trusted application explicitly needs to
 issue SQL directly, because enabled callers bypass both the LLM translation
 and the SELECT-only safety check.
-
-## Example pipelines
-
-**Chat with your database**
-
-`webhook → db_postgres → response`, with an LLM (e.g. `llm_anthropic`) on the
-`llm` channel. Natural-language questions come in, validated SQL runs against
-Postgres, and results return as a table, text, or answers depending on the
-connected output lane.
-
-**Structured extraction into a table**
-
-`webhook → ocr → extract_data → db_postgres`
-
-Scanned documents are OCR'd, `extract_data` structures the fields, and the
-rows arrive on this node's `answers` lane — the table is auto-created on
-first insert.
-
-**Agent with database access**
-
-An agent (e.g. `agent_deepagent`) with this node connected as a tool. The
-agent calls `get_schema` to learn the shape of the data, then `get_data` to
-answer questions — with the SELECT-only whitelist keeping it read-safe.
 
 ## Limitations
 

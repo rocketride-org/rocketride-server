@@ -24,6 +24,27 @@ A personal access token is **required**: the pipeline fails to start without one
 operations are **allowed by default**; enable **read-only mode** to block every mutating
 tool when the agent should only inspect.
 
+## Example pipelines
+
+**Issue triage agent**
+
+`webhook → agent_rocketride → response`, with this node connected as a tool
+and read-only mode **off**. The agent lists open issues, inspects recent
+commits for context, labels and comments on issues, and closes duplicates.
+
+**Read-only codebase analyst**
+
+An agent with this node as a tool and read-only mode **on**: it can search
+code, read files, and summarize pull requests, with every mutating call
+blocked at dispatch — safe to point at production repositories.
+
+**Release automation**
+
+`webhook → agent_deepagent → response`, with this node plus `tool_python` as
+tools. The agent drafts release notes from `commit_list`, creates the release
+with `release_create`, and dispatches the publish workflow with
+`workflow_dispatch`.
+
 ## As a tool
 
 List tools accept `per_page` (1–100, default 30) and `page` (default 1) for pagination.
@@ -161,27 +182,6 @@ repositories the agent needs is the safer choice. The token is sent as a
 
 API errors are surfaced to the agent as readable messages including the HTTP status and
 GitHub's error details.
-
-## Example pipelines
-
-**Issue triage agent**
-
-`webhook → agent_rocketride → response`, with this node connected as a tool
-and read-only mode **off**. The agent lists open issues, inspects recent
-commits for context, labels and comments on issues, and closes duplicates.
-
-**Read-only codebase analyst**
-
-An agent with this node as a tool and read-only mode **on**: it can search
-code, read files, and summarize pull requests, with every mutating call
-blocked at dispatch — safe to point at production repositories.
-
-**Release automation**
-
-`webhook → agent_deepagent → response`, with this node plus `tool_python` as
-tools. The agent drafts release notes from `commit_list`, creates the release
-with `release_create`, and dispatches the publish workflow with
-`workflow_dispatch`.
 
 ## Notes
 

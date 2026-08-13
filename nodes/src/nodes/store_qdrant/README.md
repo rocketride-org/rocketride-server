@@ -19,6 +19,31 @@ Documents must be run through an embedding node before reaching this node: the s
 
 The collection is created automatically on first write, including payload indexes on `meta.nodeId`, `meta.objectId`, `meta.parent`, `meta.permissionId`, `meta.isDeleted`, `meta.isTable`, and a full-text index on `content` (word tokenizer, lowercase, token length 2-15). Writing chunk 0 of an object first deletes all existing points with the same `objectId`, so re-ingesting a document replaces it rather than duplicating it. Upserts are batched: a flush happens every 500 points or when the accumulated payload exceeds the payload limit (32 MiB by default).
 
+## Example pipelines
+
+**Document ingestion for RAG**
+
+`webhook → embedding_transformer → store_qdrant`
+
+Documents arrive over a webhook, the embedding node turns them into vectors,
+and they land in the collection through the `documents` lane. Run once per
+corpus, or continuously for a live source.
+
+**Question answering over stored documents**
+
+`webhook → embedding_transformer → store_qdrant → llm_anthropic → response`
+
+The question is embedded, this node enriches it with the most relevant stored
+documents (`questions` → `questions` lane), and the LLM answers from that
+retrieved context.
+
+**Agent with searchable memory**
+
+An agent with this node connected as a tool: it calls `search` for context
+when it decides it needs it, and `upsert`s new facts as it works — a knowledge
+base the agent reads and writes on demand instead of retrieval running on
+every question.
+
 ## Lanes
 
 | Lane in     | Lane out    | Description                                                      |
@@ -79,31 +104,6 @@ collide and the agent can tell the stores apart.
 ## Authentication
 
 Self-hosted Qdrant typically needs no credentials: leave `apikey` empty. For Qdrant Cloud, set `host` to your instance endpoint (`<instance>.<region>.qdrant.io`) and provide the cluster API key in `apikey`. The key is passed as the `api_key` argument of the Qdrant client.
-
-## Example pipelines
-
-**Document ingestion for RAG**
-
-`webhook → embedding_transformer → store_qdrant`
-
-Documents arrive over a webhook, the embedding node turns them into vectors,
-and they land in the collection through the `documents` lane. Run once per
-corpus, or continuously for a live source.
-
-**Question answering over stored documents**
-
-`webhook → embedding_transformer → store_qdrant → llm_anthropic → response`
-
-The question is embedded, this node enriches it with the most relevant stored
-documents (`questions` → `questions` lane), and the LLM answers from that
-retrieved context.
-
-**Agent with searchable memory**
-
-An agent with this node connected as a tool: it calls `search` for context
-when it decides it needs it, and `upsert`s new facts as it works — a knowledge
-base the agent reads and writes on demand instead of retrieval running on
-every question.
 
 ## Notes
 

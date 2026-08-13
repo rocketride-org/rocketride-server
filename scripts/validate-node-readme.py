@@ -24,13 +24,13 @@ from pathlib import Path
 CANONICAL_ORDER = [
     'About',  # optional, vendor
     'What it does',  # core
+    'Example pipelines',  # core (>=1 real flow; opens with the shipped example)
     'Connections',  # conditional: invoke
     'Lanes',  # conditional: lanes
     'As a tool',  # conditional: tool in classType
     'Profiles',  # conditional: >=2 real profiles
     'Configuration',  # core (usage guidance + ### field details)
     'Authentication',  # optional: credential setup
-    'Example pipelines',  # core (>=1 real flow)
     'Requirements',  # conditional: gpu
     'Limitations',  # conditional: nosaas/noremote/security/filesystem
     'Notes',  # optional

@@ -12,6 +12,31 @@ Table extraction uses **img2table** for OpenCV-based table structure detection, 
 
 Animated GIFs are handled frame by frame: each frame is OCR'd individually and the per-frame texts are joined with newlines before being written to the `text` lane. OCR reads are serialised with an internal threading lock so concurrent instances share one engine safely.
 
+## Example pipelines
+
+**Scanned-document summarization**
+
+`webhook → ocr → summarization → response`
+
+Scanned PDFs or photos arrive over a webhook, OCR turns them into text, and
+the summarization node condenses each document. The default Latin profile
+covers English; switch profiles for other languages.
+
+**Invoice tables into a database**
+
+`webhook → ocr → extract_data → db_postgres`
+
+Invoice images come in and the `table` lane extracts their line items as
+Markdown tables; `extract_data` structures the fields and PostgreSQL stores
+the rows — paper documents to queryable data with no manual entry.
+
+**Searchable archive of scanned records**
+
+`webhook → ocr → embedding_transformer → store_qdrant`
+
+OCR converts a scanned archive to text, the embedding node vectorizes it, and
+the vector store makes it searchable by meaning rather than filename.
+
 ## Lanes
 
 | Lane in     | Lane out | Description                       |
@@ -106,31 +131,6 @@ Engine used for table text extraction (default DocTR, which is optimized for
 document tables; EasyOCR and Surya are general-purpose alternatives). This is
 independent of the main `engine` field — text and tables can use different
 engines.
-
-## Example pipelines
-
-**Scanned-document summarization**
-
-`webhook → ocr → summarization → response`
-
-Scanned PDFs or photos arrive over a webhook, OCR turns them into text, and
-the summarization node condenses each document. The default Latin profile
-covers English; switch profiles for other languages.
-
-**Invoice tables into a database**
-
-`webhook → ocr → extract_data → db_postgres`
-
-Invoice images come in and the `table` lane extracts their line items as
-Markdown tables; `extract_data` structures the fields and PostgreSQL stores
-the rows — paper documents to queryable data with no manual entry.
-
-**Searchable archive of scanned records**
-
-`webhook → ocr → embedding_transformer → store_qdrant`
-
-OCR converts a scanned archive to text, the embedding node vectorizes it, and
-the vector store makes it searchable by meaning rather than filename.
 
 ## Requirements
 
