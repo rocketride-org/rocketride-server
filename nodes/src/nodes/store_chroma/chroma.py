@@ -32,7 +32,7 @@ import chromadb
 from ai.common.schema import Doc, DocFilter, DocMetadata, QuestionText
 from ai.common.store import DocumentStoreBase
 from ai.common.config import Config
-from rocketlib import debug
+from rocketlib import debug, warning
 import uuid
 import numpy as np
 import json
@@ -126,7 +126,13 @@ class Store(DocumentStoreBase):
         # issues its first request while HttpClient() is still constructing,
         # so one unresponsive connection hangs the whole pipeline forever.
         # Give every session created by chromadb's transport module a default
-        # timeout; the patch is confined to that module's namespace.
+        # timeout.
+        #
+        # Scope: the replacement only shadows the `httpx` name inside
+        # chromadb.api.fastapi, which is where this client builds its sessions.
+        # Nothing else in the process sees it, and any explicit timeout the
+        # caller passes is preserved. chromadb-client exposes no supported
+        # timeout setting, which is why the default is installed this way.
         try:
             import httpx
             import chromadb.api.fastapi as _chroma_fastapi
@@ -145,8 +151,13 @@ class Store(DocumentStoreBase):
 
                 _chroma_fastapi.httpx = _HttpxShim()
                 _chroma_fastapi._rocketrideTimeoutShim = True
-        except Exception:
-            pass
+        except Exception as exc:
+            # This is hardening against an upstream default, not a feature, so a
+            # failure here must not stop the node from connecting: if chromadb
+            # reorganises its transport module the store still works, just
+            # without the timeout. Say so rather than failing silently, because
+            # the symptom otherwise is a pipeline that hangs with no explanation.
+            warning(f'chroma: HTTP timeout shim not applied ({exc}); an unresponsive server may hang requests')
 
         # The Chroma client connects eagerly (identity/tenant validation on construction),
         # so an incompatible/old server surfaces here as a cryptic error (e.g.
