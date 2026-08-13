@@ -190,8 +190,8 @@ works for both past and live runs:
 | --- | --- | --- |
 | `log_chapters` | List recorded runs (chapters) for a pipeline — begin/end times, `beginSeq`, outcome. | `projectId`, `source`, `teamId` (optional — omit for your own dev runs) |
 | `log_read` | Read raw run-log events, cursor-paged; `types=["output"]` returns console lines only. Pass `nextCursor` back as `cursor` to continue. | `projectId`, `source`, `fromSeq`, `cursor`, `maxEvents` (floored at 1, capped at 200), `types` |
-| `log_traces` | List per-object trace summaries (one per file/document that traveled the pipeline). Each carries `beginSeq` — the permanent trace id. Returns `{traces, open}` — `traces` holds finished runs, `open` holds ones still in flight. Defaults to the latest/live run; pass `chapterBeginSeq` (from `log_chapters`) to address a specific past run instead. | `projectId`, `source`, `n` (default 20, clamped 1-100), `chapterBeginSeq` |
-| `log_trace` | Fetch one object's full begin-to-end journey through the pipeline by its `beginSeq`: a summary plus every component enter/leave with lane data, plus node narration. Returns `{beginSeq, summary, events}`. | `projectId`, `source`, `beginSeq` |
+| `log_traces` | List per-object trace summaries (one per file/document that traveled the pipeline). Each carries `beginSeq` — the permanent trace id. Returns `{traces, open, context}` — `traces` holds finished runs, `open` holds ones still in flight, `context` echoes the keying identity (`projectId`, `source`, `teamId?`) so a follow-up call or widget can address the same run. Defaults to the latest/live run; pass `chapterBeginSeq` (from `log_chapters`) to address a specific past run instead. | `projectId`, `source`, `n` (default 20, clamped 1-100), `chapterBeginSeq` |
+| `log_trace` | Fetch one object's full begin-to-end journey through the pipeline by its `beginSeq`: a summary plus every component enter/leave with lane data, plus node narration. Returns `{beginSeq, summary, events, context}` (same `context` shape as `log_traces`). | `projectId`, `source`, `beginSeq` |
 
 A `log_read` page is bounded two ways: `maxEvents` (≤ 200) and a fixed 1 MiB
 total-byte cap forwarded to the engine as `max_bytes` — so a maxed-out page is
@@ -263,9 +263,11 @@ that tool's result, all other hosts see the unchanged JSON. The capability is
 advertised only when at least one built bundle exists on disk.
 
 Current widgets: `pipelines-table` (linked to `list_running_pipelines`;
-refresh/terminate call back through the bridge) and `dropper` (linked to
+refresh/terminate call back through the bridge), `dropper` (linked to
 `run_dropper_pipe`; in-chat file upload with progress, then renders the
-pipeline's results). The introspection tools (`describe_pipeline`,
+pipeline's results), and `trace-viewer` (linked to both `log_traces` and
+`log_trace`; renders the run's request list and, on open, one request's
+full call tree). The introspection tools (`describe_pipeline`,
 `validate_pipeline`) carry no widget link — their results are plain JSON.
 (Two earlier widgets were removed after live testing: the run-monitor view
 and the pipeline-view widget in both its incarnations, the SVG graph and the

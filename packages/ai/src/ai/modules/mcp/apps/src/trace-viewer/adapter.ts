@@ -44,9 +44,15 @@ export interface ListPayload {
 	note?: string;
 }
 
-function toRequestSummary(s: LogTraceSummary, inFlight: boolean): RequestSummary {
+/**
+ * `index` is this row's position in the combined closed+open list (assigned
+ * before sorting) — used only as a fallback key when `beginSeq` is missing,
+ * so rows without one still get distinct `docId`s instead of colliding on
+ * `-1` (React list keys must be unique).
+ */
+function toRequestSummary(s: LogTraceSummary, inFlight: boolean, index: number): RequestSummary {
 	return {
-		docId: s.beginSeq ?? -1,
+		docId: s.beginSeq ?? -(index + 1),
 		beginSeq: s.beginSeq ?? null,
 		objectName: s.doc || '<unknown>',
 		hasError: false,
@@ -64,8 +70,12 @@ export function parseListPayload(payload: Record<string, unknown>): ListPayload 
 	}
 	const closed = (Array.isArray(payload.traces) ? payload.traces : []) as LogTraceSummary[];
 	const open = (Array.isArray(payload.open) ? payload.open : []) as LogTraceSummary[];
-	const summaries = [...closed.map((s) => toRequestSummary(s, false)), ...open.map((s) => toRequestSummary(s, true))].sort(
-		(a, b) => (a.beginSeq ?? 0) - (b.beginSeq ?? 0),
-	);
+	const combined: Array<{ summary: LogTraceSummary; inFlight: boolean }> = [
+		...closed.map((summary) => ({ summary, inFlight: false })),
+		...open.map((summary) => ({ summary, inFlight: true })),
+	];
+	const summaries = combined
+		.map((row, index) => toRequestSummary(row.summary, row.inFlight, index))
+		.sort((a, b) => (a.beginSeq ?? 0) - (b.beginSeq ?? 0));
 	return { context, summaries, note: typeof payload.note === 'string' ? payload.note : undefined };
 }

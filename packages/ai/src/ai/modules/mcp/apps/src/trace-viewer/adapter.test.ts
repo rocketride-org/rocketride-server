@@ -44,4 +44,18 @@ describe('parseListPayload', () => {
 		expect(summaries).toEqual([]);
 		expect(note).toBe('no traces recorded');
 	});
+
+	it('assigns distinct docIds to rows missing beginSeq instead of colliding on -1', () => {
+		const payload = {
+			ok: true,
+			context: CONTEXT,
+			traces: [{ doc: 'a.pdf' }, { doc: 'b.pdf' }],
+			open: [{ doc: 'c.pdf' }],
+		};
+		const { summaries } = parseListPayload(payload);
+		expect(summaries.every((s) => s.beginSeq === null)).toBe(true);
+		const docIds = summaries.map((s) => s.docId);
+		expect(new Set(docIds).size).toBe(docIds.length);
+		expect(docIds.every((id) => id < 0)).toBe(true);
+	});
 });

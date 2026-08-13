@@ -91,6 +91,11 @@ export interface TraceViewerAppProps {
 export const TraceViewerApp: React.FC<TraceViewerAppProps> = ({ app, initialResult }) => {
 	const initial = useMemo(() => parseInitial(initialResult), [initialResult]);
 	const [selected, setSelected] = useState<number | null>(initial.prefetched?.beginSeq ?? null);
+	// Bumped by the Retry button to remount TraceDetail (via `key`) and force
+	// a fresh fetchTrace call — TraceDetail only refetches on its own when
+	// `traceId` changes, so a failed fetch for the *same* trace has no other
+	// way to retry.
+	const [retryKey, setRetryKey] = useState(0);
 
 	const fetchTrace = useMemo(() => {
 		if (!initial.context) return null;
@@ -124,9 +129,12 @@ export const TraceViewerApp: React.FC<TraceViewerAppProps> = ({ app, initialResu
 							</button>
 						</>
 					)}
+					<button style={S.btn} onClick={() => setRetryKey((k) => k + 1)} title="Re-fetch this trace">
+						Retry
+					</button>
 				</div>
 				<div style={S.detail}>
-					<TraceDetail traceId={selected} projectId={initial.context.projectId} fetchTrace={fetchTrace} />
+					<TraceDetail key={retryKey} traceId={selected} projectId={initial.context.projectId} fetchTrace={fetchTrace} />
 				</div>
 			</section>
 		);
