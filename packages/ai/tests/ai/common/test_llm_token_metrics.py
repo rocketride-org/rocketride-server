@@ -23,11 +23,9 @@ from ai.web.metrics.metrics import metrics
 
 def setup_function(_):
     metrics.reset()
-    # The turn collector is a module global; clear it so a leaked scope from one
-    # test can't seed the next.
-    with _adapter._USAGE_LOCK:
-        _adapter._USAGE_CALLS.clear()
-        _adapter._TURN_DEPTH = 0
+    # No turn is open between tests; reset the per-turn collector to its default so a
+    # leaked scope from one test cannot seed the next.
+    _adapter._TURN_CALLS.set(None)
 
 
 def _counters():
@@ -148,6 +146,18 @@ class _FakeChatXAI(_FakeChatOpenAI):
     model = 'grok-4'
 
 
+class _FakeRejectsUsageFlag(_FakeChatOpenAI):
+    """An old vLLM/strict proxy: 400s on the usage flag before any chunk, streams without it."""
+
+    model = 'vllm-local'
+
+    def stream(self, messages, **kwargs):
+        self.kwargs = kwargs
+        if kwargs.get('stream_usage'):
+            raise RuntimeError('400 stream_options.include_usage unsupported')
+        yield from self._chunks
+
+
 def _assert_four_counters():
     c = _counters()
     assert c['llm_input_tokens'] == 60
@@ -180,8 +190,23 @@ def test_stream_omits_the_flag_for_a_model_that_lacks_it():
     _assert_four_counters()
 
 
+def test_stream_retries_without_the_usage_flag_when_the_endpoint_rejects_it():
+    # A custom base URL that 400s on include_usage (old vLLM/strict proxy) must not lose the
+    # stream: we ask, the endpoint rejects it before any chunk, and we retry once without it.
+    llm = _FakeRejectsUsageFlag([_Chunk('Hi'), _Chunk(' there')])
+
+    events = list(LangChainAdapter(llm).stream('q'))
+
+    # Streamed on the retry, with the flag dropped. That endpoint goes unmetered (no usage
+    # chunk without the flag) but reasoning/text still flows.
+    assert ''.join(e.text for e in events if e.type == 'text') == 'Hi there'
+    assert 'stream_usage' not in llm.kwargs
+
+
 def test_stream_keeps_the_final_total_not_the_sum_of_chunks():
-    """Chunk counts are cumulative, so the reader takes max(), never a running sum."""
+    """Every provider reached today reports usage on one chunk, so max() returns that
+    chunk's total; a delta-reporting provider would instead need the deltas summed.
+    """
     llm = _FakeChatBedrock(
         [
             _Chunk('Hi', {'input_tokens': 100, 'output_tokens': 5}),
@@ -256,7 +281,8 @@ def test_turn_reader_sums_a_many_call_turn():
 
 
 def test_turn_is_cleared_when_the_outermost_scope_exits():
-    # Bounded to one turn: a second turn does not inherit the first's calls.
+    # Bounded to one turn: the second turn opens a fresh list, so it never inherits the
+    # first's calls.
     with turn_usage() as r1:
         report_llm_tokens(10, 5, model='m1')
         assert r1()['input'] == 10
@@ -274,8 +300,8 @@ def test_zero_usage_leaves_the_turn_empty():
 
 def test_nested_scope_reads_its_own_calls_while_the_outer_reads_all():
     # An agent can drive a sub-agent: the sub-agent's scope shows only its own calls,
-    # the outer scope shows the whole turn (sub-agent included), and the collector is
-    # cleared only when the outermost scope exits.
+    # the outer scope shows the whole turn (sub-agent included), and the list is freed
+    # only when the outermost scope exits.
     with turn_usage() as outer:
         report_llm_tokens(10, 5, model='a')
         with turn_usage() as inner:
@@ -289,16 +315,46 @@ def test_nested_scope_reads_its_own_calls_while_the_outer_reads_all():
 
 
 def test_calls_from_a_worker_thread_land_in_the_open_turn():
-    # CrewAI/deepagent run kickoffs on a worker thread under a copied context, where a
-    # ContextVar write would never propagate back to the reader. The module-global
-    # collector does, so the agent's answer still carries the total.
+    # CrewAI/deepagent (and the rocketride tool wave) run kickoffs on a worker thread under
+    # copy_context().run(...). copy_context copies the mapping, not the values, so the thread
+    # inherits the SAME list object and its appends reach the reader that opened the turn.
     import threading
+    from contextvars import copy_context
 
     with turn_usage() as read_usage:
-        t = threading.Thread(target=lambda: report_llm_tokens(200, 60, model='crew'))
+        ctx = copy_context()  # snapshots the context WITH this turn's list bound
+        t = threading.Thread(target=lambda: ctx.run(report_llm_tokens, 200, 60, model='crew'))
         t.start()
         t.join()  # the agent blocks on the kickoff before reading
         assert read_usage() == {'input': 200, 'output': 60, 'cache_read': 0, 'cache_creation': 0, 'model': 'crew'}
+
+
+def test_two_overlapping_turns_do_not_read_each_others_calls():
+    # Concurrent turns are normal (a ThreadPoolExecutor tool wave, one pipeline per inbound
+    # message). Each opens its own list, so neither reads the other's calls — the bug a
+    # single process-wide collector had.
+    import threading
+
+    results: dict = {}
+    open_barrier = threading.Barrier(2)  # both scopes open before either reports
+    report_barrier = threading.Barrier(2)  # both reported while both scopes still open
+
+    def run_turn(name, n):
+        with turn_usage() as read_usage:
+            open_barrier.wait()
+            report_llm_tokens(n, n, model=name)
+            report_barrier.wait()
+            results[name] = read_usage()
+
+    a = threading.Thread(target=run_turn, args=('A', 10))
+    b = threading.Thread(target=run_turn, args=('B', 9000))
+    a.start()
+    b.start()
+    a.join()
+    b.join()
+
+    assert results['A'] == {'input': 10, 'output': 10, 'cache_read': 0, 'cache_creation': 0, 'model': 'A'}
+    assert results['B'] == {'input': 9000, 'output': 9000, 'cache_read': 0, 'cache_creation': 0, 'model': 'B'}
 
 
 # ---------------------------------------------------------------------------

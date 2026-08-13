@@ -11,29 +11,44 @@ Design: repo discussion #1679 (RFC — virtualized provider Adapter).
 
 import threading
 from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import Any, Callable, Iterator, Optional, Protocol, runtime_checkable
 
 from ai.common.utils import flatten_content_blocks
 
-# Per-turn LLM usage collector. Every model call appends one entry here; a scope
-# (turn_usage) reads the entries added while it was open and hangs them on the Answer.
+# Per-turn LLM usage collector. Every model call appends one entry to the open turn's
+# list; a scope (turn_usage) reads the entries added while it was open and hangs them on
+# the Answer.
 #
-# It is a module-global list, NOT a ContextVar, on purpose: CrewAI/deepagent run their
-# kickoffs on a worker thread under ``contextvars.copy_context().run(...)`` (see
-# nodes/agent_crewai/crewai_runner.py), and a ContextVar written in that copied context
-# never propagates back to the thread that reads it — the agent's answer would carry no
-# tokens. The metrics singleton already spans threads this way for billing; usage must too.
-# A lock keeps worker-thread appends race-free with the reader.
+# The list lives in a ContextVar, but the VALUE is a mutable list appended IN PLACE —
+# never re-``.set()``. That distinction is the whole design:
+#   - Per-turn isolation: two turns that overlap in time each get their own list, so one
+#     turn's Trace never shows another's tokens, and the list dies with its scope (no
+#     global clear, no unbounded growth under load). Concurrent turns are normal here —
+#     agent_rocketride/executor.py runs a tool wave on a ThreadPoolExecutor, and one
+#     pipeline is started per inbound message via asyncio.to_thread.
+#   - Cross-thread capture: contextvars.copy_context() copies the mapping, not the
+#     values, so a worker thread that runs under copy_context().run(...) (CrewAI/deepagent
+#     kickoffs; a ThreadPoolExecutor wave that submits copy_context().run) inherits the
+#     SAME list object — its appends are visible to the reader that opened the turn.
+# A lock keeps concurrent appends race-free with the reader's slice.
 _USAGE_LOCK = threading.Lock()
-_USAGE_CALLS: list = []
-_TURN_DEPTH = 0
+_TURN_CALLS: ContextVar[Optional[list]] = ContextVar('llm_turn_calls', default=None)
 
 
 def _record_usage(call: dict) -> None:
-    """Append one model call's usage to the shared collector (thread-safe)."""
+    """Append one model call's usage to the open turn's collector (thread-safe).
+
+    A no-op when no turn is open (a bare LLM call outside any ``turn_usage`` scope): the
+    call is simply not collected for a Trace. Billing is unaffected — ``report_llm_tokens``
+    fires its counters regardless of whether a turn is open.
+    """
+    calls = _TURN_CALLS.get()
+    if calls is None:
+        return
     with _USAGE_LOCK:
-        _USAGE_CALLS.append(call)
+        calls.append(call)
 
 
 @contextmanager
@@ -41,23 +56,24 @@ def turn_usage():
     """Scope one Answer's model calls; yields a reader for the usage they produced.
 
     Nesting-safe: an agent can drive sub-agents (or per-call ``ask`` invokes), each its
-    own nested scope, because a scope reads only the calls appended after it opened
-    (a ``seen`` slice), not the whole list. The OUTERMOST scope clears the collector on
-    exit, so it stays bounded to one top-level turn instead of growing for the life of
-    the task (a long agent run would otherwise accumulate one dict per call forever).
+    own nested scope. A nested scope reuses the turn's list and reads only the calls
+    appended after it opened (a ``seen`` slice), so it sees its own sub-calls while the
+    outer scope still sees the whole turn.
+
+    Concurrency-safe: each top-level turn opens its own list (the ContextVar default is
+    None outside any scope), so two turns overlapping in time never read each other. The
+    list is reachable only through this scope, so it is freed when the scope exits — no
+    global clear and no depth counter.
     """
-    global _TURN_DEPTH
+    parent = _TURN_CALLS.get()
+    calls = parent if parent is not None else []
+    token = _TURN_CALLS.set(calls)
     with _USAGE_LOCK:
-        seen = len(_USAGE_CALLS)
-        _TURN_DEPTH += 1
+        seen = len(calls)
     try:
-        yield lambda: usage_since(seen)
+        yield lambda: usage_since(seen, calls)
     finally:
-        with _USAGE_LOCK:
-            _TURN_DEPTH -= 1
-            if _TURN_DEPTH <= 0:
-                _TURN_DEPTH = 0
-                _USAGE_CALLS.clear()
+        _TURN_CALLS.reset(token)
 
 
 @dataclass
@@ -255,31 +271,26 @@ def report_llm_tokens(
             pass
 
 
-def usage_since(seen: int) -> Optional[dict]:
+def usage_since(seen: int, calls: Optional[list] = None) -> Optional[dict]:
     """Aggregate the model calls recorded after the first ``seen`` of this turn.
 
+    ``calls`` is the open turn's collector; it defaults to the current context's list so
+    a caller inside a ``turn_usage`` scope can read it without threading the list through.
     The collector is append-only within a turn, so a scope that records its length
     beforehand gets exactly its own calls back (its own nested sub-agents/invokes
     included). One call returns that call unchanged, so a single-call invoke renders
     as plain totals with no redundant breakdown.
     """
+    if calls is None:
+        calls = _TURN_CALLS.get() or []
     with _USAGE_LOCK:
-        calls = _USAGE_CALLS[seen:]
+        calls = calls[seen:]
     if not calls:
         return None
     if len(calls) == 1:
         return dict(calls[0])
     total = {k: sum(int(c.get(k, 0)) for c in calls) for k in ('input', 'output', 'cache_read', 'cache_creation')}
     return {**total, 'model': calls[-1].get('model', ''), 'calls': len(calls), 'breakdown': list(calls)}
-
-
-def _has_custom_base_url(llm: Any) -> bool:
-    """True if the model points at a non-OpenAI base URL (DeepSeek, Qwen, xAI, Ollama,
-    a local vLLM/proxy). Those reach OpenAI-compatible endpoints where forcing
-    ``stream_options.include_usage`` can 400, so the streaming-usage flag is left off.
-    """
-    base = getattr(llm, 'openai_api_base', None) or getattr(llm, 'base_url', None)
-    return bool(base) and 'api.openai.com' not in str(base)
 
 
 def _split_input_cache(um: dict) -> tuple[int, int, int, int]:
@@ -324,22 +335,46 @@ class LangChainAdapter:
         self.history.append({'role': 'user', 'content': user_text})
         parse = _make_stream_content_parser(True)
         parts: list[str] = []
-        # OpenAI-family models only emit streaming usage when asked. Ask whichever
-        # model declares the flag rather than matching on the class name: ChatXAI
-        # inherits it from BaseChatOpenAI without carrying 'OpenAI' in its name, and
-        # a model that lacks it (ChatBedrock) would reject it as an unknown kwarg.
-        # But NOT when a custom base URL is set: langchain-openai defaults the flag off
-        # there because older vLLM builds and strict proxies 400 on
-        # stream_options.include_usage. Respect that — usage is still read below if the
-        # endpoint sends it anyway; forcing it would break the request outright.
+        # OpenAI-family models only emit streaming usage when asked. Ask whichever model
+        # declares the flag rather than matching on the class name: ChatXAI inherits it
+        # from BaseChatOpenAI without carrying 'OpenAI' in its name, and a model that
+        # lacks it (ChatBedrock) would reject it as an unknown kwarg. langchain-openai
+        # sends stream_options.include_usage only when this is on, so without it every
+        # custom-base-URL provider (xAI, DeepSeek, Qwen, Together, Groq, self-hosted vLLM)
+        # bills zero. So we ask unconditionally and RETRY once without it if the endpoint
+        # rejects it before the first chunk — the old-vLLM/strict-proxy case. That makes
+        # metering the default for the whole OpenAI-compatible family while the
+        # incompatible minority still streams (it just goes unmetered). An explicit
+        # stream_usage in stream_kwargs (a node/operator override) wins over this default.
         skw = dict(self.stream_kwargs)
-        if hasattr(self.llm, 'stream_usage') and not _has_custom_base_url(self.llm):
-            skw.setdefault('stream_usage', True)
+        ask_usage = hasattr(self.llm, 'stream_usage') and 'stream_usage' not in skw
+        if ask_usage:
+            skw['stream_usage'] = True
         total_in = out_toks = cache_read = cache_creation = 0
+
+        def _open(kw: dict):
+            # Pull the first chunk here: a 400 on stream_options.include_usage raises on
+            # this call, before anything has been yielded downstream, so the retry is safe.
+            gen = self.llm.stream(self.history, **kw)
+            return gen, next(gen)
+
+        try:
+            gen, piece = _open(skw)
+        except StopIteration:
+            gen, piece = None, None
+        except Exception:
+            if not ask_usage:
+                raise
+            skw.pop('stream_usage', None)
+            try:
+                gen, piece = _open(skw)
+            except StopIteration:
+                gen, piece = None, None
+
         # try/finally so a mid-stream raise still records the usage the chunks already
         # carried, matching the two native adapters.
         try:
-            for piece in self.llm.stream(self.history, **skw):
+            while piece is not None:
                 um = getattr(piece, 'usage_metadata', None)
                 if isinstance(um, dict):
                     # LangChain's usage_metadata is additive by contract (AIMessageChunk
@@ -361,6 +396,10 @@ class LangChainAdapter:
                 reason = (getattr(piece, 'response_metadata', None) or {}).get('finish_reason')
                 if reason:
                     self.finish_reason = reason
+                try:
+                    piece = next(gen)
+                except StopIteration:
+                    break
             tail_text, tail_thinking = parse.flush()
             if tail_thinking:
                 yield Event('thinking', tail_thinking)

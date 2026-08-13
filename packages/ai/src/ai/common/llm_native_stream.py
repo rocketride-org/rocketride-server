@@ -313,8 +313,11 @@ def try_openai_compat_reasoning_stream(
     parts: list[str] = []
     finish_reason: Optional[str] = None
     usage: Any = None
-    try:
-        for chunk in client.chat.completions.create(**kwargs):
+    emitted = 0
+
+    def _drain(kw: Dict[str, Any]) -> None:
+        nonlocal finish_reason, usage, emitted
+        for chunk in client.chat.completions.create(**kw):
             # The final chunk carries usage with an empty choices list, so read it
             # before the choices guard skips that chunk.
             if getattr(chunk, 'usage', None) is not None:
@@ -326,17 +329,44 @@ def try_openai_compat_reasoning_stream(
             rc = getattr(delta, 'reasoning_content', None)
             if rc and on_reasoning_chunk is not None:
                 on_reasoning_chunk(rc)
+                emitted += 1
             if delta.content:
                 on_chunk(delta.content)
                 parts.append(delta.content)
+                emitted += 1
             if ch.finish_reason:
                 finish_reason = ch.finish_reason
+
+    try:
+        _drain(kwargs)
     except Exception as e:
-        warning(
-            f'llm_native_stream openai_compat_reasoning: stream failed ({type(e).__name__}): {e} '
-            '(falling back to non-streaming chat).'
-        )
-        return None
+        # This handler is wired ONLY for custom base URLs (ChatBase returns early unless
+        # openai_api_base is set), which is exactly where include_usage can 400. If the
+        # endpoint rejected it before emitting anything, retry once without it: nothing has
+        # reached on_chunk yet, so the retry cannot duplicate visible output — we just forgo
+        # the usage chunk (that endpoint goes unmetered) and keep reasoning streaming alive.
+        # A failure AFTER the first chunk can't be safely re-run: fall back to the
+        # non-streaming path, which meters itself.
+        if emitted == 0 and 'stream_options' in kwargs:
+            warning(
+                f'llm_native_stream openai_compat_reasoning: endpoint rejected stream_options '
+                f'({type(e).__name__}); retrying without include_usage (this call is unmetered).'
+            )
+            kwargs.pop('stream_options', None)
+            try:
+                _drain(kwargs)
+            except Exception as e2:
+                warning(
+                    f'llm_native_stream openai_compat_reasoning: stream failed ({type(e2).__name__}): {e2} '
+                    '(falling back to non-streaming chat).'
+                )
+                return None
+        else:
+            warning(
+                f'llm_native_stream openai_compat_reasoning: stream failed ({type(e).__name__}): {e} '
+                '(falling back to non-streaming chat).'
+            )
+            return None
 
     if not parts:
         return None
