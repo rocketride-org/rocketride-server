@@ -166,6 +166,12 @@ public class RarSevenZipParser implements Parser {
                         // are preserved. Anything else is a genuine archive read error.
                         callback.rethrowPending();
                         throw new TikaException("RarSevenZipParser failed to extract RAR entries", e);
+                    } finally {
+                        // setOperationResult() closes and deletes each entry on the normal
+                        // path, but 7-Zip-JBinding does not promise a matching call once a
+                        // callback throws. This covers the aborted entry so no stream is
+                        // left open on a corrupt archive.
+                        callback.discardActiveEntry();
                     }
                     callback.rethrowPending();
                 }
@@ -279,6 +285,34 @@ public class RarSevenZipParser implements Parser {
                     // Keep peak disk usage to a single entry rather than the whole archive.
                     file.delete();
                 }
+            }
+        }
+
+        /**
+         * Close and drop the entry still in flight, if any.
+         *
+         * On the normal path {@link #setOperationResult} has already cleared this
+         * state, so this is a no-op. It matters when extraction aborts between
+         * {@link #getStream} and {@link #setOperationResult}: the entry's stream
+         * would otherwise stay open, and on Windows that open handle also stops
+         * {@link TemporaryResources} from deleting the file it points at.
+         */
+        void discardActiveEntry() {
+            OutputStream out = currentOut;
+            File file = currentFile;
+            currentOut = null;
+            currentFile = null;
+            currentIndex = -1;
+
+            if (out != null) {
+                try {
+                    out.close();
+                } catch (IOException e) {
+                    logger.log(Level.WARNING, "Failed to close stream for aborted RAR entry", e);
+                }
+            }
+            if (file != null) {
+                file.delete();
             }
         }
 
