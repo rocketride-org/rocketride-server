@@ -242,6 +242,30 @@ class IStore(ABC):
         content = await self.read_file(filename)
         return content.encode('latin-1')
 
+    async def move_file(self, src: str, dst: str) -> None:
+        """
+        Move a file onto ``dst``, replacing it if it exists.
+
+        Backends override this with their native primitive — ``os.replace`` on a filesystem,
+        a server-side copy on an object store — which is what makes publishing a file written
+        elsewhere safe: the destination is replaced only once the new content is in place,
+        and the bytes never pass through this process.
+
+        The default below has neither property. It reads the whole file into memory and
+        writes over the destination, so a failure part-way leaves the destination damaged.
+        It exists so a backend that cannot move natively still works.
+
+        Args:
+            src: Relative path to move from
+            dst: Relative path to move onto
+
+        Raises:
+            StorageError: If the source is missing or the move fails
+        """
+        data = await self.read_bytes(src)
+        await self.write_bytes(dst, data)
+        await self.delete_file(src)
+
     # =========================================================================
     # Handle-Based I/O — open / read / write / close
     # =========================================================================
