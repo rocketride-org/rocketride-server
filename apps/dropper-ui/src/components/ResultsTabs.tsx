@@ -5,7 +5,7 @@
  */
 
 import React from 'react';
-import { Database, FileText, Table, Image, Music, Video, File, HelpCircle, MessageSquare } from 'lucide-react';
+import { Database, FileText, Table, Image, Music, Video, File, HelpCircle, MessageSquare, Fingerprint } from 'lucide-react';
 import { TabType, ProcessedResults } from '../types/dropper.types';
 
 interface ResultsTabsProps {
@@ -45,6 +45,8 @@ export const ResultsTabs: React.FC<ResultsTabsProps> = ({
 				return results.questions.some(group => group.contents.length > 1);
 			case 'answers':
 				return results.answers.some(group => group.contents.length > 1);
+				case 'hashes':
+					return results.hashes.some(group => group.contents.length > 1);
 			default:
 				return false;
 		}
@@ -155,6 +157,19 @@ export const ResultsTabs: React.FC<ResultsTabsProps> = ({
 					<MessageSquare className="w-4 h-4" />
 					<span>Answers</span>
 					<span className="tab-badge">{results.answers.length}</span>
+				</button>
+			)}
+
+			{/* Fingerprints Tab */}
+			{results.hashes.length > 0 && (
+				<button
+					onClick={() => onTabChange('hashes')}
+					className={`tab-btn ${activeTab === 'hashes' ? 'active' : ''}`}
+					type="button"
+				>
+					<Fingerprint className="w-4 h-4" />
+					<span>Fingerprints</span>
+					<span className="tab-badge">{results.hashes.length}</span>
 				</button>
 			)}
 
