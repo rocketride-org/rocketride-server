@@ -94,7 +94,15 @@ def _require_identifier(value: Any, what: str) -> str:
 
 
 class HotdataError(RuntimeError):
-    """Any non-retryable failure talking to the Hotdata API."""
+    """Any non-retryable failure talking to the Hotdata API.
+
+    Carries ``status_code`` when the failure came from an HTTP response, so
+    callers can branch on the status instead of pattern-matching the message.
+    """
+
+    def __init__(self, message: str, status_code: Optional[int] = None) -> None:
+        super().__init__(message)
+        self.status_code = status_code
 
 
 class HotdataOverloadedError(HotdataError):
@@ -235,10 +243,16 @@ class HotdataClient:
             if status >= 500:
                 if idempotent and self._sleep_before_retry(None, attempt, deadline):
                     continue
-                raise HotdataError(f'hotdata: {method} {path} failed with HTTP {status}: {_body_snippet(response)}')
+                raise HotdataError(
+                    f'hotdata: {method} {path} failed with HTTP {status}: {_body_snippet(response)}',
+                    status_code=status,
+                )
 
             if status >= 400:
-                raise HotdataError(f'hotdata: {method} {path} failed with HTTP {status}: {_body_snippet(response)}')
+                raise HotdataError(
+                    f'hotdata: {method} {path} failed with HTTP {status}: {_body_snippet(response)}',
+                    status_code=status,
+                )
 
             return _parse_json(response)
 

@@ -696,7 +696,10 @@ class IInstance(IInstanceBase):
                 key=key or None,
             )
         except Exception as e:
-            if '409' in str(e) or 'exists' in str(e).lower():
+            # 409 means the table is already declared, which is success here.
+            # Branch on the status rather than the message: a load failure whose
+            # body happened to mention 'exists' would otherwise be swallowed.
+            if getattr(e, 'status_code', None) == 409:
                 return
             raise
 

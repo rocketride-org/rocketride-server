@@ -838,7 +838,7 @@ def test_load_data_with_no_rows_does_no_work():
 
 def test_existing_table_409_is_treated_as_success():
     def _create(**_kw):
-        raise RuntimeError('hotdata: POST ... failed with HTTP 409: table exists')
+        raise client_mod.HotdataError('hotdata: POST ... failed with HTTP 409', status_code=409)
 
     g = _loaded_global()
     g.client = SimpleNamespace(
@@ -1511,3 +1511,24 @@ def test_legitimate_identifiers_build_the_expected_paths():
         connection_id='conn-1', schema='main', table='orders', index_name='i', index_type='bm25', columns=['note']
     )
     assert rec.calls[-1]['url'].endswith('/v1/connections/conn-1/tables/main/orders/indexes')
+
+
+def test_a_non_409_failure_mentioning_exists_is_not_swallowed():
+    """The 409 branch keys off the status, not the message. A different failure
+    whose body happens to say 'exists' must still propagate.
+    """
+
+    def _create(**_kw):
+        raise client_mod.HotdataError(
+            'hotdata: POST ... failed with HTTP 400: column already exists in another table',
+            status_code=400,
+        )
+
+    g = _loaded_global()
+    g.client = SimpleNamespace(
+        create_table=_create,
+        upload_bytes=lambda *_a, **_k: 'up-1',
+        load_table=lambda **_kw: {'row_count': 1},
+    )
+    with pytest.raises(client_mod.HotdataError, match='HTTP 400'):
+        _instance(g).load_data({'table': 'orders', 'rows': [{'a': 1}]})
