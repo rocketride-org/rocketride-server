@@ -57,6 +57,8 @@
 //-----------------------------------------------------------------------------
 #pragma once
 
+#include <engLib/eng.h>
+
 namespace engine::store::filter::hash {
 class IFilterGlobal;
 
