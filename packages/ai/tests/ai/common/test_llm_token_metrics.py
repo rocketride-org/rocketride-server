@@ -48,10 +48,13 @@ def test_reports_input_and_output_counters():
     assert 'llm_cache_creation_tokens' not in c
 
 
-def test_emits_llm_tokens_event_payload():
+def test_no_per_call_event_is_emitted():
+    # The per-call llm_tokens event fed an unbounded events list that taskMetricsObjectEnd
+    # re-serialized in full after every object (O(N^2), multi-MB lines on long chat tasks).
+    # It was dropped — the counters carry the billable totals, the turn collector the detail.
     report_llm_tokens(5, 9, model='gpt-5.4-mini')
-    payload = {'input': 5, 'output': 9, 'cache_read': 0, 'cache_creation': 0, 'model': 'gpt-5.4-mini'}
-    assert {'llm_tokens': payload} in _events()
+    assert _events() == []
+    assert _counters()['llm_input_tokens'] == 5
 
 
 def test_reports_cache_counters_separately():
