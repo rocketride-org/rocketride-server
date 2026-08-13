@@ -1417,14 +1417,12 @@ def test_pending_envelope_is_matched_case_insensitively():
     assert out.get('row_count') == 3, 'the job should have been polled to completion'
 
 
-def test_partial_load_releases_the_dedup_reservation():
-    """Only some rows landed, so a retry of the same payload must reach the
-    server rather than being skipped as a duplicate.
+def test_partial_append_keeps_its_reservation_and_warns_against_retry():
+    """Append is not idempotent. A partial load means an unknown subset already
+    landed, so releasing the reservation would let a blind retry duplicate
+    exactly those rows. Keep it and tell the caller to reconcile instead.
     """
-    jobs = [
-        {'status': 'partially_succeeded', 'id': 'job-1'},
-        {'status': 'succeeded', 'row_count': 1},
-    ]
+    jobs = [{'status': 'partially_succeeded', 'id': 'job-1'}]
     calls = []
     g = _global()
     g._loaded = set()
@@ -1440,8 +1438,28 @@ def test_partial_load_releases_the_dedup_reservation():
     g.database = {'id': 'db-1', 'default_schema': 'main'}
     inst = _instance(g)
     rows = [{'a': 1}]
+
     first = inst.load_data({'table': 'orders', 'rows': rows, 'mode': 'append'})
     assert first.get('partial') is True
+    assert 'do not simply retry' in first['note'].lower()
+
     second = inst.load_data({'table': 'orders', 'rows': rows, 'mode': 'append'})
-    assert not second.get('deduplicated'), 'a partial load must be retryable'
-    assert len(calls) == 2
+    assert second.get('deduplicated') is True, 'a partial append must not silently re-append'
+    assert len(calls) == 1, 'the retry must not reach the server and duplicate the landed subset'
+
+
+def test_result_id_load_does_not_claim_zero_rows():
+    """A result_id load has no local row count; reporting 0 would claim an empty
+    load that may well have inserted rows.
+    """
+    g = _global()
+    g._loaded = set()
+    g.client = SimpleNamespace(
+        create_database=lambda **_kw: {'id': 'db-1', 'default_schema': 'main'},
+        create_table=lambda **_kw: {},
+        information_schema=lambda **_kw: {'tables': []},
+        load_table=lambda **_kw: {'status': 'succeeded'},
+    )
+    g.database = {'id': 'db-1', 'default_schema': 'main'}
+    out = _instance(g).load_data({'table': 'orders', 'result_id': 'res-1', 'mode': 'append'})
+    assert out['row_count'] is None, f'unknown must stay unknown, got {out["row_count"]}'

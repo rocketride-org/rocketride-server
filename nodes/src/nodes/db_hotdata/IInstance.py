@@ -829,11 +829,11 @@ class IInstance(IInstanceBase):
                 key=key,
                 rows=rows,
             )
-            if fingerprint and result.get('partial'):
-                # Only some rows landed. Keeping the reservation would make a
-                # retry of the same payload report deduplicated and drop the
-                # missing rows for good.
-                glb.release_load(fingerprint)
+            # A partial append deliberately KEEPS its reservation. Append is not
+            # idempotent, so an unknown subset of the payload already landed and
+            # a blind retry would duplicate exactly those rows. There is no safe
+            # automatic action here: the caller has to reconcile. Releasing would
+            # trade silent data loss for silent duplication.
             return result
         except Exception:
             if fingerprint:
@@ -875,14 +875,20 @@ class IInstance(IInstanceBase):
                 (finished.get('result') or {}).get('row_count') if isinstance(finished.get('result'), dict) else None
             )
         debug(f'db_hotdata: loaded into {schema}.{table} (mode {mode})')
-        if row_count is None:
-            # output_schema declares an integer; the agent should not see null
-            # after a load that succeeded.
-            row_count = len(rows) if rows else 0
+        if row_count is None and rows:
+            # Fall back only when we actually uploaded inline rows. A result_id
+            # load has no local count, and reporting 0 there would claim an empty
+            # load that may well have inserted rows.
+            row_count = len(rows)
         out = {'table': table, 'schema': schema, 'mode': mode, 'row_count': row_count}
         if finished.get('partial'):
             out['partial'] = True
-            out['note'] = 'The load only partially succeeded; some rows may be missing. Retrying is safe.'
+            out['note'] = (
+                'The load only partially succeeded: an unknown subset of the rows landed. '
+                'Do NOT simply retry this payload - append is not idempotent, so a retry would '
+                'duplicate the rows that did load. Query the table to see what is present and '
+                'load only what is missing.'
+            )
         return out
 
     @tool_function(
