@@ -46,7 +46,7 @@ reviews:
         accept hand edits inside the ROCKETRIDE:GENERATED:PARAMS region. If a
         PR changes node behavior, config fields, or tools without updating the
         README, flag it.
-    - path: 'docs/clients/**/*.md'
+    - path: 'docs/public/**/*.md'
       instructions: |
         Client docs follow docs/development/client-readme-schema.md. The Python
         and TypeScript readmes must stay in parity: an API method, type, or

@@ -3,7 +3,7 @@
 docs/development/client-readme-schema.md.
 
 Deterministic, no LLM. Checks section order and API symbol parity between
-docs/clients/python/readme.md and docs/clients/typescript/readme.md.
+docs/public/python/README.md and docs/public/typescript/README.md.
 Symbols are harvested from the first backticked cell of table rows inside
 the shared API sections and normalized across naming conventions
 (snake_case == camelCase). Rows ending with an HTML comment containing
@@ -87,8 +87,8 @@ def harvest(section_text: str):
 def main():
     root = Path(sys.argv[1]) if len(sys.argv) > 1 else Path('.')
     files = {
-        'python': root / 'docs/clients/python/readme.md',
-        'typescript': root / 'docs/clients/typescript/readme.md',
+        'python': root / 'docs/public/python/README.md',
+        'typescript': root / 'docs/public/typescript/README.md',
     }
     failures = []
 
