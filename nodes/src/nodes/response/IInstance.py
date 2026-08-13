@@ -109,6 +109,14 @@ class IInstance(IInstanceBase):
                         dest[key] = value
             return dest
 
+        if self.instance.currentObject.hasComponentId and self.IGlobal.glb.logicalType == 'response_hash':
+            key = self._getkey('hash')
+
+            if key not in self.instance.currentObject.response:
+                self.instance.currentObject.response[key] = []
+
+            self.instance.currentObject.response[key].append(self.instance.currentObject.componentId)
+
         if self.text:
             # Get the key to write to
             key = self._getkey('text')
