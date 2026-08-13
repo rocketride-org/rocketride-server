@@ -795,19 +795,33 @@ class IInstance(IInstanceBase):
             # rather than duplicating business data.
             if mode == 'append':
                 fingerprint = hashlib.sha256(f'{schema}.{table}|'.encode('utf-8') + payload).hexdigest()
-                if glb.seen_load(fingerprint):
+                prior = glb.seen_load(fingerprint)
+                if prior is not None:
                     warning(f'db_hotdata: identical append to {schema}.{table} already ran this session; skipping')
-                    return {
+                    out = {
                         'table': table,
                         'schema': schema,
                         'mode': mode,
                         'row_count': len(rows),
                         'deduplicated': True,
-                        'note': (
+                    }
+                    if prior == 'partial':
+                        # Reporting this as a clean duplicate would claim the table
+                        # holds all the rows, which a partial load contradicts.
+                        out['partial'] = True
+                        out['note'] = (
+                            'This exact payload was already attempted during this run and only '
+                            'partially succeeded: an unknown subset of the rows landed. It was NOT '
+                            'loaded again, because append is not idempotent and a retry would '
+                            'duplicate whatever did land. Query the table to see what is present '
+                            'and load only what is missing.'
+                        )
+                    else:
+                        out['note'] = (
                             'This exact payload was already appended to this table during this run, '
                             'so it was not loaded again. The table already contains these rows.'
-                        ),
-                    }
+                        )
+                    return out
 
             upload_id = glb.client.upload_bytes(
                 payload,
@@ -832,6 +846,8 @@ class IInstance(IInstanceBase):
                 key=key,
                 rows=rows,
             )
+            if fingerprint:
+                glb.record_load(fingerprint, 'partial' if result.get('partial') else 'complete')
             # A partial append deliberately KEEPS its reservation. Append is not
             # idempotent, so an unknown subset of the payload already landed and
             # a blind retry would duplicate exactly those rows. There is no safe

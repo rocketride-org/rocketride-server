@@ -1174,7 +1174,7 @@ def test_get_data_retries_after_a_rejected_write_and_succeeds():
 
 def _load_global(uploads, *, destructive=False):
     g = _global(allow_destructive_load=destructive)
-    g._loaded = set()
+    g._loaded = {}
     g.client = SimpleNamespace(
         create_database=lambda **_kw: {'id': 'db-1', 'default_schema': 'main'},
         upload_bytes=lambda payload, **_kw: uploads.append(payload) or f'upl-{len(uploads)}',
@@ -1311,7 +1311,7 @@ def test_execute_still_blocks_sql_writes_regardless_of_the_load_gate():
 
 def _failing_load_global(calls, fail_times):
     g = _global()
-    g._loaded = set()
+    g._loaded = {}
     state = {'n': 0}
 
     def _load(**_kw):
@@ -1361,7 +1361,7 @@ def test_result_id_load_failure_propagates_without_nameerror():
     never creates one, so the name must still be bound. This regressed once.
     """
     g = _global()
-    g._loaded = set()
+    g._loaded = {}
     g.client = SimpleNamespace(
         create_database=lambda **_kw: {'id': 'db-1', 'default_schema': 'main'},
         create_table=lambda **_kw: {},
@@ -1400,11 +1400,13 @@ def test_drop_database_clears_the_dedup_fingerprints():
     g = _global()
     handle = {'id': 'db-1'}
     g.database = handle
-    g._loaded = set()
-    assert g.seen_load('fp-1') is False
+    g._loaded = {}
+    assert g.seen_load('fp-1') is None, 'first sight of a payload reserves it'
+    g.record_load('fp-1', 'complete')
+    assert g.seen_load('fp-1') == 'complete'
     g.drop_database(handle)
     assert g.database is None
-    assert g.seen_load('fp-1') is False, 'the fingerprint should not survive the drop'
+    assert g.seen_load('fp-1') is None, 'the fingerprint should not survive the drop'
 
 
 def test_pending_envelope_is_matched_case_insensitively():
@@ -1425,7 +1427,7 @@ def test_partial_append_keeps_its_reservation_and_warns_against_retry():
     jobs = [{'status': 'partially_succeeded', 'id': 'job-1'}]
     calls = []
     g = _global()
-    g._loaded = set()
+    g._loaded = {}
     g.client = SimpleNamespace(
         create_database=lambda **_kw: {'id': 'db-1', 'default_schema': 'main'},
         create_table=lambda **_kw: {},
@@ -1453,7 +1455,7 @@ def test_result_id_load_does_not_claim_zero_rows():
     load that may well have inserted rows.
     """
     g = _global()
-    g._loaded = set()
+    g._loaded = {}
     g.client = SimpleNamespace(
         create_database=lambda **_kw: {'id': 'db-1', 'default_schema': 'main'},
         create_table=lambda **_kw: {},
@@ -1532,3 +1534,34 @@ def test_a_non_409_failure_mentioning_exists_is_not_swallowed():
     )
     with pytest.raises(client_mod.HotdataError, match='HTTP 400'):
         _instance(g).load_data({'table': 'orders', 'rows': [{'a': 1}]})
+
+
+def test_a_repeated_partial_append_keeps_reporting_partial():
+    """A partial outcome must survive the dedup branch. Reporting the repeat as a
+    clean duplicate would claim the table holds every row, which the partial
+    result contradicts.
+    """
+    jobs = [{'status': 'partially_succeeded', 'id': 'job-1'}]
+    calls = []
+    g = _global()
+    g._loaded = {}
+    g.client = SimpleNamespace(
+        create_database=lambda **_kw: {'id': 'db-1', 'default_schema': 'main'},
+        create_table=lambda **_kw: {},
+        information_schema=lambda **_kw: {'tables': []},
+        upload_bytes=lambda *_a, **_k: 'upl-1',
+        load_table=lambda **_kw: calls.append(1) or {'status': 'pending', 'id': 'job-1'},
+        get_job=lambda _i: jobs.pop(0),
+    )
+    g.database = {'id': 'db-1', 'default_schema': 'main'}
+    inst = _instance(g)
+    rows = [{'a': 1}]
+
+    first = inst.load_data({'table': 'orders', 'rows': rows, 'mode': 'append'})
+    assert first.get('partial') is True
+
+    second = inst.load_data({'table': 'orders', 'rows': rows, 'mode': 'append'})
+    assert second.get('deduplicated') is True
+    assert second.get('partial') is True, 'the repeat must still be reported as partial'
+    assert 'only what is missing' in second['note']
+    assert len(calls) == 1, 'the repeat must not reach the server'

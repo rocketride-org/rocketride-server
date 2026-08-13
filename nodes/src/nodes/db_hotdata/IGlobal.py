@@ -74,7 +74,10 @@ class IGlobal(IGlobalBase):
     # Fingerprints of append payloads already loaded this run. Hotdata has no
     # idempotency key on loads and append duplicates rows, so a retrying agent
     # would silently double the data without this.
-    _loaded: Optional[set] = None
+    #: fingerprint -> outcome: "pending" while in flight, then "complete"
+    #: or "partial". A partial append must keep reporting itself as
+    #: partial, or a repeat call is told the table has all the rows.
+    _loaded: Optional[dict] = None
 
     apikey: str = ''
     workspace_id: str = ''
@@ -93,7 +96,7 @@ class IGlobal(IGlobalBase):
             return
 
         self._db_lock = threading.Lock()
-        self._loaded = set()
+        self._loaded = {}
 
         cfg = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
 
@@ -142,32 +145,40 @@ class IGlobal(IGlobalBase):
                 database = self.database
         return database
 
-    def seen_load(self, fingerprint: str) -> bool:
-        """Reserve an append payload; True if this exact payload already ran.
+    def seen_load(self, fingerprint: str) -> Optional[str]:
+        """Reserve an append payload; return the prior outcome if there was one.
 
-        Append is not idempotent on Hotdata's side, so a repeated identical
-        load would duplicate rows. Checked and recorded atomically because
-        agents fire tool calls in parallel.
+        Append is not idempotent on Hotdata's side, so a repeated identical load
+        would duplicate rows. Checked and recorded atomically because agents fire
+        tool calls in parallel.
 
-        This is a *reservation*, not a record of success. The caller must call
-        ``release_load`` if the load then fails, otherwise a retry of a failed
-        load would be skipped as a duplicate and the rows would be lost while
-        the tool reported them as already present.
+        Returns None when this payload is new (and reserves it), otherwise the
+        stored outcome: ``pending``, ``complete`` or ``partial``. The caller must
+        call ``release_load`` if the load then fails, or ``record_load`` with the
+        final outcome once it settles.
         """
         if self._loaded is None:
-            self._loaded = set()
+            self._loaded = {}
         with self._db_lock:
-            if fingerprint in self._loaded:
-                return True
-            self._loaded.add(fingerprint)
-            return False
+            existing = self._loaded.get(fingerprint)
+            if existing is not None:
+                return existing
+            self._loaded[fingerprint] = 'pending'
+            return None
+
+    def record_load(self, fingerprint: str, outcome: str) -> None:
+        """Record how a reserved load finished: 'complete' or 'partial'."""
+        if self._loaded is None:
+            self._loaded = {}
+        with self._db_lock:
+            self._loaded[fingerprint] = outcome
 
     def release_load(self, fingerprint: str) -> None:
         """Undo a reservation whose load did not complete, so a retry can run."""
         if not self._loaded:
             return
         with self._db_lock:
-            self._loaded.discard(fingerprint)
+            self._loaded.pop(fingerprint, None)
 
     def drop_database(self, database: Dict[str, Any]) -> None:
         """Forget a database the server reports gone.
