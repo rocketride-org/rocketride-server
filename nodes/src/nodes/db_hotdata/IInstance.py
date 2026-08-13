@@ -162,7 +162,9 @@ def _schema_summary(tables: List[Any]) -> List[str]:
         name = '.'.join(p for p in (table.get('schema'), table.get('table')) if p)
         columns = table.get('columns') or []
         rendered = ', '.join(
-            f'{c.get("name")} {c.get("data_type")}'.strip() for c in columns if isinstance(c, dict) and c.get('name')
+            f'{c.get("name") or c.get("column_name")} {c.get("data_type") or c.get("type") or ""}'.strip()
+            for c in columns
+            if isinstance(c, dict) and (c.get('name') or c.get('column_name'))
         )
         lines.append(f'{name}({rendered})' if rendered else f'{name}(no columns reported)')
     return lines
@@ -182,6 +184,11 @@ def _to_ndjson(rows: List[Any]) -> bytes:
     return ('\n'.join(lines) + '\n').encode('utf-8')
 
 
+def _cell(value: Any) -> str:
+    """Render one table cell: pipes and newlines both break the row otherwise."""
+    return str(value).replace('|', '\\|').replace('\r\n', ' ').replace('\n', ' ').replace('\r', ' ')
+
+
 def _rows_to_markdown(rows: List[Any], limit: int = 100) -> str:
     """Render result rows as a GitHub-flavored table for the text/table lanes."""
     if not rows:
@@ -198,7 +205,7 @@ def _rows_to_markdown(rows: List[Any], limit: int = 100) -> str:
 
     header = '| ' + ' | '.join(columns) + ' |'
     divider = '| ' + ' | '.join('---' for _ in columns) + ' |'
-    body = ['| ' + ' | '.join(str(row.get(c, '')).replace('|', '\\|') for c in columns) + ' |' for row in shown]
+    body = ['| ' + ' | '.join(_cell(row.get(c, '')) for c in columns) + ' |' for row in shown]
     table = '\n'.join([header, divider] + body)
     if len(rows) > limit:
         table += f'\n\n_{len(rows) - limit} more rows not shown._'
@@ -471,7 +478,7 @@ class IInstance(IInstanceBase):
         question_text: str,
         limit: int,
         previous_sql: str = '',
-        error: str = '',
+        previous_error: str = '',
     ) -> str:
         """Translate a question to SQL with the bound LLM."""
         glb = self.IGlobal
@@ -494,16 +501,16 @@ class IInstance(IInstanceBase):
 
         q.addExample(
             'Which products sold the most units?',
-            'SELECT product, SUM(units) AS "units" FROM sales GROUP BY product ORDER BY "units" DESC LIMIT 250',
+            f'SELECT product, SUM(units) AS "units" FROM sales GROUP BY product ORDER BY "units" DESC LIMIT {limit}',
         )
         q.addExample(
             'Find support tickets that mention a refund',
-            "SELECT * FROM bm25_search('default.main.tickets', 'body', 'refund') LIMIT 250",
+            f"SELECT * FROM bm25_search('default.main.tickets', 'body', 'refund') LIMIT {limit}",
         )
 
-        if previous_sql and error:
+        if previous_sql and previous_error:
             q.addContext(
-                f'Your previous SQL was rejected with this error:\n\n{error}\n\n'
+                f'Your previous SQL was rejected with this error:\n\n{previous_error}\n\n'
                 f'Failed SQL:\n{previous_sql}\n\n'
                 f'Fix the query and try again.'
             )
@@ -588,7 +595,7 @@ class IInstance(IInstanceBase):
         previous_sql = ''
         last_error = ''
         for attempt in range(1, attempts + 1):
-            sql = self._generate_sql(question_text, limit, previous_sql=previous_sql, error=last_error)
+            sql = self._generate_sql(question_text, limit, previous_sql=previous_sql, previous_error=last_error)
             cleaned, statement_count = _split_statements(sql)
             if statement_count > 1:
                 previous_sql, last_error = sql, 'Only one statement per request is allowed.'
@@ -760,6 +767,8 @@ class IInstance(IInstanceBase):
         database_id = database.get('id')
         schema = str(args.get('schema') or '').strip() or database.get('default_schema') or 'main'
 
+        if not database_id:
+            raise RuntimeError('db_hotdata: database was created without an id')
         self._ensure_table(database_id, schema, table, key)
 
         upload_id = ''
@@ -866,6 +875,10 @@ class IInstance(IInstanceBase):
                 (finished.get('result') or {}).get('row_count') if isinstance(finished.get('result'), dict) else None
             )
         debug(f'db_hotdata: loaded into {schema}.{table} (mode {mode})')
+        if row_count is None:
+            # output_schema declares an integer; the agent should not see null
+            # after a load that succeeded.
+            row_count = len(rows) if rows else 0
         out = {'table': table, 'schema': schema, 'mode': mode, 'row_count': row_count}
         if finished.get('partial'):
             out['partial'] = True

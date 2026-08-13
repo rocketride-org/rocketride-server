@@ -28,6 +28,9 @@ It needs a connected LLM (the `llm` control connection) to translate questions i
 | --- | --- | --- |
 | `questions` | in | Natural-language question, answered and emitted to `table` / `text` / `answers` |
 | `answers` | in | Structured rows, loaded into the configured table |
+| `table` | out | Query results as a Markdown table |
+| `text` | out | Query results rendered as text |
+| `answers` | out | Query results as an answer payload |
 
 ## Setup
 

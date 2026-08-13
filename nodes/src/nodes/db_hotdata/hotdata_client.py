@@ -305,8 +305,11 @@ class HotdataClient:
     ) -> Dict[str, Any]:
         """Introspect via the REST endpoint.
 
-        ``SHOW TABLES`` / ``SHOW COLUMNS`` error on this engine, so REST
-        introspection (or ``information_schema`` in SQL) is the only route.
+        Preferred over the ``SHOW`` forms for reliability, not because they
+        fail: ``SHOW TABLES`` works (verified 2026-08-13, contrary to Hotdata's
+        written brief), but ``DESCRIBE`` / ``SHOW COLUMNS`` return nothing for a
+        table that has never been loaded. REST returns structured columns in a
+        single call regardless.
 
         Scoped by **connection_id**, not database_id - a database's connection is
         its ``default_connection_id``. Passing database_id here is silently

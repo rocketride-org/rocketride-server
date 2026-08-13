@@ -527,15 +527,18 @@ def test_execute_limit_is_clamped_and_booleans_rejected():
 
     def _query(**kw):
         seen.update(kw)
-        return {'rows': []}
+        return {'rows': [{'a': i} for i in range(25)]}
 
     g = _global(max_execute_rows=10)
     g.client = SimpleNamespace(query=_query, create_database=lambda **_kw: {'id': 'db-1'})
     inst = _instance(g)
+    # execute does not rewrite the SQL - it slices the returned rows - so assert
+    # the effective limit through row_count rather than the statement text.
     out = inst.execute({'sql': 'SELECT 1', 'limit': 9999})
-    assert out['row_count'] == 0
+    assert out['row_count'] == 10, f'9999 should clamp to max_execute_rows=10, got {out["row_count"]}'
     # JSON true must not be read as limit=1
-    inst.execute({'sql': 'SELECT 1', 'limit': True})
+    out = inst.execute({'sql': 'SELECT 1', 'limit': True})
+    assert out['row_count'] == 10, f'a boolean limit must not be coerced to 1, got {out["row_count"]}'
 
 
 def test_execute_follows_async_run_to_a_result():
@@ -1104,7 +1107,6 @@ def test_answers_lane_surfaces_a_load_failure():
     inst = _instance(g)
     with pytest.raises(RuntimeError, match='load rejected'):
         inst.writeAnswers(_StubAnswer([{'a': 1}]))
-    assert any('writeAnswers' in m for m in _WARNING_CALLS + _DEBUG_CALLS) or True
 
 
 def test_markdown_rendering_escapes_pipes_and_truncates():
@@ -1142,7 +1144,6 @@ def test_get_data_rejects_generated_write_sql_without_calling_the_server():
         inst.get_data({'question': 'make a customers table'})
 
     assert calls == [], 'generated DDL must never reach the server'
-    assert any('read-only' in m for m in _DEBUG_CALLS + _WARNING_CALLS) or True
 
 
 def test_get_data_retries_after_a_rejected_write_and_succeeds():
