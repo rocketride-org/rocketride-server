@@ -1,0 +1,160 @@
+{
+	"title": "Hotdata",
+	"protocol": "db_hotdata://",
+	"classType": ["database", "tool"],
+	"capabilities": ["noremote", "invoke"],
+	"register": "filter",
+	"node": "python",
+	"path": "nodes.db_hotdata",
+	"prefix": "hotdata",
+	"icon": "hotdata.svg",
+	"documentation": "https://docs.rocketride.org",
+	"description": [
+		"Creates one ephemeral Hotdata database for each pipeline run.",
+		"Lets agents inspect its live schema and execute read-only SQL before the database is destroyed at teardown."
+	],
+	"tile": [],
+	"lanes": {
+		"answers": [],
+		"questions": ["table", "text", "answers"]
+	},
+	"invoke": {
+		"llm": {
+			"description": "LLM used to generate SQL from natural language",
+			"min": 1
+		}
+	},
+	"preconfig": {
+		"default": "default",
+		"profiles": {
+			"default": {
+				"title": "Hotdata",
+				"apikey": ""
+			}
+		}
+	},
+	"fields": {
+		"hotdata.apikey": {
+			"type": "string",
+			"title": "API Key",
+			"description": "Hotdata API key.",
+			"default": "",
+			"secure": true,
+			"ui": {
+				"ui:widget": "ApiKeyWidget"
+			}
+		},
+		"hotdata.workspace_id": {
+			"type": "string",
+			"title": "Workspace ID",
+			"description": "Hotdata workspace ID.",
+			"default": ""
+		},
+		"hotdata.api_url": {
+			"type": "string",
+			"title": "API URL",
+			"description": "Hotdata API base URL. Leave empty for https://api.hotdata.dev.",
+			"default": "",
+			"optional": true
+		},
+		"hotdata.ttl": {
+			"type": "string",
+			"title": "Database lifetime",
+			"description": "Crash-safety expiry for the ephemeral database.",
+			"default": "24h",
+			"enum": [
+				["1h", "1 hour"],
+				["24h", "24 hours"],
+				["7d", "7 days"]
+			]
+		},
+		"hotdata.table": {
+			"type": "string",
+			"title": "Table",
+			"description": "Table that rows arriving on the answers lane are loaded into. Created on first use.",
+			"default": "pipeline_data"
+		},
+		"hotdata.db_description": {
+			"type": "string",
+			"title": "Database description",
+			"description": "Schema and domain hints for natural-language SQL generation.",
+			"default": "",
+			"optional": true
+		},
+		"hotdata.max_attempts": {
+			"type": "integer",
+			"title": "Maximum attempts",
+			"description": "Maximum SQL-generation attempts.",
+			"default": 3,
+			"minimum": 1,
+			"maximum": 10
+		},
+		"hotdata.max_execute_rows": {
+			"type": "integer",
+			"title": "Maximum execute rows",
+			"description": "Maximum rows returned by raw SQL execution.",
+			"default": 25000,
+			"minimum": 1,
+			"maximum": 25000
+		},
+		"hotdata.allow_destructive_load": {
+			"type": "boolean",
+			"title": "Allow destructive loads",
+			"description": "Permit load_data to use replace, update or delete modes, which overwrite or remove existing rows. Off by default: load_data is append/upsert only, so an agent cannot destroy data another pipeline step loaded.",
+			"default": false
+		},
+		"hotdata.allow_execute": {
+			"type": "boolean",
+			"title": "Allow direct query execution",
+			"description": "Permit trusted callers to submit raw read-only SQL.",
+			"default": false
+		},
+		"hotdata.job_timeout_secs": {
+			"type": "integer",
+			"title": "Job timeout (seconds)",
+			"description": "Maximum time to wait for an asynchronous query.",
+			"default": 300,
+			"minimum": 10,
+			"maximum": 3600
+		},
+		"hotdata.async_after_ms": {
+			"type": "integer",
+			"title": "Run asynchronously after (milliseconds)",
+			"description": "Wait this long before a query continues as an asynchronous job.",
+			"default": 5000,
+			"minimum": 0,
+			"maximum": 60000
+		}
+	},
+	"test": {
+		"profiles": ["default"],
+		"outputs": [],
+		"cases": [
+			{
+				"name": "Hotdata smoke test (placeholder key)",
+				"questions": "test query"
+			}
+		]
+	},
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Hotdata",
+			"properties": [
+				"type",
+				"hotdata.apikey",
+				"hotdata.workspace_id",
+				"hotdata.api_url",
+				"hotdata.ttl",
+				"hotdata.table",
+				"hotdata.db_description",
+				"hotdata.max_attempts",
+				"hotdata.max_execute_rows",
+				"hotdata.allow_execute",
+				"hotdata.allow_destructive_load",
+				"hotdata.job_timeout_secs",
+				"hotdata.async_after_ms"
+			]
+		}
+	]
+}

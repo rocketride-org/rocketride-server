@@ -153,6 +153,7 @@ channel; they have no data lanes and **bind to an agent** (see
 | `db_postgres`   | answers, questions → answers, table, text | PostgreSQL and Supabase (insert + NL-to-SQL) |
 | `db_mysql`      | answers, questions → answers, table, text | MySQL                                        |
 | `db_clickhouse` | questions → answers, table, text   | ClickHouse (NL-to-SQL)                       |
+| `db_hotdata`    | answers, questions → answers, table, text | Hotdata (ephemeral per-run database, load + index + NL-to-SQL) |
 
 ### Graph Databases
 
