@@ -422,8 +422,9 @@ class IInstance(IInstanceBase):
         self._check_path(candidate)
 
         if self.IGlobal.on_conflict == OnConflict.OVERWRITE:
-            # FilesystemStore.open_write opens 'wb' and FileStore.write is
-            # last-write-wins, so replacing needs no explicit truncate here.
+            # No probe: replacing is the point, so a stat only costs a round-trip. How the
+            # replacement happens is decided later — a one-shot write is last-write-wins, a
+            # stream goes through _write_path_for.
             return candidate
 
         if self.IGlobal.on_conflict == OnConflict.SKIP:
@@ -597,14 +598,11 @@ class IInstance(IInstanceBase):
     def _write_path_for(self, path: str) -> str:
         """Where the stream's bytes actually go.
 
-        Only ``overwrite`` needs staging. Under ``unique`` and ``skip`` the destination was
-        probed free, so there is nothing at risk and the stream writes straight to it.
-
-        Under ``overwrite`` the destination holds the operator's file, and opening it is
-        already destructive — the filesystem backend truncates at ``open_write``, and the
-        object stores commit over it at ``close_write``. Writing to a sibling and renaming
-        on success keeps the original intact until there is a complete file to replace it
-        with, and makes the failure cleanup unambiguous: the staging file is always ours.
+        Only ``overwrite`` stages. Opening the destination is already destructive — the
+        filesystem backend truncates at ``open_write`` — so the stream writes to a sibling
+        and renames on success, leaving the operator's file intact until there is a complete
+        one to replace it with. ``unique`` and ``skip`` probed their path free and write to
+        it directly.
 
         Args:
             path: The final destination.
@@ -641,8 +639,11 @@ class IInstance(IInstanceBase):
             return
         try:
             _run_on_stream_loop(self.IGlobal.file_store.delete(write_path))
-        except Exception:
-            pass
+        except Exception as e:
+            # The cleanup itself failed — the store may still hold the handle the failed
+            # close left open. Say so: the leftover is inert, but silence is how it ends up
+            # discovered by hand in the target directory months later.
+            warning(f'tool_filesystem: could not remove {write_path!r} after a failed write: {e}')
 
     def _stream_filename(self, descriptor, mime: str) -> str:
         """Filename for one media stream, preferring the name the stream carries.
@@ -716,9 +717,8 @@ class IInstance(IInstanceBase):
             try:
                 _run_on_stream_loop(self.IGlobal.file_store.write_chunk(st['handle'], bytes(data)))
             except Exception:
-                # Nothing later in this object reaches this stream, so without discarding it
-                # here the handle stays open — holding the store's write lock — and the
-                # partial file sits in the store until the next object's open() sweeps it.
+                # Nothing later in this object revisits this stream, so undiscarded it would
+                # hold the store's write lock until the next object's open().
                 self._media_abort(kind)
                 raise
         elif aviAction == AVI_ACTION.END:

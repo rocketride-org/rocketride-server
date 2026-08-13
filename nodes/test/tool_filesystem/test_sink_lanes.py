@@ -454,3 +454,32 @@ def test_chunk_write_failure_discards_the_stream():
     (deleted,), _ = fs.delete.await_args
     assert deleted == 'output/o7.png'
     assert not inst._media_streams.get('image'), 'the stream must not stay pending'
+
+
+def test_failed_cleanup_is_reported_not_swallowed():
+    """When the cleanup delete fails, the leftover must at least be named.
+
+    Observed against a real store: a close that fails without releasing the OS handle
+    leaves the staging file undeletable. Nothing downstream breaks, but a silent pass here
+    means the debris is only ever found by looking in the directory.
+    """
+    import tool_filesystem.IInstance as mod
+
+    fs = _fs()
+    fs.close_write.side_effect = RuntimeError('close failed')
+    fs.delete.side_effect = RuntimeError('still open')
+    inst = _sink_instance(fs, has_name=False, object_id='o8', on_conflict='overwrite')
+    from rocketlib import AVI_ACTION
+
+    said = []
+    original = mod.warning
+    mod.warning = lambda msg: said.append(msg)
+    try:
+        inst.writeImage(AVI_ACTION.BEGIN, 'image/png', b'')
+        inst.writeImage(AVI_ACTION.WRITE, 'image/png', b'bytes')
+        with pytest.raises(RuntimeError, match='close failed'):
+            inst.writeImage(AVI_ACTION.END, 'image/png', b'')
+    finally:
+        mod.warning = original
+
+    assert any('o8.png.part-o8' in m for m in said), f'the leftover path must be named: {said}'

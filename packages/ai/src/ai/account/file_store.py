@@ -993,9 +993,9 @@ class FileStore:
         if not old_rest or not new_rest:
             raise StorageError('rename cannot target a scope root')
 
-        # Check for directory (has children under old_path/). Listing a prefix returns the
-        # file sitting at that path too, so it has to be excluded — counting it would send
-        # every plain file down the directory branch. Same test as stat() uses for is_dir.
+        # Directory means children under old_path/. Listing a prefix also returns the file
+        # sitting at that path, so it is excluded — counting it sends every plain file down
+        # the directory branch. Same test stat() uses.
         dir_prefix = old_full.rstrip('/') + '/'
         listed = await self._store.list_files(dir_prefix)
         all_files = [f for f in listed if f != old_full and f.startswith(dir_prefix)]
@@ -1034,10 +1034,9 @@ class FileStore:
                     pass
                 if dest_exists:
                     raise StorageError(f'Destination already exists: {new_path}')
-            # Native move: on a filesystem this is os.replace, on an object store a
-            # server-side copy. Both leave the destination untouched until the new content
-            # is in place, and neither reads the file through this process — which a
-            # read-then-write would, spiking memory by the file's whole size.
+            # Native move — os.replace, or a server-side copy on an object store. Leaves the
+            # destination alone until the new content is in place, and never reads the file
+            # through this process, which a read-then-write would.
             await self._store.move_file(old_full, new_full)
 
     async def stat(self, path: str) -> dict:
