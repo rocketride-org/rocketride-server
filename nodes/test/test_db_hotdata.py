@@ -1605,12 +1605,23 @@ def test_concurrent_identical_append_gets_in_progress_not_false_success():
     rows = [{'a': 1}]
     results = {}
 
-    first = threading.Thread(
-        target=lambda: results.update(first=inst.load_data({'table': 'orders', 'rows': rows, 'mode': 'append'}))
-    )
+    def _run_first():
+        try:
+            results['first'] = inst.load_data({'table': 'orders', 'rows': rows, 'mode': 'append'})
+        except Exception as exc:  # reported below instead of hanging the suite
+            results['error'] = exc
+
+    first = threading.Thread(target=_run_first)
     first.start()
-    while not calls:  # wait until the first call is genuinely mid-flight
+    # Bounded wait. If the first call fails before reaching load_table, `calls`
+    # never fills, and an unbounded loop here would hang the entire test suite.
+    deadline = time.monotonic() + 5
+    while not calls and time.monotonic() < deadline:
         time.sleep(0.01)
+    if not calls:
+        gate.set()
+        first.join(timeout=5)
+        pytest.fail(f'the first load never reached load_table: {results.get("error")!r}')
 
     second = inst.load_data({'table': 'orders', 'rows': rows, 'mode': 'append'})
     assert second.get('in_progress') is True, 'a mid-flight duplicate must not report completion'
