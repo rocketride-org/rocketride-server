@@ -24,14 +24,14 @@ const NODES_GLOB = 'nodes/src/nodes/*/README.md';
 const GENERATED_START = '<!-- ROCKETRIDE:GENERATED:PARAMS START -->';
 const DOCS_GLOB = '{nodes,packages,apps}/**/docs/**/*.{md,mdx}';
 // Top-level docs/ tree mounts (docs consolidation): source dir -> spine slot.
-// readme.md files inside these roots are package-README export sources
+// README.md files inside these roots are package-README export sources
 // (docs:export), never site pages.
 const DOCS_ROOT_MOUNTS = [
-	{ source: 'docs/clients/typescript', mount: 'develop/typescript' },
-	{ source: 'docs/clients/python', mount: 'develop/python' },
-	{ source: 'docs/clients/vscode', mount: 'ide-extensions/vscode' },
-	{ source: 'docs/protocols/mcp', mount: 'protocols/mcp' },
-	{ source: 'docs/protocols/websocket', mount: 'protocols/websocket' },
+	{ source: 'docs/public/typescript', mount: 'develop/typescript' },
+	{ source: 'docs/public/python', mount: 'develop/python' },
+	{ source: 'docs/public/vscode', mount: 'ide-extensions/vscode' },
+	{ source: 'docs/public/mcp', mount: 'protocols/mcp' },
+	{ source: 'docs/development/websocket', mount: 'protocols/websocket' },
 ];
 // Node sources and node tests are excluded from the package-mount pass: node
 // markdown is the nodes contributor's domain (staged when the node's top-level
@@ -554,13 +554,19 @@ async function gather({ projectRoot, contentStaticDir, contentDir, staticDir, mo
 	}
 
 	// 3. Declared per-package mounts, plus the central top-level docs/ tree mounts
-	//    (DOCS_ROOT_MOUNTS). readme.md files under a root mount are skipped — they
-	//    are future package-README export sources (docs:export), never site pages.
+	//    (DOCS_ROOT_MOUNTS). README.md files under a root mount are skipped — they
+	//    are package-README export sources (docs:export), never site pages.
+	//    The sweep covers all of docs/public/ plus docs/development/websocket, so
+	//    any new .md there without a covering mount aborts the build. Exclusions:
+	//    docs/public/product/ is the shell-authored spine (staged in pass 1, not a
+	//    mount), and docs/public/n8n/ holds only the exported README. Non-markdown
+	//    files (per-client assets/, docs/public/assets/) are never swept — the
+	//    globs match .md/.mdx only, so images need no mount coverage.
 	const contributors = discoverContributors().concat(
 		DOCS_ROOT_MOUNTS.map((m) => ({ sourceDir: path.join(projectRoot, m.source), mount: m.mount, module: 'docs' }))
 	);
 	const packageDocsFiles = await glob(DOCS_GLOB, { cwd: projectRoot, nodir: true, ignore: IGNORE });
-	const rootDocsFiles = await glob('docs/{clients,protocols}/**/*.{md,mdx}', { cwd: projectRoot, nodir: true, ignore: ['**/readme.md'] });
+	const rootDocsFiles = await glob(['docs/public/**/*.{md,mdx}', 'docs/development/websocket/**/*.{md,mdx}'], { cwd: projectRoot, nodir: true, ignore: ['**/README.md', 'docs/public/product/**'] });
 	const allDocsFiles = [...packageDocsFiles, ...rootDocsFiles];
 	for (const rel of allDocsFiles) {
 		const abs = path.join(projectRoot, rel);

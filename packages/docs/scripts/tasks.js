@@ -18,7 +18,7 @@ const DOC_GENERATORS = ['nodes:docs-generate', 'client-typescript:docs-generate'
 
 const DOCS_DIR = path.join(__dirname, '..');
 // Spine pages now live in the top-level docs/ tree (docs consolidation).
-const CONTENT_STATIC_DIR = path.join(PROJECT_ROOT, 'docs', 'product');
+const CONTENT_STATIC_DIR = path.join(PROJECT_ROOT, 'docs', 'public', 'product');
 const STATIC_DIR = path.join(DOCS_DIR, 'static');
 
 // Assembled content tree Docusaurus reads (gather populates it).

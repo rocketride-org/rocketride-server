@@ -119,9 +119,9 @@ describe('gather — top-level docs/ root mounts', () => {
 		projectRoot = path.join(root, 'project');
 		contentDir = path.join(root, 'content');
 		const staticDir = path.join(root, 'static');
-		await mkdir(path.join(projectRoot, 'docs/clients/typescript'), { recursive: true });
-		await writeFile(path.join(projectRoot, 'docs/clients/typescript/index.md'), '# TypeScript SDK\n\nThe TypeScript client library.\n');
-		await writeFile(path.join(projectRoot, 'docs/clients/typescript/readme.md'), '# Package README\n\nExport source for docs:export, never a site page.\n');
+		await mkdir(path.join(projectRoot, 'docs/public/typescript'), { recursive: true });
+		await writeFile(path.join(projectRoot, 'docs/public/typescript/index.md'), '# TypeScript SDK\n\nThe TypeScript client library.\n');
+		await writeFile(path.join(projectRoot, 'docs/public/typescript/README.md'), '# Package README\n\nExport source for docs:export, never a site page.\n');
 		manifest = await gather({ projectRoot, contentStaticDir: path.join(root, 'no-such-static-dir'), contentDir, staticDir });
 	});
 
@@ -137,9 +137,9 @@ describe('gather — top-level docs/ root mounts', () => {
 		assert.equal(entry.route, '/develop/typescript');
 	});
 
-	it('stages no page or route for readme.md', () => {
-		assert.equal(existsSync(path.join(contentDir, 'develop', 'typescript', 'readme.md')), false);
-		const entry = manifest.find((m) => m.source && m.source.endsWith('readme.md'));
-		assert.equal(entry, undefined, 'no manifest entry sourced from readme.md');
+	it('stages no page or route for README.md', () => {
+		assert.equal(existsSync(path.join(contentDir, 'develop', 'typescript', 'README.md')), false);
+		const entry = manifest.find((m) => m.source && m.source.endsWith('README.md'));
+		assert.equal(entry, undefined, 'no manifest entry sourced from README.md');
 	});
 });
