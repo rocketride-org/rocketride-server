@@ -11,6 +11,25 @@
 	"protocol": "hash://",
 	//
 	// Required:
+	//		The physical type - "cpp" makes this a C++ node. The engine loads
+	//		the shared library named by "path" and calls its initializeNode
+	//		entry point, which registers the factories this protocol resolves
+	//		to. Contrast "python", where the engine registers generic python
+	//		factories on the node's behalf.
+	//
+	"node": "cpp",
+	//
+	// Required (for "node": "cpp"):
+	//		Base name of the node's shared library, without the platform
+	//		prefix or extension. Resolved against the node's own directory
+	//		under the engine's nodes folder, so this becomes
+	//		nodes/hash/hash.dll on Windows and nodes/hash/libhash.so
+	//		elsewhere. Must match the target name passed to
+	//		rocketride_add_node in CMakeLists.txt.
+	//
+	"path": "hash",
+	//
+	// Required:
 	//		Class type of the node - what it does
 	//
 	"classType": ["data"],
