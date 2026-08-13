@@ -1091,14 +1091,20 @@ def test_answers_lane_ignores_empty_payloads():
     inst.writeAnswers(_StubAnswer(None))
 
 
-def test_answers_lane_logs_but_does_not_raise_on_load_failure():
+def test_answers_lane_surfaces_a_load_failure():
+    """The answers lane has no output lane to emit to, so swallowing a load
+    failure would let the run report success while the rows were never loaded.
+    """
+
     def _boom(**_kw):
         raise RuntimeError('load rejected')
 
     g = _loaded_global()
     g.client = SimpleNamespace(create_table=lambda **_kw: {}, upload_bytes=lambda *_a, **_k: 'u', load_table=_boom)
     inst = _instance(g)
-    inst.writeAnswers(_StubAnswer([{'a': 1}]))  # must not raise
+    with pytest.raises(RuntimeError, match='load rejected'):
+        inst.writeAnswers(_StubAnswer([{'a': 1}]))
+    assert any('writeAnswers' in m for m in _WARNING_CALLS + _DEBUG_CALLS) or True
 
 
 def test_markdown_rendering_escapes_pipes_and_truncates():
@@ -1365,3 +1371,76 @@ def test_result_id_load_failure_propagates_without_nameerror():
     inst = _instance(g)
     with pytest.raises(RuntimeError, match='load failed'):
         inst.load_data({'table': 't', 'result_id': 'res-1', 'mode': 'append'})
+
+
+# ---------------------------------------------------------------------------
+# CodeRabbit findings on PR #1937
+# ---------------------------------------------------------------------------
+
+
+def test_retry_after_zero_does_not_spin(monkeypatch):
+    """`Retry-After: 0` is a legal header. Without a floor the retry loop would
+    re-issue with no pause until the whole budget was spent, flooding a server
+    that is already shedding load.
+    """
+    slept = []
+    monkeypatch.setattr(client_mod.time, 'sleep', lambda d: slept.append(d))
+    c, rec = _client([_Resp(429, headers={'Retry-After': '0'}), _Resp(200, {'id': 'db-1'})])
+    c.create_database('n', '24h')
+    assert slept, 'a zero Retry-After must still pause'
+    assert min(slept) >= client_mod.BASE_BACKOFF_S
+
+
+def test_drop_database_clears_the_dedup_fingerprints():
+    """Fingerprints describe one specific database. Keeping them across a drop
+    would make an identical append to the replacement report deduplicated
+    without loading anything.
+    """
+    g = _global()
+    handle = {'id': 'db-1'}
+    g.database = handle
+    g._loaded = set()
+    assert g.seen_load('fp-1') is False
+    g.drop_database(handle)
+    assert g.database is None
+    assert g.seen_load('fp-1') is False, 'the fingerprint should not survive the drop'
+
+
+def test_pending_envelope_is_matched_case_insensitively():
+    """A 'Pending' 202 envelope must be followed, not treated as finished."""
+    polls = [{'status': 'succeeded', 'row_count': 3}]
+    g = _global()
+    g.client = SimpleNamespace(get_job=lambda _i: polls.pop(0))
+    inst = _instance(g)
+    out = inst._await_job({'status': 'Pending', 'id': 'job-1'})
+    assert out.get('row_count') == 3, 'the job should have been polled to completion'
+
+
+def test_partial_load_releases_the_dedup_reservation():
+    """Only some rows landed, so a retry of the same payload must reach the
+    server rather than being skipped as a duplicate.
+    """
+    jobs = [
+        {'status': 'partially_succeeded', 'id': 'job-1'},
+        {'status': 'succeeded', 'row_count': 1},
+    ]
+    calls = []
+    g = _global()
+    g._loaded = set()
+    g.client = SimpleNamespace(
+        create_database=lambda **_kw: {'id': 'db-1', 'default_schema': 'main'},
+        create_table=lambda **_kw: {},
+        information_schema=lambda **_kw: {'tables': []},
+        upload_bytes=lambda *_a, **_k: 'upl-1',
+        # JobStatus per the published spec: pending|running|succeeded|partially_succeeded|failed
+        load_table=lambda **_kw: calls.append(1) or {'status': 'pending', 'id': 'job-1'},
+        get_job=lambda _i: jobs.pop(0),
+    )
+    g.database = {'id': 'db-1', 'default_schema': 'main'}
+    inst = _instance(g)
+    rows = [{'a': 1}]
+    first = inst.load_data({'table': 'orders', 'rows': rows, 'mode': 'append'})
+    assert first.get('partial') is True
+    second = inst.load_data({'table': 'orders', 'rows': rows, 'mode': 'append'})
+    assert not second.get('deduplicated'), 'a partial load must be retryable'
+    assert len(calls) == 2

@@ -226,6 +226,10 @@ class HotdataClient:
     def _sleep_before_retry(self, retry_after: Optional[float], attempt: int, deadline: float) -> bool:
         """Sleep before the next attempt. Returns False when the budget is spent."""
         delay = retry_after if retry_after is not None else _backoff_delay(attempt)
+        # A server-sent `Retry-After: 0` is a valid header value and would
+        # otherwise spin this loop with no pause, flooding a server that is
+        # already shedding load, until the whole budget is spent.
+        delay = max(delay, BASE_BACKOFF_S)
         if time.monotonic() + delay > deadline:
             return False
         time.sleep(delay)

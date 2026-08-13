@@ -178,6 +178,11 @@ class IGlobal(IGlobalBase):
         with self._db_lock:
             if self.database is database:
                 self.database = None
+                # The append fingerprints describe the contents of that specific
+                # database. Keeping them would make an identical append to the
+                # replacement database report deduplicated without loading.
+                if self._loaded:
+                    self._loaded.clear()
 
     def validateConfig(self) -> None:
         try:

@@ -374,11 +374,7 @@ class IInstance(IInstanceBase):
                 '(SELECT, WITH, EXPLAIN, DESCRIBE and VALUES only)'
             )
 
-        raw_limit = args.get('limit')
-        if isinstance(raw_limit, bool) or not isinstance(raw_limit, int):
-            limit = min(250, glb.max_execute_rows)
-        else:
-            limit = max(1, min(raw_limit, glb.max_execute_rows))
+        limit = self._resolve_limit(args.get('limit'))
 
         debug(f'db_hotdata: executing statement, limit {limit}')
         return self._run_sql(cleaned, limit)
@@ -431,7 +427,12 @@ class IInstance(IInstanceBase):
         try:
             self.load_data({'table': self.IGlobal.table, 'rows': items, 'mode': 'append'})
         except Exception as e:
+            # Re-raise rather than only logging. The answers lane has no output
+            # lane to emit to, so swallowing here would let the run report
+            # success while the rows were never loaded - silent data loss. The
+            # client already retries transient failures before we get here.
             error(f'db_hotdata: error in writeAnswers: {e}')
+            raise
 
     def _emitError(self, message: str, lanes) -> None:
         """Emit a failure to the wired lanes, structurally distinguishable from prose."""
@@ -640,7 +641,12 @@ class IInstance(IInstanceBase):
 
     def _await_job(self, response: Dict[str, Any]) -> Dict[str, Any]:
         """Follow a 202 job to completion, or pass a synchronous result straight through."""
-        job_id = response.get('id') if response.get('status') in _JOB_PENDING else None
+        # The polled status is lowercased below, so the envelope casing is not
+        # guaranteed either. A 'Pending' envelope would otherwise be treated as
+        # a finished job and the caller would keep a dedup reservation for rows
+        # that never landed.
+        envelope_status = str(response.get('status') or '').lower()
+        job_id = response.get('id') if envelope_status in _JOB_PENDING else None
         if not job_id:
             return response
 
@@ -655,6 +661,11 @@ class IInstance(IInstanceBase):
                 raise RuntimeError(f'db_hotdata: job {job_id} failed: {message}')
             if status == 'partially_succeeded':
                 warning(f'db_hotdata: job {job_id} only partially succeeded')
+                # Flag it so load_data releases the dedup reservation: only some
+                # rows landed, so a retry of the same payload must not be
+                # skipped as a duplicate.
+                job = dict(job)
+                job['partial'] = True
                 return job
             if status in _JOB_OK:
                 return job
@@ -797,7 +808,7 @@ class IInstance(IInstanceBase):
         # fails, release it: otherwise the agent's retry is skipped as a
         # duplicate and the rows are silently never loaded.
         try:
-            return self._perform_load(
+            result = self._perform_load(
                 glb,
                 database_id=database_id,
                 schema=schema,
@@ -809,6 +820,12 @@ class IInstance(IInstanceBase):
                 key=key,
                 rows=rows,
             )
+            if fingerprint and result.get('partial'):
+                # Only some rows landed. Keeping the reservation would make a
+                # retry of the same payload report deduplicated and drop the
+                # missing rows for good.
+                glb.release_load(fingerprint)
+            return result
         except Exception:
             if fingerprint:
                 glb.release_load(fingerprint)
@@ -849,7 +866,11 @@ class IInstance(IInstanceBase):
                 (finished.get('result') or {}).get('row_count') if isinstance(finished.get('result'), dict) else None
             )
         debug(f'db_hotdata: loaded into {schema}.{table} (mode {mode})')
-        return {'table': table, 'schema': schema, 'mode': mode, 'row_count': row_count}
+        out = {'table': table, 'schema': schema, 'mode': mode, 'row_count': row_count}
+        if finished.get('partial'):
+            out['partial'] = True
+            out['note'] = 'The load only partially succeeded; some rows may be missing. Retrying is safe.'
+        return out
 
     @tool_function(
         input_schema={
