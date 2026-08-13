@@ -880,7 +880,11 @@ class IInstance(IInstanceBase):
             # load has no local count, and reporting 0 there would claim an empty
             # load that may well have inserted rows.
             row_count = len(rows)
-        out = {'table': table, 'schema': schema, 'mode': mode, 'row_count': row_count}
+        out = {'table': table, 'schema': schema, 'mode': mode}
+        if row_count is not None:
+            # output_schema declares an integer, so omit the key rather than
+            # reporting null for a result_id load the server gave no count for.
+            out['row_count'] = row_count
         if finished.get('partial'):
             out['partial'] = True
             out['note'] = (

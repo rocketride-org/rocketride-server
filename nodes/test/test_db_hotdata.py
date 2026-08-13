@@ -1462,4 +1462,52 @@ def test_result_id_load_does_not_claim_zero_rows():
     )
     g.database = {'id': 'db-1', 'default_schema': 'main'}
     out = _instance(g).load_data({'table': 'orders', 'result_id': 'res-1', 'mode': 'append'})
-    assert out['row_count'] is None, f'unknown must stay unknown, got {out["row_count"]}'
+    assert 'row_count' not in out, f'unknown count must be omitted, got {out.get("row_count")!r}'
+
+
+# ---------------------------------------------------------------------------
+# Path-segment safety
+#
+# schema/table/index names arrive as agent tool arguments and are interpolated
+# into request paths. Verified before the guard existed: a table named
+# '../../other' produced .../tables/../../other/loads, which requests
+# normalises into a different endpoint, and 'orders?x=1' injected a query
+# string. Refuse rather than escape.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize('hostile', ['../../other', 'orders?x=1', 'a/b', 'x#y', 'has space', '', '.'])
+def test_hostile_identifiers_are_refused(hostile):
+    c, _rec = _client([_Resp(200, {})])
+    with pytest.raises(ValueError, match='invalid'):
+        c.load_table(
+            database_id='db-1',
+            schema='main',
+            table=hostile,
+            mode='append',
+            upload_id='u',
+            result_id='',
+            data_format='json',
+            key=None,
+            async_after_ms=0,
+        )
+
+
+def test_legitimate_identifiers_build_the_expected_paths():
+    c, rec = _client([_Resp(200, {}), _Resp(200, {}), _Resp(200, {})])
+    c.load_table(
+        database_id='db-1',
+        schema='main',
+        table='orders_2024',
+        mode='append',
+        upload_id='u',
+        result_id='',
+        data_format='json',
+        key=None,
+        async_after_ms=0,
+    )
+    assert rec.calls[-1]['url'].endswith('/v1/databases/db-1/schemas/main/tables/orders_2024/loads')
+    c.create_index(
+        connection_id='conn-1', schema='main', table='orders', index_name='i', index_type='bm25', columns=['note']
+    )
+    assert rec.calls[-1]['url'].endswith('/v1/connections/conn-1/tables/main/orders/indexes')

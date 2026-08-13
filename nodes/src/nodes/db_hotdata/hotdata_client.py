@@ -44,6 +44,7 @@ at Hotdata's explicit request. Two tiers:
 from __future__ import annotations
 
 import random
+import re
 import time
 from typing import Any, Dict, List, Optional
 
@@ -72,6 +73,24 @@ MAX_RETRY_AFTER_S = 120.0
 _IDEMPOTENT_METHODS = ('GET', 'DELETE')
 
 _HTTP_TOO_MANY_REQUESTS = 429
+
+
+#: Identifiers that get interpolated into request paths. Agent-supplied table and
+#: schema names reach these, so anything outside this set is refused rather than
+#: escaped: `../../other` would otherwise resolve to a different endpoint once
+#: requests normalises the path, and `orders?x=1` would inject a query string.
+_IDENTIFIER_RE = re.compile(r'^[A-Za-z0-9_][A-Za-z0-9_$-]{0,127}$')
+
+
+def _require_identifier(value: Any, what: str) -> str:
+    """Return `value` if it is a safe path segment, else raise ValueError."""
+    text = str(value or '').strip()
+    if not _IDENTIFIER_RE.match(text):
+        raise ValueError(
+            f'db_hotdata: invalid {what} {text!r} - use letters, digits, underscore, '
+            'dollar or hyphen only (no dots, slashes or query characters)'
+        )
+    return text
 
 
 class HotdataError(RuntimeError):
@@ -472,6 +491,8 @@ class HotdataClient:
             body['partition_by'] = partition_by
         if sorted_by:
             body['sorted_by'] = sorted_by
+        database_id = _require_identifier(database_id, 'database id')
+        schema = _require_identifier(schema, 'schema name')
         return self._request('POST', f'/v1/databases/{database_id}/schemas/{schema}/tables', json_body=body)
 
     def load_table(
@@ -504,7 +525,9 @@ class HotdataClient:
             body['key'] = key
         return self._request(
             'POST',
-            f'/v1/databases/{database_id}/schemas/{schema}/tables/{table}/loads',
+            f'/v1/databases/{_require_identifier(database_id, "database id")}'
+            f'/schemas/{_require_identifier(schema, "schema name")}'
+            f'/tables/{_require_identifier(table, "table name")}/loads',
             json_body=body,
         )
 
@@ -543,7 +566,9 @@ class HotdataClient:
             body['output_column'] = output_column
         return self._request(
             'POST',
-            f'/v1/connections/{connection_id}/tables/{schema}/{table}/indexes',
+            f'/v1/connections/{_require_identifier(connection_id, "connection id")}'
+            f'/tables/{_require_identifier(schema, "schema name")}'
+            f'/{_require_identifier(table, "table name")}/indexes',
             json_body=body,
         )
 
