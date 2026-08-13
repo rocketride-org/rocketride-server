@@ -27,10 +27,11 @@ parent agent, so it works as a specialist inside a larger agent hierarchy.
 `chat → agent_llamaindex → response_answers`
 
 <div align="center">
-  <img src="example.png" alt="The agent_llamaindex node on the canvas with an LLM and an HTTP Request tool connected" width="100%" />
-  <p>
-    <a href="example.pipe"><img src="https://img.shields.io/badge/example.pipe-Download-41b6e6?style=for-the-badge" alt="Download example.pipe" /></a>
-  </p>
+
+![The agent_llamaindex node on the canvas with an LLM and an HTTP Request tool connected](example.png)
+
+[![Download example.pipe](https://img.shields.io/badge/example.pipe-Download-41b6e6?style=for-the-badge)](example.pipe)
+
 </div>
 
 `llm_anthropic` is wired to the `llm` channel and `tool_http_request` to

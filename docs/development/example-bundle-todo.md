@@ -23,10 +23,11 @@ is already complete — its entry below is the reference.
 
 ```markdown
 <div align="center">
-  <img src="example.png" alt="The Deep Agent node on the canvas with an LLM and an HTTP Request tool connected" width="100%" />
-  <p>
-    <a href="example.pipe"><img src="https://img.shields.io/badge/example.pipe-Download-41b6e6?style=for-the-badge" alt="Download example.pipe" /></a>
-  </p>
+
+![The Deep Agent node on the canvas with an LLM and an HTTP Request tool connected](example.png)
+
+[![Download example.pipe](https://img.shields.io/badge/example.pipe-Download-41b6e6?style=for-the-badge)](example.pipe)
+
 </div>
 ```
 
@@ -34,10 +35,11 @@ is already complete — its entry below is the reference.
 
 ```markdown
 <div align="center">
-  <img src="example.png" alt="The agent_llamaindex node on the canvas with an LLM and an HTTP Request tool connected" width="100%" />
-  <p>
-    <a href="example.pipe"><img src="https://img.shields.io/badge/example.pipe-Download-41b6e6?style=for-the-badge" alt="Download example.pipe" /></a>
-  </p>
+
+![The agent_llamaindex node on the canvas with an LLM and an HTTP Request tool connected](example.png)
+
+[![Download example.pipe](https://img.shields.io/badge/example.pipe-Download-41b6e6?style=for-the-badge)](example.pipe)
+
 </div>
 ```
 
@@ -45,10 +47,11 @@ is already complete — its entry below is the reference.
 
 ```markdown
 <div align="center">
-  <img src="example.png" alt="The PostgreSQL node on the canvas answering questions from chat, with an LLM connected" width="100%" />
-  <p>
-    <a href="example.pipe"><img src="https://img.shields.io/badge/example.pipe-Download-41b6e6?style=for-the-badge" alt="Download example.pipe" /></a>
-  </p>
+
+![The PostgreSQL node on the canvas answering questions from chat, with an LLM connected](example.png)
+
+[![Download example.pipe](https://img.shields.io/badge/example.pipe-Download-41b6e6?style=for-the-badge)](example.pipe)
+
 </div>
 ```
 
@@ -56,10 +59,11 @@ is already complete — its entry below is the reference.
 
 ```markdown
 <div align="center">
-  <img src="example.png" alt="The Anthropic node on the canvas between a chat source and an answers response" width="100%" />
-  <p>
-    <a href="example.pipe"><img src="https://img.shields.io/badge/example.pipe-Download-41b6e6?style=for-the-badge" alt="Download example.pipe" /></a>
-  </p>
+
+![The Anthropic node on the canvas between a chat source and an answers response](example.png)
+
+[![Download example.pipe](https://img.shields.io/badge/example.pipe-Download-41b6e6?style=for-the-badge)](example.pipe)
+
 </div>
 ```
 
@@ -67,10 +71,11 @@ is already complete — its entry below is the reference.
 
 ```markdown
 <div align="center">
-  <img src="example.png" alt="The OCR node on the canvas extracting text from parsed documents in a redaction pipeline" width="100%" />
-  <p>
-    <a href="example.pipe"><img src="https://img.shields.io/badge/example.pipe-Download-41b6e6?style=for-the-badge" alt="Download example.pipe" /></a>
-  </p>
+
+![The OCR node on the canvas extracting text from parsed documents in a redaction pipeline](example.png)
+
+[![Download example.pipe](https://img.shields.io/badge/example.pipe-Download-41b6e6?style=for-the-badge)](example.pipe)
+
 </div>
 ```
 
@@ -78,10 +83,11 @@ is already complete — its entry below is the reference.
 
 ```markdown
 <div align="center">
-  <img src="example.png" alt="The Qdrant node on the canvas storing embedded documents and serving retrieval for a RAG pipeline" width="100%" />
-  <p>
-    <a href="example.pipe"><img src="https://img.shields.io/badge/example.pipe-Download-41b6e6?style=for-the-badge" alt="Download example.pipe" /></a>
-  </p>
+
+![The Qdrant node on the canvas storing embedded documents and serving retrieval for a RAG pipeline](example.png)
+
+[![Download example.pipe](https://img.shields.io/badge/example.pipe-Download-41b6e6?style=for-the-badge)](example.pipe)
+
 </div>
 ```
 
@@ -89,10 +95,11 @@ is already complete — its entry below is the reference.
 
 ```markdown
 <div align="center">
-  <img src="example.png" alt="The GitHub node on the canvas connected to an agent as a tool" width="100%" />
-  <p>
-    <a href="example.pipe"><img src="https://img.shields.io/badge/example.pipe-Download-41b6e6?style=for-the-badge" alt="Download example.pipe" /></a>
-  </p>
+
+![The GitHub node on the canvas connected to an agent as a tool](example.png)
+
+[![Download example.pipe](https://img.shields.io/badge/example.pipe-Download-41b6e6?style=for-the-badge)](example.pipe)
+
 </div>
 ```
 

@@ -91,10 +91,11 @@ it from prose.
 `webhook → ocr → summarization → response`
 
 <div align="center">
-  <img src="example.png" alt="The ocr node wired between a webhook source and summarization on the canvas" width="100%" />
-  <p>
-    <a href="example.pipe"><img src="https://img.shields.io/badge/example.pipe-Download-41b6e6?style=for-the-badge" alt="Download example.pipe" /></a>
-  </p>
+
+![The ocr node wired between a webhook source and summarization on the canvas](example.png)
+
+[![Download example.pipe](https://img.shields.io/badge/example.pipe-Download-41b6e6?style=for-the-badge)](example.pipe)
+
 </div>
 
 Scanned PDFs arrive over a webhook, OCR turns them into text, and the
@@ -112,10 +113,12 @@ Rules:
   hand-write absolute URLs. Relative is also what makes the button work
   best in the IDE: the extension registers a custom editor for `*.pipe`,
   so clicking it there opens the pipeline straight onto the canvas.
-- Use the centred HTML block above rather than markdown image syntax —
-  it centres the screenshot and scales it to the content width, matching
-  the repository README. Both forms validate, but the HTML form is the
-  house style.
+- Keep the **blank lines inside the `<div>`** exactly as shown. They are
+  load-bearing: a blank line ends the HTML block, so the image and badge
+  are parsed as markdown while the wrapper still centres them. Written as
+  raw `<img>`/`<a>` tags instead, the block renders on GitHub but comes up
+  empty in the VS Code / Cursor markdown preview, which only rewrites
+  relative paths for markdown-syntax images.
 - The download button is a [shields.io](https://shields.io) badge, exactly
   as in the template (`style=for-the-badge`, brand color `41b6e6`).
 - **Reference both halves or neither.** Embedding the screenshot obliges
