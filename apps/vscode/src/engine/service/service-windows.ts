@@ -451,10 +451,21 @@ export class WindowsServiceManager extends ServiceManager {
 		if (!nssmData) {
 			throw new Error('Could not read nssm.exe from downloaded archive');
 		}
-		fs.mkdirSync(NSSM_DIR, { recursive: true });
-		fs.writeFileSync(NSSM_PATH, nssmData);
 
-		try { fs.unlinkSync(zipPath); } catch { /* ignore */ }
+		fs.mkdirSync(NSSM_DIR, { recursive: true });
+
+		let tempDir: string | undefined;
+		try {
+			tempDir = fs.mkdtempSync(path.join(NSSM_DIR, '.nssm-'));
+			const tempPath = path.join(tempDir, 'nssm.exe');
+			fs.writeFileSync(tempPath, nssmData);
+			fs.renameSync(tempPath, NSSM_PATH);
+		} finally {
+			if (tempDir) {
+				try { fs.rmSync(tempDir, { recursive: true, force: true }); } catch { /* ignore */ }
+			}
+			try { fs.unlinkSync(zipPath); } catch { /* ignore */ }
+		}
 
 		if (!fs.existsSync(NSSM_PATH)) {
 			throw new Error(`NSSM extraction failed, expected at ${NSSM_PATH}`);
