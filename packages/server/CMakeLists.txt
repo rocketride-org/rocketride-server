@@ -167,6 +167,9 @@ add_subdirectory(engine-mod)
 # Main engine executable
 add_subdirectory(engine)
 
+# C++ nodes
+add_subdirectory(${ROCKETRIDE_PROJECT_ROOT}/nodes/src/nodes/hash ${CMAKE_BINARY_DIR}/nodes/hash)
+
 # -----------------------------------------------------------------------------
 # Testing configuration
 # -----------------------------------------------------------------------------

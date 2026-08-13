@@ -23,12 +23,13 @@
 
 #include "../store.h"
 
+// The expected hashes below are the reference vectors for the filter.
 TEST_CASE("store::hash") {
     //-----------------------------------------------------------------
     // Text section
     //-----------------------------------------------------------------
     SECTION("text") {
-        IFilterTest filter({engine::store::filter::hash::Type});
+        IFilterTest filter({"hash"_itv});
 
         auto text = "Lorem ipsum"_tv;
 
@@ -58,7 +59,7 @@ TEST_CASE("store::hash") {
     // Text section
     //-----------------------------------------------------------------
     SECTION("partitioned text") {
-        IFilterTest filter({engine::store::filter::hash::Type});
+        IFilterTest filter({"hash"_itv});
 
         auto text = {
             "Lorem ipsum dolor sit amet, consectetur adipiscing elit, "_tv,
@@ -127,7 +128,7 @@ TEST_CASE("store::hash") {
     // Text section
     //-----------------------------------------------------------------
     SECTION("partitioned text vs full text") {
-        IFilterTest filter({engine::store::filter::hash::Type});
+        IFilterTest filter({"hash"_itv});
 
         // APPLAT-4352 SHA-512 Signature Change changes the way of computing
         // hash. now it is computed only from data part but not from tags. So if
@@ -172,7 +173,7 @@ TEST_CASE("store::hash") {
     // Text section
     //-----------------------------------------------------------------
     SECTION("file") {
-        IFilterTest filter({engine::store::filter::hash::Type});
+        IFilterTest filter({"hash"_itv});
 
         auto file = "ocr.bmp"_tv;
 
