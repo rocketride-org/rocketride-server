@@ -38,7 +38,6 @@ void deinit() noexcept {
         filter::bottom::IFilterInstance::Factory,
         filter::classify::IFilterInstance::Factory,
         filter::indexer::IFilterInstance::Factory,
-        filter::hash::IFilterInstance::Factory,
         filter::parse::IFilterInstance::Factory,
         filter::pipe::IFilterInstance::Factory,
 
@@ -59,7 +58,6 @@ void deinit() noexcept {
         filter::bottom::IFilterGlobal::Factory,
         filter::classify::IFilterGlobal::Factory,
         filter::indexer::IFilterGlobal::Factory,
-        filter::hash::IFilterGlobal::Factory,
         filter::parse::IFilterGlobal::Factory,
         filter::pipe::IFilterGlobal::Factory,
 
@@ -111,7 +109,6 @@ Error init() noexcept {
             filter::bottom::IFilterInstance::Factory,
             filter::classify::IFilterInstance::Factory,
             filter::indexer::IFilterInstance::Factory,
-            filter::hash::IFilterInstance::Factory,
             filter::parse::IFilterInstance::Factory,
             filter::pipe::IFilterInstance::Factory,
 
@@ -132,7 +129,6 @@ Error init() noexcept {
             filter::bottom::IFilterGlobal::Factory,
             filter::classify::IFilterGlobal::Factory,
             filter::indexer::IFilterGlobal::Factory,
-            filter::hash::IFilterGlobal::Factory,
             filter::parse::IFilterGlobal::Factory,
             filter::pipe::IFilterGlobal::Factory,
 

@@ -59,7 +59,6 @@ TEST_CASE("store::linkages") {
                 "service": {
                     "filters": [
                         "pipe",
-                        "hash",
                         "classify",
                         "null",
                         "bottom"
@@ -82,7 +81,6 @@ TEST_CASE("store::linkages") {
                 "service": {
                     "filters": [
                         "pipe",
-                        "hash",
                         "null",
                         "bottom"
                     ],
