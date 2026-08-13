@@ -29,7 +29,7 @@ const VITE_CONFIG = path.join(APP_ROOT, 'vite.config.ts');
 const TS_CONFIG = path.join(APP_ROOT, 'tsconfig.json');
 const BUILD_HASH_KEY = 'mcp-widgets.buildHash';
 
-const WIDGETS = ['pipelines-table', 'dropper'];
+const WIDGETS = ['pipelines-table', 'dropper', 'trace-viewer'];
 
 // =============================================================================
 // ACTION FACTORIES
@@ -86,6 +86,14 @@ function makeCleanAction() {
 	};
 }
 
+function makeTestAction() {
+	return {
+		run: async (_ctx, task) => {
+			await execCommand('pnpm', ['run', 'test'], { task, cwd: APP_ROOT });
+		},
+	};
+}
+
 // =============================================================================
 // MODULE DEFINITION
 // =============================================================================
@@ -107,6 +115,13 @@ module.exports = {
 			action: () => ({
 				description: 'Cleaning mcp-widgets',
 				...makeCleanAction(),
+			}),
+		},
+		{
+			name: 'mcp-widgets:test',
+			action: () => ({
+				description: 'Run MCP widget unit tests',
+				...makeTestAction(),
 			}),
 		},
 	],
