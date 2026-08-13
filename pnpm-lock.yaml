@@ -21,7 +21,7 @@ overrides:
   react-router-config>react-router: 5.3.4
   react-router-dom@5>react-router: 5.3.4
   serialize-javascript: '>=7.0.5 <8'
-  undici: '>=7.28.0 <8'
+  undici: '>=7.29.0 <8'
   uuid: '>=11.1.1 <12'
   webpack-dev-server: '>=5.2.5 <6'
   ws: '>=8.21.0 <9'
@@ -11431,8 +11431,8 @@ packages:
   undici-types@6.21.0:
     resolution: {integrity: sha512-iwDZqg0QAGrg9Rav5H4n0M64c3mkR59cJ6wQp+7C4nI0gsmExaedaYLNO44eT4AtBBwjbTiGPMlt2Md0T9H9JQ==}
 
-  undici@7.28.0:
-    resolution: {integrity: sha512-cRZYrTDwWznlnRiPjggAGxZXanty6M8RV1ff8Wm4LWXBp7/IG8v5DnOm74DtUBp9OONpK75YlPnIjQqX0dBDtA==}
+  undici@7.29.0:
+    resolution: {integrity: sha512-IDxfleLmmbSskfWSUATiN1nfn2rDuvnMOqb5CWR92iIfojA0Ud+ulOAAEQ57LPr9rWmsreUyf5lwyao+7GNNVw==}
     engines: {node: '>=20.18.1'}
 
   unicode-canonical-property-names-ecmascript@2.0.1:
@@ -15701,7 +15701,7 @@ snapshots:
       isomorphic-ws: 5.0.0(ws@8.21.0)
       node-schedule: 2.1.1
       typescript: 5.9.3
-      undici: 7.28.0
+      undici: 7.29.0
       ws: 8.21.0
     transitivePeerDependencies:
       - bufferutil
@@ -18372,7 +18372,7 @@ snapshots:
       parse5: 7.3.0
       parse5-htmlparser2-tree-adapter: 7.1.0
       parse5-parser-stream: 7.1.2
-      undici: 7.28.0
+      undici: 7.29.0
       whatwg-mimetype: 4.0.0
 
   chokidar@3.6.0:
@@ -25280,7 +25280,7 @@ snapshots:
 
   undici-types@6.21.0: {}
 
-  undici@7.28.0: {}
+  undici@7.29.0: {}
 
   unicode-canonical-property-names-ecmascript@2.0.1: {}
 

@@ -74,5 +74,8 @@
 	},
 	"peerDependencies": {
 		"n8n-workflow": "*"
+	},
+	"overrides": {
+		"undici": "^6.28.0"
 	}
 }
