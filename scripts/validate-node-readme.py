@@ -289,32 +289,46 @@ def validate(node_dir: Path):
         )
 
         # Shipped example bundle: example.pipe + example.png in the node dir,
-        # a screenshot embed, and a download badge linking the .pipe. All or
-        # nothing — any part present makes every part required. Nothing at
-        # all is a WARN (pre-bundle node awaiting migration).
+        # referenced from this section by a screenshot embed and a download
+        # badge. The trigger is a REFERENCE, not a loose file: a referenced
+        # file that is missing renders a broken page and fails, while an
+        # unreferenced file harms no reader and lets the bundle be assembled
+        # in stages (author the .pipe now, screenshot it later). Referencing
+        # either half obliges the other, so a README never ships with only
+        # part of the bundle visible.
         pipe_file = (node_dir / 'example.pipe').exists()
         png_file = (node_dir / 'example.png').exists()
         images = re.findall(r'!\[([^\]]*)\]\((?:\./)?example\.png\)', section)
-        # A plain or badge link whose target is the .pipe file.
         pipe_links = re.findall(r'\]\((?:\./)?example\.pipe\)', section)
-        parts = {
-            'example.pipe file': pipe_file,
-            'example.png file': png_file,
-            'screenshot embed (example.png)': bool(images),
-            'download link (example.pipe)': bool(pipe_links),
-        }
-        if any(parts.values()):
-            for label, present in parts.items():
-                add(
-                    'PASS' if present else 'FAIL',
-                    f'shipped example: {label}',
-                    '' if present else 'bundle is all-or-nothing',
-                )
+        if images or pipe_links:
+            add(
+                'PASS' if images else 'FAIL',
+                'shipped example: screenshot embed (example.png)',
+                '' if images else 'referenced bundle must show the screenshot',
+            )
+            add(
+                'PASS' if pipe_links else 'FAIL',
+                'shipped example: download link (example.pipe)',
+                '' if pipe_links else 'referenced bundle must offer the .pipe',
+            )
             if images:
                 add(
-                    'PASS' if images[0].strip() else 'FAIL',
-                    'shipped example: screenshot has alt text',
+                    'PASS' if png_file else 'FAIL',
+                    'shipped example: example.png exists',
+                    'referenced but not in the node directory',
                 )
+                add('PASS' if images[0].strip() else 'FAIL', 'shipped example: screenshot has alt text')
+            if pipe_links:
+                add(
+                    'PASS' if pipe_file else 'FAIL',
+                    'shipped example: example.pipe exists',
+                    'referenced but not in the node directory',
+                )
+        elif pipe_file or png_file:
+            have = ' + '.join(n for n, ok in (('example.pipe', pipe_file), ('example.png', png_file)) if ok)
+            add(
+                'WARN', 'shipped example bundle', f'{have} present but not referenced — embed it once both halves exist'
+            )
         else:
             add('WARN', 'shipped example bundle', 'no example.pipe/example.png yet (required for new nodes)')
 

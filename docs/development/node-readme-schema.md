@@ -109,10 +109,14 @@ Rules:
   hand-write absolute URLs.
 - The download button is a [shields.io](https://shields.io) badge, exactly
   as in the template (`style=for-the-badge`, brand color `41b6e6`).
-- **All-or-nothing:** if any part of the bundle is present (either file,
-  the badge, or the screenshot reference), every part must be. Nodes that
-  predate this rule get a validator warning until their bundle lands; new
-  nodes ship all of it.
+- **Reference both halves or neither.** Embedding the screenshot obliges
+  the download badge and vice versa, and a referenced file must exist —
+  a README never renders half a bundle or a broken link. Committing a
+  file *without* referencing it is fine and is the normal way to build
+  the bundle in stages: land `example.pipe` first, add `example.png` and
+  the two references together once the pipeline has been screenshotted.
+  Until then the node gets a validator warning, not a failure. New nodes
+  ship the complete bundle.
 - Further examples follow the same title → flow → prose format (no files
   required).
 
@@ -240,9 +244,9 @@ are shared fragments and are ignored):
   lanes, Profiles rows = declared profiles
 - `## Example pipelines` contains at least one flow
 - the generated region, when present, is last and unmodified in shape
-- shipped example bundle: all-or-nothing (`example.pipe`, `example.png`,
-  screenshot embed, download link) with alt text on the screenshot; a node
-  with no bundle at all gets a warning, not a failure
+- shipped example bundle: referencing either half obliges the other, every
+  referenced file exists, and the screenshot carries alt text; an
+  unreferenced file — or no bundle at all — is a warning, not a failure
 - `## About` ≤ 80 words, first section, with `## Upstream docs` present
 - warns when a field with objective complexity signals (a `textarea`
   widget or a large enum) lacks a `###` subsection under `## Configuration`
