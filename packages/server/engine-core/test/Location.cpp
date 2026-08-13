@@ -23,11 +23,15 @@
 
 #include "test.h"
 
-// Everything here feeds Location string literals, which is what the class asks for: it
-// holds string_views so that constructing one costs no allocation, and that is only sound
-// while the characters outlive every Error the location is copied into. A view over a
-// caller-local string has no place in these tests because it has no place in the product -
-// what it produces is undefined, not a result worth pinning.
+// Most cases here feed Location string literals, which is the ordinary way the class is
+// used: it holds string_views so that constructing one costs no allocation, and that is
+// only sound while the characters outlive every Error the location is copied into. A view
+// over a caller-local string has no place in these tests because it has no place in the
+// product - what it produces is undefined, not a result worth pinning.
+//
+// What is pinned below is the other half of that contract: a view is valid without being
+// NUL-terminated, so fileName() must stop at the end of the view rather than read on to
+// the next NUL in whatever buffer the view points into.
 //
 // Separators are platform-specific and the cases below are split accordingly: '/' divides
 // a path everywhere, '\' only on Windows.
@@ -61,6 +65,25 @@ TEST_CASE("Location::fileName") {
 
     SECTION("full path mode keeps the directory") {
         ap::Location loc{"/usr/src/apLib/Location.hpp", 91, "fileName", true};
+        REQUIRE(loc.fileName() == "/usr/src/apLib/Location.hpp");
+    }
+
+    // The two cases below hold a view that is a prefix of a longer buffer, so the
+    // character one past its end is 'a', not a NUL. Reading the path as a C string would
+    // pick up the trailing words - and, in the general case, run off the allocation.
+    SECTION("a view without a NUL after it stops at its own end") {
+        const std::string buffer{"/usr/src/apLib/Location.hpp and more text"};
+        const std::string_view path =
+            std::string_view{buffer}.substr(0, buffer.find(' '));
+        ap::Location loc{path, 91, "fileName"};
+        REQUIRE(loc.fileName() == "Location.hpp");
+    }
+
+    SECTION("a view without a NUL after it stops at its own end in full path mode") {
+        const std::string buffer{"/usr/src/apLib/Location.hpp and more text"};
+        const std::string_view path =
+            std::string_view{buffer}.substr(0, buffer.find(' '));
+        ap::Location loc{path, 91, "fileName", true};
         REQUIRE(loc.fileName() == "/usr/src/apLib/Location.hpp");
     }
 
