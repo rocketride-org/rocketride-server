@@ -788,6 +788,13 @@ Error IServiceEndpoint::buildPipeStack() noexcept {
     Text filterPipe = engine::store::filter::pipe::Type;
     Text filterBottom = engine::store::filter::bottom::Type;
 
+    // The hash filter is C++ node and not available in tests
+    const auto filterHash = "hash"_itv;
+    const auto isDeclared = [](TextView type) noexcept {
+        return (bool) IServices::getServiceDefinition((Text) type);
+    };
+    const bool hasHashFilter = isDeclared(filterHash);
+
     // Add the filter
     const auto pushAbsolute =
         localfcn(Text id, uint32_t capabilities, Text logicalType,
@@ -894,7 +901,7 @@ Error IServiceEndpoint::buildPipeStack() noexcept {
                              "The service is not a target service");
 
             // Add the hash driver in case one of the paths asked for signing
-            pushString(filter::hash::Type);
+            if (hasHashFilter) pushString(filterHash);
 
             // Add autopipe to figure out what to do, what to remote or not
             // This will typically add the parser, optional ocr, indexer if
@@ -929,7 +936,7 @@ Error IServiceEndpoint::buildPipeStack() noexcept {
                              "The service is not a target service");
 
             // Don't need much, just the hasher
-            pushString(filter::hash::Type);
+            if (hasHashFilter) pushString(filterHash);
             break;
         }
 

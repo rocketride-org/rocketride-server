@@ -172,6 +172,7 @@ add_subdirectory(engine)
 # output is mirrored into build/nodes/<name> to keep it off the engine's own
 # artifacts.
 add_subdirectory(${ROCKETRIDE_PROJECT_ROOT}/nodes/src/nodes/cpp-example ${CMAKE_BINARY_DIR}/nodes/cpp-example)
+add_subdirectory(${ROCKETRIDE_PROJECT_ROOT}/nodes/src/nodes/hash ${CMAKE_BINARY_DIR}/nodes/hash)
 
 # -----------------------------------------------------------------------------
 # Testing configuration
