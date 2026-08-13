@@ -433,3 +433,24 @@ def test_whitelist_rejecting_the_sibling_falls_back_to_writing_in_place():
     (opened,), _ = fs.open_write.await_args
     assert opened == 'output/o6.png'
     fs.rename.assert_not_awaited()
+
+
+def test_chunk_write_failure_discards_the_stream():
+    """A failed chunk must not leave the handle open and the file behind.
+
+    Nothing later in the object's lifecycle revisits a stream that raised here, so the
+    store would hold the write lock and the partial file until the next object began.
+    """
+    fs = _fs()
+    fs.write_chunk.side_effect = RuntimeError('chunk failed')
+    inst = _sink_instance(fs, has_name=False, object_id='o7')
+    from rocketlib import AVI_ACTION
+
+    inst.writeImage(AVI_ACTION.BEGIN, 'image/png', b'')
+    with pytest.raises(RuntimeError, match='chunk failed'):
+        inst.writeImage(AVI_ACTION.WRITE, 'image/png', b'bytes')
+
+    fs.close_write.assert_awaited()
+    (deleted,), _ = fs.delete.await_args
+    assert deleted == 'output/o7.png'
+    assert not inst._media_streams.get('image'), 'the stream must not stay pending'

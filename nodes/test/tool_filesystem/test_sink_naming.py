@@ -31,7 +31,12 @@ class TestServicesContract:
         assert d['lanes'] == {}
         assert d['protocol'] == 'tool_filesystem://'
         # Sink config must be gone from the tool surface.
-        for key in ('filesystem.targetDir', 'filesystem.emitUrl', 'filesystem.urlExpiresIn'):
+        for key in (
+            'filesystem.targetDir',
+            'filesystem.onConflict',
+            'filesystem.emitUrl',
+            'filesystem.urlExpiresIn',
+        ):
             assert key not in d['fields']
             assert key not in d['shape'][0]['properties']
 

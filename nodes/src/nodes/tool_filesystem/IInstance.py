@@ -713,7 +713,14 @@ class IInstance(IInstanceBase):
                 st['handle'] = _run_on_stream_loop(self.IGlobal.file_store.open_write(write_path))
                 st['path'] = path
                 st['write_path'] = write_path
-            _run_on_stream_loop(self.IGlobal.file_store.write_chunk(st['handle'], bytes(data)))
+            try:
+                _run_on_stream_loop(self.IGlobal.file_store.write_chunk(st['handle'], bytes(data)))
+            except Exception:
+                # Nothing later in this object reaches this stream, so without discarding it
+                # here the handle stays open — holding the store's write lock — and the
+                # partial file sits in the store until the next object's open() sweeps it.
+                self._media_abort(kind)
+                raise
         elif aviAction == AVI_ACTION.END:
             st = streams.pop(kind, None)
             if st is None or st['handle'] is None:
