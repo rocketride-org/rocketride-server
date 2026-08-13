@@ -447,11 +447,17 @@ export class WindowsServiceManager extends ServiceManager {
 			throw new Error('Could not find nssm.exe in downloaded archive');
 		}
 
-		zip.extractEntryTo(nssmEntry, NSSM_DIR, false, true);
+		const nssmData = zip.readFile(nssmEntry);
+		if (!nssmData) {
+			throw new Error('Could not read nssm.exe from downloaded archive');
+		}
+		fs.mkdirSync(NSSM_DIR, { recursive: true });
+		fs.writeFileSync(NSSM_PATH, nssmData);
+
 		try { fs.unlinkSync(zipPath); } catch { /* ignore */ }
 
 		if (!fs.existsSync(NSSM_PATH)) {
-			throw new Error(`NSSM extraction failed — expected at ${NSSM_PATH}`);
+			throw new Error(`NSSM extraction failed, expected at ${NSSM_PATH}`);
 		}
 
 		this.logger.output(`${icons.success} NSSM downloaded to ${NSSM_PATH}`);
