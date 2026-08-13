@@ -9,16 +9,55 @@ ChatBase consumes Adapters and never touches provider-native content shapes.
 Design: repo discussion #1679 (RFC — virtualized provider Adapter).
 """
 
-from contextvars import ContextVar
+import threading
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Any, Callable, Iterator, Optional, Protocol, runtime_checkable
 
 from ai.common.utils import flatten_content_blocks
 
-# Accumulated LLM token usage for the current turn. report_llm_tokens sums every
-# model call here so the node can hang the turn total on the Answer (Trace grid);
-# llm_base clears it per turn so one answer can't inherit the previous turn's sum.
-LAST_LLM_USAGE_VAR: ContextVar[Optional[dict]] = ContextVar('last_llm_usage', default=None)
+# Per-turn LLM usage collector. Every model call appends one entry here; a scope
+# (turn_usage) reads the entries added while it was open and hangs them on the Answer.
+#
+# It is a module-global list, NOT a ContextVar, on purpose: CrewAI/deepagent run their
+# kickoffs on a worker thread under ``contextvars.copy_context().run(...)`` (see
+# nodes/agent_crewai/crewai_runner.py), and a ContextVar written in that copied context
+# never propagates back to the thread that reads it — the agent's answer would carry no
+# tokens. The metrics singleton already spans threads this way for billing; usage must too.
+# A lock keeps worker-thread appends race-free with the reader.
+_USAGE_LOCK = threading.Lock()
+_USAGE_CALLS: list = []
+_TURN_DEPTH = 0
+
+
+def _record_usage(call: dict) -> None:
+    """Append one model call's usage to the shared collector (thread-safe)."""
+    with _USAGE_LOCK:
+        _USAGE_CALLS.append(call)
+
+
+@contextmanager
+def turn_usage():
+    """Scope one Answer's model calls; yields a reader for the usage they produced.
+
+    Nesting-safe: an agent can drive sub-agents (or per-call ``ask`` invokes), each its
+    own nested scope, because a scope reads only the calls appended after it opened
+    (a ``seen`` slice), not the whole list. The OUTERMOST scope clears the collector on
+    exit, so it stays bounded to one top-level turn instead of growing for the life of
+    the task (a long agent run would otherwise accumulate one dict per call forever).
+    """
+    global _TURN_DEPTH
+    with _USAGE_LOCK:
+        seen = len(_USAGE_CALLS)
+        _TURN_DEPTH += 1
+    try:
+        yield lambda: usage_since(seen)
+    finally:
+        with _USAGE_LOCK:
+            _TURN_DEPTH -= 1
+            if _TURN_DEPTH <= 0:
+                _TURN_DEPTH = 0
+                _USAGE_CALLS.clear()
 
 
 @dataclass
@@ -201,29 +240,11 @@ def report_llm_tokens(
             metrics.counter('llm_cache_read_tokens', cr)
         if cc:
             metrics.counter('llm_cache_creation_tokens', cc)
-        # Per-call: the event and counters fire once per model call, so an agentic
-        # turn that calls the model N times bills and traces every call.
-        call = {'input': it, 'output': ot, 'cache_read': cr, 'cache_creation': cc, 'model': model}
-        metrics.event({'llm_tokens': call})
-        # Per-turn: accumulate onto the context so the Answer's Trace "Tokens" grid
-        # shows the whole turn's total plus every call's cost, not just the last call
-        # of a many-call loop. ``breakdown`` lists each call so the action history can
-        # show the agent and what each of its model calls cost (in tokens).
-        prev = LAST_LLM_USAGE_VAR.get()
-        if prev:
-            LAST_LLM_USAGE_VAR.set(
-                {
-                    'input': int(prev.get('input', 0)) + it,
-                    'output': int(prev.get('output', 0)) + ot,
-                    'cache_read': int(prev.get('cache_read', 0)) + cr,
-                    'cache_creation': int(prev.get('cache_creation', 0)) + cc,
-                    'model': model or prev.get('model', ''),
-                    'calls': int(prev.get('calls', 1)) + 1,
-                    'breakdown': [*prev.get('breakdown', []), call],
-                }
-            )
-        else:
-            LAST_LLM_USAGE_VAR.set({**call, 'calls': 1, 'breakdown': [call]})
+        # The counters (above) carry the billable totals; task_metrics rolls them up.
+        # Record the per-call detail on the turn collector for the Trace instead of a
+        # per-call metrics.event — that fed an unbounded events list re-serialized in
+        # full after every object (multi-MB metric lines on long-lived chat tasks).
+        _record_usage({'input': it, 'output': ot, 'cache_read': cr, 'cache_creation': cc, 'model': model})
     except Exception as exc:
         # Best-effort accounting: keep the chat turn alive, but leave an operational trace.
         try:
@@ -235,19 +256,30 @@ def report_llm_tokens(
 
 
 def usage_since(seen: int) -> Optional[dict]:
-    """Usage of the model calls reported after the first ``seen`` of this turn.
+    """Aggregate the model calls recorded after the first ``seen`` of this turn.
 
-    ``breakdown`` is append-only, so a caller that records its length beforehand
-    gets exactly its own calls back. One call returns that call unchanged, so a
-    single-call invoke renders as plain totals with no redundant breakdown.
+    The collector is append-only within a turn, so a scope that records its length
+    beforehand gets exactly its own calls back (its own nested sub-agents/invokes
+    included). One call returns that call unchanged, so a single-call invoke renders
+    as plain totals with no redundant breakdown.
     """
-    calls = (LAST_LLM_USAGE_VAR.get() or {}).get('breakdown', [])[seen:]
+    with _USAGE_LOCK:
+        calls = _USAGE_CALLS[seen:]
     if not calls:
         return None
     if len(calls) == 1:
         return dict(calls[0])
     total = {k: sum(int(c.get(k, 0)) for c in calls) for k in ('input', 'output', 'cache_read', 'cache_creation')}
     return {**total, 'model': calls[-1].get('model', ''), 'calls': len(calls), 'breakdown': list(calls)}
+
+
+def _has_custom_base_url(llm: Any) -> bool:
+    """True if the model points at a non-OpenAI base URL (DeepSeek, Qwen, xAI, Ollama,
+    a local vLLM/proxy). Those reach OpenAI-compatible endpoints where forcing
+    ``stream_options.include_usage`` can 400, so the streaming-usage flag is left off.
+    """
+    base = getattr(llm, 'openai_api_base', None) or getattr(llm, 'base_url', None)
+    return bool(base) and 'api.openai.com' not in str(base)
 
 
 def _split_input_cache(um: dict) -> tuple[int, int, int, int]:
@@ -296,17 +328,24 @@ class LangChainAdapter:
         # model declares the flag rather than matching on the class name: ChatXAI
         # inherits it from BaseChatOpenAI without carrying 'OpenAI' in its name, and
         # a model that lacks it (ChatBedrock) would reject it as an unknown kwarg.
+        # But NOT when a custom base URL is set: langchain-openai defaults the flag off
+        # there because older vLLM builds and strict proxies 400 on
+        # stream_options.include_usage. Respect that — usage is still read below if the
+        # endpoint sends it anyway; forcing it would break the request outright.
         skw = dict(self.stream_kwargs)
-        if hasattr(self.llm, 'stream_usage'):
+        if hasattr(self.llm, 'stream_usage') and not _has_custom_base_url(self.llm):
             skw.setdefault('stream_usage', True)
         total_in = out_toks = cache_read = cache_creation = 0
-        # try/finally so a mid-stream raise still records the cumulative usage the
-        # chunks already carried, matching the two native adapters.
+        # try/finally so a mid-stream raise still records the usage the chunks already
+        # carried, matching the two native adapters.
         try:
             for piece in self.llm.stream(self.history, **skw):
                 um = getattr(piece, 'usage_metadata', None)
                 if isinstance(um, dict):
-                    # Chunks carry cumulative counts; max() lands on the final totals.
+                    # LangChain's usage_metadata is additive by contract (AIMessageChunk
+                    # merges chunks with add_usage), but every provider we reach emits it
+                    # on exactly one chunk, so max() == that single total. If one ever
+                    # streams usage across chunks, switch these to summing the deltas.
                     total_in = max(total_in, int(um.get('input_tokens') or 0))
                     out_toks = max(out_toks, int(um.get('output_tokens') or 0))
                     det = um.get('input_token_details')

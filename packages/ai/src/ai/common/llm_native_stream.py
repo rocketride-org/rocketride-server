@@ -302,14 +302,23 @@ def try_openai_compat_reasoning_stream(
         'model': chat._model,
         'messages': [{'role': 'user', 'content': prompt}],
         'stream': True,
+        # Ask for the usage-bearing final chunk; without this the whole reasoning
+        # path (DeepSeek/Qwen/xAI/Ollama on custom base URLs) bills zero tokens.
+        # A strict proxy that rejects it raises below and we fall back to non-streaming.
+        'stream_options': {'include_usage': True},
         'max_tokens': chat._modelOutputTokens,
     }
     kwargs.update(getattr(chat, '_reasoning_kwargs', {}))
 
     parts: list[str] = []
     finish_reason: Optional[str] = None
+    usage: Any = None
     try:
         for chunk in client.chat.completions.create(**kwargs):
+            # The final chunk carries usage with an empty choices list, so read it
+            # before the choices guard skips that chunk.
+            if getattr(chunk, 'usage', None) is not None:
+                usage = chunk.usage
             if not chunk.choices:
                 continue
             ch = chunk.choices[0]
@@ -331,6 +340,16 @@ def try_openai_compat_reasoning_stream(
 
     if not parts:
         return None
+    # Report on success only. A mid-stream failure returns None above and falls back to
+    # the non-streaming path, which reports its own usage — reporting here too would double-count.
+    if usage is not None:
+        cached = int(getattr(getattr(usage, 'prompt_tokens_details', None), 'cached_tokens', 0) or 0)
+        report_llm_tokens(
+            max(0, int(getattr(usage, 'prompt_tokens', 0) or 0) - cached),
+            int(getattr(usage, 'completion_tokens', 0) or 0),
+            model=str(getattr(chat, '_model', '') or ''),
+            cache_read_tokens=cached,
+        )
     if on_finish is not None:
         on_finish(finish_reason or 'stop')
     return ''.join(parts)

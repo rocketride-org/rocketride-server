@@ -7,11 +7,12 @@
 
 import pytest
 
+import ai.common.llm_adapter as _adapter
 from ai.common.llm_adapter import (
-    LAST_LLM_USAGE_VAR,
     LangChainAdapter,
     _split_input_cache,
     report_llm_tokens,
+    turn_usage,
     usage_since,
 )
 
@@ -22,6 +23,11 @@ from ai.web.metrics.metrics import metrics
 
 def setup_function(_):
     metrics.reset()
+    # The turn collector is a module global; clear it so a leaked scope from one
+    # test can't seed the next.
+    with _adapter._USAGE_LOCK:
+        _adapter._USAGE_CALLS.clear()
+        _adapter._TURN_DEPTH = 0
 
 
 def _counters():
@@ -214,39 +220,82 @@ def test_collect_reports_usage_from_the_invoke_result():
     _assert_four_counters()
 
 
-def test_publishes_usage_on_the_contextvar():
-    # The node reads this to hang the usage on the Answer (Trace "Tokens" grid).
-    LAST_LLM_USAGE_VAR.set(None)
-    report_llm_tokens(14, 81, model='claude-haiku-4-5', cache_read_tokens=2, cache_creation_tokens=3)
-    call = {'input': 14, 'output': 81, 'cache_read': 2, 'cache_creation': 3, 'model': 'claude-haiku-4-5'}
-    assert LAST_LLM_USAGE_VAR.get() == {**call, 'calls': 1, 'breakdown': [call]}
+def test_turn_reader_returns_a_single_call():
+    # The node reads its scope to hang usage on the Answer (Trace "Tokens" grid).
+    with turn_usage() as read_usage:
+        report_llm_tokens(14, 81, model='claude-haiku-4-5', cache_read_tokens=2, cache_creation_tokens=3)
+        assert read_usage() == {
+            'input': 14,
+            'output': 81,
+            'cache_read': 2,
+            'cache_creation': 3,
+            'model': 'claude-haiku-4-5',
+        }
 
 
-def test_contextvar_accumulates_across_a_many_call_turn():
-    # An agentic turn calls the model repeatedly; the Trace must show the turn total
-    # AND every call's cost, not just the last call. Counters/events stay per-call
-    # (billing unchanged) — only this display accumulator sums the turn.
-    LAST_LLM_USAGE_VAR.set(None)
-    report_llm_tokens(10, 5, model='m1', cache_read_tokens=1, cache_creation_tokens=2)
-    report_llm_tokens(30, 7, model='m2', cache_read_tokens=3, cache_creation_tokens=4)
-    c1 = {'input': 10, 'output': 5, 'cache_read': 1, 'cache_creation': 2, 'model': 'm1'}
-    c2 = {'input': 30, 'output': 7, 'cache_read': 3, 'cache_creation': 4, 'model': 'm2'}
-    assert LAST_LLM_USAGE_VAR.get() == {
-        'input': 40,
-        'output': 12,
-        'cache_read': 4,
-        'cache_creation': 6,
-        'model': 'm2',  # last model that actually reported usage
-        'calls': 2,
-        'breakdown': [c1, c2],  # each call's cost, in order, for the action history
-    }
+def test_turn_reader_sums_a_many_call_turn():
+    # An agentic turn calls the model repeatedly; the Trace shows the turn total AND
+    # every call's cost. Counters stay per-call (billing unchanged).
+    with turn_usage() as read_usage:
+        report_llm_tokens(10, 5, model='m1', cache_read_tokens=1, cache_creation_tokens=2)
+        report_llm_tokens(30, 7, model='m2', cache_read_tokens=3, cache_creation_tokens=4)
+        c1 = {'input': 10, 'output': 5, 'cache_read': 1, 'cache_creation': 2, 'model': 'm1'}
+        c2 = {'input': 30, 'output': 7, 'cache_read': 3, 'cache_creation': 4, 'model': 'm2'}
+        assert read_usage() == {
+            'input': 40,
+            'output': 12,
+            'cache_read': 4,
+            'cache_creation': 6,
+            'model': 'm2',  # last model that actually reported usage
+            'calls': 2,
+            'breakdown': [c1, c2],  # each call's cost, in order, for the action history
+        }
 
 
-def test_all_zero_usage_leaves_the_contextvar_unset():
+def test_turn_is_cleared_when_the_outermost_scope_exits():
+    # Bounded to one turn: a second turn does not inherit the first's calls.
+    with turn_usage() as r1:
+        report_llm_tokens(10, 5, model='m1')
+        assert r1()['input'] == 10
+    with turn_usage() as r2:
+        report_llm_tokens(30, 7, model='m2')
+        assert r2() == {'input': 30, 'output': 7, 'cache_read': 0, 'cache_creation': 0, 'model': 'm2'}
+
+
+def test_zero_usage_leaves_the_turn_empty():
     # No usage reported -> nothing to attach, so the Answer carries no tokens.
-    LAST_LLM_USAGE_VAR.set(None)
-    report_llm_tokens(0, 0)
-    assert LAST_LLM_USAGE_VAR.get() is None
+    with turn_usage() as read_usage:
+        report_llm_tokens(0, 0)
+        assert read_usage() is None
+
+
+def test_nested_scope_reads_its_own_calls_while_the_outer_reads_all():
+    # An agent can drive a sub-agent: the sub-agent's scope shows only its own calls,
+    # the outer scope shows the whole turn (sub-agent included), and the collector is
+    # cleared only when the outermost scope exits.
+    with turn_usage() as outer:
+        report_llm_tokens(10, 5, model='a')
+        with turn_usage() as inner:
+            report_llm_tokens(20, 7, model='b')
+            report_llm_tokens(30, 9, model='b')
+            assert inner()['calls'] == 2 and inner()['input'] == 50
+        report_llm_tokens(1, 1, model='a')
+        assert outer()['calls'] == 4 and outer()['input'] == 61 and outer()['output'] == 22
+    with turn_usage() as fresh:
+        assert fresh() is None
+
+
+def test_calls_from_a_worker_thread_land_in_the_open_turn():
+    # CrewAI/deepagent run kickoffs on a worker thread under a copied context, where a
+    # ContextVar write would never propagate back to the reader. The module-global
+    # collector does, so the agent's answer still carries the total.
+    import threading
+
+    with turn_usage() as read_usage:
+        t = threading.Thread(target=lambda: report_llm_tokens(200, 60, model='crew'))
+        t.start()
+        t.join()  # the agent blocks on the kickoff before reading
+        assert read_usage() == {'input': 200, 'output': 60, 'cache_read': 0, 'cache_creation': 0, 'model': 'crew'}
 
 
 # ---------------------------------------------------------------------------
@@ -256,57 +305,40 @@ def test_all_zero_usage_leaves_the_contextvar_unset():
 
 def test_usage_since_returns_only_the_calls_made_after_the_mark():
     # An agent's 7th invoke must show its own cost, not the running turn total.
-    LAST_LLM_USAGE_VAR.set(None)
-    report_llm_tokens(10, 5, model='m1')
-    mark = len(LAST_LLM_USAGE_VAR.get()['breakdown'])
-    report_llm_tokens(30, 7, model='m2')
-
-    assert usage_since(mark) == {'input': 30, 'output': 7, 'cache_read': 0, 'cache_creation': 0, 'model': 'm2'}
+    with turn_usage():
+        report_llm_tokens(10, 5, model='m1')  # collector index 0
+        report_llm_tokens(30, 7, model='m2')  # collector index 1
+        assert usage_since(1) == {'input': 30, 'output': 7, 'cache_read': 0, 'cache_creation': 0, 'model': 'm2'}
 
 
 def test_usage_since_a_single_call_has_no_redundant_breakdown():
     # One call renders as plain chips; a breakdown of itself would be noise.
-    LAST_LLM_USAGE_VAR.set(None)
-    report_llm_tokens(10, 5, model='m1')
-
-    assert 'breakdown' not in usage_since(0)
-    assert 'calls' not in usage_since(0)
+    with turn_usage():
+        report_llm_tokens(10, 5, model='m1')
+        assert 'breakdown' not in usage_since(0)
+        assert 'calls' not in usage_since(0)
 
 
 def test_usage_since_sums_when_one_invoke_made_several_calls():
-    LAST_LLM_USAGE_VAR.set(None)
-    report_llm_tokens(10, 5, model='m1', cache_read_tokens=1)
-    report_llm_tokens(30, 7, model='m2', cache_creation_tokens=2)
+    with turn_usage():
+        report_llm_tokens(10, 5, model='m1', cache_read_tokens=1)
+        report_llm_tokens(30, 7, model='m2', cache_creation_tokens=2)
+        assert usage_since(0) == {
+            'input': 40,
+            'output': 12,
+            'cache_read': 1,
+            'cache_creation': 2,
+            'model': 'm2',
+            'calls': 2,
+            'breakdown': [
+                {'input': 10, 'output': 5, 'cache_read': 1, 'cache_creation': 0, 'model': 'm1'},
+                {'input': 30, 'output': 7, 'cache_read': 0, 'cache_creation': 2, 'model': 'm2'},
+            ],
+        }
 
-    assert usage_since(0) == {
-        'input': 40,
-        'output': 12,
-        'cache_read': 1,
-        'cache_creation': 2,
-        'model': 'm2',
-        'calls': 2,
-        'breakdown': [
-            {'input': 10, 'output': 5, 'cache_read': 1, 'cache_creation': 0, 'model': 'm1'},
-            {'input': 30, 'output': 7, 'cache_read': 0, 'cache_creation': 2, 'model': 'm2'},
-        ],
-    }
 
-
-def test_usage_since_is_none_when_the_call_reported_nothing():
+def test_usage_since_is_none_when_no_call_came_after_the_mark():
     # A cached/failed call adds no entry, so the invoke row shows no grid at all.
-    LAST_LLM_USAGE_VAR.set(None)
-    report_llm_tokens(10, 5, model='m1')
-    mark = len(LAST_LLM_USAGE_VAR.get()['breakdown'])
-
-    assert usage_since(mark) is None
-
-
-def test_usage_since_does_not_disturb_the_turn_total():
-    # The answer still gets the whole turn; usage_since only reads.
-    LAST_LLM_USAGE_VAR.set(None)
-    report_llm_tokens(10, 5, model='m1')
-    report_llm_tokens(30, 7, model='m2')
-    usage_since(1)
-
-    assert LAST_LLM_USAGE_VAR.get()['calls'] == 2
-    assert LAST_LLM_USAGE_VAR.get()['input'] == 40
+    with turn_usage():
+        report_llm_tokens(10, 5, model='m1')
+        assert usage_since(1) is None
