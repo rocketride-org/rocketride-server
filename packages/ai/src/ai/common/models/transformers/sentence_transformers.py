@@ -14,6 +14,7 @@ import logging
 import os
 import threading
 import time
+import weakref
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Union
 
 if TYPE_CHECKING:
@@ -46,19 +47,58 @@ class SentenceTransformerLoader(BaseLoader):
     _DEFAULTS: dict = {}  # SentenceTransformers typically only vary by model_name
 
     # Per-model locks for thread safety. A single torch module cannot run
-    # concurrent forward passes safely, so the GPU pass below is serialized
-    # per model instance. Tokenization and postprocess stay outside the lock
-    # and are free to overlap.
+    # concurrent forward passes safely, so the forward call in inference() is
+    # serialized per model instance. Tokenization, tensor transfer, pooling and
+    # postprocess all stay outside the lock and are free to overlap.
     _model_locks: Dict[int, threading.Lock] = {}
     _locks_lock = threading.Lock()
 
+    # Per-thread carrier for time spent waiting on a model lock. inference()
+    # records it here so the local encode path can bill contention as queue
+    # wait instead of GPU compute, without changing the loader's signature
+    # (the model server calls these static methods directly).
+    _lock_wait = threading.local()
+
     @classmethod
-    def _get_model_lock(cls, model_id: int) -> threading.Lock:
-        """Get or create a lock for a specific model instance."""
+    def _get_model_lock(cls, model: Any) -> threading.Lock:
+        """Get or create the forward-pass lock for a model instance.
+
+        The registry is keyed on ``id(model)`` to match ``WhisperLoader``, and a
+        finalizer drops the entry once the model is collected. Without that, the
+        dict would grow for the process lifetime and a later object reusing a
+        freed id could inherit an unrelated model's lock.
+        """
+        model_id = id(model)
         with cls._locks_lock:
-            if model_id not in cls._model_locks:
-                cls._model_locks[model_id] = threading.Lock()
-            return cls._model_locks[model_id]
+            lock = cls._model_locks.get(model_id)
+            if lock is None:
+                lock = threading.Lock()
+                cls._model_locks[model_id] = lock
+                try:
+                    weakref.finalize(model, cls._drop_model_lock, model_id)
+                except TypeError:
+                    # Not weak-referenceable. Keep the entry rather than fail
+                    # the forward pass; correctness never depends on eviction.
+                    pass
+            return lock
+
+    @classmethod
+    def _drop_model_lock(cls, model_id: int) -> None:
+        """Remove a retired model's lock entry."""
+        with cls._locks_lock:
+            cls._model_locks.pop(model_id, None)
+
+    @classmethod
+    def _add_lock_wait(cls, wait_ms: float) -> None:
+        """Accumulate lock wait (ms) for the current thread's encode call."""
+        cls._lock_wait.value = getattr(cls._lock_wait, 'value', 0.0) + wait_ms
+
+    @classmethod
+    def take_lock_wait(cls) -> float:
+        """Return and reset the lock wait (ms) accumulated on this thread."""
+        wait_ms = getattr(cls._lock_wait, 'value', 0.0)
+        cls._lock_wait.value = 0.0
+        return wait_ms
 
     @staticmethod
     def load(
@@ -207,13 +247,25 @@ class SentenceTransformerLoader(BaseLoader):
         # model across threads (local wrapper and model server alike) would
         # otherwise interleave forward passes on the same module and read back
         # embeddings computed for another thread's batch.
-        model_lock = SentenceTransformerLoader._get_model_lock(id(actual_model))
+        model_lock = SentenceTransformerLoader._get_model_lock(actual_model)
 
-        with model_lock, torch.no_grad():
+        with torch.no_grad():
+            # Transfer touches only this thread's tensors, so it stays unlocked.
             inputs_gpu = {k: v.to(device) for k, v in encoded.items()}
-            outputs = transformer_model(**inputs_gpu)
 
-            # Mean pooling
+            # Only the forward call shares mutable module state.
+            t_wait = time.perf_counter()
+            model_lock.acquire()
+            wait_ms = (time.perf_counter() - t_wait) * 1000
+            try:
+                outputs = transformer_model(**inputs_gpu)
+            finally:
+                model_lock.release()
+
+            SentenceTransformerLoader._add_lock_wait(wait_ms)
+
+            # Pooling and normalization read this thread's own output tensors
+            # and are safe to overlap with another thread's forward pass.
             token_embeddings = outputs.last_hidden_state
             attention_mask = inputs_gpu['attention_mask']
             mask_expanded = attention_mask.unsqueeze(-1).expand(token_embeddings.size()).float()
@@ -397,6 +449,11 @@ class SentenceTransformer:
         t_pre = 0.0
         t_gpu = 0.0
         t_post = 0.0
+        t_queue = 0.0
+
+        # Drop any wait left on this thread by an earlier call so the first
+        # batch below does not inherit it.
+        SentenceTransformerLoader.take_lock_wait()
 
         # Process in batches. Serialization of the shared model happens inside
         # SentenceTransformerLoader.inference(), so tokenization and postprocess
@@ -409,10 +466,15 @@ class SentenceTransformer:
             preprocessed = SentenceTransformerLoader.preprocess(self._model, batch, self._metadata)
             t_pre += (time.perf_counter() - t0) * 1000
 
-            # GPU inference phase
+            # GPU inference phase. Time spent blocked on another thread's
+            # forward pass is contention, not compute, so it is billed as
+            # queue wait instead of inflating gpu_compute.
             t0 = time.perf_counter()
             raw_output = SentenceTransformerLoader.inference(self._model, preprocessed, self._metadata)
-            t_gpu += (time.perf_counter() - t0) * 1000
+            elapsed = (time.perf_counter() - t0) * 1000
+            wait = SentenceTransformerLoader.take_lock_wait()
+            t_gpu += max(elapsed - wait, 0.0)
+            t_queue += wait
 
             # Postprocess phase
             t0 = time.perf_counter()
@@ -424,14 +486,16 @@ class SentenceTransformer:
                 emb = result.get('$embeddings') or result.get('embeddings') or result
                 all_embeddings.append(emb)
 
-        # Report all perf counters — same keys as model server response
-        inference_sec = (t_pre + t_gpu + t_post) / 1000.0
+        # Report all perf counters — same keys as model server response.
+        # Queue wait stays inside inference_sec: the model still occupies GPU
+        # memory while a thread waits, so GB-seconds are unchanged.
+        inference_sec = (t_pre + t_gpu + t_queue + t_post) / 1000.0
         metrics.add_time(
             {
                 'gpu_preprocess': t_pre,
                 'gpu_compute': t_gpu,
                 'gpu_postprocess': t_post,
-                'gpu_queue_wait': 0,
+                'gpu_queue_wait': t_queue,
                 'gpu_memory': model_gpu_gb(self._model) * inference_sec,
             }
         )

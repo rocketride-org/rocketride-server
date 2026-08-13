@@ -17,6 +17,7 @@ Run from project root:
 
 from concurrent.futures import ThreadPoolExecutor
 import contextlib
+import gc
 import sys
 import threading
 import time
@@ -161,14 +162,44 @@ def _make_preprocessed(batch=2, seq=4):
 # -----------------------------------------------------------------------------
 
 
-def test_get_model_lock_is_stable_per_model_id():
-    """The same model id maps to the same lock; different ids do not share one."""
-    first = SentenceTransformerLoader._get_model_lock(1234)
-    again = SentenceTransformerLoader._get_model_lock(1234)
-    other = SentenceTransformerLoader._get_model_lock(5678)
+def test_get_model_lock_is_stable_per_model():
+    """The same model maps to the same lock; different models do not share one."""
+    model = _make_model(_ForwardRecorder())
+    other_model = _make_model(_ForwardRecorder())
+
+    first = SentenceTransformerLoader._get_model_lock(model)
+    again = SentenceTransformerLoader._get_model_lock(model)
+    other = SentenceTransformerLoader._get_model_lock(other_model)
 
     assert first is again
     assert first is not other
+
+
+def test_get_model_lock_entry_is_dropped_when_model_is_collected():
+    """A retired model's lock entry does not linger in the registry."""
+
+    class _Model(list):
+        """Weak-referenceable stand-in for a loaded model bundle."""
+
+    model = _Model([types.SimpleNamespace(auto_model=_ForwardRecorder())])
+    model_id = id(model)
+
+    SentenceTransformerLoader._get_model_lock(model)
+    assert model_id in SentenceTransformerLoader._model_locks
+
+    del model
+    gc.collect()
+
+    assert model_id not in SentenceTransformerLoader._model_locks
+
+
+def test_get_model_lock_tolerates_models_without_weakref_support():
+    """A model that cannot be weak-referenced still gets a working lock."""
+    model = _make_model(_ForwardRecorder())  # plain list: no __weakref__
+
+    lock = SentenceTransformerLoader._get_model_lock(model)
+
+    assert lock is SentenceTransformerLoader._get_model_lock(model)
 
 
 # -----------------------------------------------------------------------------
@@ -196,10 +227,12 @@ def test_inference_serializes_forward_pass_for_shared_model(fake_torch):
 
 def test_inference_allows_distinct_models_to_overlap(fake_torch):
     """Separate model instances hold separate locks and may run concurrently."""
-    recorder_a = _ForwardRecorder(delay=0.05)
-    recorder_b = _ForwardRecorder(delay=0.05)
-    model_a = _make_model(recorder_a)
-    model_b = _make_model(recorder_b)
+    # One recorder shared by both bundles, so it observes true overlap across
+    # them. Per-model recorders would each see a single call and would pass
+    # even if one global lock serialized everything.
+    recorder = _ForwardRecorder(delay=0.05)
+    model_a = _make_model(recorder)
+    model_b = _make_model(recorder)
     metadata = {'device': 'cpu'}
 
     barrier = threading.Barrier(2, timeout=5)
@@ -213,9 +246,10 @@ def test_inference_allows_distinct_models_to_overlap(fake_torch):
         for future in futures:
             future.result()
 
-    # Each model saw exactly one call, and neither blocked on the other's lock.
-    assert recorder_a.calls == 1
-    assert recorder_b.calls == 1
+    # Both forward passes were in flight at once: distinct model ids do not
+    # block each other.
+    assert recorder.calls == 2
+    assert recorder.max_active == 2
 
 
 def test_inference_serializes_via_model_obj_unwrap(fake_torch):
@@ -290,3 +324,45 @@ def test_encode_local_serializes_shared_model(monkeypatch, fake_torch):
     for result in results:
         assert isinstance(result, np.ndarray)
         assert result.shape == (4, recorder.hidden_size)
+
+
+def test_inference_reports_lock_wait_as_queue_time(fake_torch):
+    """Time blocked on another thread's forward pass is queue wait, not compute."""
+    recorder = _ForwardRecorder(delay=0.05)
+    shared_model = _make_model(recorder)
+    metadata = {'device': 'cpu'}
+
+    SentenceTransformerLoader.take_lock_wait()
+
+    barrier = threading.Barrier(2, timeout=5)
+    waits = {}
+
+    def run(name):
+        barrier.wait()
+        SentenceTransformerLoader.take_lock_wait()
+        SentenceTransformerLoader.inference(shared_model, _make_preprocessed(), metadata)
+        waits[name] = SentenceTransformerLoader.take_lock_wait()
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        futures = [executor.submit(run, 'a'), executor.submit(run, 'b')]
+        for future in futures:
+            future.result()
+
+    # One thread went straight through; the other queued behind it for roughly
+    # the forward-pass delay. Whichever won the race, the waits differ.
+    assert recorder.max_active == 1
+    blocked = max(waits.values())
+    assert blocked >= 25, f'expected a measurable queue wait, got {waits}'
+
+
+def test_take_lock_wait_resets_between_calls(fake_torch):
+    """Lock wait is consumed once, so it cannot leak into a later encode."""
+    recorder = _ForwardRecorder(delay=0)
+    model = _make_model(recorder)
+
+    SentenceTransformerLoader.take_lock_wait()
+    SentenceTransformerLoader.inference(model, _make_preprocessed(), {'device': 'cpu'})
+
+    first = SentenceTransformerLoader.take_lock_wait()
+    assert first >= 0.0
+    assert SentenceTransformerLoader.take_lock_wait() == 0.0
