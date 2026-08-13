@@ -298,8 +298,17 @@ def validate(node_dir: Path):
         # part of the bundle visible.
         pipe_file = (node_dir / 'example.pipe').exists()
         png_file = (node_dir / 'example.png').exists()
+        # Both the markdown form — ![alt](example.png) — and the HTML form
+        # used for centred/sized embeds are accepted; `images` collects the
+        # alt text of each so the alt-text check works either way.
         images = re.findall(r'!\[([^\]]*)\]\((?:\./)?example\.png\)', section)
-        pipe_links = re.findall(r'\]\((?:\./)?example\.pipe\)', section)
+        for tag in re.findall(r'<img\b[^>]*>', section):
+            if re.search(r'src=["\'](?:\./)?example\.png["\']', tag):
+                alt = re.search(r'alt=["\']([^"\']*)["\']', tag)
+                images.append(alt.group(1) if alt else '')
+        pipe_links = re.findall(r'\]\((?:\./)?example\.pipe\)', section) + re.findall(
+            r'href=["\'](?:\./)?example\.pipe["\']', section
+        )
         if images or pipe_links:
             add(
                 'PASS' if images else 'FAIL',

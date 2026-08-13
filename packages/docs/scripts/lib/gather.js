@@ -198,9 +198,11 @@ const REPO_BLOB = 'https://github.com/rocketride-org/rocketride-server/blob/deve
 
 function rewriteExampleRefs(body, nodeRel) {
 	if (!nodeRel) return body;
-	return body
-		.replace(/\]\((?:\.\/)?example\.png\)/g, `](${REPO_RAW}/${nodeRel}/example.png)`)
-		.replace(/\]\((?:\.\/)?example\.pipe\)/g, `](${REPO_BLOB}/${nodeRel}/example.pipe)`);
+	// Matches both the markdown target form — ](example.png) — and the HTML
+	// attribute form used for centred/sized embeds: src="example.png",
+	// href="example.pipe". The closing delimiter is kept via lookahead.
+	const rewrite = (name, base) => (s) => s.replace(new RegExp(String.raw`(\]\(|src=["']|href=["'])(?:\./)?${name}(?=[)"'])`, 'g'), (_, prefix) => `${prefix}${base}/${nodeRel}/${name}`);
+	return [rewrite('example.png', REPO_RAW), rewrite('example.pipe', REPO_BLOB)].reduce((s, f) => f(s), body);
 }
 
 function stageNodeMarkdown(content, { slug, title, nodeRel }) {

@@ -90,9 +90,12 @@ it from prose.
 
 `webhook → ocr → summarization → response`
 
-![The ocr node wired between a webhook source and summarization on the canvas](example.png)
-
-[![Download example.pipe](https://img.shields.io/badge/example.pipe-Download-41b6e6?style=for-the-badge)](example.pipe)
+<div align="center">
+  <img src="example.png" alt="The ocr node wired between a webhook source and summarization on the canvas" width="100%" />
+  <p>
+    <a href="example.pipe"><img src="https://img.shields.io/badge/example.pipe-Download-41b6e6?style=for-the-badge" alt="Download example.pipe" /></a>
+  </p>
+</div>
 
 Scanned PDFs arrive over a webhook, OCR turns them into text, and the
 summarization node condenses each one.
@@ -106,7 +109,13 @@ Rules:
 - Reference the files by bare relative name (`example.png`,
   `example.pipe`), as above. The docs build rewrites both to repository
   URLs when staging the site, and GitHub resolves them natively — do not
-  hand-write absolute URLs.
+  hand-write absolute URLs. Relative is also what makes the button work
+  best in the IDE: the extension registers a custom editor for `*.pipe`,
+  so clicking it there opens the pipeline straight onto the canvas.
+- Use the centred HTML block above rather than markdown image syntax —
+  it centres the screenshot and scales it to the content width, matching
+  the repository README. Both forms validate, but the HTML form is the
+  house style.
 - The download button is a [shields.io](https://shields.io) badge, exactly
   as in the template (`style=for-the-badge`, brand color `41b6e6`).
 - **Reference both halves or neither.** Embedding the screenshot obliges

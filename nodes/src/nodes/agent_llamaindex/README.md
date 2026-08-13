@@ -22,19 +22,26 @@ parent agent, so it works as a specialist inside a larger agent hierarchy.
 
 ## Example pipelines
 
-**Answer questions using a web search tool**
+**Answer questions using an HTTP tool**
 
-`webhook → agent_llamaindex → response`
+`chat → agent_llamaindex → response_answers`
 
-Connect an LLM on the `llm` channel and `tool_tavily` on the `tool` channel. A
-question arrives, the agent decides when to search, reads the results, and
-returns a grounded answer.
+<div align="center">
+  <img src="example.png" alt="The agent_llamaindex node on the canvas with an LLM and an HTTP Request tool connected" width="100%" />
+  <p>
+    <a href="example.pipe"><img src="https://img.shields.io/badge/example.pipe-Download-41b6e6?style=for-the-badge" alt="Download example.pipe" /></a>
+  </p>
+</div>
+
+`llm_anthropic` is wired to the `llm` channel and `tool_http_request` to
+`tool`. A question arrives on chat, the agent decides when to call the API,
+reads the response, and returns a grounded answer.
 
 **Research agent over your own documents**
 
-`webhook → agent_llamaindex → response`
+`chat → agent_llamaindex → response_answers`
 
-With `store_qdrant` connected as a tool: the agent searches the vector store on
+Swap the HTTP tool for `store_qdrant`: the agent searches the vector store on
 demand rather than every question being forced through retrieval, then answers
 from what it found.
 
