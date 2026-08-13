@@ -54,7 +54,7 @@ packages:
 overrides:
   shell: 'workspace:*'
   '@remix-run/router': '>=1.23.2 <2'
-  brace-expansion: '>=5.0.5 <6'
+  brace-expansion: '>=5.0.7 <6'
   # minimatch 3.x (eslint's config-array, glob@7) does a CJS default-import of
   # brace-expansion; v5's commonjs build exports named {expand} only, so the
   # global floor crashes every minimatch@3 consumer ("expand is not a
@@ -63,6 +63,7 @@ overrides:
   'minimatch@3>brace-expansion': '>=1.1.12 <2'
   'diff@7': '>=8.0.3 <9'
   dompurify: '>=3.4.9 <3.5.0'
+  fast-uri: '>=3.1.5 <4'
   glob: '>=11.1.0'
   joi: '>=18.2.1 <19'
   js-yaml: '>=4.2.0 <5'
