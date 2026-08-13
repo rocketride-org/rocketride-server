@@ -69,16 +69,6 @@ PostgreSQL — as a pipeline node via lanes or as an agent tool.
   sibling nodes.
 - RocketRide's perspective only — vendor background belongs in `## About`.
 
-**Screenshot** (optional, maintainer-added): the section may end with one
-screenshot of the node wired into a pipeline on the canvas.
-
-- File: `./screenshot.png`, stored in the node's directory.
-- Must show the node connected to at least one other node.
-- Alt text is mandatory and must name the node.
-- Contributors are not expected to provide screenshots; the maintainer team
-  adds them for visual consistency. Reviewers must not block a PR on a
-  missing screenshot.
-
 ## 3. `## Connections` — CONDITIONAL
 
 **Trigger:** a service entry declares an `invoke` object.
@@ -158,14 +148,50 @@ stale.
 
 ## 9. `## Example pipelines` — CORE
 
-At least one example. Purpose: show what the node can actually do, in
-context. For each example:
+At least one example. The **first example is the shipped example**: a
+small working pipeline committed with the node, so a reader can see the
+node on the canvas and download the pipeline itself instead of rebuilding
+it from prose.
 
-- **Bold one-line title** stating the use case.
-- The pipeline shape as a flow of node names:
-  `webhook → ocr → summarization → response`
-- 1–3 sentences: what flows through, what the node contributes, what comes
-  out. Mention non-default configuration when the example depends on it.
+**Files, in the node's directory:**
+
+- `example.pipe` — a minimal, runnable pipeline featuring this node
+- `example.png` — a canvas screenshot of that same pipeline
+
+**The section opens with the shipped example**, in this shape:
+
+```markdown
+## Example pipelines
+
+**Summarize scanned documents**
+
+`webhook → ocr → summarization → response`
+
+![The ocr node wired between a webhook source and summarization on the canvas](example.png)
+
+[![Download example.pipe](https://img.shields.io/badge/example.pipe-Download-41b6e6?style=for-the-badge)](example.pipe)
+
+Scanned PDFs arrive over a webhook, OCR turns them into text, and the
+summarization node condenses each one.
+```
+
+Rules:
+
+- The flow line, the screenshot, and the `.pipe` must all depict the
+  **same pipeline**. The screenshot shows the node wired on the canvas —
+  never floating alone — and its alt text names the node.
+- Reference the files by bare relative name (`example.png`,
+  `example.pipe`), as above. The docs build rewrites both to repository
+  URLs when staging the site, and GitHub resolves them natively — do not
+  hand-write absolute URLs.
+- The download button is a [shields.io](https://shields.io) badge, exactly
+  as in the template (`style=for-the-badge`, brand color `41b6e6`).
+- **All-or-nothing:** if any part of the bundle is present (either file,
+  the badge, or the screenshot reference), every part must be. Nodes that
+  predate this rule get a validator warning until their bundle lands; new
+  nodes ship all of it.
+- Further examples follow the same title → flow → prose format (no files
+  required).
 
 Examples must be real, runnable shapes using nodes that exist — no
 hypothetical node names.
@@ -214,7 +240,9 @@ are shared fragments and are ignored):
   lanes, Profiles rows = declared profiles
 - `## Example pipelines` contains at least one flow
 - the generated region, when present, is last and unmodified in shape
-- screenshot, only if referenced: file exists and alt text is non-empty
+- shipped example bundle: all-or-nothing (`example.pipe`, `example.png`,
+  screenshot embed, download link) with alt text on the screenshot; a node
+  with no bundle at all gets a warning, not a failure
 - `## About` ≤ 80 words, first section, with `## Upstream docs` present
 - warns when a field with objective complexity signals (a `textarea`
   widget or a large enum) lacks a `###` subsection under `## Configuration`

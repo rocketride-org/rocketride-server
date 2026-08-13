@@ -188,7 +188,22 @@ function yamlStr(v) {
  * swizzle) instead of a content section. Everything else in README.md renders
  * verbatim, so the page, README.md, and the LLM .md surface carry the same content.
  */
-function stageNodeMarkdown(content, { slug, title }) {
+// Node READMEs reference their shipped example by bare relative name
+// (example.png / example.pipe, per docs/development/node-readme-schema.md) so
+// node folders stay self-contained and GitHub renders them natively. Staged
+// site pages have no adjacent assets, so rewrite those two refs to
+// repository URLs — same develop-pinned pattern as the generated Source link.
+const REPO_RAW = 'https://raw.githubusercontent.com/rocketride-org/rocketride-server/develop';
+const REPO_BLOB = 'https://github.com/rocketride-org/rocketride-server/blob/develop';
+
+function rewriteExampleRefs(body, nodeRel) {
+	if (!nodeRel) return body;
+	return body
+		.replace(/\]\((?:\.\/)?example\.png\)/g, `](${REPO_RAW}/${nodeRel}/example.png)`)
+		.replace(/\]\((?:\.\/)?example\.pipe\)/g, `](${REPO_BLOB}/${nodeRel}/example.pipe)`);
+}
+
+function stageNodeMarkdown(content, { slug, title, nodeRel }) {
 	let fmLines = [];
 	let body = content;
 	const fm = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/.exec(content);
@@ -214,7 +229,7 @@ function stageNodeMarkdown(content, { slug, title }) {
 	if (title != null && !has('title')) inject.push(`title: ${yamlStr(title)}`);
 	if (sourceUrl && !has('source_url')) inject.push(`source_url: ${yamlStr(sourceUrl)}`);
 	const merged = [...inject, ...fmLines].filter((l) => l.trim() !== '');
-	return `---\n${merged.join('\n')}\n---\n\n${body}`;
+	return `---\n${merged.join('\n')}\n---\n\n${rewriteExampleRefs(body, nodeRel)}`;
 }
 
 /**
@@ -525,7 +540,7 @@ async function gather({ projectRoot, contentStaticDir, contentDir, staticDir, mo
 			// index so the parent label is clickable.
 			const folderRel = toPosix(path.join(NODES_DIR, cat.slug, name));
 			await writeFileEnsure(path.join(contentDir, folderRel, '_category_.json'), JSON.stringify({ label, collapsed: true, link: { type: 'doc', id: `${folderRel}/index` } }, null, 2));
-			await writeFileEnsure(path.join(contentDir, folderRel, 'index.md'), stampLastUpdate(stageNodeMarkdown(content, { slug: `/${route}`, title: existingTitle ? null : label }), gitLastUpdate(srcAbs)));
+			await writeFileEnsure(path.join(contentDir, folderRel, 'index.md'), stampLastUpdate(stageNodeMarkdown(content, { slug: `/${route}`, title: existingTitle ? null : label, nodeRel: toPosix(path.relative(projectRoot, nodeDir)) }), gitLastUpdate(srcAbs)));
 			await writeFileEnsure(path.join(staticDir, `${route}.md`), content);
 			manifest.push({ id: route, route: `/${route}`, title: label, mdSibling: `/${route}.md`, source: srcAbs, node: name, category: cat.label, categoryOrder: cat.position, description });
 			const serviceDescriptions = await readServiceDescriptions(nodeDir);
@@ -538,7 +553,7 @@ async function gather({ projectRoot, contentStaticDir, contentDir, staticDir, mo
 				const vExistingTitle = frontMatterTitle(vcontent);
 				const vlabel = vExistingTitle || nodeLabel(variant, '');
 				const vdescription = variantDescription(variant, serviceDescriptions);
-				await writeFileEnsure(path.join(contentDir, folderRel, `${variant}.md`), stampLastUpdate(stageNodeMarkdown(vcontent, { slug: `/${vroute}`, title: vExistingTitle ? null : vlabel }), gitLastUpdate(vsrcAbs)));
+				await writeFileEnsure(path.join(contentDir, folderRel, `${variant}.md`), stampLastUpdate(stageNodeMarkdown(vcontent, { slug: `/${vroute}`, title: vExistingTitle ? null : vlabel, nodeRel: toPosix(path.relative(projectRoot, path.dirname(vsrcAbs))) }), gitLastUpdate(vsrcAbs)));
 				await writeFileEnsure(path.join(staticDir, `${vroute}.md`), vcontent);
 				manifest.push({ id: vroute, route: `/${vroute}`, title: vlabel, mdSibling: `/${vroute}.md`, source: vsrcAbs, node: name, variant, category: cat.label, categoryOrder: cat.position, description: vdescription });
 			}
@@ -548,7 +563,7 @@ async function gather({ projectRoot, contentStaticDir, contentDir, staticDir, mo
 		// fills in when missing, and the body H1 is dropped to avoid a duplicate
 		// heading. Always a real write — a symlink can't carry the edits.
 		const destAbs = path.join(contentDir, NODES_DIR, cat.slug, `${name}.md`);
-		await writeFileEnsure(destAbs, stampLastUpdate(stageNodeMarkdown(content, { slug: `/${route}`, title: existingTitle ? null : label }), gitLastUpdate(srcAbs)));
+		await writeFileEnsure(destAbs, stampLastUpdate(stageNodeMarkdown(content, { slug: `/${route}`, title: existingTitle ? null : label, nodeRel: toPosix(path.relative(projectRoot, nodeDir)) }), gitLastUpdate(srcAbs)));
 		await writeFileEnsure(path.join(staticDir, `${route}.md`), content);
 		manifest.push({ id: route, route: `/${route}`, title: label, mdSibling: `/${route}.md`, source: srcAbs, node: name, category: cat.label, categoryOrder: cat.position, description });
 	}

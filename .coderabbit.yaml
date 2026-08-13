@@ -45,7 +45,10 @@ reviews:
         behavior, and Example pipelines must reference nodes that exist. Never
         accept hand edits inside the ROCKETRIDE:GENERATED:PARAMS region. If a
         PR changes node behavior, config fields, or tools without updating the
-        README, flag it.
+        README, flag it. A PR adding a NEW node must ship the example bundle:
+        example.pipe + example.png in the node directory, embedded at the top
+        of Example pipelines (screenshot + shields.io download badge) per the
+        schema; flag new nodes without it.
     - path: 'docs/clients/**/*.md'
       instructions: |
         Client docs follow docs/development/client-readme-schema.md. The Python

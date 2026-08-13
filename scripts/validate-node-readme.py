@@ -23,7 +23,7 @@ from pathlib import Path
 
 CANONICAL_ORDER = [
     'About',  # optional, vendor
-    'What it does',  # core (may end with maintainer-added screenshot)
+    'What it does',  # core
     'Connections',  # conditional: invoke
     'Lanes',  # conditional: lanes
     'As a tool',  # conditional: tool in classType
@@ -278,22 +278,45 @@ def validate(node_dir: Path):
             f'missing: {sorted(missing)}' if missing else '',
         )
 
-    # -- Example pipelines has at least one flow --
+    # -- Example pipelines: >=1 flow, plus the shipped-example bundle --
     if 'Example pipelines' in seen:
         body = re.search(r'^## Example pipelines.*?$(.*?)(?=^## |\Z)', hand, re.M | re.S)
+        section = body.group(1) if body else ''
         add(
-            'PASS' if body and '→' in body.group(1) else 'FAIL',
+            'PASS' if '→' in section else 'FAIL',
             'Example pipelines has >=1 flow',
             'no `a → b` pipeline shape found',
         )
 
-    # -- screenshot, only if referenced --
-    wid = re.search(r'^## What it does.*?$(.*?)(?=^## |\Z)', hand, re.M | re.S)
-    if wid:
-        for alt, src in re.findall(r'!\[([^\]]*)\]\(([^)]+)\)', wid.group(1)):
-            img = (node_dir / src).resolve()
-            add('PASS' if img.exists() else 'FAIL', 'screenshot file exists', src)
-            add('PASS' if alt.strip() else 'FAIL', 'screenshot has alt text', src)
+        # Shipped example bundle: example.pipe + example.png in the node dir,
+        # a screenshot embed, and a download badge linking the .pipe. All or
+        # nothing — any part present makes every part required. Nothing at
+        # all is a WARN (pre-bundle node awaiting migration).
+        pipe_file = (node_dir / 'example.pipe').exists()
+        png_file = (node_dir / 'example.png').exists()
+        images = re.findall(r'!\[([^\]]*)\]\((?:\./)?example\.png\)', section)
+        # A plain or badge link whose target is the .pipe file.
+        pipe_links = re.findall(r'\]\((?:\./)?example\.pipe\)', section)
+        parts = {
+            'example.pipe file': pipe_file,
+            'example.png file': png_file,
+            'screenshot embed (example.png)': bool(images),
+            'download link (example.pipe)': bool(pipe_links),
+        }
+        if any(parts.values()):
+            for label, present in parts.items():
+                add(
+                    'PASS' if present else 'FAIL',
+                    f'shipped example: {label}',
+                    '' if present else 'bundle is all-or-nothing',
+                )
+            if images:
+                add(
+                    'PASS' if images[0].strip() else 'FAIL',
+                    'shipped example: screenshot has alt text',
+                )
+        else:
+            add('WARN', 'shipped example bundle', 'no example.pipe/example.png yet (required for new nodes)')
 
     # -- Layer-2 floor: complex fields should have a ### under Configuration --
     conf = re.search(r'^## Configuration.*?$(.*?)(?=^## |\Z)', hand, re.M | re.S)
