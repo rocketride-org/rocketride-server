@@ -279,10 +279,8 @@ class AzureBlobStore(IStore):
     async def move_file(self, src: str, dst: str) -> None:
         """Move a blob onto ``dst``, replacing it if it exists.
 
-        The copy is server-side — the bytes never travel through this process — and the
-        destination is only replaced once it completes, so a failure leaves the old blob as
-        it was. Within one account a same-account copy completes synchronously; the status is
-        checked rather than assumed, so a pending copy surfaces instead of a silent truncation.
+        The copy is server-side and the destination is replaced only once it completes, so a
+        failure leaves the old blob as it was. The status is checked rather than assumed.
 
         Args:
             src: Source path, relative to the container prefix.
@@ -301,7 +299,9 @@ class AzureBlobStore(IStore):
             except Exception as e:
                 raise StorageError(f'File not found: {src}') from e
 
-            result = await asyncio.to_thread(dst_client.start_copy_from_url, src_client.url)
+            # Without requires_sync the copy can return 'pending' having already started
+            # overwriting the destination, which this process cannot undo.
+            result = await asyncio.to_thread(dst_client.start_copy_from_url, src_client.url, requires_sync=True)
             if str(result.get('copy_status', '')).lower() != 'success':
                 raise StorageError(f'Copy of {src} to {dst} did not complete: {result.get("copy_status")}')
 

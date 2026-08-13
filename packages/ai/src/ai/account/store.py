@@ -246,14 +246,9 @@ class IStore(ABC):
         """
         Move a file onto ``dst``, replacing it if it exists.
 
-        Backends override this with their native primitive — ``os.replace`` on a filesystem,
-        a server-side copy on an object store — which is what makes publishing a file written
-        elsewhere safe: the destination is replaced only once the new content is in place,
-        and the bytes never pass through this process.
-
-        The default below has neither property. It reads the whole file into memory and
-        writes over the destination, so a failure part-way leaves the destination damaged.
-        It exists so a backend that cannot move natively still works.
+        Backends override this with a native primitive that leaves the destination alone
+        until the new content is in place and never routes the bytes through this process.
+        This fallback has neither property — it exists for backends without one.
 
         Args:
             src: Relative path to move from

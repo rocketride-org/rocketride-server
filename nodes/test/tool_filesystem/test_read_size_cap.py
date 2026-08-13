@@ -109,8 +109,7 @@ def _install_tool_filesystem_pkg_stub() -> None:
         path_patterns: list | None = None
 
     iglobal_mod.IGlobal = _IGlobalStub
-    # ``IInstance`` imports OnConflict from this module, so the stub has to export it too.
-    # Loaded from the production source rather than restated: the sink resolves the config
+    # Read from the production source rather than restated: the sink resolves the config
     # value by member name, so a copy that drifted would be a silent divergence.
     iglobal_mod.OnConflict = _load_production_on_conflict()
     sys.modules['tool_filesystem.IGlobal'] = iglobal_mod

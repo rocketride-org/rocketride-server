@@ -301,10 +301,8 @@ def _install_iinstance_stubs():
         ig.IGlobal = _IGlobalStub
         sys.modules['tool_filesystem.IGlobal'] = ig
 
-    # IInstance imports OnConflict from this module, so whichever stub is installed has to
-    # expose it. Taken from the real IGlobal rather than restated, and set every time rather
-    # than only when absent — test_read_size_cap installs its own stub over the same key, and
-    # a conditional patch would make the result depend on which module ran first.
+    # Set unconditionally: test_read_size_cap installs its own stub over the same key, so a
+    # conditional patch would depend on which module ran first.
     stub_module = sys.modules['tool_filesystem.IGlobal']
     stub_module.OnConflict = _load_real_iglobal_module().OnConflict
     stub_module.IGlobal.on_conflict = stub_module.OnConflict.UNIQUE
@@ -651,12 +649,7 @@ class TestConflictPolicy:
         inst.instance.writeJson.assert_not_called()
 
     def test_skip_compares_against_a_file_not_a_directory(self):
-        """A directory sharing the name is not a file to preserve.
-
-        `stat` reports type as well as existence; skipping on bare existence would drop
-        the output for a name that holds no file at all, which is not what the setting
-        says it does.
-        """
+        """A directory sharing the name is not a file to preserve, so it does not skip."""
         fs = _fs()
 
         async def _dir_stat(path):
@@ -667,11 +660,7 @@ class TestConflictPolicy:
         assert inst._sink_target_path('report.pdf') == 'output/report.pdf'
 
     def test_skip_treats_a_file_shadowed_by_a_directory_as_present(self):
-        """`both` means an object store holds a key and a same-named prefix.
-
-        There is a file there to leave alone, so it skips — the directory alongside it
-        does not make it any less of a file.
-        """
+        """`both` still has a file to leave alone, so it skips."""
         fs = _fs()
 
         async def _both_stat(path):

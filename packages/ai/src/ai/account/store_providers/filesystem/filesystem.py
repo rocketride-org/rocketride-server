@@ -281,9 +281,8 @@ class FilesystemStore(IStore):
     async def move_file(self, src: str, dst: str) -> None:
         """Move a file onto ``dst``, replacing it if it exists.
 
-        ``os.replace`` is atomic within a filesystem: readers see either the old file or the
-        new one, never a partial write, and the destination is never truncated first. That is
-        what makes it safe to use for publishing a file written elsewhere.
+        ``os.replace`` is atomic within a filesystem: readers see the old file or the new
+        one, never a partial write, and the destination is never truncated first.
 
         Args:
             src: Source path, relative to the store root.

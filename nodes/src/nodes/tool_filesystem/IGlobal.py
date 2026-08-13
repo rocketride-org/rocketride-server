@@ -51,9 +51,8 @@ from rocketlib import IGlobalBase, OPEN_MODE, warning
 class OnConflict(IntEnum):
     """What to do when the sink's target path is already taken.
 
-    Member names are the services.store.json enum values uppercased, which is what lets
-    :meth:`IGlobal._sink_config` resolve one to the other by name. Resolved once at config
-    time, so each write compares ints.
+    Member names are the services.store.json enum values uppercased, so
+    :meth:`IGlobal._sink_config` resolves one to the other by name.
     """
 
     UNIQUE = 0
@@ -157,9 +156,8 @@ class IGlobal(IGlobalBase):
 
         ``url_expires_in`` is clamped to the FileStore range of 1..3600 seconds;
         non-positive or missing values fall back to the 3600-second default.
-        ``on_conflict`` falls back to :attr:`OnConflict.UNIQUE` on anything that does not name
-        a member, so a mistyped config degrades to the non-destructive outcome rather than
-        failing the pipeline.
+        ``on_conflict`` falls back to :attr:`OnConflict.UNIQUE` on anything that does not
+        name a member, so a mistyped config degrades to the non-destructive outcome.
         """
         target_dir = str(cfg.get('targetDir', 'output/'))
         emit_url = bool(cfg.get('emitUrl', False))

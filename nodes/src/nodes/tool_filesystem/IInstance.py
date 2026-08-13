@@ -388,28 +388,20 @@ class IInstance(IInstanceBase):
         return ''
 
     def _sink_target_path(self, filename: str, *, index: int | None = None) -> str | None:
-        """Resolve the store path to write to under targetDir, per the conflict policy.
+        """Resolve the store path to write to under targetDir, per ``onConflict``.
 
-        Each candidate is whitelist-checked *before* it is probed, so a path the
-        whitelist would reject never reveals whether files exist in the store.
+        ``overwrite`` returns the path unprobed, ``skip`` yields ``None`` if a file is
+        already there, ``unique`` suffixes ``_1``, ``_2``, … up to
+        ``MAX_COLLISION_SUFFIX``. Each candidate is whitelist-checked *before* it is
+        probed, so a rejected path never reveals whether files exist in the store.
+
+        Args:
+            filename: Name the object carries.
+            index:    Ordinal used to disambiguate several files from one object.
 
         Returns:
-            The path to write, or ``None`` when ``onConflict`` is ``skip`` and the
-            path is already taken — callers must treat that as "leave it alone",
-            not as an error. The reason is logged here, so the message lives in one
-            place rather than at each caller.
-
-        The three policies:
-
-        * ``overwrite`` — write straight over whatever is there. No ``stat()`` at
-          all, which also saves a store round-trip per stream.
-        * ``skip`` — leave an existing *file* alone. A directory at the candidate
-          name is not a file to preserve, so it does not trigger a skip; the write
-          proceeds and the store rejects it if it cannot hold both.
-        * ``unique`` (default) — keep the object's own name (``output/report.pdf``)
-          and fall back to ``_1``, ``_2``, … when it is taken. Bounded by
-          ``MAX_COLLISION_SUFFIX`` and raises past it, rather than probing forever
-          if the store keeps reporting the path as existing.
+            The path to write, or ``None`` when ``skip`` left an existing file alone —
+            not an error, and logged here rather than at each caller.
         """
         target_dir = (self.IGlobal.target_dir or '').strip()
         if target_dir and not target_dir.endswith('/'):
@@ -422,14 +414,11 @@ class IInstance(IInstanceBase):
         self._check_path(candidate)
 
         if self.IGlobal.on_conflict == OnConflict.OVERWRITE:
-            # No probe: replacing is the point, so a stat only costs a round-trip. How the
-            # replacement happens is decided later — a one-shot write is last-write-wins, a
-            # stream goes through _write_path_for.
+            # No probe: replacing is the point, so a stat only costs a round-trip.
             return candidate
 
         if self.IGlobal.on_conflict == OnConflict.SKIP:
-            # 'both' means a file and a same-named directory co-exist, which an object
-            # store allows; there is still a file to leave alone.
+            # 'both' is an object store holding a key and a same-named prefix: still a file.
             if _run_async(self.IGlobal.file_store.stat(candidate)).get('type') in ('file', 'both'):
                 warning(f'tool_filesystem: {filename!r} already exists and onConflict is skip; not written')
                 return None
@@ -480,8 +469,7 @@ class IInstance(IInstanceBase):
         no Doc/chunkId semantics — so downstream JSON consumers get the refs
         without vector-store metadata riding along.
         """
-        # A skipped write yields None rather than a ref; those are dropped here so a
-        # reference is only ever emitted for a file this node actually created.
+        # A skipped write yields None; dropping those keeps refs to files actually written.
         refs = [ref for ref in refs if ref]
         if not refs:
             return
@@ -598,11 +586,9 @@ class IInstance(IInstanceBase):
     def _write_path_for(self, path: str) -> str:
         """Where the stream's bytes actually go.
 
-        Only ``overwrite`` stages. Opening the destination is already destructive — the
-        filesystem backend truncates at ``open_write`` — so the stream writes to a sibling
-        and renames on success, leaving the operator's file intact until there is a complete
-        one to replace it with. ``unique`` and ``skip`` probed their path free and write to
-        it directly.
+        Only ``overwrite`` stages: ``open_write`` truncates the destination, so the bytes
+        go to a sibling and rename in on success, keeping the existing file until a
+        complete one can replace it. ``unique`` and ``skip`` probed their path free.
 
         Args:
             path: The final destination.
@@ -615,9 +601,8 @@ class IInstance(IInstanceBase):
         try:
             return self._staging_path(path)
         except ValueError:
-            # A whitelist that admits the destination but not a sibling of it. Failing here
-            # would break a pipeline that worked before this staging existed, so fall back
-            # to writing in place — with the exposure this method exists to avoid.
+            # Writing in place is worse than staging, better than failing a pipeline
+            # that worked before staging existed.
             warning(
                 f'tool_filesystem: the path whitelist rejects a staging file beside {path!r}; '
                 'writing in place, so an interrupted stream will leave it incomplete'
@@ -627,9 +612,8 @@ class IInstance(IInstanceBase):
     def _discard_partial(self, st: dict) -> None:
         """Remove what a half-written stream produced.
 
-        Always safe to delete: under ``unique`` and ``skip`` the path was probed free before
-        the handle opened, and under ``overwrite`` the bytes went to a staging sibling. Either
-        way the file removed here is one this stream created.
+        Always safe: ``unique`` and ``skip`` probed the path free before opening it, and
+        ``overwrite`` wrote to a staging sibling — so this file is one the stream created.
 
         Args:
             st: The stream state being discarded.
@@ -640,9 +624,7 @@ class IInstance(IInstanceBase):
         try:
             _run_on_stream_loop(self.IGlobal.file_store.delete(write_path))
         except Exception as e:
-            # The cleanup itself failed — the store may still hold the handle the failed
-            # close left open. Say so: the leftover is inert, but silence is how it ends up
-            # discovered by hand in the target directory months later.
+            # The leftover is inert, but silence means nobody ever learns it is there.
             warning(f'tool_filesystem: could not remove {write_path!r} after a failed write: {e}')
 
     def _stream_filename(self, descriptor, mime: str) -> str:
@@ -706,8 +688,7 @@ class IInstance(IInstanceBase):
                 name = self._stream_filename(st.get('descriptor'), st['mime'])
                 path = self._sink_target_path(name)
                 if path is None:
-                    # Drop the stream, so the remaining chunks and the END that follows
-                    # find nothing and become no-ops.
+                    # Dropped, so the remaining chunks and the END find nothing.
                     streams.pop(kind, None)
                     return
                 write_path = self._write_path_for(path)
@@ -717,8 +698,8 @@ class IInstance(IInstanceBase):
             try:
                 _run_on_stream_loop(self.IGlobal.file_store.write_chunk(st['handle'], bytes(data)))
             except Exception:
-                # Nothing later in this object revisits this stream, so undiscarded it would
-                # hold the store's write lock until the next object's open().
+                # Nothing revisits this stream, so its handle would hold the store's
+                # write lock until the next object's open().
                 self._media_abort(kind)
                 raise
         elif aviAction == AVI_ACTION.END:
@@ -728,8 +709,7 @@ class IInstance(IInstanceBase):
             try:
                 _run_on_stream_loop(self.IGlobal.file_store.close_write(st['handle']))
                 if st['write_path'] != st['path']:
-                    # Staged under overwrite: the destination is replaced only now, with a
-                    # complete file, so everything up to this point left it untouched.
+                    # Staged: the destination is replaced only now, and only by a whole file.
                     _run_on_stream_loop(self.IGlobal.file_store.rename(st['write_path'], st['path'], overwrite=True))
             except Exception:
                 # A failed commit leaves an incomplete file: remove it before

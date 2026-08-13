@@ -332,9 +332,8 @@ def test_end_close_failure_deletes_partial_and_raises():
 # ---------------------------------------------------------------------------
 # overwrite stages the stream and swaps it in only when it is complete
 #
-# Opening the destination is itself destructive — the filesystem backend truncates at
-# open_write, the object stores commit over it at close_write — so a stream that fails
-# part-way would leave the operator's file neither old nor new.
+# open_write is itself destructive, so writing straight to the destination would leave a
+# failed stream's file neither old nor new.
 # ---------------------------------------------------------------------------
 
 
@@ -436,13 +435,12 @@ def test_whitelist_rejecting_the_sibling_falls_back_to_writing_in_place():
 
 
 def test_chunk_write_failure_discards_the_stream():
-    """A failed chunk must not leave the handle open and the file behind.
-
-    Nothing later in the object's lifecycle revisits a stream that raised here, so the
-    store would hold the write lock and the partial file until the next object began.
-    """
+    """A failed chunk must not leave the handle open and the file behind."""
     fs = _fs()
     fs.write_chunk.side_effect = RuntimeError('chunk failed')
+    order = []
+    for name in ('close_write', 'delete'):
+        getattr(fs, name).side_effect = (lambda n: lambda *a, **k: order.append((n, a)))(name)
     inst = _sink_instance(fs, has_name=False, object_id='o7')
     from rocketlib import AVI_ACTION
 
@@ -450,19 +448,17 @@ def test_chunk_write_failure_discards_the_stream():
     with pytest.raises(RuntimeError, match='chunk failed'):
         inst.writeImage(AVI_ACTION.WRITE, 'image/png', b'bytes')
 
-    fs.close_write.assert_awaited()
+    # Order matters, not just occurrence: FileStore.delete refuses a path whose write handle
+    # is still open, so a cleanup that deleted before closing would fail against a real store
+    # while passing against mocks that accept either.
+    assert [c[0] for c in order] == ['close_write', 'delete'], order
     (deleted,), _ = fs.delete.await_args
     assert deleted == 'output/o7.png'
     assert not inst._media_streams.get('image'), 'the stream must not stay pending'
 
 
 def test_failed_cleanup_is_reported_not_swallowed():
-    """When the cleanup delete fails, the leftover must at least be named.
-
-    Observed against a real store: a close that fails without releasing the OS handle
-    leaves the staging file undeletable. Nothing downstream breaks, but a silent pass here
-    means the debris is only ever found by looking in the directory.
-    """
+    """An undeletable leftover must at least be named, or it is only found by hand."""
     import tool_filesystem.IInstance as mod
 
     fs = _fs()
@@ -482,4 +478,6 @@ def test_failed_cleanup_is_reported_not_swallowed():
     finally:
         mod.warning = original
 
+    (attempted,), _ = fs.delete.await_args
+    assert attempted == 'output/o8.png.part-o8', 'the staging path is what cleanup must try to remove'
     assert any('o8.png.part-o8' in m for m in said), f'the leftover path must be named: {said}'

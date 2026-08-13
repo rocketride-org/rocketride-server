@@ -148,10 +148,10 @@ emits a JSON reference for each file it writes.
   two inputs at `a/1.jpg` and `b/1.jpg` both resolve to the same target in a flat
   `targetDir` and the second silently replaces the first. `unique` stays the default for
   exactly that reason.
-  A streamed write that is cut off part-way leaves the target in whatever state it reached.
-  Under `unique` and `skip` the sink removes it — the path was free, so the partial file is
-  its own. Under `overwrite` it does not, because the file at that path is yours: an
-  interrupted stream leaves it truncated rather than deleted.
+  A streamed write that is cut off part-way never leaves a partial file behind. Under
+  `unique` and `skip` the sink deletes what it wrote. Under `overwrite` the stream goes to
+  a `.part-<objectId>` sibling and only replaces the target once it is complete, so an
+  interrupted run leaves the existing file exactly as it was.
   `skip` compares against an existing **file**. A directory sharing the name is not a file
   to preserve and does not by itself cause a skip.
   Every candidate is whitelist-checked *before* it is probed, so a path the whitelist

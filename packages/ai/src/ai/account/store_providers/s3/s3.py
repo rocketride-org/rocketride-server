@@ -282,9 +282,8 @@ class S3Store(IStore):
     async def move_file(self, src: str, dst: str) -> None:
         """Move an object onto ``dst``, replacing it if it exists.
 
-        ``CopyObject`` runs inside S3 — the bytes never travel through this process — and the
-        destination key is only replaced once the copy has succeeded, so a failure leaves the
-        old object as it was.
+        ``CopyObject`` runs inside S3 and the destination key is replaced only once the copy
+        has succeeded, so a failure leaves the old object as it was.
 
         Args:
             src: Source path, relative to the store prefix.
