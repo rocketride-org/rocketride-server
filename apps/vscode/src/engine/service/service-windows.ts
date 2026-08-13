@@ -427,35 +427,32 @@ export class WindowsServiceManager extends ServiceManager {
 			}
 		}
 
-		// Verify ZIP integrity before extraction
-		const zipBuffer = fs.readFileSync(zipPath);
-		const zipHash = crypto.createHash('sha256').update(zipBuffer).digest('hex');
-		if (zipHash !== NSSM_SHA256) {
-			try { fs.unlinkSync(zipPath); } catch { /* ignore */ }
-			throw new Error('NSSM integrity check failed — expected ' + NSSM_SHA256 + ', got ' + zipHash);
-		}
-
-		const AdmZip = require('adm-zip');
-		const zip = new AdmZip(zipPath);
-		const entries = zip.getEntries();
-
-		const nssmEntry = entries.find((e: { entryName: string }) =>
-			e.entryName.includes('win64/nssm.exe') || e.entryName.includes('win64\\nssm.exe')
-		);
-
-		if (!nssmEntry) {
-			throw new Error('Could not find nssm.exe in downloaded archive');
-		}
-
-		const nssmData = zip.readFile(nssmEntry);
-		if (!nssmData) {
-			throw new Error('Could not read nssm.exe from downloaded archive');
-		}
-
-		fs.mkdirSync(NSSM_DIR, { recursive: true });
-
 		let tempDir: string | undefined;
 		try {
+			// Verify ZIP integrity before extraction
+			const zipBuffer = fs.readFileSync(zipPath);
+			const zipHash = crypto.createHash('sha256').update(zipBuffer).digest('hex');
+			if (zipHash !== NSSM_SHA256) {
+				throw new Error('NSSM integrity check failed, expected ' + NSSM_SHA256 + ', got ' + zipHash);
+			}
+
+			const AdmZip = require('adm-zip');
+			const zip = new AdmZip(zipPath);
+			const entries = zip.getEntries();
+
+			const nssmEntry = entries.find((e: { entryName: string }) =>
+				e.entryName.includes('win64/nssm.exe') || e.entryName.includes('win64\\nssm.exe')
+			);
+
+			if (!nssmEntry) {
+				throw new Error('Could not find nssm.exe in downloaded archive');
+			}
+
+			const nssmData = zip.readFile(nssmEntry);
+			if (!nssmData) {
+				throw new Error('Could not read nssm.exe from downloaded archive');
+			}
+
 			tempDir = fs.mkdtempSync(path.join(NSSM_DIR, '.nssm-'));
 			const tempPath = path.join(tempDir, 'nssm.exe');
 			fs.writeFileSync(tempPath, nssmData);
