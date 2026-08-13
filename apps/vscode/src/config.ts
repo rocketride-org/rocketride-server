@@ -44,9 +44,6 @@ export interface ConnectionGroupConfig {
 	/** API key for authentication (from secure storage) */
 	apiKey: string;
 
-	/** Cloud team ID */
-	teamId: string;
-
 	/** Local engine configuration */
 	local: {
 		/** Engine version: 'latest', 'prerelease', or a specific tag */
@@ -86,7 +83,6 @@ export interface ConnectionGroupSnapshot {
 	connectionMode: ConnectionMode | null;
 	hostUrl: string;
 	apiKey: string;
-	teamId: string;
 	local: {
 		engineVersion: string;
 	};
@@ -133,7 +129,6 @@ export class ConfigManager {
 		connectionMode: 'local',
 		hostUrl: '',
 		apiKey: '',
-		teamId: '',
 		local: { engineVersion: 'latest' },
 	};
 
@@ -144,7 +139,7 @@ export class ConfigManager {
 		defaultPipelinePath: '',
 		pipelineRestartBehavior: 'prompt',
 		pipelineTtl: 900,
-		pipelineTraceLevel: 'summary',
+		pipelineTraceLevel: 'full',
 		taskArguments: '',
 		pipelineDebugOutput: false,
 	};
@@ -218,7 +213,6 @@ export class ConfigManager {
 			connectionMode,
 			hostUrl,
 			apiKey,
-			teamId: gc.get<string>('teamId', ''),
 			local: {
 				engineVersion: gc.get<string>('local.engineVersion', 'latest'),
 			},
@@ -239,7 +233,7 @@ export class ConfigManager {
 			defaultPipelinePath: config.get('defaultPipelinePath', 'pipelines'),
 			pipelineRestartBehavior: config.get('pipelineRestartBehavior', 'prompt'),
 			pipelineTtl: config.get('pipelineTTL', 900),
-			pipelineTraceLevel: config.get('pipelineTraceLevel', 'summary'),
+			pipelineTraceLevel: config.get('pipelineTraceLevel', 'full'),
 			taskArguments: config.get('taskArguments', ''),
 			pipelineDebugOutput: config.get('pipelineDebugOutput', false),
 		};
@@ -454,13 +448,11 @@ export class ConfigManager {
 			// --- Development group ---
 			await wc.update('development.connectionMode', s.development.connectionMode, vscode.ConfigurationTarget.Global);
 			await wc.update('development.hostUrl', s.development.hostUrl, vscode.ConfigurationTarget.Global);
-			await wc.update('development.teamId', s.development.teamId, vscode.ConfigurationTarget.Global);
 			await wc.update('development.local.engineVersion', s.development.local.engineVersion, vscode.ConfigurationTarget.Global);
 
 			// --- Deployment group ---
 			await wc.update('deployment.connectionMode', s.deployment.connectionMode, vscode.ConfigurationTarget.Global);
 			await wc.update('deployment.hostUrl', s.deployment.hostUrl, vscode.ConfigurationTarget.Global);
-			await wc.update('deployment.teamId', s.deployment.teamId, vscode.ConfigurationTarget.Global);
 			await wc.update('deployment.local.engineVersion', s.deployment.local.engineVersion, vscode.ConfigurationTarget.Global);
 
 			// --- Global settings ---
@@ -518,22 +510,6 @@ export class ConfigManager {
 	public async updateConnectionMode(group: ConnectionGroup, connectionMode: ConnectionMode | null): Promise<void> {
 		const config = vscode.workspace.getConfiguration(this.configSection);
 		await config.update(`${group}.connectionMode`, connectionMode, vscode.ConfigurationTarget.Global);
-	}
-
-	/**
-	 * Sets the team ID in cache only for a group (runtime, not persisted).
-	 * Use when the sidebar changes the team at runtime.
-	 */
-	public setTeamId(group: ConnectionGroup, teamId: string): void {
-		this.config[group].teamId = teamId;
-	}
-
-	/**
-	 * Updates the team ID for a group (ASYNC - updates both cache and storage).
-	 */
-	public async updateTeamId(group: ConnectionGroup, teamId: string): Promise<void> {
-		const config = vscode.workspace.getConfiguration(this.configSection);
-		await config.update(`${group}.teamId`, teamId, vscode.ConfigurationTarget.Global);
 	}
 
 	/**

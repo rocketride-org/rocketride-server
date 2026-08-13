@@ -55,11 +55,9 @@ interface ConnectionSettingsProps {
 	cloudUserName?: string;
 	onCloudSignIn?: () => void;
 	onCloudSignOut?: () => void;
-	onProbeCloudServer?: () => void;
-	onFetchTeams?: () => void;
+	onProbeCloudServer?: (cloudUrl: string) => void;
 	/** Whether the probed server supports SaaS/OAuth. */
 	isSaas?: boolean;
-	teams?: Array<{ id: string; name: string }>;
 	/** Whether the user has an active subscription. */
 	isSubscribed?: boolean;
 	/** Checkout callbacks for CloudPanel's embedded CheckoutModal. */
@@ -149,9 +147,7 @@ export const ConnectionSettings: React.FC<ConnectionSettingsProps> = (props) => 
 					onCloudSignIn={props.onCloudSignIn!}
 					onCloudSignOut={props.onCloudSignOut!}
 					onProbeCloudServer={props.onProbeCloudServer}
-					onFetchTeams={props.onFetchTeams}
 					isSaas={props.isSaas}
-					teams={props.teams ?? []}
 					onClearCredentials={props.onClearCredentials}
 					onTestConnection={props.onTestConnection}
 					testMessage={props.testMessage}

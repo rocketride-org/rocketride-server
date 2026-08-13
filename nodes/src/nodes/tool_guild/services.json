@@ -1,0 +1,145 @@
+{
+	"title": "Guild.ai",
+	"protocol": "tool_guild://",
+	"classType": ["data", "tool"],
+	"capabilities": ["invoke", "experimental"],
+	"register": "filter",
+	"node": "python",
+	"path": "nodes.tool_guild",
+	"prefix": "guild",
+	"icon": "guild.svg",
+	"documentation": "https://docs.rocketride.org",
+	"description": ["Run Guild.ai agents from a RocketRide pipeline or an agent.", "As a pipeline step, lane input is sent to a configured Guild agent as a session and its answer flows downstream; as a tool, an agent can start Guild sessions and inspect their status and transcript.", "Guild is the control plane for AI agents — RocketRide prepares the data, a governed Guild agent performs the action."],
+	"tile": ["Guild${parameters.tool_guild.agent ? ': ' + parameters.tool_guild.agent : ''}"],
+	"lanes": {
+		"text": ["text", "answers", "table"],
+		"questions": ["answers", "text", "table"],
+		"documents": ["documents", "text", "table"]
+	},
+	"preconfig": {
+		"default": "default",
+		"profiles": {
+			"default": {
+				"title": "Guild.ai",
+				"baseUrl": "https://app.guild.ai",
+				"apiKeyId": "",
+				"apiKeySecret": "",
+				"owner": "",
+				"workspace": "",
+				"agent": "",
+				"resultMode": "wait",
+				"timeout": 300,
+				"maxSessions": 10,
+				"verifyTls": true
+			}
+		}
+	},
+	"fields": {
+		"tool_guild.baseUrl": {
+			"type": "string",
+			"title": "Guild Base URL",
+			"default": "https://app.guild.ai",
+			"description": "Base URL of the Guild API. Leave as the default for Guild Cloud; override only for an enterprise or self-hosted deployment."
+		},
+		"tool_guild.apiKeyId": {
+			"type": "string",
+			"title": "API Key ID",
+			"default": "",
+			"description": "The id half of a Guild trigger API key. Guild authenticates with HTTP Basic — the key id is the username. Create a key on the trigger's page in the Guild app.",
+			"secure": true,
+			"ui": {
+				"ui:widget": "ApiKeyWidget"
+			}
+		},
+		"tool_guild.apiKeySecret": {
+			"type": "string",
+			"title": "API Key Secret",
+			"default": "",
+			"description": "The secret half of the Guild trigger API key (the Basic auth password). Shown once when the key is created.",
+			"secure": true,
+			"ui": {
+				"ui:widget": "ApiKeyWidget"
+			}
+		},
+		"tool_guild.owner": {
+			"type": "string",
+			"title": "Workspace owner",
+			"default": "",
+			"description": "The owner name that the workspace lives under, as it appears in the Guild app URL (app.guild.ai/<owner>/<workspace>)."
+		},
+		"tool_guild.workspace": {
+			"type": "string",
+			"title": "Workspace",
+			"default": "",
+			"description": "The Guild workspace holding the agent to run, as it appears in the app URL."
+		},
+		"tool_guild.agent": {
+			"type": "string",
+			"title": "Agent",
+			"default": "",
+			"description": "Agent to run as the pipeline step, and the default for the run_agent tool. Required for the pipeline step; an agent may override it per call.",
+			"optional": true
+		},
+		"tool_guild.resultMode": {
+			"type": "string",
+			"title": "Result mode",
+			"default": "wait",
+			"enum": [
+				["wait", "Wait for the session result"],
+				["start", "Start the session and return immediately"]
+			],
+			"description": "Guild runs agents asynchronously; 'wait' polls the session until it finishes. 'start' returns the session id without waiting — useful for fire-and-forget tool calls, but the pipeline step always waits (a session id is of no use downstream)."
+		},
+		"tool_guild.timeout": {
+			"type": "integer",
+			"title": "Session timeout (seconds)",
+			"default": 300,
+			"minimum": 5,
+			"maximum": 3600,
+			"description": "Max seconds to wait for a session to finish before raising. Guild's own turn timeout is 3600s; a timeout here does NOT cancel the session on Guild's side — the session id is reported so the run stays traceable."
+		},
+		"tool_guild.maxSessions": {
+			"type": "integer",
+			"title": "Max sessions per run",
+			"default": 10,
+			"minimum": 1,
+			"maximum": 1000,
+			"description": "Cap on Guild sessions this node may start in one pipeline run. Guild bills per automation (the free tier allows 100/month), so this bounds a runaway agent loop."
+		},
+		"tool_guild.verifyTls": {
+			"type": "boolean",
+			"title": "Verify TLS certificate",
+			"default": true,
+			"description": "Leave ON. Disable only for a self-hosted Guild served with a self-signed certificate.",
+			"enum": [
+				[true, "Yes"],
+				[false, "No"]
+			]
+		}
+	},
+	"test": {
+		"requires": ["ROCKETRIDE_GUILD_KEY_ID", "ROCKETRIDE_GUILD_KEY_SECRET", "ROCKETRIDE_GUILD_OWNER", "ROCKETRIDE_GUILD_WORKSPACE", "ROCKETRIDE_GUILD_AGENT"],
+		"profiles": ["default"],
+		"cases": [
+			{
+				"name": "Run agent smoke test (needs a live Guild workspace + trigger API key)",
+				"text": "hello from rocketride",
+				"expect": {
+					"text": { "noError": true }
+				}
+			}
+		]
+	},
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Guild.ai",
+			"properties": ["type", "tool_guild.baseUrl", "tool_guild.apiKeyId", "tool_guild.apiKeySecret", "tool_guild.owner", "tool_guild.workspace", "tool_guild.agent", "tool_guild.resultMode", "tool_guild.timeout", "tool_guild.maxSessions", "tool_guild.verifyTls"],
+			"ui": {
+				"ui:options": {
+					"compactDescriptions": true
+				}
+			}
+		}
+	]
+}

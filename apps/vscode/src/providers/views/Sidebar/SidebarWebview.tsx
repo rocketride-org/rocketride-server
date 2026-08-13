@@ -19,18 +19,20 @@
  *
  * Architecture:
  *   SidebarProvider (Node.js) ↔ postMessage ↔ SidebarViewWebview (browser)
- *     → SidebarView (shared-ui) + SidebarFooter (shared-ui)
+ *     → SidebarView (shared) + SidebarFooter (shared)
  */
 
 import React, { useState, useCallback, useMemo, useRef, useEffect } from 'react';
 
-import 'shared/themes/rocketride-default.css';
-import 'shared/themes/rocketride-vscode.css';
+import 'shell/themes/rocketride-default.css';
+import '../../../themes/rocketride-vscode.css';
 
-import { SidebarView, BxUser, BxCog, BxExport, BxLock, BxRocket } from 'shared';
-import { SidebarFooter } from 'shared/components/sidebar-footer/SidebarFooter';
-import type { SidebarFooterMenuItem } from 'shared/components/sidebar-footer/SidebarFooter';
-import type { ProjectEntry, ActiveTaskState, UnknownTask, ConnectionInfo } from 'shared';
+import { SidebarView } from 'shared/modules/sidebar/SidebarView';
+import { BxUser, BxCog, BxExport, BxLock, BxRocket } from 'shell';
+import { foldTaskEvent } from 'shared/modules/sidebar/taskFold';
+import { SidebarFooter } from 'shell';
+import type { SidebarFooterMenuItem } from 'shell';
+import type { ProjectEntry, ActiveTaskState, UnknownTask, ConnectionInfo, AppListItem, SidebarMode } from 'shared/modules/sidebar/types';
 import { useMessaging } from '../hooks/useMessaging';
 
 // =============================================================================
@@ -45,13 +47,16 @@ interface HostProjectEntry {
 
 interface TaskEventBody {
 	action: 'begin' | 'end' | 'restart' | 'running';
+	/** Run classification stamp — deploy runs never enter the dev lists. */
+	runKind?: string;
 	name?: string;
 	projectId: string;
 	source: string;
-	tasks?: { id: string; name: string; projectId: string; source: string }[];
+	/** Bulk snapshot rows — each row carries its OWN runKind stamp. */
+	tasks?: { id: string; name: string; projectId: string; source: string; runKind?: string }[];
 }
 
-type OutgoingMessage = { type: 'view:ready' } | { type: 'connect' } | { type: 'disconnect' } | { type: 'command'; command: string; args?: unknown[] } | { type: 'openFile'; fsPath: string } | { type: 'runPipeline'; fsPath: string; sourceId?: string } | { type: 'stopPipeline'; projectId: string; sourceId: string } | { type: 'refresh' } | { type: 'openUnknownTask'; projectId: string; sourceId: string; displayName: string } | { type: 'setDevelopmentMode'; mode: string } | { type: 'setDevelopmentTeam'; teamId: string } | { type: 'setDeployTargetMode'; mode: string | null } | { type: 'setDeployTargetTeam'; teamId: string } | { type: 'cloudSignIn' };
+type OutgoingMessage = { type: 'view:ready' } | { type: 'connect' } | { type: 'disconnect' } | { type: 'command'; command: string; args?: unknown[] } | { type: 'openFile'; fsPath: string } | { type: 'runPipeline'; fsPath: string; sourceId?: string } | { type: 'stopPipeline'; projectId: string; sourceId: string } | { type: 'refresh' } | { type: 'openUnknownTask'; projectId: string; sourceId: string; displayName: string } | { type: 'setDevelopmentMode'; mode: string } | { type: 'setDeployTargetMode'; mode: string | null } | { type: 'cloudSignIn' } | { type: 'openApp'; appId: string } | { type: 'setSidebarMode'; mode: SidebarMode };
 
 interface DashboardTaskDTO {
 	id: string;
@@ -60,13 +65,8 @@ interface DashboardTaskDTO {
 	source: string;
 	completed: boolean;
 	state: number;
-}
-
-interface TeamDTO {
-	id: string;
-	name: string;
-	color?: string;
-	memberCount?: number;
+	/** Run classification stamp: deploy runs never enter the dev lists. */
+	runKind?: string;
 }
 
 type IncomingMessage =
@@ -76,18 +76,13 @@ type IncomingMessage =
 				// Dev connection
 				connectionState: string;
 				connectionMode: string;
-				developmentTeamId?: string;
 				devProgressMessage?: string;
 				devProgressLogLine?: string;
 				// Deploy connection
 				deployConnectionState?: string;
 				deployConnectionMode?: string | null;
-				deployTargetTeamId?: string;
 				deployProgressMessage?: string;
 				deployProgressLogLine?: string;
-				// Teams (from respective servers)
-				teams?: TeamDTO[];
-				deployTeams?: TeamDTO[];
 				// Shared auth
 				cloudConnected?: boolean;
 				userName?: string;
@@ -95,9 +90,14 @@ type IncomingMessage =
 				// Pipeline data
 				entries: HostProjectEntry[];
 				unknownTasks: UnknownTask[];
+				// App Builder (MY APPS) — merged workspace ∪ server list
+				apps?: AppListItem[];
+				/** Host-persisted sidebar mode (workspaceState). */
+				sidebarMode?: SidebarMode;
 			};
 	  }
 	| { type: 'entriesUpdate'; entries: HostProjectEntry[] }
+	| { type: 'appsUpdate'; apps: AppListItem[] }
 	| { type: 'taskEvent'; event: TaskEventBody }
 	| { type: 'statusUpdate'; projectId: string; sourceId: string; errors: string[]; warnings: string[] }
 	| { type: 'dashboardSnapshot'; tasks: DashboardTaskDTO[] };
@@ -110,9 +110,7 @@ const SidebarViewWebview: React.FC = () => {
 	// ── Dev connection state ────────────────────────────────────────────────
 	const [connection, setConnection] = useState<ConnectionInfo>({ state: 'disconnected' });
 	const [developmentMode, setDevelopmentMode] = useState('local');
-	const [developmentTeamId, setDevelopmentTeamId] = useState('');
 	const [devProgressMessage, setDevProgressMessage] = useState<string | undefined>();
-	const [teams, setTeams] = useState<TeamDTO[]>([]);
 
 	// ── Subscription state ─────────────────────────────────────────────────
 	const [subscribed, setSubscribed] = useState(true);
@@ -120,14 +118,33 @@ const SidebarViewWebview: React.FC = () => {
 	// ── Deploy connection state ─────────────────────────────────────────────
 	const [deployConnectionState, setDeployConnectionState] = useState('disconnected');
 	const [deployTargetMode, setDeployTargetMode] = useState<string | null>(null);
-	const [deployTargetTeamId, setDeployTargetTeamId] = useState('');
 	const [deployProgressMessage, setDeployProgressMessage] = useState<string | undefined>();
-	const [deployTeams, setDeployTeams] = useState<TeamDTO[]>([]);
 
 	// ── Pipeline data ───────────────────────────────────────────────────────
 	const [entries, setEntries] = useState<ProjectEntry[]>([]);
 	const [activeTasks, setActiveTasks] = useState<Map<string, ActiveTaskState>>(new Map());
 	const [unknownTasks, setUnknownTasks] = useState<UnknownTask[]>([]);
+
+	// ── App Builder (MY APPS) ───────────────────────────────────────────────
+	const [apps, setApps] = useState<AppListItem[]>([]);
+	const [sidebarMode, setSidebarMode] = useState<SidebarMode>('pipelines');
+	// The host-persisted mode seeds the strip ONCE: an `update` composed
+	// before the persist round trip completed carries the previous value and
+	// must not revert a selection the user just made.
+	const sidebarModeSeededRef = useRef(false);
+
+	// Synchronously-updated mirrors: the shared foldTaskEvent needs BOTH
+	// collections atomically, and relayed events can burst faster than a
+	// render — refs advance in the handler itself so successive folds never
+	// read stale state; the effects re-anchor them after any other mutation.
+	const activeTasksRef = useRef(activeTasks);
+	const unknownTasksRef = useRef(unknownTasks);
+	useEffect(() => {
+		activeTasksRef.current = activeTasks;
+	}, [activeTasks]);
+	useEffect(() => {
+		unknownTasksRef.current = unknownTasks;
+	}, [unknownTasks]);
 
 	// ── Engine progress log (last N lines for popup display) ───────────────
 	const MAX_PROGRESS_LINES = 15;
@@ -155,80 +172,18 @@ const SidebarViewWebview: React.FC = () => {
 	/** Process an apaevt_task event to update activeTasks and unknownTasks. */
 	const handleTaskEvent = useCallback(
 		(event: TaskEventBody) => {
-			const { action, projectId, source: sourceId } = event;
-			const key = `${projectId}.${sourceId}`;
-
-			setActiveTasks((prev) => {
-				const next = new Map(prev);
-
-				switch (action) {
-					case 'begin':
-					case 'restart':
-						if (!next.has(key)) {
-							next.set(key, { running: true, errors: [], warnings: [] });
-						} else {
-							const existing = next.get(key)!;
-							next.set(key, { ...existing, running: true });
-						}
-						break;
-
-					case 'running':
-						// Full resync — clear and rebuild from task list
-						next.clear();
-						for (const task of event.tasks ?? []) {
-							const k = `${task.projectId}.${task.source}`;
-							next.set(k, { running: true, errors: [], warnings: [] });
-						}
-						break;
-
-					case 'end':
-						next.delete(key);
-						break;
-				}
-
-				return next;
-			});
-
-			// Update unknown tasks
-			setUnknownTasks((prev) => {
-				switch (action) {
-					case 'begin':
-					case 'restart':
-						if (!isKnownTask(projectId, sourceId)) {
-							if (!prev.some((ut) => ut.projectId === projectId && ut.sourceId === sourceId)) {
-								return [
-									...prev,
-									{
-										projectId,
-										sourceId,
-										displayName: event.name || sourceId,
-										projectLabel: projectId.substring(0, 8),
-									},
-								];
-							}
-						}
-						return prev;
-
-					case 'running': {
-						// Full resync
-						const tasks = event.tasks ?? [];
-						return tasks
-							.filter((t) => !isKnownTask(t.projectId, t.source))
-							.map((t) => ({
-								projectId: t.projectId,
-								sourceId: t.source,
-								displayName: t.name || t.source,
-								projectLabel: t.projectId.substring(0, 8),
-							}));
-					}
-
-					case 'end':
-						return prev.filter((ut) => !(ut.projectId === projectId && ut.sourceId === sourceId));
-
-					default:
-						return prev;
-				}
-			});
+			// The dev-view classification and the whole lifecycle fold live in
+			// shared code (foldTaskEvent) — one implementation for this webview
+			// and the rocket-ui sidebar. Deploy runs never enter the active/
+			// ad-hoc lists; the fold filters every path, including each row of
+			// a bulk 'running' snapshot.
+			const folded = foldTaskEvent(event, activeTasksRef.current, unknownTasksRef.current, isKnownTask);
+			if (folded) {
+				activeTasksRef.current = folded.activeTasks;
+				unknownTasksRef.current = folded.unknownTasks;
+				setActiveTasks(folded.activeTasks);
+				setUnknownTasks(folded.unknownTasks);
+			}
 		},
 		[isKnownTask]
 	);
@@ -251,37 +206,43 @@ const SidebarViewWebview: React.FC = () => {
 					if (msg.data.cloudConnected !== undefined) setCloudSignedIn(msg.data.cloudConnected);
 
 					// Dev connection state
-					if (msg.data.teams) setTeams(msg.data.teams);
 					if (msg.data.connectionMode) setDevelopmentMode(msg.data.connectionMode);
-					if (msg.data.developmentTeamId !== undefined) setDevelopmentTeamId(msg.data.developmentTeamId);
 					setDevProgressMessage(msg.data.devProgressMessage);
 
 					// Accumulate dev engine log lines; clear on connect
 					if (msg.data.connectionState === 'connected') {
 						setDevProgressLog([]);
 					} else if (msg.data.devProgressLogLine && msg.data.devProgressLogLine !== devProgressLog[devProgressLog.length - 1]) {
-						setDevProgressLog((prev) => prev[prev.length - 1] === msg.data.devProgressLogLine ? prev : [...prev.slice(-(MAX_PROGRESS_LINES - 1)), msg.data.devProgressLogLine!]);
+						setDevProgressLog((prev) => (prev[prev.length - 1] === msg.data.devProgressLogLine ? prev : [...prev.slice(-(MAX_PROGRESS_LINES - 1)), msg.data.devProgressLogLine!]));
 					}
 
 					// Deploy connection state
 					if (msg.data.deployConnectionState) setDeployConnectionState(msg.data.deployConnectionState);
-					if (msg.data.deployTeams) setDeployTeams(msg.data.deployTeams);
 					if (msg.data.deployConnectionMode !== undefined) setDeployTargetMode(msg.data.deployConnectionMode ?? null);
-					if (msg.data.deployTargetTeamId !== undefined) setDeployTargetTeamId(msg.data.deployTargetTeamId);
 					setDeployProgressMessage(msg.data.deployProgressMessage);
 
 					// Accumulate deploy engine log lines; clear on connect
 					if (msg.data.deployConnectionState === 'connected') {
 						setDeployProgressLog([]);
 					} else if (msg.data.deployProgressLogLine) {
-						setDeployProgressLog((prev) => prev[prev.length - 1] === msg.data.deployProgressLogLine ? prev : [...prev.slice(-(MAX_PROGRESS_LINES - 1)), msg.data.deployProgressLogLine!]);
+						setDeployProgressLog((prev) => (prev[prev.length - 1] === msg.data.deployProgressLogLine ? prev : [...prev.slice(-(MAX_PROGRESS_LINES - 1)), msg.data.deployProgressLogLine!]));
 					}
 					// Subscription status
 					if ((msg.data as any).isSubscribed !== undefined) setSubscribed((msg.data as any).isSubscribed);
+					// App Builder list + host-persisted mode (seed once — see ref)
+					if (msg.data.apps) setApps(msg.data.apps);
+					if (msg.data.sidebarMode && !sidebarModeSeededRef.current) {
+						sidebarModeSeededRef.current = true;
+						setSidebarMode(msg.data.sidebarMode);
+					}
 					break;
 
 				case 'entriesUpdate':
 					setEntries(msg.entries);
+					break;
+
+				case 'appsUpdate':
+					setApps(msg.apps);
 					break;
 
 				case 'taskEvent':
@@ -289,14 +250,15 @@ const SidebarViewWebview: React.FC = () => {
 					break;
 
 				case 'statusUpdate': {
-					// Update errors/warnings for a specific source
+					// Update errors/warnings for a specific source. Advance the
+					// sync refs FIRST (same rule as handleTaskEvent): a task event
+					// in the same tick folds from the refs, not from state.
 					const statusKey = `${msg.projectId}.${msg.sourceId}`;
-					setActiveTasks((prev) => {
-						const next = new Map(prev);
-						const existing = next.get(statusKey) ?? { running: false, errors: [], warnings: [] };
-						next.set(statusKey, { ...existing, errors: msg.errors, warnings: msg.warnings });
-						return next;
-					});
+					const nextActive = new Map(activeTasksRef.current);
+					const existing = nextActive.get(statusKey) ?? { running: false, errors: [], warnings: [] };
+					nextActive.set(statusKey, { ...existing, errors: msg.errors, warnings: msg.warnings });
+					activeTasksRef.current = nextActive;
+					setActiveTasks(nextActive);
 					break;
 				}
 
@@ -306,12 +268,24 @@ const SidebarViewWebview: React.FC = () => {
 					const unknown: UnknownTask[] = [];
 					for (const t of msg.tasks) {
 						if (t.completed) continue;
+						// Same classification the shared fold applies on every event
+						// path: deploy runs never seed the dev sidebar.
+						if (t.runKind === 'deploy') continue;
 						const k = `${t.projectId}.${t.source}`;
-						taskMap.set(k, { running: true, errors: [], warnings: [] });
+						// Preserve accumulated diagnostics for a task that was
+						// already tracked — the snapshot confirms it is still
+						// running, it does not reset its indicators (same rule as
+						// the shared fold's bulk 'running' rebuild).
+						const prev = activeTasksRef.current.get(k);
+						taskMap.set(k, { running: true, errors: prev?.errors ?? [], warnings: prev?.warnings ?? [] });
 						if (!isKnownTask(t.projectId, t.source)) {
 							unknown.push({ projectId: t.projectId, sourceId: t.source, displayName: t.name || t.source, projectLabel: t.projectId.substring(0, 8) });
 						}
 					}
+					// Advance the sync refs FIRST (same rule as handleTaskEvent)
+					// so an event in the same tick folds from the seeded state.
+					activeTasksRef.current = taskMap;
+					unknownTasksRef.current = unknown;
 					setActiveTasks(taskMap);
 					setUnknownTasks(unknown);
 					break;
@@ -370,17 +344,40 @@ const SidebarViewWebview: React.FC = () => {
 		[sendMessage]
 	);
 
+	// ── App Builder callbacks ───────────────────────────────────────────────
+
+	/** New app → the scaffolder command (extension host). */
+	const onNewApp = useCallback(() => {
+		sendMessage({ type: 'command', command: 'rocketride.app.create' });
+	}, [sendMessage]);
+
+	/** App row click → open (or reveal) its App Builder screen. */
+	const onOpenApp = useCallback(
+		(appId: string) => {
+			sendMessage({ type: 'openApp', appId });
+		},
+		[sendMessage]
+	);
+
+	/** Mode strip selection — local state now, host persists via message. */
+	const onSidebarModeChange = useCallback(
+		(mode: SidebarMode) => {
+			// A user selection counts as the seed: an `update` composed before
+			// the persist round trip completed must not revert it.
+			sidebarModeSeededRef.current = true;
+			setSidebarMode(mode);
+			sendMessage({ type: 'setSidebarMode', mode });
+		},
+		[sendMessage]
+	);
+
 	// ── Footer popup menu items ─────────────────────────────────────────────
 	//
-	// Development and Deployment appear in the popup with `>` indicators.
-	//   - Non-cloud modes: clicking opens the Settings page (dev or deploy section)
-	//   - Cloud mode: clicking opens a team selection submenu
+	// Development and Deployment appear in the popup; clicking opens the
+	// Settings page (dev or deploy section). Runs use the profile-assigned
+	// development team, so no team selection exists here.
 	// Account, Billing, Settings, Log out follow below.
 	// ─────────────────────────────────────────────────────────────────────────
-
-	/** Resolve team names from their respective connection's team lists. */
-	const devTeamName = teams.find((t) => t.id === developmentTeamId)?.name;
-	const deployTeamName = deployTeams.find((t) => t.id === deployTargetTeamId)?.name;
 
 	/** Builds a mode display label like "Local" or "Cloud". */
 	const modeLabel = (mode: string | null): string => {
@@ -420,8 +417,7 @@ const SidebarViewWebview: React.FC = () => {
 
 		// ── Development section ─────────────────────────────────────────────
 		const devStatus = connectionStatusText(connection.state, developmentMode, devProgressMessage);
-		const devTeamLine = developmentMode === 'cloud' && devTeamName ? `Team: ${devTeamName}` : undefined;
-		const devLines = [devStatus, ...(devTeamLine ? [devTeamLine] : []), ...devProgressLog];
+		const devLines = [devStatus, ...devProgressLog];
 		items.push({
 			id: 'dev-header',
 			label: 'Development',
@@ -429,14 +425,12 @@ const SidebarViewWebview: React.FC = () => {
 			statusText: devLines.join('\n'),
 			statusState: connection.state === 'connected' ? 'connected' : connection.state === 'connecting' ? 'connecting' : 'disconnected',
 			onClick: () => sendMessage({ type: 'command', command: 'rocketride.page.settings.open', args: ['development'] }),
-			submenu: developmentMode === 'cloud' && teams.length > 0 ? [...teams].sort((a, b) => a.name.localeCompare(b.name)).map((t: TeamDTO) => ({ id: `dev-${t.id}`, label: t.name, checked: developmentTeamId === t.id, onClick: () => sendMessage({ type: 'setDevelopmentTeam', teamId: t.id }) })) : undefined,
 		});
 
 		// ── Deployment section ──────────────────────────────────────────────
 		if (deployTargetMode) {
 			const deployStatus = connectionStatusText(deployConnectionState, deployTargetMode, deployProgressMessage);
-			const deployTeamLine = deployTargetMode === 'cloud' && deployTeamName ? `Team: ${deployTeamName}` : undefined;
-			const deployLines = [deployStatus, ...(deployTeamLine ? [deployTeamLine] : []), ...deployProgressLog];
+			const deployLines = [deployStatus, ...deployProgressLog];
 			items.push({
 				id: 'deploy-header',
 				label: 'Deployment',
@@ -444,7 +438,6 @@ const SidebarViewWebview: React.FC = () => {
 				statusText: deployLines.join('\n'),
 				statusState: deployConnectionState === 'connected' ? 'connected' : deployConnectionState === 'connecting' ? 'connecting' : 'disconnected',
 				onClick: () => sendMessage({ type: 'command', command: 'rocketride.page.settings.open', args: ['deployment'] }),
-				submenu: deployTargetMode === 'cloud' && deployTeams.length > 0 ? [...deployTeams].sort((a, b) => a.name.localeCompare(b.name)).map((t: TeamDTO) => ({ id: `deploy-${t.id}`, label: t.name, checked: deployTargetTeamId === t.id, onClick: () => sendMessage({ type: 'setDeployTargetTeam', teamId: t.id }) })) : undefined,
 			});
 		}
 
@@ -473,7 +466,7 @@ const SidebarViewWebview: React.FC = () => {
 		}
 
 		return items;
-	}, [sendMessage, cloudConnected, connection.state, teams, deployTeams, developmentMode, developmentTeamId, devTeamName, devProgressMessage, devProgressLog, deployConnectionState, deployTargetMode, deployTargetTeamId, deployTeamName, deployProgressMessage, deployProgressLog, subscribed, anyConnected]);
+	}, [sendMessage, cloudConnected, connection.state, developmentMode, devProgressMessage, devProgressLog, deployConnectionState, deployTargetMode, deployProgressMessage, deployProgressLog, subscribed, anyConnected]);
 
 	// ── Footer slot ─────────────────────────────────────────────────────────
 	const footerSlot = <SidebarFooter collapsed={false} userName={userName} userEmail={userEmail} onOpenDocs={onOpenDocs} menuItems={footerMenuItems} />;
@@ -482,8 +475,8 @@ const SidebarViewWebview: React.FC = () => {
 
 	// No headerSlot: the VS Code host has no home-app destination, so it injects no
 	// host-specific top nav. The "Home" button is a SaaS-shell concept owned by the
-	// web host (rocket-ui), intentionally absent from shared-ui / this extension.
-	return <SidebarView connection={connection} isSubscribed={subscribed} entries={entries} activeTasks={activeTasks} unknownTasks={unknownTasks} onNavigate={onNavigate} onOpenFile={onOpenFile} onSourceAction={onSourceAction} onRefresh={onRefresh} footerSlot={footerSlot} onOpenUnknownTask={onOpenUnknownTask} />;
+	// web host (rocket-ui), intentionally absent from shared / this extension.
+	return <SidebarView connection={connection} isSubscribed={subscribed} entries={entries} activeTasks={activeTasks} unknownTasks={unknownTasks} onNavigate={onNavigate} onOpenFile={onOpenFile} onSourceAction={onSourceAction} onRefresh={onRefresh} footerSlot={footerSlot} onOpenUnknownTask={onOpenUnknownTask} appBuilder={{ apps, onNewApp, onOpenApp }} sidebarMode={sidebarMode} onSidebarModeChange={onSidebarModeChange} />;
 };
 
 export default SidebarViewWebview;

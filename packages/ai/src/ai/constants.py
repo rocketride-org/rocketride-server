@@ -58,6 +58,10 @@ CONST_TTL_CHECK = 60  # check for tasks to kill every 60 seconds
 # =============================================================================
 # Run Logging (per-task JSONL event continuum) Configuration
 # =============================================================================
+# Run-analytics slowest-completions list: the status body keeps this many
+# of the run's slowest completions (insert-sorted, slowest first).
+CONST_ANALYTICS_SLOWEST_DOCS = 10
+
 # Sealed-segment size: the active spool segment seals at this many bytes
 # (on a line boundary) and uploads as one immutable store object.
 CONST_LOG_SEGMENT_BYTES = 16 * 1024 * 1024  # 16 MB
@@ -130,6 +134,7 @@ CONST_WEB_WS_MAX_SIZE = 250 * 1024 * 1024  # maximum WebSocket message size in b
 # =============================================================================
 CONST_DATA_PIPE_TIMEOUT = 60.0  # seconds of inactivity before pipe is considered zombie
 CONST_DATA_SHUTDOWN_TIMEOUT = 30.0  # seconds to wait for data connection shutdown
+CONST_DATA_OPEN_TARGET_WAIT = 5.0  # seconds `_open` waits for source to bind `state.target`
 
 # =============================================================================
 # HTTP/Stream Configuration

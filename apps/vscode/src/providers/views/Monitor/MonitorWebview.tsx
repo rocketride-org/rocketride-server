@@ -16,12 +16,14 @@
 
 import React, { useState, useCallback, useRef, useEffect } from 'react';
 
-import { applyTheme } from 'shared/themes';
-import { MonitorView, parseActivityEvent } from 'shared';
-import type { DashboardResponse, ActivityEvent } from 'shared';
+import { applyTheme } from 'shell';
+import type { ThemeTokens } from 'shell';
+import { MonitorView } from 'shell';
+import { parseActivityEvent } from 'shell';
+import type { DashboardResponse, ActivityEvent } from 'shell';
 import { useMessaging } from '../hooks/useMessaging';
 import { useGridConfigBridge } from '../hooks/useGridConfigBridge';
-import type { MonitorHostToWebview, MonitorWebviewToHost } from '../types';
+import type { MonitorHostToWebview, MonitorWebviewToHost } from '../../types/monitorTypes';
 
 // =============================================================================
 // COMPONENT
@@ -47,12 +49,12 @@ const MonitorWebview: React.FC = () => {
 	const handleMessage = useCallback((message: MonitorHostToWebview) => {
 		switch (message.type) {
 			case 'shell:init':
-				if (message.theme) applyTheme(message.theme);
+				if (message.theme) applyTheme(message.theme as ThemeTokens);
 				setIsConnected(message.isConnected);
 				sendMessageRef.current({ type: 'view:initialized' });
 				break;
 			case 'shell:themeChange':
-				applyTheme(message.tokens);
+				applyTheme(message.tokens as ThemeTokens);
 				break;
 			case 'shell:connectionChange':
 				setIsConnected(message.isConnected);
@@ -86,7 +88,7 @@ const MonitorWebview: React.FC = () => {
 
 	// --- Render --------------------------------------------------------------
 
-	return <MonitorView data={data} events={events} isConnected={isConnected} onRefresh={handleRefresh} />;
+	return <MonitorView documentTitle="Server Monitor" data={data} events={events} isConnected={isConnected} onRefresh={handleRefresh} />;
 };
 
 export default MonitorWebview;

@@ -1,0 +1,74 @@
+{
+  "components": [
+    {
+      "id": "tools_1",
+      "provider": "tools",
+      "name": "Tools",
+      "config": {
+        "hideForm": true,
+        "mode": "Source",
+        "parameters": {},
+        "type": "tools",
+        "name": "Tools"
+      },
+      "ui": {
+        "position": {
+          "x": 570,
+          "y": 280
+        },
+        "measured": {
+          "width": 150,
+          "height": 87
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      }
+    },
+    {
+      "id": "db_mysql_1",
+      "provider": "db_mysql",
+      "name": "MySQL",
+      "config": {
+        "profile": "default",
+        "default": {
+          "allow_execute": true,
+          "database": "rocketride",
+          "db_description": "RocketRide DB",
+          "host": "localhost",
+          "max_attempts": 5,
+          "table": "table",
+          "user": "root",
+          "password": "root"
+        },
+        "name": "MySQL"
+      },
+      "ui": {
+        "position": {
+          "x": 700,
+          "y": 430
+        },
+        "measured": {
+          "width": 150,
+          "height": 123
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      },
+      "control": [
+        {
+          "classType": "tool",
+          "from": "tools_1"
+        }
+      ]
+    }
+  ],
+  "project_id": "93cc072e-c627-410f-980c-39b11c3c058a",
+  "version": 1,
+  "docRevision": 9,
+  "isLocked": false,
+  "snapToGrid": true,
+  "snapGridSize": [
+    10,
+    10
+  ]
+}

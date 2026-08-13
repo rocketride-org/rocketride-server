@@ -75,7 +75,7 @@ Usage:
                 print(f"Error: {error}")
 """
 
-from typing import List, Dict, Union
+from typing import List, Dict, Optional, Union
 from enum import Enum
 from pydantic import BaseModel, Field
 
@@ -422,3 +422,63 @@ class TASK_STATUS(BaseModel):
     tokens: TASK_TOKENS = Field(
         default_factory=TASK_TOKENS, description='Cumulative token usage for CPU, memory, GPU (100 tokens = $1.00)'
     )
+
+    # Run analytics (server-accumulated from trace events while tracing is
+    # enabled; empty when pipelineTraceLevel is 'none'). Computed at the
+    # supervisor where every event is born, so status-at-position reads are
+    # exact anywhere on the continuum — live, replayed, or mid-scrub.
+    componentStats: Dict[str, 'TASK_STATUS_COMPONENT_STAT'] = Field(
+        default_factory=dict,
+        description='Per-component timing accumulated this run: calls, total and max seconds (requires tracing)',
+    )
+
+    slowestDocs: List['TASK_STATUS_SLOWEST_DOC'] = Field(
+        default_factory=list,
+        description='The 10 slowest completions this run, sorted slowest-first (requires tracing)',
+    )
+
+    completionSeconds: float = Field(
+        default=0.0, description='Total begin-to-end seconds across all completions this run (requires tracing)'
+    )
+
+    idleSeconds: float = Field(
+        default=0.0,
+        description='Total seconds the pipe sat unused between completions this run (requires tracing)',
+    )
+
+    idleLongestSeconds: float = Field(
+        default=0.0, description='Longest single unused stretch between completions this run (requires tracing)'
+    )
+
+    idleLongestAt: float = Field(
+        default=0.0, description='Epoch when the longest unused stretch began (0 while none is recorded)'
+    )
+
+
+class TASK_STATUS_COMPONENT_STAT(BaseModel):
+    """
+    Per-component timing accumulated by the supervisor for one run.
+
+    Correlation happens by PIPE (concurrent completions run the same
+    component on different pipes); aggregation rolls up by component.
+    Seconds are rounded to 2 decimals at accumulation.
+    """
+
+    calls: int = Field(default=0, description='Completed enter/leave pairs this run')
+    totalSeconds: float = Field(default=0.0, description='Sum of enter-to-leave seconds')
+    maxSeconds: float = Field(default=0.0, description='Longest single call in seconds')
+
+
+class TASK_STATUS_SLOWEST_DOC(BaseModel):
+    """
+    One of the run's slowest completions (server-tracked top list).
+
+    beginSeq is the completion's begin flow event's continuum seq — the
+    permanent trace identity getTrace resolves. beginTime is carried
+    explicitly: catalog-seeded seqs do not encode time.
+    """
+
+    name: str = Field(default='', description='Object name from the begin event (capped at 200 chars)')
+    elapsed: float = Field(default=0.0, description='Begin-to-end seconds, rounded to 2 decimals')
+    beginTime: float = Field(default=0.0, description='Begin emission time (epoch seconds)')
+    beginSeq: Optional[int] = Field(default=None, description='Begin flow event continuum seq (trace identity)')

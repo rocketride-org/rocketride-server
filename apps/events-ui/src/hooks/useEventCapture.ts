@@ -36,7 +36,7 @@
 // =============================================================================
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useClient, useShellEvent } from 'shell-ui';
+import { useClient, useShellEvent } from 'shell';
 import type { CaptureSnapshot, CapturedEvent, EventRow, MonitorConfig } from '../types';
 import { EVENT_TYPE_NAMES, FLUSH_INTERVAL_MS, MAX_EVENTS } from '../types';
 import { summarize } from '../format';

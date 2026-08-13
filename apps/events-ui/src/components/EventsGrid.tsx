@@ -26,8 +26,8 @@
 
 import React, { useMemo } from 'react';
 import type { CSSProperties } from 'react';
-import { Card, CardDataGrid, monoEl, mutedEl } from 'shared';
-import type { GridColumnDefinition } from 'shared';
+import { Card, CardDataGrid, monoEl, mutedEl } from 'shell';
+import type { GridColumnDefinition } from 'shell';
 import type { EventRow } from '../types';
 import { eventColor } from '../styles';
 import { formatTime } from '../format';

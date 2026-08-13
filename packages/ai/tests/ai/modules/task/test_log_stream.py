@@ -41,7 +41,6 @@ import time
 import pytest
 
 import ai.modules.task.run_log as run_log
-from ai.account.file_store import FileStore
 from ai.account.store_providers.filesystem import FilesystemStore
 from rocketride import log_stream as rr_log_stream
 from rocketride._log_codec import normalize_stamps
@@ -54,6 +53,7 @@ from .test_run_log import (
     PROJECT,
     SOURCE,
     flow_op,
+    make_file_store,
     make_stamp,
     open_writer,
     output_event,
@@ -86,10 +86,10 @@ class _StubLogApi:
     def __init__(self, reader):
         self._reader = reader
 
-    async def chapters(self, project_id, source, run_kind):
+    async def chapters(self, project_id, source, *, team_id=''):
         return await self._reader.chapters()
 
-    async def segment(self, project_id, source, run_kind, segment, *, offset=0, max_bytes=None):
+    async def segment(self, project_id, source, segment, *, team_id='', offset=0, max_bytes=None):
         if max_bytes is None:
             return await self._reader.segment_raw(segment, offset=offset)
         return await self._reader.segment_raw(segment, offset=offset, max_bytes=max_bytes)
@@ -104,7 +104,7 @@ class _StubClient:
 
 def open_session(reader):
     """A session bound to the stub client over the standard test stream."""
-    return LogEventStream(_StubClient(reader), PROJECT, SOURCE, KIND)
+    return LogEventStream(_StubClient(reader), PROJECT, SOURCE)
 
 
 async def seed_rich(istore, spool_root, monkeypatch):
@@ -149,7 +149,14 @@ async def seed_rich(istore, spool_root, monkeypatch):
 
     await writer._drain_uploads()
     await writer.end_run('ok')
-    return run_log.RunLogReader(FileStore(istore, CLIENT), CLIENT, PROJECT, SOURCE, KIND, spool_root=spool_root)
+    return run_log.RunLogReader(
+        make_file_store(istore),
+        CLIENT,
+        PROJECT,
+        SOURCE,
+        KIND,
+        spool_root=spool_root,
+    )
 
 
 def sse_event(pid, message):
@@ -309,6 +316,80 @@ class TestSeededReads:
         assert status == expected
 
     @pytest.mark.asyncio
+    async def test_get_status_analytics_exact_at_every_position(self, istore, spool_root, monkeypatch):
+        """
+        The run-analytics status fields (componentStats / slowestDocs /
+        completionSeconds) reconstruct EXACTLY at every status position on
+        the continuum — the keyframe+delta codec must carry the nested dict
+        (per-component shallow-delta) and the list (wholesale) through
+        multiple sealed segments with no fold-window or recency caveats.
+        """
+        # Tiny seal size forces the evolving statuses across several
+        # segments, so mid-stream reads exercise keyframe + delta merging.
+        monkeypatch.setattr(run_log, 'CONST_LOG_SEGMENT_BYTES', 700)
+
+        # EVERY event — run markers included — draws a strictly-increasing
+        # time from one clock, so every seek position is unambiguous
+        # (wall-clock stamps can collide within resolution and the markers
+        # would otherwise stamp real now around the synthetic times).
+        # Anchored just BEHIND now: retention and the backstop seal judge
+        # segment times against the real clock, so a synthetic epoch would
+        # read as ancient and be sealed/evicted out of the stream.
+        base_stamp, raise_floor, _ = make_stamp()
+        clock = [time.time() - 60.0]
+
+        def stamp(message, *, event_time=None):
+            clock[0] += 1.0
+            return base_stamp(message, event_time=clock[0])
+
+        writer = await open_writer(istore, spool_root, stamp, raise_floor)
+
+        def emit(ev):
+            writer.append(stamp(ev))
+
+        # Analytics evolve one component at a time so interior updates
+        # delta-encode only the changed entries.
+        emit(status_event(state='running', completionSeconds=0.0, componentStats={}, slowestDocs=[]))
+        for i in range(1, 6):
+            for j in range(6):
+                emit(output_event(f'fill-{i}-{j}-' + 'x' * 30))
+            stats = {'parse': {'calls': i, 'totalSeconds': round(i * 0.7, 2), 'maxSeconds': 0.7}}
+            if i > 2:
+                stats['llm'] = {'calls': i - 2, 'totalSeconds': round((i - 2) * 2.1, 2), 'maxSeconds': 2.1}
+            docs = [
+                {'name': f'doc-{k}.txt', 'elapsed': round(3.0 - k * 0.5, 2), 'beginTime': 900.0 + k, 'beginSeq': k}
+                for k in range(min(i, 3))
+            ]
+            emit(
+                status_event(
+                    state='running', completionSeconds=round(i * 1.5, 2), componentStats=stats, slowestDocs=docs
+                )
+            )
+        await writer._drain_uploads()
+        await writer.end_run('ok')
+        reader = run_log.RunLogReader(
+            make_file_store(istore),
+            CLIENT,
+            PROJECT,
+            SOURCE,
+            KIND,
+            spool_root=spool_root,
+        )
+
+        golden = await read_golden(reader, from_seq=0)
+        # Sanity: the scenario really spans multiple segments.
+        assert len((await reader.chapters())['segments']) >= 3
+
+        session = open_session(reader)
+        statuses = [e for e in golden if e['event'] == 'apaevt_status_update']
+        assert len(statuses) == 6
+        # As-of ANY status position, statusAt answers that exact body.
+        for expected in statuses:
+            await session.seek(time_of(expected))
+            assert await session.get_status() == expected['body']
+        session.close_event_stream()
+
+    @pytest.mark.asyncio
     async def test_get_console_exact_at_position(self, istore, spool_root, monkeypatch):
         reader = await seed_rich(istore, spool_root, monkeypatch)
         golden = await read_golden(reader, from_seq=0)
@@ -370,7 +451,14 @@ class TestSeededReads:
         writer = await open_writer(istore, spool_root, stamp, raise_floor)
         writer.append(stamp(flow_op('begin', pid=3, component='x')))
         writer.append(stamp(flow_op('end', pid=3, component='x')))
-        reader = run_log.RunLogReader(FileStore(istore, CLIENT), CLIENT, PROJECT, SOURCE, KIND, spool_root=spool_root)
+        reader = run_log.RunLogReader(
+            make_file_store(istore),
+            CLIENT,
+            PROJECT,
+            SOURCE,
+            KIND,
+            spool_root=spool_root,
+        )
 
         session = open_session(reader)
         # Cache the active segment NOW — it goes stale the moment more
@@ -406,7 +494,14 @@ class TestLiveIngest:
         stamp, raise_floor, state = make_stamp()
         writer = await open_writer(istore, spool_root, stamp, raise_floor)
         writer.append(stamp(output_event('boot')))
-        reader = run_log.RunLogReader(FileStore(istore, CLIENT), CLIENT, PROJECT, SOURCE, KIND, spool_root=spool_root)
+        reader = run_log.RunLogReader(
+            make_file_store(istore),
+            CLIENT,
+            PROJECT,
+            SOURCE,
+            KIND,
+            spool_root=spool_root,
+        )
 
         session = open_session(reader)
         delivered = []
@@ -444,7 +539,14 @@ class TestLiveIngest:
         stamp, raise_floor, state = make_stamp()
         writer = await open_writer(istore, spool_root, stamp, raise_floor)
         writer.append(stamp(output_event('boot')))
-        reader = run_log.RunLogReader(FileStore(istore, CLIENT), CLIENT, PROJECT, SOURCE, KIND, spool_root=spool_root)
+        reader = run_log.RunLogReader(
+            make_file_store(istore),
+            CLIENT,
+            PROJECT,
+            SOURCE,
+            KIND,
+            spool_root=spool_root,
+        )
 
         session = open_session(reader)
         delivered = []

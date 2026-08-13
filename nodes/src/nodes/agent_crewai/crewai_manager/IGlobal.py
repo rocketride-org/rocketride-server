@@ -6,7 +6,7 @@
 """
 CrewAI Manager — global state for the hierarchical multi-agent CrewAI node.
 
-Loads the manager-only connConfig fields (`goal`, `backstory`), ensures the
+Loads the manager-only connConfig fields (`goal`, `backstory`, `planning`), ensures the
 process-wide CrewAI kickoff runner is running, and instantiates the
 `CrewManager` driver held on `self.agent`.
 
@@ -29,6 +29,7 @@ class IGlobal(IGlobalBase):
     agent: Any = None
     goal: str = ''
     backstory: str = ''
+    planning: bool = False
     _kickoff_runner: Any = None
 
     def beginGlobal(self) -> None:
@@ -51,6 +52,7 @@ class IGlobal(IGlobalBase):
 
         self.goal = str(conn_config.get('goal') or '').strip()
         self.backstory = str(conn_config.get('backstory') or '').strip()
+        self.planning = bool(conn_config.get('planning', False))
 
         from ..crewai_runner import get_shared_runner
 
@@ -64,4 +66,5 @@ class IGlobal(IGlobalBase):
         self.agent = None
         self.goal = ''
         self.backstory = ''
+        self.planning = False
         self._kickoff_runner = None

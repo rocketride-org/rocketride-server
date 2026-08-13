@@ -6,7 +6,7 @@ A RocketRide source node that connects a Telegram bot to your pipeline, routing 
 
 A `source` node (`telegram://`) that authenticates with a bot you create via @BotFather and listens for incoming messages. It handles text and media alike: photos, audio, voice notes, video, and documents are each downloaded (up to Telegram's 20 MB bot file limit) and routed to the matching pipeline lane. The first answer produced by the pipeline is sent back to the originating chat via `sendMessage` automatically.
 
-Talks to the Telegram Bot API directly over **aiohttp** with no Telegram SDK dependency. In webhook mode the incoming POST route is served by the node's built-in FastAPI web server.
+Talks to the Telegram Bot API directly over **aiohttp** with no Telegram SDK dependency. In webhook mode the incoming POST route is registered on the shared FastAPI web server that `ai/node.py` starts for the pipeline subprocess — the node does not create a server of its own.
 
 Both new and edited messages are processed. Unsupported message types (stickers, locations, polls, and so on) are silently ignored.
 
@@ -53,7 +53,7 @@ The default. The node long-polls the Telegram `getUpdates` API in a background t
 
 For production deployments with a public HTTPS endpoint. At startup the node registers `telegram.webhookUrl` with Telegram via `setWebhook` along with a freshly generated random secret token. Incoming POSTs are validated against the `X-Telegram-Bot-Api-Secret-Token` header; requests with a wrong or missing secret are rejected with HTTP 403. Each accepted update is handled concurrently as a background task. In-flight handlers are awaited during shutdown, and the webhook is deregistered via `deleteWebhook` when the pipeline stops.
 
-The local POST route is derived from the path portion of `telegram.webhookUrl`, falling back to `/telegram/webhook` if the URL contains no path. Your reverse proxy or tunnel must forward that path to the node's web server port.
+The local POST route is derived from the path portion of `telegram.webhookUrl`, falling back to `/telegram/webhook` if the URL contains no path. Your reverse proxy or tunnel must forward that path to the shared web server's port (the `--data_port` the engine assigns to the pipeline subprocess).
 
 ---
 

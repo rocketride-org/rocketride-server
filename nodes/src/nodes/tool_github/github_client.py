@@ -33,8 +33,58 @@ and response normalisation. All tool methods in IInstance call through here.
 from __future__ import annotations
 
 from typing import Any
+import time
 
 import requests
+from tenacity import RetryCallState, Retrying, retry_if_exception_type, stop_after_attempt, wait_exponential
+
+
+class GitHubAPIError(ValueError):
+    """Raised when the GitHub API returns an error response."""
+
+    def __init__(self, status_code: int, message: str):
+        super().__init__(f'GitHub API {status_code}: {message}')
+        self.status_code = status_code
+        self.message = message
+
+
+class RateLimitError(Exception):
+    """Raised when GitHub signals a rate limit (429 or 403 secondary limit)."""
+
+    def __init__(self, response: requests.Response):
+        self.response = response
+
+
+def _rate_limit_hint(headers) -> str:
+    """Human-readable retry hint from rate-limit headers, or '' if none present."""
+    retry_after = headers.get('Retry-After')
+    if retry_after:
+        return f'retry after {retry_after}s'
+    reset = headers.get('X-RateLimit-Reset')
+    if reset:
+        try:
+            secs = max(0, int(float(reset) - time.time()))
+            return f'rate limit resets in ~{secs}s'
+        except ValueError:
+            return f'rate limit resets at epoch {reset}'
+    return ''
+
+
+def _raise_github_error(resp: requests.Response) -> None:
+    """Parse GitHub error response and raise GitHubAPIError."""
+    try:
+        err = resp.json()
+        msg = err.get('message', resp.text)
+        errors = err.get('errors')
+        if errors:
+            msg += ' — ' + '; '.join(e.get('message', str(e)) if isinstance(e, dict) else str(e) for e in errors)
+    except Exception:
+        msg = resp.text or resp.reason or 'unknown error'
+    hint = _rate_limit_hint(resp.headers)
+    if hint:
+        msg += f' ({hint})'
+    raise GitHubAPIError(resp.status_code, msg)
+
 
 BASE_URL = 'https://api.github.com'
 DEFAULT_TIMEOUT = 30
@@ -60,33 +110,80 @@ def call(
     }
 
     url = BASE_URL + path
-    try:
-        resp = requests.request(
-            method.upper(),
-            url,
-            headers=headers,
-            params={k: v for k, v in (params or {}).items() if v is not None},
-            json=body,
-            timeout=DEFAULT_TIMEOUT,
-        )
-    except requests.RequestException as exc:
-        raise ValueError(f'GitHub request failed: {exc}') from exc
 
-    if resp.status_code == 204:
-        return {}
-
-    if not resp.ok:
+    def _attempt() -> Any:
         try:
-            err = resp.json()
-            msg = err.get('message', resp.text)
-            errors = err.get('errors')
-            if errors:
-                msg += ' — ' + '; '.join(e.get('message', str(e)) if isinstance(e, dict) else str(e) for e in errors)
-        except Exception:
-            msg = resp.text or resp.reason or 'unknown error'
-        raise ValueError(f'GitHub API {resp.status_code}: {msg}')
+            resp = requests.request(
+                method.upper(),
+                url,
+                headers=headers,
+                params={k: v for k, v in (params or {}).items() if v is not None},
+                json=body,
+                timeout=DEFAULT_TIMEOUT,
+            )
+        except requests.RequestException as exc:
+            raise ValueError(f'GitHub request failed: {exc}') from exc
 
-    return resp.json()
+        if resp.status_code == 204:
+            return {}
+
+        if not resp.ok:
+            is_rate_limit = resp.status_code == 429 or (
+                resp.status_code == 403
+                and (
+                    'Retry-After' in resp.headers
+                    or resp.headers.get('X-RateLimit-Remaining') == '0'
+                    or 'rate limit' in resp.text.lower()
+                )
+            )
+            if is_rate_limit:
+                raise RateLimitError(resp)
+
+            _raise_github_error(resp)
+
+        return resp.json()
+
+    def github_rate_limit_wait(retry_state: RetryCallState) -> float:
+        exc = retry_state.outcome.exception()
+        if isinstance(exc, RateLimitError):
+            hdrs = exc.response.headers
+
+            def _check_and_cap(w: float) -> float:
+                import math
+
+                if not math.isfinite(w) or w < 0:
+                    raise ValueError()
+                if w > DEFAULT_TIMEOUT:
+                    # Fail fast if server requires waiting longer than local cap
+                    raise exc
+                return w
+
+            # 1. Retry-After provides exactly how many seconds to wait
+            if 'Retry-After' in hdrs:
+                try:
+                    return _check_and_cap(float(hdrs['Retry-After']))
+                except ValueError:
+                    pass
+
+            # 2. X-RateLimit-Reset provides epoch timestamp of reset
+            if 'X-RateLimit-Reset' in hdrs:
+                try:
+                    reset_epoch = float(hdrs['X-RateLimit-Reset'])
+                    sleep_time = reset_epoch - time.time()
+                    return _check_and_cap(max(1.0, sleep_time))
+                except ValueError:
+                    pass
+        return float(wait_exponential(multiplier=2, min=2, max=DEFAULT_TIMEOUT)(retry_state))
+
+    try:
+        return Retrying(
+            stop=stop_after_attempt(3),
+            wait=github_rate_limit_wait,
+            retry=retry_if_exception_type(RateLimitError),
+            reraise=True,
+        )(_attempt)
+    except RateLimitError as exc:
+        _raise_github_error(exc.response)
 
 
 # ---------------------------------------------------------------------------

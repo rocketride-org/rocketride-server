@@ -25,10 +25,9 @@
 // =============================================================================
 
 import React from 'react';
-import type { AppDescriptor } from 'shell-ui';
+import type { AppDescriptor } from 'shell';
 import ProfilerApp from './ProfilerApp';
-import ProfilerSidebar from './ProfilerSidebar';
-import { RocketRideMark } from 'shared';
+import { RocketRideMark } from 'shell';
 
 /**
  * AppDescriptor for the Profiler app.
@@ -47,10 +46,9 @@ const PROFILER_APP: AppDescriptor = {
 		iconDark: React.createElement(RocketRideMark, { bodyColor: '#E0DDF0', style: { width: '100%', height: '100%' } }),
 		iconLight: React.createElement(RocketRideMark, { bodyColor: '#1E1A34', style: { width: '100%', height: '100%' } }),
 	},
-	components: {
-		App: ProfilerApp,
-		Sidebar: ProfilerSidebar,
-	},
+	// Frame-only app: ProfilerApp's root AppLayout keeps the branded sidebar
+	// frame (empty slot) and the status bar.
+	app: ProfilerApp,
 };
 
 export default PROFILER_APP;

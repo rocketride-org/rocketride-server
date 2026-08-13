@@ -61,12 +61,11 @@ updates:
       # Block major-version PRs — handle via manual `pnpm outdated` cycles.
       - dependency-name: "*"
         update-types: ["version-update:semver-major"]
-      # rsbuild/rslib/rspack: shared-ui is on 1.x while apps/{chat,dropper}-ui
+      # rsbuild/rspack: shared-ui is on 1.x while apps/{chat,dropper}-ui
       # are pinned to 0.4.x. Bumps strand the apps at intermediate versions
       # (see #855, #860, #866). Coordinate via manual PRs across all three
       # locations together.
       - dependency-name: "@rsbuild/*"
-      - dependency-name: "@rslib/*"
       - dependency-name: "@rspack/*"
       # @types/vscode is constrained by apps/vscode/package.json's
       # engines.vscode field — vsce package fails the build if @types/vscode

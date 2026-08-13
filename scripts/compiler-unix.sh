@@ -27,16 +27,54 @@ else
     SUDO="sudo"
 fi
 
+# ~/toolchains installs must belong to the invoking user, not root, even under
+# sudo. Resolve the real user/home from SUDO_* and chown back afterward.
+REAL_USER="${SUDO_USER:-$(id -un)}"
+if [ -n "${SUDO_USER:-}" ]; then
+    REAL_HOME=$(getent passwd "$SUDO_USER" 2>/dev/null | cut -d: -f6)
+fi
+REAL_HOME="${REAL_HOME:-$HOME}"
+
 # Function to check if a command exists
 command_exists() {
     command -v "$1" >/dev/null 2>&1
 }
 
+# True if privileged commands can run non-interactively (already root, or
+# passwordless/pre-authenticated sudo). The builder captures stdio, so a sudo that
+# would prompt for a password counts as "no root".
+have_root() {
+    [ "$EUID" -eq 0 ] && return 0
+    command_exists sudo && sudo -n true 2>/dev/null
+}
+
+# Run a command as the invoking user, dropping root when the script runs under sudo
+# — so ~/toolchains installs are never owned by root.
+as_user() {
+    if [ "$EUID" -eq 0 ] && [ -n "$REAL_USER" ] && [ "$REAL_USER" != "root" ]; then
+        sudo -u "$REAL_USER" -- "$@"
+    else
+        "$@"
+    fi
+}
+
 # Setup the global required packages
 REQUIRES=()              # macOS (brew) package list
 COMMANDS=()              # macOS: install commands to print/run
-EXTRA_PKGS=()            # Linux: compiler/clang packages chosen by select_*_triplet
-NEED_CC_ALTERNATIVES=""  # apt: set when cc/c++ must be pointed at clang
+SYSTEM_COMPILER=""          # --system-compiler: install a compatible clang system-wide via apt/dnf
+LLVM_TARBALL_VERSION=""     # set when no usable system clang → fetch LLVM from llvm.org into ~/toolchains
+CLANG_PKGS=()               # apt/dnf clang packages to install (--system-compiler)
+CLANG_ALT_VERSION=""        # versioned clang to force via update-alternatives (apt --system-compiler)
+LLVM_APT_VERSION=""         # apt.llvm.org clang major to add when the distro archive lacks it (--system-compiler)
+LLVM_TARBALL_PREFIX="$REAL_HOME/toolchains/llvm"  # user-local install root (no root needed to unpack)
+LLVM_TARBALL_FALLBACK="18.1.8"  # used only if the latest 18.x can't be discovered online
+DUMP_SYMS_DIR="$REAL_HOME/toolchains/bin"  # user-local bin for build tools (dump_syms); on the build PATH via tasks.js
+DUMP_SYMS_VERSION="v2.3.7"  # pinned: the releases/latest API is unauthenticated and rate-limited on CI
+
+# Supported clang range on Linux: 16 (Crashpad needs C++20 <ranges>) .. 18
+# (engine doesn't build with clang >= 19). Install target is clang-18.
+MIN_CLANG=16
+MAX_CLANG=18
 
 # Single source of truth for the shared Linux build deps: one row per logical
 # dependency as "apt|dnf". An empty field means the dep is not needed on that
@@ -52,6 +90,7 @@ LINUX_DEPS=(
     "wget"
     "dos2unix"
     "ca-certificates"
+    "tzdata"                                # /usr/share/zoneinfo — libc++ std::chrono tz lookups abort without it (minimal Ubuntu 22.04/24.04 omit it)
     "gnupg|gnupg2"
     "lsb-release|"                          # apt-only: Fedora build path doesn't use lsb_release
     "python3"
@@ -62,8 +101,8 @@ LINUX_DEPS=(
     "ninja-build"
     "cmake"                                 # version gated (>= 3.19) by check_linux_cmake
     "git"
-    "|gcc"                                  # fedora: sdist C extensions
-    "|gcc-c++"                              # fedora: sdist C++ extensions
+    "gcc"                                   # C compiler + crt objects the llvm.org clang links on every distro; also sdist C extensions
+    "g++|gcc-c++"                           # provides libstdc++.so — clang's DEFAULT (non-libc++) link and CMake's compiler check need it; also sdist C++ extensions
     "|perl-core"                            # fedora: vcpkg openssl Configure needs core Perl (IPC::Cmd, FindBin); Fedora modularizes it
     "autoconf"
     "autoconf-archive"
@@ -71,6 +110,7 @@ LINUX_DEPS=(
     "libtool"
     "zip"
     "unzip"
+    "xz-utils|xz"                           # `xz` CLI: tar -xJf unpacks the .tar.xz LLVM/dump_syms tarballs (minimal Ubuntu 24.04+ omits it)
     "uuid-dev|libuuid-devel"
     "pkg-config|pkgconf-pkg-config"
     "libffi-dev|libffi-devel"
@@ -87,12 +127,13 @@ LINUX_DEPS=(
     "libxmlsec1-dev|xmlsec1-devel"
     "|xmlsec1-openssl-devel"                # fedora: split out (bundled in libxmlsec1-dev on apt)
     "zlib1g-dev|zlib-devel"
-    "|python3-build"                        # fedora-only
-    "|python3-wheel"                        # fedora-only
+    "python3-build"                         # PEP 517 build frontend (apt: universe)
+    "python3-wheel"                         # wheel backend (apt: universe)
     # Runtime .so libs the prebuilt/compiled engine links against.
     "libc++1|libcxx"                        # libc++.so.1
     "libc++abi1|libcxxabi"                  # libc++abi.so.1
     "|llvm-libunwind"                       # fedora: clang/libc++ unwinder (apt pulls it via libc++ dev; packaged by tasks.js)
+    "libatomic1|libatomic"                  # libatomic.so.1 — vcpkg build tools (icupkg/ICU) link it; absent on minimal EL, and gcc doesn't pull it on dnf
     "libgomp1|libgomp"                      # OMP runtime for bundled transitive deps
     "libgles2|mesa-libGLES"                 # libGLESv2.so.2 — MediaPipe GPU-delegate dlopen
     "libegl1|libglvnd-egl"                  # libEGL.so.1
@@ -125,188 +166,199 @@ detect_linux_distro() {
     fi
 }
 
+# True on the RHEL / Enterprise-Linux family (AlmaLinux, Rocky, RHEL, CentOS,
+# Oracle) — NOT Fedora. Both use dnf, but EL ships a far smaller default package
+# set, so the dnf column needs EL-specific handling (extra repos + a few drops).
+is_el_family() {
+    [ -r /etc/os-release ] || return 1
+    ( . /etc/os-release
+      case " $ID $ID_LIKE " in
+          *" rhel "*|*" centos "*|*" almalinux "*|*" rocky "*|*" ol "*) exit 0 ;;
+      esac
+      exit 1 )
+}
+
+# EL BaseOS/AppStream are minimal; enable CRB (CodeReady Builder) and EPEL so the
+# dnf column resolves. On AlmaLinux 10 these carry ncurses-compat-libs
+# (libtinfo.so.5), python3-build/wheel and libdb-devel — all absent from the base
+# repos. Best-effort: a leg without these repos still surfaces via the strict
+# post-install re-check.
+enable_el_repos() {
+    # config-manager ships in dnf-plugins-core (dnf4) or dnf5-plugins (dnf5).
+    $SUDO dnf install -y dnf-plugins-core >/dev/null 2>&1 \
+        || $SUDO dnf install -y dnf5-plugins >/dev/null 2>&1 || true
+    # Enable CRB (EL9/10) / PowerTools (EL8); --set-enabled is dnf4, setopt is dnf5.
+    $SUDO dnf config-manager --set-enabled crb >/dev/null 2>&1 \
+        || $SUDO dnf config-manager setopt crb.enabled=1 >/dev/null 2>&1 \
+        || $SUDO dnf config-manager --set-enabled powertools >/dev/null 2>&1 || true
+    $SUDO dnf install -y epel-release >/dev/null 2>&1 || true
+}
+
 # =============================================================================
 # Triplet Selection
 # =============================================================================
 
-# Detect installed clang version (12 or later)
+# Bare clang major version if it's within [MIN_CLANG, MAX_CLANG], else empty. Only
+# the bare `clang` counts: the triplet invokes bare `clang++`, and we don't touch
+# system alternatives, so a versioned-only clang-N wouldn't be reachable.
 detect_installed_clang() {
-    # Prefer the distro-DEFAULT unversioned `clang` when it's >=12. The image
-    # provisions the matching libc++ stack — including the UNVERSIONED
-    # libc++-dev / libc++abi-dev that own the multiarch symlink
-    # /usr/lib/x86_64-linux-gnu/libc++.so, which is what the linker resolves
-    # `-lc++` against. Picking a DIFFERENT (higher) versioned clang here makes
-    # the libc++ check below force-install libc++-<higher>-dev, and apt resolves
-    # the conflict by REMOVING the unversioned libc++-dev — deleting that
-    # symlink and breaking every `-stdlib=libc++` link with
-    # `/usr/bin/ld: cannot find -lc++`. Seen on GHA ubuntu-22.04 image
-    # 20260525: default clang is 14 but clang-15 is also present, so taking the
-    # highest version silently broke the build. Aligning to the default keeps
-    # compiler and its fully-installed libc++ in lockstep, no apt mutation.
-    if command_exists "clang"; then
-        CLANG_VER=$(clang --version | head -n1 | grep -o '[0-9]\+\.[0-9]\+' | head -1 | cut -d. -f1)
-        if [ "$CLANG_VER" -ge 12 ] 2>/dev/null; then
-            echo "$CLANG_VER"
-            return 0
-        fi
-    fi
-
-    # Fallback: highest installed versioned clang (no usable default `clang`).
-    for ver in 18 17 16 15 14 13 12; do
-        if command_exists "clang-$ver"; then
-            echo "$ver"
-            return 0
-        fi
-    done
-
-    return 1
+    command_exists clang || return 1
+    local v
+    v=$(clang --version | head -n1 | grep -o '[0-9]\+' | head -1)
+    [ -n "$v" ] && [ "$v" -ge "$MIN_CLANG" ] 2>/dev/null && [ "$v" -le "$MAX_CLANG" ] 2>/dev/null || return 1
+    echo "$v"
 }
 
-select_linux_triplet() {   # $1 = apt | dnf
+# True if bare clang++ can compile+link a trivial -stdlib=libc++ program (matching
+# libc++ headers + runtime present).
+clang_libcxx_works() {
+    local t; t=$(mktemp -d)
+    printf '#include <vector>\nint main(){std::vector<int> v; return (int)v.size();}\n' > "$t/t.cpp"
+    local ok=0
+    clang++ -stdlib=libc++ "$t/t.cpp" -o "$t/t" >/dev/null 2>&1 && ok=1
+    rm -rf "$t"
+    [ "$ok" = 1 ]
+}
+
+# Major version the unversioned `clang` package would install (i.e. what bare clang
+# would become), or empty. Lets us decide whether apt/dnf can cleanly provide a
+# compatible compiler on a box that has no clang at all.
+pkg_default_clang_version() {
+    case "$1" in
+        apt)
+            [ "$AUTOINSTALL" = "1" ] && $SUDO apt-get update -qq 2>/dev/null || true
+            apt-cache policy clang 2>/dev/null \
+                | sed -nE 's/^[[:space:]]*Candidate:[[:space:]]*([0-9]+:)?([0-9]+).*/\2/p' | head -1
+            ;;
+        dnf)
+            dnf -q info clang 2>/dev/null \
+                | sed -nE 's/^Version[[:space:]]*:[[:space:]]*([0-9]+).*/\1/p' | head -1
+            ;;
+    esac
+}
+
+in_clang_range() { [ -n "$1" ] && [ "$1" -ge "$MIN_CLANG" ] 2>/dev/null && [ "$1" -le "$MAX_CLANG" ] 2>/dev/null; }
+
+# Does the distro's own apt archive carry an install candidate for clang-$1?
+apt_archive_has_clang() {
+    apt-cache policy "clang-$1" 2>/dev/null | grep -qE 'Candidate: [0-9]'
+}
+
+# Add apt.llvm.org for clang-$1 when the distro archive lacks it (e.g. Ubuntu 22.04
+# tops out at clang-15). Idempotent by the sources file; rolls back a broken repo.
+ensure_llvm_repo() {
+    local ver="$1" codename list="/etc/apt/sources.list.d/llvm-toolchain-$1.list"
+    [ -f "$list" ] && return 0
+    command_exists wget || { echo "ERROR: wget is required to add apt.llvm.org (install it or re-run with --autoinstall)"; return 1; }
+    command_exists gpg  || { echo "ERROR: gpg is required to add apt.llvm.org (install it or re-run with --autoinstall)"; return 1; }
+    codename=$(. /etc/os-release 2>/dev/null; printf '%s' "${VERSION_CODENAME:-}")
+    [ -z "$codename" ] && { echo "ERROR: cannot determine apt codename for apt.llvm.org (clang-$ver)"; return 1; }
+    echo "→ adding apt.llvm.org ($codename) for clang-$ver"
+    $SUDO install -d -m 0755 /etc/apt/keyrings || return 1
+    # Stage via temp files: a plain wget|gpg|tee pipe reports tee's exit (not
+    # wget's), so a failed key download would silently write an empty keyring.
+    # (Can't capture the dearmored key in a var — it's binary, and bash strips NULs.)
+    local tmpkey; tmpkey=$(mktemp)
+    wget -qO "$tmpkey" https://apt.llvm.org/llvm-snapshot.gpg.key \
+        || { rm -f "$tmpkey"; echo "ERROR: failed to download the apt.llvm.org GPG key"; return 1; }
+    gpg --dearmor < "$tmpkey" > "$tmpkey.gpg" \
+        || { rm -f "$tmpkey" "$tmpkey.gpg"; echo "ERROR: failed to dearmor the apt.llvm.org GPG key"; return 1; }
+    $SUDO install -m 0644 "$tmpkey.gpg" /etc/apt/keyrings/apt.llvm.org.gpg \
+        || { rm -f "$tmpkey" "$tmpkey.gpg"; return 1; }
+    rm -f "$tmpkey" "$tmpkey.gpg"
+    echo "deb [signed-by=/etc/apt/keyrings/apt.llvm.org.gpg] http://apt.llvm.org/${codename}/ llvm-toolchain-${codename}-${ver} main" \
+        | $SUDO tee "$list" >/dev/null || return 1
+    $SUDO apt-get update || { $SUDO rm -f "$list"; return 1; }
+}
+
+# Force bare clang/clang++/cc/c++ at clang-$1 via /usr/local/bin (ahead of /usr/bin)
+# — a versioned apt install leaves /usr/bin/clang pointing at the old default.
+force_system_clang() {
+    local v="$1" cc cxx
+    cc=$(command -v "clang-$v" 2>/dev/null); cxx=$(command -v "clang++-$v" 2>/dev/null)
+    { [ -z "$cc" ] || [ -z "$cxx" ]; } && { echo "ERROR: clang-$v not on PATH after install"; exit 1; }
+    $SUDO ln -sf "$cc" /usr/local/bin/clang
+    $SUDO ln -sf "$cxx" /usr/local/bin/clang++
+    $SUDO ln -sf "$cc" /usr/local/bin/cc
+    $SUDO ln -sf "$cxx" /usr/local/bin/c++
+    echo "✓ clang/clang++/cc/c++ -> clang-$v (/usr/local/bin)"
+}
+
+# --system-compiler: pick a system-wide clang install. Sets CLANG_PKGS /
+# CLANG_ALT_VERSION / LLVM_APT_VERSION. Returns 0 if the package manager can provide
+# clang 16-18 (erroring out if root is unavailable), 1 if it can't (→ tarball). $1=apt|dnf.
+select_system_clang() {
+    local mgr="$1" cand
+    cand=$(pkg_default_clang_version "$mgr")
+    if [ "$mgr" = "dnf" ]; then
+        # Fedora's default clang (22) is out of range and its compat clangNN lacks a
+        # matching libc++ — dnf can't assemble a 16-18 toolchain. Only the (rare)
+        # in-range default is usable; otherwise fall back to the tarball.
+        in_clang_range "$cand" || return 1
+        CLANG_PKGS=(clang libcxx-devel libcxxabi-devel lld); CLANG_VERSION="$cand"
+    elif in_clang_range "$cand"; then
+        # Default clang package is already 16-18 (e.g. Ubuntu 24.04) — bare clang++
+        # becomes it, no alternatives needed.
+        CLANG_PKGS=(clang libc++-dev libc++abi-dev lld); CLANG_VERSION="$cand"
+    else
+        # Install versioned clang-18, from the archive or apt.llvm.org, then repoint.
+        # Its versioned libc++1-N replaces the distro's unversioned libc++1 (dropped
+        # below) to avoid the apt "held broken packages" ping-pong.
+        local v="$MAX_CLANG"
+        apt_archive_has_clang "$v" || LLVM_APT_VERSION="$v"
+        CLANG_PKGS=(clang-"$v" libc++-"$v"-dev libc++abi-"$v"-dev libc++1-"$v" libc++abi1-"$v" lld-"$v")
+        CLANG_ALT_VERSION="$v"; CLANG_VERSION="$v"
+    fi
+
+    if ! have_root; then
+        echo "=========================================="
+        echo "ERROR: --system-compiler needs root to install clang-$CLANG_VERSION via $mgr."
+        echo "Re-run with sudo (or pre-authenticate: sudo -v), or drop --system-compiler"
+        echo "to use the local ~/toolchains toolchain instead."
+        echo "=========================================="
+        exit 1
+    fi
+    echo "→ --system-compiler: installing clang-$CLANG_VERSION system-wide via $mgr${LLVM_APT_VERSION:+ (apt.llvm.org)}"
+    return 0
+}
+
+# Compiler policy (uniform Fedora/Ubuntu):
+#   1. bare clang is 16-18 with a complete toolchain (libc++ works + ld.lld, since
+#      Crashpad forces -fuse-ld=lld) → use it as-is.
+#   2. --system-compiler → install a compatible clang system-wide via apt/dnf
+#      (apt: archive or apt.llvm.org, + repoint clang++). Needs root.
+#   3. otherwise → self-contained LLVM toolchain into ~/toolchains (root-free); the
+#      JS build env points the build at it.
+# $1 = apt|dnf.
+select_linux_triplet() {
     local mgr="$1"
     detect_linux_distro
-    
-    # First, try to detect if a suitable clang is already installed
-    INSTALLED_CLANG=$(detect_installed_clang) || true
-    
     TRIPLET_NAME="x64-linux-clang-rocketride.cmake"
+    TRIPLET_FILE="packages/server/cmake/triplets/$TRIPLET_NAME"
+    export CC=clang
+    export CXX=clang++
 
-    # Fedora/RHEL differ ONLY in the clang packages: an UNVERSIONED clang plus a
-    # libcxx-devel stack (Debian uses versioned clang-15 / libc++-15-dev). Same
-    # triplet, same downstream flow. cc/c++ is pointed at clang later by
-    # setup_cc_alternatives (dnf symlink), so no update-alternatives probing here.
-    if [ "$mgr" = "dnf" ]; then
-        export CC=clang
-        export CXX=clang++
-        if [ -n "$INSTALLED_CLANG" ] && [ "$INSTALLED_CLANG" -ge 12 ]; then
-            CLANG_VERSION="$INSTALLED_CLANG"
-            echo "✓ Compiler: Using clang-$CLANG_VERSION (found and supported)"
-            dep_installed dnf libcxx-devel    || EXTRA_PKGS+=("libcxx-devel")
-            dep_installed dnf libcxxabi-devel || EXTRA_PKGS+=("libcxxabi-devel")
-            dep_installed dnf lld             || EXTRA_PKGS+=("lld")
-        else
-            echo "✗ Compiler: clang not found or too old (requires clang 12+)"
-            echo "→ Will install clang (Fedora unversioned)"
-            EXTRA_PKGS+=("clang" "lld" "libcxx-devel" "libcxxabi-devel")
-        fi
-        TRIPLET_FILE="packages/server/cmake/triplets/$TRIPLET_NAME"
+    INSTALLED_CLANG=$(detect_installed_clang || true)
+    if [ -n "$INSTALLED_CLANG" ] && command_exists ld.lld && clang_libcxx_works; then
+        CLANG_VERSION="$INSTALLED_CLANG"
+        echo "✓ Compiler: system clang-$CLANG_VERSION (in range; libc++ + lld OK)"
         return 0
     fi
 
-    # Debian/Ubuntu (apt): versioned clang packages.
-    # Determine default/recommended version based on distro
-    case "$DISTRO" in
-        ubuntu)
-            case "$VERSION_ID" in
-                24.*)
-                    DEFAULT_CLANG="18"
-                    ;;
-                22.*)
-                    DEFAULT_CLANG="15"
-                    ;;
-                20.*)
-                    DEFAULT_CLANG="10"
-                    ;;
-                *)
-                    echo "=========================================="
-                    echo "ERROR: Unrecognized Ubuntu version $VERSION_ID"
-                    echo "=========================================="
-                    exit 1
-                    ;;
-            esac
-            ;;
-        debian)
-            case "$VERSION_ID" in
-                12|11)
-                    DEFAULT_CLANG="16"
-                    ;;
-                *)
-                    echo "=========================================="
-                    echo "ERROR: Unrecognized Debian version $VERSION_ID"
-                    echo "=========================================="
-                    exit 1
-                    ;;
-            esac
-            ;;
-        *)
-            echo "=========================================="
-            echo "ERROR: Unrecognized Linux distribution $DISTRO"
-            echo "=========================================="
-            exit 1
-            ;;
-    esac
-    
-    # Check if we have a suitable clang
-    if [ -n "$INSTALLED_CLANG" ] && [ "$INSTALLED_CLANG" -ge 12 ]; then
-        # Use installed clang
-        CLANG_VERSION="$INSTALLED_CLANG"
-        echo "✓ Compiler: Using clang-$CLANG_VERSION (found and supported)"
-        
-        # Use generic triplet and set CC/CXX to point to the installed version
-        TRIPLET_NAME="x64-linux-clang-rocketride.cmake"
+    if [ -n "$SYSTEM_COMPILER" ] && select_system_clang "$mgr"; then
+        return 0
+    fi
 
-        # CLANG_VERSION is the DEFAULT clang's version (see
-        # detect_installed_clang), so its libc++ stack — including the
-        # unversioned multiarch libc++.so the linker needs for `-lc++` — is
-        # already installed and consistent. Prefer the versioned frontend, but
-        # fall back to the bare `clang`/`clang++` when no versioned symlink
-        # exists (clang via update-alternatives or a source build) — otherwise
-        # we'd set an invalid CC/CXX that only fails later at compile time.
-        if command_exists "clang-${CLANG_VERSION}" && command_exists "clang++-${CLANG_VERSION}"; then
-            export CC=clang-${CLANG_VERSION}
-            export CXX=clang++-${CLANG_VERSION}
-        else
-            export CC=clang
-            export CXX=clang++
-        fi
-        
-        # Check if required libc++ libraries are installed for this version
-        if ! dpkg -l "libc++-${CLANG_VERSION}-dev" 2>/dev/null | grep -q "^ii"; then
-            echo "  → libc++-${CLANG_VERSION}-dev not found, will install"
-            EXTRA_PKGS+=("libc++-${CLANG_VERSION}-dev" "libc++abi-${CLANG_VERSION}-dev" "lld-${CLANG_VERSION}")
-        fi
-        
-    elif [ -n "$INSTALLED_CLANG" ]; then
-        # Clang found but too old - install recommended version
-        echo "✗ Compiler: clang-$INSTALLED_CLANG found but unsupported (requires clang 12+)"
-        echo "→ Will install clang-$DEFAULT_CLANG (recommended for $DISTRO $VERSION_ID)"
-        
-        CLANG_VERSION="$DEFAULT_CLANG"
-        EXTRA_PKGS+=("clang-$CLANG_VERSION" "libc++-${CLANG_VERSION}-dev" "libc++abi-${CLANG_VERSION}-dev" "lld-${CLANG_VERSION}")
-        TRIPLET_NAME="x64-linux-clang-rocketride.cmake"
-        export CC=clang-${CLANG_VERSION}
-        export CXX=clang++-${CLANG_VERSION}
-        
+    LLVM_TARBALL_VERSION="$MAX_CLANG"
+    CLANG_VERSION="$MAX_CLANG"
+    if [ -n "$SYSTEM_COMPILER" ]; then
+        echo "→ $mgr has no clang $MIN_CLANG-$MAX_CLANG; using ~/toolchains/llvm-$MAX_CLANG"
+    elif command_exists clang; then
+        echo "→ system clang incompatible (need $MIN_CLANG-$MAX_CLANG); using ~/toolchains/llvm-$MAX_CLANG"
     else
-        # No clang found - install recommended version
-        echo "✗ Compiler: clang not found (requires clang 12+)"
-        echo "→ Will install clang-$DEFAULT_CLANG (recommended for $DISTRO $VERSION_ID)"
-        
-        CLANG_VERSION="$DEFAULT_CLANG"
-        EXTRA_PKGS+=("clang-$CLANG_VERSION" "libc++-${CLANG_VERSION}-dev" "libc++abi-${CLANG_VERSION}-dev" "lld-${CLANG_VERSION}")
-        TRIPLET_NAME="x64-linux-clang-rocketride.cmake"
-        export CC=clang-${CLANG_VERSION}
-        export CXX=clang++-${CLANG_VERSION}
+        echo "→ using ~/toolchains/llvm-$MAX_CLANG"
     fi
-    
-    # cc/c++ must resolve to clang for vcpkg's compiler detection. Flag it here;
-    # the generic setup_cc_alternatives (run by check_dependencies) applies it
-    # via update-alternatives — Fedora does the equivalent with a symlink.
-    CC_PATH=$(command -v "$CC" 2>/dev/null)
-    CXX_PATH=$(command -v "$CXX" 2>/dev/null)
-    CC_LINK=$(readlink -f "$(command -v cc 2>/dev/null)" 2>/dev/null || true)
-    CXX_LINK=$(readlink -f "$(command -v c++ 2>/dev/null)" 2>/dev/null || true)
-    CC_RESOLVED=""
-    CXX_RESOLVED=""
-    [ -n "$CC_PATH" ] && CC_RESOLVED=$(readlink -f "$CC_PATH" 2>/dev/null)
-    [ -n "$CXX_PATH" ] && CXX_RESOLVED=$(readlink -f "$CXX_PATH" 2>/dev/null)
-    if [ -n "$CC_RESOLVED" ] && [ -n "$CXX_RESOLVED" ]; then
-        if [ "$CC_RESOLVED" != "$CC_LINK" ] || [ "$CXX_RESOLVED" != "$CXX_LINK" ]; then
-            NEED_CC_ALTERNATIVES="1"
-        fi
-    fi
-
-    TRIPLET_FILE="packages/server/cmake/triplets/$TRIPLET_NAME"
+    return 0
 }
 
 select_macos_triplet() {
@@ -430,98 +482,196 @@ dep_install() {
     esac
 }
 
+# Put a genuine libtinfo.so.5 into $1 (a dir on the build LD_LIBRARY_PATH) WITHOUT
+# root. The llvm.org clang is built against ncurses 5: it needs libtinfo.so.5 with
+# the NCURSES_TINFO_5 versioned symbols, which libtinfo.so.6 does NOT export — so a
+# .so.6 -> .so.5 symlink fails to load. Sources it root-free into lib-compat: an
+# apt-get download, then (Ubuntu 24.04+, where the package is gone) a pinned jammy
+# .deb by URL, verified by sha256; dnf uses ncurses-compat-libs (also pulled
+# system-wide under --autoinstall on dnf, see check_dependencies).
+# $1 = target dir, $2 = apt|dnf.
+provide_libtinfo5() {
+    local compat="$1" mgr="$2" existing real tmp deb rpm larch ldeb lurl lsha
+
+    # A genuine libtinfo.so.5 already on the system (e.g. installed above) → link it.
+    existing=$(ldconfig -p 2>/dev/null | grep -oE '/[^ ]*/libtinfo\.so\.5(\.[0-9]+)*' | head -1)
+    [ -n "$existing" ] && { as_user ln -sf "$existing" "$compat/libtinfo.so.5"; return 0; }
+
+    # Otherwise fetch the distro's compat package and extract just the .so (no root).
+    tmp=$(as_user mktemp -d)
+    case "$mgr" in
+        apt)
+            as_user sh -c "cd '$tmp' && apt-get download libtinfo5" >/dev/null 2>&1 || true
+            deb=$(ls "$tmp"/*.deb 2>/dev/null | head -1)
+            # Ubuntu 24.04+ dropped libtinfo5, so apt-get download finds nothing.
+            # Fall back to a pinned jammy .deb — it still ships a genuine
+            # libtinfo.so.5 that the tarball clang loads.
+            if [ -z "$deb" ]; then
+                # This path bypasses apt's signed index, and the .so it yields is
+                # loaded by clang on every build via lib-compat on LD_LIBRARY_PATH.
+                # The digest is the only thing vouching for the file, so a mismatch
+                # must discard it rather than fall through.
+                case "$(uname -m)" in
+                    x86_64)        larch=amd64
+                                   lurl="https://archive.ubuntu.com/ubuntu/pool/universe/n/ncurses"
+                                   lsha=b9bb64e716a7d9de05b1b33992763142ca81bcae3a7f8ce7e29fa3c6fd32f1e8 ;;
+                    aarch64|arm64) larch=arm64
+                                   lurl="https://ports.ubuntu.com/ubuntu-ports/pool/universe/n/ncurses"
+                                   lsha=79498b68a0253005d483021563414f8595bd3d81a3d32af08fc5ba04ff4b9631 ;;
+                esac
+                if [ -n "$larch" ]; then
+                    ldeb="libtinfo5_6.3-2ubuntu0.2_${larch}.deb"
+                    if ! as_user curl -fsSL --retry 3 -o "$tmp/$ldeb" "$lurl/$ldeb" >/dev/null 2>&1; then
+                        echo "⚠ could not download $ldeb — the pin may have been superseded in the pool"
+                    elif ! (cd "$tmp" && echo "$lsha  $ldeb" | sha256sum -c -) >/dev/null 2>&1; then
+                        echo "⚠ $ldeb failed its sha256 check — discarding it"
+                        as_user rm -f "$tmp/$ldeb"
+                    fi
+                    deb=$(ls "$tmp"/*.deb 2>/dev/null | head -1)
+                fi
+            fi
+            [ -n "$deb" ] && as_user dpkg-deb -x "$deb" "$tmp/x" >/dev/null 2>&1 || true
+            ;;
+        dnf)
+            as_user sh -c "cd '$tmp' && dnf download ncurses-compat-libs" >/dev/null 2>&1 || true
+            rpm=$(ls "$tmp"/*.rpm 2>/dev/null | head -1)
+            [ -n "$rpm" ] && { as_user mkdir -p "$tmp/x"; as_user sh -c "cd '$tmp/x' && rpm2cpio '$rpm' | cpio -idm" >/dev/null 2>&1 || true; }
+            ;;
+    esac
+    real=$(find "$tmp/x" -name 'libtinfo.so.5*' -type f 2>/dev/null | head -1)
+    [ -n "$real" ] && as_user cp -f "$real" "$compat/libtinfo.so.5"
+    as_user rm -rf "$tmp"
+    [ -e "$compat/libtinfo.so.5" ]
+}
+
+# Linux fallback: unpack the latest ver.x clang+llvm release (bundles libc++)
+# into ~/toolchains, root-free — used when no in-range system clang is available
+# (all of Fedora; Ubuntu without --system-compiler).
+# $1 = major version, $2 = run|print, $3 = apt|dnf.
+install_llvm_tarball() {
+    local ver="$1" mode="$2" mgr="${3:-apt}"
+    local prefix="$LLVM_TARBALL_PREFIX-$ver"
+
+    if [ "$mode" = "print" ]; then
+        echo "No supported clang $MIN_CLANG-$MAX_CLANG with a matching libc++ is installed."
+        echo "A self-contained LLVM $ver toolchain (bundles its own libc++) will be"
+        echo "unpacked into $prefix (user-local, no root needed)."
+        return 0
+    fi
+
+    if [ -x "$prefix/bin/clang++" ] && [ -f "$prefix/include/c++/v1/__config" ]; then
+        echo "✓ LLVM $ver toolchain present at $prefix"
+    else
+        # curl not here yet: defer to the --autoinstall retry (which installs curl).
+        command_exists curl || { echo "⚠ curl not available yet; will fetch the LLVM toolchain after deps install"; return 0; }
+        local arch asset_re
+        arch=$(uname -m)
+        # The '+' in clang+llvm is %2B-encoded in the asset URL.
+        case "$arch" in
+            x86_64)        asset_re='clang(\+|%2[Bb])llvm-[0-9.]+-x86_64-linux-gnu[^"]*\.tar\.xz' ;;
+            aarch64|arm64) asset_re='clang(\+|%2[Bb])llvm-[0-9.]+-aarch64-linux-gnu[^"]*\.tar\.xz' ;;
+            *) echo "ERROR: no prebuilt LLVM tarball for arch $arch; install one manually from https://github.com/llvm/llvm-project/releases"; exit 1 ;;
+        esac
+
+        # Latest ver.x point release (no rc); fall back to a known-good pin offline.
+        local pin
+        pin=$(git ls-remote --tags --refs https://github.com/llvm/llvm-project.git "llvmorg-$ver.*" 2>/dev/null \
+              | grep -oE "llvmorg-$ver\.[0-9]+\.[0-9]+$" | sed 's/llvmorg-//' | sort -V | tail -1)
+        [ -z "$pin" ] && pin="$LLVM_TARBALL_FALLBACK"
+
+        local url
+        url=$(curl -fsSL "https://api.github.com/repos/llvm/llvm-project/releases/tags/llvmorg-$pin" 2>/dev/null \
+              | grep -oE '"browser_download_url": *"[^"]+"' | cut -d'"' -f4 \
+              | grep -E "$asset_re" | head -1)
+        if [ -z "$url" ]; then
+            echo "=========================================="
+            echo "ERROR: no self-contained clang+llvm $pin tarball ($arch) in the llvm.org"
+            echo "release assets. Install an LLVM $MIN_CLANG-$MAX_CLANG toolchain manually from"
+            echo "https://github.com/llvm/llvm-project/releases, then re-run."
+            echo "=========================================="
+            exit 1
+        fi
+
+        echo "→ downloading LLVM $pin toolchain ($arch, a few hundred MB)..."
+        echo "  $url"
+        local tmp; tmp=$(as_user mktemp -d)
+        if ! as_user curl -fSL --retry 3 -o "$tmp/llvm.tar.xz" "$url"; then
+            as_user rm -rf "$tmp"; echo "ERROR: failed to download the LLVM toolchain"; exit 1
+        fi
+        echo "→ unpacking into $prefix ..."
+        as_user mkdir -p "$prefix"
+        if ! as_user tar -xJf "$tmp/llvm.tar.xz" -C "$prefix" --strip-components=1; then
+            as_user rm -rf "$tmp" "$prefix"; echo "ERROR: failed to unpack the LLVM toolchain"; exit 1
+        fi
+        as_user rm -rf "$tmp"
+        if [ ! -f "$prefix/include/c++/v1/__config" ]; then
+            echo "ERROR: the downloaded LLVM tarball did not include libc++ headers ($prefix)"; exit 1
+        fi
+        echo "✓ LLVM $pin toolchain installed at $prefix"
+    fi
+
+    # The llvm.org clang needs a real libtinfo.so.5 (a libtinfo.so.6 symlink fails:
+    # the NCURSES_TINFO_5 versioned symbols are absent). On dnf --autoinstall it's
+    # already installed system-wide; otherwise (all apt distros) fetch it root-free
+    # into lib-compat, which tasks.js puts on the build LD_LIBRARY_PATH.
+    local compat="$prefix/lib-compat"
+    as_user mkdir -p "$compat"
+    if ! LD_LIBRARY_PATH="$compat" "$prefix/bin/clang" --version >/dev/null 2>&1; then
+        provide_libtinfo5 "$compat" "$mgr" || true
+        LD_LIBRARY_PATH="$compat" "$prefix/bin/clang" --version >/dev/null 2>&1 \
+            || echo "⚠ $prefix/bin/clang still can't load its libs (check: ldd $prefix/bin/clang)"
+    fi
+
+    echo "✓ LLVM $ver toolchain ready at $prefix (build tools use it via env)"
+}
+
+# Install Mozilla dump_syms (prebuilt) into ~/toolchains/bin, root-free. Best-effort:
+# symbol generation is non-fatal. $1 = run|print.
+install_dump_syms() {
+    local mode="$1" bin="$DUMP_SYMS_DIR/dump_syms"
+
+    if [ "$mode" = "print" ]; then
+        echo "dump_syms (crash-symbol generator) is missing — shipped builds need it."
+        echo "--autoinstall fetches the prebuilt binary into $bin."
+        return 0
+    fi
+
+    if command_exists dump_syms; then echo "✓ dump_syms ($(command -v dump_syms))"; return 0; fi
+    if [ -x "$bin" ] && "$bin" --version >/dev/null 2>&1; then echo "✓ dump_syms ($bin)"; return 0; fi
+
+    command_exists curl || { echo "⚠ curl not available yet; skipping dump_syms (re-run after deps install)"; return 0; }
+    local os arch asset
+    os=$(uname -s); arch=$(uname -m)
+    case "$os/$arch" in
+        Linux/x86_64)  asset='dump_syms-x86_64-unknown-linux-gnu.tar.xz' ;;
+        Darwin/arm64)  asset='dump_syms-aarch64-apple-darwin.tar.xz' ;;
+        Darwin/x86_64) asset='dump_syms-x86_64-apple-darwin.tar.xz' ;;
+        *) echo "⚠ no prebuilt dump_syms for $os/$arch — install it manually (cargo install dump_syms) for crash symbols"; return 0 ;;
+    esac
+
+    # Build the release URL from the pinned tag: querying releases/latest needs no auth
+    # but is IP-rate-limited, and a throttled reply silently skipped the install.
+    local url="https://github.com/mozilla/dump_syms/releases/download/$DUMP_SYMS_VERSION/$asset"
+
+    echo "→ downloading dump_syms ($arch)..."
+    local tmp; tmp=$(as_user mktemp -d)
+    if ! as_user curl -fSL --retry 3 -o "$tmp/ds.tar.xz" "$url"; then
+        as_user rm -rf "$tmp"; echo "⚠ failed to download dump_syms — skipping (symbols won't be generated)"; return 0
+    fi
+    as_user mkdir -p "$DUMP_SYMS_DIR"
+    as_user tar -xJf "$tmp/ds.tar.xz" -C "$tmp"
+    local extracted; extracted=$(find "$tmp" -name dump_syms -type f | head -1)
+    [ -z "$extracted" ] && { as_user rm -rf "$tmp"; echo "⚠ dump_syms binary not in the archive — skipping"; return 0; }
+    as_user cp -f "$extracted" "$bin"; as_user chmod +x "$bin"; as_user rm -rf "$tmp"
+    "$bin" --version >/dev/null 2>&1 || { echo "⚠ installed dump_syms can't run ($bin) — skipping"; return 0; }
+    echo "✓ dump_syms installed ($bin)"
+}
+
 # The install command shown to the user in non-autoinstall mode ($1 = apt|dnf).
 dep_install_hint() {
     case "$1" in
         apt) echo "$SUDO apt-get install -y" ;;
         dnf) echo "$SUDO dnf install -y" ;;
-    esac
-}
-
-# Run a command that needs root, prefixing sudo when we're not already root
-# ($SUDO is "" under root, unquoted so it disappears cleanly). The build harness
-# spawns this script with stdio captured and no controlling terminal for the
-# child, so a sudo that needs a password can't prompt and dies with
-# "sudo: a password is required". Rather than let `set -e` abort with that bare,
-# contextless error, catch the failure and tell the user exactly how to recover:
-# run this script standalone in a real terminal where sudo CAN prompt. This is
-# what keeps a privileged step (e.g. the cc/c++ symlinks below) from failing the
-# whole build with an unexplained exit 1. $*: the command to run (without sudo).
-run_privileged() {
-    if $SUDO "$@"; then
-        return 0
-    fi
-    echo ""
-    echo "=========================================="
-    echo "ERROR: a required privileged step failed:"
-    echo "    $SUDO $*"
-    if [ -n "$SUDO" ]; then
-        echo ""
-        echo "sudo could not obtain credentials. When the build runs this check it"
-        echo "captures output, so sudo has no terminal to prompt for a password."
-        echo ""
-        echo "Run the prerequisite setup once, directly in your terminal:"
-        echo "    ./scripts/compiler-unix.sh --autoinstall"
-        echo ""
-        echo "then re-run the build. Alternatives: pre-authenticate with 'sudo -v'"
-        echo "before building, or grant passwordless sudo for this command."
-    fi
-    echo "=========================================="
-    exit 1
-}
-
-# True when path $1 exists and resolves to the same file as $2. Used to make the
-# cc/c++ -> clang symlinking idempotent, so a fully-provisioned machine doesn't
-# invoke sudo just to recreate links that are already correct.
-link_points_to() {
-    [ -e "$1" ] || return 1
-    [ "$(readlink -f "$1" 2>/dev/null)" = "$(readlink -f "$2" 2>/dev/null)" ]
-}
-
-# Point the default cc/c++ at clang so vcpkg's compiler detection doesn't pick
-# gcc (which rejects the triplet's -stdlib=libc++). $1 = apt|dnf, $2 = run|print.
-# apt uses update-alternatives; Fedora symlinks into /usr/local/bin (ahead of
-# /usr/bin in PATH).
-setup_cc_alternatives() {
-    case "$1" in
-        apt)
-            # apt already guards on NEED_CC_ALTERNATIVES (set only when cc/c++
-            # don't already resolve to clang), so the run path is reached only
-            # when a change is genuinely needed — no extra idempotency check here.
-            [ "$NEED_CC_ALTERNATIVES" = "1" ] || return 0
-            if [ "$2" = "run" ]; then
-                run_privileged update-alternatives --install /usr/bin/cc cc "$CC_PATH" 100
-                run_privileged update-alternatives --install /usr/bin/c++ c++ "$CXX_PATH" 100
-                echo "✓ cc/c++ -> $CC/$CXX"
-            else
-                echo "    # Set default cc/c++ to $CC and $CXX"
-                echo "    $SUDO update-alternatives --install /usr/bin/cc cc $CC_PATH 100"
-                echo "    $SUDO update-alternatives --install /usr/bin/c++ c++ $CXX_PATH 100"
-            fi
-            ;;
-        dnf)
-            if [ "$2" = "run" ] && command_exists clang && command_exists clang++; then
-                local clang_path clangxx_path
-                clang_path=$(command -v clang)
-                clangxx_path=$(command -v clang++)
-                # Already pointing at clang? Skip — never invoke sudo on a box
-                # whose symlinks are already correct (the common re-run case).
-                if link_points_to /usr/local/bin/cc "$clang_path" && \
-                   link_points_to /usr/local/bin/c++ "$clangxx_path"; then
-                    echo "✓ cc/c++ already -> clang (/usr/local/bin)"
-                else
-                    run_privileged ln -sf "$clang_path" /usr/local/bin/cc
-                    run_privileged ln -sf "$clangxx_path" /usr/local/bin/c++
-                    echo "✓ cc/c++ -> clang (/usr/local/bin)"
-                fi
-            elif [ "$2" = "print" ]; then
-                # Fedora's cc defaults to gcc; point it at clang (ahead of /usr/bin
-                # in PATH) so vcpkg's compiler detection doesn't choke on -stdlib=libc++.
-                echo "    # Point default cc/c++ at clang"
-                echo "    $SUDO ln -sf \"\$(command -v clang)\" /usr/local/bin/cc"
-                echo "    $SUDO ln -sf \"\$(command -v clang++)\" /usr/local/bin/c++"
-            fi
-            ;;
     esac
 }
 
@@ -531,11 +681,32 @@ check_dependencies() {
     check_linux_python  # hard version gate (python >= 3.10), distro-agnostic
     check_linux_cmake   # hard version gate (cmake >= 3.19), distro-agnostic
 
-    # Package set = shared LINUX_DEPS column + the compiler packages the
-    # select_*_triplet chose. This list is the ONLY per-distro input.
+    local el_family=0
+    is_el_family && el_family=1
+
+    # Package set = shared LINUX_DEPS column + any clang packages select_system_clang
+    # chose. For a versioned apt clang install, drop the distro's unversioned
+    # libc++1/libc++abi1 — the versioned libc++1-N in CLANG_PKGS supersedes them.
     local pkgs=() p
-    while IFS= read -r p; do pkgs+=("$p"); done < <(emit_distro_deps "$mgr")
-    pkgs+=("${EXTRA_PKGS[@]}")
+    while IFS= read -r p; do
+        if [ -n "$CLANG_ALT_VERSION" ] && { [ "$p" = "libc++1" ] || [ "$p" = "libc++abi1" ]; }; then continue; fi
+        # libcxx/libcxxabi/llvm-libunwind are Fedora-only and bundled inside the
+        # LLVM tarball the EL leg downloads — RHEL/EL packages none of them.
+        if [ "$el_family" = 1 ] && { [ "$p" = "libcxx" ] || [ "$p" = "libcxxabi" ] || [ "$p" = "llvm-libunwind" ]; }; then continue; fi
+        pkgs+=("$p")
+    done < <(emit_distro_deps "$mgr")
+    pkgs+=("${CLANG_PKGS[@]}")
+
+    # The llvm.org tarball clang needs a real libtinfo.so.5 (ncurses 5). On dnf we
+    # pull ncurses-compat-libs system-wide. On apt we deliberately do NOT add
+    # libtinfo5 here: it was dropped from Ubuntu 24.04+ repos, so a strict install
+    # would abort the whole apt batch. The root-free provide_libtinfo5 (with its
+    # pinned-.deb fallback) supplies libtinfo.so.5 into lib-compat instead.
+    if [ -n "$LLVM_TARBALL_VERSION" ] && [ "$AUTOINSTALL" = "1" ]; then
+        case "$mgr" in
+            dnf) pkgs+=(ncurses-compat-libs) ;;
+        esac
+    fi
 
     local missing=()
     for p in "${pkgs[@]}"; do
@@ -547,54 +718,87 @@ check_dependencies() {
         fi
     done
 
-    if [ "$AUTOINSTALL" == "1" ]; then
-        if [ ${#missing[@]} -ne 0 ]; then
-            echo "Auto-installing missing dependencies with $mgr..."
-            # A failed install must stop the build. Without this the script would
-            # continue and report success, and the missing runtime libs only
-            # surface much later as "libc++.so.1: cannot open shared object file".
-            if ! dep_install "$mgr" "${missing[@]}"; then
-                echo ""
-                echo "=========================================="
-                echo "ERROR: $mgr failed to install dependencies."
-                echo "Read the package manager errors above, fix them, then re-run:"
-                echo "  ./scripts/compiler-unix.sh --autoinstall"
-                echo "=========================================="
-                exit 1
-            fi
-            # Re-check every package. A package manager can exit 0 without
-            # installing everything (unknown package name, held package). Verify
-            # before claiming success so a partial install is not silently accepted.
-            local still_missing=() m
-            for m in "${missing[@]}"; do
-                dep_installed "$mgr" "$m" || still_missing+=("$m")
-            done
-            if [ ${#still_missing[@]} -ne 0 ]; then
-                echo ""
-                echo "=========================================="
-                echo "ERROR: these packages are still missing after install:"
-                echo "    ${still_missing[*]}"
-                echo "Check the package names for this distro, then re-run:"
-                echo "  ./scripts/compiler-unix.sh --autoinstall"
-                echo "=========================================="
-                exit 1
-            fi
-            echo ""
-            echo "Dependencies installed successfully."
-            echo ""
+    # dump_syms isn't a distro package — OK if on PATH or in ~/toolchains/bin.
+    local dump_syms_ok=""
+    if command_exists dump_syms || { [ -x "$DUMP_SYMS_DIR/dump_syms" ] && "$DUMP_SYMS_DIR/dump_syms" --version >/dev/null 2>&1; }; then
+        dump_syms_ok="1"; echo "✓ dump_syms"
+    else
+        echo "✗ dump_syms"
+    fi
+
+    # Policy: distro packages (root) need --autoinstall; root-free ~/toolchains
+    # downloads (LLVM toolchain, dump_syms) install regardless.
+
+    # Distro packages (root) — only under --autoinstall.
+    if [ "$AUTOINSTALL" == "1" ] && [ ${#missing[@]} -ne 0 ]; then
+        echo "Auto-installing missing dependencies with $mgr..."
+        # EL base repos are minimal — turn on CRB + EPEL so ncurses-compat-libs,
+        # python3-build/wheel and libdb-devel are resolvable before the install.
+        if [ "$mgr" = "dnf" ] && [ "$el_family" = 1 ]; then
+            enable_el_repos
         fi
-        setup_cc_alternatives "$mgr" run
-    elif [ ${#missing[@]} -ne 0 ] || { [ "$mgr" = "apt" ] && [ "$NEED_CC_ALTERNATIVES" = "1" ]; }; then
+        # --system-compiler on a distro whose archive lacks clang-18 (e.g. Ubuntu
+        # 22.04): add apt.llvm.org first.
+        if [ -n "$LLVM_APT_VERSION" ] && ! ensure_llvm_repo "$LLVM_APT_VERSION"; then
+            echo "=========================================="
+            echo "ERROR: could not set up apt.llvm.org for clang-$LLVM_APT_VERSION"
+            echo "=========================================="
+            exit 1
+        fi
+        # A failed install must stop the build. Without this the script would
+        # continue and report success, and the missing runtime libs only
+        # surface much later as "libc++.so.1: cannot open shared object file".
+        if ! dep_install "$mgr" "${missing[@]}"; then
+            echo ""
+            echo "=========================================="
+            echo "ERROR: $mgr failed to install dependencies."
+            echo "Read the package manager errors above, fix them, then re-run:"
+            echo "  ./scripts/compiler-unix.sh --autoinstall"
+            echo "=========================================="
+            exit 1
+        fi
+        # Re-check every package. A package manager can exit 0 without installing
+        # everything (unknown package name, held package). Verify before claiming
+        # success so a partial install is not silently accepted.
+        local still_missing=() m
+        for m in "${missing[@]}"; do
+            dep_installed "$mgr" "$m" || still_missing+=("$m")
+        done
+        if [ ${#still_missing[@]} -ne 0 ]; then
+            echo ""
+            echo "=========================================="
+            echo "ERROR: these packages are still missing after install:"
+            echo "    ${still_missing[*]}"
+            echo "Check the package names for this distro, then re-run:"
+            echo "  ./scripts/compiler-unix.sh --autoinstall"
+            echo "=========================================="
+            exit 1
+        fi
+        missing=()
+        echo ""
+        echo "Dependencies installed successfully."
+        echo ""
+    fi
+
+    # --system-compiler versioned install: repoint bare clang++/cc/c++ at clang-N.
+    [ "$AUTOINSTALL" == "1" ] && [ -n "$CLANG_ALT_VERSION" ] && force_system_clang "$CLANG_ALT_VERSION"
+
+    # Root-free tools: always (after package install so curl/tar are present).
+    [ -n "$LLVM_TARBALL_VERSION" ] && install_llvm_tarball "$LLVM_TARBALL_VERSION" run "$mgr"
+    [ -z "$dump_syms_ok" ] && install_dump_syms run
+
+    # Missing distro packages without --autoinstall? Report + stop.
+    if [ "$AUTOINSTALL" != "1" ] && [ ${#missing[@]} -ne 0 ]; then
         echo "=========================================="
-        echo "ERROR: Missing required dependencies - install with:"
+        echo "ERROR: missing packages need root — re-run with --autoinstall."
         echo ""
-        if [ ${#missing[@]} -ne 0 ]; then
-            echo "    $(dep_install_hint "$mgr") ${missing[*]}"
-        fi
-        setup_cc_alternatives "$mgr" print
+        echo "Missing: ${missing[*]}"
         echo ""
-        echo "Or run with --autoinstall to install them automatically:"
-        echo "  ./scripts/compiler-unix.sh --autoinstall"
+        echo "Re-run the build with one of:"
+        echo "    ./builder server:build --autoinstall"
+        echo "        install deps; use a LOCAL clang toolchain in ~/toolchains (no system change)"
+        echo "    ./builder server:build --autoinstall --system-compiler"
+        echo "        install deps; install clang SYSTEM-WIDE via $mgr (updates the default clang++)"
         echo "=========================================="
         exit 1
     fi
@@ -697,6 +901,13 @@ check_mac_dependencies() {
         fi
     fi
 
+    # dump_syms: root-free download, always installed (best-effort).
+    if command_exists dump_syms || { [ -x "$DUMP_SYMS_DIR/dump_syms" ] && "$DUMP_SYMS_DIR/dump_syms" --version >/dev/null 2>&1; }; then
+        echo "[OK] dump_syms"
+    else
+        install_dump_syms run
+    fi
+
     if [ ${#COMMANDS[@]} -ne 0 ]; then
         if [ "$AUTOINSTALL" == "1" ]; then
             echo "Auto-installing missing dependencies..."
@@ -757,24 +968,39 @@ while [[ $# -gt 0 ]]; do
             AUTOINSTALL="1"
             shift
             ;;
+        --system-compiler)
+            SYSTEM_COMPILER="1"
+            shift
+            ;;
         --help)
             echo "Usage: ./scripts/compiler-unix.sh [options]"
             echo ""
             echo "Options:"
             echo "  --arch x86_64|arm64          Target architecture (default: auto-detect)"
             echo "  --autoinstall                Auto-install missing dependencies"
+            echo "  --system-compiler            Install a compatible clang system-wide via apt/dnf"
+            echo "                               (needs root); default keeps it local in ~/toolchains"
             echo "  --help                       Show this help"
             exit 0
             ;;
         *)
             echo "=========================================="
             echo "ERROR: unknown parameter \"$1\""
-            echo "Usage: ./scripts/compiler-unix.sh [--arch x86_64|arm64] [--autoinstall]"
+            echo "Usage: ./scripts/compiler-unix.sh [--arch x86_64|arm64] [--autoinstall] [--system-compiler]"
             echo "=========================================="
             exit 1
             ;;
     esac
 done
+
+# --system-compiler installs packages, which only happens under --autoinstall.
+if [ -n "$SYSTEM_COMPILER" ] && [ "$AUTOINSTALL" != "1" ]; then
+    echo "=========================================="
+    echo "ERROR: --system-compiler requires --autoinstall (it installs packages)."
+    echo "Use: ./scripts/compiler-unix.sh --autoinstall --system-compiler"
+    echo "=========================================="
+    exit 1
+fi
 
 # =============================================================================
 # Platform-specific setup

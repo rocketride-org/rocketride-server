@@ -266,6 +266,24 @@ PYBIND11_EMBEDDED_MODULE(engLib, engLib) {
 
     //-------------------------------------------------------------
     /// @details
+    ///		Returns the complete task-file JSON of the task currently
+    ///		executing in this process, or None when no task is
+    ///		running. This is how subprocess python reads trusted
+    ///		task-file data (identity, storage anchor) without
+    ///		per-endpoint plumbing — published around the task's
+    ///		begin/end window by ITask::execute.
+    ///------------------------------------------------------------
+    engLib.PYBIND_FUNCTION(getTask, []() -> py::object {
+        // Read the published task (a copy; null when none is running)
+        auto task = engine::task::ITask::currentTask();
+        if (task.isNull()) return py::none();
+
+        // Hand python its own dict representation
+        return pyjson::jsonToDict(task);
+    });
+
+    //-------------------------------------------------------------
+    /// @details
     ///		Declares a debug output function which can accept
     ///		multiple arguments. All arguments MUST be convertable
     ///		to python strings. This is for nodes to output
@@ -967,7 +985,7 @@ PYBIND11_EMBEDDED_MODULE(engLib, engLib) {
         .PYBIND(writeTagEndObject,
                 &IServiceFilterInstance::cb_writeTagEndObject)
         .PYBIND(close, &IServiceFilterInstance::cb_close)
-        .PYBIND(closing, &IServiceFilterInstance::cb_close)
+        .PYBIND(closing, &IServiceFilterInstance::cb_closing)
 
         .PYBIND_PROP_READONLY_CUSTOM(
             currentObject, [](IServiceFilterInstance &obj) -> py::object {

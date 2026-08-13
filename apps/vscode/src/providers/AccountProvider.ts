@@ -345,7 +345,7 @@ export class AccountProvider {
 
 	/**
 	 * Loads only the data needed for the requested section tab.
-	 * Mirrors the shell-ui pattern of lazy per-section loading.
+	 * Mirrors the shell pattern of lazy per-section loading.
 	 */
 	private async handleSectionChange(panel: vscode.WebviewPanel, section: string): Promise<void> {
 		const { client, orgId } = this.resolveClient();

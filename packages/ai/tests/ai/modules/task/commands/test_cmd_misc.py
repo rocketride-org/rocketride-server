@@ -78,34 +78,34 @@ def test_resolve_monitor_label_unrecognised_key():
 
 
 def test_resolve_monitor_label_project_wildcard():
-    """A 'p.<id>.*' key uses the project label + '.*' suffix."""
+    """An owner-scoped 'p.<owner>.<id>.*' key uses the project label + '.*'."""
     project_names = {'proj-1': 'my-project'}
-    assert MiscCommands._resolve_monitor_label('p.proj-1.*', project_names, {}) == 'my-project.*'
+    assert MiscCommands._resolve_monitor_label('p.user-1.proj-1.*', project_names, {}) == 'my-project.*'
 
 
 def test_resolve_monitor_label_project_only():
-    """A bare 'p.<id>' key (no source) yields '<project>.*'."""
+    """A 'p.<owner>.<id>' key (no source) yields '<project>.*'."""
     project_names = {'proj-1': 'my-project'}
-    assert MiscCommands._resolve_monitor_label('p.proj-1', project_names, {}) == 'my-project.*'
+    assert MiscCommands._resolve_monitor_label('p.user-1.proj-1', project_names, {}) == 'my-project.*'
 
 
 def test_resolve_monitor_label_with_source():
-    """A 'p.<id>.<source>' key uses both the project and source friendly names."""
+    """A 'p.<owner>.<id>.<source>' key uses the project and source friendly names."""
     project_names = {'proj-1': 'my-project'}
     source_names = {'proj-1.src-1': 'reader'}
-    result = MiscCommands._resolve_monitor_label('p.proj-1.src-1', project_names, source_names)
+    result = MiscCommands._resolve_monitor_label('p.user-1.proj-1.src-1', project_names, source_names)
     assert result == 'my-project.reader'
 
 
 def test_resolve_monitor_label_with_pipe_suffix():
-    """A 4-part 'p.<id>.<source>.<pipe>' key appends a 'pipe<n>' suffix."""
-    result = MiscCommands._resolve_monitor_label('p.proj-1.src-1.42', {}, {})
+    """A 5-part 'p.<owner>.<id>.<source>.<pipe>' key appends a 'pipe<n>' suffix."""
+    result = MiscCommands._resolve_monitor_label('p.user-1.proj-1.src-1.42', {}, {})
     assert result == 'proj-1.src-1.pipe42'
 
 
 def test_resolve_monitor_label_truncates_project_id_when_no_friendly_name():
     """Unknown project ids are truncated to 8 characters."""
-    result = MiscCommands._resolve_monitor_label('p.proj-very-long-id-here.*', {}, {})
+    result = MiscCommands._resolve_monitor_label('p.user-1.proj-very-long-id-here.*', {}, {})
     assert result.startswith('proj-ver')
 
 
@@ -119,7 +119,7 @@ def test_build_monitors_list_resolves_keys_and_flag_names():
     from rocketride import EVENT_TYPE
 
     monitors = {
-        'p.proj-1.src-1': EVENT_TYPE.SUMMARY,
+        'p.user-1.proj-1.src-1': EVENT_TYPE.SUMMARY,
         '*': EVENT_TYPE.SUMMARY,
     }
     project_names = {'proj-1': 'my-project'}
@@ -142,9 +142,13 @@ def test_build_monitors_list_resolves_keys_and_flag_names():
 
 @pytest.mark.asyncio
 async def test_on_rrext_services_returns_specific_service(monkeypatch):
-    """When `arguments.service` is set, return that single definition."""
+    """When `arguments.service` is set, return that single full entry."""
     schema = {'name': 'ocr', 'fields': []}
-    monkeypatch.setattr(cmd_misc, 'getServiceDefinition', lambda name: schema if name == 'ocr' else None)
+
+    async def fake_get_service(name):
+        return schema if name == 'ocr' else None
+
+    monkeypatch.setattr(cmd_misc.services_catalog, 'get_service', fake_get_service)
 
     conn = _make_conn()
     result = await MiscCommands.on_rrext_services(conn, {'arguments': {'service': 'ocr'}})
@@ -155,7 +159,11 @@ async def test_on_rrext_services_returns_specific_service(monkeypatch):
 @pytest.mark.asyncio
 async def test_on_rrext_services_unknown_service_raises(monkeypatch):
     """An unknown service id raises ValueError (re-raised after debug log)."""
-    monkeypatch.setattr(cmd_misc, 'getServiceDefinition', lambda name: None)
+
+    async def fake_get_service(name):
+        return None
+
+    monkeypatch.setattr(cmd_misc.services_catalog, 'get_service', fake_get_service)
 
     conn = _make_conn()
     with pytest.raises(ValueError, match="Service 'unknown' not found"):
@@ -164,14 +172,18 @@ async def test_on_rrext_services_unknown_service_raises(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_on_rrext_services_no_service_returns_all(monkeypatch):
-    """Without a `service` arg, getServiceDefinitions() is returned."""
-    all_schemas = [{'name': 'a'}, {'name': 'b'}]
-    monkeypatch.setattr(cmd_misc, 'getServiceDefinitions', lambda: all_schemas)
+async def test_on_rrext_services_no_service_returns_summary(monkeypatch):
+    """Without a `service` arg, the cached summary body is returned."""
+    summary = {'services': {'a': {'title': 'A'}}, 'version': 7}
+
+    async def fake_get_summary():
+        return summary
+
+    monkeypatch.setattr(cmd_misc.services_catalog, 'get_summary', fake_get_summary)
 
     conn = _make_conn()
     result = await MiscCommands.on_rrext_services(conn, {})
-    assert result['body'] == all_schemas
+    assert result['body'] == summary
 
 
 # ---------------------------------------------------------------------------
@@ -318,6 +330,9 @@ async def test_on_rrext_dashboard_filters_to_caller_user_id(monkeypatch):
         token='tk_1',
         source='reader',
         project_id='proj-1',
+        run_kind='dev',
+        # Real controls always expose owner_id (dev run -> the user).
+        owner_id='user-1',
         provider='node-x',
         task=own_task,
         launch_type=SimpleNamespace(value='LAUNCH'),
@@ -329,6 +344,8 @@ async def test_on_rrext_dashboard_filters_to_caller_user_id(monkeypatch):
         token='tk_2',
         source='other-source',
         project_id='proj-2',
+        run_kind='dev',
+        owner_id='other-user',
         provider='node-y',
         task=MagicMock(),
         launch_type=SimpleNamespace(value='EXECUTE'),
@@ -374,6 +391,9 @@ async def test_on_rrext_dashboard_tk_auth_locks_to_owning_task(monkeypatch):
             token=token,
             source='s',
             project_id='p',
+            run_kind='dev',
+            # Real controls always expose owner_id (dev run -> the user).
+            owner_id='user-1',
             provider='node-x',
             task=SimpleNamespace(
                 get_status=lambda: SimpleNamespace(
@@ -461,6 +481,7 @@ def _list_control(task_id, *, name=None, start=900.0, provider='node-x', team_id
         token=f'tk_{task_id}',
         source='reader',
         project_id='proj-1',
+        run_kind='dev',
         provider=provider,
         task=SimpleNamespace(
             get_status=lambda: status,

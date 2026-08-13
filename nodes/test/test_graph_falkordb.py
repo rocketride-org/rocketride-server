@@ -638,6 +638,156 @@ def test_affected_rows_reported_for_write_that_also_returns_rows():
     assert out['affected_rows'] == 2  # ...and the write is still counted
 
 
+# ---------------------------------------------------------------------------
+# Connection profiles: manual (host/port) and URL
+# ---------------------------------------------------------------------------
+
+
+class _RecordingFalkorDB:
+    """Captures how the driver was asked to connect, without opening a socket."""
+
+    last_kwargs = None
+    last_url = None
+
+    def __init__(self, **kwargs):
+        _RecordingFalkorDB.last_kwargs = kwargs
+        _RecordingFalkorDB.last_url = None
+
+    @classmethod
+    def from_url(cls, url, **kwargs):
+        instance = cls.__new__(cls)
+        _RecordingFalkorDB.last_url = url
+        _RecordingFalkorDB.last_kwargs = kwargs
+        return instance
+
+
+@pytest.fixture
+def recording_client(monkeypatch):
+    monkeypatch.setattr(_glb_mod, 'FalkorDB', _RecordingFalkorDB)
+    _RecordingFalkorDB.last_kwargs = None
+    _RecordingFalkorDB.last_url = None
+    return _RecordingFalkorDB
+
+
+def test_manual_profile_connects_with_host_and_port(recording_client):
+    """The pre-existing profile must keep building the client from host/port."""
+    _glb_mod.IGlobal._connect(
+        {'mode': 'manual', 'host': 'localhost', 'port': 6379, 'username': 'u', 'password': 'p', 'tls': True}
+    )
+
+    assert recording_client.last_url is None
+    assert recording_client.last_kwargs == {
+        'host': 'localhost',
+        'port': 6379,
+        'username': 'u',
+        'password': 'p',
+        'ssl': True,
+    }
+
+
+def test_url_profile_connects_from_url(recording_client):
+    url = 'falkor://falkordb:s3cret@r-6jissuruar.instance-ytljliglb.us-east-1.aws.cloud:53939'
+    _glb_mod.IGlobal._connect({'mode': 'url', 'url': f'  {url}  '})
+
+    # No password field set -> the URL is passed through untouched.
+    assert recording_client.last_url == url
+    assert recording_client.last_kwargs == {}
+
+
+def test_password_field_replaces_the_one_embedded_in_the_url(recording_client):
+    """The field is the single source of truth: redis-py must not prefer the URL."""
+    _glb_mod.IGlobal._connect({'mode': 'url', 'url': 'falkor://falkordb:stale@host:53939', 'password': 'current'})
+
+    assert recording_client.last_url == 'falkor://falkordb@host:53939'
+    assert recording_client.last_kwargs == {'password': 'current'}
+
+
+def test_password_field_fills_in_a_url_without_credentials(recording_client):
+    _glb_mod.IGlobal._connect({'mode': 'url', 'url': 'falkor://falkordb@host:53939', 'password': 'secret'})
+
+    assert recording_client.last_url == 'falkor://falkordb@host:53939'
+    assert recording_client.last_kwargs == {'password': 'secret'}
+
+
+@pytest.mark.parametrize(
+    ('url', 'expected'),
+    [
+        # The username survives, percent-escapes and all; only the password goes.
+        ('falkor://us%3Aer:p%40ss@host:6379', 'falkor://us%3Aer@host:6379'),
+        # No username either — an authority that is only a password.
+        ('falkor://:pw@host:6379', 'falkor://host:6379'),
+        # unix:// carries its password in the query string instead.
+        ('unix:///tmp/f.sock?db=0&password=pw', 'unix:///tmp/f.sock?db=0'),
+        ('falkor://host:6379', 'falkor://host:6379'),
+    ],
+)
+def test_url_without_password_strips_only_the_password(url, expected):
+    assert _glb_mod._url_without_password(url) == expected
+
+
+@pytest.mark.parametrize('url', ['http://host:6379', 'host:6379', 'bolt://host:7687'])
+def test_url_profile_rejects_unsupported_schemes(url):
+    with pytest.raises(ValueError, match='Unsupported FalkorDB URL scheme'):
+        _glb_mod._connection_url({'mode': 'url', 'url': url})
+
+
+def test_url_profile_requires_a_url():
+    """An empty URL in the URL profile must fail, not silently hit localhost."""
+    with pytest.raises(ValueError, match='FalkorDB URL is required'):
+        _glb_mod._connection_url({'mode': 'url', 'url': ''})
+
+
+def test_manual_profile_has_no_url():
+    assert _glb_mod._connection_url({'mode': 'manual', 'host': 'localhost'}) == ''
+
+
+def test_legacy_flat_config_still_uses_host_port(recording_client):
+    """Pipelines saved before profiles existed carry no 'mode' key at all."""
+    _glb_mod.IGlobal._connect({'host': 'db.internal', 'port': 6380})
+
+    assert recording_client.last_url is None
+    assert recording_client.last_kwargs == {'host': 'db.internal', 'port': 6380}
+
+
+def test_probe_does_not_leak_url_credentials(monkeypatch, recording_client):
+    """A failed probe is logged: the password in the URL must not reach the log."""
+    messages = []
+    monkeypatch.setattr(_glb_mod, 'warning', messages.append)
+    monkeypatch.setattr(
+        recording_client, 'from_url', classmethod(lambda cls, url, **kw: (_ for _ in ()).throw(_StubRedisError('nope')))
+    )
+
+    glb = _FakeGlobal(_FakeGraph())
+    glb._probe_connection({'mode': 'url', 'url': 'falkor://falkordb:s3cret@host:53939'})
+
+    assert messages and 's3cret' not in messages[0]
+    assert 'falkor://***@host:53939' in messages[0]
+
+
+def test_probe_does_not_leak_unix_socket_password(monkeypatch, recording_client):
+    """A unix:// URL carries its password in the query string, not the authority."""
+    messages = []
+    monkeypatch.setattr(_glb_mod, 'warning', messages.append)
+    monkeypatch.setattr(
+        recording_client, 'from_url', classmethod(lambda cls, url, **kw: (_ for _ in ()).throw(_StubRedisError('nope')))
+    )
+
+    glb = _FakeGlobal(_FakeGraph())
+    glb._probe_connection({'mode': 'url', 'url': 'unix:///tmp/f.sock?db=0&password=s3cret'})
+
+    assert messages and 's3cret' not in messages[0]
+    assert 'unix:///tmp/f.sock?db=0&password=***' in messages[0]
+
+
+def test_probe_reports_missing_host_on_manual_profile(monkeypatch):
+    messages = []
+    monkeypatch.setattr(_glb_mod, 'warning', messages.append)
+
+    _FakeGlobal(_FakeGraph())._probe_connection({'mode': 'manual', 'host': ''})
+
+    assert messages == ['host is required']
+
+
 def test_reflect_schema_failure_does_not_break_begin(monkeypatch):
     """A driver error during reflection degrades the schema, it does not crash the node."""
     glb = _FakeGlobal(_FakeGraph())
