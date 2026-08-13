@@ -26,8 +26,8 @@
       "config": {
         "profile": "default",
         "default": {
-          "apikey": "${ROCKETRIDE_HOTDATA_API_KEY}",
-          "workspace_id": "${ROCKETRIDE_HOTDATA_WORKSPACE}",
+          "apikey": "${ROCKETRIDE_DB_HOTDATA_KEY}",
+          "workspace_id": "${ROCKETRIDE_DB_HOTDATA_WORKSPACE_ID}",
           "api_url": "",
           "ttl": "24h",
           "table": "pipeline_data",
@@ -128,5 +128,5 @@
   ],
   "version": 1,
   "isLocked": false,
-  "project_id": "f72ea61b-ff92-44f1-a999-eb2de1a4d9cb"
+  "project_id": "a1488265-190a-4dbc-b8bc-4b4e6a0759a6"
 }
