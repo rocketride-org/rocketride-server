@@ -2,6 +2,7 @@
 """In-process Streamable-HTTP MCP server module."""
 
 import contextlib
+import json
 import logging
 import os
 from typing import Any, Dict
@@ -9,11 +10,34 @@ from typing import Any, Dict
 from starlette.routing import Mount
 from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 
+from ai.web import oauth_resource
+
+from . import auth
 from .engine import make_engine_client
 from .handlers import build_mcp_server
 from .registry import TaskRegistry
 
 _MOUNT_PATH = '/mcp'
+
+
+def _bind_host(server: 'Any', config: Dict[str, Any]) -> str:
+    """Return the server's configured bind host.
+
+    Reads the configured value rather than the resolved address — a hostname
+    that merely *resolves* to loopback is not treated as loopback. An empty or
+    absent host means bind-all in most ASGI stacks, so it is never coerced to
+    a loopback literal.
+
+    Args:
+        server: The WebServer (or test double) that may carry a ``config``.
+        config: Module configuration dict, used as a fallback.
+
+    Returns:
+        str: The configured host, or ``''`` when unset.
+    """
+    server_config = getattr(server, 'config', None) or {}
+    host = server_config.get('host', config.get('host', 'localhost'))
+    return str(host) if host is not None else ''
 
 
 def initModule(server: 'Any', config: Dict[str, Any]) -> None:
@@ -66,8 +90,48 @@ def initModule(server: 'Any', config: Dict[str, Any]) -> None:
     # 4. Mount the raw ASGI handler at /mcp
     # app.add_api_route / add_route expect FastAPI callables with Request
     # signatures; a raw ASGI app must be mounted via starlette.routing.Mount.
+    #
+    # The audience guard runs first: a Zitadel token must be stamped for the
+    # MCP project, or it does not reach the session manager. Static API keys
+    # and credential-less dev requests pass straight through — see auth.py.
     # ------------------------------------------------------------------
+    bind_host = _bind_host(server, config)
+
+    async def _reject(send: Any, message: str) -> None:
+        """Send a 401 carrying the discovery challenge, in raw ASGI."""
+        body = json.dumps({'error': message}).encode()
+        await send(
+            {
+                'type': 'http.response.start',
+                'status': 401,
+                'headers': [
+                    (b'content-type', b'application/json'),
+                    (
+                        b'www-authenticate',
+                        oauth_resource.www_authenticate_value(error='invalid_token', description=message).encode(
+                            'latin-1'
+                        ),
+                    ),
+                    (b'content-length', str(len(body)).encode()),
+                ],
+            }
+        )
+        await send({'type': 'http.response.body', 'body': body})
+
     async def handle_mcp(scope: Any, receive: Any, send: Any) -> None:
+        # AuthMiddleware is a BaseHTTPMiddleware, which only wraps 'http'
+        # scopes — a websocket routed here by Mount would arrive with no
+        # authentication having run at all. The transport is HTTP/SSE only,
+        # so refuse anything else rather than hand it to the session manager.
+        if scope.get('type') != 'http':
+            if scope.get('type') == 'websocket':
+                await send({'type': 'websocket.close', 'code': 1008})
+            return
+
+        denial = auth.authorize(scope, bind_host=bind_host)
+        if denial is not None:
+            await _reject(send, denial)
+            return
         await session_manager.handle_request(scope, receive, send)
 
     server.app.router.routes.append(Mount(_MOUNT_PATH, app=handle_mcp))
@@ -155,22 +219,27 @@ def initModule(server: 'Any', config: Dict[str, Any]) -> None:
 
     # ------------------------------------------------------------------
     # 6. Auth seam
-    # Dev bypass: mark /mcp public so AuthMiddleware skips it.
+    #
+    # /mcp is an OAuth 2.0 protected resource. Publish its RFC 9728 metadata
+    # document first — that document is public by necessity, since it is what
+    # an unauthenticated client reads in order to discover which authorization
+    # server to log in against. Registering it through add_route(public=True)
+    # is what places it on the auth middleware's bypass list.
+    #
+    # Then apply the dev bypass, which is about /mcp itself, not the document.
     # Real WebServer: _public_paths is the backing list; we append and
     #   invalidate the compiled-regex cache.
     # FakeServer / test double: keeps a plain `public` set.
     # ------------------------------------------------------------------
+    if hasattr(server, 'add_route'):
+        oauth_resource.register_routes(server)
+
     dev_no_auth = bool(config.get('mcp_dev_no_auth')) or os.environ.get('MCP_DEV_NO_AUTH') == '1'
     if dev_no_auth:
         # Loopback-only: the tools accept unrestricted filepaths, so an
         # unauthenticated /mcp on a public bind is remote file access.
         # Refuse the bypass (auth stays on) rather than fail engine boot.
-        server_config = getattr(server, 'config', None) or {}
-        _host = server_config.get('host', config.get('host', 'localhost'))
-        # An empty/None host means bind-all in most ASGI stacks (same as
-        # 0.0.0.0) — never coerce it to a loopback literal.
-        bind_host = str(_host) if _host is not None else ''
-        if bind_host not in ('localhost', '127.0.0.1', '::1'):
+        if not auth.is_loopback_bind(bind_host):
             logging.getLogger(__name__).warning(
                 'MCP_DEV_NO_AUTH ignored: server binds %s (non-loopback); /mcp stays authenticated',
                 bind_host or '<unset/bind-all>',

@@ -361,6 +361,79 @@ shared across event loops or accessed concurrently from multiple threads.
   callers, not just MCP. Until then, run this module only where the process
   boundary itself is the trust boundary (local dev, loopback-only).
 
+## OAuth discovery
+
+`/mcp` is an OAuth 2.0 protected resource. Two things make it discoverable to
+clients that cannot be handed an API key (Claude, ChatGPT):
+
+| Path | Auth | Purpose |
+|---|---|---|
+| `/.well-known/oauth-protected-resource/mcp` | public | RFC 9728 metadata naming the authorization server |
+| `/mcp` | required | the MCP endpoint itself; 401s carry `WWW-Authenticate: Bearer resource_metadata="..."` |
+
+The metadata document is registered by `initModule` through
+`ai.web.oauth_resource.register_routes()`, using `add_route(..., public=True)`.
+It **must** stay public: it is what an unauthenticated client reads in order to
+learn how to authenticate. Publishing it does not open `/mcp` itself, which
+remains behind the auth middleware (pinned by `test_module_registration.py`).
+
+The authorization server is Zitadel, which serves its own RFC 8414 document at
+`https://auth.rocketride.ai/.well-known/oauth-authorization-server`. There is no
+broker and no dynamic client registration — DCR is deliberately disabled, and
+external clients are registered in a dedicated Zitadel project and issued a
+static client id.
+
+### Configuration
+
+| Env var | Default | Meaning |
+|---|---|---|
+| `MCP_RESOURCE_IDENTIFIER` | `https://api.rocketride.ai/mcp` | Canonical resource identifier. Must match the deployed URL exactly — it determines both the well-known path and the audience clients request. |
+| `MCP_AUTHORIZATION_SERVER` | `https://auth.rocketride.ai` | Issuer allowed to mint tokens for this resource. |
+| `MCP_EXPECTED_AUDIENCE` | *(unset)* | Zitadel **project id** an OAuth token must carry in `aud`. See "Audience enforcement" below. |
+| `MCP_JWKS_URL` | `<issuer>/oauth/v2/keys` | Where the issuer's public signing keys are fetched from. |
+
+### Audience enforcement
+
+`ai.modules.mcp.auth` gates the `/mcp` mount before the session manager sees a
+request. A bearer token is a ticket, and Zitadel stamps each one with the id of
+the project its client belongs to (the `aud` claim). Without checking that
+stamp, a token minted for the VS Code extension would open `/mcp` as readily as
+one minted for Claude — hence a dedicated MCP-only Zitadel project, whose id
+goes in `MCP_EXPECTED_AUDIENCE`.
+
+The guard verifies the JWT signature against the issuer's JWKS, checks the
+issuer, and requires `MCP_EXPECTED_AUDIENCE` to appear in `aud`. Verified claims
+are stashed at `scope['state']['mcp_claims']` for downstream handlers. The check
+lives here rather than in the engine's global authenticator chain deliberately:
+"was this token issued for MCP" is a rule about MCP, and must not be imposed on
+`/task` or `/api/chat`.
+
+Two things it does not affect:
+
+- **Static API keys.** `rr_`/`tk_`/`pk_` and bare API keys are opaque strings,
+  not JWTs, and are routed by *shape* rather than by a prefix allowlist. They
+  take the existing authenticator path with no audience check, so Cursor and the
+  CLI are unchanged.
+- **Requests with no credential.** Whether one is required is the auth
+  middleware's decision, not the guard's.
+
+When `MCP_EXPECTED_AUDIENCE` is unset, OAuth tokens are accepted on a loopback
+bind and **refused on any other bind** — the same posture `MCP_DEV_NO_AUTH`
+takes. Local development keeps working; a production deploy that forgets the
+setting fails loudly instead of silently accepting every token it is handed.
+
+Per RFC 9728 §3.1 the well-known segment is inserted between host and path, so
+the document's location follows the identifier. Changing it to a bare host (e.g.
+`https://mcp.rocketride.ai`) moves the document from
+`/.well-known/oauth-protected-resource/mcp` to
+`/.well-known/oauth-protected-resource`. Routing must follow, or discovery
+silently 404s.
+
+Note that Zitadel discards the RFC 8707 `resource` parameter and stamps its own
+project id into the token's `aud` claim instead. The resource identifier above
+and the value that actually appears in `aud` are therefore different strings by
+design; audience enforcement compares against the project id.
+
 ## Dev caveats — not production-ready
 
 - **Local processes + in-band results are the dev mode.** Inputs are reference-able
