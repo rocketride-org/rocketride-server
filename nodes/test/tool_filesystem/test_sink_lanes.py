@@ -185,6 +185,41 @@ def test_open_discards_stream_the_previous_object_left_unfinished():
     inst.instance.writeJson.assert_not_called()
 
 
+def test_closing_discards_a_stream_no_later_object_would_sweep():
+    """The last object of a run gets no following open(), so closing() is the only sweep."""
+    fs = _fs()
+    inst = _sink_instance(fs, name='track.wav', object_id='a9')
+    from rocketlib import AVI_ACTION
+
+    inst.writeAudio(AVI_ACTION.BEGIN, 'audio/wav', b'')
+    inst.writeAudio(AVI_ACTION.WRITE, 'audio/wav', b'RIFF')  # cut off: no END
+    inst.closing()
+    fs.close_write.assert_awaited_once()
+    fs.delete.assert_awaited_once_with('output/track.wav')
+    inst.instance.writeJson.assert_not_called()  # nothing was completed, so nothing is claimed
+
+
+def test_closing_removes_the_staging_file_not_the_operators_own():
+    """Under overwrite the destination must survive a run that ended mid-stream."""
+    fs = _fs()
+    inst = _sink_instance(fs, has_name=False, object_id='o9', on_conflict='overwrite')
+    from rocketlib import AVI_ACTION
+
+    inst.writeImage(AVI_ACTION.BEGIN, 'image/png', b'')
+    inst.writeImage(AVI_ACTION.WRITE, 'image/png', b'\x89PNG')
+    inst.closing()
+    # once, and with the staging path: the destination is never a delete target
+    fs.delete.assert_awaited_once_with('output/o9.png.part-o9')
+
+
+def test_closing_without_any_stream_is_a_noop():
+    fs = _fs()
+    inst = _sink_instance(fs, name='a.txt')
+    inst.closing()
+    fs.close_write.assert_not_awaited()
+    fs.delete.assert_not_awaited()
+
+
 def test_open_does_not_leak_state_between_objects():
     fs = _fs()
     inst = _sink_instance(fs, name='a.txt', object_id='obj-a')
