@@ -69,6 +69,16 @@ PostgreSQL — as a pipeline node via lanes or as an agent tool.
   sibling nodes.
 - RocketRide's perspective only — vendor background belongs in `## About`.
 
+<!--
+PARKED — `## Example pipelines` (shipped example: screenshot + .pipe download).
+
+Deferred until the node READMEs have been migrated to this schema. The
+supporting machinery stays in place (the validator's bundle checks are
+parked alongside this, and the docs build already rewrites relative
+example refs), so restoring it is: uncomment this block, re-number the
+sections below, and un-park the matching checks in
+scripts/validate-node-readme.py.
+
 ## 3. `## Example pipelines` — CORE
 
 At least one example. The **first example is the shipped example**: a
@@ -134,8 +144,9 @@ Rules:
 
 Examples must be real, runnable shapes using nodes that exist — no
 hypothetical node names.
+-->
 
-## 4. `## Connections` — CONDITIONAL
+## 3. `## Connections` — CONDITIONAL
 
 **Trigger:** a service entry declares an `invoke` object.
 
@@ -145,7 +156,7 @@ hypothetical node names.
 - Exactly one row per key in `invoke`. Required = "yes" when `min ≥ 1`.
 - Connection names must match the `invoke` keys.
 
-## 5. `## Lanes` — CONDITIONAL
+## 4. `## Lanes` — CONDITIONAL
 
 **Trigger:** a service entry declares a non-empty `lanes` object.
 
@@ -156,7 +167,7 @@ hypothetical node names.
   outputs gets one row per output; an input with no output gets `—`).
 - Lane names must match `services*.json` exactly.
 
-## 6. `## As a tool` — CONDITIONAL
+## 5. `## As a tool` — CONDITIONAL
 
 **Trigger:** `"tool"` ∈ `classType`.
 
@@ -170,7 +181,7 @@ name and one row per exposed function.
 - This section is the agent-facing contract — it has the highest accuracy
   bar in the file.
 
-## 7. `## Profiles` — CONDITIONAL
+## 6. `## Profiles` — CONDITIONAL
 
 **Trigger:** `preconfig.profiles` contains ≥ 2 entries other than `custom`.
 
@@ -180,7 +191,7 @@ name and one row per exposed function.
 - List exactly the declared profiles, default marked `*(default)*`. Column
   names after the first may be adapted to the node.
 
-## 8. `## Configuration` — CORE
+## 7. `## Configuration` — CORE
 
 Usage guidance for the configuration panel. The generated `## Schema` table
 already lists every field — do not repeat it. This section contains:
@@ -205,21 +216,21 @@ presets of the same implementation with identical wiring (e.g. a branded
 variant), document them once and describe the preset differences under
 `## Notes`.
 
-## 9. `## Authentication` — OPTIONAL
+## 8. `## Authentication` — OPTIONAL
 
 Credentials setup: which key/token the node needs, required scopes, where
 to obtain it, and the expected format. Keep instructions structural
 (scopes, format) rather than duplicating vendor UI walkthroughs that go
 stale.
 
-## 10. `## Requirements` — CONDITIONAL
+## 9. `## Requirements` — CONDITIONAL
 
 **Trigger:** `"gpu"` ∈ `capabilities`.
 
 Hardware/runtime requirements: GPU, VRAM, local model downloads, CPU
 fallback behavior.
 
-## 11. `## Limitations` — CONDITIONAL
+## 10. `## Limitations` — CONDITIONAL
 
 **Trigger:** any of `nosaas`, `noremote`, `security`, `filesystem`
 ∈ `capabilities`.
@@ -227,14 +238,14 @@ fallback behavior.
 Where the node can and cannot run, and any security-relevant behavior
 (filesystem access, network access, SaaS exclusion), in plain language.
 
-## 12. `## Notes` — OPTIONAL
+## 11. `## Notes` — OPTIONAL
 
 The only free-form section. Anything genuinely node-specific:
 troubleshooting, compatibility quirks, algorithm details, test
 instructions. Use `###` subsections. Must not duplicate content owned by a
 structured section.
 
-## 13. `## Upstream docs` — OPTIONAL
+## 12. `## Upstream docs` — OPTIONAL
 
 *Required when `## About` exists; allowed otherwise.*
 
@@ -254,11 +265,7 @@ are shared fragments and are ignored):
 - section order; no unknown `##` headings in the hand-written region
 - table parity: Connections rows = `invoke` keys, Lanes rows = declared
   lanes, Profiles rows = declared profiles
-- `## Example pipelines` contains at least one flow
 - the generated region, when present, is last and unmodified in shape
-- shipped example bundle: referencing either half obliges the other, every
-  referenced file exists, and the screenshot carries alt text; an
-  unreferenced file — or no bundle at all — is a warning, not a failure
 - `## About` ≤ 80 words, first section, with `## Upstream docs` present
 - warns when a field with objective complexity signals (a `textarea`
   widget or a large enum) lacks a `###` subsection under `## Configuration`

@@ -24,7 +24,7 @@ from pathlib import Path
 CANONICAL_ORDER = [
     'About',  # optional, vendor
     'What it does',  # core
-    'Example pipelines',  # core (>=1 real flow; opens with the shipped example)
+    'Example pipelines',  # PARKED — tolerated in this slot, no longer required
     'Connections',  # conditional: invoke
     'Lanes',  # conditional: lanes
     'As a tool',  # conditional: tool in classType
@@ -112,7 +112,9 @@ def real_profiles(svc) -> dict:
 
 
 def required_sections(svc):
-    req = {'What it does', 'Configuration', 'Example pipelines'}
+    # 'Example pipelines' is PARKED: still allowed in its slot, no longer
+    # required. Restore it here and un-park the bundle checks below together.
+    req = {'What it does', 'Configuration'}
     forb = set()
     (req if svc.get('invoke') else forb).add('Connections')
     (req if svc.get('lanes') else forb).add('Lanes')
@@ -278,7 +280,7 @@ def validate(node_dir: Path):
             f'missing: {sorted(missing)}' if missing else '',
         )
 
-    # -- Example pipelines: >=1 flow, plus the shipped-example bundle --
+    # -- Example pipelines (parked section): >=1 flow when present --
     if 'Example pipelines' in seen:
         body = re.search(r'^## Example pipelines.*?$(.*?)(?=^## |\Z)', hand, re.M | re.S)
         section = body.group(1) if body else ''
@@ -288,58 +290,61 @@ def validate(node_dir: Path):
             'no `a → b` pipeline shape found',
         )
 
-        # Shipped example bundle: example.pipe + example.png in the node dir,
-        # referenced from this section by a screenshot embed and a download
-        # badge. The trigger is a REFERENCE, not a loose file: a referenced
-        # file that is missing renders a broken page and fails, while an
-        # unreferenced file harms no reader and lets the bundle be assembled
-        # in stages (author the .pipe now, screenshot it later). Referencing
-        # either half obliges the other, so a README never ships with only
-        # part of the bundle visible.
-        pipe_file = (node_dir / 'example.pipe').exists()
-        png_file = (node_dir / 'example.png').exists()
-        # Both the markdown form — ![alt](example.png) — and the HTML form
-        # used for centred/sized embeds are accepted; `images` collects the
-        # alt text of each so the alt-text check works either way.
-        images = re.findall(r'!\[([^\]]*)\]\((?:\./)?example\.png\)', section)
-        for tag in re.findall(r'<img\b[^>]*>', section):
-            if re.search(r'src=["\'](?:\./)?example\.png["\']', tag):
-                alt = re.search(r'alt=["\']([^"\']*)["\']', tag)
-                images.append(alt.group(1) if alt else '')
-        pipe_links = re.findall(r'\]\((?:\./)?example\.pipe\)', section) + re.findall(
-            r'href=["\'](?:\./)?example\.pipe["\']', section
-        )
-        if images or pipe_links:
-            add(
-                'PASS' if images else 'FAIL',
-                'shipped example: screenshot embed (example.png)',
-                '' if images else 'referenced bundle must show the screenshot',
-            )
-            add(
-                'PASS' if pipe_links else 'FAIL',
-                'shipped example: download link (example.pipe)',
-                '' if pipe_links else 'referenced bundle must offer the .pipe',
-            )
-            if images:
-                add(
-                    'PASS' if png_file else 'FAIL',
-                    'shipped example: example.png exists',
-                    'referenced but not in the node directory',
-                )
-                add('PASS' if images[0].strip() else 'FAIL', 'shipped example: screenshot has alt text')
-            if pipe_links:
-                add(
-                    'PASS' if pipe_file else 'FAIL',
-                    'shipped example: example.pipe exists',
-                    'referenced but not in the node directory',
-                )
-        elif pipe_file or png_file:
-            have = ' + '.join(n for n, ok in (('example.pipe', pipe_file), ('example.png', png_file)) if ok)
-            add(
-                'WARN', 'shipped example bundle', f'{have} present but not referenced — embed it once both halves exist'
-            )
-        else:
-            add('WARN', 'shipped example bundle', 'no example.pipe/example.png yet (required for new nodes)')
+    # -- PARKED: shipped-example bundle (example.pipe + example.png) --
+    # Un-park together with the `## Example pipelines` block in
+    # docs/development/node-readme-schema.md. Restore by uncommenting inside
+    # the `if 'Example pipelines' in seen:` block above.
+    #
+    #     # The trigger is a REFERENCE, not a loose file: a referenced file
+    #     # that is missing renders a broken page and fails, while an
+    #     # unreferenced file harms no reader and lets the bundle be
+    #     # assembled in stages (author the .pipe now, screenshot it later).
+    #     # Referencing either half obliges the other, so a README never
+    #     # ships with only part of the bundle visible.
+    #     pipe_file = (node_dir / 'example.pipe').exists()
+    #     png_file = (node_dir / 'example.png').exists()
+    #     # Both the markdown form — ![alt](example.png) — and the HTML form
+    #     # used for centred/sized embeds are accepted; `images` collects the
+    #     # alt text of each so the alt-text check works either way.
+    #     images = re.findall(r'!\[([^\]]*)\]\((?:\./)?example\.png\)', section)
+    #     for tag in re.findall(r'<img\b[^>]*>', section):
+    #         if re.search(r'src=["\'](?:\./)?example\.png["\']', tag):
+    #             alt = re.search(r'alt=["\']([^"\']*)["\']', tag)
+    #             images.append(alt.group(1) if alt else '')
+    #     pipe_links = re.findall(r'\]\((?:\./)?example\.pipe\)', section) + re.findall(
+    #         r'href=["\'](?:\./)?example\.pipe["\']', section
+    #     )
+    #     if images or pipe_links:
+    #         add(
+    #             'PASS' if images else 'FAIL',
+    #             'shipped example: screenshot embed (example.png)',
+    #             '' if images else 'referenced bundle must show the screenshot',
+    #         )
+    #         add(
+    #             'PASS' if pipe_links else 'FAIL',
+    #             'shipped example: download link (example.pipe)',
+    #             '' if pipe_links else 'referenced bundle must offer the .pipe',
+    #         )
+    #         if images:
+    #             add(
+    #                 'PASS' if png_file else 'FAIL',
+    #                 'shipped example: example.png exists',
+    #                 'referenced but not in the node directory',
+    #             )
+    #             add('PASS' if images[0].strip() else 'FAIL', 'shipped example: screenshot has alt text')
+    #         if pipe_links:
+    #             add(
+    #                 'PASS' if pipe_file else 'FAIL',
+    #                 'shipped example: example.pipe exists',
+    #                 'referenced but not in the node directory',
+    #             )
+    #     elif pipe_file or png_file:
+    #         have = ' + '.join(n for n, ok in (('example.pipe', pipe_file), ('example.png', png_file)) if ok)
+    #         add(
+    #             'WARN', 'shipped example bundle', f'{have} present but not referenced — embed it once both halves exist'
+    #         )
+    #     else:
+    #         add('WARN', 'shipped example bundle', 'no example.pipe/example.png yet (required for new nodes)')
 
     # -- Layer-2 floor: complex fields should have a ### under Configuration --
     conf = re.search(r'^## Configuration.*?$(.*?)(?=^## |\Z)', hand, re.M | re.S)
