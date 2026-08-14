@@ -1,0 +1,77 @@
+# ---------------------------------------------------------------------------
+#  Documentation schema checks — SCOPED TO THE fix/docs BRANCH.
+#
+#  ci.yml deliberately does not carry any of this. The doc schemas are still
+#  being rolled out across the node corpus, and the shared pipeline should not
+#  grow jobs (or minutes) for work that only concerns this branch. Everything
+#  here triggers exclusively on pull requests targeting fix/docs, so it stays
+#  inert on develop even after fix/docs merges.
+#
+#  When the schemas graduate, the move is to delete this file and add the same
+#  jobs to ci.yml in a PR that targets develop on its own merits.
+# ---------------------------------------------------------------------------
+name: Doc schemas
+
+on:
+  pull_request:
+    branches: [fix/docs]
+  push:
+    branches: [fix/docs]
+  workflow_dispatch:
+
+concurrency:
+  group: docs-schemas-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # -------------------------------------------------------------------------
+  #  Schema validators. ADVISORY while the node corpus is migrated: the node
+  #  README checker fails most of the corpus today, so a hard gate would make
+  #  every PR into this branch red. Drop continue-on-error once the migration
+  #  lands and the validator reports a clean sweep.
+  # -------------------------------------------------------------------------
+  schemas:
+    name: Schema validators (advisory)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+      - name: Validate node READMEs
+        run: python3 scripts/validate-node-readme.py --all nodes/src/nodes
+      - name: Validate client doc parity
+        if: always()
+        run: python3 scripts/validate-client-docs.py
+
+  # -------------------------------------------------------------------------
+  #  Stage and compile the docs site. Catches what only a full build can:
+  #  broken internal links, files under docs/ not covered by a mount, and
+  #  spine entries with no backing page. docs:test guards the gather/export
+  #  logic itself; docs:check is the export drift gate. Blocking — every
+  #  failure mode here is deterministic and currently passes.
+  # -------------------------------------------------------------------------
+  build:
+    name: Docs site build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Docs unit tests
+        run: node scripts/build.js docs:test
+      - name: Build docs site
+        run: node scripts/build.js docs:build
+      - name: Check docs export drift
+        run: node scripts/build.js docs:check
