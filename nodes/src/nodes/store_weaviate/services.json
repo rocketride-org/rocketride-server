@@ -132,7 +132,10 @@
 	"preconfig": {
 		// Define the values that will be merged into any profile configuration
 		// specified, unless the profile is 'absolute'
-		"default": "cloud",
+		// Must match the "weaviate.profile" field default below: this one is the
+		// fallback for a config that carries no "profile" key, that one is what
+		// the editor writes into a fresh node. They describe the same choice.
+		"default": "local",
 		// Defines profiles used with the "profile": key
 		"profiles": {
 			"local": {
