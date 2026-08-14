@@ -120,6 +120,11 @@ class Chat(ChatBase):
             tokenization schemes. For production use, consider using the
             model's native token counting method if available.
         """
+        # None or empty means nothing to count. The SDK hands back None (not
+        # '') for a response with no text parts, and token accounting must not
+        # be the place that discovers it.
+        if not value:
+            return 0
         # Simple approximation: ~0.75 tokens per word
         word_count = len(value.split())
         return int(word_count / 0.75)
@@ -148,5 +153,19 @@ class Chat(ChatBase):
         # Generate content using the configured model
         response = self._client.models.generate_content(model=self._model, contents=prompt)
 
-        # Extract and return the text response
-        return response.text
+        # `.text` is None (not '') when the candidate carried no text parts:
+        # safety-blocked, the token budget spent before any visible text (a
+        # thinking model can burn it all mid-thought), or non-text parts only.
+        # Name the API's own reasons rather than letting the None surface
+        # downstream as a token-counting crash that says nothing.
+        text = response.text
+        if text is None:
+            candidates = getattr(response, 'candidates', None) or []
+            finish = getattr(candidates[0], 'finish_reason', None) if candidates else 'no candidates'
+            feedback = getattr(response, 'prompt_feedback', None)
+            block = getattr(feedback, 'block_reason', None) if feedback else None
+            detail = f'finish_reason={finish}'
+            if block:
+                detail += f', block_reason={block}'
+            raise Exception(f'Gemini returned a response with no text ({detail})')
+        return text
