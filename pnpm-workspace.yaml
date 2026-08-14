@@ -54,6 +54,7 @@ packages:
 overrides:
   shell: 'workspace:*'
   '@remix-run/router': '>=1.23.3 <2'
+  adm-zip: '>=0.6.0 <1'
   body-parser: '>=1.20.6 <2'
   brace-expansion: '>=5.0.7 <6'
   # minimatch 3.x (eslint's config-array, glob@7) does a CJS default-import of
