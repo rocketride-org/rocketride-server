@@ -1663,3 +1663,51 @@ def test_pending_then_failure_lets_a_retry_through():
     with pytest.raises(RuntimeError):
         inst.load_data({'table': 'orders', 'rows': rows, 'mode': 'append'})
     assert len(calls) == 2, 'the retry must reach the server, not be swallowed as a duplicate'
+
+
+# ---------------------------------------------------------------------------
+# get_sql must apply the same guard as get_data and execute
+#
+# Raised in review: get_sql handed back generated SQL unchecked, so a write verb
+# or a semicolon batch came back as a "query" the node's own execute would then
+# refuse - and unlike get_data there was no corrective retry. All three paths
+# now ask the same question via _validate_generated_sql.
+# ---------------------------------------------------------------------------
+
+
+def test_get_sql_retries_when_the_model_returns_a_write():
+    """First answer is a DELETE; the model gets the error fed back and the
+    corrected SELECT is what the caller receives.
+    """
+    g = _loaded_global(max_attempts=3)
+    inst = _llm_instance(g, ["DELETE FROM orders WHERE status='refunded'", 'SELECT * FROM orders'])
+    out = inst.get_sql({'question': 'clean up the refunds'})
+    assert out['sql'] == 'SELECT * FROM orders'
+    assert len(inst.asked) == 2, 'the write should have triggered one regeneration'
+    assert 'read-only' in inst.asked[1].all_text(), 'the rejection reason must reach the model'
+
+
+def test_get_sql_refuses_rather_than_returning_unusable_sql():
+    """When every attempt is a write, failing is better than handing back SQL
+    the node's own execute would refuse - the caller gets a clear reason.
+    """
+    g = _loaded_global(max_attempts=2)
+    inst = _llm_instance(g, ['DROP TABLE orders', 'TRUNCATE orders'])
+    with pytest.raises(RuntimeError, match='could not generate acceptable SQL'):
+        inst.get_sql({'question': 'wipe it'})
+
+
+def test_get_sql_rejects_a_semicolon_batch():
+    g = _loaded_global(max_attempts=2)
+    inst = _llm_instance(g, ['SELECT 1; SELECT 2', 'SELECT 1'])
+    assert inst.get_sql({'question': 'two things'})['sql'] == 'SELECT 1'
+
+
+def test_all_three_sql_paths_share_one_validator():
+    """get_data, get_sql and execute must agree on what is acceptable."""
+    inst = _instance(_global())
+    for sql in ('DELETE FROM t', 'SELECT 1; SELECT 2'):
+        _cleaned, invalid = inst._validate_generated_sql(sql)
+        assert invalid, f'{sql!r} should be rejected by the shared validator'
+    _cleaned, invalid = inst._validate_generated_sql('SELECT 1;')
+    assert not invalid, 'a single statement with a trailing semicolon is fine'

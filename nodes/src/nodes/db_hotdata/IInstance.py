@@ -523,6 +523,24 @@ class IInstance(IInstanceBase):
             raise RuntimeError('db_hotdata: the connected LLM did not return a query')
         return strip_sql_fences(result.answer)
 
+    def _validate_generated_sql(self, sql: str) -> Tuple[str, str]:
+        """Return (cleaned_sql, error). Error is '' when the SQL is acceptable.
+
+        The single place that decides whether generated SQL may leave the node.
+        get_data retries on the error, get_sql refuses to hand it back; both ask
+        the same question so the paths cannot drift apart.
+        """
+        cleaned, statement_count = _split_statements(sql)
+        if statement_count > 1:
+            return cleaned, 'Only one statement per request is allowed.'
+        verb = _leading_verb(cleaned)
+        if verb in _WRITE_VERBS:
+            return cleaned, (
+                f'"{verb}" is not permitted: the Hotdata SQL surface is read-only. '
+                'Use SELECT, WITH, EXPLAIN, DESCRIBE or VALUES only.'
+            )
+        return cleaned, ''
+
     def _resolve_limit(self, raw_limit: Any) -> int:
         """Clamp a caller-supplied row limit, rejecting JSON booleans."""
         cap = self.IGlobal.max_execute_rows
@@ -557,7 +575,23 @@ class IInstance(IInstanceBase):
         if not question_text:
             raise ValueError('db_hotdata: question is required')
         limit = self._resolve_limit(args.get('limit'))
-        return {'sql': self._generate_sql(question_text, limit), 'dialect': 'datafusion'}
+        attempts = max(1, int(getattr(self.IGlobal, 'max_attempts', 3) or 3))
+
+        previous_sql = ''
+        last_error = ''
+        for _ in range(attempts):
+            sql = self._generate_sql(question_text, limit, previous_sql=previous_sql, previous_error=last_error)
+            cleaned, invalid = self._validate_generated_sql(sql)
+            if not invalid:
+                return {'sql': cleaned, 'dialect': 'datafusion'}
+            previous_sql, last_error = cleaned, invalid
+            debug(f'db_hotdata: regenerating SQL, previous attempt rejected: {invalid}')
+
+        # Handing back SQL the node's own execute would refuse is worse than
+        # failing: the caller has no signal that it is unusable.
+        raise RuntimeError(
+            f'db_hotdata: could not generate acceptable SQL after {attempts} attempts. Last issue: {last_error}'
+        )
 
     @tool_function(
         input_schema={
@@ -596,21 +630,13 @@ class IInstance(IInstanceBase):
         last_error = ''
         for attempt in range(1, attempts + 1):
             sql = self._generate_sql(question_text, limit, previous_sql=previous_sql, previous_error=last_error)
-            cleaned, statement_count = _split_statements(sql)
-            if statement_count > 1:
-                previous_sql, last_error = sql, 'Only one statement per request is allowed.'
-                continue
             # Same read-only guard `execute` applies. The server rejects writes
             # anyway, but catching it here turns a wasted round trip into an
-            # immediate corrective retry and keeps both paths consistent.
-            verb = _leading_verb(cleaned)
-            if verb in _WRITE_VERBS:
-                previous_sql = cleaned
-                last_error = (
-                    f'"{verb}" is not permitted: the Hotdata SQL surface is read-only. '
-                    'Use SELECT, WITH, EXPLAIN, DESCRIBE or VALUES only.'
-                )
-                debug(f'db_hotdata: rejected generated {verb.upper()} before execution')
+            # immediate corrective retry.
+            cleaned, invalid = self._validate_generated_sql(sql)
+            if invalid:
+                previous_sql, last_error = cleaned, invalid
+                debug(f'db_hotdata: rejected generated SQL before execution: {invalid}')
                 continue
             try:
                 result = self._run_sql(cleaned, limit)
