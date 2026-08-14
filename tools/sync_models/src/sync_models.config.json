@@ -601,11 +601,11 @@
 			// keyless OpenRouter fallback can never wrongly retire them.
 			"protected_profiles": [
 				["custom", "2126-04-09"],
-				["nemotron-3-super", "2026-11-01"],
-				["nemotron-3-ultra", "2026-11-01"],
-				["nemotron-3-nano", "2026-11-01"],
-				["nemotron-3-super-local", "2026-11-01"],
-				["nemotron-3-nano-local", "2026-11-01"]
+				["nemotron-3-super", "2027-02-01"],
+				["nemotron-3-ultra", "2027-02-01"],
+				["nemotron-3-nano", "2027-02-01"],
+				["nemotron-3-super-local", "2027-02-01"],
+				["nemotron-3-nano-local", "2027-02-01"]
 			],
 			// NVIDIA's /v1/models omits context_window; lock the seeded models at
 			// their model-card values.
