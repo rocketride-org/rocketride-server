@@ -7,6 +7,11 @@
     "**/__pycache__": true,
     "**/node_modules": true,
   },
+  // This workspace IS rocketride-server, so the extension's agent stubs — which
+  // tell a reader to consult the customer-facing .rocketride/docs/ SDK guides —
+  // are wrong here and contradict AGENTS.md, the contributor router. Off by
+  // default for everyone who opens the repo.
+  "rocketride.integrations.autoAgentIntegration": false,
   "cmake.sourceDirectory": "${workspaceFolder}/packages/server",
   "python.analysis.extraPaths": [
     "packages/server/engine-lib/rocketlib-python/lib",

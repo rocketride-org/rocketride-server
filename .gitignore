@@ -24,6 +24,15 @@ out/
 .claude/*
 !.claude/CLAUDE.md
 .cursor/
+.windsurf/
+# Agent stubs planted by the RocketRide VS Code extension's agent installer
+# (apps/vscode/src/agents/). It gitignores its own .rocketride/ docs but not
+# these, so they land in commits. Anchored to the root so the deliberate
+# .claude/CLAUDE.md pointer above still applies. AGENTS.md cannot be listed
+# here — it is a real tracked file — so the installer is also switched off in
+# .vscode/settings.json, which is what stops it appending to AGENTS.md.
+/CLAUDE.md
+/.github/copilot-instructions.md
 
 # -----------------------------------------------------------------------------
 # Git hooks (local overrides)
