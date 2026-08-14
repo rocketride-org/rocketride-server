@@ -22,19 +22,27 @@ the model as `max_tokens`. Token counts for budgeting are estimated at roughly
 
 ## Example pipelines
 
+**Direct question answering**
+
+`chat → llm_anthropic → response_answers`
+
+<div align="center">
+
+![The Anthropic node on the canvas between a chat source and an answers response](example.png)
+
+[![Download example.pipe](https://img.shields.io/badge/example.pipe-Download-41b6e6?style=for-the-badge)](example.pipe)
+
+</div>
+
+Questions arrive from chat and Claude's answers stream to the answers
+response.
+
 **LLM for an agent**
 
 `webhook → agent_rocketride → response`, with this node connected to the
 agent's `llm` channel. The agent uses Claude for its reasoning and tool
 calling; swap profiles to trade cost against capability without touching the
 pipeline.
-
-**Direct question answering**
-
-`webhook → llm_anthropic → response`
-
-Questions arrive on the `questions` lane and Claude's answers stream back on
-`answers` — the minimal chat-over-API pipeline.
 
 **SQL generation for a database node**
 

@@ -26,11 +26,21 @@ tool when the agent should only inspect.
 
 ## Example pipelines
 
-**Issue triage agent**
+**GitHub assistant**
 
-`webhook → agent_rocketride → response`, with this node connected as a tool
-and read-only mode **off**. The agent lists open issues, inspects recent
-commits for context, labels and comments on issues, and closes duplicates.
+`chat → agent_rocketride → response_answers`
+
+<div align="center">
+
+![The GitHub node on the canvas connected to an agent as a tool](example.png)
+
+[![Download example.pipe](https://img.shields.io/badge/example.pipe-Download-41b6e6?style=for-the-badge)](example.pipe)
+
+</div>
+
+`llm_anthropic` is wired to `llm` and `tool_github` to `tool`. Chat questions
+reach the agent, which can inspect or update the configured repository before
+returning an answer.
 
 **Read-only codebase analyst**
 

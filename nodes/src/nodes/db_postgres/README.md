@@ -16,10 +16,19 @@ The same implementation also ships as a Supabase preset (`services.supabase.json
 
 **Chat with your database**
 
-`webhook → db_postgres → response`, with an LLM (e.g. `llm_anthropic`) on the
-`llm` channel. Natural-language questions come in, validated SQL runs against
-Postgres, and results return as a table, text, or answers depending on the
-connected output lane.
+`chat → db_postgres → response_answers + response_table`
+
+<div align="center">
+
+![The PostgreSQL node on the canvas answering questions from chat, with an LLM connected](example.png)
+
+[![Download example.pipe](https://img.shields.io/badge/example.pipe-Download-41b6e6?style=for-the-badge)](example.pipe)
+
+</div>
+
+`llm_anthropic` is wired to `llm`. Natural-language questions arrive from
+chat; PostgreSQL returns conversational answers and tabular results on the
+two response lanes.
 
 **Structured extraction into a table**
 

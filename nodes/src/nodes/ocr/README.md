@@ -14,13 +14,21 @@ Animated GIFs are handled frame by frame: each frame is OCR'd individually and t
 
 ## Example pipelines
 
-**Scanned-document summarization**
+**Extract and redact document text**
 
-`webhook → ocr → summarization → response`
+`webhook → parse → ocr → ner → anonymize_text → response_text`
 
-Scanned PDFs or photos arrive over a webhook, OCR turns them into text, and
-the summarization node condenses each document. The default Latin profile
-covers English; switch profiles for other languages.
+<div align="center">
+
+![The OCR node on the canvas extracting text from parsed documents in a redaction pipeline](example.png)
+
+[![Download example.pipe](https://img.shields.io/badge/example.pipe-Download-41b6e6?style=for-the-badge)](example.pipe)
+
+</div>
+
+`parse` feeds document images to OCR and also sends text directly to NER.
+Recognized and parsed text is tagged, anonymized, and returned as redacted
+text.
 
 **Invoice tables into a database**
 

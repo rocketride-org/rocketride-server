@@ -21,13 +21,23 @@ The collection is created automatically on first write, including payload indexe
 
 ## Example pipelines
 
-**Document ingestion for RAG**
+**End-to-end RAG pipeline**
 
-`webhook → embedding_transformer → store_qdrant`
+`webhook → parse → preprocessor_langchain → embedding_transformer → qdrant`
 
-Documents arrive over a webhook, the embedding node turns them into vectors,
-and they land in the collection through the `documents` lane. Run once per
-corpus, or continuously for a live source.
+`chat → embedding_transformer → qdrant → prompt → llm_openai → response_answers`
+
+<div align="center">
+
+![The Qdrant node on the canvas storing embedded documents and serving retrieval for a RAG pipeline](example.png)
+
+[![Download example.pipe](https://img.shields.io/badge/example.pipe-Download-41b6e6?style=for-the-badge)](example.pipe)
+
+</div>
+
+Documents are parsed, chunked, embedded, and stored in Qdrant. Chat questions
+use the same embedding and Qdrant retrieval path before the prompt and LLM
+produce an answer.
 
 **Question answering over stored documents**
 

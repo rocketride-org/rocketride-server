@@ -20,12 +20,21 @@ Sub-agents are optional: with none connected, the Deep Agent behaves as a standa
 
 ## Example pipelines
 
-**Research assistant**
+**Research assistant with an HTTP tool**
 
-`webhook → agent_deepagent → response`, with `llm_anthropic` on the `llm`
-channel and `tool_tavily` on `tool`. A research question arrives, the agent
-plans its searches, runs them, and returns a cited answer — the planning step
-is what separates this from a single search-and-summarize pass.
+`chat → agent_deepagent → response_answers`
+
+<div align="center">
+
+![The Deep Agent node on the canvas with an LLM and an HTTP Request tool connected](example.png)
+
+[![Download example.pipe](https://img.shields.io/badge/example.pipe-Download-41b6e6?style=for-the-badge)](example.pipe)
+
+</div>
+
+`llm_anthropic` is wired to `llm` and `tool_http_request` to `tool`. Chat
+questions reach the agent, which can call the HTTP tool before returning an
+answer.
 
 **Hierarchical team with specialists**
 
