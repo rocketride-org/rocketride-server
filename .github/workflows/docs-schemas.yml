@@ -66,10 +66,16 @@ jobs:
 
           # Node dirs whose README or service metadata changed. Deleted nodes
           # drop out via the -d test.
+          # `|| true` on both filters is load-bearing under `set -euo pipefail`:
+          # grep exits 1 when nothing matches, and the `-d` test exits 1 when
+          # the last candidate is a deleted node. Either would kill the step
+          # before the empty check below could report the intended skip, which
+          # on a blocking job means an unrelated PR fails for no reason.
           CHANGED="$(git diff --name-only "$BASE"...HEAD \
-            | grep -E '^nodes/src/nodes/[^/]+/(README\.md|services[^/]*\.json)$' \
+            | { grep -E '^nodes/src/nodes/[^/]+/(README\.md|services[^/]*\.json)$' || true; } \
             | cut -d/ -f1-4 \
-            | sort -u | while read -r d; do [ -d "$d" ] && echo "$d"; done)"
+            | sort -u \
+            | { while read -r d; do [ -d "$d" ] && echo "$d"; done || true; })"
 
           if [ -z "$CHANGED" ]; then
             echo 'No node README or services*.json touched — nothing to validate.'
@@ -101,11 +107,14 @@ jobs:
       - name: Node README schema — whole corpus
         run: |
           python3 scripts/validate-node-readme.py --all nodes/src/nodes | tee /tmp/sweep.txt || true
+          # `grep -c` already prints 0 when it matches nothing; it just exits 1
+          # as well. `|| true` swallows the status — `|| echo 0` would print a
+          # second zero and render as "0 0".
           {
             echo '### Node README schema — corpus'
             echo
-            echo "- passing: $(grep -c '^ok' /tmp/sweep.txt || echo 0)"
-            echo "- failing: $(grep -cE '^x ' /tmp/sweep.txt || echo 0)"
+            echo "- passing: $(grep -c '^ok' /tmp/sweep.txt || true)"
+            echo "- failing: $(grep -cE '^x ' /tmp/sweep.txt || true)"
           } >> "$GITHUB_STEP_SUMMARY"
 
   # -------------------------------------------------------------------------
