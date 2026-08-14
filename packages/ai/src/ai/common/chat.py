@@ -23,18 +23,24 @@ from ai.common.llm_native_stream import STOP_SEQUENCES_VAR, dispatch_native_chat
 from ai.common.llm_adapter import LangChainAdapter, NativeOpenAIResponsesAdapter, drive_adapter
 
 
-def _stop_kwargs() -> dict:
+def _stop_kwargs(is_reasoning: bool = False) -> dict:
     """Return ``{'stop': [...]}`` only when stop sequences are active for this call.
 
-    Passing ``stop=`` unconditionally (even ``stop=None``) breaks model backends and
-    test mocks whose ``invoke``/``stream`` signature does not accept a ``stop`` kwarg, so
+    Passing `stop=` unconditionally (even `stop=None`) breaks model backends and
+    test mocks whose `invoke`/`stream` signature does not accept a `stop` kwarg, so
     the argument is omitted entirely for the common no-stop path.
 
-    INVARIANT: this is read within the synchronous ``ask()`` call, while
-    ``LLMBase._question`` still holds the contextvar (before its ``finally`` reset).
-    Do not defer consumption (e.g. by returning a lazy generator to the caller) —
-    the value would then read ``None`` after the reset and silently send no stop.
+    Reasoning models (gpt-5.x / o-series) reject the `stop` parameter outright with a
+    400 `unsupported_parameter` error, so `is_reasoning` gates it off regardless of
+    whether stop sequences are active -- callers pass `self._is_reasoning`.
+
+    INVARIANT: this is read within the synchronous `ask()` call, while
+    `LLMBase._question` still holds the contextvar (before its `finally` reset).
+    Do not defer consumption (e.g. by returning a lazy generator to the caller) --
+    the value would then read `None` after the reset and silently send no stop.
     """
+    if is_reasoning:
+        return {}
     stop = STOP_SEQUENCES_VAR.get()
     return {'stop': stop} if stop else {}
 
@@ -186,7 +192,7 @@ class ChatBase:
         """
         # Non-streaming: invoke through the adapter — same shared normalization as streaming,
         # but a genuinely different mechanism, so the streaming fallback can still recover.
-        text, _items = LangChainAdapter(self._llm, stream_kwargs=_stop_kwargs()).collect(prompt)
+        text, _items = LangChainAdapter(self._llm, stream_kwargs=_stop_kwargs(self._is_reasoning)).collect(prompt)
         return text
 
     def getTokens(self, value: str) -> int:
@@ -412,7 +418,7 @@ class ChatBase:
             # Only retry non-streaming if nothing reached the UI; otherwise the full
             # fallback would arrive on top of the partial we already streamed.
             if emitted is None or not emitted['any']:
-                adapter = LangChainAdapter(self._llm, stream_kwargs=_stop_kwargs())
+                adapter = LangChainAdapter(self._llm, stream_kwargs=_stop_kwargs(self._is_reasoning))
                 content_text, _items = adapter.collect(prompt)
                 # Reasoning reaches its own lane; it must never land in the visible text.
                 if adapter.reasoning and on_reasoning_chunk is not None:
@@ -508,7 +514,7 @@ class ChatBase:
             try:
                 # Stream the LangChain path through the normalized adapter; drive_adapter
                 # fans text/thinking to the callbacks and returns the joined answer.
-                adapter = LangChainAdapter(_llm, stream_kwargs=_stop_kwargs())
+                adapter = LangChainAdapter(_llm, stream_kwargs=_stop_kwargs(self._is_reasoning))
                 answer, _items = drive_adapter(adapter, prompt, on_chunk_w, on_reasoning_chunk_w)
                 if answer:
                     result = answer

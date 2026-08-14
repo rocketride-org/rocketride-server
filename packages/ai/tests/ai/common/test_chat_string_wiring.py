@@ -76,6 +76,23 @@ def test_stop_sequences_reach_the_model():
     assert llm.kwargs == {'stop': ['\nObservation:']}
 
 
+def test_stop_sequences_omitted_for_reasoning_model():
+    # gpt-5.x / o-series models reject the 'stop' parameter outright (400
+    # unsupported_parameter), so it must never be sent when _is_reasoning is True,
+    # even if the caller (e.g. a CrewAI/ReAct agent) set stop sequences.
+    from ai.common.llm_native_stream import STOP_SEQUENCES_VAR
+
+    llm = _FakeLLM([_Piece('plain answer here')])
+    chat = _Chat(llm)
+    chat._is_reasoning = True
+    token = STOP_SEQUENCES_VAR.set(['\nObservation:'])
+    try:
+        chat.chat_string('hi', on_chunk=lambda t: None)
+    finally:
+        STOP_SEQUENCES_VAR.reset(token)
+    assert llm.kwargs == {}
+
+
 def test_chat_nonstreaming_invokes_via_adapter():
     # _chat drains via collect() → invoke() (a different mechanism than stream(), so the
     # streaming fallback can recover); content is normalized (thinking dropped) and stop passes.
