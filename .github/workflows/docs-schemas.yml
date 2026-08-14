@@ -30,13 +30,67 @@ permissions:
 
 jobs:
   # -------------------------------------------------------------------------
-  #  Schema validators. ADVISORY while the node corpus is migrated: the node
-  #  README checker fails most of the corpus today, so a hard gate would make
-  #  every PR into this branch red. Drop continue-on-error once the migration
-  #  lands and the validator reports a clean sweep.
+  #  Schema validators — scoped to what the PR actually touches, and BLOCKING.
+  #
+  #  Deliberately not `--all`. 109 of 124 nodes fail the schema today, so a
+  #  corpus-wide gate would be red on every PR from the day it was added. A
+  #  check that has always failed is a check nobody reads, and the day it fails
+  #  for a new reason looks identical to every day before it. Scoping to the
+  #  diff inverts that: green by default, so red means this PR broke something.
+  #
+  #  Being scoped is also what lets it be a hard gate immediately rather than
+  #  waiting on a 109-node cleanup to finish first. The backlog drains on its
+  #  own — touching a node obliges you to bring its README along — and it can
+  #  never grow, because a new or edited node is validated the moment it lands.
+  #
+  #  services*.json counts as a trigger, not just README.md: the metadata is
+  #  what decides which sections are required or forbidden, so a metadata-only
+  #  change can invalidate a README that nobody edited.
+  #
+  #  The corpus-wide number still has a home — see the `corpus` job below.
   # -------------------------------------------------------------------------
   schemas:
-    name: Schema validators (advisory)
+    name: Schema validators
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0 # need the base commit to diff against
+      - name: Validate the node READMEs this PR touches
+        run: |
+          set -euo pipefail
+          BASE='${{ github.event.pull_request.base.sha }}'
+          if [ -z "$BASE" ]; then BASE="$(git rev-parse HEAD^)"; fi
+
+          # Node dirs whose README or service metadata changed. Deleted nodes
+          # drop out via the -d test.
+          CHANGED="$(git diff --name-only "$BASE"...HEAD \
+            | grep -E '^nodes/src/nodes/[^/]+/(README\.md|services[^/]*\.json)$' \
+            | cut -d/ -f1-4 \
+            | sort -u | while read -r d; do [ -d "$d" ] && echo "$d"; done)"
+
+          if [ -z "$CHANGED" ]; then
+            echo 'No node README or services*.json touched — nothing to validate.'
+            exit 0
+          fi
+          echo "Validating $(echo "$CHANGED" | wc -l | tr -d ' ') node(s):"
+          echo "$CHANGED" | sed 's/^/  /'
+          # shellcheck disable=SC2086
+          python3 scripts/validate-node-readme.py $CHANGED
+      - name: Validate client doc parity
+        if: always()
+        run: python3 scripts/validate-client-docs.py
+
+  # -------------------------------------------------------------------------
+  #  Corpus-wide sweep. A count, not a gate — `--all` is information when it is
+  #  a trend line and noise when it is a merge blocker, so it lives here where
+  #  a large number is expected and readable. Retire this job once the count
+  #  reaches zero; the scoped gate above keeps it there.
+  # -------------------------------------------------------------------------
+  corpus:
+    name: Corpus sweep (informational)
     runs-on: ubuntu-latest
     timeout-minutes: 5
     continue-on-error: true
@@ -44,11 +98,15 @@ jobs:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           persist-credentials: false
-      - name: Validate node READMEs
-        run: python3 scripts/validate-node-readme.py --all nodes/src/nodes
-      - name: Validate client doc parity
-        if: always()
-        run: python3 scripts/validate-client-docs.py
+      - name: Node README schema — whole corpus
+        run: |
+          python3 scripts/validate-node-readme.py --all nodes/src/nodes | tee /tmp/sweep.txt || true
+          {
+            echo '### Node README schema — corpus'
+            echo
+            echo "- passing: $(grep -c '^ok' /tmp/sweep.txt || echo 0)"
+            echo "- failing: $(grep -cE '^x ' /tmp/sweep.txt || echo 0)"
+          } >> "$GITHUB_STEP_SUMMARY"
 
   # -------------------------------------------------------------------------
   #  Stage and compile the docs site. Catches what only a full build can:
