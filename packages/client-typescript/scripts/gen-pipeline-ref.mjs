@@ -2,7 +2,7 @@
  * client-typescript:gen-pipeline-ref — generate the Pipeline JSON reference from
  * the .pipe schema's owning types (src/client/types/pipeline.ts) using the
  * TypeScript compiler API. Deposited in-tree at docs/reference/pipeline/index.md
- * and mounted to /pipeline-reference by the docs shell.
+ * and mounted to /reference/pipeline-reference by the docs shell.
  */
 
 import { readFileSync, writeFileSync, mkdirSync } from 'fs';
@@ -40,7 +40,7 @@ function main() {
 	const preamble = [
 		'---',
 		'title: Pipeline JSON Reference',
-		'slug: /pipeline-reference',
+		'slug: /reference/pipeline-reference',
 		'---',
 		'',
 		'# Pipeline JSON Reference',

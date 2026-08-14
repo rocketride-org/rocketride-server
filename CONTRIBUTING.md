@@ -14,7 +14,7 @@ By participating in this project, you agree to abide by our Code of Conduct. Ple
    git clone https://github.com/rocketride-org/rocketride-server.git
    cd rocketride-server
    ```
-3. **Set up your development environment** following the [Setup Guide](docs/README.md)
+3. **Set up your development environment** following the [Development Setup Guide](docs/development/index.md)
 
 ## Development Workflow
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate node READMEs against docs/development/node-readme-schema.md.
+"""Validate node READMEs against docs/development/nodes/readme-schema.md.
 
 Deterministic, no LLM. For each node directory:
   1. Parse and merge services*.json (JSONC: // comments + trailing commas).
@@ -402,7 +402,7 @@ def main():
             if st in ('FAIL', 'WARN'):
                 print(f'    {st}: {check}' + (f' — {detail}' if detail else ''))
     if any_fail:
-        print('\nSchema: docs/development/node-readme-schema.md')
+        print('\nSchema: docs/development/nodes/readme-schema.md')
     sys.exit(1 if any_fail else 0)
 
 

@@ -16,6 +16,7 @@ on:
       - 'packages/client-typescript/README.md'
       - 'packages/client-python/README.md'
       - 'packages/client-mcp/README.md'
+      - 'packages/n8n-nodes/README.md'
       - '.github/workflows/docs.yml'
   workflow_dispatch: {}
 

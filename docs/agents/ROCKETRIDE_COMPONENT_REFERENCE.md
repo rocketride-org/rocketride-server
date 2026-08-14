@@ -21,11 +21,11 @@ When the RocketRide VS Code extension is installed, it populates a `.rocketride/
 
 **IMPORTANT:** Always read `.rocketride/services-catalog.json` for the current list of available components. The catalog is the single source of truth: it is generated from the connected server and may contain components not listed in this document.
 
-> **See also:** [`docs/internal/nodes.md`](../internal/nodes.md) is the node catalog
-> grouped by category, with each node's lanes and the wire-vs-bind rule.
-> [`docs/internal/node-schema.md`](../internal/node-schema.md) explains the
-> `services.json` model (`lanes`, `preconfig`/`profiles`, `fields`, `shape`)
-> behind this reference and the canvas UI.
+> **See also (in the RocketRide repo):** `docs/development/nodes/index.md` covers
+> how nodes connect — lane types and the wire-vs-bind rule.
+> `docs/development/nodes/services-schema.md` explains the `services.json` model
+> (`lanes`, `preconfig`/`profiles`, `fields`, `shape`) behind this reference and
+> the canvas UI. Per-node reference lives at <https://docs.rocketride.org/nodes>.
 
 ### Reading the Catalog
 

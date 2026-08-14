@@ -1,0 +1,65 @@
+---
+title: Integrate a pipeline with an SDK
+sidebar_label: Integrate with an SDK
+---
+
+# Integrate a pipeline with an SDK
+
+Once you have a `.pipe` file, run it from your own application with the
+[Python](/develop/python) or [TypeScript](/develop/typescript) SDK. Both connect to a
+running engine, a local server (`ws://localhost:5565`) or RocketRide Cloud
+(`https://cloud.rocketride.ai`), start the pipeline with `use()`, stream data with
+`send()`, and stop it with `terminate()`.
+
+If you do not have a `.pipe` file yet, build one first with the
+[IDE walkthrough](/quickstart/ide-walkthrough).
+
+## Python
+
+```bash
+pip install rocketride
+```
+
+```python
+import asyncio
+from rocketride import RocketRideClient
+
+async def main():
+    async with RocketRideClient(uri='ws://localhost:5565', auth='my-key') as client:
+        result = await client.use(filepath='my-first-pipeline.pipe')
+        token = result['token']
+        out = await client.send(token, 'Hello, pipeline!', objinfo={'name': 'input.txt'}, mimetype='text/plain')
+        print(out)
+        await client.terminate(token)
+
+asyncio.run(main())
+```
+
+See the [Python SDK reference](/develop/python) for chat, file uploads, streaming pipes,
+events, and persist-mode reconnection.
+
+## TypeScript
+
+```bash
+npm install rocketride
+```
+
+```typescript
+import { RocketRideClient } from 'rocketride';
+
+const client = new RocketRideClient({ uri: 'ws://localhost:5565', auth: process.env.ROCKETRIDE_APIKEY! });
+await client.connect();
+const { token } = await client.use({ filepath: './my-first-pipeline.pipe' });
+const result = await client.send(token, 'Hello, pipeline!', { name: 'input.txt' }, 'text/plain');
+console.log(result);
+await client.terminate(token);
+await client.disconnect();
+```
+
+See the [TypeScript SDK reference](/develop/typescript) for chat, file uploads, streaming
+pipes, events, and persist-mode reconnection.
+
+## Next
+
+- [Pipeline JSON reference](/reference/pipeline-reference): every field of a `.pipe` file.
+- [Troubleshooting](/operate/troubleshooting): what to check when a run does not behave.

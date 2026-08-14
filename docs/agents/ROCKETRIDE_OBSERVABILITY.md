@@ -6,6 +6,13 @@ runtime logs, lifecycle events, and pipeline tracing data from a RocketRide serv
 It reflects the actual server implementation, not aspirational features. If a feature
 is not listed here, it likely does not exist in the server.
 
+> **Maintainers:** sections 4 and 5 (`rrext_monitor`, the bitmask table, and the
+> `apaevt_*` payload schemas) describe the same wire protocol as
+> `docs/public/product/protocols/websocket/observability.md`. The duplication is
+> deliberate: this file is exported to `.rocketride/docs/` for **offline** use by
+> AI assistants, so it cannot be reduced to a link. Change the wire protocol and
+> both files must be updated in the same commit.
+
 ---
 
 ## 1. What RocketRide ships for observability

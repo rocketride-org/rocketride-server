@@ -621,6 +621,90 @@ const redirects: RedirectItem[] = [
       "/ide-extensions/cursor",
       "/ide-extensions/windsurf"
     ]
+  },
+  {
+    "to": "/nodes/llm_anthropic",
+    "from": [
+      "/integrations/anthropic"
+    ]
+  },
+  {
+    "to": "/nodes/aparavi_aql",
+    "from": [
+      "/integrations/aparavi-aql"
+    ]
+  },
+  {
+    "to": "/nodes/tool_firecrawl",
+    "from": [
+      "/integrations/firecrawl"
+    ]
+  },
+  {
+    "to": "/nodes/graph_neo4j",
+    "from": [
+      "/integrations/neo4j"
+    ]
+  },
+  {
+    "to": "/nodes/db_postgres",
+    "from": [
+      "/integrations/postgres"
+    ]
+  },
+  {
+    "to": "/nodes/store_qdrant",
+    "from": [
+      "/integrations/qdrant"
+    ]
+  },
+  {
+    "to": "/protocols/websocket",
+    "from": [
+      "/protocols/websocket/crash-reporting"
+    ]
+  },
+  {
+    "to": "/quickstart/ide-walkthrough",
+    "from": [
+      "/evaluate/use-cases"
+    ]
+  },
+  {
+    "to": "/operate/cloud",
+    "from": [
+      "/cloud"
+    ]
+  },
+  {
+    "to": "/operate/self-hosting",
+    "from": [
+      "/self-hosting"
+    ]
+  },
+  {
+    "to": "/operate/troubleshooting",
+    "from": [
+      "/troubleshooting"
+    ]
+  },
+  {
+    "to": "/reference/pipeline-reference",
+    "from": [
+      "/pipeline-reference"
+    ]
+  },
+  {
+    "to": "/reference/cli",
+    "from": [
+      "/cli"
+    ]
+  },
+  {
+    "to": "/reference/glossary",
+    "from": [
+      "/glossary"
+    ]
   }
 ];
 

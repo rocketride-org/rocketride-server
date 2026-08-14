@@ -69,14 +69,14 @@ The agent never chooses the host — every request targets the configured Base U
 
 ## Setup notes
 
-- **Triggering is webhook-only.** The target workflow needs a **Webhook** trigger node. Manual/cron/event-triggered workflows can't be triggered over HTTP directly — wrap them with a webhook **dispatcher** (Execute Sub-Workflow); see the [n8n integration guide](../../../../docs/product/integrations/n8n.md).
+- **Triggering is webhook-only.** The target workflow needs a **Webhook** trigger node. Manual/cron/event-triggered workflows can't be triggered over HTTP directly — wrap them with a webhook **dispatcher** (Execute Sub-Workflow); see the [n8n integration guide](../../../../docs/public/product/integrations/n8n.md).
 - **Activate the workflow.** A production webhook (`/webhook/...`) only exists once the workflow is **activated/published** in n8n — otherwise the call 404s and the node tells you to activate it. While editing, set `test_mode` to use the editor's one-shot `/webhook-test/...` route.
 - **Return a result.** For `sync` mode, the workflow must end in a **"Respond to Webhook"** node (or set the Webhook node to respond when the last node finishes); otherwise n8n only returns a "workflow started" ack and the node warns you.
 - **Docker reachability.** If RocketRide runs in a container, `localhost` points at the container, not your machine. Use `http://host.docker.internal:5678` (Docker Desktop, or add `extra_hosts: ["host.docker.internal:host-gateway"]` on Linux), or run n8n on the same Docker network and use `http://n8n:5678`. The node detects this and suggests the fix.
 
 ## Round-trips (n8n → RocketRide)
 
-The reverse direction needs no special node: any RocketRide pipeline with a `webhook`/`chat`/`dropper` source is HTTP-callable from n8n's **HTTP Request** node, enabling RR→n8n→RR round-trips. See the [n8n integration guide](../../../../docs/product/integrations/n8n.md) and the templates [`examples/n8n-roundtrip.pipe`](../../../../examples/n8n-roundtrip.pipe) + [`examples/n8n-call-rocketride.workflow.json`](../../../../examples/n8n-call-rocketride.workflow.json).
+The reverse direction needs no special node: any RocketRide pipeline with a `webhook`/`chat`/`dropper` source is HTTP-callable from n8n's **HTTP Request** node, enabling RR→n8n→RR round-trips. See the [n8n integration guide](../../../../docs/public/product/integrations/n8n.md) and the templates [`examples/n8n-roundtrip.pipe`](../../../../examples/n8n-roundtrip.pipe) + [`examples/n8n-call-rocketride.workflow.json`](../../../../examples/n8n-call-rocketride.workflow.json).
 
 ## Environment variables
 
