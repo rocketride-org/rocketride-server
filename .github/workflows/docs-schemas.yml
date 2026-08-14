@@ -12,12 +12,14 @@
 # ---------------------------------------------------------------------------
 name: Doc schemas
 
+#  No workflow_dispatch: that trigger only works when the workflow file is on
+#  the repository's default branch, and the whole point of this file is that it
+#  never needs to be there.
 on:
   pull_request:
     branches: [fix/docs]
   push:
     branches: [fix/docs]
-  workflow_dispatch:
 
 concurrency:
   group: docs-schemas-${{ github.head_ref || github.run_id }}
