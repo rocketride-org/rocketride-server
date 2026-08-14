@@ -104,6 +104,19 @@ def test_parse_json_strips_think_then_fence():
     assert util.parseJson(raw) == {'x': 'y'}
 
 
+def test_parse_json_raises_on_unterminated_think_block():
+    """A <think> block with no closing tag means the model ran out of
+    output budget before emitting any JSON; this must raise a clear
+    error naming modelOutputTokens rather than a generic JSON error.
+    """
+    raw = (
+        '<think>The user wants a JSON summary. Let me work through the '
+        'fields one at a time. First the title, which should be'
+    )
+    with pytest.raises(ValueError, match='cut off inside a <think> block'):
+        util.parseJson(raw)
+
+
 def test_parse_json_keeps_inner_backticks_in_string_value():
     """Triple-backticks inside a JSON string value must NOT be treated as fences."""
     raw = '{"answer": "see ```python\\nprint(1)\\n``` here"}'

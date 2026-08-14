@@ -46,6 +46,16 @@ def parseJson(value: str) -> Any:
         # so fence detection below is not confused by content inside the think block.
         value = re.sub(r'<think>.*?</think>', '', value, flags=re.DOTALL).strip()
 
+        # An UNCLOSED block means the model ran out of output budget while still
+        # reasoning, so it never reached the JSON at all. The regex above cannot
+        # match it, and the generic "unable to parse" that follows sends you
+        # looking at the schema instead of at modelOutputTokens. Say which it is.
+        if value.startswith('<think>') and '</think>' not in value:
+            raise ValueError(
+                'model was cut off inside a <think> block and never emitted JSON; '
+                'raise modelOutputTokens, or disable reasoning for this call'
+            )
+
         # If the LLM wrapped the response in a ```json fence, strip the opening marker.
         # We only check the beginning of the string so we don't accidentally strip ``` sequences
         # that appear inside JSON string values (e.g. a chartjs fenced code block in an "answer" field).
