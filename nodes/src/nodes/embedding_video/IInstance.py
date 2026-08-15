@@ -204,8 +204,13 @@ class IInstance(IInstanceBase):
 
                     # Source provenance + per-frame name (<video-stem>.frame<N>) from
                     # the descriptor (extensionless: the doc is an embedding, not a file).
+                    #
+                    # The index is the document's ordinal, not its position in the video:
+                    # one object can carry several videos, whose positions both start at 0
+                    # and whose stems match when they share a parent. `frame_number` above
+                    # is where the true position lives.
                     attach_source(metadata, self._source_descriptor)
-                    attach_name(metadata, self._source_descriptor, index=current_frame_pos, marker='frame')
+                    attach_name(metadata, self._source_descriptor, index=self._frame_chunk_id, marker='frame')
 
                     # Create the document with the frame image and embedding.
                     doc = Doc(type='Image', page_content=frame_base64, metadata=metadata)
