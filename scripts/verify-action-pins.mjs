@@ -14,7 +14,7 @@ import { pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
-const USES_RE = /^\s*(?:-\s*)?uses:\s*([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+(?:\/[^@\s#]+)?)@([0-9a-f]{40})(?:\s+#\s*(\S+))?\s*$/;
+const USES_RE = /^\s*(?:-\s*)?uses:\s*(["']?)([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+(?:\/[^@\s#]+)?)@([0-9a-f]{40})\1(?:\s+#\s*(\S+))?\s*$/;
 const VERSION_RE = /^v\d+(?:\.\d+){0,2}(?:[-+][0-9A-Za-z.-]+)?$/;
 
 /** Parse remotely hosted, SHA-pinned actions from one workflow. */
@@ -22,15 +22,15 @@ export function parseWorkflow(source, filename) {
 	return source.split(/\r?\n/).flatMap((line, index) => {
 		const match = line.match(USES_RE);
 		if (!match) return [];
-		const action = match[1];
+		const action = match[2];
 		return [
 			{
 				filename,
 				line: index + 1,
 				action,
 				repository: action.split('/').slice(0, 2).join('/'),
-				sha: match[2],
-				version: match[3] ?? null,
+				sha: match[3],
+				version: match[4] ?? null,
 			},
 		];
 	});
@@ -93,12 +93,14 @@ export async function resolveGitHubTag(repository, version) {
 	return [...new Set(tags.values())];
 }
 
+/** Return every YAML workflow in the repository's workflow directory. */
 async function workflowFiles(root) {
 	const workflowDir = path.join(root, '.github', 'workflows');
 	const entries = await fs.readdir(workflowDir, { withFileTypes: true });
 	return entries.filter((entry) => entry.isFile() && /\.ya?ml$/i.test(entry.name)).map((entry) => path.join(workflowDir, entry.name));
 }
 
+/** Run the repository-wide verifier and emit GitHub annotation commands. */
 async function main() {
 	const root = process.cwd();
 	const pins = [];

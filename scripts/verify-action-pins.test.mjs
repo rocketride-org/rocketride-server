@@ -28,6 +28,18 @@ describe('action pin verification', () => {
 		assert.deepEqual(await verifyPins(pins, async () => [OTHER_SHA, SHA]), []);
 	});
 
+	it('validates single- and double-quoted uses values', async () => {
+		const pins = parseWorkflow(`uses: "actions/checkout@${SHA}" # v4\n- uses: 'actions/setup-node@${OTHER_SHA}' # v4`, 'quoted.yml');
+		assert.deepEqual(
+			pins.map(({ action, sha, version }) => ({ action, sha, version })),
+			[
+				{ action: 'actions/checkout', sha: SHA, version: 'v4' },
+				{ action: 'actions/setup-node', sha: OTHER_SHA, version: 'v4' },
+			]
+		);
+		assert.deepEqual(await verifyPins(pins, async (_repository, _version) => [SHA, OTHER_SHA]), []);
+	});
+
 	it('requires comments on SHA-pinned remote actions', async () => {
 		const pins = parseWorkflow(`uses: actions/github-script@${SHA}`, 'release.yml');
 		const errors = await verifyPins(pins, async () => SHA);
