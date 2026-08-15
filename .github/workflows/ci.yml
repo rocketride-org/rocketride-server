@@ -29,6 +29,20 @@ env:
 #  Build
 # ---------------------------------------------------------------------------
 jobs:
+  action-pins:
+    name: Verify action pins
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Test pin verifier
+        run: node --test scripts/verify-action-pins.test.mjs
+
+      - name: Compare pins with version tags
+        run: node scripts/verify-action-pins.mjs
+
   init:
     name: Initialize
     uses: ./.github/workflows/_init.yaml
