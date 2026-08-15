@@ -192,18 +192,26 @@ class Config:
             # Get the default from the profile
             defaultConfig = profileConfig
 
-            # Get the user specified profile
-            userConfig = connConfig.get(profile, {})
+            # Resolve explicit configuration in the same order as the default
+            # profile branch: profile defaults < top-level keys < profile keys.
+            # A number of pipeline files keep credentials and other overrides
+            # at the top level even when they select a profile.
+            profileUserConfig = connConfig.get(profile, {})
+            if isinstance(profileUserConfig, IJson):
+                profileUserConfig = IJson.toDict(profileUserConfig)
+            if not isinstance(profileUserConfig, dict):
+                profileUserConfig = {}
 
-            # If it is none, then set to empty
-            if not userConfig:
-                userConfig = {}
+            userConfig = {key: value for key, value in connConfig.items() if key not in ('profile', profile)}
+            for key, value in profileUserConfig.items():
+                if value is not None:
+                    userConfig[key] = value
 
             # Merge defaultConfig into userConfig
             config = merge(userConfig, defaultConfig)
 
         # Output the computed configuration
-        return config
+        return IJson.toDict(config)
 
     @staticmethod
     def getProviderConfig(providerConfig: Dict[str, any]):

@@ -26,7 +26,14 @@ _SERVICE = {
     'preconfig': {
         'default': 'default',
         'profiles': {
-            'default': {'instructions': [], 'agent_description': '', 'role': 'Assistant', 'require_tool_call': False},
+            'default': {
+                'instructions': [],
+                'agent_description': '',
+                'role': 'Assistant',
+                'require_tool_call': False,
+                'entityTypes': [],
+            },
+            'exa': {'apikey': '', 'region': 'us-east-1'},
         },
     }
 }
@@ -38,12 +45,31 @@ def _load_config():
 
     rl = types.ModuleType('rocketlib')
 
-    class _IJson:
+    class FakeIJson:
+        def __init__(self, value):
+            self.value = value
+
+        def get(self, key, default=None):
+            if isinstance(self.value, dict):
+                return self.value.get(key, default)
+            return default
+
+        def items(self):
+            if isinstance(self.value, dict):
+                return self.value.items()
+            return ()
+
         @staticmethod
         def toDict(x):
-            return dict(x) if isinstance(x, dict) else x
+            if isinstance(x, FakeIJson):
+                return FakeIJson.toDict(x.value)
+            if isinstance(x, dict):
+                return {key: FakeIJson.toDict(value) for key, value in x.items()}
+            if isinstance(x, list):
+                return [FakeIJson.toDict(value) for value in x]
+            return x
 
-    rl.IJson = _IJson
+    rl.IJson = FakeIJson
     rl.warning = lambda *a, **k: None
     rl.getServiceDefinition = lambda logical_type: _SERVICE
     sys.modules['rocketlib'] = rl
@@ -53,7 +79,7 @@ def _load_config():
         spec = importlib.util.spec_from_file_location('rr_real_config', _CONFIG_PATH)
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
-        return mod.Config
+        return mod.Config, FakeIJson
     finally:
         for k, v in saved.items():
             if v is None:
@@ -62,7 +88,7 @@ def _load_config():
                 sys.modules[k] = v
 
 
-Config = _load_config()
+Config, ConfigIJson = _load_config()
 
 
 class TestFlatShape:
@@ -107,6 +133,36 @@ class TestExplicitProfileBranchUnaffected:
     def test_explicit_profile_reads_nested(self):
         cfg = Config.getNodeConfig('agent_x', {'profile': 'default', 'default': {'instructions': ['x']}})
         assert cfg['instructions'] == ['x']
+
+
+class TestExplicitProfilePrecedence:
+    def test_top_level_keys_apply_with_an_explicit_profile(self):
+        cfg = Config.getNodeConfig('agent_x', {'profile': 'exa', 'apikey': 'top-level-key'})
+
+        assert cfg['apikey'] == 'top-level-key'
+        assert cfg['region'] == 'us-east-1'
+
+    def test_profile_specific_keys_override_top_level_keys(self):
+        cfg = Config.getNodeConfig(
+            'agent_x',
+            {'profile': 'exa', 'apikey': 'top-level-key', 'exa': {'apikey': 'profile-key'}},
+        )
+
+        assert cfg['apikey'] == 'profile-key'
+
+
+class TestNativeConfigTypes:
+    def test_configured_arrays_and_objects_are_native_python_values(self):
+        cfg = Config.getNodeConfig(
+            'agent_x',
+            {
+                'entityTypes': ConfigIJson(['PERSON', ConfigIJson({'nested': ['LOCATION']})]),
+            },
+        )
+
+        assert cfg['entityTypes'] == ['PERSON', {'nested': ['LOCATION']}]
+        assert isinstance(cfg['entityTypes'], list)
+        assert isinstance(cfg['entityTypes'][1], dict)
 
 
 class TestRequireToolCallResolution:
