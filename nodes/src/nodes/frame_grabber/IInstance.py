@@ -54,6 +54,10 @@ class IInstance(IInstanceBase):
     _wm_timestamp: bool = False
     _source_descriptor = None  # full stream descriptor parsed on the video BEGIN
 
+    # Frames emitted for the current object, across all its video streams. Names and
+    # chunk ids come from this rather than from a frame's position in its own video.
+    _frame_ordinal: int = 0
+
     _start_times: list = []
 
     def beginInstance(self):  # pylint: disable=C0103
@@ -91,6 +95,7 @@ class IInstance(IInstanceBase):
             obj (Entry): The input entry containing the video stream.
         """
         self._start_times = []
+        self._frame_ordinal = 0
 
     def close(self):
         """Close the video stream and generate table output if applicable.
@@ -150,7 +155,7 @@ class IInstance(IInstanceBase):
             return f'{inner} @ {container}'
         return inner or container or None
 
-    def _image_begin_payload(self, frame_number: int, image_size: int, width=None, height=None) -> bytes:
+    def _image_begin_payload(self, frame_ordinal: int, image_size: int, width=None, height=None) -> bytes:
         """Build the ImageStream BEGIN enrichment for an extracted frame.
 
         Mirrors the documents lane: top level describes the image stream itself
@@ -159,7 +164,9 @@ class IInstance(IInstanceBase):
         image stream_index (the per-frame index).
 
         Args:
-            frame_number (int): The frame index, used for the per-frame name.
+            frame_ordinal (int): The frame's ordinal within the object, used for the name.
+                Not its position in the video — one object can carry several video streams,
+                whose positions both start at 0 and whose stems match when they share a parent.
             image_size (int): The frame's PNG byte size (the image stream's own size).
             width (int): The frame width in pixels (best-effort; omitted when unknown).
             height (int): The frame height in pixels (best-effort; omitted when unknown).
@@ -169,7 +176,7 @@ class IInstance(IInstanceBase):
         """
         # One-to-many: per-frame name '<stem>.frame<N>.png'. image_begin_payload projects the
         # source video under `source` (nesting any existing chain) and omits absent dims.
-        name = derived_name(self._source_descriptor, index=frame_number, marker='frame', ext='png')
+        name = derived_name(self._source_descriptor, index=frame_ordinal, marker='frame', ext='png')
         return image_begin_payload(self._source_descriptor, size=image_size, width=width, height=height, name=name)
 
     def _frame_callback(self, image: bytes, frame_number: int, time_stamp: float):
@@ -207,15 +214,18 @@ class IInstance(IInstanceBase):
             # Create the default metadata for the document
             metadata = DocMetadata(self)
 
-            # Save the frame and time stamp in the metadata
-            metadata.chunkId = frame_number
+            # chunkId is the frame's ordinal within the object, not its position in the
+            # video: one object can carry several video streams, whose positions both
+            # start at 0. `frame_number` keeps the true position.
+            metadata.chunkId = self._frame_ordinal
+            metadata.frame_number = frame_number
             metadata.time_stamp = time_stamp
 
             # Provenance: the source video's media detail under `source` + a per-frame
             # name '<video-stem>.frame<N>.png' (identity/backlink is already on this
             # frame's own metadata). Both no-op when no descriptor was received.
             attach_source(metadata, self._source_descriptor)
-            attach_name(metadata, self._source_descriptor, index=frame_number, marker='frame', ext='png')
+            attach_name(metadata, self._source_descriptor, index=self._frame_ordinal, marker='frame', ext='png')
 
             # Create the document object and save the base64 encoded image
             doc = Doc(type='Image', page_content=base64.b64encode(image).decode('utf-8'), metadata=metadata)
@@ -231,10 +241,14 @@ class IInstance(IInstanceBase):
             self.instance.writeImage(
                 AVI_ACTION.BEGIN,
                 'image/png',
-                self._image_begin_payload(frame_number, len(image), width, height),
+                self._image_begin_payload(self._frame_ordinal, len(image), width, height),
             )
             self.instance.writeImage(AVI_ACTION.WRITE, 'image/png', image)
             self.instance.writeImage(AVI_ACTION.END, 'image/png')
+
+        # Counted per frame, not per listener: both lanes above name the frame by this
+        # ordinal, so it advances once for the frame regardless of who is listening.
+        self._frame_ordinal += 1
 
     def _apply_watermark(self, image: bytes, timestamp_text: str) -> bytes:
         """Apply a watermark to the image.
