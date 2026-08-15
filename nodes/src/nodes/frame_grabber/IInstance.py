@@ -207,8 +207,10 @@ class IInstance(IInstanceBase):
             image = self._apply_watermark(image, format_seconds(time_stamp))
 
         if self.instance.hasListener('table'):
-            # Add the start time
-            self._start_times.append([frame_number, time_stamp, format_seconds(time_stamp)])
+            # One table covers the whole object, so the Frame column carries the ordinal
+            # rather than the position in the video: several videos would otherwise each
+            # contribute a row 0, a row 1, and so on, with nothing to tell them apart.
+            self._start_times.append([self._frame_ordinal, time_stamp, format_seconds(time_stamp)])
 
         if self.instance.hasListener('documents'):
             # Create the default metadata for the document

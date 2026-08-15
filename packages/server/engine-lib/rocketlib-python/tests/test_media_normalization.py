@@ -290,6 +290,31 @@ def test_close_settles_nothing_for_a_failed_object(warnings):
     assert AVI_ACTION.END not in node.actions()
 
 
+def test_a_failed_objects_stream_is_reported_as_such(warnings):
+    """The stream was whole, so the line must not read as a byte count that fell short.
+
+    Every byte arrived; the base held it back because the object failed. Reporting that
+    as 'could not be settled' sends the reader hunting for a cut-off that never happened.
+    """
+    node = _Node(_Obj(failed=True))
+    _stream(node, 4, data=b'ABCD')
+    node.close()
+
+    assert len(warnings) == 1
+    assert 'its object failed' in warnings[0]
+    assert 'declared=4' in warnings[0] and 'written=4' in warnings[0]
+
+
+def test_a_failed_objects_stream_is_reported_once(warnings):
+    """close() marks the lane closed, so the next open() finds nothing left to report."""
+    node = _Node(_Obj(failed=True))
+    _stream(node, 4, data=b'ABCD')
+    node.close()
+    node.open(None)
+
+    assert len(warnings) == 1
+
+
 def test_close_settles_when_the_object_is_a_bare_mock(warnings):
     """Every unset attribute of a MagicMock is a truthy Mock.
 

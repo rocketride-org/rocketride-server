@@ -792,14 +792,21 @@ class IInstanceBase:
 
     Media lanes are normalized for every subclass (see the block above). A handler
     for ``writeImage``/``writeAudio``/``writeVideo`` receives, per stream, exactly
-    one BEGIN, zero or more WRITEs, and at most one END. An END means the stream is
-    complete: every byte its BEGIN declared has arrived, and there was at least one.
-    It comes when the producer sends it, when the next stream begins on the lane, or
-    as the object closes — whichever happens first. A stream that carried no bytes,
-    fell short of what it declared, or declared nothing at all never gets an END;
-    the handler learns of it from the next BEGIN on that lane, or from ``open()``,
-    and must release whatever it holds there. A handler owning an external resource
-    (a write handle, a decoder) should also sweep in its own ``closing()``.
+    one BEGIN, zero or more WRITEs, and at most one END. That END is either the
+    producer's own, forwarded exactly as it arrives, or one this base supplies in its
+    place — when the next stream begins on the lane, or as the object closes.
+
+    The base supplies one only for a stream that received every byte its BEGIN
+    declared, so the guarantee is this and no more: a stream displaced by the next
+    BEGIN, or still open when the object closes, is either ended or reported — never
+    dropped in silence. A producer's own END is never checked against the declared
+    size, so a handler that must know its bytes are whole still checks them itself.
+
+    A displaced stream that carried no bytes, fell short of what it declared, or
+    declared nothing at all gets no END; the handler learns of it from the next BEGIN
+    on that lane, or from ``open()``, and must release whatever it holds there. A
+    handler owning an external resource (a write handle, a decoder) should also sweep
+    in its own ``closing()``.
     """
 
     IEndpoint: IEndpointBase = None  #: Endpoint instance for communication.
@@ -918,9 +925,9 @@ class IInstanceBase:
         finally:
             self._avi_reentrant = previous
 
-    def _avi_warn_lost(self, lane: str, state: '_AviLane') -> None:
+    def _avi_warn_lost(self, lane: str, state: '_AviLane', reason: str = 'it could not be settled') -> None:
         """
-        Report a pending stream that could not be settled.
+        Report a pending stream that was dropped.
 
         Silent for a stream that promised nothing and delivered nothing: that is an
         empty stream rather than a loss, and a line firing on ordinary traffic is
@@ -929,6 +936,10 @@ class IInstanceBase:
         Args:
             lane (str): The media lane.
             state (_AviLane): The lane's state, still holding the lost stream.
+            reason (str): Why the stream went unsettled. Named rather than assumed:
+                a complete stream held back because its object failed reads as a
+                truncated one otherwise, and sends the reader hunting for a cut-off
+                that never happened.
         """
         if not state.written and not state.declared:
             return
@@ -938,7 +949,7 @@ class IInstanceBase:
         from .engine import warning
 
         warning(
-            f'media lane {lane}: dropped a stream that could not be settled '
+            f'media lane {lane}: dropped a stream, {reason} '
             f'(object={state.owner}, mime={state.mime}, '
             f'declared={state.declared}, written={state.written})'
         )
@@ -989,22 +1000,32 @@ class IInstanceBase:
         stream's own object: ``open()`` has already advanced it and ``closing()``
         runs after it is cleared, so this is the only per-object place a synthesized
         END can be attributed correctly. A failed object settles nothing — it must
-        not publish output it would never otherwise have produced.
+        not publish output it would never otherwise have produced — and its pending
+        streams are reported with that as the stated reason.
+
+        Every open lane is marked closed here, whichever way it went, so ``open()``
+        does not report the same loss a second time.
         """
         lanes = getattr(self, '_avi_lanes', None)
         if not lanes:
             return
 
         obj = self._avi_current_object()
-        if obj is None or _avi_object_failed(obj):
-            return
+        reason = None
+        if obj is None:
+            reason = 'its object is no longer current'
+        elif _avi_object_failed(obj):
+            reason = 'its object failed'
 
         for lane, state in lanes.items():
             if not state.open:
                 continue
-            method = self._avi_handler(lane)
-            if method is not None:
-                self._avi_settle(lane, state, method)
+            if reason is not None:
+                self._avi_warn_lost(lane, state, reason)
+            else:
+                method = self._avi_handler(lane)
+                if method is not None:
+                    self._avi_settle(lane, state, method)
             state.open = False
 
     def _avi_reset_lanes(self) -> None:

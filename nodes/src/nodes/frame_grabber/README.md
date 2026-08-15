@@ -59,8 +59,8 @@ Input lane: `video`. Output lanes:
 | Lane out    | Description                                                                                                                                       |
 |-------------|---------------------------------------------------------------------------------------------------------------------------------------------------|
 | `image`     | Each extracted frame streamed as a raw `image/png` payload.                                                                                       |
-| `table`     | One markdown table per video, written when the video closes: columns `Frame`, `Seconds`, `Time Stamp` (formatted as `HH:MM:SS.ss`).               |
-| `documents` | One document per frame: `type: "Image"`, base64-encoded PNG as content, with `chunkId` set to the frame number, `time_stamp` (seconds), and a `source` object carrying the originating video's media detail (see Source provenance below) in the metadata. |
+| `table`     | One markdown table per object, written as the object closes: columns `Frame`, `Seconds`, `Time Stamp` (formatted as `HH:MM:SS.ss`). `Frame` counts the object's frames, so an object carrying several videos yields one table numbered straight through. |
+| `documents` | One document per frame: `type: "Image"`, base64-encoded PNG as content, with `chunkId` counting the object's frames, `frame_number` (the frame's position in its own video), `time_stamp` (seconds), and a `source` object carrying the originating video's media detail (see Source provenance below) in the metadata. |
 
 ### Fields
 

@@ -210,6 +210,27 @@ def test_the_true_position_in_the_video_is_kept(node):
     assert [doc.metadata.frame_number for doc in node.instance.docs] == [0, 1, 0, 1]
 
 
+def test_the_counter_restarts_for_the_next_object(node):
+    """Frames are numbered within their own object, so a pooled instance starts again.
+
+    The ordinal outlives one object otherwise, and which value the next object opens on
+    depends on the instance the pipe pool handed it — the same input would then label
+    its frames differently from run to run.
+    """
+    _video(node)
+
+    node.open(None)  # the engine opens the next object
+    _video(node)
+
+    assert [doc.metadata.name for doc in node.instance.docs] == [
+        'clip.frame0',
+        'clip.frame1',
+        'clip.frame0',
+        'clip.frame1',
+    ]
+    assert [doc.metadata.chunkId for doc in node.instance.docs] == [0, 1, 0, 1]
+
+
 def test_a_single_video_is_unchanged(node):
     """The ordinary one-video object still numbers from zero."""
     _video(node)

@@ -506,6 +506,11 @@ class IInstance(IInstanceBase):
 
     # -- lane handlers -------------------------------------------------
 
+    def _media_abort_all(self) -> None:
+        """Release every stream still in flight, whatever it has written so far."""
+        for kind in list(getattr(self, '_media_streams', None) or {}):
+            self._media_abort(kind)
+
     def open(self, object: Entry):
         """Per-object reset: stale media streams are dropped.
 
@@ -513,8 +518,7 @@ class IInstance(IInstanceBase):
         otherwise keep its write handle and half-written file alive, and the
         next object's chunks would land in it.
         """
-        for kind in list(getattr(self, '_media_streams', None) or {}):
-            self._media_abort(kind)
+        self._media_abort_all()
 
     def closing(self):
         """Last chance to drop a stream: no further object will open to sweep it.
@@ -523,8 +527,7 @@ class IInstance(IInstanceBase):
         store for good — a truncated file under ``unique``/``skip``, an orphaned
         ``.part-*`` under ``overwrite``.
         """
-        for kind in list(getattr(self, '_media_streams', None) or {}):
-            self._media_abort(kind)
+        self._media_abort_all()
 
     def writeDocuments(self, documents):
         """Documents lane: ``page_content`` is parsed text, so it always stores .txt.

@@ -65,6 +65,7 @@ class _Capture:
     def __init__(self, listeners=('documents', 'image')):
         self.docs = []
         self.images = []
+        self.tables = []
         self._listeners = listeners
         self.currentObject = _Obj()
 
@@ -76,6 +77,9 @@ class _Capture:
 
     def writeImage(self, action, mime, buffer=None):  # noqa: N802 (engine method name)
         self.images.append((action, mime, buffer))
+
+    def writeTable(self, table):  # noqa: N802 (engine method name)
+        self.tables.append(table)
 
 
 class _Endpoint:
@@ -157,6 +161,26 @@ def test_the_image_lane_is_named_the_same_way():
         inst._frame_callback(_png(), frame_number, 0.0)
 
     assert _begin_names(inst) == [doc.metadata.name for doc in inst.instance.docs]
+
+
+def test_the_table_lane_numbers_frames_the_same_way():
+    """One table covers the whole object, so its Frame column must too.
+
+    Per-video positions put a row 0 and a row 1 in the table twice over, and the table
+    is the one output a person reads directly — the duplicate rows are visible and
+    nothing in them says which video they came from.
+    """
+    inst = _instance(listeners=('table',))
+
+    for frame_number in (0, 1):
+        inst._frame_callback(_png(), frame_number, 0.0)
+    for frame_number in (0, 1):
+        inst._frame_callback(_png(), frame_number, 0.0)
+
+    assert [row[0] for row in inst._start_times] == [0, 1, 2, 3]
+
+    inst.close()
+    assert len(inst.instance.tables) == 1, 'the table is emitted once, as the object closes'
 
 
 def test_the_true_position_in_the_video_is_kept():

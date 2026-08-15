@@ -38,7 +38,9 @@ It then emits on whichever output lanes have listeners attached:
 
 - **`documents` listener**: the thumbnail is base64-encoded (PNG) and emitted as a
   single `Doc` of type `Image` with fresh metadata (`chunkId`, `isTable: false`,
-  `tableId: 0`, `isDeleted: false`), plus a `metadata.source` provenance chain (the input
+  `tableId: 0`, `isDeleted: false`), where `chunkId` counts the object's thumbnails — an
+  object arriving as several image streams gets one per stream, numbered from zero again
+  with each object — plus a `metadata.source` provenance chain (the input
   image's media detail, nesting the input's own `source` underneath, so the chain grows one
   hop per transform) and `metadata.name` (inherited from the input, else `<image-stem>.png`)
   when the input carried a stream descriptor.

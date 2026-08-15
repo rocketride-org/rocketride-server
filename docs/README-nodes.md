@@ -64,29 +64,35 @@ album page into separate photos, a frame grabber pulling frames from a video.
 on this:
 
 > A media lane handler receives, per stream, exactly one `BEGIN`, zero or more
-> `WRITE`s, and at most one `END`. An `END` means the stream is complete: every
-> byte its `BEGIN` declared has arrived, and there was at least one. It comes when
-> the producer sends it, when the next stream begins on the lane, or as the object
-> closes — whichever happens first. A stream that carried no bytes, fell short of
-> what it declared, or declared nothing at all **never gets an `END`**; you learn
-> of it from the next `BEGIN` on that lane, or from `open()`, and must release
-> whatever you were holding there.
+> `WRITE`s, and at most one `END`. That `END` is either the producer's own, passed
+> through exactly as it arrives, or one the base supplies in its place — when the
+> next stream begins on the lane, or as the object closes.
+>
+> The base supplies one only for a stream that received every byte its `BEGIN`
+> declared, so the guarantee is this and no more: a stream **displaced by the next
+> `BEGIN`, or still open when the object closes**, is either ended or reported as
+> lost — never dropped in silence. A producer's own `END` is never checked against
+> the declared size, so if you must know the bytes are whole, check them yourself.
+>
+> A displaced stream that carried no bytes, fell short of what it declared, or
+> declared nothing at all **gets no `END`**; you learn of it from the next `BEGIN`
+> on that lane, or from `open()`, and must release whatever you were holding there.
 
 So a consumer keeps one buffer (or one write handle) per lane, fills it on
 `WRITE`, does its work on `END`, and drops whatever is still pending when a new
-`BEGIN` or an `open()` arrives. It never needs to compare byte counts itself —
-the base does that and delivers the `END` a producer failed to send. A node that
-holds an operating-system resource, such as an open file handle or a decoder,
-should also release it in `closing()`, which is the last call before the instance
-goes away.
+`BEGIN` or an `open()` arrives. It never needs to work out which stream is which
+— the base delivers the `END` a producer failed to send before the next `BEGIN`
+reaches you. A node that holds an operating-system resource, such as an open file
+handle or a decoder, should also release it in `closing()`, which is the last call
+before the instance goes away.
 
 Producers are the other half of the contract: **declare the stream's byte count
 on `BEGIN`**, because that is the only signal telling a complete stream from a
 truncated one. Use the helpers in `ai.common.avi.descriptor` —
 `image_begin_payload`, `audio_begin_payload`, `video_begin_payload`, or the
 `forward_enriched_*` wrappers when you hold the whole payload in memory. A stream
-that declares nothing still works, but if the object emits more than one on that
-lane, all but the last are dropped and reported as lost.
+that declares nothing still completes on its own `END`, but if the object emits
+more than one on that lane, all but the last are dropped and reported as lost.
 
 ### 2. Tool binding: agents and tools
 
