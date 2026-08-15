@@ -47,6 +47,14 @@ class IInstance(IInstanceBase):
         for q in question.questions:
             self.question.addQuestion(q.text)
 
+        # Collecting alone is not enough: without this the framework also
+        # forwards the untouched incoming question, so the LLM downstream
+        # receives two -- the original, carrying none of the configured
+        # instructions, and the merged one emitted from closing(). Both are
+        # answered, and the first reply ignores every instruction the node
+        # exists to apply. Same defect and same fix as the guardrails node.
+        self.preventDefault()
+
     def writeDocuments(self, documents):
         """
         Collect documents for merging.
