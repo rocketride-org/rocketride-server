@@ -35,6 +35,36 @@ from rocketlib import warning
 HTTP_BODY_MARKER = 'http response body:'
 
 
+def _index_field(index: Any, name: str, default: Any = None) -> Any:
+    """Read a field from an entry returned by ``list_indexes()``.
+
+    The shape of those entries is not stable across the pinecone client. Older
+    releases yielded plain dicts; from v7 the description objects (``IndexModel``)
+    are returned instead, and they expose attributes but no ``.get()``. Calling
+    ``.get()`` on one raises ``'IndexModel' object has no attribute 'get'``.
+
+    requirements.txt pins no version, so which shape arrives depends on when the
+    dependency was resolved.
+    """
+    if isinstance(index, dict):
+        return index.get(name, default)
+    value = getattr(index, name, None)
+    if value is None:
+        return default
+    # Nested descriptions (``spec``) are themselves model objects; hand back a
+    # mapping so callers can treat both shapes alike.
+    if not isinstance(value, (str, int, float, bool, dict, list)):
+        for converter in ('to_dict', 'model_dump', 'dict'):
+            method = getattr(value, converter, None)
+            if callable(method):
+                try:
+                    return method()
+                except Exception:
+                    continue
+        return {key: getattr(value, key) for key in dir(value) if not key.startswith('_')}
+    return value
+
+
 class IGlobal(StoreGlobalBase):
     serverName: str = 'pinecone'
 
@@ -104,9 +134,11 @@ class IGlobal(StoreGlobalBase):
             index_list = client.list_indexes()
 
             # Check if collection exists and validate mode compatibility
-            existing_collection = next((index for index in index_list if index.get('name') == collection), None)
+            existing_collection = next(
+                (index for index in index_list if _index_field(index, 'name') == collection), None
+            )
             if existing_collection:
-                is_serverless = 'serverless' in existing_collection.get('spec', {})
+                is_serverless = 'serverless' in (_index_field(existing_collection, 'spec', {}) or {})
                 if mode == 'serverless-dense' and not is_serverless:
                     warning(
                         f"Collection '{collection}' exists and is pod-based but you selected serverless mode. Please select 'Pinecone Pod-Based Index' to use this collection"
