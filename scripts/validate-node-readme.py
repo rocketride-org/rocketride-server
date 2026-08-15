@@ -130,6 +130,21 @@ def canon(h: str) -> str:
     return 'About' if h.startswith('About') else h.strip()
 
 
+def _clean_cell(c: str) -> str:
+    """Strip markdown decoration from a table cell without eating identifiers.
+
+    Underscores cannot be removed wholesale: they are markdown emphasis, but
+    they are also legal in the names this function exists to compare. Lane
+    `_source`, profile `gemini-2_5-flash` and connection `streamable_http` all
+    lose characters under a blanket strip and then fail to match the metadata
+    that declared them. Emphasis is therefore only removed when a pair of
+    underscores wraps the whole cell.
+    """
+    c = c.replace('`', '').replace('*', '')
+    c = re.sub(r'\s*_?\(default\)_?\s*', '', c).strip()
+    return re.sub(r'^_(.+?)_$', r'\1', c).strip()
+
+
 def table_col(text: str, section: str, col: int = 0):
     """First-column cell values of tables in a section (markup-stripped).
 
@@ -148,7 +163,7 @@ def table_col(text: str, section: str, col: int = 0):
         nxt = lines[i + 1] if i + 1 < len(lines) else ''
         if re.match(r'^\|[\s\-:|]+\|$', nxt):
             continue  # header row
-        cells = [re.sub(r'\s*\(default\)\s*', '', re.sub(r'[*_`]', '', c)).strip() for c in row.group(1).split('|')]
+        cells = [_clean_cell(c) for c in row.group(1).split('|')]
         if cells and not set(cells[0]) <= {'-', ' ', ':'}:
             vals.append(cells[col] if col < len(cells) else '')
     return [v for v in vals if v]
