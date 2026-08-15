@@ -45,16 +45,13 @@ class _Endpoint:
 
 
 def _drive_image(inst, payload):
-    """Send one complete image stream and swallow the engine preventDefault signal."""
+    """Send one complete image stream through the real node handler."""
     for action, buffer in (
         (AVI_ACTION.BEGIN, b''),
         (AVI_ACTION.WRITE, payload),
         (AVI_ACTION.END, b''),
     ):
-        try:
-            inst.writeImage(action, 'image/png', buffer)
-        except Exception:
-            pass
+        inst.writeImage(action, 'image/png', buffer)
 
 
 def test_sequential_images_receive_distinct_chunk_ids(monkeypatch):
@@ -66,6 +63,7 @@ def test_sequential_images_receive_distinct_chunk_ids(monkeypatch):
     monkeypatch.setattr(thumbnail_module.ImageProcessor, 'get_base64', lambda _: 'dGh1bWJuYWls')
 
     inst = IInstance()
+    monkeypatch.setattr(inst, 'preventDefault', lambda: None)
     inst.instance = _Capture()
     inst.IEndpoint = _Endpoint()
     inst.open(inst.instance.currentObject)
