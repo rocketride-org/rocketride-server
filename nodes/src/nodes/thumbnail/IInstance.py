@@ -123,6 +123,7 @@ class IInstance(IInstanceBase):
 
                 # Emit the document(s) for further processing in the pipeline
                 self.instance.writeDocuments([doc])
+                self.chunkId += 1
 
                 # Reset image data after processing is complete
                 self.image_data = b''
