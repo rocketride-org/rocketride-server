@@ -65,6 +65,22 @@ def _index_field(index: Any, name: str, default: Any = None) -> Any:
     return value
 
 
+def _is_serverless(index: Any) -> bool:
+    """Return True when an index description denotes a serverless index.
+
+    The value has to be read, not just the key. ``IndexSpec.to_dict()`` emits
+    every variant it knows about, unset ones included, so a pod-based index
+    describes itself as ``{'serverless': None, 'pod': {...}, 'byoc': None}``.
+    Testing for key membership therefore reports every pod-based index as
+    serverless and produces the opposite compatibility warning to the one the
+    user needs.
+    """
+    spec = _index_field(index, 'spec', {}) or {}
+    if isinstance(spec, dict):
+        return bool(spec.get('serverless'))
+    return bool(getattr(spec, 'serverless', None))
+
+
 class IGlobal(StoreGlobalBase):
     serverName: str = 'pinecone'
 
@@ -138,7 +154,7 @@ class IGlobal(StoreGlobalBase):
                 (index for index in index_list if _index_field(index, 'name') == collection), None
             )
             if existing_collection:
-                is_serverless = 'serverless' in (_index_field(existing_collection, 'spec', {}) or {})
+                is_serverless = _is_serverless(existing_collection)
                 if mode == 'serverless-dense' and not is_serverless:
                     warning(
                         f"Collection '{collection}' exists and is pod-based but you selected serverless mode. Please select 'Pinecone Pod-Based Index' to use this collection"
