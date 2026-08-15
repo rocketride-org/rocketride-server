@@ -71,8 +71,11 @@ on this:
 > The base supplies one only for a stream that received every byte its `BEGIN`
 > declared, so the guarantee is this and no more: a stream **displaced by the next
 > `BEGIN`, or still open when the object closes**, is either ended or reported as
-> lost — never dropped in silence. A producer's own `END` is never checked against
-> the declared size, so if you must know the bytes are whole, check them yourself.
+> lost — never dropped in silence. One case is deliberately left out of that: a
+> stream that neither promised bytes nor delivered any goes without an `END` and
+> without a word, having lost nothing. A producer's own `END` is never checked
+> against the declared size, so if you must know the bytes are whole, check them
+> yourself.
 >
 > A displaced stream that carried no bytes, fell short of what it declared, or
 > declared nothing at all **gets no `END`**; you learn of it from the next `BEGIN`
@@ -91,8 +94,10 @@ on `BEGIN`**, because that is the only signal telling a complete stream from a
 truncated one. Use the helpers in `ai.common.avi.descriptor` —
 `image_begin_payload`, `audio_begin_payload`, `video_begin_payload`, or the
 `forward_enriched_*` wrappers when you hold the whole payload in memory. A stream
-that declares nothing still completes on its own `END`, but if the object emits
-more than one on that lane, all but the last are dropped and reported as lost.
+that declares nothing still completes on its own `END`, and several of them in a
+row are fine as long as each one ends. What the base cannot rescue is the one whose
+`END` never comes: with no byte count to check it against, it stays open until the
+next `BEGIN` displaces it, and is then dropped and reported as lost.
 
 ### 2. Tool binding: agents and tools
 

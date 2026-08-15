@@ -799,7 +799,9 @@ class IInstanceBase:
     The base supplies one only for a stream that received every byte its BEGIN
     declared, so the guarantee is this and no more: a stream displaced by the next
     BEGIN, or still open when the object closes, is either ended or reported — never
-    dropped in silence. A producer's own END is never checked against the declared
+    dropped in silence. One case is deliberately left out of that: a stream that
+    neither promised bytes nor delivered any goes without an END and without a word,
+    having lost nothing. A producer's own END is never checked against the declared
     size, so a handler that must know its bytes are whole still checks them itself.
 
     A displaced stream that carried no bytes, fell short of what it declared, or

@@ -61,7 +61,7 @@ class IInstance(IInstanceBase):
         self._mime_type = None
         self._source_descriptor = None
 
-    def open(self, object: Entry):
+    def open(self, obj: Entry):
         """Open a new object for processing.
 
         Frames are numbered within the object they belong to, so the counter starts
@@ -70,7 +70,7 @@ class IInstance(IInstanceBase):
         object happened to get.
 
         Args:
-            object (Entry): The data entry or object to process.
+            obj (Entry): The data entry or object to process.
         """
         self._frame_chunk_id = 0
 
