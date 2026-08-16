@@ -1,0 +1,169 @@
+{
+	"title": "Trust Boundary",
+	"protocol": "trust_boundary://",
+	"classType": ["guard"],
+	"capabilities": ["experimental"],
+	"register": "filter",
+	"node": "python",
+	"path": "nodes.trust_boundary",
+	"prefix": "trust_boundary",
+	"description": [
+		"A trust boundary evaluation gate that mitigates Excessive Agency and Insecure Output Handling ",
+		"from the OWASP LLM Top 10. Intercepts agent-to-agent interactions and tool invocations in ",
+		"multi-agent frameworks (CrewAI), enforcing permission-scoped authorization policies.</br>",
+		"</br>",
+		"<b>Features</b>: Tool call interception with deny-precedence glob matching, per-scope rate ",
+		"limiting, argument schema validation, run-level payload policy enforcement, and structured ",
+		"audit logging. Default-deny semantics ensure unscoped agents cannot invoke tools."
+	],
+	"icon": "util-guard.svg",
+	"lanes": {
+		"questions": ["questions"]
+	},
+	"test": {
+		"profiles": ["default"],
+		"cases": [
+			{
+				"questions": {
+					"questions": [
+						{
+							"text": "Execute task"
+						}
+					]
+				},
+				"expect": {
+					"questions": {
+						"notEmpty": true
+					}
+				}
+			}
+		]
+	},
+	"preconfig": {
+		"default": "default",
+		"profiles": {
+			"default": {
+				"title": "Default: Intercept + audit, no run policy",
+				"enable_tool_interception": true,
+				"enable_run_policy": false,
+				"abort_on_unauthorized": true,
+				"audit_log": true,
+				"permission_scopes": [],
+				"payload_schema": null
+			},
+			"strict": {
+				"title": "Strict: All enforcement enabled",
+				"enable_tool_interception": true,
+				"enable_run_policy": true,
+				"abort_on_unauthorized": true,
+				"audit_log": true,
+				"permission_scopes": [],
+				"payload_schema": null
+			},
+			"audit_only": {
+				"title": "Audit Only: Log decisions, do not block",
+				"enable_tool_interception": true,
+				"enable_run_policy": false,
+				"abort_on_unauthorized": false,
+				"audit_log": true,
+				"permission_scopes": [],
+				"payload_schema": null
+			}
+		}
+	},
+	"fields": {
+		"enable_tool_interception": {
+			"type": "boolean",
+			"title": "Enable tool interception",
+			"description": "Intercept and evaluate tool calls against permission scopes",
+			"default": true
+		},
+		"enable_run_policy": {
+			"type": "boolean",
+			"title": "Enable run-level policy",
+			"description": "Validate and sanitize execution payloads at run start",
+			"default": false
+		},
+		"abort_on_unauthorized": {
+			"type": "boolean",
+			"title": "Abort on unauthorized",
+			"description": "Raise HookAborted to block unauthorized tool calls (false = log only)",
+			"default": true
+		},
+		"audit_log": {
+			"type": "boolean",
+			"title": "Enable audit logging",
+			"description": "Log all authorization decisions with timestamps for security review",
+			"default": true
+		},
+		"permission_scopes": {
+			"type": "array",
+			"title": "Permission scopes",
+			"description": "List of permission scope objects defining allowed/denied tools per agent",
+			"items": {
+				"type": "object"
+			}
+		},
+		"payload_schema": {
+			"type": "object",
+			"title": "Payload schema",
+			"description": "JSON Schema for run-level payload validation (optional)"
+		},
+		"trust_boundary.default": {
+			"object": "default",
+			"properties": [
+				"enable_tool_interception",
+				"abort_on_unauthorized",
+				"audit_log",
+				"permission_scopes"
+			]
+		},
+		"trust_boundary.strict": {
+			"object": "strict",
+			"properties": [
+				"enable_tool_interception",
+				"enable_run_policy",
+				"abort_on_unauthorized",
+				"audit_log",
+				"permission_scopes",
+				"payload_schema"
+			]
+		},
+		"trust_boundary.audit_only": {
+			"object": "audit_only",
+			"properties": [
+				"enable_tool_interception",
+				"audit_log",
+				"permission_scopes"
+			]
+		},
+		"trust_boundary.profile": {
+			"title": "Profile",
+			"description": "Trust boundary profile",
+			"type": "string",
+			"default": "default",
+			"enum": ["*>preconfig.profiles.*.title"],
+			"conditional": [
+				{
+					"value": "default",
+					"properties": ["trust_boundary.default"]
+				},
+				{
+					"value": "strict",
+					"properties": ["trust_boundary.strict"]
+				},
+				{
+					"value": "audit_only",
+					"properties": ["trust_boundary.audit_only"]
+				}
+			]
+		}
+	},
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Trust Boundary",
+			"properties": ["trust_boundary.profile"]
+		}
+	]
+}
