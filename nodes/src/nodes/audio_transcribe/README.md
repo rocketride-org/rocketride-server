@@ -94,13 +94,11 @@ Defaults to English (`en`). Change the `language` config value to transcribe oth
 | Field | Type | Description | Default |
 |---|---|---|---|
 | `transcribe.beam_size` | `number` | **Beam Size**<br/>Beam size for decoding. 1 is greedy (fastest); higher is slower and usually more accurate | `5` |
-| `transcribe.max_seconds` | `number` | **Maximum Seconds**<br/>The maximum seconds of audio to buffer to process | `300` |
-| `transcribe.min_seconds` | `number` | **Minimum Seconds**<br/>The minimum seconds of audio to process in a batch and looking for silence | `240` |
+| `transcribe.chunk_duration` | `number` | **Chunk Duration (s)**<br/>Seconds of audio to buffer before sending a chunk to Whisper | `60` |
+| `transcribe.language` | `string` | **Language**<br/>ISO 639-1 code of the spoken language (e.g. en, ru, de). Must match the audio; a mismatch produces garbled half-translated text | `"en"` |
 | `transcribe.model` | `string` | **Model**<br/>The Whisper model to use for transcription | `"base"` |
 | `transcribe.profile` | `string` |  | `"default"` |
-| `transcribe.silence_threshold` | `number` | **Silence Threshold**<br/>The silence threshold to detect silence in speech (in seconds) | `0.25` |
 | `transcribe.vad_filter` | `boolean` | **VAD Filter**<br/>Use Whisper's built-in Silero VAD to drop non-speech before transcribing | `true` |
-| `transcribe.vad_level` | `number` | **VAD Level**<br/>The VAD level to use for silence detection (0-3) | `1` |
 | `transcribe.vad_max_speech_duration_s` | `number` | **VAD Maximum Speech (s)**<br/>Split speech chunks longer than this. 0 means no limit | `0` |
 | `transcribe.vad_min_silence_duration_ms` | `number` | **VAD Minimum Silence (ms)**<br/>Silence this long ends a speech chunk | `500` |
 | `transcribe.vad_speech_pad_ms` | `number` | **VAD Speech Padding (ms)**<br/>Padding added to each side of a detected speech chunk | `400` |

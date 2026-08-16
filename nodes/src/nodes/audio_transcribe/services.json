@@ -168,6 +168,14 @@
 			],
 			"default": "base"
 		},
+		// Read by IGlobal since the initial commit, but never declared here, so the
+		// UI could not set it and every profile silently pinned English.
+		"transcribe.language": {
+			"type": "string",
+			"title": "Language",
+			"description": "ISO 639-1 code of the spoken language (e.g. en, ru, de). Must match the audio; a mismatch produces garbled half-translated text",
+			"default": "en"
+		},
 		// Buffering, passed to Transcribe(). Defaults are its own constants, which ran
 		// unconditionally before — min_seconds/max_seconds never reached it (#1809).
 		"transcribe.chunk_duration": {
@@ -216,7 +224,7 @@
 		},
 		"transcribe.default": {
 			"object": "default",
-			"properties": ["transcribe.model", "transcribe.chunk_duration", "transcribe.beam_size", "transcribe.vad_filter", "transcribe.vad_threshold", "transcribe.vad_min_silence_duration_ms", "transcribe.vad_speech_pad_ms", "transcribe.vad_max_speech_duration_s"]
+			"properties": ["transcribe.model", "transcribe.language", "transcribe.chunk_duration", "transcribe.beam_size", "transcribe.vad_filter", "transcribe.vad_threshold", "transcribe.vad_min_silence_duration_ms", "transcribe.vad_speech_pad_ms", "transcribe.vad_max_speech_duration_s"]
 		},
 		"transcribe.profile": {
 			"hidden": true,
