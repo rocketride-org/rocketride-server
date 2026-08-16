@@ -238,7 +238,7 @@ class FileLock:
                     msvcrt.locking(self._file.fileno(), msvcrt.LK_NBLCK, 1)
                 else:
                     fcntl.flock(self._file, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                # Lock acquired — initialize sidecar state and enable writes
+                # Lock acquired - initialize sidecar state and enable writes
                 _progress_path = self._sidecar_path
                 _sidecar_start_time = time.time()
                 _last_sidecar_message = None
@@ -250,7 +250,7 @@ class FileLock:
                 # Read what the lock holder is doing and include it in our status
                 detail = _read_progress(self._sidecar_path)
                 if detail:
-                    monitorStatus(f'Waiting — {detail}')
+                    monitorStatus(f'Waiting - {detail}')
                 else:
                     monitorStatus('Waiting for another installation to complete...')
                 time.sleep(self.poll_interval)
@@ -324,11 +324,30 @@ def _get_constraints_path() -> str:
 def _constraints_args(constraints_path: str, exe_dir: str) -> list[str]:
     """Return uv ``-c`` args if the constraints file exists and is non-empty, else ``[]``.
 
-    Relative to exe_dir (the subprocess cwd) — uv splits the value on whitespace.
+    Relative to exe_dir (the subprocess cwd); uv splits the value on whitespace.
     """
     if os.path.exists(constraints_path) and os.path.getsize(constraints_path) > 0:
         return ['-c', os.path.relpath(constraints_path, exe_dir)]
     return []
+
+
+def _torch_cpu_index_args() -> list[str]:
+    """Return uv args to resolve torch from the PyTorch CPU wheel index, or ``[]``.
+
+    Opt-in via the ``ROCKETRIDE_TORCH_CPU`` environment variable (set to ``1``,
+    ``true`` or ``yes``). Default off, so GPU hosts and existing installs are
+    unaffected. When enabled, the PyTorch CPU wheel index is added as an extra
+    index so ``torch`` (and the transitive ``nvidia-*`` / ``triton`` CUDA stack
+    that PyPI's default GPU wheel pulls in) resolves to ``+cpu`` builds instead.
+
+    See issue #1697: on a CPU-only node the default resolve installs ~6.6 GB of
+    CUDA libraries that can never run there, and it can also prevent the engine
+    from booting on hosts without a matching GPU wheel. Because the CPU index is
+    additive and left off by default, self-hosted GPU users are not affected.
+    """
+    if os.environ.get('ROCKETRIDE_TORCH_CPU', '').strip().lower() not in ('1', 'true', 'yes'):
+        return []
+    return ['--extra-index-url', 'https://download.pytorch.org/whl/cpu']
 
 
 def _run(args: list[str], check: bool = True) -> subprocess.CompletedProcess:
@@ -483,8 +502,8 @@ def _ensure_setuptools():
     """Ensure setuptools is installed in the parent env.
 
     Required because we compile/install with --no-build-isolation, which means uv
-    builds source-only wheels (e.g. docopt 0.6.2, transitively pulled by kokoro →
-    misaki → num2words) against the parent env. Several legacy sdists declare
+    builds source-only wheels (e.g. docopt 0.6.2, transitively pulled by kokoro to
+    misaki to num2words) against the parent env. Several legacy sdists declare
     setup.py-style builds without listing setuptools in build-system.requires,
     so uv can't auto-bootstrap them. Mirroring _ensure_wheel so the parent env
     has the standard PEP 517 backend available at compile/install time.
@@ -624,7 +643,7 @@ def bootstrap():
     _ensure_site_packages()  # Must be first!
     _ensure_pip()
     _ensure_wheel()  # Needed for building packages with --no-build-isolation
-    _ensure_setuptools()  # Same reason — required by sdists with legacy setup.py builds
+    _ensure_setuptools()  # Same reason - required by sdists with legacy setup.py builds
     _ensure_uv()
 
 
@@ -706,6 +725,8 @@ def _compile_constraints(constraints_path: str):
         '--no-build-isolation',  # Don't create temp venvs (engine.exe can't create venvs)
         '--emit-index-url',  # Preserve --extra-index-url etc. so install/dry-run can find packages (e.g. torch+cu128)
     ]
+    # Optionally resolve torch from the PyTorch CPU index (opt-in, default off). See #1697.
+    args.extend(_torch_cpu_index_args())
     debug(f'Compile: {args}')
     result = subprocess.run(
         args,
@@ -822,6 +843,9 @@ def _install_dry_run(requirements_path: str, constraints_path: str) -> list[str]
 
     args.extend(_constraints_args(constraints_path, exe_dir))
 
+    # Optionally resolve torch from the PyTorch CPU index (opt-in, default off). See #1697.
+    args.extend(_torch_cpu_index_args())
+
     debug(f'Dry-run: {args}')
     result = subprocess.run(
         args,
@@ -840,7 +864,7 @@ def _install_dry_run(requirements_path: str, constraints_path: str) -> list[str]
         error(f'Dependency resolution failed for {requirements_path}: {output}')
         raise RuntimeError(f'Dependency resolution failed: {output[:200]}')
 
-    # Parse packages from output — lines starting with "+ "
+    # Parse packages from output - lines starting with "+ "
     packages = []
     for line in (result.stderr + result.stdout).splitlines():
         line = line.strip()
@@ -873,7 +897,7 @@ def _install_requirements(requirements_path: str, constraints_path: str):
         debug(f'  Empty requirements file, skipping: {requirements_path}')
         return
 
-    # Start heartbeat early — the dry-run can block on uv's internal lock
+    # Start heartbeat early - the dry-run can block on uv's internal lock
     # for minutes, and we need monitorStatus events to keep the task startup
     # timeout alive during that time.
     _start_heartbeat()
@@ -918,10 +942,13 @@ def _install_requirements_inner(requirements_path: str, constraints_path: str):
         '--no-build-isolation',  # Don't create temp venvs (engine.exe can't create venvs)
     ]
 
-    # Relative to cwd (exe_dir) — see the --excludes note in _install_dry_run (#1256).
+    # Relative to cwd (exe_dir) - see the --excludes note in _install_dry_run (#1256).
     uv_args.extend(['--excludes', os.path.relpath(_write_excludes_file(), exe_dir)])
 
     uv_args.extend(_constraints_args(constraints_path, exe_dir))
+
+    # Optionally resolve torch from the PyTorch CPU index (opt-in, default off). See #1697.
+    uv_args.extend(_torch_cpu_index_args())
 
     # Run uv and stream output (heartbeat is already running from the caller)
     debug(f'Install: {uv_args}')
