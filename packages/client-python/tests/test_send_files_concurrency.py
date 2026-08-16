@@ -230,6 +230,27 @@ async def test_rejects_before_opening_anything(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_a_missing_file_raises_what_the_docstring_says(tmp_path):
+    """
+    The `Raises:` block promised `FileNotFoundError` and the code has always raised
+    `ValueError` -- both lines are older than this branch. Documented to match the
+    shipped behaviour rather than the other way round, because `FileNotFoundError` is
+    an `OSError` and not a `ValueError`, so swapping it is a public break. Nothing
+    asserted either one, which is how it drifted for the life of the function.
+    """
+    client = FakeClient()
+    files = write_files(tmp_path, 2) + [str(tmp_path / 'not-there.txt')]
+
+    with pytest.raises(ValueError, match='File not found'):
+        await client.send_files(files, 'token')
+
+    assert client.ledger['peak'] == 0
+
+    raises = DataMixin.send_files.__doc__.split('Raises:')[1].split('Example:')[0]
+    assert 'FileNotFoundError' not in raises
+
+
+@pytest.mark.asyncio
 async def test_a_bad_bound_outranks_a_bad_file_list(tmp_path):
     """Both are caller errors; the one that does not depend on the data is reported."""
     client = FakeClient()

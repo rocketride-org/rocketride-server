@@ -511,9 +511,8 @@ class DataMixin(DAPClient):
             List[Dict]: Upload results for each file with status, timing, and processing results
 
         Raises:
-            ValueError: If files list is empty, file paths invalid, token missing,
-                or max_concurrent is not a positive integer
-            FileNotFoundError: If any specified file doesn't exist
+            ValueError: If files list is empty, a file path is invalid or does not
+                exist, token missing, or max_concurrent is not a positive integer
             RuntimeError: If API key is not configured
 
         Example:
