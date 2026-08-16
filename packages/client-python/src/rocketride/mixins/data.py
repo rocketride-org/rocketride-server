@@ -488,7 +488,7 @@ class DataMixin(DAPClient):
         ],
         token: str,
         max_concurrent: int = 5,
-    ) -> UPLOAD_RESULT:
+    ) -> List[UPLOAD_RESULT]:
         """
         Upload multiple files to a pipeline with progress tracking.
 
@@ -632,7 +632,7 @@ class DataMixin(DAPClient):
         async def upload_file(index: int, filepath: str, objinfo: Dict[str, Any], mimetype: str) -> None:
             """
             Upload a single file - straightforward linear process:
-            1. Wait for pipe to become available (server handles queuing)
+            1. Open a pipe (the caller's worker pool decides when this runs)
             2. Transfer data
             3. Close pipe
             4. Send status update

@@ -156,7 +156,7 @@ rocketride start my-pipeline.pipe --apikey YOUR_KEY
 **Upload files:**
 
 ```bash
-rocketride upload files/*.csv --pipeline ./pipeline.pipe --apikey YOUR_KEY
+rocketride upload files/*.csv --pipeline_path ./pipeline.pipe --apikey YOUR_KEY
 # or with existing task token
 rocketride upload files/*.csv --token TASK_TOKEN --apikey YOUR_KEY
 # with a custom upload fan-out (default is 5)
@@ -166,7 +166,7 @@ rocketride upload files/*.csv --token TASK_TOKEN --max-concurrent 10 --apikey YO
 Upload command supports parallel file uploads. Use `--max-concurrent` to control how many
 files are uploaded simultaneously. `--threads` is a different knob: it is forwarded to
 `use()` as the pipeline's processing-thread count, and is only read when this command
-starts the pipeline itself (`--pipeline`, not `--token`).
+starts the pipeline itself (`--pipeline_path`, not `--token`).
 
 **Monitor pipeline status:**
 

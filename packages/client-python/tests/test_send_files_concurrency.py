@@ -401,3 +401,17 @@ def test_docstring_no_longer_promises_unbounded_parallelism():
     doc = DataMixin.send_files.__doc__
     assert 'Server handles queuing automatically' not in doc
     assert 'max_concurrent' in doc
+
+
+def test_returns_one_result_per_file_in_the_annotation_too():
+    """
+    `UPLOAD_RESULT` is one file's result -- types/data.py's own usage example says
+    `uploads: List[UPLOAD_RESULT] = await client.send_files(...)`. The annotation said
+    a single one, which disagreed with the docs tables and with every caller.
+    """
+    from typing import List as TypingList
+
+    from rocketride.types import UPLOAD_RESULT
+
+    returns = inspect.get_annotations(DataMixin.send_files, eval_str=True)['return']
+    assert returns == TypingList[UPLOAD_RESULT]
