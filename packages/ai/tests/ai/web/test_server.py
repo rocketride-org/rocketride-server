@@ -2,6 +2,7 @@
 
 import os
 import signal
+import socket
 import sys
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -254,3 +255,104 @@ class TestEnsureSigningKey:
         monkeypatch.setenv('RR_STORE_URL', 'filesystem:///tmp/store')
         _ensure_signing_key()
         assert len(os.environ.get('RR_SIGNING_KEY', '')) == 64
+
+
+# ============================================================================
+# WebServer.get_port() tests — see #994
+# ============================================================================
+
+
+def _bind_ipv4() -> socket.socket:
+    """Bind a real IPv4 socket to an OS-assigned ephemeral port."""
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.bind(('127.0.0.1', 0))
+    return sock
+
+
+def _bind_ipv6() -> socket.socket:
+    """Bind a real IPv6 socket to an OS-assigned ephemeral port, or skip.
+
+    ``socket.has_ipv6`` only reports build-time support, not whether this
+    host can actually bind the IPv6 loopback (many CI runners can't) — so
+    the bind itself, not just the flag, decides whether to skip.
+    """
+    if not socket.has_ipv6:
+        pytest.skip('platform built without IPv6 support')
+    sock = socket.socket(socket.AF_INET6, socket.SOCK_STREAM)
+    try:
+        sock.bind(('::1', 0))
+    except OSError as exc:
+        sock.close()
+        pytest.skip(f'cannot bind IPv6 loopback: {exc}')
+    return sock
+
+
+def _make_port_server() -> WebServer:
+    """Build a minimal WebServer-like object suitable for get_port() tests."""
+    server = object.__new__(WebServer)
+    server._port = 0
+    server.server = None
+    server._base_url_scheme = 'http'
+    server._base_url_host = 'localhost'
+    return server
+
+
+def _stub_uvicorn_server(*sockets: socket.socket) -> SimpleNamespace:
+    """Minimal stand-in for uvicorn's server object: server.servers[*].sockets."""
+    return SimpleNamespace(servers=[SimpleNamespace(sockets=list(sockets))])
+
+
+class TestGetPort:
+    """Verify get_port() prefers a bound IPv4 socket over IPv6. See #994."""
+
+    def test_dual_stack_prefers_ipv4(self, monkeypatch):
+        monkeypatch.delenv('RR_BASE_URL', raising=False)
+        ipv4 = _bind_ipv4()
+        ipv6 = _bind_ipv6()
+        try:
+            ipv4_port = ipv4.getsockname()[1]
+            ipv6_port = ipv6.getsockname()[1]
+            if ipv4_port == ipv6_port:
+                pytest.skip('kernel assigned the same port to both families; preference is unobservable')
+
+            server = _make_port_server()
+            # IPv6 listed first — the test proves nothing if IPv4 wins by position alone.
+            server.server = _stub_uvicorn_server(ipv6, ipv4)
+
+            assert server.get_port() == ipv4_port
+        finally:
+            ipv4.close()
+            ipv6.close()
+
+    def test_ipv6_only_falls_back(self, monkeypatch):
+        monkeypatch.delenv('RR_BASE_URL', raising=False)
+        ipv6 = _bind_ipv6()
+        try:
+            ipv6_port = ipv6.getsockname()[1]
+
+            server = _make_port_server()
+            server.server = _stub_uvicorn_server(ipv6)
+
+            assert server.get_port() == ipv6_port
+        finally:
+            ipv6.close()
+
+    def test_rr_base_url_behaviour(self, monkeypatch):
+        """RR_BASE_URL is published from the resolved port only when unset."""
+        ipv4 = _bind_ipv4()
+        try:
+            ipv4_port = ipv4.getsockname()[1]
+
+            monkeypatch.delenv('RR_BASE_URL', raising=False)
+            server = _make_port_server()
+            server.server = _stub_uvicorn_server(ipv4)
+            server.get_port()
+            assert os.environ['RR_BASE_URL'] == f'http://localhost:{ipv4_port}'
+
+            monkeypatch.setenv('RR_BASE_URL', 'sentinel-value')
+            other_server = _make_port_server()
+            other_server.server = _stub_uvicorn_server(ipv4)
+            other_server.get_port()
+            assert os.environ['RR_BASE_URL'] == 'sentinel-value'
+        finally:
+            ipv4.close()
