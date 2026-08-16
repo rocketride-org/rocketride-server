@@ -49,10 +49,14 @@ else:
     import fcntl
 
 # engLib is built into engine.exe. Outside the engine (unit tests, static
-# tooling) fall back to plain logging so the module stays importable.
+# tooling) fall back to plain logging so the module stays importable. Only a
+# missing engLib takes the fallback: a broken engLib, or one missing a symbol,
+# must still fail loudly inside the engine.
 try:
     from engLib import debug, monitorStatus, error
-except ImportError:  # only reached outside engine.exe
+except ModuleNotFoundError as exc:
+    if exc.name != 'engLib':
+        raise
     import logging as _logging
 
     _log = _logging.getLogger('depends')
