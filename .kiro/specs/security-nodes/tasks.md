@@ -85,7 +85,7 @@ Implement two security filter nodes for the RocketRide pipeline using the Python
     - Create `nodes/src/nodes/input_prescreen/IInstance.py`
     - `writeQuestions`: extract text; if empty/whitespace forward immediately; run heuristic scan if `block_ignore_instructions` enabled; apply policy_mode logic (block → preventDefault + warnings, warn → warnings + forward, log → forward silently); if `enable_nonce_fencing` enabled, generate cycle nonce, fence each question text and context document with same nonce, append system_addendum; reject if nonce unavailable
     - `writeDocuments`: apply nonce fencing to documents if enabled, forward downstream
-    - Handle unrecognized policy_mode by defaulting to "warn"
+    - Handle unrecognized policy_mode by defaulting to "block" (fail-closed)
     - _Requirements: 4.1, 4.2, 4.3, 4.4, 4.5, 5.1, 5.2, 5.3, 5.4, 5.5, 5.6, 5.7_
 
   - [x]* 4.3 Write property test: Block Mode Guarantee

@@ -130,19 +130,22 @@ class AuthorizationEngine:
         """Validate tool args against a JSON Schema.
 
         Returns empty string if valid, or an error message if invalid.
+        Fail-closed: rejects call when jsonschema is unavailable or schema is malformed.
         """
         try:
             import jsonschema
         except ImportError:
-            # If jsonschema not available, skip validation (graceful degradation)
-            return ""
+            return 'jsonschema library unavailable; tool call denied (fail-closed)'
 
         try:
-            jsonschema.validate(args, schema)
+            jsonschema.validate(
+                args, schema,
+                format_checker=jsonschema.FormatChecker(),
+            )
         except jsonschema.ValidationError as e:
             path = '.'.join(str(p) for p in e.absolute_path) if e.absolute_path else '(root)'
             return f"Tool args schema violation at '{path}': {e.message}"
         except jsonschema.SchemaError as e:
-            return f"Malformed require_args_schema: {e.message}"
+            return f'Malformed require_args_schema: {e.message}'
 
-        return ""
+        return ''

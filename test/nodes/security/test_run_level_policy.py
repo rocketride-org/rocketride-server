@@ -76,6 +76,44 @@ class TestRunLevelPolicySanitization:
         result = policy.enforce(payload, schema=schema, enable_run_policy=True)
         assert result == {'items': [{'name': 'a'}, {'name': 'b'}]}
 
+    def test_nested_array_of_objects_stripped(self):
+        """Unknown keys inside nested arrays of objects are stripped recursively."""
+        policy = RunLevelPolicy(jsonschema_available=True)
+        schema = {
+            'type': 'object',
+            'properties': {
+                'groups': {
+                    'type': 'array',
+                    'items': {
+                        'type': 'object',
+                        'properties': {
+                            'name': {'type': 'string'},
+                            'members': {
+                                'type': 'array',
+                                'items': {
+                                    'type': 'object',
+                                    'properties': {
+                                        'id': {'type': 'integer'},
+                                    },
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+        }
+        payload = {
+            'groups': [
+                {
+                    'name': 'admin',
+                    'members': [{'id': 1, 'secret': 'x'}, {'id': 2, 'hack': 'y'}],
+                    'extra': 'bad',
+                }
+            ]
+        }
+        result = policy.enforce(payload, schema=schema, enable_run_policy=True)
+        assert result == {'groups': [{'name': 'admin', 'members': [{'id': 1}, {'id': 2}]}]}
+
     def test_invalid_type_raises_hook_aborted(self):
         """Type mismatch raises HookAborted."""
         policy = RunLevelPolicy(jsonschema_available=True)

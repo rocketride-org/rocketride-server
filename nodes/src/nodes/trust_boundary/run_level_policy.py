@@ -71,7 +71,8 @@ class RunLevelPolicy:
     def _strip_unknown_keys(self, data, schema: dict):
         """Recursively strip keys not defined in schema properties.
 
-        Also sanitizes objects inside arrays when items schema is defined.
+        Handles nested objects, arrays of objects, and nested arrays recursively.
+        Non-dict/scalar elements in arrays are preserved unchanged.
         """
         if not isinstance(data, dict):
             return data
@@ -88,17 +89,28 @@ class RunLevelPolicy:
                     # Recurse into nested objects
                     result[key] = self._strip_unknown_keys(value, prop_schema)
                 elif isinstance(value, list) and prop_schema.get('type') == 'array':
-                    # Sanitize objects inside arrays
-                    items_schema = prop_schema.get('items', {})
-                    if items_schema.get('type') == 'object' and 'properties' in items_schema:
-                        result[key] = [
-                            self._strip_unknown_keys(item, items_schema)
-                            if isinstance(item, dict) else item
-                            for item in value
-                        ]
-                    else:
-                        result[key] = value
+                    # Sanitize elements inside arrays
+                    result[key] = self._strip_array_items(value, prop_schema.get('items', {}))
                 else:
                     result[key] = value
+
+        return result
+
+    def _strip_array_items(self, items: list, items_schema: dict) -> list:
+        """Recursively sanitize elements in an array per the items schema.
+
+        Handles objects, nested arrays, and scalars.
+        """
+        if not items_schema:
+            return items
+
+        result = []
+        for item in items:
+            if isinstance(item, dict) and items_schema.get('type') == 'object' and 'properties' in items_schema:
+                result.append(self._strip_unknown_keys(item, items_schema))
+            elif isinstance(item, list) and items_schema.get('type') == 'array':
+                result.append(self._strip_array_items(item, items_schema.get('items', {})))
+            else:
+                result.append(item)
 
         return result

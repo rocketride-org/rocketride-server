@@ -108,11 +108,8 @@ class IGlobal(IGlobalBase):
         # Register TrustBoundaryHook when CrewAI is available
         self._hook_instance = None
         if self._crewai_available and config.enable_tool_interception:
-            try:
-                from .trust_boundary_hook import TrustBoundaryHook
-                self._hook_instance = TrustBoundaryHook(instance=None)
-            except Exception as e:
-                warning(f'[TrustBoundary] Failed to create hook: {e}')
+            from .trust_boundary_hook import TrustBoundaryHook
+            self._hook_instance = TrustBoundaryHook(instance=None)
 
     def get_hook(self):
         """Return the registered TrustBoundaryHook instance (or None)."""

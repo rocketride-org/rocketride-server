@@ -82,9 +82,8 @@ class IInstance(IInstanceBase):
                     logger = logging.getLogger('rocketride.input_prescreen')
                     for match in scan_result.matches:
                         logger.info(
-                            '[PreScreen] Detected: %s — %s (rule=%s, severity=%s, pos=%d)',
-                            match.category, match.matched_text[:60],
-                            match.rule_id, match.severity, match.position,
+                            '[PreScreen] Detected: category=%s, rule=%s, severity=%s, pos=%d',
+                            match.category, match.rule_id, match.severity, match.position,
                         )
 
         # Phase 2: Nonce fencing
@@ -196,8 +195,8 @@ class IInstance(IInstanceBase):
                     logger = logging.getLogger('rocketride.input_prescreen')
                     for match in scan_result.matches:
                         logger.info(
-                            '[PreScreen] Document detected: %s — %s',
-                            match.category, match.matched_text[:60],
+                            '[PreScreen] Document detected: category=%s, rule=%s, severity=%s, pos=%d',
+                            match.category, match.rule_id, match.severity, match.position,
                         )
 
         # Nonce fencing on documents is handled when they appear as question context

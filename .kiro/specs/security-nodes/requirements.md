@@ -72,7 +72,7 @@ This document defines the requirements for two security nodes in the RocketRide 
 2. WHILE policy_mode is set to "warn", WHEN the Heuristic_Engine scan returns passed equal to false, THE Pre-Screen_Node SHALL emit a warning message per matched violation indicating the rule name and violation details, and forward the question downstream
 3. WHILE policy_mode is set to "log", WHEN the Heuristic_Engine scan returns passed equal to false, THE Pre-Screen_Node SHALL forward the question downstream without emitting any warning messages
 4. WHEN the input text is empty or contains only whitespace characters, THE Pre-Screen_Node SHALL forward it downstream without invoking the Heuristic_Engine scan
-5. IF policy_mode is not set to one of the recognized values ("block", "warn", "log"), THEN THE Pre-Screen_Node SHALL default to "warn" behavior and emit a warning message per matched violation while forwarding the question downstream
+5. IF policy_mode is not set to one of the recognized values ("block", "warn", "log"), THEN THE Pre-Screen_Node SHALL default to "block" behavior, call preventDefault, and stop the question from reaching downstream nodes
 
 ### Requirement 5: Pre-Screen Nonce Integration
 
