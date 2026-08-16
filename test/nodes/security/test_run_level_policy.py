@@ -55,6 +55,27 @@ class TestRunLevelPolicySanitization:
         result = policy.enforce(payload, schema=schema, enable_run_policy=True)
         assert result == {'config': {'name': 'test'}}
 
+    def test_array_of_objects_stripped(self):
+        """Unknown keys inside array objects are stripped."""
+        policy = RunLevelPolicy(jsonschema_available=True)
+        schema = {
+            'type': 'object',
+            'properties': {
+                'items': {
+                    'type': 'array',
+                    'items': {
+                        'type': 'object',
+                        'properties': {
+                            'name': {'type': 'string'},
+                        },
+                    },
+                },
+            },
+        }
+        payload = {'items': [{'name': 'a', 'secret': 'bad'}, {'name': 'b', 'hidden': 1}]}
+        result = policy.enforce(payload, schema=schema, enable_run_policy=True)
+        assert result == {'items': [{'name': 'a'}, {'name': 'b'}]}
+
     def test_invalid_type_raises_hook_aborted(self):
         """Type mismatch raises HookAborted."""
         policy = RunLevelPolicy(jsonschema_available=True)

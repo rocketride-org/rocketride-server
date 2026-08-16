@@ -46,8 +46,8 @@ class IGlobal(IGlobalBase):
         # Validate policy_mode
         policy_mode = raw.get('policy_mode', 'block')
         if policy_mode not in ('block', 'warn', 'log'):
-            warning(f"[PreScreen] Unrecognized policy_mode '{policy_mode}'; defaulting to 'warn'")
-            policy_mode = 'warn'
+            warning(f"[PreScreen] Unrecognized policy_mode '{policy_mode}'; defaulting to 'block'")
+            policy_mode = 'block'
         config.policy_mode = policy_mode
 
         config.custom_rules = raw.get('custom_rules', [])

@@ -35,9 +35,36 @@ sys.modules.setdefault('ai.common.config', ai_config_mock)
 # Mock depends
 sys.modules.setdefault('depends', MagicMock())
 
-# Mock crewai
-sys.modules.setdefault('crewai', MagicMock())
-sys.modules.setdefault('crewai.security', MagicMock())
+# Mock crewai with explicit stubs
+crewai_mock = types.ModuleType('crewai')
+sys.modules.setdefault('crewai', crewai_mock)
+
+crewai_security = types.ModuleType('crewai.security')
+
+
+class _InterceptionPoint:
+    PRE_TOOL_CALL = 'pre_tool_call'
+    EXECUTION_START = 'execution_start'
+
+
+def _on(interception_point):
+    """Stub decorator that preserves the decorated method."""
+    def decorator(func):
+        return func
+    return decorator
+
+
+class _HookAborted(Exception):
+    def __init__(self, reason='', source=''):
+        self.reason = reason
+        self.source = source
+        super().__init__(reason)
+
+
+crewai_security.on = _on
+crewai_security.InterceptionPoint = _InterceptionPoint
+crewai_security.HookAborted = _HookAborted
+sys.modules.setdefault('crewai.security', crewai_security)
 
 # Add the nodes source path
 import pathlib

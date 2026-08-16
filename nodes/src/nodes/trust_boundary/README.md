@@ -41,7 +41,7 @@ Uses default-deny semantics: any tool/agent not explicitly scoped is blocked. De
 | Profile | Behaviour |
 |---------|-----------|
 | Default | Intercept + audit, no run policy. |
-| Strict | All enforcement enabled (interception + run policy + abort). |
+| Strict | All enforcement enabled (interception + run policy + abort). Run-level payload enforcement requires `payload_schema` to be configured. |
 | Audit Only | Log decisions without blocking. |
 
 ---

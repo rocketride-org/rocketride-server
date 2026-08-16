@@ -68,22 +68,36 @@ class RunLevelPolicy:
 
         return sanitized
 
-    def _strip_unknown_keys(self, data: dict, schema: dict) -> dict:
-        """Recursively strip keys not defined in schema properties."""
+    def _strip_unknown_keys(self, data, schema: dict):
+        """Recursively strip keys not defined in schema properties.
+
+        Also sanitizes objects inside arrays when items schema is defined.
+        """
         if not isinstance(data, dict):
             return data
 
-        properties = schema.get("properties", {})
+        properties = schema.get('properties', {})
         if not properties:
             return data
 
         result = {}
         for key, value in data.items():
             if key in properties:
-                # Recurse into nested objects
                 prop_schema = properties[key]
-                if isinstance(value, dict) and prop_schema.get("type") == "object":
+                if isinstance(value, dict) and prop_schema.get('type') == 'object':
+                    # Recurse into nested objects
                     result[key] = self._strip_unknown_keys(value, prop_schema)
+                elif isinstance(value, list) and prop_schema.get('type') == 'array':
+                    # Sanitize objects inside arrays
+                    items_schema = prop_schema.get('items', {})
+                    if items_schema.get('type') == 'object' and 'properties' in items_schema:
+                        result[key] = [
+                            self._strip_unknown_keys(item, items_schema)
+                            if isinstance(item, dict) else item
+                            for item in value
+                        ]
+                    else:
+                        result[key] = value
                 else:
                     result[key] = value
 

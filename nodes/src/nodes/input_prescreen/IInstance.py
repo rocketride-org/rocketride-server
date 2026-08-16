@@ -49,15 +49,21 @@ class IInstance(IInstanceBase):
             self.instance.writeQuestions(question)
             return
 
+        # Enforce max_input_length before scanning
+        if config.max_input_length > 0 and len(full_text) > config.max_input_length:
+            warning(
+                f'[PreScreen] Input length {len(full_text)} exceeds max_input_length '
+                f'{config.max_input_length}; blocking'
+            )
+            self.preventDefault()
+            return
+
         # Phase 1: Static heuristic scan
         if config.block_ignore_instructions:
             scan_result = engine.scan(full_text)
 
             if not scan_result.passed:
                 policy = config.policy_mode
-                # Unrecognized policy_mode defaults to warn
-                if policy not in ('block', 'warn', 'log'):
-                    policy = 'warn'
 
                 if policy == 'block':
                     for match in scan_result.matches:
@@ -71,7 +77,15 @@ class IInstance(IInstanceBase):
                         warning(
                             f'[PreScreen] Warning: {match.category} \u2014 {match.matched_text[:60]}'
                         )
-                # "log" mode: forward silently (no warnings emitted)
+                elif policy == 'log':
+                    import logging
+                    logger = logging.getLogger('rocketride.input_prescreen')
+                    for match in scan_result.matches:
+                        logger.info(
+                            '[PreScreen] Detected: %s — %s (rule=%s, severity=%s, pos=%d)',
+                            match.category, match.matched_text[:60],
+                            match.rule_id, match.severity, match.position,
+                        )
 
         # Phase 2: Nonce fencing
         if config.enable_nonce_fencing and nonce_fencer:
@@ -115,7 +129,79 @@ class IInstance(IInstanceBase):
         self.instance.writeQuestions(question)
 
     def writeDocuments(self, documents):
-        """Forward documents downstream (nonce fencing of documents is applied via context)."""
+        """Apply pre-screen enforcement to documents lane.
+
+        Scans document content for injection, applies policy mode,
+        and fences with nonces if enabled.
+        """
+        engine = self.IGlobal.heuristic_engine
+        config = self.IGlobal.config
+        nonce_fencer = self.IGlobal.nonce_fencer
+
+        if engine is None or config is None:
+            self.instance.writeDocuments(documents)
+            return
+
+        # Extract document text for scanning
+        text_parts = []
+        for doc in documents:
+            content = None
+            if hasattr(doc, 'page_content'):
+                content = doc.page_content
+            elif isinstance(doc, dict):
+                content = doc.get('page_content', '')
+            else:
+                content = str(doc) if doc else ''
+            if content and str(content).strip():
+                text_parts.append(str(content))
+
+        full_text = ' '.join(text_parts)
+
+        if not full_text.strip():
+            self.instance.writeDocuments(documents)
+            return
+
+        # Enforce max_input_length
+        if config.max_input_length > 0 and len(full_text) > config.max_input_length:
+            warning(
+                f'[PreScreen] Document input length {len(full_text)} exceeds '
+                f'max_input_length {config.max_input_length}; blocking'
+            )
+            self.preventDefault()
+            return
+
+        # Heuristic scan
+        if config.block_ignore_instructions:
+            scan_result = engine.scan(full_text)
+
+            if not scan_result.passed:
+                policy = config.policy_mode
+
+                if policy == 'block':
+                    for match in scan_result.matches:
+                        warning(
+                            f'[PreScreen] Document blocked: {match.category} '
+                            f'\u2014 {match.matched_text[:60]}'
+                        )
+                    self.preventDefault()
+                    return
+                elif policy == 'warn':
+                    for match in scan_result.matches:
+                        warning(
+                            f'[PreScreen] Document warning: {match.category} '
+                            f'\u2014 {match.matched_text[:60]}'
+                        )
+                elif policy == 'log':
+                    import logging
+                    logger = logging.getLogger('rocketride.input_prescreen')
+                    for match in scan_result.matches:
+                        logger.info(
+                            '[PreScreen] Document detected: %s — %s',
+                            match.category, match.matched_text[:60],
+                        )
+
+        # Nonce fencing on documents is handled when they appear as question context
+        # (documents lane is typically collected and attached to questions by the engine)
         self.instance.writeDocuments(documents)
 
     def close(self):

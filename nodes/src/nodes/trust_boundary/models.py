@@ -59,7 +59,7 @@ class TrustBoundaryConfig:
 class HookAborted(Exception):
     """Raised to block unauthorized tool calls or invalid payloads."""
 
-    def __init__(self, reason: str, source: str = "TrustBoundaryEvaluationGate"):
+    def __init__(self, reason: str, source: str = 'TrustBoundaryEvaluationGate'):
         self.reason = reason
         self.source = source
-        super().__init__(f"[{source}] {reason}")
+        super().__init__(f'[{source}] {reason}')

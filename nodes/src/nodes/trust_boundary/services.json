@@ -52,7 +52,7 @@
 				"payload_schema": null
 			},
 			"strict": {
-				"title": "Strict: All enforcement enabled",
+				"title": "Strict: All enforcement enabled (requires payload_schema)",
 				"enable_tool_interception": true,
 				"enable_run_policy": true,
 				"abort_on_unauthorized": true,

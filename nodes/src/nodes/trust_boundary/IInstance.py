@@ -16,9 +16,13 @@ class IInstance(IInstanceBase):
     IGlobal: IGlobal
 
     def open(self, entry: Entry):
-        """Reset per-run call counters at the start of each execution."""
+        """Reset per-run call counters and wire the hook to this instance."""
         if self.IGlobal.auth_engine:
             self.IGlobal.auth_engine.reset_counters()
+        # Wire the hook to this active instance for delegation
+        hook = self.IGlobal.get_hook()
+        if hook is not None:
+            hook._instance = self
 
     def writeQuestions(self, question: Question):
         """Forward questions downstream.

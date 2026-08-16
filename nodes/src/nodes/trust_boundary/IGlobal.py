@@ -105,6 +105,19 @@ class IGlobal(IGlobalBase):
         from .audit_logger import AuditLogger
         self.audit_logger = AuditLogger(enabled=config.audit_log)
 
+        # Register TrustBoundaryHook when CrewAI is available
+        self._hook_instance = None
+        if self._crewai_available and config.enable_tool_interception:
+            try:
+                from .trust_boundary_hook import TrustBoundaryHook
+                self._hook_instance = TrustBoundaryHook(instance=None)
+            except Exception as e:
+                warning(f'[TrustBoundary] Failed to create hook: {e}')
+
+    def get_hook(self):
+        """Return the registered TrustBoundaryHook instance (or None)."""
+        return self._hook_instance
+
     def endGlobal(self):
         self.auth_engine = None
         self.run_level_policy = None

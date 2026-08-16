@@ -62,6 +62,6 @@ class PreScreenConfig:
     block_ignore_instructions: bool = True
     enable_nonce_fencing: bool = True
     nonce_length: int = 16
-    policy_mode: str = "block"  # "block" | "warn" | "log"
+    policy_mode: str = 'block'  # 'block' | 'warn' | 'log'
     custom_rules: list = field(default_factory=list)
     max_input_length: int = 0  # 0 = no limit
