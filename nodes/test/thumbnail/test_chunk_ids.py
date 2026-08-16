@@ -111,10 +111,14 @@ def _instance(monkeypatch, listeners=('documents',)):
 
 
 def _stream(inst, data=b'\x89PNG-source'):
-    """One complete image stream through the node."""
+    """One complete image stream through the node.
+
+    Every call passes a buffer, including END: that is the shape the engine delivers,
+    and the point here is to drive the node the way it is really driven.
+    """
     inst.writeImage(AVI_ACTION.BEGIN, 'image/png', b'')
     inst.writeImage(AVI_ACTION.WRITE, 'image/png', data)
-    inst.writeImage(AVI_ACTION.END, 'image/png')
+    inst.writeImage(AVI_ACTION.END, 'image/png', b'')
 
 
 def test_each_stream_of_one_object_gets_its_own_chunk_id(monkeypatch):
