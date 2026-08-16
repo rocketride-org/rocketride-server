@@ -143,8 +143,14 @@ class AgentHostServices:
             entry = self._tool_list.get(tool_name)
             if entry is not None:
                 return entry
-            node_id = tool_name.split('.', 1)[0] if tool_name else ''
-            if node_id in self._tool_nodes:
+            # Node ids may themselves contain dots, so the owning node is the
+            # longest known id the name is prefixed by — not the first segment.
+            node_id = max(
+                (node for node in self._tool_nodes if tool_name.startswith(f'{node}.')),
+                key=len,
+                default=None,
+            )
+            if node_id is not None:
                 self._refresh_node(node_id)
                 entry = self._tool_list.get(tool_name)
                 if entry is not None:

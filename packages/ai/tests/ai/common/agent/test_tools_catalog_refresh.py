@@ -202,6 +202,18 @@ class TestMiss:
         assert set(old_catalog) == {'n1.srv.a'} and [d['name'] for d in old_list] == ['n1.srv.a']
         assert tools._tool_list is not old_catalog and tools.list is not old_list
 
+    def test_dotted_node_id_resolves_to_the_longest_matching_node(self):
+        # 'n1.x.late' is prefixed by both known node ids 'n1' and 'n1.x'.
+        # Splitting on the first dot would re-query 'n1' and still miss.
+        instance = _FakeInstance({'n1': [_descriptor('a')], 'n1.x': [_descriptor('b')]})
+        tools = Tools(_FakeInvoker(instance))
+        instance.tools_by_node['n1.x'].append(_descriptor('late'))
+
+        assert tools.invoke('n1.x.late', {}) == {'called': 'late'}
+
+        assert instance.queries == ['n1', 'n1.x', 'n1.x']
+        assert {d['name'] for d in tools.list} == {'n1.a', 'n1.x.b', 'n1.x.late'}
+
     def test_refresh_only_touches_the_owning_node(self):
         instance = _FakeInstance({'n1': [_descriptor('srv.a')], 'n2': [_descriptor('other.z')]})
         tools = Tools(_FakeInvoker(instance))

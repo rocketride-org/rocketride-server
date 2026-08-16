@@ -59,6 +59,16 @@ from .mcp_streamable_http_client import McpStreamableHttpClient
 REFRESH_MIN_INTERVAL_S = 1.0
 
 
+def _monotonic() -> float:
+    """Clock used for the refresh rate limit.
+
+    Indirection on purpose: tests drive this instead of patching
+    ``time.monotonic`` on the stdlib module, which is process-wide and would
+    reach anything else relying on it.
+    """
+    return time.monotonic()
+
+
 class ToolUnavailableError(Exception):
     """A tool the agent asked for is not on the MCP server, even after a
     catalog refresh. Distinct from a transport failure so callers can tell
@@ -252,7 +262,7 @@ class IGlobal(IGlobalBase):
             by_namespaced[f'{self.serverName}.{t.name}'] = t
         self._tools_by_original = by_original
         self._tools_by_namespaced = by_namespaced
-        self._catalog_fetched_at = time.monotonic()
+        self._catalog_fetched_at = _monotonic()
 
     def refresh_tools(self, *, reason: str, min_age_s: float = 0.0) -> bool:
         """Re-read tools/list from the server and swap the cache.
@@ -270,7 +280,7 @@ class IGlobal(IGlobalBase):
         lock = self.__dict__.setdefault('_refresh_lock', threading.Lock())
         with lock:
             fetched_at = getattr(self, '_catalog_fetched_at', None)
-            if fetched_at is not None and min_age_s > 0 and (time.monotonic() - fetched_at) < min_age_s:
+            if fetched_at is not None and min_age_s > 0 and (_monotonic() - fetched_at) < min_age_s:
                 return False
             try:
                 tools = client.list_tools()
@@ -299,10 +309,12 @@ class IGlobal(IGlobalBase):
         if server_name != self.serverName:
             return None
         tool = (getattr(self, '_tools_by_original', None) or {}).get(tool_name)
-        if tool is None and self.refresh_tools(
-            reason=f'lookup miss for {tool_name!r}', min_age_s=REFRESH_MIN_INTERVAL_S
-        ):
-            tool = (self._tools_by_original or {}).get(tool_name)
+        if tool is None:
+            self.refresh_tools(reason=f'lookup miss for {tool_name!r}', min_age_s=REFRESH_MIN_INTERVAL_S)
+            # Re-read whatever the attempt returned: False also means "another
+            # thread refreshed inside the rate-limit window", and that refresh
+            # may be the one carrying this tool.
+            tool = (getattr(self, '_tools_by_original', None) or {}).get(tool_name)
         return tool
 
     def call_tool(self, *, server_name: str, tool_name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:

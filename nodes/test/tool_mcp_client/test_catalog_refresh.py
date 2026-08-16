@@ -128,9 +128,14 @@ def _iglobal(client, *initial):
 
 @pytest.fixture
 def clock(monkeypatch):
-    """Controllable ``time.monotonic`` for the IGlobal module."""
+    """Controllable refresh clock for the IGlobal module.
+
+    Patches the module's own ``_monotonic`` shim, not ``time.monotonic`` on the
+    stdlib module — the latter is process-wide and would reach every other
+    consumer for the duration of the test.
+    """
     now = [1000.0]
-    monkeypatch.setattr(iglobal_module.time, 'monotonic', lambda: now[0])
+    monkeypatch.setattr(iglobal_module, '_monotonic', lambda: now[0])
     return now
 
 
@@ -212,6 +217,21 @@ class TestLookupMiss:
         clock[0] += REFRESH_MIN_INTERVAL_S
         assert g.get_tool(server_name='srv', tool_name='ghost') is None
         assert client.list_calls == 2
+
+    def test_miss_re_reads_the_cache_even_when_its_own_refresh_is_skipped(self):
+        # Another caller refreshed the catalog inside the rate-limit window, so
+        # our own attempt is skipped and returns False — but the tool it
+        # fetched is in the cache, and the miss path must still find it.
+        client = _ScriptedClient([_tool('a')])
+        g = _iglobal(client, _tool('a'))
+
+        def _refresh_by_someone_else(**_kwargs):
+            g._cache_tools([_tool('a'), _tool('late')])
+            return False
+
+        g.refresh_tools = _refresh_by_someone_else
+
+        assert g.get_tool(server_name='srv', tool_name='late').name == 'late'
 
     def test_other_server_name_is_not_this_node(self):
         client = _ScriptedClient([_tool('a')])
