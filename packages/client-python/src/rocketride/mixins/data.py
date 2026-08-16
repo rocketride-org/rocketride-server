@@ -767,7 +767,19 @@ class DataMixin(DAPClient):
         worker_count = min(max_concurrent, len(normalized_files))
 
         # Wait for all uploads to complete
-        await asyncio.gather(*(upload_worker() for _ in range(worker_count)), return_exceptions=True)
+        outcomes = await asyncio.gather(
+            *(upload_worker() for _ in range(worker_count)), return_exceptions=True
+        )
+
+        # A worker cancelled on its own -- not through this call, which gather() already
+        # propagates -- takes the file it had claimed AND every file still on the cursor
+        # with it, because no other worker is created to drain them. Returning here would
+        # hand back a list with holes in it where `List[UPLOAD_RESULT]` was promised, so
+        # anything the worker's `except Exception` deliberately does not catch is re-raised
+        # instead. `return_exceptions=True` is what makes these values rather than throws.
+        for outcome in outcomes:
+            if isinstance(outcome, BaseException) and not isinstance(outcome, Exception):
+                raise outcome
 
         # Log summary
         successful_uploads = sum(1 for r in results if r and r.get('action') == 'complete')

@@ -376,6 +376,55 @@ async def test_a_file_that_vanishes_mid_upload_does_not_strand_the_queue(tmp_pat
     assert gather_spy.failures == []
 
 
+async def _start_and_reach_a_worker(client, files, max_concurrent):
+    """Start send_files() and hand back its task plus the worker tasks gather() made.
+
+    Nothing public holds a reference to a gather() child, so the only way to cancel one
+    without cancelling the caller is to go through the loop's task registry -- which is
+    also the only way the case under test arises.
+    """
+    caller = asyncio.create_task(client.send_files(files, 'token', max_concurrent=max_concurrent))
+    await asyncio.sleep(0.05)
+    workers = [
+        t
+        for t in asyncio.all_tasks()
+        if t is not caller and getattr(t.get_coro(), '__name__', None) == 'upload_worker'
+    ]
+    return caller, workers
+
+
+@pytest.mark.asyncio
+async def test_a_cancelled_worker_propagates_rather_than_returning_holes(tmp_path):
+    """
+    A cancelled worker is the one death `except Exception` does not cover: CancelledError
+    is a BaseException, so the worker dies with an index already off the cursor and no
+    survivor obliged to pick up what is left. Pre-fix this returned quietly with `None`
+    entries in a `List[UPLOAD_RESULT]`, and with max_concurrent=1 that was every file.
+    """
+    client = FakeClient(latency=0.30)
+    files = write_files(tmp_path, 9)
+
+    caller, workers = await _start_and_reach_a_worker(client, files, max_concurrent=3)
+    assert len(workers) == 3
+    workers[0].cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await caller
+
+
+@pytest.mark.asyncio
+async def test_cancelling_the_caller_still_propagates(tmp_path):
+    """The reachable case -- wait_for, TaskGroup, loop shutdown -- must be unchanged."""
+    client = FakeClient(latency=0.30)
+    files = write_files(tmp_path, 9)
+
+    caller, workers = await _start_and_reach_a_worker(client, files, max_concurrent=3)
+    caller.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await caller
+
+
 @pytest.mark.asyncio
 async def test_progress_events_still_fire_for_every_file(tmp_path):
     client = FakeClient()
