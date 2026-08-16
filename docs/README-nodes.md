@@ -119,6 +119,7 @@ channel; they have no data lanes and **bind to an agent** (see
 | `tool_bland_ai`     | Places and manages AI phone calls via Bland AI                   |
 | `tool_slack`        | Slack workspace operations: post messages, list channels, read history |
 | `tool_oura`         | Oura Ring health data (sleep, readiness, activity, heart rate), read-only |
+| `tool_insforge`     | InsForge backend: record CRUD, RPC calls, storage; read-only by default |
 | `tool_xtrace_memory`| Long-term shared agent memory, backed by xTrace Memory Manager   |
 | `tool_mem0`         | Long-term shared agent memory, backed by the hosted Mem0 Platform |
 | `tool_gohighlevel`  | GoHighLevel (LeadConnector) v2 sub-account operations: contacts, opportunities, conversations, calendars |

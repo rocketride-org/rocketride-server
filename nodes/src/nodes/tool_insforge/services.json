@@ -1,0 +1,60 @@
+{
+	"title": "InsForge",
+	"protocol": "tool_insforge://",
+	"classType": ["tool"],
+	"capabilities": ["invoke"],
+	"register": "filter",
+	"node": "python",
+	"path": "nodes.tool_insforge",
+	"prefix": "insforge",
+	"icon": "insforge.svg",
+	"documentation": "https://docs.rocketride.org",
+	"description": ["Exposes an InsForge project's REST API as agent tools.", "Covers PostgREST-style record queries, inserts, updates, upserts and deletes,", "database function (RPC) calls, and storage bucket listing, download URLs and deletes.", "Read-only by default; mutating tools require writes to be enabled."],
+	"tile": ["InsForge"],
+	"lanes": {},
+	"preconfig": {
+		"default": "default",
+		"profiles": {
+			"default": {
+				"title": "InsForge",
+				"project_url": "",
+				"api_key": "",
+				"allow_writes": false
+			}
+		}
+	},
+	"fields": {
+		"insforge.project_url": {
+			"type": "string",
+			"title": "Project URL",
+			"description": "Base URL of the InsForge project, e.g. https://your-app.insforge.app. A self-hosted deployment's own origin works too. Falls back to the ROCKETRIDE_INSFORGE_URL environment variable when empty.",
+			"default": "",
+			"ui": {
+				"ui:placeholder": "https://your-app.insforge.app"
+			}
+		},
+		"insforge.api_key": {
+			"type": "string",
+			"title": "API Key",
+			"description": "InsForge API key or JWT, sent as a Bearer token. Row-level security applies to whatever this credential authorizes, so prefer a scoped key over an admin one. Falls back to the ROCKETRIDE_INSFORGE_KEY environment variable when empty.",
+			"default": "",
+			"secure": true,
+			"ui": {
+				"ui:widget": "ApiKeyWidget"
+			}
+		},
+		"insforge.allow_writes": {
+			"type": "boolean",
+			"title": "Allow writes",
+			"description": "Permit the agent to insert, update, upsert and delete records, call database functions, and delete stored objects. Leave OFF unless the agent is meant to change the backend — query and listing tools work either way.",
+			"default": false
+		}
+	},
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "InsForge",
+			"properties": ["type", "insforge.project_url", "insforge.api_key", "insforge.allow_writes"]
+		}
+	]
+}
