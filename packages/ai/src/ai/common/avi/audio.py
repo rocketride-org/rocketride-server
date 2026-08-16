@@ -79,8 +79,10 @@ class AudioReader(AVIReader):
         onData() callback — so from inside onData() this is the position where
         the current chunk starts.
         """
-        # Sample size depends on format
-        sample_size = 2 if self._format == 'pcm' else 4  # 4 bytes for f32le, 2 for 16-bit WAV
-        samples = self._bytes_read / sample_size
+        # Both output modes emit pcm_s16le, so 2 bytes per sample either way.
+        # In wav mode the count also includes the container header — a fixed
+        # sub-millisecond offset, deliberately not parsed out; the pcm mode
+        # used in production is exact.
+        samples = self._bytes_read / 2
         frames = samples / self._channels
         return frames / self._sample_rate

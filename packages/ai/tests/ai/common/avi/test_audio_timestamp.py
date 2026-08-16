@@ -78,12 +78,16 @@ def test_timestamp_resets_per_stream():
     assert reader.getTimestamp() == 0.0
 
 
-def test_wav_format_uses_its_own_sample_size():
+def test_wav_format_also_uses_16bit_samples():
+    """Both output modes emit pcm_s16le — the old wav branch divided by 4,
+    a sample size the ffmpeg args never produce.
+    """
+
     class _WavProbe(AudioReader):
         def onData(self, data):
             pass
 
     reader = _WavProbe(name='wav', format='wav', sample_rate=8000, channels=2)
-    reader._bytes_read = 8000 * 2 * 4  # one second of stereo at 4 bytes/sample
+    reader._bytes_read = 8000 * 2 * 2  # one second of stereo pcm_s16le
 
     assert reader.getTimestamp() == 1.0
