@@ -61,7 +61,11 @@ def _index_field(index: Any, name: str, default: Any = None) -> Any:
                     return method()
                 except Exception:
                     continue
-        return {key: getattr(value, key) for key in dir(value) if not key.startswith('_')}
+        return {
+            key: getattr(value, key)
+            for key in dir(value)
+            if not key.startswith('_') and not callable(getattr(value, key, None))
+        }
     return value
 
 
