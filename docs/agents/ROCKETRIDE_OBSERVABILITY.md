@@ -425,28 +425,34 @@ event message. Source: `packages/client-python/src/rocketride/` and
 
 ---
 
-## 8. Recommended ingestion design for the agents database
+## 8. Recommended design for an agents / product database
+
+**Prefer the persisted run log for history and replay.** Use the SDK run-log
+APIs (`client.log.openEventStream` / `open_event_stream`) to seek, seed, and
+play chapters. Do **not** duplicate that continuum into your own
+`pipeline_runs` / `pipeline_run_traces` / `pipeline_run_logs` tables just to
+store the same lifecycle, flow, and output events.
+
+Use a live DAP subscription only when you need something the run log is not
+for:
+
+- real-time product UI that must react before a chapter is seekable,
+- cross-product analytics with a schema the run log does not provide,
+- long-term warehouses beyond the engine retention window.
+
+If you do subscribe live:
 
 1. Open one long-lived WebSocket to `ws://<rocketride-host>:5565/task/service`.
 2. Send `auth` with the service-account API key.
 3. Send `rrext_monitor` with `token: "*"` and
    `types: ["TASK", "SUMMARY", "FLOW", "OUTPUT", "SSE"]`.
-4. For every inbound `event` message, switch on `event` and write to your DB:
-   - `apaevt_task` → `pipeline_runs` (insert on `begin`, update on `end`,
-     reconcile from `running` snapshot at startup).
-     by `(project_id, source, startTime)`.
-   - `apaevt_flow` → append to `pipeline_run_traces` keyed by
-     `(project_id, source, id /*pipe*/, op, seq)`. Store `trace.data`,
-     `trace.result`, `trace.error` as JSONB.
-   - `apaevt_sse` → append to `pipeline_run_node_events`.
-   - `output` events → append to `pipeline_run_logs`.
-5. Correlate runs: there is no global run-id. Use
-   `(project_id, source, startTime)` from `TASK_STATUS` as the run key, or
-   capture the `token` from `running`/`apaevt_task` and your own `execute`
-   responses.
-6. Reconnect on disconnect; the SDK handles auto-resubscribe of monitors,
-   and the next `running` snapshot will let you reconcile any missed
-   `begin`/`end` you slept through.
+4. Treat inbound events as **derived analytics** (counters, alerts, custom
+   joins) — not as a second copy of the run log. Keep `client.log` as the
+   source of truth for “what happened in this run.”
+5. Correlate with `(project_id, source, startTime)` from `TASK_STATUS` or the
+   `token` from `running` / your own `execute` responses when you need a join
+   key.
+6. Reconnect on disconnect; the SDK auto-resubscribes monitors.
 7. If you need full per-component data flow, ensure pipelines are launched
    with `pipelineTraceLevel: "summary"` (or `"full"` for debugging). Without
    it `apaevt_flow` does not fire.
