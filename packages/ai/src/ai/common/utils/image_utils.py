@@ -28,6 +28,11 @@ Shared image + image-derived-array helpers for model loaders/facades.
 Single home for converting images to wire bytes and for the base64+zlib codec
 used to ship numpy arrays (depth maps, alpha mattes) over JSON.
 
+Also home to the JPEG quality helpers: recovering the quality an image was saved
+at, and choosing one to re-encode at. Those are pure standard library — no numpy,
+no Pillow — because the nodes that use them (``scan_cropper``, ``image_orient``)
+have unit tests that run under an interpreter carrying neither.
+
 Deps are pulled in lazily (inside functions) so importing this module is cheap
 and gpu_guard-safe. Pillow is sourced via ``ai.common.image`` (whose
 ``depends()`` guarantees it is installed); ``numpy`` is a base engine dep.
@@ -37,7 +42,9 @@ from __future__ import annotations
 
 import base64
 import io
+import struct
 import zlib
+from statistics import median
 from typing import Any, Dict, Optional, Tuple
 
 
@@ -56,8 +63,7 @@ def image_to_bytes(image: Any) -> bytes:
     """
     if isinstance(image, (bytes, bytearray)):
         return bytes(image)
-    # A live PIL image means Pillow is already imported here, so use its methods
-    # directly (no import needed); anything else is unsupported.
+    # A live PIL image means Pillow is already imported; anything else is unsupported.
     if type(image).__module__.startswith('PIL.'):
         buf = io.BytesIO()
         image.convert('RGB').save(buf, format='PNG')
@@ -156,3 +162,200 @@ def scale_point(point: Dict[str, float], fx: float, fy: float) -> None:
     """Scale an ``{x, y}`` point (keypoint / centroid / landmark) in place by (fx, fy)."""
     point['x'] *= fx
     point['y'] *= fy
+
+
+# The standard JPEG luminance quantisation table, which every encoder scales to hit a
+# requested quality. Recovering the scale it was multiplied by recovers the quality.
+STD_LUMA_QUANT = (
+    16,
+    11,
+    10,
+    16,
+    24,
+    40,
+    51,
+    61,
+    12,
+    12,
+    14,
+    19,
+    26,
+    58,
+    60,
+    55,
+    14,
+    13,
+    16,
+    24,
+    40,
+    57,
+    69,
+    56,
+    14,
+    17,
+    22,
+    29,
+    51,
+    87,
+    80,
+    62,
+    18,
+    22,
+    37,
+    56,
+    68,
+    109,
+    103,
+    77,
+    24,
+    35,
+    55,
+    64,
+    81,
+    104,
+    113,
+    92,
+    49,
+    64,
+    78,
+    87,
+    103,
+    121,
+    120,
+    101,
+    72,
+    92,
+    95,
+    98,
+    112,
+    100,
+    103,
+    99,
+)
+
+# What "auto" writes at, against the quality the input was saved at. Each row was measured by
+# pushing photos through the crop and the deskew at every input quality, then taking the
+# cheapest output setting whose end result is still within TOLERANCE dB of the best obtainable
+# from that input. Tighten the tolerance and files grow for little visible gain; loosen it and
+# they shrink quickly. On a 33-page album scanned at quality 75 the whole run comes to 657 MB
+# at 0.2 dB, 463 MB at 0.5 and 330 MB at 1.0.
+QUALITY_TOLERANCE = 0.5
+TOLERANCE_STEPS = (0.2, 0.5, 1.0, 1.5)
+SOURCE_QUALITY = (10, 20, 30, 40, 50, 60, 70, 75, 80, 90, 100)
+MATCHED_QUALITY = (
+    (28, 61, 77, 84, 88, 90, 93, 94, 95, 97, 98),  # 0.2 dB
+    (20, 41, 60, 70, 77, 81, 86, 88, 90, 95, 96),  # 0.5 dB
+    (20, 27, 37, 49, 57, 66, 74, 78, 83, 90, 92),  # 1.0 dB
+    (20, 20, 27, 34, 42, 52, 63, 68, 74, 86, 88),  # 1.5 dB
+)
+
+# What to write when the input was not a lossy JPEG (a PNG or TIFF scan, or a page rendered
+# from a PDF): there was no lossy step to match, so pick a high fixed point.
+LOSSLESS_INPUT_QUALITY = 95
+
+
+def _interp(x, xs, ys):
+    """
+    Linear interpolation over a table, clamping at both ends.
+
+    Stands in for ``numpy.interp`` so this module stays dependency-free. End-clamping is not
+    incidental — it is what makes an out-of-range tolerance resolve to the nearest calibrated
+    row instead of extrapolating off the table into nonsense.
+
+    Args:
+        x: The point to evaluate at.
+        xs: Strictly increasing sample positions.
+        ys: Sample values, same length as ``xs``.
+
+    Returns:
+        float: The interpolated value, clamped to ``ys[0]`` / ``ys[-1]`` outside ``xs``.
+    """
+    if x <= xs[0]:
+        return float(ys[0])
+    if x >= xs[-1]:
+        return float(ys[-1])
+    for i in range(1, len(xs)):
+        if x <= xs[i]:
+            span = xs[i] - xs[i - 1]
+            t = (x - xs[i - 1]) / span if span else 0.0
+            return float(ys[i - 1]) + t * (float(ys[i]) - float(ys[i - 1]))
+    return float(ys[-1])
+
+
+def source_quality(data: bytes):
+    """
+    Recover the quality a JPEG was saved at, by reading it back out of the bytes.
+
+    JPEG never records the quality number. What it records is the table the encoder divided
+    its DCT coefficients by, and libjpeg builds that table by scaling a standard one — so the
+    scale, and with it the quality, can be recovered. Both tables are sorted before comparing,
+    which makes the result independent of the zigzag order the table happens to be stored in.
+
+    Every failure path returns ``None`` rather than raising, so a caller can hand it arbitrary
+    bytes. Note that ``None`` is also the honest answer for PNG and TIFF, where there was no
+    lossy step to match in the first place.
+
+    Args:
+        data: The raw image bytes, as they arrived on the lane.
+
+    Returns:
+        float | None: The recovered quality in 1..100, or ``None`` when the bytes are not a
+        JPEG, carry no luminance quantisation table, or the table is unusable.
+    """
+    if not data or len(data) < 4 or data[0] != 0xFF or data[1] != 0xD8:
+        return None  # not a JPEG
+
+    i = 2
+    while i < len(data) - 3:
+        if data[i] != 0xFF:
+            i += 1
+            continue
+        marker = data[i + 1]
+        if marker == 0xD8 or 0xD0 <= marker <= 0xD7:  # no payload
+            i += 2
+            continue
+        if marker in (0xDA, 0xD9):  # pixel data starts
+            break
+        length = struct.unpack('>H', data[i + 2 : i + 4])[0]
+        segment = data[i + 4 : i + 2 + length]
+        if marker == 0xDB:  # quantisation table
+            p = 0
+            while p + 65 <= len(segment):
+                precision, table_id = segment[p] >> 4, segment[p] & 15
+                p += 1
+                if precision == 0 and table_id == 0:
+                    table = list(segment[p : p + 64])
+                    if min(table) <= 0:
+                        return None
+                    scale = median(a / b for a, b in zip(sorted(table), sorted(STD_LUMA_QUANT))) * 100.0
+                    if scale <= 0:
+                        return None
+                    q = (200.0 - scale) / 2.0 if scale <= 100 else 5000.0 / scale
+                    return max(1.0, min(100.0, q))
+                p += 64 * (2 if precision else 1)
+        i += 2 + length
+    return None
+
+
+def matched_quality(quality_in, tolerance: float = QUALITY_TOLERANCE) -> int:
+    """
+    Pick the output quality, given how good the input was and how much end quality to trade.
+
+    Reads each calibrated row at the input quality, then interpolates across the rows at the
+    requested tolerance — so a tolerance between two measured steps lands between their curves
+    rather than snapping to one.
+
+    Args:
+        quality_in: The source quality from :func:`source_quality`, or ``None`` when the input
+            was not a lossy JPEG.
+        tolerance: dB of end quality to give up against the best obtainable. Values outside
+            :data:`TOLERANCE_STEPS` clamp to the nearest calibrated row.
+
+    Returns:
+        int: The JPEG quality to encode crops at, or :data:`LOSSLESS_INPUT_QUALITY` when there
+        was no lossy source to match.
+    """
+    if quality_in is None:
+        return LOSSLESS_INPUT_QUALITY
+    per_row = [_interp(quality_in, SOURCE_QUALITY, row) for row in MATCHED_QUALITY]
+    return int(round(_interp(tolerance, TOLERANCE_STEPS, per_row)))
