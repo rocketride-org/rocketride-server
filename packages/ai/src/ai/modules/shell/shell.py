@@ -95,8 +95,17 @@ PUBLIC_ROUTE_MANIFEST = [
         'token pricing. No hard caps, no surprise bills, no vendor lock-in.',
     ),
     (
+        '/marketplace',
+        'Marketplace',
+        'Ready-to-run AI apps built on RocketRide. Browse the catalog, try apps '
+        'instantly, and deploy them on managed infrastructure.',
+    ),
+    (
+        # Legacy alias for /marketplace (the pre-rename App Store URL). Kept so
+        # old links and bookmarks survive a hard reload; the client route
+        # manifest (routes.ts) canonicalizes the address bar to /marketplace.
         '/store',
-        'App Store',
+        'Marketplace',
         'Ready-to-run AI apps built on RocketRide. Browse the catalog, try apps '
         'instantly, and deploy them on managed infrastructure.',
     ),
@@ -120,6 +129,41 @@ PUBLIC_ROUTE_MANIFEST = [
         'MCP',
         'Connect tools and data to your AI with the Model Context Protocol. Bring '
         'your own servers or use the ones RocketRide ships with.',
+    ),
+    (
+        '/extension',
+        'Extension',
+        'Build and run RocketRide pipelines inside your editor with the IDE extension.',
+    ),
+    (
+        '/sdk',
+        'SDK',
+        'Client SDKs for Python and TypeScript. Execute pipelines, move data, and monitor runs from your own code.',
+    ),
+    (
+        '/blog',
+        'Blog',
+        'Product updates, engineering deep dives, and stories from the RocketRide team.',
+    ),
+    (
+        '/events',
+        'Events',
+        'Meet the RocketRide team at conferences, webinars, and community events.',
+    ),
+    (
+        '/about',
+        'About Us',
+        'Who we are and why we are building RocketRide — AI infrastructure from prototype to production.',
+    ),
+    (
+        '/careers',
+        'Careers',
+        'Join the team building RocketRide. Open roles across engineering, product, and go-to-market.',
+    ),
+    (
+        '/contact',
+        'Contact',
+        'Get in touch with the RocketRide team — sales, support, and partnership inquiries.',
     ),
 ]
 
