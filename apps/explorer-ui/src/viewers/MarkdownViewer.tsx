@@ -3,7 +3,7 @@
 // =============================================================================
 
 import React from 'react';
-import { MarkdownRenderer } from 'shared';
+import { MarkdownRenderer } from 'shell';
 import { viewerStyles } from './styles';
 
 interface Props {

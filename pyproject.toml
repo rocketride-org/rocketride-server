@@ -13,7 +13,11 @@ line-length = 120
 # Target Python version
 target-version = "py310"
 
-# Directories to exclude from linting
+# Directories to exclude from linting.
+# force-exclude makes the list apply even when paths are passed explicitly
+# (lefthook's `ruff check {staged_files}`), which is what keeps the vendored
+# ANTLR-generated parsers out of lint.
+force-exclude = true
 exclude = [
     ".git",
     ".venv",
@@ -24,6 +28,10 @@ exclude = [
     "node_modules",
     ".eggs",
     "*.egg-info",
+    # Vendored third-party code (Apache-2.0) incl. ANTLR-generated parsers —
+    # not held to local style; provenance in ai/common/graph/age/README.md
+    "packages/ai/src/ai/common/graph/age/_agtype",
+    "packages/ai/src/ai/common/graph/age/_cypher",
 ]
 
 [tool.ruff.format]

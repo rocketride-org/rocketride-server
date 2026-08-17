@@ -177,10 +177,15 @@ Each package is published independently:
 1. **Bump the version** in the appropriate file(s) on the `develop` branch.
 2. **Cut the changelog** in the *same* pull request, so the cut rides the normal `develop → stage → main` promotion:
    ```bash
+   # Fill [Unreleased] from commit history first — it is maintained by hand and
+   # in practice it is empty. Hand-written entries are preserved.
+   node scripts/release/generate-unreleased.mjs origin/main origin/stage
+
    # Archive [Unreleased] -> [<server-version>] - <today> and open a fresh [Unreleased].
    node scripts/release/cut-changelog.mjs            # uses the root package.json version + today
    # or pin explicitly:  node scripts/release/cut-changelog.mjs 3.2.0 2026-06-05
    ```
+   Do not skip the first command. The v3.4.0 cut came out **empty** because nothing had been added to `[Unreleased]` since 8 June, which would have shipped blank release notes for all five packages across 445 commits.
    This is what makes the stable GitHub Release notes scoped to the release (see [Release Notes](#release-notes)). Do this in the version-bump PR, **never** auto-commit a cut to `main` from CI (it would re-trigger the release workflow and diverge `main`'s changelog from `develop`).
 3. **Commit and push** to `develop`, then **merge `develop` into `stage`** once the change is ready to be validated:
    ```bash
@@ -190,13 +195,42 @@ Each package is published independently:
    ```
    The next nightly build will create a prerelease with the new version from `stage`.
 4. **Verify the prerelease** by downloading artifacts from the GitHub Releases page.
-5. **Merge `stage` into `main`**:
-   ```bash
-   git checkout main
-   git merge stage
-   git push origin main
-   ```
+5. **Promote `stage` to `main`** — see [Promoting stage to main](#promoting-stage-to-main) below. A plain `git merge stage` will not work.
 6. The release workflow triggers automatically and publishes all packages with new versions.
+7. **Merge the back-merge PR.** `release-backmerge` opens one automatically once the release succeeds. Until it lands, `develop` still carries the old version numbers and the nightly prereleases publish *below* the shipped stable line.
+
+### Promoting stage to main
+
+**A direct `stage → main` merge does not work, and the reason is structural.** Past releases were squash-merged into `main`, so `main` and `stage` share almost no commits. Git treats nearly everything as divergent: the July 2026 attempt produced **105 conflicts**, none of them real. This gets worse with every squashed release.
+
+Until that is changed, promote through a dedicated branch whose *content* is `stage` and whose *parent* is `main`:
+
+```bash
+git fetch origin main stage
+git checkout -B release-to-main-<version> origin/main
+git read-tree -u --reset origin/stage      # working tree becomes stage's, parent stays main
+git commit -m "release: v<version> — stage → main"
+git push -u origin release-to-main-<version>
+# then open a PR against main
+```
+
+**Before doing this, confirm nothing on `main` is about to be dropped** — `main` may hold hotfixes that never came back:
+
+```bash
+# Files that exist on main but not on stage. Each one needs an explanation.
+git diff --diff-filter=D --name-only origin/main origin/stage
+
+# Spot-check the files past hotfixes touched; identical output means stage already has the fix.
+git diff origin/main:<path> origin/stage:<path>
+```
+
+In the v3.4.0 promotion this surfaced `nodes/src/nodes/tool_falkordb/`, present on `main` and absent from `stage` — deliberately reworked into `graph_falkordb`, so dropping it was correct. Verify, do not assume.
+
+### If the release train stalls
+
+`Release` only fires on a push to `main`, and the `stage → main` cut is a manual pull request. Nothing breaks when it is skipped: `develop → stage` keeps flowing and prereleases keep publishing, so a stalled train is indistinguishable from a healthy one. In July 2026 that ran for 15 days with 445 commits on `stage`.
+
+The `release-stall-check` workflow now measures the gap on weekdays and opens a tracking issue past 7 days or 50 commits. It closes the issue when `main` catches up.
 
 ### Releasing a single package
 

@@ -1,6 +1,10 @@
 {
   "extends": "@docusaurus/tsconfig",
   "compilerOptions": {
+    // The base config declares baseUrl inside node_modules and maps
+    // "@site/*" relative to it; overriding baseUrl here re-anchors that
+    // alias at this package's root. baseUrl is deprecated in TS 6 but
+    // required until @docusaurus/tsconfig drops it upstream.
     "baseUrl": "."
   },
   "exclude": [".docusaurus", "build", "**/*.test.mjs"]

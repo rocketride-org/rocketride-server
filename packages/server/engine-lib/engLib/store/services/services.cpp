@@ -1677,6 +1677,20 @@ Error IServices::init() noexcept {
             // Resolve all the descriptions fields
             resolveDescriptions(serviceInfo);
 
+            // Resolve the icon reference to its absolute file location.
+            // The icon field in a services.json is relative to the file's
+            // own directory, and only the loader knows where that is. The
+            // resolved path is consumed SERVER-SIDE (the Python service
+            // catalog reads the file to inline its content) and must never
+            // be returned to clients.
+            if (auto iconName = serviceInfo.lookup<Text>("icon")) {
+                const auto iconPath = (path / iconName).resolve();
+                if (!file::exists(iconPath))
+                    LOG(Services, "    Icon          : **** MISSING",
+                        iconPath, "****");
+                serviceInfo["icon"] = static_cast<const Utf8Chr *>(iconPath);
+            }
+
             // Declare our definition
             IServices::ServiceDefinition def;
 

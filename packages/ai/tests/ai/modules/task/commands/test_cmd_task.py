@@ -766,6 +766,7 @@ def test_store_commands_init_builds_subcommand_dispatch_table():
     assert set(conn._store_subcommand_handlers.keys()) == {
         'fs_open',
         'fs_read',
+        'fs_read_many',
         'fs_write',
         'fs_close',
         'fs_delete',

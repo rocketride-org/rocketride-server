@@ -9,25 +9,30 @@
     "publisher": "Aparavi Software AG",
     "name": "Event Monitor",
     "description": "Real-time event stream viewer with JSON inspection and export",
-    "categories": ["tools"],
+    "categories": [
+      "tools"
+    ],
     "mode": "free",
     "authenticated": true,
     "showStatusBar": true
   },
   "scripts": {
-    "build": "pnpm rsbuild build",
-    "build:prod": "pnpm rsbuild build --env-mode production"
+    "build": "rsbuild build",
+    "build:prod": "rsbuild build --env-mode production"
   },
   "dependencies": {
     "@module-federation/rsbuild-plugin": "^2.5.1",
-    "shell-ui": "workspace:*",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
-    "shared": "workspace:*"
+    "rocketride": "workspace:*",
+    "shell": "file:../../.rocketride/shell/shell.tgz"
   },
   "devDependencies": {
     "@rsbuild/core": "~2.0.11",
     "@rsbuild/plugin-react": "~2.0.1",
-    "typescript": "^5.3.0"
+    "typescript": "^5.3.0",
+    "@types/react": "~18.3.31",
+    "@types/react-dom": "~18.3.7",
+    "@types/tabulator-tables": "~6.2.0"
   }
 }

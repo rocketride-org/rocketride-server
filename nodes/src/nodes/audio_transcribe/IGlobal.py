@@ -53,16 +53,22 @@ class IGlobal(IGlobalBase):
         if not audio_bytes:
             return []
 
+        vad_parameters = {
+            'threshold': self._whisper_threshold,
+            'min_silence_duration_ms': self._whisper_min_silence_duration_ms,
+            'speech_pad_ms': self._whisper_speech_pad_ms,
+        }
+        # 0 = no limit: upstream's default is inf, which JSON cannot express, so omit the
+        # key. This key only — threshold=0 and speech_pad_ms=0 are real values.
+        if self._whisper_max_speech_duration_s:
+            vad_parameters['max_speech_duration_s'] = self._whisper_max_speech_duration_s
+
         with self.transcribe_lock:
             result = self._whisper.transcribe(
                 audio_bytes,
-                beam_size=5,
-                vad_filter=True,
-                vad_parameters={
-                    'threshold': self._whisper_threshold,
-                    'min_silence_duration_ms': self._whisper_min_silence_duration_ms,
-                    'max_speech_duration_s': self._whisper_max_speech_duration_s,
-                },
+                beam_size=self._whisper_beam_size,
+                vad_filter=self._whisper_vad_filter,
+                vad_parameters=vad_parameters,
             )
 
         segments = result.get('$segments') or []
@@ -114,9 +120,17 @@ class IGlobal(IGlobalBase):
             compute_type=compute_type,
         )
 
-        self._whisper_threshold = config.get('vad_threshold', 0.5)
-        self._whisper_min_silence_duration_ms = config.get('vad_min_silence_duration_ms', 500)
-        self._whisper_max_speech_duration_s = config.get('vad_max_speech_duration_s', 20)
+        # Transcribe()'s own default; IInstance passes it through (#1809).
+        self.chunk_duration = int(config.get('chunk_duration', 60))
+
+        # Cast to the types VadOptions declares — JSON does not distinguish 5 from 5.0.
+        self._whisper_beam_size = int(config.get('beam_size', 5))
+        self._whisper_vad_filter = bool(config.get('vad_filter', True))
+        self._whisper_threshold = float(config.get('vad_threshold', 0.5))
+        self._whisper_min_silence_duration_ms = int(config.get('vad_min_silence_duration_ms', 500))
+        self._whisper_speech_pad_ms = int(config.get('vad_speech_pad_ms', 400))
+        # Was 20, but it never reached the decoder — 0 is what actually runs today.
+        self._whisper_max_speech_duration_s = float(config.get('vad_max_speech_duration_s', 0))
 
         debug(f'    Audio transcribe: model={self.model_name}, language={language}')
 

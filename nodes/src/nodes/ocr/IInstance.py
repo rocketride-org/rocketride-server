@@ -26,7 +26,7 @@ import io
 import numpy as np
 from PIL import Image
 from typing import List
-from rocketlib import IInstanceBase, AVI_ACTION, Entry
+from rocketlib import IInstanceBase, AVI_ACTION, Entry, debug, warning
 from ai.common.schema import Doc
 from ai.common.avi.descriptor import rename_ext
 from .IGlobal import IGlobal
@@ -46,9 +46,8 @@ class IInstance(IInstanceBase):
         :param table_callback: Function to call with each extracted Markdown table
         """
 
-        # Write diagnostics to a file since print() goes to DAP
         def _diag(msg):
-            pass
+            debug(msg)
 
         _diag(f'[DIAG] extract_tables_from_image called, image size: {len(image_data)} bytes')
 
@@ -121,8 +120,8 @@ class IInstance(IInstanceBase):
         except Exception as e:
             import traceback
 
-            _diag(f'[DIAG] Table extraction EXCEPTION: {str(e)}')
-            _diag(f'[DIAG] Traceback: {traceback.format_exc()}')
+            # swallowed so a table failure cannot kill text OCR, but must stay visible
+            warning(f'OCR table extraction failed: {e}\n{traceback.format_exc()}')
 
     def writeImage(self, action: int, mimeType: str, buffer: bytes):
         # Handle AVI_BEGIN action
@@ -190,14 +189,18 @@ class IInstance(IInstanceBase):
             image_data = base64.b64decode(doc.page_content)
 
             # Read the text by OCR model
-            text = self.IGlobal.reader(image_data)
+            with self.IGlobal.readerLock:
+                text = self.IGlobal.reader.read(image_data)
+
+            if isinstance(text, list):
+                text = ' '.join(text)
 
             # Read the tables by OCR model , invoke writeTable
             self.extract_tables_from_image(image_data, self.instance.writeTable)
 
             # If we have a listener on our text lane, write the text to it
             if self.instance.hasListener('text'):
-                self.writeText(text)
+                self.instance.writeText(text)
 
             # If we have a listener on our documents lane, create a new
             # text document and add it to the list

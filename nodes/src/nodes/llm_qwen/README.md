@@ -6,7 +6,7 @@ A RocketRide LLM node that connects Alibaba Cloud Qwen models to a pipeline via 
 
 Provides Qwen chat completions to the pipeline. Used primarily as an `llm` invoke connection by agents and other nodes that need an LLM, and can also be used directly via lanes.
 
-Uses **LangChain's `ChatOpenAI`** client pointed at DashScope's OpenAI-compatible endpoint. The regional endpoint is resolved from the `region` field at startup. Temperature is fixed at `0`, and `max_tokens` is taken from the profile's `modelOutputTokens`.
+Uses **LangChain's `ChatOpenAI`** client pointed at DashScope's OpenAI-compatible endpoint. The endpoint is resolved at startup from the `base_url` field if set, otherwise from the `region` field. Temperature is fixed at `0`, and `max_tokens` is taken from the profile's `modelOutputTokens`.
 
 When the node configuration is validated, the node performs a live 1-token test request against the API to verify the key, model, and region actually work. Failures surface as configuration warnings with the provider's error message.
 
@@ -29,6 +29,7 @@ The main setting is the **profile** (model selection, default `qwen-flash`). Eac
 | `profile`          | enum, `qwen-flash`  | Qwen AI model selection (see profiles below, or `custom`)                |
 | `apikey`           | string              | DashScope API key. Must start with `sk-`.                                |
 | `region`           | enum, `us`          | DashScope regional endpoint: `us`, `intl`, or `cn` (see regions below)   |
+| `base_url`         | string, empty       | Optional endpoint override, wins over `region` (see regions below)       |
 | `model`            | string              | Qwen model name (custom profile only)                                    |
 | `modelTotalTokens` | number              | Maximum context length in tokens (custom profile only, must be > 0)      |
 
@@ -36,19 +37,40 @@ The main setting is the **profile** (model selection, default `qwen-flash`). Eac
 
 ## Profiles
 
-| Profile                         | Model                           | Context tokens | Output tokens |
-|---------------------------------|---------------------------------|----------------|---------------|
-| Qwen Flash *(default)*          | `qwen-flash`                    | 131,072        | 4,096         |
-| Qwen Plus                       | `qwen-plus`                     | 1,000,000      | 32,768        |
-| Qwen2.5 72B Instruct            | `qwen-2.5-72b-instruct`         | 32,768         | 16,384        |
-| Qwen2.5 7B Instruct             | `qwen-2.5-7b-instruct`          | 32,768         | 32,768        |
-| Qwen2.5 Coder 32B Instruct      | `qwen-2.5-coder-32b-instruct`   | 32,768         | 4,096         |
-| Qwen-Max                        | `qwen-max`                      | 32,768         | 8,192         |
-| Qwen Plus 0728                  | `qwen-plus-2025-07-28`          | 1,000,000      | 32,768        |
-| Qwen Plus 0728 (thinking)       | `qwen-plus-2025-07-28:thinking` | 1,000,000      | 32,768        |
-| Qwen-Turbo                      | `qwen-turbo`                    | 131,072        | 8,192         |
+Profiles come in two kinds.
+
+**Stable aliases** always resolve to DashScope's current snapshot for their tier, so they do not go stale as new generations ship. Prefer these unless you need to pin a specific release:
+
+| Profile                          | Model         | Context tokens | Output tokens |
+|----------------------------------|---------------|----------------|---------------|
+| Qwen Flash (latest) *(default)*  | `qwen-flash`  | 131,072        | 4,096         |
+| Qwen Plus (latest)               | `qwen-plus`   | 1,000,000      | 32,768        |
+| Qwen Max (latest)                | `qwen-max`    | 32,768         | 8,192         |
+| Qwen Turbo (latest)              | `qwen-turbo`  | 131,072        | 8,192         |
+
+**Pinned releases** name a specific model version:
+
+| Profile                | Model                  | Context tokens | Output tokens |
+|------------------------|------------------------|----------------|---------------|
+| Qwen3.7 Max            | `qwen3.7-max`          | 1,000,000      | 65,536        |
+| Qwen3.7 Plus           | `qwen3.7-plus`         | 1,000,000      | 65,536        |
+| Qwen3.6 Flash          | `qwen3.6-flash`        | 1,000,000      | 65,536        |
+| Qwen Plus 0728         | `qwen-plus-2025-07-28` | 1,000,000      | 32,768        |
 
 Choose `custom` to set the model name and context length manually.
+
+### Deprecated profiles
+
+These remain selectable so saved pipelines keep loading, but DashScope rejects their model IDs. They were introduced by OpenRouter fallback discovery in the model sync and carry OpenRouter/HuggingFace IDs rather than DashScope ones. Migrate to a profile above.
+
+| Profile                    | Model                           | Why it fails                                        |
+|----------------------------|---------------------------------|-----------------------------------------------------|
+| Qwen2.5 72B Instruct       | `qwen-2.5-72b-instruct`         | DashScope uses `qwen2.5-72b-instruct`               |
+| Qwen2.5 7B Instruct        | `qwen-2.5-7b-instruct`          | DashScope uses `qwen2.5-7b-instruct`                |
+| Qwen2.5 Coder 32B Instruct | `qwen-2.5-coder-32b-instruct`   | DashScope uses `qwen2.5-coder-32b-instruct`         |
+| Qwen Plus 0728 (thinking)  | `qwen-plus-2025-07-28:thinking` | `:thinking` is OpenRouter variant syntax            |
+
+DashScope has no `:thinking` model variants — reasoning is controlled with the `enable_thinking` request parameter instead.
 
 ---
 
@@ -63,6 +85,8 @@ Choose `custom` to set the model name and context length manually.
 | `cn`   | China (Beijing) | `https://dashscope.aliyuncs.com/compatible-mode/v1`       |
 
 The default is `us`. An unrecognised value falls back to the US endpoint.
+
+Setting `base_url` overrides this table entirely, which is how you reach a DashScope host Alibaba Cloud serves outside the three above — another Alibaba Cloud region, for instance. It is available on every live profile, including `custom`; the deprecated profiles above do not expose it. Leave it empty to use the regional endpoint.
 
 Note: DashScope API keys are not interchangeable between regions. A key issued for one region will fail authentication against another region's endpoint.
 
@@ -87,9 +111,22 @@ Rate-limit and connection errors are classified as retryable by the shared chat 
 
 ---
 
+## Keeping the model list current
+
+Profiles are maintained by the model sync tool, see [tools/sync_models](../../../../tools/sync_models/README.md):
+
+```bash
+python tools/sync_models/src/sync_models.py --provider llm_qwen --enable-discovery --apply
+```
+
+Discovery — adding profiles — requires `ROCKETRIDE_QWEN_KEY`. Without it the command above still runs, but only enriches profiles that already exist: OpenRouter and LiteLLM can supply token counts, and neither may add a profile unless you also pass `--allow-fallback-discovery`. Avoid that flag here — it lets OpenRouter contribute the HuggingFace-style IDs DashScope does not accept, which is what the deprecated profiles above are. The stable aliases are listed in `protected_profiles` so a non-authoritative source cannot deprecate them.
+
+---
+
 ## Upstream docs
 
 - [DashScope API reference](https://help.aliyun.com/zh/dashscope/)
+- [Alibaba Cloud Model Studio models](https://www.alibabacloud.com/help/en/model-studio/models)
 
 ---
 

@@ -2,7 +2,7 @@
 # MIT License
 # Copyright (c) 2026 Aparavi Software AG
 # =============================================================================
-"""Tests for the tool_filesystem sink: services.json contract, config, and the
+"""Tests for the tool_filesystem sink: services*.json contracts, config, and the
 per-lane naming/path helpers.
 """
 
@@ -20,29 +20,48 @@ import pytest
 _NODE_DIR = Path(__file__).resolve().parent.parent.parent / 'src' / 'nodes' / 'tool_filesystem'
 
 
-def _load_services():
-    return json.loads((_NODE_DIR / 'services.json').read_text())
+def _load_services(name='services.tool.json'):
+    return json.loads((_NODE_DIR / name).read_text())
 
 
 class TestServicesContract:
-    def test_classtype_is_store_and_tool(self):
-        # Convention across the codebase is domain-first, "tool" last.
+    def test_tool_variant_reverted_to_tool_only(self):
         d = _load_services()
-        assert d['classType'] == ['store', 'tool']
+        assert d['classType'] == ['tool']
+        assert d['lanes'] == {}
+        assert d['protocol'] == 'tool_filesystem://'
+        # Sink config must be gone from the tool surface.
+        for key in (
+            'filesystem.targetDir',
+            'filesystem.onConflict',
+            'filesystem.emitUrl',
+            'filesystem.urlExpiresIn',
+        ):
+            assert key not in d['fields']
+            assert key not in d['shape'][0]['properties']
 
-    def test_all_input_lanes_emit_documents(self):
-        d = _load_services()
+    def test_store_variant_identity(self):
+        d = _load_services('services.store.json')
+        assert d['protocol'] == 'filestore://'
+        assert d['title'] == 'File Store'
+        assert d['classType'] == ['store']
+        assert d['register'] == 'filter'
+        assert d['path'] == 'nodes.tool_filesystem'
+
+    def test_store_variant_lanes_all_emit_json(self):
+        d = _load_services('services.store.json')
         assert d['lanes'] == {
-            'documents': ['documents'],
-            'text': ['documents'],
-            'table': ['documents'],
-            'image': ['documents'],
-            'audio': ['documents'],
-            'video': ['documents'],
+            'documents': ['json'],
+            'text': ['json'],
+            'table': ['json'],
+            'image': ['json'],
+            'audio': ['json'],
+            'video': ['json'],
         }
 
-    def test_new_config_fields_present_with_defaults(self):
-        f = _load_services()['fields']
+    def test_store_variant_fields(self):
+        d = _load_services('services.store.json')
+        f = d['fields']
         assert f['filesystem.targetDir']['type'] == 'string'
         assert f['filesystem.targetDir']['default'] == 'output/'
         assert f['filesystem.emitUrl']['type'] == 'boolean'
@@ -51,6 +70,40 @@ class TestServicesContract:
         assert f['filesystem.urlExpiresIn']['default'] == 3600
         assert f['filesystem.urlExpiresIn']['minimum'] == 1
         assert f['filesystem.urlExpiresIn']['maximum'] == 3600
+        assert f['filesystem.onConflict']['type'] == 'string'
+        assert f['filesystem.onConflict']['default'] == 'unique', 'the safe outcome must be the default'
+        assert [c[0] for c in f['filesystem.onConflict']['enum']] == ['unique', 'overwrite', 'skip']
+        assert 'filesystem.onConflict' in d['shape'][0]['properties']
+        # No agent-tool toggles on the store surface.
+        assert not any(k.startswith('filesystem.allow') for k in f)
+
+    def test_source_variant_identity(self):
+        d = _load_services('services.source.json')
+        assert d['protocol'] == 'filestore_source://'
+        assert d['title'] == 'File Store Source'
+        assert d['classType'] == ['source']
+        assert d['register'] == 'endpoint'
+        assert d['capabilities'] == ['noinclude']
+        assert d['path'] == 'nodes.tool_filesystem'
+        # Raw objects go out on the tags lane for a downstream Parser.
+        assert d['lanes'] == {'_source': ['tags']}
+        # The shape must route the declared fields through the source-parameters
+        # wrapper (telegram/dropper convention) — fields listed directly in the
+        # Pipe section never reach serviceConfig['parameters'] at runtime.
+        assert d['shape'][0]['properties'] == ['type', 'Pipe.source.parameters']
+
+    def test_source_variant_fields(self):
+        d = _load_services('services.source.json')
+        f = d['fields']
+        assert f['filesystem.path']['type'] == 'string'
+        assert f['filesystem.recursive']['type'] == 'boolean'
+        assert f['filesystem.recursive']['default'] is False
+        # Source-parameters wrapper: the engine strips the 'filesystem.' prefix
+        # and delivers these flat under serviceConfig['parameters'].
+        assert f['Pipe.source.parameters'] == {
+            'section': 'parameters',
+            'properties': ['filesystem.path', 'filesystem.recursive'],
+        }
 
 
 def _install_stubs():
@@ -149,40 +202,74 @@ def _install_stubs():
         sys.modules['ai.common.schema'] = m
 
 
-def _load_real_iglobal():
-    """Load the real ``IGlobal`` under a unique module name (deps stubbed)."""
+def _load_real_iglobal_module():
+    """Load the real ``IGlobal`` module under a unique name (deps stubbed)."""
     _install_stubs()
     spec = importlib.util.spec_from_file_location('tfs_iglobal_real', str(_NODE_DIR / 'IGlobal.py'))
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
-    return mod.IGlobal
+    return mod
+
+
+def _load_real_iglobal():
+    """The real ``IGlobal`` class."""
+    return _load_real_iglobal_module().IGlobal
 
 
 class TestSinkConfig:
     def test_defaults_when_missing(self):
-        IG = _load_real_iglobal()
-        assert IG._sink_config({}) == ('output/', False, 3600)
+        mod = _load_real_iglobal_module()
+        assert mod.IGlobal._sink_config({}) == ('output/', False, 3600, mod.OnConflict.UNIQUE)
 
     def test_explicit_values(self):
-        IG = _load_real_iglobal()
-        assert IG._sink_config({'targetDir': 'out2/', 'emitUrl': True, 'urlExpiresIn': 120}) == (
+        mod = _load_real_iglobal_module()
+        IG = mod.IGlobal
+        assert IG._sink_config({'targetDir': 'out2/', 'emitUrl': True, 'urlExpiresIn': 120, 'onConflict': 'skip'}) == (
             'out2/',
             True,
             120,
+            mod.OnConflict.SKIP,
         )
 
+    def test_conflict_policy_defaults_to_the_non_destructive_choice(self):
+        """A mistyped or missing policy degrades to `unique`, never to overwriting."""
+        mod = _load_real_iglobal_module()
+        IG = mod.IGlobal
+        assert IG._sink_config({})[3] is mod.OnConflict.UNIQUE
+        assert IG._sink_config({'onConflict': 'nonsense'})[3] is mod.OnConflict.UNIQUE
+        assert IG._sink_config({'onConflict': None})[3] is mod.OnConflict.UNIQUE
+        assert IG._sink_config({'onConflict': '  skip  '})[3] is mod.OnConflict.SKIP
+        assert IG._sink_config({'onConflict': 'OVERWRITE'})[3] is mod.OnConflict.OVERWRITE
+
+    def test_overwriting_is_never_reached_by_accident(self):
+        """The destructive outcome has to be named exactly; nothing else degrades into it."""
+        mod = _load_real_iglobal_module()
+        IG = mod.IGlobal
+        for junk in ({}, {'onConflict': ''}, {'onConflict': 'true'}, {'onConflict': True}):
+            assert IG._sink_config(junk)[3] is mod.OnConflict.UNIQUE
+
+    def test_members_cover_exactly_the_services_json_enum(self):
+        """Member names are what resolves the dropdown value, so a new choice needs a member."""
+        mod = _load_real_iglobal_module()
+        fields = _load_services('services.store.json')['fields']
+        choices = [c[0] for c in fields['filesystem.onConflict']['enum']]
+        assert sorted(m.name.lower() for m in mod.OnConflict) == sorted(choices)
+
     def test_url_expires_clamped_to_ceiling(self):
-        IG = _load_real_iglobal()
+        mod = _load_real_iglobal_module()
+        IG = mod.IGlobal
         assert IG._sink_config({'urlExpiresIn': 999999})[2] == 3600
 
     def test_url_expires_non_positive_falls_back_to_default(self):
-        IG = _load_real_iglobal()
+        mod = _load_real_iglobal_module()
+        IG = mod.IGlobal
         assert IG._sink_config({'urlExpiresIn': -5})[2] == 3600
         assert IG._sink_config({'urlExpiresIn': 0})[2] == 3600
 
     def test_url_expires_non_numeric_falls_back_to_default(self):
         # A bad config value must not raise out of beginGlobal.
-        IG = _load_real_iglobal()
+        mod = _load_real_iglobal_module()
+        IG = mod.IGlobal
         assert IG._sink_config({'urlExpiresIn': 'not-a-number'})[2] == 3600
 
 
@@ -214,6 +301,12 @@ def _install_iinstance_stubs():
         ig.IGlobal = _IGlobalStub
         sys.modules['tool_filesystem.IGlobal'] = ig
 
+    # Set unconditionally: test_read_size_cap installs its own stub over the same key, so a
+    # conditional patch would depend on which module ran first.
+    stub_module = sys.modules['tool_filesystem.IGlobal']
+    stub_module.OnConflict = _load_real_iglobal_module().OnConflict
+    stub_module.IGlobal.on_conflict = stub_module.OnConflict.UNIQUE
+
 
 def _fs(exists_paths=()):
     """AsyncMock FileStore covering the one-shot write API and the streaming
@@ -227,24 +320,28 @@ def _fs(exists_paths=()):
     fs.delete = AsyncMock(return_value=None)
 
     async def _stat(path):
-        return {'exists': path in exists_paths}
+        # Shaped like the real FileStore.stat, which reports `type` alongside `exists` —
+        # the conflict policy distinguishes a file from a directory sharing the name.
+        if path in exists_paths:
+            return {'exists': True, 'type': 'file', 'size': 1, 'modified': 0}
+        return {'exists': False}
 
     fs.stat = AsyncMock(side_effect=_stat)
 
     fs.streams = {}
     counter = {'n': 0}
 
-    async def _open_write(path, connection_id):
+    async def _open_write(path):
         counter['n'] += 1
         handle = f'h{counter["n"]}'
         fs.streams[handle] = {'path': path, 'chunks': []}
         return handle
 
-    async def _write_chunk(handle, data, connection_id=0):
+    async def _write_chunk(handle, data):
         fs.streams[handle]['chunks'].append(bytes(data))
         return len(data)
 
-    async def _close_write(handle, connection_id=0):
+    async def _close_write(handle):
         return None
 
     fs.open_write = AsyncMock(side_effect=_open_write)
@@ -264,11 +361,12 @@ def _sink_instance(
     url_expires_in=3600,
     allow_write=True,
     path_patterns=None,
-    listeners=('documents',),
+    listeners=('json',),
+    on_conflict='unique',
 ):
     """Build an IInstance wired to a stub IGlobal + mocked engine ``instance``."""
     _install_iinstance_stubs()
-    from tool_filesystem.IGlobal import IGlobal
+    from tool_filesystem.IGlobal import IGlobal, OnConflict
     from tool_filesystem.IInstance import IInstance
 
     inst = IInstance()
@@ -279,6 +377,7 @@ def _sink_instance(
     g.target_dir = target_dir
     g.emit_url = emit_url
     g.url_expires_in = url_expires_in
+    g.on_conflict = OnConflict[on_conflict.upper()]
     inst.IGlobal = g
     inst.instance = MagicMock()
     inst.instance.getListeners.return_value = list(listeners)
@@ -443,3 +542,130 @@ class TestSinkWrite:
         with pytest.raises(ValueError, match='does not match any allowed path pattern'):
             inst._sink_write(b'd', 'secret.pdf')
         fs.write.assert_not_awaited()
+
+
+# ---------------------------------------------------------------------------
+# Per-stream naming from the BEGIN descriptor
+# ---------------------------------------------------------------------------
+
+
+class _Descriptor:
+    """Stand-in for a parsed stream descriptor carrying only a name."""
+
+    def __init__(self, name):
+        self.metadata = types.SimpleNamespace(name=name)
+
+
+class TestStreamFilename:
+    """A stream's own name wins over the source object's, so fan-out stays distinguishable."""
+
+    def test_descriptor_name_is_preferred(self):
+        inst = _sink_instance(_fs(), name='1.jpg')
+        assert inst._stream_filename(_Descriptor('1.crop0.jpg'), 'image/jpeg') == '1.crop0.jpg'
+
+    def test_falls_back_to_the_object_name(self):
+        """No descriptor, or no name on it, keeps the previous behaviour."""
+        inst = _sink_instance(_fs(), name='report.pdf')
+        assert inst._stream_filename(None, 'image/jpeg') == 'report.jpg'
+        assert inst._stream_filename(_Descriptor(None), 'image/jpeg') == 'report.jpg'
+
+    def test_extension_appended_when_the_name_has_none(self):
+        """
+        A producer names a stream without necessarily giving it an extension.
+
+        os.path.splitext cannot answer this: it splits at the last dot, so `1.crop0` looks
+        like stem `1` with extension `.crop0` and the file would be stored with nothing
+        identifying its type. The stream's mime decides instead.
+        """
+        inst = _sink_instance(_fs(), name='1.jpg')
+        assert inst._stream_filename(_Descriptor('1.crop0'), 'image/jpeg') == '1.crop0.jpg'
+
+    def test_extension_is_not_doubled(self):
+        """A name that already ends in the stream's extension is left alone."""
+        inst = _sink_instance(_fs(), name='1.jpg')
+        assert inst._stream_filename(_Descriptor('1.crop0.jpg'), 'image/jpeg') == '1.crop0.jpg'
+        assert inst._stream_filename(_Descriptor('1.crop0.JPG'), 'image/jpeg') == '1.crop0.JPG'
+
+    def test_path_separators_are_stripped(self):
+        """
+        The name is untrusted: it comes from whatever node is upstream.
+
+        Backslashes are checked explicitly because os.path.basename on a POSIX host leaves
+        a Windows-style traversal completely untouched. The stored name also picks up the
+        stream's real extension, so a payload cannot masquerade as another type.
+        """
+        inst = _sink_instance(_fs(), name='report.pdf')
+        assert inst._stream_filename(_Descriptor('../../secrets/key.pem'), 'image/jpeg') == 'key.pem.jpg'
+        assert inst._stream_filename(_Descriptor(r'..\..\secrets\key.pem'), 'image/jpeg') == 'key.pem.jpg'
+
+    def test_name_that_reduces_to_nothing_falls_back(self):
+        inst = _sink_instance(_fs(), name='report.pdf')
+        assert inst._stream_filename(_Descriptor('../'), 'image/jpeg') == 'report.jpg'
+
+
+class TestConflictPolicy:
+    def test_unique_suffixes_rather_than_replacing(self):
+        """The default: never destructive, never silent."""
+        fs = _fs(exists_paths={'output/report.pdf'})
+        inst = _sink_instance(fs, object_id='obj-123')
+        assert inst._sink_target_path('report.pdf') == 'output/report_1.pdf'
+
+    def test_overwrite_returns_the_plain_path(self):
+        """Overwriting replaces in place rather than finding a free name."""
+        fs = _fs(exists_paths={'output/report.pdf'})
+        inst = _sink_instance(fs, object_id='obj-123', on_conflict='overwrite')
+        assert inst._sink_target_path('report.pdf') == 'output/report.pdf'
+
+    def test_overwrite_does_not_probe_the_store(self):
+        """
+        No stat() at all when overwriting.
+
+        Worth asserting rather than assuming: the probe is a network round-trip per stream
+        on S3 or Azure, and skipping it is half the point of the setting.
+        """
+        fs = _fs(exists_paths={'output/report.pdf'})
+        inst = _sink_instance(fs, object_id='obj-123', on_conflict='overwrite')
+        inst._sink_target_path('report.pdf')
+        fs.stat.assert_not_awaited()
+
+    def test_skip_returns_none_when_taken(self):
+        """`None` means "leave it alone" — it is a decision, not a failure."""
+        fs = _fs(exists_paths={'output/report.pdf'})
+        inst = _sink_instance(fs, object_id='obj-123', on_conflict='skip')
+        assert inst._sink_target_path('report.pdf') is None
+
+    def test_skip_writes_normally_when_free(self):
+        fs = _fs()
+        inst = _sink_instance(fs, object_id='obj-123', on_conflict='skip')
+        assert inst._sink_target_path('report.pdf') == 'output/report.pdf'
+
+    def test_skipped_write_touches_nothing_and_emits_no_ref(self):
+        """A skipped one-shot write must not create a file or claim it did."""
+        fs = _fs(exists_paths={'output/report.md'})
+        inst = _sink_instance(fs, name='report.pdf', on_conflict='skip')
+        assert inst._sink_write(b'data', 'report.md') is None
+        fs.write.assert_not_awaited()
+        inst._sink_emit([None])
+        inst.instance.writeJson.assert_not_called()
+
+    def test_skip_compares_against_a_file_not_a_directory(self):
+        """A directory sharing the name is not a file to preserve, so it does not skip."""
+        fs = _fs()
+
+        async def _dir_stat(path):
+            return {'exists': True, 'type': 'dir'}
+
+        fs.stat.side_effect = _dir_stat
+        inst = _sink_instance(fs, object_id='obj-123', on_conflict='skip')
+        assert inst._sink_target_path('report.pdf') == 'output/report.pdf'
+
+    def test_skip_treats_a_file_shadowed_by_a_directory_as_present(self):
+        """`both` still has a file to leave alone, so it skips."""
+        fs = _fs()
+
+        async def _both_stat(path):
+            return {'exists': True, 'type': 'both', 'size': 1, 'modified': 0}
+
+        fs.stat.side_effect = _both_stat
+        inst = _sink_instance(fs, object_id='obj-123', on_conflict='skip')
+        assert inst._sink_target_path('report.pdf') is None

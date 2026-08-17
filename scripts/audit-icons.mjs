@@ -30,7 +30,7 @@
  *   2. Every SVG under `nodes/src/nodes/<node>/` is referenced by at least one
  *      service JSON in the same directory (no orphaned icons), with the
  *      well-known exception of `nodes/src/nodes/core/unknown.svg` (the fallback).
- *   3. No SVGs remain in `packages/shared-ui/src/assets/nodes/` (the legacy
+ *   3. No SVGs remain in `apps/shared/src/assets/nodes/` (the legacy
  *      central location must be emptied).
  *   4. Same-named SVGs across multiple node directories have byte-identical
  *      content (warning only — we duplicate by design when an icon is shared
@@ -52,8 +52,8 @@ const REPO_ROOT = path.resolve(__dirname, '..');
 const NODES_DIR = path.join(REPO_ROOT, 'nodes', 'src', 'nodes');
 const LEGACY_ICONS_DIR = path.join(
 	REPO_ROOT,
-	'packages',
-	'shared-ui',
+	'apps',
+	'shared',
 	'src',
 	'assets',
 	'nodes',

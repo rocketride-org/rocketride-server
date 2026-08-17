@@ -46,7 +46,7 @@ import { DeployManager } from '../connection/deploy-manager';
 import { ConfigManager } from '../config';
 import { ConnectionState } from '../shared/types';
 import type { ConnectionStatus } from '../shared/types';
-import type { EnvironmentSlotState, EnvironmentWebviewToHost } from './views/environmentTypes';
+import type { EnvironmentSlotState, EnvironmentWebviewToHost } from './types/environmentTypes';
 
 // =============================================================================
 // PROVIDER

@@ -22,7 +22,7 @@
  * SOFTWARE.
  */
 
-import { PIPELINE_RESULT } from 'rocketride';
+import type { PIPELINE_RESULT } from 'rocketride';
 
 /**
  * Extracts text responses from pipeline result

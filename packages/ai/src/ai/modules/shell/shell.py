@@ -23,7 +23,7 @@
 """
 Shell static file handler.
 
-Serves the shell-ui web application (Module Federation host) from
+Serves the shell web application (Module Federation host) from
 ``dist/server/static/shell/`` and MF remote app bundles from
 ``dist/server/static/apps/``.
 
@@ -131,7 +131,7 @@ async def shell_static(request: Request):
     # Shell hasn't been built yet
     raise HTTPException(
         status_code=503,
-        detail='Shell UI not built. Run: ./builder shell-ui:build',
+        detail='Shell UI not built. Run: ./builder shell:build',
     )
 
 

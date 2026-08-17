@@ -121,6 +121,7 @@ channel; they have no data lanes and **bind to an agent** (see
 | `tool_oura`         | Oura Ring health data (sleep, readiness, activity, heart rate), read-only |
 | `tool_xtrace_memory`| Long-term shared agent memory, backed by xTrace Memory Manager   |
 | `tool_mem0`         | Long-term shared agent memory, backed by the hosted Mem0 Platform |
+| `tool_gohighlevel`  | GoHighLevel (LeadConnector) v2 sub-account operations: contacts, opportunities, conversations, calendars |
 
 ### Embeddings
 
@@ -152,6 +153,7 @@ channel; they have no data lanes and **bind to an agent** (see
 | `db_postgres`   | answers, questions → answers, table, text | PostgreSQL and Supabase (insert + NL-to-SQL) |
 | `db_mysql`      | answers, questions → answers, table, text | MySQL                                        |
 | `db_clickhouse` | questions → answers, table, text   | ClickHouse (NL-to-SQL)                       |
+| `db_hotdata`    | answers, questions → answers, table, text | Hotdata (ephemeral per-run database, load + index + NL-to-SQL) |
 
 ### Graph Databases
 

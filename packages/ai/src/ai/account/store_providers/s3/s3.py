@@ -279,6 +279,48 @@ class S3Store(IStore):
         retry=retry_if_exception_type((ConnectionError, TimeoutError)),
         reraise=True,
     )
+    async def move_file(self, src: str, dst: str) -> None:
+        """Move an object onto ``dst``, replacing it if it exists.
+
+        ``CopyObject`` runs inside S3 and the destination key is replaced only once the copy
+        has succeeded, so a failure leaves the old object as it was.
+
+        Args:
+            src: Source path, relative to the store prefix.
+            dst: Destination path, relative to the store prefix.
+
+        Raises:
+            StorageError: If the source is missing or the move fails.
+        """
+        try:
+            client = self._get_client()
+            src_key = self._get_key(src)
+            dst_key = self._get_key(dst)
+            try:
+                await asyncio.to_thread(
+                    client.copy_object,
+                    Bucket=self._bucket,
+                    Key=dst_key,
+                    CopySource={'Bucket': self._bucket, 'Key': src_key},
+                )
+            except Exception as e:
+                if self._is_no_such_key_error(e):
+                    raise StorageError(f'File not found: {src}')
+                raise
+            await asyncio.to_thread(client.delete_object, Bucket=self._bucket, Key=src_key)
+        except (ConnectionError, TimeoutError):
+            raise
+        except StorageError:
+            raise
+        except Exception as e:
+            raise StorageError(f'Failed to move {src} to {dst} in S3: {e}') from e
+
+    @retry(
+        stop=stop_after_attempt(STORE_MAX_RETRY_ATTEMPTS),
+        wait=wait_exponential(multiplier=1, min=1),
+        retry=retry_if_exception_type((ConnectionError, TimeoutError)),
+        reraise=True,
+    )
     async def list_files(self, prefix: str = '') -> list:
         """
         List all files in S3 with given prefix.
