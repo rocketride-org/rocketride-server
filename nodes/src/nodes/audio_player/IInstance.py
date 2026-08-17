@@ -49,10 +49,13 @@ class IInstance(IInstanceBase):
         # Change the policy or LaneConflictError here only. Precondition check
         # only - state is committed in _commit_lane, only after writeAVI
         # actually succeeds, so a raised BEGIN/END never wedges the state.
-        if action == AVI_ACTION.BEGIN and self._active_lane not in (None, lane):
+        # A repeated BEGIN on the SAME lane re-enters the Player's lock exactly
+        # like a different lane would, so any active lane blocks every BEGIN,
+        # not just a mismatched one.
+        if action == AVI_ACTION.BEGIN and self._active_lane is not None:
             raise LaneConflictError(
-                f'audio_player: cannot start the {lane} lane, the {self._active_lane} lane '
-                f'is already playing on this object; only one lane can play at a time'
+                f'audio_player: cannot start the {lane} lane, this object already has an '
+                f'active {self._active_lane} lane; only one lane can play at a time'
             )
 
     def _commit_lane(self, lane: str, action: int):

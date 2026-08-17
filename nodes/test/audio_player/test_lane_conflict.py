@@ -172,3 +172,55 @@ def test_failed_begin_does_not_wedge_the_other_lane():
         inst.writeVideo(AVI_ACTION.BEGIN, 'video/mp4', b'')
     assert not isinstance(excinfo.value, LaneConflictError), 'video was wrongly rejected as a lane conflict'
     assert 'simulated start failure' in str(excinfo.value)
+
+
+def _drive_repeated_begin(inst, lane, results, errors):
+    from rocketlib import AVI_ACTION
+
+    write = inst.writeAudio if lane == 'audio' else inst.writeVideo
+    mime = 'audio/wav' if lane == 'audio' else 'video/mp4'
+
+    try:
+        write(AVI_ACTION.BEGIN, mime, b'')
+        write(AVI_ACTION.BEGIN, mime, b'')
+        results.append('completed')
+    except Exception as e:  # noqa: BLE001 - capturing whatever the guard raises
+        errors.append(e)
+
+
+def _assert_repeated_begin_is_rejected_not_deadlocked(lane):
+    """
+    A second BEGIN on the SAME lane re-enters the Player's non-reentrant lock
+    exactly like a different lane would (CodeRabbit catch on #1966: the guard
+    only compared lanes, so audio-then-audio slipped through to writeAVI while
+    the Player still held the lock). Same bounded-thread technique as the
+    cross-lane test: a regression must show up as a failing assertion, never
+    as a hung suite.
+    """
+    inst = _fresh_instance()
+    from audio_player.IInstance import LaneConflictError
+
+    results = []
+    errors = []
+
+    t = threading.Thread(target=_drive_repeated_begin, args=(inst, lane, results, errors), daemon=True)
+    t.start()
+    t.join(timeout=5)
+
+    assert not t.is_alive(), (
+        f'repeated {lane} BEGIN did not return within 5s - same-lane lock re-entry, not a slow test'
+    )
+    assert not results, f'expected the repeated BEGIN to be rejected, but it completed: {results}'
+    assert len(errors) == 1, f'expected exactly one LaneConflictError, got: {errors}'
+    assert isinstance(errors[0], LaneConflictError), f'wrong error type: {errors[0]!r}'
+
+    # Same teardown reasoning as test_second_lane_begin_is_rejected_not_deadlocked above.
+    inst._audio._playback_finished = True
+
+
+def test_repeated_audio_begin_is_rejected_not_deadlocked():
+    _assert_repeated_begin_is_rejected_not_deadlocked('audio')
+
+
+def test_repeated_video_begin_is_rejected_not_deadlocked():
+    _assert_repeated_begin_is_rejected_not_deadlocked('video')
