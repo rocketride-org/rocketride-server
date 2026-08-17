@@ -198,6 +198,7 @@ class TestEnsureConstraints:
 class TestInstallRequirements:
     def test_comment_only_file_is_skipped_without_installing(self, tmp_path, monkeypatch):
         req = _write(tmp_path / 'requirements.txt', '# nothing here\n\n   \n')
+        monkeypatch.setattr(depends, '_start_heartbeat', lambda: pytest.fail('heartbeat must not start'))
         monkeypatch.setattr(depends, '_install_requirements_inner', lambda *a: pytest.fail('should not install'))
 
         depends._install_requirements(str(req), str(tmp_path / 'constraints.txt'))
