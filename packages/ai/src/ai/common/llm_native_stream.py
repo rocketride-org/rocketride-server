@@ -56,19 +56,28 @@ def gate_model_name(model: str) -> str:
     return m
 
 
+_ADAPTIVE_MODEL_PREFIXES = (
+    'claude-opus-4-7',
+    'claude-opus-4-8',
+    'claude-opus-5',
+    'claude-sonnet-5',
+    'claude-fable-5',
+    'claude-mythos-5',
+)
+
+
 def build_anthropic_thinking_kwargs(model_gate: str, model_output_tokens: int) -> Dict[str, Any]:
-    """Return ``ChatAnthropic`` thinking kwargs by model name, or ``{}`` if unsupported."""
     if model_gate.startswith('claude-3') and 'haiku' in model_gate:
-        return {}  # Only legacy Claude 3/3.5 Haiku lack extended thinking; 4.5+ supports it.
+        return {}
     out: Dict[str, Any] = {}
-    if model_gate.startswith('claude-opus-4-7') or model_gate.startswith('claude-opus-4-8'):
+    if model_gate.startswith(_ADAPTIVE_MODEL_PREFIXES):
         out['thinking'] = {'type': 'adaptive', 'display': 'summarized'}
     else:
         budget = max(2048, model_output_tokens // 2)
         if budget >= model_output_tokens:
             budget = model_output_tokens - 1024
         if budget < 1024:
-            return {}  # output window too small for a valid thinking budget
+            return {}
         out['betas'] = ['interleaved-thinking-2025-05-14']
         out['thinking'] = {'type': 'enabled', 'budget_tokens': budget}
     return out
