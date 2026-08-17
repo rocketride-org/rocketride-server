@@ -110,7 +110,8 @@ def resolve_quality(value):
         return 'auto'
     try:
         return max(1, min(100, int(float(text))))
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
+        # OverflowError is not a ValueError: `float('inf')` parses, and `int()` on it raises.
         warning(f'scan_cropper: config quality={value!r} is neither "auto" nor a number; using auto')
         return 'auto'
 
@@ -151,7 +152,7 @@ def _region(rect, page_area: float) -> dict:
         page_area: Area of the whole scan, in pixels.
 
     Returns:
-        dict: ``{cx, cy, w, h, angle, area_pct, ratio_error}``, every value a builtin.
+        dict: ``{cx, cy, w, h, angle, area_pct, ratio_error, cropped}``, every value a builtin.
     """
     (cx, cy), (w, h), angle = rect
     return {
@@ -162,6 +163,9 @@ def _region(rect, page_area: float) -> dict:
         'angle': round(float(angle), 2),
         'area_pct': round(float(w) * float(h) / page_area * 100.0, 2) if page_area else 0.0,
         'ratio_error': round(float(ratio_error(rect)), 1),
+        # Here, not in the crop loop: that loop runs only when the image lane is listening,
+        # and the record must not change shape with the wiring.
+        'cropped': False,
     }
 
 
@@ -232,7 +236,6 @@ def build_split_scan(config: dict):
 
         crops = []
         for index, rect in enumerate(rects):
-            regions[index]['cropped'] = False
             straight = abs(normalise_rect(rect)[2]) < DESKEW_MIN_ANGLE
             crop = cut_out(img, rect) if (deskew and not straight) else bbox_crop(img, rect)
             if crop is None:

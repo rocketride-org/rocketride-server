@@ -22,7 +22,7 @@ import json
 import sys
 from pathlib import Path
 
-from rocketlib import AVI_ACTION
+from rocketlib import APERR, AVI_ACTION, Ec
 from ai.common.avi.descriptor import build_stream_descriptor, descriptor_to_payload
 
 NODES_SRC = Path(__file__).parent.parent.parent / 'src' / 'nodes'
@@ -45,6 +45,7 @@ def _region(cx, cy, w=400.0, h=520.0):
         'angle': 0.0,
         'area_pct': 10.0,
         'ratio_error': 2.0,
+        'cropped': False,  # split_scan sets it on every region, crop loop or not
     }
 
 
@@ -115,8 +116,11 @@ def _send_stream(inst, payload, body=b'scan-bytes'):
     ):
         try:
             inst.writeImage(action, 'image/jpeg', buffer)
-        except Exception:
-            pass
+        except APERR as e:
+            # Anything else is a real failure out of _finish, which is where the emitting
+            # happens — swallowing it would pass a node that emitted nothing.
+            if e.ec != Ec.PreventDefault:
+                raise
 
 
 def _triplets(capture):
@@ -288,6 +292,26 @@ class TestNothingFound:
         triplets = _triplets(inst.instance)
         assert len(triplets) == 1
         assert triplets[0][1][2] == b'original-scan-bytes'
+
+    def test_regions_but_no_crops_forwards_the_original(self):
+        """Photos were found and none survived cutting — the scan still has to come out.
+
+        `split_scan` returns regions with an empty crop list when every one of them is too
+        small to cut or fails to encode. Deciding on the regions rather than on what was
+        actually emitted leaves the image lane with nothing at all for that scan.
+        """
+        inst = _make(([], [_region(300, 400)]))
+
+        _send_stream(inst, _descriptor_payload(), body=b'original-scan-bytes')
+
+        triplets = _triplets(inst.instance)
+        assert len(triplets) == 1
+        assert triplets[0][1][2] == b'original-scan-bytes'
+
+        # The two lanes together still say "a photo was here and you did not get it".
+        report = json.loads(inst.instance.texts[0])
+        assert report['count'] == 1
+        assert report['regions'][0]['cropped'] is False
 
 
 class TestListenerGating:

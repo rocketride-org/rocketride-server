@@ -311,7 +311,10 @@ def source_quality(data: bytes):
             i += 1
             continue
         marker = data[i + 1]
-        if marker == 0xD8 or 0xD0 <= marker <= 0xD7:  # no payload
+        if marker == 0xFF:
+            i += 1  # fill byte: legal padding before the marker code, not a code itself
+            continue
+        if marker == 0xD8 or marker == 0x01 or 0xD0 <= marker <= 0xD7:  # no payload
             i += 2
             continue
         if marker in (0xDA, 0xD9):  # pixel data starts

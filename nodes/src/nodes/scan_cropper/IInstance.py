@@ -129,7 +129,8 @@ class IInstance(IInstanceBase):
         for crop in crops:
             self._emit_crop(crop, regions)
 
-        if not crops and not regions:
+        # On what was emitted, not on what was detected: every region can fail to cut.
+        if not crops:
             self._emit_original(source, mimeType, wants_image)
 
         self._emit_report(True, regions, wants_text)

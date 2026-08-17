@@ -221,7 +221,8 @@ def foreground_mask(img, params: DetectParams):
     bg = np.zeros((h, w), dtype=bool)
     for c in peaks:
         same = plain & ~wall & (np.abs(img16 - unpack_colour(c)).max(axis=2) < COLOUR_TOL)
-        _, labels = cv2.connectedComponents(same.astype(np.uint8), 8)
+        # By keyword: the second positional parameter is the output `labels`, not connectivity.
+        _, labels = cv2.connectedComponents(same.astype(np.uint8), connectivity=8)
         at_border = set(labels[0, :]) | set(labels[-1, :]) | set(labels[:, 0]) | set(labels[:, -1])
         at_border.discard(0)
         if at_border:
