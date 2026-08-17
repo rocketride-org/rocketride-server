@@ -449,9 +449,16 @@ If you do subscribe live:
 4. Treat inbound events as **derived analytics** (counters, alerts, custom
    joins) — not as a second copy of the run log. Keep `client.log` as the
    source of truth for “what happened in this run.”
-5. Correlate with `(project_id, source, startTime)` from `TASK_STATUS` or the
-   `token` from `running` / your own `execute` responses when you need a join
-   key.
+5. When you need a join key into the run log, do **not** rely only on
+   `(project_id, source, startTime)` — those can collide across users, teams,
+   or run kinds. Prefer one of:
+   - the `token` from `running` / your own `execute` responses (maps to the
+     continuum the SDK already opens), or
+   - the full run-log identity: owner scope (`users/<clientId>/…` for
+     development, `@/Team/=<teamId>/` for deploy) plus `run_kind`
+     (`dev` / `deploy`) together with `(project_id, source)` / stream name
+     (`project.source.run_kind`). Persist a server-issued mapping if your
+     warehouse cannot carry that full key.
 6. Reconnect on disconnect; the SDK auto-resubscribes monitors.
 7. If you need full per-component data flow, ensure pipelines are launched
    with `pipelineTraceLevel: "summary"` (or `"full"` for debugging). Without
