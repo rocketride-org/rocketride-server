@@ -97,15 +97,21 @@ def call(
     *,
     params: dict | None = None,
     body: dict | None = None,
+    accept: str | None = None,
+    raw: bool = False,
 ) -> Any:
-    """Make an authenticated GitHub API call and return parsed JSON.
+    """Make an authenticated GitHub API call and return parsed JSON (or raw text).
 
     Raises ``ValueError`` with a human-readable message on HTTP errors.
-    Returns an empty dict for 204 No Content responses.
+    Returns an empty dict for 204 No Content responses (or ``''`` when ``raw``).
+
+    Args:
+        accept: Optional ``Accept`` header override (e.g. ``application/vnd.github.v3.diff``).
+        raw: When True, return response body as text instead of parsing JSON.
     """
     headers = {
         'Authorization': f'Bearer {token}',
-        'Accept': 'application/vnd.github+json',
+        'Accept': accept or 'application/vnd.github+json',
         'X-GitHub-Api-Version': '2022-11-28',
     }
 
@@ -125,7 +131,7 @@ def call(
             raise ValueError(f'GitHub request failed: {exc}') from exc
 
         if resp.status_code == 204:
-            return {}
+            return '' if raw else {}
 
         if not resp.ok:
             is_rate_limit = resp.status_code == 429 or (
@@ -141,6 +147,8 @@ def call(
 
             _raise_github_error(resp)
 
+        if raw:
+            return resp.text
         return resp.json()
 
     def github_rate_limit_wait(retry_state: RetryCallState) -> float:
