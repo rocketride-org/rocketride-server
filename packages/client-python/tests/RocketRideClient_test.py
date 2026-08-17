@@ -277,8 +277,7 @@ class TestPipelineOperations:
 
             status = await client.get_task_status(result['token'])
 
-            assert 'state' in status
-            assert status['state'] in [state.value for state in TASK_STATE]
+            assert status.state in [state.value for state in TASK_STATE]
 
             await client.terminate(result['token'])
         finally:
@@ -1544,8 +1543,7 @@ class TestEndToEndWorkflow:
             assert 'text' in process_result
             assert test_data in process_result['text'][0]
 
-            assert 'state' in status
-            assert status['state'] in [state.value for state in TASK_STATE]
+            assert status.state in [state.value for state in TASK_STATE]
             assert result['token'] is not None
         finally:
             if token:
@@ -1603,8 +1601,8 @@ Line 3: random data {random.random()}"""
             assert 'text' in processing_result
             assert 'End-to-end file processing test' in processing_result['text'][0]
 
-            assert 'state' in final_status
-            assert 'completed' in final_status
+            assert final_status.state is not None
+            assert final_status.completed is not None
         finally:
             if token:
                 await ensure_clean_pipeline(client, token)
@@ -1829,7 +1827,7 @@ Line 3: random data {random.random()}"""
 
             # Check status after valid operation
             status_after_valid = await client.get_task_status(token)
-            assert len(status_after_valid['errors']) == 0
+            assert len(status_after_valid.errors) == 0
 
             # Try to send data after termination (should fail)
             await client.terminate(token)
@@ -1887,7 +1885,7 @@ Line 3: random data {random.random()}"""
 
             # Get final status to verify task completed
             final_status = await client.get_task_status(token)
-            assert 'state' in final_status
+            assert final_status.state is not None
 
             await client.terminate(token)
             token = None
