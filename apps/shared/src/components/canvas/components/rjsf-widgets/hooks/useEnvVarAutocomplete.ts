@@ -27,7 +27,13 @@ export interface UseEnvVarAutocompleteResult {
 	highlightedIndex: number;
 	/** Move highlight up/down. */
 	moveHighlight: (direction: 'up' | 'down') => void;
+	/**
+	 * Open the suggestions list with every saved variable at ``cursorPos``.
+	 * Used by the explicit picker button so users need not type ``${``.
+	 */
+	openAll: (anchorElement: HTMLElement | null, cursorPos: number) => void;
 }
+
 
 // =============================================================================
 // Constants
@@ -35,6 +41,17 @@ export interface UseEnvVarAutocompleteResult {
 
 /** Matches `${` followed by an optional partial ROCKETRIDE_* key name at the end of a string. */
 const TRIGGER_REGEX = /\$\{(ROCKETRIDE_\w*)?$/;
+
+/**
+ * Insert `${key}` replacing the span from ``triggerStart`` to ``cursorPos``.
+ * Used by both the `${` autocomplete path and the explicit picker (`openAll`),
+ * where ``triggerStart === cursorPos`` so the reference is inserted at the caret.
+ */
+export function insertEnvVarRef(currentValue: string, key: string, triggerStart: number, cursorPos: number): string {
+	const before = currentValue.substring(0, triggerStart);
+	const after = currentValue.substring(cursorPos);
+	return `${before}\${${key}}${after}`;
+}
 
 // =============================================================================
 // Hook
@@ -91,10 +108,7 @@ export function useEnvVarAutocomplete(envKeys: string[]): UseEnvVarAutocompleteR
 			const triggerStart = triggerStartRef.current;
 			const cursorPos = inputEl?.selectionStart ?? currentValue.length;
 
-			// Replace from the `${` trigger to the cursor with the full variable reference
-			const before = currentValue.substring(0, triggerStart);
-			const after = currentValue.substring(cursorPos);
-			const newValue = `${before}\${${key}}${after}`;
+			const newValue = insertEnvVarRef(currentValue, key, triggerStart, cursorPos);
 
 			setIsOpen(false);
 
@@ -108,6 +122,22 @@ export function useEnvVarAutocomplete(envKeys: string[]): UseEnvVarAutocompleteR
 			return newValue;
 		},
 		[],
+	);
+
+	const openAll = useCallback(
+		(anchorElement: HTMLElement | null, cursorPos: number) => {
+			if (!anchorElement || !envKeys.length) {
+				setIsOpen(false);
+				return;
+			}
+			// Insert at the caret — no `${` prefix required for the picker path.
+			triggerStartRef.current = cursorPos;
+			setSuggestions([...envKeys]);
+			setAnchorEl(anchorElement);
+			setHighlightedIndex(0);
+			setIsOpen(true);
+		},
+		[envKeys],
 	);
 
 	const handleDismiss = useCallback(() => {
@@ -124,5 +154,15 @@ export function useEnvVarAutocomplete(envKeys: string[]): UseEnvVarAutocompleteR
 		[suggestions.length],
 	);
 
-	return { isOpen, suggestions, anchorEl, handleInputChange, handleSelect, handleDismiss, highlightedIndex, moveHighlight };
+	return {
+		isOpen,
+		suggestions,
+		anchorEl,
+		handleInputChange,
+		handleSelect,
+		handleDismiss,
+		highlightedIndex,
+		moveHighlight,
+		openAll,
+	};
 }
