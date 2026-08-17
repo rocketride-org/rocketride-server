@@ -19,7 +19,7 @@ from typing import Any, Callable, Dict, List, Optional
 
 from rocketlib import debug, warning
 
-from ai.common.llm_adapter import Event, drive_adapter, report_llm_tokens
+from ai.common.llm_adapter import Event, drive_adapter, is_usage_flag_rejection, report_llm_tokens
 
 # Per-call carrier for API-level stop sequences (e.g. CrewAI's ReAct "\nObservation:").
 # Set on the ask path in llm_base._question and read at every model sink so the stop
@@ -341,13 +341,14 @@ def try_openai_compat_reasoning_stream(
         _drain(kwargs)
     except Exception as e:
         # This handler is wired ONLY for custom base URLs (ChatBase returns early unless
-        # openai_api_base is set), which is exactly where include_usage can 400. Retry once
-        # without it ONLY on a 400 (the flag rejection) before any chunk: nothing has reached
-        # on_chunk yet, so the retry cannot duplicate visible output — we just forgo the usage
-        # chunk (that endpoint goes unmetered) and keep reasoning streaming alive. A 401/429 or
-        # a mid-stream failure is not retried here — it falls straight through to the
-        # non-streaming path (which meters itself), so a rate limit stays at two round trips.
-        if emitted == 0 and 'stream_options' in kwargs and getattr(e, 'status_code', None) == 400:
+        # openai_api_base is set), which is exactly where include_usage can be rejected. Retry
+        # once without it ONLY on a flag rejection (a 400/422 client error) before any chunk:
+        # nothing has reached on_chunk yet, so the retry cannot duplicate visible output — we
+        # just forgo the usage chunk (that endpoint goes unmetered) and keep reasoning
+        # streaming alive. A 401/429 or a mid-stream failure is not retried here — it falls
+        # straight through to the non-streaming path (which meters itself), so a rate limit
+        # stays at two round trips.
+        if emitted == 0 and 'stream_options' in kwargs and is_usage_flag_rejection(e):
             warning(
                 f'llm_native_stream openai_compat_reasoning: endpoint rejected stream_options '
                 f'({type(e).__name__}); retrying without include_usage (this call is unmetered).'

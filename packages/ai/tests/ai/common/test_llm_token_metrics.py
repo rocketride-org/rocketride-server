@@ -11,9 +11,9 @@ import ai.common.llm_adapter as _adapter
 from ai.common.llm_adapter import (
     LangChainAdapter,
     _split_input_cache,
+    aggregate_usage,
     report_llm_tokens,
     turn_usage,
-    usage_since,
 )
 
 # Same singleton report_llm_tokens reports into; imported from the module (not the
@@ -147,30 +147,49 @@ class _FakeChatXAI(_FakeChatOpenAI):
 
 
 class _FakeRejectsUsageFlag(_FakeChatOpenAI):
-    """An old vLLM/strict proxy: 400s on the usage flag before any chunk, streams without it."""
+    """An old vLLM/strict proxy: rejects the usage flag before any chunk, streams without it.
+
+    ``REJECT_STATUS`` is the openai SDK's BadRequestError shape (400); a FastAPI-based
+    server answers the same rejection with UnprocessableEntityError (422).
+    """
 
     model = 'vllm-local'
+    REJECT_STATUS = 400
 
     def stream(self, messages, **kwargs):
         self.kwargs = kwargs
         if kwargs.get('stream_usage'):
             err = RuntimeError('stream_options.include_usage unsupported')
-            err.status_code = 400  # the openai SDK's BadRequestError shape
+            err.status_code = self.REJECT_STATUS
             raise err
         yield from self._chunks
+
+
+class _FakeRejectsUsageFlag422(_FakeRejectsUsageFlag):
+    """vLLM's OpenAI-compatible server is FastAPI: request validation fails with 422."""
+
+    REJECT_STATUS = 422
 
 
 class _FakeRaises401(_FakeChatOpenAI):
     """A bad key: the failure carries status_code 401, so the flag retry must NOT fire."""
 
     model = 'gpt-401'
+    RAISE_STATUS = 401
 
     def stream(self, messages, **kwargs):
         self.kwargs = kwargs
-        err = RuntimeError('401 unauthorized')
-        err.status_code = 401
+        err = RuntimeError(f'{self.RAISE_STATUS} rejected')
+        err.status_code = self.RAISE_STATUS
         raise err
         yield  # unreachable — makes this a generator so the raise fires on first next()
+
+
+class _FakeRaises429(_FakeRaises401):
+    """A rate limit: a client error, but not a flag rejection — no second round trip."""
+
+    model = 'gpt-429'
+    RAISE_STATUS = 429
 
 
 class _FakeRaisesTransient(_FakeChatOpenAI):
@@ -218,10 +237,13 @@ def test_stream_omits_the_flag_for_a_model_that_lacks_it():
     _assert_four_counters()
 
 
-def test_stream_retries_without_the_usage_flag_when_the_endpoint_rejects_it():
-    # A custom base URL that 400s on include_usage (old vLLM/strict proxy) must not lose the
+@pytest.mark.parametrize('cls', [_FakeRejectsUsageFlag, _FakeRejectsUsageFlag422])
+def test_stream_retries_without_the_usage_flag_when_the_endpoint_rejects_it(cls):
+    # A custom base URL that rejects include_usage (old vLLM/strict proxy) must not lose the
     # stream: we ask, the endpoint rejects it before any chunk, and we retry once without it.
-    llm = _FakeRejectsUsageFlag([_Chunk('Hi'), _Chunk(' there')])
+    # 400 is the openai SDK's shape; a FastAPI-based server says 422 for the same rejection,
+    # and gating on 400 alone dropped every such endpoint to the two-round-trip path.
+    llm = cls([_Chunk('Hi'), _Chunk(' there')])
 
     events = list(LangChainAdapter(llm).stream('q'))
 
@@ -231,10 +253,11 @@ def test_stream_retries_without_the_usage_flag_when_the_endpoint_rejects_it():
     assert 'stream_usage' not in llm.kwargs
 
 
-def test_stream_does_not_retry_a_non_400_failure():
-    # A 401/429/etc. is not the usage-flag rejection: it must surface without a second
-    # identical round trip. The flag stays on and the error propagates.
-    llm = _FakeRaises401([_Chunk('x')])
+@pytest.mark.parametrize('cls', [_FakeRaises401, _FakeRaises429])
+def test_stream_does_not_retry_an_excluded_client_error(cls):
+    # A 401/429 is a client error, but never the usage-flag rejection: it must surface
+    # without a second identical round trip. The flag stays on and the error propagates.
+    llm = cls([_Chunk('x')])
 
     with pytest.raises(RuntimeError):
         list(LangChainAdapter(llm).stream('q'))
@@ -386,8 +409,10 @@ def test_two_overlapping_turns_do_not_read_each_others_calls():
     import threading
 
     results: dict = {}
-    open_barrier = threading.Barrier(2)  # both scopes open before either reports
-    report_barrier = threading.Barrier(2)  # both reported while both scopes still open
+    # timeout so a thread that dies before wait() fails the test with BrokenBarrierError
+    # instead of parking the other one until the CI job hits its own limit.
+    open_barrier = threading.Barrier(2, timeout=10)  # both scopes open before either reports
+    report_barrier = threading.Barrier(2, timeout=10)  # both reported while both scopes still open
 
     def run_turn(name, n):
         with turn_usage() as read_usage:
@@ -416,7 +441,7 @@ def test_two_sibling_scopes_in_one_turn_do_not_read_each_others_calls():
     from contextvars import copy_context
 
     results: dict = {}
-    both_open = threading.Barrier(2)
+    both_open = threading.Barrier(2, timeout=10)  # see the timeout note above
 
     with turn_usage() as outer:
 
@@ -445,31 +470,23 @@ def test_two_sibling_scopes_in_one_turn_do_not_read_each_others_calls():
 
 
 # ---------------------------------------------------------------------------
-# usage_since — one invoke row's own slice of the turn
+# aggregate_usage — how one scope's calls render on its row
 # ---------------------------------------------------------------------------
 
 
-def test_usage_since_returns_only_the_calls_made_after_the_mark():
-    # An agent's 7th invoke must show its own cost, not the running turn total.
-    with turn_usage():
-        report_llm_tokens(10, 5, model='m1')  # collector index 0
-        report_llm_tokens(30, 7, model='m2')  # collector index 1
-        assert usage_since(1) == {'input': 30, 'output': 7, 'cache_read': 0, 'cache_creation': 0, 'model': 'm2'}
-
-
-def test_usage_since_a_single_call_has_no_redundant_breakdown():
+def test_aggregate_usage_a_single_call_has_no_redundant_breakdown():
     # One call renders as plain chips; a breakdown of itself would be noise.
     with turn_usage():
         report_llm_tokens(10, 5, model='m1')
-        assert 'breakdown' not in usage_since(0)
-        assert 'calls' not in usage_since(0)
+        assert 'breakdown' not in aggregate_usage()
+        assert 'calls' not in aggregate_usage()
 
 
-def test_usage_since_sums_when_one_invoke_made_several_calls():
+def test_aggregate_usage_sums_when_one_invoke_made_several_calls():
     with turn_usage():
         report_llm_tokens(10, 5, model='m1', cache_read_tokens=1)
         report_llm_tokens(30, 7, model='m2', cache_creation_tokens=2)
-        assert usage_since(0) == {
+        assert aggregate_usage() == {
             'input': 40,
             'output': 12,
             'cache_read': 1,
@@ -483,8 +500,8 @@ def test_usage_since_sums_when_one_invoke_made_several_calls():
         }
 
 
-def test_usage_since_is_none_when_no_call_came_after_the_mark():
+def test_aggregate_usage_is_none_when_the_scope_made_no_call():
     # A cached/failed call adds no entry, so the invoke row shows no grid at all.
-    with turn_usage():
-        report_llm_tokens(10, 5, model='m1')
-        assert usage_since(1) is None
+    with turn_usage() as read_usage:
+        assert read_usage() is None
+        assert aggregate_usage() is None

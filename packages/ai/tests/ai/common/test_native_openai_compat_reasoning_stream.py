@@ -12,6 +12,8 @@ the empty-``choices`` guard skips it, and the ``prompt_tokens - cached_tokens`` 
 field). Plus the retry-without-the-flag path for an endpoint that 400s on it.
 """
 
+import pytest
+
 from ai.common.llm_native_stream import try_openai_compat_reasoning_stream
 from ai.web.metrics.metrics import metrics
 
@@ -145,10 +147,14 @@ def test_a_stream_without_usage_reports_nothing():
     assert _counters() == {}
 
 
-def test_retries_without_stream_options_on_a_400():
+@pytest.mark.parametrize('status', [400, 422])
+def test_retries_without_stream_options_on_a_client_rejection(status):
+    # 400 is the openai SDK's BadRequestError; vLLM's OpenAI-compatible server is FastAPI,
+    # so it answers the same unknown-field rejection with 422. Both must retry — gating on
+    # 400 alone left every such endpoint without token-by-token streaming.
     comp = _Completions(
         [],  # never served: the flagged call raises
-        raise_status=400,
+        raise_status=status,
         retry_chunks=[_Chunk([_Choice(content='hi', finish_reason='stop')])],
     )
     result, text, _, finish = _run(_Chat(comp))

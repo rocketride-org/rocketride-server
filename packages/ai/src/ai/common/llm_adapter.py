@@ -74,7 +74,7 @@ def turn_usage():
     calls: list = []
     token = _TURN_CALLS.set(calls)
     try:
-        yield lambda: usage_since(0, calls)
+        yield lambda: aggregate_usage(calls)
     finally:
         _TURN_CALLS.reset(token)
         # Fold this scope's calls into the parent so the outer turn still sees them.
@@ -227,6 +227,20 @@ def flatten_content(content: Any) -> str:
     return flatten_content_parts(content)[0]
 
 
+def is_usage_flag_rejection(e: Exception) -> bool:
+    """True when an endpoint refused the request itself, so one retry without the flag pays off.
+
+    Any 4xx means the endpoint rejected this request as written: 400 (BadRequestError) is
+    what the openai SDK raises for an unknown ``stream_options.include_usage``, and 422
+    (UnprocessableEntityError) is what a FastAPI-based server — vLLM's OpenAI-compatible
+    server is one — answers request-validation failures with. Auth, timeout and rate-limit
+    statuses say nothing about the flag, so they re-raise without a second round trip, and a
+    transient connection failure carries no ``status_code`` at all.
+    """
+    status = getattr(e, 'status_code', None)
+    return isinstance(status, int) and 400 <= status < 500 and status not in (401, 403, 408, 429)
+
+
 def report_llm_tokens(
     input_tokens: int = 0,
     output_tokens: int = 0,
@@ -278,20 +292,20 @@ def report_llm_tokens(
             pass
 
 
-def usage_since(seen: int, calls: Optional[list] = None) -> Optional[dict]:
-    """Aggregate the model calls recorded after the first ``seen`` of this turn.
+def aggregate_usage(calls: Optional[list] = None) -> Optional[dict]:
+    """Aggregate one scope's model calls into the dict the Trace renders.
 
-    ``calls`` is the open turn's collector; it defaults to the current context's list so
-    a caller inside a ``turn_usage`` scope can read it without threading the list through.
-    The collector is append-only within a turn, so a scope that records its length
-    beforehand gets exactly its own calls back (its own nested sub-agents/invokes
-    included). One call returns that call unchanged, so a single-call invoke renders
-    as plain totals with no redundant breakdown.
+    ``calls`` is the scope's own collector — how a scope isolates itself from its
+    concurrent siblings is that each owns its list (see ``turn_usage``), never an offset
+    into a shared one. It defaults to the current context's list so a caller inside a
+    ``turn_usage`` scope can read it without threading the list through. One call returns
+    that call unchanged, so a single-call invoke renders as plain totals with no
+    redundant breakdown.
     """
     if calls is None:
         calls = _TURN_CALLS.get() or []
     with _USAGE_LOCK:
-        calls = calls[seen:]
+        calls = list(calls)
     if not calls:
         return None
     if len(calls) == 1:
@@ -370,12 +384,13 @@ class LangChainAdapter:
         except StopIteration:
             gen, piece = None, None
         except Exception as e:
-            # Retry without the usage flag ONLY for the failure it causes: a 400 that rejects
-            # stream_options.include_usage (an old vLLM/strict proxy; the openai SDK raises
-            # BadRequestError with status_code 400). Re-raise everything else — a 401/429
-            # surfaces without a second round trip, and a transient connection/timeout (no
-            # status_code) is not mistaken for a flag rejection and silently retried unmetered.
-            if not ask_usage or getattr(e, 'status_code', None) != 400:
+            # Retry without the usage flag ONLY for the failure it causes: a client error
+            # rejecting stream_options.include_usage (an old vLLM/strict proxy — 400 from the
+            # openai SDK, 422 from a FastAPI-based server). Re-raise everything else — a
+            # 401/429 surfaces without a second round trip, and a transient connection/timeout
+            # (no status_code) is not mistaken for a flag rejection and silently retried
+            # unmetered.
+            if not ask_usage or not is_usage_flag_rejection(e):
                 raise
             from rocketlib import warning
 
