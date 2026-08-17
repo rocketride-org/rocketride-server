@@ -281,11 +281,13 @@ def test_dotfile_paths_keep_their_leading_dot(tmp_path: Path) -> None:
     (tmp_path / '.env').write_text('K=v\n', encoding='utf-8')
     (tmp_path / '.github' / 'workflows').mkdir(parents=True)
     (tmp_path / '.github' / 'workflows' / 'ci.yml').write_text('on: push\n', encoding='utf-8')
+    (tmp_path / '.github' / 'engine.py').write_text('version.docker.json\n', encoding='utf-8')
 
     index = CodeIndex.build(tmp_path)
     assert index.has_path('.env')
     assert index.has_path('.github/workflows/ci.yml')
     assert not index.has_path('env')
+    assert index.find_literal('version.docker.json') == ('.github/engine.py', 1)
 
 
 def test_unreadable_doc_is_reported_and_fails(tmp_path: Path) -> None:
