@@ -122,9 +122,8 @@ export const ConnectionErrorBanner: React.FC<ConnectionErrorBannerProps> = ({ me
 			// A reload re-runs bootstrap, which recovers every shape: a stored
 			// token logs back in, tokenless renders the landing, and a still-
 			// unreachable server re-latches this banner. In-place recovery via
-			// ConnectionManager.reconnect() stalls in CONNECTING even against a
-			// healthy server (pre-existing; tracked separately) — don't use it
-			// as the default action.
+			// ConnectionManager.reconnect() is preferred when available; reload
+			// remains a safe fallback for a full shell reset.
 			window.location.reload();
 		})
 		: onSignIn ?? (() => {

@@ -396,7 +396,14 @@ export class ConnectionManager implements IConnectionManager {
 			// Fired when the WebSocket closes for any reason
 			onDisconnected: async (reason, hasError) => {
 				if (!this.hasCurrentLifecycleOwner()) return;
-				this.lifecycleOwner!.connectedPublished = false;
+				const owner = this.lifecycleOwner!;
+				// Ignore disconnects that arrive before this owner published
+				// CONNECTED (in-flight login / reconnect) — and ignore stale
+				// callbacks from a prior transport after reconnect already
+				// restored an authenticated attachment (#1628).
+				if (!owner.connectedPublished) return;
+				if (this.client?.isAttached() && this.client.isAuthenticated()) return;
+				owner.connectedPublished = false;
 				this.clearServicesCache();
 				// Don't overwrite AUTH_FAILED state
 				if (this.connectionStatus.state !== ConnectionState.AUTH_FAILED) {
@@ -1018,6 +1025,15 @@ export class ConnectionManager implements IConnectionManager {
 		if (manager && client) {
 			await manager.disconnect(client);
 			if (this.manager === manager) this.manager = null;
+		} else if (client) {
+			// No RemoteManager (anonymous attach or a path that never bound one).
+			// Still detach the shared persist client so reconnect()/connect()
+			// cannot stall on a half-closed transport (#1628).
+			try {
+				await client.disconnect();
+			} catch (error) {
+				console.error('[ConnectionManager] Client disconnect during tear-down failed:', error);
+			}
 		}
 		if (this.connectionGeneration !== generation) return;
 
@@ -1031,11 +1047,17 @@ export class ConnectionManager implements IConnectionManager {
 	}
 
 	/**
-	 * Disconnect and reconnect.
+	 * Disconnect and reconnect with the stored token.
+	 *
+	 * Flushes microtasks after disconnect so async onDisconnected handlers from
+	 * the torn-down transport run while ``lifecycleOwner`` is still unset and
+	 * no-op, instead of flipping a fresh connect back to CONNECTING (#1628).
 	 */
 	public async reconnect(): Promise<void> {
 		const token = this.loadToken();
 		await this.disconnect();
+		await Promise.resolve();
+		this._attachPromise = undefined;
 		if (token) {
 			await this.connect(token);
 		}
