@@ -21,3 +21,11 @@ test('insertEnvVarRef replaces an incomplete ${ trigger span', () => {
 test('insertEnvVarRef preserves text after the cursor', () => {
 	assert.equal(insertEnvVarRef('abCD', 'ROCKETRIDE_X', 2, 2), 'ab${ROCKETRIDE_X}CD');
 });
+
+test('explicit picker insert range stays stable when end equals open caret', () => {
+	// openAll stores the same index for start and end; moving the live caret must not
+	// matter when callers pass that frozen end (regression for CodeRabbit #2018).
+	const value = 'hello world';
+	const openAt = 6;
+	assert.equal(insertEnvVarRef(value, 'ROCKETRIDE_NAME', openAt, openAt), 'hello ${ROCKETRIDE_NAME}world');
+});

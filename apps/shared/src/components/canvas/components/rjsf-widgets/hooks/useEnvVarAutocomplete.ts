@@ -72,9 +72,20 @@ export function useEnvVarAutocomplete(envKeys: string[]): UseEnvVarAutocompleteR
 
 	// Track the position of the `${` trigger in the input value
 	const triggerStartRef = useRef<number>(0);
+	/**
+	 * When set, selection uses this end cursor instead of the live caret.
+	 * Keeps explicit-picker inserts stable if the user moves the caret while
+	 * the suggestions popover is open.
+	 */
+	const explicitInsertEndRef = useRef<number | null>(null);
+
+	const clearExplicitInsert = useCallback(() => {
+		explicitInsertEndRef.current = null;
+	}, []);
 
 	const handleInputChange = useCallback(
 		(value: string, cursorPos: number, anchorElement: HTMLElement | null) => {
+			clearExplicitInsert();
 			if (!anchorElement || !envKeys.length) {
 				setIsOpen(false);
 				return;
@@ -100,16 +111,18 @@ export function useEnvVarAutocomplete(envKeys: string[]): UseEnvVarAutocompleteR
 
 			setIsOpen(false);
 		},
-		[envKeys],
+		[clearExplicitInsert, envKeys],
 	);
 
 	const handleSelect = useCallback(
 		(key: string, currentValue: string, inputEl: HTMLInputElement | HTMLTextAreaElement | null): string => {
 			const triggerStart = triggerStartRef.current;
-			const cursorPos = inputEl?.selectionStart ?? currentValue.length;
+			const cursorPos =
+				explicitInsertEndRef.current ?? inputEl?.selectionStart ?? currentValue.length;
 
 			const newValue = insertEnvVarRef(currentValue, key, triggerStart, cursorPos);
 
+			explicitInsertEndRef.current = null;
 			setIsOpen(false);
 
 			// Restore cursor position after the inserted reference
@@ -132,6 +145,7 @@ export function useEnvVarAutocomplete(envKeys: string[]): UseEnvVarAutocompleteR
 			}
 			// Insert at the caret — no `${` prefix required for the picker path.
 			triggerStartRef.current = cursorPos;
+			explicitInsertEndRef.current = cursorPos;
 			setSuggestions([...envKeys]);
 			setAnchorEl(anchorElement);
 			setHighlightedIndex(0);
@@ -141,6 +155,7 @@ export function useEnvVarAutocomplete(envKeys: string[]): UseEnvVarAutocompleteR
 	);
 
 	const handleDismiss = useCallback(() => {
+		explicitInsertEndRef.current = null;
 		setIsOpen(false);
 	}, []);
 
