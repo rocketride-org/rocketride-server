@@ -182,9 +182,9 @@ def test_does_not_retry_a_429():
 
 
 def test_reasoning_only_stream_reports_usage_and_returns_empty_not_none():
-    # A turn that spends its budget on reasoning (no content) is a real completion: usage is
-    # reported and the empty answer returned, so the caller keeps it instead of re-issuing the
-    # whole request via fallback — which would bill the provider twice.
+    # A turn that spends its budget on reasoning (no content) is a real completion: the user
+    # already watched the reasoning stream, so the empty answer is returned rather than
+    # re-issuing the request behind their back.
     comp = _Completions(
         [
             _Chunk([_Choice(reasoning_content='thinking hard', finish_reason='length')]),
@@ -197,6 +197,27 @@ def test_reasoning_only_stream_reports_usage_and_returns_empty_not_none():
     assert text == ''
     assert reasoning == 'thinking hard'
     assert finish == ['length']
+    c = _counters()
+    assert c['llm_input_tokens'] == 40
+    assert c['llm_output_tokens'] == 100
+
+
+def test_empty_stream_with_usage_still_falls_back_and_meters():
+    # The case include_usage makes the common one: a proxy that strips delta.reasoning_content
+    # hits max_tokens while reasoning, so nothing is emitted but the final usage chunk arrives.
+    # There is nothing for the user to keep, so the handler must return None and let the caller
+    # re-issue non-streaming — while this request, which the provider does bill, stays metered.
+    comp = _Completions(
+        [
+            _Chunk([_Choice(finish_reason='length')]),
+            _Chunk(choices=[], usage=_Usage(prompt_tokens=40, completion_tokens=100)),
+        ]
+    )
+    result, text, reasoning, _ = _run(_Chat(comp))
+
+    assert result is None  # falls back — an empty string would be served as the answer
+    assert text == ''
+    assert reasoning == ''
     c = _counters()
     assert c['llm_input_tokens'] == 40
     assert c['llm_output_tokens'] == 100

@@ -96,6 +96,13 @@ class LLMBase(IInstanceBase):
                 warning(f'writeQuestions: LLM call failed: {type(e).__name__}: {e}')
                 answer = Answer()
                 answer.setAnswer(err_msg)
+                # A turn that failed after burning tokens still spent them: the adapters
+                # report from their own finally, so the scope holds what was billed —
+                # hang it on the error answer or the Trace shows nothing for exactly the
+                # turn the user opens.
+                failed_usage = read_usage()
+                if failed_usage:
+                    answer.tokens = failed_usage
                 self.instance.writeAnswers(answer)
                 return
 

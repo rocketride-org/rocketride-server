@@ -381,11 +381,11 @@ def try_openai_compat_reasoning_stream(
             cache_read_tokens=cached,
         )
     # A reasoning-only turn (budget spent on reasoning, empty content) is a real completion: it
-    # streamed its reasoning live and carries usage. Return the (possibly empty) answer so the
-    # caller keeps it, instead of discarding the captured usage and re-issuing the whole request
-    # via the non-streaming fallback — which would bill the provider twice. Only a stream that
-    # produced nothing at all (no content, no reasoning, no usage) falls back.
-    if not parts and emitted == 0 and usage is None:
+    # streamed its reasoning live, so returning the empty answer keeps what the user already saw.
+    # A stream that produced nothing at all still falls back to the non-streaming path — the
+    # usage above was already reported, so the fallback's own metering adds the second request
+    # the provider does bill, rather than double-counting this one.
+    if not parts and emitted == 0:
         return None
     if on_finish is not None:
         on_finish(finish_reason or 'stop')
