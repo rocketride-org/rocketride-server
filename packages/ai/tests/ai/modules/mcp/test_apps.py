@@ -148,6 +148,29 @@ def test_read_ui_resource_missing_bundle_returns_none(tmp_path):
     assert apps.read_ui_resource(apps.PIPELINES_TABLE_URI, tmp_path) is None
 
 
+@pytest.mark.asyncio
+async def test_list_resources_stamps_csp_from_engine_origin_without_building_client(tmp_path):
+    """`engine_origin` is threaded straight from the caller (see __init__.py's
+    `_base_url_from_uri`) rather than by calling `engine_factory().base_url` --
+    `list_resources` must not construct an EngineClient at all (Task 5's
+    handlers.py:146 simplification).
+    """
+    import ai.modules.mcp.handlers as handlers_mod
+
+    (tmp_path / 'dropper.html').write_text('<!doctype html><html><body>d</body></html>', encoding='utf-8')
+
+    def _engine_factory_must_not_be_called():
+        raise AssertionError('list_resources must not call engine_factory()')
+
+    server = handlers_mod.build_mcp_server(
+        _engine_factory_must_not_be_called, apps_dir=tmp_path, engine_origin='http://localhost:5565'
+    )
+    async with Client(server) as client:
+        listed = await client.list_resources()
+    dropper = next(r for r in listed.resources if str(r.uri) == apps.DROPPER_URI)
+    assert dropper.meta == {'ui': {'csp': {'connectDomains': ['http://localhost:5565']}}}
+
+
 def test_trace_viewer_spec_registered():
     spec = next(s for s in apps.APPS if s.uri == apps.TRACE_VIEWER_URI)
     assert spec.filename == 'trace-viewer.html'

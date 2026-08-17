@@ -11,7 +11,7 @@ like every other module and mounted at:
 /mcp
 ```
 
-This module exposes a static, 26-tool RocketRide authoring/execution surface served
+This module exposes a static, 27-tool RocketRide authoring/execution surface served
 over HTTP from inside the running engine process — no separate process or transport
 bridge required. It supersedes the earlier 2-tool port, which exposed a dynamic
 per-pipeline `{filepath}` tool plus a `RocketRide_Document_Processor` convenience
@@ -104,7 +104,7 @@ on every `CacheableResult` this module returns:
 Config key `mcp_dev_no_auth` (bool, in the module `config` dict passed to `initModule`)
 is the config-driven equivalent of `MCP_DEV_NO_AUTH=1`; either one enables the bypass.
 
-## The 26 tools
+## The 27 tools
 
 Dispatch is registry-based: `tooling.ToolRegistry` holds `{name -> (description,
 inputSchema, handler)}`; `tools/__init__.register_all(registry)` populates one shared
@@ -120,19 +120,20 @@ All tools are static and typed (fixed name + JSON Schema) — there is no dynami
 per-pipeline tool generation and no `filepath`-shaped catch-all tool of the kind the
 legacy 2-tool port used.
 
-The 26 tools are organized into 8 groups (plus 2 resources), matching
+The 27 tools are organized into 8 groups (plus 2 resources), matching
 `claude/tasks/http-mcp-tools-port/final-tool-surface.md` minus the Query group
 (see History: the 3 convenience query tools were removed pending their cloud DB
-backend), plus the Run log (DVR) group added below.
+backend), plus the Run log (DVR) group and `list_integrations` added below.
 
-**Introspection (4)** — `tools/introspection.py`, read-only/static-analysis, no task tokens:
+**Introspection (5)** — `tools/introspection.py` plus `tools/integrations.py`, read-only/static-analysis, no task tokens:
 
 | Tool | Purpose | Key args |
 | --- | --- | --- |
-| `list_components` | List available pipeline components (name, category, summary). | none |
-| `describe_component` | Full metadata/config schema for one component. | `name` (required) |
+| `list_components` | List pipeline components ready to use *now* — zero-config components plus integrations whose credentials are configured. Configured entries carry a `wiring` block of `${VAR}` placeholders; a `note` counts integrations omitted for needing setup. Call `list_integrations` for those. | none |
+| `describe_component` | Full metadata/config schema for one component; catalog nodes also get a `credentials` block (same readiness vocabulary as `list_integrations`). | `name` (required) |
 | `validate_pipeline` | Validate a pipeline against the engine's own rules (engine-authoritative, zero client-side drift). | `pipeline` or `filepath` |
 | `describe_pipeline` | Statically describe a pipeline's source and components (id, provider, title, classType, inputs); synthesized client-side, no backing SDK method. | `pipeline` or `filepath` |
+| `list_integrations` | Credential readiness for catalog integrations this engine has a matching node for. Bare call: terse per-integration rows (`name`/`title`/`status`/`missing_count`). With `name`: full field detail, `missing`, `candidates`, the caller's own variable names (`caller_variables`), and either `setup` (not configured) or `wiring` (configured). | `name` (optional) |
 
 **Execution (4)** — `tools/execution.py`, token-based, no sessions:
 
@@ -237,6 +238,74 @@ an in-band `{ok: False, error_type, message, hint}` result; hard failures
 — `ConnectionError`, `AuthenticationException`, `TimeoutError`) propagate out of the
 handler and surface as a genuine MCP tool error, not a structured result. Structured `{ok: False}` envelopes additionally set `isError=true` on the `CallToolResult` (derived from the in-band `ok` field) so hosts can detect a failed call without parsing the JSON body — the envelope itself still rides `content`/`structuredContent` for the agent to self-correct from.
 
+## Integrations & credential readiness
+
+A curated catalog (`credentials.json`, sibling to this doc) describes which
+config *fields* on which nodes are credential-shaped, and suggests a
+`ROCKETRIDE_*` environment-variable name for each. `credentials.py` turns that
+catalog plus the caller's own variable *names* (never values — see below) into
+a per-integration readiness verdict, shared by `list_integrations`,
+`list_components`, and `describe_component`'s `credentials` block.
+
+### The catalog
+
+- **Location**: `packages/ai/src/ai/modules/mcp/credentials.json`, keyed by
+  node name, each entry a `title` plus a list of `fields` (`path`, `title`,
+  `kind`, `required`, `suggests`, optional `review`).
+- **Generator**: `nodes/scripts/gen-credentials.mjs` scans every node's
+  `services*.json` for credential-shaped fields (name matches
+  `api_key`/`secret`/`passw`/`bearer`/`credential`/`token`, empty-string
+  default) and reconciles them against the catalog.
+- **Curated names win.** A path the generator detects that is already covered
+  by an existing catalog entry is left completely untouched — a human's
+  chosen `title`/`suggests` always beats the generator's derived stub. A
+  newly detected path with no catalog entry gets a stub appended with
+  `review: true` so a human can give it a real name later.
+- **Builder wiring**: `nodes:credentials-generate` (writes) runs as part of
+  `nodes:build`, immediately after `nodes:docs-generate`.
+  `nodes:credentials-check` (drift gate, never writes) exits non-zero on an
+  unmapped credential path or a stale catalog entry; a `review: true` field
+  still pending curation only warns, it does not fail the gate. Staleness is
+  path-level only for generator-owned `review: true` stubs — the generator no
+  longer detecting their path is the signal a human still needs to name or
+  remove them. A human-curated field (no `review` flag) on a node that still
+  exists is never path-stale, since curation exists precisely to describe
+  config the generator can't detect; either kind goes stale, whole-entry, if
+  its node's directory is gone entirely. Nothing is ever auto-deleted.
+- As of this change the catalog covers 55 nodes / 83 fields.
+
+### The readiness rule
+
+`credentials.evaluate(spec, env_keys)` — same logic behind every tool above —
+classifies each integration as exactly one of:
+
+| Status | Meaning |
+| --- | --- |
+| `configured` | Every required field's suggested name is an exact match in the caller's environment-key names. `wiring` (a `{path: '${VAR}'}` map) is returned; `setup` is not. |
+| `unconfirmed` | Either a required field is missing but a name-token substring match against the caller's variable names *surfaces candidates* (the agent proposes a binding, the user must confirm before it's used — a substring match never confers readiness on its own), **or** the environment-keys read itself failed. A read failure must never look like "nothing is set up," so it is always `unconfirmed`, never `available`. |
+| `available` | A required field is missing and no candidate names were found either — nothing detected, not yet configured. |
+
+Both non-`configured` statuses carry a `setup` block (`variables`, `how`,
+`docs`) so the agent can relay concrete next steps: `how` points at
+RocketRide's VS Code extension (Settings → Variables) or
+`https://app.rocketride.ai/settings/variables`. **Variable *names* only ever
+transit MCP — values never do**; `caller_variables` on a named
+`list_integrations` call, and the candidate lists everywhere else, are always
+names.
+
+### Per-caller identity
+
+`/mcp` requests build a per-request `EngineClient` from the caller's own
+credential when the request carries one (an API key, or a verified OAuth JWT
+— both passed through as `rocketride_auth`, the same pattern `task_http`
+uses), so `get_environment_keys()` — and therefore every readiness verdict
+above — reflects *that caller's* configured variables, not the server
+operator's. A request with no credential falls back to the configured
+`ROCKETRIDE_AUTH`/`ROCKETRIDE_APIKEY` singleton, unchanged from
+pre-integrations behavior. See "The `EngineClient` seam" below for the
+factory mechanics and `identity.py` for the `ContextVar` propagation; the
+mount's `finally` closes each per-request client.
+
 ## Resources (2)
 
 `resources.py` exposes two read-only resources, both `application/json`:
@@ -286,8 +355,8 @@ prompt templates from the earlier port were removed along with their tests.
 
 ## The `EngineClient` seam
 
-`engine.py` defines one `Protocol`, `EngineClient`, with the 26 methods needed
-by the 26-tool surface (task lifecycle, services/validation, store/templates/store
+`engine.py` defines one `Protocol`, `EngineClient`, with the methods needed
+by the 27-tool surface (task lifecycle, services/validation, store/templates/store
 metadata/signed URLs, full deployment lifecycle, `rrext_log` chapters/read/traces/
 trace — see the `Protocol` definition in `engine.py` for exact signatures). All
 tool/resource code depends only on this interface — never on a concrete client — so
@@ -307,11 +376,26 @@ from the environment and constructs a `WsEngineClient`; this is the only place t
 env vars are consumed.
 
 `handlers.build_mcp_server` takes an `engine_factory: Callable[[], EngineClient]` and
-calls it on every request/handler invocation, but in production `engine_factory` is
-the lazy **singleton** wired up in `__init__.initModule` — every call returns the
-same long-lived `WsEngineClient`. All concurrent `/mcp` requests therefore multiplex
-one shared WS connection; the client's connect lock only guards the one-time
-`connect()` race, not in-flight request correlation.
+calls it on every request/handler invocation. In production `engine_factory`
+(`_make_engine_factory` in `__init__.py`) branches on `identity.CALLER_AUTH`, a
+`ContextVar` set for the duration of the request by the `/mcp` mount:
+
+- **Caller credential present** (the request carried its own API key or a
+  verified OAuth JWT — see "Per-caller identity" below) — a **fresh**
+  `WsEngineClient` is built from `{**config, 'rocketride_auth': caller_auth}`,
+  never cached, and appended to that request's `identity.REQUEST_CLIENTS`
+  bucket so the mount's `finally` can close it once the request completes.
+- **No caller credential** — the pre-integrations lazy-**singleton** path,
+  unchanged: the first such call builds one long-lived `WsEngineClient` from
+  the configured `ROCKETRIDE_AUTH`/`ROCKETRIDE_APIKEY`, and every later call
+  on this path returns that same instance. Concurrent unauthenticated-caller
+  `/mcp` requests multiplex this one shared WS connection; the client's
+  connect lock only guards the one-time `connect()` race, not in-flight
+  request correlation.
+
+Only the singleton client is closed from `initModule`'s shutdown hook
+(`engine_factory._state['client']`); per-caller clients are closed per-request
+by the mount, not at shutdown.
 
 This seam exists specifically so a later revision can swap in a direct in-process
 `modules/task` implementation (bypassing the WS round-trip entirely, since the MCP
@@ -447,11 +531,15 @@ design; audience enforcement compares against the project id.
   `claude/tasks/http-mcp-tools-port/tool-specs.md` §Data-handling.
 - **`deploy_add`/`deploy_update` require a `project_id` in the pipeline** — an SDK
   requirement, not enforced by this module's schema.
-- **Env/secrets tools (`set_env`, `list_env_keys`) are out of scope for this
-  surface.** They shipped briefly, then were removed: the env-var/integrations
-  surface is covered by a separate plan, not this module. `ROCKETRIDE_URI`/
-  `ROCKETRIDE_AUTH`/`ROCKETRIDE_APIKEY` (the *connection* env vars, unrelated to the
-  removed tools) are still read at boot — see "Environment variables / config" above.
+- **Env/secrets *mutation* tools (`set_env`, `list_env_keys`) remain out of
+  scope for this surface.** They shipped briefly, then were removed. What
+  this module now does own is read-only credential *readiness* —
+  `list_integrations`, plus `list_components`/`describe_component`'s
+  credentials integration — see "Integrations & credential readiness" above;
+  variable values are never read, written, or transmitted by any tool here.
+  `ROCKETRIDE_URI`/`ROCKETRIDE_AUTH`/`ROCKETRIDE_APIKEY` (the *connection* env
+  vars, unrelated to either) are still read at boot — see "Environment
+  variables / config" above.
 - **Known pre-existing follow-up:** `resources.read_resource` returns a bare `str`,
   which the MCP SDK now deprecates in favor of `Iterable[ReadResourceContents]`.
   Cleanup deferred; not a functional break today.
@@ -504,6 +592,12 @@ change.
 `get_pipeline_trace` retirement is the 23 → 22 step recorded above). Run tools
 now default `pipelineTraceLevel` to `'summary'` and return
 `projectId`/`source`.
+
+**2026-08-17** — `list_integrations` added (26 → 27), alongside the
+credential-catalog readiness engine described above ("Integrations &
+credential readiness"). `list_components` narrowed at the same time to only
+usable components (zero-config plus configured integrations), and
+`describe_component` gained a `credentials` block for catalog nodes.
 
 ## Running / testing locally
 

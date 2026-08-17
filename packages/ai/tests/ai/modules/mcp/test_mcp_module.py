@@ -11,6 +11,39 @@ def test_module_exposes_initmodule():
     assert callable(mcp_module.initModule)
 
 
+def test_base_url_from_uri_normalizes_scheme_and_strips_trailing_slash():
+    import ai.modules.mcp as mcp_module
+
+    assert mcp_module._base_url_from_uri('ws://localhost:5565/') == 'http://localhost:5565'
+    assert mcp_module._base_url_from_uri('wss://host/') == 'https://host'
+    assert mcp_module._base_url_from_uri('http://localhost:5565') == 'http://localhost:5565'
+
+
+@pytest.mark.asyncio
+async def test_initmodule_threads_engine_origin_from_configured_uri(monkeypatch, fake_engine, fake_web_server):
+    """`initModule` reads the configured URI directly (not via `engine_factory()
+    .base_url`) and passes the normalized origin to `build_mcp_server` --
+    the Task 5 handlers.py:146 simplification, verified at the wiring site.
+    """
+    import ai.modules.mcp as mcp_module
+
+    monkeypatch.setattr(mcp_module, 'make_engine_client', lambda cfg, on_event=None: fake_engine)
+
+    captured = {}
+    real_build_mcp_server = mcp_module.build_mcp_server
+
+    def _capturing_build_mcp_server(*args, **kwargs):
+        captured['engine_origin'] = kwargs.get('engine_origin')
+        return real_build_mcp_server(*args, **kwargs)
+
+    monkeypatch.setattr(mcp_module, 'build_mcp_server', _capturing_build_mcp_server)
+
+    srv = fake_web_server
+    mcp_module.initModule(srv, {'mcp_dev_no_auth': True, 'rocketride_uri': 'ws://engine-host:5565/'})
+
+    assert captured['engine_origin'] == 'http://engine-host:5565'
+
+
 @pytest.mark.asyncio
 async def test_build_mcp_server_lists_tools_from_real_registry(fake_engine):
     """End-to-end smoke over the v2 in-memory `Client`, against the real

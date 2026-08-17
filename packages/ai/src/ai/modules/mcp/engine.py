@@ -82,6 +82,7 @@ class EngineClient(Protocol):
     async def log_trace(
         self, project_id: str, source: str, team_id: str = '', *, begin_seq: int = 0
     ) -> Dict[str, Any]: ...
+    async def get_environment_keys(self) -> List[str]: ...
     async def close(self) -> None: ...
 
 
@@ -347,6 +348,9 @@ class WsEngineClient:
             raise
         finally:
             session.close_event_stream()
+
+    async def get_environment_keys(self) -> List[str]:
+        return await self._guarded(lambda: self._client.account.get_environment_keys())
 
 
 def make_engine_client(config: Dict[str, Any]) -> EngineClient:

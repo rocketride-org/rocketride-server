@@ -7,9 +7,9 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[4] / 'src'))
 import pytest
 
 # The full expected MCP tool surface, in registration order (register_all:
-# introspection, execution, capability, visibility, logs). Single source of
-# truth for the suite — assert against this instead of copying the list or
-# hard-coding its count in individual test files.
+# introspection, execution, capability, visibility, logs, integrations).
+# Single source of truth for the suite — assert against this instead of
+# copying the list or hard-coding its count in individual test files.
 # The MCP protocol revision this surface pins its tests against.
 PINNED_PROTOCOL_VERSION = '2026-07-28'
 
@@ -45,6 +45,8 @@ EXPECTED_TOOL_NAMES = (
     'log_read',
     'log_traces',
     'log_trace',
+    # integrations
+    'list_integrations',
 )
 
 
@@ -64,6 +66,8 @@ class FakeEngineClient:
         fs_stat_result=None,
         fs_get_url_result='https://signed.example/f?sig=abc',
         deploy_status_result=None,
+        env_keys=None,
+        auth=None,
     ):
         self._tasks = (
             tasks
@@ -141,6 +145,16 @@ class FakeEngineClient:
         # or an Exception instance/class to be raised.
         self._task_statuses = list(task_statuses) if task_statuses is not None else [{'state': 5, 'completed': True}]
         self.get_task_status_calls = []
+
+        # -- per-caller identity (Task 5) --
+        # `auth` records the credential this instance was constructed with,
+        # for tests asserting engine_factory() built a per-caller client from
+        # the right ContextVar-carried value (rather than the service config).
+        self.auth = auth
+        self._env_keys = env_keys if env_keys is not None else []
+        self.get_environment_keys_calls = 0
+        self.closed = False
+        self.close_calls = 0
 
     async def list_tasks(self):
         self.list_tasks_calls += 1
@@ -300,6 +314,16 @@ class FakeEngineClient:
         if isinstance(self.log_trace_result, Exception):
             raise self.log_trace_result
         return self.log_trace_result
+
+    async def get_environment_keys(self):
+        self.get_environment_keys_calls += 1
+        if isinstance(self._env_keys, Exception):
+            raise self._env_keys
+        return list(self._env_keys)
+
+    async def close(self):
+        self.close_calls += 1
+        self.closed = True
 
 
 @pytest.fixture

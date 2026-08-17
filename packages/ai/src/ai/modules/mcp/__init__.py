@@ -5,7 +5,7 @@ import contextlib
 import json
 import logging
 import os
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from starlette.routing import Mount
 from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
@@ -13,11 +13,64 @@ from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 from ai.web import oauth_resource
 
 from . import auth
+from . import identity
 from .engine import make_engine_client
 from .handlers import build_mcp_server
 from .registry import TaskRegistry
 
+logger = logging.getLogger(__name__)
+
 _MOUNT_PATH = '/mcp'
+
+
+def _base_url_from_uri(uri: str) -> str:
+    """Normalize a configured ``rocketride_uri`` to its HTTP(S) origin.
+
+    Mirrors ``WsEngineClient.base_url`` exactly (ws(s):// -> http(s)://, no
+    trailing slash) but works from the raw configured string, so callers that
+    only need the origin -- not a connected client -- don't have to build one.
+    """
+    uri = uri or ''
+    if uri.startswith('ws://'):
+        uri = 'http://' + uri[len('ws://') :]
+    elif uri.startswith('wss://'):
+        uri = 'https://' + uri[len('wss://') :]
+    return uri.rstrip('/')
+
+
+def _make_engine_factory(config: Dict[str, Any]) -> Any:
+    """Build the zero-arg engine-client factory closure.
+
+    Two paths, chosen per call by ``identity.CALLER_AUTH``:
+
+    - Set (a per-request caller credential is bound, see ``handle_mcp``): a
+      FRESH client is built from ``{**config, 'rocketride_auth': auth}`` --
+      never cached -- and appended to the ``identity.REQUEST_CLIENTS`` bucket
+      when one is bound, so ``handle_mcp`` can close it after the request.
+    - Unset: the pre-integrations lazy-singleton path, unchanged -- the first
+      call builds one long-lived client from ``config`` alone and every later
+      call (with CALLER_AUTH still unset) returns that same instance.
+
+    The mutable singleton state is exposed as ``factory._state`` so
+    `initModule`'s shutdown hook can still close the shared client without a
+    second closure variable escaping this function.
+    """
+    _state: Dict[str, Any] = {'client': None}
+
+    def factory() -> Any:
+        caller_auth = identity.CALLER_AUTH.get()
+        if caller_auth is not None:
+            client = make_engine_client({**config, 'rocketride_auth': caller_auth})
+            bucket = identity.REQUEST_CLIENTS.get()
+            if bucket is not None:
+                bucket.append(client)
+            return client
+        if _state['client'] is None:
+            _state['client'] = make_engine_client(config)
+        return _state['client']
+
+    factory._state = _state
+    return factory
 
 
 def _bind_host(server: 'Any', config: Dict[str, Any]) -> str:
@@ -44,9 +97,10 @@ def initModule(server: 'Any', config: Dict[str, Any]) -> None:
     """Mount the Streamable-HTTP MCP endpoint on the engine web server.
 
     Builds a lazy-singleton EngineClient (deferred until first request so
-    missing credentials don't crash the engine at boot), wires a stateless
-    StreamableHTTPSessionManager at ``/mcp``, runs its lifespan across app
-    startup/shutdown, and applies the auth seam.
+    missing credentials don't crash the engine at boot; used whenever a
+    request carries no caller credential -- see ``_make_engine_factory``),
+    wires a stateless StreamableHTTPSessionManager at ``/mcp``, runs its
+    lifespan across app startup/shutdown, and applies the auth seam.
 
     Args:
         server: The WebServer (or FakeServer in tests) providing ``.app``
@@ -63,21 +117,24 @@ def initModule(server: 'Any', config: Dict[str, Any]) -> None:
     task_registry = TaskRegistry()
 
     # ------------------------------------------------------------------
-    # 2. Lazy-singleton engine factory
+    # 2. Engine client factory
     # Deferring make_engine_client means missing ROCKETRIDE_URI/AUTH env
     # vars don't raise ValueError at engine boot — only on first request.
+    # Per-caller requests (identity.CALLER_AUTH set by handle_mcp below) get
+    # a fresh client instead of the shared singleton — see _make_engine_factory.
     # ------------------------------------------------------------------
-    _state: Dict[str, Any] = {'client': None}
-
-    def engine_factory() -> Any:
-        if _state['client'] is None:
-            _state['client'] = make_engine_client(config)
-        return _state['client']
+    engine_factory = _make_engine_factory(config)
 
     # ------------------------------------------------------------------
     # 3. Build MCP server + stateless StreamableHTTP session manager
+    # engine_origin is read straight from the configured URI (not built via
+    # engine_factory()) so widget CSP stamping never has to construct --
+    # and, on the per-caller path, bucket for later close -- a whole
+    # EngineClient just to read a string. See handlers.py's docstring.
     # ------------------------------------------------------------------
-    mcp_server = build_mcp_server(engine_factory, task_registry)
+    _configured_uri = config.get('rocketride_uri') or os.environ.get('ROCKETRIDE_URI') or ''
+    engine_origin = _base_url_from_uri(_configured_uri) if _configured_uri else None
+    mcp_server = build_mcp_server(engine_factory, task_registry, engine_origin=engine_origin)
 
     session_manager = StreamableHTTPSessionManager(
         app=mcp_server,
@@ -132,7 +189,47 @@ def initModule(server: 'Any', config: Dict[str, Any]) -> None:
         if denial is not None:
             await _reject(send, denial)
             return
-        await session_manager.handle_request(scope, receive, send)
+
+        # Only past the auth gate does the stashed credential (if any) become
+        # the per-request caller identity — presence of mcp_credential alone
+        # does not imply an authorized request (auth.authorize stashes it on
+        # rejected requests too, but those never reach here).
+        caller_auth = identity.credential_from_scope(scope)
+        auth_token = identity.CALLER_AUTH.set(caller_auth)
+        # Bind the bucket to a local name and pass THAT object to .set() --
+        # draining `bucket` below (rather than calling REQUEST_CLIENTS.get()
+        # again) means a downstream .set() (e.g. a nested/re-entrant call
+        # sharing this context) can never swap the ContextVar out from under
+        # the drain and orphan the clients engine_factory() actually appended
+        # into this request's bucket.
+        bucket: list = []
+        clients_token = identity.REQUEST_CLIENTS.set(bucket)
+        try:
+            await session_manager.handle_request(scope, receive, send)
+        finally:
+            # `pending` carries a cancellation (or other non-Exception
+            # BaseException) delivered while closing a client. Catching it
+            # per-client keeps the drain going instead of abandoning the rest
+            # of `bucket`, and stashing it here — rather than letting it
+            # propagate immediately — means the ContextVar resets in the
+            # inner `finally` below are never skipped by an in-flight
+            # cancellation. It is re-raised once cleanup has fully run so the
+            # caller's cancellation still lands.
+            pending: Optional[BaseException] = None
+            try:
+                for client in bucket:
+                    try:
+                        await client.close()
+                    except Exception:  # noqa: BLE001 - one failed close must not skip the rest
+                        logger.exception('failed to close per-request MCP engine client')
+                    except BaseException as exc:  # noqa: BLE001 - see `pending` note above
+                        logger.warning('per-request MCP engine client close interrupted by %r; continuing drain', exc)
+                        pending = exc
+            finally:
+                identity.REQUEST_CLIENTS.reset(clients_token)
+                identity.CALLER_AUTH.reset(auth_token)
+            if pending is not None:
+                raise pending
 
     server.app.router.routes.append(Mount(_MOUNT_PATH, app=handle_mcp))
 
@@ -173,8 +270,9 @@ def initModule(server: 'Any', config: Dict[str, Any]) -> None:
         try:
             await _stack.aclose()
         finally:
-            if _state['client'] is not None:
-                await _state['client'].close()
+            singleton = engine_factory._state['client']
+            if singleton is not None:
+                await singleton.close()
         _lifecycle['stopped'] = True
 
     # Always register on the router — fires when there is no custom lifespan
@@ -240,7 +338,7 @@ def initModule(server: 'Any', config: Dict[str, Any]) -> None:
         # unauthenticated /mcp on a public bind is remote file access.
         # Refuse the bypass (auth stays on) rather than fail engine boot.
         if not auth.is_loopback_bind(bind_host):
-            logging.getLogger(__name__).warning(
+            logger.warning(
                 'MCP_DEV_NO_AUTH ignored: server binds %s (non-loopback); /mcp stays authenticated',
                 bind_host or '<unset/bind-all>',
             )

@@ -131,6 +131,17 @@ class _FakeLogApi:
         return self._session
 
 
+class _FakeAccountApi:
+    """Stand-in for RocketRideClient.account (cached_property sub-API)."""
+
+    def __init__(self) -> None:
+        self.get_environment_keys_calls = 0
+
+    async def get_environment_keys(self) -> list:
+        self.get_environment_keys_calls += 1
+        return ['ROCKETRIDE_FOO', 'ROCKETRIDE_BAR']
+
+
 class _FakeUnderlyingClient:
     """Stand-in for RocketRideClient that records lifecycle calls without any I/O."""
 
@@ -155,6 +166,7 @@ class _FakeUnderlyingClient:
         self.fs_get_url_calls = []
         self.deploy = _FakeDeployApi()
         self.log = _FakeLogApi()
+        self.account = _FakeAccountApi()
 
     async def connect(self) -> None:
         self.connect_calls += 1
@@ -316,6 +328,15 @@ async def test_get_services_calls_sdk():
 
     assert fake.get_services_calls == 1
     assert result == {'services': {'ocr': {}}, 'version': 'x'}
+
+
+async def test_get_environment_keys_calls_sdk():
+    client, fake = _make_client_with_fake()
+
+    result = await client.get_environment_keys()
+
+    assert fake.account.get_environment_keys_calls == 1
+    assert result == ['ROCKETRIDE_FOO', 'ROCKETRIDE_BAR']
 
 
 async def test_get_service_calls_sdk_with_name():

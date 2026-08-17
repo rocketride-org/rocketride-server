@@ -12,6 +12,7 @@ plus a best-effort `get_service` lookup per component provider.
 import time
 from typing import Any, Dict
 
+from .. import credentials as credentials_mod
 from ..errors import _bad
 from ..tooling import ToolRegistry
 from ._common import engine_call
@@ -38,18 +39,41 @@ async def _list_components(client, tasks, args: Dict[str, Any]) -> dict:
     if err:
         return err
     definitions = (services or {}).get('services') or {}
-    components = [
-        {
+    catalog = credentials_mod.load_catalog()
+    # Only pay for the env-keys round trip when a credentialed node is
+    # actually present in this engine's definitions; a catalog entry with no
+    # matching node here is irrelevant to this call.
+    has_credentialed_node = any(name in catalog for name in definitions)
+    env_keys = await credentials_mod.fetch_env_keys(client) if has_credentialed_node else None
+
+    components = []
+    skipped = 0
+    for name, definition in definitions.items():
+        # One malformed (non-mapping) definition must not block discovery
+        # for the whole catalog.
+        if not isinstance(definition, dict):
+            continue
+        entry = {
             'name': name,
             'category': definition.get('classType'),
             'summary': definition.get('description'),
         }
-        for name, definition in definitions.items()
-        # One malformed (non-mapping) definition must not block discovery
-        # for the whole catalog.
-        if isinstance(definition, dict)
-    ]
-    return {'ok': True, 'components': components}
+        spec = catalog.get(name)
+        if spec is not None:
+            state = credentials_mod.evaluate(spec, env_keys)
+            if state['status'] != 'configured':
+                # Not ready to use: omit rather than list a component the
+                # caller can't actually run yet (env_error included -- a
+                # read failure must never be mistaken for readiness).
+                skipped += 1
+                continue
+            entry['wiring'] = state['wiring']
+        components.append(entry)
+
+    result = {'ok': True, 'components': components}
+    if skipped:
+        result['note'] = f'{skipped} integrations need setup - call list_integrations.'
+    return result
 
 
 async def _describe_component(client, tasks, args: Dict[str, Any]) -> dict:
@@ -63,7 +87,18 @@ async def _describe_component(client, tasks, args: Dict[str, Any]) -> dict:
     if service is None:
         return _bad(f'Unknown component: {name}', 'call list_components for valid names')
 
-    return {**service, 'ok': True}
+    # Merge order: spread the engine's own service definition first, then
+    # layer MCP-added keys ('ok', 'credentials') on top. No service*.json in
+    # the current tree defines a top-level 'credentials' field, but if one
+    # ever did, this ordering deliberately shadows it with the readiness
+    # block -- consistent with how 'ok' already shadows any same-named key.
+    result = {**service, 'ok': True}
+    spec = credentials_mod.load_catalog().get(name)
+    if spec is not None:
+        env_keys = await credentials_mod.fetch_env_keys(client)
+        state = credentials_mod.evaluate(spec, env_keys)
+        result['credentials'] = credentials_mod.describe_state(spec, state)
+    return result
 
 
 async def _validate_pipeline(client, tasks, args: Dict[str, Any]) -> dict:
@@ -123,8 +158,8 @@ def register(registry: ToolRegistry) -> None:
     """Register the 4 authoring/introspection tools against ``registry``."""
     registry.register(
         'list_components',
-        'List available RocketRide pipeline components (name, category, summary). '
-        'Call describe_component for a component config schema.',
+        'List RocketRide components ready to use now (zero-config plus integrations you have configured). '
+        'Call describe_component for a config schema, list_integrations for integrations needing setup.',
         {'type': 'object', 'properties': {}},
     )(_list_components)
 

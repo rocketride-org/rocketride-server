@@ -210,3 +210,43 @@ def test_looks_like_jwt_discriminates_credential_shapes(credential, is_jwt):
 
 def test_looks_like_jwt_accepts_a_real_token(keypair):
     assert auth.looks_like_jwt(make_token(keypair)) is True
+
+
+# --- credential stashing -------------------------------------------------
+
+
+def test_api_key_credential_is_stashed(monkeypatch):
+    """Bearer credential is stashed for API-key paths."""
+    monkeypatch.setenv(auth.ENV_EXPECTED_AUDIENCE, MCP_PROJECT)
+    scope = scope_with('rr_abc123')
+
+    assert auth.authorize(scope, bind_host='0.0.0.0') is None
+    assert scope['state']['mcp_credential'] == 'rr_abc123'
+
+
+def test_jwt_credential_is_stashed(monkeypatch, keypair):
+    """Bearer credential is stashed for verified JWT paths."""
+    monkeypatch.setenv(auth.ENV_EXPECTED_AUDIENCE, MCP_PROJECT)
+    credential = make_token(keypair)
+    scope = scope_with(credential)
+
+    assert auth.authorize(scope, bind_host='0.0.0.0') is None
+    assert scope['state']['mcp_credential'] == credential
+
+
+def test_loopback_oauth_credential_is_stashed(keypair):
+    """Bearer credential is stashed for loopback OAuth paths."""
+    credential = make_token(keypair)
+    scope = scope_with(credential)
+
+    assert auth.authorize(scope, bind_host='localhost') is None
+    assert scope['state']['mcp_credential'] == credential
+
+
+def test_no_credential_does_not_stash(monkeypatch):
+    """No credential stash occurs when authorization header is absent."""
+    monkeypatch.setenv(auth.ENV_EXPECTED_AUDIENCE, MCP_PROJECT)
+    scope = scope_with(None)
+
+    assert auth.authorize(scope, bind_host='0.0.0.0') is None
+    assert 'mcp_credential' not in scope['state']

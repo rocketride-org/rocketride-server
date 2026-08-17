@@ -198,6 +198,8 @@ def authorize(scope: Dict[str, Any], *, bind_host: str) -> Optional[str]:
     if not credential:
         return None
 
+    scope.setdefault('state', {})['mcp_credential'] = credential
+
     # Static API keys keep the existing path untouched — they are opaque by
     # design and there is no audience to check.
     if credential.startswith(API_KEY_PREFIXES):

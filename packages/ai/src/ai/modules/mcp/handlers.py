@@ -53,18 +53,25 @@ def build_mcp_server(
     *,
     registry: Optional[ToolRegistry] = None,
     apps_dir: Optional[Path] = None,
+    engine_origin: Optional[str] = None,
 ) -> Server:
     """Build and return a low-level MCP Server wired with tools and resources.
 
     Args:
         engine_factory: Zero-arg callable returning an EngineClient. In production
-            this wraps a lazy SINGLETON (see `__init__.initModule`): the first call
-            constructs one long-lived `WsEngineClient` and every later call returns
-            the same instance, so all handlers here share one client for the life
-            of the process. Concurrent `/mcp` requests therefore multiplex a single
-            underlying `RocketRideClient` WS connection — the client's connect lock
-            only guards the one-time `connect()` race, it does not serialize or
-            correlate concurrent in-flight requests on that connection.
+            this is `__init__._make_engine_factory`'s closure, which takes one of
+            two paths per call depending on `identity.CALLER_AUTH`:
+              - Unset: the pre-integrations lazy SINGLETON. The first call
+                constructs one long-lived `WsEngineClient` and every later call
+                (with CALLER_AUTH still unset) returns that same instance, so
+                those handlers share one client for the life of the process.
+                Concurrent `/mcp` requests on this path multiplex a single
+                underlying `RocketRideClient` WS connection — the client's
+                connect lock only guards the one-time `connect()` race, it does
+                not serialize or correlate concurrent in-flight requests.
+              - Set (a per-request caller credential is bound by `handle_mcp`):
+                a FRESH client is built for that caller and returned uncached;
+                `handle_mcp` closes it once the request completes.
         task_registry: Optional pre-built `TaskRegistry`. When omitted, a fresh
             registry is created here (back-compat for callers/tests that don't
             need a pre-populated one).
@@ -75,6 +82,13 @@ def build_mcp_server(
             read from. Keyword-only test seam like `registry`; production
             callers never pass this, and `apps.py` falls back to the built
             `apps/dist` directory when omitted.
+        engine_origin: The engine's HTTP(S) origin, precomputed by the caller
+            from its configured `rocketride_uri` (see `__init__._base_url_from_uri`),
+            for widget CSP stamping in `_on_list_resources`. Reading the
+            configured URI directly here -- rather than calling
+            `engine_factory().base_url` -- avoids building (and, on the
+            per-caller path above, leaking into the request's close bucket) a
+            whole EngineClient just to read a string.
 
     Returns:
         A configured mcp.server.lowlevel.Server ready to run.
@@ -142,11 +156,6 @@ def build_mcp_server(
         )
 
     async def _on_list_resources(ctx, params: types.PaginatedRequestParams | None) -> types.ListResourcesResult:
-        try:
-            engine_origin = engine_factory().base_url
-        except Exception as exc:  # noqa: BLE001 - origin is an enhancement, never a failure
-            logger.debug('No engine origin for widget CSP stamping: %s', exc)
-            engine_origin = None
         return types.ListResourcesResult(
             resources=resources_mod.list_resources() + apps_mod.list_ui_resources(apps_dir, engine_origin),
             ttl_ms=RESOURCES_LIST_TTL_MS,
