@@ -6,5 +6,9 @@
 		"declaration": false,
 		"declarationMap": false,
 		"sourceMap": true
-	}
+	},
+	"include": [
+		"./src/app-sdk/**/*",
+		"./src/client/**/*"
+	]
 }

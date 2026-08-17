@@ -5,17 +5,17 @@
 	"license": "MIT",
 	"description": "TypeScript client for RocketRide data processing and AI services",
 	"type": "commonjs",
-	"main": "./dist/cjs/index.js",
-	"module": "./dist/esm/index.js",
-	"types": "./dist/types/index.d.ts",
+	"main": "./dist/cjs/client/index.js",
+	"module": "./dist/esm/client/index.js",
+	"types": "./dist/types/client/index.d.ts",
 	"bin": {
 		"rocketride": "./dist/cli/cli/rocketride.js"
 	},
 	"exports": {
 		".": {
-			"types": "./dist/types/index.d.ts",
-			"import": "./dist/esm/index.js",
-			"require": "./dist/cjs/index.js"
+			"types": "./dist/types/client/index.d.ts",
+			"import": "./dist/esm/client/index.js",
+			"require": "./dist/cjs/client/index.js"
 		},
 		"./app-sdk": {
 			"types": "./dist/types/app-sdk/index.d.ts",
@@ -23,9 +23,9 @@
 			"require": "./dist/cjs/app-sdk/index.js"
 		},
 		"./analytics": {
-			"types": "./dist/types/analytics/index.d.ts",
-			"import": "./dist/esm/analytics/index.js",
-			"require": "./dist/cjs/analytics/index.js"
+			"types": "./dist/types/client/analytics/index.d.ts",
+			"import": "./dist/esm/client/analytics/index.js",
+			"require": "./dist/cjs/client/analytics/index.js"
 		}
 	},
 	"files": [
