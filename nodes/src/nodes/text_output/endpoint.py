@@ -77,24 +77,15 @@ class Endpoint:
 
         except ValueError as e:
             engLib.error(e)
-        except OSError as e:
-            # A rejected credential, a share the user cannot enter, or a share
-            # that does not exist is a configuration problem, so it has to fail
-            # validation. connect() already tolerates ENOENT on the store path
-            # itself (that subdirectory is created later), so an ENOENT arriving
-            # here came from the share root and means the share name is wrong.
-            if e.errno in (errno.EACCES, errno.EPERM, errno.ENOENT):
+        except Exception as e:
+            if Endpoint.is_smb_config_error(e):
                 engLib.error(e)
             else:
-                # Anything else here is a reachability problem, not bad config.
-                # Validation also runs on the Platform host, which frequently
-                # has no route to the customer's SMB share, so failing here
-                # would reject configurations that are actually correct.
+                # Not bad config, so do not reject it. Validation also runs on
+                # the Platform host, which frequently has no route to the
+                # customer's SMB share, and failing here would reject
+                # configurations that are actually correct.
                 engLib.warning(f'Could not verify SMB target (config not rejected): {e}')
-        except Exception as e:
-            # Same reasoning as above: the probe is advisory, so an unexpected
-            # failure is reported without rejecting the configuration.
-            engLib.warning(f'Could not verify SMB target (config not rejected): {e}')
 
     def getConfigSubKey(self):
         """Call from engLib, target service uniqueness key."""
@@ -114,6 +105,60 @@ class Endpoint:
         else:
             return []
 
+    # NtStatus codes that mean the configuration itself is wrong: the credential
+    # was rejected, the account may not use the share, or the share/path is not
+    # there. Anything else (timeouts, dropped transports) says the validating host
+    # cannot reach the server, which is not the user's mistake.
+    #
+    # Classified on NtStatus rather than errno on purpose. SMBOSError maps only a
+    # handful of statuses onto errno and leaves the rest at 0, and
+    # STATUS_ACCESS_DENIED is one of the unmapped ones. Note also that errno EPERM
+    # comes from STATUS_SHARING_VIOLATION ("file in use by another process"), which
+    # is transient and must NOT reject a configuration.
+    _CONFIG_ERROR_STATUS_NAMES = (
+        'STATUS_ACCESS_DENIED',
+        'STATUS_LOGON_FAILURE',
+        'STATUS_WRONG_PASSWORD',
+        'STATUS_PASSWORD_EXPIRED',
+        'STATUS_PRIVILEGE_NOT_HELD',
+        'STATUS_BAD_NETWORK_NAME',
+        'STATUS_OBJECT_NAME_NOT_FOUND',
+        'STATUS_OBJECT_PATH_NOT_FOUND',
+        'STATUS_NOT_FOUND',
+    )
+
+    @staticmethod
+    def is_smb_config_error(exc: Exception) -> bool:
+        """Whether a connect() failure means the configuration is wrong.
+
+        Args:
+            exc (Exception): the exception raised by connect().
+
+        Returns:
+            True when the failure is a configuration mistake the user must fix,
+            False when it only says this host could not reach the server.
+        """
+        try:
+            from smbprotocol.exceptions import SMBAuthenticationError
+            from smbprotocol.header import NtStatus
+        except Exception:
+            # smbprotocol unavailable: nothing can be classified, so do not
+            # reject the configuration on the strength of a guess.
+            return False
+
+        # A rejected credential is raised during session setup as its own class,
+        # which derives from SMBException and is NOT an OSError, so it carries no
+        # errno and would slip past any errno-based check.
+        if isinstance(exc, SMBAuthenticationError):
+            return True
+
+        ntstatus = getattr(exc, 'ntstatus', None)
+        if ntstatus is None:
+            return False
+
+        expected = {getattr(NtStatus, name) for name in Endpoint._CONFIG_ERROR_STATUS_NAMES if hasattr(NtStatus, name)}
+        return ntstatus in expected
+
     def connect(self):
         """Authenticate and test connection to the target share.
 
@@ -125,9 +170,12 @@ class Endpoint:
         import smbclient
         from smbprotocol.exceptions import SMBOSError
 
-        # Setup user name and password
+        # Register the credential against this server only. ClientConfig is a
+        # process-wide singleton, so using it here would let one endpoint's
+        # validation overwrite the credential another endpoint is already
+        # connected with, in any process that runs both.
         if self.username and self.password:
-            smbclient.ClientConfig(username=self.username, password=self.password)
+            smbclient.register_session(self.server, username=self.username, password=self.password)
 
         # Build paths to check
         share = next(iter(re.split(r'[\\/]', self.store_path)), None)

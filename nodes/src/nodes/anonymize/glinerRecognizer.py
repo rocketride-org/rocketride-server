@@ -23,6 +23,8 @@
 
 import os
 import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from threading import Lock
 from typing import Any, Dict
 
 from rocketlib import debug, expand
@@ -68,6 +70,12 @@ class GliNERRecognizer:
 
         # Use ai.common.models.GLiNER - auto-detects local vs model server mode
         self.model = GLiNER(self.model_name)
+
+        # GLiNER wraps a single torch module, which cannot run concurrent forward
+        # passes: doing so corrupts the CUDA heap and aborts the worker. predict()
+        # holds this around the predict_entities call only, so chunking, offset
+        # arithmetic and the overlap filter still run concurrently.
+        self._predict_lock = Lock()
 
     def extract_keywords_from_xml(self, data):
         """
@@ -140,14 +148,20 @@ class GliNERRecognizer:
                 chunk_offsets.append(i)
 
         label_batches = list(self.batch_labels(cleaned_labels, batch_size))
-
-        all_results = []
         total_chunks = len(chunks)
 
-        for chunk_idx, (chunk, offset) in enumerate(zip(chunks, chunk_offsets)):
+        def process_chunk(chunk_idx):
+            """Predict one chunk, offset-corrected and overlap-filtered."""
+            chunk = chunks[chunk_idx]
+            offset = chunk_offsets[chunk_idx]
+            chunk_results = []
+
             for label_batch in label_batches:
                 try:
-                    results = self.model.predict_entities(chunk, label_batch)
+                    # Only the forward pass is unsafe to interleave. Everything
+                    # after it works on this thread's own result dicts.
+                    with self._predict_lock:
+                        results = self.model.predict_entities(chunk, label_batch)
 
                     for res in results:
                         res['start'] += offset
@@ -157,14 +171,29 @@ class GliNERRecognizer:
                         if chunk_idx > 0 and res['start'] < offset + OVERLAP:
                             continue
 
-                        all_results.append(res)
+                        chunk_results.append(res)
 
                 except Exception as e:
                     debug(f'Anonymize: GLiNER Error on chunk {chunk_idx} with labels {label_batch}: {str(e)}')
 
-            completed = chunk_idx + 1
-            if completed % 5 == 0 or completed == total_chunks:
-                debug(f'Anonymize: Processing text chunks: {completed}/{total_chunks} complete')
+            return chunk_results
+
+        all_results = []
+        with ThreadPoolExecutor(max_workers=4) as executor:
+            futures = [executor.submit(process_chunk, index) for index in range(total_chunks)]
+
+            completed = 0
+            for future in as_completed(futures):
+                try:
+                    all_results.extend(future.result())
+                except Exception as e:
+                    # Per-batch failures are already handled inside process_chunk,
+                    # so this only catches a failure in the surrounding scaffolding.
+                    debug(f'Anonymize: Error processing chunk: {str(e)}')
+
+                completed += 1
+                if completed % 5 == 0 or completed == total_chunks:
+                    debug(f'Anonymize: Processing text chunks: {completed}/{total_chunks} complete')
 
         # Remove duplicates from overlapping regions
         seen = set()
