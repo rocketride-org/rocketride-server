@@ -79,7 +79,10 @@ def test_default_profile_exists_and_can_connect_unconfigured():
     profiles = svc['preconfig']['profiles']
     default = svc['preconfig']['default']
     assert default in profiles, f'default profile {default!r} is not defined'
-    assert profiles[default].get('host'), (
+    # weaviate.py strips the host before use, so a whitespace-only value is as
+    # unusable as an empty one — check what the runtime would actually see.
+    host = profiles[default].get('host')
+    assert isinstance(host, str) and host.strip(), (
         f'default profile {default!r} ships an empty host, so an unconfigured node cannot connect'
     )
 
