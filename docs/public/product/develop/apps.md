@@ -640,7 +640,8 @@ All operations are methods on the `Documents` instance:
 | `openStaticDocument(uri, label, content?, groupId?)` | Open a read-only static document with a display label |
 | `splitGroupWithDocument(groupId, orientation)` | Split a group, moving the active document to the new pane |
 | `updateSplitSizes(splitNodeId, sizes)` | Update the sizes of a split layout node |
-| `updateEditorViewState(editorId, viewState)` | Persist an editor's view state (e.g. scroll, cursor) |
+| `updateEditorViewport(editorId, patch)` | Merge an editor's scroll position and cursor coordinates |
+| `updateEditorViewState(editorId, viewState)` | Persist an editor's opaque view state (the app owns its shape) |
 | `getState()` | Read state without subscribing |
 | `getDocument(uri)` | Get a single document by URI |
 | `destroy()` | Clean up the instance |
@@ -941,7 +942,7 @@ Everything below is exported from `'rocketride/app-sdk'`.
 
 ### Classes
 
-`Documents`: instantiable document model with methods: `openDocument()`, `createDocument()`, `closeEditor()`, `updateContent()`, `saveDocument()`, `revertDocument()`, `splitGroup()`, `moveEditor()`, `closeGroup()`, `setActiveEditor()`, `setActiveGroup()`, `updateEditorViewport()`, `getState()`, `getDocument()`, `useStore()`, `destroy()`
+`Documents`: instantiable document model with methods: `openDocument()`, `openStaticDocument()`, `createDocument()`, `closeEditor()`, `updateContent()`, `saveDocument()`, `revertDocument()`, `splitGroup()`, `splitGroupWithDocument()`, `moveEditor()`, `closeGroup()`, `updateSplitSizes()`, `setActiveEditor()`, `setActiveGroup()`, `updateEditorViewport()`, `updateEditorViewState()`, `getState()`, `getDocument()`, `useStore()`, `destroy()`
 
 ### Components
 

@@ -74,16 +74,14 @@ output-layout reference.
 
 ### Start the server
 
-After building, the engine executable is located in `dist/server/`. Run it directly:
-
-```bash
-./dist/server/engine ai/eaas.py
-```
-
-`./builder build server` populates `dist/server/`, which is a complete **runtime
+`./builder server:build` populates `dist/server/`, which is a complete **runtime
 directory**: the `engine` binary plus its `ai/` runtime, the same layout a release
-archive ships. To run it as a standalone service (rather than under the VS Code
-extension), start it from inside that directory and bind it to localhost:
+archive ships. `ai/eaas.py` exists only there — it is copied out of
+`packages/ai/src/ai/`, never checked in at the repo root — so the engine is always
+launched **from inside `dist/server/`**, with the script path relative to that
+directory. (`./builder server:run-eaas` does exactly this, with `cwd` set to
+`dist/server`.) To run it as a standalone service rather than under the VS Code
+extension, start it there and bind it to localhost:
 
 ```bash
 # Linux / macOS
@@ -109,7 +107,7 @@ command, use the Compose stack in the repo instead of running the binary directl
 Requires Docker Engine >= 24.0 and Docker Compose v2 >= 2.17:
 
 ```bash
-./builder build server       # the Compose image is built from dist/server/
+./builder server:build       # the Compose image is built from dist/server/
 cd docker
 cp .env.example .env         # change every password before non-local use
 docker compose up engine     # engine + its required PostgreSQL

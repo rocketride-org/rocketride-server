@@ -59,14 +59,33 @@ A typical RAG flow chains these types end to end:
 
 ### 2. Tool binding: agents and tools
 
-Nodes whose `classType` is `tool` (and a few infrastructure nodes) **have no data
-lanes**. They do not sit in the data flow. Instead they **attach to an agent node's
-tool channel** and are invoked on demand by the agent. A tool is agent-agnostic:
-the same `tool_github` or `tool_tavily` can attach to `agent_deepagent`,
-`agent_langchain`, `agent_crewai`, or `agent_rocketride`.
+A node whose `classType` includes `tool` **attaches to an agent node's tool
+channel** and is invoked on demand by the agent instead of (or as well as) being
+pulled along by the data flow. A tool is agent-agnostic: the same `tool_github`
+or `tool_tavily` can attach to `agent_deepagent`, `agent_langchain`,
+`agent_crewai`, or `agent_rocketride`.
 
-> Rule of thumb: if a node has lanes, **wire** it into the flow. If it is a `tool`,
-> **bind** it to an agent. Mixing these up produces an invalid pipeline.
+**The two connection kinds are independent axes, not a choice.** A node declares
+lanes or not, and includes `tool` in `classType` or not, and all four
+combinations are legal:
+
+| | No `tool` in `classType` | `tool` in `classType` |
+| --- | --- | --- |
+| **No `lanes`** | — | Pure tool: `tool_tavily`, `tool_python`, `tool_http_request` |
+| **Has `lanes`** | Ordinary pipeline node: `prompt`, `llm_openai` | Both: `tool_n8n`, `tool_filesystem`, `agent_crewai` |
+
+Roughly a third of the services carrying `tool` also declare lanes. `tool_n8n`
+(`classType: ["data", "tool"]`) consumes and produces six lane types *and* exposes
+itself to agents; every `agent_*` node is `["agent", "tool"]` with `questions`
+lanes, which is what lets one agent be another agent's tool; `tool_pipe` is
+`["tool"]` alone yet still declares a `_source` lane. `scripts/validate-node-readme.py`
+mirrors this — it requires a `Lanes` section when `lanes` is present and an
+`As a tool` section when `tool` is in `classType`, evaluating the two conditions
+separately.
+
+> So: **wire** a node by its lanes, **bind** it by its `classType`. A node that
+> declares both wants both, and leaving one side unconnected is what produces a
+> pipeline that does not run — not the combination itself.
 
 ---
 
@@ -88,25 +107,103 @@ standalone catalog nodes.
 ## Adding a New Node
 
 1. Create a directory in `nodes/src/nodes/<node_name>/`.
-2. Implement the required interfaces:
+2. Implement the loader contract. The engine imports **one module** — the dotted
+   name in the service definition's `"path"` (`nodes.my_node`), which resolves to
+   the directory's `__init__.py` — and then reads two attributes off it:
+
+   - **`IInstance` is required.** `IPythonInstanceBase` does
+     `m_pyModule.attr("IInstance")` with no guard, so a module that does not
+     export it fails to load
+     (`packages/server/engine-lib/engLib/store/python/python-instance.cpp`).
+   - **`IGlobal` is optional.** `IPythonGlobalBase` guards it with
+     `py::hasattr(m_pyModule, "IGlobal")`. When present the engine instantiates it
+     once per pipeline, injects `IEndpoint` and `glb`, and calls `beginGlobal()` /
+     `endGlobal()` around the run (`python-global.cpp`).
+
+   Because the imported module is the package itself, `__init__.py` **must
+   re-export both symbols** — a class sitting in `my_node.py` that `__init__.py`
+   does not surface is invisible to the loader. There is no `process()` entry
+   point and no node class beyond these two.
+
+   ```text
+   nodes/src/nodes/my_node/
+   ├── __init__.py        # re-exports IGlobal and IInstance — this is what the engine imports
+   ├── IGlobal.py
+   ├── IInstance.py
+   ├── services.json      # "path": "nodes.my_node"
+   ├── my_node.svg
+   └── requirements.txt
+   ```
 
    ```python
    # nodes/src/nodes/my_node/__init__.py
-   from .my_node import MyNode
+   from .IGlobal import IGlobal
    from .IInstance import IInstance
+
+   __all__ = ['IGlobal', 'IInstance']
+   ```
+
+   ```python
+   # nodes/src/nodes/my_node/IGlobal.py
+   from rocketlib import IGlobalBase, OPEN_MODE
+
+
+   class IGlobal(IGlobalBase):
+       """Shared state, one per pipeline run."""
+
+       def beginGlobal(self) -> None:
+           # The editor opens nodes in CONFIG mode just to validate settings —
+           # never install dependencies or open connections in that mode.
+           if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
+               return
+
+           from depends import load_depends
+
+           load_depends(__file__)  # installs this node's requirements.txt
+
+       def endGlobal(self) -> None:
+           """Release anything beginGlobal acquired."""
+   ```
+
+   ```python
+   # nodes/src/nodes/my_node/IInstance.py
+   from rocketlib import Entry, IInstanceBase
+
    from .IGlobal import IGlobal
 
 
-   # nodes/src/nodes/my_node/my_node.py
-   class MyNode:
-       def __init__(self, config):
-           self.config = config
+   class IInstance(IInstanceBase):
+       """Per-object state. The engine injects IEndpoint, IGlobal, and instance."""
 
-       def process(self, input_data):
-           # Process data
-           output_data = input_data
-           return output_data
+       IGlobal: IGlobal
+       buffer: str = ''
+
+       def open(self, obj: Entry) -> None:
+           self.buffer = ''
+
+       def writeText(self, text: str) -> None:
+           self.buffer += text
+           self.preventDefault()  # take the lane over; re-emit at closing
+
+       def closing(self) -> None:
+           self.instance.writeText(self.buffer.upper())
    ```
+
+   **Only methods you actually override are bound.** At load time the engine walks
+   a fixed list of callbacks and, for each, compares the method on your class with
+   the one on `IInstanceBase`; if they are the same object the callback is left
+   unbound and the engine never calls it. Inheriting a method therefore costs
+   nothing — but a misspelled method name silently does nothing rather than
+   erroring. The bindable set is `beginInstance`, `endInstance`, `checkChanged`,
+   `control`, `open`, `closing`, `close`, `writeTag`, `writeText`, `writeTable`,
+   `writeWords`, `writeJson`, `writeAudio`, `writeVideo`, `writeImage`,
+   `writeQuestions`, `writeAnswers`, `writeClassifications`,
+   `writeClassificationContext`, `writeDocuments`, `getPermissions`,
+   `getPermissionsBulk`, `outputPermissions`, and `getThreadCount`.
+
+   Agent-facing behaviour does not go through that list: decorate `IInstance`
+   methods with `@tool_function` (or `@invoke_function` for control-plane ops) and
+   `IInstanceBase.invoke()` dispatches to them by name.
 
 3. Add a `services.json` (or `services.<variant>.json`) node definition. This is
    where you declare `classType`, `capabilities`, the `lanes` block (which makes
@@ -158,7 +255,7 @@ my-workspace/
 └── local_nodes/
     ├── __init__.py          # empty -- just marks local_nodes as a package
     └── my_node/
-        ├── __init__.py      # required -- runs depends(requirements.txt) and exports IGlobal/IInstance (see "Adding a New Node")
+        ├── __init__.py      # required -- exports IGlobal/IInstance (see "Adding a New Node")
         ├── services.json    # "path": "local_nodes.my_node"
         ├── IGlobal.py
         ├── IInstance.py

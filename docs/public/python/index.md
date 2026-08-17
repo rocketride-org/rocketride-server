@@ -30,7 +30,7 @@ from rocketride import RocketRideClient
 
 
 async def main():
-    async with RocketRideClient(uri='https://cloud.rocketride.ai', auth='my-key') as client:
+    async with RocketRideClient(uri='https://api.rocketride.ai', auth='my-key') as client:
         result = await client.use(filepath='pipeline.pipe')
         token = result['token']
         out = await client.send(token, 'Hello, pipeline!', objinfo={'name': 'input.txt'}, mimetype='text/plain')
@@ -41,7 +41,7 @@ async def main():
 asyncio.run(main())
 ```
 
-**URI scheme:** the scheme selects the transport. The client normalizes the `uri` to a WebSocket address before connecting: `https://` and `wss://` both resolve to a secure `wss://` connection, while `http://`, `ws://`, and a bare `host:port` resolve to plain `ws://`. For RocketRide Cloud use `https://cloud.rocketride.ai` (or the equivalent `wss://cloud.rocketride.ai`); for a local engine use `ws://localhost:5565`. **Caution:** against a Cloud endpoint always use `https://` or `wss://`, because an `http://` or `ws://` URI (or a bare `host:port`) silently downgrades to an unencrypted `ws://` connection.
+**URI scheme:** the scheme selects the transport. The client normalizes the `uri` to a WebSocket address before connecting: `https://` and `wss://` both resolve to a secure `wss://` connection, while `http://`, `ws://`, and a bare `host:port` resolve to plain `ws://`. For RocketRide Cloud use `https://api.rocketride.ai` (or the equivalent `wss://api.rocketride.ai`); for a local engine use `ws://localhost:5565`. **Caution:** against a Cloud endpoint always use `https://` or `wss://`, because an `http://` or `ws://` URI (or a bare `host:port`) silently downgrades to an unencrypted `ws://` connection.
 
 Don't have a pipeline yet? Visit [RocketRide on GitHub](https://github.com/rocketride-org/rocketride-server) or download the extension directly in your IDE.
 
@@ -124,7 +124,7 @@ Raises `ValueError` if both `uri` and `ROCKETRIDE_URI` are empty or if `auth` is
 
 ```python
 client = RocketRideClient(
-    uri='https://cloud.rocketride.ai',
+    uri='https://api.rocketride.ai',
     auth='my-key',
     persist=True,
     max_retry_time=300000,
@@ -152,7 +152,7 @@ from rocketride import RocketRideClient
 
 
 async def main():
-    async with RocketRideClient(uri='wss://cloud.rocketride.ai', auth=os.environ['ROCKETRIDE_APIKEY']) as client:
+    async with RocketRideClient(uri='wss://api.rocketride.ai', auth=os.environ['ROCKETRIDE_APIKEY']) as client:
         result = await client.use(filepath='pipeline.json')
         token = result['token']
         await client.send(token, 'Hello, pipeline!')
@@ -502,7 +502,7 @@ from rocketride import RocketRideClient
 
 
 async def main():
-    client = RocketRideClient(uri='https://cloud.rocketride.ai', auth='my-key')
+    client = RocketRideClient(uri='https://api.rocketride.ai', auth='my-key')
     await client.connect()
     result = await client.use(filepath='pipeline.json')
     token = result['token']
@@ -523,7 +523,7 @@ from rocketride import RocketRideClient
 
 
 async def main():
-    async with RocketRideClient(uri='wss://cloud.rocketride.ai', auth='my-key') as client:
+    async with RocketRideClient(uri='wss://api.rocketride.ai', auth='my-key') as client:
         result = await client.use(pipeline={'pipeline': my_pipeline_config})
         token = result['token']
         await client.send(token, '{"data": 1}')
@@ -544,7 +544,7 @@ from rocketride import RocketRideClient
 
 async def main():
     client = RocketRideClient(
-        uri='https://cloud.rocketride.ai',
+        uri='https://api.rocketride.ai',
         auth='my-key',
         persist=True,
         max_retry_time=300000,
@@ -569,7 +569,7 @@ from rocketride import RocketRideClient
 
 
 async def main():
-    client = RocketRideClient(uri='https://cloud.rocketride.ai', auth='my-key')
+    client = RocketRideClient(uri='https://api.rocketride.ai', auth='my-key')
     await client.connect()
     result = await client.use(filepath='vectorize.json')
     token = result['token']
@@ -604,7 +604,7 @@ from rocketride import RocketRideClient
 
 
 async def main():
-    async with RocketRideClient(uri='https://cloud.rocketride.ai', auth='my-key') as client:
+    async with RocketRideClient(uri='https://api.rocketride.ai', auth='my-key') as client:
         result = await client.use(filepath='ingest.json')
         token = result['token']
         pipe = await client.pipe(token, objinfo={'name': 'large.csv'}, mime_type='text/csv')
@@ -632,7 +632,7 @@ from rocketride.schema import Question, Answer
 
 
 async def main():
-    async with RocketRideClient(uri='https://cloud.rocketride.ai', auth='my-key') as client:
+    async with RocketRideClient(uri='https://api.rocketride.ai', auth='my-key') as client:
         result = await client.use(filepath='chat_pipeline.json')
         token = result['token']
         question = Question(expectJson=True)
@@ -657,7 +657,7 @@ from rocketride import RocketRideClient
 
 
 async def main():
-    client = RocketRideClient(uri='https://cloud.rocketride.ai', auth='my-key')
+    client = RocketRideClient(uri='https://api.rocketride.ai', auth='my-key')
     await client.connect()
     services = await client.get_services()
     print('Available:', list(services.keys()))
@@ -689,7 +689,7 @@ from the TypeScript one's, are documented in the
 
 | Variable            | Description                                                            |
 | ------------------- | ---------------------------------------------------------------------- |
-| `ROCKETRIDE_URI`    | Server URI (e.g. `wss://cloud.rocketride.ai` or `ws://localhost:5565`) |
+| `ROCKETRIDE_URI`    | Server URI (e.g. `wss://api.rocketride.ai` or `ws://localhost:5565`) |
 | `ROCKETRIDE_APIKEY` | API key for authentication                                             |
 
 ## Links

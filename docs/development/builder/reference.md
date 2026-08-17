@@ -7,7 +7,7 @@ RocketRide monorepo.
 To **write** build tasks — a package's `scripts/tasks.js`, control-flow helpers,
 deduplication, state, patterns — see [Build System Authoring](authoring.md).
 
-## Primary Command: `builder build`
+## Primary Command: `./builder build`
 
 The recommended way to build the project is:
 
@@ -95,30 +95,30 @@ Not all modules support all commands. Run `./builder --help` for the full list.
 
 ```bash
 # Run a single action
-builder my-package:build
+./builder my-package:build
 
 # Run multiple actions
-builder server:build nodes:build ai:build
+./builder server:build nodes:build ai:build
 
 # Run all builds (global command)
-builder build
+./builder build
 
 # Run with options
-builder my-package:test --force           # Force rebuild (ignore cache/state)
-builder my-package:test --verbose         # Detailed output
-builder my-package:test --pytest="-s -v"  # Pass pytest args
-builder build --sequential               # Run modules sequentially
-builder build --autoinstall              # Install missing tools automatically
-builder build --arch=arm                 # Target architecture (macOS cross-compile)
+./builder my-package:test --force           # Force rebuild (ignore cache/state)
+./builder my-package:test --verbose         # Detailed output
+./builder my-package:test --pytest="-s -v"  # Pass pytest args
+./builder build --sequential                # Run modules sequentially
+./builder build --autoinstall               # Install missing tools automatically
+./builder build --arch=arm                  # Target architecture (macOS cross-compile)
 
 # Show help
-builder --help
+./builder --help
 
 # List all actions (including internal)
-builder --list-actions
+./builder --list-actions
 
 # Show dependency diagram for an action
-builder my-package:test --list-deps
+./builder my-package:test --list-deps
 ```
 
 ---

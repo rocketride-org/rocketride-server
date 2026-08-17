@@ -35,7 +35,7 @@ Everything here lives in `packages/docs/`:
 
 `docs:build` expands to:
 
-```
+```text
 parallel(nodes:docs-generate, client-typescript:docs-generate)
   -> docs:gather -> docs:index -> docs:compile
 ```
@@ -216,15 +216,32 @@ unpublished, so relocating them needs no redirect at all.
 
 ## Adding a page
 
-**A new site page** (three edits, all required):
+Which steps apply depends on whether the page is a **spine page** or lives
+**under an existing mount**. Only spine leaves and mount roots are `SPINE`
+entries; mounted descendants are not.
 
-1. Write the file. If it belongs to the spine, it goes under
-   `docs/public/product/`; if it belongs to an existing mount, put it in that
-   mount's source directory.
-2. Add its id and label to `SPINE` in `scripts/lib/spine.js`, at the position you
-   want it to appear in the sidebar. The id is the URL.
+**A new spine page** (a page the shell owns, under `docs/public/product/`):
+
+1. Write the file under `docs/public/product/`. Its doc id is its path relative
+   to that directory, so the path you pick is the URL.
+2. Add that id and a label to `SPINE` in `scripts/lib/spine.js`, at the position
+   you want it to appear in the sidebar.
 3. `./builder docs:build`. If it publishes as a placeholder, the id and the file
    path disagree.
+
+**A page under an existing mount** (one `SPINE` edit fewer):
+
+1. Write the file inside that mount's source directory. Its doc id is
+   `<mount>/<path under the source dir>` (`docIdFor()`; an `index` file collapses
+   to its directory), so again the path is the URL.
+2. **Do not add a `SPINE` entry.** Only the mount root is a spine node —
+   `toSidebar()` renders it as a single `type: 'doc'` leaf, and the descendants
+   are staged and routed by the mount, not by the spine. Adding an id for a
+   descendant makes it a spine leaf the placeholder gate then expects to find on
+   its own terms.
+3. `./builder docs:build`. Consequence of step 2: a mounted descendant gets a
+   route but no sidebar entry of its own, so link to it from the mount root or a
+   sibling page.
 
 **A new mount** (a package that wants to own a whole subtree):
 
@@ -245,7 +262,7 @@ and add a `redirects.ts` entry from the old URL.
 Node documentation is never written in `docs/`. It lives at
 `nodes/src/nodes/<name>/README.md`, and only the region between
 
-```
+```text
 <!-- ROCKETRIDE:GENERATED:PARAMS START -->
 <!-- ROCKETRIDE:GENERATED:PARAMS END -->
 ```

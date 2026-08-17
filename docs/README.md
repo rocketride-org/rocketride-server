@@ -1,10 +1,5 @@
 # docs/
 
-Hand-written documentation source for RocketRide, gathered into the docs site by
-`./builder docs:build`. Nothing generated is committed under `docs/` — generated
-reference material lives next to the code it's generated from and node docs stay
-co-located with their nodes.
-
 The three folders split by **audience**: `public/` is for people outside the repo,
 `development/` is for contributors, `agents/` is for AI assistants.
 

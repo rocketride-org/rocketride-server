@@ -67,7 +67,7 @@ import { Sequelize, DataTypes } from 'sequelize';
 
 const client = new RocketRideClient({
 	auth: process.env.ROCKETRIDE_APIKEY!,
-	uri: 'wss://cloud.rocketride.ai',
+	uri: 'wss://api.rocketride.ai',
 });
 await client.connect();
 

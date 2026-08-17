@@ -89,8 +89,11 @@ nodes:
   RocketRide → n8n direction. Paste its URL into the `tool_n8n` node. Supports an optional shared
   secret on the `Authorization` header and a configurable respond mode.
 
-Both use a single **RocketRide API** credential: the gateway **Base URL** (e.g.
-`http://localhost:5567`) and the pipeline's public `pk_…` **API Key**, sent as a Bearer token.
+Only the **RocketRide** action node uses a credential — a single **RocketRide API**
+credential holding the gateway **Base URL** (e.g. `http://localhost:5567`) and the
+pipeline's public `pk_…` **API Key**, sent as a Bearer token. **RocketRide Trigger** takes
+no credential: RocketRide calls *it*, so its only authentication is the optional shared
+secret above.
 
 Once the package is published to npm, self-hosted instance owners install it from
 **Settings → Community Nodes → Install** by entering `n8n-nodes-rocketride`; on n8n Cloud it appears

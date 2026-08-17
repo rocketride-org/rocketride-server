@@ -142,7 +142,7 @@ to index that DWARF; that is work, not a hang.
 
 ### Worked example (`aptest`)
 
-`./builder test server` sweeps each crash dump the engine test suite produces
+`./builder server:test` sweeps each crash dump the engine test suite produces
 into the crash-dump location, so a failing test leaves you a dump named by the
 pattern above. Point LLDB at the test binary and that dump:
 
@@ -171,7 +171,7 @@ swept it into place, and LLDB symbolized it back to the exact source line.
 Crashpad minidumps carry no auxiliary vector, so a converted core has no PIE load
 bias for GDB to auto-apply -- pass the module base explicitly (read it from the dump):
 
-```
+```bash
 minidump-2-core crash.dmp > crash.core
 base=$(minidump-stackwalk --json crash.dmp | python3 -c \
   'import json,sys;b="<binary-basename>";print(next(m["base_addr"] for m in json.load(sys.stdin)["modules"] if b in (m["filename"] or "")))')

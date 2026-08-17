@@ -7,7 +7,7 @@ The app API — `AppManifest`, `AppDescriptor`, shell props, screen zones, hooks
 `connectionManager`, the documents system, the virtual file system,
 `DocExplorer`/`DocTabs`, cross-app component loading, and theming — is the same
 in both setups and is documented once, publicly, at
-[Shell Apps](https://docs.rocketride.ai/develop/apps)
+[Shell Apps](https://docs.rocketride.org/develop/apps)
 (source: `docs/public/product/develop/apps.md`). Only the project setup differs,
 and that difference is what this page covers.
 
@@ -16,7 +16,7 @@ and that difference is what this page covers.
 | | Standalone | Monorepo |
 |---|---|---|
 | **Import types from** | `rocketride/app-sdk` | `shell-ui` |
-| **Install** | `npm install rocketride` | `shell-ui: workspace:~` |
+| **Install** | `npm install rocketride` | `shell-ui: workspace:*` |
 | **MF shared** | `rocketride/app-sdk` | `shell-ui` + `shared` |
 | **Build** | `npx rsbuild build` | `./builder my-app:build` |
 | **Deploy** | Upload `dist/` to CDN | Builder copies to server static |
@@ -58,14 +58,25 @@ apps/my-app/
     "categories": ["tools"]
   },
   "dependencies": {
-    "@module-federation/rsbuild-plugin": "^0.9.0",
-    "shell-ui": "workspace:~",
+    "@module-federation/rsbuild-plugin": "^2.5.1",
+    "shell-ui": "workspace:*",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
-    "shared": "workspace:~"
+    "shared": "workspace:*"
+  },
+  "devDependencies": {
+    "@rsbuild/core": "~2.0.11",
+    "@rsbuild/plugin-react": "~2.0.1",
+    "typescript": "^5.3.0"
   }
 }
 ```
+
+`rsbuild.config.ts` imports `@rsbuild/core` and `@rsbuild/plugin-react` directly,
+so both have to be declared here — pnpm's isolated `node_modules` will not resolve
+them from another workspace package. Match the versions the existing apps pin
+(`apps/hello-ui/package.json` is the reference); a different major of
+`@rsbuild/core` will not share a Module Federation runtime with the shell.
 
 ### 3. AppDescriptor: import from `shell-ui`
 

@@ -80,7 +80,7 @@ The returned `token` is required for all subsequent operations: sending data, ch
 ```python
 from rocketride import RocketRideClient
 
-async with RocketRideClient(uri='https://cloud.rocketride.ai', auth='your-api-key') as client:
+async with RocketRideClient(uri='https://api.rocketride.ai', auth='your-api-key') as client:
     result = await client.use(filepath='text_analyzer.json')
     token = result['token']
     print(f'Pipeline started with token: {token}')
@@ -91,7 +91,7 @@ import { RocketRideClient } from 'rocketride';
 
 const client = new RocketRideClient({
     auth: 'your-api-key',
-    uri: 'https://cloud.rocketride.ai',
+    uri: 'https://api.rocketride.ai',
 });
 await client.connect();
 

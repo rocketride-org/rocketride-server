@@ -32,7 +32,7 @@ Open VS Code settings (`Ctrl+,` / `Cmd+,`) and search for `rocketride` to config
 |---------|---------|-------------|
 | `rocketride.connectionMode` | - | Connection mode: `cloud`, `onprem`, or `local` |
 | `rocketride.hostUrl` | `http://localhost:5565` | RocketRide server URL |
-| `rocketride.deployment.hostUrl` | `https://cloud.rocketride.ai` | Cloud deployment API URL |
+| `rocketride.deployment.hostUrl` | `https://api.rocketride.ai` | Cloud deployment API URL |
 
 > Credentials are not a settings key. Enter your API key with the **Settings** page command `rocketride.page.settings.setupCredentials` (update or clear it via `rocketride.page.settings.updateApiKey` / `rocketride.page.settings.clearApiKey`). It is held in VS Code SecretStorage, not in `settings.json`.
 

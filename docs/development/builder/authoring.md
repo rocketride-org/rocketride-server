@@ -127,7 +127,7 @@ To add a new package to the build system:
 
 1. Create `your-package/scripts/tasks.js`
 2. Define your module with `name`, `description`, and `actions`
-3. Run `builder your-package:build`
+3. Run `./builder your-package:build`
 
 ```javascript
 // packages/my-package/scripts/tasks.js
@@ -334,7 +334,7 @@ The **only difference** is the `description` property:
 | Property | Public Action | Internal Action |
 | -------- | ------------- | --------------- |
 | `description` | Has description | No description |
-| Shown in `builder --help` | Yes | No |
+| Shown in `./builder --help` | Yes | No |
 | Can be run via CLI | Yes | Yes |
 
 ```javascript
@@ -1216,7 +1216,7 @@ This section covers common patterns and **when** to use them based on the proble
 })}
 ```
 
-**Why this works:** Running `builder ai:build client-python:build` only runs `nodes:build` once, even though both request it.
+**Why this works:** Running `./builder ai:build client-python:build` only runs `nodes:build` once, even though both request it.
 
 ### Pattern: integration tests with server
 
@@ -1375,9 +1375,9 @@ function makeBuildAction() {
 
 ### Pattern: global commands with :build convention
 
-**Problem:** You want a single `builder build` command that builds everything, but each package owns its own `:build` action.
+**Problem:** You want a single `./builder build` command that builds everything, but each package owns its own `:build` action.
 
-**Solution:** Use the naming convention. Any action named `*:build` is included in global `builder build`:
+**Solution:** Use the naming convention. Any action named `*:build` is included in global `./builder build`:
 
 ```javascript
 // server/scripts/tasks.js
@@ -1393,7 +1393,7 @@ function makeBuildAction() {
 })}
 ```
 
-Now `builder build` runs all `*:build` actions. Same for `builder test` (runs all `*:test` actions).
+Now `./builder build` runs all `*:build` actions. Same for `./builder test` (runs all `*:test` actions).
 
 ### Pattern: passing options to actions
 
@@ -1411,7 +1411,7 @@ run: async (ctx, task) => {
 
 ```bash
 # From CLI:
-builder tests:pytest --pytest="-s -v -k test_login"
+./builder tests:pytest --pytest="-s -v -k test_login"
 ```
 
 **Available options:**
@@ -1525,14 +1525,14 @@ await saveSourceHash(HASH_KEY, hash);
 
 **Why?** Consistent naming enables:
 
-- **Global commands**: `builder build` finds all `*:build` actions automatically
+- **Global commands**: `./builder build` finds all `*:build` actions automatically
 - **Discoverability**: Developers know to look for `pkg:build` without reading docs
 - **Tab completion**: Predictable names work better with shell completion
 
 ```javascript
 // Standard action names:
 'pkg:build'      // Main build action (public) - always create this one
-'pkg:test'       // Run tests (public) - enables `builder test`
+'pkg:test'       // Run tests (public) - enables `./builder test`
 'pkg:clean'      // Remove artifacts (public) - for clean builds
 'pkg:sync'       // Sync files (internal) - copy source to dist/
 'pkg:compile'    // Compile source (internal) - run compiler
@@ -1647,13 +1647,13 @@ Error: Unknown action 'my-package:build'
 
 - Check that `tasks.js` is in `scripts/` subdirectory
 - Verify `module.exports.name` matches the action prefix (e.g., name `my-package` -> actions must start with `my-package:`)
-- Run `builder --list-actions` to see what actions ARE registered
+- Run `./builder --list-actions` to see what actions ARE registered
 
 ### Task skipped unexpectedly
 
 **Why it happens:** Deduplication. The action already ran earlier in the session.
 
-**How to tell:** The output shows the task completing instantly, or `builder --verbose` shows "already completed".
+**How to tell:** The output shows the task completing instantly, or `./builder --verbose` shows "already completed".
 
 **Fixes:**
 

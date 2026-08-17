@@ -55,7 +55,7 @@ ruff format --check
 Runs on every PR with no path gating. It mirrors the local lefthook hook so a
 contributor who commits with `--no-verify` is still caught.
 
-### Docs export drift — `builder docs:check` (blocking, always runs)
+### Docs export drift — `./builder docs:check` (blocking, always runs)
 
 ```bash
 node scripts/build.js docs:check      # or ./builder docs:check
@@ -96,7 +96,7 @@ requires a paid licence for org-owned repos. Mirrors the local pre-commit hook.
 ```
 
 `_build.yaml` runs a three-platform matrix (Ubuntu 22.04, Windows Server 2022,
-macOS ARM64), each doing `builder build` then `builder test --verbose --sequential`,
+macOS ARM64), each doing `./builder build` then `./builder test --verbose --sequential`,
 with 90-minute timeouts. The test step boots a local engine on `:5565` and
 connects a test client, so both sides need a matching `ROCKETRIDE_APIKEY` — CI
 uses the literal `MYAPIKEY`, the same placeholder as `.env.template`. Ubuntu also
