@@ -306,6 +306,7 @@ class TestGetPort:
     """Verify get_port() prefers a bound IPv4 socket over IPv6. See #994."""
 
     def test_dual_stack_prefers_ipv4(self, monkeypatch):
+        """On a dual-stack host, get_port() returns the IPv4 port even when IPv6 is listed first."""
         monkeypatch.delenv('RR_BASE_URL', raising=False)
         ipv4 = _bind_ipv4()
         ipv6 = _bind_ipv6()
@@ -325,6 +326,7 @@ class TestGetPort:
             ipv6.close()
 
     def test_ipv6_only_falls_back(self, monkeypatch):
+        """With no IPv4 socket bound, get_port() falls back to the IPv6 port."""
         monkeypatch.delenv('RR_BASE_URL', raising=False)
         ipv6 = _bind_ipv6()
         try:
