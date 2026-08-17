@@ -51,7 +51,7 @@ Quick Start:
     finally:
         await client.disconnect()
 
-For more information, see the documentation at https://docs.rocketride.ai
+For more information, see the documentation at https://docs.rocketride.org
 """
 
 # Package metadata — __version__ is populated at runtime from the installed

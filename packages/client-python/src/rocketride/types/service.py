@@ -67,14 +67,14 @@ class SERVICE_INPUT_LANE(TypedDict, total=False):
     output: List[Dict[str, str]]  # Output lanes this input can produce
 
 
-class SERVICE_DEFINITION(TypedDict, total=False):
+class SERVICE_SUMMARY(TypedDict, total=False):
     """
-    A service definition as returned by the engine via ``rrext_services``.
-
-    Each definition describes a driver/connector that can be used as a
-    component in a pipeline. The object contains known fixed fields plus
-    dynamic section keys (e.g. "Pipe", "Source", "Global") that each hold
-    a SERVICE_SECTION with ``schema`` and ``ui``.
+    A service SUMMARY as returned per-entry by the bulk ``rrext_services``
+    call: the display fields a client needs to render the canvas / node
+    palette. The node's icon is referenced by id into the response's
+    deduplicated ``icons`` table. Configuration schema is NOT included —
+    fetch the full SERVICE_DEFINITION via ``get_service()`` when
+    configuring a node.
 
     Usage:
         services = await client.get_services()
@@ -94,14 +94,30 @@ class SERVICE_DEFINITION(TypedDict, total=False):
     input: List[SERVICE_INPUT_LANE]  # Structured input/output lane definitions
     invoke: Dict[str, SERVICE_INVOKE_SLOT]  # Control-plane invoke slot definitions
     tile: Dict[str, Any]  # Tile/card rendering hint for the pipeline editor
-    icon: str  # Icon filename or identifier
+    icon: str  # Opaque id into the response's 'icons' table (absent = no icon)
     documentation: str  # External documentation URL
 
 
-class SERVICES_RESPONSE(TypedDict):
-    """Response from ``get_services()``: a map of logical type names to definitions."""
+class SERVICE_DEFINITION(SERVICE_SUMMARY, total=False):
+    """
+    A FULL service definition, returned by ``get_service()``.
 
-    services: Dict[str, SERVICE_DEFINITION]
+    Extends the summary with dynamic configuration section keys (e.g.
+    "Pipe", "Source", "Global") that each hold a SERVICE_SECTION with
+    ``schema`` and ``ui``. TypedDict cannot express dynamic keys, so
+    access sections via ``definition.get(section_name)``.
+    """
+
+
+class SERVICES_RESPONSE(TypedDict, total=False):
+    """
+    Response from ``get_services()``: service summaries plus the
+    deduplicated icon table their ``icon`` ids point into.
+    """
+
+    services: Dict[str, SERVICE_SUMMARY]
+    icons: Dict[str, str]  # Icon id -> raw SVG text (sanitize before DOM use)
+    version: int  # Engine services version
 
 
 # ============================================================================
@@ -120,8 +136,8 @@ class VALIDATION_RESULT(TypedDict, total=False):
     """
     Result of a pipeline validation via ``validate()``.
 
-    The engine validates structure, component compatibility, and connection
-    integrity. The result contains any errors and warnings found.
+    The engine validates structure — required fields and component
+    references. The result contains any errors and warnings found.
     """
 
     errors: List[VALIDATION_ERROR]  # Validation errors — pipeline will not execute with these

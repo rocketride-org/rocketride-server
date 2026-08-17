@@ -7,14 +7,14 @@
  * Host-side SDK-to-view-model mapping for the deploy surfaces.
  *
  * The extension host fetches through `client.deploy.*` and maps the SDK rows
- * into the serialisable DTOs of `providers/views/deployTypes.ts` BEFORE they
+ * into the serialisable DTOs of `providers/types/deployTypes.ts` BEFORE they
  * cross postMessage — the webviews render view models only, exactly like the
  * rocket-ui hosts (DeployLifecycleProvider / DeploymentPage / useDeployments),
  * whose mapping logic this module mirrors line-for-line.
  */
 
 import type { RocketRideClient, Deployment, DeployArtifact, DeployHistoryEntry } from 'rocketride';
-import type { DeployTeamRefDTO, DeployVersionCardDTO, TeamDeploymentRowDTO, DeployHistoryRowDTO, DeployScheduleRowDTO, DeploymentInfoDTO } from '../../providers/views/deployTypes';
+import type { DeployTeamRefDTO, DeployVersionCardDTO, TeamDeploymentRowDTO, DeployHistoryRowDTO, DeployScheduleRowDTO, DeploymentInfoDTO } from '../../providers/types/deployTypes';
 
 // =============================================================================
 // TEAM RESOLUTION

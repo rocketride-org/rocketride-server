@@ -33,13 +33,38 @@ agent's context.
 
 ## Configuration
 
+The node connects in one of two ways, picked with the **Connection** selector — the same choice
+the FalkorDB Browser offers between *Manual Configuration* and *FalkorDB URL*:
+
+- **Manual configuration (host and port)** — profile `default`. Fill in `host`, `port`,
+  `username`, `password` and `tls` yourself.
+- **FalkorDB URL (connection string)** — profile `url`. Paste the connection string from the
+  FalkorDB Cloud console, e.g.
+  `falkor://falkordb@r-6jissuruar.instance-ytljliglb.us-east-1.aws.cloud:53939`. Schemes
+  accepted: `falkor://`, `falkors://` (TLS), `redis://`, `rediss://`, `unix://`. The password may
+  be embedded (`falkor://user:password@host:port`) or left out of the URL and typed into
+  `password`, which keeps the secret in the node's encrypted field instead of in the URL. When
+  `password` is filled in it is the one used: any password the URL embeds is stripped before the
+  connection is opened, so the two can never silently disagree.
+
+Every other setting below is available in both profiles. Pipelines saved before the URL profile
+existed keep working unchanged: they already use the `default` profile.
+
+### Connection fields
+
+| Field | Profile | Type | Description |
+|---|---|---|---|
+| `host` | manual | string | Default `localhost`. FalkorDB host, e.g. `localhost` or `your-instance.falkordb.cloud`. |
+| `port` | manual | integer | Default 6379 (1–65535). FalkorDB port (Redis protocol). |
+| `username` | manual | string | Default empty. Username, e.g. `default` for FalkorDB Cloud. Leave empty for no auth. |
+| `tls` | manual | boolean | Default false. Connect with TLS (for FalkorDB Cloud TLS endpoints). |
+| `url` | url | string | Connection string, e.g. `falkor://user@host:6379`. Required in this profile. |
+| `password` | both | string | Default empty. Stored encrypted. When set it replaces any password embedded in the URL. Leave empty for no auth, or to use the one the URL carries. |
+
+### Shared fields
+
 | Field | Type | Description |
 |---|---|---|
-| `host` | string | Default `localhost`. FalkorDB host, e.g. `localhost` or `your-instance.falkordb.cloud`. |
-| `port` | integer | Default 6379 (1–65535). FalkorDB port (Redis protocol). |
-| `username` | string | Default empty. Username, e.g. `default` for FalkorDB Cloud. Leave empty for no auth. |
-| `password` | string | Default empty. Password for the FalkorDB instance. Leave empty for no auth. |
-| `tls` | boolean | Default false. Connect with TLS (for FalkorDB Cloud TLS endpoints). |
 | `graph` | string | Default `agent`. Graph queried when the agent does not pass one explicitly. |
 | `db_description` | string | Default empty. What this graph holds, in your own words. Given to the LLM so it writes better Cypher. |
 | `allow_writes` | boolean | Default false. Permit `CREATE`/`MERGE`/`SET`/`DELETE` in `query`. When off, queries run via `GRAPH.RO_QUERY` and the server rejects write clauses. |
@@ -109,8 +134,8 @@ read-only path.
 docker run -p 6379:6379 -it --rm falkordb/falkordb:latest
 ```
 
-Point the node at `localhost:6379` and ask the agent to `MATCH` away, or to `CREATE` with
-**Allow Writes** turned on.
+Point the node at `localhost:6379` (manual profile) or at `falkor://localhost:6379` (URL
+profile) and ask the agent to `MATCH` away, or to `CREATE` with **Allow Writes** turned on.
 
 ---
 
@@ -138,10 +163,12 @@ pytest nodes/test/test_graph_falkordb.py -v
 | `graph_falkordb.max_attempts` | `integer` | **Max Validation Attempts**<br/>Maximum number of times to re-ask the LLM if EXPLAIN rejects the generated Cypher query. | `5` |
 | `graph_falkordb.max_execute_rows` | `integer` | **Max Execute Rows**<br/>Upper cap on rows returned by the execute tool. The query fails if exceeded, so one statement cannot exhaust worker memory. | `25000` |
 | `graph_falkordb.max_rows` | `integer` | **Max Rows**<br/>Upper cap on rows returned per query. Results beyond it are cut and flagged as truncated. | `250` |
-| `graph_falkordb.password` | `string` | **Password**<br/>Password for the FalkorDB instance. Leave empty for no auth. | `""` |
+| `graph_falkordb.password` | `string` | **Password**<br/>Password for the FalkorDB instance. Stored encrypted. When set it is the one used, replacing any password embedded in the FalkorDB URL. Leave empty for no auth, or to use the one the URL already carries. | `""` |
 | `graph_falkordb.port` | `integer` | **Port**<br/>FalkorDB port (Redis protocol). FalkorDB Cloud assigns a per-instance port. | `6379` |
+| `graph_falkordb.profile` | `string` | **Connection**<br/>How this node connects to FalkorDB | `"default"` |
 | `graph_falkordb.query_timeout_ms` | `integer` | **Query Timeout (ms)**<br/>Server-side timeout for a single query. | `30000` |
 | `graph_falkordb.tls` | `boolean` | **TLS**<br/>Connect with TLS. Required by FalkorDB Cloud TLS endpoints. | `false` |
+| `graph_falkordb.url` | `string` | **FalkorDB URL**<br/>Connection string as shown in the FalkorDB Cloud console, e.g. falkor://falkordb@r-xxxx.instance-yyyy.cloud:53939. Use falkors:// for TLS. The URL may carry credentials, so it is stored encrypted; the password can also be left out of it and typed in the Password field below, which then replaces whatever the URL embeds. | `""` |
 | `graph_falkordb.username` | `string` | **Username**<br/>Username, e.g. "default" for FalkorDB Cloud. Leave empty for no auth. | `""` |
 
 ## Dependencies

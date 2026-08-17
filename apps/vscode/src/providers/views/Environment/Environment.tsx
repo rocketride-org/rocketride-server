@@ -30,8 +30,8 @@
  */
 
 // ── Theme CSS (order matters: default first, then VS Code overrides) ────────
-import 'shared/themes/rocketride-default.css';
-import 'shared/themes/rocketride-vscode.css';
+import 'shell/themes/rocketride-default.css';
+import '../../../themes/rocketride-vscode.css';
 import '../../styles/root.css';
 
 // ── Re-export the bridge component as the named entry ───────────────────────

@@ -85,12 +85,22 @@ inline std::string Location::function() const noexcept {
 }
 
 // Filename accessor (strips just the file name off the path)
+//
+// The path is copied into a std::string before it is parsed. m_path is a view, and a
+// view carries no NUL at its end, so handing path(m_path.data()) a view that is a
+// substring of a larger buffer reads on past the characters that belong to it.
+// Constructing or rendering a std::filesystem::path can also throw - on Windows the
+// narrow/wide conversion does, for bytes the active code page cannot represent - and
+// this accessor is noexcept, so a throw here is terminate rather than a bad file name.
+// Returning the path unsplit is a far better answer than aborting the process.
 inline std::string Location::fileName() const noexcept {
     if (m_path.empty()) return {};
-    if (m_fullPath)
-        return std::filesystem::path(m_path.data()).string();
-    else
-        return std::filesystem::path(m_path.data()).filename().string();
+    try {
+        const std::filesystem::path path{std::string(m_path)};
+        return m_fullPath ? path.string() : path.filename().string();
+    } catch (...) {
+        return std::string(m_path);
+    }
 }
 
 }  // namespace ap

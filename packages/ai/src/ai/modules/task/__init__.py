@@ -4,7 +4,7 @@ from ai.web import WebServer
 from .task_server import TaskServer
 from .task_scheduler import TaskScheduler
 from .run_log import sweep_spool_root
-from .fetch import handle_fetch
+from .fetch import handle_fetch, handle_fetch_dir
 from depends import depends
 
 requirements = os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt'
@@ -52,3 +52,8 @@ def initModule(server: WebServer, config: Dict[str, Any]):
 
     # Presigned file fetch — public route because auth is in the JWT token
     server.add_route('/task/fetch', handle_fetch, ['GET'], public=True)
+
+    # Directory-capability fetch for multi-file app bundles: the token rides
+    # the PATH so relative chunk requests derived from remoteEntry.js inherit
+    # it automatically (see fetch.handle_fetch_dir). Auth is in the JWT.
+    server.add_route('/task/fetch/{token}/{subpath:path}', handle_fetch_dir, ['GET'], public=True)

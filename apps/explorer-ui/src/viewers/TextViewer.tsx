@@ -4,7 +4,7 @@
 
 import React, { useCallback } from 'react';
 import type { CSSProperties } from 'react';
-import type { Documents } from 'shell-ui';
+import type { Documents } from 'shell';
 
 const styles = {
 	textarea: {

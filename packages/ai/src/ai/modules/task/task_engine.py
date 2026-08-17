@@ -457,6 +457,65 @@ class Task(DAPBase):
         """
         return resolve_pipeline_env(pipeline, self._env)
 
+    # Providers that connect to the per-tenant RocketRide cloud database and
+    # therefore need ROCKETRIDE_DB_DSN injected into the task subprocess.
+    _ROCKETRIDE_DB_PROVIDERS = frozenset({'rocketride_sql', 'rocketride_vector', 'rocketride_graph'})
+
+    def _pipeline_uses_rocketride_db(self) -> bool:
+        """True when any pipeline component is a RocketRide cloud DB node."""
+        components = self._pipeline.get('components') or []
+        return any(
+            isinstance(component, dict) and component.get('provider') in self._ROCKETRIDE_DB_PROVIDERS
+            for component in components
+        )
+
+    async def _build_subprocess_env(self) -> Dict[str, str]:
+        """Build the environment for the task subprocess.
+
+        Credential hygiene for the RocketRide cloud DB path:
+
+        - The broker credential can resolve ANY tenant's DSN — it must never
+          reach node subprocesses, which run user pipeline code.
+        - A DSN inherited from the parent environment must not leak into
+          pipelines that didn't resolve one (and must not survive a broker
+          failure as a stale value pointing at who-knows-which tenant).
+
+        Children only ever get the single DSN resolved here, for pipelines
+        that actually contain one of the DB nodes. Identity is NOT delivered
+        through the environment (it rides the task file's 'identity' block —
+        the ROCKETRIDE_* env namespace is caller-influenced by design).
+        """
+        subprocess_env = os.environ.copy()
+
+        subprocess_env.pop('ROCKETRIDE_DB_BROKER_URL', None)
+        subprocess_env.pop('ROCKETRIDE_DB_BROKER_TOKEN', None)
+        subprocess_env.pop('ROCKETRIDE_DB_DSN', None)
+        subprocess_env.pop('ROCKETRIDE_DB_RESOLVE_ERROR', None)
+
+        # Resolve the per-tenant DSN server-side (the SaaS account context
+        # exists only in this process) and hand it to the node subprocess via
+        # env — the same delivery mechanism as ROCKETRIDE_CLIENT_ID. Scoped to
+        # pipelines that actually contain one of the DB nodes so unrelated
+        # tasks never trigger provisioning. Resolution failure is non-fatal
+        # here: the node surfaces its own clear error, with the failure reason
+        # passed down so it isn't misreported as a sign-in problem.
+        if self._pipeline_uses_rocketride_db():
+            try:
+                from ai.account import account
+
+                dsn = await account.resolve_db_dsn(self.client_id)
+                subprocess_env['ROCKETRIDE_DB_DSN'] = dsn
+            except NotImplementedError:
+                # Broker env not configured (open-source default) — the
+                # node raises the sign-in message itself.
+                pass
+            except Exception as e:
+                self.debug_message(f'RocketRide DB DSN resolution failed: {e}')
+                reason = (str(e).strip().splitlines() or [repr(e)])[0]
+                subprocess_env['ROCKETRIDE_DB_RESOLVE_ERROR'] = reason
+
+        return subprocess_env
+
     def _check_pipeline(self, pipeline: Dict[str, Any]) -> None:
         """
         Validate pipeline configuration and extract metadata.
@@ -2078,7 +2137,9 @@ class Task(DAPBase):
             # Launch subprocess. Identity travels in the TASK FILE (see
             # _build_task's 'identity' block), never the environment — the
             # ROCKETRIDE_* env namespace is caller-influenced by design.
-            subprocess_env = os.environ.copy()
+            # _build_subprocess_env additionally scrubs the RocketRide DB
+            # broker credentials and injects the resolved per-tenant DSN.
+            subprocess_env = await self._build_subprocess_env()
 
             # avoidMocks: strip ROCKETRIDE_MOCK so node.py loads real libraries
             if self._pipeline.get('avoidMocks'):

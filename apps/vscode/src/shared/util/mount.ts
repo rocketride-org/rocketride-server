@@ -99,8 +99,10 @@ export function mountComponent<T = {}>(component: React.ComponentType<T>, compon
 
 		if (rootElement) {
 			try {
-				// Use React 18 createRoot API
-				createRoot(rootElement).render(React.createElement(component as React.ComponentType<Record<string, unknown>>, props));
+				// Use React 18 createRoot API (T is unconstrained, so the
+				// element factory gets the same widened prop shape as the
+				// component cast beside it)
+				createRoot(rootElement).render(React.createElement(component as React.ComponentType<Record<string, unknown>>, props as Record<string, unknown> | undefined));
 			} catch (error) {
 				console.error(`Error mounting ${componentName}:`, error);
 			}

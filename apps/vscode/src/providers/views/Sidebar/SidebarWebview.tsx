@@ -19,18 +19,20 @@
  *
  * Architecture:
  *   SidebarProvider (Node.js) ↔ postMessage ↔ SidebarViewWebview (browser)
- *     → SidebarView (shared-ui) + SidebarFooter (shared-ui)
+ *     → SidebarView (shared) + SidebarFooter (shared)
  */
 
 import React, { useState, useCallback, useMemo, useRef, useEffect } from 'react';
 
-import 'shared/themes/rocketride-default.css';
-import 'shared/themes/rocketride-vscode.css';
+import 'shell/themes/rocketride-default.css';
+import '../../../themes/rocketride-vscode.css';
 
-import { SidebarView, BxUser, BxCog, BxExport, BxLock, BxRocket, foldTaskEvent } from 'shared';
-import { SidebarFooter } from 'shared/components/sidebar-footer/SidebarFooter';
-import type { SidebarFooterMenuItem } from 'shared/components/sidebar-footer/SidebarFooter';
-import type { ProjectEntry, ActiveTaskState, UnknownTask, ConnectionInfo } from 'shared';
+import { SidebarView } from 'shared/modules/sidebar/SidebarView';
+import { BxUser, BxCog, BxExport, BxLock, BxRocket } from 'shell';
+import { foldTaskEvent } from 'shared/modules/sidebar/taskFold';
+import { SidebarFooter } from 'shell';
+import type { SidebarFooterMenuItem } from 'shell';
+import type { ProjectEntry, ActiveTaskState, UnknownTask, ConnectionInfo, AppListItem, SidebarMode } from 'shared/modules/sidebar/types';
 import { useMessaging } from '../hooks/useMessaging';
 
 // =============================================================================
@@ -54,7 +56,7 @@ interface TaskEventBody {
 	tasks?: { id: string; name: string; projectId: string; source: string; runKind?: string }[];
 }
 
-type OutgoingMessage = { type: 'view:ready' } | { type: 'connect' } | { type: 'disconnect' } | { type: 'command'; command: string; args?: unknown[] } | { type: 'openFile'; fsPath: string } | { type: 'runPipeline'; fsPath: string; sourceId?: string } | { type: 'stopPipeline'; projectId: string; sourceId: string } | { type: 'refresh' } | { type: 'openUnknownTask'; projectId: string; sourceId: string; displayName: string } | { type: 'setDevelopmentMode'; mode: string } | { type: 'setDeployTargetMode'; mode: string | null } | { type: 'cloudSignIn' };
+type OutgoingMessage = { type: 'view:ready' } | { type: 'connect' } | { type: 'disconnect' } | { type: 'command'; command: string; args?: unknown[] } | { type: 'openFile'; fsPath: string } | { type: 'runPipeline'; fsPath: string; sourceId?: string } | { type: 'stopPipeline'; projectId: string; sourceId: string } | { type: 'refresh' } | { type: 'openUnknownTask'; projectId: string; sourceId: string; displayName: string } | { type: 'setDevelopmentMode'; mode: string } | { type: 'setDeployTargetMode'; mode: string | null } | { type: 'cloudSignIn' } | { type: 'openApp'; appId: string } | { type: 'setSidebarMode'; mode: SidebarMode };
 
 interface DashboardTaskDTO {
 	id: string;
@@ -88,9 +90,14 @@ type IncomingMessage =
 				// Pipeline data
 				entries: HostProjectEntry[];
 				unknownTasks: UnknownTask[];
+				// App Builder (MY APPS) — merged workspace ∪ server list
+				apps?: AppListItem[];
+				/** Host-persisted sidebar mode (workspaceState). */
+				sidebarMode?: SidebarMode;
 			};
 	  }
 	| { type: 'entriesUpdate'; entries: HostProjectEntry[] }
+	| { type: 'appsUpdate'; apps: AppListItem[] }
 	| { type: 'taskEvent'; event: TaskEventBody }
 	| { type: 'statusUpdate'; projectId: string; sourceId: string; errors: string[]; warnings: string[] }
 	| { type: 'dashboardSnapshot'; tasks: DashboardTaskDTO[] };
@@ -117,6 +124,14 @@ const SidebarViewWebview: React.FC = () => {
 	const [entries, setEntries] = useState<ProjectEntry[]>([]);
 	const [activeTasks, setActiveTasks] = useState<Map<string, ActiveTaskState>>(new Map());
 	const [unknownTasks, setUnknownTasks] = useState<UnknownTask[]>([]);
+
+	// ── App Builder (MY APPS) ───────────────────────────────────────────────
+	const [apps, setApps] = useState<AppListItem[]>([]);
+	const [sidebarMode, setSidebarMode] = useState<SidebarMode>('pipelines');
+	// The host-persisted mode seeds the strip ONCE: an `update` composed
+	// before the persist round trip completed carries the previous value and
+	// must not revert a selection the user just made.
+	const sidebarModeSeededRef = useRef(false);
 
 	// Synchronously-updated mirrors: the shared foldTaskEvent needs BOTH
 	// collections atomically, and relayed events can burst faster than a
@@ -214,10 +229,20 @@ const SidebarViewWebview: React.FC = () => {
 					}
 					// Subscription status
 					if ((msg.data as any).isSubscribed !== undefined) setSubscribed((msg.data as any).isSubscribed);
+					// App Builder list + host-persisted mode (seed once — see ref)
+					if (msg.data.apps) setApps(msg.data.apps);
+					if (msg.data.sidebarMode && !sidebarModeSeededRef.current) {
+						sidebarModeSeededRef.current = true;
+						setSidebarMode(msg.data.sidebarMode);
+					}
 					break;
 
 				case 'entriesUpdate':
 					setEntries(msg.entries);
+					break;
+
+				case 'appsUpdate':
+					setApps(msg.apps);
 					break;
 
 				case 'taskEvent':
@@ -315,6 +340,33 @@ const SidebarViewWebview: React.FC = () => {
 	const onOpenUnknownTask = useCallback(
 		(projectId: string, sourceId: string, displayName: string) => {
 			sendMessage({ type: 'openUnknownTask', projectId, sourceId, displayName });
+		},
+		[sendMessage]
+	);
+
+	// ── App Builder callbacks ───────────────────────────────────────────────
+
+	/** New app → the scaffolder command (extension host). */
+	const onNewApp = useCallback(() => {
+		sendMessage({ type: 'command', command: 'rocketride.app.create' });
+	}, [sendMessage]);
+
+	/** App row click → open (or reveal) its App Builder screen. */
+	const onOpenApp = useCallback(
+		(appId: string) => {
+			sendMessage({ type: 'openApp', appId });
+		},
+		[sendMessage]
+	);
+
+	/** Mode strip selection — local state now, host persists via message. */
+	const onSidebarModeChange = useCallback(
+		(mode: SidebarMode) => {
+			// A user selection counts as the seed: an `update` composed before
+			// the persist round trip completed must not revert it.
+			sidebarModeSeededRef.current = true;
+			setSidebarMode(mode);
+			sendMessage({ type: 'setSidebarMode', mode });
 		},
 		[sendMessage]
 	);
@@ -423,8 +475,8 @@ const SidebarViewWebview: React.FC = () => {
 
 	// No headerSlot: the VS Code host has no home-app destination, so it injects no
 	// host-specific top nav. The "Home" button is a SaaS-shell concept owned by the
-	// web host (rocket-ui), intentionally absent from shared-ui / this extension.
-	return <SidebarView connection={connection} isSubscribed={subscribed} entries={entries} activeTasks={activeTasks} unknownTasks={unknownTasks} onNavigate={onNavigate} onOpenFile={onOpenFile} onSourceAction={onSourceAction} onRefresh={onRefresh} footerSlot={footerSlot} onOpenUnknownTask={onOpenUnknownTask} />;
+	// web host (rocket-ui), intentionally absent from shared / this extension.
+	return <SidebarView connection={connection} isSubscribed={subscribed} entries={entries} activeTasks={activeTasks} unknownTasks={unknownTasks} onNavigate={onNavigate} onOpenFile={onOpenFile} onSourceAction={onSourceAction} onRefresh={onRefresh} footerSlot={footerSlot} onOpenUnknownTask={onOpenUnknownTask} appBuilder={{ apps, onNewApp, onOpenApp }} sidebarMode={sidebarMode} onSidebarModeChange={onSidebarModeChange} />;
 };
 
 export default SidebarViewWebview;

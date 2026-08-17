@@ -61,21 +61,21 @@ export interface ServiceInputLane {
 }
 
 /**
- * A service definition as returned by the engine via `rrext_services`.
- *
- * Each definition describes a driver/connector that can be used as a
- * component in a pipeline. The object contains known fixed fields plus
- * dynamic section keys (e.g. "Pipe", "Source", "Global") that each hold
- * a {@link ServiceSection} with `schema` and `ui`.
+ * A service SUMMARY as returned per-entry by the bulk `rrext_services`
+ * call: the display fields a client needs to render the canvas / node
+ * palette. The node's icon is referenced by id into the response's
+ * deduplicated {@link ServicesResponse.icons} table. Configuration
+ * schema is NOT included — fetch the full {@link ServiceDefinition} via
+ * `getService()` when the user opens the configure panel.
  *
  * @example
  * ```typescript
- * const services = await client.getServices();
+ * const { services } = await client.getServices();
  * const ocr = services['ocr'];
  * console.log(ocr.title, ocr.classType);
  * ```
  */
-export interface ServiceDefinition {
+export interface ServiceSummary {
 	/** Human-readable display name. */
 	title: string;
 	/** Protocol URI scheme (e.g. "filesys://", "agent_rocketride://"). */
@@ -100,21 +100,44 @@ export interface ServiceDefinition {
 	invoke?: Record<string, ServiceInvokeSlot>;
 	/** Tile/card rendering hint for the pipeline editor. */
 	tile?: Record<string, unknown>;
-	/** Icon filename or identifier. */
+	/**
+	 * Opaque id into the response's deduplicated {@link ServicesResponse.icons}
+	 * table. Absent when the node ships no icon (or the file is unreadable)
+	 * — clients render their built-in unknown icon. Ids are stable only
+	 * within one response; never persist them across reloads.
+	 */
 	icon?: string;
 	/** External documentation URL. */
 	documentation?: string;
+}
+
+/**
+ * A FULL service definition, returned by the single-service
+ * `rrext_services` call (`getService()`). Extends the summary with the
+ * dynamic configuration section keys (e.g. "Pipe", "Source", "Global")
+ * that each hold a {@link ServiceSection} with `schema` and `ui`.
+ */
+export interface ServiceDefinition extends ServiceSummary {
 	/** Dynamic configuration sections (e.g. "Pipe", "Source", "Global"). */
 	[section: string]: unknown;
 }
 
 /**
  * Response from `getServices()`: a map of logical type names to their
- * service definitions, plus a version field.
+ * service summaries, the deduplicated icon table, and a version field.
  */
 export interface ServicesResponse {
-	/** Map of logical type name (e.g. "ocr", "filesys") to its definition. */
-	services: Record<string, ServiceDefinition>;
+	/** Map of logical type name (e.g. "ocr", "filesys") to its summary. */
+	services: Record<string, ServiceSummary>;
+	/**
+	 * Deduplicated icon table: icon id -> raw SVG text. Many nodes share
+	 * byte-identical icons, so each distinct SVG appears once and services
+	 * reference it via their `icon` id. Sanitize before injecting into the
+	 * DOM.
+	 */
+	icons?: Record<string, string>;
+	/** Engine services version. */
+	version?: number;
 }
 
 // ============================================================================
@@ -134,8 +157,8 @@ export interface ValidationError {
 /**
  * Result of a pipeline validation via `validate()`.
  *
- * The engine validates structure, component compatibility, and connection
- * integrity. The result contains any errors and warnings found.
+ * The engine validates structure — required fields and component
+ * references. The result contains any errors and warnings found.
  */
 export interface ValidationResult {
 	/** Validation errors — pipeline will not execute with these. */

@@ -869,10 +869,10 @@ function makeCompileEngineAction(options = {}) {
 			// Copy engine to dist
 			await mkdir(DIST_DIR);
 			const exeExt = isWindows() ? '.exe' : '';
-			await syncFile(path.join(BUILD_ROOT, 'apps', 'engine', 'engine' + exeExt), path.join(DIST_DIR, 'engine' + exeExt), { package: true });
+			await syncFile(path.join(BUILD_ROOT, 'packages', 'engine', 'engine' + exeExt), path.join(DIST_DIR, 'engine' + exeExt), { package: true });
 
 			if (isWindows()) {
-				await syncFile(path.join(BUILD_ROOT, 'apps', 'engine', 'engine.pdb'), path.join(DIST_DIR, 'engine.pdb'));
+				await syncFile(path.join(BUILD_ROOT, 'packages', 'engine', 'engine.pdb'), path.join(DIST_DIR, 'engine.pdb'));
 			} else {
 				// crashpad_handler must ship next to the engine (runtime finds it via
 				// execDir()). Windows keeps its native MiniDumpWriteDump path.
@@ -885,7 +885,7 @@ function makeCompileEngineAction(options = {}) {
 				}
 
 				// Retain generated symbols (if dump_syms ran) for later symbolication.
-				const symbolsSrc = path.join(BUILD_ROOT, 'apps', 'engine', 'symbols');
+				const symbolsSrc = path.join(BUILD_ROOT, 'packages', 'engine', 'symbols');
 				if (await exists(symbolsSrc)) {
 					await syncDir(symbolsSrc, path.join(DIST_DIR, 'symbols'), { mirror: false, package: true });
 				}
@@ -1117,13 +1117,18 @@ function makeBuildAction() {
 			// After sync, the node/ai requirement files are in the dist, so depends()
 			// has the full constraint set — install the test/runtime deps through it.
 			'server:setup-test-deps',
+			// The shell platform ships WITH the server (static/shell bundle,
+			// /client/shell tgz, the materialized .rocketride/shell package),
+			// so the server build carries it. The TS SDK builds first —
+			// pack-shell vendors its dist inside the shell package.
+			'client-typescript:build',
+			'shell:build',
 		],
 	};
 }
 
 function makeCleanServerAction() {
 	return {
-		description: 'Cleaning server',
 		run: async (ctx, task) => {
 			await setState('server', {});
 			await setState('package', null);
@@ -1326,7 +1331,17 @@ module.exports = {
 		{ name: 'server:run-aptest', action: makeRunAptestAction },
 		{ name: 'server:run-engtest', action: makeRunEngtestAction },
 		{ name: 'server:run-rocketlib-test', action: makeRocketlibPythonTestAction },
-		{ name: 'server:clean', action: makeCleanServerAction },
+		{ name: 'server:clean-run', action: makeCleanServerAction },
+		{
+			// The shell rides the server build (see server:build), so its
+			// artifacts go with the server clean. steps SHADOW run in the
+			// runner, hence the internal clean-run + compound split.
+			name: 'server:clean',
+			action: () => ({
+				description: 'Cleaning server',
+				steps: ['server:clean-run', 'shell:clean'],
+			}),
+		},
 
 		// Public actions (have descriptions, shown in help)
 		{
@@ -1335,7 +1350,7 @@ module.exports = {
 				description: 'Starting server (dev)',
 				steps: [
 					'server:build',
-					parallel(['server:run-eaas', 'shell-ui:dev'], 'Start dev servers'),
+					parallel(['server:run-eaas', 'shell:dev'], 'Start dev servers'),
 				],
 			}),
 		},
@@ -1360,7 +1375,7 @@ module.exports = {
 		},
 		{
 			// Internal action — starts the EaaS Python server process.
-			// Separated so it can be run in parallel with shell-ui:dev or model_server.
+			// Separated so it can be run in parallel with shell:dev or model_server.
 			name: 'server:run-eaas',
 			action: (options = {}) => ({
 				run: async (_ctx, task) => {

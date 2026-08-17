@@ -179,23 +179,24 @@ export interface RocketRideClientConfig {
 
 	/**
 	 * Environment variables dictionary for configuration and variable substitution.
-	 * If not provided, will load from .env file (Node.js only), then fall back to process.env
+	 * If provided, it is copied and used instead of process.env. If omitted in
+	 * Node.js, string values are copied from process.env. The SDK does not load .env files.
 	 */
 	env?: Record<string, string>;
 
-	/** Callback for handling real-time events from server */
+	/** Called for events owned by the current transport epoch; stale async event publication is suppressed. */
 	onEvent?: EventCallback;
 
-	/** Callback for connection establishment */
+	/** Called once after an accepted authentication and best-effort monitor restoration completes. */
 	onConnected?: ConnectCallback;
 
-	/** Callback for disconnection events */
+	/** Called at most once for an accepted generation that previously published onConnected. */
 	onDisconnected?: DisconnectCallback;
 
-	/** Callback when a connection attempt fails (persist mode: called on each failure while retrying) */
+	/** Called for each accepted automatic reconnect failure; foreground methods reject their own promises. */
 	onConnectError?: ConnectErrorCallback;
 
-	/** Optional function to output a protocol message */
+	/** Optional function to output a credential-redacted protocol message. */
 	onProtocolMessage?: (message: string) => void;
 
 	/** Optional function to output a debug message */
@@ -214,7 +215,10 @@ export interface RocketRideClientConfig {
 	/** Default timeout in ms for individual requests. Default: no timeout. */
 	requestTimeout?: number;
 
-	/** Max total time in ms to keep retrying connections. Default: undefined (forever). */
+	/**
+	 * @deprecated Accepted for backward compatibility but currently ignored;
+	 * persistent retry continues until stopped.
+	 */
 	maxRetryTime?: number;
 
 	/** Custom WebSocket path override (default: '/task/service'). Use '/models' for the model server. */
@@ -231,7 +235,8 @@ export interface RocketRideClientConfig {
 
 	/**
 	 * Optional trace callback invoked at the start and end of every `call()`.
-	 * Use for logging, debugging, or telemetry.
+	 * Credential-bearing fields are redacted from the callback copy. Use for
+	 * logging, debugging, or telemetry.
 	 *
 	 * @param traceType - 0 = request (before send), 1 = success (response), 2 = error
 	 * @param payload   - The trace data: command, args, and (for success/error) the result or error message.
@@ -291,6 +296,14 @@ export interface OrgInfo {
 
 	/** Display name of the organisation */
 	name: string;
+
+	/**
+	 * Public developer slug — the organisation's app publisher identity, the
+	 * first segment of app linkage names ('<developerId>.<appName>').
+	 * Null/absent until the organisation registers as a marketplace developer
+	 * (and always absent on OSS servers).
+	 */
+	developerId?: string | null;
 
 	/**
 	 * Organisation-level permission strings granted to the authenticated user.

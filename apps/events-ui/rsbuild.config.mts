@@ -32,14 +32,16 @@ export default defineConfig(() => {
 				shared: {
 					react: { singleton: true, eager: true, requiredVersion: '^18.2.0' },
 					'react-dom': { singleton: true, eager: true, requiredVersion: '^18.2.0' },
-					'shell-ui': { singleton: true, requiredVersion: false, import: false },
-					'shared':   { singleton: true, requiredVersion: false, import: false },
+					'shell': { singleton: true, requiredVersion: false, import: false },
 					'rocketride': { singleton: true, requiredVersion: false, import: false },
 				},
 			}),
 		],
 		resolve: {},
-		server: { port: 3020 },
+		// CORS: explicitly allow any origin — the serving host isn't fixed, so no
+		// allowlist is possible; declaring it also stops the MF plugin injecting
+		// its own wildcard defaults (and warning about it).
+		server: { port: 3020, cors: { origin: '*' } },
 		source: {
 			entry: {
 				index: './src/index.ts',

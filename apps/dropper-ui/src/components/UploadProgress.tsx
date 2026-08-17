@@ -5,7 +5,7 @@
  */
 
 import React from 'react';
-import { UPLOAD_RESULT } from 'rocketride';
+import type { UPLOAD_RESULT } from 'rocketride';
 import { formatBytes } from '../utils/dropperUtils';
 
 /**

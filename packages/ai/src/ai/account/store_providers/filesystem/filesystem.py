@@ -278,6 +278,31 @@ class FilesystemStore(IStore):
         except Exception as e:
             raise StorageError(f'Failed to write file {filename}: {e}') from e
 
+    async def move_file(self, src: str, dst: str) -> None:
+        """Move a file onto ``dst``, replacing it if it exists.
+
+        ``os.replace`` is atomic within a filesystem: readers see the old file or the new
+        one, never a partial write, and the destination is never truncated first.
+
+        Args:
+            src: Source path, relative to the store root.
+            dst: Destination path, relative to the store root.
+
+        Raises:
+            StorageError: If the source is missing or the move fails.
+        """
+        try:
+            src_path = self._get_full_path(src)
+            dst_path = self._get_full_path(dst)
+            if not src_path.exists():
+                raise StorageError(f'File not found: {src}')
+            dst_path.parent.mkdir(parents=True, exist_ok=True)
+            await asyncio.to_thread(os.replace, str(src_path), str(dst_path))
+        except StorageError:
+            raise
+        except Exception as e:
+            raise StorageError(f'Failed to move {src} to {dst}: {e}') from e
+
     async def read_bytes(self, filename: str) -> bytes:
         """Read binary data from file."""
         try:
