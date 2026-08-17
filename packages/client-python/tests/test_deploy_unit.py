@@ -99,3 +99,13 @@ async def test_publish_allowed_on_self_hosted():
             },
         )
     ]
+
+@pytest.mark.asyncio
+async def test_trailing_dns_dot_cloud_uri_is_rejected():
+    fake = FakeClient('wss://api.rocketride.ai./task/service')
+    api = DeployApi(fake)
+
+    with pytest.raises(RuntimeError, match='not supported'):
+        await api.publish({'project_id': 'p1', 'name': 'test'})
+
+    assert fake.calls == []

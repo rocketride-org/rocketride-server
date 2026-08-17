@@ -109,8 +109,8 @@ class DeployApi:
     def _ensure_supported(self) -> None:
         uri = self._client.get_connection_info().get('uri', '')
 
-        cloud_host = urlparse(CONST_DEFAULT_WEB_CLOUD).hostname
-        current_host = urlparse(uri).hostname
+        cloud_host = (urlparse(CONST_DEFAULT_WEB_CLOUD).hostname or '').rstrip('.')
+        current_host = (urlparse(uri).hostname or '').rstrip('.')
 
         if current_host == cloud_host:
             raise RuntimeError(
