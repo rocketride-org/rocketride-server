@@ -20,39 +20,42 @@ import { parseListPayload, type ListPayload, type ToolContext } from './adapter'
 import { makeFetchTrace, type PrefetchedTrace } from './fetch-trace';
 import { parseToolJson, ToolError } from './tool-json';
 
+/** Scroll caps, in px (see the note on `shell` for why not vh/%). */
+const LIST_MAX_HEIGHT = 420;
+const DETAIL_MAX_HEIGHT = 640;
+
 const S: Record<string, React.CSSProperties> = {
+	// Height is content-driven end to end: the host's auto-resize measures
+	// this document with `html { height: max-content }` and resizes the
+	// iframe to match. Caps MUST therefore be in pixels, never vh/% — a
+	// viewport-relative cap shrinks as the iframe shrinks, clamping the
+	// content that produced the measurement, and the widget collapses to
+	// nothing over successive resize rounds.
+	// No background here: .rr-card's surface shows through, matching the
+	// sibling widgets. Rows and the call tree paint their own backgrounds.
 	shell: {
 		display: 'flex',
 		flexDirection: 'column',
-		height: '100%',
 		color: 'var(--rr-text-primary)',
-		background: 'var(--rr-bg-surface)',
 		fontFamily: 'var(--rr-font-family)',
 		fontSize: 13,
 	},
-	list: { flex: 1, overflowY: 'auto', minWidth: 0 },
+	// .rr-card supplies the border/radius/surface; zero its padding so rows
+	// and the call tree run edge to edge, clipped by the radius.
+	card: { padding: 0, overflow: 'hidden' },
+	list: { overflowY: 'auto', maxHeight: LIST_MAX_HEIGHT, minWidth: 0 },
 	note: { padding: '6px 10px', fontSize: 11, color: 'var(--rr-text-secondary)' },
-	error: { padding: 12, color: 'var(--rr-color-error)' },
+	error: { borderLeft: '3px solid var(--rr-flame)', color: 'var(--rr-color-error)' },
 	bar: {
 		display: 'flex',
 		alignItems: 'center',
-		gap: 8,
+		gap: 6,
 		padding: '6px 10px',
-		borderBottom: '1px solid var(--rr-bg-widget)',
+		borderBottom: '1px solid var(--rr-line)',
 		flexShrink: 0,
 	},
 	barTitle: { flex: 1, fontSize: 11, color: 'var(--rr-text-secondary)' },
-	btn: {
-		font: 'inherit',
-		fontSize: 11,
-		padding: '2px 8px',
-		cursor: 'pointer',
-		color: 'var(--rr-text-primary)',
-		background: 'var(--rr-bg-surface-alt)',
-		border: '1px solid var(--rr-bg-widget)',
-		borderRadius: 3,
-	},
-	detail: { flex: 1, overflowY: 'auto', minWidth: 0 },
+	detail: { overflowY: 'auto', maxHeight: DETAIL_MAX_HEIGHT, minWidth: 0 },
 };
 
 interface ParsedInitial {
@@ -103,7 +106,11 @@ export const TraceViewerApp: React.FC<TraceViewerAppProps> = ({ app, initialResu
 	}, [app, initial]);
 
 	if (initial.error || !fetchTrace || !initial.context) {
-		return <div style={S.error}>{initial.error ?? 'unexpected tool result'}</div>;
+		return (
+			<div className="rr-card" style={S.error}>
+				{initial.error ?? 'unexpected tool result'}
+			</div>
+		);
 	}
 
 	const order = initial.list?.summaries.map((s) => s.beginSeq).filter((seq): seq is number => seq !== null) ?? [];
@@ -111,25 +118,25 @@ export const TraceViewerApp: React.FC<TraceViewerAppProps> = ({ app, initialResu
 
 	if (selected !== null) {
 		return (
-			<section style={S.shell}>
+			<section className="rr-card" style={{ ...S.shell, ...S.card }}>
 				<div style={S.bar}>
 					{initial.list && (
-						<button style={S.btn} onClick={() => setSelected(null)}>
+						<button className="rr-btn rr-btn-ghost" onClick={() => setSelected(null)}>
 							← All requests
 						</button>
 					)}
 					<span style={S.barTitle}>{index >= 0 ? `Request ${index + 1} of ${order.length}` : `Trace ${selected}`}</span>
 					{order.length > 1 && (
 						<>
-							<button style={S.btn} disabled={index <= 0} onClick={() => setSelected(order[index - 1])}>
+							<button className="rr-btn" disabled={index <= 0} onClick={() => setSelected(order[index - 1])}>
 								Prev
 							</button>
-							<button style={S.btn} disabled={index < 0 || index >= order.length - 1} onClick={() => setSelected(order[index + 1])}>
+							<button className="rr-btn" disabled={index < 0 || index >= order.length - 1} onClick={() => setSelected(order[index + 1])}>
 								Next
 							</button>
 						</>
 					)}
-					<button style={S.btn} onClick={() => setRetryKey((k) => k + 1)} title="Re-fetch this trace">
+					<button className="rr-btn" onClick={() => setRetryKey((k) => k + 1)} title="Re-fetch this trace">
 						Retry
 					</button>
 				</div>
@@ -142,10 +149,14 @@ export const TraceViewerApp: React.FC<TraceViewerAppProps> = ({ app, initialResu
 
 	const list = initial.list as ListPayload;
 	if (list.summaries.length === 0) {
-		return <EmptyState title="No trace data" description={list.note ?? 'Run the pipeline, then call log_traces again.'} />;
+		return (
+			<div className="rr-card">
+				<EmptyState title="No trace data" description={list.note ?? 'Run the pipeline, then call log_traces again.'} />
+			</div>
+		);
 	}
 	return (
-		<section style={S.shell}>
+		<section className="rr-card" style={{ ...S.shell, ...S.card }}>
 			{list.note && <div style={S.note}>{list.note}</div>}
 			<div style={S.list}>
 				{list.summaries.map((summary) => (
