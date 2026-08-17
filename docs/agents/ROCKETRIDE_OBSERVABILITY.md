@@ -11,18 +11,30 @@ is not listed here, it likely does not exist in the server.
 ## 1. What RocketRide ships for observability
 
 RocketRide does **not** expose OpenTelemetry, Jaeger, Prometheus `/metrics`,
-Sentry, webhook registration, audit-log tables, or a queryable history database.
-There is no SQL store of past runs to read from.
+Sentry, webhook registration, or SQL audit-log tables. Do not assume those
+exist.
 
-Everything is delivered live over a single channel: a **WebSocket Debug Adapter
-Protocol (DAP) connection** on which the server emits typed events. To capture
-historical data, your service must connect, subscribe, and write the events to
-its own database as they arrive.
+It **does** persist a per-task **run log** (DVR continuum): one continuous JSONL
+event stream per identity (`projectId` + `source`, optionally scoped by
+`teamId` for deploy). Individual runs are chapters inside that stream. The log
+survives disconnects and restarts, supports seek/replay through the SDKs
+(`client.log` / `client.log.openEventStream` in TypeScript;
+`client.log.open_event_stream` in Python), and is retained on a size ring plus
+an age window. Prefer the run-log APIs when you need queryable history —
+you should **not** build a parallel “history database” just to store the same
+lifecycle/flow/output events.
+
+**Live** monitoring still uses a **WebSocket Debug Adapter Protocol (DAP)**
+connection: the server emits typed events as work happens. Use DAP when you
+need real-time dashboards or to mirror events into *your* product database for
+reasons the run log does not cover (cross-product analytics, custom schemas,
+long-term warehouses). The run log already covers task history and replay.
 
 The features that _do_ exist:
 
 | Feature                                                                   | Surface                                                             | Granularity        |
 | ------------------------------------------------------------------------- | ------------------------------------------------------------------- | ------------------ |
+| Persisted run history / replay (chapters, seek, play)                     | SDK `client.log` (run-log / DVR continuum)                          | Per identity       |
 | Task lifecycle events (`begin` / `end` / `running` / `restart`)           | DAP event `apaevt_task`                                             | Per task           |
 | Periodic full task status (counts, rates, errors, metrics, tokens)        | DAP event `apaevt_status_update`                                    | Per task, periodic |
 | Pipeline flow / component traces (op, lane, input/output, result, error)  | DAP event `apaevt_flow`                                             | Per pipe, per op   |
@@ -30,6 +42,10 @@ The features that _do_ exist:
 | Real-time node→UI custom messages (`monitorSSE`)                          | DAP event `apaevt_sse`                                              | Per pipe           |
 | File upload progress                                                      | DAP event `apaevt_status_upload`                                    | Per upload         |
 | Server/admin dashboard events (connection added/removed, monitor changes) | DAP event `apaevt_dashboard`                                        | Server-wide        |
+
+> Details and code samples for the run log live in the TypeScript client guide
+> `packages/client-typescript/docs/guide/methods/log.md` (and the matching
+> Python SDK `client.log` namespace).
 
 ---
 
