@@ -91,8 +91,9 @@ PUBLIC_ROUTE_MANIFEST = [
     (
         '/pricing',
         'Pricing',
-        'Predictable pricing that scales with you. Managed cloud with usage-based '
-        'token pricing. No hard caps, no surprise bills, no vendor lock-in.',
+        'Predictable pricing that scales with you. Subscription plans and '
+        'metered billing, with no hard caps, no surprise bills, and no vendor '
+        'lock-in.',
     ),
     (
         '/marketplace',
@@ -108,6 +109,12 @@ PUBLIC_ROUTE_MANIFEST = [
         'Marketplace',
         'Ready-to-run AI apps built on RocketRide. Browse the catalog, try apps '
         'instantly, and deploy them on managed infrastructure.',
+    ),
+    (
+        '/build-publish-earn',
+        'Build, Publish, Earn',
+        'Build AI apps on RocketRide, publish them to the Marketplace, and earn '
+        'from every run. Bring your own pipeline, reach customers, get paid.',
     ),
     (
         '/oss',
@@ -170,6 +177,19 @@ PUBLIC_ROUTE_MANIFEST = [
 # Bare route list — kept as the module's public surface for route
 # registration and the sitemap.
 PUBLIC_ROUTES = [route for route, _, _ in PUBLIC_ROUTE_MANIFEST]
+
+# Served but not advertised. These stay registered above (typing the URL or
+# hard-reloading must keep working) while being excluded from /sitemap.xml and
+# /llms.txt: /oss and /mcp are `unlisted` in the client route manifest
+# (routes.ts stamps them noindex — listing them here would hand crawlers the
+# very URLs the client tells them to drop), and /store is the legacy alias the
+# client canonicalizes to /marketplace, so listing it publishes a duplicate of
+# its own canonical.
+UNLISTED_ROUTES = frozenset({'/oss', '/mcp', '/store'})
+
+# The advertised subset — what /sitemap.xml and /llms.txt enumerate.
+LISTED_ROUTE_MANIFEST = [entry for entry in PUBLIC_ROUTE_MANIFEST if entry[0] not in UNLISTED_ROUTES]
+LISTED_ROUTES = [route for route, _, _ in LISTED_ROUTE_MANIFEST]
 
 # Canonical docs site, linked from /llms.txt.
 DOCS_URL = 'https://docs.rocketride.org/'
@@ -331,7 +351,7 @@ async def sitemap_xml(request: Request):
         raise HTTPException(status_code=404, detail='Not found')
 
     # escape() guards against XML metacharacters in the configured URL.
-    entries = ''.join(f'  <url><loc>{escape(base_url + route)}</loc></url>\n' for route in PUBLIC_ROUTES)
+    entries = ''.join(f'  <url><loc>{escape(base_url + route)}</loc></url>\n' for route in LISTED_ROUTES)
 
     xml = (
         '<?xml version="1.0" encoding="UTF-8"?>\n'
@@ -374,7 +394,7 @@ async def llms_txt(request: Request):
     """
     Serve ``/llms.txt`` — an llmstxt.org index of the public pages.
 
-    One bullet per ``PUBLIC_ROUTE_MANIFEST`` entry plus a pointer at the
+    One bullet per ``LISTED_ROUTE_MANIFEST`` entry plus a pointer at the
     docs site. Same gating as the sitemap: absolute URLs come exclusively
     from ``RR_APP_URL``, and the endpoint 404s when it is unset.
 
@@ -392,7 +412,7 @@ async def llms_txt(request: Request):
         raise HTTPException(status_code=404, detail='Not found')
 
     pages = ''.join(
-        f'- [{title}]({base_url}{route}): {description}\n' for route, title, description in PUBLIC_ROUTE_MANIFEST
+        f'- [{title}]({base_url}{route}): {description}\n' for route, title, description in LISTED_ROUTE_MANIFEST
     )
 
     content = (

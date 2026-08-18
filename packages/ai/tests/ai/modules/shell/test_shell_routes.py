@@ -22,8 +22,11 @@ from fastapi.testclient import TestClient
 import ai.modules.shell.shell as shell_mod
 from ai.modules.shell.shell import (
     DOCS_URL,
+    LISTED_ROUTE_MANIFEST,
+    LISTED_ROUTES,
     PUBLIC_ROUTE_MANIFEST,
     PUBLIC_ROUTES,
+    UNLISTED_ROUTES,
     llms_txt,
     robots_txt,
     shell_static,
@@ -95,8 +98,33 @@ def test_public_routes_contains_home_ui_pages():
     # Mirrors the home-ui route manifest (apps/home-ui/src/routes.ts) — a page
     # deep-linkable on the client must also be served here, or a hard reload
     # 404s before the client can take over.
-    for route in ('/', '/pricing', '/store', '/oss', '/cloud', '/mcp'):
+    for route in (
+        '/',
+        '/pricing',
+        '/marketplace',
+        '/build-publish-earn',
+        '/store',
+        '/oss',
+        '/cloud',
+        '/mcp',
+        '/extension',
+        '/sdk',
+        '/blog',
+        '/events',
+        '/about',
+        '/careers',
+        '/contact',
+    ):
         assert route in PUBLIC_ROUTES
+
+
+def test_unlisted_routes_are_served_but_not_listed():
+    # routes.ts marks /oss and /mcp `unlisted` (client stamps noindex), and
+    # /store is the legacy alias canonicalized to /marketplace — all three must
+    # keep serving while staying out of the advertised subset.
+    for route in UNLISTED_ROUTES:
+        assert route in PUBLIC_ROUTES
+        assert route not in LISTED_ROUTES
 
 
 def test_manifest_entries_have_titles_and_descriptions():
@@ -123,13 +151,15 @@ def test_sitemap_404_without_app_url(no_app_url):
     assert resp.status_code == 404
 
 
-def test_sitemap_lists_all_public_routes(app_url):
+def test_sitemap_lists_all_listed_routes(app_url):
     resp = _client().get('/sitemap.xml')
     assert resp.status_code == 200
     assert resp.headers['content-type'].startswith('application/xml')
     assert '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">' in resp.text
-    for route in PUBLIC_ROUTES:
+    for route in LISTED_ROUTES:
         assert f'<loc>{BASE}{route}</loc>' in resp.text
+    for route in UNLISTED_ROUTES:
+        assert f'<loc>{BASE}{route}</loc>' not in resp.text
 
 
 def test_sitemap_ignores_forwarded_headers(app_url):
@@ -199,8 +229,10 @@ def test_llms_lists_all_pages_with_absolute_urls(app_url):
     assert resp.headers['content-type'] == 'text/plain; charset=utf-8'
     assert resp.text.startswith('# RocketRide\n')
     assert '## Pages' in resp.text
-    for route, title, description in PUBLIC_ROUTE_MANIFEST:
+    for route, title, description in LISTED_ROUTE_MANIFEST:
         assert f'- [{title}]({BASE}{route}): {description}' in resp.text
+    for route in UNLISTED_ROUTES:
+        assert f'({BASE}{route})' not in resp.text
     assert '## Documentation' in resp.text
     assert f'- [Docs]({DOCS_URL}): Product and API documentation.' in resp.text
 
