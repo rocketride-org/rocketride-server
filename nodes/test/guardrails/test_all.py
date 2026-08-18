@@ -616,12 +616,17 @@ class TestIInstanceLifecycle:
             def getNodeConfig(logicalType, connConfig):
                 return {}
 
+        def fake_invoke_function(fn):
+            fn.__invoke_op__ = fn.__name__
+            return fn
+
         stubs['rocketlib'].IInstanceBase = FakeIInstanceBase
         stubs['rocketlib'].IGlobalBase = FakeIGlobalBase
         stubs['rocketlib'].Entry = FakeEntry
         stubs['rocketlib'].OPEN_MODE = FakeOPEN_MODE
         stubs['rocketlib'].debug = lambda *a, **kw: None
         stubs['rocketlib'].warning = lambda *a, **kw: None
+        stubs['rocketlib'].invoke_function = fake_invoke_function
         stubs['ai.common.schema'].Question = FakeQuestion
         stubs['ai.common.schema'].Answer = FakeAnswer
         stubs['ai.common.config'].Config = FakeConfig
@@ -824,6 +829,86 @@ class TestIInstanceLifecycle:
         assert inst.source_documents[0] == 'Valid document content'
         assert inst.source_documents[1] == 'Another valid doc'
         assert len(forwarded) == 1  # documents forwarded downstream
+
+
+class TestControlPlaneCheck:
+    """Verify the `check()` control-plane handler (guard-as-tool-wrapper attachment).
+
+    Unlike writeQuestions/writeAnswers, `check()` never enforces the policy
+    itself — it reports the verdict on `param.result` and lets the caller
+    (e.g. AgentHostServices.Tools guarding a tool call) decide what to do.
+    """
+
+    @staticmethod
+    def _load(config):
+        IInstance, EngineClass, *_ = TestIInstanceLifecycle._load_iinstance_class()
+        inst = IInstance()
+        inst.IGlobal = types.SimpleNamespace(engine=EngineClass(config), config={})
+        return inst
+
+    def test_pass_reports_pass_action(self):
+        inst = self._load({'policy_mode': 'block', 'enable_pii_detection': True})
+        param = types.SimpleNamespace(mode='output', text='Nothing sensitive here.', result=None)
+
+        returned = inst.check(param)
+
+        assert returned is param
+        assert param.result['action'] == 'pass'
+        assert param.result['violations'] == []
+
+    def test_block_is_reported_not_raised(self):
+        """A block-mode violation must not raise or call preventDefault — only report."""
+        inst = self._load({'policy_mode': 'block', 'enable_pii_detection': True})
+        inst.preventDefault = lambda: (_ for _ in ()).throw(AssertionError('preventDefault should not be called'))
+        param = types.SimpleNamespace(mode='output', text='Email me at john.doe@example.com', result=None)
+
+        inst.check(param)  # must not raise
+
+        assert param.result['action'] == 'block'
+        assert any(v['rule'] == 'pii_leak' for v in param.result['violations'])
+
+    def test_no_engine_passes_through(self):
+        """Config mode (engine not built yet) reports pass rather than erroring."""
+        IInstance, *_ = TestIInstanceLifecycle._load_iinstance_class()
+        inst = IInstance()
+        inst.IGlobal = types.SimpleNamespace(engine=None, config={})
+        param = types.SimpleNamespace(mode='input', text='anything', result=None)
+
+        inst.check(param)
+
+        assert param.result == {'action': 'pass', 'violations': []}
+
+    def test_empty_text_passes_through(self):
+        inst = self._load({'policy_mode': 'block'})
+        param = types.SimpleNamespace(mode='input', text='   ', result=None)
+
+        inst.check(param)
+
+        assert param.result == {'action': 'pass', 'violations': []}
+
+    def test_log_mode_does_not_emit_warnings(self):
+        """`log` mode must stay silent, same as writeQuestions/writeAnswers."""
+        inst = self._load({'policy_mode': 'log', 'enable_pii_detection': True})
+        calls = []
+        inst.check.__func__.__globals__['warning'] = lambda *a, **kw: calls.append(a)
+        param = types.SimpleNamespace(mode='output', text='Email me at john.doe@example.com', result=None)
+
+        inst.check(param)
+
+        assert param.result['action'] == 'log'
+        assert calls == [], 'log mode must not call warning()'
+
+    def test_warn_mode_emits_warnings(self):
+        """`warn` mode still logs, for contrast with the log-mode-silent case above."""
+        inst = self._load({'policy_mode': 'warn', 'enable_pii_detection': True})
+        calls = []
+        inst.check.__func__.__globals__['warning'] = lambda *a, **kw: calls.append(a)
+        param = types.SimpleNamespace(mode='output', text='Email me at john.doe@example.com', result=None)
+
+        inst.check(param)
+
+        assert param.result['action'] == 'warn'
+        assert len(calls) == 1
 
 
 # ============================================================================

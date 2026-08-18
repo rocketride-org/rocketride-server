@@ -328,6 +328,32 @@ class IInvokeMemory(IInvokeTool):
         tool_name: str = Field(default='clear', frozen=True)
 
 
+class IInvokeGuard(IInvoke):
+    """
+    Guardrails invoke operations. Pure namespace — construct via inner classes.
+
+    Lets a `guard` node attach via `control` to whatever it's protecting
+    (e.g. an agent node) instead of only via lane connections, so tool
+    calls made on the control plane can be checked the same way
+    lane-connected questions/answers already are.
+
+    Usage::
+
+        param = IInvokeGuard.Check(mode='output', text=message_text)
+        instance.invoke(param, component_id=guard_node_id)
+        result = param.result  # {'action': 'pass'|'warn'|'block', 'violations': [...]}
+    """
+
+    class Check(IInvokeOp):
+        """Run guardrails policy checks on the given text."""
+
+        lane: str = 'guard'
+        op: str = Field(default='check', frozen=True)
+        mode: str  # 'input' | 'output' — see GuardrailsEngine.evaluate()
+        text: str
+        result: Any = Field(default=None)
+
+
 class IInvokeCrew(IInvoke):
     """
     Crew invoke operations.  Pure namespace — construct via inner classes.

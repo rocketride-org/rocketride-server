@@ -117,6 +117,32 @@
       ]
     },
     {
+      "id": "guardrails_1",
+      "provider": "guardrails",
+      "name": "Guardrails",
+      "config": {
+        "type": "guardrails",
+        "profile": "strict",
+        "policy_mode": "block",
+        "enable_content_safety": true,
+        "enable_pii_detection": true
+      },
+      "ui": {
+        "position": {
+          "x": 500,
+          "y": 200
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      },
+      "control": [
+        {
+          "classType": "guard",
+          "from": "agent_rocketride_1"
+        }
+      ]
+    },
+    {
       "id": "llm_anthropic_1",
       "provider": "llm_anthropic",
       "name": "Anthropic",

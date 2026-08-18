@@ -77,6 +77,7 @@ from .types import IInvokeTool
 from .types import IInvokeCrew
 from .types import IInvokeDeepagent
 from .types import IInvokeMemory
+from .types import IInvokeGuard
 from .types import IJson
 from .types import OPEN_MODE
 from .types import PROTOCOL_CAPS
@@ -126,6 +127,7 @@ __all__ = [
     'IInvokeCrew',
     'IInvokeDeepagent',
     'IInvokeMemory',
+    'IInvokeGuard',
     'IJson',
     'ILoader',
     'isAppMonitor',

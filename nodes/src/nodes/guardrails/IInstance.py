@@ -21,7 +21,7 @@
 # SOFTWARE.
 # =============================================================================
 
-from rocketlib import IInstanceBase, Entry, warning
+from rocketlib import IInstanceBase, Entry, invoke_function, warning
 from ai.common.schema import Question, Answer
 from .IGlobal import IGlobal
 
@@ -152,3 +152,34 @@ class IInstance(IInstanceBase):
     def close(self):
         """Reset state on close."""
         self.source_documents = []
+
+    @invoke_function
+    def check(self, param):
+        """Control-plane guard check, for a `guard` node attached via `control`.
+
+        Mirrors the writeQuestions/writeAnswers policy logic above, but
+        returns the raw evaluation result on ``param.result`` instead of
+        enforcing it directly — unlike a lane write, the caller here
+        (e.g. AgentHostServices.Tools, checking a tool call's args/result)
+        is the one that knows whether blocking should stop a tool from
+        running or drop its result, so it decides what to do with the
+        verdict.
+
+        Args:
+            param: An IInvokeGuard.Check operation (`mode`, `text`).
+        """
+        engine = self.IGlobal.engine
+        if engine is None or not param.text.strip():
+            param.result = {'action': 'pass', 'violations': []}
+            return param
+
+        result = engine.evaluate(param.text, mode=param.mode)
+
+        # 'log' mode records violations silently, same as writeQuestions/writeAnswers.
+        if result['action'] in ('block', 'warn'):
+            level = 'blocked' if result['action'] == 'block' else 'warning'
+            for violation in result.get('violations', []):
+                warning(f'Guardrails control-plane {param.mode} {level}: {violation["rule"]} — {violation["details"]}')
+
+        param.result = result
+        return param
