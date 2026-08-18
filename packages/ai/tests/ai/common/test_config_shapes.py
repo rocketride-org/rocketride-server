@@ -114,6 +114,8 @@ Config = _load_config()
 
 
 class TestFlatShape:
+    """No "profile" key, no nesting: connConfig is the node's config as-is (Shape B)."""
+
     def test_top_level_fields_resolve(self):
         """Fields written directly at the top level (no "default" nesting) resolve."""
         cfg = Config.getNodeConfig('agent_x', {'instructions': ['a', 'b'], 'agent_description': 'desc'})
@@ -128,6 +130,8 @@ class TestFlatShape:
 
 
 class TestNestedShape:
+    """No "profile" key; fields nested under connConfig["default"] instead (Shape A)."""
+
     def test_nested_under_default_resolves(self):
         """Fields nested under connConfig["default"] (Shape A) resolve too."""
         cfg = Config.getNodeConfig('agent_x', {'default': {'instructions': ['a', 'b'], 'agent_description': 'desc'}})
@@ -141,6 +145,8 @@ class TestNestedShape:
 
 
 class TestMixedShapePrecedence:
+    """No "profile" key, both a top-level field and a nested "default" block present."""
+
     def test_real_top_level_beats_empty_nested_default(self):
         """A real top-level value wins even when the nested block sets the same field to empty."""
         cfg = Config.getNodeConfig('agent_x', {'instructions': ['real'], 'default': {'instructions': []}})
@@ -158,6 +164,8 @@ class TestMixedShapePrecedence:
 
 
 class TestExplicitProfileBranchNestedShape:
+    """An explicit "profile" key, with fields nested under that profile name."""
+
     def test_explicit_profile_reads_nested(self):
         """With an explicit "profile" key, fields nested under that profile name resolve."""
         cfg = Config.getNodeConfig('agent_x', {'profile': 'default', 'default': {'instructions': ['x']}})
