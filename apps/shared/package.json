@@ -49,7 +49,6 @@
     "react-joyride": "~2.9.3",
     "react-json-view": "~1.21.3",
     "react-markdown": "^10.1.0",
-    "react-router-dom": "~6.26.1",
     "react-syntax-highlighter": "^15.6.6",
     "react-virtualized-auto-sizer": "~1.0.24",
     "react-window": "~1.8.10",

@@ -13,3 +13,9 @@ nvidia-ml-py
 croniter
 filetype
 mcp>=2.0.0,<3
+
+# JWT for /task/fetch capability tokens (ai/modules/task/fetch.py) and the
+# local file-store URL signer (ai/account/file_store.py). Declared here, not
+# per-module: task/__init__.py imports .fetch before its own depends() runs,
+# so the package must already be present when `import ai` finishes.
+pyjwt

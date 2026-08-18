@@ -51,6 +51,8 @@ class _FakeWhisper:
     """Stands in for ai.common.models.Whisper, recording the decode kwargs."""
 
     def __init__(self, model_name, output_fields=None, language=None, compute_type=None, **kwargs):
+        self.model_name = model_name
+        self.language = language
         self.calls = []
 
     def transcribe(self, audio, **kw):
@@ -179,6 +181,36 @@ def test_several_keys_at_once():
     assert kw['vad_parameters']['threshold'] == 0.7
     assert kw['vad_parameters']['max_speech_duration_s'] == 15
     assert kw['vad_parameters']['min_silence_duration_ms'] == 500  # untouched default
+
+
+def _built_whisper(raw_config):
+    """Build an IGlobal from a node config and return the _FakeWhisper it constructed."""
+    IGlobal, holder = _load_iglobal()
+    holder['raw'] = raw_config
+
+    ig = IGlobal.__new__(IGlobal)
+    ig.glb = types.SimpleNamespace(logicalType='audio_transcribe://', connConfig={})
+    ig.beginGlobal()
+    return ig._whisper
+
+
+def test_language_reaches_the_whisper_constructor():
+    """IGlobal has read `language` since the initial commit, but services.json never
+    declared it, so the UI could not reach it and every profile pinned en.
+    """
+    assert _built_whisper({'language': 'ru'}).language == 'ru'
+
+
+def test_language_defaults_to_english():
+    assert _built_whisper({}).language == 'en'
+
+
+def test_language_is_declared_in_services_json():
+    fields = _parse_services_json()['fields']
+
+    assert 'transcribe.language' in fields
+    assert 'transcribe.language' in fields['transcribe.default']['properties']
+    assert fields['transcribe.language']['default'] == 'en'
 
 
 # -----------------------------------------------------------------------------

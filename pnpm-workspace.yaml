@@ -56,8 +56,10 @@ packages:
 # downgrades for Docusaurus-era parents.
 overrides:
   shell: 'workspace:*'
-  '@remix-run/router': '>=1.23.2 <2'
-  brace-expansion: '>=5.0.5 <6'
+  '@remix-run/router': '>=1.23.3 <2'
+  adm-zip: '>=0.6.0 <1'
+  body-parser: '>=1.20.6 <2'
+  brace-expansion: '>=5.0.7 <6'
   # minimatch 3.x (eslint's config-array, glob@7) does a CJS default-import of
   # brace-expansion; v5's commonjs build exports named {expand} only, so the
   # global floor crashes every minimatch@3 consumer ("expand is not a
@@ -65,20 +67,22 @@ overrides:
   # ReDoS fix the floor exists for.
   'minimatch@3>brace-expansion': '>=1.1.12 <2'
   'diff@7': '>=8.0.3 <9'
-  dompurify: '>=3.4.9 <3.5.0'
+  dompurify: '>=3.4.13 <3.5.0'
+  fast-uri: '>=3.1.5 <4'
   glob: '>=11.1.0'
+  immutable: '>=5.1.8 <6'
   joi: '>=18.2.1 <19'
-  js-yaml: '>=4.2.0 <5'
+  js-yaml: '>=4.3.1 <5'
   lodash: '>=4.18.1 <5'
   prismjs: '>=1.30.0 <2'
-  react-router: '>=6.30.4 <7'
   '@docusaurus/core>react-router': '5.3.4'
   'react-router-config>react-router': '5.3.4'
   'react-router-dom@5>react-router': '5.3.4'
   serialize-javascript: '>=7.0.5 <8'
-  undici: '>=7.28.0 <8'
+  shell-quote: '>=1.9.0 <2'
+  undici: '>=7.29.0 <8'
   uuid: '>=11.1.1 <12'
-  webpack-dev-server: '>=5.2.5 <6'
+  webpack-dev-server: '>=5.2.6 <6'
   ws: '>=8.21.0 <9'
 
 # Patch gray-matter's frontmatter handling for the docs site (see patches/).
