@@ -189,6 +189,44 @@ def _is_self_method_call(call: ast.Call) -> Optional[str]:
     return None
 
 
+class _OwnScopeCalls(ast.NodeVisitor):
+    """Collects `ast.Call` nodes that execute as part of a function's own body -
+    not inside a nested `def`/`async def`/`lambda`/`class`, which may never
+    run. `ast.walk` does not respect scope boundaries: an unreferenced nested
+    helper containing `self.preventDefault()` would otherwise make a
+    forwarding handler that never actually calls it read as compliant, and a
+    nested helper with an unresolvable call could fail the contract for a
+    handler that never invokes it.
+    """
+
+    def __init__(self):
+        self.calls: List[ast.Call] = []
+
+    def visit_Call(self, node: ast.Call) -> None:
+        self.calls.append(node)
+        self.generic_visit(node)  # still look inside the call's own args/keywords
+
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+        pass  # do not descend into a nested function's body
+
+    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
+        pass
+
+    def visit_Lambda(self, node: ast.Lambda) -> None:
+        pass
+
+    def visit_ClassDef(self, node: ast.ClassDef) -> None:
+        pass
+
+
+def _calls_in_own_scope(func: ast.FunctionDef) -> List[ast.Call]:
+    """`ast.Call` nodes in `func`'s own execution, excluding nested def/lambda/class bodies."""
+    collector = _OwnScopeCalls()
+    for stmt in func.body:
+        collector.visit(stmt)
+    return collector.calls
+
+
 class _Analyzer:
     """Per-file analysis: resolves same-class helper calls transitively and cycle-safely.
 
@@ -221,9 +259,7 @@ class _Analyzer:
         return unresolved
 
     def _walks_to(self, func: ast.FunctionDef, lane, predicate, visited: Set[str]) -> bool:
-        for node in ast.walk(func):
-            if not isinstance(node, ast.Call):
-                continue
+        for node in _calls_in_own_scope(func):
             if predicate(node, lane):
                 return True
             helper = _is_self_method_call(node)
@@ -238,9 +274,7 @@ class _Analyzer:
         return False
 
     def _collect_unresolved(self, func: ast.FunctionDef, out: List[str], visited: Set[str]) -> None:
-        for node in ast.walk(func):
-            if not isinstance(node, ast.Call):
-                continue
+        for node in _calls_in_own_scope(func):
             helper = _is_self_method_call(node)
             if helper is None:
                 target_desc = self._describe_unresolvable(node.func)
@@ -392,9 +426,69 @@ def main() -> int:
     return 1 if (new or unresolved or stale) else 0
 
 
+def _analyzer_for(source: str) -> _Analyzer:
+    """Build an `_Analyzer` from an inline `IInstance` class body, for scope-boundary tests."""
+    tree = ast.parse(source)
+    return _Analyzer(_class_methods(tree))
+
+
 # ============================================================================
 # Pytest wrapper
 # ============================================================================
+
+
+class TestScopeBoundaries:
+    """Regression coverage for the scope-boundary bug flagged on PR #2039/#2043's review:
+    `ast.walk` does not respect nested def/lambda/class boundaries, so a call inside an
+    uncalled nested helper could previously be mistaken for something the handler itself
+    reaches. `_calls_in_own_scope` fixes this by not descending into nested callables.
+    """
+
+    def test_uncalled_nested_helper_does_not_hide_a_violation(self):
+        """A preventDefault() call buried in a nested, never-invoked helper must not count."""
+        analyzer = _analyzer_for(
+            """
+class IInstance:
+    def writeText(self, text):
+        def _never_called():
+            self.preventDefault()
+        self.instance.writeText(text)
+"""
+        )
+        func = analyzer._methods['writeText']
+        assert analyzer.forwards_own_lane(func, 'writeText') is True
+        assert analyzer.reaches_prevent_default(func) is False
+
+    def test_uncalled_nested_helper_does_not_manufacture_an_unresolved_call(self):
+        """An unresolvable call buried in a nested, never-invoked helper must not surface."""
+        analyzer = _analyzer_for(
+            """
+class IInstance:
+    def writeTable(self, table):
+        def _never_called():
+            super().finalize(table)
+        self.instance.writeTable(table)
+        self.preventDefault()
+"""
+        )
+        func = analyzer._methods['writeTable']
+        assert analyzer.forwards_own_lane(func, 'writeTable') is True
+        assert analyzer.reaches_prevent_default(func) is True
+        assert analyzer.unresolved_calls(func, 'writeTable') == []
+
+    def test_lambda_body_is_also_out_of_scope(self):
+        """The same rule applies to a lambda assigned but never invoked."""
+        analyzer = _analyzer_for(
+            """
+class IInstance:
+    def writeText(self, text):
+        _unused = lambda: self.preventDefault()
+        self.instance.writeText(text)
+"""
+        )
+        func = analyzer._methods['writeText']
+        assert analyzer.forwards_own_lane(func, 'writeText') is True
+        assert analyzer.reaches_prevent_default(func) is False
 
 
 def test_nodes_directory_was_actually_scanned():
