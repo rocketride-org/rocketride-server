@@ -159,7 +159,14 @@ def build_orient(config: dict):
 
         height, width = image.shape[:2]
         scale = min(1.0, detect_size / float(max(height, width)))
-        small = cv2.resize(image, (int(width * scale), int(height * scale)), interpolation=cv2.INTER_AREA)
+        # Floored at one pixel: a frame far longer than it is tall truncates its short side to
+        # zero and cv2.resize raises, and this node answers what it cannot read with a reason,
+        # not an exception. A 1px strip finds no faces and abstains through NO_FACES.
+        small = cv2.resize(
+            image,
+            (max(1, int(width * scale)), max(1, int(height * scale))),
+            interpolation=cv2.INTER_AREA,
+        )
         # The detector wants three channels; a PNG decoded UNCHANGED may carry alpha or be grey.
         if small.ndim == 2:
             small = cv2.cvtColor(small, cv2.COLOR_GRAY2BGR)
