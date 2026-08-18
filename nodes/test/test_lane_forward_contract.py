@@ -115,10 +115,6 @@ KNOWN_VIOLATIONS = frozenset(
         ('anomaly_detector', 'writeDocuments'),  # #2041
         ('ner', 'writeText'),  # #2041
         ('ner', 'writeDocuments'),  # #2041
-        ('search_exa', 'writeQuestions'),  # #2041
-        # These two call preventDefault() in *other* handlers, so a file-level
-        # search calls them clean. The offending handler does not.
-        ('llamaparse', 'writeTable'),  # #2041
         ('llm_vision_mistral', 'writeDocuments'),  # #2041
         # guardrails.writeQuestions/writeAnswers each call preventDefault() in
         # their own blocked-content branch, so the (deliberately coarse, see
@@ -127,6 +123,31 @@ KNOWN_VIOLATIONS = frozenset(
         # no blocking path at all, so it has no preventDefault() call anywhere
         # and the analyzer catches it directly.
         ('guardrails', 'writeDocuments'),  # #1849
+    }
+)
+
+# (node, handler) pairs that forward on their own lane and also call
+# self.instance.<other-method>(...) or super().<method>(...) somewhere in the
+# same handler - a shape this analyzer deliberately does not resolve (see
+# _describe_unresolvable), so whether the handler is actually compliant is
+# unverified rather than assumed either way. Same ratchet discipline as
+# KNOWN_VIOLATIONS: test_no_unresolved_forwarding_calls fails on anything
+# outside this set, test_known_unresolved_are_still_unresolved fails when an
+# entry is resolved (by extending the analyzer or refactoring the node)
+# without being removed.
+KNOWN_UNRESOLVED = frozenset(
+    {
+        # hasListener(...) checks before forwarding on other lanes; each also
+        # calls preventDefault() directly, so likely compliant, but this
+        # analyzer does not follow hasListener's effect on delivery.
+        ('llamaparse', 'writeTable'),  # #2041
+        ('llamaparse', 'writeDocuments'),
+        ('ocr', 'writeDocuments'),
+        # Forwards on writeQuestions AND writeAnswers/writeText via
+        # hasListener-gated self.instance calls, with no preventDefault()
+        # anywhere - this one is plausibly a genuine violation the unresolved
+        # calls are masking, not just noise. Worth a human look.
+        ('search_exa', 'writeQuestions'),  # #2041
     }
 )
 
@@ -255,7 +276,7 @@ class _Analyzer:
         `forwards_own_lane` already returned True for.
         """
         unresolved: List[str] = []
-        self._collect_unresolved(func, unresolved, set())
+        self._collect_unresolved(func, lane, unresolved, set())
         return unresolved
 
     def _walks_to(self, func: ast.FunctionDef, lane, predicate, visited: Set[str]) -> bool:
@@ -273,8 +294,10 @@ class _Analyzer:
                 return True
         return False
 
-    def _collect_unresolved(self, func: ast.FunctionDef, out: List[str], visited: Set[str]) -> None:
+    def _collect_unresolved(self, func: ast.FunctionDef, lane: str, out: List[str], visited: Set[str]) -> None:
         for node in _calls_in_own_scope(func):
+            if self._is_forward_call(node, lane):
+                continue  # the expected forward itself - accounted for by forwards_own_lane, not unresolved
             helper = _is_self_method_call(node)
             if helper is None:
                 target_desc = self._describe_unresolvable(node.func)
@@ -290,21 +313,43 @@ class _Analyzer:
                 out.append(f'self.{helper}(...) [not defined on this class] (line {node.lineno})')
                 continue
             visited.add(helper)
-            self._collect_unresolved(target, out, visited)
+            self._collect_unresolved(target, lane, out, visited)
 
     @staticmethod
     def _describe_unresolvable(target: ast.expr) -> Optional[str]:
         """Describe a call target worth flagging as unresolved, or None to ignore it.
 
-        Deliberately narrow: only attribute calls through something other than
-        `self` (e.g. `self.instance.foo()`, `super().foo()`) are candidates -
-        these are exactly the shapes that could plausibly forward or call
-        preventDefault() through a path this analyzer does not follow. Bare
-        function calls, builtins, and calls on unrelated locals are noise and
-        are not reported.
+        Deliberately narrow, on purpose in both directions:
+
+        - `self.instance.<method>(...)` for any `<method>` other than the
+          current lane (that one shape is excluded by the caller before
+          reaching here) - `self.instance` is the same engine-provided proxy
+          every lane forward goes through, so another call on it (a different
+          lane, `hasListener(...)`, a hypothetical `stop_forwarding()`) could
+          plausibly affect delivery semantics in a way this analyzer does not
+          otherwise follow.
+        - `super().<method>(...)` - could resolve to a base class override in
+          another file this analyzer never reads.
+
+        Deliberately does NOT flag `self.<other_attr>.<method>(...)` in
+        general (e.g. `self.documents.extend(...)`, a plain list on ordinary
+        instance state): that owns no connection to the forwarding contract,
+        and flagging it would bury real findings in noise. If a real node
+        ever forwards or suppresses through some other attribute, that shape
+        should be added here deliberately, not caught by an overbroad rule.
         """
-        if isinstance(target, ast.Attribute) and isinstance(target.value, ast.Call):
-            inner = target.value.func
+        if not isinstance(target, ast.Attribute):
+            return None
+        owner = target.value
+        if (
+            isinstance(owner, ast.Attribute)
+            and owner.attr == 'instance'
+            and isinstance(owner.value, ast.Name)
+            and owner.value.id == 'self'
+        ):
+            return f'self.instance.{target.attr}(...)'
+        if isinstance(owner, ast.Call):
+            inner = owner.func
             if isinstance(inner, ast.Name) and inner.id == 'super':
                 return f'super().{target.attr}(...)'
         return None
@@ -385,6 +430,8 @@ def scan() -> Tuple[List[Violation], List[Unresolved]]:
 def _print_report(violations: List[Violation], unresolved: List[Unresolved]) -> None:
     new = sorted(v for v in violations if v.key not in KNOWN_VIOLATIONS)
     known = sorted(v for v in violations if v.key in KNOWN_VIOLATIONS)
+    new_unresolved = sorted(u for u in unresolved if u.key not in KNOWN_UNRESOLVED)
+    known_unresolved = sorted(u for u in unresolved if u.key in KNOWN_UNRESOLVED)
 
     if new:
         print('NEW VIOLATIONS (forward on own lane, preventDefault() never reached):')
@@ -398,22 +445,32 @@ def _print_report(violations: List[Violation], unresolved: List[Unresolved]) -> 
             print(f'  {v.node}.{v.handler} (line {v.line})')
         print()
 
-    if unresolved:
-        print('UNRESOLVED (forwards on own lane; calls something this analyzer cannot follow):')
-        for u in unresolved:
+    if new_unresolved:
+        print('NEW UNRESOLVED (forwards on own lane; calls something this analyzer cannot follow):')
+        for u in new_unresolved:
             print(f'  {u.node}.{u.handler} (line {u.line}): {u.reason}')
         print()
 
-    if not new and not unresolved:
-        print(f'Clean: no new violations, no unresolved calls ({len(known)} known violation(s) still tracked).')
+    if known_unresolved:
+        print(f'Known unresolved ({len(known_unresolved)}, tracked in KNOWN_UNRESOLVED):')
+        for u in known_unresolved:
+            print(f'  {u.node}.{u.handler} (line {u.line}): {u.reason}')
+        print()
+
+    if not new and not new_unresolved:
+        print(
+            f'Clean: no new violations, no new unresolved calls ({len(known)} known violation(s), '
+            f'{len(known_unresolved)} known unresolved handler(s) still tracked).'
+        )
 
 
 def main() -> int:
     """Run the scan, print the full report, and return a shell-friendly exit code.
 
-    Exit 0: no new violations and nothing unresolved (known violations may
+    Exit 0: no new violations and no new unresolved calls (known entries may
     still be present - they are tracked, not exempted). Exit 1: a new
-    violation or an unresolved forwarding call was found.
+    violation, a new unresolved forwarding call, or a stale allowlist entry
+    was found.
     """
     violations, unresolved = scan()
     _print_report(violations, unresolved)
@@ -423,7 +480,12 @@ def main() -> int:
     if stale:
         print(f'Stale KNOWN_VIOLATIONS entries (already fixed, remove them): {stale}')
 
-    return 1 if (new or unresolved or stale) else 0
+    new_unresolved = [u for u in unresolved if u.key not in KNOWN_UNRESOLVED]
+    stale_unresolved = sorted(set(KNOWN_UNRESOLVED) - {u.key for u in unresolved})
+    if stale_unresolved:
+        print(f'Stale KNOWN_UNRESOLVED entries (now resolved, remove them): {stale_unresolved}')
+
+    return 1 if (new or new_unresolved or stale or stale_unresolved) else 0
 
 
 def _analyzer_for(source: str) -> _Analyzer:
@@ -491,6 +553,64 @@ class IInstance:
         assert analyzer.reaches_prevent_default(func) is False
 
 
+class TestUnresolvedAttributeChainCalls:
+    """Regression coverage for the self-attribute-chain gap flagged on PR #2043's review:
+    `_describe_unresolvable` originally recognized only `super().<method>()`, so a call
+    like `self.instance.stop_forwarding()` was silently ignored - a forwarding handler
+    with that shape read as a definite Violation (or clean) instead of Unresolved.
+    """
+
+    def test_self_instance_other_method_call_is_unresolved_not_a_violation(self):
+        """`self.instance.<other-method>()` in a forwarding handler must surface as unresolved,
+        not get silently ignored and mis-scored as a proven violation.
+        """
+        analyzer = _analyzer_for(
+            """
+class IInstance:
+    def writeText(self, text):
+        self.instance.writeText(text)
+        self.instance.hasListener('writeAnswers')
+"""
+        )
+        func = analyzer._methods['writeText']
+        assert analyzer.forwards_own_lane(func, 'writeText') is True
+        unresolved = analyzer.unresolved_calls(func, 'writeText')
+        assert len(unresolved) == 1
+        assert 'self.instance.hasListener(...)' in unresolved[0]
+
+    def test_own_lane_forward_is_excluded_from_unresolved(self):
+        """The handler's own expected forward call must not double-count as unresolved."""
+        analyzer = _analyzer_for(
+            """
+class IInstance:
+    def writeText(self, text):
+        self.instance.writeText(text)
+        self.preventDefault()
+"""
+        )
+        func = analyzer._methods['writeText']
+        assert analyzer.forwards_own_lane(func, 'writeText') is True
+        assert analyzer.unresolved_calls(func, 'writeText') == []
+
+    def test_unrelated_self_attribute_call_is_not_flagged(self):
+        """A plain `self.<other_attr>.<method>()` unrelated to `self.instance` (e.g. a list on
+        ordinary instance state) must not be flagged - only `self.instance.*` and `super().*`
+        plausibly affect forwarding semantics.
+        """
+        analyzer = _analyzer_for(
+            """
+class IInstance:
+    def writeDocuments(self, docs):
+        self.documents.extend(docs)
+        self.instance.writeDocuments(docs)
+        self.preventDefault()
+"""
+        )
+        func = analyzer._methods['writeDocuments']
+        assert analyzer.forwards_own_lane(func, 'writeDocuments') is True
+        assert analyzer.unresolved_calls(func, 'writeDocuments') == []
+
+
 def test_nodes_directory_was_actually_scanned():
     """Guard the guard: an empty or moved node tree must not read as a pass."""
     handlers = sum(
@@ -506,18 +626,35 @@ def test_nodes_directory_was_actually_scanned():
 
 
 def test_no_unresolved_forwarding_calls():
-    """A handler that forwards on its own lane must be fully resolvable.
-
-    An unresolved call (through something other than a same-class `self.<method>()`)
-    from a forwarding handler must be triaged by a human, not silently assumed
-    to reach preventDefault(). If this fires on a real base-class/helper
-    pattern, extend the analyzer to follow it rather than suppressing the
-    finding.
+    """A newly-unresolvable forwarding handler must be triaged by a human, not silently
+    assumed to reach preventDefault(). Same ratchet shape as
+    test_no_new_lane_forward_violations: entries already tracked in KNOWN_UNRESOLVED
+    do not fail here (see test_known_unresolved_are_still_unresolved for their half of
+    the ratchet); anything new does.
     """
     _violations, unresolved = scan()
-    assert not unresolved, (
+    new_unresolved = sorted(u for u in unresolved if u.key not in KNOWN_UNRESOLVED)
+
+    assert not new_unresolved, (
         'these handlers forward on their own lane via a call this analyzer cannot resolve:\n'
-        + '\n'.join(f'  {u.node}.{u.handler} (line {u.line}): {u.reason}' for u in unresolved)
+        + '\n'.join(f'  {u.node}.{u.handler} (line {u.line}): {u.reason}' for u in new_unresolved)
+        + '\nTriage: verify the unresolved call cannot skip the forward or double-forward, then add '
+        '(node, handler) to KNOWN_UNRESOLVED, or extend the analyzer to follow the call if it fits a '
+        'general pattern.'
+    )
+
+
+def test_known_unresolved_are_still_unresolved():
+    """A handler resolved by extending the analyzer or refactoring the node must be removed
+    from KNOWN_UNRESOLVED, so the list only shrinks.
+    """
+    _violations, unresolved = scan()
+    found = {u.key for u in unresolved}
+    stale = sorted(set(KNOWN_UNRESOLVED) - found)
+
+    assert not stale, (
+        f'{stale} are no longer unresolved - remove them from KNOWN_UNRESOLVED (they now show up as '
+        f'either clean or a tracked Violation)'
     )
 
 
