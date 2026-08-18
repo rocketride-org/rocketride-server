@@ -224,6 +224,16 @@ TEST_CASE("Location::toString") {
         REQUIRE(buff.empty());
     }
 
+    SECTION("an unset location renders the separator and a zero line") {
+        Text buff;
+        ap::Location{}.toString(buff, false, true);
+        REQUIRE(buff == ":0");
+    }
+        Text buff;
+        loc.toString(buff, false, false);
+        REQUIRE(buff.empty());
+    }
+
     SECTION("an unset location reaches toString via the unguarded pack API shape") {
         const ap::Location unsetLoc{};
         Text buff;
