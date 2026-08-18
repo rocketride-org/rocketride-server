@@ -122,6 +122,12 @@ class TestCacheDirs:
         assert path == str(exe_dir / 'cache' / 'models' / 'whisper')
         assert os.path.isdir(path)
 
+    def test_model_cache_dir_does_not_create_when_asked_not_to(self, exe_dir):
+        path = depends.model_cache_dir('whisper', create=False)
+
+        assert path == str(exe_dir / 'cache' / 'models' / 'whisper')
+        assert not os.path.isdir(path)
+
 
 class TestWriteExcludesFile:
     # ``_write_excludes_file`` assumes the cache directory already exists: in

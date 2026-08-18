@@ -48,30 +48,8 @@ if os.name == 'nt':
 else:
     import fcntl
 
-# engLib is built into engine.exe. Outside the engine (unit tests, static
-# tooling) fall back to plain logging so the module stays importable. Only a
-# missing engLib takes the fallback: a broken engLib, or one missing a symbol,
-# must still fail loudly inside the engine.
-try:
-    from engLib import debug, monitorStatus, error
-except ModuleNotFoundError as exc:
-    if exc.name != 'engLib':
-        raise
-    import logging as _logging
-
-    _log = _logging.getLogger('depends')
-
-    def debug(message: str) -> None:
-        """Fallback for engLib.debug when running outside the engine."""
-        _log.debug(message)
-
-    def monitorStatus(message: str) -> None:
-        """Fallback for engLib.monitorStatus when running outside the engine."""
-        _log.info(message)
-
-    def error(message: str) -> None:
-        """Fallback for engLib.error when running outside the engine."""
-        _log.error(message)
+# engLib is built into engine.exe, always available
+from engLib import debug, monitorStatus, error
 
 # ---------------------------------------------------------------------------
 # Configuration

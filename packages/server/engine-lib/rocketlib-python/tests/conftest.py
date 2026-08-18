@@ -1,4 +1,4 @@
-"""Make ``lib/`` importable so ``import depends`` works outside the packaged engine."""
+"""Put ``lib/`` ahead of ``dist`` on ``sys.path`` so ``import depends`` reads the source tree."""
 
 import sys
 from pathlib import Path
