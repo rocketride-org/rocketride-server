@@ -83,6 +83,10 @@ def _number(config: dict, key: str, default, cast):
         The clamped value, or ``default`` when the config holds something non-numeric.
     """
     raw = config.get(key, default)
+    if isinstance(raw, bool):
+        # bool is a subclass of int, so `true` would cast to 1 without complaint.
+        warning(f'scan_cropper: config {key}={raw!r} is not a number; using {default}')
+        return default
     try:
         value = cast(raw)
     except (TypeError, ValueError, OverflowError):

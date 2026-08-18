@@ -59,6 +59,14 @@ class TestNumber:
         """
         assert _number({'texture': math.inf}, 'texture', 4.0, float) == 4.0
 
+    def test_a_boolean_falls_back_rather_than_counting_as_one(self):
+        """`bool` is a subclass of `int`, so `true` casts to 1 without complaint — and
+        `maxDepth: true` would then cut a blob apart once instead of the documented four
+        times, with nothing said.
+        """
+        assert _number({'maxDepth': True}, 'maxDepth', 4, int) == 4
+        assert _number({'texture': False}, 'texture', 4.0, float) == 4.0
+
     def test_not_a_number_falls_back(self):
         """The quiet one: every comparison against nan is false, so the clamp returns it
         untouched and each threshold reading it becomes a no-op.
