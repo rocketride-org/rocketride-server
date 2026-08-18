@@ -165,6 +165,7 @@ class Violation:
 
     @property
     def key(self) -> Tuple[str, str]:
+        """`(node, handler)` - the ratchet identity used against KNOWN_VIOLATIONS."""
         return (self.node, self.handler)
 
 
@@ -186,6 +187,7 @@ class Unresolved:
 
     @property
     def key(self) -> Tuple[str, str]:
+        """`(node, handler)` - the ratchet identity used against KNOWN_UNRESOLVED."""
         return (self.node, self.handler)
 
 
@@ -222,28 +224,35 @@ class _OwnScopeCalls(ast.NodeVisitor):
     """
 
     def __init__(self):
+        """Start with no calls collected yet."""
         self.calls: List[ast.Call] = []
         self.awaited_call_ids: Set[int] = set()
 
     def visit_Call(self, node: ast.Call) -> None:
+        """Record this call and keep walking into its own args/keywords."""
         self.calls.append(node)
         self.generic_visit(node)  # still look inside the call's own args/keywords
 
     def visit_Await(self, node: ast.Await) -> None:
+        """Mark a directly-awaited call's id, so `await foo()` is distinguishable from `foo()`."""
         if isinstance(node.value, ast.Call):
             self.awaited_call_ids.add(id(node.value))
         self.generic_visit(node)
 
     def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
-        pass  # do not descend into a nested function's body
+        """Do not descend into a nested function's body."""
+        pass
 
     def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
+        """Do not descend into a nested async function's body."""
         pass
 
     def visit_Lambda(self, node: ast.Lambda) -> None:
+        """Do not descend into a lambda's body."""
         pass
 
     def visit_ClassDef(self, node: ast.ClassDef) -> None:
+        """Do not descend into a nested class's body."""
         pass
 
 
@@ -284,6 +293,7 @@ class _Analyzer:
     """
 
     def __init__(self, class_methods: Dict[str, ast.FunctionDef]):
+        """Build the analyzer from a map of method name -> FunctionDef for one class."""
         self._methods = class_methods
 
     def forwards_own_lane(self, func: ast.FunctionDef, lane: str) -> bool:
@@ -355,6 +365,9 @@ class _Analyzer:
         visited: Set[int],
         local_helpers: Dict[str, ast.FunctionDef],
     ) -> bool:
+        """True when some call reachable from `func` (transitively, through resolvable
+        same-class or local helpers) satisfies `predicate`.
+        """
         calls, awaited_ids = _calls_in_own_scope(func)
         for node in calls:
             if predicate(node, lane):
@@ -378,6 +391,9 @@ class _Analyzer:
         visited: Set[int],
         local_helpers: Dict[str, ast.FunctionDef],
     ) -> None:
+        """Append a description of every call reachable from `func` that this analyzer
+        cannot resolve (excluding the expected forward and the terminal preventDefault()).
+        """
         calls, awaited_ids = _calls_in_own_scope(func)
         for node in calls:
             if self._is_forward_call(node, lane):
@@ -441,10 +457,12 @@ class _Analyzer:
 
     @staticmethod
     def _is_forward_call(call: ast.Call, lane: str) -> bool:
+        """True when `call` is `self.instance.<lane>(...)` - the handler's own forward."""
         return _is_self_attr_call(call, 'instance', lane)
 
     @staticmethod
     def _is_prevent_default_call(call: ast.Call, _lane) -> bool:
+        """True when `call` is `self.preventDefault()`."""
         target = call.func
         return (
             isinstance(target, ast.Attribute)
@@ -513,6 +531,7 @@ def scan() -> Tuple[List[Violation], List[Unresolved]]:
 
 
 def _print_report(violations: List[Violation], unresolved: List[Unresolved]) -> None:
+    """Print the CLI report: new/known violations, new/known unresolved calls, or a clean line."""
     new = sorted(v for v in violations if v.key not in KNOWN_VIOLATIONS)
     known = sorted(v for v in violations if v.key in KNOWN_VIOLATIONS)
     new_unresolved = sorted(u for u in unresolved if u.key not in KNOWN_UNRESOLVED)
