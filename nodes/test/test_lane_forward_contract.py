@@ -50,11 +50,12 @@ every *branch* reaches it is not decidable this way - that needs real
 dataflow analysis, which is out of scope (see #2042). A handler with no call
 at all, anywhere on any path, is the shape that has actually shipped broken,
 six times; that is what this catches. Resolution is transitive: a handler
-that forwards and then calls a same-class helper is checked by walking into
-that helper too (`_forwards_own_lane` / `_reaches_prevent_default` in
-`_Analyzer`), so the `_forward_answer()`-style helper pattern from #1849 does
-not read as clean just because the forward and the `preventDefault()` call
-live in different methods.
+that forwards and then calls a same-class helper - or a helper it defines and
+calls locally - is checked by walking into that helper too
+(`_forwards_own_lane` / `_reaches_prevent_default` in `_Analyzer`), so the
+`_forward_answer()`-style helper pattern from #1849 does not read as clean
+just because the forward and the `preventDefault()` call live in different
+methods.
 
 A call the analyzer cannot resolve - a call through something other than
 `self`, an attribute chain, a name not defined as a method on the class - is
@@ -248,6 +249,20 @@ def _calls_in_own_scope(func: ast.FunctionDef) -> List[ast.Call]:
     return collector.calls
 
 
+def _local_helpers(func: ast.FunctionDef) -> Dict[str, ast.FunctionDef]:
+    """Map of name -> FunctionDef for helpers defined directly in `func`'s own body.
+
+    A handler that organizes its own logic into a nested `def` and then calls
+    it is still running that code as part of its own execution - unlike the
+    uncalled-nested-helper case `_OwnScopeCalls` deliberately excludes (see
+    TestScopeBoundaries), an *invoked* local helper's `self.preventDefault()`
+    or unresolvable call is not optional context, it is on the path the
+    handler actually takes. Resolved the same way a same-class `self.<method>()`
+    helper is: only reachable via a real call, never by merely being defined.
+    """
+    return {stmt.name: stmt for stmt in func.body if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef))}
+
+
 class _Analyzer:
     """Per-file analysis: resolves same-class helper calls transitively and cycle-safely.
 
@@ -260,15 +275,15 @@ class _Analyzer:
         self._methods = class_methods
 
     def forwards_own_lane(self, func: ast.FunctionDef, lane: str) -> bool:
-        """True when `func` forwards on `lane`, directly or via a same-class helper."""
+        """True when `func` forwards on `lane`, directly or via a same-class or local helper."""
         return self._walks_to(func, lane, self._is_forward_call, set())
 
     def reaches_prevent_default(self, func: ast.FunctionDef) -> bool:
-        """True when `func` calls `self.preventDefault()`, directly or via a same-class helper."""
+        """True when `func` calls `self.preventDefault()`, directly or via a same-class or local helper."""
         return self._walks_to(func, None, self._is_prevent_default_call, set())
 
     def unresolved_calls(self, func: ast.FunctionDef, lane: str) -> List[str]:
-        """Same-class `self.<method>()` calls from `func` (transitively) that resolve to nothing.
+        """Calls from `func` (transitively, through same-class and local helpers) that resolve to nothing.
 
         Only meaningful when `func` forwards on `lane`: an unresolved call from
         a handler that never forwards at all cannot hide a missing
@@ -279,41 +294,54 @@ class _Analyzer:
         self._collect_unresolved(func, lane, unresolved, set())
         return unresolved
 
-    def _walks_to(self, func: ast.FunctionDef, lane, predicate, visited: Set[str]) -> bool:
+    def _resolve_call(self, call: ast.Call, local_helpers: Dict[str, ast.FunctionDef]) -> Optional[ast.FunctionDef]:
+        """Resolve `call` to a `FunctionDef` this analyzer can recurse into: a same-class
+        `self.<method>()`, or a helper defined directly in the enclosing function and
+        actually invoked by name (see `_local_helpers`). Anything else - a module-level
+        function, a call through some other object - is not resolvable here.
+        """
+        helper = _is_self_method_call(call)
+        if helper is not None:
+            return self._methods.get(helper)
+        target = call.func
+        if isinstance(target, ast.Name) and target.id in local_helpers:
+            return local_helpers[target.id]
+        return None
+
+    def _walks_to(self, func: ast.FunctionDef, lane, predicate, visited: Set[int]) -> bool:
+        local_helpers = _local_helpers(func)
         for node in _calls_in_own_scope(func):
             if predicate(node, lane):
                 return True
-            helper = _is_self_method_call(node)
-            if helper is None or helper in visited:
-                continue
-            target = self._methods.get(helper)
-            if target is None:
+            target = self._resolve_call(node, local_helpers)
+            if target is None or id(target) in visited:
                 continue  # unresolved: not a violation signal by itself, see unresolved_calls
-            visited.add(helper)
+            visited.add(id(target))
             if self._walks_to(target, lane, predicate, visited):
                 return True
         return False
 
-    def _collect_unresolved(self, func: ast.FunctionDef, lane: str, out: List[str], visited: Set[str]) -> None:
+    def _collect_unresolved(self, func: ast.FunctionDef, lane: str, out: List[str], visited: Set[int]) -> None:
+        local_helpers = _local_helpers(func)
         for node in _calls_in_own_scope(func):
             if self._is_forward_call(node, lane):
                 continue  # the expected forward itself - accounted for by forwards_own_lane, not unresolved
             helper = _is_self_method_call(node)
-            if helper is None:
-                target_desc = self._describe_unresolvable(node.func)
-                if target_desc is not None:
-                    out.append(f'{target_desc} (line {node.lineno})')
-                continue
             if helper == 'preventDefault':
                 continue  # terminal, not a helper to resolve further; handled by reaches_prevent_default
-            if helper in visited:
+            target = self._resolve_call(node, local_helpers)
+            if target is not None:
+                if id(target) in visited:
+                    continue
+                visited.add(id(target))
+                self._collect_unresolved(target, lane, out, visited)
                 continue
-            target = self._methods.get(helper)
-            if target is None:
+            if helper is not None:
                 out.append(f'self.{helper}(...) [not defined on this class] (line {node.lineno})')
                 continue
-            visited.add(helper)
-            self._collect_unresolved(target, lane, out, visited)
+            target_desc = self._describe_unresolvable(node.func)
+            if target_desc is not None:
+                out.append(f'{target_desc} (line {node.lineno})')
 
     @staticmethod
     def _describe_unresolvable(target: ast.expr) -> Optional[str]:
@@ -551,6 +579,47 @@ class IInstance:
         func = analyzer._methods['writeText']
         assert analyzer.forwards_own_lane(func, 'writeText') is True
         assert analyzer.reaches_prevent_default(func) is False
+
+    def test_invoked_nested_helper_reaching_prevent_default_counts(self):
+        """The counterpart to test_uncalled_nested_helper_does_not_hide_a_violation: when the
+        nested helper IS actually called, its self.preventDefault() must count - it runs as
+        part of the handler's own execution, just organized into a local function.
+        """
+        analyzer = _analyzer_for(
+            """
+class IInstance:
+    def writeText(self, text):
+        def _finish():
+            self.preventDefault()
+        self.instance.writeText(text)
+        _finish()
+"""
+        )
+        func = analyzer._methods['writeText']
+        assert analyzer.forwards_own_lane(func, 'writeText') is True
+        assert analyzer.reaches_prevent_default(func) is True
+        assert analyzer.unresolved_calls(func, 'writeText') == []
+
+    def test_invoked_nested_helper_with_unresolvable_call_surfaces_as_unresolved(self):
+        """An invoked local helper's own unresolvable call must still surface - going quiet just
+        because it is one level of nesting away would repeat the same silent-assume-clean gap
+        #2042 opened against direct calls.
+        """
+        analyzer = _analyzer_for(
+            """
+class IInstance:
+    def writeTable(self, table):
+        def _finish():
+            self.instance.hasListener('writeAnswers')
+        self.instance.writeTable(table)
+        _finish()
+"""
+        )
+        func = analyzer._methods['writeTable']
+        assert analyzer.forwards_own_lane(func, 'writeTable') is True
+        unresolved = analyzer.unresolved_calls(func, 'writeTable')
+        assert len(unresolved) == 1
+        assert 'self.instance.hasListener(...)' in unresolved[0]
 
 
 class TestUnresolvedAttributeChainCalls:
