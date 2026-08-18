@@ -120,6 +120,36 @@ class Config:
 
             return merged
 
+        def overlay_top_level(nested_key: str) -> Dict[str, Any]:
+            """
+            Combine connConfig[nested_key] with connConfig's own top-level keys,
+            with real (non-None) top-level values winning over the nested block.
+            Some UIs nest a node's fields under a sub-object named after the
+            profile (e.g. connConfig["claude-sonnet-4-6"] = {"apikey": "..."})
+            instead of writing them at the top level; without this, whichever
+            shape a given branch didn't check for was silently dropped. Shared
+            by both branches below so they agree on where configuration can
+            live, regardless of whether "profile" was set explicitly.
+            """
+            nested = connConfig.get(nested_key)
+            if isinstance(nested, IJson):
+                combined = dict(IJson.toDict(nested))
+            elif isinstance(nested, dict):
+                combined = dict(nested)
+            else:
+                combined = {}
+
+            for key, value in connConfig.items():
+                # "profile" is the branch selector, not a node field, and must
+                # never leak into the resolved config; a None placeholder must
+                # not clobber a populated nested value.
+                if key in (nested_key, 'profile'):
+                    continue
+                if value is not None:
+                    combined[key] = value
+
+            return combined
+
         # Output the requested configuration
         service = getServiceDefinition(logicalType)
 
@@ -154,28 +184,6 @@ class Config:
 
             defaultConfig = profileConfig
 
-            # Use the connConfig directly as it is not using profiles
-            userConfig = connConfig
-
-            # Some UIs nest a node's fields under a sub-object named after the default
-            # profile (e.g. connConfig["default"] = {"instructions": [...]}) instead of at
-            # the top level. That nesting is otherwise invisible here — merge() below never
-            # descends into it — so agent nodes silently lose their instructions. Overlay the
-            # nested object's keys as a lower-priority layer, with real top-level keys still
-            # winning, so both shapes resolve. No-op unless such a sub-object exists.
-            nested = connConfig.get(profile)
-            if isinstance(nested, (dict, IJson)):
-                combined = dict(IJson.toDict(nested) if isinstance(nested, IJson) else nested)
-                for key, value in connConfig.items():
-                    # Only real (non-None) top-level values override the nested block; a
-                    # None placeholder must not clobber a populated nested value.
-                    if key != profile and value is not None:
-                        combined[key] = value
-                userConfig = combined
-
-            # Merge it
-            config = merge(userConfig, defaultConfig)
-
         else:
             # Make sure it is a valid profile
             if profile not in preconfig['profiles']:
@@ -192,15 +200,12 @@ class Config:
             # Get the default from the profile
             defaultConfig = profileConfig
 
-            # Get the user specified profile
-            userConfig = connConfig.get(profile, {})
-
-            # If it is none, then set to empty
-            if not userConfig:
-                userConfig = {}
-
-            # Merge defaultConfig into userConfig
-            config = merge(userConfig, defaultConfig)
+        # Overlay the nested (profile-named) block under real top-level keys,
+        # then merge the profile defaults underneath the result. Identical for
+        # both branches, so a key a caller wrote at the top level is honoured
+        # whether or not "profile" was set explicitly.
+        userConfig = overlay_top_level(profile)
+        config = merge(userConfig, defaultConfig)
 
         # Output the computed configuration
         return config

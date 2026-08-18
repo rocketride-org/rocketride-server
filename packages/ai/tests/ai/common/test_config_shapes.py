@@ -7,6 +7,12 @@ top-level. ``getNodeConfig`` now overlays that nested object so both the flat
 (Shape B) and nested (Shape A) shapes resolve, with real top-level values
 winning over a stale/empty nested block.
 
+Also pins the fix for #1839 defect 1: that overlay previously only ran when
+"profile" was absent. With an explicit "profile" key set, the other branch
+read only ``connConfig[profile]``, so a key written at the top level (e.g.
+"apikey" alongside "profile") was silently dropped — see
+``TestExplicitProfileBranchTopLevelFields``.
+
 Loaded by file path with ``rocketlib``/``json5`` stubbed so no engine runtime is
 needed — run with ``pytest --noconftest``.
 """
@@ -103,10 +109,43 @@ class TestMixedShapePrecedence:
         assert cfg['role'] == 'Analyst'
 
 
-class TestExplicitProfileBranchUnaffected:
+class TestExplicitProfileBranchNestedShape:
     def test_explicit_profile_reads_nested(self):
         cfg = Config.getNodeConfig('agent_x', {'profile': 'default', 'default': {'instructions': ['x']}})
         assert cfg['instructions'] == ['x']
+
+
+class TestExplicitProfileBranchTopLevelFields:
+    """Pins the fix for #1839 defect 1: with a "profile" key set, the
+    explicit-profile branch used to read only connConfig[profile] and
+    silently drop every key written at the top level (e.g. an "apikey"
+    sitting alongside "profile" instead of nested under the profile name).
+    Mirrors TestMixedShapePrecedence so both branches of getNodeConfig
+    agree on where a caller's configuration can live.
+    """
+
+    def test_top_level_fields_resolve_with_explicit_profile(self):
+        cfg = Config.getNodeConfig(
+            'agent_x', {'profile': 'default', 'instructions': ['a', 'b'], 'agent_description': 'desc'}
+        )
+        assert cfg['instructions'] == ['a', 'b']
+        assert cfg['agent_description'] == 'desc'
+
+    def test_top_level_overrides_nested_value_with_explicit_profile(self):
+        cfg = Config.getNodeConfig(
+            'agent_x', {'profile': 'default', 'instructions': ['top'], 'default': {'instructions': ['nested']}}
+        )
+        assert cfg['instructions'] == ['top']
+
+    def test_explicit_none_top_level_does_not_clobber_nested_with_explicit_profile(self):
+        cfg = Config.getNodeConfig(
+            'agent_x', {'profile': 'default', 'role': None, 'default': {'role': 'Analyst'}}
+        )
+        assert cfg['role'] == 'Analyst'
+
+    def test_profile_selector_key_is_not_leaked_into_resolved_config(self):
+        cfg = Config.getNodeConfig('agent_x', {'profile': 'default', 'instructions': ['a']})
+        assert 'profile' not in cfg
 
 
 class TestRequireToolCallResolution:
