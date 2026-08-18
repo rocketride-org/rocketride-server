@@ -350,6 +350,65 @@ def _torch_cpu_index_args() -> list[str]:
     return ['--extra-index-url', 'https://download.pytorch.org/whl/cpu']
 
 
+def _torch_cpu_enabled() -> bool:
+    """True when the opt-in ``ROCKETRIDE_TORCH_CPU`` flag is set."""
+    return os.environ.get('ROCKETRIDE_TORCH_CPU', '').strip().lower() in ('1', 'true', 'yes')
+
+
+def _torch_cpu_overrides_file() -> Optional[str]:
+    """Write a uv overrides file that forces torch/torchvision to their ``+cpu`` builds.
+
+    Only used when ``ROCKETRIDE_TORCH_CPU`` is enabled. Adding the CPU index alone is
+    not enough: the declared requirements pin exact CUDA locals (e.g. ``torch==X+cu128``
+    for non-Darwin), so uv would still resolve the GPU wheel. An overrides file forces
+    the version regardless of the declared pin (see uv docs on overrides).
+
+    The ``+cpu`` versions are derived from the existing CUDA pins found in the
+    requirement files, so this tracks version bumps automatically rather than
+    hardcoding a version. Returns the overrides path, or ``None`` if disabled or no
+    CUDA-pinned torch requirement is found.
+    """
+    if not _torch_cpu_enabled():
+        return None
+
+    import re
+
+    pattern = re.compile(r'^\s*(torch|torchvision)\s*==\s*([0-9][0-9.]*)\+cu\w+', re.IGNORECASE)
+    overrides: list[str] = []
+    seen: set[str] = set()
+    for req_path in _find_requirement_files():
+        try:
+            with open(req_path, 'r', encoding='utf-8') as f:
+                for line in f:
+                    match = pattern.match(line)
+                    if match:
+                        name = match.group(1).lower()
+                        if name not in seen:
+                            seen.add(name)
+                            overrides.append(f'{name}=={match.group(2)}+cpu')
+        except OSError:
+            continue
+
+    if not overrides:
+        return None
+
+    overrides_path = os.path.join(engine_cache_dir(), 'torch-cpu-overrides.txt')
+    with open(overrides_path, 'w', encoding='utf-8') as f:
+        f.write('\n'.join(overrides) + '\n')
+    return overrides_path
+
+
+def _torch_cpu_override_args(exe_dir: str) -> list[str]:
+    """Return uv ``--override`` args forcing torch/torchvision to ``+cpu`` builds, or ``[]``.
+
+    Relative to exe_dir (the subprocess cwd), consistent with the other file args.
+    """
+    overrides_path = _torch_cpu_overrides_file()
+    if not overrides_path:
+        return []
+    return ['--override', os.path.relpath(overrides_path, exe_dir)]
+
+
 def _run(args: list[str], check: bool = True) -> subprocess.CompletedProcess:
     """
     Run a subprocess command, keeping stdin open until process exits.
@@ -669,8 +728,14 @@ def _find_requirement_files() -> list[str]:
 
 
 def _compute_hash(file_paths: list[str]) -> str:
-    """Compute a fast hash from file metadata (mtime + size)."""
+    """Compute a fast hash from file metadata (mtime + size), plus the torch CPU mode.
+
+    The ``ROCKETRIDE_TORCH_CPU`` value is included so that toggling it invalidates
+    the cache and rebuilds the constraints file, instead of reusing constraints that
+    were compiled for the other mode. See #1697.
+    """
     hasher = hashlib.md5()
+    hasher.update(f'torch_cpu:{os.environ.get("ROCKETRIDE_TORCH_CPU", "")}\n'.encode())
     for path in sorted(file_paths):
         stat = os.stat(path)
         entry = f'{path}:{stat.st_size}:{stat.st_mtime_ns}\n'
@@ -727,6 +792,7 @@ def _compile_constraints(constraints_path: str):
     ]
     # Optionally resolve torch from the PyTorch CPU index (opt-in, default off). See #1697.
     args.extend(_torch_cpu_index_args())
+    args.extend(_torch_cpu_override_args(exe_dir))
     debug(f'Compile: {args}')
     result = subprocess.run(
         args,
@@ -845,6 +911,7 @@ def _install_dry_run(requirements_path: str, constraints_path: str) -> list[str]
 
     # Optionally resolve torch from the PyTorch CPU index (opt-in, default off). See #1697.
     args.extend(_torch_cpu_index_args())
+    args.extend(_torch_cpu_override_args(exe_dir))
 
     debug(f'Dry-run: {args}')
     result = subprocess.run(
@@ -949,6 +1016,7 @@ def _install_requirements_inner(requirements_path: str, constraints_path: str):
 
     # Optionally resolve torch from the PyTorch CPU index (opt-in, default off). See #1697.
     uv_args.extend(_torch_cpu_index_args())
+    uv_args.extend(_torch_cpu_override_args(exe_dir))
 
     # Run uv and stream output (heartbeat is already running from the caller)
     debug(f'Install: {uv_args}')
