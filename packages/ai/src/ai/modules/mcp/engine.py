@@ -339,9 +339,11 @@ class WsEngineClient:
             try:
                 return await session.get_trace(begin_seq)
             except KeyError as exc:
-                # The SDK raises a plain KeyError for a beginSeq below the
-                # retention horizon; narrow it so the tool layer's catch
-                # cannot swallow unrelated KeyErrors.
+                # get_trace() contracts a plain KeyError for a begin_seq with
+                # no trace — never recorded, or expired below the retention
+                # horizon (log_stream.py). Translate it to the module's typed
+                # LogNotFound at this seam so the tool layer's catch cannot
+                # swallow unrelated KeyErrors.
                 raise LogNotFound(begin_seq) from exc
         except (ConnectionError, RuntimeError) as exc:
             self._note_transport_error(exc)

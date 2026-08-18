@@ -13,9 +13,15 @@ MCP" is a rule about MCP, and must not be imposed on ``/task`` or ``/api/chat``.
 
 Two things it deliberately does not break:
 
-* **Static API keys.** ``rr_``/``tk_``/``pk_`` and bare API keys are opaque
+* **Persistent user API keys.** ``rr_`` keys and bare API keys are opaque
   strings, not JWTs. They keep taking the existing authenticator path with no
-  audience check, so Cursor and the CLI are unaffected.
+  audience check, so Cursor and the CLI are unaffected. Task-scoped keys
+  (``tk_``/``pk_``) and PKCE exchange codes (``cd_``) are NOT callers: they
+  are minted per-task (or per-exchange), and the authenticator chain scopes
+  their *permissions* but not their *routes* — so without an explicit reject
+  here, a leaked ``pk_`` (which travels in dropper URLs by design) could reach
+  the tools that never consult engine permissions at all. They are refused at
+  this boundary.
 * **Local development.** When no expected audience is configured the check is
   skipped on a loopback bind, but *refused* on a public one — the same
   posture ``MCP_DEV_NO_AUTH`` already takes elsewhere in this module. A
@@ -42,12 +48,22 @@ ENV_JWKS_URL = 'MCP_JWKS_URL'
 # API keys (``rr_``), task-scoped keys (``tk_``/``pk_``), and PKCE code
 # exchanges (``cd_``). These are opaque by design and carry no audience.
 #
-# The list is exhaustive on purpose. Anything that is neither one of these nor
-# a verifiable JWT is treated as an unverifiable OAuth token and refused while
-# an audience is configured — see :func:`authorize`. Zitadel can be configured
-# to issue *opaque* access tokens instead of JWTs, and those would otherwise
-# sail past the audience check as if they were API keys.
-API_KEY_PREFIXES = ('rr_', 'tk_', 'pk_', 'cd_')
+# Together the two tuples are exhaustive on purpose. Anything that is neither
+# a known API-key prefix nor a verifiable JWT is treated as an unverifiable
+# OAuth token and refused while an audience is configured — see
+# :func:`authorize`. Zitadel can be configured to issue *opaque* access tokens
+# instead of JWTs, and those would otherwise sail past the audience check as
+# if they were API keys.
+#
+# Only ``rr_`` (a persistent per-user key) identifies a caller. ``tk_``/``pk_``
+# are locked to a single task and ``cd_`` is consumed by the code exchange —
+# none of them is ever a legitimate MCP caller, so they are rejected outright
+# rather than handed to the authenticator chain (which scopes permissions,
+# not routes).
+ACCEPTED_API_KEY_PREFIXES = ('rr_',)
+REJECTED_API_KEY_PREFIXES = ('tk_', 'pk_', 'cd_')
+# Backwards-compatible union used by the opaque-vs-JWT discrimination.
+API_KEY_PREFIXES = ACCEPTED_API_KEY_PREFIXES + REJECTED_API_KEY_PREFIXES
 
 # Same allowlist the dev-auth bypass uses. Literal matches only: a hostname
 # that merely *resolves* to loopback does not qualify.
@@ -200,9 +216,19 @@ def authorize(scope: Dict[str, Any], *, bind_host: str) -> Optional[str]:
 
     scope.setdefault('state', {})['mcp_credential'] = credential
 
-    # Static API keys keep the existing path untouched — they are opaque by
-    # design and there is no audience to check.
-    if credential.startswith(API_KEY_PREFIXES):
+    # Task-scoped keys and exchange codes are never MCP callers. The upstream
+    # authenticator would accept them (it scopes permissions, not routes), and
+    # several tools never consult engine permissions — so the reject has to
+    # happen at this boundary, before the authenticator ever sees them.
+    if credential.startswith(REJECTED_API_KEY_PREFIXES):
+        logger.warning('rejected /mcp credential: task-scoped or exchange-only key (%s...)', credential[:3])
+        return (
+            'task-scoped keys (tk_/pk_) and exchange codes (cd_) cannot call /mcp; use an rr_ API key or an OAuth token'
+        )
+
+    # Persistent user API keys keep the existing path untouched — they are
+    # opaque by design and there is no audience to check.
+    if credential.startswith(ACCEPTED_API_KEY_PREFIXES):
         return None
 
     audience = expected_audience()

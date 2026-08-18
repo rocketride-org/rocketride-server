@@ -13,6 +13,11 @@ from ai.modules.mcp.tools import execution
 from ai.modules.mcp.tools import register_all
 
 
+# Minimal inline pipeline used everywhere a definition is required — the
+# tools are inline-only (no server-side filepath reads by design).
+PIPE = {'source': 'a', 'components': []}
+
+
 # --- registration -----------------------------------------------------------
 
 
@@ -38,7 +43,7 @@ def test_execution_register_binds_handlers_directly():
 
 
 @pytest.mark.asyncio
-async def test_run_pipeline_requires_pipeline_or_filepath(fake_engine):
+async def test_run_pipeline_requires_pipeline(fake_engine):
     registry = ToolRegistry()
     execution.register(registry)
     tasks = TaskRegistry()
@@ -51,18 +56,18 @@ async def test_run_pipeline_requires_pipeline_or_filepath(fake_engine):
 
 
 @pytest.mark.asyncio
-async def test_run_pipeline_with_filepath_returns_token_and_registers_it(fake_engine):
+async def test_run_pipeline_returns_token_and_registers_it(fake_engine):
     registry = ToolRegistry()
     execution.register(registry)
     tasks = TaskRegistry()
 
-    result = await registry.handler('run_pipeline')(fake_engine, tasks, {'filepath': 'p.pipe'})
+    result = await registry.handler('run_pipeline')(fake_engine, tasks, {'pipeline': PIPE})
 
     assert result == {'ok': True, 'task_token': fake_engine._token, 'projectId': 'proj-fake', 'source': 'src-fake'}
-    assert fake_engine.used == [{'filepath': 'p.pipe', 'pipelineTraceLevel': 'summary'}]
+    assert fake_engine.used == [{'pipeline': PIPE, 'pipelineTraceLevel': 'summary'}]
     registered = tasks.get(fake_engine._token)
     assert registered is not None
-    assert registered['pipeline_ref'] == 'p.pipe'
+    assert registered['pipeline_ref'] == '<inline>'
 
 
 @pytest.mark.asyncio
@@ -89,12 +94,12 @@ async def test_run_pipeline_forwards_optional_kwargs(fake_engine):
     await registry.handler('run_pipeline')(
         fake_engine,
         tasks,
-        {'filepath': 'p.pipe', 'ttl': 30, 'use_existing': True, 'source': 'src', 'threads': 4},
+        {'pipeline': PIPE, 'ttl': 30, 'use_existing': True, 'source': 'src', 'threads': 4},
     )
 
     assert fake_engine.used == [
         {
-            'filepath': 'p.pipe',
+            'pipeline': PIPE,
             'ttl': 30,
             'use_existing': True,
             'source': 'src',
@@ -110,7 +115,7 @@ async def test_run_pipeline_with_inputs_also_sends_and_returns_result(fake_engin
     execution.register(registry)
     tasks = TaskRegistry()
 
-    result = await registry.handler('run_pipeline')(fake_engine, tasks, {'filepath': 'p.pipe', 'inputs': 'hello world'})
+    result = await registry.handler('run_pipeline')(fake_engine, tasks, {'pipeline': PIPE, 'inputs': 'hello world'})
 
     assert result['ok'] is True
     assert result['task_token'] == fake_engine._token
@@ -128,7 +133,7 @@ async def test_run_pipeline_without_inputs_does_not_call_send(fake_engine):
     execution.register(registry)
     tasks = TaskRegistry()
 
-    result = await registry.handler('run_pipeline')(fake_engine, tasks, {'filepath': 'p.pipe'})
+    result = await registry.handler('run_pipeline')(fake_engine, tasks, {'pipeline': PIPE})
 
     assert 'result' not in result
     assert fake_engine.sent == []
@@ -293,7 +298,7 @@ def test_register_all_includes_run_dropper_pipe():
 
 
 @pytest.mark.asyncio
-async def test_run_dropper_pipe_requires_pipeline_or_filepath(fake_engine):
+async def test_run_dropper_pipe_requires_pipeline(fake_engine):
     registry = ToolRegistry()
     execution.register(registry)
     tasks = TaskRegistry()
@@ -311,13 +316,14 @@ async def test_run_dropper_pipe_returns_self_contained_upload_url(fake_engine):
     execution.register(registry)
     tasks = TaskRegistry()
 
-    result = await registry.handler('run_dropper_pipe')(fake_engine, tasks, {'filepath': 'p.pipe'})
+    result = await registry.handler('run_dropper_pipe')(fake_engine, tasks, {'pipeline': PIPE})
 
     assert result['ok'] is True
     assert result['task_token'] == fake_engine._token
-    assert result['upload_url'] == (
-        f'{fake_engine.base_url}/task/data?token={fake_engine._token}&auth={fake_engine._public_token}'
-    )
+    # pk_ only: /task/data resolves the task from the public key, and the tk_
+    # control token must never ride in a URL (access logs, Referer, history).
+    assert result['upload_url'] == (f'{fake_engine.base_url}/task/data?auth={fake_engine._public_token}')
+    assert fake_engine._token not in result['upload_url']
     assert result['dropper_url'] == (f'{fake_engine.base_url}/dropper?auth={fake_engine._public_token}')
     assert result['projectId'] == 'proj-fake'
     assert result['source'] == 'src-fake'
@@ -334,13 +340,13 @@ async def test_run_dropper_pipe_forwards_kwargs_and_never_inline_sends(fake_engi
     await registry.handler('run_dropper_pipe')(
         fake_engine,
         tasks,
-        {'filepath': 'p.pipe', 'ttl': 30, 'use_existing': True, 'source': 'src', 'threads': 4, 'inputs': 'ignored'},
+        {'pipeline': PIPE, 'ttl': 30, 'use_existing': True, 'source': 'src', 'threads': 4, 'inputs': 'ignored'},
     )
 
     # `inputs` is NOT forwarded and NO send() happens -- this tool never inline-sends.
     assert fake_engine.used == [
         {
-            'filepath': 'p.pipe',
+            'pipeline': PIPE,
             'ttl': 30,
             'use_existing': True,
             'source': 'src',
@@ -358,7 +364,7 @@ async def test_run_dropper_pipe_bad_request_when_engine_omits_public_token(fake_
     tasks = TaskRegistry()
     fake_engine._public_token = None  # simulate an engine response missing publicToken
 
-    result = await registry.handler('run_dropper_pipe')(fake_engine, tasks, {'filepath': 'p.pipe'})
+    result = await registry.handler('run_dropper_pipe')(fake_engine, tasks, {'pipeline': PIPE})
 
     assert result['ok'] is False
     assert result['error_type'] == 'BadRequest'
@@ -377,9 +383,9 @@ async def test_run_pipeline_forwards_pipeline_trace_level(fake_engine):
     execution.register(registry)
     tasks = TaskRegistry()
 
-    await registry.handler('run_pipeline')(fake_engine, tasks, {'filepath': 'p.pipe', 'pipelineTraceLevel': 'full'})
+    await registry.handler('run_pipeline')(fake_engine, tasks, {'pipeline': PIPE, 'pipelineTraceLevel': 'full'})
 
-    assert fake_engine.used == [{'filepath': 'p.pipe', 'pipelineTraceLevel': 'full'}]
+    assert fake_engine.used == [{'pipeline': PIPE, 'pipelineTraceLevel': 'full'}]
 
 
 @pytest.mark.asyncio
@@ -388,11 +394,9 @@ async def test_run_dropper_pipe_forwards_pipeline_trace_level(fake_engine):
     execution.register(registry)
     tasks = TaskRegistry()
 
-    await registry.handler('run_dropper_pipe')(
-        fake_engine, tasks, {'filepath': 'p.pipe', 'pipelineTraceLevel': 'summary'}
-    )
+    await registry.handler('run_dropper_pipe')(fake_engine, tasks, {'pipeline': PIPE, 'pipelineTraceLevel': 'summary'})
 
-    assert fake_engine.used == [{'filepath': 'p.pipe', 'pipelineTraceLevel': 'summary'}]
+    assert fake_engine.used == [{'pipeline': PIPE, 'pipelineTraceLevel': 'summary'}]
 
 
 @pytest.mark.asyncio
@@ -406,7 +410,7 @@ async def test_run_pipeline_missing_token_is_bad_request(fake_engine, monkeypatc
 
     monkeypatch.setattr(fake_engine, 'use', _no_token)
 
-    result = await registry.handler('run_pipeline')(fake_engine, tasks, {'filepath': 'p.pipe'})
+    result = await registry.handler('run_pipeline')(fake_engine, tasks, {'pipeline': PIPE})
 
     assert result['ok'] is False
     assert result['error_type'] == 'BadRequest'
@@ -421,7 +425,7 @@ async def test_run_pipeline_returns_project_id_and_source(fake_engine):
     execution.register(registry)
     tasks = TaskRegistry()
 
-    result = await registry.handler('run_pipeline')(fake_engine, tasks, {'filepath': 'p.pipe'})
+    result = await registry.handler('run_pipeline')(fake_engine, tasks, {'pipeline': PIPE})
 
     assert result['projectId'] == 'proj-fake'
     assert result['source'] == 'src-fake'
@@ -433,7 +437,7 @@ async def test_run_pipeline_defaults_trace_level_to_summary(fake_engine):
     execution.register(registry)
     tasks = TaskRegistry()
 
-    await registry.handler('run_pipeline')(fake_engine, tasks, {'filepath': 'p.pipe'})
+    await registry.handler('run_pipeline')(fake_engine, tasks, {'pipeline': PIPE})
 
     assert fake_engine.used[0]['pipelineTraceLevel'] == 'summary'
 
@@ -444,7 +448,7 @@ async def test_run_pipeline_explicit_none_wins(fake_engine):
     execution.register(registry)
     tasks = TaskRegistry()
 
-    await registry.handler('run_pipeline')(fake_engine, tasks, {'filepath': 'p.pipe', 'pipelineTraceLevel': 'none'})
+    await registry.handler('run_pipeline')(fake_engine, tasks, {'pipeline': PIPE, 'pipelineTraceLevel': 'none'})
 
     assert fake_engine.used[0]['pipelineTraceLevel'] == 'none'
 
@@ -455,7 +459,7 @@ async def test_run_dropper_pipe_returns_project_id_and_source(fake_engine):
     execution.register(registry)
     tasks = TaskRegistry()
 
-    result = await registry.handler('run_dropper_pipe')(fake_engine, tasks, {'filepath': 'p.pipe'})
+    result = await registry.handler('run_dropper_pipe')(fake_engine, tasks, {'pipeline': PIPE})
 
     assert result['projectId'] == 'proj-fake'
     assert result['source'] == 'src-fake'
@@ -467,7 +471,7 @@ async def test_run_dropper_pipe_defaults_trace_level_to_summary(fake_engine):
     execution.register(registry)
     tasks = TaskRegistry()
 
-    await registry.handler('run_dropper_pipe')(fake_engine, tasks, {'filepath': 'p.pipe'})
+    await registry.handler('run_dropper_pipe')(fake_engine, tasks, {'pipeline': PIPE})
 
     assert fake_engine.used[0]['pipelineTraceLevel'] == 'summary'
 
@@ -478,7 +482,7 @@ async def test_run_dropper_pipe_explicit_none_wins(fake_engine):
     execution.register(registry)
     tasks = TaskRegistry()
 
-    await registry.handler('run_dropper_pipe')(fake_engine, tasks, {'filepath': 'p.pipe', 'pipelineTraceLevel': 'none'})
+    await registry.handler('run_dropper_pipe')(fake_engine, tasks, {'pipeline': PIPE, 'pipelineTraceLevel': 'none'})
 
     assert fake_engine.used[0]['pipelineTraceLevel'] == 'none'
 

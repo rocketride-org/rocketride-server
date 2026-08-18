@@ -58,6 +58,30 @@ def test_no_candidates_is_available():
     assert state['candidates'] == []
 
 
+def test_candidate_match_requires_part_boundary():
+    """GIT must match GITHUB_TOKEN/GIT_PAT (part starts with token) but never
+    DIGITALOCEAN_TOKEN (DI**GIT**ALOCEAN is a mid-part substring) — a wrong
+    candidate is worse than none, because it gets proposed as a binding.
+    """
+    raw = {
+        'tool_git': {
+            'title': 'tool_git',
+            'fields': [
+                {'path': 'git.token', 'kind': 'secret', 'required': True, 'suggests': 'ROCKETRIDE_GIT_TOKEN'},
+            ],
+        },
+    }
+    spec = creds.catalog_from_dict(raw)['tool_git']
+
+    state = creds.evaluate(spec, ['GITHUB_TOKEN', 'GIT_PAT', 'DIGITALOCEAN_TOKEN'])
+    assert state['status'] == 'unconfirmed'
+    assert state['candidates'] == ['GITHUB_TOKEN', 'GIT_PAT']
+
+    state = creds.evaluate(spec, ['DIGITALOCEAN_TOKEN'])
+    assert state['status'] == 'available'
+    assert state['candidates'] == []
+
+
 def test_env_error_is_unconfirmed_never_available():
     state = creds.evaluate(_spec(), None)
     assert state['status'] == 'unconfirmed'

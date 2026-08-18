@@ -45,7 +45,6 @@ _RUN_PIPELINE_SCHEMA = {
     'type': 'object',
     'properties': {
         'pipeline': {'type': 'object', 'description': 'Inline pipeline definition'},
-        'filepath': {'type': 'string', 'description': 'Path to a pipeline file (JSON, JSON5, or .pipe)'},
         'inputs': {'type': 'string', 'description': 'Data to send to the pipeline immediately after starting it'},
         'ttl': {'type': 'integer', 'description': 'Task time-to-live in seconds; 0 = no timeout'},
         'use_existing': {'type': 'boolean', 'description': 'Reuse an existing task instead of starting a new one'},
@@ -57,14 +56,13 @@ _RUN_PIPELINE_SCHEMA = {
             'description': 'Capture the per-node trace stream at this detail level (default "summary" — required for log_traces/log_trace to have content; pass "none" to disable)',
         },
     },
-    'anyOf': [{'required': ['pipeline']}, {'required': ['filepath']}],
+    'required': ['pipeline'],
 }
 
 _RUN_DROPPER_PIPE_SCHEMA = {
     'type': 'object',
     'properties': {
         'pipeline': {'type': 'object', 'description': 'Inline pipeline definition'},
-        'filepath': {'type': 'string', 'description': 'Path to a pipeline file (JSON, JSON5, or .pipe)'},
         'ttl': {'type': 'integer', 'description': 'Task time-to-live in seconds; 0 = no timeout'},
         'use_existing': {'type': 'boolean', 'description': 'Reuse an existing task instead of starting a new one'},
         'source': {'type': 'string', 'description': 'Optional source label forwarded to use()'},
@@ -75,7 +73,7 @@ _RUN_DROPPER_PIPE_SCHEMA = {
             'description': 'Capture the per-node trace stream at this detail level (default "summary" — required for log_traces/log_trace to have content; pass "none" to disable)',
         },
     },
-    'anyOf': [{'required': ['pipeline']}, {'required': ['filepath']}],
+    'required': ['pipeline'],
 }
 
 _SEND_DATA_SCHEMA = {
@@ -117,12 +115,14 @@ async def _start_task(client, args: Dict[str, Any], tool_name: str):
     ``(None, error_envelope)`` — keeping the default trace level and the
     timeout contract in one place so a change can't land in one copy only.
     """
+    # Inline-only by design: a server-side filepath read would let any MCP
+    # caller read files off the server's disk. Pipelines are small JSON — the
+    # MCP client reads local files itself and sends the definition inline.
     pipeline = args.get('pipeline')
-    filepath = args.get('filepath')
-    if not pipeline and not filepath:
-        return None, _bad('pipeline or filepath is required', 'pass an inline pipeline object or a filepath')
+    if not pipeline:
+        return None, _bad('pipeline is required', 'pass an inline pipeline object')
 
-    kwargs: Dict[str, Any] = {'filepath': filepath} if filepath else {'pipeline': pipeline}
+    kwargs: Dict[str, Any] = {'pipeline': pipeline}
     for key in _OPTIONAL_USE_KWARGS:
         if args.get(key) is not None:
             kwargs[key] = args[key]
@@ -150,7 +150,7 @@ async def _run_pipeline(client, tasks, args: Dict[str, Any]) -> dict:
             'engine did not return a task token',
             'the pipeline may have failed to start, or the engine response was malformed',
         )
-    tasks.add(token, pipeline_ref=args.get('filepath') or '<inline>')
+    tasks.add(token, pipeline_ref='<inline>')
 
     result_payload: Dict[str, Any] = {'ok': True, 'task_token': token}
     result_payload['projectId'] = started.get('projectId')
@@ -182,9 +182,11 @@ async def _run_dropper_pipe(client, tasks, args: Dict[str, Any]) -> dict:
 
     Bytes cannot ride the MCP tool call (transport payload limits), so this
     tool returns an HTTP endpoint an out-of-band uploader POSTs files to. The
-    URL embeds both the task token (routing) and the task's public auth key
-    (``pk_``, credential) so it needs no ``Authorization`` header. Unlike
-    ``run_pipeline`` there is no inline-send path.
+    URL embeds only the task's public auth key (``pk_``) — ``/task/data``
+    resolves the task from it, so it needs no ``Authorization`` header and no
+    routing token. The ``tk_`` control token deliberately never appears in a
+    URL: query strings land in access logs, browser history, and ``Referer``
+    headers. Unlike ``run_pipeline`` there is no inline-send path.
     """
     started, err = await _start_task(client, args, 'run_dropper_pipe')
     if err:
@@ -209,13 +211,13 @@ async def _run_dropper_pipe(client, tasks, args: Dict[str, Any]) -> dict:
             'engine did not return public auth for the dropper URL',
             'the pipeline may lack a data-ingress source, or the engine response was malformed',
         )
-    tasks.add(token, pipeline_ref=args.get('filepath') or '<inline>')
+    tasks.add(token, pipeline_ref='<inline>')
 
     base_url = str(client.base_url).rstrip('/')
     result_payload: Dict[str, Any] = {
         'ok': True,
         'task_token': token,
-        'upload_url': f'{base_url}/task/data?{urlencode({"token": token, "auth": public_token})}',
+        'upload_url': f'{base_url}/task/data?{urlencode({"auth": public_token})}',
         'dropper_url': f'{base_url}/dropper?{urlencode({"auth": public_token})}',
         'projectId': started.get('projectId'),
         'source': started.get('source'),

@@ -10,6 +10,7 @@ from typing import Any, Dict, Optional
 from starlette.routing import Mount
 from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 
+from ai.constants import CONST_DEFAULT_WEB_HOST
 from ai.web import oauth_resource
 
 from . import auth
@@ -89,7 +90,11 @@ def _bind_host(server: 'Any', config: Dict[str, Any]) -> str:
         str: The configured host, or ``''`` when unset.
     """
     server_config = getattr(server, 'config', None) or {}
-    host = server_config.get('host', config.get('host', 'localhost'))
+    # The fallback MUST be the same constant WebServer binds with (server.py):
+    # a divergent copy here fails open — the guard would answer 'localhost'
+    # while the server binds something wider, and is_loopback_bind() would
+    # wave MCP_DEV_NO_AUTH through on a publicly reachable bind.
+    host = server_config.get('host', config.get('host', CONST_DEFAULT_WEB_HOST))
     return str(host) if host is not None else ''
 
 
@@ -334,9 +339,10 @@ def initModule(server: 'Any', config: Dict[str, Any]) -> None:
 
     dev_no_auth = bool(config.get('mcp_dev_no_auth')) or os.environ.get('MCP_DEV_NO_AUTH') == '1'
     if dev_no_auth:
-        # Loopback-only: the tools accept unrestricted filepaths, so an
-        # unauthenticated /mcp on a public bind is remote file access.
-        # Refuse the bypass (auth stays on) rather than fail engine boot.
+        # Loopback-only: an unauthenticated /mcp on a public bind hands the
+        # whole tool surface (pipeline execution, store access) to anyone who
+        # can reach it. Refuse the bypass (auth stays on) rather than fail
+        # engine boot.
         if not auth.is_loopback_bind(bind_host):
             logger.warning(
                 'MCP_DEV_NO_AUTH ignored: server binds %s (non-loopback); /mcp stays authenticated',

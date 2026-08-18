@@ -3,7 +3,8 @@
 
 The catalog (credentials.json, sibling file) describes the config *fields*
 credentialed nodes need; ROCKETRIDE_* names are curated *suggestions*.
-Exact suggested-name match => configured. A name-token substring match only
+Exact suggested-name match => configured. A boundary-aware token match (an
+underscore-separated part of the env-var name starting with a node token) only
 *surfaces* candidates for the agent to confirm — it never confers readiness.
 An env-keys read failure yields 'unconfirmed' for everything, never
 'available': a read error must not look like "nothing is set up".
@@ -11,6 +12,7 @@ An env-keys read failure yields 'unconfirmed' for everything, never
 
 import json
 import logging
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -127,7 +129,13 @@ def evaluate(spec: Integration, env_keys: Optional[List[str]]) -> dict:
         wiring = {f.path: '${' + f.suggests + '}' for f in spec.fields if f.required or f.suggests in have}
         return {'status': 'configured', 'env_error': False, 'missing': [], 'candidates': [], 'wiring': wiring}
     tokens = node_tokens(spec.name)
-    candidates = sorted(k for k in have if any(t in k.upper() for t in tokens))
+    # Match on name *parts*, not raw substrings: a part must start with the
+    # token, so GITHUB_TOKEN and GIT_PAT match tool_git's GIT while
+    # DIGITALOCEAN_TOKEN does not. A wrong candidate is worse than none —
+    # the model is told to propose a binding from these.
+    candidates = sorted(
+        k for k in have if any(p.startswith(t) for t in tokens for p in re.split(r'[^A-Z0-9]+', k.upper()))
+    )
     status = 'unconfirmed' if candidates else 'available'
     return {'status': status, 'env_error': False, 'missing': missing, 'candidates': candidates, 'wiring': None}
 

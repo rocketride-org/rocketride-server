@@ -131,16 +131,16 @@ backend), plus the Run log (DVR) group and `list_integrations` added below.
 | --- | --- | --- |
 | `list_components` | List pipeline components ready to use *now* — zero-config components plus integrations whose credentials are configured. Configured entries carry a `wiring` block of `${VAR}` placeholders; a `note` counts integrations omitted for needing setup. Call `list_integrations` for those. | none |
 | `describe_component` | Full metadata/config schema for one component; catalog nodes also get a `credentials` block (same readiness vocabulary as `list_integrations`). | `name` (required) |
-| `validate_pipeline` | Validate a pipeline against the engine's own rules (engine-authoritative, zero client-side drift). | `pipeline` or `filepath` |
-| `describe_pipeline` | Statically describe a pipeline's source and components (id, provider, title, classType, inputs); synthesized client-side, no backing SDK method. | `pipeline` or `filepath` |
+| `validate_pipeline` | Validate a pipeline against the engine's own rules (engine-authoritative, zero client-side drift). | `pipeline` |
+| `describe_pipeline` | Statically describe a pipeline's source and components (id, provider, title, classType, inputs); synthesized client-side, no backing SDK method. | `pipeline` |
 | `list_integrations` | Credential readiness for catalog integrations this engine has a matching node for. Bare call: terse per-integration rows (`name`/`title`/`status`/`missing_count`). With `name`: full field detail, `missing`, `candidates`, the caller's own variable names (`caller_variables`), and either `setup` (not configured) or `wiring` (configured). | `name` (optional) |
 
 **Execution (4)** — `tools/execution.py`, token-based, no sessions:
 
 | Tool | Purpose | Key args |
 | --- | --- | --- |
-| `run_pipeline` | Start a pipeline (inline or filepath), returning a `task_token`; optionally send `inputs` in the same call and get a result back. | `pipeline`/`filepath`, `inputs`, `ttl`, `use_existing`, `source`, `threads`, `pipelineTraceLevel` |
-| `run_dropper_pipe` | Start a pipeline (inline or filepath) and return two self-contained URLs for getting files in over a separate HTTP data channel — file bytes cannot ride the MCP tool call: `upload_url` for programmatic POSTing and `dropper_url` for a human to drag-drop files in a browser. Same inputs as `run_pipeline` minus `inputs` (no inline-send path). `upload_url` is `POST {base}/task/data?token=<tk_>&auth=<pk_>` (multipart or raw body); `dropper_url` is `GET {base}/dropper?auth=<pk_>` (a browser page whose UI then POSTs to `/task/data`). Both embed the routing token and task's public auth key so no `Authorization` header is required. | `pipeline`/`filepath`, `ttl`, `use_existing`, `source`, `threads`, `pipelineTraceLevel` |
+| `run_pipeline` | Start an inline pipeline, returning a `task_token`; optionally send `inputs` in the same call and get a result back. | `pipeline`, `inputs`, `ttl`, `use_existing`, `source`, `threads`, `pipelineTraceLevel` |
+| `run_dropper_pipe` | Start an inline pipeline and return two self-contained URLs for getting files in over a separate HTTP data channel — file bytes cannot ride the MCP tool call: `upload_url` for programmatic POSTing and `dropper_url` for a human to drag-drop files in a browser. Same inputs as `run_pipeline` minus `inputs` (no inline-send path). `upload_url` is `POST {base}/task/data?auth=<pk_>` (multipart or raw body); `dropper_url` is `GET {base}/dropper?auth=<pk_>` (a browser page whose UI then POSTs to `/task/data`). Both embed only the task's public auth key (`pk_`) — `/task/data` resolves the task from it, so no `Authorization` header and no routing token are required; the `tk_` control token never rides in a URL. | `pipeline`, `ttl`, `use_existing`, `source`, `threads`, `pipelineTraceLevel` |
 | `send_data` | Send data to a running task by `task_token`, return its result. | `task_token`, `input` |
 | `terminate` | Tear down a running task by `task_token` — also the stop-runaway-task path. | `task_token` |
 
@@ -170,18 +170,18 @@ backend), plus the Run log (DVR) group and `list_integrations` added below.
 
 | Tool | Purpose | Key args |
 | --- | --- | --- |
-| `save_template` | Save a pipeline (inline or filepath) as a reusable template. | `template_id`, `pipeline`/`filepath` |
+| `save_template` | Save an inline pipeline as a reusable template. | `template_id`, `pipeline` |
 | `load_template` | Load a previously saved pipeline template. | `template_id` |
 
 **Deployments (5)** — also in `tools/capability.py`, full lifecycle, SDK: `rocketride.deploy.DeployApi`:
 
 | Tool | Purpose | Key args |
 | --- | --- | --- |
-| `deploy_add` | Register a pipeline (inline or filepath) as a deployment, optionally on a cron schedule. | `pipeline`/`filepath`, `schedule` |
+| `deploy_add` | Register an inline pipeline as a deployment, optionally on a cron schedule. | `pipeline`, `schedule` |
 | `deploy_list` | List the caller's deployments with status and schedule. | none |
 | `deploy_status` | Detailed status of one deployment by `project_id`. | `project_id` |
 | `deploy_remove` | Undeploy and remove a deployment by `project_id`. | `project_id` |
-| `deploy_update` | Update a deployment's pipeline and/or schedule by `project_id`. | `project_id`, `pipeline`/`filepath`, `schedule` |
+| `deploy_update` | Update a deployment's pipeline and/or schedule by `project_id`. | `project_id`, `pipeline`, `schedule` |
 
 **Run log (DVR) (4)** — `tools/logs.py`, read-only, keyed by `projectId`/`source`
 (never task tokens), backed by the engine's persisted continuum (`rrext_log`) —
@@ -414,38 +414,31 @@ shared across event loops or accessed concurrently from multiple threads.
 
 ## Security
 
-- **`filepath` arguments read arbitrary server-local files — there is no
-  sandboxing today.** `run_pipeline`, `run_dropper_pipe`, `validate_pipeline`,
-  `describe_pipeline`, `save_template`, `deploy_add`, and `deploy_update` all
-  accept a `filepath` in place of an inline `pipeline`. For the
-  introspection/capability tools this goes through `tools/_common.py`'s
-  `load_pipeline()` (run in a worker thread via `load_pipeline_async` so the
-  read never blocks the event loop), which does a plain `open(filepath, ...)`
-  on the engine
-  process's local filesystem — any path the process can read, it will read,
-  with no root/prefix restriction. `run_pipeline`'s and `run_dropper_pipe`'s
-  `filepath` are forwarded to the engine's own `use()` seam call, which
-  resolves them server-side with the same lack of sandboxing. Treat every
-  `filepath` argument as equivalent to giving the calling agent read access to
-  the engine process's local file scope.
-- **Consequence for `MCP_DEV_NO_AUTH`.** Because there is no path sandboxing,
-  the `MCP_DEV_NO_AUTH=1` / `mcp_dev_no_auth` bypass (see above) must **only**
-  ever be enabled on a **loopback bind** — never on `0.0.0.0` or any other
-  publicly reachable bind. Combining the auth bypass with a public bind would
-  let anyone reach `/mcp` and read arbitrary server-local files via any of the
-  `filepath`-accepting tools. `initModule` enforces this: the bypass is
-  honored only when the **configured host** (`server.config['host']`, falling
-  back to the module config's `host`, default `localhost`) is exactly
-  `localhost`, `127.0.0.1`, or `::1` — the same allowlist as the environment
-  table above. The check reads the configured value, not the resolved bind
-  address, so a hostname that *resolves* to loopback but isn't one of those
-  three literals does not qualify. On any other value the bypass is ignored
-  (with a warning) and `/mcp` stays authenticated.
-- **Path sandboxing is deferred, not solved.** It is intentionally not
-  implemented in this module; the fix lands with the dropper-ingress seam
-  (a future revision), which will own path resolution/allowlisting for all
-  callers, not just MCP. Until then, run this module only where the process
-  boundary itself is the trust boundary (local dev, loopback-only).
+- **Pipelines are inline-only — no tool reads server-local files.** No tool
+  accepts a `filepath` argument. A server-side file read would hand any
+  authenticated MCP caller read access to the engine process's local
+  filesystem, so the pipeline-taking tools (`run_pipeline`,
+  `run_dropper_pipe`, `validate_pipeline`, `describe_pipeline`,
+  `save_template`, `deploy_add`, `deploy_update`) all require the pipeline
+  definition inline. Pipeline definitions are small JSON; an MCP client that
+  has a `.pipe` file on disk reads it itself and sends the content. The only
+  file-shaped surface that remains is the store tool group (`store_read`
+  etc.), which resolves store-relative paths through the engine's own
+  account-scoped file store, and `send_files`, whose paths are likewise
+  store-relative — neither touches the server's raw filesystem namespace.
+- **`MCP_DEV_NO_AUTH` stays loopback-only.** The `MCP_DEV_NO_AUTH=1` /
+  `mcp_dev_no_auth` bypass (see above) must **only** ever be enabled on a
+  **loopback bind** — never on `0.0.0.0` or any other publicly reachable
+  bind: an unauthenticated `/mcp` hands the whole tool surface (pipeline
+  execution, store access) to anyone who can reach it. `initModule` enforces
+  this: the bypass is honored only when the **configured host**
+  (`server.config['host']`, falling back to the module config's `host`,
+  default `CONST_DEFAULT_WEB_HOST`) is exactly `localhost`, `127.0.0.1`, or
+  `::1` — the same allowlist as the environment table above. The check reads
+  the configured value, not the resolved bind address, so a hostname that
+  *resolves* to loopback but isn't one of those three literals does not
+  qualify. On any other value the bypass is ignored (with a warning) and
+  `/mcp` stays authenticated.
 
 ## OAuth discovery
 
@@ -496,12 +489,20 @@ lives here rather than in the engine's global authenticator chain deliberately:
 
 Two things it does not affect:
 
-- **Static API keys.** `rr_`/`tk_`/`pk_` and bare API keys are opaque strings,
-  not JWTs, and are routed by *shape* rather than by a prefix allowlist. They
-  take the existing authenticator path with no audience check, so Cursor and the
-  CLI are unchanged.
+- **Persistent user API keys.** `rr_` keys and bare API keys are opaque
+  strings, not JWTs, and are routed by *shape* rather than by a prefix
+  allowlist. They take the existing authenticator path with no audience check,
+  so Cursor and the CLI are unchanged.
 - **Requests with no credential.** Whether one is required is the auth
   middleware's decision, not the guard's.
+
+One class of static keys it rejects outright, on every bind: task-scoped keys
+(`tk_`/`pk_`) and PKCE exchange codes (`cd_`). These are minted per-task (or
+per-exchange), and the authenticator chain scopes their *permissions* but not
+their *routes* — a `pk_` travels in dropper URLs by design, and without this
+reject a leaked one would still reach the tools that never consult engine
+permissions. `/mcp` callers are `rr_` keys and audience-verified OAuth tokens,
+nothing else.
 
 When `MCP_EXPECTED_AUDIENCE` is unset, OAuth tokens are accepted on a loopback
 bind and **refused on any other bind** — the same posture `MCP_DEV_NO_AUTH`
@@ -522,8 +523,9 @@ design; audience enforcement compares against the project id.
 
 ## Dev caveats — not production-ready
 
-- **Local processes + in-band results are the dev mode.** Inputs are reference-able
-  (filepaths, store-relative paths). Outputs are inherently in-band today: `send()`
+- **Local processes + in-band results are the dev mode.** File inputs are
+  reference-able only as store-relative paths (`send_files`); pipeline
+  definitions are inline-only. Outputs are inherently in-band today: `send()`
   returns the full `PIPELINE_RESULT` synchronously (can embed base64 images, large
   text) as one atomic JSON-RPC message — no cap or paging. **Out-of-band /
   reference-passing / egress-spill is deferred**; large payloads over HTTP (proxy

@@ -10,12 +10,11 @@ from typing import Any, Dict
 from ..errors import _bad
 from ..tooling import ToolRegistry
 from ._common import engine_call as _engine_call
-from ._common import load_pipeline_async
+from ._common import load_pipeline
 
 
-_PIPELINE_OR_FILEPATH_SCHEMA_PROPS = {
+_PIPELINE_SCHEMA_PROPS = {
     'pipeline': {'type': 'object', 'description': 'Inline pipeline definition'},
-    'filepath': {'type': 'string', 'description': 'Path to a pipeline file (JSON, JSON5, or .pipe)'},
 }
 
 _STORE_READ_SCHEMA = {
@@ -55,10 +54,9 @@ _SAVE_TEMPLATE_SCHEMA = {
     'type': 'object',
     'properties': {
         'template_id': {'type': 'string', 'description': 'Identifier to save the template under'},
-        **_PIPELINE_OR_FILEPATH_SCHEMA_PROPS,
+        **_PIPELINE_SCHEMA_PROPS,
     },
-    'required': ['template_id'],
-    'anyOf': [{'required': ['pipeline']}, {'required': ['filepath']}],
+    'required': ['template_id', 'pipeline'],
 }
 
 _LOAD_TEMPLATE_SCHEMA = {
@@ -72,10 +70,10 @@ _LOAD_TEMPLATE_SCHEMA = {
 _DEPLOY_ADD_SCHEMA = {
     'type': 'object',
     'properties': {
-        **_PIPELINE_OR_FILEPATH_SCHEMA_PROPS,
+        **_PIPELINE_SCHEMA_PROPS,
         'schedule': {'type': 'string', 'description': 'Optional cron schedule for the deployment'},
     },
-    'anyOf': [{'required': ['pipeline']}, {'required': ['filepath']}],
+    'required': ['pipeline'],
 }
 
 _DEPLOY_STATUS_SCHEMA = {
@@ -92,11 +90,11 @@ _DEPLOY_UPDATE_SCHEMA = {
     'type': 'object',
     'properties': {
         'project_id': {'type': 'string', 'description': 'Project ID of the deployment'},
-        **_PIPELINE_OR_FILEPATH_SCHEMA_PROPS,
+        **_PIPELINE_SCHEMA_PROPS,
         'schedule': {'type': 'string', 'description': 'Replacement cron schedule (or "manual")'},
     },
     'required': ['project_id'],
-    'anyOf': [{'required': ['pipeline']}, {'required': ['filepath']}, {'required': ['schedule']}],
+    'anyOf': [{'required': ['pipeline']}, {'required': ['schedule']}],
 }
 
 
@@ -153,7 +151,7 @@ async def _save_template(client, tasks, args: Dict[str, Any]) -> dict:
     if not template_id:
         return _bad('template_id is required', 'name the template')
 
-    pipeline = await load_pipeline_async(args)  # raises ValueError -> normalized by the dispatch layer
+    pipeline = load_pipeline(args)  # raises ValueError -> normalized by the dispatch layer
     _, err = await _engine_call(client.save_template(template_id, pipeline), 'save_template')
     if err:
         return err
@@ -176,7 +174,7 @@ async def _load_template(client, tasks, args: Dict[str, Any]) -> dict:
 
 
 async def _deploy_add(client, tasks, args: Dict[str, Any]) -> dict:
-    pipeline = await load_pipeline_async(args)  # raises ValueError -> normalized by the dispatch layer
+    pipeline = load_pipeline(args)  # raises ValueError -> normalized by the dispatch layer
     deployment, err = await _engine_call(client.deploy_add(pipeline, schedule=args.get('schedule')), 'deploy_add')
     if err:
         # Non-idempotent create: the engine may have registered the deployment
@@ -222,11 +220,11 @@ async def _deploy_update(client, tasks, args: Dict[str, Any]) -> dict:
         return _bad('project_id is required', 'pass a deployment project_id (see deploy_list)')
 
     pipeline = None
-    if args.get('pipeline') or args.get('filepath'):
-        pipeline = await load_pipeline_async(args)  # raises ValueError -> normalized by the dispatch layer
+    if args.get('pipeline'):
+        pipeline = load_pipeline(args)  # raises ValueError -> normalized by the dispatch layer
     schedule = args.get('schedule')
     if pipeline is None and schedule is None:
-        return _bad('nothing to update', 'pass a replacement pipeline/filepath and/or a schedule')
+        return _bad('nothing to update', 'pass a replacement pipeline and/or a schedule')
 
     _, err = await _engine_call(client.deploy_update(project_id, pipeline=pipeline, schedule=schedule), 'deploy_update')
     if err:
@@ -270,7 +268,7 @@ def register(registry: ToolRegistry) -> None:
 
     registry.register(
         'save_template',
-        'Save a pipeline (inline or from filepath) as a reusable template under a template_id.',
+        'Save an inline pipeline as a reusable template under a template_id.',
         _SAVE_TEMPLATE_SCHEMA,
     )(_save_template)
 
@@ -282,7 +280,7 @@ def register(registry: ToolRegistry) -> None:
 
     registry.register(
         'deploy_add',
-        'Register a pipeline (inline or from filepath) as a deployment, optionally on a cron schedule.',
+        'Register an inline pipeline as a deployment, optionally on a cron schedule.',
         _DEPLOY_ADD_SCHEMA,
     )(_deploy_add)
 

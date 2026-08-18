@@ -5,12 +5,14 @@
 and the static Skills map (knowledge lives in Skills, not a resource).
 """
 
+import asyncio
 import json
 from typing import List
 
 import mcp.types as types
 
 from .engine import EngineClient
+from .tools._common import DEFAULT_TIMEOUT_SECONDS
 
 # Public: handlers.py keys its per-URI cache TTLs off these — a renamed
 # URI must fail loudly there, not silently fall through to ttl_ms=0.
@@ -36,11 +38,15 @@ def list_resources() -> List[types.Resource]:
 
 
 async def read_resource(engine: EngineClient, uri: str) -> str:
+    # Same seam bound the tool handlers use (tools/_common.py): a wedged or
+    # half-open engine WS must fail the read promptly, not hold the request
+    # open unbounded. TimeoutError propagates — resource reads have no in-band
+    # error envelope, so the SDK surfaces it as a request error.
     uri = str(uri)
     if uri == PIPELINES_URI:
-        return json.dumps(await engine.deploy_list())
+        return json.dumps(await asyncio.wait_for(engine.deploy_list(), timeout=DEFAULT_TIMEOUT_SECONDS))
     if uri == STATUS_URI:
-        tasks = await engine.list_tasks()
+        tasks = await asyncio.wait_for(engine.list_tasks(), timeout=DEFAULT_TIMEOUT_SECONDS)
         names = [t.get('name') for t in tasks if t.get('name')]
         # Count ALL running tasks; `pipelines` lists only the resolvable names.
         return json.dumps({'connected': True, 'pipeline_count': len(tasks), 'pipelines': names})

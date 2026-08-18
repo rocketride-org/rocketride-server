@@ -199,7 +199,7 @@ async def test_save_template_requires_template_id(fake_engine):
 
 
 @pytest.mark.asyncio
-async def test_save_template_requires_pipeline_or_filepath(fake_engine):
+async def test_save_template_requires_pipeline(fake_engine):
     registry = ToolRegistry()
     capability.register(registry)
 
@@ -254,7 +254,7 @@ async def test_load_template_returns_pipeline(fake_engine):
 
 
 @pytest.mark.asyncio
-async def test_deploy_add_requires_pipeline_or_filepath(fake_engine):
+async def test_deploy_add_requires_pipeline(fake_engine):
     registry = ToolRegistry()
     capability.register(registry)
 

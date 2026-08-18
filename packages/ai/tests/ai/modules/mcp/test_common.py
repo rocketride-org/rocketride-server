@@ -1,8 +1,6 @@
 # Copyright 2026 Aparavi Software AG. MIT License.
 """Tests for `tools/_common.py` `load_pipeline`."""
 
-import json
-
 import pytest
 
 from ai.modules.mcp.tools._common import load_pipeline
@@ -20,38 +18,20 @@ def test_load_pipeline_unwraps_nested_wrapper():
     assert load_pipeline({'pipeline': {'pipeline': inner}}) == inner
 
 
-def test_load_pipeline_reads_dot_pipe_file(tmp_path):
-    pipeline = {'source': 'a', 'components': []}
-    f = tmp_path / 'x.pipe'
-    f.write_text(json.dumps(pipeline), encoding='utf-8')
-
-    assert load_pipeline({'filepath': str(f)}) == pipeline
-
-
-def test_load_pipeline_reads_and_unwraps_dot_pipe_file(tmp_path):
-    inner = {'source': 'a', 'components': []}
-    f = tmp_path / 'x.pipe'
-    f.write_text(json.dumps({'pipeline': inner}), encoding='utf-8')
-
-    assert load_pipeline({'filepath': str(f)}) == inner
-
-
-def test_load_pipeline_raises_when_neither_supplied():
+def test_load_pipeline_raises_when_pipeline_missing():
     with pytest.raises(ValueError):
         load_pipeline({})
+
+
+def test_load_pipeline_ignores_filepath_and_requires_inline():
+    """Server-side file reads are removed by design: a ``filepath`` argument
+    must never cause a filesystem read — without an inline ``pipeline`` the
+    call fails, exactly as if the argument were absent.
+    """
+    with pytest.raises(ValueError):
+        load_pipeline({'filepath': '/etc/passwd'})
 
 
 def test_load_pipeline_raises_when_not_an_object():
     with pytest.raises(ValueError):
         load_pipeline({'pipeline': ['not', 'an', 'object']})
-
-
-def test_load_pipeline_reads_json5_syntax(tmp_path):
-    """The json5 path itself: comments and trailing commas, which the plain
-    json.load fallback cannot parse.
-    """
-    pytest.importorskip('json5')
-    f = tmp_path / 'x.pipe'
-    f.write_text('{ // comment\n  "source": "a", "components": [],\n}', encoding='utf-8')
-
-    assert load_pipeline({'filepath': str(f)}) == {'source': 'a', 'components': []}

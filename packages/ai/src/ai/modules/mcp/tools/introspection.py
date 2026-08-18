@@ -16,7 +16,7 @@ from .. import credentials as credentials_mod
 from ..errors import _bad
 from ..tooling import ToolRegistry
 from ._common import engine_call
-from ._common import load_pipeline_async
+from ._common import load_pipeline
 
 # One overall budget for describe_pipeline's per-provider lookups: without it a
 # client-supplied pipeline with many distinct providers against a wedged engine
@@ -24,13 +24,12 @@ from ._common import load_pipeline_async
 # unresolved when the budget elapses fall back to the pipeline's own metadata.
 DESCRIBE_LOOKUP_BUDGET_SECONDS = 30
 
-_PIPELINE_OR_FILEPATH_SCHEMA = {
+_PIPELINE_SCHEMA = {
     'type': 'object',
     'properties': {
         'pipeline': {'type': 'object', 'description': 'Inline pipeline definition'},
-        'filepath': {'type': 'string', 'description': 'Path to a pipeline file (JSON, JSON5, or .pipe)'},
     },
-    'anyOf': [{'required': ['pipeline']}, {'required': ['filepath']}],
+    'required': ['pipeline'],
 }
 
 
@@ -102,7 +101,7 @@ async def _describe_component(client, tasks, args: Dict[str, Any]) -> dict:
 
 
 async def _validate_pipeline(client, tasks, args: Dict[str, Any]) -> dict:
-    pipeline = await load_pipeline_async(args)  # raises ValueError -> normalized by the dispatch layer
+    pipeline = load_pipeline(args)  # raises ValueError -> normalized by the dispatch layer
     validated, err = await engine_call(client.validate(pipeline), 'validate_pipeline')
     if err:
         return err
@@ -113,7 +112,7 @@ async def _validate_pipeline(client, tasks, args: Dict[str, Any]) -> dict:
 
 
 async def _describe_pipeline(client, tasks, args: Dict[str, Any]) -> dict:
-    pipeline = await load_pipeline_async(args)  # raises ValueError -> normalized by the dispatch layer
+    pipeline = load_pipeline(args)  # raises ValueError -> normalized by the dispatch layer
 
     service_cache: Dict[str, Any] = {}
     components = []
@@ -178,11 +177,11 @@ def register(registry: ToolRegistry) -> None:
     registry.register(
         'validate_pipeline',
         "Validate a pipeline against the engine's own rules (zero client-side rules -- zero drift).",
-        _PIPELINE_OR_FILEPATH_SCHEMA,
+        _PIPELINE_SCHEMA,
     )(_validate_pipeline)
 
     registry.register(
         'describe_pipeline',
         'Statically describe a pipeline source and components (id, provider, title, classType, inputs).',
-        _PIPELINE_OR_FILEPATH_SCHEMA,
+        _PIPELINE_SCHEMA,
     )(_describe_pipeline)

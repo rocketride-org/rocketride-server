@@ -80,12 +80,24 @@ def scope_with(credential=None):
 # --- the API-key path must keep working -----------------------------------
 
 
-@pytest.mark.parametrize('credential', ['rr_abc123', 'tk_operator_token', 'pk_public_token', 'cd_pkce_code'])
-def test_known_api_keys_are_never_audience_checked(monkeypatch, credential):
-    """Cursor and the CLI authenticate with static keys; that path is untouched."""
+def test_user_api_keys_are_never_audience_checked(monkeypatch):
+    """Cursor and the CLI authenticate with persistent rr_ keys; that path is untouched."""
     monkeypatch.setenv(auth.ENV_EXPECTED_AUDIENCE, MCP_PROJECT)
 
-    assert auth.authorize(scope_with(credential), bind_host='0.0.0.0') is None
+    assert auth.authorize(scope_with('rr_abc123'), bind_host='0.0.0.0') is None
+
+
+@pytest.mark.parametrize('credential', ['tk_operator_token', 'pk_public_token', 'cd_pkce_code'])
+@pytest.mark.parametrize('bind_host', ['localhost', '0.0.0.0'])
+def test_task_scoped_keys_are_rejected(monkeypatch, credential, bind_host):
+    """tk_/pk_ are locked to a single task and cd_ is an exchange code — none
+    identifies an MCP caller. The upstream authenticator scopes permissions
+    but not routes, and several tools never consult engine permissions, so the
+    reject must happen at this boundary — on every bind, audience or not.
+    """
+    error = auth.authorize(scope_with(credential), bind_host=bind_host)
+    assert error is not None
+    assert 'rr_' in error  # the message tells the caller what to use instead
 
 
 def test_opaque_unrecognised_credential_is_refused_when_enforcing(monkeypatch):

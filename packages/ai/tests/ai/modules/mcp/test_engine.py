@@ -368,11 +368,12 @@ async def test_validate_defaults_source_to_none():
 
 async def test_use_passes_full_kwargs_and_returns_dict():
     client, fake = _make_client_with_fake()
+    pipeline = {'source': 'a', 'components': []}
 
-    result = await client.use(filepath='p.pipe', ttl=30, env={'X': '1'}, name='n')
+    result = await client.use(pipeline=pipeline, ttl=30, env={'X': '1'}, name='n')
 
-    assert fake.use_calls == [{'filepath': 'p.pipe', 'ttl': 30, 'env': {'X': '1'}, 'name': 'n'}]
-    assert result == {'token': 'tok', 'filepath': 'p.pipe', 'ttl': 30, 'env': {'X': '1'}, 'name': 'n'}
+    assert fake.use_calls == [{'pipeline': pipeline, 'ttl': 30, 'env': {'X': '1'}, 'name': 'n'}]
+    assert result == {'token': 'tok', 'pipeline': pipeline, 'ttl': 30, 'env': {'X': '1'}, 'name': 'n'}
 
 
 async def test_send_forwards_objinfo_mimetype():
