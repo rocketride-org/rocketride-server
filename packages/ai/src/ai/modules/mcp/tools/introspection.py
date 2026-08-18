@@ -102,7 +102,14 @@ async def _describe_component(client, tasks, args: Dict[str, Any]) -> dict:
 
 async def _validate_pipeline(client, tasks, args: Dict[str, Any]) -> dict:
     pipeline = load_pipeline(args)  # raises ValueError -> normalized by the dispatch layer
-    validated, err = await engine_call(client.validate(pipeline), 'validate_pipeline')
+    # The engine requires the {'pipeline': {...}} envelope and treats a missing
+    # version as legacy v0; add both the same way /pipe/validate does, but never
+    # double-wrap an already-enveloped config.
+    if isinstance(pipeline.get('pipeline'), dict):
+        payload = pipeline
+    else:
+        payload = {'pipeline': {**pipeline, 'version': pipeline.get('version', 1)}}
+    validated, err = await engine_call(client.validate(payload), 'validate_pipeline')
     if err:
         return err
     result = validated or {}

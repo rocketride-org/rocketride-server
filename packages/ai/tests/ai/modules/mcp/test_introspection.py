@@ -321,7 +321,31 @@ async def test_validate_pipeline_ok_true_when_no_errors(fake_engine):
     result = await registry.handler('validate_pipeline')(fake_engine, None, {'pipeline': pipeline})
 
     assert result == {'ok': True, 'errors': [], 'warnings': []}
-    assert fake_engine.validate_calls == [{'pipeline': pipeline, 'source': None}]
+    assert fake_engine.validate_calls == [
+        {'pipeline': {'pipeline': {'source': 'a', 'components': [], 'version': 1}}, 'source': None}
+    ]
+
+
+@pytest.mark.asyncio
+async def test_validate_pipeline_wraps_flat_config_exactly_once(fake_engine):
+    registry = ToolRegistry()
+    introspection.register(registry)
+    flat = {'source': 'a', 'components': [], 'version': 2}
+
+    await registry.handler('validate_pipeline')(fake_engine, None, {'pipeline': {'pipeline': flat}})
+
+    assert fake_engine.validate_calls == [{'pipeline': {'pipeline': flat}, 'source': None}]
+
+
+@pytest.mark.asyncio
+async def test_validate_pipeline_keeps_explicit_version(fake_engine):
+    registry = ToolRegistry()
+    introspection.register(registry)
+    flat = {'source': 'a', 'components': [], 'version': 3}
+
+    await registry.handler('validate_pipeline')(fake_engine, None, {'pipeline': flat})
+
+    assert fake_engine.validate_calls == [{'pipeline': {'pipeline': flat}, 'source': None}]
 
 
 @pytest.mark.asyncio
