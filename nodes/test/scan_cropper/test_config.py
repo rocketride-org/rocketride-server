@@ -14,6 +14,7 @@ and `NaN`, and clamping does not stop them.
 
 import math
 import sys
+from dataclasses import fields
 from pathlib import Path
 
 NODES_SRC = Path(__file__).parent.parent.parent / 'src' / 'nodes'
@@ -23,7 +24,7 @@ while str(NODES_SRC) in sys.path:
     sys.path.remove(str(NODES_SRC))
 sys.path.insert(0, str(NODES_SRC))
 
-from scan_cropper.process import _number, _params_from_config, resolve_quality  # noqa: E402
+from scan_cropper.process import _number, _params_from_config, _RANGES, resolve_quality  # noqa: E402
 
 
 class TestNumber:
@@ -91,15 +92,13 @@ class TestParamsFromConfig:
         assert params.max_depth == 0
 
     def test_every_tunable_survives_a_config_of_rubbish(self):
-        rubbish = dict.fromkeys(
-            ('detectSize', 'texture', 'minArea', 'maxArea', 'maxAspect', 'minRelative', 'maxDepth', 'skew'),
-            'not a number at all',
-        )
+        # Both lists are derived: a tunable added later is covered without being added here,
+        # which is how `ratioTolerance` got missed when they were spelled out.
+        params = _params_from_config(dict.fromkeys(_RANGES, 'not a number at all'))
 
-        params = _params_from_config(rubbish)
-
+        for field in fields(params):
+            assert math.isfinite(getattr(params, field.name)), field.name
         assert params.skew > 0, 'the seam search divides by this'
-        assert all(math.isfinite(v) for v in (params.texture, params.min_area, params.max_area))
 
 
 class TestResolveQuality:
