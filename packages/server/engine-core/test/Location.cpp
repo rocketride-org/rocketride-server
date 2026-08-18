@@ -176,6 +176,14 @@ TEST_CASE("Location::sanitizeFunctionName") {
 TEST_CASE("Location::toString") {
     const ap::Location loc{"/usr/src/apLib/Location.hpp", 91, "fileName"};
 
+    // Count groups digits, so a line past 999 is not rendered as bare digits.
+    SECTION("a line number past 999 is grouped") {
+        const ap::Location deepLoc{"services.cpp", 2047, "run"};
+        Text buff;
+        deepLoc.toString(buff, true, true);
+        REQUIRE(buff == "services.cpp:2,047-run");
+    }
+
     SECTION("file and function together") {
         Text buff;
         loc.toString(buff, true, true);
