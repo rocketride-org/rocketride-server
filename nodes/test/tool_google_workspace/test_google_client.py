@@ -294,3 +294,89 @@ def test_broker_refresh_invalid_expiry_raises_and_keeps_credentials_unchanged(se
         creds.refresh(None)
     # the half-update is the bug: neither token nor expiry may have changed
     assert creds.token == 'stale'
+
+
+def _scripted_request(method, outcomes):
+    """Request double whose execute() pops scripted outcomes in order."""
+    calls = {'count': 0, 'http_seen': []}
+
+    def execute(http=None):
+        calls['http_seen'].append(http)
+        index = min(calls['count'], len(outcomes) - 1)
+        calls['count'] += 1
+        outcome = outcomes[index]
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
+
+    request = types.SimpleNamespace(method=method, http=None, execute=execute)
+    return request, calls
+
+
+def test_execute_retries_transport_faults_for_get(monkeypatch, service):
+    monkeypatch.setattr(google_client._time, 'sleep', lambda seconds: None)
+    fault = OSError('[SSL] record layer failure (_ssl.c:2580)')
+    request, calls = _scripted_request('GET', [fault, fault, {'ok': True}])
+
+    assert google_client.execute(service, request) == {'ok': True}
+    assert calls['count'] == 3
+
+
+def test_execute_gives_up_on_get_after_four_transport_attempts(monkeypatch, service):
+    monkeypatch.setattr(google_client._time, 'sleep', lambda seconds: None)
+    fault = OSError('connection reset by peer')
+    request, calls = _scripted_request('GET', [fault])
+
+    with pytest.raises(ValueError, match='request failed'):
+        google_client.execute(service, request)
+    assert calls['count'] == 4
+
+
+def test_execute_does_not_retry_transport_faults_for_mutations(monkeypatch, service):
+    monkeypatch.setattr(google_client._time, 'sleep', lambda seconds: None)
+    request, calls = _scripted_request('POST', [OSError('connection reset by peer')])
+
+    with pytest.raises(ValueError, match='request failed'):
+        google_client.execute(service, request)
+    assert calls['count'] == 1
+
+
+def test_execute_uses_a_distinct_transport_per_thread(monkeypatch, service):
+    import threading
+
+    class FakeAuthorizedHttp:
+        def __init__(self, credentials, http=None):
+            self.credentials = credentials
+            self.http = http
+
+    fake_google_auth = types.SimpleNamespace(AuthorizedHttp=FakeAuthorizedHttp)
+    fake_httplib2 = types.SimpleNamespace(Http=lambda: object())
+    monkeypatch.setitem(sys.modules, 'google_auth_httplib2', fake_google_auth)
+    monkeypatch.setitem(sys.modules, 'httplib2', fake_httplib2)
+    monkeypatch.setattr(google_client, '_thread_transport', threading.local())
+
+    credentials = object()
+    per_thread = {}
+
+    def run(name):
+        seen = []
+        for _ in range(2):
+            request = types.SimpleNamespace(
+                method='GET',
+                http=types.SimpleNamespace(credentials=credentials),
+                execute=lambda http=None: seen.append(http) or {},
+            )
+            google_client.execute(service, request)
+        per_thread[name] = seen
+
+    threads = [threading.Thread(target=run, args=(i,)) for i in range(2)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    first, second = per_thread[0], per_thread[1]
+    assert first[0] is first[1], 'a thread must reuse its own transport'
+    assert second[0] is second[1], 'a thread must reuse its own transport'
+    assert first[0] is not second[0], 'threads must not share a transport'
+    assert isinstance(first[0], FakeAuthorizedHttp)
