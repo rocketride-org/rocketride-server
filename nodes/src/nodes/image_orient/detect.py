@@ -55,9 +55,57 @@ _NMS_THRESHOLD = 0.3
 _TOP_K = 5000
 
 
+#: Bounds on the fetch. The model is around 230 KB, so both are far above anything healthy;
+#: they exist so a stalled or wrong endpoint fails instead of hanging startup or filling a disk.
+_FETCH_TIMEOUT = 30.0
+_MAX_MODEL_BYTES = 32 * 1024 * 1024
+
+
+def _digest(path: str) -> str:
+    """
+    Return the SHA-256 of a file, read in chunks.
+
+    Args:
+        path (str): The file to hash.
+
+    Returns:
+        str: Lower-case hex digest.
+    """
+    digest = hashlib.sha256()
+    with open(path, 'rb') as fh:
+        for chunk in iter(lambda: fh.read(1 << 20), b''):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _fetch(url: str, target: str) -> None:
+    """
+    Download to ``target``, bounded in both time and size.
+
+    Args:
+        url (str): The fixed model URL.
+        target (str): Where to write it.
+
+    Raises:
+        OSError: If the response runs past the size bound.
+    """
+    with urllib.request.urlopen(url, timeout=_FETCH_TIMEOUT) as response:  # noqa: S310 — fixed https URL
+        with open(target, 'wb') as fh:
+            written = 0
+            for chunk in iter(lambda: response.read(1 << 16), b''):
+                written += len(chunk)
+                if written > _MAX_MODEL_BYTES:
+                    raise OSError(f'{MODEL_FILE} is larger than {_MAX_MODEL_BYTES} bytes; refusing it')
+                fh.write(chunk)
+
+
 def resolve_model() -> str:
     """
     Return a local path to the detector model, downloading it once if needed.
+
+    The cached copy is hashed before use, not only on the download that created it: pinning the
+    checksum is what stops the engine being pointed at a different model, and a guarantee that
+    holds once is not that guarantee. A cache that no longer matches is replaced.
 
     Returns:
         str: Path to the verified ``.onnx`` file.
@@ -70,16 +118,17 @@ def resolve_model() -> str:
     cache = model_cache_dir('image_orient')
     path = os.path.join(cache, MODEL_FILE)
     if os.path.exists(path):
-        return path
+        if _digest(path) == MODEL_SHA256:
+            return path
+        warning(f'image_orient: cached {MODEL_FILE} does not match its checksum; fetching it again')
 
     os.makedirs(cache, exist_ok=True)
     debug(f'image_orient: fetching {MODEL_FILE}')
     handle, tmp = tempfile.mkstemp(suffix='.onnx', dir=cache)
     os.close(handle)
     try:
-        urllib.request.urlretrieve(MODEL_URL, tmp)  # noqa: S310 — fixed https URL, checksummed below
-        with open(tmp, 'rb') as fh:
-            digest = hashlib.sha256(fh.read()).hexdigest()
+        _fetch(MODEL_URL, tmp)
+        digest = _digest(tmp)
         if digest != MODEL_SHA256:
             raise OSError(f'{MODEL_FILE} checksum mismatch: expected {MODEL_SHA256}, got {digest}')
         os.replace(tmp, path)

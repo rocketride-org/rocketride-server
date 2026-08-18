@@ -103,7 +103,7 @@ because they are single-face pictures.
 | Symptom | Try |
 | --- | --- |
 | A photo came out the wrong way round | Raise **How sure before rotating**. This should not happen; the file is worth keeping as an example |
-| Too many photos left alone | Lower **How sure before rotating** toward 1.5, then **Faces needed to decide** to 1 |
+| Too many photos left alone | Lower **How sure before rotating** toward 1.0, then **Faces needed to decide** to 1 |
 | Portraits of one person are never rotated | Lower **Faces needed to decide** to 1 — there is only ever one face to find |
 | Faces in group shots are missed | Raise **Detection size**; cost grows with the square, so 1600 is ~4× the work of 800 |
 | Nothing is ever rotated, every record says `no_model` | The model could not be downloaded. Check network access from the engine host |
@@ -120,9 +120,11 @@ because they are single-face pictures.
   most of them genuinely upright but some not. A photo where one reading says upright and the other
   says inverted is exactly the case it refuses, and it will keep refusing it — the text lane names
   those so they can be done by hand rather than hunted for.
-- **Only JPEG and PNG are re-saved.** Other formats are still analysed and reported — the record
-  tells you which way the image should go — but the node will not re-encode them, because it has no
-  way to recover their original compression settings and would be choosing one for you.
+- **Only JPEG and PNG are re-saved.** Other formats are still analysed, and the record names
+  `unencodable_format` as the reason — but it reports `rotation: 0`, not the correction it worked
+  out, so it tells you the image was left alone and not which way it should go. The node will not
+  re-encode these, because it has no way to recover their original compression settings and would
+  be choosing one for you.
 - **No EXIF is carried over.** A rotated image is re-encoded with OpenCV, which writes no EXIF and
   no colour profile. Photos that are not rotated keep their bytes exactly, so they keep everything.
 

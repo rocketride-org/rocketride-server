@@ -108,7 +108,8 @@ def decide(scores, confidences, faces, margin: float, min_faces: int):
 
     if faces[best] < min_faces:
         return 0, False, FEW_FACES, ratio, best
-    if ratio < margin:
+    # Not-greater-than: `margin` bottoms out at 1.0, so a tie must abstain.
+    if ratio <= margin:
         return 0, False, THIN_MARGIN, ratio, best
     if max(range(len(ROTATIONS)), key=lambda i: confidences[i]) != best:
         return 0, False, MIXED_SIGNALS, ratio, best

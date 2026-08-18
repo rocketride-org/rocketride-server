@@ -128,6 +128,21 @@ class TestDecide(unittest.TestCase):
         self.assertEqual(reason, THIN_MARGIN)
         self.assertAlmostEqual(ratio, 1.25)
 
+    def test_a_tie_abstains_at_the_lowest_margin(self):
+        """`margin` bottoms out at 1.0, and the form offers it as "fix as many as possible".
+
+        Two rotations scoring exactly alike carry no evidence for either. Deciding on a
+        greater-than would hand the win to whichever sorted first and re-encode the photo
+        at 90 degrees on nothing at all.
+        """
+        rotation, confident, reason, ratio, _ = decide(
+            [0.0, 1.0, 1.0, 0.0], [0.0, 0.9, 0.9, 0.0], [4, 4, 4, 4], margin=1.0, min_faces=2
+        )
+        self.assertEqual(rotation, 0)
+        self.assertFalse(confident)
+        self.assertEqual(reason, THIN_MARGIN)
+        self.assertAlmostEqual(ratio, 1.0)
+
     def test_rotations_disagreeing_is_a_thin_margin_not_its_own_case(self):
         """Two rotations scoring alike *is* a thin margin; a separate branch could never be hit."""
         _, _, reason, _, _ = decide([1.0, 1.0, 0.0, 0.0], [0.9, 0.9, 0.0, 0.0], [5, 5, 0, 0], margin=2.0, min_faces=2)
