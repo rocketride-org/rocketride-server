@@ -182,6 +182,12 @@ TEST_CASE("Location::toString") {
         REQUIRE(buff == "Location.hpp:91-fileName");
     }
 
+    SECTION("the defaults render the file only") {
+        Text buff;
+        loc.toString(buff);
+        REQUIRE(buff == "Location.hpp:91");
+    }
+
     SECTION("file only") {
         Text buff;
         loc.toString(buff, false, true);
@@ -200,6 +206,13 @@ TEST_CASE("Location::toString") {
         REQUIRE(buff.empty());
     }
 
+    SECTION("an unset location reaches toString via the unguarded pack API shape") {
+        const ap::Location unsetLoc{};
+        Text buff;
+        unsetLoc.toString(buff, false);
+        REQUIRE(buff == ":0");
+    }
+
     SECTION("full path mode keeps the directory") {
         const ap::Location fullPathLoc{"/usr/src/apLib/Location.hpp", 91, "fileName", true};
         Text buff;
@@ -212,5 +225,12 @@ TEST_CASE("Location::toString") {
         Text buff;
         lambdaLoc.toString(buff, true, false);
         REQUIRE(buff == "pybind11_init::[lambda]");
+    }
+
+    SECTION("a line number past 999 is grouped") {
+        const ap::Location deepLoc{"services.cpp", 2047, "run"};
+        Text buff;
+        deepLoc.toString(buff, true, true);
+        REQUIRE(buff == "services.cpp:2,047-run");
     }
 }
