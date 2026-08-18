@@ -16,6 +16,7 @@ not the detection.
 import sys
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import numpy as np
 
@@ -38,15 +39,24 @@ def _png(width, height):
     return buffer.tobytes()
 
 
-def _build(detect_size):
-    """The node's own `orient`, with the model swapped for a detector that finds nothing."""
-    orient_module.build_detector = lambda min_confidence: object()
-    orient_module.detect_rotations = lambda detector, lock, image: ([[], [], [], []], [0.0] * 4)
-    return orient_module.build_orient({'detectSize': detect_size})
-
-
 class TestExtremeShapes(unittest.TestCase):
     """A frame far longer than it is tall."""
+
+    def _build(self, detect_size):
+        """The node's own `orient`, with the model swapped for a detector that finds nothing.
+
+        Patched rather than assigned, and undone per test: these are module globals, and the
+        guard in `nodes/test` watches `sys.modules` rather than attributes on a module, so a
+        leak here would surface as some later test quietly running against a fake detector.
+        """
+        for name, fake in (
+            ('build_detector', lambda min_confidence: object()),
+            ('detect_rotations', lambda detector, lock, image: ([[], [], [], []], [0.0] * 4)),
+        ):
+            patcher = patch.object(orient_module, name, fake)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        return orient_module.build_orient({'detectSize': detect_size})
 
     def test_a_sliver_abstains_instead_of_raising(self):
         """The short side scales to zero, and `cv2.resize` rejects a zero dimension.
@@ -55,7 +65,7 @@ class TestExtremeShapes(unittest.TestCase):
         defeat this node is answered on the text lane; unfloored, this one was answered
         with an exception out of `writeImage`.
         """
-        orient = _build(800)
+        orient = self._build(800)
 
         _data, record = orient(_png(3000, 2), 'image/png', want_image=True)
 
@@ -66,7 +76,7 @@ class TestExtremeShapes(unittest.TestCase):
 
     def test_the_lowest_detect_size_reaches_ordinary_scans(self):
         """The floor of `detectSize` is 320, where a 25px side on an 8000px scan truncates."""
-        orient = _build(320)
+        orient = self._build(320)
 
         _data, record = orient(_png(8000, 20), 'image/png', want_image=True)
 
@@ -74,7 +84,7 @@ class TestExtremeShapes(unittest.TestCase):
 
     def test_a_short_side_that_survives_is_unaffected(self):
         """7000x9 at 800 gives (800, 1) on its own — the floor changes nothing here."""
-        orient = _build(800)
+        orient = self._build(800)
 
         _data, record = orient(_png(7000, 9), 'image/png', want_image=True)
 
@@ -86,6 +96,6 @@ class TestExtremeShapes(unittest.TestCase):
         `IInstance` turns that into the forward and the `decoded: false` record; what is
         asserted here is only that nothing escapes.
         """
-        orient = _build(800)
+        orient = self._build(800)
 
         self.assertIsNone(orient(b'not an image', 'image/png', want_image=True))
