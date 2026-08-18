@@ -90,6 +90,17 @@ def _no_call(_question, **_kwargs) -> Answer:
     return _answer('cached')
 
 
+def _fails_after_one_call(_question, **_kwargs) -> Answer:
+    """A turn that burns tokens, then the provider drops the connection."""
+    report_llm_tokens(10, 4, model='m1')
+    raise RuntimeError('provider stream died')
+
+
+def _fails_before_any_call(_question, **_kwargs) -> Answer:
+    """A turn that dies before a request ever reaches the provider."""
+    raise RuntimeError('connect timeout')
+
+
 # ---------------------------------------------------------------------------
 # writeQuestions — the answers lane every plain llm_* node emits through
 # ---------------------------------------------------------------------------
@@ -109,6 +120,30 @@ def test_write_questions_answer_carries_the_turn_token_usage():
 def test_write_questions_has_no_tokens_when_no_model_was_called():
     """No call must render no grid at all, not an empty one."""
     node = _make_node(_no_call)
+
+    node.writeQuestions(_FakeQuestion())
+
+    assert node.instance.written[0].tokens is None
+
+
+def test_write_questions_error_answer_still_carries_the_burnt_tokens():
+    """A turn that failed after burning tokens is the one a user opens the Trace on.
+
+    The adapters report from their own ``finally``, so the scope holds what was billed;
+    the except branch has to read it before returning or the grid renders empty.
+    """
+    node = _make_node(_fails_after_one_call)
+
+    node.writeQuestions(_FakeQuestion())
+
+    written = node.instance.written[0]
+    assert 'RuntimeError' in written.getText()
+    assert written.tokens == {'input': 10, 'output': 4, 'cache_read': 0, 'cache_creation': 0, 'model': 'm1'}
+
+
+def test_write_questions_error_answer_has_no_tokens_when_nothing_was_called():
+    """A failure before any request must leave tokens unset, not set it to an empty grid."""
+    node = _make_node(_fails_before_any_call)
 
     node.writeQuestions(_FakeQuestion())
 

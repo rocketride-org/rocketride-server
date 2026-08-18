@@ -40,6 +40,7 @@ from typing import Any, Dict
 from ai.common.schema import Answer, Question
 from ai.common.chat import ChatBase
 from ai.common.config import Config
+from ai.common.llm_adapter import report_usage_metadata
 from ai.common.validation import validate_prompt
 from langchain_openai import ChatOpenAI
 
@@ -209,6 +210,10 @@ class Chat(ChatBase):
             try:
                 # Ask the model
                 results = self._llm.invoke(prompt)
+
+                # This override bypasses LangChainAdapter.collect(), the capture point that
+                # meters every other provider, so report from here or the call bills zero.
+                report_usage_metadata(getattr(results, 'usage_metadata', None), self._llm)
 
                 # Create and return the answer
                 answer = Answer(expectJson=question.expectJson)

@@ -329,8 +329,12 @@ def _split_input_cache(um: dict) -> tuple[int, int, int, int]:
     return max(0, total_in - cr - cc), out, cr, cc
 
 
-def _report_usage_metadata(usage: Any, llm: Any) -> None:
-    """Extract LangChain ``usage_metadata`` and report it (fresh input + cache split)."""
+def report_usage_metadata(usage: Any, llm: Any) -> None:
+    """Extract LangChain ``usage_metadata`` and report it (fresh input + cache split).
+
+    Public because a driver that overrides ``ChatBase._chat`` bypasses ``collect()``
+    and has to report from its own call site to be metered at all.
+    """
     if not isinstance(usage, dict):
         return
     model = getattr(llm, 'model', None) or getattr(llm, 'model_name', '') or ''
@@ -461,7 +465,7 @@ class LangChainAdapter:
         # prompt string it was given, not a one-element message list.
         payload = self.history if had_history else user_text
         result = self.llm.invoke(payload, **self.stream_kwargs)
-        _report_usage_metadata(getattr(result, 'usage_metadata', None), self.llm)
+        report_usage_metadata(getattr(result, 'usage_metadata', None), self.llm)
         text, self.reasoning = flatten_content_parts(getattr(result, 'content', ''))
         assistant = {'role': 'assistant', 'content': text}
         self.history.append(assistant)

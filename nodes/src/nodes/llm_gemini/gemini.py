@@ -24,7 +24,33 @@
 from typing import Any, Dict
 from ai.common.chat import ChatBase
 from ai.common.config import Config
+from ai.common.llm_adapter import report_llm_tokens
 from google import genai
+
+
+def _report_gemini_usage(response: Any, model: str) -> None:
+    """Report a ``generate_content`` response's usage on the four token counters.
+
+    This node overrides ``_chat`` and sets no ``_llm``, so it never reaches
+    ``LangChainAdapter`` — without this the provider bills zero. Gemini counts
+    ``prompt_token_count`` with the cached prefix included, so the cache is subtracted
+    back out to keep the counters disjoint; ``thoughts_token_count`` is reasoning, which
+    Google bills at the output rate.
+    """
+    um = getattr(response, 'usage_metadata', None)
+    if um is None:
+        return
+
+    def _n(field: str) -> int:
+        return int(getattr(um, field, 0) or 0)
+
+    cache_read = _n('cached_content_token_count')
+    report_llm_tokens(
+        max(0, _n('prompt_token_count') - cache_read),
+        _n('candidates_token_count') + _n('thoughts_token_count'),
+        model=model,
+        cache_read_tokens=cache_read,
+    )
 
 
 class Chat(ChatBase):
@@ -147,6 +173,8 @@ class Chat(ChatBase):
         """
         # Generate content using the configured model
         response = self._client.models.generate_content(model=self._model, contents=prompt)
+
+        _report_gemini_usage(response, self._model)
 
         # Extract and return the text response
         return response.text

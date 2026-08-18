@@ -41,12 +41,30 @@ from typing import Any, Dict, Tuple
 from ai.common.schema import Answer, Question
 from ai.common.chat import ChatBase
 from ai.common.config import Config
+from ai.common.llm_adapter import report_llm_tokens
 from ai.common.validation import validate_prompt
 
 try:
     from mistralai.client import Mistral  # 2.x layout
 except ImportError:
     from mistralai import Mistral  # 1.x layout
+
+
+def _report_mistral_usage(response: Any, model: str) -> None:
+    """Report a ``chat.complete`` response's usage on the token counters.
+
+    This node overrides ``chat()`` and calls the Mistral SDK directly, so it never
+    reaches ``LangChainAdapter`` — without this the provider bills zero. ``UsageInfo``
+    carries no cache detail, so both cache counters stay at zero.
+    """
+    usage = getattr(response, 'usage', None)
+    if usage is None:
+        return
+    report_llm_tokens(
+        int(getattr(usage, 'prompt_tokens', 0) or 0),
+        int(getattr(usage, 'completion_tokens', 0) or 0),
+        model=model,
+    )
 
 
 class Chat(ChatBase):
@@ -276,6 +294,8 @@ class Chat(ChatBase):
                     max_tokens=None,  # Let model decide based on content
                     random_seed=None,  # No fixed seed for variety
                 )
+
+                _report_mistral_usage(chat_response, self._model)
 
                 # Create and return the answer
                 answer = Answer(expectJson=question.expectJson)
