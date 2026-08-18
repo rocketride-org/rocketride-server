@@ -41,7 +41,7 @@ from typing import Any, Dict, Tuple
 from ai.common.schema import Answer, Question
 from ai.common.chat import ChatBase
 from ai.common.config import Config
-from ai.common.llm_adapter import debug_usage_failure, report_llm_tokens
+from ai.common.llm_adapter import report_llm_tokens
 from ai.common.validation import validate_prompt
 
 try:
@@ -60,15 +60,9 @@ def _report_mistral_usage(response: Any, model: str) -> None:
     usage = getattr(response, 'usage', None)
     if usage is None:
         return
-    # Best-effort: this runs on a response the user already paid for, and the caller is
-    # a retry loop that would read a raise as a provider error and lose the answer.
-    try:
-        prompt_tokens = int(getattr(usage, 'prompt_tokens', 0) or 0)
-        completion_tokens = int(getattr(usage, 'completion_tokens', 0) or 0)
-    except Exception as exc:
-        debug_usage_failure(exc)
-        return
-    report_llm_tokens(prompt_tokens, completion_tokens, model=model)
+    # Passed through raw: report_llm_tokens coerces inside its own best-effort try, so a
+    # non-numeric count is swallowed there rather than costing this turn its answer.
+    report_llm_tokens(getattr(usage, 'prompt_tokens', None), getattr(usage, 'completion_tokens', None), model=model)
 
 
 class Chat(ChatBase):
