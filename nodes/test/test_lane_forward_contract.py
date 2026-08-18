@@ -223,10 +223,16 @@ class _OwnScopeCalls(ast.NodeVisitor):
 
     def __init__(self):
         self.calls: List[ast.Call] = []
+        self.awaited_call_ids: Set[int] = set()
 
     def visit_Call(self, node: ast.Call) -> None:
         self.calls.append(node)
         self.generic_visit(node)  # still look inside the call's own args/keywords
+
+    def visit_Await(self, node: ast.Await) -> None:
+        if isinstance(node.value, ast.Call):
+            self.awaited_call_ids.add(id(node.value))
+        self.generic_visit(node)
 
     def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
         pass  # do not descend into a nested function's body
@@ -241,12 +247,18 @@ class _OwnScopeCalls(ast.NodeVisitor):
         pass
 
 
-def _calls_in_own_scope(func: ast.FunctionDef) -> List[ast.Call]:
-    """`ast.Call` nodes in `func`'s own execution, excluding nested def/lambda/class bodies."""
+def _calls_in_own_scope(func: ast.FunctionDef) -> Tuple[List[ast.Call], Set[int]]:
+    """`ast.Call` nodes in `func`'s own execution (excluding nested def/lambda/class bodies),
+    plus the `id()`s of the ones directly awaited (`await foo()`, not merely `foo()`).
+
+    A bare call into an `async def` only constructs a coroutine - it does not run the
+    coroutine's body - so a resolver must know which calls are awaited to avoid treating
+    an un-awaited async helper as if it executed.
+    """
     collector = _OwnScopeCalls()
     for stmt in func.body:
         collector.visit(stmt)
-    return collector.calls
+    return collector.calls, collector.awaited_call_ids
 
 
 def _local_helpers(func: ast.FunctionDef) -> Dict[str, ast.FunctionDef]:
@@ -276,11 +288,11 @@ class _Analyzer:
 
     def forwards_own_lane(self, func: ast.FunctionDef, lane: str) -> bool:
         """True when `func` forwards on `lane`, directly or via a same-class or local helper."""
-        return self._walks_to(func, lane, self._is_forward_call, set())
+        return self._walks_to(func, lane, self._is_forward_call, set(), _local_helpers(func))
 
     def reaches_prevent_default(self, func: ast.FunctionDef) -> bool:
         """True when `func` calls `self.preventDefault()`, directly or via a same-class or local helper."""
-        return self._walks_to(func, None, self._is_prevent_default_call, set())
+        return self._walks_to(func, None, self._is_prevent_default_call, set(), _local_helpers(func))
 
     def unresolved_calls(self, func: ast.FunctionDef, lane: str) -> List[str]:
         """Calls from `func` (transitively, through same-class and local helpers) that resolve to nothing.
@@ -291,50 +303,95 @@ class _Analyzer:
         `forwards_own_lane` already returned True for.
         """
         unresolved: List[str] = []
-        self._collect_unresolved(func, lane, unresolved, set())
+        self._collect_unresolved(func, lane, unresolved, set(), _local_helpers(func))
         return unresolved
 
-    def _resolve_call(self, call: ast.Call, local_helpers: Dict[str, ast.FunctionDef]) -> Optional[ast.FunctionDef]:
-        """Resolve `call` to a `FunctionDef` this analyzer can recurse into: a same-class
-        `self.<method>()`, or a helper defined directly in the enclosing function and
-        actually invoked by name (see `_local_helpers`). Anything else - a module-level
-        function, a call through some other object - is not resolvable here.
+    def _resolve_call(
+        self,
+        call: ast.Call,
+        local_helpers: Dict[str, ast.FunctionDef],
+        awaited_ids: Set[int],
+    ) -> Optional[Tuple[ast.FunctionDef, Dict[str, ast.FunctionDef]]]:
+        """Resolve `call` to a `(FunctionDef, child_scope)` pair this analyzer can recurse
+        into, or None if it can't. `child_scope` is the local-helper visibility for the
+        callee's own body - the two resolution paths differ here:
+
+        - `self.<method>()`: a same-class method is its own top-level scope, unrelated to
+          the caller's local helpers. Visibility inside it starts fresh, from its own
+          nested defs only.
+        - a bare name matching a helper visible in the caller's own scope (see
+          `_local_helpers`): a nested Python closure can see its enclosing scope's other
+          names, so the callee sees the caller's helpers too, merged with (shadowed by)
+          any it defines itself. This is what makes a sibling helper calling another
+          sibling helper resolvable at any recursion depth, not just from the handler's
+          immediate body.
+
+        Either way, a bare (un-awaited) call into an `async def` only constructs a
+        coroutine - it does not run the body - so it is not resolvable here.
         """
         helper = _is_self_method_call(call)
         if helper is not None:
-            return self._methods.get(helper)
-        target = call.func
-        if isinstance(target, ast.Name) and target.id in local_helpers:
-            return local_helpers[target.id]
-        return None
+            target = self._methods.get(helper)
+            if target is None:
+                return None
+            child_scope = _local_helpers(target)
+        else:
+            fn = call.func
+            if not (isinstance(fn, ast.Name) and fn.id in local_helpers):
+                return None
+            target = local_helpers[fn.id]
+            child_scope = {**local_helpers, **_local_helpers(target)}
 
-    def _walks_to(self, func: ast.FunctionDef, lane, predicate, visited: Set[int]) -> bool:
-        local_helpers = _local_helpers(func)
-        for node in _calls_in_own_scope(func):
+        if isinstance(target, ast.AsyncFunctionDef) and id(call) not in awaited_ids:
+            return None
+
+        return target, child_scope
+
+    def _walks_to(
+        self,
+        func: ast.FunctionDef,
+        lane,
+        predicate,
+        visited: Set[int],
+        local_helpers: Dict[str, ast.FunctionDef],
+    ) -> bool:
+        calls, awaited_ids = _calls_in_own_scope(func)
+        for node in calls:
             if predicate(node, lane):
                 return True
-            target = self._resolve_call(node, local_helpers)
-            if target is None or id(target) in visited:
+            resolved = self._resolve_call(node, local_helpers, awaited_ids)
+            if resolved is None:
                 continue  # unresolved: not a violation signal by itself, see unresolved_calls
+            target, child_scope = resolved
+            if id(target) in visited:
+                continue
             visited.add(id(target))
-            if self._walks_to(target, lane, predicate, visited):
+            if self._walks_to(target, lane, predicate, visited, child_scope):
                 return True
         return False
 
-    def _collect_unresolved(self, func: ast.FunctionDef, lane: str, out: List[str], visited: Set[int]) -> None:
-        local_helpers = _local_helpers(func)
-        for node in _calls_in_own_scope(func):
+    def _collect_unresolved(
+        self,
+        func: ast.FunctionDef,
+        lane: str,
+        out: List[str],
+        visited: Set[int],
+        local_helpers: Dict[str, ast.FunctionDef],
+    ) -> None:
+        calls, awaited_ids = _calls_in_own_scope(func)
+        for node in calls:
             if self._is_forward_call(node, lane):
                 continue  # the expected forward itself - accounted for by forwards_own_lane, not unresolved
             helper = _is_self_method_call(node)
             if helper == 'preventDefault':
                 continue  # terminal, not a helper to resolve further; handled by reaches_prevent_default
-            target = self._resolve_call(node, local_helpers)
-            if target is not None:
+            resolved = self._resolve_call(node, local_helpers, awaited_ids)
+            if resolved is not None:
+                target, child_scope = resolved
                 if id(target) in visited:
                     continue
                 visited.add(id(target))
-                self._collect_unresolved(target, lane, out, visited)
+                self._collect_unresolved(target, lane, out, visited, child_scope)
                 continue
             if helper is not None:
                 out.append(f'self.{helper}(...) [not defined on this class] (line {node.lineno})')
@@ -620,6 +677,65 @@ class IInstance:
         unresolved = analyzer.unresolved_calls(func, 'writeTable')
         assert len(unresolved) == 1
         assert 'self.instance.hasListener(...)' in unresolved[0]
+
+    def test_sibling_local_helper_is_resolved_from_within_another_helper(self):
+        """A local helper calling a *sibling* helper (both nested directly in the handler,
+        not one inside the other) must resolve at any recursion depth - recomputing local
+        helpers from only the immediately-current function, rather than carrying the
+        handler's full helper scope down through recursion, would lose sight of a sibling
+        once execution moves into the first helper.
+        """
+        analyzer = _analyzer_for(
+            """
+class IInstance:
+    def writeText(self, text):
+        def _finish():
+            _suppress()
+        def _suppress():
+            self.preventDefault()
+        self.instance.writeText(text)
+        _finish()
+"""
+        )
+        func = analyzer._methods['writeText']
+        assert analyzer.forwards_own_lane(func, 'writeText') is True
+        assert analyzer.reaches_prevent_default(func) is True
+        assert analyzer.unresolved_calls(func, 'writeText') == []
+
+    def test_bare_call_into_async_helper_does_not_count_as_reaching_it(self):
+        """`_finish()` on an `async def _finish` only constructs a coroutine - it does not run
+        the body - so a bare (non-awaited) call must not count as reaching preventDefault().
+        """
+        analyzer = _analyzer_for(
+            """
+class IInstance:
+    def writeText(self, text):
+        async def _finish():
+            self.preventDefault()
+        self.instance.writeText(text)
+        _finish()
+"""
+        )
+        func = analyzer._methods['writeText']
+        assert analyzer.forwards_own_lane(func, 'writeText') is True
+        assert analyzer.reaches_prevent_default(func) is False
+
+    def test_awaited_call_into_async_helper_does_count_as_reaching_it(self):
+        """The counterpart: `await _finish()` does run the coroutine's body, so it must count."""
+        analyzer = _analyzer_for(
+            """
+class IInstance:
+    async def writeText(self, text):
+        async def _finish():
+            self.preventDefault()
+        self.instance.writeText(text)
+        await _finish()
+"""
+        )
+        func = analyzer._methods['writeText']
+        assert analyzer.forwards_own_lane(func, 'writeText') is True
+        assert analyzer.reaches_prevent_default(func) is True
+        assert analyzer.unresolved_calls(func, 'writeText') == []
 
 
 class TestUnresolvedAttributeChainCalls:
