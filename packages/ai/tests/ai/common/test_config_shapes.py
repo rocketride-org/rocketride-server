@@ -59,20 +59,24 @@ class _FakeIJson:
     """
 
     def __init__(self, value):
+        """Wrap `value` (typically a dict or list) as this stub would arrive from the engine."""
         self.value = value
 
     def get(self, key, default=None):
+        """Dict-like `.get`, delegating to the wrapped value when it's a dict."""
         if isinstance(self.value, dict):
             return self.value.get(key, default)
         return default
 
     def items(self):
+        """Dict-like `.items`, delegating to the wrapped value when it's a dict."""
         if isinstance(self.value, dict):
             return self.value.items()
         return ()
 
     @staticmethod
     def toDict(obj):
+        """Recursively unwrap `_FakeIJson`/dict/list values into native dict/list."""
         if isinstance(obj, _FakeIJson):
             return _FakeIJson.toDict(obj.value)
         if isinstance(obj, dict):
@@ -111,11 +115,13 @@ Config = _load_config()
 
 class TestFlatShape:
     def test_top_level_fields_resolve(self):
+        """Fields written directly at the top level (no "default" nesting) resolve."""
         cfg = Config.getNodeConfig('agent_x', {'instructions': ['a', 'b'], 'agent_description': 'desc'})
         assert cfg['instructions'] == ['a', 'b']
         assert cfg['agent_description'] == 'desc'
 
     def test_empty_conn_config_uses_profile_defaults(self):
+        """An empty connConfig falls back entirely to the default profile's values."""
         cfg = Config.getNodeConfig('agent_x', {})
         assert cfg['instructions'] == []
         assert cfg['role'] == 'Assistant'
@@ -123,32 +129,37 @@ class TestFlatShape:
 
 class TestNestedShape:
     def test_nested_under_default_resolves(self):
+        """Fields nested under connConfig["default"] (Shape A) resolve too."""
         cfg = Config.getNodeConfig('agent_x', {'default': {'instructions': ['a', 'b'], 'agent_description': 'desc'}})
         assert cfg['instructions'] == ['a', 'b']
         assert cfg['agent_description'] == 'desc'
 
     def test_nested_advanced_field_resolves(self):
+        """A single nested field resolves without requiring every field to be present."""
         cfg = Config.getNodeConfig('agent_x', {'default': {'role': 'Analyst'}})
         assert cfg['role'] == 'Analyst'
 
 
 class TestMixedShapePrecedence:
     def test_real_top_level_beats_empty_nested_default(self):
+        """A real top-level value wins even when the nested block sets the same field to empty."""
         cfg = Config.getNodeConfig('agent_x', {'instructions': ['real'], 'default': {'instructions': []}})
         assert cfg['instructions'] == ['real']
 
     def test_top_level_overrides_nested_value(self):
+        """A real top-level value wins over a different, populated nested value."""
         cfg = Config.getNodeConfig('agent_x', {'instructions': ['top'], 'default': {'instructions': ['nested']}})
         assert cfg['instructions'] == ['top']
 
     def test_explicit_none_top_level_does_not_clobber_nested(self):
-        # A None placeholder at the top level must not override a populated nested value.
+        """A None placeholder at the top level must not override a populated nested value."""
         cfg = Config.getNodeConfig('agent_x', {'role': None, 'default': {'role': 'Analyst'}})
         assert cfg['role'] == 'Analyst'
 
 
 class TestExplicitProfileBranchNestedShape:
     def test_explicit_profile_reads_nested(self):
+        """With an explicit "profile" key, fields nested under that profile name resolve."""
         cfg = Config.getNodeConfig('agent_x', {'profile': 'default', 'default': {'instructions': ['x']}})
         assert cfg['instructions'] == ['x']
 
@@ -227,22 +238,29 @@ class TestRequireToolCallResolution:
     """
 
     def _flag(self, conn):
+        """Resolve require_tool_call through getNodeConfig exactly as AgentBase.__init__ reads it."""
         return bool(Config.getNodeConfig('agent_x', conn).get('require_tool_call', False))
 
     def test_default_is_off(self):
+        """With no configuration at all, the guard defaults to off."""
         assert self._flag({}) is False
 
     def test_explicit_true_top_level(self):
+        """A top-level True enables the guard."""
         assert self._flag({'require_tool_call': True}) is True
 
     def test_explicit_false_top_level(self):
+        """A top-level False keeps the guard off."""
         assert self._flag({'require_tool_call': False}) is False
 
     def test_nested_true_under_default(self):
+        """A True nested under "default" also enables the guard."""
         assert self._flag({'default': {'require_tool_call': True}}) is True
 
     def test_nested_false_stays_off(self):
+        """A False nested under "default" keeps the guard off."""
         assert self._flag({'default': {'require_tool_call': False}}) is False
 
     def test_top_level_true_beats_nested_false(self):
+        """A real top-level True wins over a conflicting nested False."""
         assert self._flag({'require_tool_call': True, 'default': {'require_tool_call': False}}) is True
