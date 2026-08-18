@@ -125,6 +125,10 @@ class Player(AudioReader):
         # Save the new buffer
         self._play_callback_buffer = buf
 
+    def write(self, buffer: bytes):
+        self._wrote_any_data = True
+        super().write(buffer)
+
     def start(self):
         """
         Start the audio playback stream and the data extractor.
@@ -133,6 +137,7 @@ class Player(AudioReader):
         self._chunk_accumulator = bytearray()
         self._play_callback_buffer = bytearray()
         self._playback_finished = False
+        self._wrote_any_data = False
 
         # Create and start the audio output stream
         self._stream = sd.OutputStream(
@@ -156,9 +161,13 @@ class Player(AudioReader):
         # Stop parent processing
         super().stop()
 
-        # Wait until the queue is drained and all buffered audio is played
-        while not self._play_queue.empty() or len(self._play_callback_buffer) > 0 or not self._playback_finished:
-            time.sleep(0.1)  # Wait 100ms
+        # Nothing was ever written, so nothing will ever set _playback_finished
+        # (only onData, driven by the ffmpeg thread WRITE starts, does that) -
+        # waiting here would hang forever on an empty stream.
+        if self._wrote_any_data:
+            # Wait until the queue is drained and all buffered audio is played
+            while not self._play_queue.empty() or len(self._play_callback_buffer) > 0 or not self._playback_finished:
+                time.sleep(0.1)  # Wait 100ms
 
         # Stop the audio stream if it exists
         if self._stream:
