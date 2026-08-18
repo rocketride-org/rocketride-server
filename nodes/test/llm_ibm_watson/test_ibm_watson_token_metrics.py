@@ -127,3 +127,13 @@ def test_no_usage_key_is_a_no_op():
 
     assert chat._chat('q') == 'hi'
     assert _counters() == {}
+
+
+def test_a_corrupt_usage_count_never_costs_the_answer():
+    """Metering is best-effort: the caller is a retry loop that would read a raise
+    as a provider error, losing a response the user already paid for.
+    """
+    chat = _make_chat(_response({'prompt_tokens': 'n/a', 'completion_tokens': 5}))
+
+    assert chat._chat('q') == 'hi'
+    assert _counters() == {}

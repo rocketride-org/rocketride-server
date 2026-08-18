@@ -115,3 +115,11 @@ def test_no_usage_metadata_is_a_no_op():
 
     assert chat._chat('q') == 'answer'
     assert _counters() == {}
+
+
+def test_a_corrupt_usage_count_never_costs_the_answer():
+    """Metering is best-effort: a raise here would lose a response already paid for."""
+    chat = _make_chat('answer', {'input_tokens': 'n/a', 'output_tokens': 5})
+
+    assert chat._chat('q') == 'answer'
+    assert _counters() == {}

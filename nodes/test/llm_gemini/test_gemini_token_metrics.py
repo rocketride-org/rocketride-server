@@ -152,3 +152,13 @@ def test_a_cache_larger_than_the_prompt_never_reports_negative_input():
     # Clamped at zero: a negative count would corrupt the billing rollup.
     assert 'llm_input_tokens' not in _counters()
     assert _counters()['llm_cache_read_tokens'] == 140
+
+
+def test_a_corrupt_usage_count_never_costs_the_answer():
+    """Metering is best-effort: the caller is a retry loop that would read a raise
+    as a provider error, losing a response the user already paid for.
+    """
+    chat = _make_chat(_Response(_Usage(prompt='n/a', candidates=5)))
+
+    assert chat._chat('q') == 'hi'
+    assert _counters() == {}

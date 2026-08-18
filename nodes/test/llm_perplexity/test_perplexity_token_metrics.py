@@ -152,3 +152,13 @@ def test_a_turn_that_never_answers_meters_nothing():
         chat.chat(_FakeQuestion())
 
     assert _counters() == {}
+
+
+def test_a_corrupt_usage_count_never_costs_the_answer():
+    """The retry loop reads any raise as a provider error: a metering failure would
+    turn a paid, successful response into 'Perplexity API error' for the user.
+    """
+    chat = _make_chat({'input_tokens': 'n/a', 'output_tokens': 5})
+
+    assert chat.chat(_FakeQuestion()).getText() == 'answer'
+    assert _counters() == {}

@@ -241,6 +241,21 @@ def is_usage_flag_rejection(e: Exception) -> bool:
     return isinstance(status, int) and 400 <= status < 500 and status not in (401, 403, 408, 429)
 
 
+def debug_usage_failure(exc: BaseException) -> None:
+    """Leave an operational trace for a metering failure without ever raising.
+
+    Every usage read is best-effort: accounting must not cost the user the answer they
+    already paid for. Shared so the drivers that report from their own call site
+    (they override the ``ChatBase`` seam and never reach the Adapter) fail the same way.
+    """
+    try:
+        from rocketlib import debug
+
+        debug(f'LLM token reporting failed: {type(exc).__name__}')
+    except Exception:
+        pass
+
+
 def report_llm_tokens(
     input_tokens: int = 0,
     output_tokens: int = 0,
@@ -284,12 +299,7 @@ def report_llm_tokens(
         _record_usage({'input': it, 'output': ot, 'cache_read': cr, 'cache_creation': cc, 'model': model})
     except Exception as exc:
         # Best-effort accounting: keep the chat turn alive, but leave an operational trace.
-        try:
-            from rocketlib import debug
-
-            debug(f'LLM token reporting failed: {type(exc).__name__}')
-        except Exception:
-            pass
+        debug_usage_failure(exc)
 
 
 def aggregate_usage(calls: Optional[list] = None) -> Optional[dict]:
@@ -337,8 +347,15 @@ def report_usage_metadata(usage: Any, llm: Any) -> None:
     """
     if not isinstance(usage, dict):
         return
-    model = getattr(llm, 'model', None) or getattr(llm, 'model_name', '') or ''
-    fresh, out, cr, cc = _split_input_cache(usage)
+    # Best-effort like report_llm_tokens itself: the split runs before that guard, so a
+    # provider answering a non-numeric count would otherwise turn a paid, successful
+    # response into a failed turn (a retry loop reads the raise as a provider error).
+    try:
+        model = getattr(llm, 'model', None) or getattr(llm, 'model_name', '') or ''
+        fresh, out, cr, cc = _split_input_cache(usage)
+    except Exception as exc:
+        debug_usage_failure(exc)
+        return
     report_llm_tokens(fresh, out, model=str(model), cache_read_tokens=cr, cache_creation_tokens=cc)
 
 

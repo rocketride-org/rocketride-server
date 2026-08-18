@@ -24,7 +24,7 @@
 from typing import Any, Dict
 from ai.common.chat import ChatBase
 from ai.common.config import Config
-from ai.common.llm_adapter import report_llm_tokens
+from ai.common.llm_adapter import debug_usage_failure, report_llm_tokens
 from google import genai
 
 
@@ -44,13 +44,16 @@ def _report_gemini_usage(response: Any, model: str) -> None:
     def _n(field: str) -> int:
         return int(getattr(um, field, 0) or 0)
 
-    cache_read = _n('cached_content_token_count')
-    report_llm_tokens(
-        max(0, _n('prompt_token_count') - cache_read),
-        _n('candidates_token_count') + _n('thoughts_token_count'),
-        model=model,
-        cache_read_tokens=cache_read,
-    )
+    # Best-effort: this runs on a response the user already paid for, and the caller is
+    # a retry loop that would read a raise as a provider error and lose the answer.
+    try:
+        cache_read = _n('cached_content_token_count')
+        fresh_input = max(0, _n('prompt_token_count') - cache_read)
+        output = _n('candidates_token_count') + _n('thoughts_token_count')
+    except Exception as exc:
+        debug_usage_failure(exc)
+        return
+    report_llm_tokens(fresh_input, output, model=model, cache_read_tokens=cache_read)
 
 
 class Chat(ChatBase):

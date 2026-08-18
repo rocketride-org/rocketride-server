@@ -81,7 +81,8 @@ class _Usage:
     def __init__(self, prompt: Optional[int] = 0, completion: Optional[int] = 0) -> None:
         self.prompt_tokens = prompt
         self.completion_tokens = completion
-        self.total_tokens = (prompt or 0) + (completion or 0)
+        # The node never reads this; kept only so the double matches the SDK's shape.
+        self.total_tokens = None
 
 
 class _Response:
@@ -165,4 +166,14 @@ def test_a_turn_that_never_answers_meters_nothing():
     with pytest.raises(Exception):
         chat.chat(_FakeQuestion())
 
+    assert _counters() == {}
+
+
+def test_a_corrupt_usage_count_never_costs_the_answer():
+    """The retry loop reads any raise as a provider error: a metering failure would
+    turn a paid, successful response into 'Mistral API error' for the user.
+    """
+    chat = _make_chat(_Response(_Usage(prompt='n/a', completion=5)))
+
+    assert chat.chat(_FakeQuestion()).getText() == 'answer'
     assert _counters() == {}

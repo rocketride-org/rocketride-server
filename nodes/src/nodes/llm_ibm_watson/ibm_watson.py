@@ -25,7 +25,7 @@ import re
 from typing import Any, Dict
 from ai.common.chat import ChatBase
 from ai.common.config import Config
-from ai.common.llm_adapter import report_llm_tokens
+from ai.common.llm_adapter import debug_usage_failure, report_llm_tokens
 from ibm_watsonx_ai import Credentials
 from ibm_watsonx_ai.foundation_models import ModelInference
 from ibm_watsonx_ai.foundation_models.schema import TextChatParameters
@@ -85,11 +85,15 @@ def _report_watson_usage(response: Any, model: str) -> None:
     usage = response.get('usage') if hasattr(response, 'get') else None
     if not isinstance(usage, dict):
         return
-    report_llm_tokens(
-        int(usage.get('prompt_tokens') or 0),
-        int(usage.get('completion_tokens') or 0),
-        model=model,
-    )
+    # Best-effort: this runs on a response the user already paid for, and the caller is
+    # a retry loop that would read a raise as a provider error and lose the answer.
+    try:
+        prompt_tokens = int(usage.get('prompt_tokens') or 0)
+        completion_tokens = int(usage.get('completion_tokens') or 0)
+    except Exception as exc:
+        debug_usage_failure(exc)
+        return
+    report_llm_tokens(prompt_tokens, completion_tokens, model=model)
 
 
 class Chat(ChatBase):
