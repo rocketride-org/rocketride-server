@@ -198,7 +198,17 @@ TEST_CASE("Location::toString") {
 
     SECTION("file only") {
         Text buff;
+    SECTION("the defaults render the file only") {
+        Text buff;
+        loc.toString(buff);
+        REQUIRE(buff == "Location.hpp:91");
+    }
+
+    SECTION("file only") {
+        Text buff;
         loc.toString(buff, false, true);
+        REQUIRE(buff == "Location.hpp:91");
+    }
         REQUIRE(buff == "Location.hpp:91");
     }
 
