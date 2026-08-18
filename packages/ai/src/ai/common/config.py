@@ -207,8 +207,14 @@ class Config:
         userConfig = overlay_top_level(profile)
         config = merge(userConfig, defaultConfig)
 
-        # Output the computed configuration
-        return config
+        # Output the computed configuration. Array/object values arrive from
+        # the engine as IJson, not list/dict (see #1839 defect 2), so a node
+        # that does isinstance(value, list) on its own declared field falls
+        # through to its default and silently ignores what was configured.
+        # IJson.toDict recursively normalizes to native list/dict and is a
+        # no-op on values that are already native, so this is safe to apply
+        # unconditionally rather than pushing the conversion onto every node.
+        return IJson.toDict(config)
 
     @staticmethod
     def getProviderConfig(providerConfig: Dict[str, any]):
