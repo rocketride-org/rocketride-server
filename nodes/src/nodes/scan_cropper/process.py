@@ -36,6 +36,8 @@ successful detection, in a module that by design cannot import numpy to work aro
 region dicts are built with explicit casts rather than by handing values through.
 """
 
+import math
+
 from ai.common.opencv import cv2
 import numpy as np
 from rocketlib import debug, warning
@@ -83,8 +85,14 @@ def _number(config: dict, key: str, default, cast):
     raw = config.get(key, default)
     try:
         value = cast(raw)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
+        # OverflowError is not a ValueError: `int(float('inf'))` raises it.
         warning(f'scan_cropper: config {key}={raw!r} is not a number; using {default}')
+        return default
+    if not math.isfinite(value):
+        # Clamping cannot rescue these: every comparison against nan is false, so it would
+        # travel on into DetectParams and turn each threshold that reads it into a no-op.
+        warning(f'scan_cropper: config {key}={raw!r} is not a finite number; using {default}')
         return default
     low, high = _RANGES[key]
     return cast(max(low, min(high, value)))
