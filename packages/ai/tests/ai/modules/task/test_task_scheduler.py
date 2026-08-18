@@ -33,6 +33,8 @@ of the backend (covered by test_deployment_backend) or dispatch (covered by
 cmd/task tests).
 """
 
+import asyncio
+import time
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
@@ -296,3 +298,202 @@ class TestOverlapGuard:
         scheduler._server._task_control['tk_manual'] = running
         scheduler.register_manual_run('team-1', 'proj-1', 'src-1', 'tk_manual')
         assert scheduler.is_run_active('team-1', 'proj-1', 'src-1')
+
+
+# ============================================================================
+# Skip visibility (issue #1838) — a non-terminating source closes the
+# overlap guard forever, so the schedule stops firing while still reporting
+# itself active. These pin the added consecutive-skip counter and its
+# threshold warnings; the guard's own skip/dispatch decision is untouched
+# and stays covered by TestOverlapGuard/TestStartRun above.
+# ============================================================================
+
+
+class TestSkipVisibility:
+    KEY = ('team-1', 'proj-1', 'src-1')
+
+    def test_sync_drops_skip_counts_when_disabled(self, scheduler):
+        """Disabling/removing a deployment drops its skip counts, not just its schedule entries."""
+        scheduler.sync('org-1', _dep())
+        scheduler._skip_counts[self.KEY] = 5
+
+        scheduler.sync('org-1', _dep(state='disabled', schedules={}))
+
+        assert self.KEY not in scheduler._skip_counts
+
+    @pytest.mark.parametrize(
+        'remaining_schedules',
+        [
+            pytest.param({'src-2': {'cron': '* * * * *', 'paused': False}}, id='removed'),
+            pytest.param(
+                {
+                    'src-1': {'cron': '* * * * *', 'paused': True},
+                    'src-2': {'cron': '* * * * *', 'paused': False},
+                },
+                id='paused',
+            ),
+        ],
+    )
+    def test_sync_prunes_only_the_affected_sources_skip_count(self, scheduler, remaining_schedules):
+        """Removing or pausing one source prunes only its own skip count - a sibling source stays untouched."""
+        scheduler.sync(
+            'org-1',
+            _dep(
+                schedules={
+                    'src-1': {'cron': '* * * * *', 'paused': False},
+                    'src-2': {'cron': '* * * * *', 'paused': False},
+                }
+            ),
+        )
+        key1 = ('team-1', 'proj-1', 'src-1')
+        key2 = ('team-1', 'proj-1', 'src-2')
+        scheduler._skip_counts[key1] = 5
+        scheduler._skip_counts[key2] = 7
+
+        scheduler.sync('org-1', _dep(schedules=remaining_schedules))
+
+        assert key1 not in scheduler._skip_counts
+        assert scheduler._skip_counts[key2] == 7  # the blanket-wipe failure mode this guards against
+
+    @pytest.mark.parametrize('threshold', sched_mod._SKIP_WARN_THRESHOLDS)
+    def test_warns_at_threshold_not_before(self, scheduler, monkeypatch, threshold):
+        """A warning fires exactly at each configured threshold, never before it."""
+        warn = MagicMock()
+        monkeypatch.setattr(sched_mod, 'warning', warn)
+
+        # Seed one skip short of the threshold directly, rather than looping
+        # _note_skip from zero - a loop would cross any SMALLER threshold on
+        # the way (e.g. 3, on the way to 10), firing a warning that has
+        # nothing to do with the one under test here.
+        scheduler._skip_counts[self.KEY] = threshold - 2
+
+        scheduler._note_skip(self.KEY)  # count == threshold - 1
+        warn.assert_not_called()
+
+        scheduler._note_skip(self.KEY)  # count == threshold
+        warn.assert_called_once()
+        message = warn.call_args.args[0]
+        assert 'src-1' in message
+        assert str(threshold) in message
+
+    def test_no_repeat_warning_between_thresholds(self, scheduler, monkeypatch):
+        """No warning repeats on every skip between two thresholds."""
+        warn = MagicMock()
+        monkeypatch.setattr(sched_mod, 'warning', warn)
+
+        for _ in range(9):  # consecutive skips 1-9; next threshold is 10
+            scheduler._note_skip(self.KEY)
+        assert warn.call_count == 1  # only the 3rd skip warned
+
+    def test_dispatch_resets_the_counter(self, scheduler, monkeypatch):
+        """Resetting the counter (as a dispatch does) breaks a skip streak."""
+        warn = MagicMock()
+        monkeypatch.setattr(sched_mod, 'warning', warn)
+
+        scheduler._note_skip(self.KEY)
+        scheduler._note_skip(self.KEY)
+        # Mirrors the tick loop's reset line exactly: a tick that dispatches
+        # clears the counter before the next skip streak can accumulate.
+        scheduler._skip_counts.pop(self.KEY, None)
+
+        scheduler._note_skip(self.KEY)
+        scheduler._note_skip(self.KEY)
+        warn.assert_not_called()  # only 2 consecutive skips since the reset
+
+    @staticmethod
+    async def _run_one_tick(scheduler, monkeypatch):
+        """
+        Drive _run() itself through exactly one batch of due entries, with
+        no real waiting: _run()'s tick-processing is fully synchronous up to
+        its trailing `await asyncio.sleep(delay)`, so patching that one call
+        to raise immediately stops the loop right after the batch - no
+        restructuring of _run(), no real elapsed time, nothing timing-
+        dependent to flake.
+        """
+
+        async def _stop(_delay):
+            raise asyncio.CancelledError
+
+        monkeypatch.setattr(sched_mod.asyncio, 'sleep', _stop)
+        with pytest.raises(asyncio.CancelledError):
+            await scheduler._run()
+
+    @pytest.mark.asyncio
+    async def test_run_loop_increments_skip_count_on_skip(self, scheduler, account_stub, dispatch, monkeypatch):
+        """
+        Exercises the _note_skip call added inside _run() itself, not a
+        reimplementation of it.
+        """
+        entry = _entry(scheduler)
+        entry.next_run = time.time() - 1  # due now, no real wait
+
+        running = MagicMock()
+        running.task.is_task_complete.return_value = False
+        scheduler._active_tokens[entry.key] = 'tk_running'
+        scheduler._server._task_control['tk_running'] = running
+
+        await self._run_one_tick(scheduler, monkeypatch)
+
+        assert scheduler._skip_counts[entry.key] == 1
+        # The count alone doesn't prove a skip caused it. dispatch not being
+        # awaited plus _active_tokens left untouched (the dispatch branch's
+        # own distinguishing side effect, `_active_tokens[key] = _DISPATCHING`)
+        # together rule out the dispatch branch having run at all.
+        dispatch.assert_not_awaited()
+        assert scheduler._active_tokens[entry.key] == 'tk_running'
+
+    @pytest.mark.asyncio
+    async def test_run_loop_clears_skip_count_on_dispatch(self, scheduler, account_stub, dispatch, monkeypatch):
+        """
+        Exercises the reset pop added inside _run() itself, not a
+        reimplementation of it.
+        """
+        entry = _entry(scheduler)
+        entry.next_run = time.time() - 1  # due now, no real wait
+        scheduler._skip_counts[entry.key] = 5  # a prior skip streak
+
+        await self._run_one_tick(scheduler, monkeypatch)
+
+        assert entry.key not in scheduler._skip_counts
+        # Let the dispatch task this tick created finish before the test ends.
+        await asyncio.gather(*scheduler._inflight_starts, return_exceptions=True)
+        # The count being gone isn't enough on its own - a change that cleared
+        # counters without dispatching would pass that alone. Pin that a
+        # dispatch is what happened, not merely that the count is absent.
+        dispatch.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_skip_and_dispatch_decisions_are_unchanged(self, scheduler, account_stub, dispatch):
+        """
+        The fix must be purely additive: the same ticks skip and the same
+        ticks dispatch, with or without it. This drives the pre-existing
+        tick-loop decision (_is_previous_run_active -> skip, else
+        _start_run -> dispatch) over a short sequence and pins the exact
+        outcome. It references no symbol this change added, so it must
+        pass against unmodified source too — that is what proves additive.
+        """
+        entry = _entry(scheduler)
+        decisions = []
+
+        async def _tick():
+            if scheduler._is_previous_run_active(entry.key):
+                decisions.append('skip')
+            else:
+                await scheduler._start_run(entry)
+                decisions.append('dispatch')
+
+        await _tick()  # nothing active yet -> dispatch
+
+        running = MagicMock()
+        running.task.is_task_complete.return_value = False
+        scheduler._server._task_control['tk_dispatched'] = running
+
+        await _tick()  # previous run still going -> skip
+        await _tick()  # still going -> skip
+
+        running.task.is_task_complete.return_value = True
+
+        await _tick()  # previous run finished -> guard reopens -> dispatch
+
+        assert decisions == ['dispatch', 'skip', 'skip', 'dispatch']
+        assert dispatch.await_count == 2
