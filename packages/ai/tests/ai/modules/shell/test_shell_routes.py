@@ -289,3 +289,17 @@ def test_add_route_rejects_duplicate_method_within_single_call(web_server):
     # repeated — it must be rejected within a single add_route() call.
     with pytest.raises(ValueError, match='GET /dupe'):
         web_server.add_route('/dupe', _handler, ['GET', 'get'])
+
+
+def test_add_route_registry_unchanged_when_router_rejects(web_server, monkeypatch):
+    # If FastAPI rejects the registration itself, the pairs must not be
+    # recorded — a retry with the same route has to remain possible.
+    def _boom(*args, **kwargs):
+        raise RuntimeError('router rejected')
+
+    monkeypatch.setattr(web_server.app.router, 'add_api_route', _boom)
+    with pytest.raises(RuntimeError, match='router rejected'):
+        web_server.add_route('/rejected', _handler, ['GET'])
+
+    monkeypatch.undo()
+    web_server.add_route('/rejected', _handler, ['GET'])

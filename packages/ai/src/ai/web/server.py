@@ -923,10 +923,12 @@ class WebServer:
                 raise ValueError(f'Route already registered: {method.upper()} {path}')
             pending_routes.add(route_key)
 
-        self._registered_routes.update(pending_routes)
-
         # Add the route to the FastAPI application's router
         self.app.router.add_api_route(path, routeHandler, methods=methods, deprecated=deprecated)
+
+        # Record the pairs only once the router has accepted them, so a
+        # rejected registration stays retryable.
+        self._registered_routes.update(pending_routes)
 
         # Reset the OpenAPI schema to reflect the new route in documentation
         self.app.openapi_schema = None
