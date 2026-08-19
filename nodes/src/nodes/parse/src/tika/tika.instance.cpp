@@ -23,6 +23,8 @@
 
 #include <engLib/eng.h>
 
+#include "../parse.hpp"
+
 namespace engine::store::filter::parse::Tika {
 //-----------------------------------------------------------------
 /// @details

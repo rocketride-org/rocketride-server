@@ -23,6 +23,8 @@
 
 #include <engLib/eng.h>
 
+#include "parse.hpp"
+
 namespace engine::store::filter::parse {
 IFilterInstance::IFilterInstance(const FactoryArgs &args)
     : Parent(args),
