@@ -69,7 +69,7 @@ class ParseFilterTest : public GenericParseFilterTest {
 public:
     ParseFilterTest()
         : GenericParseFilterTest(
-              {engine::store::filter::parse::Type, "response"}) {}
+              {"parse"_itv, "response"}) {}
 };
 
 /**
@@ -79,7 +79,7 @@ class ParseFilterTestWithOCR : public GenericParseFilterTest {
 public:
     ParseFilterTestWithOCR()
         : GenericParseFilterTest(
-              {engine::store::filter::parse::Type, "ocr", "response"}) {}
+              {"parse"_itv, "ocr", "response"}) {}
 };
 
 TEST_CASE("store::parse") {
