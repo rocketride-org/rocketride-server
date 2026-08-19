@@ -25,4 +25,22 @@
     "**/downloads": true,
     "**/node_modules": true
   }
+  // Enable java settings if needed
+  // "java.configuration.runtimes": [
+  //   {
+  //     "name": "JavaSE-17",
+  //     "path": "<project-full-path>/build/java/jdk",
+  //     "default": true
+  //   }
+  // ],
+  // "java.configuration.updateBuildConfiguration": "automatic",
+  // "java.jdt.ls.java.home": "<project-full-path>/build/java/jdk",
+  // "java.import.exclusions": [
+  //   "**/node_modules/**",
+  //   "**/.metadata/**",
+  //   "**/archetype-resources/**",
+  //   "**/META-INF/maven/**",
+  //   "**/build/**",
+  //   "**/dist/**"
+  // ]
 }

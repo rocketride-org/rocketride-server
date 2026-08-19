@@ -3,20 +3,23 @@
 <project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
 	<modelVersion>4.0.0</modelVersion>
 
-	<groupId>com.aparavi</groupId>
-	<artifactId>dbgconn</artifactId>
+	<groupId>com.rocketride</groupId>
+	<artifactId>rocketride-dbgconn</artifactId>
 	<version>2.0</version>
 
-	<name>aparavi</name>
-	<url>https://www.aparavi.com/</url>
+	<name>rocketride</name>
+	<url>https://www.rocketride.com/</url>
 
 	<properties>
 		<project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
 		<maven.compiler.release>13</maven.compiler.release>
+		<rocketride.build.dir>${project.basedir}/target</rocketride.build.dir>
 	</properties>
 
 
 	<build>
+		<directory>${rocketride.build.dir}</directory>
+
 		<pluginManagement>
 			<!-- lock down plugins versions to avoid using Maven defaults (may be moved to parent pom) -->
 			<plugins>

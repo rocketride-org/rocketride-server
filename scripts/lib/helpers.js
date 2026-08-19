@@ -37,10 +37,10 @@ function parallel(actions, title = 'Parallel tasks') {
  * parallel([
  *   parallel(['nodes:sync', 'ai:sync'], 'sync'),
  *   sequence([
- *     'tika:sync-source',
- *     'tika:build-jar',
- *     'tika:sync'
- *   ], 'tika:pipeline')
+ *     'parse:sync-source',
+ *     'parse:build-jar',
+ *     'parse:sync'
+ *   ], 'parse:pipeline')
  * ])
  */
 function sequence(steps, title = 'Sequential tasks') {
