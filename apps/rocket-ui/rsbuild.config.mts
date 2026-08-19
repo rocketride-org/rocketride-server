@@ -99,6 +99,11 @@ export default defineConfig(() => {
 						test: /\.md$/,
 						type: 'asset/source',
 					},
+					// Treat .pipe files as JSON so pipeline definitions can be imported.
+					{
+						test: /\.pipe$/,
+						type: 'json',
+					},
 				);
 
 				config.plugins ??= [];
@@ -125,12 +130,12 @@ export default defineConfig(() => {
 			// Honor the builder's overlay build root (saas mode) so the bundle
 			// lands where the copy step reads it; standalone falls back to the
 			// repo-relative build dir.
-			distPath: { root: path.join(process.env.ROCKETRIDE_BUILD_ROOT ?? '../../build', 'apps', 'rocket-ui') },
+			distPath: { root: path.join(process.env.ROCKETRIDE_BUILD_ROOT ?? '../../build', 'apps', pkg.appManifest.id) },
 			// 'auto' derives the public path from remoteEntry.js's load URL at runtime,
 			// so chunks resolve correctly regardless of which server/path hosts the remote.
 			assetPrefix: 'auto',
 			cleanDistPath: true,
-			sourceMap: { js: 'source-map', css: true },
+			sourceMap: { js: 'source-map', css: true } as const,
 		},
 	};
 });

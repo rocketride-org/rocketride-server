@@ -277,6 +277,7 @@ class Task(DAPBase):
         org_id: str = '',
         env: Dict[str, str] = None,
         run_kind: str = 'dev',
+        owner_kind: str = '',
         trigger: str = 'manual',
         **kwargs,
     ) -> None:
@@ -428,6 +429,10 @@ class Task(DAPBase):
             raise ValueError(f'invalid trigger: {trigger!r}')
         self._run_log: Optional[RunLogWriter] = None
         self._run_kind: str = run_kind
+        # Owner scope: 'user' (interactive .use OR a personal @me deploy) vs
+        # 'team' (a @team deploy). Decides where the run's working files and
+        # run-log live — user tree vs team tree — independently of run_kind.
+        self._owner_kind: str = owner_kind or ('team' if run_kind == 'deploy' else 'user')
         self._run_trigger: str = trigger
 
         # Subprocess debugging flag
@@ -503,7 +508,13 @@ class Task(DAPBase):
             try:
                 from ai.account import account
 
-                dsn = await account.resolve_db_dsn(self.client_id)
+                # Tenant = the ORG (fixes the two holes of user keying: a
+                # team deploy run has client_id='' and would die at the
+                # resolver's empty-tenant guard, and an org switch would
+                # silently re-point a user's DB nodes at a different
+                # database). client_id remains the OSS/single-user fallback
+                # where no org exists.
+                dsn = await account.resolve_db_dsn(self.org_id or self.client_id)
                 subprocess_env['ROCKETRIDE_DB_DSN'] = dsn
             except NotImplementedError:
                 # Broker env not configured (open-source default) — the
@@ -620,9 +631,13 @@ class Task(DAPBase):
         """
         from ai.account.file_store import validate_storage_root
 
-        if self._run_kind == 'deploy':
+        # A TEAM-owned run (a @team deploy) anchors in the team tree so
+        # teammates can watch/replay; a USER-owned run (an interactive .use or
+        # a personal @me deploy) anchors in the owner's user tree — private and
+        # never colliding with the team's @team run of the same project.
+        if self._owner_kind == 'team':
             if not self.team_id:
-                raise ValueError('deploy runs require a team_id for their storage anchor')
+                raise ValueError('team-owned runs require a team_id for their storage anchor')
             return validate_storage_root(f'teams/{self.team_id}/files/tasks/{self.project_id}')
         # Anonymous dev runs (client_id='' — OSS/standalone launches) carry
         # NO anchor instead of failing the launch: identity.userId rides
@@ -2183,15 +2198,19 @@ class Task(DAPBase):
                 from ai.account import RequestContext, Store
 
                 # The store view anchors at the run's OWNER namespace: the
-                # TEAM for deploy runs (which carry no user identity — every
-                # path they write is '@/Team/=<id>/'-prefixed anyway), the
-                # user for dev runs. An internal-context store REQUIRES a
-                # concrete anchor — an empty one raises, and the except below
-                # would silently disable the run log for the whole run.
+                # TEAM for team-owned (@team) deploys — which carry no user
+                # identity, every path they write is '@/Team/=<id>/'-prefixed
+                # anyway — and the USER for user-owned runs (an interactive
+                # .use or a personal @me deploy: private, so its continuum
+                # must never land in the billing team's tree). An
+                # internal-context store REQUIRES a concrete anchor — an empty
+                # one raises, and the except below would silently disable the
+                # run log for the whole run.
+                owner_is_team = self._owner_kind == 'team'
                 self._run_log = RunLogWriter(
                     Store.file_store(
                         RequestContext.internal('run-log'),
-                        client_id=self.team_id if self._run_kind == 'deploy' else self.client_id,
+                        client_id=self.team_id if owner_is_team else self.client_id,
                     ),
                     self.client_id,
                     self.project_id,
@@ -2199,11 +2218,17 @@ class Task(DAPBase):
                     self._run_kind,
                     self.stamp_log_event,
                     self.raise_log_seq_floor,
-                    # Deploy runs write the TEAM continuum (teams are the
+                    # team_id is the run's real BILLING team (provenance for
+                    # the control record) for EVERY owner kind; owner_kind
+                    # decides where the logs physically live. Team-owned
+                    # deploys write the TEAM continuum (teams are the
                     # environments — teammates watch/replay the same stream);
-                    # dev runs stay in the owner's tree. The writer's scope
-                    # helper turns this into the '@/Team/=<id>/' store prefix.
-                    team_id=self.team_id if self._run_kind == 'deploy' else '',
+                    # user-owned (@me) runs stay private in the owner's tree.
+                    # Passing team_id here for an @me run keeps its billing
+                    # provenance without leaking its logs into the team tree.
+                    team_id=self.team_id,
+                    owner_kind=self._owner_kind,
+                    org_id=self.org_id,
                     debug=self.debug_message,
                 )
                 await self._run_log.open(

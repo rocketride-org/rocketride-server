@@ -52,7 +52,7 @@ async def test_account_handler_delegates_to_account_handle_account(monkeypatch, 
 
 
 # ---------------------------------------------------------------------------
-# AppCommands — five delegation handlers
+# AppCommands — two delegation handlers
 # ---------------------------------------------------------------------------
 
 
@@ -60,15 +60,12 @@ async def test_account_handler_delegates_to_account_handle_account(monkeypatch, 
 @pytest.mark.parametrize(
     'handler_name',
     [
-        'on_rrext_app_developer',
-        'on_rrext_app_submission',
-        'on_rrext_app_catalog',
-        'on_rrext_app_admin',
-        'on_rrext_app_pricing',
+        'on_rrext_app',
+        'on_rrext_deploy_app',
     ],
 )
 async def test_app_handler_delegates_to_account_handle_app(monkeypatch, handler_name):
-    """Every rrext_app_* handler must call account.handle_app(self, request)."""
+    """Every app-family handler must call account.handle_app(self, request)."""
     fake_handler = AsyncMock(return_value={'type': 'response', 'body': {'ok': True}})
     monkeypatch.setattr(cmd_app.account, 'handle_app', fake_handler)
 

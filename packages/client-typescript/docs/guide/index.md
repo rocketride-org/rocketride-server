@@ -298,17 +298,72 @@ const downloadUrl = await client.fsGetUrl('uploads/video.mp4', undefined, 'my vi
 
 ### App publish ladder
 
-Typed wrappers over `rrext_app_deploy` — the publish ladder for RocketRide apps.
-**Publish** snapshots an immutable version (never activates anything); **Deploy**
-pins a rung (`@user`, `@team/<name>`, `@org`) to a version — first publish,
-update, promote, and rollback are all this one verb.
+Typed wrappers over `rrext_deploy_app` — the publish ladder for RocketRide apps.
+**Deploy** copies code to the server as the next immutable registry version
+(`deploy.add`); a deployment carries the review lifecycle in its own `state`
+(`private` → `submit` → `ready` | `rejected`). **Publish** binds a deployment
+to an audience — `@user`, `@team/<name>`, or `@public` — as a pure pointer;
+repointing it covers first publish, update, promote, and rollback alike.
+
+The review state lives on the **deployment**, not the binding: an app deploys
+`private` (internal-eligible), the developer `submit`s it for review, an admin
+approves (`ready`) or rejects (`rejected`). A `@public` binding may only point
+at a `ready` deployment; `@user`/`@team` bindings accept any internal-eligible
+(not `failed`) deployment. So there is no separate "publish-and-wait" — public
+listing is: submit → approve → repoint the public pointer.
+
+App ids are partitioned by the caller org's **developer id**: every app is
+`<developerId>.<name>` (globally unique), so an org can only deploy/publish
+ids inside its own namespace — the platform holds `rocketride`. Deploying or
+publishing an app requires the org to have claimed a developer id.
 
 | Method | Signature | Description |
 | ------ | --------- | ----------- |
-| `appPublish` | `appPublish({appId, version, bundle, message?, moduleId?, name?}): Promise<RailEntry>` | Publish an immutable version to the org registry (single-file `remoteEntry.js` bundle; commit-style `message` shows on the version card). |
-| `appVersions` | `appVersions(appId): Promise<RailEntry[]>` | The version rail, newest first; each entry carries `rungs` naming the rungs currently pinned to it. |
-| `appDeploy` | `appDeploy(appId, registryVersion, target): Promise<{deployment, rung}>` | Pin a rung to a version. Personal deploys resolve into your own manifest immediately. |
-| `appWhere` | `appWhere(appId): Promise<Pin[]>` | The reverse index: `{rung, handle, version, appVersion, state, deployedAt}` per rung. |
+| `deploy.add` | `deploy.add({kind?, pipeline?, data?, metadata?, comment?, deployTo?}): Promise<PublishResult>` | The ONE rail door: deploy any kind of object as the next immutable registry version. `kind:'pipe'` (default) takes a `pipeline` dict; `kind:'app'` takes ONE `data` zip of the app's SOURCE — the server performs the build (client-produced binaries are never trusted); the zip is retained and unpacked at receipt, born deployment-state `private`. The app id must be inside your developer namespace. |
+| `listDeployments` | `listDeployments(appId): Promise<RailEntry[]>` | The version rail, newest first — the developer org sees its FULL rail (published or not), other callers only their visible versions. Each entry carries its deployment `state`, its `buildStatus` ('ok' = servable), and the `rungs` naming the audiences bound to it. |
+| `submitApp` | `submitApp(appId, registryVersion): Promise<{artifact}>` | Submit a deployed version for store review — flips the deployment `private` → `submit` (it enters the admin queue). Developer-org + namespace gated. |
+| `withdrawApp` | `withdrawApp(appId, registryVersion): Promise<{artifact}>` | Withdraw a pending review — the developer's own cancel: flips the deployment `submit` → `private` (leaves the admin queue, back to draft; history records `withdrawn`). Only a version in `submit` withdraws. Developer-org + namespace gated. |
+| `replyApp` | `replyApp(appId, message, registryVersion?): Promise<{replied, appId}>` | Append a developer message to the app's review thread — the developer half of the reviewer conversation. Rides `deployment_history` as a `reply` row (side `'developer'`), the same stream `deploy.history()` reads. Developer-org + namespace gated. |
+| `buildLog` | `buildLog(appId, registryVersion): Promise<{appId, version, log}>` | One version's durable server build log — the full phase-by-phase output the build worker stores beside the version's artifacts (no error text rides the rail rows). Long logs serve their tail; `''` = no log. Developer-org gated. |
+| `publishApp` | `publishApp(appId, registryVersion, target): Promise<{publish}>` | Bind a deployment to '@user', '@team/<name>', or '@public'. The binding is a pure pointer born 'enabled'. `@public` requires the deployment be `ready` (approved); `@user`/`@team` accept any non-`failed` deployment. Pinning ANOTHER org's public app to '@user'/'@team' is the version selector and is allowed; publishing your own app requires the id to be in your namespace. |
+| `whereApp` | `whereApp(appId): Promise<Pin[]>` | The reverse index: `{rung, handle, version, appVersion, state, deployedAt}` per audience — `state` is the bound DEPLOYMENT's review state. |
+
+Serving needs no verb: a version's bundle loads from the stable
+`/apps/<appId>/v<N>/remoteEntry.js` URL constructed from its registry
+version number, with entitlement enforced by the serve route on every
+request (registry ints ONLY — semver is display).
+
+### App marketplace + developer verbs
+
+Two raw DAP commands carry this surface (call via
+`client.call('<command>', { subcommand, ... })`):
+
+- **`rrext_deploy_app`** — the developer-account + review verbs (claiming a
+  developerId is a deploy PREREQUISITE, not a marketplace action): the
+  `developer_*` family, `submit`, and `register_dev`.
+- **`rrext_app`** — the pure marketplace: browse (`list`/`get`/`list_mine`),
+  install (`desktop_add`/`desktop_remove`), admin review (`admin_*`), and
+  pricing (`pricing_*`).
+
+Grouped families (the `developer_*`/`submit`/`register_dev` rows are on
+`rrext_deploy_app`; the rest on `rrext_app`):
+
+| Subcommand family | Subcommands | Guard | Purpose |
+| ----------------- | ----------- | ----- | ------- |
+| developer_* | `developer_register` · `developer_stripe` · `developer_dashboard` · `developer_status` | org.admin (register) | Claim the org's developer id slug + Stripe Connect onboarding. |
+| submit | `submit` · `withdraw` · `reply` | developer org + namespace | Submit a deployed version for review (flips the DEPLOYMENT `private` → `submit`), cancel a pending review, or append a developer message to the review thread (sugar over `submitApp`/`withdrawApp`/`replyApp`). |
+| register_dev | `register_dev` | self | Per-user live dev overlay (App Builder hot-reload); OSS-capable. |
+| catalog | `list` · `get` · `list_mine` · `desktop_add` · `desktop_remove` | authenticated | Browse reachable apps, the developer's own rail view, and desktop membership. |
+| admin_* | `admin_queue` · `admin_approve` · `admin_reject` · `admin_reply` · `admin_reseed` | sys.admin | Store review over the DEPLOYMENTS: the queue is deployments in `submit`; `admin_approve(appId, version)` flips it `ready`, `admin_reject(appId, version)` flips it `rejected`. |
+| pricing_* | `pricing_list` · `pricing_create` · `pricing_delete` | developer org (owns the app_products row) | Manage Stripe price tiers for a monetized app. |
+
+**Review model.** The review state lives on the DEPLOYMENT (`deployment_artifacts.state`).
+`@user`/`@team` bindings need no approval — they serve any non-`failed`
+deployment at once. Going public is a three-step flow: `submit` (deployment →
+`submit`, enters the admin queue) → `admin_approve` (→ `ready`) → `publishApp
+@public` (point the public binding at the now-`ready` version). A reject flips
+the deployment `rejected`; the developer fixes and deploys a NEW version. The
+store serves only public bindings whose deployment is `ready`.
 
 ### Events
 

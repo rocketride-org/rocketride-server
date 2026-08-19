@@ -229,6 +229,24 @@ class OrgInfo(TypedDict):
     teams: list[TeamInfo]
 
 
+class DevEntry(TypedDict):
+    """
+    One live dev-server registration in an app's ``devEntries`` list.
+
+    The server emits all three keys on every entry ('' / 0 as the unknown
+    fallbacks), so none is optional.
+
+    Attributes:
+        url (str): The dev server's remoteEntry URL (with its cache-buster).
+        session (str): The owning editor's session nonce ('' when unknown).
+        registeredAt (float): Registration time, epoch seconds (0 when unknown).
+    """
+
+    url: str
+    session: str
+    registeredAt: float
+
+
 class AppManifestEntry(TypedDict, total=False):
     """
     A single app entry in the server-provided manifest.
@@ -249,7 +267,13 @@ class AppManifestEntry(TypedDict, total=False):
             ``contributes.configuration`` shape ({title, properties}). Preserved
             through ConnectResult so permission-gated desktop apps (which never
             appear in the public probe) still deliver their settings schema.
-        entry (str): URL to the app's MF remote entry file.
+        entry (str): URL to the app's MF remote entry file — present ONLY
+            for dev-overlay entries (a localhost dev server is not
+            constructible from a number). Published versions carry
+            ``registryVersion`` and clients construct
+            ``/apps/<appId>/v<N>/remoteEntry.js``.
+        registryVersion (int): Registry version number the entry resolves
+            to (the scope-walk winner).
         version (str): Semver version string.
         ownerType (str): Visibility scope — "public", "org", "team", or "user".
         authenticated (bool): Whether the app UI requires auth to render.
@@ -261,6 +285,11 @@ class AppManifestEntry(TypedDict, total=False):
         seats (int): Total seats on the subscription.
         seatsUsed (int): Seats currently occupied in this org.
         features (list[str]): Feature flags enabled by the subscribed plan.
+        dev (bool): True when ``entry`` is a dev-overlay override (live
+            watch build).
+        devEntries (list[DevEntry]): Every live dev-server registration
+            for this app — one per editor session, newest first; ``entry``
+            already carries the newest.
     """
 
     id: str
@@ -271,6 +300,7 @@ class AppManifestEntry(TypedDict, total=False):
     categories: list[str]
     configuration: dict[str, Any]
     entry: str
+    registryVersion: int
     version: str
     ownerType: str
     authenticated: bool
@@ -282,6 +312,8 @@ class AppManifestEntry(TypedDict, total=False):
     seats: int
     seatsUsed: int
     features: list[str]
+    dev: bool
+    devEntries: list[DevEntry]
 
 
 class ConnectResult(TypedDict, total=False):
@@ -302,7 +334,7 @@ class ConnectResult(TypedDict, total=False):
         phoneNumber (str): Primary phone number in E.164 format.
         phoneNumberVerified (bool): True when the phone number has been verified.
         locale (str): BCP-47 locale tag (e.g. "en-US").
-        defaultTeam (str): ID of the team selected as the default context.
+        devTeam (str): The user's DEV team — dev-mode runs bill to it and use its environment layer.
         organization (OrgInfo | None): The organisation the user belongs to, or None.
         apps (list[AppManifestEntry]): Apps on the user's desktop — full manifest entries with subscription status.
         serverVersion (str): Version string of the server that handled the handshake; newer servers only.
@@ -320,7 +352,7 @@ class ConnectResult(TypedDict, total=False):
     phoneNumber: str
     phoneNumberVerified: bool
     locale: str
-    defaultTeam: str
+    devTeam: str
     organization: OrgInfo
     capabilities: list[str]
     serverVersion: str
@@ -344,9 +376,36 @@ class ServerInfoResult(TypedDict, total=False):
             ``['saas']`` for cloud.
         platform (str): Server platform (e.g. ``'linux'``, ``'win32'``, ``'darwin'``).
         apps (list[AppManifestEntry]): Public apps visible without authentication.
+        stripePublishableKey (str): Stripe publishable key (``pk_*``) configured
+            on this server, so clients initialise Stripe Elements with the key
+            matching the server's Stripe account (test vs live) instead of a
+            build-time value. Absent on servers without billing (OSS).
+        endpoints (ServerEndpoints): The server's public addresses, RESOLVED
+            to absolute URLs by :meth:`RocketRideClient.get_server_info` —
+            the server's ``'origin'`` sentinel ("the address you probed me
+            at") is substituted client-side, and the block is manufactured
+            when probing a pre-endpoints server. Consumers always receive
+            both keys and never branch on presence.
     """
 
     version: str
     capabilities: list[str]
     platform: str
     apps: list[AppManifestEntry]
+    stripePublishableKey: str
+    endpoints: 'ServerEndpoints'
+
+
+class ServerEndpoints(TypedDict):
+    """
+    The server's public addresses from the pre-auth probe, resolved.
+
+    Attributes:
+        api (str): Absolute URL clients connect the DAP WebSocket to.
+        ui (str): Absolute URL of the environment's web UI (browser links,
+            OAuth returns). Differs from ``api`` only on split deployments
+            (e.g. a CDN-served UI with a direct API host).
+    """
+
+    api: str
+    ui: str

@@ -1,496 +1,502 @@
 {
-  "name": "rocket-ui",
-  "version": "1.0.0",
-  "private": true,
-  "type": "module",
-  "description": "RocketRide Rocket UI",
-  "keywords": [],
-  "license": "MIT",
-  "author": "",
-  "appManifest": {
-    "id": "rocketride.pipeBuilder",
-    "publisher": "Aparavi Software AG",
-    "name": "Pipeline Builder",
-    "description": "Design, run, and deploy AI pipelines visually.",
-    "readme": "./src/README.md",
-    "icon": "./src/icon.svg",
-    "categories": [
-      "pipelines",
-      "ai"
-    ],
-    "mode": "paywall",
-    "contributes": {
-      "configuration": {
-        "title": "Pipeline Builder",
-        "properties": {
-          "rocketride.pipeBuilder.pipelineRestartBehavior": {
-            "type": "string",
-            "enum": [
-              "auto",
-              "manual",
-              "prompt"
-            ],
-            "enumDescriptions": [
-              "Automatically restart when .pipe changes",
-              "Do not automatically restart",
-              "Prompt to restart when .pipe changes"
-            ],
-            "default": "prompt",
-            "order": 1,
-            "description": "Behavior when a .pipe file changes while the pipeline is running."
-          },
-          "rocketride.pipeBuilder.pipelineTTL": {
-            "type": "integer",
-            "enum": [
-              900,
-              1800,
-              3600,
-              14400,
-              28800,
-              0
-            ],
-            "enumDescriptions": [
-              "15 minutes",
-              "30 minutes",
-              "1 hour",
-              "4 hours",
-              "8 hours",
-              "Run forever or until you stop it"
-            ],
-            "default": 900,
-            "minimum": 0,
-            "order": 2,
-            "description": "Default idle timeout before a running pipeline is shut down."
-          },
-          "rocketride.pipeBuilder.pipelineTraceLevel": {
-            "type": "string",
-            "enum": [
-              "none",
-              "metadata",
-              "summary",
-              "full"
-            ],
-            "default": "full",
-            "order": 3,
-            "description": "Controls tracing verbosity for pipeline execution."
-          },
-          "rocketride.pipeBuilder.taskArguments": {
-            "type": "string",
-            "default": "",
-            "order": 4,
-            "description": "Additional command-line arguments passed to each pipeline task."
-          },
-          "rocketride.pipeBuilder.pipelineDebugOutput": {
-            "type": "boolean",
-            "default": false,
-            "order": 5,
-            "description": "Enable full debug output for pipeline tasks (--trace=debugOut)."
-          }
-        }
-      }
-    },
-    "billing": {
-      "plans": [
-        {
-          "nickname": "Starter",
-          "amountCents": 500,
-          "currency": "usd",
-          "interval": "month",
-          "metadata": {
-            "order": 100,
-            "seats": 1,
-            "features": [
-              "pipelines"
-            ],
-            "description": [
-              "500 tokens/month included",
-              "$0.03/token overage"
-            ],
-            "credits": {
-              "recurring": {
-                "tokens": 500
-              }
-            },
-            "labels": {
-              "tokens": "tokens"
-            }
-          }
-        },
-        {
-          "nickname": "Starter",
-          "amountCents": 6000,
-          "currency": "usd",
-          "interval": "year",
-          "metadata": {
-            "order": 100,
-            "seats": 1,
-            "features": [
-              "pipelines"
-            ],
-            "description": [
-              "500 tokens/month included",
-              "$0.03/token overage"
-            ],
-            "credits": {
-              "recurring": {
-                "tokens": 500
-              }
-            },
-            "labels": {
-              "tokens": "tokens"
-            }
-          }
-        },
-        {
-          "nickname": "Builder",
-          "amountCents": 5000,
-          "currency": "usd",
-          "interval": "month",
-          "metadata": {
-            "order": 200,
-            "seats": 1,
-            "features": [
-              "pipelines"
-            ],
-            "description": [
-              "2,500 tokens/month included",
-              "$0.03/token overage"
-            ],
-            "credits": {
-              "recurring": {
-                "tokens": 2500
-              }
-            },
-            "labels": {
-              "tokens": "tokens"
-            }
-          }
-        },
-        {
-          "nickname": "Builder",
-          "amountCents": 55000,
-          "currency": "usd",
-          "interval": "year",
-          "metadata": {
-            "order": 200,
-            "seats": 1,
-            "features": [
-              "pipelines"
-            ],
-            "description": [
-              "2,500 tokens/month included",
-              "$0.03/token overage",
-              "1 month free",
-              "+2,500 welcome bonus"
-            ],
-            "credits": {
-              "initial": {
-                "tokens": 5000
-              },
-              "recurring": {
-                "tokens": 2500
-              }
-            },
-            "labels": {
-              "tokens": "tokens"
-            }
-          }
-        },
-        {
-          "nickname": "Pro",
-          "amountCents": 25000,
-          "currency": "usd",
-          "interval": "month",
-          "metadata": {
-            "order": 300,
-            "seats": 1,
-            "features": [
-              "pipelines",
-              "priority_support"
-            ],
-            "description": [
-              "15,000 tokens/month included",
-              "$0.03/token overage",
-              "Priority support"
-            ],
-            "credits": {
-              "recurring": {
-                "tokens": 15000
-              }
-            },
-            "labels": {
-              "tokens": "tokens"
-            }
-          }
-        },
-        {
-          "nickname": "Pro",
-          "amountCents": 275000,
-          "currency": "usd",
-          "interval": "year",
-          "metadata": {
-            "order": 300,
-            "seats": 1,
-            "features": [
-              "pipelines",
-              "priority_support"
-            ],
-            "description": [
-              "15,000 tokens/month included",
-              "$0.03/token overage",
-              "Priority support",
-              "1 month free",
-              "+15,000 welcome bonus"
-            ],
-            "credits": {
-              "initial": {
-                "tokens": 30000
-              },
-              "recurring": {
-                "tokens": 15000
-              }
-            },
-            "labels": {
-              "tokens": "tokens"
-            }
-          }
-        },
-        {
-          "nickname": "Team",
-          "amountCents": 75000,
-          "currency": "usd",
-          "interval": "month",
-          "metadata": {
-            "order": 400,
-            "seats": 5,
-            "features": [
-              "pipelines",
-              "priority_support"
-            ],
-            "description": [
-              "30,000 tokens/month included",
-              "$0.03/token overage",
-              "Priority support",
-              "5 seats"
-            ],
-            "credits": {
-              "recurring": {
-                "tokens": 30000
-              }
-            },
-            "labels": {
-              "tokens": "tokens"
-            }
-          }
-        },
-        {
-          "nickname": "Team",
-          "amountCents": 825000,
-          "currency": "usd",
-          "interval": "year",
-          "metadata": {
-            "order": 400,
-            "seats": 5,
-            "features": [
-              "pipelines",
-              "priority_support"
-            ],
-            "description": [
-              "30,000 tokens/month included",
-              "$0.03/token overage",
-              "Priority support",
-              "5 seats",
-              "1 month free",
-              "+30,000 welcome bonus"
-            ],
-            "credits": {
-              "initial": {
-                "tokens": 60000
-              },
-              "recurring": {
-                "tokens": 30000
-              }
-            },
-            "labels": {
-              "tokens": "tokens"
-            }
-          }
-        },
-        {
-          "nickname": "Enterprise",
-          "amountCents": 0,
-          "currency": "usd",
-          "interval": "one_time",
-          "metadata": {
-            "order": 500,
-            "description": [
-              "Negotiated token pricing",
-              "Priority support + SLA",
-              "Dedicated infrastructure",
-              "Custom integrations"
-            ],
-            "displayAmount": "Custom",
-            "action": {
-              "type": "mailto",
-              "url": "sales@rocketride.ai",
-              "subject": "Enterprise pricing inquiry",
-              "label": "Contact us"
-            }
-          }
-        },
-        {
-          "nickname": "Pay-as-you-go",
-          "amountCents": 0,
-          "currency": "usd",
-          "interval": "month",
-          "metadata": {
-            "kind": "promo_base",
-            "order": 550,
-            "seats": 1,
-            "features": [
-              "pipelines"
-            ],
-            "description": [
-              "Promo-code base plan",
-              "No included tokens",
-              "Top up as you go"
-            ],
-            "labels": {
-              "tokens": "tokens"
-            }
-          }
-        },
-        {
-          "nickname": "3,700 tokens",
-          "amountCents": 10000,
-          "currency": "usd",
-          "interval": "one_time",
-          "metadata": {
-            "kind": "topup",
-            "order": 600,
-            "description": [
-              "3,700 tokens",
-              "$0.027/token"
-            ],
-            "credits": {
-              "initial": {
-                "tokens": 3700
-              }
-            },
-            "labels": {
-              "tokens": "tokens"
-            }
-          }
-        },
-        {
-          "nickname": "10,000 tokens",
-          "amountCents": 25000,
-          "currency": "usd",
-          "interval": "one_time",
-          "metadata": {
-            "kind": "topup",
-            "order": 601,
-            "description": [
-              "10,000 tokens",
-              "$0.025/token"
-            ],
-            "credits": {
-              "initial": {
-                "tokens": 10000
-              }
-            },
-            "labels": {
-              "tokens": "tokens"
-            }
-          }
-        },
-        {
-          "nickname": "21,750 tokens",
-          "amountCents": 50000,
-          "currency": "usd",
-          "interval": "one_time",
-          "metadata": {
-            "kind": "topup",
-            "order": 602,
-            "description": [
-              "21,750 tokens",
-              "$0.023/token"
-            ],
-            "credits": {
-              "initial": {
-                "tokens": 21750
-              }
-            },
-            "labels": {
-              "tokens": "tokens"
-            }
-          }
-        }
-      ]
-    }
-  },
-  "scripts": {
-    "build": "pnpm rsbuild build",
-    "build:prod": "pnpm rsbuild build --env-mode production"
-  },
-  "browserslist": [
-    "chrome >= 81",
-    "edge >= 83",
-    "firefox >= 76",
-    "safari >= 13"
-  ],
-  "dependencies": {
-    "@fontsource-variable/figtree": "^5.2.10",
-    "@fontsource/quicksand": "~5.0.18",
-    "@fontsource/roboto": "~5.0.13",
-    "@fontsource/roboto-condensed": "~5.0.17",
-    "@fontsource/ubuntu-mono": "~5.0.20",
-    "@module-federation/rsbuild-plugin": "^2.5.1",
-    "@mui/icons-material": "~6.1.5",
-    "@mui/material": "~6.1.5",
-    "@mui/styles": "~5.16.7",
-    "@mui/x-date-pickers": "~7.18.0",
-    "@xyflow/react": "~12.3.4",
-    "boxicons": "^2.1.4",
-    "chart.js": "^4.4.0",
-    "clsx": "~2.1.1",
-    "i18next": "~23.11.3",
-    "immer": "~9.0.6",
-    "lodash": "~4.17.21",
-    "lucide-react": "~0.460.0",
-    "markdown-to-jsx": "~7.7.16",
-    "moment": "~2.30.1",
-    "posthog-js": "~1.274.1",
-    "react": "^18.2.0",
-    "react-canny": "~0.0.8",
-    "react-dom": "^18.2.0",
-    "react-i18next": "~14.1.1",
-    "react-joyride": "~2.9.3",
-    "react-json-view": "~1.21.3",
-    "react-markdown": "^10.1.0",
-    "react-social-icons": "~6.24.0",
-    "react-syntax-highlighter": "^15.6.6",
-    "react-virtualized-auto-sizer": "~1.0.24",
-    "react-window": "~1.8.10",
-    "rehype-raw": "^7.0.0",
-    "remark-gfm": "^4.0.1",
-    "shared": "file:../shared",
-    "rocketride": "workspace:*",
-    "shell": "file:../../.rocketride/shell/shell.tgz"
-  },
-  "engines": {
-    "node": ">=20.11.0",
-    "npm": ">=10.2.4"
-  },
-  "devDependencies": {
-    "@chromatic-com/storybook": "^1.7.0",
-    "@rsbuild/core": "~2.0.11",
-    "@rsbuild/plugin-react": "~2.0.1",
-    "@rsbuild/plugin-sass": "~1.5.3",
-    "@simbathesailor/use-what-changed": "~2.0.0",
-    "@types/react": "~18.3.31",
-    "@types/react-dom": "~18.3.7",
-    "@types/react-syntax-highlighter": "^15.5.13",
-    "prop-types": "^15.8.1"
-  }
+	"name": "rocket-ui",
+	"version": "1.0.0",
+	"private": true,
+	"description": "RocketRide Rocket UI",
+	"keywords": [],
+	"license": "MIT",
+	"author": "",
+	"appManifest": {
+		"id": "rocketride.pipeBuilder",
+		"projectId": "f648481f-cee8-4edd-95c6-c7bd192457d7",
+		"publisher": "Aparavi Software AG",
+		"name": "Pipeline Builder",
+		"description": "Design, run, and deploy AI pipelines visually.",
+		"readme": "./src/README.md",
+		"icon": "./src/icon.svg",
+		"categories": [
+			"pipelines",
+			"ai"
+		],
+		"mode": "paywall",
+		"contributes": {
+			"configuration": {
+				"title": "Pipeline Builder",
+				"properties": {
+					"rocketride.pipeBuilder.pipelineRestartBehavior": {
+						"type": "string",
+						"enum": [
+							"auto",
+							"manual",
+							"prompt"
+						],
+						"enumDescriptions": [
+							"Automatically restart when .pipe changes",
+							"Do not automatically restart",
+							"Prompt to restart when .pipe changes"
+						],
+						"default": "prompt",
+						"order": 1,
+						"description": "Behavior when a .pipe file changes while the pipeline is running."
+					},
+					"rocketride.pipeBuilder.pipelineTTL": {
+						"type": "integer",
+						"enum": [
+							900,
+							1800,
+							3600,
+							14400,
+							28800,
+							0
+						],
+						"enumDescriptions": [
+							"15 minutes",
+							"30 minutes",
+							"1 hour",
+							"4 hours",
+							"8 hours",
+							"Run forever or until you stop it"
+						],
+						"default": 900,
+						"minimum": 0,
+						"order": 2,
+						"description": "Default idle timeout before a running pipeline is shut down."
+					},
+					"rocketride.pipeBuilder.pipelineTraceLevel": {
+						"type": "string",
+						"enum": [
+							"none",
+							"metadata",
+							"summary",
+							"full"
+						],
+						"default": "full",
+						"order": 3,
+						"description": "Controls tracing verbosity for pipeline execution."
+					},
+					"rocketride.pipeBuilder.taskArguments": {
+						"type": "string",
+						"default": "",
+						"order": 4,
+						"description": "Additional command-line arguments passed to each pipeline task."
+					},
+					"rocketride.pipeBuilder.pipelineDebugOutput": {
+						"type": "boolean",
+						"default": false,
+						"order": 5,
+						"description": "Enable full debug output for pipeline tasks (--trace=debugOut)."
+					}
+				}
+			}
+		},
+		"billing": {
+			"plans": [
+				{
+					"nickname": "Starter",
+					"amountCents": 500,
+					"currency": "usd",
+					"interval": "month",
+					"metadata": {
+						"order": 100,
+						"seats": 1,
+						"features": [
+							"pipelines"
+						],
+						"description": [
+							"500 tokens/month included",
+							"$0.03/token overage"
+						],
+						"credits": {
+							"recurring": {
+								"tokens": 500
+							}
+						},
+						"labels": {
+							"tokens": "tokens"
+						}
+					}
+				},
+				{
+					"nickname": "Starter",
+					"amountCents": 6000,
+					"currency": "usd",
+					"interval": "year",
+					"metadata": {
+						"order": 100,
+						"seats": 1,
+						"features": [
+							"pipelines"
+						],
+						"description": [
+							"500 tokens/month included",
+							"$0.03/token overage"
+						],
+						"credits": {
+							"recurring": {
+								"tokens": 500
+							}
+						},
+						"labels": {
+							"tokens": "tokens"
+						}
+					}
+				},
+				{
+					"nickname": "Builder",
+					"amountCents": 5000,
+					"currency": "usd",
+					"interval": "month",
+					"metadata": {
+						"order": 200,
+						"seats": 1,
+						"features": [
+							"pipelines"
+						],
+						"description": [
+							"2,500 tokens/month included",
+							"$0.03/token overage"
+						],
+						"credits": {
+							"recurring": {
+								"tokens": 2500
+							}
+						},
+						"labels": {
+							"tokens": "tokens"
+						}
+					}
+				},
+				{
+					"nickname": "Builder",
+					"amountCents": 55000,
+					"currency": "usd",
+					"interval": "year",
+					"metadata": {
+						"order": 200,
+						"seats": 1,
+						"features": [
+							"pipelines"
+						],
+						"description": [
+							"2,500 tokens/month included",
+							"$0.03/token overage",
+							"1 month free",
+							"+2,500 welcome bonus"
+						],
+						"credits": {
+							"initial": {
+								"tokens": 5000
+							},
+							"recurring": {
+								"tokens": 2500
+							}
+						},
+						"labels": {
+							"tokens": "tokens"
+						}
+					}
+				},
+				{
+					"nickname": "Pro",
+					"amountCents": 25000,
+					"currency": "usd",
+					"interval": "month",
+					"metadata": {
+						"order": 300,
+						"seats": 1,
+						"features": [
+							"pipelines",
+							"priority_support"
+						],
+						"description": [
+							"15,000 tokens/month included",
+							"$0.03/token overage",
+							"Priority support"
+						],
+						"credits": {
+							"recurring": {
+								"tokens": 15000
+							}
+						},
+						"labels": {
+							"tokens": "tokens"
+						}
+					}
+				},
+				{
+					"nickname": "Pro",
+					"amountCents": 275000,
+					"currency": "usd",
+					"interval": "year",
+					"metadata": {
+						"order": 300,
+						"seats": 1,
+						"features": [
+							"pipelines",
+							"priority_support"
+						],
+						"description": [
+							"15,000 tokens/month included",
+							"$0.03/token overage",
+							"Priority support",
+							"1 month free",
+							"+15,000 welcome bonus"
+						],
+						"credits": {
+							"initial": {
+								"tokens": 30000
+							},
+							"recurring": {
+								"tokens": 15000
+							}
+						},
+						"labels": {
+							"tokens": "tokens"
+						}
+					}
+				},
+				{
+					"nickname": "Team",
+					"amountCents": 75000,
+					"currency": "usd",
+					"interval": "month",
+					"metadata": {
+						"order": 400,
+						"seats": 5,
+						"features": [
+							"pipelines",
+							"priority_support"
+						],
+						"description": [
+							"30,000 tokens/month included",
+							"$0.03/token overage",
+							"Priority support",
+							"5 seats"
+						],
+						"credits": {
+							"recurring": {
+								"tokens": 30000
+							}
+						},
+						"labels": {
+							"tokens": "tokens"
+						}
+					}
+				},
+				{
+					"nickname": "Team",
+					"amountCents": 825000,
+					"currency": "usd",
+					"interval": "year",
+					"metadata": {
+						"order": 400,
+						"seats": 5,
+						"features": [
+							"pipelines",
+							"priority_support"
+						],
+						"description": [
+							"30,000 tokens/month included",
+							"$0.03/token overage",
+							"Priority support",
+							"5 seats",
+							"1 month free",
+							"+30,000 welcome bonus"
+						],
+						"credits": {
+							"initial": {
+								"tokens": 60000
+							},
+							"recurring": {
+								"tokens": 30000
+							}
+						},
+						"labels": {
+							"tokens": "tokens"
+						}
+					}
+				},
+				{
+					"nickname": "Enterprise",
+					"amountCents": 0,
+					"currency": "usd",
+					"interval": "one_time",
+					"metadata": {
+						"order": 500,
+						"description": [
+							"Negotiated token pricing",
+							"Priority support + SLA",
+							"Dedicated infrastructure",
+							"Custom integrations"
+						],
+						"displayAmount": "Custom",
+						"action": {
+							"type": "mailto",
+							"url": "sales@rocketride.ai",
+							"subject": "Enterprise pricing inquiry",
+							"label": "Contact us"
+						}
+					}
+				},
+				{
+					"nickname": "Pay-as-you-go",
+					"amountCents": 0,
+					"currency": "usd",
+					"interval": "month",
+					"metadata": {
+						"kind": "promo_base",
+						"order": 550,
+						"seats": 1,
+						"features": [
+							"pipelines"
+						],
+						"description": [
+							"Promo-code base plan",
+							"No included tokens",
+							"Top up as you go"
+						],
+						"labels": {
+							"tokens": "tokens"
+						}
+					}
+				},
+				{
+					"nickname": "3,700 tokens",
+					"amountCents": 10000,
+					"currency": "usd",
+					"interval": "one_time",
+					"metadata": {
+						"kind": "topup",
+						"order": 600,
+						"description": [
+							"3,700 tokens",
+							"$0.027/token"
+						],
+						"credits": {
+							"initial": {
+								"tokens": 3700
+							}
+						},
+						"labels": {
+							"tokens": "tokens"
+						}
+					}
+				},
+				{
+					"nickname": "10,000 tokens",
+					"amountCents": 25000,
+					"currency": "usd",
+					"interval": "one_time",
+					"metadata": {
+						"kind": "topup",
+						"order": 601,
+						"description": [
+							"10,000 tokens",
+							"$0.025/token"
+						],
+						"credits": {
+							"initial": {
+								"tokens": 10000
+							}
+						},
+						"labels": {
+							"tokens": "tokens"
+						}
+					}
+				},
+				{
+					"nickname": "21,750 tokens",
+					"amountCents": 50000,
+					"currency": "usd",
+					"interval": "one_time",
+					"metadata": {
+						"kind": "topup",
+						"order": 602,
+						"description": [
+							"21,750 tokens",
+							"$0.023/token"
+						],
+						"credits": {
+							"initial": {
+								"tokens": 21750
+							}
+						},
+						"labels": {
+							"tokens": "tokens"
+						}
+					}
+				}
+			]
+		},
+		"typecheck": false,
+		"include": [
+			"apps/shared"
+		]
+	},
+	"scripts": {
+		"build": "rsbuild build",
+		"build:prod": "rsbuild build --env-mode production",
+		"dev": "rsbuild dev",
+		"typecheck": "tsc --noEmit"
+	},
+	"browserslist": [
+		"chrome >= 81",
+		"edge >= 83",
+		"firefox >= 76",
+		"safari >= 13"
+	],
+	"dependencies": {
+		"@fontsource-variable/figtree": "^5.2.10",
+		"@fontsource/quicksand": "~5.0.18",
+		"@fontsource/roboto": "~5.0.13",
+		"@fontsource/roboto-condensed": "~5.0.17",
+		"@fontsource/ubuntu-mono": "~5.0.20",
+		"@module-federation/rsbuild-plugin": "^2.5.1",
+		"@mui/icons-material": "~6.1.5",
+		"@mui/material": "~6.1.5",
+		"@mui/styles": "~5.16.7",
+		"@mui/x-date-pickers": "~7.18.0",
+		"@xyflow/react": "~12.3.4",
+		"boxicons": "^2.1.4",
+		"chart.js": "^4.4.0",
+		"clsx": "~2.1.1",
+		"i18next": "~23.11.3",
+		"immer": "~9.0.6",
+		"lodash": "~4.17.21",
+		"lucide-react": "~0.460.0",
+		"markdown-to-jsx": "~7.7.16",
+		"moment": "~2.30.1",
+		"posthog-js": "~1.274.1",
+		"react": "^18.2.0",
+		"react-canny": "~0.0.8",
+		"react-dom": "^18.2.0",
+		"react-i18next": "~14.1.1",
+		"react-joyride": "~2.9.3",
+		"react-json-view": "~1.21.3",
+		"react-markdown": "^10.1.0",
+		"react-social-icons": "~6.24.0",
+		"react-syntax-highlighter": "^15.6.6",
+		"react-virtualized-auto-sizer": "~1.0.24",
+		"react-window": "~1.8.10",
+		"rehype-raw": "^7.0.0",
+		"remark-gfm": "^4.0.1",
+		"shared": "file:../shared",
+		"rocketride": "workspace:*",
+		"shell": "file:../../.rocketride/shell/shell.tgz"
+	},
+	"engines": {
+		"node": ">=20.11.0",
+		"npm": ">=10.2.4"
+	},
+	"devDependencies": {
+		"@chromatic-com/storybook": "^1.7.0",
+		"@rsbuild/core": "~2.0.11",
+		"@rsbuild/plugin-react": "~2.0.1",
+		"@rsbuild/plugin-sass": "~1.5.3",
+		"@simbathesailor/use-what-changed": "~2.0.0",
+		"@types/react": "~18.3.31",
+		"@types/react-dom": "~18.3.7",
+		"@types/react-syntax-highlighter": "^15.5.13",
+		"prop-types": "^15.8.1"
+	}
 }

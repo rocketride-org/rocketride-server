@@ -27,7 +27,7 @@
 # =============================================================================
 
 from dataclasses import dataclass
-from typing import NotRequired, Optional, TypedDict
+from typing import Any, NotRequired, Optional, TypedDict
 
 from pydantic import BaseModel
 
@@ -91,8 +91,12 @@ class AccountInfo(BaseModel):
     phoneNumberVerified: bool = False
     locale: str = ''
 
-    # Default team ID for this session (pre-resolved server-side)
-    defaultTeam: str = ''
+    # The session's DEVELOPMENT team (pre-resolved server-side): the team a
+    # dev-mode run is billed to and whose environment layer applies. Carries
+    # NO authorization meaning — permission checks resolve the union of
+    # memberships (has_permission) or the addressed team
+    # (verify_team_permission), never this field.
+    devTeam: str = ''
 
     # Single org/team/permissions structure — all permission checks resolve through this.
     # None when the user has no org membership (e.g. freshly invited, not yet provisioned).
@@ -132,6 +136,27 @@ class AccountInfo(BaseModel):
         # Use pydantic's model_dump with an explicit exclusion set so that the
         # raw authentication credential is never returned to the client.
         return self.model_dump(exclude={'auth'})
+
+    def to_push_result(self) -> dict:
+        """
+        Serialize for a PUSHED ``apaext_account`` update — excludes ``auth`` AND
+        blanks ``userToken``.
+
+        A pushed account update fans out to every open connection of a user,
+        matched by userId only. Unlike the connect/auth response, it must NOT
+        carry the user's real ``rr_`` session credential: a task-scoped
+        (``pk_``/``tk_``) connection matched by userId would otherwise ADOPT it
+        client-side, escalating a deliberately minimal task identity into the
+        full user. ``userToken`` is kept as an EMPTY STRING rather than removed
+        so the shell's ``isConnectResult`` guard (which requires ``userToken``
+        to be a string) still accepts the body and re-emits the update.
+
+        Returns:
+            dict: ``to_connect_result()`` with ``userToken`` blanked.
+        """
+        data = self.to_connect_result()
+        data['userToken'] = ''
+        return data
 
 
 # =============================================================================
@@ -289,6 +314,50 @@ def resolve_task_permissions(account_info: AccountInfo, task_team_id: str) -> li
                 return list(_FULL_TEAM_PERMISSIONS)
             return list(team.get('permissions', []))
     return []
+
+
+def resolve_run_permissions(account_info: AccountInfo, control: Any) -> list[str]:
+    """
+    Return the caller's effective permissions for one RUN (a TASK_CONTROL).
+
+    CONTRACT — RETURNS ``[]`` on no access (never raises), like
+    ``resolve_task_permissions``.
+
+    USER-owned runs (interactive dev runs and personal @me deploys) are
+    PRIVATE: the owner holds full permissions, everyone else none — the
+    run's billing ``teamId`` NEVER grants visibility into a personal run.
+    TEAM-owned runs resolve through team membership exactly as before.
+    sys.admin and internal (pod service) credentials keep full access to
+    both (resolved here for user-owned runs, inside
+    ``resolve_task_permissions`` for team-owned ones).
+
+    Anonymous/legacy controls with no owner id (OSS single-user runs)
+    fall through to the team resolution so the synthetic local grants
+    keep working.
+
+    Args:
+        account_info: The authenticated caller's session.
+        control: The run's TASK_CONTROL (or any object carrying
+            ``owner_kind``/``owner_id``/``run_kind``/``teamId``).
+
+    Returns:
+        Effective permission list, or empty list if the caller may not
+        reach the run.
+    """
+    # Owner scope: explicit stamp wins; fall back to the run_kind default
+    # for controls built before owner_kind existed.
+    owner_kind = getattr(control, 'owner_kind', '') or (
+        'team' if getattr(control, 'run_kind', '') == 'deploy' else 'user'
+    )
+    owner_id = getattr(control, 'owner_id', '') or ''
+    if owner_kind == 'user' and owner_id:
+        sys_perms = getattr(account_info, 'sysPermissions', []) or []
+        if 'sys.admin' in sys_perms or 'internal' in sys_perms:
+            return list(_FULL_TEAM_PERMISSIONS)
+        if owner_id == getattr(account_info, 'userId', None):
+            return list(_FULL_TEAM_PERMISSIONS)
+        return []
+    return resolve_task_permissions(account_info, getattr(control, 'teamId', ''))
 
 
 def resolve_team_permissions(account_info: AccountInfo, team_id: str) -> list[str]:

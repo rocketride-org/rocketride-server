@@ -33,20 +33,23 @@ import { ConnectionManager } from './connection/connection';
 // =============================================================================
 
 /**
- * Compile-time snapshot of all RR_* environment variables baked into the cloud
+ * Compile-time snapshot of the RR_* environment variables baked into the cloud
  * bundle by rsbuild's `source.define` substitution.
  *
  * This object is passed into ShellConfig and distributed to remote apps through
  * React context (ShellApiConfigProvider / useShellApiConfig).  Remote apps must
  * NEVER read `process.env` directly — they must use `useShellApiConfig()`.
+ *
+ * NOTE: RR_STRIPE_PUBLISHABLE_KEY is deliberately NOT baked here — it is
+ * environment-specific (pk_test vs pk_live) and arrives at runtime from the
+ * server probe (see buildShellConfig), keeping the built bundle promotable
+ * between environments byte-for-byte.
  */
 const API_CONFIG: ShellApiConfig = {
-	// Base URI for the RocketRide WebSocket server
-	ROCKETRIDE_URI:             process.env.ROCKETRIDE_URI,
-	// Hard-coded API key for service accounts / dev; bypasses OAuth2 when present
-	RR_APIKEY:                 process.env.RR_APIKEY,
-	// Stripe publishable key — passed to loadStripe() in CheckoutModal
-	RR_STRIPE_PUBLISHABLE_KEY: process.env.RR_STRIPE_PUBLISHABLE_KEY,
+	// The server address and API keys are DELIBERATELY absent: the shell
+	// self-targets from window.location.origin, and keys enter through the
+	// ApiKeyLogin prompt — never through the bundle. (The contract fields
+	// remain declared; they are simply never populated.)
 	// Zitadel OIDC issuer URL — required for the OAuth2 PKCE sign-in flow
 	RR_ZITADEL_URL:            process.env.RR_ZITADEL_URL,
 	// OAuth2 client ID registered with Zitadel for this SPA
@@ -83,11 +86,15 @@ const THEME_OPTIONS = [
  * manifest JSON.  All apps (including home) come from the manifest — there
  * are no built-in apps prepended.
  *
- * @param apps         - Array of app manifest entries from the server probe.
- * @param capabilities - Server capability tags (['oss'] or ['saas']).
+ * @param apps                 - Array of app manifest entries from the server probe.
+ * @param capabilities         - Server capability tags (['oss'] or ['saas']).
+ * @param stripePublishableKey - Stripe publishable key from the server probe;
+ *                               empty when the server has no billing configured.
+ * @param serverUri            - The probe's resolved endpoints.api — where live
+ *                               traffic connects. Empty = window.location.origin.
  * @returns A fully populated ShellConfig ready to pass to `<ShellApp>`.
  */
-export function buildShellConfig(apps: AppManifestEntry[], capabilities: string[] = []): ShellConfig {
+export function buildShellConfig(apps: AppManifestEntry[], capabilities: string[] = [], stripePublishableKey = '', serverUri = ''): ShellConfig {
 	// Determine mode from server capabilities
 	const isSaas = capabilities.includes('saas');
 	const brandName = isSaas ? 'RocketRide Cloud' : 'RocketRide';
@@ -99,8 +106,13 @@ export function buildShellConfig(apps: AppManifestEntry[], capabilities: string[
 		// Server capabilities for feature-flagging (billing, OAuth, etc.)
 		capabilities,
 
-		// API endpoints and credentials baked in at build time
-		apiConfig: API_CONFIG,
+		// Where live traffic connects (the probe's resolved endpoints.api) —
+		// empty falls through to window.location.origin in the connection.
+		serverUri,
+
+		// Build-time API endpoints plus the server-supplied Stripe key —
+		// runtime-sourced so the bundle stays environment-neutral
+		apiConfig: { ...API_CONFIG, RR_STRIPE_PUBLISHABLE_KEY: stripePublishableKey || undefined },
 
 		// Branding shown on the loading screen before any app is mounted
 		loginBranding: {

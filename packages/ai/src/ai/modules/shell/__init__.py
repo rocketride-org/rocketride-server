@@ -33,18 +33,26 @@ Static files:
   - ``static/shell/static/css/*.css``     — CSS bundles
   - ``static/shell/themes/*.json``        — theme token files
   - ``static/shell/favicon.svg``          — favicon
-  - ``static/apps/<app>/remoteEntry.js``  — MF remote app bundles
+  - ``static/apps/<app>/...``             — app ASSETS (icons/readmes); MF
+                                            bundles serve store-backed and
+                                            versioned, never from this tree
 
 Routes registered:
-    GET /                           — shell SPA entry point (index.html)
-    GET /shell/{file_path:path}     — shell assets (JS, CSS, themes)
-    GET /apps/{file_path:path}      — MF remote app bundles
+    GET  /                          — shell SPA entry point (index.html)
+    GET  /shell/{file_path:path}    — shell assets (JS, CSS, themes)
+    POST /apps/session              — mint the /apps auth cookie
+    GET  /apps/{file_path:path}     — app serving, three shapes:
+        <appId>/v<N>/<file>         — versioned MF bundle (store-backed)
+        <appId>                     — resolution info: what a bundle fetch
+                                      would serve THIS caller (the deploy
+                                      smoke-test / ops probe)
+        anything else               — the static assets tree
 """
 
 from typing import Any, Dict
 
 from ai.web import WebServer
-from .shell import shell_static, apps_static
+from .shell import shell_static, apps_static, apps_session
 
 
 def initModule(server: WebServer, config: Dict[str, Any]):
@@ -75,6 +83,19 @@ def initModule(server: WebServer, config: Dict[str, Any]):
         path='/shell/{file_path:path}',
         routeHandler=shell_static,
         methods=['GET'],
+        public=True,
+    )
+
+    # ── App-session cookie (SaaS) ───────────────────────────────────────
+    # POST /apps/session stows the caller's token into an /apps-scoped cookie
+    # so the browser attaches it to bundle fetches (the shell calls this after
+    # a successful connect). Registered BEFORE the catch-all so it isn't
+    # swallowed by the bundle server. Trust-free — apps_static does the real
+    # per-app permission check on every serve (SaaS only).
+    server.add_route(
+        path='/apps/session',
+        routeHandler=apps_session,
+        methods=['POST'],
         public=True,
     )
 

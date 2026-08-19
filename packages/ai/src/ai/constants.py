@@ -129,6 +129,12 @@ CONST_DEFAULT_WEB_PORT = 5565  # default web server port
 CONST_DEFAULT_WEB_HOST = 'localhost'  # default bind address (localhost only; use 0.0.0.0 in Docker/K8s)
 CONST_WEB_WS_MAX_SIZE = 250 * 1024 * 1024  # maximum WebSocket message size in bytes (250MB)
 
+# Fallback for RR_SIGNING_KEY (the /task/fetch capability-JWT HMAC secret)
+# when .env/.config leaves it unset, so a fresh install serves signed fetch
+# URLs out of the box. Replacing it for production is the operator's job —
+# the value is deliberately self-describing.
+CONST_DEFAULT_SIGNING_KEY = '<your signing key here -- replace in production>'
+
 # =============================================================================
 # Data Connection Configuration
 # =============================================================================

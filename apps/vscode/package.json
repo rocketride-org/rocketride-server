@@ -91,6 +91,17 @@
 					"description": "Host URL for development connection",
 					"format": "uri"
 				},
+				"rocketride.development.useCustomServer": {
+					"type": "boolean",
+					"default": false,
+					"description": "Cloud mode: connect to the server named in 'Cloud Url' instead of RocketRide Cloud"
+				},
+				"rocketride.development.cloudUrl": {
+					"type": "string",
+					"default": "https://api.rocketride.ai",
+					"description": "Cloud mode: the server this connection targets when 'Use Custom Server' is enabled (e.g. https://staging.rocketride.ai, http://localhost:5565)",
+					"format": "uri"
+				},
 				"rocketride.development.local.engineVersion": {
 					"type": "string",
 					"default": "latest",
@@ -116,6 +127,17 @@
 					"type": "string",
 					"default": "",
 					"description": "Host URL for deployment connection",
+					"format": "uri"
+				},
+				"rocketride.deployment.useCustomServer": {
+					"type": "boolean",
+					"default": false,
+					"description": "Cloud mode: deploy to the server named in 'Cloud Url' instead of RocketRide Cloud"
+				},
+				"rocketride.deployment.cloudUrl": {
+					"type": "string",
+					"default": "https://api.rocketride.ai",
+					"description": "Cloud mode: the server this connection targets when 'Use Custom Server' is enabled (e.g. https://staging.rocketride.ai)",
 					"format": "uri"
 				},
 				"rocketride.deployment.local.engineVersion": {
@@ -639,6 +661,7 @@
 		"adm-zip": "^0.6.0",
 		"chart.js": "^4.4.0",
 		"dockerode": "^4.0.12",
+		"ignore": "^7.0.5",
 		"proper-lockfile": "^4.1.2",
 		"shared": "file:../shared",
 		"tar": "^7.5.21",

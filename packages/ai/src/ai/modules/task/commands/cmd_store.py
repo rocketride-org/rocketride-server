@@ -108,7 +108,7 @@ class StoreCommands(DAPConn):
             # NO permission check here: the STORE is the security boundary.
             # Every path resolution inside the identity-bound FileStore
             # enforces the policy-required permission for the addressed scope
-            # (plain paths behave like the old defaultTeam task.store hoist;
+            # (plain paths behave like the old dev-team task.store hoist;
             # @/Team/@/Org paths check the addressed team/org; reserved
             # subtrees like .logs apply their own rules).
 

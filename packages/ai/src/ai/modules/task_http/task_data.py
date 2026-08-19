@@ -433,6 +433,10 @@ async def task_Data(
     request: Request,
     token: Optional[str] = Query(None, description='Token returned from task execute'),
     teamId: Optional[str] = Query(None, description="Address the team's DEPLOY run of the path's project/source"),
+    runKind: Optional[str] = Query(
+        None,
+        description="Teamless continuum selector: absent/'dev' = the caller's dev run, 'deploy' = the caller's personal @me deploy run",
+    ),
     authorization: str = Header(..., description='Bearer API key in the Authorization header'),
 ) -> Response:
     r"""
@@ -490,15 +494,17 @@ async def task_Data(
                 if project_id is not None and source is not None:
                     try:
                         # Owner-scoped resolution: teamId query ⇒ the team's
-                        # deploy run; absent ⇒ the caller's own dev run.
-                        # PermissionError propagates — an authenticated caller
-                        # must never resolve someone else's task token.
+                        # deploy run; absent ⇒ the caller's own run (dev by
+                        # default; the caller's @me deploy when runKind says
+                        # so). PermissionError propagates — an authenticated
+                        # caller must never resolve someone else's task token.
                         control = request.app.state.task.get_task_control_by_project(
                             project_id,
                             source,
                             account,
                             require='task.data',
                             team_id=teamId or '',
+                            run_kind=runKind or '',
                         )
                         token = control.token
                     except RuntimeError:
@@ -541,6 +547,10 @@ async def task_Process(
     request: Request,
     token: Optional[str] = Query(None, description='Token returned from task execute'),
     teamId: Optional[str] = Query(None, description="Address the team's DEPLOY run of the path's project/source"),
+    runKind: Optional[str] = Query(
+        None,
+        description="Teamless continuum selector: absent/'dev' = the caller's dev run, 'deploy' = the caller's personal @me deploy run",
+    ),
     authorization: str = Header(..., description='Bearer API key in the Authorization header'),
 ) -> DataResult:
     r"""
@@ -548,4 +558,6 @@ async def task_Process(
 
     DEPRECATED - Use /task/data.
     """
-    return await task_Data(request=request, token=token, teamId=teamId, authorization=authorization)
+    # Forward runKind too: without it a caller on this deprecated endpoint who
+    # means their @me deploy run resolves the dev run instead (or 404s).
+    return await task_Data(request=request, token=token, teamId=teamId, runKind=runKind, authorization=authorization)

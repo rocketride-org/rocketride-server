@@ -48,6 +48,15 @@ export default defineConfig(() => {
 		// CORS: explicitly allow any origin — the serving host isn't fixed, so no
 		// allowlist is possible; declaring it also stops the MF plugin injecting
 		// its own wildcard defaults (and warning about it).
+		// Treat .pipe files as JSON so pipeline definitions can be imported.
+		// `as const` keeps the rule's `type` a literal for the config typecheck.
+		tools: {
+			rspack: {
+				module: {
+					rules: [{ test: /\.pipe$/, type: 'json' } as const],
+				},
+			},
+		},
 		server: { port: 3016, cors: { origin: '*' } },
 		source: {
 			entry: {
@@ -56,14 +65,14 @@ export default defineConfig(() => {
 		},
 		output: {
 			distPath: {
-				root: path.join(process.env.ROCKETRIDE_BUILD_ROOT ?? '../../build', 'apps', 'monitor-ui'),
+				root: path.join(process.env.ROCKETRIDE_BUILD_ROOT ?? '../../build', 'apps', pkg.appManifest.id),
 			},
 			assetPrefix: 'auto',
 			cleanDistPath: true,
 			sourceMap: {
 				js: 'source-map',
 				css: true,
-			},
+			} as const,
 		},
 	};
 });

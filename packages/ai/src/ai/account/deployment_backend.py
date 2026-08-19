@@ -100,20 +100,110 @@ def _actor_record(actor: Dict[str, Any]) -> Dict[str, Any]:
     trail survives account deletion (the enterprise requirement) — a bare
     foreign key would go NULL and lose "who".
 
+    System actors (the platform seeder) have no user row: ``userId`` may be
+    None when a non-empty ``display`` carries the identity instead — the FK
+    stays NULL while the audit trail still says who.
+
     Args:
-        actor: Mapping with at least ``userId``; optionally ``display`` and
-               ``email``.
+        actor: Mapping with at least ``userId`` (or a ``display`` for
+               system actors); optionally ``email``.
 
     Returns:
-        ``{'userId', 'display', 'email'}`` with missing fields as ''.
+        ``{'userId', 'display', 'email'}`` with missing fields as ''
+        (``userId`` is None for system actors).
     """
-    if not isinstance(actor, dict) or not actor.get('userId'):
+    if not isinstance(actor, dict):
+        raise ValueError('actor.userId is required')
+    user_id = actor.get('userId')
+    display = str(actor.get('display') or '')
+    if not user_id and not display:
         raise ValueError('actor.userId is required')
     return {
-        'userId': str(actor['userId']),
-        'display': str(actor.get('display') or ''),
+        'userId': str(user_id) if user_id else None,
+        'display': display,
         'email': str(actor.get('email') or ''),
     }
+
+
+def audience_display(audience: Dict[str, str]) -> Dict[str, str]:
+    """The self-describing audience payload for a history row.
+
+    History rows are rendered without a second lookup — every id they carry
+    must ride with its dereferenced display form (the same denormalization
+    rule as the actor identity above). Command-layer callers resolve the
+    real display facts before the write (team names live in their session);
+    this fallback composes the handle from the audience type alone so a
+    bare ``{'type','id'}`` dict — the seeder, a legacy caller — still
+    yields a readable row instead of a raw id.
+
+    Args:
+        audience: ``{'type','id'}`` plus optional ``name``/``handle``
+                  display keys stamped by the resolver.
+
+    Returns:
+        A copy with ``handle`` guaranteed present ('@me' | '@public' |
+        '@team/<name-or-id>'); resolver-stamped keys pass through verbatim.
+    """
+    out = dict(audience)
+    if not out.get('handle'):
+        kind = out.get('type')
+        if kind == 'user':
+            out['handle'] = '@me'
+        elif kind == 'public':
+            out['handle'] = '@public'
+        else:
+            out['handle'] = f'@team/{out.get("name") or out.get("id", "")}'
+    return out
+
+
+# The app review lifecycle on the DEPLOYMENT (deployment_artifacts.state).
+# 'private' is the internal-eligible default; 'submit' enters the public
+# review queue; the admin approves ('ready') or rejects ('rejected').
+# Resubmitting after a reject is a NEW deploy (a new registry version), so
+# 'rejected' is terminal; a developer may also withdraw a submission back to
+# 'private'. This is the ONE source of an app's review state — the publish
+# binding is a pure pointer.
+#
+# The default for a missing/empty state is 'private' — the SAFE, internal-
+# eligible state — and EVERY reader must apply the same default (import this
+# constant). A legacy entry written before the state field existed is then
+# consistently: internally bindable, blocked from @public until reviewed, and
+# still submittable. Defaulting a missing state to 'ready' anywhere would let
+# an unreviewed legacy version reach the public store; defaulting it to '' in
+# the transition asserter would trap it (no legal edge out of '').
+DEFAULT_REVIEW_STATE = 'private'
+
+_REVIEW_TRANSITIONS = {
+    ('private', 'submit'),
+    ('submit', 'ready'),
+    ('submit', 'rejected'),
+    ('submit', 'private'),
+    # Content-write compensation: a version whose bytes never fully landed
+    # is dead on arrival — 'failed' is terminal (re-deploying allocates a
+    # NEW version), so no exit edges exist.
+    ('private', 'failed'),
+}
+
+# History action verb recorded for each review target state.
+_REVIEW_ACTION = {
+    'submit': 'request',
+    'ready': 'approved',
+    'rejected': 'rejected',
+    'private': 'withdrawn',
+    'failed': 'failed',
+}
+
+
+def _assert_review_transition(current: str, target: str) -> None:
+    """Raise ValueError unless (current -> target) is a legal review move.
+
+    Same-state is an idempotent no-op (re-approving a 'ready' deployment is
+    harmless). Everything else must be an explicit edge above.
+    """
+    if current == target:
+        return
+    if (current, target) not in _REVIEW_TRANSITIONS:
+        raise ValueError(f'Illegal review transition {current!r} -> {target!r}')
 
 
 def artifact_path(org_id: str, project_id: str, version: int, sha256: str) -> str:
@@ -133,6 +223,46 @@ def artifact_path(org_id: str, project_id: str, version: int, sha256: str) -> st
 def artifact_sha256(data: str) -> str:
     """The registry hash of an artifact: sha256 over the exact stored bytes."""
     return hashlib.sha256(data.encode('utf-8')).hexdigest()
+
+
+def artifact_content_dir(artifact_path: str) -> str:
+    """The store home of one registry version's CONTENT, from its artifact path.
+
+    ONE convention for seeded and deployed bytes alike: content lives in the
+    SIBLING directory of the registry JSON — the artifact path minus its
+    ``.json`` extension (``.deployments/<project>/v<N>-<sha8>/``). Zip
+    deploys keep ``bundle/`` (the retained transport zip), ``source/`` (what
+    the developer shipped) and ``dist/`` (the server build's servable
+    output, entry minting points there) under it; platform seeds write the
+    SAME ``dist/`` layout. Derived by convention — never stored in the
+    artifact JSON.
+    """
+    return artifact_path[:-5] if artifact_path.endswith('.json') else artifact_path
+
+
+def artifact_metadata(artifact: Dict[str, Any], metadata: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """The rail entry's metadata blob, shared verbatim by both editions.
+
+    Shape: ``{'manifest': {...}, 'build': {...}}``. The caller-supplied
+    ``metadata`` wins field-by-field; a minimal ``manifest.name`` is always
+    synthesized from the artifact dict so display names never depend on the
+    retired pipeline_name column/key.
+
+    Args:
+        artifact: The deployed artifact dict (pipeline JSON or app record).
+        metadata: Optional caller-supplied metadata blob.
+
+    Returns:
+        The metadata dict to persist alongside the registry entry.
+    """
+    meta = dict(metadata) if isinstance(metadata, dict) else {}
+    manifest = meta.get('manifest')
+    manifest = dict(manifest) if isinstance(manifest, dict) else {}
+    # Display name is mandatory metadata — sourced from the artifact when the
+    # caller sent none (plain pipeline JSON carries its name at 'name').
+    manifest.setdefault('name', str(artifact.get('name') or ''))
+    meta['manifest'] = manifest
+    return meta
 
 
 class FileDeploymentBackend:
@@ -158,15 +288,30 @@ class FileDeploymentBackend:
         pipeline: Dict[str, Any],
         actor: Dict[str, Any],
         comment: str = '',
+        metadata: Optional[Dict[str, Any]] = None,
+        state: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Snapshot ``pipeline`` as the next immutable registry version.
 
+        DEPLOY in the settled vocabulary: copy code to the server. The
+        entry's ``kind`` comes from the artifact dict (app artifacts carry
+        kind:'app'; plain pipeline JSON defaults to 'pipe'), ``state`` is
+        stamped by kind (app -> 'private' — internal-eligible, the developer
+        submits it for review; pipe -> 'ready') unless the caller overrides
+        it, and ``metadata`` carries the manifest/build blob (a minimal
+        manifest.name is synthesized so display names never depend on the
+        legacy pipelineName key).
+
         Args:
             org_id:     Owning organisation (registry scope).
-            project_id: Pipeline project id (registry key inside the org).
-            pipeline:   Full pipeline JSON to snapshot.
-            actor:      Who is publishing ({'userId', 'display', 'email'}).
+            project_id: Project id — pipe project id / app id (registry key).
+            pipeline:   Full artifact dict to snapshot (pipeline JSON or app record).
+            actor:      Who is deploying ({'userId', 'display', 'email'}).
             comment:    Optional "what changed" note, kept in the registry.
+            metadata:   Optional metadata blob ({'manifest': ..., 'build': ...}).
+            state:      Optional born-state override (an artifact review state:
+                        private|submit|ready|rejected|failed) — the seeder
+                        registers pre-approved platform artifacts as 'ready'.
 
         Returns:
             The new registry entry (version, sha256, publishedBy, ...).
@@ -175,12 +320,18 @@ class FileDeploymentBackend:
         _safe_id(project_id, 'project_id')
         if not isinstance(pipeline, dict) or not pipeline:
             raise ValueError('pipeline must be a non-empty object')
+        if state is not None and state not in ('private', 'submit', 'ready', 'rejected', 'failed'):
+            raise ValueError(f'Unknown artifact state: {state!r}')
         who = _actor_record(actor)
 
         # The artifact bytes are canonical: stable key order so the sha256 is
         # reproducible from the semantic pipeline, not dict ordering.
         data = json.dumps(pipeline, sort_keys=True, indent=1)
         sha = artifact_sha256(data)
+        # Kind rides the artifact dict itself; state is stamped by kind (apps
+        # deploy 'private' — internal-eligible, submitted for review
+        # separately; pipes are servable immediately).
+        kind = str(pipeline.get('kind') or 'pipe')
 
         async def mutate(meta: Dict[str, Any]) -> Dict[str, Any]:
             """Allocate the next version and append the registry entry."""
@@ -189,6 +340,9 @@ class FileDeploymentBackend:
                 'version': version,
                 'sha256': sha,
                 'bytes': len(data.encode('utf-8')),
+                'kind': kind,
+                'state': state or ('private' if kind == 'app' else 'ready'),
+                'metadata': artifact_metadata(pipeline, metadata),
                 'pipelineName': str(pipeline.get('name') or ''),
                 'publishedBy': who,
                 'publishedAt': time.time(),
@@ -202,9 +356,20 @@ class FileDeploymentBackend:
             # a committed one.
             await self._store.write_file(entry['artifactPath'], data)
             meta['versions'].append(entry)
-            meta['history'].append(
-                {'at': entry['publishedAt'], 'action': 'publish', 'teamId': '', 'version': version, 'actor': who}
-            )
+            # The DEPLOY row (registry write — no audience). The comment is
+            # the developer's "what changed" note; riding it on the history
+            # row keeps the event stream self-describing (the viewer never
+            # joins back to the registry entry).
+            history_row: Dict[str, Any] = {
+                'at': entry['publishedAt'],
+                'action': 'publish',
+                'teamId': '',
+                'version': version,
+                'actor': who,
+            }
+            if entry['comment']:
+                history_row['data'] = {'comment': entry['comment']}
+            meta['history'].append(history_row)
             return entry
 
         return await self._mutate_meta(org_id, project_id, mutate)
@@ -220,12 +385,16 @@ class FileDeploymentBackend:
         project_id: str,
         version: int,
         actor: Dict[str, Any],
+        billing_team_id: str = '',
     ) -> Dict[str, Any]:
         """Set ``team_id``'s deployment of ``project_id`` to ``version``.
 
         Creates the team deployment on first use; otherwise moves the
         pointer. Moving to a LOWER version is recorded as 'rollback' in the
-        history (same operation, honest audit label).
+        history (same operation, honest audit label). ``billing_team_id`` is
+        the ABSOLUTE billing/secrets stamp, decided by the command layer at
+        pointer time and re-stamped on every move — this store never
+        resolves it.
 
         Returns:
             The team's deployment record after the move.
@@ -233,6 +402,8 @@ class FileDeploymentBackend:
         _safe_id(org_id, 'org_id')
         _safe_id(team_id, 'team_id')
         _safe_id(project_id, 'project_id')
+        if billing_team_id:
+            _safe_id(billing_team_id, 'billing_team_id')
         who = _actor_record(actor)
         if not isinstance(version, int) or version < 1:
             raise ValueError('version must be a positive integer')
@@ -248,6 +419,7 @@ class FileDeploymentBackend:
                     'teamId': team_id,
                     'version': version,
                     'state': 'enabled',
+                    'billingTeamId': billing_team_id,
                     'createdAt': now,
                     'createdBy': who,
                     'schedules': {},
@@ -257,7 +429,9 @@ class FileDeploymentBackend:
             else:
                 action = 'rollback' if version < dep['version'] else 'deploy'
                 dep['version'] = version
-                # A pointer move revives a removed/errored deployment.
+                # A pointer move revives a removed/errored deployment — and
+                # RE-STAMPS the billing team: each pointer move re-decides.
+                dep['billingTeamId'] = billing_team_id
                 dep['state'] = 'enabled'
             dep['updatedAt'] = now
             dep['updatedBy'] = who
@@ -467,19 +641,27 @@ class FileDeploymentBackend:
     # READS
     # =========================================================================
 
-    async def list_team(self, org_id: str, team_id: str) -> List[Dict[str, Any]]:
-        """All non-removed deployments of one team, joined with registry info."""
+    async def list_team(self, org_id: str, team_id: 'Optional[str]' = None) -> List[Dict[str, Any]]:
+        """Non-removed deployments joined with registry info.
+
+        ``team_id`` scopes to one team (or ``user~`` personal space); None
+        returns the WHOLE org — every team and every personal space. The
+        backend is mechanical: who may see which rows is the COMMAND
+        layer's visibility model, which slices this list.
+        """
         _safe_id(org_id, 'org_id')
-        _safe_id(team_id, 'team_id')
+        if team_id is not None:
+            _safe_id(team_id, 'team_id')
         out: List[Dict[str, Any]] = []
         for project_id in await self._project_ids(org_id):
             meta = await self._read_meta(org_id, project_id)
             if meta is None:
                 continue
-            dep = meta['deployments'].get(team_id)
-            if not dep or dep.get('state') == 'removed':
-                continue
-            out.append(self._joined(meta, project_id, dep))
+            deps = [meta['deployments'].get(team_id)] if team_id is not None else list(meta['deployments'].values())
+            for dep in deps:
+                if not dep or dep.get('state') == 'removed':
+                    continue
+                out.append(self._joined(meta, project_id, dep))
         return out
 
     async def get(self, org_id: str, team_id: str, project_id: str) -> Optional[Dict[str, Any]]:
@@ -503,6 +685,435 @@ class FileDeploymentBackend:
         if meta is None:
             return []
         return sorted(meta['versions'], key=lambda v: v['version'], reverse=True)
+
+    # =========================================================================
+    # PUBLISHES — audience pointers (PUBLISH = bind a deployment to an audience)
+    # =========================================================================
+    #
+    # meta['publishes'] = {audience_key: row}; audience_key is the file-format
+    # encoding 'user~<id>' | 'team~<id>' | '~public' (never on the wire — the
+    # contract carries {'type','id'} audience dicts). Only kind='app' exists
+    # today; published_pipes joins in its own phase.
+
+    @staticmethod
+    def _audience_key(audience: Dict[str, str]) -> str:
+        """The storage key of one audience ({'type','id'} -> file encoding)."""
+        kind = audience.get('type')
+        if kind == 'user':
+            return f'user~{audience.get("id", "")}'
+        if kind == 'team':
+            return f'team~{audience.get("id", "")}'
+        if kind == 'public':
+            return '~public'
+        raise ValueError(f'Unknown audience type: {kind!r}')
+
+    @staticmethod
+    def _publish_row(
+        key: str,
+        row: Dict[str, Any],
+        org_id: str,
+        project_id: str,
+        artifact_state: str = '',
+        artifact_path: str = '',
+        artifact_build: str = '',
+    ) -> Dict[str, Any]:
+        """One stored binding -> the contract shape (audience decoded).
+
+        ``row['state']`` is the BINDING lifecycle (enabled/disabled/removed);
+        ``artifactState`` is the bound DEPLOYMENT's review state,
+        ``artifactPath`` its registry JSON path (the content home derives
+        from it), and ``artifactBuild`` its build status
+        (metadata.build.status — '' for pre-worker rows), all joined from
+        meta['versions'] so the scope walk can gate serving and mint entry
+        URLs without a second registry read.
+        """
+        if key == '~public':
+            audience = {'type': 'public', 'id': ''}
+        elif key.startswith('user~'):
+            audience = {'type': 'user', 'id': key[len('user~') :]}
+        else:
+            audience = {'type': 'team', 'id': key[len('team~') :]}
+        return {
+            'orgId': org_id,
+            'appId': project_id,
+            'audience': audience,
+            'artifactState': artifact_state,
+            'artifactPath': artifact_path,
+            'artifactBuild': artifact_build,
+            **row,
+        }
+
+    @staticmethod
+    def _build_status_of(ver: Dict[str, Any]) -> str:
+        """One registry entry's build status ('' when never stamped)."""
+        metadata = ver.get('metadata') if isinstance(ver.get('metadata'), dict) else {}
+        build = metadata.get('build') if isinstance(metadata.get('build'), dict) else {}
+        return str(build.get('status') or '')
+
+    @staticmethod
+    def _artifact_entry_of(meta: Dict[str, Any], version: int) -> Dict[str, Any]:
+        """The registry version row a binding points at (from meta['versions'])."""
+        for v in meta.get('versions', []):
+            if int(v.get('version', 0)) == int(version):
+                return v
+        return {}
+
+    def _publishes_of(self, meta: Dict[str, Any]) -> Dict[str, Any]:
+        """The meta's publishes dict (container-tolerant on old files)."""
+        publishes = meta.get('publishes')
+        return publishes if isinstance(publishes, dict) else {}
+
+    async def publish_set(
+        self,
+        org_id: str,
+        kind: str,
+        app_id: str,
+        audience: Dict[str, str],
+        version: int,
+        snapshot: Dict[str, Any],
+        actor: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Create or repoint one audience's binding (upsert-in-place).
+
+        The binding is a pure pointer born 'enabled' — the REVIEW state lives
+        on the deployment, not here (the caller has already gated the audience
+        against the deployment's state). Repointing updates the target version
+        + manifest snapshot and re-enables the binding.
+        """
+        _safe_id(org_id, 'org_id')
+        _safe_id(app_id, 'app_id')
+        if kind != 'app':
+            raise ValueError(f'publish_set: unsupported kind {kind!r}')
+        who = _actor_record(actor)
+        key = self._audience_key(audience)
+
+        async def mutate(meta: Dict[str, Any]) -> Dict[str, Any]:
+            """Verify the version exists, then upsert the audience row."""
+            if not any(int(v.get('version', 0)) == version for v in meta['versions']):
+                raise StorageError(f'{app_id} v{version}: not in the registry')
+            publishes = meta.setdefault('publishes', {})
+            existing = publishes.get(key) or {}
+            now = time.time()
+            row = {
+                'version': version,
+                'state': 'enabled',
+                'snapshot': dict(snapshot or {}),
+                'createdAt': existing.get('createdAt', now),
+                'createdBy': existing.get('createdBy', who),
+                'updatedAt': now,
+                'updatedBy': who,
+                'publishedAt': now,
+            }
+            publishes[key] = row
+            # The PUBLISH row (audience bind). The audience is stored in its
+            # self-describing form, and a repoint records the version it
+            # moved OFF of — "published to @public (was v2)" reads whole
+            # from this one row.
+            data: Dict[str, Any] = {'audience': audience_display(audience)}
+            prev_version = int(existing.get('version') or 0)
+            if prev_version and prev_version != version:
+                data['previousVersion'] = prev_version
+            meta['history'].append(
+                {
+                    'at': now,
+                    'action': 'publish',
+                    'teamId': '',
+                    'version': version,
+                    'actor': who,
+                    'data': data,
+                }
+            )
+            ver = self._artifact_entry_of(meta, version)
+            return self._publish_row(
+                key,
+                row,
+                org_id,
+                app_id,
+                str(ver.get('state') or ''),
+                str(ver.get('artifactPath') or ''),
+                self._build_status_of(ver),
+            )
+
+        return await self._mutate_meta(org_id, app_id, mutate)
+
+    async def publish_get(
+        self, org_id: str, kind: str, app_id: str, audience: Dict[str, str]
+    ) -> Optional[Dict[str, Any]]:
+        """One audience's publish row of one app, or None (removed = None)."""
+        _safe_id(org_id, 'org_id')
+        _safe_id(app_id, 'app_id')
+        if kind != 'app':
+            raise ValueError(f'publish_get: unsupported kind {kind!r}')
+        meta = await self._read_meta(org_id, app_id)
+        if meta is None:
+            return None
+        key = self._audience_key(audience)
+        row = self._publishes_of(meta).get(key)
+        if not row or row.get('state') == 'removed':
+            return None
+        ver = self._artifact_entry_of(meta, row.get('version', 0))
+        return self._publish_row(
+            key,
+            row,
+            org_id,
+            app_id,
+            str(ver.get('state') or ''),
+            str(ver.get('artifactPath') or ''),
+            self._build_status_of(ver),
+        )
+
+    async def publish_of_app(self, org_id: str, kind: str, app_id: str) -> List[Dict[str, Any]]:
+        """Every live publish row of one app (the where/reverse index feed)."""
+        _safe_id(org_id, 'org_id')
+        _safe_id(app_id, 'app_id')
+        if kind != 'app':
+            raise ValueError(f'publish_of_app: unsupported kind {kind!r}')
+        meta = await self._read_meta(org_id, app_id)
+        if meta is None:
+            return []
+        out: List[Dict[str, Any]] = []
+        for key, row in self._publishes_of(meta).items():
+            if row.get('state') == 'removed':
+                continue
+            ver = self._artifact_entry_of(meta, row.get('version', 0))
+            out.append(
+                self._publish_row(
+                    key,
+                    row,
+                    org_id,
+                    app_id,
+                    str(ver.get('state') or ''),
+                    str(ver.get('artifactPath') or ''),
+                    self._build_status_of(ver),
+                )
+            )
+        return out
+
+    async def publish_list(self, org_id: str, kind: str, audiences: List[Dict[str, str]]) -> List[Dict[str, Any]]:
+        """Every live publish row matching ANY of the audiences, across apps.
+
+        The scope-walk / store-browse feed. Scans the org's project metas
+        (same pattern as list_team) — the SaaS DB edition answers this with
+        one indexed query instead.
+        """
+        _safe_id(org_id, 'org_id')
+        if kind != 'app':
+            raise ValueError(f'publish_list: unsupported kind {kind!r}')
+        keys = {self._audience_key(a) for a in audiences}
+        out: List[Dict[str, Any]] = []
+        for project_id in await self._project_ids(org_id):
+            meta = await self._read_meta(org_id, project_id)
+            if meta is None:
+                continue
+            for key, row in self._publishes_of(meta).items():
+                if key in keys and row.get('state') != 'removed':
+                    ver = self._artifact_entry_of(meta, row.get('version', 0))
+                    out.append(
+                        self._publish_row(
+                            key,
+                            row,
+                            org_id,
+                            project_id,
+                            str(ver.get('state') or ''),
+                            str(ver.get('artifactPath') or ''),
+                            self._build_status_of(ver),
+                        )
+                    )
+        return out
+
+    async def publish_set_state(
+        self, org_id: str, kind: str, app_id: str, audience: Dict[str, str], state: str, actor: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Flip one binding's lifecycle state (disable/remove/re-enable)."""
+        _safe_id(org_id, 'org_id')
+        _safe_id(app_id, 'app_id')
+        if kind != 'app':
+            raise ValueError(f'publish_set_state: unsupported kind {kind!r}')
+        if state not in ('enabled', 'disabled', 'removed'):
+            raise ValueError(f'Unknown binding state: {state!r}')
+        who = _actor_record(actor)
+        key = self._audience_key(audience)
+
+        async def mutate(meta: Dict[str, Any]) -> Dict[str, Any]:
+            """Update the binding's state in place."""
+            publishes = self._publishes_of(meta)
+            row = publishes.get(key)
+            if not row:
+                raise StorageError(f'{app_id}: no publish for that audience')
+            now = time.time()
+            row['state'] = state
+            row['updatedAt'] = now
+            row['updatedBy'] = who
+            meta['history'].append(
+                {
+                    'at': now,
+                    'action': state,
+                    'teamId': '',
+                    'version': row.get('version'),
+                    'actor': who,
+                    'data': {'audience': audience_display(audience)},
+                }
+            )
+            ver = self._artifact_entry_of(meta, row.get('version', 0))
+            return self._publish_row(
+                key,
+                row,
+                org_id,
+                app_id,
+                str(ver.get('state') or ''),
+                str(ver.get('artifactPath') or ''),
+                self._build_status_of(ver),
+            )
+
+        return await self._mutate_meta(org_id, app_id, mutate)
+
+    async def set_artifact_state(
+        self,
+        org_id: str,
+        project_id: str,
+        version: int,
+        new_state: str,
+        actor: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Transition ONE deployment's review state (submit/approve/reject).
+
+        The deployment's ``state`` is the single source of an app's review
+        status. The transition is validated, the version entry's state is
+        updated in place, and a history event is appended. Returns the
+        refreshed rail entry.
+        """
+        _safe_id(org_id, 'org_id')
+        _safe_id(project_id, 'project_id')
+        if new_state not in ('private', 'submit', 'ready', 'rejected', 'failed'):
+            raise ValueError(f'Unknown artifact state: {new_state!r}')
+        who = _actor_record(actor)
+
+        async def mutate(meta: Dict[str, Any]) -> Dict[str, Any]:
+            """Validate the transition and update the version's state."""
+            entry = next((v for v in meta['versions'] if int(v.get('version', 0)) == version), None)
+            if entry is None:
+                raise StorageError(f'{project_id} v{version}: not in the registry')
+            old_state = str(entry.get('state') or DEFAULT_REVIEW_STATE)
+            _assert_review_transition(old_state, new_state)
+            entry['state'] = new_state
+            meta['history'].append(
+                {
+                    'at': time.time(),
+                    'action': _REVIEW_ACTION.get(new_state, new_state),
+                    'teamId': '',
+                    'version': version,
+                    'actor': who,
+                    # Both endpoints of the transition, so the row reads
+                    # whole even out of sequence.
+                    'data': {'from': old_state, 'to': new_state},
+                }
+            )
+            return dict(entry)
+
+        return await self._mutate_meta(org_id, project_id, mutate)
+
+    async def set_build(
+        self,
+        org_id: str,
+        project_id: str,
+        version: int,
+        build: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Replace ONE registry version's ``metadata.build`` blob.
+
+        The build worker's job record: the rail row IS the job, and this is
+        its single mutation point (``metadata`` is explicitly mutable — the
+        processing lifecycle for app zips). The blob is replaced whole, never
+        merged, so a new attempt can never inherit stale fields; the review
+        ``state`` is deliberately NOT touched here — it belongs to
+        ``set_artifact_state``. No history row is appended: build
+        transitions are operational churn (queued/building/ok per deploy),
+        not audit events — the deploy event stream carries the signal.
+
+        Returns the refreshed rail entry.
+        """
+        _safe_id(org_id, 'org_id')
+        _safe_id(project_id, 'project_id')
+        if not isinstance(build, dict):
+            raise ValueError('build must be an object')
+
+        async def mutate(meta: Dict[str, Any]) -> Dict[str, Any]:
+            """Swap the build blob on the version's metadata."""
+            entry = next((v for v in meta['versions'] if int(v.get('version', 0)) == version), None)
+            if entry is None:
+                raise StorageError(f'{project_id} v{version}: not in the registry')
+            metadata = entry.get('metadata')
+            metadata = metadata if isinstance(metadata, dict) else {}
+            metadata['build'] = dict(build)
+            entry['metadata'] = metadata
+            return dict(entry)
+
+        return await self._mutate_meta(org_id, project_id, mutate)
+
+    async def scan_builds(self, statuses: 'tuple[str, ...]') -> List[Dict[str, Any]]:
+        """Every kind:'app' version whose ``metadata.build.status`` matches.
+
+        The restart-recovery feed: after a process restart the build worker
+        re-enqueues everything left 'queued'/'building'. A full walk of the
+        org trees is acceptable here — this runs once at startup, never on a
+        request path.
+
+        Returns:
+            ``[{'orgId', 'projectId', 'version'}]`` for each match.
+        """
+        out: List[Dict[str, Any]] = []
+        try:
+            orgs = await self._store.list_entries('orgs/', recursive=False, include_files=False)
+        except StorageError:
+            return out
+        for org_prefix in orgs:
+            org_id = org_prefix.rstrip('/').rsplit('/', 1)[-1]
+            for project_id in await self._project_ids(org_id):
+                meta = await self._read_meta(org_id, project_id)
+                if meta is None:
+                    continue
+                for entry in meta['versions']:
+                    if str(entry.get('kind') or 'pipe') != 'app':
+                        continue
+                    metadata = entry.get('metadata') if isinstance(entry.get('metadata'), dict) else {}
+                    build = metadata.get('build') if isinstance(metadata.get('build'), dict) else {}
+                    if str(build.get('status') or '') in statuses:
+                        out.append({'orgId': org_id, 'projectId': project_id, 'version': int(entry.get('version', 0))})
+        return out
+
+    async def history_append(
+        self,
+        org_id: str,
+        project_id: str,
+        action: str,
+        actor: Dict[str, Any],
+        version: Optional[int] = None,
+        data: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """Append one bare event to the project's history stream.
+
+        The review/comms thread writer ('request', 'approved', 'rejected',
+        'reply') — human rows ride the same append-only stream as the
+        machine audit, with the payload in ``data``.
+        """
+        _safe_id(org_id, 'org_id')
+        _safe_id(project_id, 'project_id')
+        who = _actor_record(actor)
+
+        async def mutate(meta: Dict[str, Any]) -> None:
+            """Append the event row."""
+            row: Dict[str, Any] = {
+                'at': time.time(),
+                'action': str(action),
+                'teamId': '',
+                'version': version,
+                'actor': who,
+            }
+            if data is not None:
+                row['data'] = dict(data)
+            meta['history'].append(row)
+
+        await self._mutate_meta(org_id, project_id, mutate)
 
     async def history(
         self,
@@ -674,6 +1285,9 @@ class FileDeploymentBackend:
             'teamId': dep['teamId'],
             'version': dep['version'],
             'state': dep['state'],
+            # The absolute billing/secrets stamp — runs read this, never
+            # resolve ('' on records from before the field existed).
+            'billingTeamId': dep.get('billingTeamId', ''),
             'schedules': dep.get('schedules', {}),
             'createdAt': dep.get('createdAt'),
             'createdBy': dep.get('createdBy'),

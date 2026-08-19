@@ -85,12 +85,6 @@ export interface ConnectionStatus {
 	/** True if we have necessary credentials/config to connect */
 	hasCredentials: boolean;
 
-	/** Current retry attempt number (0 when not retrying) */
-	retryAttempt: number;
-
-	/** Maximum retry attempts */
-	maxRetryAttempts: number;
-
 	/** Detailed progress message (e.g. download progress) shown during connecting states */
 	progressMessage?: string;
 

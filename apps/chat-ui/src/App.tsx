@@ -75,21 +75,12 @@ const App: React.FC = () => {
 		const urlParams = new URLSearchParams(window.location.search);
 
 		// Init
-		let uri = '';
 		let token = '';
 
-		// If we are in dev mode and we have the host address specified
-		// in the .env put there by rsbuild, then use that
-		if (API_CONFIG.devMode && API_CONFIG.ROCKETRIDE_URI) {
-			// The uri was overridden by our .devMode = true and it being specified
-			// in the .env file
-			uri = API_CONFIG.ROCKETRIDE_URI;
-		}
-
-		// If we don't have a URI from the .env, use the one from where we loaded the page
-		if (!uri) {
-			uri = window.location.origin;
-		}
+		// The server is always wherever this page was served from — no
+		// address is baked into the bundle. In dev the dev server proxies
+		// the engine, so origin holds there too.
+		const uri = window.location.origin;
 
 		// URL param always wins — it carries the freshly-minted pk for the
 		// current task and must not be shadowed by a stale sessionStorage value
@@ -105,10 +96,7 @@ const App: React.FC = () => {
 			token = API_CONFIG.ROCKETRIDE_APIKEY;
 		}
 
-		// Check these
-		if (!uri) {
-			throw new Error('Failed to start RocketRide client: No uri found');
-		}
+		// A token is the one thing that cannot be derived — fail loudly.
 		if (!token) {
 			throw new Error('Failed to start RocketRide client: No token found');
 		}

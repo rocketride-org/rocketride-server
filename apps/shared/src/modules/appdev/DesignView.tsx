@@ -21,11 +21,11 @@
 // SOFTWARE.
 
 // =============================================================================
-// DEVELOP VIEW — one workspace, pill-switched panes
+// DESIGN VIEW — one workspace, pill-switched panes
 // =============================================================================
 
 /**
- * The DEVELOP view: `Preview | Code | Components | Events | Console | Errors`
+ * The DESIGN view: `Preview | Code | Components | Events | Console | Errors`
  * as pill-switched panes of ONE workspace (the Status-screen idiom — pills
  * switch the lens, never the context: the dev session, watch state, and
  * accumulated feeds persist across pane switches). Components is the one
@@ -45,14 +45,14 @@ import { ToggleGroup } from 'shell';
 import { ComponentGallery } from './gallery';
 import { LogList, LOG_LIST_CAP } from './LogList';
 import type { LogListRow } from './LogList';
-import type { AppErrorRow, AppEventRow, ConsoleRow, DevelopPane, IAppBuilderHost, WatchStatus } from './types';
+import type { AppErrorRow, AppEventRow, ConsoleRow, DesignPane, IAppBuilderHost, WatchStatus } from './types';
 
 // =============================================================================
 // TYPES
 // =============================================================================
 
-/** Props for the {@link DevelopView} component. */
-export interface IDevelopViewProps {
+/** Props for the {@link DesignView} component. */
+export interface IDesignViewProps {
 	/** The host adapter (data + actions). */
 	host: IAppBuilderHost;
 	/** The live preview surface (host-owned iframe wrapper). */
@@ -503,15 +503,15 @@ const styles: Record<string, React.CSSProperties> = {
 // =============================================================================
 
 /**
- * Renders the DEVELOP workspace.
+ * Renders the DESIGN workspace.
  *
- * @param props - See {@link IDevelopViewProps}.
+ * @param props - See {@link IDesignViewProps}.
  */
-export const DevelopView: React.FC<IDevelopViewProps> = ({ host, previewPane, codePane }) => {
+export const DesignView: React.FC<IDesignViewProps> = ({ host, previewPane, codePane }) => {
 	const caps = host.capabilities;
 
 	// ── Pane state — the active lens ─────────────────────────────────────
-	const [pane, setPane] = useState<DevelopPane>('preview');
+	const [pane, setPane] = useState<DesignPane>('preview');
 	const [previewTheme, setPreviewTheme] = useState<'light' | 'dark'>('light');
 	// Persisted preview preferences: read ONCE at mount from host storage
 	// (synchronous by then — VSCode delivers the bag with appdev:init) and
@@ -637,14 +637,14 @@ export const DevelopView: React.FC<IDevelopViewProps> = ({ host, previewPane, co
 	// ── Pill menu — Code only where the host has a Code pane. Errors and
 	//    events fold into Console (one log), so no pills of their own.
 	const pillOptions = useMemo(() => {
-		const options: Array<{ id: DevelopPane; label: string }> = [{ id: 'preview', label: 'Preview' }];
+		const options: Array<{ id: DesignPane; label: string }> = [{ id: 'preview', label: 'Preview' }];
 		if (caps.hasCodePane) options.push({ id: 'code', label: 'Code' });
 		options.push({ id: 'components', label: 'Components' }, { id: 'console', label: 'Console' });
 		return options;
 	}, [caps.hasCodePane]);
 
 	/** Switch panes, mounting the Components gallery on its first visit. */
-	const selectPane = (id: DevelopPane): void => {
+	const selectPane = (id: DesignPane): void => {
 		setPane(id);
 		if (id === 'components') setGalleryMounted(true);
 	};
@@ -922,10 +922,10 @@ export const DevelopView: React.FC<IDevelopViewProps> = ({ host, previewPane, co
 							Zoom
 							<button
 								style={styles.zoomStepBtn}
-								title="Zoom in 5%"
+								title="Zoom out 5%"
 								disabled={fitMode}
-								onClick={() => setPreviewZoom((z) => Math.min(2, Math.round((z + 0.05) * 100) / 100))}
-							>+</button>
+								onClick={() => setPreviewZoom((z) => Math.max(0.25, Math.round((z - 0.05) * 100) / 100))}
+							>-</button>
 							<input
 								type="range"
 								min={25}
@@ -939,10 +939,10 @@ export const DevelopView: React.FC<IDevelopViewProps> = ({ host, previewPane, co
 							/>
 							<button
 								style={styles.zoomStepBtn}
-								title="Zoom out 5%"
+								title="Zoom in 5%"
 								disabled={fitMode}
-								onClick={() => setPreviewZoom((z) => Math.max(0.25, Math.round((z - 0.05) * 100) / 100))}
-							>-</button>
+								onClick={() => setPreviewZoom((z) => Math.min(2, Math.round((z + 0.05) * 100) / 100))}
+							>+</button>
 							<span style={styles.zoomValue}>{Math.round(effectiveZoom * 100)}%</span>
 						</label>
 						<button

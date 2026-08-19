@@ -25,8 +25,10 @@ import type { NewAppHostToWebview, NewAppIdentity, NewAppWebviewToHost } from '.
 // CONSTANTS
 // =============================================================================
 
-/** One-segment slug shape for the user-typed app-name half. */
-const APP_NAME_RE = /^[a-z][a-z0-9-]*$/;
+/** One-segment slug shape for the user-typed app-name half: starts with a
+ * lowercase letter, then any mix of letters, digits, underscores, and hyphens
+ * (the server accepts digits — e.g. `acme.s3-explorer`, `acme.app2`). */
+const APP_NAME_RE = /^[a-z][a-zA-Z0-9_-]*$/;
 
 /** Wireframe geometry — the 320x200 preview canvas and its chrome regions. */
 const WF = {
@@ -55,38 +57,59 @@ const WF_FILL = {
 // =============================================================================
 
 const styles: Record<string, React.CSSProperties> = {
-	page: { display: 'flex', justifyContent: 'center', padding: '40px 16px', fontFamily: 'var(--rr-font-family, system-ui)', fontSize: 13, color: 'var(--rr-text-primary)' },
-	panel: { width: 640, background: 'var(--rr-bg-paper)', border: '1px solid var(--rr-border)', borderRadius: 6, overflow: 'hidden' },
-	header: { padding: '16px 24px 14px', borderBottom: '1px solid var(--rr-border)' },
-	headerTitle: { fontSize: 16, fontWeight: 600, margin: 0 },
-	headerSub: { marginTop: 4, marginBottom: 0, fontSize: 12, color: 'var(--rr-text-secondary)' },
-	body: { padding: '20px 24px' },
-	section: { marginBottom: 22 },
-	sectionLabel: { display: 'block', fontSize: 11, fontWeight: 600, letterSpacing: 0.5, textTransform: 'uppercase', color: 'var(--rr-text-secondary)', marginBottom: 10 },
-	frameRow: { display: 'flex', gap: 18, alignItems: 'stretch' },
-	framePreview: { flex: 'none', width: 340, background: 'var(--rr-bg-default)', border: '1px solid var(--rr-border)', borderRadius: 5, padding: 12 },
-	frameCaption: { marginTop: 8, textAlign: 'center', fontSize: 11.5, color: 'var(--rr-text-secondary)' },
-	frameOptions: { flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 14 },
+	// The page mirrors the pipeline canvas behind its starting-point card:
+	// the editor background with the same dot grid, card floating centered.
+	page: {
+		display: 'flex',
+		justifyContent: 'center',
+		alignItems: 'flex-start',
+		minHeight: '100vh',
+		boxSizing: 'border-box',
+		padding: '40px 16px',
+		fontFamily: 'var(--rr-font-family-widget)',
+		fontSize: 12,
+		color: 'var(--rr-fg-widget)',
+		backgroundImage: 'radial-gradient(var(--rr-border) 1px, transparent 1px)',
+		backgroundSize: '24px 24px',
+	},
+	// Card shell matches EmptyCanvasPrompt: bg-widget, 8px radius, 24/28 padding
+	card: {
+		width: '100%',
+		maxWidth: 560,
+		height: 'fit-content',
+		background: 'var(--rr-bg-widget)',
+		border: '1px solid var(--rr-border)',
+		borderRadius: 8,
+		padding: '24px 28px',
+		boxSizing: 'border-box',
+	},
+	heading: { margin: '0 0 4px 0', fontSize: 14, fontWeight: 600, color: 'var(--rr-text-primary)' },
+	subheading: { margin: '0 0 16px 0', fontSize: 12, color: 'var(--rr-text-secondary)' },
+	divider: { margin: '16px 0', borderTop: '1px solid var(--rr-border)' },
+	frameRow: { display: 'flex', gap: 16, alignItems: 'stretch' },
+	framePreview: { flex: 'none', width: 264, background: 'var(--rr-bg-default)', border: '1px solid var(--rr-border)', borderRadius: 4, padding: 10 },
+	frameCaption: { marginTop: 6, textAlign: 'center', fontSize: 11, color: 'var(--rr-text-secondary)' },
+	frameOptions: { flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 12 },
 	checkRow: { display: 'flex', alignItems: 'flex-start', gap: 8 },
-	checkBox: { width: 15, height: 15, marginTop: 1, accentColor: 'var(--rr-brand)', cursor: 'pointer' },
-	checkLabel: { cursor: 'pointer' },
-	checkHint: { display: 'block', color: 'var(--rr-text-secondary)', fontSize: 11.5, marginTop: 2 },
-	field: { marginBottom: 14 },
-	fieldLabel: { display: 'block', marginBottom: 5 },
-	input: { width: '100%', boxSizing: 'border-box', background: 'var(--rr-bg-input)', border: '1px solid var(--rr-border)', borderRadius: 3, color: 'var(--rr-text-primary)', fontSize: 13, padding: '6px 8px', outline: 'none' },
+	checkBox: { width: 14, height: 14, marginTop: 1, accentColor: 'var(--rr-brand)', cursor: 'pointer' },
+	checkLabel: { cursor: 'pointer', fontSize: 12 },
+	checkHint: { display: 'block', color: 'var(--rr-text-secondary)', fontSize: 11, marginTop: 2, lineHeight: 1.3 },
+	field: { marginBottom: 12 },
+	fieldLabel: { display: 'block', marginBottom: 4, fontSize: 12 },
+	input: { width: '100%', boxSizing: 'border-box', background: 'var(--rr-bg-input)', border: '1px solid var(--rr-border)', borderRadius: 4, color: 'var(--rr-text-primary)', fontFamily: 'inherit', fontSize: 12, padding: '6px 10px', outline: 'none' },
 	inputInvalid: { borderColor: 'var(--rr-error, #be1100)' },
-	fieldError: { color: 'var(--rr-error, #f48771)', fontSize: 11.5, marginTop: 4 },
-	identity: { background: 'var(--rr-bg-default)', border: '1px solid var(--rr-border)', borderRadius: 5, padding: '12px 14px' },
-	identityRow: { display: 'flex', alignItems: 'center', gap: 10, padding: '4px 0' },
-	identityKey: { width: 110, color: 'var(--rr-text-secondary)', fontSize: 12, flex: 'none' },
-	identityValue: { fontFamily: 'var(--rr-font-mono, monospace)', fontSize: 12.5 },
-	chip: { display: 'inline-block', background: 'var(--rr-bg-input)', border: '1px solid var(--rr-border)', borderRadius: 10, padding: '1px 10px 2px', fontFamily: 'var(--rr-font-mono, monospace)', fontSize: 12, color: 'var(--rr-brand)' },
+	fieldError: { color: 'var(--rr-error, #f48771)', fontSize: 11, marginTop: 4 },
+	identity: { border: '1px solid var(--rr-border)', borderRadius: 4, padding: '10px 12px' },
+	identityRow: { display: 'flex', alignItems: 'center', gap: 10, padding: '3px 0' },
+	identityKey: { width: 104, color: 'var(--rr-text-secondary)', fontSize: 11, flex: 'none' },
+	identityValue: { fontFamily: 'var(--rr-font-mono, monospace)', fontSize: 11.5 },
+	chip: { display: 'inline-block', background: 'var(--rr-bg-input)', border: '1px solid var(--rr-border)', borderRadius: 10, padding: '1px 10px 2px', fontFamily: 'var(--rr-font-mono, monospace)', fontSize: 11.5, color: 'var(--rr-brand)' },
 	chipSource: { color: 'var(--rr-text-secondary)', fontSize: 11 },
 	linkage: { color: 'var(--rr-success, var(--rr-brand))' },
-	footer: { display: 'flex', alignItems: 'center', gap: 8, padding: '14px 24px', borderTop: '1px solid var(--rr-border)', background: 'var(--rr-bg-default)' },
+	footer: { display: 'flex', alignItems: 'center', gap: 8 },
 	footerNote: { flex: 1, color: 'var(--rr-text-secondary)', fontSize: 11, lineHeight: 1.4 },
 	footerError: { flex: 1, color: 'var(--rr-error, #f48771)', fontSize: 11, lineHeight: 1.4 },
-	button: { fontFamily: 'inherit', fontSize: 13, padding: '6px 16px', borderRadius: 3, border: '1px solid transparent', cursor: 'pointer' },
+	button: { fontFamily: 'inherit', fontSize: 12, padding: '6px 14px', borderRadius: 4, border: '1px solid transparent', cursor: 'pointer', transition: 'background-color 0.1s, border-color 0.1s' },
 	buttonPrimary: { background: 'var(--rr-brand)', color: 'var(--rr-text-on-brand, #ffffff)' },
 	buttonPrimaryDisabled: { background: 'var(--rr-bg-input)', color: 'var(--rr-text-secondary)', cursor: 'default' },
 	buttonSecondary: { background: 'transparent', color: 'var(--rr-text-primary)', borderColor: 'var(--rr-border)' },
@@ -213,15 +236,21 @@ const CheckRow: React.FC<{ id: string; label: string; hint: string; checked: boo
 // =============================================================================
 
 /**
- * Derives a default display name from the app-name slug, e.g.
- * 'brand-studio' becomes 'Brand Studio'. Same derivation the pre-wizard
- * native flow used for its InputBox default.
+ * Derives a default display name from the app-name slug: hyphens,
+ * underscores, and camelCase humps all read as word breaks, so
+ * 'brand-studio', 'brand_studio', and 'brandStudio' each become
+ * 'Brand Studio'. Same derivation the pre-wizard native flow used for
+ * its InputBox default.
  *
  * @param slug - The app-name slug.
  * @returns The title-cased display name.
  */
 function deriveDisplayName(slug: string): string {
-	return slug.replace(/(^|-)(\w)/g, (_, __, c: string) => ` ${c.toUpperCase()}`).trim();
+	return slug
+		.replace(/([a-z])([A-Z])/g, '$1 $2')
+		.replace(/[-_]+/g, ' ')
+		.replace(/(^|\s)(\w)/g, (_, sp: string, c: string) => `${sp}${c.toUpperCase()}`)
+		.trim();
 }
 
 // =============================================================================
@@ -324,83 +353,79 @@ const NewAppWebview: React.FC = () => {
 
 	return (
 		<div style={styles.page}>
-			<div style={styles.panel}>
-				<div style={styles.header}>
-					<h1 style={styles.headerTitle}>Create New App</h1>
-					<p style={styles.headerSub}>Scaffold a new RocketRide app into the workspace apps directory.</p>
-				</div>
-
-				<div style={styles.body}>
-					{/* ── Application frame ─────────────────────────────── */}
-					<div style={styles.section}>
-						<span style={styles.sectionLabel}>Application Frame</span>
-						<div style={styles.frameRow}>
-							<FramePreview frame={frame} />
-							<div style={styles.frameOptions}>
-								<CheckRow id="optSidebar" label="Sidebar" hint="Standard navigation rail on the left." checked={frame.sidebar} onChange={(v) => setFrame((f) => ({ ...f, sidebar: v }))} />
-								<CheckRow id="optFooter" label="Status footer" hint="Status bar across the bottom of the app." checked={frame.statusFooter} onChange={(v) => setFrame((f) => ({ ...f, statusFooter: v }))} />
-								<CheckRow id="optTabs" label="Tabs / Documents" hint="Document tab strip (DocTabs) across the content area." checked={frame.docTabs} onChange={(v) => setFrame((f) => ({ ...f, docTabs: v }))} />
-							</div>
-						</div>
-					</div>
-
-					{/* ── Name ──────────────────────────────────────────── */}
-					<div style={styles.section}>
-						<span style={styles.sectionLabel}>Name</span>
-						<div style={styles.field}>
-							<label htmlFor="appName" style={styles.fieldLabel}>
-								App name
-							</label>
-							<input
-								id="appName"
-								type="text"
-								spellCheck={false}
-								placeholder="lowercase letters, digits, hyphens"
-								value={appName}
-								onChange={(e) => onAppNameChange(e.target.value.trim())}
-								style={{ ...styles.input, ...(appName !== '' && !nameValid ? styles.inputInvalid : {}) }}
-							/>
-							{appName !== '' && !nameValid && <div style={styles.fieldError}>Must start with a letter; lowercase letters, digits, and hyphens only.</div>}
-							{collision && <div style={styles.fieldError}>Folder "apps/{folderName}" already exists in the workspace.</div>}
-						</div>
-						<div style={styles.field}>
-							<label htmlFor="displayName" style={styles.fieldLabel}>
-								Display name
-							</label>
-							<input
-								id="displayName"
-								type="text"
-								spellCheck={false}
-								value={displayName}
-								onChange={(e) => {
-									setDisplayTouched(true);
-									setDisplayName(e.target.value);
-								}}
-								style={styles.input}
-							/>
-						</div>
-					</div>
-
-					{/* ── Identity ──────────────────────────────────────── */}
-					<div style={styles.section}>
-						<span style={styles.sectionLabel}>Identity</span>
-						<div style={styles.identity}>
-							<div style={styles.identityRow}>
-								<span style={styles.identityKey}>Developer ID</span>
-								<span style={styles.chip}>{developerId}</span>
-								<span style={styles.chipSource}>{identity.source === 'organization' ? 'from organization profile' : 'default (no organization developer id)'}</span>
-							</div>
-							<div style={styles.identityRow}>
-								<span style={styles.identityKey}>Linkage name</span>
-								<span style={{ ...styles.identityValue, ...styles.linkage }}>{linkageName}</span>
-							</div>
-							<div style={styles.identityRow}>
-								<span style={styles.identityKey}>Location</span>
-								<span style={styles.identityValue}>{location}</span>
-							</div>
-						</div>
+			<div style={styles.card}>
+				{/* ── Application frame ─────────────────────────────────── */}
+				<h3 style={styles.heading}>Create a new app</h3>
+				<p style={styles.subheading}>Choose an application frame to begin — the preview updates live</p>
+				<div style={styles.frameRow}>
+					<FramePreview frame={frame} />
+					<div style={styles.frameOptions}>
+						<CheckRow id="optSidebar" label="Sidebar" hint="Standard navigation rail on the left." checked={frame.sidebar} onChange={(v) => setFrame((f) => ({ ...f, sidebar: v }))} />
+						<CheckRow id="optFooter" label="Status footer" hint="Status bar across the bottom of the app." checked={frame.statusFooter} onChange={(v) => setFrame((f) => ({ ...f, statusFooter: v }))} />
+						<CheckRow id="optTabs" label="Tabs / Documents" hint="Document tab strip (DocTabs) across the content area." checked={frame.docTabs} onChange={(v) => setFrame((f) => ({ ...f, docTabs: v }))} />
 					</div>
 				</div>
+
+				<div style={styles.divider} />
+
+				{/* ── Name ──────────────────────────────────────────────── */}
+				<h3 style={styles.heading}>Name your app</h3>
+				<p style={styles.subheading}>The app name forms the app id; the display name is what users see</p>
+				<div style={styles.field}>
+					<label htmlFor="appName" style={styles.fieldLabel}>
+						App name
+					</label>
+					<input
+						id="appName"
+						type="text"
+						spellCheck={false}
+						placeholder="starts lowercase; letters, digits, underscores, hyphens"
+						value={appName}
+						onChange={(e) => onAppNameChange(e.target.value.trim())}
+						style={{ ...styles.input, ...(appName !== '' && !nameValid ? styles.inputInvalid : {}) }}
+					/>
+					{appName !== '' && !nameValid && <div style={styles.fieldError}>Must start with a lowercase letter; letters, digits, underscores, and hyphens only.</div>}
+					{collision && <div style={styles.fieldError}>Folder "apps/{folderName}" already exists in the workspace.</div>}
+				</div>
+				<div style={styles.field}>
+					<label htmlFor="displayName" style={styles.fieldLabel}>
+						Display name
+					</label>
+					<input
+						id="displayName"
+						type="text"
+						spellCheck={false}
+						value={displayName}
+						onChange={(e) => {
+							setDisplayTouched(true);
+							setDisplayName(e.target.value);
+						}}
+						style={styles.input}
+					/>
+				</div>
+
+				<div style={styles.divider} />
+
+				{/* ── Identity ──────────────────────────────────────────── */}
+				<h3 style={styles.heading}>Identity</h3>
+				<p style={styles.subheading}>How the app is linked and where it is scaffolded</p>
+				<div style={styles.identity}>
+					<div style={styles.identityRow}>
+						<span style={styles.identityKey}>Developer ID</span>
+						<span style={styles.chip}>{developerId}</span>
+						<span style={styles.chipSource}>{identity.source === 'organization' ? 'from organization profile' : 'default (no organization developer id)'}</span>
+					</div>
+					<div style={styles.identityRow}>
+						<span style={styles.identityKey}>Linkage name</span>
+						<span style={{ ...styles.identityValue, ...styles.linkage }}>{linkageName}</span>
+					</div>
+					<div style={styles.identityRow}>
+						<span style={styles.identityKey}>Location</span>
+						<span style={styles.identityValue}>{location}</span>
+					</div>
+				</div>
+
+				<div style={styles.divider} />
 
 				{/* ── Footer ────────────────────────────────────────────── */}
 				<div style={styles.footer}>

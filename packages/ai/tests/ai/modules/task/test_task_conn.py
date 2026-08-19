@@ -25,7 +25,6 @@ from __future__ import annotations
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
-import logging
 
 import pytest
 
@@ -93,17 +92,20 @@ def _make_conn(
     return conn
 
 
-def _make_account_info(*, auth: str = 'ak_user_token', user_id: str = 'user-1', default_team: str = 'team-1'):
+def _make_account_info(*, auth: str = 'ak_user_token', user_id: str = 'user-1', dev_team: str = 'team-1', teams=None):
     """
     Build a minimal AccountInfo-shaped object covering the attributes
     TaskConn touches: ``auth`` (the credential string), ``userId``,
-    ``userToken``, ``defaultTeam``.
+    ``userToken``, ``devTeam``, and ``organization`` (whose membership
+    teams feed ``has_permission``'s union walk — devTeam itself carries
+    no authorization meaning).
 
     Args:
         auth: credential string. Tests use ``pk_``, ``tk_``, ``ak_`` prefixes
             to exercise the different code paths in ``get_task_token``.
         user_id: opaque user identifier.
-        default_team: team id used by ``has_permission``.
+        dev_team: the dev team id (billing/env only — never permissions).
+        teams: membership team dicts; defaults to one entry for ``dev_team``.
 
     Returns:
         SimpleNamespace: a stand-in object with the expected attributes.
@@ -112,7 +114,13 @@ def _make_account_info(*, auth: str = 'ak_user_token', user_id: str = 'user-1', 
         auth=auth,
         userId=user_id,
         userToken='token-' + user_id,
-        defaultTeam=default_team,
+        devTeam=dev_team,
+        organization={
+            'id': 'org-1',
+            'name': 'Acme',
+            'permissions': [],
+            'teams': teams if teams is not None else [{'id': dev_team, 'name': 'Development', 'permissions': []}],
+        },
         sysPermissions=[],
         waitlisted=False,
     )
@@ -286,38 +294,49 @@ def test_has_permission_swallows_permission_error(monkeypatch):
     assert conn.has_permission('task.control') is False
 
 
-def test_has_permission_logs_why_it_denied(monkeypatch, caplog):
-    """
-    The denial must say WHO, WHICH TEAM, WHICH PERMISSION and WHAT FAILED.
+def test_has_permission_unions_membership_teams(monkeypatch):
+    """The perm may come from ANY membership team — devTeam is irrelevant.
 
-    Asserting only the False return is not enough: that assertion passes just as
-    happily with the logging deleted, which is how the #373 incident stayed
-    invisible for a day. The silent-denial path is the whole reason this log
-    exists, so the test has to fail if the message goes away or loses a field.
+    The visibility model: what a session may do ambiently is the union of
+    its memberships. A grant on the SECOND team suffices even though the
+    dev team (billing/env only) holds nothing.
     """
     from ai.modules.task import task_conn as tc_mod
 
-    def _raise(info, team):
-        raise PermissionError('team-1 not in organization')
+    grants = {'team-1': set(), 'team-2': {'task.control'}}
+    monkeypatch.setattr(tc_mod, 'resolve_team_permissions', lambda info, team: grants[team])
 
-    monkeypatch.setattr(tc_mod, 'resolve_team_permissions', _raise)
+    teams = [{'id': 'team-1', 'name': 'A', 'permissions': []}, {'id': 'team-2', 'name': 'B', 'permissions': []}]
+    conn = _make_conn(account_info=_make_account_info(dev_team='team-1', teams=teams))
+    assert conn.has_permission('task.control') is True
 
-    conn = _make_conn(account_info=_make_account_info(user_id='user-1', default_team='team-1'))
-    with caplog.at_level(logging.WARNING, logger=tc_mod.__name__):
-        assert conn.has_permission('task.control') is False
 
-    # Pin the record down before reading it. Joining every captured record would
-    # let an unrelated log satisfy these field checks, and would keep passing if
-    # the denial were downgraded to debug or raised to error — either of which
-    # changes whether we actually see it in CloudWatch, which is the entire point.
-    records = [r for r in caplog.records if r.name == tc_mod.__name__ and r.levelno == logging.WARNING]
-    assert len(records) == 1, (
-        f'expected exactly one WARNING from {tc_mod.__name__}, got {[(r.name, r.levelname) for r in caplog.records]}'
-    )
+def test_has_permission_ignores_stale_dev_team(monkeypatch):
+    """A stale devTeam (no membership) cannot affect the answer either way.
 
-    message = records[0].getMessage()
-    for expected in ('team-1', 'user-1', 'task.control', 'not in organization'):
-        assert expected in message, f'denial log omits {expected!r}: {message}'
+    The #373 class — a devTeam pointing outside the membership list — is
+    structurally impossible now: the union walks memberships only, so the
+    stale pointer neither denies (the old flood) nor grants.
+    """
+    from ai.modules.task import task_conn as tc_mod
+
+    monkeypatch.setattr(tc_mod, 'resolve_team_permissions', lambda info, team: {'task.monitor'})
+
+    teams = [{'id': 'team-2', 'name': 'B', 'permissions': []}]
+    conn = _make_conn(account_info=_make_account_info(dev_team='team-gone', teams=teams))
+    assert conn.has_permission('task.monitor') is True
+
+    # No memberships at all: denied quietly, never raising.
+    conn = _make_conn(account_info=_make_account_info(dev_team='team-gone', teams=[]))
+    assert conn.has_permission('task.monitor') is False
+
+
+def test_has_permission_superusers_pass_without_memberships(monkeypatch):
+    """sys.admin/internal hold everything even with zero membership rows."""
+    info = _make_account_info(teams=[])
+    info.sysPermissions = ['sys.admin']
+    conn = _make_conn(account_info=info)
+    assert conn.has_permission('task.control') is True
 
 
 def test_verify_permission_raises_on_missing(monkeypatch):
@@ -354,8 +373,8 @@ def _org(team_perms, *, team_id='team-1', org_perms=()):
 
 
 def test_verify_team_permission_grants_on_that_team():
-    """The permission is resolved against the ADDRESSED team, not defaultTeam."""
-    account = _make_account_info(default_team='team-other')
+    """The permission is resolved against the ADDRESSED team, not devTeam."""
+    account = _make_account_info(dev_team='team-other')
     account.organization = _org(['task.control'], team_id='team-1')
     conn = _make_conn(account_info=account)
     conn.verify_team_permission('team-1', 'task.control')  # must not raise
@@ -512,10 +531,10 @@ def test_get_task_apikey_rejects_task_in_team_caller_cannot_access(monkeypatch):
     from ai.modules.task import task_conn as tc_mod
 
     # Caller has no team membership for this task's team → empty permission list.
-    monkeypatch.setattr(tc_mod, 'resolve_task_permissions', lambda info, team_id: [])
+    monkeypatch.setattr(tc_mod, 'resolve_run_permissions', lambda info, control: [])
 
     server = MagicMock()
-    fake_control = SimpleNamespace(teamId='team-other', task=SimpleNamespace(name='target'))
+    fake_control = SimpleNamespace(teamId='team-other', owner_id='team-other', task=SimpleNamespace(name='target'))
     server.get_task_control = MagicMock(return_value=fake_control)
 
     conn = _make_conn(
@@ -531,11 +550,13 @@ def test_get_task_apikey_returns_task_when_team_grants_access(monkeypatch):
     """API-key auth with the requested team permission returns the underlying task."""
     from ai.modules.task import task_conn as tc_mod
 
-    monkeypatch.setattr(tc_mod, 'resolve_task_permissions', lambda info, team_id: ['task.control'])
+    monkeypatch.setattr(tc_mod, 'resolve_run_permissions', lambda info, control: ['task.control'])
 
     target_task = SimpleNamespace(name='target')
     server = MagicMock()
-    server.get_task_control = MagicMock(return_value=SimpleNamespace(teamId='team-1', task=target_task))
+    server.get_task_control = MagicMock(
+        return_value=SimpleNamespace(teamId='team-1', owner_id='team-1', task=target_task)
+    )
 
     conn = _make_conn(
         account_info=_make_account_info(auth='ak_user-1', user_id='user-1'),
@@ -617,11 +638,13 @@ async def test_request_errors_when_debug_interface_missing(monkeypatch):
     from ai.modules.task import task_conn as tc_mod
 
     # Caller has task.debug on the task's team — get_task() returns the task.
-    monkeypatch.setattr(tc_mod, 'resolve_task_permissions', lambda info, team_id: ['task.debug'])
+    monkeypatch.setattr(tc_mod, 'resolve_run_permissions', lambda info, control: ['task.debug'])
 
     fake_task = SimpleNamespace(_debug_python=None)
     server = MagicMock()
-    server.get_task_control = MagicMock(return_value=SimpleNamespace(teamId='team-1', task=fake_task))
+    server.get_task_control = MagicMock(
+        return_value=SimpleNamespace(teamId='team-1', owner_id='team-1', task=fake_task)
+    )
     conn = _make_conn(account_info=_make_account_info(auth='ak_user-1', user_id='user-1'), server=server)
 
     response = await TaskConn.request(conn, {'command': 'continue', 'arguments': {'token': 'tk_x'}})

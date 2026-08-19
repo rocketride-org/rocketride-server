@@ -185,7 +185,7 @@ tick is skipped — runs of the same deployment source never overlap.
 | Error | Cause |
 | --- | --- |
 | `RuntimeError` / `Error` | Unknown project/version; deploying an unpublished version; invalid cron; missing `teamId` |
-| Permission error | Missing `task.control` on the TARGET team (mutations) or `task.monitor` (reads). Unknown and foreign teams are denied identically |
+| Permission error | Missing `task.control` on the TARGET team (mutations). Reads follow the visibility model: an org admin sees every team and every personal space; a user sees their own personal space and the teams they are a member of |
 
 ```python
 try:

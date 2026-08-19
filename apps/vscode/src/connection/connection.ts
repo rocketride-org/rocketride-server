@@ -67,6 +67,19 @@ import {
 	GenerationOwnedOperationSlot,
 } from './connection-generation';
 
+// =============================================================================
+// CONSTANTS
+// =============================================================================
+
+/** Foreground connect timeout — applied to the transport dial AND the auth
+ *  request (the SDK uses the caller timeout for both), replacing the SDK's
+ *  180s transport default and unbounded auth request. */
+const CONNECT_TIMEOUT_MS = 30_000;
+
+/** Retry backoff for failed connect attempts: doubles per failure up to the cap. */
+const RETRY_BASE_DELAY_MS = 2_000;
+const RETRY_MAX_DELAY_MS = 30_000;
+
 export class ConnectionManager extends EventEmitter {
 	private static instance: ConnectionManager;
 
@@ -85,9 +98,13 @@ export class ConnectionManager extends EventEmitter {
 		state: ConnectionState.DISCONNECTED,
 		connectionMode: 'local',
 		hasCredentials: false,
-		retryAttempt: 0,
-		maxRetryAttempts: 120,
 	};
+
+	// Retry scheduling for failed connect attempts. Non-auth failures retry
+	// with backoff until superseded (config change, explicit disconnect,
+	// engine event, success); auth failures stop and open the settings page.
+	private retryTimer?: NodeJS.Timeout;
+	private retryDelayMs = RETRY_BASE_DELAY_MS;
 
 	// Debounce timer for configuration changes
 	private configChangeTimeout?: NodeJS.Timeout;
@@ -114,6 +131,22 @@ export class ConnectionManager extends EventEmitter {
 		this.group = group;
 		this.client = this.createClient();
 		this.setupConfigurationListener();
+		this.setupCloudAuthListener();
+	}
+
+	/**
+	 * Keeps hasCredentials truthful when the stored cloud session changes
+	 * outside a config write (sign-in committed on save, sign-out, staged
+	 * changes) — token storage is not part of VS Code configuration, so the
+	 * config-change listener never sees it.
+	 */
+	private setupCloudAuthListener(): void {
+		const cloudAuth = CloudAuthProvider.getInstance();
+		const handler = () => {
+			this.updateCredentialsStatus().catch(() => { /* best effort */ });
+		};
+		cloudAuth.onDidChange.on('changed', handler);
+		this.disposables.push({ dispose: () => cloudAuth.onDidChange.removeListener('changed', handler) });
 	}
 
 	public static getInstance(): ConnectionManager {
@@ -193,6 +226,9 @@ export class ConnectionManager extends EventEmitter {
 					// Invalidate BEFORE tearing down so an in-flight connect attempt
 					// cannot publish through the connection this event just retired.
 					const generation = this.invalidateConnectionAttempts();
+					// The engine is gone — retrying the WebSocket is pointless
+					// until the registry reports 'ready' again.
+					this.cancelConnectRetry();
 					this.connectedMode = undefined;
 					this.engineUri = undefined;
 					this.client?.disconnect().catch(() => { /* best effort */ });
@@ -238,10 +274,17 @@ export class ConnectionManager extends EventEmitter {
 					const msg = err instanceof Error ? err.message : String(err);
 					this.logger.output(`${icons.error} Failed to connect to engine: ${msg}`);
 					this.connectedMode = undefined;
-					this.updateConnectionStatus({
-						state: ConnectionState.DISCONNECTED,
-						lastError: msg,
-					});
+					// A foreground auth rejection surfaces here (the SDK only
+					// routes BACKGROUND rejections through onConnectError) —
+					// publish AUTH_FAILED and open the settings page, same as
+					// the background path. Non-auth failures retry with backoff.
+					if (err instanceof AuthenticationException) {
+						this.updateConnectionStatus({ state: ConnectionState.AUTH_FAILED, lastError: msg });
+						vscode.commands.executeCommand('rocketride.page.settings.open', this.group, msg);
+					} else {
+						this.updateConnectionStatus({ state: ConnectionState.DISCONNECTED, lastError: msg });
+						this.scheduleConnectRetry(generation);
+					}
 				});
 				break;
 			}
@@ -271,7 +314,7 @@ export class ConnectionManager extends EventEmitter {
 		// Hand callback publication rights to this attempt immediately before
 		// the SDK call so stale onConnected/onDisconnected callbacks go silent.
 		if (!this.connectionGeneration.activateAttemptCallbacks(generation)) return;
-		await this.client.connect(auth, { uri });
+		await this.client.connect(auth, { uri, timeout: CONNECT_TIMEOUT_MS });
 		if (!this.isCurrentConnectionAttempt(generation)) return;
 		// onConnected callback in createClient() handles state update
 
@@ -279,6 +322,35 @@ export class ConnectionManager extends EventEmitter {
 		// RocketRide SDK/CLI can drive the same (self-hosted) engine. Best-effort:
 		// a failure here must never break an otherwise-successful connection.
 		await this.syncEnvFile(mode, auth, generation);
+	}
+
+	/**
+	 * Schedules a retry after a failed connect attempt. Bound to the failed
+	 * attempt's generation: any newer lifecycle (config change, explicit
+	 * disconnect, engine event, manual connect) supersedes the pending retry.
+	 * The newest failure always owns the retry slot.
+	 */
+	private scheduleConnectRetry(generation: number): void {
+		if (this.isDisposing) return;
+		this.cancelConnectRetry();
+		const delay = this.retryDelayMs;
+		this.retryDelayMs = Math.min(this.retryDelayMs * 2, RETRY_MAX_DELAY_MS);
+		this.logger.output(`${icons.info} Retrying connection in ${Math.round(delay / 1000)}s...`);
+		this.retryTimer = setTimeout(() => {
+			this.retryTimer = undefined;
+			if (this.isDisposing || !this.isCurrentConnectionGeneration(generation)) return;
+			// connect() publishes its own failure state and schedules the next
+			// retry, so a rejection here needs no additional handling.
+			this.connect().catch(() => { /* published by connect() */ });
+		}, delay);
+	}
+
+	/** Cancels any pending connect retry. */
+	private cancelConnectRetry(): void {
+		if (this.retryTimer) {
+			clearTimeout(this.retryTimer);
+			this.retryTimer = undefined;
+		}
 	}
 
 	/** Start a new connection attempt generation (invalidates older attempts). */
@@ -422,6 +494,8 @@ export class ConnectionManager extends EventEmitter {
 		// A config change retires every older connection lifecycle first, so a
 		// half-finished connect can't publish into the reconfigured connection.
 		const generation = this.invalidateConnectionAttempts();
+		this.cancelConnectRetry();
+		this.retryDelayMs = RETRY_BASE_DELAY_MS;
 		this.logger.output(`${icons.info} Configuration changed, reconnecting...`);
 		await this.updateCredentialsStatus(generation);
 		if (!this.isCurrentConnectionGeneration(generation)) return;
@@ -554,16 +628,35 @@ export class ConnectionManager extends EventEmitter {
 					return;
 				}
 
+				// The user's default org changed — a pure notification: the
+				// server never swaps a live connection's identity in place, so
+				// adopting the new org requires a fresh login handshake.
+				// Reconnect; the new session resolves the new default org and
+				// the CONNECTED status fan-out re-syncs every provider.
+				if (message.event === 'apaext_org_changed') {
+					this.logger.output(`${icons.info} Default org changed — reconnecting to adopt the new org`);
+					// Deferred: disconnect() tears down the client that is
+					// dispatching this very callback.
+					setTimeout(() => {
+						this.reconnectForOrgChange().catch((err) => {
+							this.logger.error(`Reconnect after org change failed: ${err}`);
+						});
+					}, 0);
+					return;
+				}
+
 				this.emit('shell:event', message);
 			},
 			onConnected: async () => {
 				const generation = this.connectionGeneration.callbackGeneration;
 				if (!this.connectionGeneration.isCurrentCallback(generation) || this.isDisposing) return;
+				// Success ends the retry regime and re-arms the backoff.
+				this.cancelConnectRetry();
+				this.retryDelayMs = RETRY_BASE_DELAY_MS;
 				this.updateConnectionStatus({
 					state: ConnectionState.CONNECTED,
 					lastConnected: new Date(),
 					lastError: undefined,
-					retryAttempt: 0,
 					progressMessage: undefined,
 					progressLogLine: undefined,
 				});
@@ -594,11 +687,10 @@ export class ConnectionManager extends EventEmitter {
 					|| this.isDisposing
 					|| error instanceof LoginAttemptCancelledError
 				) return;
-				// Auth rejection: stop retrying, clear stale credentials, and
-				// open the auth page so the user can fix them.
+				// Auth rejection: stop retrying and open the auth page so the
+				// user can fix credentials.
 				if (error instanceof AuthenticationException) {
 					this.logger.output(`${icons.error} Authentication failed: ${error.message}`);
-					const mode = this.connectionStatus.connectionMode;
 
 					// Stop the client's auto-reconnect loop so it doesn't keep
 					// retrying with stale credentials. The reconcile path will
@@ -606,12 +698,13 @@ export class ConnectionManager extends EventEmitter {
 					// user fixes them in Settings and saves.
 					this.client.disconnect().catch(() => { /* best effort */ });
 
-					// Only clear the cloud token — on-prem/docker/service keys
-					// live in config, not SecretStorage.
-					if (connectionModeUsesOAuth(mode)) {
-						await CloudAuthProvider.getInstance().signOut();
-						if (!this.isCurrentConnectionAttempt(generation)) return;
-					}
+					// The stored cloud session is deliberately KEPT: a rejection
+					// can be transient (server restart, auth backend hiccup,
+					// per-socket attempt cap) and the token slot is shared by
+					// both connection groups — deleting it here signed the user
+					// out of everything on any hiccup. Recovery is a fresh
+					// sign-in from Settings, which stages a new session and
+					// reconnects on Save.
 
 					this.updateConnectionStatus({
 						state: ConnectionState.AUTH_FAILED,
@@ -653,6 +746,28 @@ export class ConnectionManager extends EventEmitter {
 				// Swallow failures of a superseded/cancelled attempt — its
 				// replacement owns error reporting for the live connection.
 				if (!this.isCurrentConnectionAttempt(generation) || error instanceof LoginAttemptCancelledError) return;
+				// A manual attempt owns its own state publication: connectToEngine
+				// set CONNECTING before resolving credentials, and without this
+				// reset a failure would strand the status surfaces on an
+				// unclickable "Connecting..." forever.
+				const msg = error instanceof Error ? error.message : String(error);
+				if (error instanceof AuthenticationException) {
+					this.updateConnectionStatus({
+						state: ConnectionState.AUTH_FAILED,
+						lastError: msg,
+						progressMessage: undefined,
+						progressLogLine: undefined,
+					});
+					vscode.commands.executeCommand('rocketride.page.settings.open', this.group, msg);
+				} else {
+					this.updateConnectionStatus({
+						state: ConnectionState.DISCONNECTED,
+						lastError: msg,
+						progressMessage: undefined,
+						progressLogLine: undefined,
+					});
+					this.scheduleConnectRetry(generation);
+				}
 				throw error;
 			}
 		}
@@ -665,7 +780,20 @@ export class ConnectionManager extends EventEmitter {
 	 */
 	public async disconnect(): Promise<void> {
 		const generation = this.invalidateConnectionAttempts();
+		this.cancelConnectRetry();
 		await this.disconnectForGeneration(generation);
+	}
+
+	/**
+	 * Full re-auth cycle after an org switch. `apaext_org_changed` is a pure
+	 * notification — the server deliberately leaves the live connection's
+	 * identity on the old org — so the client re-logs-in to receive a session
+	 * stamped to the new default org.
+	 */
+	private async reconnectForOrgChange(): Promise<void> {
+		if (this.isDisposing) return;
+		await this.disconnect();
+		await this.connect();
 	}
 
 	/**
@@ -916,6 +1044,7 @@ export class ConnectionManager extends EventEmitter {
 		this.isDisposing = true;
 		// Retire every in-flight lifecycle so late completions go silent.
 		const generation = this.invalidateConnectionAttempts();
+		this.cancelConnectRetry();
 
 		if (this.configChangeTimeout) {
 			clearTimeout(this.configChangeTimeout);
@@ -970,4 +1099,53 @@ export function getCloudConnection(): ConnectionManager | undefined {
  */
 export function isCloudConnected(): boolean {
 	return getCloudConnection() !== undefined;
+}
+
+/**
+ * Disconnects every connection currently configured for cloud mode (dev, and
+ * deploy when independent). Called after the STORED cloud session changes
+ * (direct sign-out, or a save-time credential commit) so no live connection
+ * keeps riding a credential that storage no longer backs — the follow-up
+ * reconcile() reconnects with the fresh state.
+ */
+export async function disconnectCloudConnections(): Promise<void> {
+	// Import lazily to avoid circular dependency
+	const { DeployManager } = require('./deploy-manager');
+	const dev = ConnectionManager.getInstance();
+	if (dev.getConnectionMode() === 'cloud') {
+		await dev.disconnect();
+	}
+	const deploy = DeployManager.getDeployInstance();
+	if (!deploy.isSharedMode() && deploy.getConnectionMode() === 'cloud') {
+		await deploy.disconnect();
+	}
+}
+
+/**
+ * Commits staged cloud auth changes against the just-saved configuration.
+ * Shared by the Settings and Welcome save flows:
+ *
+ *   1. Valid targets = resolved hostUrls of every saved group in cloud mode.
+ *   2. commitPendingChanges() stores/deletes the session accordingly; a
+ *      staged session minted by a server no saved connection targets is
+ *      dropped (and surfaced), never stored.
+ *   3. When the stored session changed, cloud connections are torn down so
+ *      the caller's reconcile() reconnects with the new credential state.
+ */
+export async function commitStagedCloudCredentials(): Promise<void> {
+	const cloudAuth = CloudAuthProvider.getInstance();
+	const cfg = ConfigManager.getInstance().getConfig();
+	const cloudTargets = [cfg.development, cfg.deployment]
+		.filter((group) => group.connectionMode === 'cloud')
+		.map((group) => group.hostUrl);
+
+	const result = await cloudAuth.commitPendingChanges(cloudTargets);
+	if (result.droppedMismatch) {
+		vscode.window.showWarningMessage(
+			`The signed-in session for ${result.droppedMismatch} was discarded because no saved connection targets that server. Sign in again from the Cloud panel.`
+		);
+	}
+	if (result.committed) {
+		await disconnectCloudConnections();
+	}
 }

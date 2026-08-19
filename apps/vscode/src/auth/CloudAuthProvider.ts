@@ -14,8 +14,14 @@
  *   2. Open Zitadel authorize URL in browser
  *   3. Receive authorization code via vscode:// URI handler
  *   4. Exchange code for rr_* token via a temporary WebSocket connection
- *   5. Store token in VS Code SecretStorage + display name
+ *   5. STAGE the session in memory — the settings screens are transactional,
+ *      so the token reaches SecretStorage only when the user saves
+ *      (commitPendingChanges), keyed to the server that minted it
  *   6. Disconnect the temporary connection — no persistent connection made
+ *
+ * Sign-out from a settings screen is staged the same way (stageSignOut) and
+ * deletes the stored session only on save. Direct surfaces (sidebar menu,
+ * account page) still use signOut(), which applies immediately.
  *
  * The userToken is a persistent rr_* API key — no refresh needed.
  */
@@ -32,7 +38,49 @@ import { EventEmitter } from 'events';
 
 const SECRET_KEY_TOKEN = 'rocketride.cloudToken';
 const SECRET_KEY_NAME = 'rocketride.cloudUserName';
+const SECRET_KEY_URL = 'rocketride.cloudServerUrl';
 const REDIRECT_URI = `${vscode.env.uriScheme}://rocketride.rocketride/auth/callback`;
+
+// =============================================================================
+// HELPERS
+// =============================================================================
+
+/**
+ * Comparable identity of a server URL — origin when parseable, else the
+ * trimmed string sans trailing slashes. Mirrors CloudPanel's serverIdentity()
+ * so host-side commit checks agree with what the webview showed the user.
+ *
+ * @param url - The server URL to normalize.
+ * @returns Lowercased origin (or trimmed string) usable for equality checks.
+ */
+function serverIdentity(url: string): string {
+	const trimmed = url.trim().replace(/\/+$/, '');
+	try {
+		return new URL(trimmed).origin.toLowerCase();
+	} catch {
+		return trimmed.toLowerCase();
+	}
+}
+
+/** A completed browser sign-in held in memory until the user saves. */
+export interface PendingCloudSession {
+	token: string;
+	displayName: string;
+	/** The server that minted the token — the ONLY server it is valid on. */
+	cloudUrl: string;
+}
+
+/** Outcome of committing staged auth changes on save. */
+export interface CommitPendingResult {
+	/** True when the STORED session changed (sign-in stored or sign-out
+	 *  executed) — live cloud connections must be re-established. */
+	committed: boolean;
+	/** True when a staged sign-out deleted the stored session. */
+	signedOut: boolean;
+	/** Set when a staged sign-in was DROPPED because no saved cloud
+	 *  connection targets the server that minted it (the minting URL). */
+	droppedMismatch: string | null;
+}
 
 // =============================================================================
 // CLASS
@@ -43,6 +91,22 @@ export class CloudAuthProvider implements vscode.UriHandler, vscode.Disposable {
 
 	private context: vscode.ExtensionContext | undefined;
 	private pendingVerifier: string | null = null;
+	/** The cloud server the in-flight sign-in exchanges its code against —
+	 * captured at signIn() because the callback arrives later. */
+	private pendingCloudUrl: string | null = null;
+	/** Set when the LAST sign-in attempt came back waitlisted (auth fine,
+	 * access not yet granted, no token minted). In-memory only — the
+	 * waitlist is a server fact and must never persist into staleness; the
+	 * panels render it as a friendly banner for this host's lifetime. */
+	private waitlistedName: string | null = null;
+	/** Staged (uncommitted) session from a completed browser sign-in — the
+	 * settings screens are transactional, so this reaches SecretStorage only
+	 * via commitPendingChanges() when the user saves. In-memory only: closing
+	 * the settings surface without saving discards it. */
+	private pendingSession: PendingCloudSession | null = null;
+	/** Sign-out staged from a settings screen — the stored session is deleted
+	 * only when the user saves (commitPendingChanges). */
+	private pendingSignOut = false;
 	private pendingGoogleOAuth = new Map<string, (tokens: string, state: string) => void>();
 	private disposables: vscode.Disposable[] = [];
 	private readonly _onDidChange = new EventEmitter();
@@ -79,14 +143,30 @@ export class CloudAuthProvider implements vscode.UriHandler, vscode.Disposable {
 
 	// --- Sign In -------------------------------------------------------------
 
-	async signIn(zitadelUrl: string, clientId: string): Promise<void> {
+	/**
+	 * Start the browser PKCE round trip.
+	 *
+	 * @param zitadelUrl - Zitadel issuer (shared across all environments).
+	 * @param clientId   - Zitadel VS Code application client id.
+	 * @param cloudUrl   - The cloud server the OAuth code will be exchanged
+	 *                     against (the caller's effective cloud target —
+	 *                     nothing is baked into the extension). Captured
+	 *                     alongside the verifier because the exchange happens
+	 *                     later, in the deep-link callback.
+	 */
+	async signIn(zitadelUrl: string, clientId: string, cloudUrl: string): Promise<void> {
 		if (!zitadelUrl || !clientId) {
 			vscode.window.showErrorMessage('RocketRide Cloud sign-in required.');
+			return;
+		}
+		if (!cloudUrl) {
+			vscode.window.showErrorMessage('RocketRide Cloud sign-in failed: no cloud server is configured.');
 			return;
 		}
 
 		const { verifier, challenge } = generatePkce();
 		this.pendingVerifier = verifier;
+		this.pendingCloudUrl = cloudUrl;
 
 		const authUrl = buildAuthUrl(zitadelUrl, clientId, REDIRECT_URI, challenge);
 		await vscode.env.openExternal(vscode.Uri.parse(authUrl));
@@ -182,12 +262,13 @@ export class CloudAuthProvider implements vscode.UriHandler, vscode.Disposable {
 		// Exchange the code for a persistent rr_* token using a temporary
 		// client connection. This is auth only — not a persistent connection.
 		try {
-			// Always use the cloud URI for token exchange -- the OAuth code must
-			// be exchanged against the cloud server regardless of the current
-			// connection mode (local, docker, etc.).
-			const cloudUrl = process.env.ROCKETRIDE_URI;
+			// Exchange against the cloud server CAPTURED AT SIGN-IN — the
+			// caller's effective cloud target (default cloud or the user's
+			// custom server), never a value baked into the extension.
+			const cloudUrl = this.pendingCloudUrl;
+			this.pendingCloudUrl = null;
 			if (!cloudUrl) {
-				vscode.window.showErrorMessage('RocketRide Cloud sign-in failed: cloud endpoint is not configured (ROCKETRIDE_URI).');
+				vscode.window.showErrorMessage('RocketRide Cloud sign-in failed: no cloud server was captured for this sign-in.');
 				return;
 			}
 			const tempClient = new RocketRideClient({ persist: false });
@@ -195,15 +276,39 @@ export class CloudAuthProvider implements vscode.UriHandler, vscode.Disposable {
 
 			const token = (result as any)?.userToken || '';
 			const displayName = (result as any)?.displayName || '';
+			const waitlisted = Boolean((result as any)?.waitlisted);
 
 			// Disconnect immediately — we only needed the token
 			await tempClient.disconnect();
 
-			if (token) {
-				await this.storeToken(token);
-				await this.storeUserName(displayName);
+			// Waitlisted account: authentication SUCCEEDED but access is not
+			// granted yet — the server deliberately returns no token so no
+			// session exists to store. Mirror the browser shell's waitlist
+			// screen: record the state (the Cloud panels render it as a
+			// friendly banner via cloud:status) and toast for surfaces
+			// without a panel, instead of falling through to the generic
+			// "no token received" failure.
+			if (waitlisted) {
+				this.waitlistedName = displayName;
 				this._onDidChange.emit('changed');
-				vscode.window.showInformationMessage(`Signed in to RocketRide Cloud as ${displayName || 'user'}`);
+				vscode.window.showInformationMessage(
+					`Thanks for signing up${displayName ? `, ${displayName}` : ''}! Your RocketRide Cloud account is in the access queue — access is rolling out in waves, and we'll email you as soon as your account is activated.`
+				);
+				return;
+			}
+			this.waitlistedName = null;
+
+			if (token) {
+				// STAGE, don't store: the settings screens commit credentials
+				// only on Save, together with the form fields the sign-in
+				// belongs to (mode, custom server URL). The minting server
+				// rides along because the token is only valid there — commit
+				// refuses to store a session no saved connection targets.
+				// No toast here: the Cloud panel renders the staged state
+				// itself, and a notification would cover the Save footer.
+				this.pendingSession = { token, displayName, cloudUrl };
+				this.pendingSignOut = false;
+				this._onDidChange.emit('changed');
 			} else {
 				vscode.window.showErrorMessage('RocketRide Cloud sign-in failed: no token received.');
 			}
@@ -250,13 +355,138 @@ export class CloudAuthProvider implements vscode.UriHandler, vscode.Disposable {
 		}
 	}
 
+	// --- Signed-In Server Storage --------------------------------------------
+
+	/** Records the cloud server the current session's token was minted against. */
+	async storeSignedInUrl(url: string): Promise<void> {
+		if (!this.context) return;
+		await this.context.secrets.store(SECRET_KEY_URL, url);
+	}
+
+	/** The cloud server of the CURRENT session ('' when signed out or unknown —
+	 *  sessions minted before this field existed carry no URL). */
+	async getSignedInUrl(): Promise<string> {
+		if (!this.context) return '';
+		try {
+			return (await this.context.secrets.get(SECRET_KEY_URL)) || '';
+		} catch {
+			return '';
+		}
+	}
+
+	/** The display name of the last WAITLISTED sign-in attempt, or null when
+	 *  the last attempt was not waitlisted (this host's lifetime only). */
+	getWaitlistedName(): string | null {
+		return this.waitlistedName;
+	}
+
+	// --- Staged Changes (transactional settings screens) ----------------------
+
+	/** The staged sign-in awaiting Save, or null. Token deliberately omitted —
+	 *  display surfaces never need it. */
+	getPendingSession(): { displayName: string; cloudUrl: string } | null {
+		if (!this.pendingSession) return null;
+		return { displayName: this.pendingSession.displayName, cloudUrl: this.pendingSession.cloudUrl };
+	}
+
+	/** True when a sign-out is staged and will apply on the next save. */
+	hasPendingSignOut(): boolean {
+		return this.pendingSignOut;
+	}
+
+	/**
+	 * Stages a sign-out from a settings screen. A staged sign-in is simply
+	 * discarded (nothing was stored yet); a stored session is marked for
+	 * deletion on the next save.
+	 */
+	async stageSignOut(): Promise<void> {
+		if (this.pendingSession) {
+			this.pendingSession = null;
+		} else if (await this.isSignedIn()) {
+			this.pendingSignOut = true;
+		}
+		this._onDidChange.emit('changed');
+	}
+
+	/** Discards any staged sign-in/sign-out (Cancel, or the settings surface
+	 *  closing without a save). The stored session is untouched. */
+	clearPendingChanges(): void {
+		if (!this.pendingSession && !this.pendingSignOut) return;
+		this.pendingSession = null;
+		this.pendingSignOut = false;
+		this._onDidChange.emit('changed');
+	}
+
+	/**
+	 * Commits staged auth changes — called by the save flows AFTER the form
+	 * fields are persisted, so credentials and the config they belong to land
+	 * atomically from the user's point of view.
+	 *
+	 * @param validTargets - The resolved hostUrls of every saved connection
+	 *                       group in cloud mode. A staged session whose minting
+	 *                       server matches none of them is DROPPED, never
+	 *                       stored — the token is only valid on its minting
+	 *                       server, and storing it would recreate the
+	 *                       mismatched-session class of failures.
+	 */
+	async commitPendingChanges(validTargets: string[]): Promise<CommitPendingResult> {
+		let committed = false;
+		let signedOut = false;
+		let droppedMismatch: string | null = null;
+		let stagedStateChanged = false;
+
+		// Step 1: staged sign-out deletes the stored session.
+		if (this.pendingSignOut) {
+			this.pendingSignOut = false;
+			stagedStateChanged = true;
+			if (this.context) {
+				await this.context.secrets.delete(SECRET_KEY_TOKEN);
+				await this.context.secrets.delete(SECRET_KEY_NAME);
+				await this.context.secrets.delete(SECRET_KEY_URL);
+			}
+			committed = true;
+			signedOut = true;
+		}
+
+		// Step 2: staged sign-in stores the session — only when a saved cloud
+		// connection actually targets the server that minted it.
+		const pending = this.pendingSession;
+		if (pending) {
+			this.pendingSession = null;
+			stagedStateChanged = true;
+			const targetMatches = validTargets.some((target) => target && serverIdentity(target) === serverIdentity(pending.cloudUrl));
+			if (targetMatches) {
+				await this.storeToken(pending.token);
+				await this.storeUserName(pending.displayName);
+				await this.storeSignedInUrl(pending.cloudUrl);
+				committed = true;
+			} else {
+				droppedMismatch = pending.cloudUrl;
+			}
+		}
+
+		if (stagedStateChanged) {
+			this._onDidChange.emit('changed');
+		}
+		return { committed, signedOut, droppedMismatch };
+	}
+
 	// --- Sign Out -------------------------------------------------------------
 
+	/**
+	 * Immediate sign-out for DIRECT surfaces (sidebar menu, account page) —
+	 * settings screens stage via stageSignOut() instead. Also discards any
+	 * staged changes so no stale pending session survives the sign-out.
+	 */
 	async signOut(): Promise<void> {
 		if (this.context) {
 			await this.context.secrets.delete(SECRET_KEY_TOKEN);
 			await this.context.secrets.delete(SECRET_KEY_NAME);
+			await this.context.secrets.delete(SECRET_KEY_URL);
 		}
+		this.pendingSession = null;
+		this.pendingSignOut = false;
+		this.waitlistedName = null;
 		this._onDidChange.emit('changed');
 	}
 }

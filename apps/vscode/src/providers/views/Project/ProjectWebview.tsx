@@ -31,6 +31,8 @@ import type { CheckoutPlan, PlanAction } from 'shell';
 import { DeploymentRecordPanel, TeamDeploymentRecordPanel } from 'shared/components/deploy-panel';
 import type { DeploySnapshot } from 'shared/components/deploy-panel';
 import { useMessaging } from '../hooks/useMessaging';
+import { useStripeKey } from '../hooks/useStripeKey';
+import { CheckoutUnavailableNotice } from '../components';
 import type { ProjectHostToWebview, ProjectWebviewToHost } from '../../types/projectTypes';
 import type { DeployTeamRefDTO, TeamDeploymentRowDTO, DeploymentLoadPayload, SchedulePreviewResultDTO } from '../../types/deployTypes';
 
@@ -80,6 +82,9 @@ const ProjectWebview: React.FC = () => {
 	const [subscribed, setSubscribed] = useState(true);
 	const [isReadonly, setIsReadonly] = useState(false);
 	const [showCheckout, setShowCheckout] = useState(false);
+	// Server-supplied Stripe publishable key — matches the connected server's
+	// Stripe account instead of a build-time value.
+	const { key: stripeKey, reason: stripeKeyReason } = useStripeKey();
 	const [envKeys, setEnvKeys] = useState<string[]>([]);
 
 	// Deploy lifecycle: LIVE rows pushed by deploy:data (badges/where-live);
@@ -290,7 +295,7 @@ const ProjectWebview: React.FC = () => {
 				break;
 			case 'checkout:required':
 				// Host says subscription is required — show inline prompt (handled by ProjectView's Subscribe button)
-				console.log(`[ProjectWebview] checkout:required received, stripeKey=${!!(typeof process !== 'undefined' && (process.env as any).RR_STRIPE_PUBLISHABLE_KEY)}`);
+				console.log('[ProjectWebview] checkout:required received');
 				setShowCheckout(true);
 				break;
 			case 'checkout:subscriptionUpdate':
@@ -787,8 +792,6 @@ const ProjectWebview: React.FC = () => {
 
 	// --- Render --------------------------------------------------------------
 
-	const stripeKey = process.env.RR_STRIPE_PUBLISHABLE_KEY || '';
-
 	return (
 		<>
 			<ProjectView
@@ -835,6 +838,10 @@ const ProjectWebview: React.FC = () => {
 							// refresh via deploy:fetch once the mutation resolves.
 							onDeploySetDisabled: async (teamId: string, disabled: boolean) => {
 								await deploymentRequest((requestId) => ({ type: 'deployment:setDisabled', teamId, requestId, disabled }));
+								sendMessageRef.current({ type: 'deploy:fetch', projectId: projectIdRef.current });
+							},
+							onDeployRemove: async (teamId: string) => {
+								await deploymentRequest((requestId) => ({ type: 'deployment:remove', teamId, requestId }));
 								sendMessageRef.current({ type: 'deploy:fetch', projectId: projectIdRef.current });
 							},
 							onDeploySetSchedule: async (teamId: string, sourceId: string, cron: string | null, ttl: number | null) => {
@@ -959,6 +966,7 @@ const ProjectWebview: React.FC = () => {
 				/>
 			)}
 			{showCheckout && stripeKey && <CheckoutModal appName="RocketRide" appDescription="Visual AI pipeline editor — run and deploy pipelines on RocketRide Cloud." stripePublishableKey={stripeKey} onFetchPlans={handleFetchPlans} onCreateCheckout={handleCreateCheckout} onConfirmPending={handleConfirmPending} onSuccess={handleCheckoutSuccess} onClose={() => setShowCheckout(false)} onActionClick={(_plan: CheckoutPlan, action: PlanAction) => sendMessageRef.current({ type: 'project:openLink', url: action.type === 'mailto' ? `mailto:${action.url}${action.subject ? `?subject=${encodeURIComponent(action.subject)}` : ''}` : action.url, browser: true })} />}
+			{showCheckout && !stripeKey && <CheckoutUnavailableNotice reason={stripeKeyReason} onClose={() => setShowCheckout(false)} />}
 		</>
 	);
 };

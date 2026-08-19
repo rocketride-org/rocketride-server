@@ -27,6 +27,7 @@ from ai.account.models import RequestContext
 from ai.account.store import STORE_MAX_RETRY_ATTEMPTS, Store, StorageError
 from ai.account.store_providers.azure import AzureBlobStore
 from ai.account.store_providers.filesystem import FilesystemStore
+from ai.account.store_providers.filesystem.filesystem import _os_path
 from ai.account.store_providers.memory import MemoryStore
 from ai.account.store_providers.s3 import S3Store
 
@@ -362,6 +363,40 @@ class TestFilesystemStore(BaseStoreTest):
         assert full_path.exists()
         assert full_path.read_text() == data
 
+    @pytest.mark.asyncio
+    async def test_paths_past_windows_max_path(self, store, temp_dir):
+        r"""Deployment-style trees must round-trip past Windows' 260-char
+        MAX_PATH. The store's canonical internal spelling is the
+        extended-length (``\\?\``) form — the root is prefixed once, every
+        derived path inherits it — so write/read/stat/delete work where a
+        plain path fails with a misleading ENOENT (the include-packing
+        lesson: org guid + .deployments + version + source/<workspace tree>
+        crossed the ceiling on a real deploy). The read-back specifically
+        exercises the re-canonicalization after resolve(). On POSIX the
+        same key is just a deep tree.
+        """
+        # A store key whose FULL resolved path clearly exceeds 260 chars
+        # regardless of how long the temp root itself is.
+        segment = 'component-directory-with-a-real-world-name'
+        depth = max((300 - len(temp_dir)) // (len(segment) + 1) + 1, 3)
+        key = '/'.join([segment] * depth) + '/GoogleDrivePickerWidget.tsx'
+        assert len(str(Path(temp_dir) / key)) > 260
+
+        payload = b'x' * 4096
+        await store.write_bytes(key, payload)
+        assert await store.read_bytes(key) == payload
+        info = await store.get_file_info(key)
+        assert info['size'] == len(payload)
+
+        await store.delete_file(key)
+        with pytest.raises(StorageError):
+            await store.read_bytes(key)
+
+        # Tidy the deep tree explicitly — the fixture's plain rmtree cannot
+        # reach past MAX_PATH on Windows.
+        deep_root = Path(temp_dir) / segment
+        shutil.rmtree(f'\\\\?\\{deep_root}' if os.name == 'nt' else str(deep_root), ignore_errors=True)
+
 
 # ============================================================================
 # Memory Tests
@@ -558,7 +593,8 @@ class TestStoreFactory:
 
         assert isinstance(store, Store)
         assert isinstance(store._store, FilesystemStore)
-        assert store._store._root_path == tmp_path
+        # The root is stored in the CANONICAL spelling (Windows: \\?\).
+        assert store._store._root_path == _os_path(tmp_path.resolve())
 
     def test_create_with_default_url(self, monkeypatch):
         """Test creating store with default URL."""
@@ -584,7 +620,8 @@ class TestStoreFactory:
 
         assert isinstance(store, Store)
         assert isinstance(store._store, FilesystemStore)
-        assert store._store._root_path == tmp_path
+        # The root is stored in the CANONICAL spelling (Windows: \\?\).
+        assert store._store._root_path == _os_path(tmp_path.resolve())
 
         # Cleanup
         os.environ.pop('RR_STORE_URL', None)

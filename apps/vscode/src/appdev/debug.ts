@@ -17,6 +17,7 @@
 import * as vscode from 'vscode';
 import { ConnectionManager } from '../connection/connection';
 import { scanWorkspaceApps } from './appScan';
+import { DEV_SESSION_NONCE } from './devSession';
 import { ensureWatch } from './watchManager';
 
 // =============================================================================
@@ -49,7 +50,9 @@ export async function debugApp(appId: string): Promise<void> {
 		name: `Debug ${app.name}`,
 		type: 'msedge',
 		request: 'launch',
-		url: `${base}/?appid=${encodeURIComponent(appId)}&rrdev=1`,
+		// rrsession routes the browser preview to THIS editor's dev-overlay
+		// entry when several editors dev-serve the same app.
+		url: `${base}/?appid=${encodeURIComponent(appId)}&rrdev=1&rrsession=${DEV_SESSION_NONCE}`,
 		webRoot: app.folder,
 		sourceMapPathOverrides: {
 			'webpack:///./*': `${app.folder}/*`,

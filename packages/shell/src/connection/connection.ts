@@ -363,6 +363,12 @@ export class ConnectionManager implements IConnectionManager {
 					this.emit('store:changed', (message.body ?? {}) as ShellConnectionEventMap['store:changed']);
 					return;
 				}
+				// The user's default org changed — a pure notification; each
+				// client decides how to react (the shell reloads).
+				if (message.event === 'apaext_org_changed') {
+					this.emit('shell:orgChanged', (message.body ?? { orgId: '' }) as ShellConnectionEventMap['shell:orgChanged']);
+					return;
+				}
 				// The service catalog changed server-side: re-fetch the summary
 				// cache after a random delay — the push is a broadcast, and the
 				// jitter keeps the whole fleet from refetching in the same
@@ -462,6 +468,7 @@ export class ConnectionManager implements IConnectionManager {
 							lastError: undefined,
 							progressMessage: undefined,
 						});
+						console.warn('[shell] reloading: session token cleared by another same-origin context (storage event)');
 						window.location.reload();
 						return;
 					}
@@ -472,6 +479,7 @@ export class ConnectionManager implements IConnectionManager {
 						currentUserToken: this.accountInfo?.userToken,
 						hasAccountInfo: Boolean(this.accountInfo),
 					})) {
+						console.warn('[shell] reloading: session token replaced by another same-origin context (storage event)');
 						window.location.reload();
 					}
 				} catch {
@@ -1179,6 +1187,30 @@ export class ConnectionManager implements IConnectionManager {
 		try { localStorage.setItem(LS_TOKEN, token); } catch (e) {
 			console.error('[ConnectionManager] Failed to save token:', e);
 		}
+		this.primeAppsCookie(token);
+	}
+
+	/**
+	 * Stow the user token in the ``/apps``-scoped cookie so the browser
+	 * attaches it to MF bundle fetches — SaaS gates each bundle by per-app
+	 * permission (see the server's ``/apps/session`` + ``apps_static``).
+	 *
+	 * Same-origin relative POST (the shell is served from the app origin, so
+	 * the cookie lands on the right host), fire-and-forget: the bundle route
+	 * re-validates on every serve, so a lost prime is self-correcting. Harmless
+	 * in OSS — the endpoint mints a cookie the OSS serve path ignores.
+	 *
+	 * @param token - The authenticated user token to cookie.
+	 */
+	private primeAppsCookie(token: string): void {
+		if (!token) return;
+		try {
+			void fetch('/apps/session', {
+				method: 'POST',
+				headers: { Authorization: `Bearer ${token}` },
+				credentials: 'same-origin',
+			}).catch(() => { /* best-effort */ });
+		} catch { /* best-effort — the bundle route re-checks anyway */ }
 	}
 
 	/** Load token from localStorage. Migrates the old sessionStorage value once. */

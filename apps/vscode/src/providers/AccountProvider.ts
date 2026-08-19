@@ -17,7 +17,7 @@
 import * as vscode from 'vscode';
 import * as crypto from 'crypto';
 import { readFileSync } from 'fs';
-import { ConnectionManager } from '../connection/connection';
+import { ConnectionManager, disconnectCloudConnections } from '../connection/connection';
 import { DeployManager } from '../connection/deploy-manager';
 import { ConfigManager } from '../config';
 import { ConnectionState } from '../shared/types';
@@ -25,6 +25,8 @@ import type { ConnectionStatus } from '../shared/types';
 import type { ConnectResult, TeamDetail } from 'rocketride';
 import { CloudAuthProvider } from '../auth/CloudAuthProvider';
 import { PIPE_BUILDER_APP_ID } from '../shared/types';
+import { getStripePublishableKey } from './shared/stripe-key';
+import type { StripeKeyUnavailableReason } from './types/checkoutTypes';
 
 // =============================================================================
 // INTERFACES
@@ -49,6 +51,7 @@ interface AccountWebviewMessage {
 	subscriptionId?: string;
 	promotionCode?: string;
 	code?: string;
+	requestId?: number;
 }
 
 // =============================================================================
@@ -156,8 +159,8 @@ export class AccountProvider {
 				await this.handleSaveProfile(panel, message.fields as Record<string, string>);
 				break;
 
-			case 'account:setDefaultTeam':
-				await this.handleSetDefaultTeam(panel, message.teamId as string);
+			case 'account:setDevTeam':
+				await this.handleSetDevTeam(panel, message.teamId as string);
 				break;
 
 			case 'account:setDefaultOrg':
@@ -248,6 +251,19 @@ export class AccountProvider {
 				break;
 
 			// -- Checkout flow (embedded Stripe Elements in the Account webview) ---
+			case 'checkout:getStripeKey': {
+				// Server-supplied publishable key (cached per URI) so the
+				// CheckoutModal mounts Stripe for THIS server's account. When it
+				// resolves empty, say WHY (no connection, failed probe, or a
+				// server without billing) so the webview can explain the gap
+				// instead of a dead Subscribe.
+				const client = this.resolveClient().client;
+				const { key, probed } = await getStripePublishableKey(client);
+				const reason: StripeKeyUnavailableReason | undefined = key ? undefined : !client ? 'no-connection' : probed ? 'no-billing' : 'probe-failed';
+				await panel.webview.postMessage({ type: 'checkout:stripeKey', key, requestId: message.requestId ?? 0, ...(reason ? { reason } : {}) });
+				break;
+			}
+
 			case 'checkout:fetchPlans':
 				await this.handleCheckoutFetchPlans(panel);
 				break;
@@ -407,20 +423,20 @@ export class AccountProvider {
 	}
 
 	/**
-	 * Sets the user's default team and posts the refreshed profile.
+	 * Sets the user's dev team and posts the refreshed profile.
 	 *
 	 * @param panel  - The webview panel.
 	 * @param teamId - The team ID to set as default.
 	 */
-	private async handleSetDefaultTeam(panel: vscode.WebviewPanel, teamId: string): Promise<void> {
+	private async handleSetDevTeam(panel: vscode.WebviewPanel, teamId: string): Promise<void> {
 		const { client } = this.resolveClient();
 		if (!client) {
 			this.postError(panel, 'Not connected');
 			return;
 		}
 
-		// Step 1: send the set_default_team request.
-		await client.account.setDefaultTeam(teamId);
+		// Step 1: send the set_dev_team request.
+		await client.account.setDevTeam(teamId);
 
 		// Step 2: the server pushes a refreshed ConnectResult to all connections
 		// via push_account_update. The SDK updates getAccountInfo() automatically.
@@ -447,12 +463,13 @@ export class AccountProvider {
 		// Step 1: send the set_default_org request.
 		await client.account.setDefaultOrg(orgId);
 
-		// Step 2: the server pushes a refreshed ConnectResult to all connections.
-		// Re-fetch profile and authUser so the UI reflects the new active org.
-		const profile = await client.account.getProfile().catch(() => null);
-		const authUser = client.getAccountInfo();
-		await panel.webview.postMessage({ type: 'account:profile', profile: profile || authUser || null });
-		await panel.webview.postMessage({ type: 'account:authUser', authUser });
+		// Step 2: nothing to post here. The server answers with a pure
+		// apaext_org_changed notification — the live connection's identity is
+		// NOT swapped in place — and the connection manager reacts by
+		// reconnecting under the new org. The CONNECTED state change then
+		// re-inits this panel with fresh data (handleConnectionStateChange
+		// -> sendInitialData); posting getAccountInfo() now would show the
+		// OLD org's identity.
 	}
 
 	// =========================================================================
@@ -793,6 +810,10 @@ export class AccountProvider {
 	private async handleLogout(): Promise<void> {
 		const cloudAuth = CloudAuthProvider.getInstance();
 		await cloudAuth.signOut();
+		// A direct sign-out applies immediately — drop the live cloud
+		// connection so no surface keeps showing a session that storage no
+		// longer backs.
+		await disconnectCloudConnections();
 	}
 
 	/**
@@ -818,46 +839,61 @@ export class AccountProvider {
 	// EVENT LISTENERS
 	// =========================================================================
 
-	/** Subscribes to connection state changes and account update events. */
+	/** Subscribes to connection state changes and account update events.
+	 *
+	 * BOTH connection managers are observed: resolveClient() serves the panel
+	 * from whichever connection group is cloud-connected (development first,
+	 * deployment otherwise), so an org switch or account push arriving on the
+	 * DEPLOYMENT connection must refresh the panel exactly like one on the
+	 * development connection — observing only one manager left the panel
+	 * holding the previous organization's identity in deploy-only-cloud
+	 * setups. Every refresh routes through resolveClient(), so a signal from
+	 * the non-serving manager at worst re-reads current data.
+	 */
 	private setupEventListeners(): void {
-		// Re-sync webview when connection state changes
-		const connectionStateListener = this.connectionManager.on('shell:statusChange', (status: ConnectionStatus) => {
-			this.handleConnectionStateChange(status).catch((error) => {
-				console.error(`[AccountProvider] Connection state change error: ${error}`);
+		for (const manager of [this.connectionManager, DeployManager.getDeployInstance()]) {
+			// Re-sync webview when connection state changes
+			const connectionStateListener = manager.on('shell:statusChange', (status: ConnectionStatus) => {
+				this.handleConnectionStateChange(status).catch((error) => {
+					console.error(`[AccountProvider] Connection state change error: ${error}`);
+				});
 			});
-		});
 
-		// Re-fetch data when the server pushes an account update
-		const accountEventListener = this.connectionManager.on('shell:accountUpdate', () => {
-			if (AccountProvider.panel) {
-				const panel = AccountProvider.panel;
-				// Refresh profile (always needed — identity/permissions may have changed)
-				this.refreshProfile(panel).catch((error) => {
-					console.error(`[AccountProvider] Account update error: ${error}`);
-				});
-				// Re-fetch the currently visible section's data (teams, members, etc.)
-				this.handleSectionChange(panel, AccountProvider.currentSection).catch((error) => {
-					console.error(`[AccountProvider] Section reload error: ${error}`);
-				});
-				// Notify the webview that account data has changed
-				panel.webview.postMessage({ type: 'account:accountUpdate' }).then(undefined, (err: unknown) => {
-					console.error(`[AccountProvider] Failed to post accountUpdate: ${err}`);
-				});
-			}
-		});
+			// Re-fetch data when the server pushes an account update
+			const accountEventListener = manager.on('shell:accountUpdate', () => {
+				if (AccountProvider.panel) {
+					const panel = AccountProvider.panel;
+					// Refresh profile (always needed — identity/permissions may have changed)
+					this.refreshProfile(panel).catch((error) => {
+						console.error(`[AccountProvider] Account update error: ${error}`);
+					});
+					// Re-fetch the currently visible section's data (teams, members, etc.)
+					this.handleSectionChange(panel, AccountProvider.currentSection).catch((error) => {
+						console.error(`[AccountProvider] Section reload error: ${error}`);
+					});
+					// Notify the webview that account data has changed
+					panel.webview.postMessage({ type: 'account:accountUpdate' }).then(undefined, (err: unknown) => {
+						console.error(`[AccountProvider] Failed to post accountUpdate: ${err}`);
+					});
+				}
+			});
 
-		// Subscribe to billing monitor and re-fetch on billing ledger events
-		const client = this.connectionManager.getClient();
+			// Re-fetch on billing ledger events from either connection
+			const billingEventListener = manager.on('shell:event' as any, ({ event }: any) => {
+				if (event?.event === 'apaext_billing_update' && AccountProvider.panel) {
+					this.fetchBillingData(AccountProvider.panel).catch(() => {});
+				}
+			});
+
+			this.disposables.push(connectionStateListener, accountEventListener, billingEventListener);
+		}
+
+		// Subscribe the billing monitor on the connection serving the panel
+		// (falls back to the development client pre-resolution).
+		const client = this.resolveClient().client ?? this.connectionManager.getClient();
 		if (client) {
 			client.addMonitor({ token: '*' }, ['billing']).catch(() => {});
 		}
-		const billingEventListener = this.connectionManager.on('shell:event' as any, ({ event }: any) => {
-			if (event?.event === 'apaext_billing_update' && AccountProvider.panel) {
-				this.fetchBillingData(AccountProvider.panel).catch(() => {});
-			}
-		});
-
-		this.disposables.push(connectionStateListener, accountEventListener, billingEventListener);
 	}
 
 	/**

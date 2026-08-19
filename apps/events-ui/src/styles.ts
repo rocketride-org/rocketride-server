@@ -71,7 +71,10 @@ export const styles = {
 /**
  * DAP event name to display color, from the `--rr-chart-*` set and semantic
  * tokens (never raw hex) so the coloring stays legible across every theme. The
- * grid's Type column and the detail-panel header both read this map.
+ * grid's Type column and the detail-panel header both read this map. Tokens
+ * repeat across names of the same character (output-like feeds share purple,
+ * status-like words share blue, lifecycle events share green) — the palette is
+ * six chart tokens wide, so same-family reuse beats an arbitrary collision.
  */
 const EVENT_COLORS: Record<string, string> = {
 	apaevt_status_update: 'var(--rr-chart-blue)',
@@ -83,6 +86,13 @@ const EVENT_COLORS: Record<string, string> = {
 	apaevt_dashboard: 'var(--rr-color-success)',
 	apaevt_billing: 'var(--rr-chart-yellow)',
 	apaevt_status_upload: 'var(--rr-chart-purple)',
+	// Deploy rail (org-scoped DEPLOY subscription): the invalidation ping, the
+	// build worker's output feed, and the per-version status ticker.
+	apaevt_deploy: 'var(--rr-color-warning)',
+	apaevt_build: 'var(--rr-chart-purple)',
+	apaevt_build_status: 'var(--rr-chart-blue)',
+	// Run-log lifecycle transitions (run-begin/run-end), task-family green.
+	apaevt_log_lifecycle: 'var(--rr-chart-green)',
 };
 
 /**

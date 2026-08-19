@@ -111,18 +111,40 @@ export interface DeployHistoryEntry {
 	/** Unix timestamp (seconds). */
 	at?: number;
 	/** `pause`/`resume` appear only on rows written before the
-	    enable/disable vocabulary (the trail is immutable). */
+	    enable/disable vocabulary (the trail is immutable). NOTE: app rails
+	    additionally carry the review vocabulary (`request`/`approved`/
+	    `rejected`/`withdrawn`/`failed`) and the human `reply` row at runtime —
+	    the union names the pipe-rail actions only and stays as the frozen
+	    v1.3 floor wrote it (widening a returned union would break floor
+	    assignability); compare raw strings for the app-rail extras. */
 	action?: 'publish' | 'deploy' | 'rollback' | 'enable' | 'disable' | 'pause' | 'resume' | 'errored' | 'remove';
 	/** `''` on org-wide rows (publish); the team id on pointer changes. */
 	teamId?: string;
 	version?: number;
 	actor?: DeployActor;
+	/** Row payload — self-describing by contract (rows render without a
+	    second lookup). `reply` rows carry the review-thread message and its
+	    side. App audience rows (publish binds, removed/disabled/enabled)
+	    carry the audience WITH its server-dereferenced display facts
+	    (`name`, `handle`), plus `previousVersion` when a publish repointed
+	    an existing binding. A `publish` row without an audience is the
+	    registry write (the DEPLOY) and rides the deploy `comment`; review
+	    transitions carry both endpoints (`from`/`to`). */
+	data?: {
+		side?: 'admin' | 'developer';
+		message?: string;
+		audience?: { type?: string; id?: string; name?: string; handle?: string };
+		previousVersion?: number;
+		comment?: string;
+		from?: string;
+		to?: string;
+	} | null;
 }
 
-/** Body of `deploy.publish()`. */
+/** Body of `deploy.add()` — the generic rail door. */
 export interface PublishResult {
 	artifact?: DeployArtifact;
-	/** Present only when `deployTo` was given (one-step publish+deploy). */
+	/** Present only when `deployTo` was given (one-step add+deploy; pipes only). */
 	deployment?: Deployment;
 }
 

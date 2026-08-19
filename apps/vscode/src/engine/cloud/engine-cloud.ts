@@ -14,9 +14,8 @@
 
 import * as vscode from 'vscode';
 import { EngineBackend, type StatusEmitter, type EngineInfo, type EngineBackendStatus, type IoControlResult, type IoProgressCallback } from '../engine-backend';
-import type { ConnectionMode } from '../../config';
+import { ConfigManager, type ConnectionMode, type ConnectionGroupConfig } from '../../config';
 import { CloudAuthProvider } from '../../auth/CloudAuthProvider';
-import type { ConnectionGroupConfig } from '../../config';
 
 // =============================================================================
 // CLOUD ENGINE BACKEND
@@ -124,7 +123,8 @@ export class EngineCloud extends EngineBackend {
 				case 'signin':
 					await cloudAuth.signIn(
 						(params?.zitadelUrl as string) || process.env.RR_ZITADEL_URL || '',
-						(params?.clientId as string) || process.env.RR_ZITADEL_VSCODE_CLIENT_ID || ''
+						(params?.clientId as string) || process.env.RR_ZITADEL_VSCODE_CLIENT_ID || '',
+						(params?.cloudUrl as string) || ConfigManager.getInstance().getEffectiveCloudUrl()
 					);
 					return { success: true };
 				case 'signout':

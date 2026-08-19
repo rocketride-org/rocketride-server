@@ -36,7 +36,8 @@ import type { IGridConfigGetDetail, IGridConfigSetDetail, IGridConfigClearDetail
 import type { DataGridLayout } from '../data-grid/persistence';
 import { ConnectionManager } from '../../connection/connection';
 import { HOME_APP_ID, HELLO_APP_ID } from '../../constants';
-import { resetRemote, setDescriptorInvalidator, isDevPreviewPage, previewLockedAppId, waitForDevRemote } from '../../util/appLoader';
+import { resetRemote, setDescriptorInvalidator, isDevPreviewPage, previewLockedAppId, waitForDevRemote, isDevRemote } from '../../util/appLoader';
+import { getAppVersionOverride, clearAppVersionOverride } from '../../util/versionOverride';
 import { SHELL_API_VERSION } from '../../apiver';
 
 // =============================================================================
@@ -355,7 +356,7 @@ export const WorkspaceProvider: React.FC<IWorkspaceProviderProps> = ({ apps, wor
 		if (failedSetRef.current.has(appId)) { return false; }
 		// Find the manifest entry
 		const entry = apps.find((a) => a.id === appId);
-		if (!entry) return false;
+		if (!entry) { return false; }
 
 		// Forward-compat gate: an app stamped with a NEWER shell-api version
 		// than this shell provides would load, then hit undefined API members
@@ -420,6 +421,23 @@ export const WorkspaceProvider: React.FC<IWorkspaceProviderProps> = ({ apps, wor
 			// message + stack explicitly: Error objects JSON-stringify to {}
 			// through console forwarding, hiding the actual failure.
 			console.error(`[WorkspaceContext] Failed to load AppDescriptor for "${appId}": ${e instanceof Error ? (e.stack || e.message) : String(e)}`);
+			// A pinned version that fails to load is DROPPED: the serve route
+			// answers a version the caller is not (or no longer) entitled to
+			// with the same 404 as absence, so a failing override would strand
+			// the app behind a dead URL on every boot. Clear it and reload
+			// ONCE — boot then resolves the manifest default; with no override
+			// left, a second failure cannot loop. Dev-owned containers are
+			// exempt (overrides never apply to them).
+			if (!isDevRemote(entry.moduleId) && getAppVersionOverride(appId)) {
+				const dropped = getAppVersionOverride(appId);
+				clearAppVersionOverride(appId);
+				try {
+					sessionStorage.setItem('rr:droppedOverride', `${appId} v${dropped?.version ?? '?'}`);
+				} catch { /* storage unavailable — the reload still restores the default */ }
+				console.warn(`[shell] reloading: dropped failing version override for ${appId} (v${dropped?.version ?? '?'}) — rebooting onto the default resolution`);
+				window.location.reload();
+				return false;
+			}
 			failedSetRef.current.add(appId);
 			setAppLoadErrors((prev) => ({ ...prev, [appId]: (e instanceof Error ? e.message : String(e)) || `App "${appId}" failed to load.` }));
 			return false;

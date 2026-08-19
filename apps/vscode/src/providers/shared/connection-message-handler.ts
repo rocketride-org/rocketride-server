@@ -14,12 +14,12 @@
 
 import * as https from 'https';
 import * as vscode from 'vscode';
-import { RocketRideClient } from 'rocketride';
+import { RocketRideClient, ConnectionException } from 'rocketride';
 import { EngineInstaller } from '../../engine/shared/engine-installer';
 import { EngineRegistry } from '../../engine';
 import { IMAGE_BASE } from '../../engine/docker/docker-manager';
 import { ConnectionManager } from '../../connection/connection';
-import { type ConnectionMode } from '../../config';
+import { ConfigManager, type ConnectionMode } from '../../config';
 import { CloudAuthProvider } from '../../auth/CloudAuthProvider';
 import { setCachedEngineVersions, setCachedDockerTags, getExtensionContext } from '../../extension';
 import { getLogger } from '../../shared/util/output';
@@ -79,7 +79,9 @@ export class ConnectionMessageHandler {
 	private readonly engineInstaller: EngineInstaller;
 	private pendingSudoPassword: ((pw: string) => void) | null = null;
 	private cloudAuthCleanups: Array<() => void> = [];
-	private cachedServerInfo: { version: string; capabilities: string[]; platform?: string } | null = null;
+	/** Probe results keyed by the probed URL — dev and deploy panels can probe
+	 * different targets concurrently, so a single slot would misattribute. */
+	private cachedServerInfo = new Map<string, { version: string; capabilities: string[]; platform?: string }>();
 
 	/** Global version cache — populated once, served to all webviews. */
 	private versionCache: VersionCache = { versions: [], fetchedAt: 0, fetching: false };
@@ -114,13 +116,35 @@ export class ConnectionMessageHandler {
 		switch (message.type) {
 			case 'cloud:signIn': {
 				const cloudAuth = CloudAuthProvider.getInstance();
-				await cloudAuth.signIn(process.env.RR_ZITADEL_URL || '', process.env.RR_ZITADEL_VSCODE_CLIENT_ID || '');
+				// Prefer the webview's IN-FORM effective server (checkbox + URL
+				// may not be saved yet); fall back to the saved config for
+				// senders without a form (sidebar, welcome) — and for a payload
+				// that is not a usable string: webview messages are untrusted
+				// input, and signIn's contract is a string URL.
+				const requested = typeof message.cloudUrl === 'string' ? message.cloudUrl.trim() : '';
+				await cloudAuth.signIn(
+					process.env.RR_ZITADEL_URL || '',
+					process.env.RR_ZITADEL_VSCODE_CLIENT_ID || '',
+					requested || ConfigManager.getInstance().getEffectiveCloudUrl()
+				);
 				return true;
 			}
 
 			case 'cloud:signOut': {
+				// Settings screens are transactional: the sign-out is STAGED and
+				// the stored session is deleted only when the user saves. Direct
+				// surfaces (sidebar menu, account page) sign out immediately via
+				// CloudAuthProvider.signOut() instead.
 				const cloudAuth = CloudAuthProvider.getInstance();
-				await cloudAuth.signOut();
+				await cloudAuth.stageSignOut();
+				await this.sendCloudStatus(webview);
+				return true;
+			}
+
+			case 'cloud:clearPending': {
+				// Cancel/undo: discard any staged sign-in/sign-out without
+				// touching the stored session.
+				CloudAuthProvider.getInstance().clearPendingChanges();
 				await this.sendCloudStatus(webview);
 				return true;
 			}
@@ -139,7 +163,7 @@ export class ConnectionMessageHandler {
 				return true;
 
 			case 'probeServerInfo':
-				this.cachedServerInfo = null; // force re-probe
+				this.cachedServerInfo.delete(message.hostUrl as string); // force re-probe
 				await this.probeServerInfo(webview, message.hostUrl as string);
 				return true;
 
@@ -268,25 +292,32 @@ export class ConnectionMessageHandler {
 	 * Caches the result so subsequent calls are instant.
 	 */
 	public async probeServerInfo(webview: vscode.Webview, hostUrl: string): Promise<void> {
-		if (this.cachedServerInfo) {
-			webview.postMessage({ type: 'serverInfo', ...this.cachedServerInfo });
-			return;
-		}
-
 		const uri = hostUrl;
 		if (!uri) return;
+
+		// Every serverInfo message echoes the probed URL so the webview can
+		// route the result to the panel (dev/deploy) that asked for it.
+		const cached = this.cachedServerInfo.get(uri);
+		if (cached) {
+			webview.postMessage({ type: 'serverInfo', hostUrl: uri, ...cached });
+			return;
+		}
 
 		console.log(`[ConnectionMessageHandler] probeServerInfo: uri=${uri}`);
 
 		try {
 			const info = await RocketRideClient.getServerInfo(uri, 5000);
 			console.log(`[ConnectionMessageHandler] probeServerInfo result: capabilities=${JSON.stringify(info.capabilities)}, version=${info.version}`);
-			this.cachedServerInfo = info;
-			webview.postMessage({ type: 'serverInfo', ...info });
+			this.cachedServerInfo.set(uri, info);
+			webview.postMessage({ type: 'serverInfo', hostUrl: uri, ...info });
 		} catch (error) {
 			console.log(`[ConnectionMessageHandler] probeServerInfo FAILED: ${error}`);
-			// Fall back to showing all modes if probe fails
-			webview.postMessage({ type: 'serverInfo', capabilities: [], version: '' });
+			// Distinguish "server cannot be reached" from "server answered but
+			// does not support the probe" (a legacy/OSS server): transport-level
+			// failures are ConnectionExceptions; anything else means a socket
+			// opened, so the server is reachable but not probe-capable.
+			const unreachable = error instanceof ConnectionException;
+			webview.postMessage({ type: 'serverInfo', hostUrl: uri, capabilities: [], version: '', unreachable });
 		}
 	}
 
@@ -298,7 +329,28 @@ export class ConnectionMessageHandler {
 		const cloudAuth = CloudAuthProvider.getInstance();
 		const signedIn = await cloudAuth.isSignedIn();
 		const userName = await cloudAuth.getUserName();
-		webview.postMessage({ type: 'cloud:status', signedIn, userName });
+		// The server the session's token was minted against — CloudPanel's
+		// subscribe gate compares the form's target to it, so checkout can
+		// never bill a different server than the one on screen.
+		const signedInUrl = await cloudAuth.getSignedInUrl();
+		// Last attempt came back waitlisted -> the panel renders the friendly
+		// access-queue banner instead of looking silently signed out.
+		const waitlistedName = cloudAuth.getWaitlistedName();
+		// Staged (uncommitted) auth changes — the panel renders them as
+		// pending rows and the settings surface treats them as unsaved edits.
+		const pending = cloudAuth.getPendingSession();
+		webview.postMessage({
+			type: 'cloud:status',
+			signedIn,
+			userName,
+			signedInUrl,
+			waitlisted: waitlistedName !== null,
+			waitlistedName: waitlistedName ?? '',
+			pendingSignIn: pending !== null,
+			pendingUserName: pending?.displayName ?? '',
+			pendingUrl: pending?.cloudUrl ?? '',
+			pendingSignOut: cloudAuth.hasPendingSignOut(),
+		});
 	}
 
 	// =========================================================================

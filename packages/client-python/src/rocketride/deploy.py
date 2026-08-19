@@ -23,25 +23,28 @@
 """
 Deploy API namespace for the RocketRide Python SDK.
 
-Teams-as-environments deployments via the ``rrext_deploy`` DAP command
-(dispatched by ``subcommand``) over the existing WebSocket connection:
+Teams-as-environments deployments over two DAP commands (dispatched by
+``subcommand``) on the existing WebSocket connection:
 
-  - ``publish`` snapshots a pipeline as an IMMUTABLE, sha256-locked artifact
-    version in the org registry.
-  - ``deploy`` points a TEAM at a published version. Teams ARE the
-    environments (Staging, Production, ...): promotion and rollback are this
-    same pointer move aimed at a different version or team. Deploy targets
-    are always explicit — there is deliberately no default-team fallback.
-  - Every publish and pointer change lands in an immutable audit history.
+  - ``rrext_deploy`` — the GENERIC, kind-agnostic rail door: ``add`` deploys
+    any kind (pipe|app|node) as an IMMUTABLE, sha256-locked registry version;
+    ``versions``/``artifact``/``history`` read the rail.
+  - ``rrext_deploy_pipe`` — PIPE-specific control: ``deploy`` points a TEAM at
+    a published version. Teams ARE the environments (Staging, Production, ...):
+    promotion and rollback are this same pointer move aimed at a different
+    version or team; targets are always explicit (no default-team fallback).
+    Plus its lifecycle, scheduling (``set_schedule``/pause/resume), and
+    run-now dispatch (``run``).
+  - Every deploy and pointer change lands in an immutable audit history.
   - ``list``/``versions``/``history`` return the standard list envelope
     ({rows, total, page, pageSize}) with page/search/filter/sort arguments.
 
 Usage:
-    result = await client.deploy.publish(my_pipeline, comment='v2 prompt fix')
+    result = await client.deploy.add(my_pipeline, comment='v2 prompt fix')
     await client.deploy.deploy('proj-1', result['artifact']['version'], 'team-staging')
     live = await client.deploy.list()
     await client.deploy.set_schedule('proj-1', 'webhook_1', '*/15 * * * *', team_id='team-staging')
-    await client.deploy.pause('proj-1', 'team-staging')
+    await client.deploy.pause_schedule('proj-1', 'webhook_1', 'team-staging')
 """
 
 from __future__ import annotations
@@ -106,40 +109,65 @@ class DeployApi:
         self._client = client
 
     # =========================================================================
-    # PUBLISH — immutable artifact into the org registry
+    # ADD — deploy any kind of object into the org registry (the ONE rail door)
     # =========================================================================
 
-    async def publish(
+    async def add(
         self,
-        pipeline: PipelineConfig,
+        pipeline: PipelineConfig | None = None,
         *,
+        kind: str = 'pipe',
+        data: bytes | bytearray | None = None,
+        metadata: dict[str, Any] | None = None,
         comment: str | None = None,
         deploy_to: str | None = None,
     ) -> PublishResult:
         """
-        Publish a pipeline as the next immutable registry version.
+        Deploy an object to the server as the next immutable registry version.
 
-        The artifact is sha256-locked: what was published is provably what
-        runs. Publishing alone puts nothing live — point a team at the
-        version with :meth:`deploy` (or pass ``deploy_to`` to do both in one
-        step, the small-team convenience).
+        The ONE generic rail door for every kind — DEPLOY in the settled
+        vocabulary means "copy code to the server"; binding it to an audience
+        is the separate publish step (:meth:`deploy` for pipe teams; the app
+        publish verbs for apps). The artifact is sha256-locked: what was
+        deployed is provably what runs. Mirrors the TypeScript
+        ``client.deploy.add``.
+
+        Kind dispatch:
+          - ``kind='pipe'`` (default): pass ``pipeline`` — the full definition
+            dict; ``name`` is REQUIRED (server-enforced): artifacts are
+            immutable and pipelineName renders on every deploy surface, so a
+            nameless deploy would show as a project GUID forever.
+          - ``kind='app'``: pass ``data`` — ONE zip of the app's SOURCE (the
+            server owns the build and never trusts client-produced binaries).
+            Two layouts: package.json + src at the zip root (legacy), or
+            workspace-relative with ``metadata.appRoot`` naming the app folder
+            so ``appManifest.include`` extras ride at their real workspace
+            paths. The server retains the zip and unpacks it at receipt; the
+            app deployment is born state 'private' (an @me/@team binding may
+            serve it; the developer submits it for review to reach the public
+            store).
 
         Args:
-            pipeline: The full pipeline definition dict to snapshot. Its
-                ``name`` is REQUIRED (server-enforced): artifacts are
-                immutable and pipelineName renders on every deploy surface
-                — a nameless publish would show as a project GUID forever.
+            pipeline: Pipeline definition (kind 'pipe').
+            kind: 'pipe' (default) or 'app'.
+            data: Source zip bytes (kind 'app').
+            metadata: Optional metadata blob (e.g. projectId provenance,
+                appRoot for workspace-relative app zips).
             comment: Optional "what changed" note kept in the registry.
             deploy_to: Optional team id to deploy the new version to
-                immediately (one-step publish+deploy).
+                immediately (one-step add+deploy; pipes only).
 
         Returns:
             ``{'artifact': ...}`` plus ``'deployment'`` when ``deploy_to``
             was given.
         """
-        kwargs: dict = {'subcommand': 'publish', 'pipeline': pipeline}
-        if comment is not None:
-            kwargs['comment'] = comment
+        kwargs: dict = {'subcommand': 'add', 'kind': kind, 'comment': comment or ''}
+        if pipeline is not None:
+            kwargs['pipeline'] = pipeline
+        if data is not None:
+            kwargs['data'] = data
+        if metadata is not None:
+            kwargs['metadata'] = metadata
         if deploy_to is not None:
             kwargs['deployTo'] = deploy_to
         return await self._client.call('rrext_deploy', **kwargs)
@@ -165,7 +193,7 @@ class DeployApi:
             The updated deployment record, registry-joined.
         """
         return await self._client.call(
-            'rrext_deploy', subcommand='deploy', projectId=project_id, version=version, teamId=team_id
+            'rrext_deploy_pipe', subcommand='deploy', projectId=project_id, version=version, teamId=team_id
         )
 
     # =========================================================================
@@ -200,7 +228,9 @@ class DeployApi:
         kwargs: dict = {'subcommand': 'list'}
         if team_id is not None:
             kwargs['teamId'] = team_id
-        return await self._client.call('rrext_deploy', **_list_args(kwargs, page, page_size, search, filters, sort))
+        return await self._client.call(
+            'rrext_deploy_pipe', **_list_args(kwargs, page, page_size, search, filters, sort)
+        )
 
     async def get(self, project_id: str, team_id: str) -> Deployment:
         """
@@ -213,7 +243,7 @@ class DeployApi:
         Returns:
             The deployment record (version, state, schedules, actors).
         """
-        return await self._client.call('rrext_deploy', subcommand='get', projectId=project_id, teamId=team_id)
+        return await self._client.call('rrext_deploy_pipe', subcommand='get', projectId=project_id, teamId=team_id)
 
     async def versions(
         self,
@@ -261,7 +291,7 @@ class DeployApi:
             ``{'token', 'version'}`` of the started run.
         """
         return await self._client.call(
-            'rrext_deploy', subcommand='run', projectId=project_id, sourceId=source_id, teamId=team_id
+            'rrext_deploy_pipe', subcommand='run', projectId=project_id, sourceId=source_id, teamId=team_id
         )
 
     async def artifact(self, project_id: str, version: int) -> PipelineConfig:
@@ -336,7 +366,7 @@ class DeployApi:
         Returns:
             The updated deployment record.
         """
-        return await self._client.call('rrext_deploy', subcommand='disable', projectId=project_id, teamId=team_id)
+        return await self._client.call('rrext_deploy_pipe', subcommand='disable', projectId=project_id, teamId=team_id)
 
     async def enable(self, project_id: str, team_id: str) -> Deployment:
         """
@@ -349,7 +379,7 @@ class DeployApi:
         Returns:
             The updated deployment record.
         """
-        return await self._client.call('rrext_deploy', subcommand='enable', projectId=project_id, teamId=team_id)
+        return await self._client.call('rrext_deploy_pipe', subcommand='enable', projectId=project_id, teamId=team_id)
 
     async def remove(self, project_id: str, team_id: str) -> Deployment:
         """
@@ -366,7 +396,7 @@ class DeployApi:
         Returns:
             The final deployment record (state ``removed``).
         """
-        return await self._client.call('rrext_deploy', subcommand='remove', projectId=project_id, teamId=team_id)
+        return await self._client.call('rrext_deploy_pipe', subcommand='remove', projectId=project_id, teamId=team_id)
 
     # =========================================================================
     # SCHEDULES
@@ -410,7 +440,7 @@ class DeployApi:
             kwargs['schedule'] = schedule
         if ttl is not None:
             kwargs['ttl'] = ttl
-        return await self._client.call('rrext_deploy', **kwargs)
+        return await self._client.call('rrext_deploy_pipe', **kwargs)
 
     async def set_source_config(
         self,
@@ -448,7 +478,7 @@ class DeployApi:
         }
         if trace_level is not None:
             kwargs['traceLevel'] = trace_level
-        return await self._client.call('rrext_deploy', **kwargs)
+        return await self._client.call('rrext_deploy_pipe', **kwargs)
 
     async def pause_schedule(self, project_id: str, source_id: str, team_id: str) -> Deployment:
         """
@@ -464,7 +494,7 @@ class DeployApi:
             The updated deployment record.
         """
         return await self._client.call(
-            'rrext_deploy', subcommand='schedule_pause', projectId=project_id, sourceId=source_id, teamId=team_id
+            'rrext_deploy_pipe', subcommand='schedule_pause', projectId=project_id, sourceId=source_id, teamId=team_id
         )
 
     async def resume_schedule(self, project_id: str, source_id: str, team_id: str) -> Deployment:
@@ -480,7 +510,7 @@ class DeployApi:
             The updated deployment record.
         """
         return await self._client.call(
-            'rrext_deploy', subcommand='schedule_resume', projectId=project_id, sourceId=source_id, teamId=team_id
+            'rrext_deploy_pipe', subcommand='schedule_resume', projectId=project_id, sourceId=source_id, teamId=team_id
         )
 
     async def preview(self, schedule: str, count: int | None = None) -> SchedulePreview:
@@ -501,4 +531,4 @@ class DeployApi:
         kwargs: dict = {'subcommand': 'preview', 'schedule': schedule}
         if count is not None:
             kwargs['count'] = count
-        return await self._client.call('rrext_deploy', **kwargs)
+        return await self._client.call('rrext_deploy_pipe', **kwargs)

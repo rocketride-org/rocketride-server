@@ -77,35 +77,44 @@ def test_resolve_monitor_label_unrecognised_key():
     assert MiscCommands._resolve_monitor_label('foo', {}, {}) == 'Task monitor'
 
 
+# Keys carry the owner_key layout p.{runKind}.{owner}.{project}.{source}
+# (the leading runKind segment separates a user's dev run from their @me
+# deploy). The label resolver reads project from segment 2 and source from
+# segment 3 — NOT 1/2 as the pre-runKind layout did.
 def test_resolve_monitor_label_project_wildcard():
-    """An owner-scoped 'p.<owner>.<id>.*' key uses the project label + '.*'."""
+    """A 'p.<runKind>.<owner>.<id>.*' key uses the project label + '.*'."""
     project_names = {'proj-1': 'my-project'}
-    assert MiscCommands._resolve_monitor_label('p.user-1.proj-1.*', project_names, {}) == 'my-project.*'
+    assert MiscCommands._resolve_monitor_label('p.dev.user-1.proj-1.*', project_names, {}) == 'my-project.*'
 
 
 def test_resolve_monitor_label_project_only():
-    """A 'p.<owner>.<id>' key (no source) yields '<project>.*'."""
+    """A 'p.<runKind>.<owner>.<id>' key (no source) yields '<project>.*'."""
     project_names = {'proj-1': 'my-project'}
-    assert MiscCommands._resolve_monitor_label('p.user-1.proj-1', project_names, {}) == 'my-project.*'
+    assert MiscCommands._resolve_monitor_label('p.dev.user-1.proj-1', project_names, {}) == 'my-project.*'
 
 
 def test_resolve_monitor_label_with_source():
-    """A 'p.<owner>.<id>.<source>' key uses the project and source friendly names."""
+    """A 'p.<runKind>.<owner>.<id>.<source>' key uses project + source friendly names."""
     project_names = {'proj-1': 'my-project'}
     source_names = {'proj-1.src-1': 'reader'}
-    result = MiscCommands._resolve_monitor_label('p.user-1.proj-1.src-1', project_names, source_names)
+    result = MiscCommands._resolve_monitor_label('p.deploy.user-1.proj-1.src-1', project_names, source_names)
     assert result == 'my-project.reader'
 
 
-def test_resolve_monitor_label_with_pipe_suffix():
-    """A 5-part 'p.<owner>.<id>.<source>.<pipe>' key appends a 'pipe<n>' suffix."""
-    result = MiscCommands._resolve_monitor_label('p.user-1.proj-1.src-1.42', {}, {})
-    assert result == 'proj-1.src-1.pipe42'
+def test_resolve_monitor_label_reads_project_not_owner_segment():
+    """Regression: the owner segment must NOT be read as the project. A key
+    whose owner id would resolve to a friendly name if mis-indexed proves the
+    resolver reads segment 2 (project), not segment 1 (owner).
+    """
+    # If the resolver wrongly read segment 1 (owner 'user-1') as the project,
+    # it would emit 'owner-label'; reading segment 2 (proj-1) emits my-project.
+    project_names = {'proj-1': 'my-project', 'user-1': 'owner-label'}
+    assert MiscCommands._resolve_monitor_label('p.dev.user-1.proj-1.*', project_names, {}) == 'my-project.*'
 
 
 def test_resolve_monitor_label_truncates_project_id_when_no_friendly_name():
     """Unknown project ids are truncated to 8 characters."""
-    result = MiscCommands._resolve_monitor_label('p.user-1.proj-very-long-id-here.*', {}, {})
+    result = MiscCommands._resolve_monitor_label('p.dev.user-1.proj-very-long-id-here.*', {}, {})
     assert result.startswith('proj-ver')
 
 
@@ -119,7 +128,7 @@ def test_build_monitors_list_resolves_keys_and_flag_names():
     from rocketride import EVENT_TYPE
 
     monitors = {
-        'p.user-1.proj-1.src-1': EVENT_TYPE.SUMMARY,
+        'p.deploy.user-1.proj-1.src-1': EVENT_TYPE.SUMMARY,
         '*': EVENT_TYPE.SUMMARY,
     }
     project_names = {'proj-1': 'my-project'}

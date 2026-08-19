@@ -153,6 +153,35 @@ class TaskScheduler:
         """
         return self._is_previous_run_active((team_id, project_id, source_id))
 
+    def try_reserve_run(self, team_id: str, project_id: str, source_id: str) -> bool:
+        """Atomically claim the overlap slot for a manual run; False if taken.
+
+        The manual path used to check ``is_run_active`` and only register the
+        token AFTER several awaits (artifact read, task start). Two concurrent
+        run-now requests for one source both passed the check and both started,
+        corrupting the shared team storage anchor. This does the check AND the
+        reservation with NO await between (asyncio is single-threaded, so this
+        is atomic), planting the same ``_DISPATCHING`` marker the cron tick
+        uses. The caller MUST release_run() if the start then fails, and
+        register_manual_run() overwrites the marker with the real token on
+        success.
+        """
+        key = (team_id, project_id, source_id)
+        if self._is_previous_run_active(key):
+            return False
+        self._active_tokens[key] = _DISPATCHING
+        return True
+
+    def release_run(self, team_id: str, project_id: str, source_id: str) -> None:
+        """Drop a reservation planted by try_reserve_run when the start fails.
+
+        Only clears the placeholder; a slot already overwritten with a real
+        run token (register_manual_run) is left intact.
+        """
+        key = (team_id, project_id, source_id)
+        if self._active_tokens.get(key) == _DISPATCHING:
+            self._active_tokens.pop(key, None)
+
     def register_manual_run(self, team_id: str, project_id: str, source_id: str, token: str) -> None:
         """Record a manually-dispatched run under the overlap guard.
 
@@ -340,20 +369,39 @@ class TaskScheduler:
             pipeline = dict(pipeline)
             pipeline['source'] = source_id
 
+            # Owner rung: a 'user~{uid}' slot is a PERSONAL (@me) deployment —
+            # the run is USER-owned; a plain team id is the team-owned
+            # dispatch (no human identity). Billing is ABSOLUTE: the stamp
+            # was written at pointer time, and fires only ever read it — a
+            # missing stamp (team deleted, pre-stamp record) is
+            # permission-shaped: permanent until a human re-publishes, so
+            # mark errored, don't retry.
+            billing_team = str(dep.get('billingTeamId') or '')
+            if team_id.startswith('user~'):
+                owner_kind, owner_user = 'user', team_id[len('user~') :]
+            else:
+                owner_kind, owner_user = 'team', ''
+                # Team records from before the stamp bill their own audience.
+                billing_team = billing_team or team_id
+            if not billing_team:
+                error(f'[SCHEDULER] {entry.key}: no billing team stamped; marking errored')
+                await self._mark_errored(org_id, team_id, project_id)
+                return
+
             try:
                 ttl = sched.get('ttl')
-                # The run executes AS THE TEAM and carries no human identity —
-                # who deployed lives in the deployment history, not on the run.
                 task_token = await start_server_task_as_team(
                     self._server,
                     pipeline,
                     org_id=org_id,
-                    team_id=team_id,
+                    team_id=billing_team,
                     trigger='schedule',
                     ttl=int(ttl) if isinstance(ttl, (int, float)) and ttl else None,
                     # Per-source execution settings ride the schedule record.
                     trace_level=sched.get('traceLevel') or 'full',
                     debug_out=bool(sched.get('debugOut')),
+                    owner_kind=owner_kind,
+                    owner_user_id=owner_user,
                 )
             except PermissionError as e:
                 # Permission-shaped failures are permanent until a human acts —

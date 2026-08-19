@@ -30,10 +30,12 @@ deletion. The server (EaaS) is the ONE read path — it composes store
 segments and local spool via the stream's control file; clients never touch
 storage.
 
-THE SCOPE IS THE KIND: pass ``team_id`` to address that team's DEPLOY
-continuum (deploy runs execute as the team and log into its tree — any
-teammate with monitor rights can watch/replay); omit it for your own dev
-stream. There is no run-kind argument anywhere.
+Pass ``team_id`` to address that team's DEPLOY continuum (deploy runs
+execute as the team and log into its tree — any teammate with monitor
+rights can watch/replay). Omit it for your OWN stream, where the optional
+``run_kind`` selects the continuum: ``''``/``'dev'`` is your dev stream;
+``'deploy'`` is your PERSONAL (@me) deploy stream — deploy-kind but
+user-owned, the one case team-presence cannot express.
 
 Usage:
     timeline = await client.log.chapters('proj-1', 'chat_1')
@@ -75,7 +77,9 @@ class LogApi:
     # RUN LOG
     # =========================================================================
 
-    def open_event_stream(self, project_id: str, source: str, *, team_id: str = '') -> LogEventStream:
+    def open_event_stream(
+        self, project_id: str, source: str, *, team_id: str = '', run_kind: str = ''
+    ) -> LogEventStream:
         """
         Open a DVR session over one source continuum.
 
@@ -88,14 +92,19 @@ class LogApi:
             project_id: Pipeline project id.
             source: Source component id.
             team_id: A team id addresses that team's deploy continuum;
-                omitted = your own dev stream.
+                omitted = your own stream (see run_kind).
+            run_kind: Teamless-scope selector: ''/'dev' = your dev stream;
+                'deploy' = your personal (@me) deploy stream. Ignored when
+                team_id is set.
 
         Returns:
             A new, unpositioned session (call ``seek()`` first).
         """
-        return LogEventStream(self._client, project_id, source, team_id=team_id)
+        return LogEventStream(self._client, project_id, source, team_id=team_id, run_kind=run_kind)
 
-    async def chapters(self, project_id: str, source: str, *, team_id: str = '') -> LogChaptersResult:
+    async def chapters(
+        self, project_id: str, source: str, *, team_id: str = '', run_kind: str = ''
+    ) -> LogChaptersResult:
         """
         List a stream's chapters (tracks) and activity-bar metadata.
 
@@ -115,6 +124,8 @@ class LogApi:
         kwargs: dict = {'subcommand': 'chapters', 'projectId': project_id, 'source': source}
         if team_id:
             kwargs['teamId'] = team_id
+        elif run_kind == 'deploy':
+            kwargs['runKind'] = run_kind
         return await self._client.call('rrext_log', **kwargs)
 
     async def read(
@@ -123,6 +134,7 @@ class LogApi:
         source: str,
         *,
         team_id: str = '',
+        run_kind: str = '',
         from_seq: Optional[int] = None,
         to_seq: Optional[int] = None,
         from_time: Optional[float] = None,
@@ -163,6 +175,8 @@ class LogApi:
         kwargs: dict = {'subcommand': 'read', 'projectId': project_id, 'source': source}
         if team_id:
             kwargs['teamId'] = team_id
+        elif run_kind == 'deploy':
+            kwargs['runKind'] = run_kind
         # Only send provided range/paging options over the wire.
         for key, value in (
             ('fromSeq', from_seq),
@@ -186,6 +200,7 @@ class LogApi:
         segment: int,
         *,
         team_id: str = '',
+        run_kind: str = '',
         offset: int = 0,
         max_bytes: Optional[int] = None,
     ) -> LogSegmentResult:
@@ -221,6 +236,8 @@ class LogApi:
         }
         if team_id:
             kwargs['teamId'] = team_id
+        elif run_kind == 'deploy':
+            kwargs['runKind'] = run_kind
         if max_bytes is not None:
             kwargs['maxBytes'] = max_bytes
         return await self._client.call('rrext_log', **kwargs)
@@ -231,6 +248,7 @@ class LogApi:
         source: str,
         *,
         team_id: str = '',
+        run_kind: str = '',
         before_time: Optional[float] = None,
         all: bool = False,
     ) -> LogDeleteResult:
@@ -256,6 +274,8 @@ class LogApi:
         kwargs: dict = {'subcommand': 'delete', 'projectId': project_id, 'source': source}
         if team_id:
             kwargs['teamId'] = team_id
+        elif run_kind == 'deploy':
+            kwargs['runKind'] = run_kind
         if before_time is not None:
             kwargs['beforeTime'] = before_time
         if all:

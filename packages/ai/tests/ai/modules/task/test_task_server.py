@@ -492,11 +492,11 @@ def test_get_task_control_with_require_denies_without_membership(monkeypatch):
     """No permissions on the task's team -> uniform access-denied error."""
     from ai.modules.task import task_server as ts_mod
 
-    monkeypatch.setattr(ts_mod, 'resolve_task_permissions', lambda info, team: [])
+    monkeypatch.setattr(ts_mod, 'resolve_run_permissions', lambda info, control: [])
 
     ts = _make_server()
     ts._task_control['tk_1'] = _make_control()
-    account = SimpleNamespace(userId='u', defaultTeam='t', sysPermissions=[])
+    account = SimpleNamespace(userId='u', devTeam='t', sysPermissions=[])
 
     with pytest.raises(PermissionError, match='no permissions for this task'):
         ts.get_task_control('tk_1', account_info=account, require='task.debug')
@@ -506,11 +506,11 @@ def test_get_task_control_with_require_enforces_permission(monkeypatch):
     """Membership without the required permission raises PermissionError."""
     from ai.modules.task import task_server as ts_mod
 
-    monkeypatch.setattr(ts_mod, 'resolve_task_permissions', lambda info, team: ['task.monitor'])
+    monkeypatch.setattr(ts_mod, 'resolve_run_permissions', lambda info, control: ['task.monitor'])
 
     ts = _make_server()
     ts._task_control['tk_1'] = _make_control()
-    account = SimpleNamespace(userId='u', defaultTeam='t', sysPermissions=[])
+    account = SimpleNamespace(userId='u', devTeam='t', sysPermissions=[])
 
     with pytest.raises(PermissionError, match="'task.debug' denied"):
         ts.get_task_control('tk_1', account_info=account, require='task.debug')
@@ -520,12 +520,12 @@ def test_get_task_control_with_require_passes_when_granted(monkeypatch):
     """A granted permission lets get_task_control return the control unmodified."""
     from ai.modules.task import task_server as ts_mod
 
-    monkeypatch.setattr(ts_mod, 'resolve_task_permissions', lambda info, team: ['task.debug'])
+    monkeypatch.setattr(ts_mod, 'resolve_run_permissions', lambda info, control: ['task.debug'])
 
     ts = _make_server()
     control = _make_control()
     ts._task_control['tk_1'] = control
-    account = SimpleNamespace(userId='u', defaultTeam='t', sysPermissions=[])
+    account = SimpleNamespace(userId='u', devTeam='t', sysPermissions=[])
 
     assert ts.get_task_control('tk_1', account_info=account, require='task.debug') is control
 
@@ -539,7 +539,7 @@ def test_get_task_control_with_require_sys_admin_bypasses():
     control = _make_control()
     ts._task_control['tk_1'] = control
     # No organization at all: only the resolver's sys.admin expansion grants.
-    account = SimpleNamespace(userId='u', defaultTeam='t', sysPermissions=['sys.admin'], organization=None)
+    account = SimpleNamespace(userId='u', devTeam='t', sysPermissions=['sys.admin'], organization=None)
 
     assert ts.get_task_control('tk_1', account_info=account, require='task.debug') is control
 
@@ -938,6 +938,150 @@ async def test_push_account_update_swallows_send_errors(monkeypatch):
     await TaskServer.push_account_update(ts, 'u1')
     target.send_event.assert_not_awaited()
     ts.debug_message.assert_called()
+
+
+@pytest.mark.asyncio
+async def test_push_account_update_skips_task_scoped_connections(monkeypatch):
+    """pk_/tk_ connections carry the LAUNCHING user's id (so they match the
+    userId filter) but must NOT be rebuilt or notified: rebuilding escalates a
+    minimal task identity into the full user and leaks the user's rr_ session
+    key. Only the full-user connection is notified, with the token-stripped body.
+    """
+    # push_account_update resolves `from ai.account import account` and reads
+    # account._service.get_authentication_result -- patch the real facade's
+    # service so the positive (send) path is actually exercised.
+    from ai.account import account as real_account
+
+    fresh = MagicMock()
+    fresh.to_push_result = MagicMock(return_value={'userId': 'u1', 'userToken': ''})
+    service = MagicMock()
+    service.get_authentication_result = AsyncMock(return_value=fresh)
+    # raising=False: the default (OSS) facade in this test env has no _service;
+    # the SaaS facade that actually runs push_account_update does.
+    monkeypatch.setattr(real_account, '_service', service, raising=False)
+
+    ts = _make_server()
+
+    def _conn(cid, auth):
+        c = MagicMock()
+        c._account_info = SimpleNamespace(userId='u1', auth=auth)
+        c.send_event = AsyncMock()
+        c.get_connection_id = MagicMock(return_value=cid)
+        return c
+
+    pk = _conn(1, 'pk_abc')
+    tk = _conn(2, 'tk_abc')
+    full = _conn(3, 'rr_abc')
+    ts._connections = {1: pk, 2: tk, 3: full}
+
+    await TaskServer.push_account_update(ts, 'u1')
+
+    # Task-scoped sockets are neither rebuilt nor notified.
+    pk.send_event.assert_not_awaited()
+    tk.send_event.assert_not_awaited()
+    assert pk._account_info.auth == 'pk_abc'  # identity untouched
+    assert tk._account_info.auth == 'tk_abc'
+
+    # The full-user connection is notified with the token-stripped push body.
+    full.send_event.assert_awaited_once()
+    args, kwargs = full.send_event.call_args
+    assert args[0] == 'apaext_account'
+    assert kwargs['body'] == {'userId': 'u1', 'userToken': ''}
+    fresh.to_push_result.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# push_org_update
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_push_org_update_skips_other_orgs(monkeypatch):
+    """Connections whose primary org differs are not notified."""
+    from ai.modules.task import task_server as ts_mod
+
+    service = MagicMock()
+    service.get_authentication_result = AsyncMock()
+    fake_account = SimpleNamespace(_service=service)
+    monkeypatch.setitem(sys.modules, 'ai.account.account', fake_account)
+    monkeypatch.setattr(ts_mod, 'account', fake_account, raising=False)
+
+    ts = _make_server()
+    other = MagicMock()
+    other._account_info = SimpleNamespace(userId='u1', auth='rr_o', organization={'id': 'org-other'})
+    other.send_event = AsyncMock()
+    other.get_connection_id = MagicMock(return_value=99)
+    ts._connections = {99: other}
+
+    await TaskServer.push_org_update(ts, 'org-1')
+    other.send_event.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_push_org_update_swallows_send_errors(monkeypatch):
+    """If account refresh raises, the loop logs and moves on (no propagation)."""
+    from ai.account import account as real_account
+
+    service = MagicMock()
+    service.get_authentication_result = AsyncMock(side_effect=RuntimeError('refresh fail'))
+    monkeypatch.setattr(real_account, '_service', service, raising=False)
+
+    ts = _make_server()
+    target = MagicMock()
+    target._account_info = SimpleNamespace(userId='u1', auth='rr_a', organization={'id': 'org-1'})
+    target.send_event = AsyncMock()
+    target.get_connection_id = MagicMock(return_value=1)
+    ts._connections = {1: target}
+
+    await TaskServer.push_org_update(ts, 'org-1')
+    target.send_event.assert_not_awaited()
+    ts.debug_message.assert_called()
+
+
+@pytest.mark.asyncio
+async def test_push_org_update_notifies_org_and_skips_task_scoped(monkeypatch):
+    """Every full-user connection on the org is rebuilt and notified with the
+    token-stripped body; pk_/tk_ sockets on the same org are skipped for the
+    same reason as push_account_update (no escalation, no rr_ key leak).
+    Organization may be a dict or an object — both shapes must match.
+    """
+    from ai.account import account as real_account
+
+    fresh = MagicMock()
+    fresh.to_push_result = MagicMock(return_value={'userId': 'u1', 'userToken': ''})
+    service = MagicMock()
+    service.get_authentication_result = AsyncMock(return_value=fresh)
+    # raising=False: the default (OSS) facade in this test env has no _service;
+    # the SaaS facade that actually runs push_org_update does.
+    monkeypatch.setattr(real_account, '_service', service, raising=False)
+
+    ts = _make_server()
+
+    def _conn(cid, auth, org):
+        c = MagicMock()
+        c._account_info = SimpleNamespace(userId='u1', auth=auth, organization=org)
+        c.send_event = AsyncMock()
+        c.get_connection_id = MagicMock(return_value=cid)
+        return c
+
+    pk = _conn(1, 'pk_abc', {'id': 'org-1'})
+    full_dict = _conn(2, 'rr_abc', {'id': 'org-1'})
+    full_obj = _conn(3, 'rr_def', SimpleNamespace(id='org-1'))
+    ts._connections = {1: pk, 2: full_dict, 3: full_obj}
+
+    await TaskServer.push_org_update(ts, 'org-1')
+
+    # Task-scoped sockets are neither rebuilt nor notified.
+    pk.send_event.assert_not_awaited()
+    assert pk._account_info.auth == 'pk_abc'  # identity untouched
+
+    # Both full-user connections (dict- and object-shaped org) are notified.
+    for full in (full_dict, full_obj):
+        full.send_event.assert_awaited_once()
+        args, kwargs = full.send_event.call_args
+        assert args[0] == 'apaext_account'
+        assert kwargs['body'] == {'userId': 'u1', 'userToken': ''}
+        assert full._account_info is fresh
 
 
 # ---------------------------------------------------------------------------

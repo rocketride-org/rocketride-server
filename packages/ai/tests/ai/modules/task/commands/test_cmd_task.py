@@ -86,7 +86,7 @@ def _make_conn(*, account_info=None, server=None, connection_id=1):
     return conn
 
 
-def _account_info(*, user_id='user-1', auth='ak_x', default_team='team-1', organization=None):
+def _account_info(*, user_id='user-1', auth='ak_x', dev_team='team-1', organization=None):
     """Build an AccountInfo-shaped stub.
 
     The default organization contains the default team so the real org
@@ -97,8 +97,8 @@ def _account_info(*, user_id='user-1', auth='ak_x', default_team='team-1', organ
         userId=user_id,
         auth=auth,
         userToken='token-' + user_id,
-        defaultTeam=default_team,
-        organization=organization if organization is not None else {'id': 'org-1', 'teams': [{'id': default_team}]},
+        devTeam=dev_team,
+        organization=organization if organization is not None else {'id': 'org-1', 'teams': [{'id': dev_team}]},
         sysPermissions=[],
     )
 
@@ -112,7 +112,7 @@ def _account_info(*, user_id='user-1', auth='ak_x', default_team='team-1', organ
 async def test_on_execute_starts_task_with_resolved_org_id():
     """on_execute resolves org_id from the user's default team and calls start_task."""
     organization = {'id': 'org-B', 'teams': [{'id': 'team-1'}, {'id': 'team-other'}]}
-    account = _account_info(user_id='user-1', default_team='team-1', organization=organization)
+    account = _account_info(user_id='user-1', dev_team='team-1', organization=organization)
 
     server = MagicMock()
     server.start_task = AsyncMock(return_value={'token': 'tk_new'})
@@ -140,32 +140,34 @@ async def test_on_execute_requires_task_control_permission():
 
 
 @pytest.mark.asyncio
-async def test_on_execute_rejects_client_team_override(monkeypatch):
+async def test_on_execute_ignores_client_team_override(monkeypatch):
     """A client-supplied teamId that differs from the session's team context
-    (the profile-assigned development team) is REJECTED, not honored — clients
-    no longer choose which team a run executes under.
+    (the profile-assigned development team) is IGNORED, not honored — a client
+    cannot choose which team a run is billed/authorized/secret-resolved under.
+    The run proceeds under the session's default team.
     """
     from ai.account import account as account_mod
 
-    # The stubbed permission check grants, so execution continues into the
-    # secret merge — patch it out so this test asserts only the check target.
     monkeypatch.setattr(account_mod, 'get_merged_env', AsyncMock(return_value={}))
 
     organization = {'id': 'org-1', 'teams': [{'id': 'team-1'}, {'id': 'team-target'}]}
     server = MagicMock()
     server.start_task = AsyncMock(return_value={'token': 'tk_new'})
-    conn = _make_conn(account_info=_account_info(default_team='team-1', organization=organization), server=server)
+    conn = _make_conn(account_info=_account_info(dev_team='team-1', organization=organization), server=server)
 
-    with pytest.raises(PermissionError, match='development team'):
-        await TaskCommands.on_execute(conn, {'arguments': {'teamId': 'team-target'}})
+    # A stray teamId must NOT raise — it is silently ignored.
+    await TaskCommands.on_execute(conn, {'arguments': {'teamId': 'team-target'}})
 
-    server.start_task.assert_not_called()
+    # Authorization AND the run both use the session's default team, never the
+    # client-supplied one.
+    conn.verify_team_permission.assert_called_once_with('team-1', 'task.control')
+    assert server.start_task.await_args.kwargs['team_id'] == 'team-1'
 
 
 @pytest.mark.asyncio
 async def test_on_execute_accepts_team_id_matching_session_team(monkeypatch):
     """A teamId EQUAL to the session's team passes (the trusted in-process
-    dispatch sends teamId = the synthesized defaultTeam) and task.control is
+    dispatch sends teamId = the synthesized devTeam) and task.control is
     verified on that team.
     """
     from ai.account import account as account_mod
@@ -176,7 +178,7 @@ async def test_on_execute_accepts_team_id_matching_session_team(monkeypatch):
 
     server = MagicMock()
     server.start_task = AsyncMock(return_value={'token': 'tk_new'})
-    conn = _make_conn(account_info=_account_info(default_team='team-1'), server=server)
+    conn = _make_conn(account_info=_account_info(dev_team='team-1'), server=server)
 
     await TaskCommands.on_execute(conn, {'arguments': {'teamId': 'team-1'}})
 
@@ -184,25 +186,26 @@ async def test_on_execute_accepts_team_id_matching_session_team(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_on_execute_foreign_team_denied_before_secret_merge(monkeypatch):
-    """A foreign teamId aborts BEFORE the env/secret merge and before
-    start_task — the cross-team secret-exfiltration hole this check closes.
+async def test_on_execute_foreign_team_secrets_resolve_to_dev_team(monkeypatch):
+    """A foreign teamId is ignored, so the env/secret merge resolves the
+    SESSION's default team — never the client-supplied one. This closes the
+    cross-team secret-exfiltration hole by construction: a client cannot point
+    the merge at another team at all.
     """
     from ai.account import account as account_mod
 
-    merged_env = AsyncMock()
+    merged_env = AsyncMock(return_value={})
     monkeypatch.setattr(account_mod, 'get_merged_env', merged_env)
 
     server = MagicMock()
-    server.start_task = AsyncMock()
-    conn = _make_conn(account_info=_account_info(), server=server)
+    server.start_task = AsyncMock(return_value={'token': 'tk_new'})
+    conn = _make_conn(account_info=_account_info(dev_team='team-1'), server=server)
 
-    with pytest.raises(PermissionError, match='development team'):
-        await TaskCommands.on_execute(conn, {'arguments': {'teamId': 'team-foreign'}})
+    await TaskCommands.on_execute(conn, {'arguments': {'teamId': 'team-foreign'}})
 
-    # Neither the secret merge nor the task start may have been reached.
-    merged_env.assert_not_awaited()
-    server.start_task.assert_not_called()
+    # The secret merge used the session's default team, not the foreign one.
+    assert merged_env.await_args.kwargs['team_id'] == 'team-1'
+    assert server.start_task.await_args.kwargs['team_id'] == 'team-1'
 
 
 @pytest.mark.asyncio
@@ -364,7 +367,7 @@ async def test_on_rrext_get_token_returns_token_from_server():
     response = await TaskCommands.on_rrext_get_token(conn, {'arguments': {'projectId': 'proj-1', 'source': 'src-1'}})
     assert response == {'type': 'response', 'body': {'token': 'tk_found'}}
     server.get_task_control_by_project.assert_called_once_with(
-        'proj-1', 'src-1', conn._account_info, require='task.monitor', team_id=''
+        'proj-1', 'src-1', conn._account_info, require='task.monitor', team_id='', run_kind=''
     )
 
 
@@ -382,7 +385,7 @@ async def test_on_rrext_get_token_team_scope_resolves_deploy_run():
     assert response == {'type': 'response', 'body': {'token': 'tk_deploy'}}
     conn.verify_team_permission.assert_called_once_with('team-1', 'task.monitor')
     server.get_task_control_by_project.assert_called_once_with(
-        'proj-1', 'src-1', conn._account_info, require='task.monitor', team_id='team-1'
+        'proj-1', 'src-1', conn._account_info, require='task.monitor', team_id='team-1', run_kind=''
     )
 
 
@@ -399,25 +402,31 @@ async def test_on_rrext_get_tasks_filters_to_caller_and_running_only():
     running_status = SimpleNamespace(state=TASK_STATE.RUNNING.value, status='running')
     completed_status = SimpleNamespace(state=TASK_STATE.COMPLETED.value, status='completed')
 
-    def _ctrl(token, team_id, status):
+    def _ctrl(token, team_id, status, run_kind='dev'):
         """Build a TASK_CONTROL stub with the given team_id + status."""
         task = MagicMock()
         task.get_status = MagicMock(return_value=status)
+        # owner_id mirrors TASK_CONTROL.owner_id: the team owns a deploy run,
+        # the user owns a dev run.
+        owner_id = team_id if run_kind == 'deploy' else 'user-1'
         return SimpleNamespace(
             token=token,
             userId='user-1',
             teamId=team_id,
-            run_kind='dev',
+            run_kind=run_kind,
+            owner_id=owner_id,
             source='src',
             pipeline={'name': 'my-pipeline', 'description': 'desc'},
             task=task,
         )
 
     server = MagicMock()
+    # tk_running_other is a TEAM-owned deploy run in a team the caller cannot
+    # access — the only run here the caller neither owns nor has team rights to.
     server._task_control = {
         'tk_running_mine': _ctrl('tk_running_mine', 'team-1', running_status),
         'tk_done_mine': _ctrl('tk_done_mine', 'team-1', completed_status),
-        'tk_running_other': _ctrl('tk_running_other', 'team-other', running_status),
+        'tk_running_other': _ctrl('tk_running_other', 'team-other', running_status, run_kind='deploy'),
     }
 
     # Caller has access to team-1 only; team-other is invisible.
@@ -450,6 +459,7 @@ async def test_on_rrext_get_tasks_falls_back_to_source_name():
         userId='user-1',
         teamId='team-1',
         run_kind='dev',
+        owner_id='user-1',
         source='my-source',
         pipeline=None,
         task=task,

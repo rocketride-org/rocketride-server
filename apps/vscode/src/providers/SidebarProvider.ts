@@ -44,7 +44,6 @@ import type { ScannedApp } from '../appdev/appScan';
 interface AppRowDTO {
 	id: string;
 	name: string;
-	status: 'local' | 'dev' | 'draft' | 'pending' | 'approved' | 'rejected' | 'live';
 	folder?: string;
 	/** Host-resolved icon (a data: URI here — loadable under the webview CSP
 	 * regardless of localResourceRoots, which only cover the extension dir). */
@@ -82,14 +81,14 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 	private parsedFiles = new Map<string, ParsedPipelineFile>();
 
 	// ── App Builder state ────────────────────────────────────────────────────
-	// Cached workspace scan (re-run on package.json events) and the current
-	// sidebar mode (session-scoped; the webview restores it from updates).
+	// Cached workspace scan (re-run on .rrapp / package.json events) and the
+	// current sidebar mode (session-scoped; the webview restores it from updates).
 	private scannedApps: ScannedApp[] = [];
-	// Cached MY APPS rows — sendFullUpdate must not await the catalog RPC
-	// (it would stall every webview update on a slow server); rescans
-	// refresh this cache out-of-band and push appsUpdate when it lands.
+	// Cached MY APPS rows — building them reads icon files off disk, and
+	// sendFullUpdate must not await that; rescans refresh this cache
+	// out-of-band and push appsUpdate when it lands.
 	private appRows: AppRowDTO[] = [];
-	/** Coalesces package.json event bursts into one workspace rescan. */
+	/** Coalesces .rrapp / package.json event bursts into one workspace rescan. */
 	private rescanTimer?: NodeJS.Timeout;
 	/**
 	 * Monotonic rescan counter (the fetchSeq pattern): connect/auth/watcher
@@ -189,11 +188,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 						await this.deployManager.initialize();
 						this.sendFullUpdate();
 						break;
-					case 'cloudSignIn': {
-						const auth = CloudAuthProvider.getInstance();
-						await auth.signIn(process.env.RR_ZITADEL_URL || '', process.env.RR_ZITADEL_VSCODE_CLIENT_ID || '');
-						break;
-					}
 				}
 			} catch (error) {
 				console.error('[SidebarProvider] Message handling error:', error);
@@ -225,30 +219,49 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 			watcherPipeJson.onDidChange((uri) => this.handleFileChanged(uri))
 		);
 
-		// App bindings live in package.json appManifest blocks — any
-		// package.json event can add/remove/rename an app. node_modules is
-		// excluded (its package.json churn is enormous and never a binding).
+		// App discovery is .rrapp-driven, and the marker's adjacent
+		// package.json (appManifest block) verifies the binding — events on
+		// either can add/remove/rename an app. node_modules is excluded (its
+		// package.json churn is enormous and never a binding).
+		const watcherMarker = vscode.workspace.createFileSystemWatcher('**/*.rrapp');
 		const watcherPkg = vscode.workspace.createFileSystemWatcher('**/package.json');
-		const onPkgEvent = (uri: vscode.Uri): void => {
-			if (uri.fsPath.includes('node_modules')) return;
-			// Debounced: installs and branch switches touch many package.json
-			// files at once — one rescan after the burst settles.
+		// Debounced: installs and branch switches touch many binding files at
+		// once — one rescan after the burst settles.
+		const scheduleRescan = (): void => {
 			if (this.rescanTimer) clearTimeout(this.rescanTimer);
 			this.rescanTimer = setTimeout(() => {
 				this.rescanTimer = undefined;
 				void this.rescanApps();
 			}, 500);
 		};
-		this.disposables.push(watcherPkg, watcherPkg.onDidCreate(onPkgEvent), watcherPkg.onDidDelete(onPkgEvent), watcherPkg.onDidChange(onPkgEvent), {
-			dispose: () => { if (this.rescanTimer) clearTimeout(this.rescanTimer); },
-		});
+		const onBindingEvent = (uri: vscode.Uri): void => {
+			if (uri.fsPath.includes('node_modules')) return;
+			scheduleRescan();
+		};
+		this.disposables.push(
+			watcherMarker,
+			watcherMarker.onDidCreate(onBindingEvent),
+			watcherMarker.onDidDelete(onBindingEvent),
+			watcherMarker.onDidChange(onBindingEvent),
+			watcherPkg,
+			watcherPkg.onDidCreate(onBindingEvent),
+			watcherPkg.onDidDelete(onBindingEvent),
+			watcherPkg.onDidChange(onBindingEvent),
+			// Adding/removing a workspace folder fires no binding-file event, but
+			// scanWorkspaceApps only searches the CURRENT folder set — rescan so
+			// MY APPS never goes stale against a changed workspace.
+			vscode.workspace.onDidChangeWorkspaceFolders(() => scheduleRescan()),
+			{
+				dispose: () => { if (this.rescanTimer) clearTimeout(this.rescanTimer); },
+			}
+		);
 	}
 
 	// =========================================================================
 	// APP BUILDER (MY APPS)
 	// =========================================================================
 
-	/** Re-scans the workspace for app bindings and pushes the merged list. */
+	/** Re-scans the workspace for .rrapp-bound apps and pushes the fresh rows. */
 	private async rescanApps(): Promise<void> {
 		// Capture this run's sequence; a newer rescan supersedes it at every
 		// await point below.
@@ -265,38 +278,16 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 	}
 
 	/**
-	 * Builds the MY APPS rows: the workspace scan merged with the server's
-	 * list_mine statuses when cloud-signed-in. Merge key is the app id
-	 * (bind, don't sync). Local-only rows read 'local'; server statuses win
-	 * for bound apps; server-only apps appear without a folder.
+	 * Builds the MY APPS rows from the workspace scan alone: every row is a
+	 * .rrapp-bound working copy. The server catalog is deliberately not
+	 * consulted — the sidebar lists what is on disk, nothing else.
 	 */
 	private async buildAppRows(): Promise<AppRowDTO[]> {
-		const rows = new Map<string, AppRowDTO>();
+		const rows: AppRowDTO[] = [];
 		for (const app of this.scannedApps) {
-			rows.set(app.id, { id: app.id, name: app.name, status: 'local', folder: app.folder, iconUrl: await appIconDataUri(app.icon) });
+			rows.push({ id: app.id, name: app.name, folder: app.folder, iconUrl: await appIconDataUri(app.icon) });
 		}
-
-		// Server statuses — best-effort: OSS engines reject the marketplace
-		// command (NotImplementedError) and signed-out sessions have no org.
-		try {
-			const client = this.connectionManager.getClient();
-			if (client && this.connectionManager.isConnected() && isCloudConnected()) {
-				const res = (await client.call('rrext_app_catalog', { subcommand: 'list_mine' })) as { apps?: Array<{ id: string; name?: string; status?: string }> };
-				for (const server of res?.apps ?? []) {
-					const status = (server.status ?? 'draft') as AppRowDTO['status'];
-					const bound = rows.get(server.id);
-					if (bound) {
-						bound.status = status;
-					} else {
-						rows.set(server.id, { id: server.id, name: server.name ?? server.id, status });
-					}
-				}
-			}
-		} catch {
-			/* marketplace unavailable (OSS / signed out) — workspace rows stand */
-		}
-
-		return [...rows.values()];
+		return rows;
 	}
 
 	/** Handles a newly created .pipe file — assigns a project_id if missing. */
@@ -415,9 +406,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 			}
 			// Teams come from ConnectResult — no fetch needed, just update the webview
 			this.sendFullUpdate();
-			// Server app statuses arrive out-of-band: sendFullUpdate posts the
-			// cached rows, so refresh the cache now that the server answers.
-			void this.rescanApps();
 		};
 		this.connectionManager.on('shell:connected', connectedHandler);
 		const disconnectedHandler = () => {
@@ -444,8 +432,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 		const cloudAuth = CloudAuthProvider.getInstance();
 		const cloudAuthHandler = async () => {
 			this.sendFullUpdate();
-			// Sign-in/sign-out changes which server statuses list_mine returns
-			void this.rescanApps();
 		};
 		cloudAuth.onDidChange.on('changed', cloudAuthHandler);
 

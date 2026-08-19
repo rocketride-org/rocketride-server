@@ -74,6 +74,7 @@ from .client import (
     ConnectResult,
     ServerInfoResult,
     AppManifestEntry,
+    DevEntry,
 )
 
 # Pipeline types: the structures that describe a pipeline's topology — its
@@ -230,6 +231,7 @@ __all__ = [
     'ConnectResult',
     'ServerInfoResult',
     'AppManifestEntry',
+    'DevEntry',
     # Pipeline types
     'PipelineInputConnection',
     'PipelineControlConnection',

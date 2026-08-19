@@ -470,7 +470,10 @@ export const SidebarFooter: React.FC<SidebarFooterProps> = ({ collapsed, userNam
 															whiteSpace: 'nowrap',
 														}}
 													>
-														{/* Colored dot on the connection status line */}
+														{/* Colored dot on the connection status line: green when
+														    connected, neutral while connecting (transitional, nothing
+														    wrong yet), red for any resting not-connected state so
+														    failures - including auth failures - stand out. */}
 														{i === 0 && item.statusState && (
 															<span
 																style={{
@@ -479,7 +482,7 @@ export const SidebarFooter: React.FC<SidebarFooterProps> = ({ collapsed, userNam
 																	borderRadius: '50%',
 																	flexShrink: 0,
 																	marginRight: 5,
-																	backgroundColor: item.statusState === 'connected' ? 'var(--rr-color-success)' : 'var(--rr-text-secondary)',
+																	backgroundColor: item.statusState === 'connected' ? 'var(--rr-color-success)' : item.statusState === 'connecting' ? 'var(--rr-text-secondary)' : 'var(--rr-color-error)',
 																}}
 															/>
 														)}

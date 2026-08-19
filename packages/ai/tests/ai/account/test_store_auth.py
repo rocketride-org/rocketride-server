@@ -44,6 +44,12 @@ from ai.account.store import Store, StorageError
 from ai.account.store_providers.filesystem import FilesystemStore
 
 
+# One signing key for the env var, the encode, and the decode. Three copies
+# of the literal could drift, and a mismatched decode key fails as an opaque
+# 401 instead of a clear error.
+_SIGNING_KEY = 'test-signing-key-of-32-bytes-min!'
+
+
 # ============================================================================
 # Fixtures + account stubs
 # ============================================================================
@@ -65,7 +71,7 @@ def _account(
     team_name='Development',
     org_perms=(),
     sys_perms=(),
-    default_team='team-1',
+    dev_team='team-1',
     extra_teams=(),
 ):
     """AccountInfo-shaped stub with one org and one primary team."""
@@ -75,7 +81,7 @@ def _account(
         userId=user_id,
         auth='ak_x',
         userToken='tk',
-        defaultTeam=default_team,
+        devTeam=dev_team,
         organization={'id': 'org-1', 'name': 'Acme', 'permissions': list(org_perms), 'teams': teams},
         sysPermissions=list(sys_perms),
     )
@@ -304,11 +310,22 @@ class TestJoinedUserAlias:
         assert (await fs.read('My Files/a.txt')) == b'joined'
         assert fs._full_path('@/User/My Files/a.txt') == fs._full_path('My Files/a.txt')
 
-    def test_alias_carries_own_permission_rule(self, store):
-        # Same task.store requirement as plain paths — an alias, not a hole.
+    def test_alias_is_unconditional_like_plain_paths(self, store):
+        # Ownership IS the authorization: the caller's own tree consults no
+        # team- or org-carried permission — alias and plain spelling alike.
         fs = _fs(store, _account(team_perms=['task.monitor']))
-        with pytest.raises(PermissionError, match="'task.store' denied"):
-            fs._full_path('@/User/x.txt')
+        assert fs._full_path('@/User/x.txt') == 'users/user-1/files/x.txt'
+
+    def test_own_tree_survives_teamless_org(self, store):
+        # The org-switch regression: a user whose ACTIVE org holds none of
+        # their team memberships (or no org at all) must still reach their
+        # own files — personal storage never hinges on org/team context.
+        teamless = _account()
+        teamless.organization = {'id': 'org-2', 'name': 'Elsewhere', 'permissions': [], 'teams': []}
+        assert store._file_store(_ctx(teamless))._full_path('workspace/f.txt') == 'users/user-1/files/workspace/f.txt'
+        orgless = _account()
+        orgless.organization = None
+        assert store._file_store(_ctx(orgless))._full_path('workspace/f.txt') == 'users/user-1/files/workspace/f.txt'
 
     def test_alias_system_trees_still_denied(self, store):
         fs = _fs(store, _account())
@@ -347,11 +364,6 @@ class TestSystemTrees:
         fs = _fs(store, _account(sys_perms=['sys.admin']))
         assert fs._full_path('.logs/p1/x.jsonl') == 'users/user-1/files/.logs/p1/x.jsonl'
         assert fs._full_path('@/Team/=team-1/.deployments/p1.json') == ('teams/team-1/files/.deployments/p1.json')
-
-    def test_default_subtree_needs_task_store(self, store):
-        fs = _fs(store, _account(team_perms=['task.monitor', 'task.control']))
-        with pytest.raises(PermissionError, match="'task.store' denied"):
-            fs._full_path('workspace/file.txt')
 
     def test_internal_identity_requires_id_references(self, store):
         # Internal has no name dictionary: bare (name) references deny.
@@ -634,12 +646,12 @@ class TestSignedFetchUrls:
         import jwt
 
         token = url.split('token=', 1)[1]
-        return jwt.decode(token, 'test-signing-key', algorithms=['HS256'])
+        return jwt.decode(token, _SIGNING_KEY, algorithms=['HS256'])
 
     @pytest.fixture(autouse=True)
     def _signing_env(self, monkeypatch):
         """The env get_url's local-JWT branch requires."""
-        monkeypatch.setenv('RR_SIGNING_KEY', 'test-signing-key')
+        monkeypatch.setenv('RR_SIGNING_KEY', _SIGNING_KEY)
         monkeypatch.setenv('RR_BASE_URL', 'http://localhost:5565')
 
     @pytest.mark.asyncio
@@ -717,7 +729,7 @@ class TestSignedFetchUrls:
 
         from ai.modules.task.fetch import handle_fetch
 
-        token = jwt.encode({**claim, 'exp': int(time.time()) + 600}, 'test-signing-key', algorithm='HS256')
+        token = jwt.encode({**claim, 'exp': int(time.time()) + 600}, _SIGNING_KEY, algorithm='HS256')
         request = SimpleNamespace(query_params={'token': token})  # handle_fetch reads only query_params
 
         response = await handle_fetch(request)

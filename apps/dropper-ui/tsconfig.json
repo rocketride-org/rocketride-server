@@ -70,7 +70,8 @@
 		"src/types/global.d.ts",
 		"public/**/*",
 		"*.ts",
-		"*.tsx"
+		"*.tsx",
+    "rsbuild.config.mts"
 	],
 	"exclude": [
 		"node_modules",

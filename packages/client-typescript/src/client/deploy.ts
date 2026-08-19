@@ -25,16 +25,18 @@
 /**
  * Deploy API namespace for the RocketRide TypeScript SDK.
  *
- * Teams-as-environments deployments via the `rrext_deploy` DAP command
- * (dispatched by `subcommand`) over the existing WebSocket connection:
+ * Teams-as-environments deployments over two DAP commands (dispatched by
+ * `subcommand`) on the existing WebSocket connection:
  *
- * - `publish` snapshots a pipeline as an IMMUTABLE, sha256-locked artifact
- *   version in the org registry.
- * - `deploy` points a TEAM at a published version. Teams ARE the
- *   environments (Staging, Production, ...): promotion and rollback are this
- *   same pointer move aimed at a different version or team. Deploy targets
- *   are always explicit — there is deliberately no default-team fallback.
- * - Every publish and pointer change lands in an immutable audit history.
+ * - `rrext_deploy` — the GENERIC, kind-agnostic rail door: `add` deploys any
+ *   kind (pipe|app|node) as an IMMUTABLE, sha256-locked registry version;
+ *   `versions`/`artifact`/`history` read the rail.
+ * - `rrext_deploy_pipe` — PIPE-specific control: `deploy` points a TEAM at a
+ *   published version (teams ARE the environments — Staging, Production, ...;
+ *   promotion and rollback are the same pointer move; targets are always
+ *   explicit, no default-team fallback), plus its lifecycle, scheduling
+ *   (`schedule_*`), and run-now dispatch (`run`).
+ * - Every deploy and pointer change lands in an immutable audit history.
  * - `list`/`versions`/`history` return the standard list envelope
  *   (`{rows, total, page, pageSize}`) with page/search/filter/sort params.
  */
@@ -71,7 +73,8 @@ function listArgs(params: DeployListParams): Record<string, unknown> {
 // =============================================================================
 
 /**
- * Typed wrapper around the `rrext_deploy` DAP command and its subcommands.
+ * Typed wrapper around the `rrext_deploy` (generic rail door) and
+ * `rrext_deploy_pipe` (pipe deploy control) DAP commands and their subcommands.
  *
  * Accessed via `client.deploy` — not instantiated directly. All methods
  * delegate to {@link RocketRideClient.call} which handles envelope
@@ -82,31 +85,48 @@ export class DeployApi {
 	constructor(private client: RocketRideClient) {}
 
 	// =========================================================================
-	// PUBLISH — immutable artifact into the org registry
+	// ADD — deploy any kind of object into the org registry (the ONE rail door)
 	// =========================================================================
 
 	/**
-	 * Publishes a pipeline as the next immutable registry version.
+	 * Deploys an object to the server as the next immutable registry version.
 	 *
-	 * The artifact is sha256-locked: what was published is provably what
-	 * runs. Publishing alone puts nothing live — point a team at the version
-	 * with {@link deploy} (or pass `deployTo` to do both in one step, the
-	 * small-team convenience).
+	 * The ONE generic rail door for every kind — DEPLOY in the settled
+	 * vocabulary means "copy code to the server"; binding it to an audience
+	 * is the separate publish step ({@link deploy} for pipe teams; the app
+	 * publish verbs for apps). The artifact is sha256-locked: what was
+	 * deployed is provably what runs.
 	 *
-	 * @param pipeline - The full pipeline definition to snapshot. `name` is
-	 *   REQUIRED here (narrowed at compile time, enforced by the server):
-	 *   artifacts are immutable and pipelineName renders on every deploy
-	 *   surface — a nameless publish would show as a project GUID forever.
-	 * @param options - Optional publish options.
+	 * Kind dispatch:
+	 * - `kind: 'pipe'` (default) — pass `pipeline` (the full definition;
+	 *   `name` REQUIRED: it renders on every deploy surface forever).
+	 * - `kind: 'app'` — pass `data` (ONE zip of the app's SOURCE — the server
+	 *   owns the build and never trusts client-produced binaries). Two
+	 *   layouts: package.json + src at the zip root (legacy), or
+	 *   workspace-relative with `metadata.appRoot` naming the app folder so
+	 *   `appManifest.include` extras ride at their real workspace paths. The
+	 *   server retains the zip and unpacks it at receipt; the app deployment
+	 *   is born state 'private' (internally publishable — an @me/@team binding
+	 *   may serve it; the developer submits it for review to reach the public
+	 *   store).
+	 *
+	 * @param options.kind - 'pipe' (default) | 'app'.
+	 * @param options.pipeline - The pipeline definition (kind 'pipe').
+	 * @param options.data - The source zip bytes (kind 'app').
+	 * @param options.metadata - Optional metadata blob (e.g. projectId
+	 *   provenance, appRoot for workspace-relative app zips).
 	 * @param options.comment - "What changed" note kept in the registry.
 	 * @param options.deployTo - Team id to deploy the new version to
-	 *   immediately (one-step publish+deploy).
+	 *   immediately (one-step add+deploy; pipes only).
 	 * @returns The artifact entry, plus the deployment when `deployTo` was given.
 	 */
-	async publish(pipeline: PipelineConfig & { name: string }, options: { comment?: string; deployTo?: string } = {}): Promise<PublishResult> {
+	async add(options: { kind?: 'pipe' | 'app' | 'node'; pipeline?: PipelineConfig & { name: string }; data?: Uint8Array; metadata?: Record<string, unknown>; comment?: string; deployTo?: string }): Promise<PublishResult> {
 		return this.client.call<PublishResult>('rrext_deploy', {
-			subcommand: 'publish',
-			pipeline,
+			subcommand: 'add',
+			kind: options.kind ?? 'pipe',
+			...(options.pipeline !== undefined && { pipeline: options.pipeline }),
+			...(options.data !== undefined && { data: options.data }),
+			...(options.metadata !== undefined && { metadata: options.metadata }),
 			...(options.comment !== undefined && { comment: options.comment }),
 			...(options.deployTo !== undefined && { deployTo: options.deployTo }),
 		});
@@ -129,7 +149,7 @@ export class DeployApi {
 	 * @returns The updated deployment record, registry-joined.
 	 */
 	async deploy(projectId: string, version: number, teamId: string): Promise<Deployment> {
-		return this.client.call<Deployment>('rrext_deploy', {
+		return this.client.call<Deployment>('rrext_deploy_pipe', {
 			subcommand: 'deploy',
 			projectId,
 			version,
@@ -150,7 +170,7 @@ export class DeployApi {
 	 * @returns `{rows, total, page, pageSize}` of {@link Deployment} rows.
 	 */
 	async list(params: DeployListParams & { teamId?: string } = {}): Promise<DeployListEnvelope<Deployment>> {
-		return this.client.call<DeployListEnvelope<Deployment>>('rrext_deploy', {
+		return this.client.call<DeployListEnvelope<Deployment>>('rrext_deploy_pipe', {
 			subcommand: 'list',
 			...(params.teamId !== undefined && { teamId: params.teamId }),
 			...listArgs(params),
@@ -165,7 +185,7 @@ export class DeployApi {
 	 * @returns The deployment record (version, state, schedules, actors).
 	 */
 	async get(projectId: string, teamId: string): Promise<Deployment> {
-		return this.client.call<Deployment>('rrext_deploy', {
+		return this.client.call<Deployment>('rrext_deploy_pipe', {
 			subcommand: 'get',
 			projectId,
 			teamId,
@@ -202,7 +222,7 @@ export class DeployApi {
 	 * @returns The started run's token and the version that ran.
 	 */
 	async run(projectId: string, sourceId: string, teamId: string): Promise<{ token?: string; version?: number }> {
-		return this.client.call<{ token?: string; version?: number }>('rrext_deploy', {
+		return this.client.call<{ token?: string; version?: number }>('rrext_deploy_pipe', {
 			subcommand: 'run',
 			projectId,
 			sourceId,
@@ -267,7 +287,7 @@ export class DeployApi {
 	 * @returns The updated deployment record.
 	 */
 	async disable(projectId: string, teamId: string): Promise<Deployment> {
-		return this.client.call<Deployment>('rrext_deploy', {
+		return this.client.call<Deployment>('rrext_deploy_pipe', {
 			subcommand: 'disable',
 			projectId,
 			teamId,
@@ -282,7 +302,7 @@ export class DeployApi {
 	 * @returns The updated deployment record.
 	 */
 	async enable(projectId: string, teamId: string): Promise<Deployment> {
-		return this.client.call<Deployment>('rrext_deploy', {
+		return this.client.call<Deployment>('rrext_deploy_pipe', {
 			subcommand: 'enable',
 			projectId,
 			teamId,
@@ -301,7 +321,7 @@ export class DeployApi {
 	 * @returns The final deployment record (state `removed`).
 	 */
 	async remove(projectId: string, teamId: string): Promise<Deployment> {
-		return this.client.call<Deployment>('rrext_deploy', {
+		return this.client.call<Deployment>('rrext_deploy_pipe', {
 			subcommand: 'remove',
 			projectId,
 			teamId,
@@ -330,7 +350,7 @@ export class DeployApi {
 	 * @returns The updated deployment record.
 	 */
 	async setSchedule(projectId: string, sourceId: string, schedule: string | null, teamId: string, options: { ttl?: number } = {}): Promise<Deployment> {
-		return this.client.call<Deployment>('rrext_deploy', {
+		return this.client.call<Deployment>('rrext_deploy_pipe', {
 			subcommand: 'schedule_set',
 			projectId,
 			sourceId,
@@ -357,7 +377,7 @@ export class DeployApi {
 	 * @returns The updated deployment record.
 	 */
 	async setSourceConfig(projectId: string, sourceId: string, teamId: string, options: { traceLevel?: 'none' | 'metadata' | 'summary' | 'full' | null; debugOut?: boolean } = {}): Promise<Deployment> {
-		return this.client.call<Deployment>('rrext_deploy', {
+		return this.client.call<Deployment>('rrext_deploy_pipe', {
 			subcommand: 'source_config',
 			projectId,
 			sourceId,
@@ -377,7 +397,7 @@ export class DeployApi {
 	 * @returns The updated deployment record.
 	 */
 	async pauseSchedule(projectId: string, sourceId: string, teamId: string): Promise<Deployment> {
-		return this.client.call<Deployment>('rrext_deploy', {
+		return this.client.call<Deployment>('rrext_deploy_pipe', {
 			subcommand: 'schedule_pause',
 			projectId,
 			sourceId,
@@ -394,7 +414,7 @@ export class DeployApi {
 	 * @returns The updated deployment record.
 	 */
 	async resumeSchedule(projectId: string, sourceId: string, teamId: string): Promise<Deployment> {
-		return this.client.call<Deployment>('rrext_deploy', {
+		return this.client.call<Deployment>('rrext_deploy_pipe', {
 			subcommand: 'schedule_resume',
 			projectId,
 			sourceId,
@@ -414,7 +434,7 @@ export class DeployApi {
 	 * @returns Validity plus the next occurrence timestamps.
 	 */
 	async preview(schedule: string, count?: number): Promise<SchedulePreview> {
-		return this.client.call<SchedulePreview>('rrext_deploy', {
+		return this.client.call<SchedulePreview>('rrext_deploy_pipe', {
 			subcommand: 'preview',
 			schedule,
 			...(count !== undefined && { count }),

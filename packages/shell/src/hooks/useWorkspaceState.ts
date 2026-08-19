@@ -270,8 +270,9 @@ export function useWorkspaceState(
 	// --- Load on first connect (or seed defaults pre-auth) -------------------
 
 	useEffect(() => {
+		console.log('[WS-state] load-effect fire', { hasClient: !!client, isConnected, preAuthSeeded: preAuthSeededRef.current, diskLoaded: diskLoadedRef.current, loaded, seeded, defaultAppId, startupAppId });
 		// Wait for the client singleton to be initialized
-		if (!client) return;
+		if (!client) { console.log('[WS-state] EARLY RETURN: no client → seeded stays', seeded); return; }
 
 		if (!isConnected) {
 			// Pre-auth: seed default workspace state so the shell can render
@@ -280,20 +281,25 @@ export function useWorkspaceState(
 			if (!preAuthSeededRef.current) {
 				preAuthSeededRef.current = true;
 				const appId = startupAppId ?? defaultAppId;
+				console.log('[WS-state] PRE-AUTH SEED → setSeeded(true)', { appId, defaultAppId, startupAppId });
 				setActiveAppId(appId);
 				setApps({ [appId]: makeDefaultAppState(appId) });
 				setSeeded(true);
+			} else {
+				console.log('[WS-state] not connected, already pre-auth-seeded — no-op');
 			}
 			return;
 		}
 
 		// Connected: do the full disk load once (skip if already done)
-		if (diskLoadedRef.current) return;
+		if (diskLoadedRef.current) { console.log('[WS-state] connected but disk already loaded — no-op'); return; }
 		diskLoadedRef.current = true;
+		console.log('[WS-state] CONNECTED → starting disk load', { hasStoreApi: hasStoreApi(client) });
 
 		// Graceful degradation: client without filesystem API
 		if (!hasStoreApi(client)) {
 			if (!loaded) {
+				console.log('[WS-state] no store API → seed + setLoaded(true)');
 				setApps({ [defaultAppId]: makeDefaultAppState(defaultAppId) });
 				setSeeded(true);
 				setLoaded(true);
@@ -338,14 +344,16 @@ export function useWorkspaceState(
 				// Commit the resolved state — setLoaded must be in the same
 				// microtask as setApps so React batches them into one render.
 				// Otherwise consumers see loaded=true with stale empty appState.
+				console.log('[WS-state] disk load DONE → setLoaded(true)', { restoredAppId });
 				setActiveAppId(restoredAppId);
 				setApps({ [restoredAppId]: mergedState });
 				if (savedSettings && typeof savedSettings === 'object') setSettings(savedSettings);
 				setSeeded(true);
 				setLoaded(true);
 			})
-			.catch(() => {
+			.catch((err) => {
 				// Load failure — seed defaults
+				console.log('[WS-state] disk load FAILED → seed defaults + setLoaded(true)', err);
 				setActiveAppId(defaultAppId);
 				setApps({ [defaultAppId]: makeDefaultAppState(defaultAppId) });
 				setSeeded(true);

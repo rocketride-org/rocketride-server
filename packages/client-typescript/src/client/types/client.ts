@@ -369,7 +369,7 @@ export interface ConnectResult {
 	 * ID of the team that should be used by default for operations that do not
 	 * explicitly specify a team context.
 	 */
-	defaultTeam: string;
+	devTeam: string;
 
 	/**
 	 * The organisation the authenticated user belongs to, with its own
@@ -454,8 +454,16 @@ export interface AppManifestEntry {
 	/** App-specific setting definitions. */
 	settings?: unknown[];
 
-	/** URL to the app's Module Federation remote entry file. */
-	entry: string;
+	/**
+	 * URL to the app's Module Federation remote entry file — present ONLY
+	 * for dev-overlay entries (a localhost dev server is not constructible
+	 * from a number). Published versions carry `registryVersion` instead and
+	 * clients construct `/apps/<appId>/v<N>/remoteEntry.js` themselves.
+	 */
+	entry?: string;
+
+	/** Registry version number the entry resolves to (the scope-walk winner). */
+	registryVersion?: number;
 
 	/** App version string (semver). */
 	version?: string;
@@ -541,4 +549,31 @@ export interface ServerInfoResult {
 	 * public apps (e.g. landing page) before login.
 	 */
 	apps?: AppManifestEntry[];
+
+	/**
+	 * Stripe publishable key (`pk_*`) configured on this server.
+	 *
+	 * Lets clients initialise Stripe Elements with the key matching the
+	 * server's Stripe account (test vs live) instead of a build-time value.
+	 * Absent on servers without billing (OSS).
+	 */
+	stripePublishableKey?: string;
+
+	/**
+	 * The server's public addresses, RESOLVED to absolute URLs.
+	 *
+	 * `getServerInfo` substitutes the server's `'origin'` sentinel ("the
+	 * address you probed me at") with the probed URI before returning, and
+	 * manufactures the block when probing a pre-endpoints server — so
+	 * consumers ALWAYS receive both keys as absolute URLs and never branch
+	 * on presence. `api` is where clients open the WebSocket; `ui` is the
+	 * environment's public web address (browser links, OAuth returns).
+	 * They differ only on split deployments (e.g. CDN-served UI).
+	 */
+	endpoints: {
+		/** Absolute URL clients connect the DAP WebSocket to. */
+		api: string;
+		/** Absolute URL of the environment's web UI. */
+		ui: string;
+	};
 }

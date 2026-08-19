@@ -54,9 +54,11 @@ export default defineConfig(() => {
 		resolve: {},
 		tools: {
 			// Treat .pipe files as JSON so the pipeline definition can be imported.
+			// `as const` keeps the rule's `type` a literal (rspack wants the
+			// union, and a widened `string` fails the config typecheck).
 			rspack: {
 				module: {
-					rules: [{ test: /\.pipe$/, type: 'json' }],
+					rules: [{ test: /\.pipe$/, type: 'json' } as const],
 				},
 			},
 		},
@@ -71,14 +73,16 @@ export default defineConfig(() => {
 		},
 		output: {
 			distPath: {
-				root: path.join(process.env.ROCKETRIDE_BUILD_ROOT ?? '../../build', 'apps', 'aparavi-ui'),
+				root: path.join(process.env.ROCKETRIDE_BUILD_ROOT ?? '../../build', 'apps', pkg.appManifest.id),
 			},
 			assetPrefix: 'auto',
 			cleanDistPath: true,
+			// `as const` keeps `js` a DevTool literal (a widened `string`
+			// fails the config typecheck).
 			sourceMap: {
 				js: 'source-map',
 				css: true,
-			},
+			} as const,
 		},
 	};
 });

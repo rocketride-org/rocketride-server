@@ -430,6 +430,10 @@ interface AppManifest {
   showStatusBar?: boolean;
   /** Settings the app requires. Shown in the shell's Settings overlay. */
   settings?: AppSettingDefinition[];
+  /** Extra workspace paths (files or directories) packed into the deploy
+   *  zip beyond the app folder — e.g. a shared source directory the app's
+   *  tsconfig reaches. WORKSPACE-relative, packed verbatim at those paths. */
+  include?: string[];
   /** Internal: MF module identifier (derived from id). */
   moduleId?: string;
   /** App lifecycle status (e.g. 'auth', 'free', 'unsubscribed', 'subscribed', 'trialing', 'past_due', 'canceled'). */
@@ -462,6 +466,29 @@ Settings are:
 - Rendered in the shell's Settings overlay (grouped by app)
 - Persisted to `.workspace/settings.json`
 - Available to your app via `useShellApiConfig()`, access as `config.MY_API_KEY`
+
+### Packaging extra directories (`include`)
+
+Deploying an app uploads its SOURCE — the server owns the build. The deploy
+zip mirrors the workspace tree: the app folder packs at its workspace-relative
+position, and any `include` entries pack verbatim at theirs, so relative
+references between them (a `../shared/src/*` tsconfig mapping, a `file:`
+dependency) resolve identically after the server unpacks:
+
+```json
+{
+  "appManifest": {
+    "include": ["apps/shared"]
+  }
+}
+```
+
+Entries are workspace-relative paths (files or directories) — no absolute
+paths, drive letters, or `..` segments, and every entry must exist or the
+deploy fails. Packing honors the workspace's `.gitignore` files plus a
+built-in baseline (`node_modules/`, `dist/`, `.git/`): dependency trees and
+build output never ship — the server installs dependencies and builds from
+source itself.
 
 ---
 

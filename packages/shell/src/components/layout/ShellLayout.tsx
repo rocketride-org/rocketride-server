@@ -46,6 +46,7 @@ import { AppErrorBoundary } from './AppErrorBoundary';
 import { OverlayManager, useOverlay } from './OverlayManager';
 import { HostChromeProvider, useHostChromeState } from './HostChromeContext';
 import { AppFrame } from './AppFrame';
+import RocketRideWordmark from '../../assets/icons/RocketRideWordmark';
 import Sidebar from './Sidebar';
 import StatusBar from './StatusBar';
 import LoadingScreen from './LoadingScreen';
@@ -67,11 +68,25 @@ import { commonStyles } from '../../themes/styles';
  * @param name - Display name of the app that failed.
  * @returns Plain-language explanation of the failure.
  */
+/**
+ * True for the stale-platform failure class: shared-module negotiation
+ * breakage (and the TDZ artifact a failed first attempt leaves behind).
+ * Usually the PAGE outlived a platform rebuild — the live MF runtime
+ * negotiated against bundles since replaced on disk — which one reload
+ * fixes; only when it recurs immediately is the bundle truly mismatched.
+ *
+ * @param raw - The raw error message recorded by WorkspaceContext.
+ * @returns True when the failure is shared-module/TDZ shaped.
+ */
+function isStalePlatformError(raw: string): boolean {
+	return /RUNTIME-012|shared module|shareKey|before initialization/i.test(raw);
+}
+
 function friendlyLoadError(raw: string, name: string): string {
 	// Shared-module negotiation failures — and the TDZ artifact a failed first
 	// attempt leaves behind — mean the bundle was built against a different
 	// platform build than the one now serving it.
-	if (/RUNTIME-012|shared module|shareKey|before initialization/i.test(raw)) {
+	if (isStalePlatformError(raw)) {
 		return `${name} was built for a different version of the platform and needs to be rebuilt or redeployed.`;
 	}
 	// Network-shaped failures: missing bundle, unreachable server, timeout.
@@ -207,6 +222,19 @@ const styles = {
 		minWidth: 0,
 		minHeight: 0,
 	} as CSSProperties,
+	/** Faint brand wordmark pinned to the client area's lower-left; shown only
+	    while a chrome-less (no sidebar AND no status bar) app owns the client
+	    area. The wrapper carries the theme text color so the SVG
+	    (fill=currentColor) tracks theme changes without a palette-mode
+	    observer. */
+	fullScreenWatermark: {
+		position: 'absolute',
+		left: 16,
+		bottom: 12,
+		opacity: 0.15,
+		pointerEvents: 'none',
+		color: 'var(--rr-text-primary)',
+	} as CSSProperties,
 };
 
 // =============================================================================
@@ -265,6 +293,42 @@ export const ShellLayout: React.FC<ShellLayoutProps> = ({
 	const [showModalDetails, setShowModalDetails] = useState(false);
 	useEffect(() => { setShowModalDetails(false); }, [loadFailure]);
 
+	// ── Stale-build self-heal ─────────────────────────────────────────────
+	// A stale-platform load failure (isStalePlatformError) usually means this
+	// PAGE outlived a platform rebuild: bundles were replaced on disk under a
+	// live MF runtime, and one reload brings host + remotes back coherent.
+	// Reload ONCE automatically instead of stranding the user on the
+	// "rebuilt or redeployed" dialog; a sessionStorage guard ensures that if
+	// the SAME app fails the same way right after that reload — a REAL
+	// contract mismatch — the dialog shows as before. If storage is
+	// unavailable the guard cannot prevent a reload loop, so don't auto-heal.
+	const [autoReloading, setAutoReloading] = useState(false);
+	useEffect(() => {
+		const failedAppId = loadFailure?.appId ?? (appLoadErrors[activeAppId] ? activeAppId : null);
+		if (!failedAppId) return;
+		if (!isStalePlatformError(appLoadErrors[failedAppId] ?? '')) return;
+		try {
+			// Guard keyed PER APP (appId → last-reload epoch ms): a single
+			// {appId, at} record let alternating failures defeat the guard —
+			// after reloading for app A, a stale failure of app B overwrote the
+			// record, and A's next failure no longer matched, looping inside the
+			// 60s window. A per-app map gives every app its own cooldown, so a
+			// SAME-app failure right after its reload (a REAL contract mismatch)
+			// still surfaces the dialog while distinct apps can't reset each
+			// other's guard.
+			const guard = JSON.parse(sessionStorage.getItem('rr.staleReload') ?? '{}') as Record<string, number>;
+			const lastReload = guard[failedAppId];
+			if (typeof lastReload === 'number' && Date.now() - lastReload < 60_000) return;
+			guard[failedAppId] = Date.now();
+			sessionStorage.setItem('rr.staleReload', JSON.stringify(guard));
+		} catch {
+			return;
+		}
+		console.log('[SL] stale platform bundle for', failedAppId, '— auto-reloading once to resync');
+		setAutoReloading(true);
+		window.location.reload();
+	}, [appLoadErrors, activeAppId, loadFailure]);
+
 	/**
 	 * Retry from the load-failure modal: re-attempts the load (retryApp tears
 	 * down the failed container first); on success closes the modal and
@@ -319,6 +383,12 @@ export const ShellLayout: React.FC<ShellLayoutProps> = ({
 
 	// --- Debug panel state (ALT+D toggle) ------------------------------------
 	const [debugOpen, setDebugOpen] = useState(false);
+	// Watchdog latch: set when the client area has shown the boot rocket past a
+	// grace period without ever resolving to real content (a mounted app, a
+	// load error, or the not-found surface). Flips the render off the endless
+	// spinner and onto a diagnostic surface — see the watchdog effect and the
+	// loading guard below.
+	const [bootStalled, setBootStalled] = useState(false);
 
 	// --- ALT+D keyboard handler ----------------------------------------------
 	useEffect(() => {
@@ -413,11 +483,30 @@ export const ShellLayout: React.FC<ShellLayoutProps> = ({
 		}
 	}, [subGateActive, activeAppId, activeManifest]);
 
+	// --- Boot watchdog -------------------------------------------------------
+	// The client area must always resolve to SOMETHING — a mounted app, a load
+	// error, or the not-found surface. A seed/manifest that never completes
+	// would otherwise strand the user on the boot rocket forever with no
+	// explanation. If no first content has appeared after a grace period, latch
+	// bootStalled so the render falls through to a diagnostic surface instead
+	// of spinning indefinitely. Harmless once content exists: firstContentRef
+	// short-circuits the timer, and the real-content branches take precedence
+	// over the stalled fallthrough.
+	const BOOT_STALL_MS = 15_000;
+	useEffect(() => {
+		if (firstContentRef.current || bootStalled) return;
+		const timer = setTimeout(() => {
+			if (!firstContentRef.current) setBootStalled(true);
+		}, BOOT_STALL_MS);
+		return () => clearTimeout(timer);
+	}, [loaded, seeded, activeAppId, hasAppUi, bootStalled]);
+
 	// --- Loading guard -------------------------------------------------------
 	// Workspace still hydrating: hold the SAME phase-anchored rocket as the
 	// boot LoadingScreen — returning null here put a blank frame between two
-	// otherwise-continuous loading screens.
-	if (!loaded && !seeded) return <LoadingScreen />;
+	// otherwise-continuous loading screens. Once the watchdog latches, stop
+	// holding here so the render can reach the diagnostic surface below.
+	if (!loaded && !seeded && !bootStalled) return <LoadingScreen />;
 
 	// First boot: stay full-screen on the rocket until the first activation
 	// resolves to real content — the mounted app, or a terminal error surface
@@ -425,10 +514,21 @@ export const ShellLayout: React.FC<ShellLayoutProps> = ({
 	// preview counts as still-loading: its registration self-corrects when
 	// the embedder's injection lands (see the client-area branch below).
 	const devPending = isDevPreviewPending(activeAppId);
+	// The active app id resolves to nothing on this server. Gated on a SETTLED
+	// signal so it never fires during the brief empty-while-loading window:
+	//   • appManifest.length > 0 — the manifest loaded and has no such id
+	//     (a stale per-tab session id, or a renamed/removed app), OR
+	//   • loaded — the workspace finished hydrating with an empty manifest, OR
+	//   • bootStalled — the watchdog gave up waiting (a manifest that never
+	//     arrived, e.g. the SaaS home app on a server built without it).
+	// loadDescriptor returns false silently for unknown ids, so without this
+	// the user is stranded on the boot rocket forever.
+	const activeAppUnresolvable = !devPending && !activeManifest
+		&& (appManifest.length > 0 || loaded || bootStalled);
 	const hasFirstContent =
 		hasAppUi ||
 		(!devPending && !!appLoadErrors[activeAppId]) ||
-		(!devPending && appManifest.length > 0 && !activeManifest);
+		activeAppUnresolvable;
 	if (hasFirstContent) firstContentRef.current = true;
 	if (!firstContentRef.current) {
 		// A latched failure (server unreachable, session expired) can strand the
@@ -494,7 +594,7 @@ export const ShellLayout: React.FC<ShellLayoutProps> = ({
 							// invalidates + retries the load when it lands). Hold
 							// the loading animation instead.
 							<LoadingScreen />
-						) : appLoadErrors[activeAppId] ? (
+						) : appLoadErrors[activeAppId] && !autoReloading ? (
 							<div style={styles.appLoadError}>
 								<div style={styles.appLoadErrorTitle}>Could not load {activeManifest?.name ?? activeAppId}</div>
 								{/* Plain-language explanation; raw error lives behind Show Details */}
@@ -518,23 +618,40 @@ export const ShellLayout: React.FC<ShellLayoutProps> = ({
 									<pre style={styles.appLoadErrorDetails}>{appLoadErrors[activeAppId]}</pre>
 								)}
 							</div>
-						) : (loaded || seeded) && appManifest.length > 0 && !activeManifest ? (
-							// The active app id is not in this server's manifest — e.g. a
-							// stale per-tab session id left by a different shell flavour on
-							// the same origin, or an app that was renamed/removed. Say so
-							// explicitly with an exit; never strand the user on the splash
-							// (loadDescriptor returns false silently for unknown ids).
+						) : activeAppUnresolvable ? (
+							// The active app id resolves to nothing on this server: the
+							// manifest is settled (loaded, non-empty, or the watchdog gave
+							// up) and has no entry for it — a stale per-tab session id from
+							// a different shell flavour, a renamed/removed app, or (empty
+							// manifest) an app this deployment simply does not have, e.g.
+							// the SaaS home app on a server built without it. Say so with
+							// an exit; never strand the user on the splash (loadDescriptor
+							// returns false silently for unknown ids).
 							<div style={styles.appLoadError}>
-								<div style={styles.appLoadErrorTitle}>App not found</div>
+								<div style={styles.appLoadErrorTitle}>
+									{activeAppId === defaultAppId ? 'Home app unavailable' : 'App not found'}
+								</div>
 								<div style={styles.appLoadErrorMessage} role="alert">
-									This server has no app with the id &quot;{activeAppId}&quot;. It may have been
-									renamed, removed, or belong to a different RocketRide deployment.
+									{activeAppId === defaultAppId
+										? `This server has no home app (“${activeAppId}”) installed. It may not have been built and registered on this deployment.`
+										: `This server has no app with the id “${activeAppId}”. It may have been renamed, removed, or belong to a different RocketRide deployment.`}
 								</div>
 								<div style={styles.appLoadErrorActions}>
-									{/* Home is the guaranteed exit — $HOME resolves to the platform default */}
-									<button type="button" style={styles.appLoadErrorButton} onClick={() => ConnectionManager.getInstance().emit('shell:switchApp', { appId: '$HOME' })}>
-										Go to Home
-									</button>
+									{activeAppId === defaultAppId ? (
+										// "Go to Home" would loop straight back here. retryApp
+										// can't help either: this branch requires NO manifest
+										// entry, so loadDescriptor returns false immediately and
+										// nothing changes. Reload the page instead so a refreshed
+										// manifest (with the home app) can arrive.
+										<button type="button" style={styles.appLoadErrorButton} onClick={() => window.location.reload()}>
+											Try Again
+										</button>
+									) : (
+										// Home is the guaranteed exit — $HOME resolves to the platform default
+										<button type="button" style={styles.appLoadErrorButton} onClick={() => ConnectionManager.getInstance().emit('shell:switchApp', { appId: '$HOME' })}>
+											Go to Home
+										</button>
+									)}
 								</div>
 							</div>
 						) : appLoading || !activeApp ? (
@@ -545,11 +662,16 @@ export const ShellLayout: React.FC<ShellLayoutProps> = ({
 							<LoadingScreen />
 						) : null}
 					</div>
+
+					{/* Faint brand mark for chrome-less (no sidebar, no status bar) apps;
+					    gated on a mounted app UI so it never overlays boot/loading/error
+					    surfaces. */}
+					{hasAppUi && <FullScreenWatermark />}
 				</div>
 
 				{/* Load-failure modal — a switch-to-app failed while the current app
 				    stayed on screen; shown over it instead of a page takeover. */}
-				{loadFailure && (
+				{loadFailure && !autoReloading && (
 					/* Backdrop is inert like every shell dialog (OverlayManager is the
 					   source of truth for the no-backdrop-dismiss rule); the footer
 					   Close button is the dismiss control. */
@@ -627,6 +749,36 @@ const SidebarWithOverlay: React.FC<{
 			isSaas={isSaas}
 			onOverlay={onOverlay}
 		/>
+	);
+};
+
+// =============================================================================
+// FULL-SCREEN WATERMARK — faint brand mark for chrome-less apps
+// =============================================================================
+
+/**
+ * Faint RocketRide wordmark overlaid on the client area's lower-left corner.
+ *
+ * Presence mirrors the chrome's self-hide rules, inverted: an app whose
+ * AppLayout declares neither a sidebar nor a status bar registers nothing in
+ * the host-chrome slots, the standard chrome (and the wordmark in its header)
+ * is absent, and the app spans the full client area — so the brand mark
+ * surfaces here instead. Any registered chrome zone (sidebar OR status bar)
+ * already anchors the shell's identity on screen, so the watermark withdraws.
+ * Must render inside HostChromeProvider.
+ *
+ * Purely decorative: pointer events pass through and it is hidden from the
+ * accessibility tree.
+ */
+const FullScreenWatermark: React.FC = () => {
+	const { sidebarContent, statusBarContent } = useHostChromeState();
+	// Any registered chrome zone means shell branding is on screen — no mark.
+	if (sidebarContent != null || statusBarContent != null) return null;
+	return (
+		<div style={styles.fullScreenWatermark} aria-hidden="true">
+			{/* currentColor fills from the wrapper's --rr-text-primary */}
+			<RocketRideWordmark height={15} color="currentColor" />
+		</div>
 	);
 };
 

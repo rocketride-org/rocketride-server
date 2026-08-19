@@ -318,6 +318,10 @@ class AccountBase(ABC):
         """
         return {'transactions': [], 'total': 0, 'page': page, 'pageSize': page_size}
 
+    # NOTE: fire-time billing resolution (resolve_billing_team) is GONE by
+    # doctrine — billing is ABSOLUTE, stamped onto every publish at pointer
+    # time (deployments_deploy billing_team_id) and only ever read by runs.
+
     # =========================================================================
     # CLOUD DATABASE — env-gated broker call; raises when unconfigured
     # =========================================================================
@@ -483,17 +487,120 @@ class AccountBase(ABC):
         return self._deployments_backend
 
     async def deployments_publish(
-        self, org_id: str, project_id: str, pipeline: dict, actor: dict, comment: str = ''
+        self,
+        org_id: str,
+        project_id: str,
+        pipeline: dict,
+        actor: dict,
+        comment: str = '',
+        metadata: dict = None,
+        state: str = None,
     ) -> dict:
-        """Snapshot ``pipeline`` as the next immutable registry version.
+        """Snapshot the artifact dict as the next immutable registry version.
+
+        DEPLOY = copy code to the server. Kind rides the artifact dict
+        (app records carry kind:'app'; plain pipeline JSON is 'pipe');
+        ``metadata`` optionally carries the manifest/build blob. ``state``
+        overrides the by-kind born state — the seeder registers
+        pre-approved platform artifacts directly as 'ready'.
 
         Returns the new registry entry (version, sha256, publishedBy, ...).
         """
-        return await self._deployment_backend().publish(org_id, project_id, pipeline, actor, comment)
+        return await self._deployment_backend().publish(
+            org_id, project_id, pipeline, actor, comment, metadata=metadata, state=state
+        )
 
-    async def deployments_deploy(self, org_id: str, team_id: str, project_id: str, version: int, actor: dict) -> dict:
-        """Point ``team_id`` at registry ``version`` (promotion/rollback)."""
-        return await self._deployment_backend().deploy(org_id, team_id, project_id, version, actor)
+    async def deployments_deploy(
+        self, org_id: str, team_id: str, project_id: str, version: int, actor: dict, billing_team_id: str = ''
+    ) -> dict:
+        """Point ``team_id`` at registry ``version`` (promotion/rollback).
+
+        ``billing_team_id`` is the ABSOLUTE billing/secrets stamp the command
+        layer decided at pointer time — stored verbatim, never resolved here.
+        """
+        return await self._deployment_backend().deploy(org_id, team_id, project_id, version, actor, billing_team_id)
+
+    # ── Publishes — audience pointers (PUBLISH = bind a deployment) ──────────
+
+    async def publish_set(
+        self,
+        org_id: str,
+        kind: str,
+        app_id: str,
+        audience: dict,
+        version: int,
+        snapshot: dict,
+        actor: dict,
+    ) -> dict:
+        """Create or repoint one audience's binding (pure pointer, born enabled)."""
+        return await self._deployment_backend().publish_set(org_id, kind, app_id, audience, version, snapshot, actor)
+
+    async def set_artifact_state(self, org_id: str, project_id: str, version: int, new_state: str, actor: dict) -> dict:
+        """Transition one deployment's review state (submit/approve/reject)."""
+        return await self._deployment_backend().set_artifact_state(org_id, project_id, version, new_state, actor)
+
+    async def deployments_set_build(self, org_id: str, project_id: str, version: int, build: dict) -> dict:
+        """Replace one registry version's metadata.build blob (build worker)."""
+        return await self._deployment_backend().set_build(org_id, project_id, version, build)
+
+    async def deployments_scan_builds(self, statuses: tuple) -> list:
+        """Every kind:'app' version whose build status matches (restart requeue)."""
+        return await self._deployment_backend().scan_builds(statuses)
+
+    async def publish_get(self, org_id: str, kind: str, app_id: str, audience: dict) -> dict | None:
+        """One audience's publish row of one app, or None."""
+        return await self._deployment_backend().publish_get(org_id, kind, app_id, audience)
+
+    async def publish_of_app(self, org_id: str, kind: str, app_id: str) -> list:
+        """Every live publish row of one app (the where/reverse index feed)."""
+        return await self._deployment_backend().publish_of_app(org_id, kind, app_id)
+
+    async def publish_list(self, org_id: str, kind: str, audiences: list) -> list:
+        """Every live publish row matching ANY audience, across apps."""
+        return await self._deployment_backend().publish_list(org_id, kind, audiences)
+
+    async def publish_set_state(
+        self, org_id: str, kind: str, app_id: str, audience: dict, state: str, actor: dict
+    ) -> dict:
+        """Flip one publish row's serving state (approve/disable/remove)."""
+        return await self._deployment_backend().publish_set_state(org_id, kind, app_id, audience, state, actor)
+
+    # ── Seeding — platform built-ins from apps.json (both editions) ──────────
+
+    async def seed_app(self, org_id: str, entry: dict, actor: dict) -> dict:
+        """Mint one apps.json entry as a pre-approved rail version + bundle copy.
+
+        The edition-neutral primitive: registers the seed artifact (born
+        'ready') and copies the built bundle into the store beside it.
+        Binding the version to an audience is the caller's job — each
+        edition records visibility its own way (SaaS: DB rows via the pod
+        deploy tool; OSS: the meta file via its init sequence).
+        """
+        from .seed_apps import seed_app
+
+        return await seed_app(self, org_id, entry, actor)
+
+    async def seed_apps_from_manifest(self, org_id: str, actor: dict, *, force: bool = False, seed_entry=None) -> dict:
+        """Walk apps.json and register every absent platform app (idempotent).
+
+        ``seed_entry`` lets an edition wrap the per-entry step (SaaS adds
+        billing/fleet-repoint); defaults to the shared seed_manifest_app.
+        Returns ``{total, seeded, skipped, failed}`` counts.
+        """
+        from .seed_apps import seed_apps_from_manifest
+
+        return await seed_apps_from_manifest(self, org_id, actor, force=force, seed_entry=seed_entry)
+
+    async def deployments_history_append(
+        self, org_id: str, project_id: str, action: str, actor: dict, version: int = None, data: dict = None
+    ) -> None:
+        """Append one bare event to a project's history stream.
+
+        The review/comms thread writer: 'request', 'approved', 'rejected',
+        'reply' rows ride the same stream as the machine audit — ``data``
+        carries the human payload (message, side, notes).
+        """
+        await self._deployment_backend().history_append(org_id, project_id, action, actor, version=version, data=data)
 
     async def deployments_set_state(self, org_id: str, team_id: str, project_id: str, state: str, actor: dict) -> dict:
         """Enable/disable/error/soft-remove a team deployment."""
@@ -543,8 +650,13 @@ class AccountBase(ABC):
         """Stamp lastRunAt after the scheduler fires a source (best-effort)."""
         await self._deployment_backend().mark_run(org_id, team_id, project_id, source_id)
 
-    async def deployments_list(self, org_id: str, team_id: str) -> list:
-        """All non-removed deployments of one team, joined with registry info."""
+    async def deployments_list(self, org_id: str, team_id: 'str | None' = None) -> list:
+        """Non-removed deployments joined with registry info.
+
+        ``team_id`` scopes to one team (or a ``user~`` personal space);
+        None returns the WHOLE org — every team and every personal space.
+        Mechanical by design: visibility slicing is the command layer's.
+        """
         return await self._deployment_backend().list_team(org_id, team_id)
 
     async def deployments_get(self, org_id: str, team_id: str, project_id: str) -> 'dict | None':
@@ -576,7 +688,7 @@ class AccountBase(ABC):
         return self._deployment_backend().iter_enabled()
 
     # =========================================================================
-    # DAP COMMAND DISPATCH — SaaS overrides all three
+    # DAP COMMAND DISPATCH — SaaS overrides all of these
     # =========================================================================
 
     async def handle_account(self, conn, request):
@@ -593,34 +705,82 @@ class AccountBase(ABC):
         """
         raise NotImplementedError('Account management requires SaaS mode')
 
-    async def handle_app(self, conn, request):
+    async def handle_saas(self, conn, request):
         """
-        Dispatch an ``rrext_app_*`` DAP command to the app/marketplace handler.
+        Dispatch an ``rrext_saas`` platform-admin DAP command.
 
-        OSS raises NotImplementedError for marketplace commands — EXCEPT the
-        dev overlay (``rrext_app_submission.register_dev``), which is platform
-        infrastructure: local app development must work on the OSS engine
-        without SaaS. The SaaS implementation overrides this method entirely
-        and delegates to ``app_handler.handle()`` (which routes register_dev
-        to the same shared handler).
+        OSS raises NotImplementedError — the uniform edition signal, not the
+        bare AttributeError a missing method would leak. The SaaS
+        implementation delegates to ``saas_handler.handle()``.
 
         Args:
             conn:    ``TaskConn`` instance.
             request: Raw DAP request dict.
         """
-        # Dev overlay: shared platform capability, not marketplace
-        if request.get('command') == 'rrext_app_submission':
-            args = request.get('arguments', {}) or {}
-            if args.get('subcommand') == 'register_dev':
+        raise NotImplementedError('SaaS administration requires SaaS mode')
+
+    async def handle_billing_rates(self, conn, request):
+        """
+        Dispatch an ``rrext_billing_rates`` DAP command (deprecated surface).
+
+        OSS raises NotImplementedError — there is no billing backend
+        standalone. The SaaS implementation overrides this method.
+
+        Args:
+            conn:    ``TaskConn`` instance.
+            request: Raw DAP request dict.
+        """
+        raise NotImplementedError('Billing rates require SaaS mode')
+
+    async def handle_app(self, conn, request):
+        """
+        Dispatch an app-family DAP command to the app/marketplace handler.
+
+        The ``rrext_app`` marketplace surface (browse/install/admin/pricing)
+        requires SaaS — OSS raises NotImplementedError. ``rrext_deploy_app`` is
+        app deploy control on the shared deployments registry and works on both
+        editions, with three subcommands special on OSS: ``register_dev`` (the
+        per-user dev overlay — platform infrastructure so local app development
+        works without SaaS), ``developer_status`` (answered from the session's
+        org — OSS carries the fixed ``rocketride`` namespace), and the
+        remaining ``developer_*`` verbs (developer-account / Stripe
+        registration — SaaS only). The SaaS implementation overrides this
+        method entirely and delegates to ``app_handler.handle()``.
+
+        Args:
+            conn:    ``TaskConn`` instance.
+            request: Raw DAP request dict.
+        """
+        command = request.get('command')
+        sub = (request.get('arguments', {}) or {}).get('subcommand') or ''
+        if command == 'rrext_deploy_app':
+            # Dev overlay: shared platform capability (not marketplace).
+            if sub == 'register_dev':
                 from ai.account.dev_overlay import handle_register_dev
 
                 return await handle_register_dev(conn, request)
-        # The publish ladder (rung deployments) is platform infrastructure —
-        # it rides the shared deployments registry on OSS and SaaS alike.
-        if request.get('command') == 'rrext_app_deploy':
-            from ai.account.app_deploy import handle_app_deploy
+            # Namespace status is readable on both editions — the session
+            # already carries the org's developerId ('rocketride' on OSS), so
+            # the App Builder's DEPLOY page can render without a SaaS lookup.
+            # Same body shape as the SaaS handler; OSS has no Stripe Connect.
+            if sub == 'developer_status':
+                org = getattr(conn._account_info, 'organization', None)
+                dev = org.get('developerId') if isinstance(org, dict) else getattr(org, 'developerId', None)
+                return conn.build_response(
+                    request,
+                    body={
+                        'developerId': dev,
+                        'stripeAccountId': None,
+                        'stripeAccountStatus': 'none',
+                    },
+                )
+            # Developer-account / Stripe registration is SaaS-only.
+            if sub.startswith('developer_'):
+                raise NotImplementedError('Developer registration requires SaaS mode')
+            # App publish control rides the shared deployments registry.
+            from ai.account.app_deploy import handle_deploy_app
 
-            return await handle_app_deploy(conn, request)
+            return await handle_deploy_app(conn, request)
         raise NotImplementedError('App marketplace requires SaaS mode')
 
     async def handle_public(self, conn, request):

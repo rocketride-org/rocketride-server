@@ -16,15 +16,21 @@
  */
 
 import * as vscode from 'vscode';
+import * as path from 'path';
 import { randomBytes } from 'crypto';
 import { ConnectionManager } from '../connection/connection';
 import { GenericEvent } from '../shared/types';
-import { scanWorkspaceApps } from '../appdev/appScan';
+import { appIconDataUri, MAX_README_IMAGE_BYTES, scanWorkspaceApps } from '../appdev/appScan';
+import { DEV_SESSION_NONCE } from '../appdev/devSession';
 import type { ScannedApp } from '../appdev/appScan';
+import { ensureAppTrigger, ensureProjectId, readAppListing, saveAppListing } from '../appdev/appMarker';
+import type { AppListing } from '../appdev/appMarker';
 import { ensureWatch, getWatchManager } from '../appdev/watchManager';
-import { publishApp } from '../appdev/publish';
+import { deployApp } from '../appdev/publish';
 import { vendorAppTypes } from '../appdev/appTypes';
+import { getLogger } from '../shared/util/output';
 import { CloudAuthProvider } from '../auth/CloudAuthProvider';
+import { ConfigManager } from '../config';
 
 // =============================================================================
 // TYPES
@@ -71,8 +77,9 @@ export class AppScreenProvider implements vscode.CustomReadonlyEditorProvider {
 	 * in the app folder is the document (double-clicking it in the Explorer
 	 * opens the App Builder), and this custom editor is its surface. VSCode
 	 * owns tab identity, one-editor-per-file dedupe, Open Editors
-	 * membership, and restore-on-reload. The marker is created on first
-	 * open for apps that predate it (a one-line JSON carrying the app id).
+	 * membership, and restore-on-reload. The trigger file is contentless —
+	 * every app fact (id, projectId) lives in the folder's appManifest —
+	 * and is created on first open for apps that predate it.
 	 *
 	 * @param appId - The app id (appManifest.id).
 	 */
@@ -85,14 +92,12 @@ export class AppScreenProvider implements vscode.CustomReadonlyEditorProvider {
 			return;
 		}
 
-		// The document: <folder>/<name>.rrapp — created on demand
-		const marker = vscode.Uri.joinPath(vscode.Uri.file(app.folder), `${appId.split('.').pop()}.rrapp`);
-		try {
-			await vscode.workspace.fs.stat(marker);
-		} catch {
-			await vscode.workspace.fs.writeFile(marker, Buffer.from(`${JSON.stringify({ id: appId }, null, 2)}\n`, 'utf8'));
-		}
-		await vscode.commands.executeCommand('vscode.openWith', marker, 'rocketride.appBuilder');
+		// The document: <folder>/<name>.rrapp — a contentless trigger created
+		// on demand. The working-copy projectId is ensured in the appManifest
+		// (package.json is the single home of app facts).
+		await ensureProjectId(app.folder);
+		const trigger = await ensureAppTrigger(app.folder, appId);
+		await vscode.commands.executeCommand('vscode.openWith', trigger, 'rocketride.appBuilder');
 	}
 
 	// =========================================================================
@@ -104,18 +109,49 @@ export class AppScreenProvider implements vscode.CustomReadonlyEditorProvider {
 		return { uri, dispose: () => undefined };
 	}
 
-	/** Reads the app id from an .rrapp document (falls back to the folder binding). */
+	/** Resolves an .rrapp document's app id from its folder's appManifest. */
 	private async appIdOf(uri: vscode.Uri): Promise<string> {
-		// The marker carries {"id": "<appId>"}
-		try {
-			const raw = await vscode.workspace.fs.readFile(uri);
-			const parsed = JSON.parse(Buffer.from(raw).toString('utf8')) as { id?: string };
-			if (parsed?.id) return parsed.id;
-		} catch { /* malformed/empty marker — fall through to the binding */ }
-		// Fallback: the appManifest binding of the containing folder
+		// The trigger file carries nothing — identity lives ONLY in the
+		// containing folder's package.json appManifest.
 		const folder = uri.with({ path: uri.path.slice(0, uri.path.lastIndexOf('/')) }).fsPath;
 		const apps = await scanWorkspaceApps();
 		return apps.find((a) => a.folder === folder)?.id ?? '';
+	}
+
+	/**
+	 * Starts watches for App Builder tabs that were already open when THIS
+	 * extension host came up. "Developer: Restart Extension Host" kills the
+	 * dev servers via deactivation but keeps the tabs and their persisted
+	 * webview contexts — VSCode never re-resolves the custom editor, so
+	 * view:ready never re-fires and the open-path ensureWatch belongs to a
+	 * resolve that never ran. The tab list is the one surface that survives
+	 * every restart mode; activation reconciles against it directly.
+	 *
+	 * Safe against a concurrent re-resolve: ensureWatch rides the per-app
+	 * serialized chain and doStart's existing-session guard no-ops the loser.
+	 */
+	public async reconcileOpenTabs(): Promise<void> {
+		// Collect the open App Builder tabs (synchronous, cheap).
+		const uris: vscode.Uri[] = [];
+		for (const group of vscode.window.tabGroups.all) {
+			for (const tab of group.tabs) {
+				if (tab.input instanceof vscode.TabInputCustom && tab.input.viewType === 'rocketride.appBuilder') {
+					uris.push(tab.input.uri);
+				}
+			}
+		}
+		if (uris.length === 0) return;
+		for (const uri of uris) {
+			try {
+				const appId = await this.appIdOf(uri);
+				const apps = await scanWorkspaceApps();
+				const app = apps.find((a) => a.id === appId);
+				if (app && !getWatchManager()?.isRunning(app.id)) void ensureWatch(app);
+			} catch {
+				// Unresolvable tab (marker unreadable / app unbound) — VSCode's
+				// eventual re-resolve reports that failure in a visible panel.
+			}
+		}
 	}
 
 	/**
@@ -135,6 +171,11 @@ export class AppScreenProvider implements vscode.CustomReadonlyEditorProvider {
 			localResourceRoots: [this.context.extensionUri],
 		};
 		this.panels.set(appId, panel);
+		// The build ticker + compile feed are org-scoped DEPLOY-type pushes:
+		// without this monitor the server filters every apaevt_build* event
+		// out for this connection (only the pipeline editor armed 'deploy'
+		// before, so App Builder sessions heard nothing).
+		this.armDeployMonitor();
 		panel.webview.html = this.getHtmlForWebview(panel.webview);
 
 		// Bridge: answer the webview's messages
@@ -148,7 +189,7 @@ export class AppScreenProvider implements vscode.CustomReadonlyEditorProvider {
 							previewUrl: this.buildPreviewUrl(appId),
 							// VSCode variant: files are native, F5 debugs, no Code pane
 							capabilities: { hasCodePane: false, hasNativeFiles: true, canDebug: true },
-							stage: this.context.workspaceState.get(`appdev.stage.${appId}`) ?? 'develop',
+							stage: AppScreenProvider.normalizeStage(this.context.workspaceState.get(`appdev.stage.${appId}`)),
 							// App Builder UI preferences (preview layout, zoom, …)
 							// — per-workspace, per-app; written back via appdev:pref
 							prefs: this.context.workspaceState.get(`appdev.prefs.${appId}`) ?? {},
@@ -167,7 +208,9 @@ export class AppScreenProvider implements vscode.CustomReadonlyEditorProvider {
 						try {
 							const token = await this.connectionManager.resolveAuthCredential();
 							if (token) await panel.webview.postMessage({ type: 'appdev:auth', token });
-						} catch { /* signed out — the preview shows its sign-in prompt */ }
+						} catch {
+							/* signed out — the preview shows its sign-in prompt */
+						}
 						// The resolve-time watch start can lose a race with the
 						// workspace scan — retry here (idempotent when running)
 						if (app && !getWatchManager()?.isRunning(appId)) void ensureWatch(app);
@@ -206,11 +249,17 @@ export class AppScreenProvider implements vscode.CustomReadonlyEditorProvider {
 						// (browser-based, works everywhere), then hand the fresh
 						// credential down the normal rrdev:auth path.
 						const auth = CloudAuthProvider.getInstance();
-						await auth.signIn(process.env.RR_ZITADEL_URL || '', process.env.RR_ZITADEL_VSCODE_CLIENT_ID || '');
+						await auth.signIn(
+							process.env.RR_ZITADEL_URL || '',
+							process.env.RR_ZITADEL_VSCODE_CLIENT_ID || '',
+							ConfigManager.getInstance().getEffectiveCloudUrl()
+						);
 						try {
 							const token = await this.connectionManager.resolveAuthCredential();
 							if (token) await panel.webview.postMessage({ type: 'appdev:auth', token });
-						} catch { /* sign-in abandoned — preview keeps its prompt */ }
+						} catch {
+							/* sign-in abandoned — preview keeps its prompt */
+						}
 						break;
 					}
 
@@ -241,19 +290,290 @@ export class AppScreenProvider implements vscode.CustomReadonlyEditorProvider {
 							let value: unknown;
 							switch (method) {
 								case 'listVersions':
-									value = client ? await client.appVersions(appId) : [];
+									value = client ? await client.listDeployments(appId) : [];
 									break;
 								case 'where':
-									value = client ? await client.appWhere(appId) : [];
+									value = client ? await client.whereApp(appId) : [];
 									break;
-								case 'deploy': {
+								case 'deploy':
+									// DEPLOY = copy the built bundle to the server as the next
+									// immutable registry version.
+									value = await deployApp(appId, String(callArgs?.[0] ?? ''));
+									break;
+								case 'submit': {
+									// Submit a deployed version for store review — flips the
+									// DEPLOYMENT private -> submit (review state lives on the
+									// deployment; admin approval to 'ready' gates @public).
 									if (!client) throw new Error('Not connected');
-									value = await client.appDeploy(appId, Number(callArgs?.[0]), String(callArgs?.[1] ?? ''));
+									value = await client.submitApp(appId, this.requireRegistryVersion(callArgs?.[0]));
 									break;
 								}
-								case 'publish':
-									value = await publishApp(appId, String(callArgs?.[0] ?? ''));
+								case 'publish': {
+									// PUBLISH = bind a version to an audience (@me/@team/@public).
+									if (!client) throw new Error('Not connected');
+									value = await client.publishApp(appId, this.requireRegistryVersion(callArgs?.[0]), String(callArgs?.[1] ?? ''));
 									break;
+								}
+								case 'withdraw': {
+									// Cancel a pending review (submit -> private).
+									if (!client) throw new Error('Not connected');
+									value = await client.withdrawApp(appId, this.requireRegistryVersion(callArgs?.[0]));
+									break;
+								}
+								case 'unpublish': {
+									// Remove an audience binding (soft — republishing revives).
+									if (!client) throw new Error('Not connected');
+									value = await client.removeAppPublish(appId, String(callArgs?.[0] ?? ''));
+									break;
+								}
+								case 'teams':
+									// The caller's team roster (the publish picker's team rows).
+									value = (client?.getAccountInfo()?.organization?.teams ?? []).map((t) => ({ id: t.id, name: t.name }));
+									break;
+								case 'developerStatus':
+									// The org's developer registration + Stripe status.
+									if (!client) throw new Error('Not connected');
+									value = await client.call('rrext_deploy_app', { subcommand: 'developer_status' });
+									break;
+								case 'loadListing': {
+									// The listing IS the appManifest — read it from disk.
+									const apps = await scanWorkspaceApps();
+									const scanned = apps.find((a) => a.id === appId);
+									value = scanned ? await readAppListing(scanned.folder) : null;
+									break;
+								}
+								case 'saveListing': {
+									// Persist the listing back into package.json (files are
+									// truth; the next deploy packs it as metadata.manifest).
+									const apps = await scanWorkspaceApps();
+									const scanned = apps.find((a) => a.id === appId);
+									if (!scanned) throw new Error(`App "${appId}" has no bound folder in this workspace.`);
+									await saveAppListing(scanned.folder, callArgs?.[0] as AppListing);
+									value = null;
+									break;
+								}
+								case 'registerDeveloper':
+									// Claim the org's developerId slug (org.admin, self-service).
+									if (!client) throw new Error('Not connected');
+									value = await client.call('rrext_deploy_app', { subcommand: 'developer_register', developerId: String(callArgs?.[0] ?? '') });
+									break;
+								case 'preflight': {
+									// Real, client-side readiness checks over the app's manifest
+									// (no server round-trip), TIERED: 'package' rows are the
+									// complete-and-buildable bar (the PACKAGE tab's readiness box
+									// — all green means a personal @me/@team publish just works);
+									// 'store' rows are the ADDITIONAL public-submission bar the
+									// STORE tab gates its Submit button on.
+									const apps = await scanWorkspaceApps();
+									const scanned = apps.find((a) => a.id === appId);
+									const checks: Array<{ id: string; state: 'pass' | 'warn' | 'fail'; label: string; note?: string; tier?: 'package' | 'store' }> = [];
+									if (!scanned) {
+										checks.push({ id: 'manifest', state: 'fail', label: 'App manifest', note: 'No package.json appManifest found for this app.', tier: 'package' });
+										value = checks;
+										break;
+									}
+									const listing = await readAppListing(scanned.folder);
+									/** Whether an app-folder-relative file exists. */
+									const fileExists = async (rel: string): Promise<boolean> => {
+										try {
+											await vscode.workspace.fs.stat(vscode.Uri.joinPath(vscode.Uri.file(scanned.folder), ...rel.replace(/^\.\//, '').split('/')));
+											return true;
+										} catch {
+											return false;
+										}
+									};
+									// ── package tier — the personal-publish bar ──────────
+									checks.push(scanned.id.includes('.') ? { id: 'appid', state: 'pass', label: 'App id namespaced', note: scanned.id, tier: 'package' } : { id: 'appid', state: 'fail', label: 'App id namespaced', note: `"${scanned.id}" must be <developerId>.<name>`, tier: 'package' });
+									checks.push(scanned.name ? { id: 'name', state: 'pass', label: 'Display name', note: scanned.name, tier: 'package' } : { id: 'name', state: 'fail', label: 'Display name', note: 'appManifest.name is required.', tier: 'package' });
+									// Icon/readme: a DECLARED path that does not resolve is a
+									// fail (the manifest lies); undeclared is only a warn.
+									if (listing.icon) {
+										checks.push((await fileExists(listing.icon)) ? { id: 'icon', state: 'pass', label: 'Icon', note: listing.icon, tier: 'package' } : { id: 'icon', state: 'fail', label: 'Icon', note: `${listing.icon} does not exist in the app folder.`, tier: 'package' });
+									} else {
+										checks.push({ id: 'icon', state: 'warn', label: 'Icon', note: 'No icon declared — tiles show a generic glyph.', tier: 'package' });
+									}
+									if (listing.readme) {
+										checks.push((await fileExists(listing.readme)) ? { id: 'readme', state: 'pass', label: 'README', note: listing.readme, tier: 'package' } : { id: 'readme', state: 'fail', label: 'README', note: `${listing.readme} does not exist in the app folder.`, tier: 'package' });
+									} else {
+										checks.push({ id: 'readme', state: 'warn', label: 'README', note: 'No README declared — recommended so users know what the app does.', tier: 'package' });
+									}
+									// Include paths are WORKSPACE-relative; a missing one fails
+									// the deploy pack, so it fails here first, by name.
+									const includeEntries = listing.include ?? [];
+									if (includeEntries.length > 0) {
+										const wsRoot = vscode.workspace.getWorkspaceFolder(vscode.Uri.file(scanned.folder))?.uri;
+										const missing: string[] = [];
+										for (const entry of includeEntries) {
+											try {
+												if (!wsRoot) throw new Error('no workspace');
+												await vscode.workspace.fs.stat(vscode.Uri.joinPath(wsRoot, ...entry.split('/')));
+											} catch {
+												missing.push(entry);
+											}
+										}
+										checks.push(missing.length === 0 ? { id: 'include', state: 'pass', label: 'Include paths', note: `${includeEntries.length} path${includeEntries.length === 1 ? '' : 's'} resolve`, tier: 'package' } : { id: 'include', state: 'fail', label: 'Include paths', note: `Missing in the workspace: ${missing.join(', ')}`, tier: 'package' });
+									}
+									// The typecheck waiver is always VISIBLE, never silent —
+									// a deploy that skips verification should read as a choice.
+									if (listing.typecheck === false) {
+										checks.push({ id: 'typecheck', state: 'warn', label: 'Strict type checking', note: 'Off — the server builds without verifying types.', tier: 'package' });
+									}
+									// ── store tier — the additional public-submission bar ─
+									checks.push(scanned.description ? { id: 'desc', state: 'pass', label: 'Description', tier: 'store' } : { id: 'desc', state: 'fail', label: 'Description', note: 'A store listing needs a description.', tier: 'store' });
+									if (listing.mode !== 'free') {
+										checks.push(listing.plans.length > 0 ? { id: 'pricing', state: 'pass', label: 'Pricing plans', note: `${listing.plans.length} plan${listing.plans.length === 1 ? '' : 's'}`, tier: 'store' } : { id: 'pricing', state: 'fail', label: 'Pricing plans', note: `Mode "${listing.mode}" needs at least one plan.`, tier: 'store' });
+									}
+									// No dist/ check: deployment packs SOURCE (packFilter's
+									// BASELINE_PATTERNS excludes dist/ unconditionally) and the
+									// server builds the client bundle itself, so a local build
+									// is never read or uploaded — failing on a missing dist/
+									// would block a submission the deploy would have accepted.
+									value = checks;
+									break;
+								}
+								case 'pickFile': {
+									// Native picker for a manifest asset (icon/readme). The
+									// result is APP-FOLDER-relative: the server's harvest only
+									// copies app-root-relative paths, so a pick outside the app
+									// folder is refused, not silently accepted.
+									const kind = String(callArgs?.[0] ?? '') === 'icon' ? 'icon' : 'readme';
+									const apps = await scanWorkspaceApps();
+									const scanned = apps.find((a) => a.id === appId);
+									if (!scanned) throw new Error(`App "${appId}" has no bound folder in this workspace.`);
+									const picked = await vscode.window.showOpenDialog({
+										canSelectMany: false,
+										defaultUri: vscode.Uri.file(scanned.folder),
+										openLabel: 'Select',
+										filters: kind === 'icon' ? { 'SVG icon': ['svg'] } : { Markdown: ['md'] },
+									});
+									if (!picked || picked.length === 0) {
+										value = null;
+										break;
+									}
+									const rel = path.relative(scanned.folder, picked[0].fsPath);
+									if (rel.startsWith('..') || path.isAbsolute(rel)) {
+										throw new Error('The file must live inside the app folder — the deploy only packs (and the server only serves) app-relative assets.');
+									}
+									value = `./${rel.split(path.sep).join('/')}`;
+									break;
+								}
+								case 'pickIncludePath': {
+									// Native picker for an include path — a workspace FOLDER or
+									// FILE. The result is WORKSPACE-relative (include entries
+									// pack from the workspace root, unlike app-relative assets),
+									// so a pick outside the workspace is refused, not silently
+									// accepted. The native dialog cannot offer files and folders
+									// TOGETHER on Windows/Linux (macOS only), so a QuickPick
+									// asks which kind first.
+									const apps = await scanWorkspaceApps();
+									const scanned = apps.find((a) => a.id === appId);
+									if (!scanned) throw new Error(`App "${appId}" has no bound folder in this workspace.`);
+									const wsRoot = vscode.workspace.getWorkspaceFolder(vscode.Uri.file(scanned.folder))?.uri;
+									if (!wsRoot) throw new Error('The app folder is not inside an open workspace folder.');
+									const choice = await vscode.window.showQuickPick(
+										[
+											{ label: 'Folder', description: 'include a whole directory' },
+											{ label: 'File', description: 'include a single file' },
+										],
+										{ placeHolder: 'Include a folder or a single file?' }
+									);
+									if (!choice) {
+										value = null;
+										break;
+									}
+									const wantFolder = choice.label === 'Folder';
+									const picked = await vscode.window.showOpenDialog({
+										canSelectMany: false,
+										canSelectFiles: !wantFolder,
+										canSelectFolders: wantFolder,
+										defaultUri: wsRoot,
+										openLabel: 'Select',
+									});
+									if (!picked || picked.length === 0) {
+										value = null;
+										break;
+									}
+									const rel = path.relative(wsRoot.fsPath, picked[0].fsPath);
+									if (rel.startsWith('..') || path.isAbsolute(rel)) {
+										throw new Error('The path must live inside the workspace — include paths are workspace-relative and packed from the workspace root.');
+									}
+									// The workspace root itself would pack the entire workspace
+									// into every deploy — an include entry names something in it.
+									if (!rel) throw new Error('Select a folder inside the workspace, not the workspace root itself.');
+									value = rel.split(path.sep).join('/');
+									break;
+								}
+								case 'readImage': {
+									// One app-folder-relative image as a data: URI — README
+									// images are binary, so the text-read path would corrupt
+									// them. Reuses the icon inliner (mime by extension,
+									// undefined on anything unservable) with the README size
+									// budget — screenshots/GIFs dwarf icons.
+									const rel = String(callArgs?.[0] ?? '').replace(/^\.\//, '');
+									const apps = await scanWorkspaceApps();
+									const scanned = apps.find((a) => a.id === appId);
+									if (!scanned) throw new Error(`App "${appId}" has no bound folder in this workspace.`);
+									const abs = path.resolve(scanned.folder, ...rel.split('/'));
+									if (!abs.startsWith(path.resolve(scanned.folder) + path.sep)) {
+										throw new Error('Path escapes the app folder.');
+									}
+									value = (await appIconDataUri(abs, MAX_README_IMAGE_BYTES)) ?? null;
+									break;
+								}
+								case 'readFile': {
+									// One app-folder-relative text file for preview (icon SVG,
+									// README markdown). Traversal-guarded and size-capped.
+									const rel = String(callArgs?.[0] ?? '').replace(/^\.\//, '');
+									const apps = await scanWorkspaceApps();
+									const scanned = apps.find((a) => a.id === appId);
+									if (!scanned) throw new Error(`App "${appId}" has no bound folder in this workspace.`);
+									const abs = path.resolve(scanned.folder, ...rel.split('/'));
+									if (!abs.startsWith(path.resolve(scanned.folder) + path.sep)) {
+										throw new Error('Path escapes the app folder.');
+									}
+									const bytes = await vscode.workspace.fs.readFile(vscode.Uri.file(abs));
+									if (bytes.byteLength > 512 * 1024) throw new Error('File is over the 512KB preview limit.');
+									value = Buffer.from(bytes).toString('utf8');
+									break;
+								}
+								case 'history': {
+									// The app's full deployment_history stream — audit rows
+									// plus the review thread. The server clamps page_size to
+									// 100, so walk the pages; the webview projects the one
+									// array into the Dashboard thread AND the Store timeline.
+									if (!client) throw new Error('Not connected');
+									const rows: unknown[] = [];
+									let total = Number.POSITIVE_INFINITY;
+									// Defensive ceiling — 50 pages (5000 rows) is far past any
+									// real thread; a server paging bug must not spin forever.
+									for (let page = 1; rows.length < total && page <= 50; page += 1) {
+										const envelope = await client.deploy.history(appId, { page, pageSize: 100 });
+										const chunk = envelope?.rows ?? [];
+										total = typeof envelope?.total === 'number' ? envelope.total : rows.length + chunk.length;
+										// A short/empty page ends the walk even if `total`
+										// disagrees — rows deleted between requests must not
+										// spin the loop.
+										if (chunk.length === 0) break;
+										rows.push(...chunk);
+										if (chunk.length < 100) break;
+									}
+									// Server pages newest-first; the views render oldest-first.
+									value = rows.reverse();
+									break;
+								}
+								case 'reply':
+									// Append a developer message to the review thread.
+									if (!client) throw new Error('Not connected');
+									value = await client.replyApp(appId, String(callArgs?.[0] ?? ''), typeof callArgs?.[1] === 'number' ? callArgs[1] : undefined);
+									break;
+								case 'buildLog': {
+									// One version's durable server build log (the Deploy
+									// card's "failed" badge opens it).
+									if (!client) throw new Error('Not connected');
+									const body = await client.buildLog(appId, this.requireRegistryVersion(callArgs?.[0]));
+									value = body?.log ?? '';
+									break;
+								}
 								default:
 									throw new Error(`Unknown appdev method: ${method}`);
 							}
@@ -307,6 +627,17 @@ export class AppScreenProvider implements vscode.CustomReadonlyEditorProvider {
 			this.notifyWatch(appId, { state: 'error', target: 'no workspace binding' });
 			this.notifyConsole(appId, 'error', `No workspace folder is bound to "${appId}" — the .rrapp marker's folder has no package.json with appManifest.id "${appId}", so the dev server cannot start.`);
 		}
+	}
+
+	/**
+	 * Whether an App Builder panel is currently open for this app — the
+	 * watchManager's crash-recovery gate (respawn only while someone is
+	 * looking at the preview).
+	 *
+	 * @param appId - The app to check.
+	 */
+	public hasPanel(appId: string): boolean {
+		return this.panels.has(appId);
 	}
 
 	/**
@@ -388,6 +719,42 @@ export class AppScreenProvider implements vscode.CustomReadonlyEditorProvider {
 	}
 
 	// =========================================================================
+	// BRIDGE HELPERS
+	// =========================================================================
+
+	/**
+	 * Parses a registry version argument from a bridge call, rejecting anything
+	 * that is not a finite integer. A missing / non-numeric arg would otherwise
+	 * become NaN and serialize to null over JSON — silently changing deployment
+	 * state against an unspecified version.
+	 *
+	 * @param arg - The raw bridge argument (callArgs[0]).
+	 * @returns The validated integer registry version.
+	 */
+	private requireRegistryVersion(arg: unknown): number {
+		const version = Number(arg);
+		if (!Number.isInteger(version)) {
+			throw new Error(`Invalid registry version: ${JSON.stringify(arg)}`);
+		}
+		return version;
+	}
+
+	/**
+	 * Maps a persisted stage value to the current vocabulary. workspaceState
+	 * stores the active tab raw, so windows that persisted before the
+	 * DEVELOP -> DESIGN rename hold the legacy id; anything unknown (or
+	 * never persisted) lands on 'dashboard', the default view.
+	 *
+	 * @param raw - The raw workspaceState value.
+	 * @returns A valid stage id for the current tab set.
+	 */
+	private static normalizeStage(raw: unknown): 'dashboard' | 'design' | 'package' | 'store' | 'deploy' {
+		if (raw === 'develop') return 'design';
+		if (raw === 'design' || raw === 'package' || raw === 'store' || raw === 'deploy' || raw === 'dashboard') return raw;
+		return 'dashboard';
+	}
+
+	// =========================================================================
 	// INIT PAYLOAD HELPERS
 	// =========================================================================
 
@@ -415,7 +782,9 @@ export class AppScreenProvider implements vscode.CustomReadonlyEditorProvider {
 		const base = override || this.connectionManager.getHttpUrl?.() || 'http://localhost:5565';
 		// _ts busts the browser's cached index.html — the flavor picker lives
 		// in the html, and a stale copy silently serves the wrong shell flavor.
-		return `${base.replace(/\/$/, '')}/?appid=${encodeURIComponent(appId)}&rrdev=1&_ts=${Date.now()}`;
+		// rrsession routes the preview to THIS editor's dev-overlay entry when
+		// several editors dev-serve the same app.
+		return `${base.replace(/\/$/, '')}/?appid=${encodeURIComponent(appId)}&rrdev=1&rrsession=${DEV_SESSION_NONCE}&_ts=${Date.now()}`;
 	}
 
 	// =========================================================================
@@ -427,6 +796,33 @@ export class AppScreenProvider implements vscode.CustomReadonlyEditorProvider {
 		return new Date().toLocaleTimeString(undefined, { hour12: false });
 	}
 
+	/** Whether the org-wide DEPLOY monitor has been armed this session. */
+	private deployMonitorArmed = false;
+
+	/**
+	 * Subscribes this connection to org-scoped DEPLOY-type server events.
+	 *
+	 * The build ticker (apaevt_build_status) and compile feed (apaevt_build)
+	 * ride EVENT_TYPE.DEPLOY, and the server delivers a type only to
+	 * connections that monitored it — the pipeline editor arms 'deploy' for
+	 * its own views, but an App Builder session without an open pipeline
+	 * heard NOTHING. Idempotent; a failed arm re-tries on the next
+	 * connected status change, and the SDK replays a successful monitor
+	 * across reconnects on its own.
+	 */
+	private armDeployMonitor(): void {
+		if (this.deployMonitorArmed) return;
+		const client = this.connectionManager.getClient();
+		if (!client || !this.connectionManager.isConnected()) return;
+		this.deployMonitorArmed = true;
+		client.addMonitor({ token: '*' }, ['deploy']).catch((err: unknown) => {
+			// Arm again on the next reconnect — the feed is telemetry, never
+			// worth failing a panel over.
+			this.deployMonitorArmed = false;
+			getLogger().output(`[appdev] deploy monitor subscribe failed: ${err}`);
+		});
+	}
+
 	/** Forward connection + server events to every open App Builder panel. */
 	private setupEventListeners(): void {
 		// connectionManager.on() returns the SHARED manager (a Node
@@ -435,6 +831,44 @@ export class AppScreenProvider implements vscode.CustomReadonlyEditorProvider {
 		// Server push events → Events pane rows
 		const onEvent = (event: GenericEvent): void => {
 			if (!event?.event) return;
+			// Server BUILD feed (apaevt_build): the build worker's live
+			// pnpm/tsc/rsbuild output for this org's apps — routed into the
+			// app's Console pane so a deploy shows its compile as it runs
+			// (between the coarse status-ticker transitions).
+			if (event.event === 'apaevt_build' && event.body) {
+				const b = event.body as { appId?: string; phase?: string; lines?: string[] };
+				if (b.appId && Array.isArray(b.lines) && b.lines.length > 0) {
+					const prefix = `[build:${b.phase || '?'}]`;
+					this.notifyConsole(b.appId, 'log', b.lines.map((l) => `${prefix} ${l}`).join('\n'));
+				}
+			}
+			// Server BUILD status ticker (apaevt_build_status): one short
+			// display word per lifecycle transition ('' clears) — forwarded
+			// to the app's panel for the DEPLOY-view version card.
+			if (event.event === 'apaevt_build_status' && event.body) {
+				const b = event.body as { appId?: string; version?: number; status?: string };
+				if (b.appId && typeof b.status === 'string') {
+					this.panels.get(b.appId)?.webview.postMessage({
+						type: 'appdev:buildStatus',
+						appId: b.appId,
+						version: b.version,
+						status: b.status,
+					});
+				}
+			}
+			// Review-state push (app:statusChanged): a review transition for
+			// one of this org's apps. The open panel re-fetches its org-scoped
+			// data (version rail + Store review state) through the existing
+			// account-changed re-mint. No toasts: the dashboard's narrated
+			// status, conversation stream, and Store review history are the
+			// verdict surfaces (a verdict arriving with no panel open shows
+			// the next time the app opens).
+			if (event.event === 'app:statusChanged' && event.body) {
+				const b = event.body as { appId?: string };
+				if (b.appId && this.panels.has(b.appId)) {
+					this.panels.get(b.appId)?.webview.postMessage({ type: 'appdev:accountChanged' });
+				}
+			}
 			const row = {
 				time: AppScreenProvider.feedTime(),
 				name: String(event.event),
@@ -462,6 +896,16 @@ export class AppScreenProvider implements vscode.CustomReadonlyEditorProvider {
 			// now that a server is reachable — center-screen error to running
 			// preview without closing and reopening the app.
 			if (this.connectionManager.isConnected()) {
+				// A panel opened while disconnected could not arm the DEPLOY
+				// monitor — arm it now (the SDK replays a successful monitor
+				// across later reconnects on its own).
+				if (this.panels.size > 0) this.armDeployMonitor();
+				// A reconnect may carry a NEW identity (an org switch re-logs-in
+				// under the new default org): tell every open panel to re-fetch
+				// its org-scoped data (developer namespace, publish rail, teams).
+				for (const panel of this.panels.values()) {
+					panel.webview.postMessage({ type: 'appdev:accountChanged' });
+				}
 				for (const [appId, status] of this.lastWatch) {
 					if (status.state !== 'error' || status.target !== 'platform package') continue;
 					void (async () => {
@@ -481,6 +925,43 @@ export class AppScreenProvider implements vscode.CustomReadonlyEditorProvider {
 		};
 		this.connectionManager.on('shell:statusChange', onStatus);
 		this.disposables.push({ dispose: () => this.connectionManager.off('shell:statusChange', onStatus) });
+
+		// The server pushed a refreshed account (developer registration, org
+		// property change, subscription move) WITHOUT a reconnect — the same
+		// org-scoped data in open panels is stale; have them re-fetch.
+		const onAccountUpdate = (): void => {
+			for (const panel of this.panels.values()) {
+				panel.webview.postMessage({ type: 'appdev:accountChanged' });
+			}
+		};
+		this.connectionManager.on('shell:accountUpdate', onAccountUpdate);
+		this.disposables.push({ dispose: () => this.connectionManager.off('shell:accountUpdate', onAccountUpdate) });
+
+		// Tab-based close detection. A tab can close WITHOUT ever having been
+		// resolved by THIS host — reconcileOpenTabs starts watches for tabs
+		// restored from a previous host, and until VSCode re-resolves one it
+		// has no panel handle, so panel.onDidDispose cannot fire and closing
+		// the tab would leave its dev server running forever. The tab list is
+		// the universal close signal; for resolved panels this double-fires
+		// alongside onDidDispose, which stop()'s linger path absorbs.
+		const tabListener = vscode.window.tabGroups.onDidChangeTabs(async (e) => {
+			for (const tab of e.closed) {
+				const input = tab.input;
+				if (!(input instanceof vscode.TabInputCustom) || input.viewType !== 'rocketride.appBuilder') continue;
+				try {
+					// A tab MOVE between groups reports close+open — only stop
+					// when no tab still shows this document.
+					const uriKey = input.uri.toString();
+					const stillOpen = vscode.window.tabGroups.all.some((g) =>
+						g.tabs.some((t) => t.input instanceof vscode.TabInputCustom && t.input.viewType === 'rocketride.appBuilder' && t.input.uri.toString() === uriKey),
+					);
+					if (stillOpen) continue;
+					const appId = await this.appIdOf(input.uri);
+					void getWatchManager()?.stop(appId);
+				} catch { /* unresolvable marker — nothing to stop */ }
+			}
+		});
+		this.disposables.push(tabListener);
 	}
 
 	// =========================================================================

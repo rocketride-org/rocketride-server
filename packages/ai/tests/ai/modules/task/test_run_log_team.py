@@ -133,11 +133,11 @@ class TestScopePaths:
         # Deploy: the internal-identity scope grammar + team id as scope id.
         assert scope_paths('deploy', CLIENT, TEAM) == (f'@/Team/={TEAM}/', TEAM)
 
-    def test_deploy_without_team_is_an_error(self):
-        # A deploy run with no team has no valid home — fail loudly rather
-        # than silently landing team output in a user tree.
-        with pytest.raises(ValueError):
-            scope_paths('deploy', CLIENT, '')
+    def test_deploy_without_team_is_user_scoped(self):
+        # A TEAMLESS deploy is a USER-OWNED (@me) deploy: its continuum lives
+        # in the owner's user tree — private, like a dev run — distinguished
+        # from the dev continuum by the '.deploy.' path segment.
+        assert scope_paths('deploy', CLIENT, '') == ('', CLIENT)
 
     @pytest.mark.parametrize('bad', ['../x', './x', '/x', 'a/b', 'a\\b', '.', '..', '@x', '=x', '.x'])
     def test_deploy_rejects_path_unsafe_team_ids(self, bad):
@@ -214,6 +214,87 @@ class TestTeamScopedWriter:
 
 
 # =============================================================================
+# PERSONAL (@me) DEPLOY WRITER — private storage, real billing provenance
+# =============================================================================
+
+# A real billing team for an @me run: the run bills to it, but its logs must
+# NOT live in the team tree. Distinct from TEAM so a leak is unambiguous.
+BILLING_TEAM = 'bbbb1111-2c6c-4a9e-9c11-ffff9999cccc'
+
+
+class TestPersonalDeployWriter:
+    """A user-owned (@me) deploy: storage scope and billing provenance are
+    SEPARATE. owner_kind='user' keeps the logs in the owner's private user
+    tree, while team_id still records the run's REAL billing team on the
+    control record — so a private @me log is never stored in (nor leaked to)
+    the billing team's tree, and its billing context stays auditable.
+    """
+
+    async def _open_me_writer(self, istore, spool_root):
+        stamp, raise_floor, _ = make_stamp()
+        writer = RunLogWriter(
+            FileStore(Store(istore), CLIENT, RequestContext.internal('test')),
+            CLIENT,
+            PROJECT,
+            SOURCE,
+            'deploy',
+            stamp,
+            raise_floor,
+            team_id=BILLING_TEAM,  # real billing team (provenance)
+            owner_kind='user',  # user-owned => PRIVATE storage scope
+            spool_root=spool_root,
+        )
+        await writer.open(trigger='manual', user=CLIENT, pipeline_hash='abc123', trace_level='summary')
+        return writer
+
+    @pytest.mark.asyncio
+    async def test_me_deploy_logs_stay_private_in_user_tree(self, istore, spool_root):
+        writer = await self._open_me_writer(istore, spool_root)
+        stamp, _, _ = make_stamp(100)
+        writer.append(stamp(output_event('me-run')))
+        await writer._drain_uploads()
+        await writer.end_run('ok')
+
+        # Private: the deploy continuum lives in the OWNER's user tree...
+        user_files = await istore.list_files(f'users/{CLIENT}/files/.logs/{PROJECT}')
+        names = [path.rsplit('/', 1)[-1] for path in (user_files or [])]
+        assert f'{SOURCE}.deploy.json' in names
+        assert any(name.startswith(f'{SOURCE}.deploy.') and name.endswith('.jsonl') for name in names)
+
+        # ...and NOTHING landed in the billing team's tree — that would leak a
+        # private personal run to every teammate.
+        team_files = await istore.list_files(f'teams/{BILLING_TEAM}/files/.logs/{PROJECT}')
+        assert not (team_files or [])
+
+    @pytest.mark.asyncio
+    async def test_me_deploy_control_stamps_the_real_billing_team(self, istore, spool_root):
+        writer = await self._open_me_writer(istore, spool_root)
+        stamp, _, _ = make_stamp(100)
+        writer.append(stamp(output_event('me-run')))
+        await writer.end_run('ok')
+
+        # Provenance is NOT lost to the private-scope '': the control record
+        # carries the REAL billing team, so the run's billing/secrets context
+        # is auditable even though its logs are private. (Before the scope/
+        # provenance split this was either '' here or a leak into the team
+        # tree — never both correct.)
+        assert writer._control['teamId'] == BILLING_TEAM
+
+    @pytest.mark.asyncio
+    async def test_me_deploy_spool_is_user_qualified_not_team(self, istore, spool_root):
+        writer = await self._open_me_writer(istore, spool_root)
+        stamp, _, _ = make_stamp(100)
+        writer.append(stamp(output_event('me-run')))
+
+        # The live spool file carries the OWNER (user) scope id, never the
+        # billing team — the storage scope is the user's.
+        spooled = [name for name in os.listdir(spool_root) if name.endswith('.jsonl')]
+        assert spooled and all(name.startswith(f'{CLIENT}.{DEPLOY_STREAM}.') for name in spooled)
+        assert not any(name.startswith(f'{BILLING_TEAM}.') for name in spooled)
+        await writer.end_run('ok')
+
+
+# =============================================================================
 # TEAM-SCOPED READER
 # =============================================================================
 
@@ -238,16 +319,17 @@ class TestTeamScopedReader:
         assert outputs == ['deploy-0', 'deploy-1', 'deploy-2']
 
     @pytest.mark.asyncio
-    async def test_unscoped_deploy_reader_is_rejected_at_construction(self, istore, spool_root):
-        # Deploy continua have no user-scope home anymore: building a deploy
-        # reader without a team fails LOUDLY at construction (same helper,
-        # same rule as the writer) instead of quietly reading nothing.
-        with pytest.raises(ValueError):
-            run_log.RunLogReader(
-                FileStore(Store(istore), CLIENT, RequestContext.internal('test')),
-                CLIENT,
-                PROJECT,
-                SOURCE,
-                'deploy',
-                spool_root=spool_root,
-            )
+    async def test_unscoped_deploy_reader_is_user_scoped(self, istore, spool_root):
+        # A teamless deploy reader targets the caller's OWN @me continuum in
+        # the user tree (same helper, same rule as the writer) — never a
+        # team's stream.
+        reader = run_log.RunLogReader(
+            FileStore(Store(istore), CLIENT, RequestContext.internal('test')),
+            CLIENT,
+            PROJECT,
+            SOURCE,
+            'deploy',
+            spool_root=spool_root,
+        )
+        assert reader._scope_prefix == ''
+        assert reader._scope_id == CLIENT

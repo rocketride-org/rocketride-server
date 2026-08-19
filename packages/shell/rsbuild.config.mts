@@ -32,7 +32,7 @@ import { pluginTypeCheck } from '@rsbuild/plugin-type-check';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
-const { getenv, requireKeys } = require('../../scripts/lib/getenv');
+const { getenv } = require('../../scripts/lib/getenv');
 // The SDK version the host serves under the 'rocketride' MF share — read from
 // the package itself so the advertised share version never drifts from it.
 const sdkVersion: string = require('../client-typescript/package.json').version;
@@ -77,9 +77,9 @@ export default defineConfig(({ command }) => {
 	// process.env — they call useShellApiConfig() instead.
 	// ---------------------------------------------------------------------------
 	const env = getenv();
-	// Only ROCKETRIDE_URI is required for OSS. SaaS keys (Zitadel, Stripe)
-	// are optional — the shell feature-flags their UI based on capabilities.
-	requireKeys(env, ['ROCKETRIDE_URI'], 'shell');
+	// Nothing is REQUIRED: the shell bakes no server address (origin +
+	// probe self-targeting) and the SaaS keys (Zitadel) are optional — the
+	// shell feature-flags their UI based on capabilities.
 
 	// Helper: JSON.stringify a single env var for use in `define` substitution.
 	const e = (key: string) => JSON.stringify(env[key] ?? '');
@@ -119,6 +119,16 @@ export default defineConfig(({ command }) => {
 					// and /apps.json resolves to the generated app manifest.
 					{ name: path.join(process.env.ROCKETRIDE_BUILD_ROOT ?? path.resolve(__dirname, '../../build')), watch: false },
 				],
+				// The dev server relays the engine's live paths so the shell can
+				// self-target window.location.origin in dev exactly as it does in
+				// every deployment (no address is baked into any bundle). The
+				// engine listens on 5565; /task and /api carry WebSockets.
+				proxy: {
+					'/task': { target: 'http://localhost:5565', ws: true },
+					'/auth': { target: 'http://localhost:5565' },
+					'/api': { target: 'http://localhost:5565', ws: true },
+					'/marketplace': { target: 'http://localhost:5565' },
+				},
 			}),
 		},
 		plugins: [
@@ -214,29 +224,27 @@ export default defineConfig(({ command }) => {
 
 			// Compile-time constant substitution.
 			//
-			// ONLY the five variables below are injected into the browser bundle.
+			// ONLY the variables below are injected into the browser bundle.
 			// Every key listed here becomes a string literal at build time — nothing
 			// else from the .env file is ever included.
 			//
 			// SECURITY: never add server-side secrets here (RR_STRIPE_SECRET_KEY,
 			// RR_STRIPE_WEBHOOK_SECRET, RR_DB_URL, RR_ZITADEL_SERVICE_TOKEN, etc.).
 			// Those values are never needed in the browser and must stay server-side.
+			//
+			// ENV NEUTRALITY: never add environment-specific values here (the
+			// Stripe publishable key pk_test/pk_live moved to the server probe) —
+			// baked per-env values break byte-for-byte staging→prod promotion.
 			define: {
 				// Standard Node.js env flag — enables React's production optimisations.
 				// The dev FLAVOR builds with development React so react-refresh has a
 				// renderer that supports it (production react-dom has no refresh hooks).
 				'process.env.NODE_ENV': JSON.stringify(isDev || isDevFlavor ? 'development' : 'production'),
 
-				// WebSocket URI for the RocketRide server.
-				'process.env.ROCKETRIDE_URI': e('ROCKETRIDE_URI'),
-
-				// Dev/service-account API key — bypasses OAuth2 when set.
-				// Leave empty in production; only set in .env for local development.
-				'process.env.RR_APIKEY': e('RR_APIKEY'),
-
-				// Stripe publishable key — safe to expose in the browser (pk_*).
-				// Never put the secret key (sk_*) here.
-				'process.env.RR_STRIPE_PUBLISHABLE_KEY': e('RR_STRIPE_PUBLISHABLE_KEY'),
+				// NO server address and NO credential is ever baked here. The shell
+				// self-targets from window.location.origin (bootstrap + connection),
+				// and API keys enter through the ApiKeyLogin prompt — a bundle must
+				// be bit-identical across every environment it is promoted to.
 
 				// Zitadel OIDC issuer URL — required for OAuth2 PKCE flow.
 				'process.env.RR_ZITADEL_URL': e('RR_ZITADEL_URL'),

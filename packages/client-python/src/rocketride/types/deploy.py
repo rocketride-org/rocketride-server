@@ -34,7 +34,7 @@ Types:
     DeploymentSchedule: Per-source cron schedule on a team deployment.
     Deployment:         One team's deployment of a project (registry-joined).
     DeployHistoryEntry: One immutable audit-trail row.
-    PublishResult:      publish() body: the artifact (+ deployment when
+    PublishResult:      add() body: the artifact (+ deployment when
                         deploy_to was given).
     DeployListResult:   Standard list envelope of Deployment rows.
     DeployVersionsResult: Standard list envelope of DeployArtifact rows.
@@ -130,10 +130,10 @@ class DeployHistoryEntry(TypedDict, total=False):
 
 
 class PublishResult(TypedDict, total=False):
-    """Body of ``deploy.publish``."""
+    """Body of ``deploy.add``."""
 
     artifact: DeployArtifact
-    # Present only when deploy_to was given (one-step publish+deploy).
+    # Present only when deploy_to was given (one-step add+deploy).
     deployment: Deployment
 
 

@@ -1,9 +1,9 @@
 """
 Clients module for serving downloadable client packages.
 
-This module provides HTTP endpoints to download client SDKs (Python, TypeScript, and VSCode)
-from the build/Engine/clients directory, and the installable shell platform package from
-the static clients directory.
+This module provides HTTP endpoints to download client SDKs (Python, TypeScript, and
+VSCode) and the installable shell platform package, all served from the static clients
+directory beside the engine binary (where build tasks stage them).
 """
 
 from typing import Any, Dict

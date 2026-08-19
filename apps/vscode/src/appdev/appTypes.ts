@@ -55,6 +55,33 @@ export type ShellVendorResult =
 let ensureShellPromise: Promise<ShellVendorResult> | null = null;
 
 /**
+ * The workspace-install AUTHORITY — the WatchManager's generation-chained
+ * single-flight, registered at its construction.
+ *
+ * While registered, every install this module needs routes through it, so
+ * two pnpm processes can never touch the shared node_modules at once:
+ * the vendor pass spawning its OWN pnpm beside the watch/scaffold install
+ * raced it on fresh workspaces, and concurrent pnpm runs on one root fail
+ * with ERR_PNPM_EEXIST during symlinkAllModules (a half-linked virtual
+ * store). An injected seam rather than an import: watchManager already
+ * imports from this module, so importing it back would be a cycle.
+ */
+let workspaceInstallDelegate: (() => Promise<boolean>) | null = null;
+
+/**
+ * Registers the single-flight workspace-install authority.
+ *
+ * The delegate must run a FRESH install when invoked (the caller has just
+ * changed the vendored tarball): bump the install generation, then chain
+ * the run behind any in-flight install.
+ *
+ * @param run - Resolves true when the workspace install succeeded.
+ */
+export function setWorkspaceInstallDelegate(run: () => Promise<boolean>): void {
+	workspaceInstallDelegate = run;
+}
+
+/**
  * Ensures the workspace's shell package is vendored — ONCE.
  *
  * Every consumer that needs the shell tarball (panel open, scaffold, the
@@ -322,6 +349,40 @@ export function extractInstallCause(output: string, code: number | null): string
 }
 
 /**
+ * True when pnpm install output carries a TRANSIENT Windows file-lock
+ * signature rather than a genuine dependency or build failure.
+ *
+ * On Windows another process routinely holds a short-lived handle on a file
+ * under `node_modules/.pnpm` — antivirus scanning a just-written file, the
+ * Search indexer, or an editor watching the tree — so pnpm's atomic
+ * rename/unlink step fails with EPERM/EBUSY/ENOTEMPTY even though the
+ * dependency graph is sound. The handle is released moments later and a fresh
+ * install succeeds, so the caller may safely retry ONLY this class of error.
+ * A resolution error, a missing package, or a build failure never matches and
+ * so is never retried.
+ *
+ * @param output - Combined stdout+stderr of the failed pnpm run.
+ * @returns True when the failure is a retriable transient lock.
+ */
+export function isTransientLockError(output: string): boolean {
+	// Both halves must hold ON THE SAME LINE: the errno AND a filesystem op it
+	// aborted. pnpm mentions "rename" in ordinary progress, so an EPERM sitting
+	// on an unrelated line must not pair with it — a genuine transient lock
+	// prints the errno and the aborted op together on one line.
+	//
+	// EEXIST pairs ONLY with symlink: pnpm's symlinkAllModules hits it when a
+	// previous install died (or raced) mid-link and left the virtual store
+	// half-written — a rerun reconciles the store and succeeds, so it earns a
+	// retry; EEXIST anywhere else stays a genuine failure.
+	const errno = /\b(EPERM|EBUSY|ENOTEMPTY|EEXIST)\b/;
+	const fsOp = /(rename|unlink|symlink|operation not permitted|resource busy|directory not empty)/i;
+	return output.split(/\r?\n/).some((line) => {
+		if (!errno.test(line) || !fsOp.test(line)) return false;
+		return !/\bEEXIST\b/.test(line) || /symlink/i.test(line);
+	});
+}
+
+/**
  * Downloads the connected server's shell.tgz to the workspace's canonical
  * .rocketride/shell/shell.tgz and installs it at the workspace root.
  *
@@ -392,8 +453,19 @@ export async function vendorShellPackage(workspaceRoot: string, fallbackTgz?: st
 		logger.output(`[appdev] vendored shell package from ${source} -> ${tgzPath} (${(tgz.length / 1024).toFixed(0)} KB)`);
 
 		// step: install at the workspace root — links the new tarball into
-		// every app that depends on it
-		await runRootInstall(workspaceRoot);
+		// every app that depends on it. Routed through the WatchManager's
+		// single-flight whenever it is registered: a private pnpm spawn here
+		// ran BESIDE the watch/scaffold install on fresh workspaces, and two
+		// pnpm processes on one node_modules corrupt the virtual store
+		// (ERR_PNPM_EEXIST in symlinkAllModules). The direct spawn survives
+		// only as the fallback for delegate-less contexts.
+		if (workspaceInstallDelegate) {
+			if (!(await workspaceInstallDelegate())) {
+				return { ok: false, reason: 'Workspace pnpm install failed — the app Console carries the pnpm output.' };
+			}
+		} else {
+			await runRootInstall(workspaceRoot);
+		}
 		logger.output(`[appdev] workspace install complete — apps are linked to the new shell package`);
 		return { ok: true, tgzPath };
 	} catch (err) {

@@ -53,7 +53,7 @@ import '../../styles/root.css';
 
 interface WelcomeExtraSettings {}
 
-type IncomingMessage = { type: 'settingsLoaded'; settings: SettingsData & WelcomeExtraSettings; logoDarkUri?: string; logoLightUri?: string } | { type: 'showMessage'; level: 'success' | 'error' | 'info' | 'warning'; message: string } | { type: 'versionsLoaded'; versions: EngineVersionItem[] } | { type: 'cloud:status'; signedIn: boolean; userName: string } | { type: 'dockerStatus'; status: DockerStatus } | { type: 'dockerVersionsLoaded'; tags: string[] } | { type: 'serviceStatus'; status: ServiceStatus } | { type: 'serviceNeedsSudo' } | { type: 'ioProgress'; mode: string; command: string; message: string } | { type: 'ioResult'; mode: string; command: string; success: boolean; error?: string };
+type IncomingMessage = { type: 'settingsLoaded'; settings: SettingsData & WelcomeExtraSettings; logoDarkUri?: string; logoLightUri?: string } | { type: 'showMessage'; level: 'success' | 'error' | 'info' | 'warning'; message: string } | { type: 'versionsLoaded'; versions: EngineVersionItem[] } | { type: 'cloud:status'; signedIn: boolean; userName: string; signedInUrl?: string; waitlisted?: boolean; waitlistedName?: string; pendingSignIn?: boolean; pendingSignOut?: boolean; pendingUserName?: string; pendingUrl?: string } | { type: 'dockerStatus'; status: DockerStatus } | { type: 'dockerVersionsLoaded'; tags: string[] } | { type: 'serviceStatus'; status: ServiceStatus } | { type: 'serviceNeedsSudo' } | { type: 'ioProgress'; mode: string; command: string; message: string } | { type: 'ioResult'; mode: string; command: string; success: boolean; error?: string };
 
 type OutgoingMessage = { type: string; [key: string]: unknown };
 
@@ -131,6 +131,9 @@ const DEFAULT_SETTINGS: SettingsData = {
 	development: {
 		connectionMode: 'local',
 		hostUrl: 'http://localhost:5565',
+		useCustomServer: false,
+		cloudUrl: '',
+		defaultCloudUrl: '',
 		apiKey: '',
 		hasApiKey: false,
 		local: { engineVersion: 'latest' },
@@ -138,6 +141,9 @@ const DEFAULT_SETTINGS: SettingsData = {
 	deployment: {
 		connectionMode: null,
 		hostUrl: '',
+		useCustomServer: false,
+		cloudUrl: '',
+		defaultCloudUrl: '',
 		hasApiKey: false,
 		apiKey: '',
 		local: { engineVersion: 'latest' },
@@ -180,13 +186,18 @@ export const Welcome: React.FC = () => {
 	const [engineVersions, setEngineVersions] = useState<EngineVersionItem[]>([]);
 	const [engineVersionsLoading, setEngineVersionsLoading] = useState(false);
 
-	// Server capabilities
-	const [serverCapabilities, setServerCapabilities] = useState<string[]>([]);
-	const [isSaasProbed, setIsSaasProbed] = useState<boolean | undefined>(undefined);
+	// Cloud probe result — `isSaas` keeps its last value during a re-probe
+	// (no flicker); undefined = never probed ("Checking...").
+	const [probe, setProbe] = useState<{ isSaas?: boolean; unreachable: boolean }>({ unreachable: false });
 
 	// Cloud auth
 	const [cloudSignedIn, setCloudSignedIn] = useState(false);
 	const [cloudUserName, setCloudUserName] = useState('');
+	const [cloudSignedInUrl, setCloudSignedInUrl] = useState('');
+	const [cloudWaitlisted, setCloudWaitlisted] = useState(false);
+	const [cloudWaitlistedName, setCloudWaitlistedName] = useState('');
+	// Staged (uncommitted) cloud auth change — applies on Save & Connect.
+	const [cloudPending, setCloudPending] = useState<{ signIn: boolean; signOut: boolean; userName: string; url: string }>({ signIn: false, signOut: false, userName: '', url: '' });
 
 	// Docker state
 	const [dockerStatus, setDockerStatus] = useState<DockerStatus>({ state: 'not-installed', version: null, publishedAt: null, imageTag: null });
@@ -239,6 +250,15 @@ export const Welcome: React.FC = () => {
 				case 'cloud:status':
 					setCloudSignedIn((msg as any).signedIn);
 					setCloudUserName((msg as any).userName || '');
+					setCloudSignedInUrl((msg as any).signedInUrl || '');
+					setCloudWaitlisted(Boolean((msg as any).waitlisted));
+					setCloudWaitlistedName((msg as any).waitlistedName || '');
+					setCloudPending({
+						signIn: Boolean((msg as any).pendingSignIn),
+						signOut: Boolean((msg as any).pendingSignOut),
+						userName: (msg as any).pendingUserName || '',
+						url: (msg as any).pendingUrl || '',
+					});
 					break;
 
 				// Status polling — actual OS/Docker daemon state
@@ -305,9 +325,9 @@ export const Welcome: React.FC = () => {
 				}
 
 				case 'serverInfo' as string: {
-					const caps = (msg as any).capabilities || [];
-					setServerCapabilities(caps);
-					setIsSaasProbed(caps.includes('saas'));
+					const caps: string[] = (msg as any).capabilities || [];
+					const unreachable = Boolean((msg as any).unreachable);
+					setProbe({ isSaas: unreachable ? undefined : caps.includes('saas'), unreachable });
 					break;
 				}
 			}
@@ -381,7 +401,7 @@ export const Welcome: React.FC = () => {
 	};
 
 	const handleProbeCloudServer = (cloudUrl: string) => {
-		setIsSaasProbed(undefined);
+		// The previous result stays on screen until the fresh one arrives.
 		sendMessage({ type: 'probeServerInfo', hostUrl: cloudUrl } as any);
 	};
 
@@ -496,16 +516,24 @@ export const Welcome: React.FC = () => {
 						simplified
 						idPrefix="welcome"
 						group="development"
-						serverCapabilities={serverCapabilities}
 						onConnectionModeChange={handleConnectionModeChange}
 						settings={settings}
 						onSettingsChange={handleSettingsChange}
 						cloudSignedIn={cloudSignedIn}
 						cloudUserName={cloudUserName}
-						onCloudSignIn={() => sendMessage({ type: 'cloud:signIn' })}
+						cloudSignedInUrl={cloudSignedInUrl}
+						cloudWaitlisted={cloudWaitlisted}
+						cloudWaitlistedName={cloudWaitlistedName}
+						// Sign-in targets the form's CURRENT effective server, same as
+						// the Settings page — the simplified panel exposes no custom
+						// server UI, so this is normally the default cloud.
+						onCloudSignIn={() => sendMessage({ type: 'cloud:signIn', cloudUrl: (settings.development.useCustomServer && settings.development.cloudUrl) || settings.development.defaultCloudUrl })}
 						onCloudSignOut={() => sendMessage({ type: 'cloud:signOut' })}
+						cloudPending={cloudPending}
+						onCloudUndoPending={() => sendMessage({ type: 'cloud:clearPending' })}
 						onProbeCloudServer={handleProbeCloudServer}
-						isSaas={isSaasProbed}
+						isSaas={probe.isSaas}
+						probeUnreachable={probe.unreachable}
 						onClearCredentials={() => {
 							setSettings((prev) => ({
 								...prev,

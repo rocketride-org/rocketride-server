@@ -25,11 +25,8 @@
 import React, { useMemo, useRef, useState, CSSProperties } from 'react';
 
 import { Button } from 'shell';
-import { Modal } from 'shell';
 import { ConfirmDialog } from 'shell';
 import { DetailPanel } from 'shell';
-import { commonStyles } from 'shell';
-import { formatTime } from 'shell';
 import { DeploymentView } from './DeploymentView';
 import type { IDeploymentViewProps } from './DeploymentView';
 

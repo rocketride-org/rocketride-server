@@ -54,9 +54,13 @@ def _decode_fetch_claim(token: str):
     path; served under today's meaning it would be a store-root-relative
     physical path into another user's tree — see FETCH_CLAIM_VERSION.
     """
-    signing_key = os.environ.get('RR_SIGNING_KEY', '')
-    if not signing_key:
-        return None, JSONResponse({'error': 'Server signing key not configured'}, status_code=500)
+    # Same fallback as the minting side (mint_directory_url / FileStore
+    # .get_url) — both halves MUST resolve the identical key or every signed
+    # URL 401s. Unset means the self-describing development default;
+    # production replaces it via .env/.config.
+    from ai.constants import CONST_DEFAULT_SIGNING_KEY
+
+    signing_key = os.environ.get('RR_SIGNING_KEY', '') or CONST_DEFAULT_SIGNING_KEY
 
     try:
         # Require the `exp` claim so a signed token without an expiration is

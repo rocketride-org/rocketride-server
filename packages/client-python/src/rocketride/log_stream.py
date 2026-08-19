@@ -136,7 +136,9 @@ class LogEventStream:
     of it, and ``play()`` streams forward from it.
     """
 
-    def __init__(self, client: RocketRideClient, project_id: str, source: str, *, team_id: str = '') -> None:
+    def __init__(
+        self, client: RocketRideClient, project_id: str, source: str, *, team_id: str = '', run_kind: str = ''
+    ) -> None:
         """
         Bind the session to its client and stream identity.
 
@@ -145,13 +147,16 @@ class LogEventStream:
             project_id: Pipeline project id.
             source: Source component id.
             team_id: A team id addresses that team's deploy continuum;
-                omitted = the caller's own dev stream (the scope IS the
-                kind — there is no run-kind argument).
+                omitted = the caller's own stream (see run_kind).
+            run_kind: Teamless-scope selector: ''/'dev' = the caller's dev
+                stream; 'deploy' = the caller's personal (@me) deploy
+                stream. Ignored when team_id is set.
         """
         self._client = client
         self._project_id = project_id
         self._source = source
         self._team_id = team_id
+        self._run_kind = run_kind
 
         # Timeline (chapters + segment spans) cache.
         self._timeline: Optional[Dict[str, Any]] = None
@@ -211,7 +216,9 @@ class LogEventStream:
         """Fetch/refresh the timeline (chapters + segment spans) when stale."""
         if not force and self._timeline is not None and time.time() - self._timeline_at < _TIMELINE_TTL_S:
             return
-        self._timeline = await self._client.log.chapters(self._project_id, self._source, team_id=self._team_id)
+        self._timeline = await self._client.log.chapters(
+            self._project_id, self._source, team_id=self._team_id, run_kind=self._run_kind
+        )
         self._timeline_at = time.time()
 
     # =========================================================================
@@ -229,9 +236,10 @@ class LogEventStream:
             return
         self._monitor_registered = True
         try:
-            # The stream's team scope rides the registration — a deploy
-            # stream must subscribe the TEAM's run, not the caller's dev run
-            # (the scope IS the kind).
+            # The stream's scope rides the registration — a team stream
+            # subscribes the TEAM's run; a teamless stream the caller's own
+            # run, with runKind selecting dev vs the personal @me deploy
+            # continuum.
             args = {
                 'projectId': self._project_id,
                 'source': self._source,
@@ -239,6 +247,8 @@ class LogEventStream:
             }
             if self._team_id:
                 args['teamId'] = self._team_id
+            elif self._run_kind == 'deploy':
+                args['runKind'] = self._run_kind
             await self._client.call('rrext_monitor', **args)
         except Exception:
             pass
@@ -755,7 +765,7 @@ class LogEventStream:
         offset = seg.next_offset or 0
         while True:
             chunk = await self._client.log.segment(
-                self._project_id, self._source, seg.id, team_id=self._team_id, offset=offset
+                self._project_id, self._source, seg.id, team_id=self._team_id, run_kind=self._run_kind, offset=offset
             )
             data = chunk.get('data') or ''
             for line in data.split('\n'):

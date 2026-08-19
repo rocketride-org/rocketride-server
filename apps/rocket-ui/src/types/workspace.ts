@@ -3,7 +3,6 @@
 // =============================================================================
 
 import type { PipelineConfig } from 'shell';
-import type { ViewItem } from './tabs';
 import type { ViewState } from 'shared/modules/project';
 
 // Re-export ViewState from shared — single source of truth
@@ -49,7 +48,10 @@ export interface WorkspacePrefs {
 export interface WorkspaceState {
 	version: 1;
 	documents: Record<string, DocumentState>;
-	views: ViewItem[];
+	/** Legacy persisted tab entries — their `./tabs` ViewItem type died with
+	 * the ViewNav-era refactor and nothing reads the field anymore; it
+	 * survives untyped so stored version-1 state stays parseable. */
+	views: unknown[];
 	layouts: Record<string, DocumentLayout>;
 	prefs: WorkspacePrefs;
 }

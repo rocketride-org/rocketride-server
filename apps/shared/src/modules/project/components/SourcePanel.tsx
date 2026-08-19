@@ -221,7 +221,7 @@ function formatTime(time: number | null | undefined): string {
 /**
  * The self-contained per-source monitoring + replay section.
  */
-export const SourcePanel: React.FC<ISourcePanelProps> = ({ source, runKind, projectId, liveEvents, openSession, fetchTimeline, liveTaskStatus, componentNames, isConnected, isSubscribed, isReadonly, serverHost, onPipelineAction, onOpenLink }) => {
+export const SourcePanel: React.FC<ISourcePanelProps> = ({ source, runKind, projectId, liveEvents, openSession, fetchTimeline, liveTaskStatus, componentNames, isSubscribed, isReadonly, serverHost, onPipelineAction, onOpenLink }) => {
 	// --- Section-local view state --------------------------------------------
 	const [pill, setPill] = useState<SourcePill>('status');
 	const [timeline, setTimeline] = useState<TaskTimeline | null>(null);

@@ -13,22 +13,6 @@ from fastapi.responses import FileResponse, JSONResponse
 from ai.web import Request
 
 
-def _get_clients_root() -> Path:
-    """
-    Get the root directory for client packages.
-
-    Returns the path to the clients directory relative to the current working directory.
-    The engine runs from build/Engine, so clients are in ./clients
-
-    Returns:
-        Path: The resolved path to the clients directory
-    """
-    # Engine runs from build/Engine, so clients are at ./clients
-    clients_dir = Path('./clients')
-
-    return clients_dir
-
-
 def _find_latest_file(directory: Path, pattern: str) -> Path | None:
     """
     Find the latest file matching the given pattern in the directory.
@@ -118,18 +102,18 @@ async def client_python_file(request: Request, filename: str):
         JSONResponse: Error message if file not found (404)
 
     Examples:
-        GET /client/python/rocketlib_client_python-1.1.0-py3-none-any.whl
-        -> Serves: rocketlib_client_python-1.1.0-py3-none-any.whl
+        GET /client/python/rocketride-1.3.0-py3-none-any.whl
+        -> Serves: rocketride-1.3.0-py3-none-any.whl
 
-        GET /client/python/rocketlib_client_python-latest-py3-none-any.whl
-        -> Serves: rocketlib_client_python-1.1.0-py3-none-any.whl (latest version)
+        GET /client/python/latest
+        -> Serves: rocketride-1.3.0-py3-none-any.whl (newest wheel)
     """
-    clients_root = _get_clients_root() / 'python' / 'dist'
+    clients_root = _get_static_clients_root() / 'python'
 
     # Check if "latest" version is requested
     if 'latest' in filename.lower():
         # Find the latest wheel file
-        wheel_file = _find_latest_file(clients_root, 'rocketlib_client_python*.whl')
+        wheel_file = _find_latest_file(clients_root, 'rocketride*.whl')
         if not wheel_file or not wheel_file.exists():
             return JSONResponse(
                 status_code=404,
@@ -139,6 +123,16 @@ async def client_python_file(request: Request, filename: str):
                 },
             )
     else:
+        # The filename rides in straight off the URL — refuse separators and
+        # parent segments before joining (a backslash traverses on Windows).
+        if '/' in filename or '\\' in filename or '..' in filename:
+            return JSONResponse(
+                status_code=404,
+                content={
+                    'error': 'Python client package not found',
+                    'message': f'The file {filename} could not be found.',
+                },
+            )
         # Serve specific version
         wheel_file = clients_root / filename
         if not wheel_file.exists():
@@ -160,8 +154,8 @@ async def client_typescript(request: Request):
     Serve the latest TypeScript client package.
 
     This endpoint serves the latest TypeScript client package (.tgz) from the
-    build/Engine/clients directory. The file is served with appropriate headers
-    for browser download.
+    static clients directory beside the engine binary. The file is served with
+    appropriate headers for browser download.
 
     Args:
         request (Request): The incoming HTTP request object
@@ -172,12 +166,12 @@ async def client_typescript(request: Request):
 
     Example:
         GET /client/typescript
-        -> Downloads: rocketlib-client-typescript-1.0.0.tgz
+        -> Downloads: rocketride-1.3.0.tgz
     """
-    clients_root = _get_clients_root() / 'typescript' / 'dist'
+    clients_root = _get_static_clients_root() / 'typescript'
 
     # Look for the latest TypeScript package file
-    tgz_file = _find_latest_file(clients_root, 'rocketlib-client-typescript*.tgz')
+    tgz_file = _find_latest_file(clients_root, 'rocketride*.tgz')
 
     if not tgz_file or not tgz_file.exists():
         return JSONResponse(
@@ -197,8 +191,8 @@ async def client_vscode(request: Request):
     Serve the latest VSCode extension package.
 
     This endpoint serves the latest VSCode extension package (.vsix) from the
-    build/Engine/clients directory. The file is served with appropriate headers
-    for browser download.
+    static clients directory beside the engine binary. The file is served with
+    appropriate headers for browser download.
 
     Args:
         request (Request): The incoming HTTP request object
@@ -209,12 +203,12 @@ async def client_vscode(request: Request):
 
     Example:
         GET /client/vscode
-        -> Downloads: rocketlib-1.0.0.vsix
+        -> Downloads: rocketride-1.0.0.vsix
     """
-    clients_root = _get_clients_root()
+    clients_root = _get_static_clients_root() / 'vscode'
 
     # Look for the latest VSCode extension file
-    vsix_file = _find_latest_file(clients_root, 'rocketlib-*.vsix')
+    vsix_file = _find_latest_file(clients_root, 'rocketride*.vsix')
 
     if not vsix_file or not vsix_file.exists():
         return JSONResponse(

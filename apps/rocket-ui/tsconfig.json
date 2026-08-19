@@ -13,18 +13,23 @@
 		"noEmit": true,
 		"jsx": "react-jsx",
 
-		/* Type Checking */
+		/* Type Checking — the platform baseline (strict, like the vscode app
+		   and the app-template scaffold). exactOptionalPropertyTypes and
+		   noUncheckedIndexedAccess were never enforced anywhere (no tsc ran
+		   this config before the server deploy verifier) and re-litigate the
+		   included shared library source, which is proven under the baseline
+		   only — they stay off by design. */
 		"strict": true,
 		"noUnusedLocals": true,
 		"noUnusedParameters": true,
 		"noFallthroughCasesInSwitch": true,
-		"exactOptionalPropertyTypes": true,
 		"noImplicitReturns": true,
 		"noImplicitOverride": true,
-		"noUncheckedIndexedAccess": true,
 
 		/* Module Resolution */
 		"paths": {
+			"shared": ["../shared/src"],
+			"shared/*": ["../shared/src/*"],
 			"@/*": ["./src/*"],
 			"@components/*": ["./src/components/*"],
 			"@pages/*": ["./src/pages/*"],
@@ -35,9 +40,9 @@
 			"@assets/*": ["./src/assets/*"]
 		},
 
-		/* Emit */
-		"declaration": true,
-		"declarationMap": true,
+		/* Emit — noEmit app: declaration flags stay off (they add TS2742-class
+		   portability diagnostics while emitting nothing; the template
+		   scaffold sets none). */
 		"sourceMap": true,
 		"outDir": "./dist",
 		"removeComments": true,
@@ -66,7 +71,8 @@
 		"src/types/global.d.ts",
 		"public/**/*",
 		"*.ts",
-		"*.tsx"
+		"*.tsx",
+    "rsbuild.config.mts"
 	],
 
 	"exclude": [

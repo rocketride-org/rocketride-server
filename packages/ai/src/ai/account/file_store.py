@@ -90,8 +90,7 @@ def mint_directory_url(dir_path: str, entry_file: str, expires_in: int = 86400, 
         Absolute URL to ``entry_file`` inside the signed directory.
 
     Raises:
-        ValueError:   If ``expires_in`` is not positive or the signing key
-                      is not configured.
+        ValueError:   If ``expires_in`` is not positive.
         RuntimeError: If ``RR_BASE_URL`` is not configured.
     """
     import os
@@ -99,12 +98,14 @@ def mint_directory_url(dir_path: str, entry_file: str, expires_in: int = 86400, 
 
     import jwt
 
+    from ai.constants import CONST_DEFAULT_SIGNING_KEY
+
     if expires_in <= 0:
         raise ValueError('expires_in must be positive')
 
-    signing_key = os.environ.get('RR_SIGNING_KEY', '')
-    if not signing_key:
-        raise ValueError('RR_SIGNING_KEY not configured — cannot generate fetch URL')
+    # Unset falls back to the self-describing development default so a fresh
+    # install works out of the box; production replaces it via .env/.config.
+    signing_key = os.environ.get('RR_SIGNING_KEY', '') or CONST_DEFAULT_SIGNING_KEY
 
     # Directory claim: `dir` (not `path`) so the fetch handler knows the
     # capability covers a subtree, gated by the same claim generation.
@@ -382,12 +383,13 @@ def resolve_scope(
       - sys.admin sessions: full access everywhere, system trees included;
         team names still resolve in their OWN org only, ``=id`` references
         cross boundaries mechanically (the platform support capability).
-      - ordinary sessions: ``@/User/<rest>`` is an alias of the own tree;
-        team references (name or ``=id``) resolve strictly within their own
-        membership; ``@/Org`` (implicitly their one org) needs ``org.admin``;
-        ``task.store`` required elsewhere; SYSTEM TREES ARE FULLY DENIED —
-        logs/deployments are reachable only through their domain APIs
-        (rrext_log / rrext_deploy), never the file API.
+      - ordinary sessions: the OWN tree (plain paths and the ``@/User/<rest>``
+        alias) is unconditional — ownership is the authorization, no team or
+        org grant consulted; team references (name or ``=id``) resolve
+        strictly within their own membership and require ``task.store``;
+        ``@/Org`` (implicitly their one org) needs ``org.admin``; SYSTEM
+        TREES ARE FULLY DENIED — logs/deployments are reachable only through
+        their domain APIs (rrext_log / rrext_deploy), never the file API.
 
     Raises:
         PermissionError: Identity may not touch the addressed location (or
@@ -438,20 +440,13 @@ def resolve_scope(
         raise PermissionError(f'{_system_tree(rest)}/ is system-owned (use its API)')
 
     # -- Own namespace: plain paths and their joined-mode alias @/User/<rest> -
+    # Ownership IS the authorization: this branch resolves to the caller's
+    # own users/<id>/files tree by construction, so an authenticated
+    # identity needs no team- or org-carried permission. Personal storage
+    # must survive every org/team context switch — routing it through the
+    # active org's team grants denied users their own files whenever an
+    # org switch landed them somewhere they hold no team membership.
     if kind == 'own' or (kind == 'user' and ref is None):
-        if is_sys_admin:
-            return (kind, f'users/{client_id}/files', rest)
-        # The caller's OWN tree must not hinge on the defaultTeam pointer —
-        # an unset or stale defaultTeam would deny a user their own storage.
-        # The file-storage permission is granted when ANY membership carries
-        # it (org.admin implies it via full team permissions).
-        org = account_info.organization if isinstance(account_info.organization, dict) else {}
-        if not any(
-            _DEFAULT_PERMISSION in resolve_task_permissions(account_info, team['id'])
-            for team in org.get('teams', [])
-            if team.get('id')
-        ):
-            raise PermissionError(f'Permission {_DEFAULT_PERMISSION!r} denied')
         return (kind, f'users/{client_id}/files', rest)
 
     # -- @/Org: implicitly MY org — org.admin only; =id crosses for sys.admin -
@@ -1162,9 +1157,7 @@ class FileStore:
             A direct HTTP(S) URL to the file.
 
         Raises:
-            ValueError: If ``expires_in`` is not positive, or if
-                ``RR_SIGNING_KEY`` is not set and the backend requires a
-                locally-signed URL.
+            ValueError: If ``expires_in`` is not positive.
             RuntimeError: If ``RR_BASE_URL`` is not configured and the
                 backend requires a locally-signed URL.
         """
@@ -1190,9 +1183,12 @@ class FileStore:
         import time
         import jwt
 
-        signing_key = os.environ.get('RR_SIGNING_KEY', '')
-        if not signing_key:
-            raise ValueError('RR_SIGNING_KEY not configured — cannot generate fetch URL')
+        from ai.constants import CONST_DEFAULT_SIGNING_KEY
+
+        # Unset falls back to the self-describing development default so a
+        # fresh install works out of the box; production replaces it via
+        # .env/.config.
+        signing_key = os.environ.get('RR_SIGNING_KEY', '') or CONST_DEFAULT_SIGNING_KEY
 
         # The claim carries the RESOLVED physical store path, not the wire
         # spelling: authorization already ran above (_full_path under THIS

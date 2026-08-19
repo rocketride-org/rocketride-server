@@ -74,6 +74,7 @@ def _task(*, source='src-id', task_name=None, pipeline=None, status=None):
     t._threads = 4
     t._pipelineTraceLevel = None
     t._run_kind = 'dev'
+    t._owner_kind = 'user'
     t._status = status if status is not None else SimpleNamespace(name='', state=0, exitMessage='')
     t._debugger = None
     t._debug_port = None
@@ -210,6 +211,7 @@ def test_build_task_deploy_storage_anchor(monkeypatch, tmp_path):
     pipeline = {'source': 'src', 'components': []}
     t = _task(pipeline=pipeline)
     t._run_kind = 'deploy'
+    t._owner_kind = 'team'
     config = Task._build_task(t, pipeline)
     assert config['storage'] == {'root': 'teams/team-1/files/tasks/proj-test'}
 
@@ -221,6 +223,7 @@ def test_build_task_deploy_without_team_refuses(monkeypatch, tmp_path):
 
     t = _task(pipeline={'components': []})
     t._run_kind = 'deploy'
+    t._owner_kind = 'team'
     t.team_id = ''
     with pytest.raises(ValueError, match='team_id'):
         Task._build_task(t, {'components': []})
@@ -802,13 +805,58 @@ async def test_subprocess_env_scrubs_broker_credentials(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_subprocess_env_injects_resolved_dsn(monkeypatch):
-    async def fake_resolve(client_id):
-        assert client_id == 'client-env-test'
+    # Capture the tenant OUTSIDE the stub and assert after: _build_subprocess_env
+    # converts resolver exceptions into ROCKETRIDE_DB_RESOLVE_ERROR, so an
+    # AssertionError raised inside fake_resolve would be swallowed and surface
+    # as a missing DSN key here instead of the real tenant mismatch.
+    seen = {}
+
+    async def fake_resolve(tenant_id):
+        # The tenant is the ORG (B6) — the user is only the OSS fallback.
+        seen['tenant'] = tenant_id
         return 'postgresql://tenant@pooler/db?sslmode=require'
 
     _patch_resolve(monkeypatch, fake_resolve)
     env = await Task._build_subprocess_env(_env_task(pipeline=_DB_PIPELINE))
     assert env['ROCKETRIDE_DB_DSN'] == 'postgresql://tenant@pooler/db?sslmode=require'
+    assert seen['tenant'] == 'org-1'
+
+
+@pytest.mark.asyncio
+async def test_subprocess_env_dsn_tenant_is_the_org(monkeypatch):
+    """The DB tenant is the ORG, not the user: a deploy run (client_id='')
+    still resolves, and an org switch cannot silently re-point a user's DB
+    nodes at another database.
+    """
+    seen = {}
+
+    async def fake_resolve(tenant_id):
+        seen['tenant'] = tenant_id
+        return 'postgresql://tenant@pooler/db'
+
+    _patch_resolve(monkeypatch, fake_resolve)
+    # A deploy-shaped task: no client identity at all, org present.
+    t = _env_task(pipeline=_DB_PIPELINE)
+    t.client_id = ''
+    env = await Task._build_subprocess_env(t)
+    assert env['ROCKETRIDE_DB_DSN'] == 'postgresql://tenant@pooler/db'
+    assert seen['tenant'] == 'org-1'
+
+
+@pytest.mark.asyncio
+async def test_subprocess_env_dsn_falls_back_to_client_without_an_org(monkeypatch):
+    """OSS/single-user (no org concept): the user stays the tenant."""
+    seen = {}
+
+    async def fake_resolve(tenant_id):
+        seen['tenant'] = tenant_id
+        return 'postgresql://tenant@pooler/db'
+
+    _patch_resolve(monkeypatch, fake_resolve)
+    t = _env_task(pipeline=_DB_PIPELINE)
+    t.org_id = ''
+    await Task._build_subprocess_env(t)
+    assert seen['tenant'] == 'client-env-test'
 
 
 @pytest.mark.asyncio

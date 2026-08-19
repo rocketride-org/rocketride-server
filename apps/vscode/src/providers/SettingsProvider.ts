@@ -38,7 +38,11 @@ import { ConfigManager, SettingsSnapshot } from '../config';
 import { getConnectionManager, getEngineRegistry } from '../extension';
 import { AgentManager } from '../agents/agent-manager';
 import { DeployManager } from '../connection/deploy-manager';
+import { commitStagedCloudCredentials } from '../connection/connection';
+import { CloudAuthProvider } from '../auth/CloudAuthProvider';
 import { ConnectionMessageHandler } from './shared/connection-message-handler';
+import { getStripePublishableKey } from './shared/stripe-key';
+import type { StripeKeyUnavailableReason } from './types/checkoutTypes';
 import { isSubscribed } from '../shared/util/subscriptionGate';
 import { PIPE_BUILDER_APP_ID } from '../shared/types';
 
@@ -213,6 +217,19 @@ export class SettingsProvider {
 						break;
 					}
 
+					case 'checkout:getStripeKey': {
+						// Server-supplied publishable key (cached per URI) so the
+						// CheckoutModal mounts Stripe for THIS server's account. An
+						// empty key carries a reason (no connection, failed probe,
+						// or a server without billing) so the webview can explain
+						// the gap.
+						const client = getConnectionManager()?.getClient();
+						const { key, probed } = await getStripePublishableKey(client);
+						const reason: StripeKeyUnavailableReason | undefined = key ? undefined : !client ? 'no-connection' : probed ? 'no-billing' : 'probe-failed';
+						panel.webview.postMessage({ type: 'checkout:stripeKey', key, requestId: message.requestId, ...(reason ? { reason } : {}) });
+						break;
+					}
+
 					default: {
 						// Delegate connection messages (cloud, docker, service, test, engine versions, sudo)
 						const handled = await this.connHandler.handleMessage(message, panel.webview);
@@ -243,6 +260,9 @@ export class SettingsProvider {
 		// Clean up when panel is disposed
 		panel.onDidDispose(() => {
 			cleanupCloudAuth();
+			// Closing the page without saving discards any staged sign-in or
+			// sign-out — nothing uncommitted survives the settings surface.
+			CloudAuthProvider.getInstance().clearPendingChanges();
 			this.panel = undefined;
 			this.activeWebviews.delete(panelWebview);
 			this.connHandler.stopStatusPolling();
@@ -272,12 +292,20 @@ export class SettingsProvider {
 			}
 		}
 
+		// The cloudUrl settings' package.json defaults — sent to the webview
+		// so it can show/probe the default cloud without baking any address.
+		const devDefaultCloudUrl = vscode.workspace.getConfiguration('rocketride.development').inspect<string>('cloudUrl')?.defaultValue ?? '';
+		const depDefaultCloudUrl = vscode.workspace.getConfiguration('rocketride.deployment').inspect<string>('cloudUrl')?.defaultValue ?? '';
+
 		// Send nested structure matching the webview SettingsData type
 		const allSettings = {
 			// Connection groups
 			development: {
 				connectionMode: config.development.connectionMode,
 				hostUrl: config.development.hostUrl,
+				useCustomServer: config.development.useCustomServer,
+				cloudUrl: config.development.cloudUrl,
+				defaultCloudUrl: devDefaultCloudUrl,
 				hasApiKey: hasApiKey,
 				apiKey: apiKey,
 				local: {
@@ -287,6 +315,9 @@ export class SettingsProvider {
 			deployment: {
 				connectionMode: config.deployment.connectionMode,
 				hostUrl: config.deployment.hostUrl,
+				useCustomServer: config.deployment.useCustomServer,
+				cloudUrl: config.deployment.cloudUrl,
+				defaultCloudUrl: depDefaultCloudUrl,
 				hasApiKey: !!config.deployment.apiKey,
 				apiKey: config.deployment.apiKey || '',
 				local: {
@@ -342,6 +373,14 @@ export class SettingsProvider {
 			// intermediate config-change listeners during the batch so no CM reacts
 			// to half-written state (e.g., new API key without new host URL).
 			await this.configManager.applyAllSettings(snapshot);
+
+			// Step 1b: Commit any STAGED cloud auth change (sign-in/sign-out from
+			// the Cloud panel) — the settings page is transactional, so the
+			// credential lands in SecretStorage only here, together with the form
+			// it belongs to. When the stored session changed, live cloud
+			// connections are torn down so the reconcile below reconnects them
+			// with the fresh credential state.
+			await commitStagedCloudCredentials();
 
 			// Mark welcome as dismissed — user has configured settings
 			await vscode.workspace.getConfiguration('rocketride').update('welcomeDismissed', true, vscode.ConfigurationTarget.Global);

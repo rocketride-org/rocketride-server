@@ -29,9 +29,6 @@
 import React, { useEffect, useMemo, useState, CSSProperties, ComponentProps } from 'react';
 
 import { commonStyles } from 'shell';
-import { Button } from 'shell';
-import { Modal } from 'shell';
-import { ConfirmDialog } from 'shell';
 import { Card } from 'shell';
 import { CardDataGrid } from 'shell';
 import { ContentHeader } from 'shell';
@@ -237,7 +234,7 @@ const S = {
  * The deployment tab: STATUS | RUNS | DESIGN (READONLY) over one team's
  * deployment. See the module docstring.
  */
-export const DeploymentView: React.FC<IDeploymentViewProps> = ({ teamName, documentTitle, deployment, pipeline, servicesJson, handleValidatePipeline, sourceId, sourceName, sourceConfig, onSourceConfigChange, history, nextRun, runningSources = {}, canControl, isConnected, isSubscribed, serverHost, openSession, fetchTimeline, liveEvents, onOpenLink }) => {
+export const DeploymentView: React.FC<IDeploymentViewProps> = ({ documentTitle, deployment, pipeline, servicesJson, handleValidatePipeline, sourceId, sourceName, sourceConfig, onSourceConfigChange, history, nextRun, canControl, isConnected, isSubscribed, serverHost, openSession, fetchTimeline, liveEvents, onOpenLink }) => {
 	const [mode, setMode] = useState<'status' | 'runs' | 'design'>('status');
 	// The canvas must NOT initialize inside a hidden panel: a display:none
 	// container measures 0x0 and the viewport fit computes garbage. Mount

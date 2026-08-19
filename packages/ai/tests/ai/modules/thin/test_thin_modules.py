@@ -221,11 +221,12 @@ def test_find_latest_file_glob_filters_extension(tmp_path):
     assert picked.name == 'a.tgz'
 
 
-def test_get_clients_root_returns_path():
-    """_get_clients_root returns a Path pointing at ./clients."""
-    root = clients_mod._get_clients_root()
+def test_get_static_clients_root_returns_path():
+    """_get_static_clients_root points at static/clients beside the binary."""
+    root = clients_mod._get_static_clients_root()
     assert isinstance(root, Path)
     assert root.name == 'clients'
+    assert root.parent.name == 'static'
 
 
 # ---------------------------------------------------------------------------
@@ -236,8 +237,8 @@ def test_get_clients_root_returns_path():
 @pytest.mark.asyncio
 async def test_client_python_file_returns_404_for_missing_specific_version(monkeypatch, tmp_path):
     """Asking for a specific wheel that doesn't exist returns a 404 JSONResponse."""
-    monkeypatch.setattr(clients_mod, '_get_clients_root', lambda: tmp_path)
-    # tmp_path/python/dist does not exist — file.exists() is False
+    monkeypatch.setattr(clients_mod, '_get_static_clients_root', lambda: tmp_path)
+    # tmp_path/python does not exist — file.exists() is False
     result = await clients_mod.client_python_file(MagicMock(), 'missing-1.0.whl')
     assert result.status_code == 404
 
@@ -245,11 +246,11 @@ async def test_client_python_file_returns_404_for_missing_specific_version(monke
 @pytest.mark.asyncio
 async def test_client_python_file_serves_specific_version(monkeypatch, tmp_path):
     """An existing wheel file is served via FileResponse."""
-    dist = tmp_path / 'python' / 'dist'
-    dist.mkdir(parents=True)
-    wheel = dist / 'rocketlib_client_python-1.0-py3-none-any.whl'
+    staged = tmp_path / 'python'
+    staged.mkdir(parents=True)
+    wheel = staged / 'rocketride-1.3.0-py3-none-any.whl'
     wheel.write_text('binary-content')
-    monkeypatch.setattr(clients_mod, '_get_clients_root', lambda: tmp_path)
+    monkeypatch.setattr(clients_mod, '_get_static_clients_root', lambda: tmp_path)
 
     result = await clients_mod.client_python_file(MagicMock(), wheel.name)
     # FileResponse exposes .path; JSONResponse does not. Compare as Path
@@ -260,28 +261,43 @@ async def test_client_python_file_serves_specific_version(monkeypatch, tmp_path)
 @pytest.mark.asyncio
 async def test_client_python_file_resolves_latest(monkeypatch, tmp_path):
     """'latest' in the filename triggers the find-latest path."""
-    dist = tmp_path / 'python' / 'dist'
-    dist.mkdir(parents=True)
-    wheel = dist / 'rocketlib_client_python-2.0-py3-none-any.whl'
+    staged = tmp_path / 'python'
+    staged.mkdir(parents=True)
+    wheel = staged / 'rocketride-2.0-py3-none-any.whl'
     wheel.write_text('content')
-    monkeypatch.setattr(clients_mod, '_get_clients_root', lambda: tmp_path)
+    monkeypatch.setattr(clients_mod, '_get_static_clients_root', lambda: tmp_path)
 
-    result = await clients_mod.client_python_file(MagicMock(), 'rocketlib_client_python-latest-py3-none-any.whl')
+    result = await clients_mod.client_python_file(MagicMock(), 'latest')
     assert Path(getattr(result, 'path', '')) == wheel
 
 
 @pytest.mark.asyncio
 async def test_client_python_file_latest_returns_404_when_none(monkeypatch, tmp_path):
     """'latest' requested but no wheels exist -> 404."""
-    monkeypatch.setattr(clients_mod, '_get_clients_root', lambda: tmp_path)
+    monkeypatch.setattr(clients_mod, '_get_static_clients_root', lambda: tmp_path)
     result = await clients_mod.client_python_file(MagicMock(), 'anything-latest.whl')
     assert result.status_code == 404
 
 
 @pytest.mark.asyncio
+async def test_client_python_file_refuses_traversal(monkeypatch, tmp_path):
+    """Separators and parent segments in the filename 404 before the join —
+    a backslash in a URL path segment traverses on Windows.
+    """
+    staged = tmp_path / 'python'
+    staged.mkdir(parents=True)
+    (tmp_path / 'secret.whl').write_text('outside-the-python-dir')
+    monkeypatch.setattr(clients_mod, '_get_static_clients_root', lambda: tmp_path)
+
+    for name in ('..\\secret.whl', '../secret.whl', 'a/../secret.whl'):
+        result = await clients_mod.client_python_file(MagicMock(), name)
+        assert result.status_code == 404
+
+
+@pytest.mark.asyncio
 async def test_client_typescript_returns_404_when_no_package(monkeypatch, tmp_path):
     """No tgz files -> 404 JSONResponse."""
-    monkeypatch.setattr(clients_mod, '_get_clients_root', lambda: tmp_path)
+    monkeypatch.setattr(clients_mod, '_get_static_clients_root', lambda: tmp_path)
     result = await clients_mod.client_typescript(MagicMock())
     assert result.status_code == 404
 
@@ -289,11 +305,11 @@ async def test_client_typescript_returns_404_when_no_package(monkeypatch, tmp_pa
 @pytest.mark.asyncio
 async def test_client_typescript_serves_latest_package(monkeypatch, tmp_path):
     """An existing tgz is served by FileResponse."""
-    dist = tmp_path / 'typescript' / 'dist'
-    dist.mkdir(parents=True)
-    pkg = dist / 'rocketlib-client-typescript-1.0.0.tgz'
+    staged = tmp_path / 'typescript'
+    staged.mkdir(parents=True)
+    pkg = staged / 'rocketride-1.3.0.tgz'
     pkg.write_text('payload')
-    monkeypatch.setattr(clients_mod, '_get_clients_root', lambda: tmp_path)
+    monkeypatch.setattr(clients_mod, '_get_static_clients_root', lambda: tmp_path)
 
     result = await clients_mod.client_typescript(MagicMock())
     assert Path(getattr(result, 'path', '')) == pkg
@@ -302,7 +318,7 @@ async def test_client_typescript_serves_latest_package(monkeypatch, tmp_path):
 @pytest.mark.asyncio
 async def test_client_vscode_returns_404_when_no_extension(monkeypatch, tmp_path):
     """No vsix files -> 404."""
-    monkeypatch.setattr(clients_mod, '_get_clients_root', lambda: tmp_path)
+    monkeypatch.setattr(clients_mod, '_get_static_clients_root', lambda: tmp_path)
     result = await clients_mod.client_vscode(MagicMock())
     assert result.status_code == 404
 
@@ -310,9 +326,11 @@ async def test_client_vscode_returns_404_when_no_extension(monkeypatch, tmp_path
 @pytest.mark.asyncio
 async def test_client_vscode_serves_latest_extension(monkeypatch, tmp_path):
     """An existing vsix is served by FileResponse."""
-    ext = tmp_path / 'rocketlib-1.2.3.vsix'
+    staged = tmp_path / 'vscode'
+    staged.mkdir(parents=True)
+    ext = staged / 'rocketride-1.2.3.vsix'
     ext.write_text('payload')
-    monkeypatch.setattr(clients_mod, '_get_clients_root', lambda: tmp_path)
+    monkeypatch.setattr(clients_mod, '_get_static_clients_root', lambda: tmp_path)
 
     result = await clients_mod.client_vscode(MagicMock())
     assert Path(getattr(result, 'path', '')) == ext

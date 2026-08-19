@@ -72,12 +72,12 @@ export class AccountApi {
 	}
 
 	/**
-	 * Sets the user's preferred default team.
+	 * Sets the user's DEV team — the team dev-mode runs bill to and whose environment layer applies.
 	 *
 	 * @param teamId - The team ID to set as default.
 	 */
-	async setDefaultTeam(teamId: string): Promise<void> {
-		await this.client.call('rrext_account_me', { subcommand: 'set_default_team', teamId });
+	async setDevTeam(teamId: string): Promise<void> {
+		await this.client.call('rrext_account_me', { subcommand: 'set_dev_team', teamId });
 	}
 
 	/**

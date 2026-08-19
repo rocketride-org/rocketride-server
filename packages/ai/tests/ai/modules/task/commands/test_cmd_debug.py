@@ -52,13 +52,13 @@ def _make_conn(*, account_info=None, server=None, debug_token=None, debug_id=Non
     return conn
 
 
-def _account_info(*, organization=None, default_team='team-1'):
+def _account_info(*, organization=None, dev_team='team-1'):
     """Build an AccountInfo stub."""
     return SimpleNamespace(
         userId='user-1',
         auth='ak_x',
         userToken='token-user-1',
-        defaultTeam=default_team,
+        devTeam=dev_team,
         organization=organization if organization is not None else {'id': 'org-1', 'teams': [{'id': 'team-1'}]},
     )
 
@@ -88,7 +88,7 @@ async def test_on_initialize_returns_debug_capabilities():
 
 @pytest.mark.asyncio
 async def test_on_launch_starts_task_with_resolved_org_and_stores_token():
-    """on_launch resolves org_id from defaultTeam, calls start_task, and records _debug_*."""
+    """on_launch resolves org_id from devTeam, calls start_task, and records _debug_*."""
     server = MagicMock()
     server.start_task = AsyncMock(return_value={'id': 'task-99', 'token': 'tk_99'})
     conn = _make_conn(account_info=_account_info(), server=server)
@@ -134,7 +134,7 @@ async def test_on_launch_rejects_client_team_override():
     """
     server = MagicMock()
     server.start_task = AsyncMock()
-    conn = _make_conn(account_info=_account_info(default_team='team-1'), server=server)
+    conn = _make_conn(account_info=_account_info(dev_team='team-1'), server=server)
     with pytest.raises(PermissionError, match='development team'):
         await DebugCommands.on_launch(conn, {'arguments': {'teamId': 'team-foreign'}})
     server.start_task.assert_not_called()
@@ -145,7 +145,7 @@ async def test_on_launch_checks_task_debug_on_dev_team():
     """on_launch verifies task.debug against the development team."""
     server = MagicMock()
     server.start_task = AsyncMock(return_value={'id': 'task-1', 'token': 'tk_1'})
-    conn = _make_conn(account_info=_account_info(default_team='team-1'), server=server)
+    conn = _make_conn(account_info=_account_info(dev_team='team-1'), server=server)
     await DebugCommands.on_launch(conn, {'arguments': {}})
     conn.verify_team_permission.assert_called_once_with('team-1', 'task.debug')
 

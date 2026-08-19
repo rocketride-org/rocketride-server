@@ -41,7 +41,18 @@ def initModule(server: WebServer, config: Dict[str, Any]):
     server.app.state.scheduler = scheduler
     scheduler.start()
 
+    # The app BUILD WORKER: compiles deployed app source zips into their
+    # servable dist/ trees. Lives beside the scheduler (same lifecycle
+    # ownership); its startup sweep requeues builds a previous process left
+    # in flight. The deploy receipt enqueues through the module singleton.
+    from ai.account.app_build import init_worker
+
+    build_worker = init_worker(task_server)
+    server.app.state.app_build = build_worker
+    build_worker.start()
+
     async def _shutdown() -> None:
+        await build_worker.shutdown()
         await scheduler.shutdown()
         await task_server.shutdown()
 
