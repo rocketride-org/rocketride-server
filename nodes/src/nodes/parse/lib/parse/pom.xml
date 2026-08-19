@@ -2,19 +2,27 @@
 <project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
 	<modelVersion>4.0.0</modelVersion>
 	<groupId>com.rocketride</groupId>
-	<artifactId>tika</artifactId>
-	<version>@ROCKETRIDE_TIKA_VERSION@</version>
+	<artifactId>rocketride-parse</artifactId>
+	<version>3.2.3</version>
 	<name>rocketride</name>
 	<url>https://www.rocketride.com/</url>
 	<properties>
 		<project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
 		<maven.compiler.release>13</maven.compiler.release>
+		<tika.version>3.2.3</tika.version>
+		<rocketride.build.dir>${project.basedir}/target</rocketride.build.dir>
 	</properties>
 	<dependencies>
 		<dependency>
+			<groupId>com.rocketride</groupId>
+			<artifactId>rocketride-core</artifactId>
+			<version>1.0</version>
+			<scope>provided</scope>
+		</dependency>
+		<dependency>
 			<groupId>org.apache.tika</groupId>
 			<artifactId>tika-core</artifactId>
-			<version>@ROCKETRIDE_TIKA_VERSION@</version>
+			<version>${tika.version}</version>
 			<exclusions>
 				<exclusion>
 					<groupId>org.slf4j</groupId>
@@ -25,7 +33,7 @@
 		<dependency>
 			<groupId>org.apache.tika</groupId>
 			<artifactId>tika-parsers-standard-package</artifactId>
-			<version>@ROCKETRIDE_TIKA_VERSION@</version>
+			<version>${tika.version}</version>
 			<exclusions>
 				<exclusion>
 					<groupId>xml-apis</groupId>
@@ -44,7 +52,7 @@
 		<dependency>
 			<groupId>org.apache.tika</groupId>
 			<artifactId>tika-parser-scientific-module</artifactId>
-			<version>@ROCKETRIDE_TIKA_VERSION@</version>
+			<version>${tika.version}</version>
 			<exclusions>
 				<exclusion>
 					<groupId>org.slf4j</groupId>
@@ -59,12 +67,12 @@
 		<dependency>
 			<groupId>org.apache.tika</groupId>
 			<artifactId>tika-parser-advancedmedia-module</artifactId>
-			<version>@ROCKETRIDE_TIKA_VERSION@</version>
+			<version>${tika.version}</version>
 		</dependency>
 		<dependency>
 			<groupId>org.apache.tika</groupId>
 			<artifactId>tika-parser-sqlite3-module</artifactId>
-			<version>@ROCKETRIDE_TIKA_VERSION@</version>
+			<version>${tika.version}</version>
 		</dependency>
 		<!-- JPEG 2000 support isn't included by Tika due to its 
 			incompatible license; force it to be included in our jar -->
@@ -117,16 +125,19 @@
 			<groupId>org.apache.logging.log4j</groupId>
 			<artifactId>log4j-api</artifactId>
 			<version>2.25.2</version>
+			<scope>provided</scope>
 		</dependency>
 		<dependency>
 			<groupId>org.apache.logging.log4j</groupId>
 			<artifactId>log4j-core</artifactId>
 			<version>2.25.2</version>
+			<scope>provided</scope>
 		</dependency>
 		<dependency>
 			<groupId>org.apache.logging.log4j</groupId>
 			<artifactId>log4j-1.2-api</artifactId>
 			<version>2.25.2</version>
+			<scope>provided</scope>
 		</dependency>
 		<dependency>
 			<groupId>org.junit.jupiter</groupId>
@@ -142,6 +153,8 @@
 		</dependency>	
 	</dependencies>
 	<build>
+		<directory>${rocketride.build.dir}</directory>
+		<finalName>rocketride-parse</finalName>
 		<pluginManagement>
 			<!-- lock down plugins versions to avoid using Maven defaults (may be moved to parent pom) -->
 			<plugins>
