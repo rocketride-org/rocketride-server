@@ -11,9 +11,6 @@
 		"jdkVersion": "17",
 		"mavenVersion": "3.9.6"
 	},
-	"tika": {
-		"version": "3.2.3"
-	},
 	"author": "rocketride.org",
 	"repository": {
 		"type": "git",
