@@ -173,6 +173,7 @@ add_subdirectory(engine)
 # artifacts.
 add_subdirectory(${ROCKETRIDE_PROJECT_ROOT}/nodes/src/nodes/cpp-example ${CMAKE_BINARY_DIR}/nodes/cpp-example)
 add_subdirectory(${ROCKETRIDE_PROJECT_ROOT}/nodes/src/nodes/hash ${CMAKE_BINARY_DIR}/nodes/hash)
+add_subdirectory(${ROCKETRIDE_PROJECT_ROOT}/nodes/src/nodes/parse ${CMAKE_BINARY_DIR}/nodes/parse)
 
 # -----------------------------------------------------------------------------
 # Testing configuration
