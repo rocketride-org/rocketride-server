@@ -21,33 +21,49 @@
 // SOFTWARE.
 // =============================================================================
 
+//-----------------------------------------------------------------------------
+//
+//	The node's entry points. The engine resolves these by name after loading
+//	the library and drives the whole lifetime of the node through them.
+//
+//	Registration happens here rather than in a static initializer on purpose:
+//	the engine's factory registry has an explicit init/deinit, and a factory
+//	that outlives the module it points into is a crash waiting for shutdown.
+//
+//-----------------------------------------------------------------------------
+#include <node_api.h>
+
 #include <engLib/eng.h>
 
-namespace engine::store::filter::parse {
+#include "parse.hpp"
+
 //-------------------------------------------------------------------------
 /// @details
-///		Begins the filter operation
+///		Registers the node's factories with the engine. After this returns
+///		the engine can instantiate the node exactly like a built-in filter.
 ///	@returns
-///		Error
+///		true if the node initialized
 //-------------------------------------------------------------------------
-Error IFilterGlobal::beginFilterGlobal() noexcept {
-    LOGPIPE();
+extern "C" ROCKETRIDE_NODE_API bool initializeNode() noexcept {
+    using namespace engine::store::filter::parse;
 
-    auto ccode = m_tika.begin(endpoint->config);
-    return ccode;
+    if (auto ccode = ap::Factory::registerFactory(IFilterInstance::Factory,
+                                                  IFilterGlobal::Factory)) {
+        LOG(Services, "Failed to register the parse factories:", ccode);
+        return false;
+    }
+
+    return true;
 }
 
 //-------------------------------------------------------------------------
 /// @details
-///		Ends the filter operation
-///	@returns
-///		Error
+///		Removes what initializeNode() registered, so nothing in the registry
+///		points into this module once it is unloaded.
 //-------------------------------------------------------------------------
-Error IFilterGlobal::endFilterGlobal() noexcept {
-    LOGPIPE();
+extern "C" ROCKETRIDE_NODE_API void deinitializeNode() noexcept {
+    using namespace engine::store::filter::parse;
 
-    auto ccode = m_tika.end();
-    return ccode;
+    ap::Factory::deregisterFactory(IFilterInstance::Factory,
+                                   IFilterGlobal::Factory);
 }
-
-}  // namespace engine::store::filter::parse

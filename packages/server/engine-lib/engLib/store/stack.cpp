@@ -788,12 +788,14 @@ Error IServiceEndpoint::buildPipeStack() noexcept {
     Text filterPipe = engine::store::filter::pipe::Type;
     Text filterBottom = engine::store::filter::bottom::Type;
 
-    // The hash filter is C++ node and not available in tests
+    // The hash and parse filters are C++ nodes and not available in tests
     const auto filterHash = "hash"_itv;
+    const auto filterParse = "parse"_itv;
     const auto isDeclared = [](TextView type) noexcept {
         return (bool) IServices::getServiceDefinition((Text) type);
     };
     const bool hasHashFilter = isDeclared(filterHash);
+    const bool hasParseFilter = isDeclared(filterParse);
 
     // Add the filter
     const auto pushAbsolute =
@@ -923,7 +925,7 @@ Error IServiceEndpoint::buildPipeStack() noexcept {
                              "The service is not a target service");
 
             // We are classifying a single file
-            pushString(filter::parse::Type);
+            if (hasParseFilter) pushString(filterParse);
             // pushString(filter::tokenize::Type);
             pushString(filter::classify::Type);
             break;
