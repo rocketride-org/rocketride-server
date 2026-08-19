@@ -2,4 +2,4 @@
 # deployments created on/after 2026-07-31 serve VSR (verified live: full
 # memory round-trip on rc21); older deployments must be recreated, and a
 # local server must be a VSR-enabled build (e.g. laserdata/laser-stack).
-laser-sdk==0.0.1rc21
+laser-sdk==0.1.1
