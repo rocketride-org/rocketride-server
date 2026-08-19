@@ -788,6 +788,8 @@ Error IServiceEndpoint::buildPipeStack() noexcept {
     Text filterPipe = engine::store::filter::pipe::Type;
     Text filterBottom = engine::store::filter::bottom::Type;
 
+    // A filter that ships as a node may not be available - a host that cannot
+    // load nodes (engtest) runs without it, and it resolves to nothing there
     const auto declaredFilter = [](auto type) noexcept {
         return IServices::getServiceDefinition((Text) type) ? type
                                                             : decltype(type){};
@@ -795,6 +797,7 @@ Error IServiceEndpoint::buildPipeStack() noexcept {
 
     // The C++ nodes may not be available
     const auto filterHash = declaredFilter("hash"_itv);
+    const auto filterParse = declaredFilter("parse"_itv);
 
     // Add the filter
     const auto pushAbsolute =
@@ -923,8 +926,12 @@ Error IServiceEndpoint::buildPipeStack() noexcept {
                 return APERR(Ec::InvalidParam,
                              "The service is not a target service");
 
-            // We are classifying a single file
-            pushString(filter::parse::Type);
+            // These require a parse filter
+            if (!filterParse)
+                return APERR(Ec::InvalidCommand,
+                             "The parse node is not available");
+
+            pushString(filterParse);
             // pushString(filter::tokenize::Type);
             pushString(filter::classify::Type);
             break;

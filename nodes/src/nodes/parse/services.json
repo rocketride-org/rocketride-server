@@ -11,6 +11,17 @@
 	"protocol": "parse://",
 	//
 	// Required:
+	//		The physical type - "cpp" makes this a C++ node
+	//
+	"node": "cpp",
+	//
+	// Required (for "node": "cpp"):
+	//		Base name of the node's shared library, matching the target name
+	//		passed to rocketride_add_node in CMakeLists.txt
+	//
+	"path": "parse",
+	//
+	// Required:
 	//		Class type of the node - what it does
 	//
 	"classType": ["data"],

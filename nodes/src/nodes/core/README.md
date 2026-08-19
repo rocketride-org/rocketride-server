@@ -8,11 +8,9 @@ The shared-services module of the RocketRide engine: it registers the built-in p
 
 The directory holds three kinds of content:
 
-- **Concrete service definitions**: `services.filesys.json`, `services.parse.json`, `services.hash.json`, `services.indexer.json`, `services.zip.json`, and `services.null.json` each register one engine service (title, protocol, class type, capabilities, lanes, and config shape).
+- **Concrete service definitions**: `services.filesys.json`, `services.indexer.json`, `services.zip.json`, and `services.null.json` each register one engine service (title, protocol, class type, capabilities, lanes, and config shape).
 - **Shared field libraries**: the `services.common*.json` files define reusable field groups (cloud-provider credentials, include/exclude path forms, vector-store settings, LLM access, anonymization, remote processing) that are merged into other service definitions as required.
 - **Shared code and assets**: `google_access.py` (the access/scope resolver used by Google tool nodes), `gcp_auth.py` (ADC and service-account credentials for GCP nodes), and the SVG icons displayed in the UI for connector and processing nodes (Amazon S3, Azure Blob, Google Drive, OneDrive, SharePoint, Outlook, Gmail, Confluence, Slack, SMB, and others).
-
-The `hash/` and `parser/` subdirectories carry the per-service documentation pages for the Fingerprinter and Parser services.
 
 ---
 
@@ -21,8 +19,6 @@ The `hash/` and `parser/` subdirectories carry the per-service documentation pag
 | Service | File | Protocol | Class type | Lanes |
 |---------|------|----------|------------|-------|
 | Local File System | `services.filesys.json` | `filesys://` | `source` | `_source` → `tags` |
-| Parser | `services.parse.json` | `parse://` | `data` | `tags` → `text`, `table`, `image`, `video`, `audio` |
-| Fingerprinter | `services.hash.json` | `hash://` | `data` | `tags` → `tags` |
 | Word indexer | `services.indexer.json` | `indexer://` | (empty, internal, not selectable) | none |
 | ZIP Creation | `services.zip.json` | `zip://` | `target` (internal) | none |
 | Null | `services.null.json` | `null://` | (empty, internal) | `source` → `tags` |
@@ -41,22 +37,6 @@ A source service that reads data from the local file system, ingesting files and
 | `estimation` | section, optional | Cost estimations: `estimation.accessDelay`, `estimation.accessRate`, `estimation.storeCost`, `estimation.accessCost` (all numbers, default `0`). |
 
 The service exposes two shape sections: **Source** (full form with estimation) and **Pipe** (the `Pipe.include` / `Pipe.exclude` variants, for example `/Users/usr/Documents/product-images/*`). A development variant of the definition exists as `services.filesys.json.dev`.
-
-### Parser
-
-Extracts structured content from a wide variety of document types. It automatically identifies embedded content and routes it to the appropriate output lane, making text, tables, images, audio, and video accessible for downstream processing. No configuration fields.
-
-| Lane in | Lane out | Description |
-|---------|----------|-------------|
-| `tags` | `text` | Extracted plain text |
-| `tags` | `table` | Extracted tables |
-| `tags` | `image` | Extracted images |
-| `tags` | `video` | Extracted video streams |
-| `tags` | `audio` | Extracted audio streams |
-
-### Fingerprinter
-
-Generates a deterministic fingerprint (hash) of each document's content as it passes through the pipeline. The hash is computed from the raw or normalized text, so identical content always produces the same fingerprint regardless of metadata. Use it for deduplication, content tracking, and identity verification before indexing. Lane: `tags` → `tags`. Ships a single empty `default` preconfig profile and has no configuration fields.
 
 ### Word indexer
 
