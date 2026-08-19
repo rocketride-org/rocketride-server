@@ -282,3 +282,10 @@ def test_add_route_rejects_overlap_within_method_list(web_server):
     web_server.add_route('/mixed', _handler, ['GET', 'POST'])
     with pytest.raises(ValueError, match='POST /mixed'):
         web_server.add_route('/mixed', _handler, ['POST', 'PATCH'])
+
+
+def test_add_route_rejects_duplicate_method_within_single_call(web_server):
+    # Methods are normalized to uppercase, so ['GET', 'get'] is one pair
+    # repeated — it must be rejected within a single add_route() call.
+    with pytest.raises(ValueError, match='GET /dupe'):
+        web_server.add_route('/dupe', _handler, ['GET', 'get'])

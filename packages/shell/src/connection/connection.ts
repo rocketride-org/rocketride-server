@@ -628,7 +628,9 @@ export class ConnectionManager implements IConnectionManager {
 
 		if (errorDescription) {
 			if (this.connectionGeneration !== bootstrapGeneration) return null;
-			window.history.replaceState({}, '', window.location.pathname);
+			// Strip the query string but keep any existing history state (e.g. the
+			// rrHome snapshot / appId) so an OAuth failure does not lose navigation.
+			window.history.replaceState({ ...(window.history.state ?? {}) }, '', window.location.pathname);
 			this.updateConnectionStatus({
 				state: ConnectionState.AUTH_FAILED,
 				lastError: errorDescription,

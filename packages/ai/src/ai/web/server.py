@@ -914,12 +914,16 @@ class WebServer:
             self._registered_routes: set = set()
 
         # Reject duplicate (method, path) registrations before touching the
-        # router so a failed call leaves no partial state behind.
+        # router so a failed call leaves no partial state behind. Track pairs
+        # seen within this call too, so e.g. methods=['GET', 'get'] is caught.
+        pending_routes: set = set()
         for method in methods:
-            if (method.upper(), path) in self._registered_routes:
+            route_key = (method.upper(), path)
+            if route_key in self._registered_routes or route_key in pending_routes:
                 raise ValueError(f'Route already registered: {method.upper()} {path}')
+            pending_routes.add(route_key)
 
-        self._registered_routes.update((method.upper(), path) for method in methods)
+        self._registered_routes.update(pending_routes)
 
         # Add the route to the FastAPI application's router
         self.app.router.add_api_route(path, routeHandler, methods=methods, deprecated=deprecated)
