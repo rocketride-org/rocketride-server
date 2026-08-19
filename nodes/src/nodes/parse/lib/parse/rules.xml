@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ruleset xmlns="http://mojo.codehaus.org/versions-maven-plugin/rule/2.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" comparisonMethod="maven" xsi:schemaLocation="http://mojo.codehaus.org/versions-maven-plugin/rule/2.0.0 http://mojo.codehaus.org/versions-maven-plugin/xsd/rule-2.0.0.xsd">
+    <ignoreVersions>
+        <!-- Ignore Alpha's, Beta's, release candidates and milestones -->
+        <ignoreVersion type="regex">(?i).*Alpha(?:-?\d+)?</ignoreVersion>
+        <ignoreVersion type="regex">(?i).*a(?:-?\d+)?</ignoreVersion>
+        <ignoreVersion type="regex">(?i).*Beta(?:-?\d+)?</ignoreVersion>
+        <ignoreVersion type="regex">(?i).*-B(?:-?\d+)?</ignoreVersion>
+        <ignoreVersion type="regex">(?i).*RC(?:-?\d+)?</ignoreVersion>
+        <ignoreVersion type="regex">(?i).*CR(?:-?\d+)?</ignoreVersion>
+        <ignoreVersion type="regex">(?i).*M(?:-?\d+)?</ignoreVersion>
+    </ignoreVersions>
+    <rules>
+    </rules>
+</ruleset>
