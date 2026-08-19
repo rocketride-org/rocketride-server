@@ -1108,7 +1108,7 @@ function makeBuildCoreAction() {
 			whenNot({
 				name: 'ready',
 				condition: (ctx) => ctx.serverReady,
-				then: [parallel(['server:setup-tools', 'vcpkg:submodule-build', 'java:setup-jdk'], 'Setup build tools'), 'server:configure', 'server:compile-engine', parallel(['server:setup-python', 'server:setup-jre'], 'Setup dependencies'), parallel(['server:setup-runtime-libs', 'server:setup-samba'], 'Setup runtime'), 'tika:submodule-build'],
+				then: [parallel(['server:setup-tools', 'vcpkg:submodule-build', 'java:setup-jdk'], 'Setup build tools'), 'server:configure', 'server:compile-engine', parallel(['server:setup-python', 'server:setup-jre'], 'Setup dependencies'), parallel(['server:setup-runtime-libs', 'server:setup-samba'], 'Setup runtime'), 'java:submodule-build'],
 			}),
 		],
 	};
@@ -1213,7 +1213,7 @@ function makeTestAction() {
 					parallel(['nodes:build', sequence(['mcp-widgets:build', 'ai:build'], 'ai (with widgets)'), 'client-python:build'], 'Build modules'),
 					'server:compile-tests',
 					'server:copy-test-data',
-					parallel(['tika:submodule-test', 'server:run-aptest', 'server:run-engtest', 'server:run-rocketlib-test'], 'Run tests'),
+					parallel(['java:submodule-test', 'server:run-aptest', 'server:run-engtest', 'server:run-rocketlib-test'], 'Run tests'),
 				],
 			}),
 		],
@@ -1314,7 +1314,7 @@ function makePackageAction(options = {}) {
 function makeCleanAction() {
 	return {
 		description: 'Cleaning server (all)',
-		steps: ['server:clean', 'vcpkg:submodule-clean', 'java:submodule-clean', 'tika:submodule-clean'],
+		steps: ['server:clean', 'vcpkg:submodule-clean', 'java:submodule-clean'],
 	};
 }
 
