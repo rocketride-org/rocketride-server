@@ -2045,7 +2045,9 @@ ErrorOr<IServices::ServiceDefinitionPtr> IServices::getServiceDefinition(
     // If we couldn't find it
     if (def == m_services.end())
         return APERR(Ec::InvalidSchema, "The service", logicalType,
-                     "was not found");
+                     "was not found. Check the provider name; for a "
+                     "workspace-local node, start the engine with "
+                     "--node_path=<directory containing local_nodes>");
 
     // Return it
     return &def->second;
