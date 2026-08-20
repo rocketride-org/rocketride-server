@@ -14,7 +14,16 @@ import { ChartRenderer } from './ChartRenderer';
 
 const S = {
 	wrapper: {
-		fontSize: 13,
+		// INHERITED, not declared. This renders inside somebody else's bubble, and
+		// the bubble is the only thing that knows how big its text should be — an
+		// inline `fontSize` here cannot be overridden from outside without
+		// `!important`, so a host that raised its body copy ended up with a
+		// question at one size and the answer to it at another.
+		//
+		// Every existing caller is unaffected: `MessageBubble` pins 13 on the
+		// bubble itself, and `global.css` puts the document base at
+		// `--rr-font-size-widget`, also 13.
+		fontSize: 'inherit',
 		lineHeight: 1.6,
 		color: 'var(--rr-text-primary)',
 		fontFamily: 'var(--rr-font-family)',
@@ -32,7 +41,9 @@ const S = {
 		width: '100%',
 		borderCollapse: 'collapse' as const,
 		margin: '8px 0',
-		fontSize: 12,
+		// The ratio these already were: 12 ÷ 13. Inside a 13px host they resolve
+		// to 12 and nothing moves; inside a larger one they grow with it.
+		fontSize: '0.92em',
 	} as CSSProperties,
 
 	tableWrapper: {
@@ -45,7 +56,7 @@ const S = {
 		border: '1px solid var(--rr-border)',
 		borderRadius: 3,
 		padding: '1px 4px',
-		fontSize: 12,
+		fontSize: '0.92em',
 		fontFamily: 'var(--rr-font-mono, monospace)',
 		color: 'var(--rr-text-primary)',
 	} as CSSProperties,
@@ -98,7 +109,7 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content }) =
 
 					if (!inline && lang) {
 						return (
-							<SyntaxHighlighter style={oneDark} language={lang} PreTag="div" customStyle={{ margin: 0, borderRadius: 6, fontSize: 12 }}>
+							<SyntaxHighlighter style={oneDark} language={lang} PreTag="div" customStyle={{ margin: 0, borderRadius: 6, fontSize: '0.92em' }}>
 								{code}
 							</SyntaxHighlighter>
 						);
@@ -115,8 +126,14 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content }) =
 						<table style={S.table}>{children}</table>
 					</div>
 				),
-				th: ({ children }: any) => <th style={{ padding: '6px 10px', borderBottom: '1px solid var(--rr-border)', textAlign: 'left', fontWeight: 600, fontSize: 12, color: 'var(--rr-text-secondary)' }}>{children}</th>,
-				td: ({ children }: any) => <td style={{ padding: '6px 10px', borderBottom: '1px solid var(--rr-border)', fontSize: 12 }}>{children}</td>,
+				th: ({ children }: any) => <th style={{ padding: '6px 10px', borderBottom: '1px solid var(--rr-border)', textAlign: 'left', fontWeight: 600, fontSize: '0.92em', color: 'var(--rr-text-secondary)' }}>{children}</th>,
+				td: ({ children }: any) => <td style={{ padding: '6px 10px', borderBottom: '1px solid var(--rr-border)', fontSize: '0.92em' }}>{children}</td>,
+				// A picture in an answer is bounded by the bubble it is in. Without
+				// this a wide image widens its container instead of fitting it, which
+				// on a phone pushes the whole transcript sideways.
+				img: ({ src, alt }: any) => (
+					<img src={src} alt={alt ?? ''} style={{ maxWidth: '100%', height: 'auto' }} />
+				),
 				a: ({ href, children }: any) => {
 					// Only allow safe URL schemes — reject javascript:, data:, vbscript: etc.
 					const safeHref = /^(https?|mailto|tel):/i.test(href ?? '') ? href : undefined;
