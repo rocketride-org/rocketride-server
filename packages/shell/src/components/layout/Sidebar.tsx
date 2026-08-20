@@ -502,7 +502,10 @@ const Sidebar: React.FC<SidebarProps> = ({ themeConfig: _themeConfig, account, h
 							onClick={toggleCollapse}
 							onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--rr-bg-list-hover, var(--rr-bg-surface-alt))'; }}
 							onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
-							style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 28, height: 28, borderRadius: 6, border: 'none', cursor: 'pointer', background: 'transparent', color: 'var(--rr-text-secondary)', flexShrink: 0, transition: 'background 120ms ease' }}
+							/* 28px suits a mouse in the desktop header; the same button in the
+							   drawer is the one a thumb reaches for, and 28 is well under
+							   the 44 the rest of the compact chrome keeps to. */
+							style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: isCompact ? 44 : 28, height: isCompact ? 44 : 28, borderRadius: 6, border: 'none', cursor: 'pointer', background: 'transparent', color: 'var(--rr-text-secondary)', flexShrink: 0, transition: 'background 120ms ease' }}
 						>
 							<BxDockLeft size={18} />
 						</button>
