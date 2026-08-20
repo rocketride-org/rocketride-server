@@ -145,6 +145,11 @@ export interface IDetailPanelProps {
 	 * {@link MIN_WIDTH} (380 — form-safe for record panels). A non-record drawer
 	 * whose content reads fine narrow (a node/catalog palette) can lower it so
 	 * the user can drag it slim. Ignored for `side: 'bottom'`.
+	 *
+	 * ALSO THE ANSWER ON A PHONE. The floor wins over the usable band — a floor
+	 * that yields is not a floor — so on a 390px host the default 380 leaves a
+	 * 10px sliver of context, which is no context at all. A caller that expects
+	 * to be opened on a narrow viewport should lower this there.
 	 */
 	minWidth?: number;
 	/** Tray height in px (side 'bottom' only). Default {@link DEFAULT_HEIGHT}. */
@@ -802,13 +807,20 @@ export function DetailPanel({ open, onClose, avatar, title, subtitle, tabs, acti
 		};
 	}, [open]);
 
-	// A restored width (from persistence) may exceed the current usable band if
-	// the owning surface shrank between sessions. Clamp it once on open, after
-	// layout — overlayRef and the stack registry are live by the time an effect
-	// runs, so clampSize resolves against the real host size.
+	// A width may exceed the current usable band: a restored one because the
+	// owning surface shrank between sessions, and the CALLER'S DEFAULT because
+	// nothing ever measured it. Clamp both, once on open, after layout —
+	// overlayRef and the stack registry are live by the time an effect runs, so
+	// clampSize resolves against the real host size.
+	//
+	// The `prev == null` short-circuit this replaces meant a first open never
+	// clamped at all: a caller asking for 640 on a 390px-wide host rendered a
+	// literal 640px panel with 250px of itself, including its own resize handle,
+	// off the right of the screen. Seeding from `defaultSize` makes the first
+	// open behave exactly like every one after it.
 	useEffect(() => {
 		if (!open) return;
-		setDragSize((prev) => (prev == null ? null : clampSize(prev)));
+		setDragSize((prev) => clampSize(prev ?? defaultSize));
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [open]);
 

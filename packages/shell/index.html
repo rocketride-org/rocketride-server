@@ -3,7 +3,17 @@
   <head>
     <title>RocketRide</title>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- `interactive-widget=resizes-content`: the shell pins html/body/#root to
+         height:100% and hides overflow, so under the default `resizes-visual` an
+         on-screen keyboard scrolls the visual viewport while the layout stays
+         full height — fixed chrome floats off-screen and a focused input hides
+         behind the keyboard. Shrinking the layout viewport instead makes the
+         flex column re-lay out honestly. iOS Safari ignores the token today, so
+         it is a no-op there and correct on Android.
+         NOT viewport-fit=cover: nothing here reads env(safe-area-inset-*) yet,
+         so opting in would put the status bar under the home indicator and the
+         drawer's edge under the notch. That is its own change. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, interactive-widget=resizes-content" />
     <meta name="description" content="RocketRide" />
     <link rel="icon" href="/shell/favicon.svg" type="image/svg+xml" />
     <script>(function(){try{var h=localStorage.getItem('rr:home:theme'),t=localStorage.getItem('rr:theme');var d=h==='dark'||(h!=='light'&&!!t&&t!=='rocketride-light'&&t!=='light');if(d){document.documentElement.style.setProperty('--rr-bg-default','#080808');document.documentElement.style.background='#080808';}}catch(e){}})();</script>

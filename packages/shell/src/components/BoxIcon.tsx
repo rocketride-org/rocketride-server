@@ -137,6 +137,12 @@ export const BxChevronDown = createIcon('M16.293 9.293 12 13.586 7.707 9.293l-1.
 
 export const BxChevronLeft = createIcon('M13.293 6.293 7.586 12l5.707 5.707 1.414-1.414L10.414 12l4.293-4.293z');
 
+/** A hamburger, for the compact chrome bar that opens the navigation drawer. */
+export const BxMenu = createIcon('M4 6h16v2H4zm0 5h16v2H4zm0 5h16v2H4z');
+
+/** A cross, for dismissing the navigation drawer. */
+export const BxX = createIcon('M16.192 6.344 11.949 10.586 7.707 6.344 6.293 7.758 10.535 12l-4.242 4.242 1.414 1.414 4.242-4.242 4.243 4.242 1.414-1.414L13.364 12l4.242-4.242z');
+
 export const BxCheck = createIcon('m10 15.586-3.293-3.293-1.414 1.414L10 18.414l9.707-9.707-1.414-1.414z');
 
 export const BxCog = createMultiPathIcon([

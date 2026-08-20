@@ -47,7 +47,10 @@ import { OverlayManager, useOverlay } from './OverlayManager';
 import { HostChromeProvider, useHostChromeState } from './HostChromeContext';
 import { AppFrame } from './AppFrame';
 import RocketRideWordmark from '../../assets/icons/RocketRideWordmark';
-import Sidebar from './Sidebar';
+import Sidebar, { useHasSidebarContent } from './Sidebar';
+import { BxMenu } from '../BoxIcon';
+import { useIsCompact } from '../../hooks/useIsCompact';
+import { CompactNavProvider } from './CompactNavContext';
 import StatusBar from './StatusBar';
 import LoadingScreen from './LoadingScreen';
 import DebugPanel from './DebugPanel';
@@ -271,6 +274,64 @@ export const ShellLayout: React.FC<ShellLayoutProps> = ({
 	config, isConnected, statusMessage, hideAppSwitcher, defaultAppId,
 }) => {
 	const { loaded, seeded, appLoading, prefs, updatePrefs, activeAppId, loadedApps, settings, appManifest, appLoadErrors, retryApp, loadFailure, dismissLoadFailure } = useWorkspace();
+
+	// --- The navigation, when there is no room for a column ------------------
+	// Below the breakpoint the sidebar leaves the flex row and becomes a drawer
+	// over the client area. The state lives here because this is the one place
+	// that can hand the same answer to the sidebar and to the hamburger; two
+	// subscriptions to one media query can disagree for a frame mid-drag, and a
+	// sidebar that thinks it is a drawer while the layout thinks it is a column
+	// renders a blank screen.
+	const isCompact = useIsCompact();
+	const [drawerOpen, setDrawerOpen] = useState(false);
+
+	// Crossing the breakpoint, either way, puts the drawer away. It cannot race a
+	// deliberate open — nobody is tapping the hamburger at the instant a window
+	// crosses 1024 — so no "the user meant it" latch is needed, and the desktop
+	// rail state is never written, so coming back up restores exactly the column
+	// that was left behind.
+	useEffect(() => {
+		setDrawerOpen(false);
+		if (isCompact) ConnectionManager.getInstance().emit('shell:sidebarCollapsing', {});
+	}, [isCompact]);
+
+	// Anything that moves the user somewhere else closes it. `shell:switchApp`
+	// and `shell:openOverlay` are the two that matter; `shell:sidebarCollapsing`
+	// is here so an app that navigates internally can ask for the same thing
+	// using an event that already exists, rather than a new API.
+	useEffect(() => {
+		if (!isCompact) return undefined;
+		const bus = ConnectionManager.getInstance();
+		const close = () => setDrawerOpen(false);
+		const offs = [
+			bus.on('shell:switchApp', close),
+			bus.on('shell:openOverlay', close),
+			bus.on('shell:viewActivated', close),
+		];
+		return () => offs.forEach((off) => off?.());
+	}, [isCompact]);
+
+	// The app changing is a navigation even when no event announced it.
+	useEffect(() => {
+		setDrawerOpen(false);
+	}, [activeAppId]);
+
+	// Escape, while it is open. `defaultPrevented` first: a dialog above the
+	// drawer — a DetailPanel at z-index 1500, a confirm — has already handled
+	// the key, and closing the nav underneath it would be the wrong answer.
+	useEffect(() => {
+		if (!isCompact || !drawerOpen) return undefined;
+		const onKey = (event: KeyboardEvent) => {
+			if (event.key === 'Escape' && !event.defaultPrevented) setDrawerOpen(false);
+		};
+		document.addEventListener('keydown', onKey);
+		return () => document.removeEventListener('keydown', onKey);
+	}, [isCompact, drawerOpen]);
+
+	const compactNav = useMemo(
+		() => ({ isCompact, drawerOpen, requestClose: () => setDrawerOpen(false) }),
+		[isCompact, drawerOpen],
+	);
 
 	// The ONE workspace-prefs accessor (getPref/setPref) handed to every app and
 	// overlay the shell renders — the same API the canvas uses via ProjectView.
@@ -562,8 +623,13 @@ export const ShellLayout: React.FC<ShellLayoutProps> = ({
 		<ShellApiConfigProvider config={mergedApiConfig}>
 		<HostChromeProvider>
 		<OverlayManager>
+		<CompactNavProvider value={compactNav}>
 		<div style={styles.shell}>
 			<ConnectionErrorBanner />
+			{/* The way to the navigation once it is a drawer. Renders nothing for
+			    an app that has no sidebar to open. */}
+			{isCompact && <CompactChromeBar open={drawerOpen} onOpen={() => setDrawerOpen(true)} />}
+
 			{/* Main row: Sidebar | Client Area | Debug Panel */}
 			<div style={styles.main}>
 				{/* Sidebar zone — always mounted; self-hides when it has no content. */}
@@ -718,6 +784,7 @@ export const ShellLayout: React.FC<ShellLayoutProps> = ({
 				/>
 			)}
 		</div>
+		</CompactNavProvider>
 		</OverlayManager>
 		</HostChromeProvider>
 		</ShellApiConfigProvider>
@@ -804,4 +871,65 @@ const StatusBarWithChrome: React.FC<{
 	// Presence rule: the app declared a status bar, or there is no bar.
 	if (statusBarContent == null) return null;
 	return <StatusBar {...props} appContent={statusBarContent} />;
+};
+// COMPACT CHROME BAR — the only way to the navigation below the breakpoint
+// =============================================================================
+
+/**
+ * A 44px bar with a hamburger, shown only while the sidebar is a drawer.
+ *
+ * Above `styles.main` rather than floating over the client area: eleven apps
+ * draw their own top-left content — grids, canvases, chat headers — and a
+ * floating button would sit on top of some of them. A bar costs every app 44px
+ * below the breakpoint and is the only placement that cannot occlude anything.
+ *
+ * Defined here, inside `HostChromeProvider`, so it can ask the same question
+ * the sidebar asks: an app with no sidebar gets no bar and no hamburger, and is
+ * byte-for-byte unchanged at every width.
+ *
+ * @param props.open - Whether the drawer is currently showing.
+ * @param props.onOpen - Asks for the drawer.
+ * @returns The bar, or nothing when this app has no navigation.
+ */
+const CompactChromeBar: React.FC<{ open: boolean; onOpen: () => void }> = ({ open, onOpen }) => {
+	const hasSidebar = useHasSidebarContent();
+	const { activeAppId, loadedApps, appManifest } = useWorkspace();
+	if (!hasSidebar) return null;
+
+	// The app's own branding first, its manifest entry second — the same order
+	// the client area uses for the error boundary's label.
+	const title =
+		loadedApps[activeAppId]?.branding?.appName
+		?? appManifest.find((entry) => entry.id === activeAppId)?.name
+		?? '';
+
+	return (
+		<div
+			style={{
+				display: 'flex', alignItems: 'center', gap: 8,
+				height: 44, flexShrink: 0, padding: '0 4px',
+				background: 'var(--rr-bg-paper)',
+				borderBottom: '1px solid var(--rr-border)',
+			}}
+		>
+			<button
+				type="button"
+				aria-label="Open navigation"
+				aria-expanded={open}
+				aria-controls="rr-shell-sidebar"
+				onClick={onOpen}
+				style={{
+					display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+					width: 44, height: 44, padding: 0,
+					border: 'none', background: 'transparent', cursor: 'pointer',
+					color: 'var(--rr-text-primary)',
+				}}
+			>
+				<BxMenu size={22} />
+			</button>
+			<span style={{ fontSize: 15, fontWeight: 600, color: 'var(--rr-text-primary)', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+				{title}
+			</span>
+		</div>
+	);
 };
