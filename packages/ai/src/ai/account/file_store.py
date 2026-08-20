@@ -964,9 +964,9 @@ class FileStore:
         """
         Rename a file or directory.
 
-        On object stores there is no native rename, so this is implemented as
-        copy + delete.  For directories every file under the old prefix is
-        copied to the new prefix and then deleted.
+        Files and directories alike ride the backend's native move primitive
+        (server-side on object stores — no bytes pass through this process);
+        a directory moves as one native move per file under its prefix.
 
         Args:
             old_path: Current relative path within the account store.
@@ -1012,9 +1012,10 @@ class FileStore:
             for file_path in all_files:
                 relative_to_old = file_path[len(dir_prefix) :]
                 new_file_path = new_dir_prefix + relative_to_old
-                data = await self._store.read_bytes(file_path)
-                await self._store.write_bytes(new_file_path, data)
-                await self._store.delete_file(file_path)
+                # Native move per file — no whole-file buffering in this
+                # process, and each destination is untouched until its new
+                # content is in place (same guarantee as the file branch).
+                await self._store.move_file(file_path, new_file_path)
         else:
             # File rename: check both source and destination locks, then
             # check destination existence unless overwrite was requested.

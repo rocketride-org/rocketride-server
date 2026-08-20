@@ -222,7 +222,10 @@ async def test_on_rrext_validate_uses_explicit_source(monkeypatch):
     }
     result = await MiscCommands.on_rrext_validate(conn, request)
 
-    assert captured['payload']['source'] == 'explicit-source'
+    # The engine's config loader requires the FILE-form root: the resolved
+    # source rides inside payload['pipeline'], with the version mirrored at
+    # the root (see the wrap in on_rrext_validate).
+    assert captured['payload']['pipeline']['source'] == 'explicit-source'
     assert captured['payload']['version'] == 1  # default
     assert result == {'type': 'response', 'body': {'ok': True}}
 
@@ -240,7 +243,7 @@ async def test_on_rrext_validate_falls_back_to_pipeline_source(monkeypatch):
     conn = _make_conn()
     request = {'arguments': {'pipeline': {'source': 'pipeline-source', 'components': []}}}
     await MiscCommands.on_rrext_validate(conn, request)
-    assert captured['source'] == 'pipeline-source'
+    assert captured['pipeline']['source'] == 'pipeline-source'
 
 
 @pytest.mark.asyncio
@@ -256,7 +259,7 @@ async def test_on_rrext_validate_falls_back_to_implied_source(monkeypatch):
 
     conn = _make_conn()
     await MiscCommands.on_rrext_validate(conn, {'arguments': {'pipeline': {}}})
-    assert captured.get('source') == 'implied'
+    assert captured['pipeline']['source'] == 'implied'
 
 
 @pytest.mark.asyncio
@@ -272,7 +275,9 @@ async def test_on_rrext_validate_no_source_anywhere_omits_field(monkeypatch):
 
     conn = _make_conn()
     await MiscCommands.on_rrext_validate(conn, {'arguments': {'pipeline': {'components': []}}})
-    assert 'source' not in captured
+    # The wrapped payload's inner config is where a source would land — the
+    # top level never carries one, so assert on the inner shape.
+    assert 'source' not in captured['pipeline']
 
 
 @pytest.mark.asyncio

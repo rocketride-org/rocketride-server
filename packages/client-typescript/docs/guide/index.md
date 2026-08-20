@@ -302,13 +302,13 @@ Typed wrappers over `rrext_deploy_app` — the publish ladder for RocketRide app
 **Deploy** copies code to the server as the next immutable registry version
 (`deploy.add`); a deployment carries the review lifecycle in its own `state`
 (`private` → `submit` → `ready` | `rejected`). **Publish** binds a deployment
-to an audience — `@user`, `@team/<name>`, or `@public` — as a pure pointer;
+to an audience — `@me`, `@team/<name>`, or `@public` — as a pure pointer (`@user` is a legacy input alias for `@me`, never displayed);
 repointing it covers first publish, update, promote, and rollback alike.
 
 The review state lives on the **deployment**, not the binding: an app deploys
 `private` (internal-eligible), the developer `submit`s it for review, an admin
 approves (`ready`) or rejects (`rejected`). A `@public` binding may only point
-at a `ready` deployment; `@user`/`@team` bindings accept any internal-eligible
+at a `ready` deployment; `@me`/`@team` bindings accept any internal-eligible
 (not `failed`) deployment. So there is no separate "publish-and-wait" — public
 listing is: submit → approve → repoint the public pointer.
 
@@ -325,7 +325,7 @@ publishing an app requires the org to have claimed a developer id.
 | `withdrawApp` | `withdrawApp(appId, registryVersion): Promise<{artifact}>` | Withdraw a pending review — the developer's own cancel: flips the deployment `submit` → `private` (leaves the admin queue, back to draft; history records `withdrawn`). Only a version in `submit` withdraws. Developer-org + namespace gated. |
 | `replyApp` | `replyApp(appId, message, registryVersion?): Promise<{replied, appId}>` | Append a developer message to the app's review thread — the developer half of the reviewer conversation. Rides `deployment_history` as a `reply` row (side `'developer'`), the same stream `deploy.history()` reads. Developer-org + namespace gated. |
 | `buildLog` | `buildLog(appId, registryVersion): Promise<{appId, version, log}>` | One version's durable server build log — the full phase-by-phase output the build worker stores beside the version's artifacts (no error text rides the rail rows). Long logs serve their tail; `''` = no log. Developer-org gated. |
-| `publishApp` | `publishApp(appId, registryVersion, target): Promise<{publish}>` | Bind a deployment to '@user', '@team/<name>', or '@public'. The binding is a pure pointer born 'enabled'. `@public` requires the deployment be `ready` (approved); `@user`/`@team` accept any non-`failed` deployment. Pinning ANOTHER org's public app to '@user'/'@team' is the version selector and is allowed; publishing your own app requires the id to be in your namespace. |
+| `publishApp` | `publishApp(appId, registryVersion, target): Promise<{publish}>` | Bind a deployment to '@me', '@team/<name>', or '@public' ('@user' = legacy input alias). The binding is a pure pointer born 'enabled'. `@public` requires the deployment be `ready` (approved); `@me`/`@team` accept any non-`failed` deployment. Pinning ANOTHER org's public app to '@me'/'@team' is the version selector and is allowed; publishing your own app requires the id to be in your namespace. |
 | `whereApp` | `whereApp(appId): Promise<Pin[]>` | The reverse index: `{rung, handle, version, appVersion, state, deployedAt}` per audience — `state` is the bound DEPLOYMENT's review state. |
 
 Serving needs no verb: a version's bundle loads from the stable
@@ -358,7 +358,7 @@ Grouped families (the `developer_*`/`submit`/`register_dev` rows are on
 | pricing_* | `pricing_list` · `pricing_create` · `pricing_delete` | developer org (owns the app_products row) | Manage Stripe price tiers for a monetized app. |
 
 **Review model.** The review state lives on the DEPLOYMENT (`deployment_artifacts.state`).
-`@user`/`@team` bindings need no approval — they serve any non-`failed`
+`@me`/`@team` bindings need no approval — they serve any non-`failed`
 deployment at once. Going public is a three-step flow: `submit` (deployment →
 `submit`, enters the admin queue) → `admin_approve` (→ `ready`) → `publishApp
 @public` (point the public binding at the now-`ready` version). A reject flips

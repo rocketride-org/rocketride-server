@@ -1315,6 +1315,12 @@ class TaskServer(DAPBase):
         # Owner scope: explicit when the launch path knows the rung (@me -> user,
         # @team -> team); else derived from run_kind. MUST precede token
         # generation and monitor-key building — both scope by the owner.
+        # A team-owned DEV run is rejected outright: no launch path produces
+        # it, and its token digest would be byte-identical to the same team's
+        # deploy run (only the @me-deploy case adds a run_kind discriminator),
+        # so the registry would silently treat the second run as the first.
+        if owner_kind == 'team' and run_kind == 'dev':
+            raise ValueError('owner_kind="team" is only valid for deploy runs')
         control.owner_kind = owner_kind or ('team' if run_kind == 'deploy' else 'user')
         control.token = args.get('token', None)
         control.pipeline = args.get('pipeline', None)
@@ -1611,9 +1617,6 @@ class TaskServer(DAPBase):
 
             self.debug_message(f'Restart requested for task "{control.id}"')
 
-            # Update the new owner
-            control.launch_owner = conn
-
             # Verify the caller has control permissions for this task
             # (run-scoped: a user-owned run restarts only for its owner)
             if conn and hasattr(conn, '_account_info') and conn._account_info:
@@ -1626,6 +1629,11 @@ class TaskServer(DAPBase):
             # Check if debugger is attached - fail if so
             if control.task.has_attached_debugger():
                 raise RuntimeError('Cannot restart task while debugger is attached. Please detach the debugger first.')
+
+            # Ownership transfers ONLY once the caller is fully authorized:
+            # a rejected restart must not leave this conn as launch_owner, or
+            # its later disconnect would stop a LAUNCH task it never owned.
+            control.launch_owner = conn
 
             # Find and validate the provider from new pipeline
             components = pipeline.get('components', [])

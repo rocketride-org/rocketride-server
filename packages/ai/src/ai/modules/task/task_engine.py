@@ -427,6 +427,12 @@ class Task(DAPBase):
             raise ValueError(f'invalid run_kind: {run_kind!r}')
         if trigger not in ('', 'manual', 'schedule'):
             raise ValueError(f'invalid trigger: {trigger!r}')
+        # owner_kind picks the storage/run-log tree exactly like run_kind picks
+        # the continuum: any value outside the closed vocabulary ('Team',
+        # 'teams', ...) would silently take the user branch and write a
+        # team-owned deploy's files into the dispatcher's user tree.
+        if owner_kind not in ('', 'user', 'team'):
+            raise ValueError(f'invalid owner_kind: {owner_kind!r}')
         self._run_log: Optional[RunLogWriter] = None
         self._run_kind: str = run_kind
         # Owner scope: 'user' (interactive .use OR a personal @me deploy) vs

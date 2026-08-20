@@ -35,6 +35,11 @@ Conventions shared by both protocols:
 - **Push-driven refresh**: nothing on these surfaces polls. The host relays
   `apaevt_deploy` invalidation events and live `apaevt_task` folds; the
   WEBVIEW then drives its own re-fetch.
+- **Personal-deployment id mapping**: a personal deployment's RECORD id is the
+  owner key `user~{uid}`; the wire id for API calls is `@me`. The HOST performs
+  that mapping — API calls go out addressed `@me`, while every push
+  (`deployment:load` / `deployment:error`) is stamped with the raw `user~{uid}`
+  the webview opened with, so the record guard matches its own pushes.
 
 ## Deploy lifecycle (the file view's DEPLOY page)
 

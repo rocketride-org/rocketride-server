@@ -689,6 +689,7 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 							break;
 						}
 						const uriKey = document.uri.toString();
+						let savedKey: string | undefined;
 						this.savesForRun.add(uriKey);
 						try {
 							// Capture the text up front: the untitled save flow below
@@ -709,6 +710,11 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 								await this.saveDocument(document, text);
 							}
 							if (runTarget) {
+								// The untitled save reopens the file under a NEW URI —
+								// the save-for-run suppression must follow it, or the
+								// saved document's own change events escape the guard.
+								savedKey = runTarget.toString();
+								this.savesForRun.add(savedKey);
 								const parsed = JSON.parse(text);
 								const pipeName = path.basename(runTarget.fsPath, '.pipe');
 								await this.runPipeline({ pipeline: { ...parsed, source: source ?? parsed.source } }, pipeName);
@@ -717,7 +723,10 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 							const message = error instanceof Error ? error.message : String(error);
 							vscode.window.showErrorMessage(`Failed to run pipeline: ${message}`);
 						}
-						setTimeout(() => this.savesForRun.delete(uriKey), 2000);
+						setTimeout(() => {
+							this.savesForRun.delete(uriKey);
+							if (savedKey) this.savesForRun.delete(savedKey);
+						}, 2000);
 					} else if (action === 'stop') {
 						if (source) {
 							await this.stopPipeline(source, document);
@@ -1340,11 +1349,29 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 			}
 
 			// Step 5: which sources have a LIVE run right now — server task
-			// registry, attributed to THIS team via the descriptor's teamId.
-			const tasks = (await client.call('rrext_get_tasks')) as { tasks?: Array<{ source?: string; teamId?: string; pipeline?: { project_id?: string } }> };
+			// registry. A TEAM deployment matches on the descriptor's teamId;
+			// a PERSONAL (@me) deployment cannot — its row carries the billing
+			// team, never the wire '@me' — so it matches on the trusted owner
+			// scope instead (ownerKind/ownerId from rrext_get_tasks), with the
+			// uid taken from the record's own 'user~{uid}' key.
+			const tasks = (await client.call('rrext_get_tasks')) as {
+				tasks?: Array<{
+					source?: string;
+					teamId?: string;
+					runKind?: string;
+					ownerKind?: string;
+					ownerId?: string;
+					pipeline?: { project_id?: string };
+				}>;
+			};
+			const personalUid = recordTeamId.startsWith('user~') ? recordTeamId.slice('user~'.length) : undefined;
 			const runningSources: Record<string, boolean> = {};
 			for (const t of tasks.tasks ?? []) {
-				if (t.teamId === teamId && t.pipeline?.project_id === projectId && t.source) runningSources[t.source] = true;
+				if (t.pipeline?.project_id !== projectId || !t.source) continue;
+				const matches = personalUid
+					? t.ownerKind === 'user' && t.ownerId === personalUid && t.runKind === 'deploy'
+					: t.teamId === teamId;
+				if (matches) runningSources[t.source] = true;
 			}
 
 			// Step 6: resolve teams (names + control) and map into view models.

@@ -311,13 +311,13 @@ Typed wrappers over `rrext_deploy_app` — the publish ladder for RocketRide app
 **Deploy** copies code to the server as the next immutable registry version
 (`client.deploy.add`); a deployment carries the review lifecycle in its own `state`
 (`private` → `submit` → `ready` | `rejected`). **Publish** binds a deployment to
-an audience — `@user`, `@team/<name>`, or `@public` — as a pure pointer;
+an audience — `@me`, `@team/<name>`, or `@public` — as a pure pointer (`@user` is a legacy input alias for `@me`, never displayed);
 repointing it covers first publish, update, promote, and rollback alike.
 
 The review state lives on the **deployment**, not the binding: an app deploys
 `private`, the developer `submit`s it, an admin approves (`ready`) or rejects
 (`rejected`). A `@public` binding may only point at a `ready` deployment;
-`@user`/`@team` accept any non-`failed` deployment.
+`@me`/`@team` accept any non-`failed` deployment.
 
 App ids are partitioned by the caller org's **developer id**: every app is
 `<developerId>.<name>` (globally unique), so an org can only deploy/publish
@@ -331,7 +331,7 @@ publishing an app requires the org to have claimed a developer id.
 | `submit_app` | `async def submit_app(self, app_id, registry_version) -> dict` | Submit a deployed version for review — flips the deployment `private` → `submit`. |
 | `reply_app` | `async def reply_app(self, app_id, message, registry_version=None) -> dict` | Append a developer message to the app's review thread — rides `deployment_history` as a `reply` row (side `'developer'`), the same stream `deploy.history()` reads. Developer-org + namespace gated, like submit. |
 | `build_log` | `async def build_log(self, app_id, registry_version) -> dict` | One version's durable server build log — the full phase-by-phase output stored beside the version's artifacts (no error text rides the rail rows). Long logs serve their tail; empty `log` = none. Developer-org gated. |
-| `publish_app` | `async def publish_app(self, app_id, registry_version, target) -> dict` | Bind a deployment to '@user', '@team/<name>', or '@public'. The binding is a pure pointer born 'enabled'. '@public' requires the deployment be `ready`; '@user'/'@team' accept any non-`failed` deployment. Pinning ANOTHER org's public app to '@user'/'@team' is the version selector; publishing your own app requires the id to be in your namespace. |
+| `publish_app` | `async def publish_app(self, app_id, registry_version, target) -> dict` | Bind a deployment to '@me', '@team/<name>', or '@public' ('@user' = legacy input alias). The binding is a pure pointer born 'enabled'. '@public' requires the deployment be `ready`; '@me'/'@team' accept any non-`failed` deployment. Pinning ANOTHER org's public app to '@me'/'@team' is the version selector; publishing your own app requires the id to be in your namespace. |
 | `where_app` | `async def where_app(self, app_id) -> list[dict]` | The reverse index: `{rung, handle, version, appVersion, state, deployedAt}` per audience — `state` is the bound deployment's review state. |
 
 Serving needs no verb: a version's bundle loads from the stable
@@ -367,7 +367,7 @@ Grouped families (the `developer_*`/`submit`/`register_dev` rows are on
 three-step flow: `submit` (deployment → `submit`, enters the admin queue) →
 `admin_approve` (→ `ready`) → `publish_app @public` (point the public binding at
 the `ready` version). A reject flips the deployment `rejected`; the developer
-fixes and deploys a NEW version. `@user`/`@team` bindings need no approval.
+fixes and deploys a NEW version. `@me`/`@team` bindings need no approval.
 
 ### Events
 

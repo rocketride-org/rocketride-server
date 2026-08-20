@@ -775,7 +775,7 @@ export const DeployView: React.FC<IDeployViewProps> = ({ host, app, readOnly }) 
 				</div>
 			) : (
 				<>
-					{host.registerDeveloper && developerId === '' && (
+					{host.registerDeveloper && !readOnly && developerId === '' && (
 						<div style={styles.devBanner}>
 							<div style={styles.devBannerText}>
 								<strong>Register as a developer to deploy apps.</strong> Every app id is <code>&lt;developerId&gt;.&lt;name&gt;</code> — claim your organization&rsquo;s developer id (letters and underscores only) to publish under your own namespace.

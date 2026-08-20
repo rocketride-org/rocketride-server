@@ -119,8 +119,10 @@ checks. Absent/`true` = strict, the default.
   `{ type: 'checkout:stripeKey', key, requestId, reason? }`. The publishable key
   is fetched at runtime from the connected server's public probe (never baked
   into the build). When the key is empty, `reason` explains why
-  (`'no-connection' | 'probe-failed'`) so the webview can show a message instead
-  of a dead Subscribe button. The requesting hook re-requests when a connection
+  (`'no-connection' | 'probe-failed' | 'no-billing'` — the last means the probe
+  SUCCEEDED but the server has no billing configured, a terminal state the hook
+  stops retrying) so the webview can show a message instead of a dead
+  Subscribe button. The requesting hook re-requests when a connection
   lands (a server switch invalidates the previous key), and the `requestId`
   echo lets it drop a stale reply from a prior server that races in after the
   re-request.

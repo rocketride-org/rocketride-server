@@ -196,6 +196,27 @@ class AppsMixin(DAPClient):
             target=target,
         )
 
+    async def disable_app_publish(self, app_id: str, target: str) -> Dict[str, Any]:
+        """
+        Disable an audience binding — serving stops, but the row STAYS in the
+        where-live listing marked disabled (a visible off switch), unlike
+        remove which hides it. Publishing any version to the rung re-enables
+        the binding.
+
+        Args:
+            app_id: App id.
+            target: '@me', '@team/<name-or-id>', or '@public' ('@user' = legacy alias).
+
+        Returns:
+            Dict with the ``publish`` binding row (state 'disabled').
+        """
+        return await self.call(
+            'rrext_deploy_app',
+            subcommand='disable',
+            appId=app_id,
+            target=target,
+        )
+
     async def where_app(self, app_id: str) -> List[Dict[str, Any]]:
         """
         The reverse index: which audiences serve which version of the app.

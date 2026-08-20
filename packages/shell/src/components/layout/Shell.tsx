@@ -182,8 +182,13 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 		const fromUrl = params.get('appId') || params.get('appid') || '';
 		const raw = params.get('version') ?? '';
 		if (fromUrl && /^\d+$/.test(raw)) {
-			const version = Number.parseInt(raw, 10);
-			if (version > 0) setAppVersionOverride(fromUrl, { version });
+			// Number(), not parseInt(): a digit string too long for a safe
+			// integer must be rejected (parseInt rounds, and overlong input
+			// reaches Infinity — which passes a bare `> 0` check).
+			const version = Number(raw);
+			if (Number.isSafeInteger(version) && version > 0) {
+				setAppVersionOverride(fromUrl, { version });
+			}
 		}
 	}, []);
 

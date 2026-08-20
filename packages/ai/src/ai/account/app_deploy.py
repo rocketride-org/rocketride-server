@@ -450,8 +450,11 @@ async def handle_app_add(conn: Any, request: Dict[str, Any]) -> Dict[str, Any]:
             raise ValueError(f'registry entry carries no usable artifactPath ({content_root!r})')
         home = f'@/Org/={org_id}/{content_root[len(org_prefix) :]}'
         path = f'{home}/bundle/{app_id}-v{version:06d}.zip'
-        await fs.write(path, bytes(data))
+        # Record BEFORE the write (same rule as the source loop below): a
+        # bundle write that fails partway still leaves bytes on disk, and
+        # the compensation loop only deletes recorded paths.
         written.append(path)
+        await fs.write(path, bytes(data))
         for item in archive.infolist():
             if item.is_dir():
                 continue
@@ -515,6 +518,18 @@ async def handle_app_add(conn: Any, request: Dict[str, Any]) -> Dict[str, Any]:
             debug(f'[app_deploy] could not withdraw {app_id} v{row_version}: {exc}')
 
     # ── Hand the version to the build worker ─────────────────────────────
+    # First card-ticker word: the zip is on the server (the client's own
+    # 'uploading' state hands over here); the worker ticks the rest. Sent
+    # BEFORE the enqueue — the worker loop can resume on the next await, and
+    # its 'preparing' tick must not reach the card ahead of 'uploaded'.
+    server = getattr(conn, '_server', None)
+    if server is not None:
+        try:
+            from ai.modules.task.deploy_events import broadcast_build_status
+
+            await broadcast_build_status(server, org_id, app_id, version, 'uploaded')
+        except Exception as exc:
+            debug(f'[app_deploy] uploaded status broadcast failed: {exc}')
     # Deploy is THE build trigger (there is no developer-side manual kick):
     # the worker compiles source/ into dist/ asynchronously and stamps
     # metadata.build as it goes. Best-effort — a worker that is not running
@@ -526,16 +541,6 @@ async def handle_app_add(conn: Any, request: Dict[str, Any]) -> Dict[str, Any]:
         enqueue_build(getattr(conn, '_server', None), org_id, app_id, version)
     except Exception as exc:
         debug(f'[app_deploy] could not enqueue build for {app_id} v{version}: {exc}')
-    # First card-ticker word: the zip is on the server (the client's own
-    # 'uploading' state hands over here); the worker ticks the rest.
-    server = getattr(conn, '_server', None)
-    if server is not None:
-        try:
-            from ai.modules.task.deploy_events import broadcast_build_status
-
-            await broadcast_build_status(server, org_id, app_id, version, 'uploaded')
-        except Exception as exc:
-            debug(f'[app_deploy] uploaded status broadcast failed: {exc}')
 
     debug(f'[app_deploy] deployed {app_id} v{artifact["appVersion"]} as registry v{version} (private, build queued)')
     # One generic response shape for every kind: rrext_deploy add -> {artifact}

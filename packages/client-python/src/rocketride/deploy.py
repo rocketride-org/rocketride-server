@@ -290,8 +290,9 @@ class DeployApi:
         Deployments visible to the caller, as the standard list envelope.
 
         Args:
-            team_id: Restrict to one team; omitted = every team the caller
-                can monitor.
+            team_id: Restrict to one team; omitted = the visibility model:
+                the caller's member teams plus their own personal space, and
+                the whole org for an org admin.
             page: 1-based page number.
             page_size: Rows per page (server-clamped).
             search: Free-text search over projectId/pipelineName/teamId.

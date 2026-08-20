@@ -276,8 +276,9 @@ export class DeployApi {
 	 * Deployments visible to the caller, as the standard list envelope.
 	 *
 	 * @param params - Optional team scope + list-API params.
-	 * @param params.teamId - Restrict to one team; omitted = every team the
-	 *   caller can monitor.
+	 * @param params.teamId - Restrict to one team; omitted = the visibility
+	 *   model: the caller's member teams plus their own personal space, and
+	 *   the whole org for an org admin.
 	 * @returns `{rows, total, page, pageSize}` of {@link Deployment} rows.
 	 */
 	async list(params: DeployListParams & { teamId?: string } = {}): Promise<DeployListEnvelope<Deployment>> {

@@ -366,8 +366,10 @@ export interface ConnectResult {
 	locale: string;
 
 	/**
-	 * ID of the team that should be used by default for operations that do not
-	 * explicitly specify a team context.
+	 * ID of the user's development team. It carries NO authorization meaning:
+	 * it is the billing and environment-layer context for dev runs and for
+	 * `@me` publishes. Team-scoped operations always name their team
+	 * explicitly — there is no default-team fallback.
 	 */
 	devTeam: string;
 

@@ -283,8 +283,12 @@ export class WatchManager {
 			// LINGER REVIVE: the panel closed and reopened inside the grace
 			// window — the server never stopped, so reopening is instant:
 			// cancel the deferred teardown and re-announce the live server.
-			if (existing.lingerTimer) {
-				clearTimeout(existing.lingerTimer);
+			// Gate on the TOKEN as well as the timer: the timer callback
+			// clears lingerTimer and then ENQUEUES its teardown, so a start
+			// queued behind it sees lingerTimer undefined while the expiry
+			// (which captured the token) is still pending on the chain.
+			if (existing.lingerTimer || existing.lingerToken !== undefined) {
+				if (existing.lingerTimer) clearTimeout(existing.lingerTimer);
 				existing.lingerTimer = undefined;
 				// Drop the token so an already-fired linger's queued teardown
 				// (which captured the old token) no longer matches this session.
@@ -820,8 +824,10 @@ export class WatchManager {
 		if (lines.length === 0) return;
 		const text = lines.join('\n');
 
-		// Mirror the raw rsbuild output into the panel Console pane
-		this.consoleLines(session.app.id, 'log', text);
+		// Mirror the raw rsbuild output into the panel Console pane — stderr
+		// keeps its severity so the pane renders one stream consistently
+		// with the exit-time flush (which writes carried partials as warn).
+		this.consoleLines(session.app.id, stream === 'stderr' ? 'warn' : 'log', text);
 
 		// Dev origin: "  ➜ Local:    http://localhost:3013/" (rsbuild banner)
 		if (!session.devOrigin) {

@@ -2799,6 +2799,20 @@ export class RocketRideClient extends DAPClient {
 	}
 
 	/**
+	 * Disable an audience binding — serving stops, but the row STAYS in the
+	 * where-live listing marked disabled (a visible off switch), unlike
+	 * remove which hides it. Publishing any version to the rung re-enables
+	 * the binding.
+	 *
+	 * @param appId - App id
+	 * @param target - '@me', '@team/<name-or-id>', or '@public' ('@user' = legacy alias)
+	 * @returns The binding row (state 'disabled')
+	 */
+	async disableAppPublish(appId: string, target: string): Promise<{ publish: Record<string, unknown> }> {
+		return (await this.call('rrext_deploy_app', { subcommand: 'disable', appId, target })) as any;
+	}
+
+	/**
 	 * The reverse index: which audiences serve which version of an app.
 	 *
 	 * @param appId - App id

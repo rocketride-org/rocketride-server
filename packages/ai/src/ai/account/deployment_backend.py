@@ -758,6 +758,20 @@ class FileDeploymentBackend:
                 return v
         return {}
 
+    @staticmethod
+    def _review_state_of(ver: Dict[str, Any]) -> str:
+        """One registry row's review state — legacy rows default 'private'.
+
+        A row that predates review states carries none; every reader must
+        treat that as DEFAULT_REVIEW_STATE, never expose '' as an
+        artifactState. '' remains ONLY for a MISSING row ({} from
+        _artifact_entry_of): a binding at a deleted version must not read
+        as publishable.
+        """
+        if not ver:
+            return ''
+        return str(ver.get('state') or DEFAULT_REVIEW_STATE)
+
     def _publishes_of(self, meta: Dict[str, Any]) -> Dict[str, Any]:
         """The meta's publishes dict (container-tolerant on old files)."""
         publishes = meta.get('publishes')
@@ -829,7 +843,7 @@ class FileDeploymentBackend:
                 row,
                 org_id,
                 app_id,
-                str(ver.get('state') or ''),
+                self._review_state_of(ver),
                 str(ver.get('artifactPath') or ''),
                 self._build_status_of(ver),
             )
@@ -857,7 +871,7 @@ class FileDeploymentBackend:
             row,
             org_id,
             app_id,
-            str(ver.get('state') or ''),
+            self._review_state_of(ver),
             str(ver.get('artifactPath') or ''),
             self._build_status_of(ver),
         )
@@ -882,7 +896,7 @@ class FileDeploymentBackend:
                     row,
                     org_id,
                     app_id,
-                    str(ver.get('state') or ''),
+                    self._review_state_of(ver),
                     str(ver.get('artifactPath') or ''),
                     self._build_status_of(ver),
                 )
@@ -914,7 +928,7 @@ class FileDeploymentBackend:
                             row,
                             org_id,
                             project_id,
-                            str(ver.get('state') or ''),
+                            self._review_state_of(ver),
                             str(ver.get('artifactPath') or ''),
                             self._build_status_of(ver),
                         )
@@ -960,7 +974,7 @@ class FileDeploymentBackend:
                 row,
                 org_id,
                 app_id,
-                str(ver.get('state') or ''),
+                self._review_state_of(ver),
                 str(ver.get('artifactPath') or ''),
                 self._build_status_of(ver),
             )

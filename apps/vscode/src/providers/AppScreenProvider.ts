@@ -249,16 +249,35 @@ export class AppScreenProvider implements vscode.CustomReadonlyEditorProvider {
 						// (browser-based, works everywhere), then hand the fresh
 						// credential down the normal rrdev:auth path.
 						const auth = CloudAuthProvider.getInstance();
+						// signIn() only OPENS the browser: the token lands later,
+						// when the deep-link callback stores it and fires the
+						// provider's change event. Arm a bounded wait for that
+						// event BEFORE launching, then forward the credential —
+						// resolving immediately would read the old signed-out
+						// state and leave the preview stuck at its prompt.
+						const completed = new Promise<boolean>((resolve) => {
+							const onChanged = () => {
+								clearTimeout(timer);
+								resolve(true);
+							};
+							const timer = setTimeout(() => {
+								auth.onDidChange.removeListener('changed', onChanged);
+								resolve(false);
+							}, 300000);
+							auth.onDidChange.once('changed', onChanged);
+						});
 						await auth.signIn(
 							process.env.RR_ZITADEL_URL || '',
 							process.env.RR_ZITADEL_VSCODE_CLIENT_ID || '',
 							ConfigManager.getInstance().getEffectiveCloudUrl()
 						);
-						try {
-							const token = await this.connectionManager.resolveAuthCredential();
-							if (token) await panel.webview.postMessage({ type: 'appdev:auth', token });
-						} catch {
-							/* sign-in abandoned — preview keeps its prompt */
+						if (await completed) {
+							try {
+								const token = await this.connectionManager.resolveAuthCredential();
+								if (token) await panel.webview.postMessage({ type: 'appdev:auth', token });
+							} catch {
+								/* sign-in abandoned — preview keeps its prompt */
+							}
 						}
 						break;
 					}
@@ -732,8 +751,15 @@ export class AppScreenProvider implements vscode.CustomReadonlyEditorProvider {
 	 * @returns The validated integer registry version.
 	 */
 	private requireRegistryVersion(arg: unknown): number {
+		// Number(null) and Number('') both coerce to 0, which would pass a
+		// bare isInteger check and reach submit/publish/withdraw as version
+		// 0 — the "unspecified version" this guard exists to reject.
+		// Registry versions are positive integers (v1 is the first).
+		if (typeof arg !== 'number' && typeof arg !== 'string') {
+			throw new Error(`Invalid registry version: ${JSON.stringify(arg)}`);
+		}
 		const version = Number(arg);
-		if (!Number.isInteger(version)) {
+		if (!Number.isSafeInteger(version) || version <= 0) {
 			throw new Error(`Invalid registry version: ${JSON.stringify(arg)}`);
 		}
 		return version;

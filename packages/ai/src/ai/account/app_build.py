@@ -1140,6 +1140,9 @@ class AppBuildWorker:
             build.update({'status': 'failed', 'phase': phase, 'endedAt': time.time()})
             build.pop('errors', None)
             await self._stamp(org_id, app_id, version, build)
+            # Drain the failing phase's buffered lines BEFORE the terminal
+            # tick — they are exactly the output that explains the failure.
+            await feed.flush()
             await feed.status('failed')
             debug(f'[app_build] {app_id} v{version}: build failed in {phase}')
             return False
@@ -1156,6 +1159,7 @@ class AppBuildWorker:
             if attempt < _MAX_ATTEMPTS:
                 build.update({'status': 'queued', 'phase': phase})
                 await self._stamp(org_id, app_id, version, build)
+                await feed.flush()
                 await feed.status('queued')
                 debug(f'[app_build] {app_id} v{version}: infra failure in {phase}, requeued: {exc}')
                 return True
@@ -1163,6 +1167,7 @@ class AppBuildWorker:
             build.update({'status': 'failed', 'phase': phase, 'endedAt': time.time()})
             build.pop('errors', None)
             await self._stamp(org_id, app_id, version, build)
+            await feed.flush()
             await feed.status('failed')
             error(f'[app_build] {app_id} v{version}: infra failure (attempts exhausted): {exc}')
             return False
