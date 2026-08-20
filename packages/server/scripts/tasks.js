@@ -1392,6 +1392,23 @@ module.exports = {
 						args.push('--saas');
 					}
 
+					// An overlay repository can carry workspace-local nodes in a
+					// `local_nodes` folder at its root, and the engine scans that folder
+					// only when --node_path names its parent. The flag has to be on argv:
+					// the option is read with application::Opt, which never looks at the
+					// environment, so there is no env or config equivalent. Task
+					// subprocesses inherit it from here (task_engine.py, "Inherit parent
+					// engine's --node_path"), so the parent process is the only place it
+					// needs setting.
+					//
+					// Without it the nodes load silently as nothing: the engine logs "No
+					// local_nodes directory under --node_path", and the first pipeline
+					// naming one of those providers fails validation with "references a
+					// provider with no registered service definition".
+					if (options.overlayRoot && (await exists(path.join(options.overlayRoot, 'local_nodes')))) {
+						args.push(`--node_path=${path.resolve(options.overlayRoot)}`);
+					}
+
 					// --modelserver: true means local (default address), string means use given address
 					if (options.modelserver === true) {
 						args.push('--modelserver=localhost:5590');
