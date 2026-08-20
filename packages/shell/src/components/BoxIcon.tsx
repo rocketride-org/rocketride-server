@@ -103,7 +103,11 @@ export const BxMove = createIcon('M18 11h-5V6h3l-4-4-4 4h3v5H6V8l-4 4 4 4v-3h5v5
 // FILE TREE ICONS
 // =============================================================================
 
-export const BxListUl = createIcon('M4 6h2v2H4zm0 5h2v2H4zm0 5h2v2H4zM20 7H8V5H20v2zm0 5H8v-2h12v2zm0 5H8v-2h12v2z');
+// Boxicons "bx-list-ul", with the bullets moved up a pixel to sit on the rules
+// they belong to. Boxicons draws the dots at y 6/11/16 and the rules at y 5/10/15,
+// so every bullet hung one pixel below the line beside it — visible at any size,
+// and a list icon whose bullets do not line up reads as a rendering fault.
+export const BxListUl = createIcon('M4 5h2v2H4zm0 5h2v2H4zm0 5h2v2H4zM20 7H8V5H20v2zm0 5H8v-2h12v2zm0 5H8v-2h12v2z');
 
 export const BxFolderOpen = createMultiPathIcon(['M20 6h-8l-2-2H4c-1.103 0-2 .897-2 2v12c0 1.103.897 2 2 2h16c1.103 0 2-.897 2-2V8c0-1.103-.897-2-2-2zm0 12H4V8h16v10z']);
 
