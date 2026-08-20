@@ -236,6 +236,15 @@ def _conflict_path(conflict: Any) -> str:
     return '<unknown>'
 
 
+def _bounded_paths(paths: List[str], limit: int = 10) -> str:
+    """Return a comma-separated path list capped at *limit* entries."""
+    shown = ', '.join(paths[:limit])
+    remaining = len(paths) - limit
+    if remaining > 0:
+        shown += f' (+{remaining} more)'
+    return shown
+
+
 # ---------------------------------------------------------------------------
 # Main class
 # ---------------------------------------------------------------------------
@@ -834,13 +843,9 @@ class GitRepo:
 
         dirty_paths = sorted(repo.status())
         if dirty_paths:
-            shown_paths = ', '.join(dirty_paths[:10])
-            remaining = len(dirty_paths) - 10
-            if remaining > 0:
-                shown_paths += f' (+{remaining} more)'
             raise GitError(
                 'Merge requires a clean working tree; commit, stash, or remove changes first. '
-                f'Dirty paths: {shown_paths}'
+                f'Dirty paths: {_bounded_paths(dirty_paths)}'
             )
 
         if analysis & _GIT_MERGE_ANALYSIS_FASTFORWARD:
@@ -855,14 +860,14 @@ class GitRepo:
         if analysis & _GIT_MERGE_ANALYSIS_NORMAL:
             repo.merge(their_branch.target)
             if repo.index.conflicts:
-                conflicts = [_conflict_path(conflict) for conflict in repo.index.conflicts]
+                conflicts = sorted({_conflict_path(conflict) for conflict in repo.index.conflicts})
                 # The clean-worktree guard above makes this hard reset safe:
                 # only merge artifacts exist to discard. Clear MERGE_HEAD /
                 # MERGE_MSG and restore both the index and worktree to HEAD.
                 repo.state_cleanup()
                 repo.reset(repo.head.target, _GIT_RESET_HARD)
                 raise GitError(
-                    f'Merge conflict in: {", ".join(conflicts)}. '
+                    f'Merge conflict in: {_bounded_paths(conflicts)}. '
                     'Merge aborted (state reset to HEAD); resolve conflicts manually outside the agent and retry.'
                 )
             tree = repo.index.write_tree()

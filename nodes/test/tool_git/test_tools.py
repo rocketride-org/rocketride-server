@@ -1013,6 +1013,27 @@ class TestMergeSafety(unittest.TestCase):
         self.assertIn('file-09.txt (+3 more)', message)
         self.assertNotIn('file-10.txt', message)
 
+    def test_conflict_path_error_is_deduplicated_sorted_and_bounded(self) -> None:
+        """Conflict output stays deterministic and bounded for wide merges."""
+        wrapper, backend = _repo_for_merge(_GIT_MERGE_ANALYSIS_NORMAL)
+        conflicts = []
+        for index in range(12, -1, -1):
+            entry = MagicMock(path=f'file-{index:02d}.txt')
+            conflicts.append((None, entry, entry))
+        duplicate = MagicMock(path='file-00.txt')
+        conflicts.append((None, duplicate, duplicate))
+        backend.index.conflicts = conflicts
+
+        with self.assertRaises(GitError) as ctx:
+            wrapper.merge('feature')
+
+        message = str(ctx.exception)
+        self.assertIn('file-00.txt, file-01.txt', message)
+        self.assertIn('file-09.txt (+3 more)', message)
+        self.assertNotIn('file-10.txt', message)
+        backend.state_cleanup.assert_called_once_with()
+        backend.reset.assert_called_once_with('head-target', _GIT_RESET_HARD)
+
 
 # ---------------------------------------------------------------------------
 # Self-contained integration tests — temporary real repositories
