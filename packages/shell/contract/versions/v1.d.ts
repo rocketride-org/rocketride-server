@@ -21,10 +21,10 @@
 // SOFTWARE.
 
 // =============================================================================
-// FROZEN shell-api contract — ShellApiV0 — never edit by hand
+// FROZEN shell-api contract — ShellApiV1 — never edit by hand
 // =============================================================================
-// Generated:     2026-08-07T07:09:39.400Z
-// Source commit: 02eb2375d7963391ae0f6cb8426226affdb0adff
+// Generated:     2026-08-11T16:10:32.191Z
+// Source commit: 3beffb869acb736ee14028210daed05a0f47b8c1
 // Generator:     dts-bundle-generator@9.5.1
 // Produced by:   ./builder shell:freeze
 // =============================================================================
@@ -4857,7 +4857,7 @@ export declare class RocketRideClient extends DAPClient {
         file: File;
         objinfo?: Record<string, unknown>;
         mimetype?: string;
-    }>, token: string): Promise<UPLOAD_RESULT[]>;
+    }>, token: string, maxConcurrent?: number): Promise<UPLOAD_RESULT[]>;
     /**
      * Ask a question to RocketRide's AI and get an intelligent response.
      */
@@ -9532,6 +9532,51 @@ export interface IModalProps {
  * @returns The modal element.
  */
 export declare function Modal({ title, onClose, children, footer, showClose, closeOnEscape, width, noBodyPadding, ariaLabel, }: IModalProps): React$1.ReactElement;
+/** One selectable file type — the OS Save-dialog "Save as type" vocabulary. */
+export interface ISaveFileType {
+    /** Human-readable type label, e.g. "RocketRide Pipeline". */
+    label: string;
+    /** Extension appended to the typed name, WITH the leading dot, e.g. ".pipe". */
+    extension: string;
+}
+/** Props for the {@link SaveFileDialog} component. */
+export interface ISaveFileDialogProps {
+    /** Dialog title, e.g. "Save Pipeline As". */
+    title: string;
+    /** File system the dialog browses — only `list` and `mkdir` are called. */
+    vfs: IVirtualFileSystem;
+    /**
+     * Selectable file types. The FIRST entry is the initial selection; a
+     * single-entry list hides the type picker (the extension still shows as the
+     * name input's suffix).
+     */
+    fileTypes: ISaveFileType[];
+    /** Label rendered for the tree root row. Default "$/". */
+    rootLabel?: string;
+    /**
+     * Directory preselected on open — relative to the VFS root, '/'-separated.
+     * Rendered as a dimmed ghost row when it does not exist yet; the missing
+     * segments are created on save.
+     */
+    defaultDir?: string;
+    /** Initial value of the name input (no extension). */
+    initialName?: string;
+    /**
+     * Called with the chosen path (relative to the VFS root, extension
+     * included) AFTER any missing directories were created. The caller
+     * performs the actual write.
+     */
+    onConfirm: (path: string) => void;
+    /** Called when the dialog is dismissed (Cancel or Escape). */
+    onCancel: () => void;
+}
+/**
+ * Renders the stock Save-As dialog over a virtual file system.
+ *
+ * @param props - {@link ISaveFileDialogProps}.
+ * @returns The dialog element.
+ */
+export declare function SaveFileDialog({ title, vfs, fileTypes, rootLabel, defaultDir, initialName, onConfirm, onCancel }: ISaveFileDialogProps): React$1.ReactElement;
 /** Props for the {@link SidebarMenu} component. */
 export interface ISidebarMenuProps {
     /** The declared menu whose entries render as the vertical list. */
@@ -11308,6 +11353,7 @@ export declare const shellApi: {
     readonly TabPanel: typeof TabPanel;
     readonly Modal: typeof Modal;
     readonly CLOSE_GLYPH: string;
+    readonly SaveFileDialog: typeof SaveFileDialog;
     readonly SidebarMenu: typeof SidebarMenu;
     readonly SidebarCollapsedProvider: import("react").FC<ISidebarCollapsedProviderProps>;
     readonly SidebarCollapsedGate: import("react").FC<ISidebarCollapsedGateProps>;
@@ -11509,4 +11555,4 @@ export declare function getShellApi(): ShellApiShape;
 export { AppManifestEntry$1 as AppManifestEntry, ConnectResult as AuthUser, Document$1 as Document, Explorer as DocExplorer, ExplorerChild as DocEntryChild, ExplorerConfig as DocExplorerConfig, ExplorerEntry as DocEntry, ExplorerStatus as DocEntryStatus, IConfirmDialogProps as ConfirmDialogProps, IExplorerProps as DocExplorerProps, PipelineControlConnection as IControlConnection, PipelineInputConnection as IInputConnection, PromoRedemption$1 as PromoRedemption, PromoValidation$1 as PromoValidation, ShellConnectionEventMap as ShellEventMap, TASK_STATE as ITaskState, TASK_STATUS as ITaskStatus, TASK_STATUS_FLOW as IFlowData, };
 export {};
 // ===== END FROZEN BUNDLE =====
-export type ShellApiV0 = ShellApiShape;
+export type ShellApiV1 = ShellApiShape;

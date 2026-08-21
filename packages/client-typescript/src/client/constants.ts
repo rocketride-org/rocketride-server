@@ -25,7 +25,7 @@
 /**
  * SDK version — automatically synced from package.json during build.
  */
-export const SDK_VERSION = '2.0.0';
+export const SDK_VERSION = '1.3.0';
 
 /**
  * Default protocol for connections when none is specified.
