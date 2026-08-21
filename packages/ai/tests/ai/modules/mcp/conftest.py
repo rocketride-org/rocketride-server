@@ -46,6 +46,8 @@ EXPECTED_TOOL_NAMES = (
     'log_read',
     'log_traces',
     'log_trace',
+    # scaffold
+    'scaffold_node',
     # integrations
     'list_integrations',
 )

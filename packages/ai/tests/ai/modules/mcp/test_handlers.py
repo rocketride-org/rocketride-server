@@ -3,7 +3,7 @@
 the resource wiring it keeps (status / pipelines, no nodes).
 
 Dispatch tests inject a dummy tool by monkeypatching `tools_pkg.register_all`,
-isolating the dispatch machinery from the real 28-tool surface (which
+isolating the dispatch machinery from the real 29-tool surface (which
 `test_list_tools_reflects_real_register_all` covers against
 `conftest.EXPECTED_TOOL_NAMES`).
 

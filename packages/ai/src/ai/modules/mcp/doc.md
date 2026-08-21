@@ -11,7 +11,7 @@ like every other module and mounted at:
 /mcp
 ```
 
-This module exposes a static, 28-tool RocketRide authoring/execution surface served
+This module exposes a static, 29-tool RocketRide authoring/execution surface served
 over HTTP from inside the running engine process — no separate process or transport
 bridge required. It supersedes the earlier 2-tool port, which exposed a dynamic
 per-pipeline `{filepath}` tool plus a `RocketRide_Document_Processor` convenience
@@ -104,7 +104,7 @@ on every `CacheableResult` this module returns:
 Config key `mcp_dev_no_auth` (bool, in the module `config` dict passed to `initModule`)
 is the config-driven equivalent of `MCP_DEV_NO_AUTH=1`; either one enables the bypass.
 
-## The 28 tools
+## The 29 tools
 
 Dispatch is registry-based: `tooling.ToolRegistry` holds `{name -> (description,
 inputSchema, handler)}`; `tools/__init__.register_all(registry)` populates one shared
@@ -120,7 +120,7 @@ All tools are static and typed (fixed name + JSON Schema) — there is no dynami
 per-pipeline tool generation and no `filepath`-shaped catch-all tool of the kind the
 legacy 2-tool port used.
 
-The 28 tools are organized into 8 groups (plus 2 resources), matching
+The 29 tools are organized into 8 groups (plus 2 resources), matching
 `claude/tasks/http-mcp-tools-port/final-tool-surface.md` minus the Query group
 (see History: the 3 convenience query tools were removed pending their cloud DB
 backend), plus the Run log (DVR) group and `list_integrations` added below.
@@ -132,6 +132,7 @@ backend), plus the Run log (DVR) group and `list_integrations` added below.
 | `list_components` | List pipeline components ready to use *now* — zero-config components plus integrations whose credentials are configured. Configured entries carry a `wiring` block of `${VAR}` placeholders; a `note` counts integrations omitted for needing setup. Call `list_integrations` for those. | none |
 | `describe_component` | Full metadata/config schema for one component; catalog nodes also get a `credentials` block (same readiness vocabulary as `list_integrations`). | `name` (required) |
 | `resolve_config` | What a component config resolves to at load, after the engine applies profile and default merging. Reports keys the resolver discarded, which a schema cannot express. | `provider` (required), `config` |
+| `scaffold_node` | Emit a local node skeleton that loads on the first try, with the manifest keys and file layout the engine requires. Returns files to write. | `name` (required), `lane_in`, `lane_out`, `class_type` |
 | `validate_pipeline` | Validate a pipeline against the engine's own rules (engine-authoritative, zero client-side drift). | `pipeline` |
 | `describe_pipeline` | Statically describe a pipeline's source and components (id, provider, title, classType, inputs); synthesized client-side, no backing SDK method. | `pipeline` |
 | `list_integrations` | Credential readiness for catalog integrations this engine has a matching node for. Bare call: terse per-integration rows (`name`/`title`/`status`/`missing_count`). With `name`: full field detail, `missing`, `candidates`, the caller's own variable names (`caller_variables`), and either `setup` (not configured) or `wiring` (configured). | `name` (optional) |
@@ -357,7 +358,7 @@ prompt templates from the earlier port were removed along with their tests.
 ## The `EngineClient` seam
 
 `engine.py` defines one `Protocol`, `EngineClient`, with the methods needed
-by the 28-tool surface (task lifecycle, services/validation, store/templates/store
+by the 29-tool surface (task lifecycle, services/validation, store/templates/store
 metadata/signed URLs, full deployment lifecycle, `rrext_log` chapters/read/traces/
 trace — see the `Protocol` definition in `engine.py` for exact signatures). All
 tool/resource code depends only on this interface — never on a concrete client — so
