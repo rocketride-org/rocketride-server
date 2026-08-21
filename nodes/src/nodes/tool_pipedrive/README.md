@@ -431,7 +431,7 @@ List functions generally use `start` (offset) and `limit`; return values include
 
 ## Authentication
 
-Set `apiToken` to a Pipedrive API token or OAuth access token. The client sends JWT-style, long, or `Bearer `-prefixed values as a Bearer token; it sends other values as the `api_token` query parameter. A missing token prevents startup.
+Set `apiToken` to a Pipedrive API token or OAuth access token. The client sends JWT-style, long, or values formatted as `Bearer <token>` using the Authorization header; it sends other values as the `api_token` query parameter. A missing token prevents startup.
 
 ## Notes
 
