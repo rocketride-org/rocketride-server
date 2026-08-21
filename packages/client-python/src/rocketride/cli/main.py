@@ -21,657 +21,455 @@
 # SOFTWARE.
 
 """
-Main CLI Class and Entry Point for RocketRide Command-Line Tool.
+RocketRide CLI entry point.
 
-This module provides the primary interface for the RocketRide command-line tool,
-handling argument parsing, command routing, signal management, and event
-forwarding. Use this as the main entry point for all RocketRide CLI operations
-including pipeline management, file uploads, status monitoring, and task control.
+Command surface (kept in exact parity with the TypeScript client's CLI):
 
-The CLI supports multiple commands with comprehensive argument parsing, graceful
-signal handling, automatic reconnection, and event-driven communication with
-the RocketRide server through WebSocket connections.
+    init                       Initialize the workspace (login + provision)
+    login                      (Re-)authenticate and save .env credentials
+    list                       List active tasks
+    start / stop / upload      Task lifecycle
+    store dir/type/write/...   File store operations
+    app create/deploy/verify   App lifecycle
+    deploy add/list/publish/.. Deploy lifecycle (deployment target)
 
-Key Features:
-    - Multi-command CLI with comprehensive argument parsing
-    - Graceful signal handling for clean interruption
-    - Event-driven communication with automatic reconnection
-    - Command routing with standardized error handling
-    - Environment variable support for common parameters
-    - Cross-platform compatibility and robust error recovery
+All output is plain, line-oriented text; every command also accepts
+``--json`` / ``--json=<file>`` for a machine-readable result. Continuous
+live monitoring is deliberately absent — the platform's event monitor
+and server monitor apps own that job.
 
-Usage:
-    python main.py start my_pipeline.json --threads 8 --uri http://server:5565
-    python main.py upload *.txt --token <token> --uri http://server:5565
-    python main.py status --token <token> --uri http://server:5565
-
-Components:
-    RocketRideCLI: Main CLI class with command routing and lifecycle management
-    main: Entry point function for the CLI application
+Configuration comes from flags or the workspace ``.env``
+(ROCKETRIDE_URI/ROCKETRIDE_APIKEY for development,
+ROCKETRIDE_DEPLOY_URI/ROCKETRIDE_DEPLOY_APIKEY for deploy verbs), which
+``rocketride init`` writes.
 """
 
-import os
-import sys
-import signal
 import argparse
 import asyncio
-import time
-from typing import Dict, Any, List, Optional
+import os
+import sys
 
-from ..core.constants import CONST_DEFAULT_WEB_CLOUD
-
-from .commands.start import StartCommand
-from .commands.upload import UploadCommand
-from .commands.status import StatusCommand
-from .commands.stop import StopCommand
-from .commands.events import EventsCommand
-from .commands.list import ListCommand
-from .commands.store import StoreCommand
-
-try:
-    # Try importing from installed package first
-    from rocketride import RocketRideClient
-except ImportError:
-    # Fall back to local development path
-    from rocketride import RocketRideClient
+from .utils.env import (
+    ENV_DEPLOY_APIKEY,
+    ENV_DEPLOY_URI,
+    ENV_DEV_APIKEY,
+    ENV_DEV_URI,
+    load_dot_env,
+)
 
 
-class RocketRideCLI:
+def _add_connection_args(parser: argparse.ArgumentParser) -> None:
     """
-    Main CLI class with command routing.
+    Add the development-connection options (``--uri``, ``--apikey``,
+    ``--json``) with defaults from the (already loaded) environment.
 
-    Provides the primary interface for the RocketRide command-line tool, handling
-    argument parsing, command routing, signal management, and event forwarding.
-    Supports multiple commands including pipeline start, file upload, status
-    monitoring, task termination, and event monitoring.
-
-    Example:
-        ```python
-        # Create and run CLI
-        cli = RocketRideCLI()
-        exit_code = await cli.run()
-        ```
-
-    Key Features:
-        - Comprehensive argument parsing with subcommands
-        - Graceful signal handling for clean shutdown
-        - Event-driven communication with server
-        - Automatic reconnection handling
-        - Command lifecycle management
-        - Environment variable integration
+    Args:
+        parser: The subcommand parser to extend.
     """
+    from ..core.constants import CONST_DEFAULT_WEB_LOCAL
 
-    def __init__(self):
-        """
-        Initialize RocketRideCLI with default values and signal handlers.
+    parser.add_argument(
+        '--uri',
+        default=os.getenv(ENV_DEV_URI, CONST_DEFAULT_WEB_LOCAL),
+        help=f'RocketRide server URI (can use {ENV_DEV_URI} in .env or env var)',
+    )
+    parser.add_argument(
+        '--apikey',
+        default=os.getenv(ENV_DEV_APIKEY),
+        help=f'API key for server authentication (can use {ENV_DEV_APIKEY} in .env or env var)',
+    )
+    _add_json_arg(parser)
 
-        Sets up the CLI instance with empty state and configures signal handlers
-        for graceful shutdown on interrupt signals.
 
-        Initialization:
-            - Configures signal handlers for clean interruption
-            - Initializes connection state tracking
-            - Sets up command and client instance variables
-            - Prepares event handling system
-        """
-        # Parsed command line arguments - populated by setup_parser()
-        self.args = None
+def _add_deploy_connection_args(parser: argparse.ArgumentParser) -> None:
+    """
+    Add the deployment-target options (``--uri``, ``--apikey``,
+    ``--json``). Lifecycle verbs hard-stop when the pair is absent — the
+    development connection is never a deploy fallback.
 
-        # WebSocket URI for server connection - constructed from host/port args
-        self.uri = ''
+    Args:
+        parser: The subcommand parser to extend.
+    """
+    parser.add_argument(
+        '--uri',
+        default=os.getenv(ENV_DEPLOY_URI),
+        help=f'Deployment target URI (can use {ENV_DEPLOY_URI} env var)',
+    )
+    parser.add_argument(
+        '--apikey',
+        default=os.getenv(ENV_DEPLOY_APIKEY),
+        help=f'Deployment target API key (can use {ENV_DEPLOY_APIKEY} env var)',
+    )
+    _add_json_arg(parser)
 
-        # Current command being processed
-        self.command = None
 
-        # Cancellation flag for graceful shutdown - set by signal handlers
-        self._cancelled = False
+def _add_json_arg(parser: argparse.ArgumentParser) -> None:
+    """
+    Add the ``--json [FILE]`` option (bare = JSON on stdout).
 
-        # Configure signal handlers for clean interrupt handling
-        self._setup_signal_handlers()
+    Args:
+        parser: The subcommand parser to extend.
+    """
+    parser.add_argument(
+        '--json',
+        nargs='?',
+        const='-',
+        default=None,
+        metavar='FILE',
+        help='Output the result as a JSON value (to stdout, or to FILE)',
+    )
 
-        # Connection time we started the .connect function
-        self._connect_start = 0
 
-        # RocketRideClient instance for server communication
-        self.client: RocketRideClient = None  # Will hold the connected client instance
+def setup_parser() -> argparse.ArgumentParser:
+    """
+    Build the argument parser with every command group registered.
 
-    async def _on_event(self, message: Dict[str, Any]) -> None:
-        """
-        Handle DAP events and forward to current command.
+    Returns:
+        The configured root parser.
+    """
+    parser = argparse.ArgumentParser(
+        description='RocketRide Unified Pipeline and File Management CLI',
+        epilog='Use "rocketride <command> --help" for command-specific help',
+    )
+    subparsers = parser.add_subparsers(dest='command', help='Available commands', metavar='COMMAND')
 
-        Receives events from the RocketRideClient and forwards them to the currently
-        active command's monitor for display or processing.
+    # ── init ─────────────────────────────────────────────────────────────
+    init_parser = subparsers.add_parser(
+        'init', help='Initialize this workspace: sign in, vendor platform packages, install agent docs'
+    )
+    _add_connection_args(init_parser)
+    init_parser.add_argument(
+        '--no-deploy', dest='deploy', action='store_false', help='Do not configure a deploy target'
+    )
+    init_parser.add_argument(
+        '--no-install', dest='install', action='store_false', help='Skip the workspace install after vendoring'
+    )
 
-        Args:
-            message: DAP event message containing event type and data
+    # ── login ────────────────────────────────────────────────────────────
+    login_parser = subparsers.add_parser(
+        'login', help='(Re-)authenticate against a server and save credentials to .env'
+    )
+    _add_connection_args(login_parser)
+    login_parser.add_argument(
+        '--deploy',
+        dest='deploy_pair',
+        action='store_true',
+        help='Re-authenticate the deployment pair (ROCKETRIDE_DEPLOY_*) instead',
+    )
+    login_parser.add_argument(
+        '--no-deploy', dest='deploy', action='store_false', help='Do not mirror the credentials into the deploy pair'
+    )
 
-        Event Flow:
-            1. Receive event from RocketRideClient
-            2. Check if command has event handler
-            3. Forward event to command's on_event method
-            4. Command processes event for display/action
-        """
-        # Forward event to active command if one exists
-        if self.command and hasattr(self.command, 'on_event'):
-            await self.command.on_event(message)
+    # ── list ─────────────────────────────────────────────────────────────
+    list_parser = subparsers.add_parser('list', help='List all active tasks')
+    _add_connection_args(list_parser)
 
-    async def _on_connecting(self) -> None:
-        """
-        Issue an on connecting to the command handler.
+    # ── start ────────────────────────────────────────────────────────────
+    start_parser = subparsers.add_parser('start', help='Start a new pipeline')
+    _add_connection_args(start_parser)
+    start_parser.add_argument(
+        '--pipeline',
+        default=os.getenv('ROCKETRIDE_PIPELINE'),
+        help='Path to pipeline configuration file (can use ROCKETRIDE_PIPELINE in .env or env var)',
+    )
+    start_parser.add_argument(
+        '--token',
+        default=os.getenv('ROCKETRIDE_TOKEN'),
+        help='Optional existing task token (can use ROCKETRIDE_TOKEN in .env or env var)',
+    )
+    start_parser.add_argument('--threads', type=int, default=4, help='Number of threads (default: %(default)s)')
+    start_parser.add_argument(
+        '--args', dest='pipeline_args', nargs=argparse.REMAINDER, help='Additional pipeline arguments'
+    )
 
-        Notifies the current command that a connection attempt is in progress,
-        allowing commands to display appropriate connection status to users.
-        """
-        # Forward event to active command if one exists
-        if self.command and hasattr(self.command, 'on_connecting'):
-            await self.command.on_connecting()
+    # ── stop ─────────────────────────────────────────────────────────────
+    stop_parser = subparsers.add_parser('stop', help='Stop a running task')
+    _add_connection_args(stop_parser)
+    stop_parser.add_argument(
+        '--token',
+        default=os.getenv('ROCKETRIDE_TOKEN'),
+        help='Task token to stop (can use ROCKETRIDE_TOKEN in .env or env var)',
+    )
 
-    async def _on_connected(self, connection_info: Optional[str] = None) -> None:
-        """
-        Issue an on connected to the command handler.
+    # ── upload ───────────────────────────────────────────────────────────
+    upload_parser = subparsers.add_parser('upload', help='Upload files using --pipeline or an existing task token')
+    _add_connection_args(upload_parser)
+    upload_parser.add_argument('files', nargs='+', help='Files, wildcards, or directories to upload')
+    upload_parser.add_argument(
+        '--pipeline',
+        default=os.getenv('ROCKETRIDE_PIPELINE'),
+        help='Pipeline file to start new task (can use ROCKETRIDE_PIPELINE in .env or env var)',
+    )
+    upload_parser.add_argument(
+        '--token',
+        default=os.getenv('ROCKETRIDE_TOKEN'),
+        help='Existing task token to use for uploads (can use ROCKETRIDE_TOKEN in .env or env var)',
+    )
+    upload_parser.add_argument('--threads', type=int, default=4, help='Number of threads (default: %(default)s)')
+    upload_parser.add_argument(
+        '--max-concurrent',
+        dest='max_concurrent',
+        type=int,
+        default=5,
+        help='Maximum concurrent uploads (accepted for parity; the Python client parallelizes automatically)',
+    )
+    upload_parser.add_argument(
+        '--args', dest='pipeline_args', nargs=argparse.REMAINDER, help='Additional pipeline arguments'
+    )
 
-        Notifies the current command that connection has been established,
-        with a minimum delay to ensure users can see connection status updates.
+    # ── store ────────────────────────────────────────────────────────────
+    store_parser = subparsers.add_parser('store', help='File store operations')
+    store_subparsers = store_parser.add_subparsers(dest='store_subcommand', help='Store commands', metavar='COMMAND')
 
-        Args:
-            connection_info: Optional connection details for logging
-        """
-        # Forward event to active command if one exists
-        if self.command and hasattr(self.command, 'on_connected'):
-            # Allow at least 2 seconds to see any popup
-            current = time.time()
-            delay = max(0, 2 - (current - self._connect_start))
+    dir_parser = store_subparsers.add_parser('dir', help='List directory contents')
+    _add_connection_args(dir_parser)
+    dir_parser.add_argument('path', nargs='?', default='', help='Directory path (default: root)')
 
-            # Just in case...
-            if delay > 2:
-                delay = 2
+    type_parser = store_subparsers.add_parser('type', help='Display file contents')
+    _add_connection_args(type_parser)
+    type_parser.add_argument('path', help='File path')
 
-            # Sleep on it...
-            await asyncio.sleep(delay)
+    write_parser = store_subparsers.add_parser('write', help='Write a file')
+    _add_connection_args(write_parser)
+    write_parser.add_argument('path', help='File path')
+    write_group = write_parser.add_mutually_exclusive_group(required=True)
+    write_group.add_argument('--file', help='Local file to upload')
+    write_group.add_argument('--content', help='Inline text content')
 
-            # Signal disconnected
-            await self.command.on_connected(connection_info)
+    rm_parser = store_subparsers.add_parser('rm', help='Delete a file')
+    _add_connection_args(rm_parser)
+    rm_parser.add_argument('path', help='File path')
 
-    async def _on_disconnecting(self) -> None:
-        """
-        Issue an on disconnecting to the command handler.
+    mkdir_parser = store_subparsers.add_parser('mkdir', help='Create a directory')
+    _add_connection_args(mkdir_parser)
+    mkdir_parser.add_argument('path', help='Directory path')
 
-        Notifies the current command that disconnection is in progress,
-        allowing commands to display appropriate status during shutdown.
-        """
-        # Forward event to active command if one exists
-        if self.command and hasattr(self.command, 'on_disconnecting'):
-            await self.command.on_disconnecting()
+    stat_parser = store_subparsers.add_parser('stat', help='Get file/directory metadata')
+    _add_connection_args(stat_parser)
+    stat_parser.add_argument('path', help='File or directory path')
 
-    async def _on_disconnected(self, reason: Optional[str] = None, has_error: bool = False) -> None:
-        """
-        Issue an on disconnected to the command handler.
+    # ── app ──────────────────────────────────────────────────────────────
+    app_parser = subparsers.add_parser('app', help='App lifecycle operations')
+    app_subparsers = app_parser.add_subparsers(dest='app_subcommand', help='App commands', metavar='COMMAND')
 
-        Notifies the current command that connection has been lost,
-        providing reason and error status for appropriate user feedback.
+    app_deploy_parser = app_subparsers.add_parser(
+        'deploy', help="Pack an app folder's source and deploy it as the next registry version"
+    )
+    _add_deploy_connection_args(app_deploy_parser)
+    app_deploy_parser.add_argument('folder', help='App folder to pack and deploy')
+    app_deploy_parser.add_argument(
+        '--workspace', help='Workspace root the zip is rooted at (default: current directory)'
+    )
+    app_deploy_parser.add_argument('--comment', help='What-changed note kept in the registry')
+    app_deploy_parser.add_argument('--verbose', action='store_true', help='Narrate every pack step')
 
-        Args:
-            reason: Optional description of disconnection cause
-            has_error: Whether disconnection was due to an error
-        """
-        # Forward event to active command if one exists
-        if self.command and hasattr(self.command, 'on_disconnected'):
-            await self.command.on_disconnected(reason, has_error)
+    app_create_parser = app_subparsers.add_parser(
+        'create', help='Scaffold a new app under ./apps/<slug> (same templates as the App Builder wizard)'
+    )
+    _add_connection_args(app_create_parser)
+    app_create_parser.add_argument('slug', help='App slug')
+    app_create_parser.add_argument('--template', default='Blank', help='Template: Blank or Dashboard')
+    app_create_parser.add_argument('--name', help='Display name (default: title-cased slug)')
+    app_create_parser.add_argument('--developer', help="Developer id for <developerId>.<slug> (default: 'local')")
+    app_create_parser.add_argument('--sidebar', action='store_true', help='Two-column layout with a navigation sidebar')
+    app_create_parser.add_argument(
+        '--no-status-footer', dest='status_footer', action='store_false', help='Omit the bottom status bar'
+    )
+    app_create_parser.add_argument(
+        '--doc-tabs', dest='doc_tabs', action='store_true', help='Document tab strip (Documents + DocTabs)'
+    )
+    app_create_parser.add_argument('--workspace', help='Workspace root (default: current directory)')
+    app_create_parser.add_argument(
+        '--no-install', dest='install', action='store_false', help='Skip the workspace pnpm install'
+    )
 
-    async def connect(self) -> None:
-        """
-        Connect.
+    app_verify_parser = app_subparsers.add_parser(
+        'verify', help='Pre-check an app folder for deploy: manifest, id grammar, assets, includes, pack dry run'
+    )
+    _add_json_arg(app_verify_parser)
+    app_verify_parser.add_argument('folder', help='App folder to verify')
+    app_verify_parser.add_argument(
+        '--workspace', help='Workspace root the pack would be rooted at (default: current directory)'
+    )
 
-        Establishes connection to the RocketRide server with proper event
-        notification to the current command for status display.
-        """
-        # Issue on connecting event
-        await self._on_connecting()
+    # ── deploy ───────────────────────────────────────────────────────────
+    deploy_parser = subparsers.add_parser('deploy', help='Deploy lifecycle operations (deployment target)')
+    deploy_subparsers = deploy_parser.add_subparsers(
+        dest='deploy_subcommand', help='Deploy commands', metavar='COMMAND'
+    )
 
-        self._connect_start = time.time()
+    d_add = deploy_subparsers.add_parser(
+        'add', help='Deploy an artifact file as the next registry version (deploying activates nothing)'
+    )
+    _add_deploy_connection_args(d_add)
+    d_add.add_argument('file', help='Artifact file (pipeline JSON, or node package JSON)')
+    d_add.add_argument('--kind', default='pipe', help='Artifact kind: pipe or node (default: %(default)s)')
+    d_add.add_argument('--comment', help='What-changed note kept in the registry')
+    d_add.add_argument('--deploy-to', dest='deploy_to', help='Also point this team at the new version in the same call')
 
-        # Establish connection to the server
-        await self.client.connect()
+    d_list = deploy_subparsers.add_parser('list', help='List deployments')
+    _add_deploy_connection_args(d_list)
+    d_list.add_argument('--team', help='Scope to one team')
 
-    def cancel(self) -> None:
-        """
-        Mark CLI as cancelled.
+    d_get = deploy_subparsers.add_parser('get', help="Show one deployment's state")
+    _add_deploy_connection_args(d_get)
+    d_get.add_argument('project', help='Project id')
+    d_get.add_argument('--team', default='', help='Team the deployment belongs to')
 
-        Sets the cancellation flag that commands can check to stop execution
-        gracefully when the user interrupts the process.
+    d_versions = deploy_subparsers.add_parser('versions', help="List a project's registry versions")
+    _add_deploy_connection_args(d_versions)
+    d_versions.add_argument('project', help='Project id')
 
-        Usage:
-            Called by signal handlers or when graceful shutdown is needed
-            to allow commands to clean up resources and exit cleanly.
-        """
-        self._cancelled = True
+    d_history = deploy_subparsers.add_parser('history', help="Show a project's deploy/publish audit trail")
+    _add_deploy_connection_args(d_history)
+    d_history.add_argument('project', help='Project id')
+    d_history.add_argument('--team', help='Scope to one team')
 
-    def is_cancelled(self) -> None:
-        """
-        Check if CLI is cancelled.
+    d_publish = deploy_subparsers.add_parser(
+        'publish', help='Bind a team to a registry version (first publish, update, promote, rollback)'
+    )
+    _add_deploy_connection_args(d_publish)
+    d_publish.add_argument('project', help='Project id')
+    d_publish.add_argument('version', type=int, help='Registry version number')
+    d_publish.add_argument('--team', default='', help='Team to bind')
 
-        Returns:
-            bool: True if cancellation has been requested, False otherwise
+    d_run = deploy_subparsers.add_parser('run', help="Trigger a deployment's source to run now")
+    _add_deploy_connection_args(d_run)
+    d_run.add_argument('project', help='Project id')
+    d_run.add_argument('source', help='Source component id')
+    d_run.add_argument('--team', default='', help='Team whose deployment runs')
 
-        Usage:
-            Commands should check this regularly to respond to user
-            interruption requests and perform graceful shutdown.
-        """
-        return self._cancelled
+    d_artifact = deploy_subparsers.add_parser('artifact', help="Fetch one registry version's artifact JSON")
+    _add_deploy_connection_args(d_artifact)
+    d_artifact.add_argument('project', help='Project id')
+    d_artifact.add_argument('version', type=int, help='Registry version number')
 
-    def _setup_signal_handlers(self) -> None:
-        """
-        Set up signal handlers for graceful shutdown.
+    for verb, help_text in (
+        ('enable', 'Enable a disabled deployment'),
+        ('disable', 'Disable a deployment (whole-deployment kill switch)'),
+        ('remove', 'Remove a deployment (registry versions and audit history survive)'),
+    ):
+        verb_parser = deploy_subparsers.add_parser(verb, help=help_text)
+        _add_deploy_connection_args(verb_parser)
+        verb_parser.add_argument('project', help='Project id')
+        verb_parser.add_argument('--team', default='', help='Team the deployment belongs to')
 
-        Configures SIGINT handler to set cancellation flag when user presses Ctrl+C,
-        allowing commands to shut down cleanly rather than terminating abruptly.
+    d_log = deploy_subparsers.add_parser('log', help="Read an app version's build log")
+    _add_deploy_connection_args(d_log)
+    d_log.add_argument('app_id', help='App id')
+    d_log.add_argument('version', type=int, help='Registry version number')
 
-        Signal Handling:
-            - SIGINT (Ctrl+C): Sets cancellation flag for graceful shutdown
-            - Preserves existing signal handlers where appropriate
-            - Cross-platform signal handling support
-        """
+    d_schedule = deploy_subparsers.add_parser('schedule', help='Per-source schedule operations')
+    schedule_subparsers = d_schedule.add_subparsers(
+        dest='schedule_subcommand', help='Schedule commands', metavar='COMMAND'
+    )
 
-        def signal_handler(signum, frame):
-            """Handle interrupt signals by marking CLI as cancelled."""
-            self.cancel()
+    s_set = schedule_subparsers.add_parser('set', help="Set a source's schedule (5-field cron), or 'none' to clear it")
+    _add_deploy_connection_args(s_set)
+    s_set.add_argument('project', help='Project id')
+    s_set.add_argument('source', help='Source component id')
+    s_set.add_argument('cron', help="5-field cron expression, or 'none'")
+    s_set.add_argument('--team', default='', help='Team the deployment belongs to')
+    s_set.add_argument('--ttl', type=int, help='Run window in seconds (fixed window)')
 
-        # Register handler for keyboard interrupt (Ctrl+C)
-        signal.signal(signal.SIGINT, signal_handler)
+    for verb, help_text in (
+        ('pause', "Pause a source's schedule (cron/ttl kept, never fires)"),
+        ('resume', "Resume a source's paused schedule"),
+    ):
+        verb_parser = schedule_subparsers.add_parser(verb, help=help_text)
+        _add_deploy_connection_args(verb_parser)
+        verb_parser.add_argument('project', help='Project id')
+        verb_parser.add_argument('source', help='Source component id')
+        verb_parser.add_argument('--team', default='', help='Team the deployment belongs to')
 
-    def _parse_event_types(self, event_types_str: str) -> List[str]:
-        """
-        Parse comma-separated event types string into list.
+    s_preview = schedule_subparsers.add_parser(
+        'preview', help='Validate a cron expression and show its next occurrences'
+    )
+    _add_deploy_connection_args(s_preview)
+    s_preview.add_argument('cron', help='5-field cron expression')
+    s_preview.add_argument('--count', type=int, default=5, help='Number of occurrences to show (default: %(default)s)')
 
-        Converts a comma-separated string of event type names into a clean list
-        of uppercase event type strings, filtering out empty entries.
+    return parser
 
-        Args:
-            event_types_str: Comma-separated string of event types
 
-        Returns:
-            List[str]: Clean list of uppercase event type names
+async def _dispatch(args) -> int:
+    """
+    Route the parsed arguments to the command implementation.
 
-        Processing:
-            - Splits on commas and removes whitespace
-            - Converts to uppercase for consistency
-            - Filters out empty strings from extra commas
-            - Returns empty list for None/empty input
-        """
-        # Handle empty or None input
-        if not event_types_str:
-            return []
+    Args:
+        args: Parsed argparse namespace.
 
-        # Split by comma and clean up whitespace, convert to uppercase
-        event_types = [s.strip().upper() for s in event_types_str.split(',')]
+    Returns:
+        Exit code.
+    """
+    # Imported here so `rocketride --help` stays fast and .env is loaded
+    from .commands.app import run_app
+    from .commands.auth import run_init, run_login
+    from .commands.deploy import run_deploy
+    from .commands.store import run_store
+    from .commands.tasks import run_list, run_start, run_stop, run_upload
 
-        # Filter out empty strings that might result from extra commas
-        event_types = [et for et in event_types if et]
-
-        return event_types
-
-    def setup_parser(self) -> argparse.ArgumentParser:
-        """
-        Set up the argument parser with subcommands.
-
-        Creates and configures the main argument parser with all supported
-        subcommands (start, upload, status, stop, events) and their respective
-        arguments and options.
-
-        Returns:
-            argparse.ArgumentParser: Configured parser ready for parse_args()
-
-        Subcommands:
-            - start: Launch new pipeline execution
-            - upload: Upload files to existing or new pipeline
-            - status: Monitor task execution status
-            - stop: Terminate running task
-            - events: Monitor task events with filtering
-        """
-        # Create main parser with description and help text
-        parser = argparse.ArgumentParser(
-            description='RocketRide Pipeline and File Management CLI',
-            epilog='Use "rocketride <command> --help" for command-specific help',
-        )
-
-        # Create subparser for individual commands
-        subparsers = parser.add_subparsers(dest='command', help='Available commands', metavar='COMMAND')
-
-        def add_common_args(subparser):
-            """
-            Add common arguments shared across all commands.
-
-            Args:
-                subparser: Subparser to add common arguments to
-            """
-            # Server connection argument
-            subparser.add_argument(
-                '--uri',
-                default=os.getenv('ROCKETRIDE_URI', CONST_DEFAULT_WEB_CLOUD),
-                help='RocketRide server URI (default: %(default)s)',
+    if args.command == 'init':
+        return await run_init(args)
+    if args.command == 'login':
+        return await run_login(args)
+    if args.command == 'list':
+        return await run_list(args)
+    if args.command == 'start':
+        return await run_start(args)
+    if args.command == 'stop':
+        return await run_stop(args)
+    if args.command == 'upload':
+        return await run_upload(args)
+    if args.command == 'store':
+        if not getattr(args, 'store_subcommand', None):
+            print('Error: Store subcommand is required (dir, type, write, rm, mkdir, stat)', file=sys.stderr)
+            return 1
+        return await run_store(args)
+    if args.command == 'app':
+        if not getattr(args, 'app_subcommand', None):
+            print('Error: App subcommand is required (create, deploy, verify)', file=sys.stderr)
+            return 1
+        return await run_app(args)
+    if args.command == 'deploy':
+        if not getattr(args, 'deploy_subcommand', None):
+            print(
+                'Error: Deploy subcommand is required (add, list, get, versions, history, publish, run, artifact, enable, disable, remove, log, schedule)',
+                file=sys.stderr,
             )
-
-            # Authentication argument with environment variable fallback
-            subparser.add_argument(
-                '--apikey',
-                default=os.getenv('ROCKETRIDE_APIKEY'),
-                help='API key for authentication',
-            )
-
-            # Task token argument with environment variable fallback
-            subparser.add_argument(
-                '--token',
-                default=os.getenv('ROCKETRIDE_TOKEN'),
-                help='Optional existing task token',
-            )
-
-        # Start command - launches new pipeline execution
-        start_parser = subparsers.add_parser('start', help='Start a new pipeline')
-        add_common_args(start_parser)
-
-        # Pipeline file as positional argument with environment fallback
-        start_parser.add_argument(
-            'pipeline_path',
-            nargs='?',
-            default=os.getenv('ROCKETRIDE_PIPELINE'),
-            help='Path to .pipeline file (or set ROCKETRIDE_PIPELINE env var)',
-        )
-
-        # Execution configuration options
-        start_parser.add_argument(
-            '--threads',
-            type=int,
-            default=4,
-            help='Number of threads (default: %(default)s)',
-        )
-
-        # Additional pipeline arguments passed through
-        start_parser.add_argument(
-            '--args',
-            dest='pipeline_args',
-            nargs=argparse.REMAINDER,
-            help='Additional pipeline arguments',
-        )
-
-        # Upload command - uploads files to existing or new pipeline
-        upload_parser = subparsers.add_parser('upload', help='Upload files')
-        add_common_args(upload_parser)
-
-        # Pipeline file for creating new task if no token provided
-        upload_parser.add_argument(
-            '--pipeline_path',
-            default=os.getenv('ROCKETRIDE_PIPELINE'),
-            help='Pipeline file to start new task',
-        )
-
-        # Thread configuration for concurrent uploads
-        upload_parser.add_argument(
-            '--threads',
-            type=int,
-            default=4,
-            help='Number of threads (default: %(default)s)',
-        )
-
-        # Files to upload - supports multiple files, wildcards, directories
-        upload_parser.add_argument(
-            'files',
-            nargs='+',
-            help='Files, wildcards, or directories to upload',
-        )
-
-        # Additional pipeline arguments for new task creation
-        upload_parser.add_argument(
-            '--args',
-            dest='pipeline_args',
-            nargs=argparse.REMAINDER,
-            help='Additional pipeline arguments',
-        )
-
-        # Status command - monitors task execution status
-        status_parser = subparsers.add_parser('status', help='Monitor task status continuously')
-        add_common_args(status_parser)
-
-        # Stop command - terminates running task
-        stop_parser = subparsers.add_parser('stop', help='Stop a running task')
-        add_common_args(stop_parser)
-
-        # Events command - monitors task events with configurable types
-        events_parser = subparsers.add_parser('events', help='Monitor all events for a task')
-        add_common_args(events_parser)
-
-        # Event types as optional positional argument
-        events_parser.add_argument(
-            'event_types',
-            nargs='?',
-            help='Comma-separated list of event types (e.g., DETAIL,SUMMARY,OUTPUT or ALL)',
-        )
-
-        # Log file option for events command
-        events_parser.add_argument(
-            '--log',
-            help='Optional log file to write all events (e.g., --log=events.log)',
-        )
-
-        # List command - lists all active tasks
-        list_parser = subparsers.add_parser('list', help='List all active tasks')
-        add_common_args(list_parser)
-
-        # Optional JSON output format
-        list_parser.add_argument(
-            '--json',
-            action='store_true',
-            help='Output results in JSON format',
-        )
-
-        # Store command - file store and domain storage operations
-        store_common_parser = argparse.ArgumentParser(add_help=False)
-        add_common_args(store_common_parser)
-
-        store_parser = subparsers.add_parser('store', help='File store operations', parents=[store_common_parser])
-
-        store_subparsers = store_parser.add_subparsers(
-            dest='store_subcommand',
-            help='Store commands',
-            metavar='COMMAND',
-        )
-
-        # =====================================================================
-        # File system commands
-        # =====================================================================
-
-        # dir - list directory
-        dir_parser = store_subparsers.add_parser('dir', help='List directory contents', parents=[store_common_parser])
-        dir_parser.add_argument('path', nargs='?', default='', help='Directory path (default: root)')
-
-        # type - display file contents
-        type_parser = store_subparsers.add_parser('type', help='Display file contents', parents=[store_common_parser])
-        type_parser.add_argument('path', help='File path')
-
-        # write - write file
-        write_parser = store_subparsers.add_parser('write', help='Write a file', parents=[store_common_parser])
-        write_parser.add_argument('path', help='File path')
-        write_group = write_parser.add_mutually_exclusive_group(required=True)
-        write_group.add_argument('--file', help='Local file to upload')
-        write_group.add_argument('--content', help='Inline text content')
-
-        # rm - delete file
-        rm_parser = store_subparsers.add_parser('rm', help='Delete a file', parents=[store_common_parser])
-        rm_parser.add_argument('path', help='File path')
-
-        # mkdir - create directory
-        mkdir_parser = store_subparsers.add_parser('mkdir', help='Create a directory', parents=[store_common_parser])
-        mkdir_parser.add_argument('path', help='Directory path')
-
-        # stat - file/directory metadata
-        stat_parser = store_subparsers.add_parser(
-            'stat', help='Get file/directory metadata', parents=[store_common_parser]
-        )
-        stat_parser.add_argument('path', help='File or directory path')
-
-        return parser
-
-    async def run(self) -> int:
-        """
-        Define main entry point for the CLI.
-
-        Parses command line arguments, validates required parameters,
-        routes to appropriate command implementation, and handles errors.
-
-        Returns:
-            int: Exit code (0 for success, 1 for error)
-
-        Execution Flow:
-            1. Parse command line arguments and validate
-            2. Perform command-specific validation
-            3. Create RocketRideClient with event handlers
-            4. Route to appropriate command implementation
-            5. Execute command and return exit code
-            6. Handle errors and cleanup
-        """
-        # Parse command line arguments using configured parser
-        parser = self.setup_parser()
-        self.args = parser.parse_args()
-
-        # Show help if no command specified
-        if not self.args.command:
-            parser.print_help()
             return 1
-
-        # Validate we have something for apikey
-        if not self.args.apikey:
-            self.args.apikey = ''
-
-        # Command-specific validation and preprocessing
-        if self.args.command == 'start' and not self.args.pipeline_path:
-            # Start command requires pipeline file
-            print('Error: Pipeline file is required for start command')
+        if args.deploy_subcommand == 'schedule' and not getattr(args, 'schedule_subcommand', None):
+            print('Error: Schedule subcommand is required (set, pause, resume, preview)', file=sys.stderr)
             return 1
-
-        elif self.args.command in ['status', 'stop', 'events'] and not self.args.token:
-            # These commands require existing task token
-            print(f'Error: Token is required for {self.args.command} command')
-            return 1
-
-        elif self.args.command == 'list':
-            # List command doesn't require token (lists all user's tasks)
-            pass
-
-        elif self.args.command == 'store':
-            # Store command requires store_subcommand
-            if not hasattr(self.args, 'store_subcommand') or not self.args.store_subcommand:
-                print('Error: Store subcommand is required (dir, type, write, rm, mkdir, stat)')
-                return 1
-
-        elif self.args.command == 'upload' and not self.args.pipeline_path and not self.args.token:
-            # Upload needs either pipeline file to create task or existing token
-            print('Error: Either --pipeline_path or --token must be specified for upload command')
-            return 1
-
-        elif self.args.command == 'events':
-            # Parse event types (no validation - let server handle it)
-            try:
-                # Convert comma-separated string to list of event types
-                event_types_list = self._parse_event_types(self.args.event_types)
-                if not event_types_list:
-                    print('Error: At least one event type must be specified')
-                    return 1
-
-                # Store parsed event types for the command to use
-                self.args.parsed_event_types = event_types_list
-
-            except Exception as e:
-                print(f'Error parsing event types: {e}')
-                return 1
-
-        # Construct URI from command line argument
-        self.uri = self.args.uri
-
-        try:
-            # Create RocketRideClient instance with event handlers
-            self.client = RocketRideClient(
-                uri=self.uri,
-                auth=self.args.apikey,  # Authentication for server access
-                on_event=self._on_event,  # Forward events to CLI event handler
-                on_connected=self._on_connected,  # Connection established callback
-                on_disconnected=self._on_disconnected,  # Connection lost callback
-            )
-
-            # Route to appropriate command implementation
-            command_map = {
-                'start': StartCommand,
-                'upload': UploadCommand,
-                'status': StatusCommand,
-                'stop': StopCommand,
-                'events': EventsCommand,
-                'list': ListCommand,
-                'store': StoreCommand,
-            }
-
-            if self.args.command in command_map:
-                # Create and execute the appropriate command
-                command_class = command_map[self.args.command]
-
-                # Allocate the command processor
-                self.command = command_class(self, self.args)
-
-                # Execute the command and return its exit code
-                status = await self.command.execute(self.client)
-
-                # Disconnect the client if connected
-                await self.client.disconnect()
-
-                # And return our final status
-                return status
-            else:
-                # Unknown command - should not happen due to argparse validation
-                print(f'Unknown command: {self.args.command}')
-                return 1
-
-        except KeyboardInterrupt:
-            # Handle user interruption gracefully
-            print('\nOperation interrupted by user')
-            return 1
-
-        except Exception as e:
-            # Handle unexpected errors
-            print(f'Unexpected Error: {e}')
-            return 1
-
-        finally:
-            # Always mark as cancelled for cleanup
-            self.cancel()
+        return await run_deploy(args)
+    print(f'Unknown command: {args.command}', file=sys.stderr)
+    return 1
 
 
 def main() -> None:
     """
     Entry point for the CLI application.
 
-    Creates RocketRideCLI instance, runs it with asyncio, and handles
-    top-level exceptions and exit codes.
-
-    Usage:
-        This function serves as the main entry point when the module
-        is executed directly or installed as a command-line tool.
-
-    Error Handling:
-        - Keyboard interruption: Clean exit with user message
-        - Other exceptions: Error message and non-zero exit code
-        - Normal completion: Exit with command's return code
+    Loads the workspace ``.env`` (real environment wins), parses the
+    command line, dispatches, and exits with the command's code.
     """
-    try:
-        # Create CLI instance and run with asyncio
-        cli = RocketRideCLI()
-        exit_code = asyncio.run(cli.run())
-        sys.exit(exit_code)
+    # The workspace .env must be in os.environ BEFORE the parser is
+    # built — argparse defaults read it at construction time
+    load_dot_env()
 
-    except KeyboardInterrupt:
-        # Handle keyboard interrupt at top level
-        print('\n\nOperation interrupted by user')
+    parser = setup_parser()
+    args = parser.parse_args()
 
-    except Exception as e:
-        # Handle any other top-level exceptions
-        print(f'\nOperation failed: {e}')
+    if not args.command:
+        parser.print_help()
         sys.exit(1)
+
+    try:
+        exit_code = asyncio.run(_dispatch(args))
+        sys.exit(exit_code)
+    except KeyboardInterrupt:
+        print('\nOperation interrupted by user', file=sys.stderr)
+        sys.exit(130)
 
 
 if __name__ == '__main__':

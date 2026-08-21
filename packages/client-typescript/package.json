@@ -9,7 +9,7 @@
 	"module": "./dist/esm/client/index.js",
 	"types": "./dist/types/client/index.d.ts",
 	"bin": {
-		"rocketride": "./dist/cli/cli/rocketride.js"
+		"rocketride": "./dist/cli/packages/client-typescript/src/cli/rocketride.js"
 	},
 	"exports": {
 		".": {

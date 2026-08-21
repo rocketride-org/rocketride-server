@@ -21,33 +21,29 @@
 # SOFTWARE.
 
 """
-Monitor Implementations for Real-time Terminal Display.
-
-This module provides monitor classes for displaying real-time information in organized,
-visually appealing terminal interfaces with automatic sizing, box-based layouts, and
-live updates.
-
-Available Monitors:
-    GenericMonitor: General-purpose monitor for basic status and progress display
-    StatusMonitor: Specialized monitor for task status with processing statistics
-    EventsMonitor: Real-time event monitoring with scrollable history
-    UploadProgressMonitor: File upload progress tracking with statistics
-
-All monitors provide:
-    - Automatic terminal size detection and dynamic resizing
-    - Box-based layout system for organized information display
-    - Real-time updates with efficient screen rendering
-    - Error handling and graceful degradation
+Workspace ``.env`` handling — provided by the rocketride_common source
+library (staged into the wheel beside this package); this module keeps
+the CLI's import paths stable.
 """
 
-from .generic import GenericMonitor
-from .status import StatusMonitor
-from .events import EventsMonitor
-from .upload import UploadProgressMonitor
+from rocketride_common.env import (
+    ENV_DEPLOY_APIKEY,
+    ENV_DEPLOY_URI,
+    ENV_DEV_APIKEY,
+    ENV_DEV_URI,
+    NO_DEPLOY_TARGET_MESSAGE,
+    load_dot_env,
+    parse_env_line,
+    write_dot_env,
+)
 
 __all__ = [
-    'GenericMonitor',
-    'StatusMonitor',
-    'EventsMonitor',
-    'UploadProgressMonitor',
+    'ENV_DEPLOY_APIKEY',
+    'ENV_DEPLOY_URI',
+    'ENV_DEV_APIKEY',
+    'ENV_DEV_URI',
+    'NO_DEPLOY_TARGET_MESSAGE',
+    'load_dot_env',
+    'parse_env_line',
+    'write_dot_env',
 ]
