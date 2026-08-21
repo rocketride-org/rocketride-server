@@ -46,7 +46,11 @@ The model value is passed to `OpenAIEmbeddings`. Keep the same profile for inges
 
 ## Authentication
 
-Provide the API key in the profile’s `apikey` configuration. The wrapper passes that value as the OpenAI API key when it constructs `OpenAIEmbeddings`; a missing or invalid key prevents the embedding client from being created.
+Set the secure `llm.cloud.apikey` field for the selected profile. RocketRide
+resolves this field as `apikey` and passes it to `OpenAIEmbeddings`. If no
+configured key is available, `langchain-openai` can fall back to the engine
+process's `OPENAI_API_KEY` environment variable. The startup probe fails when
+neither source provides a usable key.
 
 ## Upstream docs
 
