@@ -15,7 +15,7 @@ across node instances with one shared lock.
 | Lane in | Lane out | Description |
 | --- | --- | --- |
 | `audio` | — | Pass the audio stream to the player. |
-| `video` | — | Pass the video stream to the player. |
+| `video` | — | Extract and play the video's audio track. |
 
 ## Configuration
 
