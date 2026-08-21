@@ -50,6 +50,7 @@ Usage:
 from __future__ import annotations
 
 import os
+import re
 from typing import TYPE_CHECKING, Any
 
 from .types.deploy import (
@@ -224,6 +225,90 @@ class DeployApi:
             data=packed.data,
             metadata=merged,
             comment=comment,
+        )
+
+    async def create_app(
+        self,
+        slug: str,
+        *,
+        workspace_root: str | None = None,
+        template: str = 'Blank',
+        display_name: str | None = None,
+        developer_id: str | None = None,
+        sidebar: bool = False,
+        status_footer: bool = True,
+        doc_tabs: bool = False,
+        install: bool = True,
+        server_base_url: str | None = None,
+        on_progress: Any = None,
+    ) -> dict:
+        """
+        Scaffold a new app in the workspace — the programmatic twin of the
+        App Builder's New App wizard, rendering the identical templates.
+        Writes ``./apps/<slug>``, ensures the pnpm workspace file and ignore
+        hygiene, vendors the connected server's shell + client packages, and
+        runs the workspace install. Scaffolding only — nothing is deployed;
+        the normal lifecycle (edit -> :meth:`verify_app` -> :meth:`add_app`
+        -> publish) follows. Mirrors the TypeScript
+        ``client.deploy.createApp``.
+
+        Args:
+            slug: The app-name slug (lowercase; digits/-/_ after the first
+                character). The id becomes ``<developerId>.<slug>``.
+            workspace_root: The workspace folder that owns ./apps
+                (default: the current working directory).
+            template: 'Blank' (default) or 'Dashboard'.
+            display_name: Display name (default: the slug, title-cased).
+            developer_id: Developer id for the app-id namespace (default
+                'local' — publishable beyond the workspace only after a
+                real developer id is registered).
+            sidebar: Two-column frame with a navigation sidebar.
+            status_footer: Status bar across the bottom of the app.
+            doc_tabs: Document tab strip across the content area.
+            install: Run ``pnpm install`` at the workspace root
+                (default True; failure is non-fatal).
+            server_base_url: HTTP(S) base for vendoring the server-matched
+                shell + client packages; defaults to this client's own
+                connection.
+            on_progress: Optional ``callable(line: str)`` receiving one
+                line per step.
+
+        Returns:
+            The created app's identity and a report of what ran
+            (``appId``, ``folder``, ``files``, ``vendored``,
+            ``installed``).
+
+        Raises:
+            ValueError: On an invalid slug/developer id/template or an
+                existing folder.
+        """
+        # step: scaffold with the shared templates (lazy import mirrors
+        # add_app's _app_pack pattern)
+        from ._app_scaffold import create_app_workspace
+
+        # step: vendor from the server THIS client talks to unless
+        # overridden — ws(s) URIs map onto the http(s) origin serving
+        # /client/*
+        base = server_base_url
+        if not base:
+            uri = self._client.get_connection_info().get('uri') or ''
+            if uri:
+                base = re.sub(r'^ws:', 'http:', uri, flags=re.IGNORECASE)
+                base = re.sub(r'^wss:', 'https:', base, flags=re.IGNORECASE)
+                base = re.sub(r'/task/service/?$', '', base, flags=re.IGNORECASE)
+                base = re.sub(r'/+$', '', base)
+        return create_app_workspace(
+            workspace_root or os.getcwd(),
+            slug,
+            template=template,
+            display_name=display_name,
+            developer_id=developer_id,
+            sidebar=sidebar,
+            status_footer=status_footer,
+            doc_tabs=doc_tabs,
+            install=install,
+            server_base_url=base,
+            on_progress=on_progress,
         )
 
     async def verify_app(self, app_root: str, *, workspace_root: str | None = None) -> Any:
