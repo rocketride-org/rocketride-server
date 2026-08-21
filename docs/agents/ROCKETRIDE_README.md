@@ -50,6 +50,12 @@ they share the same section skeleton, so any `§` reference works in both.
 
 ## Mandatory setup for a new project
 
+0. **A bare folder becomes a workspace with `rocketride init`** — it signs
+   in (writing `.env`), syncs the services catalog + schemas, vendors the
+   platform packages into `.rocketride/`, installs this documentation set,
+   and gitignores `.rocketride/` + `.env`. Idempotent — re-run any time to
+   refresh everything against the connected server. If the workspace
+   already has `.rocketride/docs/` and a populated `.env`, init has run.
 1. **Install the SDK**: `pip install rocketride` or `npm install rocketride`.
    **App development additionally requires pnpm** — the App Builder's
    install and watch tooling runs pnpm, never npm — and new apps are
@@ -62,10 +68,11 @@ they share the same section skeleton, so any `§` reference works in both.
    to two pairs: `ROCKETRIDE_URI`/`ROCKETRIDE_APIKEY` (the development
    server: run, validate, iterate) and `ROCKETRIDE_DEPLOY_URI`/
    `ROCKETRIDE_DEPLOY_APIKEY` (the deployment target: deploy, publish,
-   schedule). Never construct auth flows; build clients from the pair that
-   matches the job (ROCKETRIDE_CONCEPTS.md §Credentials). Keep `.env`
-   gitignored (the extension enforces this); commit a `.env.example` with
-   empty values instead.
+   schedule). Never construct auth flows; when credentials are rejected,
+   `rocketride login` re-authenticates and rewrites the pair. Build
+   clients from the pair that matches the job (ROCKETRIDE_CONCEPTS.md
+   §Credentials). Keep `.env` gitignored (init, login, and the extension
+   all enforce this); commit a `.env.example` with empty values instead.
 3. **Pipelines use the `.pipe` extension** and are JSON — see
    ROCKETRIDE_PIPELINES.md before writing one.
 4. **Write a check script** (`check.py` / `check.ts`) that connects, validates

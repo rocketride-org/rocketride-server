@@ -1011,30 +1011,51 @@ Methods: `getState()`, `getDocument(uri)`, `useStore()`, `openDocument(uri, grou
 
 ## 15. CLI Tool
 
-The package installs a `rocketride` command (use `npx rocketride` for local installs, or install globally).
+The package installs a `rocketride` command (use `pnpm exec rocketride` /
+`npx rocketride` for local installs). The Python client installs the
+IDENTICAL command — same verbs, same flags, same output — so recipes port
+between languages unchanged.
 
-**Common options** (every command): `--uri <uri>` (default: `ROCKETRIDE_URI` or `http://localhost:5565`) and `--apikey <key>` (default: `ROCKETRIDE_APIKEY`). Note the CLI's default URI is the **local server**, unlike the SDK's cloud default.
+**Common options** (every command): `--uri <uri>` (default:
+`ROCKETRIDE_URI` or `http://localhost:5565`), `--apikey <key>` (default:
+`ROCKETRIDE_APIKEY`), and `--json [file]` — the command's entire result
+as one JSON value on stdout (or written to `file`), built for scripts and
+agents; failures become an `{"error": {"message", "hint"}}` envelope with
+a non-zero exit. The CLI loads the workspace `.env`. Deploy verbs
+(`deploy *`, `app deploy`) use the `ROCKETRIDE_DEPLOY_*` pair instead and
+refuse to run without it.
 
-### Pipeline Commands
+### Workspace Commands
+
+- `rocketride init` — provision the workspace end-to-end: sign in (see
+  `login`), sync the services catalog + schemas, vendor `shell.tgz` and
+  `rocketride.tgz` into `.rocketride/`, install the agent docs bundle and
+  the CLAUDE.md stub, and ensure `.gitignore` covers `.rocketride/` and
+  `.env`. Idempotent — re-run any time to refresh against the connected
+  server.
+- `rocketride login [--deploy] [--apikey <key>]` — (re)authenticate and
+  save credentials to `.env` (and make `.env` git-ignored in the same
+  step). OSS servers take an API key; saas servers open the browser to
+  sign in and mint a durable personal API key. Run it whenever a command
+  reports rejected credentials. `--deploy` targets the
+  `ROCKETRIDE_DEPLOY_*` pair.
+
+### Task Commands
 
 ```bash
-# start — start a new pipeline
-rocketride start --pipeline ./my-pipeline.pipe --apikey YOUR_KEY
-
-# upload — upload files (wildcards/directories OK) via --pipeline or an existing --token
-rocketride upload files/*.csv --pipeline ./pipeline.pipe --apikey YOUR_KEY
-rocketride upload files/*.csv --token TASK_TOKEN --max-concurrent 10 --apikey YOUR_KEY
-
-# status — monitor task status continuously
-rocketride status --token TASK_TOKEN --apikey YOUR_KEY
-
-# stop — stop a running task
-rocketride stop --token TASK_TOKEN --apikey YOUR_KEY
+rocketride list                                            # one-shot list of your active tasks
+rocketride start --pipeline ./my-pipeline.pipe             # start; prints the task token and exits
+rocketride upload files/*.csv --pipeline ./pipeline.pipe   # start + upload + terminate
+rocketride upload files/*.csv --token TASK_TOKEN           # upload into an already-running task
+rocketride stop --token TASK_TOKEN                         # terminate a task
 ```
 
 - `start` options: `--pipeline <file>` (or `ROCKETRIDE_PIPELINE`; required), `--token <token>` (or `ROCKETRIDE_TOKEN`), `--threads <num>` (default 4), `--args <args...>`
 - `upload` options: `--pipeline <file>` or `--token <token>` (one required), `--threads <num>` (default 4), `--max-concurrent <num>` (default 5), `--args <args...>`
-- `status` / `stop` options: `--token <token>` (required)
+
+There is no live-monitor command: continuous monitoring belongs to the
+platform's event monitor and server monitor apps — the CLI is one-shot,
+line-oriented output by design.
 
 ### Store Commands (`rocketride store ...`)
 
@@ -1051,10 +1072,6 @@ rocketride store stat <path>                      # file/directory metadata
 ```
 
 All store subcommands take the common `--uri`/`--apikey` options.
-
----
-
-## 16. Data Types & MIME
 
 ### App Commands (`rocketride app ...`)
 
@@ -1086,6 +1103,36 @@ the development connection.
 rocketride app verify ./apps/reports
 rocketride app deploy ./apps/reports --comment "ci: $GITHUB_SHA"
 ```
+
+### Deploy Commands (`rocketride deploy ...`)
+
+Deployment-target verbs (the `ROCKETRIDE_DEPLOY_*` pair), following the
+platform vocabulary — **deploy** = version to the server's registry,
+**publish** = bind a rung to a version:
+
+```bash
+rocketride deploy add pipelines/ingest.pipe --comment "v2 parse"    # next registry version (--kind pipe|node)
+rocketride deploy publish <projectId> 3 --team <teamId>             # point the team at version 3
+rocketride deploy list                                              # deployments overview
+rocketride deploy get <projectId> --team <teamId>                   # one deployment's state + schedules
+rocketride deploy versions <projectId>                              # registry versions
+rocketride deploy history <projectId>                               # deploy/publish audit trail
+rocketride deploy run <projectId> <sourceId> --team <teamId>        # trigger a run now
+rocketride deploy schedule set <projectId> <sourceId> "0 9 * * 1-5" --team <teamId> --ttl 32400
+rocketride deploy schedule pause <projectId> <sourceId> --team <teamId>
+rocketride deploy schedule resume <projectId> <sourceId> --team <teamId>
+rocketride deploy schedule preview "0 9 * * 1-5"                    # validate a cron + next firings
+rocketride deploy log <appId> <version>                             # read an app version's build log
+rocketride deploy enable|disable|remove <projectId> --team <teamId>
+```
+
+Every verb here fronts a `client.deploy.*` SDK method — prefer the API in
+application code; the CLI is the one-shot form for terminals, CI, and
+quick lifecycle operations (all verbs support `--json`).
+
+---
+
+## 16. Data Types & MIME
 
 ### PipelineConfig
 

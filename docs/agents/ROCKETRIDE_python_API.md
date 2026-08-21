@@ -1045,58 +1045,85 @@ except Exception:
 
 ## 14. CLI
 
-The package installs a `rocketride` command-line tool.
+The package installs a `rocketride` command-line tool. The TypeScript
+client installs the IDENTICAL command — same verbs, same flags, same
+output — so recipes port between languages unchanged.
 
 ```bash
 pip install rocketride
 rocketride --help
 ```
 
-**Common flags** (every command): `--uri` (default: `ROCKETRIDE_URI` env or the cloud service), `--apikey` (default: `ROCKETRIDE_APIKEY` env), `--token` (default: `ROCKETRIDE_TOKEN` env). The CLI also reads the `.env` file like the SDK.
+**Common flags** (every command): `--uri` (default: `ROCKETRIDE_URI` env
+or `http://localhost:5565`), `--apikey` (default: `ROCKETRIDE_APIKEY`
+env), and `--json [FILE]` — the command's entire result as one JSON value
+on stdout (or written to `FILE`), built for scripts and agents; failures
+become an `{"error": {"message", "hint"}}` envelope with a non-zero exit.
+The CLI loads the workspace `.env`. Deploy verbs (`deploy *`,
+`app deploy`) use the `ROCKETRIDE_DEPLOY_*` pair instead and refuse to
+run without it.
 
-### `rocketride start <pipeline_path>`
+### `rocketride init` / `rocketride login`
 
-Start a new pipeline. The pipeline file is a positional argument (or set `ROCKETRIDE_PIPELINE`). Options: `--threads N` (default 4), `--args ...` (remaining arguments passed to the pipeline).
+`init` provisions the workspace end-to-end: signs in (see `login`), syncs
+the services catalog + schemas, vendors `shell.tgz` and `rocketride.tgz`
+into `.rocketride/`, installs the agent docs bundle and the CLAUDE.md
+stub, and ensures `.gitignore` covers `.rocketride/` and `.env`.
+Idempotent — re-run any time to refresh against the connected server.
 
-```bash
-rocketride start my-pipeline.pipe --apikey YOUR_KEY
-rocketride start my-pipeline.pipe --threads 8 --args --verbose
-```
+`login [--deploy] [--apikey KEY]` (re)authenticates and saves credentials
+to `.env` (and makes `.env` git-ignored in the same step). OSS servers
+take an API key; saas servers open the browser to sign in and mint a
+durable personal API key. Run it whenever a command reports rejected
+credentials. `--deploy` targets the `ROCKETRIDE_DEPLOY_*` pair.
 
-### `rocketride upload <files...>`
-
-Upload files (paths, wildcards, or directories) to an existing task (`--token`) or a new one (`--pipeline_path`). Options: `--pipeline_path FILE`, `--threads N` (default 4), `--args ...`.
-
-```bash
-rocketride upload files/*.csv --pipeline_path ./pipeline.pipe --apikey YOUR_KEY
-rocketride upload files/*.csv --token TASK_TOKEN --threads 10 --apikey YOUR_KEY
-```
-
-### `rocketride status --token TASK_TOKEN`
-
-Monitor task status continuously. Requires `--token`.
-
-### `rocketride stop --token TASK_TOKEN`
-
-Stop a running task. Requires `--token`.
-
-### `rocketride events <TYPES> --token TASK_TOKEN`
-
-Monitor task events. `TYPES` is a comma-separated list of event types (uppercased, e.g. `DETAIL,SUMMARY,OUTPUT`) or `ALL`. Requires `--token`. Option: `--log FILE` writes all events to a log file.
+### Task commands
 
 ```bash
-rocketride events DETAIL,SUMMARY --token TASK_TOKEN --apikey YOUR_KEY
-rocketride events ALL --token TASK_TOKEN --log events.log --apikey YOUR_KEY
+rocketride list                                            # one-shot list of your active tasks
+rocketride start --pipeline ./my-pipeline.pipe             # start; prints the task token and exits
+rocketride upload files/*.csv --pipeline ./pipeline.pipe   # start + upload + terminate
+rocketride upload files/*.csv --token TASK_TOKEN           # upload into an already-running task
+rocketride stop --token TASK_TOKEN                         # terminate a task
 ```
 
-### `rocketride list`
+- `start` options: `--pipeline FILE` (or `ROCKETRIDE_PIPELINE`; required), `--token TOKEN` (or `ROCKETRIDE_TOKEN`), `--threads N` (default 4), `--args ...`
+- `upload` options: `--pipeline FILE` or `--token TOKEN` (one required), `--threads N` (default 4), `--max-concurrent N` (default 5), `--args ...`
 
-List all of your active tasks (no token needed). Option: `--json` for JSON output.
+There is no live-monitor command: continuous monitoring belongs to the
+platform's event monitor and server monitor apps — the CLI is one-shot,
+line-oriented output by design.
+
+### `rocketride app <create|verify|deploy>`
+
+The app lifecycle verbs, identical to the TypeScript CLI: `app create
+<slug>` scaffolds under `./apps/<slug>` with the App Builder wizard's
+templates (SDK equivalent: `client.deploy.create_app`); `app verify
+<folder>` is the no-connection precheck (exit 0 when ready); `app deploy
+<folder>` packs the source and deploys it as the next registry version on
+the DEPLOYMENT target. Deploying activates nothing — publish a rung to
+serve it.
+
+### `rocketride deploy <verb>`
+
+Deployment-target verbs, following the platform vocabulary — **deploy** =
+version to the server's registry, **publish** = bind a rung to a version:
 
 ```bash
-rocketride list --apikey YOUR_KEY
-rocketride list --json --apikey YOUR_KEY
+rocketride deploy add pipelines/ingest.pipe --comment "v2 parse"    # next registry version (--kind pipe|node)
+rocketride deploy publish PROJECT_ID 3 --team TEAM_ID               # point the team at version 3
+rocketride deploy list|get|versions|history PROJECT_ID              # inspect (all support --json)
+rocketride deploy run PROJECT_ID SOURCE_ID --team TEAM_ID           # trigger a run now
+rocketride deploy schedule set PROJECT_ID SOURCE_ID "0 9 * * 1-5" --team TEAM_ID --ttl 32400
+rocketride deploy schedule pause|resume PROJECT_ID SOURCE_ID --team TEAM_ID
+rocketride deploy schedule preview "0 9 * * 1-5"                    # validate a cron + next firings
+rocketride deploy log APP_ID VERSION                                # read an app version's build log
+rocketride deploy enable|disable|remove PROJECT_ID --team TEAM_ID
 ```
+
+Every verb fronts a `client.deploy.*` SDK method — prefer the API in
+application code; the CLI is the one-shot form for terminals, CI, and
+quick lifecycle operations.
 
 ### `rocketride store <subcommand>`
 

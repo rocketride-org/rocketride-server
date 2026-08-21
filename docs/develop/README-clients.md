@@ -49,9 +49,54 @@ The engine serves the latest client packages via HTTP endpoints. Once the server
 
 | Endpoint                 | Package                | Response                                |
 | ------------------------ | ---------------------- | --------------------------------------- |
-| `GET /client/python/{filename}` | Python SDK wheel | `rocketride-{version}-py3-none-any.whl` |
+| `GET /client/python/{filename}` | Python SDK wheel (curl: use `latest`) | `rocketride-{version}-py3-none-any.whl` |
 | `GET /client/typescript` | TypeScript SDK tarball | `rocketride-{version}.tgz`              |
 | `GET /client/vscode`     | VSCode extension       | `rocketride-{version}.vsix`             |
+| `GET /client/shell`      | Shell platform package | `shell.tgz`                             |
+| `GET /client/docs`       | Agent docs bundle      | `docs.zip` (docs + stubs + manifest)    |
+
+All `/client/*` responses carry `Cache-Control: no-cache` so HTTP caches
+revalidate instead of serving stale artifacts after a server upgrade.
+
+The agent docs bundle is what `rocketride init` and the VS Code extension
+install into a workspace's `.rocketride/docs/` — its `manifest.json` carries a
+content hash consumers use as their change stamp, so an unchanged bundle is a
+no-op to re-install.
+
+The recommended workspace bootstrap, per language:
+
+```bash
+# TypeScript — the init shim, served by the server itself. No arguments
+# needed: the shim reads the server from its own install URL, downloads
+# that server's client into .rocketride/client/rocketride.tgz, installs
+# it as a content-hashed file: dependency, and runs `rocketride init`.
+pnpm install http://localhost:5565/client/typescript-init
+pnpm exec typescript-init
+
+# Python — install the server's wheel by its concrete filename (pip
+# requires the .whl name in the URL), then init:
+pip install http://localhost:5565/client/python/rocketride-1.3.0-py3-none-any.whl
+rocketride init
+```
+
+Once the `rocketride` package is published to npmjs/PyPI, the public
+bootstrap is simply `pnpm add rocketride` / `pip install rocketride`
+followed by `rocketride init`; the forms above remain the self-hosted
+path. Re-running `typescript-init` / `rocketride init` is the update
+path — the client and workspace refresh against the connected server.
+
+Two direct-URL forms to avoid, both verified broken:
+
+- `pnpm add http://.../client/typescript` — pnpm caches URL tarballs by
+  URL and NEVER refetches, so after a server upgrade it silently
+  reinstalls the old cached build. The shim's `file:` dependency is
+  hashed by content, so a rebuilt server package always installs. (The
+  shim itself is safe to cache — it is tiny, stable, and carries no
+  server-versioned content.)
+- `pip install http://.../client/python/latest` — pip rejects URLs
+  without a recognizable archive filename ("neither 'setup.py' nor
+  'pyproject.toml' found"). The `/latest` route is for curl/scripting
+  only; pip installs use the concrete wheel filename.
 
 ```bash
 # Download and install Python client (use "latest" as filename for newest version)

@@ -551,20 +551,26 @@ npm install -g rocketride     # or npx rocketride for a local install
 ```
 
 Every command takes `--uri <uri>` (default: `ROCKETRIDE_URI` env var, else
-`http://localhost:5565` — note the CLI defaults to the *local* server) and
-`--apikey <key>` (default: `ROCKETRIDE_APIKEY` env var).
+`http://localhost:5565` — note the CLI defaults to the *local* server),
+`--apikey <key>` (default: `ROCKETRIDE_APIKEY` env var), and
+`--json [file]` for a machine-readable result (one JSON value on stdout,
+or written to `file`; failures become an `{"error": ...}` envelope with a
+non-zero exit — parse that instead of scraping text).
 
 | Command | What it does | Exit code |
 |---|---|---|
-| `rocketride start --pipeline <file>` | Starts a pipeline, prints its task token, leaves it running | 0 on start, 1 on any error |
+| `rocketride start --pipeline <file>` | Starts a pipeline, prints its task token, exits | 0 on start, 1 on any error |
 | `rocketride upload <files...> --pipeline <file>` | Starts the pipeline, uploads the files, **terminates the run** | 0 / 1 |
 | `rocketride upload <files...> --token <token>` | Uploads into an already-running task (does not stop it) | 0 / 1 |
-| `rocketride status --token <token>` | Live status monitor — interactive, runs until Ctrl+C; not for CI | — |
+| `rocketride list` | One-shot list of your active tasks | 0 / 1 |
 | `rocketride stop --token <token>` | Terminates a running task | 0 / 1 |
 | `rocketride store <dir/type/write/rm/mkdir/stat>` | Cloud file store operations | 0 / 1 |
+| `rocketride app <create/verify/deploy>` | App scaffold / precheck / registry deploy | 0 / 1 |
+| `rocketride deploy <add/publish/run/schedule/...>` | Deploy lifecycle one-shots (deployment target) | 0 / 1 |
 
 `upload --pipeline` is the CI workhorse: one command exercises connect, auth, pipeline
-start, data flow, and teardown, and cleans up after itself.
+start, data flow, and teardown, and cleans up after itself. For live monitoring use
+the platform's event monitor / server monitor apps — every CLI command is one-shot.
 
 ### GitHub Actions example
 
