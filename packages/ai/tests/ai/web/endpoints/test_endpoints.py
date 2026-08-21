@@ -328,9 +328,11 @@ def test_auth_callback_response_is_html_content_type(monkeypatch):
 
 
 def _bounce_client() -> TestClient:
-    """TestClient with the bounce handler mounted at its real path."""
+    """TestClient with the bounce handler mounted at its real paths."""
     app = FastAPI()
     app.get('/auth/vscode/google')(vscode_oauth_bounce_mod.vscode_oauth_bounce)
+    app.get('/auth/vscode/microsoft')(vscode_oauth_bounce_mod.vscode_oauth_bounce)
+    app.get('/auth/vscode/unknown')(vscode_oauth_bounce_mod.vscode_oauth_bounce)
     return _client(app)
 
 
@@ -340,7 +342,24 @@ def test_vscode_oauth_bounce_default_scheme_is_vscode():
     assert r.status_code == 200
     assert r.headers['content-type'].startswith('text/html')
     assert '"vscode"' in r.text
-    assert "'://rocketride.rocketride/auth/google'" in r.text
+    assert '\'://rocketride.rocketride/auth/\' + "google"' in r.text
+
+
+@pytest.mark.parametrize(
+    'route, provider',
+    [
+        ('/auth/vscode/google', 'google'),
+        ('/auth/vscode/microsoft', 'microsoft'),
+        # Unrecognised providers fall back to google rather than building an
+        # unhandled deep link.
+        ('/auth/vscode/unknown', 'google'),
+    ],
+)
+def test_vscode_oauth_bounce_provider_comes_from_route(route, provider):
+    """The deep-link provider segment is taken from the route path."""
+    r = _bounce_client().get(route)
+    assert r.status_code == 200
+    assert f'\'://rocketride.rocketride/auth/\' + "{provider}"' in r.text
 
 
 def test_vscode_oauth_bounce_honors_allowed_scheme():

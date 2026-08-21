@@ -223,8 +223,40 @@ class IInstance(MicrosoftToolInstanceBase):
             'required': ['subject', 'start', 'end'],
             'properties': {
                 'subject': {'type': 'string', 'description': 'Event subject/title'},
-                'start': {'type': 'string', 'description': "Start time, ISO 8601 e.g. '2026-08-11T14:00:00' (UTC)"},
-                'end': {'type': 'string', 'description': "End time, ISO 8601 e.g. '2026-08-11T14:30:00' (UTC)"},
+                'start': {
+                    'oneOf': [
+                        {'type': 'string'},
+                        {
+                            'type': 'object',
+                            'required': ['dateTime', 'timeZone'],
+                            'properties': {
+                                'dateTime': {'type': 'string'},
+                                'timeZone': {'type': 'string'},
+                            },
+                        },
+                    ],
+                    'description': (
+                        "Start time: ISO 8601 string e.g. '2026-08-11T14:00:00' (treated as UTC), or a Graph "
+                        '{dateTime, timeZone} object for a specific time zone'
+                    ),
+                },
+                'end': {
+                    'oneOf': [
+                        {'type': 'string'},
+                        {
+                            'type': 'object',
+                            'required': ['dateTime', 'timeZone'],
+                            'properties': {
+                                'dateTime': {'type': 'string'},
+                                'timeZone': {'type': 'string'},
+                            },
+                        },
+                    ],
+                    'description': (
+                        "End time: ISO 8601 string e.g. '2026-08-11T14:30:00' (treated as UTC), or a Graph "
+                        '{dateTime, timeZone} object for a specific time zone'
+                    ),
+                },
                 'body': {'type': 'string', 'description': 'Event description/body text'},
                 'attendees': {
                     'type': 'array',
@@ -260,8 +292,34 @@ class IInstance(MicrosoftToolInstanceBase):
             'properties': {
                 'event_id': {'type': 'string', 'description': 'Event id to update'},
                 'subject': {'type': 'string', 'description': 'New subject/title'},
-                'start': {'type': 'string', 'description': 'New start time, ISO 8601 (UTC)'},
-                'end': {'type': 'string', 'description': 'New end time, ISO 8601 (UTC)'},
+                'start': {
+                    'oneOf': [
+                        {'type': 'string'},
+                        {
+                            'type': 'object',
+                            'required': ['dateTime', 'timeZone'],
+                            'properties': {
+                                'dateTime': {'type': 'string'},
+                                'timeZone': {'type': 'string'},
+                            },
+                        },
+                    ],
+                    'description': 'New start time: ISO 8601 string (treated as UTC) or a Graph {dateTime, timeZone} object',
+                },
+                'end': {
+                    'oneOf': [
+                        {'type': 'string'},
+                        {
+                            'type': 'object',
+                            'required': ['dateTime', 'timeZone'],
+                            'properties': {
+                                'dateTime': {'type': 'string'},
+                                'timeZone': {'type': 'string'},
+                            },
+                        },
+                    ],
+                    'description': 'New end time: ISO 8601 string (treated as UTC) or a Graph {dateTime, timeZone} object',
+                },
                 'body': {'type': 'string', 'description': 'New description/body text'},
                 'attendees': {
                     'type': 'array',
@@ -420,8 +478,40 @@ class IInstance(MicrosoftToolInstanceBase):
                     'items': {'type': 'string'},
                     'description': 'Mailbox email addresses to get free/busy schedule information for',
                 },
-                'start': {'type': 'string', 'description': "Window start, ISO 8601 e.g. '2026-08-11T00:00:00'"},
-                'end': {'type': 'string', 'description': "Window end, ISO 8601 e.g. '2026-08-11T23:59:59'"},
+                'start': {
+                    'oneOf': [
+                        {'type': 'string'},
+                        {
+                            'type': 'object',
+                            'required': ['dateTime', 'timeZone'],
+                            'properties': {
+                                'dateTime': {'type': 'string'},
+                                'timeZone': {'type': 'string'},
+                            },
+                        },
+                    ],
+                    'description': (
+                        "Window start: ISO 8601 string e.g. '2026-08-11T00:00:00' (treated as UTC), or a Graph "
+                        '{dateTime, timeZone} object'
+                    ),
+                },
+                'end': {
+                    'oneOf': [
+                        {'type': 'string'},
+                        {
+                            'type': 'object',
+                            'required': ['dateTime', 'timeZone'],
+                            'properties': {
+                                'dateTime': {'type': 'string'},
+                                'timeZone': {'type': 'string'},
+                            },
+                        },
+                    ],
+                    'description': (
+                        "Window end: ISO 8601 string e.g. '2026-08-11T23:59:59' (treated as UTC), or a Graph "
+                        '{dateTime, timeZone} object'
+                    ),
+                },
             },
         },
         description='Get free/busy schedule information for a set of mailboxes over a time window.',

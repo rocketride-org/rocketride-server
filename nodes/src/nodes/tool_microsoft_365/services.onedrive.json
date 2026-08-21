@@ -55,7 +55,7 @@
 		{
 			"section": "Pipe",
 			"title": "OneDrive",
-			"properties": ["type", "microsoft.authType", "onedrive.access"]
+			"properties": ["type", "microsoft.authType", "onedrive.access", "onedrive.allowPublicSharing", "onedrive.allowHardDelete"]
 		}
 	]
 }

@@ -73,10 +73,13 @@ def it(base: str, item: str) -> str:
     interpolated into the ``root:/{path}:`` addressing form — an unencoded
     space raises ``http.client.InvalidURL`` and an unencoded ``#`` truncates
     the path, silently addressing the wrong item. A bare item id is a single
-    path component and is URL-escaped via ``_seg``.
+    path component and is URL-escaped via ``_seg``. Leading/trailing
+    separators are dropped, so ``''``, ``'/'`` and ``'root'`` all address the
+    drive root (``root://:`` is not a valid Graph path).
     """
-    if looks_like_item_id(item):
-        return f'{base}/drive/items/{_seg(item)}'
+    item = item.strip('/')
+    if not item or looks_like_item_id(item):
+        return f'{base}/drive/items/{_seg(item or "root")}'
     return f'{base}/drive/root:/{urllib.parse.quote(item, safe="/")}:'
 
 
@@ -129,7 +132,10 @@ def upload_chunk(auth, session_url: str, chunk: bytes, start: int, end: int, tot
             raise graph_client.GraphError(
                 f'OneDrive: chunked upload failed (HTTP {exc.code}; {detail[:200]}).'
             ) from exc
-        except urllib.error.URLError as exc:
+        except OSError as exc:
+            # URLError (connect failures) and bare socket errors such as
+            # TimeoutError/ConnectionResetError raised by urlopen or resp.read()
+            # are all OSError; HTTPError is handled above.
             if attempt < 3:
                 graph_client._time.sleep(2**attempt)
                 continue

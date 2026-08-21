@@ -250,3 +250,38 @@ class TestChunkedUploadSession:
     def test_retry_budget_is_bounded(self):
         with pytest.raises(gc.GraphError, match='HTTP 503'):
             self._put([_http_error(503)] * 4)
+
+    def test_bare_socket_errors_are_retried_like_urlerror(self):
+        # TimeoutError/ConnectionResetError are OSError but not URLError; they can be
+        # raised by urlopen or by resp.read() and must stay inside the retry budget.
+        slow = _resp({'id': 'X'})
+        slow.read.side_effect = TimeoutError('timed out')
+        out, u, sl = self._put([slow, ConnectionResetError('reset'), _resp({'id': 'X'})])
+        assert out == {'id': 'X'}
+        assert u.call_count == 3
+        assert [c.args[0] for c in sl.call_args_list] == [1, 2]
+
+    def test_socket_errors_exhaust_budget_as_graph_error(self):
+        with pytest.raises(gc.GraphError, match='connection error: timed out'):
+            self._put([TimeoutError('timed out')] * 4)
+
+
+class TestListItemsRootAddressing:
+    @pytest.mark.parametrize('folder', ['', '/', 'root'])
+    def test_empty_or_slash_folder_lists_drive_root(self, folder):
+        inst = _instance(allow_public_sharing=False)
+        with mock.patch.object(gc, '_urlopen', return_value=_resp({'value': []})) as u:
+            assert inst.onedrive_list_items({'folder': folder}) == {'items': []}
+        assert u.call_args[0][0].full_url == 'https://graph.microsoft.com/v1.0/me/drive/items/root/children'
+
+    def test_omitted_folder_lists_drive_root(self):
+        inst = _instance(allow_public_sharing=False)
+        with mock.patch.object(gc, '_urlopen', return_value=_resp({'value': []})) as u:
+            inst.onedrive_list_items({})
+        assert u.call_args[0][0].full_url.endswith('/me/drive/items/root/children')
+
+    def test_path_folder_keeps_path_addressing(self):
+        inst = _instance(allow_public_sharing=False)
+        with mock.patch.object(gc, '_urlopen', return_value=_resp({'value': []})) as u:
+            inst.onedrive_list_items({'folder': '/Reports/'})
+        assert u.call_args[0][0].full_url.endswith('/me/drive/root:/Reports:/children')

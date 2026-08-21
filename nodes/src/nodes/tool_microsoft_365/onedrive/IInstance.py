@@ -167,7 +167,7 @@ class IInstance(MicrosoftToolInstanceBase):
         """List the items directly inside a OneDrive folder (root by default). Read-only."""
         args = normalize_tool_input(args, tool_name='tool_onedrive')
         folder = optional_str(args, 'folder', default='', tool_name='onedrive_list_items') or ''
-        data = request(self.IGlobal.auth, 'GET', f'{self._it(folder or "root")}/children')
+        data = request(self.IGlobal.auth, 'GET', f'{self._it(folder)}/children')  # '' -> drive root
         return {'items': [clean_item(i) for i in data.get('value') or []]}
 
     @tool_function(

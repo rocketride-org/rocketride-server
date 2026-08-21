@@ -422,13 +422,17 @@ def build_auth(svc: GraphService, auth_type: str, cfg: dict, scopes: list[str]) 
         # Fail fast: if the token is already expired and there is no refresh path
         # (no broker URL and no refresh_token), the first Graph call would fail
         # with a cryptic error. Surface a clear message now.
+        # Normalize once: the broker payload may carry expiry_date as int, float,
+        # or a numeric string (JSON-in-a-string config); BrokerUserAuth divides it.
         try:
-            is_expired = expiry_ms is not None and (float(expiry_ms) / 1000.0) < _time.time()
+            if expiry_ms is not None:
+                expiry_ms = float(expiry_ms)
         except (TypeError, ValueError) as exc:
             raise ValueError(
                 f'{svc.product}: your Microsoft account authorization has an invalid expiry_date '
                 f'({expiry_ms!r}). Please disconnect and reconnect your Microsoft account.'
             ) from exc
+        is_expired = expiry_ms is not None and (expiry_ms / 1000.0) < _time.time()
         if is_expired and not (broker_url and refresh_token):
             raise ValueError(
                 f'{svc.product} access token has expired. Please reconnect your Microsoft account in the node settings.'
@@ -475,7 +479,9 @@ def request(
     present, clamped to 0..30s) — worst case ~7s before the final raise. 429
     is retried for every method (Graph did not process the request); 5xx is
     retried only for idempotent methods (GET/HEAD/PUT/DELETE) because a POST
-    may already have been applied. An absolute ``path`` (deltaLink/nextLink)
+    may already have been applied. Transient network errors (URLError,
+    timeout, connection reset) follow the same idempotent-only rule and
+    budget, raising GraphError on exhaustion. An absolute ``path`` (deltaLink/nextLink)
     must be https on a Graph host, else ValueError — the bearer token is never
     sent to a foreign host. ``extra_headers`` are
     merged in after the defaults (e.g. an ``If-Match`` etag on a docx
@@ -549,4 +555,13 @@ def request(
                     're-read and retry.'
                 ) from exc
             raise GraphError(f'{svc.product}: Graph request failed (HTTP {status}; {detail}).') from exc
+        except OSError as exc:
+            # Transient network failure (URLError, socket timeout, connection
+            # reset — all OSError subclasses; HTTPError is handled above).
+            # Retry with the same budget/backoff, but only for idempotent
+            # methods: a POST may have been applied before the link died.
+            if retry_5xx and attempt < 3:
+                _time.sleep(base_delay * (2**attempt))
+                continue
+            raise GraphError(f'{svc.product}: Graph request failed (network error: {exc}). Please retry.') from exc
     raise RuntimeError('request: retry loop exhausted unexpectedly')  # unreachable

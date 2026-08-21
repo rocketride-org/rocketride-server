@@ -118,11 +118,14 @@ class TestAppOnlyAuth:
 
     def test_expired_token_reacquired(self):
         auth = gc.build_auth(SVC, 'service', self.CFG, [])
-        with mock.patch.object(gc, '_urlopen', return_value=_resp({'access_token': 'T1', 'expires_in': 1})):
-            auth.token()
-        with mock.patch.object(gc, '_urlopen', return_value=_resp({'access_token': 'T2', 'expires_in': 3600})):
-            time.sleep(1.1)
-            assert auth.token() == 'T2'
+        now = 1_700_000_000.0
+        with mock.patch.object(gc._time, 'time', return_value=now):
+            with mock.patch.object(gc, '_urlopen', return_value=_resp({'access_token': 'T1', 'expires_in': 3600})):
+                auth.token()
+        # Advance the fake clock past the 3600s lifetime (and 60s leeway).
+        with mock.patch.object(gc._time, 'time', return_value=now + 3601):
+            with mock.patch.object(gc, '_urlopen', return_value=_resp({'access_token': 'T2', 'expires_in': 3600})):
+                assert auth.token() == 'T2'
 
     def test_missing_config_fails_loud(self):
         with pytest.raises(ValueError, match='tenantId'):
@@ -188,6 +191,14 @@ class TestBrokerUserAuth:
             assert gc.build_auth(SVC, 'user', cfg, []).token() == 'B'
             assert u.call_count == 1
 
+    def test_numeric_string_expiry_date_is_normalized(self):
+        # JSON-in-a-string config may carry expiry_date as a numeric string;
+        # build_auth must coerce it once so BrokerUserAuth never divides a str.
+        cfg = self._payload(expiry_date=str(int((time.time() + 3600) * 1000)))
+        with mock.patch.object(gc, '_urlopen') as u:
+            assert gc.build_auth(SVC, 'user', cfg, []).token() == 'A'
+            assert u.call_count == 0
+
     def test_garbage_expiry_date_raises_readable_error(self):
         cfg = self._payload(expiry_date='not-a-number')
         with pytest.raises(ValueError, match='Excel.*Please disconnect and reconnect your Microsoft account'):
@@ -251,6 +262,35 @@ class TestRequest:
         with mock.patch.object(gc, '_urlopen', side_effect=[err, _resp({'ok': 1})]) as u:
             assert gc.request(SVC, self._auth(), 'GET', '/me') == {'ok': 1}
             assert u.call_count == 2
+
+    def test_network_error_on_get_is_retried_then_succeeds(self):
+        errs = [urllib.error.URLError('reset'), TimeoutError('timed out'), ConnectionResetError()]
+        with (
+            mock.patch.object(gc, '_urlopen', side_effect=[*errs, _resp({'ok': 1})]) as u,
+            mock.patch.object(gc._time, 'sleep') as sleep,
+        ):
+            assert gc.request(SVC, self._auth(), 'GET', '/me') == {'ok': 1}
+            assert u.call_count == 4
+            assert [c.args[0] for c in sleep.call_args_list] == [1.0, 2.0, 4.0]
+
+    def test_network_error_on_post_is_not_retried(self):
+        with (
+            mock.patch.object(gc, '_urlopen', side_effect=urllib.error.URLError('reset')) as u,
+            mock.patch.object(gc._time, 'sleep') as sleep,
+        ):
+            with pytest.raises(gc.GraphError, match='network error'):
+                gc.request(SVC, self._auth(), 'POST', '/me/sendMail', json_body={})
+            assert u.call_count == 1
+            assert sleep.call_count == 0
+
+    def test_network_error_budget_exhaustion_raises_graph_error(self):
+        with (
+            mock.patch.object(gc, '_urlopen', side_effect=TimeoutError('timed out')) as u,
+            mock.patch.object(gc._time, 'sleep'),
+        ):
+            with pytest.raises(gc.GraphError, match='network error'):
+                gc.request(SVC, self._auth(), 'GET', '/me')
+            assert u.call_count == 4
 
     def test_retries_429_with_http_date_retry_after_falls_back_to_backoff(self):
         # Graph may send an HTTP-date instead of delta-seconds; float() would

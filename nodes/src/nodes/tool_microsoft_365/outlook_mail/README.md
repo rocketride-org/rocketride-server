@@ -90,7 +90,7 @@ with admin consent.
 
 An agent drafts a reply and attaches a file:
 
-```
+```text
 outlook_mail_create_draft  { "to": ["alex@contoso.com"], "subject": "Re: Q3",
                               "body": "See attached." }
 outlook_mail_add_attachment { "message_id": "<draft id>", "name": "q3.pdf",

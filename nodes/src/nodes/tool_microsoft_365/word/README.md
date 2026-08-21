@@ -84,9 +84,19 @@ Authenticate with either an **Entra app** (`microsoft.tenantId` /
 `microsoft.clientId` / `microsoft.clientSecret` / `microsoft.userPrincipalName`,
 client-credentials flow) or **user OAuth** (click sign-in to populate
 `microsoft.userToken`). See `microsoft-oauth.md` for the Entra app / consent
-setup shared by every Microsoft 365 tool service. The app must be granted the
-Graph `Files.Read` or `Files.ReadWrite` permission (application or delegated,
-matching the auth mode) with admin consent.
+setup shared by every Microsoft 365 tool service. The Graph permission the
+app needs depends on the auth mode:
+
+| Auth mode | Tier | Graph permission |
+| --- | --- | --- |
+| User OAuth (delegated) | `readonly` | `Files.Read` |
+| User OAuth (delegated) | `write` | `Files.ReadWrite` |
+| Entra app (application, admin consent) | `readonly` | `Files.Read.All` |
+| Entra app (application, admin consent) | `write` | `Files.ReadWrite.All` |
+
+Application permissions always require admin consent. Unlike the Excel
+workbook API, Word's drive-item download/upload/convert calls work app-only,
+so both auth modes are fully supported.
 
 ## Limits
 

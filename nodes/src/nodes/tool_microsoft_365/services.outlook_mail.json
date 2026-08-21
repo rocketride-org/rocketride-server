@@ -50,7 +50,7 @@
 		{
 			"section": "Pipe",
 			"title": "Outlook Mail",
-			"properties": ["type", "microsoft.authType", "outlook_mail.access"]
+			"properties": ["type", "microsoft.authType", "outlook_mail.access", "outlook_mail.allowHardDelete"]
 		}
 	]
 }

@@ -241,6 +241,18 @@ class TestReplaceText:
             assert uploaded.paragraphs[0].text == 'bar is here'
             assert uploaded.tables[0].rows[0].cells[0].text == 'another bar cell'
 
+    def test_replace_text_with_zero_matches_does_not_upload(self):
+        # Regression: a no-op replace must not PUT the document (would bump eTag/mtime).
+        inst = _instance(tier='write')
+        original = _build_docx_bytes(paragraph_text='nothing here', cell_text='nor here')
+        meta_resp = _json_resp({'eTag': '"abc"'})
+        content_resp = _binary_resp(original)
+        with mock.patch.object(gc, '_urlopen', side_effect=[meta_resp, content_resp]) as u:
+            out = inst.word_replace_text({'file': 'Docs/doc.docx', 'find': 'foo', 'replace': 'bar'})
+            assert out == {'replacements': 0}
+            assert u.call_count == 2
+            assert all(c[0][0].get_method() == 'GET' for c in u.call_args_list)
+
     def test_replace_where_replacement_contains_find_does_not_double_count_or_corrupt(self):
         # Regression: a single-pass replace scanning ONLY the original text.
         # A run-then-paragraph two-pass approach would re-scan the just-written

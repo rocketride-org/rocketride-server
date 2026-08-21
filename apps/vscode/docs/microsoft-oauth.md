@@ -89,7 +89,7 @@ The five services and their tiers (see `SERVICE_TIER_SCOPES` in
 
 | Service | Tiers | Scopes |
 | --- | --- | --- |
-| Excel | `readonly`, `write` (default) | `Files.Read` / `Files.ReadWrite` |
+| Excel | `readonly`, `write` (default) | `Files.ReadWrite` / `Files.ReadWrite` (Graph's workbook API accepts only delegated `Files.ReadWrite`, reads included; the `readonly` tier is a node-side write gate) |
 | Word | `readonly`, `write` (default) | `Files.Read` / `Files.ReadWrite` |
 | OneDrive | `readonly`, `write` (default) | `Files.Read` / `Files.ReadWrite` (sign-in also requests `User.ReadBasic.All` for invite recipient lookup; personal accounts cannot grant it, and the invite gate then refuses invites) |
 | Outlook Mail | `readonly`, `send`, `modify` (default) | `Mail.Read` / `Mail.Read` + `Mail.Send` / `Mail.ReadWrite` + `Mail.Send` |
@@ -113,10 +113,19 @@ their own broker host with the `RR_OAUTH_BROKER_URL` environment variable.
 
 ## App authentication (client credentials)
 
-Every Microsoft 365 tool node also accepts `microsoft.authType: "service"` —
-an Entra app registration authenticating with its own client credentials
-instead of a signed-in user. This path does not depend on the OAuth broker
-and works today.
+The Word, OneDrive, Outlook Mail, and Outlook Calendar tool nodes also accept
+`microsoft.authType: "service"` — an Entra app registration authenticating
+with its own client credentials instead of a signed-in user. This path does
+not depend on the OAuth broker and works today.
+
+:::caution Excel is user OAuth only
+Microsoft Graph's workbook (Excel) API does not support application
+permissions — an app-only token is rejected regardless of what the app
+registration has been granted. The Excel node therefore needs the
+[user sign-in](#flow) path with the delegated `Files.ReadWrite` permission
+(its own README documents this). Do not add Excel to the app-only walkthrough
+below.
+:::
 
 ### Entra app registration walkthrough
 
@@ -124,11 +133,28 @@ and works today.
    **App registrations** → **New registration**. Register a
    **single-tenant** app (accounts in this organizational directory only).
 2. Under **API permissions**, add **Microsoft Graph** →
-   **Application permissions** (not delegated) for each service the node
-   will use:
-   - Excel / Word / OneDrive: `Files.ReadWrite.All`
-   - Outlook Mail: `Mail.ReadWrite` + `Mail.Send`
-   - Outlook Calendar: `Calendars.ReadWrite`
+   **Application permissions** (not delegated) matching each service the
+   node will use **and the access tier configured on that node**
+   (`<service>.access`). The engine checks the token's granted permissions
+   against the tier's required scopes (`missing_scopes` in
+   `core/microsoft_access.py`); an `.All` application permission satisfies
+   the matching delegated scope name.
+
+   | Service | Tier | Application permission |
+   | --- | --- | --- |
+   | Word | `readonly` | `Files.Read.All` |
+   | Word | `write` (default) | `Files.ReadWrite.All` |
+   | OneDrive | `readonly` | `Files.Read.All` |
+   | OneDrive | `write` (default) | `Files.ReadWrite.All` |
+   | OneDrive | any, when `onedrive.allowPublicSharing` is off and the agent uses `onedrive_invite` | `User.Read.All` (directory lookup of invite recipients; without it the invite fails closed) |
+   | Outlook Mail | `readonly` | `Mail.Read` |
+   | Outlook Mail | `send` | `Mail.Read` + `Mail.Send` |
+   | Outlook Mail | `modify` (default) | `Mail.ReadWrite` + `Mail.Send` |
+   | Outlook Calendar | `readonly` | `Calendars.Read` |
+   | Outlook Calendar | `write` (default) | `Calendars.ReadWrite` |
+
+   `Mail.Send` is a separate action permission — `Mail.ReadWrite` does not
+   imply it, so the `send` and `modify` tiers list both.
 3. Click **Grant admin consent for &lt;tenant&gt;** — application permissions
    are tenant-wide and require an admin to consent; the app cannot self-consent.
 4. Under **Certificates & secrets**, create a **client secret** and copy its
@@ -147,6 +173,16 @@ and works today.
    themselves — every Graph call the node makes targets
    `/users/{userPrincipalName}` (mail, calendar) or that user's OneDrive, so
    `userPrincipalName` selects whose data the app-only credentials act on.
+
+### App-only limitations
+
+- **Excel:** not available under app-only auth (see the caution above).
+- **OneDrive `onedrive_restore`:** Graph's item restore is OneDrive Personal
+  only; the tool refuses up front under app-only auth, which is always a
+  work/school tenant. Use the OneDrive web recycle bin instead.
+- **Outlook Calendar `outlook_calendar_find_meeting_times`:** Graph's
+  `findMeetingTimes` needs a signed-in user context and may not be
+  supported under client credentials.
 
 ### Narrowing app-only access
 

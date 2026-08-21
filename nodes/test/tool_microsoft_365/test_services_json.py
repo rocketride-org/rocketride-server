@@ -59,6 +59,10 @@ def test_service_shape(path):
     assert 'microsoft.authType' in props
     prefix = doc['prefix']
     assert f'{prefix}.access' in props
+    # every declared gate flag (<prefix>.allow*) is rendered in the form, else operators can't enable it
+    for name in doc['fields']:
+        if name.startswith(f'{prefix}.allow'):
+            assert name in props, f'{name} declared but not in shape properties'
     # subpackage exists with the four required modules
     pkg = ROOT / path.name.removeprefix('services.').removesuffix('.json')
     for f in ('__init__.py', 'client.py', 'IGlobal.py', 'IInstance.py'):

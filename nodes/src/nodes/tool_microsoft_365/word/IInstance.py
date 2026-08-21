@@ -318,6 +318,9 @@ class IInstance(MicrosoftToolInstanceBase):
         content, etag = download_docx(self.IGlobal.auth, base, file)
         doc = docx.Document(BytesIO(content))
         total = sum(_replace_in_paragraph(p, find, replace) for p in _iter_all_paragraphs(doc))
+        if total == 0:
+            # Nothing matched: skip the upload so a no-op never bumps the item's eTag/mtime.
+            return {'replacements': 0}
         buf = BytesIO()
         doc.save(buf)
         upload_docx(self.IGlobal.auth, base, file, buf.getvalue(), etag)
