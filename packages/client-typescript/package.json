@@ -59,10 +59,14 @@
 		"glob": "^10.5.0"
 	},
 	"peerDependencies": {
-		"drizzle-orm": "0.45.x"
+		"drizzle-orm": "0.45.x",
+		"sequelize": "^6.37.8"
 	},
 	"peerDependenciesMeta": {
 		"drizzle-orm": {
+			"optional": true
+		},
+		"sequelize": {
 			"optional": true
 		}
 	},
@@ -78,6 +82,7 @@
 		"jest": "^29.0.0",
 		"jest-jasmine2": "^30.4.2",
 		"rimraf": "^5.0.5",
+		"sequelize": "^6.37.8",
 		"ts-jest": "^29.4.10",
 		"typescript": "^5.0.0",
 		"ws": "^8.20.1"

@@ -33,7 +33,7 @@ import { DefaultLogger } from 'drizzle-orm/logger';
 import { PgDatabase, PgDialect } from 'drizzle-orm/pg-core';
 import { createTableRelationsHelpers, extractTablesRelationalConfig, type RelationalSchemaConfig, type TablesRelationalConfig } from 'drizzle-orm/relations';
 import type { DrizzleConfig } from 'drizzle-orm/utils';
-import type { DatabaseLike } from '../database.js';
+import type { DrizzleDatabaseLike } from '../database.js';
 import { PipesSession, type PipesQueryResultHKT, type PipesTransport } from './session.js';
 
 export * from './session.js';
@@ -42,15 +42,15 @@ export * from './session.js';
 export type RocketRideDrizzle<TSchema extends Record<string, unknown> = Record<string, never>> = PgDatabase<PipesQueryResultHKT, TSchema>;
 
 export interface DrizzleOverPipesOptions {
-	/** The SDK transport — pass `client.database` (or any `DatabaseLike`). */
-	client: DatabaseLike;
+	/** The SDK transport — pass `client.database` (or any `DrizzleDatabaseLike`). */
+	client: DrizzleDatabaseLike;
 	/** Pipeline token for authentication and resource access. */
 	token: string;
 	/** Target database node id; pins queries and transactions to one node. */
 	nodeId?: string;
 }
 
-function makeTransport(db: DatabaseLike, token: string, nodeId?: string, sessionId?: string): PipesTransport {
+function makeTransport(db: DrizzleDatabaseLike, token: string, nodeId?: string, sessionId?: string): PipesTransport {
 	return {
 		async query(sqlText, params, method) {
 			const options = {
