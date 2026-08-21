@@ -31,6 +31,11 @@ The node adds an `embedding` and `embedding_model` to documents and questions. C
 | `text-embedding-large-exp-03-07` | `text-embedding-large-exp-03-07` | 8192 tokens. |
 | `text-embedding-preview-0409` | `text-embedding-preview-0409` | 3072 tokens. |
 
+This node currently supports `text-embedding-3-small`, `text-embedding-3-large`,
+and `text-embedding-ada-002`. The other declared profiles require LiteLLM
+routing, which this node does not currently implement; selecting one sends its
+model name to the OpenAI endpoint and fails during the startup probe.
+
 ## Configuration
 
 Select the profile used for both document ingestion and question embedding. The wrapper reads the profile’s configured model and token limit, and probes the selected model with `dummy` at startup to discover the vector size; account for that small startup request.
