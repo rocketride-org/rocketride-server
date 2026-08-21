@@ -1311,10 +1311,13 @@ export class RocketRideClient extends DAPClient {
 	 *   pipeline: { components: [...], project_id: '123' },
 	 *   source: 'webhook_1'
 	 * });
-	 * if (result.errors?.length) {
+	 * if (result.errors.length) {
 	 *   console.log('Validation errors:', result.errors);
 	 * }
 	 * ```
+	 *
+	 * `errors` and `warnings` are ALWAYS arrays — a clean pipeline returns
+	 * them empty, never absent.
 	 */
 	async validate(options: { pipeline: PipelineConfig | Record<string, unknown>; source?: string }): Promise<ValidationResult> {
 		const { pipeline, source } = options;
@@ -1323,7 +1326,11 @@ export class RocketRideClient extends DAPClient {
 			args.source = source;
 		}
 		try {
-			return await this.call<ValidationResult>('rrext_validate', args);
+			const result = await this.call<ValidationResult>('rrext_validate', args);
+			// The server omits the keys entirely when a pipeline is clean —
+			// normalize so `.errors`/`.warnings` are ALWAYS arrays and callers
+			// never need null guards on a passing validation.
+			return { ...result, errors: result?.errors ?? [], warnings: result?.warnings ?? [] };
 		} catch (err) {
 			throw new Error(`Pipeline validation failed: ${err instanceof Error ? err.message : err}`);
 		}
@@ -1500,6 +1507,21 @@ export class RocketRideClient extends DAPClient {
 			this.debugMessage(`Pipeline termination failed: ${errorMsg}`);
 			throw new Error(errorMsg);
 		}
+	}
+
+	/**
+	 * List the caller's active tasks.
+	 *
+	 * Returns the tasks visible to the authenticated user (running and
+	 * recently completed pipeline executions), as reported by the server.
+	 * Each row includes the task token plus display fields such as name,
+	 * state, and timing; the exact field set is server-defined.
+	 *
+	 * Mirrors the Python SDK's `get_tasks`.
+	 */
+	async getTasks(): Promise<Array<Record<string, unknown>>> {
+		const body = await this.call<{ tasks?: Array<Record<string, unknown>> }>('rrext_get_tasks');
+		return body?.tasks || [];
 	}
 
 	/**

@@ -127,7 +127,9 @@ class ServicesMixin(DAPClient):
             source: Optional override for the source component ID.
 
         Returns:
-            Validation result containing errors and warnings.
+            Validation result containing errors and warnings. Both keys
+            are ALWAYS lists — a clean pipeline returns them empty, never
+            absent.
 
         Raises:
             RuntimeError: If the server returns a validation error.
@@ -143,6 +145,12 @@ class ServicesMixin(DAPClient):
             if source is not None:
                 kwargs['source'] = source
 
-            return await self.call('rrext_validate', **kwargs)
+            result = await self.call('rrext_validate', **kwargs)
+            # The server omits the keys entirely when a pipeline is clean —
+            # normalize so 'errors'/'warnings' are ALWAYS lists and callers
+            # never need absence guards on a passing validation
+            result.setdefault('errors', [])
+            result.setdefault('warnings', [])
+            return result
         except Exception as err:
             raise RuntimeError(f'Pipeline validation failed: {err}') from err

@@ -24,7 +24,7 @@
 // FROZEN rocketride SDK contract — floor v1.3 — never edit by hand
 // =============================================================================
 // Floor key:     1.3 (MAJOR.MINOR of packages/client-typescript/package.json)
-// Source commit: 75aecaf961c00cbfa2e389d8ef0754f37b5969bf
+// Source commit: f389d79aa11eded029a749e731d571190e233bc9
 // Generator:     dts-bundle-generator@9.5.1
 // Produced by:   ./builder client-typescript:freeze
 //
@@ -1758,8 +1758,10 @@ export interface ConnectResult {
     /** BCP-47 locale tag (e.g. "en-US") representing the user's preferred locale */
     locale: string;
     /**
-     * ID of the team that should be used by default for operations that do not
-     * explicitly specify a team context.
+     * ID of the user's development team. It carries NO authorization meaning:
+     * it is the billing and environment-layer context for dev runs and for
+     * `@me` publishes. Team-scoped operations always name their team
+     * explicitly — there is no default-team fallback.
      */
     devTeam: string;
     /**
@@ -1884,8 +1886,8 @@ export interface StripePriceEntry {
  * Server metadata returned by the pre-auth info probe.
  *
  * Obtained via {@link RocketRideClient.getServerInfo} which sends an
- * `auth` request with `infoOnly: true`. The server responds without
- * requiring credentials.
+ * `rrext_public_probe` command on a public connection. The server
+ * responds without requiring credentials.
  */
 export interface ServerInfoResult {
     /** Server engine version string. */
@@ -4139,8 +4141,9 @@ declare class DeployApi {
      * Deployments visible to the caller, as the standard list envelope.
      *
      * @param params - Optional team scope + list-API params.
-     * @param params.teamId - Restrict to one team; omitted = every team the
-     *   caller can monitor.
+     * @param params.teamId - Restrict to one team; omitted = the visibility
+     *   model: the caller's member teams plus their own personal space, and
+     *   the whole org for an org admin.
      * @returns `{rows, total, page, pageSize}` of {@link Deployment} rows.
      */
     list(params?: DeployListParams & {
@@ -4916,6 +4919,17 @@ export declare class RocketRideClient extends DAPClient {
      */
     terminate(token: string): Promise<void>;
     /**
+     * List the caller's active tasks.
+     *
+     * Returns the tasks visible to the authenticated user (running and
+     * recently completed pipeline executions), as reported by the server.
+     * Each row includes the task token plus display fields such as name,
+     * state, and timing; the exact field set is server-defined.
+     *
+     * Mirrors the Python SDK's `get_tasks`.
+     */
+    getTasks(): Promise<Array<Record<string, unknown>>>;
+    /**
      * Restart a running pipeline with a new configuration.
      *
      * Looks up the existing task by project/source, terminates it, and
@@ -5436,6 +5450,19 @@ export declare class RocketRideClient extends DAPClient {
      * @returns The final binding row (state 'removed')
      */
     removeAppPublish(appId: string, target: string): Promise<{
+        publish: Record<string, unknown>;
+    }>;
+    /**
+     * Disable an audience binding — serving stops, but the row STAYS in the
+     * where-live listing marked disabled (a visible off switch), unlike
+     * remove which hides it. Publishing any version to the rung re-enables
+     * the binding.
+     *
+     * @param appId - App id
+     * @param target - '@me', '@team/<name-or-id>', or '@public' ('@user' = legacy alias)
+     * @returns The binding row (state 'disabled')
+     */
+    disableAppPublish(appId: string, target: string): Promise<{
         publish: Record<string, unknown>;
     }>;
     /**

@@ -531,8 +531,8 @@ export interface StripePriceEntry {
  * Server metadata returned by the pre-auth info probe.
  *
  * Obtained via {@link RocketRideClient.getServerInfo} which sends an
- * `auth` request with `infoOnly: true`. The server responds without
- * requiring credentials.
+ * `rrext_public_probe` command on a public connection. The server
+ * responds without requiring credentials.
  */
 export interface ServerInfoResult {
 	/** Server engine version string. */
