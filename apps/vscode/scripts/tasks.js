@@ -28,7 +28,7 @@
  */
 const path = require('path');
 const { glob } = require('glob');
-const { execCommand, removeDirs, removeDirAndParents, removeMatching, PROJECT_ROOT, BUILD_ROOT, DIST_ROOT, hasSourceChanged, saveSourceHash, setState, exists, copyFile, mkdir, rm, readFile, writeFile, syncDir, formatSyncStats } = require('../../../scripts/lib');
+const { execCommand, removeDirs, removeDirAndParents, removeMatching, PROJECT_ROOT, BUILD_ROOT, DIST_ROOT, hasSourceChanged, saveSourceHash, setState, exists, copyFile, mkdir, rm, readFile, writeFile, syncDir, formatSyncStats, stat } = require('../../../scripts/lib');
 
 // Paths
 const APP_ROOT = path.join(__dirname, '..');
@@ -190,8 +190,13 @@ function makeStageFilesAction() {
 			// extension can locate it without knowing the version.
 			const clientTgzDir = path.join(DIST_ROOT, 'clients', 'typescript');
 			if (await exists(clientTgzDir)) {
-				const clientTgzs = (await glob('rocketride-*.tgz', { cwd: clientTgzDir, nodir: true, absolute: true })).sort();
-				const newest = clientTgzs[clientTgzs.length - 1];
+				// Newest by mtime, not name: a lexicographic sort ranks
+				// rocketride-1.9.0.tgz above rocketride-1.10.0.tgz, silently
+				// shipping a stale offline fallback across digit boundaries.
+				const clientTgzs = await glob('rocketride-*.tgz', { cwd: clientTgzDir, nodir: true, absolute: true });
+				const stamped = await Promise.all(clientTgzs.map(async (file) => ({ file, mtime: (await stat(file)).mtimeMs })));
+				stamped.sort((a, b) => a.mtime - b.mtime);
+				const newest = stamped.length > 0 ? stamped[stamped.length - 1].file : undefined;
 				if (newest) {
 					await mkdir(BUILD_DIR);
 					await copyFile(newest, path.join(BUILD_DIR, 'rocketride-client.tgz'));

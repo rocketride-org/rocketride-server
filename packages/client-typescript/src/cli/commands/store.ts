@@ -34,6 +34,14 @@ import { Command } from 'commander';
 import { addConnectionOptions, connectClient, runCliCommand } from '../common';
 
 /**
+ * Locale the listing's grouped numbers are pinned to. The host locale
+ * would render 1234 as '1.234' on a de-DE machine and shift the column
+ * widths — the Python CLI's `f"{n:,}"` is always comma-grouped, and this
+ * listing is kept byte-compatible with it.
+ */
+const BYTE_COUNT_LOCALE = 'en-US';
+
+/**
  * Register the `store` command group on the program.
  *
  * @param program - The root commander program.
@@ -53,8 +61,8 @@ export function registerStoreCommands(program: Command): void {
 				if (entries.length === 0) {
 					const stat = dirPath ? await client.fsStat(dirPath) : { exists: true, type: 'dir' as const };
 					if (stat.exists && stat.type === 'dir') {
-						out.line(`    ${(0).toLocaleString().padStart(8)} File(s)  ${(0).toLocaleString().padStart(14)} bytes`);
-						out.line(`    ${(0).toLocaleString().padStart(8)} Dir(s)`);
+						out.line(`    ${(0).toLocaleString(BYTE_COUNT_LOCALE).padStart(8)} File(s)  ${(0).toLocaleString(BYTE_COUNT_LOCALE).padStart(14)} bytes`);
+						out.line(`    ${(0).toLocaleString(BYTE_COUNT_LOCALE).padStart(8)} Dir(s)`);
 					} else {
 						out.line('File Not Found');
 					}
@@ -83,12 +91,12 @@ export function registerStoreCommands(program: Command): void {
 					} else {
 						const size = e.size ?? 0;
 						totalSize += size;
-						out.line(`${dateStr}    ${size.toLocaleString().padStart(14)} ${e.name}`);
+						out.line(`${dateStr}    ${size.toLocaleString(BYTE_COUNT_LOCALE).padStart(14)} ${e.name}`);
 						fileCount++;
 					}
 				}
-				out.line(`    ${fileCount.toLocaleString().padStart(8)} File(s)  ${totalSize.toLocaleString().padStart(14)} bytes`);
-				out.line(`    ${dirCount.toLocaleString().padStart(8)} Dir(s)`);
+				out.line(`    ${fileCount.toLocaleString(BYTE_COUNT_LOCALE).padStart(8)} File(s)  ${totalSize.toLocaleString(BYTE_COUNT_LOCALE).padStart(14)} bytes`);
+				out.line(`    ${dirCount.toLocaleString(BYTE_COUNT_LOCALE).padStart(8)} Dir(s)`);
 				out.result({ path: dirPath || '', entries });
 				return 0;
 			});
@@ -193,7 +201,7 @@ export function registerStoreCommands(program: Command): void {
 					out.line(`${filePath}: not found`);
 				} else {
 					const details: string[] = [];
-					if (result.size !== undefined) details.push(`size: ${result.size.toLocaleString()}`);
+					if (result.size !== undefined) details.push(`size: ${result.size.toLocaleString(BYTE_COUNT_LOCALE)}`);
 					if (result.modified) details.push(`modified: ${new Date(result.modified * 1000).toISOString()}`);
 					out.line(`${filePath}: ${result.type}${details.length ? ` (${details.join(', ')})` : ''}`);
 				}

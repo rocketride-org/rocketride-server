@@ -68,6 +68,22 @@ const TGZ_PATH = path.join(TGZ_DIR, 'rocketride.tgz');
 const PNPM = 'pnpm';
 
 /**
+ * Quote one token for the Windows command line.
+ *
+ * Wrapping is not enough on its own: a quote inside the value would
+ * close the wrapper and hand the rest of the token to cmd.exe as command
+ * text. Doubling it keeps the quote count even, so the value stays
+ * inside a quoted region end to end, and "" is also how the C runtime
+ * decodes a literal quote back out of the argument.
+ *
+ * @param {string} token - The raw token.
+ * @returns {string} The quoted token.
+ */
+function quoteForCmd(token) {
+	return '"' + String(token).replace(/"/g, '""') + '"';
+}
+
+/**
  * Spawn a command portably (see the PNPM note above).
  *
  * @param {string} cmd - The executable.
@@ -77,7 +93,7 @@ const PNPM = 'pnpm';
  */
 function spawnPortable(cmd, args, opts) {
 	if (process.platform === 'win32') {
-		const line = [cmd].concat(args).map(function (a) { return '"' + a + '"'; }).join(' ');
+		const line = [cmd].concat(args).map(quoteForCmd).join(' ');
 		return spawnSync(line, Object.assign({ shell: true }, opts));
 	}
 	return spawnSync(cmd, args, opts);
@@ -119,6 +135,50 @@ function installSourceServer() {
 }
 
 /**
+ * Is this hostname the local machine?
+ *
+ * @param {string} hostname - The URL's hostname (IPv6 arrives bracketed).
+ * @returns {boolean} True for loopback names and addresses.
+ */
+function isLoopbackHost(hostname) {
+	const host = String(hostname).toLowerCase();
+	return host === 'localhost' || host.endsWith('.localhost') || /^127\./.test(host) || host === '[::1]' || host === '::1';
+}
+
+/**
+ * Validate a server URL and normalize it to a base with no trailing slash.
+ *
+ * Everything this shim downloads from the server is installed into the
+ * workspace and executed, so a remote server must authenticate itself:
+ * plain http is accepted only for a loopback development server, where
+ * there is no network to intercept.
+ *
+ * @param {string} raw - The candidate server URL.
+ * @returns {string} The normalized base URL.
+ */
+function normalizeServer(raw) {
+	let parsed;
+	try {
+		parsed = new URL(raw);
+	} catch {
+		console.error('Not a valid server URL: ' + raw);
+		process.exit(1);
+	}
+	if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
+		console.error('The server URL must start with https:// or http:// (got ' + raw + ').');
+		process.exit(1);
+	}
+	if (parsed.protocol === 'http:' && !isLoopbackHost(parsed.hostname)) {
+		console.error('Refusing to bootstrap from ' + parsed.origin + ' over plain http.');
+		console.error('This downloads a package from that server, installs it, and runs its CLI — use https:// for a remote server.');
+		process.exit(1);
+	}
+	// Re-serialize from the parsed URL: percent-encoding is applied and
+	// only scheme, host, port and path survive into the request paths.
+	return (parsed.origin + parsed.pathname).replace(/\/+$/, '');
+}
+
+/**
  * Run one command inherited to this terminal; exit with its code on failure.
  *
  * @param {string} cmd - The executable.
@@ -140,7 +200,7 @@ async function main() {
 	if (arg === '--help' || arg === '-h') {
 		usage();
 	}
-	const server = (arg || installSourceServer() || DEFAULT_SERVER).replace(/\/+$/, '');
+	const server = normalizeServer(arg || installSourceServer() || DEFAULT_SERVER);
 
 	// step: preconditions - node 18+ (for fetch) and pnpm on the PATH
 	const major = Number(process.versions.node.split('.')[0]);

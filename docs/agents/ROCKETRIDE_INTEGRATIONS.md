@@ -200,7 +200,7 @@ The legacy `POST <server>/webhook` (no path segments) also works; address the ru
 
 ### Authentication
 
-All requests carry an `Authorization` header. The `Bearer ` prefix is optional — the
+All requests carry an `Authorization` header. The `Bearer` scheme prefix is optional — the
 server strips it if present. Three credential types are accepted:
 
 | Credential | Prefix | Scope | Use it for |

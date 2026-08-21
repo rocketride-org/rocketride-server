@@ -192,17 +192,20 @@ async def run_upload(args) -> int:
             )
             task_token = use_result.get('token', '')
 
-        # step: send the files and collect per-file results
+        # step: send the files and collect per-file results — the teardown
+        # sits in a finally so a raised send still stops the pipeline this
+        # command started, instead of leaving it alive until its TTL expires
         start_time = time.time()
-        results = await client.send_files(valid_files, task_token)
+        try:
+            results = await client.send_files(valid_files, task_token)
+        finally:
+            # step: tear down a pipeline this command started
+            if manage_pipeline and task_token:
+                try:
+                    await client.terminate(task_token)
+                except Exception as error:  # noqa: BLE001
+                    out.line(f'warning: failed to terminate upload pipeline: {error}')
         elapsed_seconds = time.time() - start_time
-
-        # step: tear down a pipeline this command started
-        if manage_pipeline and task_token:
-            try:
-                await client.terminate(task_token)
-            except Exception as error:  # noqa: BLE001
-                out.line(f'warning: failed to terminate upload pipeline: {error}')
 
         # step: summarize
         succeeded = [r for r in results if r.get('action') == 'complete']

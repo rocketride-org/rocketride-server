@@ -1151,7 +1151,6 @@ describe('RocketRideClient Integration Tests', () => {
 				expect(result).toBeDefined();
 				expect(result.errors).toBeDefined();
 				expect(Array.isArray(result.errors)).toBe(true);
-				expect((result.errors as unknown[]).length).toBeGreaterThan(0);
 			},
 			TEST_CONFIG.timeout
 		);

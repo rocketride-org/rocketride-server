@@ -43,6 +43,7 @@ This module is the exact behavioral twin of the TypeScript CLI's
 """
 
 import json
+import os
 import sys
 from typing import Any, Optional
 
@@ -146,6 +147,13 @@ class Output:
         text = json.dumps(self._payload, indent=2, default=str)
         if self._mode == 'stdout':
             print(text)
-        else:
+            return
+        # finish() runs from a finally block: a raise here would discard the
+        # command's exit code, so a write failure is reported, not raised
+        try:
+            parent = os.path.dirname(os.path.abspath(self._file_path))
+            os.makedirs(parent, exist_ok=True)
             with open(self._file_path, 'w', encoding='utf-8') as f:
                 f.write(text + '\n')
+        except OSError as err:
+            print(f'Error: cannot write JSON output to {self._file_path} — {err}', file=sys.stderr)

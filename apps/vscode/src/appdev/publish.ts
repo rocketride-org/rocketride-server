@@ -22,7 +22,6 @@
  * view publishes rungs.
  */
 
-import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
 // Side-effect import: arms the SDK's app-pack registry so deploy.addApp()
@@ -31,7 +30,8 @@ import * as vscode from 'vscode';
 import 'rocketride/app-pack';
 import { ConnectionManager } from '../connection/connection';
 import { scanWorkspaceApps } from './appScan';
-import { ensureProjectId } from './appMarker';
+import { ensureProjectId, readAppListing } from './appMarker';
+import type { AppListing } from './appMarker';
 import { getLogger } from '../shared/util/output';
 
 // =============================================================================
@@ -85,13 +85,16 @@ export async function deployApp(appId: string, message: string): Promise<Record<
 	// here (not left to the packer) so the failure names the VS Code
 	// workspace situation precisely.
 	if (appRoot === '') {
-		let pkg: { appManifest?: { include?: unknown[] } };
+		// readAppListing owns the read, the parse, and the include
+		// normalization — re-implementing them here would be a second copy
+		// to keep in step with the manifest shape.
+		let listing: AppListing;
 		try {
-			pkg = JSON.parse(fs.readFileSync(path.join(app.folder, 'package.json'), 'utf8'));
+			listing = await readAppListing(app.folder);
 		} catch (err) {
 			throw new Error(`Could not read the app's package.json: ${err instanceof Error ? err.message : String(err)}`);
 		}
-		if (Array.isArray(pkg.appManifest?.include) && pkg.appManifest.include.length > 0) {
+		if ((listing.include?.length ?? 0) > 0) {
 			logger.output('[appdev:pack]   check include layout — FAILED: include declared but the workspace folder IS the app folder');
 			throw new Error('appManifest.include needs the app inside a larger workspace — the workspace folder IS the app folder here.');
 		}

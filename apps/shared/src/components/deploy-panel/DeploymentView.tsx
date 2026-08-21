@@ -71,8 +71,6 @@ export interface SchedulePreviewResult {
 
 /** Props for {@link DeploymentView}. */
 export interface IDeploymentViewProps {
-	/** Team display name (tab context, e.g. 'Production'). */
-	teamName: string;
 	/**
 	 * Document display name for the pinned page header. When provided, the
 	 * non-canvas pages render a stock {@link ContentHeader} titled with it
@@ -102,8 +100,6 @@ export interface IDeploymentViewProps {
 	history: DeployHistoryRow[];
 	/** Next scheduled occurrence (host-previewed), if any schedule is armed. */
 	nextRun?: { at: number; sourceId: string; cron: string };
-	/** sourceId -> true while a run of that source is live on the server. */
-	runningSources?: Record<string, boolean>;
 	/** Caller holds task.control on this team (actions render only then). */
 	canControl: boolean;
 	isConnected: boolean;
@@ -423,7 +419,7 @@ export const DeploymentView: React.FC<IDeploymentViewProps> = ({ documentTitle, 
 		return bySource;
 	}, [liveEvents]);
 
-	const runsPage = <div style={commonStyles.tabContent}>{sources.length > 0 ? sources.map((src: { id: string; name: string }) => <SourcePanel key={`${projectId}.${src.id}.deploy`} source={src} runKind="deploy" projectId={projectId} liveEvents={liveBySource.get(src.id) ?? []} openSession={openSession ? () => openSession(src.id) : null} fetchTimeline={fetchTimeline ? () => fetchTimeline(src.id) : null} componentNames={componentNames} isConnected={isConnected} isSubscribed={isSubscribed} isReadonly serverHost={serverHost} onOpenLink={onOpenLink} />) : <div style={commonStyles.empty}>No source components found</div>}</div>;
+	const runsPage = <div style={commonStyles.tabContent}>{sources.length > 0 ? sources.map((src: { id: string; name: string }) => <SourcePanel key={`${projectId}.${src.id}.deploy`} source={src} runKind="deploy" projectId={projectId} liveEvents={liveBySource.get(src.id) ?? []} openSession={openSession ? () => openSession(src.id) : null} fetchTimeline={fetchTimeline ? () => fetchTimeline(src.id) : null} componentNames={componentNames} isSubscribed={isSubscribed} isReadonly serverHost={serverHost} onOpenLink={onOpenLink} />) : <div style={commonStyles.empty}>No source components found</div>}</div>;
 
 	// --- DESIGN page (readonly artifact render) -------------------------------
 

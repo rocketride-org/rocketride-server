@@ -31,27 +31,12 @@ CLI's ``src/cli/commands/app.ts``.
 """
 
 import os
-import re
+
+from rocketride_common.provision import to_http_base
 
 from ..utils.common import connect_client, run_cli_command
 from ..utils.env import NO_DEPLOY_TARGET_MESSAGE
 from ..utils.output import Output
-
-
-def _to_http_base(uri: str) -> str:
-    """
-    Normalize a connect URI to an http(s) base URL.
-
-    Args:
-        uri: The DAP connect URI (ws/wss/http/https).
-
-    Returns:
-        The http(s) origin with path noise stripped.
-    """
-    base = re.sub(r'^ws:', 'http:', uri, flags=re.IGNORECASE)
-    base = re.sub(r'^wss:', 'https:', base, flags=re.IGNORECASE)
-    base = re.sub(r'/task/service/?$', '', base, flags=re.IGNORECASE)
-    return base.rstrip('/')
 
 
 async def run_app(args) -> int:
@@ -101,7 +86,7 @@ async def run_app(args) -> int:
         if subcommand == 'create':
             from ..._app_scaffold import create_app_workspace
 
-            server_base_url = _to_http_base(args.uri) if args.uri else None
+            server_base_url = to_http_base(args.uri) if args.uri else None
             created = create_app_workspace(
                 args.workspace or os.getcwd(),
                 args.slug,

@@ -49,11 +49,12 @@ Usage:
 
 from __future__ import annotations
 
+import asyncio
 import os
-import re
 from typing import TYPE_CHECKING, Any
 
 from .types.deploy import (
+    AppVerifyReport,
     Deployment,
     DeployHistoryResult,
     DeployListResult,
@@ -271,7 +272,8 @@ class DeployApi:
                 shell + client packages; defaults to this client's own
                 connection.
             on_progress: Optional ``callable(line: str)`` receiving one
-                line per step.
+                line per step. Invoked on the worker thread the scaffold
+                runs on, not on the caller's event loop.
 
         Returns:
             The created app's identity and a report of what ran
@@ -282,22 +284,27 @@ class DeployApi:
             ValueError: On an invalid slug/developer id/template or an
                 existing folder.
         """
-        # step: scaffold with the shared templates (lazy import mirrors
-        # add_app's _app_pack pattern)
+        # step: scaffold with the shared templates (lazy imports mirror
+        # add_app's _app_pack pattern; rocketride_common stays out of the
+        # SDK's module-level import graph)
+        from rocketride_common.provision import to_http_base
+
         from ._app_scaffold import create_app_workspace
 
         # step: vendor from the server THIS client talks to unless
         # overridden — ws(s) URIs map onto the http(s) origin serving
-        # /client/*
+        # /client/*, by the one shared normalization rule
         base = server_base_url
         if not base:
             uri = self._client.get_connection_info().get('uri') or ''
             if uri:
-                base = re.sub(r'^ws:', 'http:', uri, flags=re.IGNORECASE)
-                base = re.sub(r'^wss:', 'https:', base, flags=re.IGNORECASE)
-                base = re.sub(r'/task/service/?$', '', base, flags=re.IGNORECASE)
-                base = re.sub(r'/+$', '', base)
-        return create_app_workspace(
+                base = to_http_base(uri)
+
+        # step: the scaffold blocks for minutes (two artifact downloads
+        # plus `pnpm install`), so it runs on a worker thread instead of
+        # stalling the event loop that services this client's socket
+        return await asyncio.to_thread(
+            create_app_workspace,
             workspace_root or os.getcwd(),
             slug,
             template=template,
@@ -311,7 +318,7 @@ class DeployApi:
             on_progress=on_progress,
         )
 
-    async def verify_app(self, app_root: str, *, workspace_root: str | None = None) -> Any:
+    async def verify_app(self, app_root: str, *, workspace_root: str | None = None) -> AppVerifyReport:
         """
         Pre-check everything :meth:`add_app` needs, WITHOUT deploying —
         purely local, no server call. Verifies the manifest shape and id
@@ -326,8 +333,8 @@ class DeployApi:
                 (default: the current working directory).
 
         Returns:
-            :class:`~rocketride._app_pack.AppVerifyReport` — ``ok`` plus
-            every check with an actionable note.
+            :class:`~rocketride.types.AppVerifyReport` — ``ok`` plus every
+            check with an actionable note.
         """
         from ._app_pack import verify_app_source
 

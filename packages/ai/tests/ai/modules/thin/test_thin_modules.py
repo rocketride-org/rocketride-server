@@ -331,7 +331,9 @@ async def test_client_python_file_refuses_traversal(monkeypatch, tmp_path):
     (tmp_path / 'secret.whl').write_text('outside-the-python-dir')
     monkeypatch.setattr(clients_mod, '_get_static_clients_root', lambda: tmp_path)
 
-    for name in ('..\\secret.whl', '../secret.whl', 'a/../secret.whl'):
+    # 'C:secret.whl' carries no separator at all: joining a drive-qualified
+    # name onto clients_root DISCARDS the root on Windows.
+    for name in ('..\\secret.whl', '../secret.whl', 'a/../secret.whl', 'C:secret.whl'):
         result = await clients_mod.client_python_file(MagicMock(), name)
         assert result.status_code == 404
 

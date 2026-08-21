@@ -195,9 +195,10 @@ async def seed_app(account: Any, org_id: str, entry: Dict[str, Any], actor: Dict
 
     The PRIMITIVE: registers the seed artifact (born 'ready') as the next
     registry version and copies the built bundle into the store next to it.
-    An EMPTY copy (no local bundle) re-stamps the row's build FAILED — an
-    empty ``dist/`` must never pass the built gate, so callers withhold the
-    binding and the self-heal path retries the copy on a later run. Binding
+    An EMPTY copy (no local bundle), or one that raises partway, re-stamps
+    the row's build FAILED — an empty or half-written ``dist/`` must never
+    pass the built gate, so callers withhold the binding and the self-heal
+    path retries the copy on a later run. Binding
     the version to an audience is deliberately the CALLER's job — each
     edition records visibility its own way.
 
@@ -228,7 +229,26 @@ async def seed_app(account: Any, org_id: str, entry: Dict[str, Any], actor: Dict
         metadata={'manifest': manifest, 'build': {'status': 'ok', 'seeded': True, 'endedAt': time.time()}},
         state='ready',
     )
-    copied = await copy_bundle_to_store(app_id, str(registered.get('artifactPath') or ''))
+    try:
+        copied = await copy_bundle_to_store(app_id, str(registered.get('artifactPath') or ''))
+    except Exception as exc:
+        # A copy that dies partway leaves a HALF-written dist/, which is as
+        # unservable as an empty one — the row must never keep the 'ok' it was
+        # published with. Stamp the build FAILED on the way out (same contract
+        # as the empty-copy branch below) so the built gate refuses the row and
+        # a later run's self-heal retries the copy, then re-raise.
+        broken = {
+            'status': 'failed',
+            'seeded': True,
+            'errors': [f'seed bundle copy failed: {exc}'],
+            'endedAt': time.time(),
+        }
+        try:
+            await account.deployments_set_build(org_id, app_id, int(registered.get('version', 0)), broken)
+        except Exception as stamp_exc:
+            debug(f'[seed_apps] {app_id}: failed-build stamp failed: {stamp_exc}')
+        registered.setdefault('metadata', {})['build'] = broken
+        raise
     if copied == 0:
         # With the static-entry short-circuit retired, the dist/ copy IS the
         # serving path — an empty copy means this seed cannot serve at all.

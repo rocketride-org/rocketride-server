@@ -400,9 +400,13 @@ export class CloudAuthProvider implements vscode.UriHandler, vscode.Disposable {
 	 * deletion on the next save.
 	 */
 	async stageSignOut(): Promise<void> {
-		if (this.pendingSession) {
-			this.pendingSession = null;
-		} else if (await this.isSignedIn()) {
+		// The staged sign-in and the stored session are INDEPENDENT: a user
+		// can re-sign-in (staging a session) while an older session is still
+		// stored, then click sign out. Discarding only the staged session
+		// would leave the stored one alive past the save — so always drop
+		// the staged one AND mark a stored session for deletion.
+		this.pendingSession = null;
+		if (await this.isSignedIn()) {
 			this.pendingSignOut = true;
 		}
 		this._onDidChange.emit('changed');

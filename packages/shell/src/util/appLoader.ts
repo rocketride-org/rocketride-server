@@ -556,34 +556,46 @@ export function resolveServerEntry(a: ServerAppEntry): string | null {
 
 export function registerAndMapApps(serverApps: ServerAppEntry[]): AppManifestEntry[] {
 	const overrides = getAppVersionOverrides();
+	const nonce = sessionNonce();
 	// An explicit override applies to dev-flagged entries too — it outranks
 	// the dev overlay (see resolveServerEntry's precedence), so the mapped
-	// entry's version chip must reflect the overridden server version.
+	// entry's version chip must reflect the overridden server version. The
+	// session-affine dev entry, however, outranks the override THERE too, so
+	// it must silence the chip's override here — otherwise the tile names a
+	// server version while the dev build is what actually loads.
 	const overrideOf = (a: ServerAppEntry): { version: number; appVersion?: string } | null => {
+		if (nonce && a.devEntries?.some((d) => d.session === nonce)) return null;
 		return overrides[a.id] ?? null;
 	};
-	const resolvedEntry = resolveServerEntry;
 
-	// Drop entries that resolve to no load URL — the server may include
-	// apps that have no built UI yet (e.g. server-only nodes). Without this
-	// guard, MF's normalizeRemote crashes on undefined.
-	const validApps = serverApps.filter((a) => resolvedEntry(a) !== null);
+	// Resolve ONCE per entry, then reuse: resolveServerEntry reads
+	// sessionStorage and JSON.parses the override map on every call, and this
+	// runs for every manifest registration during boot.
+	//
+	// Entries that resolve to no load URL are dropped here — the server may
+	// include apps that have no built UI yet (e.g. server-only nodes).
+	// Without that guard, MF's normalizeRemote crashes on undefined.
+	const resolved: Array<{ app: ServerAppEntry; url: string }> = [];
+	for (const a of serverApps) {
+		const url = resolveServerEntry(a);
+		if (url !== null) resolved.push({ app: a, url });
+	}
 
 	// Register all MF remotes so loadRemote() can resolve them.
 	// force: true overwrites any previously registered remotes (e.g. from
 	// the pre-auth probe) with the post-auth set. Dev-owned containers are
 	// NEVER (re)registered from the manifest — the dev entry stays live.
-	const registrable = validApps.filter((a) => !devRemoteModules.has(a.moduleId));
+	const registrable = resolved.filter(({ app }) => !devRemoteModules.has(app.moduleId));
 	registerRemotes(
-		registrable.map((a) => ({ name: a.moduleId, entry: resolvedEntry(a) as string })),
+		registrable.map(({ app, url }) => ({ name: app.moduleId, entry: url })),
 		{ force: true },
 	);
 
 	// Record the registered URLs so resetRemote() can rebuild a container.
-	for (const a of registrable) registeredEntries.set(a.moduleId, resolvedEntry(a) as string);
+	for (const { app, url } of registrable) registeredEntries.set(app.moduleId, url);
 
 	// Map server entries to runtime AppManifestEntry objects with lazy loaders
-	return validApps.map((a) => ({
+	return resolved.map(({ app: a }) => ({
 		id:            a.id,
 		moduleId:      a.moduleId,
 		name:          a.name,

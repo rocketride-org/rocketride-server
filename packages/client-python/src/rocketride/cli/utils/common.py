@@ -34,6 +34,7 @@ This module is the behavioral twin of the TypeScript CLI's
 
 import getpass
 import re
+import sys
 from typing import Any, Awaitable, Callable, List, Optional
 
 from .output import Output
@@ -144,7 +145,11 @@ def prompt_line(question: str, fallback: str = '') -> str:
         The entered (or defaulted) value, stripped.
     """
     suffix = f' [{fallback}]' if fallback else ''
-    answer = input(f'{question}{suffix}: ').strip()
+    # Prompt on stderr so stdout keeps carrying only the JSON value under
+    # bare --json (see utils/output.py); getpass already writes to the tty.
+    sys.stderr.write(f'{question}{suffix}: ')
+    sys.stderr.flush()
+    answer = input().strip()
     return answer or fallback
 
 

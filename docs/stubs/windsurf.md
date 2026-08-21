@@ -33,8 +33,8 @@ Full docs: `.rocketride/docs/`
 1. Read `.rocketride/docs/ROCKETRIDE_README.md` and follow its task router for the job at hand
 2. Building a pipeline: ROCKETRIDE_CONCEPTS.md + ROCKETRIDE_PIPELINES.md + ROCKETRIDE_COMPONENT_REFERENCE.md
 3. Building an app: ROCKETRIDE_CONCEPTS.md + ROCKETRIDE_APPS.md + ROCKETRIDE_UI_COMPONENTS.md
-4. Driving either from code: your language's API doc — and NEVER invent pipeline component names, config fields, or SDK methods; verify against `.rocketride/services-catalog.json` and `.rocketride/schema/`
+4. Driving either from code: NEVER invent anything — verify `client.*` method names and signatures against your language's API doc (`ROCKETRIDE_python_API.md` / `ROCKETRIDE_typescript_API.md`), and pipeline component names and config fields against `.rocketride/services-catalog.json` and `.rocketride/schema/`
 5. Two connections may exist in `.env`: `ROCKETRIDE_URI`/`ROCKETRIDE_APIKEY` (development - run/validate/iterate) and `ROCKETRIDE_DEPLOY_URI`/`ROCKETRIDE_DEPLOY_APIKEY` (deployment target - deploy/publish/schedule). Never run lifecycle verbs against the dev pair; if the DEPLOY pair is absent, no deploy target is configured - ask the user.
-6. NEW apps are created ONLY through the scaffold - agents call `client.deploy.createApp(slug, ...)` (install the client first from the workspace's own `.rocketride/client/rocketride.tgz`, vendored at boot - NEVER from the npm registry); humans use the App Builder's New App wizard. Never hand-create app files, and prefer the API over the CLI for everything.
+6. NEW apps are created ONLY through the scaffold - agents call `client.deploy.createApp(slug, ...)` (install the client first from the workspace's own `.rocketride/client/rocketride.tgz` - the scaffold vendors it from the connected server, so it is present once the workspace has been opened against one; with no server URL known the scaffold skips vendoring and the tarball lands on the next connected open - NEVER from the npm registry); humans use the App Builder's New App wizard. Never hand-create app files, and prefer the API over the CLI for everything.
 
 <!-- ROCKETRIDE:END -->

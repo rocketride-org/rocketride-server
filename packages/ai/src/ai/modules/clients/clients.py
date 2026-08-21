@@ -208,9 +208,11 @@ async def client_python_file(request: Request, filename: str):
                 },
             )
     else:
-        # The filename rides in straight off the URL — refuse separators and
-        # parent segments before joining (a backslash traverses on Windows).
-        if '/' in filename or '\\' in filename or '..' in filename:
+        # The filename rides in straight off the URL — refuse separators,
+        # parent segments and drive qualifiers before joining (a backslash
+        # traverses on Windows, and joining a drive-qualified name such as
+        # 'C:secret.whl' discards clients_root entirely).
+        if '/' in filename or '\\' in filename or '..' in filename or ':' in filename:
             return JSONResponse(
                 status_code=404,
                 content={

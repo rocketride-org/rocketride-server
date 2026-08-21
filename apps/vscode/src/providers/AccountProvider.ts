@@ -851,7 +851,14 @@ export class AccountProvider {
 	 * the non-serving manager at worst re-reads current data.
 	 */
 	private setupEventListeners(): void {
-		for (const manager of [this.connectionManager, DeployManager.getDeployInstance()]) {
+		// In SHARED mode the deploy manager re-emits the dev connection's
+		// events under its own keys, so subscribing to both would run every
+		// handler twice per dev event — two profile fetches, two billing
+		// fetches, on every reconnect. Observe it only when it is an
+		// independent connection.
+		const deploy = DeployManager.getDeployInstance();
+		const managers = deploy.isSharedMode() ? [this.connectionManager] : [this.connectionManager, deploy];
+		for (const manager of managers) {
 			// Re-sync webview when connection state changes
 			const connectionStateListener = manager.on('shell:statusChange', (status: ConnectionStatus) => {
 				this.handleConnectionStateChange(status).catch((error) => {
@@ -913,6 +920,15 @@ export class AccountProvider {
 
 		// Step 2: re-fetch all data on reconnect.
 		if (status.state === ConnectionState.CONNECTED) {
+			// Re-arm the billing monitor: it lives on the CONNECTION, and
+			// setupEventListeners runs once from the constructor — where the
+			// client may not be connected yet, or may not exist. Without this
+			// no apaext_billing_update ever arrives and the billing view goes
+			// stale for the rest of the session.
+			const client = this.resolveClient().client ?? this.connectionManager.getClient();
+			if (client) {
+				client.addMonitor({ token: '*' }, ['billing']).catch(() => {});
+			}
 			await this.sendInitialData(AccountProvider.panel);
 		}
 	}

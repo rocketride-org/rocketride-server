@@ -65,7 +65,7 @@ the user activates the app, mounts the descriptor's `app` component in the
 client area, and your app declares its own layout (sidebar, status bar) from
 inside its one React tree with `<AppLayout>`.
 
-```
+```text
 ┌──────────┬─────────────────────────┬────────────┐
 │          │                         │            │
 │ Sidebar  │      Client Area        │   Debug    │
@@ -1381,13 +1381,13 @@ all of it live.
    styled-components, no separate stylesheet files. Each component file
    declares one named `styles` const at the top:
 
-```typescript
-const styles: Record<string, React.CSSProperties> = {
-	wrap: { padding: 40, fontFamily: 'var(--rr-font-family, system-ui)' },
-	title: { fontSize: 22, fontWeight: 600, color: 'var(--rr-text-primary)' },
-	sub: { marginTop: 8, fontSize: 13, color: 'var(--rr-text-secondary)' },
-};
-```
+   ```typescript
+   const styles: Record<string, React.CSSProperties> = {
+   	wrap: { padding: 40, fontFamily: 'var(--rr-font-family, system-ui)' },
+   	title: { fontSize: 22, fontWeight: 600, color: 'var(--rr-text-primary)' },
+   	sub: { marginTop: 8, fontSize: 13, color: 'var(--rr-text-secondary)' },
+   };
+   ```
 
    JSX references `styles.wrap` — no inline object literals scattered
    through the markup.
@@ -1600,9 +1600,12 @@ not-yet-published) version never means republishing. Two ways in:
 
 - **The version drop list** on the app's desktop tile — pick any version
   you are entitled to.
-- **A deep link**: `?appid=<your.app>&version=<semver>` (e.g.
-  `?appid=acme.brandy&version=1.3.0`) — the display version resolves to its
-  registry version.
+- **A deep link**: `?appid=<your.app>&version=<registry int>` (e.g.
+  `?appid=acme.brandy&version=7`) — the registry version integer is the
+  version's wire identity, and it is the only form the shell accepts. The
+  `package.json` semver is display only; a non-integer value (`1.3.0`,
+  `7abc`) is rejected outright rather than partially parsed, and the page
+  falls back to normal resolution.
 
 Both create a **session override**: it lives in the browser tab and dies
 with it — deliberately never persisted server-side, so an override cannot

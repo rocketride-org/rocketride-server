@@ -50,7 +50,7 @@
  */
 
 import { ConnectionManager } from './connection';
-import { ROCKETRIDE_URI_KEY, ROCKETRIDE_APIKEY_KEY, ROCKETRIDE_DEPLOY_URI_KEY, ROCKETRIDE_DEPLOY_APIKEY_KEY } from '../shared/util/envFile';
+import { resolveConnectionEnv } from '../shared/util/envFile';
 import type { ConnectionStatus } from '../shared/types';
 import type { RocketRideClient } from 'rocketride';
 
@@ -146,18 +146,19 @@ export class DeployManager extends ConnectionManager {
 			if (!this.isSharedMode()) return;
 			const dev = this.getDevManager();
 			const httpUrl = dev.getHttpUrl();
-			if (!httpUrl || /[\r\n]/.test(httpUrl)) return;
+			// Cheap early-out before resolving a credential: with no dev URL
+			// there is nothing to mirror, and the resolve can reach the cloud.
+			if (!httpUrl) return;
 			const credential = await dev.resolveAuthCredential();
-			if (/[\r\n]/.test(credential)) return;
-			await this.writeEnvUpdates(
-				{
-					[ROCKETRIDE_URI_KEY]: httpUrl,
-					...(credential ? { [ROCKETRIDE_APIKEY_KEY]: credential } : {}),
-					[ROCKETRIDE_DEPLOY_URI_KEY]: httpUrl,
-					...(credential ? { [ROCKETRIDE_DEPLOY_APIKEY_KEY]: credential } : {}),
-				},
-				this.beginConnectionAttempt(),
-			);
+			const mode = dev.getResolvedConnectionMode();
+			// Compose the two groups through the resolver rather than naming
+			// the four keys here: envFile owns both the group-to-key mapping
+			// and the URL/credential validation, and a second copy of either
+			// is one that can silently drift out of step.
+			const devPair = resolveConnectionEnv({ group: 'development', mode, httpUrl, apiKey: credential });
+			const deployPair = resolveConnectionEnv({ group: 'deployment', mode, httpUrl, apiKey: credential });
+			if (!devPair || !deployPair) return;
+			await this.writeEnvUpdates({ ...devPair, ...deployPair }, this.beginConnectionAttempt());
 		} catch {
 			// No usable dev credential right now — nothing to mirror.
 		}

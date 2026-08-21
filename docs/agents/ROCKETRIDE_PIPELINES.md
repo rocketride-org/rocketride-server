@@ -241,7 +241,7 @@ not override `model`/`modelTotalTokens` except with the `custom` profile:
 | `openai-5` | gpt-5 | 400,000 / 128,000 |
 | `openai-5-mini`, `openai-5-nano` | gpt-5-mini / gpt-5-nano | 400,000 / 128,000 |
 | `openai-4o`, `openai-4o-mini` | gpt-4o / gpt-4o-mini | 128,000 / 16,384 |
-| `custom` | you supply `model`, `modelTotalTokens`, `apikey` (see also `llm_openai_api` for OpenAI-compatible endpoints) |
+| `custom` | you supply `model` and `apikey` (see also `llm_openai_api` for OpenAI-compatible endpoints) | you supply `modelTotalTokens` |
 
 The schema lists more presets; check `.rocketride/schema/llm_openai.json` when you need one.
 Other LLM providers follow the same pattern — e.g. `llm_anthropic` defaults to profile

@@ -24,7 +24,7 @@
 // FROZEN rocketride SDK contract — floor v1.3 — never edit by hand
 // =============================================================================
 // Floor key:     1.3 (MAJOR.MINOR of packages/client-typescript/package.json)
-// Source commit: f389d79aa11eded029a749e731d571190e233bc9
+// Source commit: 1f2091d93e3bba827d7f884119f4c5ef02c7837d
 // Generator:     dts-bundle-generator@9.5.1
 // Produced by:   ./builder client-typescript:freeze
 //
@@ -4845,10 +4845,13 @@ export declare class RocketRideClient extends DAPClient {
      *   pipeline: { components: [...], project_id: '123' },
      *   source: 'webhook_1'
      * });
-     * if (result.errors?.length) {
+     * if (result.errors.length) {
      *   console.log('Validation errors:', result.errors);
      * }
      * ```
+     *
+     * `errors` and `warnings` are ALWAYS arrays — a clean pipeline returns
+     * them empty, never absent.
      */
     validate(options: {
         pipeline: PipelineConfig | Record<string, unknown>;
@@ -5351,9 +5354,11 @@ export declare class RocketRideClient extends DAPClient {
      *
      * Answered by role: the developer org sees its FULL rail (published or
      * not); other callers see only the versions serving on rows visible to
-     * them. Each entry carries its deployment `state`, its `buildStatus`
-     * ('ok' = servable bytes exist), and the `rungs` naming the audiences
-     * serving it.
+     * them. Each entry carries its deployment `state`, its build lifecycle
+     * (`buildStatus` — 'ok' = servable bytes exist — plus the `buildPhase`
+     * it reached and `buildEndedAt`), and the `rungs` naming the audiences
+     * serving it. No error text rides the rail: build detail is served on
+     * demand by the build-log verb.
      *
      * @param appId - App id
      * @returns Rail entries, newest first
@@ -5367,6 +5372,8 @@ export declare class RocketRideClient extends DAPClient {
         message: string;
         state: string;
         buildStatus: string;
+        buildPhase: string;
+        buildEndedAt?: number | null;
         rungs: string[];
     }>>;
     /**

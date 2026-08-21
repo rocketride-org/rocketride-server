@@ -169,7 +169,7 @@ export async function runCliCommand(options: ConnectionOptions, fn: (out: Output
  * Load and validate a pipeline configuration file.
  *
  * @param pipelineFile - Path to the JSON pipeline file.
- * @returns The parsed configuration.
+ * @returns The parsed configuration, unwrapped from its `.pipe` envelope.
  * @throws Error when the file is missing or not valid JSON.
  */
 export function loadPipelineConfig(pipelineFile: string): PipelineConfig {
@@ -177,11 +177,16 @@ export function loadPipelineConfig(pipelineFile: string): PipelineConfig {
 		throw new Error(`Pipeline file not found: ${pipelineFile}`);
 	}
 	const content = fs.readFileSync(pipelineFile, 'utf-8');
+	let parsed: PipelineConfig & { pipeline?: PipelineConfig };
 	try {
-		return JSON.parse(content);
+		parsed = JSON.parse(content);
 	} catch (error) {
 		throw new Error(`Invalid JSON format in ${pipelineFile}: ${error}`);
 	}
+	// .pipe files wrap the config in { "pipeline": { ... } } — unwrap it so
+	// callers hand the server flat pipeline fields, exactly as
+	// RocketRideClient.use({ filepath }) does.
+	return parsed?.pipeline ?? parsed;
 }
 
 /**

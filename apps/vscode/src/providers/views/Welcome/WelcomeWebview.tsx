@@ -53,7 +53,7 @@ import '../../styles/root.css';
 
 interface WelcomeExtraSettings {}
 
-type IncomingMessage = { type: 'settingsLoaded'; settings: SettingsData & WelcomeExtraSettings; logoDarkUri?: string; logoLightUri?: string } | { type: 'showMessage'; level: 'success' | 'error' | 'info' | 'warning'; message: string } | { type: 'versionsLoaded'; versions: EngineVersionItem[] } | { type: 'cloud:status'; signedIn: boolean; userName: string; signedInUrl?: string; waitlisted?: boolean; waitlistedName?: string; pendingSignIn?: boolean; pendingSignOut?: boolean; pendingUserName?: string; pendingUrl?: string } | { type: 'dockerStatus'; status: DockerStatus } | { type: 'dockerVersionsLoaded'; tags: string[] } | { type: 'serviceStatus'; status: ServiceStatus } | { type: 'serviceNeedsSudo' } | { type: 'ioProgress'; mode: string; command: string; message: string } | { type: 'ioResult'; mode: string; command: string; success: boolean; error?: string };
+type IncomingMessage = { type: 'settingsLoaded'; settings: SettingsData & WelcomeExtraSettings; logoDarkUri?: string; logoLightUri?: string } | { type: 'showMessage'; level: 'success' | 'error' | 'info' | 'warning'; message: string } | { type: 'versionsLoaded'; versions: EngineVersionItem[] } | { type: 'cloud:status'; signedIn: boolean; userName: string; signedInUrl?: string; waitlisted?: boolean; waitlistedName?: string; pendingSignIn?: boolean; pendingSignOut?: boolean; pendingUserName?: string; pendingUrl?: string } | { type: 'serverInfo'; hostUrl?: string; capabilities?: string[]; version?: string; unreachable?: boolean } | { type: 'dockerStatus'; status: DockerStatus } | { type: 'dockerVersionsLoaded'; tags: string[] } | { type: 'serviceStatus'; status: ServiceStatus } | { type: 'serviceNeedsSudo' } | { type: 'ioProgress'; mode: string; command: string; message: string } | { type: 'ioResult'; mode: string; command: string; success: boolean; error?: string };
 
 type OutgoingMessage = { type: string; [key: string]: unknown };
 
@@ -248,16 +248,16 @@ export const Welcome: React.FC = () => {
 					break;
 
 				case 'cloud:status':
-					setCloudSignedIn((msg as any).signedIn);
-					setCloudUserName((msg as any).userName || '');
-					setCloudSignedInUrl((msg as any).signedInUrl || '');
-					setCloudWaitlisted(Boolean((msg as any).waitlisted));
-					setCloudWaitlistedName((msg as any).waitlistedName || '');
+					setCloudSignedIn(msg.signedIn);
+					setCloudUserName(msg.userName || '');
+					setCloudSignedInUrl(msg.signedInUrl || '');
+					setCloudWaitlisted(Boolean(msg.waitlisted));
+					setCloudWaitlistedName(msg.waitlistedName || '');
 					setCloudPending({
-						signIn: Boolean((msg as any).pendingSignIn),
-						signOut: Boolean((msg as any).pendingSignOut),
-						userName: (msg as any).pendingUserName || '',
-						url: (msg as any).pendingUrl || '',
+						signIn: Boolean(msg.pendingSignIn),
+						signOut: Boolean(msg.pendingSignOut),
+						userName: msg.pendingUserName || '',
+						url: msg.pendingUrl || '',
 					});
 					break;
 
@@ -324,9 +324,9 @@ export const Welcome: React.FC = () => {
 					break;
 				}
 
-				case 'serverInfo' as string: {
-					const caps: string[] = (msg as any).capabilities || [];
-					const unreachable = Boolean((msg as any).unreachable);
+				case 'serverInfo': {
+					const caps: string[] = msg.capabilities || [];
+					const unreachable = Boolean(msg.unreachable);
 					setProbe({ isSaas: unreachable ? undefined : caps.includes('saas'), unreachable });
 					break;
 				}

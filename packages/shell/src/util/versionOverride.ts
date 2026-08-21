@@ -62,12 +62,16 @@ const SS_OVERRIDES_KEY = 'rr:appVersionOverrides';
  * server enforces entitlement on every request, so constructing a URL the
  * caller is not entitled to yields a 404 at load, never a leak.
  *
+ * The id is encoded as ONE path segment: this function is reachable from app
+ * code through shellApi, and an id carrying '/', '..', '?' or '#' would
+ * otherwise re-aim the path at a different same-origin script.
+ *
  * @param appId - The app id.
  * @param version - The registry version number (ints only).
  * @returns The versioned remoteEntry URL.
  */
 export function versionedEntryUrl(appId: string, version: number): string {
-	return `/apps/${appId}/v${version}/remoteEntry.js`;
+	return `/apps/${encodeURIComponent(appId)}/v${version}/remoteEntry.js`;
 }
 
 /**
@@ -87,16 +91,45 @@ export interface AppVersionOverride {
 }
 
 /**
+ * Overrides whose write to sessionStorage FAILED — an embedded frame with
+ * storage denied, or a full quota. They stand in for the storage row so THIS
+ * document still resolves the pick (a deep link would otherwise seed nothing
+ * and the reconciliation would find no override at all).
+ *
+ * The mirror only ever ADDS: an entry that survives in storage is what the
+ * next boot resolves, so a delete that failed to persist must keep reading as
+ * present. The failing-override drop path depends on that — it verifies the
+ * clear before reloading, and a mirror that masked the surviving storage row
+ * would turn a bounded reload into a loop.
+ */
+let memoryOverrides: Record<string, AppVersionOverride> = {};
+
+/**
+ * Writes the override map to sessionStorage.
+ *
+ * @param map - The full map to persist.
+ * @returns True when storage accepted the write.
+ */
+function persistOverrides(map: Record<string, AppVersionOverride>): boolean {
+	try {
+		sessionStorage.setItem(SS_OVERRIDES_KEY, JSON.stringify(map));
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+/**
  * Reads the full override map from sessionStorage.
  *
  * @returns App id → override; empty object when none or storage unavailable.
  */
 export function getAppVersionOverrides(): Record<string, AppVersionOverride> {
+	let stored: Record<string, AppVersionOverride> = {};
 	try {
-		return JSON.parse(sessionStorage.getItem(SS_OVERRIDES_KEY) ?? '{}') as Record<string, AppVersionOverride>;
-	} catch {
-		return {};
-	}
+		stored = JSON.parse(sessionStorage.getItem(SS_OVERRIDES_KEY) ?? '{}') as Record<string, AppVersionOverride>;
+	} catch { /* storage unavailable — the in-memory mirror stands in */ }
+	return { ...stored, ...memoryOverrides };
 }
 
 /**
@@ -116,11 +149,16 @@ export function getAppVersionOverride(appId: string): AppVersionOverride | null 
  * @param override - The override record to store.
  */
 export function setAppVersionOverride(appId: string, override: AppVersionOverride): void {
-	try {
-		const map = getAppVersionOverrides();
-		map[appId] = override;
-		sessionStorage.setItem(SS_OVERRIDES_KEY, JSON.stringify(map));
-	} catch { /* storage unavailable — override lasts this page only */ }
+	const map = getAppVersionOverrides();
+	map[appId] = override;
+	// A refused write keeps the pick in memory so THIS document still resolves
+	// it (a deep link would otherwise seed nothing at all); it dies with the
+	// document, exactly like the session storage it stands in for.
+	if (persistOverrides(map)) {
+		delete memoryOverrides[appId];
+	} else {
+		memoryOverrides[appId] = override;
+	}
 }
 
 /**
@@ -129,11 +167,13 @@ export function setAppVersionOverride(appId: string, override: AppVersionOverrid
  * @param appId - The app id.
  */
 export function clearAppVersionOverride(appId: string): void {
-	try {
-		const map = getAppVersionOverrides();
-		delete map[appId];
-		sessionStorage.setItem(SS_OVERRIDES_KEY, JSON.stringify(map));
-	} catch { /* storage unavailable */ }
+	const map = getAppVersionOverrides();
+	delete map[appId];
+	// The mirror goes first and unconditionally: a mirrored override must
+	// never outlive the clear that removed it. A storage row that survives a
+	// failed write stays visible on read — that is what the drop path checks.
+	delete memoryOverrides[appId];
+	persistOverrides(map);
 }
 
 // =============================================================================

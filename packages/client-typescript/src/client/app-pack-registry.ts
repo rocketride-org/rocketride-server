@@ -40,14 +40,22 @@
     dependency on the Node-only module. */
 export type AppPackModule = typeof import('../app-pack');
 
-let registered: AppPackModule | undefined;
+/**
+ * Global key the registration is anchored under. Module-level state is NOT
+ * enough: a bundled host that ends up with two copies of this module would
+ * arm one copy and read the other, leaving getRegisteredAppPack() empty and
+ * sending deploy down the dynamic-import path that cannot resolve inside a
+ * bundle. Same idiom as the shell's ConnectionManager singleton. Reflect
+ * accepts symbol keys without an unsafe cast of globalThis.
+ */
+const REGISTRY_KEY = Symbol.for('rocketride.appPack');
 
 /** Called by the app-pack module itself at load time. */
 export function registerAppPack(module: AppPackModule): void {
-	registered = module;
+	Reflect.set(globalThis, REGISTRY_KEY, module);
 }
 
 /** The registered packer, or undefined when no host has loaded it. */
 export function getRegisteredAppPack(): AppPackModule | undefined {
-	return registered;
+	return Reflect.get(globalThis, REGISTRY_KEY);
 }

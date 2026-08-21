@@ -519,15 +519,6 @@ export default App;
 // =============================================================================
 
 /**
- * Renders a template into its file tree.
- *
- * @param name - Template name from TEMPLATE_NAMES.
- * @param vars - Substitution variables.
- * @param frame - Frame options composing the generated App.tsx; defaults to
- *                the pre-options shape (status footer only).
- * @returns The files to write into the new app folder.
- */
-/**
  * The scaffolded placeholder icon — a neutral rounded tile with an abstract
  * rocket mark. Deliberately generic: it exists so the PACKAGE tab's icon
  * readiness starts green and tiles never render the bare fallback glyph;
@@ -567,6 +558,15 @@ function readmeMd(v: TemplateVars): string {
 	);
 }
 
+/**
+ * Renders a template into its file tree.
+ *
+ * @param name - Template name from TEMPLATE_NAMES.
+ * @param vars - Substitution variables.
+ * @param frame - Frame options composing the generated App.tsx; defaults to
+ *                the pre-options shape (status footer only).
+ * @returns The files to write into the new app folder.
+ */
 export function renderTemplate(name: TemplateName, vars: TemplateVars, frame: FrameOptions = DEFAULT_FRAME): TemplateFile[] {
 	const files: TemplateFile[] = [
 		{ path: 'package.json', content: packageJson(vars) },

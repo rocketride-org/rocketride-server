@@ -333,6 +333,10 @@ function isRelativeRef(ref: string): boolean {
 	return !/^(?:[a-z][a-z0-9+.-]*:|\/|#)/i.test(ref);
 }
 
+/** Total inlined-image characters one README render may produce. Base64 is
+ *  about 1.37x the raw bytes, so this admits roughly 17 MiB of images. */
+const MAX_INLINED_README_CHARS = 24 * 1024 * 1024;
+
 /**
  * Inline every document-relative image in the markdown as a data: URI.
  * The webview has no filesystem, so a relative src would resolve against
@@ -361,11 +365,22 @@ async function inlineReadmeImages(
 	// not fan out unbounded RPCs.
 	const inlined = new Map<string, string>();
 	let budget = 24;
+	// Cumulative size budget for ONE render. The host's per-image cap bounds
+	// a single screenshot; it does not stop a README with several large ones
+	// from producing tens of MiB of base64 that crosses the message channel
+	// and stays resident in the rendered markdown. Once this is spent the
+	// remaining refs keep their original src (renders broken, which is
+	// honest) rather than growing the payload further.
+	let spent = 0;
 	for (const ref of refs) {
 		if (!isRelativeRef(ref) || budget-- <= 0) continue;
 		try {
 			const uri = await readImage(resolveAgainst(dir, ref));
-			if (uri) inlined.set(ref, uri);
+			if (uri) {
+				if (spent + uri.length > MAX_INLINED_README_CHARS) break;
+				spent += uri.length;
+				inlined.set(ref, uri);
+			}
 		} catch {
 			// Unreadable image: the original reference stays (renders broken,
 			// which is honest — the file is genuinely missing).
@@ -417,27 +432,40 @@ export const PackageView: React.FC<IPackageViewProps> = ({ host, app }) => {
 	// baseline and Cancel's revert target (ProfilePanel's exact model).
 	const [saved, setSaved] = useState<ListingDraft | null>(null);
 	const [checks, setChecks] = useState<PreflightCheck[]>([]);
-	const [iconSvg, setIconSvg] = useState<string | null>(null);
+	// SVG markup (text path) or a complete data: URI (raster path).
+	const [iconPreview, setIconPreview] = useState<string | null>(null);
 	const [saving, setSaving] = useState(false);
 	const [error, setError] = useState('');
 	// Footer-Cancel discard confirm (the standard's guard before reverting).
 	const [confirmDiscard, setConfirmDiscard] = useState(false);
-	// README viewer: null = closed; '' = loading; text = rendered.
+	// README viewer: null = closed; string = the file's content, which may
+	// legitimately be empty — loading is tracked separately so an empty
+	// README does not read as the loading sentinel and hang the modal.
 	const [readmeText, setReadmeText] = useState<string | null>(null);
+	const [readmeLoading, setReadmeLoading] = useState(false);
 
-	/** Load the icon preview for a manifest-relative SVG path (null on any
-	 *  failure — the preview slot then shows its 'none' glyph). */
+	/** Load the icon preview for a manifest-relative icon path (null on any
+	 *  failure — the preview slot then shows its 'none' glyph).
+	 *
+	 *  Raster icons (png/jpg/gif/webp — the picker and the platform accept
+	 *  all of them) go through the IMAGE reader, which returns a complete
+	 *  data: URI; the text reader would corrupt their bytes. SVG stays on
+	 *  the text path so the markup can be inlined verbatim. */
 	const loadIcon = useCallback(
 		async (rel: string | undefined): Promise<void> => {
-			if (rel && host.readAppTextFile) {
-				try {
-					setIconSvg(await host.readAppTextFile(rel));
-					return;
-				} catch {
-					// Unreadable icon: fall through to the empty preview.
+			if (rel) {
+				const isSvg = rel.toLowerCase().endsWith('.svg');
+				const read = isSvg ? host.readAppTextFile : host.readAppImageDataUri;
+				if (read) {
+					try {
+						setIconPreview(await read(rel));
+						return;
+					} catch {
+						// Unreadable icon: fall through to the empty preview.
+					}
 				}
 			}
-			setIconSvg(null);
+			setIconPreview(null);
 		},
 		[host]
 	);
@@ -531,11 +559,14 @@ export const PackageView: React.FC<IPackageViewProps> = ({ host, app }) => {
 	const onViewReadme = useCallback(async (): Promise<void> => {
 		if (!draft?.readme || !host.readAppTextFile) return;
 		setReadmeText('');
+		setReadmeLoading(true);
 		try {
 			const raw = await host.readAppTextFile(draft.readme);
 			setReadmeText(host.readAppImageDataUri ? await inlineReadmeImages(raw, draft.readme, host.readAppImageDataUri) : raw);
 		} catch (e) {
 			setReadmeText(`Could not read ${draft.readme}: ${e instanceof Error ? e.message : String(e)}`);
+		} finally {
+			setReadmeLoading(false);
 		}
 	}, [draft, host]);
 
@@ -550,8 +581,9 @@ export const PackageView: React.FC<IPackageViewProps> = ({ host, app }) => {
 				? `Everything required is in place — you can deploy and publish this app to your desktop or a team. ${warning} optional item${warning === 1 ? '' : 's'} would polish it.`
 				: 'Everything is in place — deploy it and publish to your desktop or a team whenever you like.';
 
-	// Icon preview data URI (SVG text -> inline image).
-	const iconUri = iconSvg ? `data:image/svg+xml;utf8,${encodeURIComponent(iconSvg)}` : null;
+	// Icon preview source: the raster reader already returns a data: URI;
+	// SVG arrives as markup and is inlined here.
+	const iconUri = iconPreview ? (iconPreview.startsWith('data:') ? iconPreview : `data:image/svg+xml;utf8,${encodeURIComponent(iconPreview)}`) : null;
 
 	// Dirty flag: any edited field differs from the saved baseline. Drives
 	// the materializing footer bar and gates the discard confirm.
@@ -724,7 +756,7 @@ export const PackageView: React.FC<IPackageViewProps> = ({ host, app }) => {
 					}
 				>
 					<div style={styles.readmeBody}>
-						{readmeText === '' ? (
+						{readmeLoading ? (
 							'Loading…'
 						) : (
 							<Suspense fallback="Rendering…">

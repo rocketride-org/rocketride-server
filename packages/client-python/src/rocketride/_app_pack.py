@@ -51,10 +51,14 @@ import json
 import os
 import re
 import zipfile
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Callable, Optional
 
 from pathspec.gitignore import GitIgnoreSpec
+
+# The verification report shapes are PUBLIC types (callers annotate a
+# verify_app result with them), so they live in rocketride.types.deploy
+from .types.deploy import AppVerifyCheck, AppVerifyReport
 
 # App id grammar: <developerId>.<name> (mirrors the App Builder).
 _APP_ID_RE = re.compile(r'^[a-z][a-z_]*\.[a-z][a-zA-Z0-9_-]*$')
@@ -66,6 +70,11 @@ MAX_PACK_BYTES = 512 * 1024 * 1024
 # The upload cap on the ZIPPED package — the server refuses larger uploads
 # at receipt, so packing fails fast client-side with the same bound.
 MAX_ZIP_BYTES = 50 * 1024 * 1024
+
+# Fixed timestamp stamped on every zip entry. The default writestr metadata
+# carries the current clock, which would make two packs of identical source
+# hash differently; the ZIP epoch keeps the bytes a function of content only.
+ZIP_ENTRY_DATE_TIME = (1980, 1, 1, 0, 0, 0)
 
 # Always-on excludes in gitignore syntax, anchored at the workspace root.
 # Slash-less dir patterns match at every depth (git semantics). `.git/` is
@@ -177,7 +186,12 @@ def _ancestor_matchers_of(workspace_root: str, root_rel: str) -> list[_Matcher]:
 
 def _is_within(root: str, target: str) -> bool:
     """SECURITY: symlink containment — True when target is inside root."""
-    rel = os.path.relpath(target, root)
+    try:
+        rel = os.path.relpath(target, root)
+    except ValueError:
+        # Windows raises for paths on different drives; nothing on another
+        # drive is inside root, and _walk_dir catches only OSError
+        return False
     return rel == '.' or (not rel.startswith('..' + os.sep) and rel != '..' and not os.path.isabs(rel))
 
 
@@ -301,7 +315,16 @@ def read_include_entries(
     except (OSError, ValueError) as err:
         raise ValueError(f"Could not read the app's package.json: {err}") from err
 
-    raw = (pkg.get('appManifest') or {}).get('include')
+    # A malformed package.json or a non-object appManifest must fail as the
+    # documented ValueError: `or {}` absorbs only the falsy shapes, so a
+    # string or a non-empty list would reach .get() and raise AttributeError
+    if not isinstance(pkg, dict):
+        raise ValueError('The app package.json must contain a JSON object.')
+    block = pkg.get('appManifest')
+    if block is not None and not isinstance(block, dict):
+        raise ValueError('appManifest must be an object in the app package.json.')
+
+    raw = (block or {}).get('include')
     if raw is None:
         return []
     if not isinstance(raw, list) or any(not isinstance(e, str) for e in raw):
@@ -342,25 +365,6 @@ def _resolve_app_root(workspace_root: str, app_root: str) -> tuple[str, str, str
     return ws_abs, app_abs, app_root_rel
 
 
-@dataclass
-class AppVerifyCheck:
-    """One verification check's outcome."""
-
-    id: str
-    ok: bool
-    note: str
-
-
-@dataclass
-class AppVerifyReport:
-    """The result of :func:`verify_app_source`."""
-
-    ok: bool
-    checks: list[AppVerifyCheck] = field(default_factory=list)
-    file_count: int = 0
-    uncompressed_bytes: int = 0
-
-
 def verify_app_source(workspace_root: str, app_root: str) -> AppVerifyReport:
     """Pre-check everything an app deploy needs, WITHOUT deploying.
 
@@ -379,7 +383,10 @@ def verify_app_source(workspace_root: str, app_root: str) -> AppVerifyReport:
     manifest: Optional[dict] = None
     try:
         with open(os.path.join(app_abs, 'package.json'), 'r', encoding='utf-8') as f:
-            manifest = (json.load(f) or {}).get('appManifest')
+            # A non-object appManifest (list, string, ...) is as good as
+            # absent: this is a report, so it must not raise downstream
+            block = (json.load(f) or {}).get('appManifest')
+            manifest = block if isinstance(block, dict) else None
         add('package-json', True, 'package.json parses')
     except (OSError, ValueError) as err:
         add('package-json', False, f'package.json unreadable: {err}')
@@ -519,7 +526,13 @@ def pack_app_source(
                 raise ValueError(
                     f'Pack exceeds {MAX_PACK_BYTES // (1024 * 1024)}MB uncompressed - narrow appManifest.include or add ignores.'
                 )
-            zf.writestr(zip_path, data)
+            # An explicit ZipInfo carries the fixed timestamp; it must also
+            # restate the compression and mode that writestr's own default
+            # ZipInfo would have applied
+            info = zipfile.ZipInfo(zip_path, date_time=ZIP_ENTRY_DATE_TIME)
+            info.compress_type = zipfile.ZIP_DEFLATED
+            info.external_attr = 0o600 << 16
+            zf.writestr(info, data)
             if on_progress:
                 on_progress(f'+ {zip_path} ({len(data)} bytes)')
     zipped = buffer.getvalue()

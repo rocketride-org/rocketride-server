@@ -146,14 +146,21 @@ export async function installDocsBundle(workspaceRoot: string, base: string, onP
 		}
 	}
 
-	// step: unpack the new set (docs at the root, stubs under stubs/)
+	// step: unpack the new set (docs at the root, stubs under stubs/) —
+	// entry names are server-supplied, so absolute and traversing names
+	// are rejected and every resolved target must stay under docsDir
 	fs.mkdirSync(docsDir, { recursive: true });
+	const docsRoot = path.resolve(docsDir);
 	for (const entry of zip.getEntries()) {
 		const entryName = entry.entryName.replace(/\\/g, '/');
-		if (entry.isDirectory || entryName === 'manifest.json' || entryName.includes('..')) {
+		if (entry.isDirectory || entryName === 'manifest.json' || entryName.includes('..') || path.isAbsolute(entryName)) {
 			continue;
 		}
-		const target = path.join(docsDir, entryName);
+		const target = path.resolve(docsDir, entryName);
+		if (target !== docsRoot && !target.startsWith(docsRoot + path.sep)) {
+			onProgress(`Skipped docs entry outside the workspace: ${entry.entryName}`);
+			continue;
+		}
 		fs.mkdirSync(path.dirname(target), { recursive: true });
 		fs.writeFileSync(target, entry.getData());
 	}
@@ -191,16 +198,22 @@ function firstSentence(description: string | undefined): string {
 }
 
 /**
- * Sanitize a service name so it is safe to use as a filename.
- * Only `[a-zA-Z0-9._-]` characters are kept; everything else is replaced
- * with `_`. Each leading dot is replaced individually to preserve name
- * uniqueness.
+ * Encode a service name so it is safe - and unique - as a filename.
+ * Only `[a-zA-Z0-9._-]` characters survive literally; every other character
+ * becomes the percent-escape of its UTF-8 bytes, and each leading dot becomes
+ * `%2E` so no schema file is hidden or traversing. The encoding is reversible,
+ * hence collision-free: names that differ (`a/b` vs `a_b`) can never land on
+ * the same schema file and silently overwrite each other. The Python twin
+ * encodes identically so both clients produce the same workspace contents.
  *
  * @param name - Raw service name from the server.
  * @returns Filename-safe name.
  */
 function sanitizeServiceName(name: string): string {
-	return name.replace(/[^a-zA-Z0-9._-]/g, '_').replace(/^\.+/, (match) => '_'.repeat(match.length));
+	// The /u flag makes each match a whole code point, so astral characters
+	// are encoded as one UTF-8 sequence rather than two lone surrogates
+	const encoded = name.replace(/[^a-zA-Z0-9._-]/gu, (char) => Array.from(new TextEncoder().encode(char), (byte) => `%${byte.toString(16).toUpperCase().padStart(2, '0')}`).join(''));
+	return encoded.replace(/^\.+/, (match) => '%2E'.repeat(match.length));
 }
 
 /**

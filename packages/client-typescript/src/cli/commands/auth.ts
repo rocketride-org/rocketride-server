@@ -110,17 +110,28 @@ async function resolveServerUri(options: ConnectionOptions, out: Output, envKey:
  * @param url - The URL to open.
  */
 function openBrowser(url: string): void {
+	// step: pick the platform opener. rundll32 takes the URL as a direct
+	// argument — no cmd.exe in the path, so `&` in the query string
+	// survives (cmd's `start` treats `&` as a command separator and
+	// truncates OAuth URLs).
+	let command = 'xdg-open';
+	let args = [url];
+	if (process.platform === 'win32') {
+		command = 'rundll32';
+		args = ['url.dll,FileProtocolHandler', url];
+	} else if (process.platform === 'darwin') {
+		command = 'open';
+	}
 	try {
-		if (process.platform === 'win32') {
-			// rundll32 takes the URL as a direct argument — no cmd.exe in the
-			// path, so `&` in the query string survives (cmd's `start` treats
-			// `&` as a command separator and truncates OAuth URLs).
-			spawn('rundll32', ['url.dll,FileProtocolHandler', url], { detached: true, stdio: 'ignore' }).unref();
-		} else if (process.platform === 'darwin') {
-			spawn('open', [url], { detached: true, stdio: 'ignore' }).unref();
-		} else {
-			spawn('xdg-open', [url], { detached: true, stdio: 'ignore' }).unref();
-		}
+		const child = spawn(command, args, { detached: true, stdio: 'ignore' });
+		// A missing opener surfaces asynchronously as an 'error' event, not
+		// as a throw — without this listener it would reach the process as
+		// an uncaught exception and kill the CLI before the printed URL is
+		// ever used.
+		child.on('error', () => {
+			// Non-fatal — the user can follow the printed URL
+		});
+		child.unref();
 	} catch {
 		// Non-fatal — the user can follow the printed URL
 	}

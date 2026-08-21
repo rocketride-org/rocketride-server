@@ -495,7 +495,12 @@ function registerUtilityCommands(context: vscode.ExtensionContext): void {
 			}
 		}),
 		vscode.commands.registerCommand('rocketride.sidebar.connection.disconnect', async () => {
-			await connectionManager?.disconnect();
+			try {
+				await connectionManager?.disconnect();
+			} catch (error) {
+				const msg = error instanceof Error ? error.message : String(error);
+				vscode.window.showErrorMessage(`RocketRide: failed to disconnect: ${msg}`);
+			}
 		}),
 		vscode.commands.registerCommand('rocketride.sidebar.connection.reconnect', async () => {
 			try {
@@ -601,11 +606,24 @@ function registerUtilityCommands(context: vscode.ExtensionContext): void {
 
 		vscode.commands.registerCommand('rocketride.cloud.logout', async () => {
 			const cloudAuth = CloudAuthProvider.getInstance();
-			await cloudAuth.signOut();
+			try {
+				await cloudAuth.signOut();
+			} catch (error) {
+				// Naming the step matters here: the credential may still be
+				// stored, so the user has to know the session did NOT end.
+				const msg = error instanceof Error ? error.message : String(error);
+				vscode.window.showErrorMessage(`RocketRide: failed to sign out of the cloud: ${msg}`);
+				return;
+			}
 			// A direct sign-out applies immediately — take the live cloud
 			// connection down with the credential so no surface keeps showing
 			// a connected session that storage no longer backs.
-			await disconnectCloudConnections();
+			try {
+				await disconnectCloudConnections();
+			} catch (error) {
+				const msg = error instanceof Error ? error.message : String(error);
+				vscode.window.showErrorMessage(`RocketRide: signed out, but the cloud connection did not close: ${msg}`);
+			}
 		}),
 
 		// Stub commands — run/stop/open are handled via webview messages now,

@@ -75,9 +75,12 @@ let workspaceInstallDelegate: (() => Promise<boolean>) | null = null;
  * changed the vendored tarball): bump the install generation, then chain
  * the run behind any in-flight install.
  *
- * @param run - Resolves true when the workspace install succeeded.
+ * @param run - Resolves true when the workspace install succeeded, or null
+ *              to UNREGISTER (the registering manager was disposed — module
+ *              state outlives it, and a vendor pass during deactivation
+ *              would otherwise install through a dead manager).
  */
-export function setWorkspaceInstallDelegate(run: () => Promise<boolean>): void {
+export function setWorkspaceInstallDelegate(run: (() => Promise<boolean>) | null): void {
 	workspaceInstallDelegate = run;
 }
 
@@ -115,8 +118,18 @@ export function ensureShell(context: vscode.ExtensionContext): Promise<ShellVend
  * @returns The vendor result — path on success, the reason on failure.
  */
 export function refreshVendoredPlatform(context: vscode.ExtensionContext): Promise<ShellVendorResult> {
-	ensureShellPromise = null;
-	return ensureShell(context);
+	// Chain behind any in-flight pass instead of dropping the memo: a
+	// reconnect burst (org switch, network blip) fires this repeatedly, and
+	// two concurrent passes write the same canonical tarball paths — the
+	// read/compare/write sequence is not atomic, so an overlap can leave a
+	// half-written tgz for the workspace install to read.
+	const prior: Promise<unknown> = ensureShellPromise ?? Promise.resolve();
+	const refreshed = prior.catch(() => null).then(() => {
+		ensureShellPromise = null;
+		return ensureShell(context);
+	});
+	ensureShellPromise = refreshed;
+	return refreshed;
 }
 
 /**
@@ -423,6 +436,37 @@ export function isTransientLockError(output: string): boolean {
 	});
 }
 
+/** Largest vendored tarball the extension will accept from a server. */
+const MAX_VENDORED_TGZ_BYTES = 64 * 1024 * 1024;
+
+/**
+ * Reads a fetch response body into a Buffer, refusing anything oversized.
+ *
+ * The request timeout bounds how LONG a download may take, not how BIG it
+ * may be: materializing the whole body and comparing it against the
+ * existing tarball keeps two full copies resident, so a misconfigured or
+ * hostile endpoint could drive the extension host out of memory. The
+ * declared Content-Length is refused up front; a response that declares no
+ * length is read chunk by chunk and abandoned the moment it crosses.
+ *
+ * @param res - The response whose body to drain.
+ * @param limit - Maximum bytes to accept.
+ * @returns The body bytes, or null when the response is over the limit.
+ */
+async function readBoundedBody(res: Response, limit: number): Promise<Buffer | null> {
+	const declared = Number(res.headers.get('content-length'));
+	if (Number.isFinite(declared) && declared > limit) return null;
+	if (!res.body) return Buffer.alloc(0);
+	const chunks: Buffer[] = [];
+	let total = 0;
+	for await (const chunk of res.body as unknown as AsyncIterable<Uint8Array>) {
+		total += chunk.byteLength;
+		if (total > limit) return null;
+		chunks.push(Buffer.from(chunk));
+	}
+	return Buffer.concat(chunks);
+}
+
 /**
  * Downloads the connected server's shell.tgz to the workspace's canonical
  * .rocketride/shell/shell.tgz and installs it at the workspace root.
@@ -462,8 +506,13 @@ export async function vendorShellPackage(workspaceRoot: string, fallbackTgz?: st
 			try {
 				const res = await fetch(new URL(route, base), { signal: AbortSignal.timeout(30_000) });
 				if (res.ok) {
-					tgz = Buffer.from(await res.arrayBuffer());
-					source = `${baseUrl}/${route}`;
+					const body = await readBoundedBody(res, MAX_VENDORED_TGZ_BYTES);
+					if (body) {
+						tgz = body;
+						source = `${baseUrl}/${route}`;
+					} else {
+						failure = `The ${label} served by ${baseUrl} is larger than the ${MAX_VENDORED_TGZ_BYTES / (1024 * 1024)} MB limit — refusing the download.`;
+					}
 				} else {
 					failure = `${baseUrl} does not serve the ${label} (HTTP ${res.status}).`;
 				}

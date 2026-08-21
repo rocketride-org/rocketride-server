@@ -1368,9 +1368,13 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 			const runningSources: Record<string, boolean> = {};
 			for (const t of tasks.tasks ?? []) {
 				if (t.pipeline?.project_id !== projectId || !t.source) continue;
+				// runKind on BOTH branches: without it a team's ordinary
+				// pipeline run on the same project/source would mark the
+				// source as deploy-running, exactly as the personal branch
+				// already guards against.
 				const matches = personalUid
 					? t.ownerKind === 'user' && t.ownerId === personalUid && t.runKind === 'deploy'
-					: t.teamId === teamId;
+					: t.teamId === teamId && t.runKind === 'deploy';
 				if (matches) runningSources[t.source] = true;
 			}
 

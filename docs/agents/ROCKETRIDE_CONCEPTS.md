@@ -9,7 +9,7 @@ ROCKETRIDE_APPS.md) assume you know this file.
 A person uses an **app**. The app runs **pipelines**. Pipelines compose
 **pipeline components**. Three layers, three contracts between them:
 
-```
+```text
 person ──> app (React, shell UI) ──> pipeline (.pipe, runs on the server)
                                           └──> pipeline components (catalog)
 ```

@@ -59,6 +59,12 @@ function makeBuildAction() {
 			const { changed, hash } = await hasSourceChanged(PACKAGE_DIR, SRC_HASH_KEY);
 			if (changed || !(await exists(stablePath))) {
 				await mkdir(OUT_DIR);
+				// step: clear versioned archives a failed earlier build may
+				// have left behind — after a version bump the sort below
+				// would otherwise pick the stale one and stage it as the shim
+				for (const stale of await glob('rocketride-init-*.tgz', { cwd: OUT_DIR, absolute: true })) {
+					await rm(stale);
+				}
 				await execCommand('npm', ['pack', '--pack-destination', OUT_DIR], { task, cwd: PACKAGE_DIR });
 				// Stable name: the version rides inside the package, not the
 				// filename (same pattern as shell.tgz)

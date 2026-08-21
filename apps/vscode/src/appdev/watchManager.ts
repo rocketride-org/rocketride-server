@@ -580,6 +580,10 @@ export class WatchManager {
 
 	/** Stops every session (extension deactivation) — no linger on exit. */
 	public dispose(): void {
+		// Withdraw the install authority FIRST: it is module-level state that
+		// outlives this manager, so a vendor pass reaching it after disposal
+		// would install through a stopped manager.
+		setWorkspaceInstallDelegate(null);
 		this.connectionManager.off('shell:statusChange', this.onStatusChange);
 		for (const appId of [...this.sessions.keys()]) void this.stop(appId, { immediate: true });
 	}

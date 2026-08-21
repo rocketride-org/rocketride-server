@@ -262,7 +262,12 @@ export class SettingsProvider {
 			cleanupCloudAuth();
 			// Closing the page without saving discards any staged sign-in or
 			// sign-out — nothing uncommitted survives the settings surface.
-			CloudAuthProvider.getInstance().clearPendingChanges();
+			// A save already in flight OWNS the staged change and commits it
+			// itself; discarding here would race saveAllSettings and throw
+			// away a sign-in the user was told had been saved.
+			if (!this._isSaving) {
+				CloudAuthProvider.getInstance().clearPendingChanges();
+			}
 			this.panel = undefined;
 			this.activeWebviews.delete(panelWebview);
 			this.connHandler.stopStatusPolling();

@@ -1587,7 +1587,8 @@ class TaskServer(DAPBase):
         9. Update TASK_CONTROL with new configuration (pipeline, provider)
         10. Call task.restart_task() to restart engine process
         11. Optionally wait for running state
-        12. Return task information
+        12. Transfer launch ownership to the caller (only once 10-11 succeeded)
+        13. Return task information
 
         Note:
         - Task identity (token, public_auth, project_id, source) remains unchanged
@@ -1630,11 +1631,6 @@ class TaskServer(DAPBase):
             if control.task.has_attached_debugger():
                 raise RuntimeError('Cannot restart task while debugger is attached. Please detach the debugger first.')
 
-            # Ownership transfers ONLY once the caller is fully authorized:
-            # a rejected restart must not leave this conn as launch_owner, or
-            # its later disconnect would stop a LAUNCH task it never owned.
-            control.launch_owner = conn
-
             # Find and validate the provider from new pipeline
             components = pipeline.get('components', [])
             if type(components) is not list:
@@ -1652,6 +1648,14 @@ class TaskServer(DAPBase):
             # Wait for running state if requested
             if wait_for_running:
                 await control.task.wait_for_running()
+
+            # Ownership transfers ONLY once the restart has actually SUCCEEDED:
+            # a rejected authorization, a malformed pipeline, a failed
+            # restart_task() or a wait that never reaches running must not leave
+            # this conn as launch_owner, or its later disconnect would stop a
+            # LAUNCH task it never owned. Until then the previous owner keeps
+            # the task, which is the state the caller failed to take over.
+            control.launch_owner = conn
 
             # Log successful restart
             self.debug_message(f'Task "{control.id}" restarted successfully')

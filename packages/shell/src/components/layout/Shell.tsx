@@ -136,6 +136,52 @@ const styles = {
 type RenderPhase = 'loading' | 'shell' | 'error' | 'goodbye' | 'waitlisted';
 
 // =============================================================================
+// ONE-SHOT RELOAD GUARD
+// =============================================================================
+
+/** sessionStorage key prefix for spent automatic-reload claims. */
+const SS_RELOAD_CLAIM_PREFIX = 'rr:reloadClaim:';
+
+/**
+ * Claims the ONE automatic reload allowed for a given (app, target) pair.
+ *
+ * An automatic reload is only worth taking when the next boot can change the
+ * outcome. The claim marker records that this exact pair already spent its
+ * reload: a second attempt means the assumption did not hold (a resolution
+ * boot rebuilds the same way, or a storage write that failed silently), so
+ * the caller must log and carry on rather than reload forever. The marker has
+ * to survive the reload, so a tab without usable storage claims nothing — an
+ * unbounded reload cannot be bounded without it.
+ *
+ * @param key - Stable identity of the reload attempt (app id + target URL).
+ * @returns True when the marker was newly written AND read back.
+ */
+function claimReload(key: string): boolean {
+	try {
+		const ssKey = `${SS_RELOAD_CLAIM_PREFIX}${key}`;
+		if (sessionStorage.getItem(ssKey) !== null) return false;
+		sessionStorage.setItem(ssKey, '1');
+		return sessionStorage.getItem(ssKey) !== null;
+	} catch {
+		return false;
+	}
+}
+
+/**
+ * Releases a spent reload claim once its target is in place.
+ *
+ * The reload did its job, so the pair may claim another one later in the
+ * session (a second override switch onto the same version, say).
+ *
+ * @param key - The same identity passed to {@link claimReload}.
+ */
+function releaseReload(key: string): void {
+	try {
+		sessionStorage.removeItem(`${SS_RELOAD_CLAIM_PREFIX}${key}`);
+	} catch { /* storage unavailable — nothing was claimed */ }
+}
+
+// =============================================================================
 // SHELL COMPONENT
 // =============================================================================
 
@@ -427,19 +473,30 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 			// their override dormant until the app appears in the manifest.
 			if (!app || isDevRemote(app.moduleId)) continue;
 			const url = versionedEntryUrl(appId, overrides[appId].version);
-			if (getRegisteredEntry(app.moduleId) === url) continue;
+			const claimKey = `${appId}@${url}`;
+			if (getRegisteredEntry(app.moduleId) === url) {
+				// The registration already sits at the override's URL — any
+				// reload spent getting here did its job, so free the claim.
+				releaseReload(claimKey);
+				continue;
+			}
 			// repointRemote refuses a container that already loaded this
 			// document (repointing corrupts its shared getters); a full
 			// reload re-registers the override's URL at boot, before
 			// anything loads.
 			if (repointRemote(app.moduleId, url)) {
 				invalidateAppDescriptor(appId);
-			} else {
+			} else if (claimReload(claimKey)) {
 				// EVERY automatic reload names itself — a silent reload turns
 				// the next loop regression into an afternoon of inference.
 				console.warn(`[shell] reloading: version override for ${appId} needs ${url} but its container already loaded`);
 				window.location.reload();
 				return;
+			} else {
+				// The reload for this exact target was already spent (or cannot
+				// be recorded), so boot demonstrably does not resolve to it —
+				// reloading again would only loop. Keep the loaded container.
+				console.error(`[shell] version override for ${appId} still needs ${url} after its one reload — leaving the loaded container in place`);
 			}
 		}
 	}, [identity, apps]);

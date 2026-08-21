@@ -89,7 +89,10 @@ def write_if_changed(file_path: str, content: bytes) -> bool:
         with open(file_path, 'rb') as f:
             if f.read() == content:
                 return False
-    os.makedirs(os.path.dirname(file_path), exist_ok=True)
+    # A bare filename has no directory component; makedirs('') would raise
+    parent = os.path.dirname(file_path)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
     with open(file_path, 'wb') as f:
         f.write(content)
     return True
@@ -164,13 +167,19 @@ def install_docs_bundle(workspace_root: str, base: str, on_progress: Optional[Pr
             if DOC_FILE_PATTERN.match(file_name):
                 os.remove(os.path.join(docs_dir, file_name))
 
-    # step: unpack the new set (docs at the root, stubs under stubs/)
+    # step: unpack the new set (docs at the root, stubs under stubs/) —
+    # entry names are server-supplied, so absolute and traversing names
+    # are rejected and every resolved target must stay under docs_dir
     os.makedirs(docs_dir, exist_ok=True)
+    docs_root = os.path.abspath(docs_dir)
     for entry_name in archive.namelist():
         normalized = entry_name.replace('\\', '/')
-        if normalized.endswith('/') or normalized == 'manifest.json' or '..' in normalized:
+        if normalized.endswith('/') or normalized == 'manifest.json' or '..' in normalized or os.path.isabs(normalized):
             continue
-        target = os.path.join(docs_dir, normalized)
+        target = os.path.abspath(os.path.join(docs_dir, normalized))
+        if target != docs_root and not target.startswith(docs_root + os.sep):
+            progress(f'Skipped docs entry outside the workspace: {entry_name}')
+            continue
         os.makedirs(os.path.dirname(target), exist_ok=True)
         with open(target, 'wb') as f:
             f.write(archive.read(entry_name))
@@ -211,13 +220,30 @@ def _first_sentence(description: Optional[str]) -> str:
     return match.group(0).strip() if match else text
 
 
+def _percent_escape(match: 're.Match[str]') -> str:
+    """
+    Percent-escape one character as its uppercase UTF-8 byte sequence.
+
+    Args:
+        match: Regex match holding the single character to escape.
+
+    Returns:
+        The ``%XX`` escape (one pair per UTF-8 byte).
+    """
+    return ''.join(f'%{byte:02X}' for byte in match.group(0).encode('utf-8'))
+
+
 def _sanitize_service_name(name: str) -> str:
     """
-    Sanitize a service name so it is safe to use as a filename.
+    Encode a service name so it is safe — and unique — as a filename.
 
-    Only ``[a-zA-Z0-9._-]`` characters are kept; everything else is
-    replaced with ``_``. Each leading dot is replaced individually to
-    preserve name uniqueness.
+    Only ``[a-zA-Z0-9._-]`` characters survive literally; every other
+    character becomes the percent-escape of its UTF-8 bytes, and each
+    leading dot becomes ``%2E`` so no schema file is hidden or traversing.
+    The encoding is reversible, hence collision-free: names that differ
+    (``a/b`` vs ``a_b``) can never land on the same schema file and
+    silently overwrite each other. The TypeScript twin encodes identically
+    so both clients produce the same workspace contents.
 
     Args:
         name: Raw service name from the server.
@@ -225,8 +251,8 @@ def _sanitize_service_name(name: str) -> str:
     Returns:
         Filename-safe name.
     """
-    safe = re.sub(r'[^a-zA-Z0-9._-]', '_', name)
-    return re.sub(r'^\.+', lambda match: '_' * len(match.group(0)), safe)
+    safe = re.sub(r'[^a-zA-Z0-9._-]', _percent_escape, name)
+    return re.sub(r'^\.+', lambda match: '%2E' * len(match.group(0)), safe)
 
 
 def sync_service_catalog(

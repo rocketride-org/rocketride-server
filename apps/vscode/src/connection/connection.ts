@@ -105,6 +105,9 @@ export class ConnectionManager extends EventEmitter {
 	// engine event, success); auth failures stop and open the settings page.
 	private retryTimer?: NodeJS.Timeout;
 	private retryDelayMs = RETRY_BASE_DELAY_MS;
+	// True once the saturated-backoff notice has been written for this retry
+	// regime, so the steady-state cycle logs once instead of every round.
+	private retrySaturatedLogged = false;
 
 	// Debounce timer for configuration changes
 	private configChangeTimeout?: NodeJS.Timeout;
@@ -380,8 +383,19 @@ export class ConnectionManager extends EventEmitter {
 		if (this.isDisposing) return;
 		this.cancelConnectRetry();
 		const delay = this.retryDelayMs;
+		const saturated = delay >= RETRY_MAX_DELAY_MS;
 		this.retryDelayMs = Math.min(this.retryDelayMs * 2, RETRY_MAX_DELAY_MS);
-		this.logger.output(`${icons.info} Retrying connection in ${Math.round(delay / 1000)}s...`);
+		// Retrying indefinitely is deliberate: an engine started AFTER the
+		// extension must be picked up without the user reconnecting by hand.
+		// The log line is what needs bounding — once the backoff saturates,
+		// say so once rather than writing the same line every 30 seconds for
+		// as long as the window stays open.
+		if (!saturated) {
+			this.logger.output(`${icons.info} Retrying connection in ${Math.round(delay / 1000)}s...`);
+		} else if (!this.retrySaturatedLogged) {
+			this.retrySaturatedLogged = true;
+			this.logger.output(`${icons.info} Still retrying every ${Math.round(delay / 1000)}s — this continues until the server answers.`);
+		}
 		this.retryTimer = setTimeout(() => {
 			this.retryTimer = undefined;
 			if (this.isDisposing || !this.isCurrentConnectionGeneration(generation)) return;
@@ -568,6 +582,7 @@ export class ConnectionManager extends EventEmitter {
 		const generation = this.invalidateConnectionAttempts();
 		this.cancelConnectRetry();
 		this.retryDelayMs = RETRY_BASE_DELAY_MS;
+		this.retrySaturatedLogged = false;
 		this.logger.output(`${icons.info} Configuration changed, reconnecting...`);
 		await this.updateCredentialsStatus(generation);
 		if (!this.isCurrentConnectionGeneration(generation)) return;
@@ -725,6 +740,7 @@ export class ConnectionManager extends EventEmitter {
 				// Success ends the retry regime and re-arms the backoff.
 				this.cancelConnectRetry();
 				this.retryDelayMs = RETRY_BASE_DELAY_MS;
+		this.retrySaturatedLogged = false;
 				this.updateConnectionStatus({
 					state: ConnectionState.CONNECTED,
 					lastConnected: new Date(),

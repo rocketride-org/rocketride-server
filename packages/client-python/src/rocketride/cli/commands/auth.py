@@ -274,10 +274,13 @@ async def _sign_in_saas(uri: str, out: Output) -> str:
         # unlike the session key, never expires and survives sign-outs.
         # permissions=None inherits everything from the user (full PAT).
         key_name = f'CLI on {socket.gethostname()}'
-        minted = await client.account.create_key(name=key_name)
+        minted = await client.account.create_key(name=key_name) or {}
+        key = minted.get('key')
+        if not key:
+            raise RuntimeError('Sign-in succeeded but the server minted no API key')
         display = result.get('displayName', '')
         out.line(f'Signed in{f" as {display}" if display else ""}; minted API key {key_name!r}.')
-        return minted['key']
+        return key
     finally:
         try:
             await client.disconnect()
@@ -441,17 +444,34 @@ async def run_init(args) -> int:
         sync_service_catalog(workspace_root, services, out.line)
         await disconnect_all()
 
-        # step: vendor the platform packages from the same server
+        # step: vendor the platform packages from the same server — every
+        # fetch stands alone, so one unreachable artifact cannot cost the
+        # workspace its docs, its conventions, or its directories
         base = to_http_base(uri)
-        shell_tgz = fetch_artifact(base, 'client/shell', 'platform package (shell.tgz)')
-        if write_if_changed(os.path.join(workspace_root, '.rocketride', 'shell', 'shell.tgz'), shell_tgz):
-            out.line('Vendored .rocketride/shell/shell.tgz.')
-        client_tgz = fetch_artifact(base, 'client/typescript', 'client SDK package (rocketride.tgz)')
-        if write_if_changed(os.path.join(workspace_root, '.rocketride', 'client', 'rocketride.tgz'), client_tgz):
-            out.line('Vendored .rocketride/client/rocketride.tgz.')
+        degraded = False
+
+        try:
+            shell_tgz = fetch_artifact(base, 'client/shell', 'platform package (shell.tgz)')
+            if write_if_changed(os.path.join(workspace_root, '.rocketride', 'shell', 'shell.tgz'), shell_tgz):
+                out.line('Vendored .rocketride/shell/shell.tgz.')
+        except Exception as err:  # noqa: BLE001
+            degraded = True
+            out.line(f'warning: could not vendor the platform package (shell.tgz): {err}')
+
+        try:
+            client_tgz = fetch_artifact(base, 'client/typescript', 'client SDK package (rocketride.tgz)')
+            if write_if_changed(os.path.join(workspace_root, '.rocketride', 'client', 'rocketride.tgz'), client_tgz):
+                out.line('Vendored .rocketride/client/rocketride.tgz.')
+        except Exception as err:  # noqa: BLE001
+            degraded = True
+            out.line(f'warning: could not vendor the client SDK package (rocketride.tgz): {err}')
 
         # step: agent docs bundle (sweep + stamp) and the CLAUDE.md stub
-        install_docs_bundle(workspace_root, base, out.line)
+        try:
+            install_docs_bundle(workspace_root, base, out.line)
+        except Exception as err:  # noqa: BLE001
+            degraded = True
+            out.line(f'warning: could not install the agent docs bundle: {err}')
         try:
             if install_stub(workspace_root, 'CLAUDE.md', 'CLAUDE.md'):
                 out.line('CLAUDE.md stub installed.')
@@ -464,6 +484,13 @@ async def run_init(args) -> int:
             os.makedirs(os.path.join(workspace_root, dir_name), exist_ok=True)
 
         out.line('')
+        if degraded:
+            # Credentials and conventions are on disk; only the downloads
+            # are missing, so the fix is to re-run once the server answers
+            out.line(f'Workspace set up against {uri}, but some downloads failed.')
+            out.line('Run `rocketride init` again once the server is reachable to finish provisioning.')
+            out.result({'uri': uri, 'workspaceRoot': workspace_root, 'initialized': False})
+            return 1
         out.line(f'Workspace initialized against {uri}.')
         out.line('Docs: .rocketride/docs/ROCKETRIDE_README.md is the starting point.')
         out.result({'uri': uri, 'workspaceRoot': workspace_root, 'initialized': True})

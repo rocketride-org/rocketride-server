@@ -25,9 +25,9 @@
 # =============================================================================
 """The single sender of the deploy rail's server events.
 
-Two event names ride the org-scoped ``EVENT_TYPE.DEPLOY`` subscription, with
-OPPOSITE contracts — which is exactly why they are separate names (receivers
-filter on ``event``, so neither can be mistaken for the other):
+Three event names ride the org-scoped ``EVENT_TYPE.DEPLOY`` subscription, with
+DIFFERENT contracts — which is exactly why they are separate names (receivers
+filter on ``event``, so none can be mistaken for another):
 
 - ``apaevt_deploy`` — CACHE INVALIDATION, never data. Every deployment
   mutation (DAP handlers in cmd_deploy, the scheduler's dispatch

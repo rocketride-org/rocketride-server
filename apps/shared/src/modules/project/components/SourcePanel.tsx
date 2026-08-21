@@ -79,8 +79,7 @@ export interface ISourcePanelProps {
 	liveTaskStatus?: TaskStatus;
 	/** Component id → display name for the trace viewer. */
 	componentNames: Map<string, string>;
-	/** Connection / gating flags, forwarded to the panes. */
-	isConnected: boolean;
+	/** Gating flags, forwarded to the panes. */
 	isSubscribed?: boolean;
 	isReadonly?: boolean;
 	serverHost?: string;

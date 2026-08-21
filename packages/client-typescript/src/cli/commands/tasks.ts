@@ -255,17 +255,21 @@ export function registerTaskCommands(program: Command): void {
 						objinfo: { filepath: filePath, size: stats.size },
 					};
 				});
-				const results: UPLOAD_RESULT[] = await client.sendFiles(fileObjects, taskToken!, maxConcurrent);
-				const elapsedSeconds = (Date.now() - startTime) / 1000;
-
-				// step: tear down a pipeline this command started
-				if (managePipeline && taskToken) {
-					try {
-						await client.terminate(taskToken);
-					} catch (error) {
-						out.line(`warning: failed to terminate upload pipeline: ${error}`);
+				let results: UPLOAD_RESULT[];
+				try {
+					results = await client.sendFiles(fileObjects, taskToken!, maxConcurrent);
+				} finally {
+					// step: tear down a pipeline this command started — in a
+					// finally so a failed send never strands the pipeline
+					if (managePipeline && taskToken) {
+						try {
+							await client.terminate(taskToken);
+						} catch (error) {
+							out.line(`warning: failed to terminate upload pipeline: ${error}`);
+						}
 					}
 				}
+				const elapsedSeconds = (Date.now() - startTime) / 1000;
 
 				// step: summarize
 				const succeeded = results.filter((r) => r.action === 'complete');

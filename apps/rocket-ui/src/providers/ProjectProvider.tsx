@@ -401,10 +401,12 @@ const ProjectProvider: React.FC<ProjectPageProps> = ({ uri, pipeline, isDirty, i
 			} else if (action === 'restart') {
 				client
 					.getTaskToken({ projectId: pid, source })
+					// No token = no running task to restart; the server rejects a
+					// tokenless restart outright, so skip it exactly as stop does.
 					// The SDK types restart's pipeline as a loose record (no typed
 					// pipeline shape on that verb yet); PipelineConfig carries no
 					// index signature, so the hand-off needs the cast.
-					.then((token: string | undefined) => client.restart({ token, projectId: pid, source, pipeline: pipeline as unknown as Record<string, unknown> }))
+					.then((token: string | undefined) => (token ? client.restart({ token, projectId: pid, source, pipeline: pipeline as unknown as Record<string, unknown> }) : undefined))
 					.catch((err: unknown) => setPipelineError(err instanceof Error ? err.message : String(err)));
 			}
 		},

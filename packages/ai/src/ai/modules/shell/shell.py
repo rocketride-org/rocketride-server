@@ -227,7 +227,10 @@ async def _app_entry_info(token: str, app_id: str) -> Optional[dict]:
     minimal — no org ids, no build metadata, no developer facts — because
     anonymous callers reach this. A visible entry WITHOUT a registry
     version (a dev-overlay-only preview) returns None: nothing versioned
-    would serve, and the probe must say so.
+    would serve, and the probe must say so. The same holds for a version
+    the caller cannot actually fetch (unbuilt or unentitled) — the answer
+    is resolved against the SAME servable map ``_serve_versioned`` uses, so
+    the probe can never advertise an entry URL that would 404.
     """
     for entry in await _apps_for_token(token):
         if _app_field(entry, 'id') != app_id:
@@ -236,6 +239,8 @@ async def _app_entry_info(token: str, app_id: str) -> Optional[dict]:
         if not registry_version:
             return None
         version = int(registry_version)
+        if version not in await _version_dirs_for(token, app_id):
+            return None
         return {
             'appId': app_id,
             'name': _app_field(entry, 'name') or app_id,

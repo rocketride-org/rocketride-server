@@ -428,15 +428,23 @@ export const WorkspaceProvider: React.FC<IWorkspaceProviderProps> = ({ apps, wor
 			// ONCE — boot then resolves the manifest default; with no override
 			// left, a second failure cannot loop. Dev-owned containers are
 			// exempt (overrides never apply to them).
-			if (!isDevRemote(entry.moduleId) && getAppVersionOverride(appId)) {
-				const dropped = getAppVersionOverride(appId);
+			const dropped = isDevRemote(entry.moduleId) ? null : getAppVersionOverride(appId);
+			if (dropped) {
 				clearAppVersionOverride(appId);
-				try {
-					sessionStorage.setItem('rr:droppedOverride', `${appId} v${dropped?.version ?? '?'}`);
-				} catch { /* storage unavailable — the reload still restores the default */ }
-				console.warn(`[shell] reloading: dropped failing version override for ${appId} (v${dropped?.version ?? '?'}) — rebooting onto the default resolution`);
-				window.location.reload();
-				return false;
+				// The clear swallows storage errors: a write that fails while
+				// reads still succeed leaves the override in place, so the next
+				// boot fails the same way and reloads again — unbounded. Reload
+				// ONLY once the override reads back as gone; otherwise fall
+				// through to the normal failure path (error + Retry).
+				if (getAppVersionOverride(appId) === null) {
+					try {
+						sessionStorage.setItem('rr:droppedOverride', `${appId} v${dropped.version}`);
+					} catch { /* storage unavailable — the reload still restores the default */ }
+					console.warn(`[shell] reloading: dropped failing version override for ${appId} (v${dropped.version}) — rebooting onto the default resolution`);
+					window.location.reload();
+					return false;
+				}
+				console.error(`[shell] could not clear the failing version override for ${appId} (v${dropped.version}) — not reloading; surfacing the load failure instead`);
 			}
 			failedSetRef.current.add(appId);
 			setAppLoadErrors((prev) => ({ ...prev, [appId]: (e instanceof Error ? e.message : String(e)) || `App "${appId}" failed to load.` }));

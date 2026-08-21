@@ -34,6 +34,7 @@
 import { Command } from 'commander';
 import { addConnectionOptions, addDeployConnectionOptions, connectClient, runCliCommand } from '../common';
 import { NO_DEPLOY_TARGET_MESSAGE } from '../env';
+import { toHttpBase } from '../../../../client-common/typescript/src/provision';
 
 /**
  * Register the `app` command group on the program.
@@ -94,7 +95,7 @@ export function registerAppCommands(program: Command): void {
 		.action(async (slug, options) => {
 			await runCliCommand(options, async (out) => {
 				const { createAppWorkspace } = await import('../../app-pack/index.js');
-				const serverBaseUrl = options.uri ? String(options.uri).replace(/^ws:/i, 'http:').replace(/^wss:/i, 'https:').replace(/\/task\/service\/?$/i, '').replace(/\/+$/, '') : undefined;
+				const serverBaseUrl = options.uri ? toHttpBase(String(options.uri)) : undefined;
 				const created = await createAppWorkspace(options.workspace ?? process.cwd(), slug, {
 					template: options.template,
 					displayName: options.name,
@@ -117,7 +118,7 @@ export function registerAppCommands(program: Command): void {
 	// ── app verify ───────────────────────────────────────────────────────
 	// The no-side-effect precheck: everything `app deploy` needs, verified
 	// locally with no server connection at all.
-	const verifyCmd = appCmd
+	appCmd
 		.command('verify <folder>')
 		.description('Pre-check an app folder for deploy: manifest, id grammar, assets, includes, pack dry run')
 		.option('--workspace <dir>', 'Workspace root the pack would be rooted at (default: current directory)')
@@ -134,5 +135,4 @@ export function registerAppCommands(program: Command): void {
 				return report.ok ? 0 : 1;
 			});
 		});
-	void verifyCmd;
 }

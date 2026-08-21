@@ -105,9 +105,9 @@ checks); STORE carries commerce only (mode, pricing plans, submission, and
 review history). The `preflight` checks are tiered accordingly (`tier:
 'package' | 'store'`), and Submit-for-review gates on both tiers.
 
-PACKAGE also carries the strict-type-checking waiver: `appManifest.
-typecheck: false` makes the server build SKIP its verify phase (the user's
-own `tsc --noEmit`) and bundle anyway — the waiver is recorded in the
+PACKAGE also carries the strict-type-checking waiver:
+`appManifest.typecheck: false` makes the server build SKIP its verify phase
+(the user's own `tsc --noEmit`) and bundle anyway — the waiver is recorded in the
 version's build.log and surfaces as a standing warn row in the readiness
 checks. Absent/`true` = strict, the default.
 

@@ -620,6 +620,11 @@ const AppWebview: React.FC = () => {
 					// The connection's identity changed (org switch reconnect or a
 					// server account push) — re-mint the host so org-scoped data
 					// re-fetches.
+					// Retained build words belong to the OLD rail and are keyed by
+					// registry version alone, so the same number means something
+					// else under the new identity: drop them rather than let a
+					// late-mounted DEPLOY view replay a foreign account's word.
+					buildTicks.current.clear();
 					setAccountSeq((n) => n + 1);
 					break;
 				case 'appdev:result': {

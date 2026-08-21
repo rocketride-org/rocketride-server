@@ -968,6 +968,12 @@ class FileStore:
         (server-side on object stores — no bytes pass through this process);
         a directory moves as one native move per file under its prefix.
 
+        A directory rename is therefore NOT atomic: with no atomic backend
+        primitive to ride, a mid-loop backend failure leaves the tree split
+        between both paths. That case is reported, never swallowed — every
+        file is attempted and the survivors are named in the raised error
+        (the same partial-failure contract ``rmdir`` carries).
+
         Args:
             old_path: Current relative path within the account store.
             new_path: New relative path within the account store.
@@ -977,7 +983,8 @@ class FileStore:
         Raises:
             StorageError: If old_path does not exist, is open for reading or
                 writing, the destination already exists without ``overwrite``,
-                or the operation fails.
+                or the operation fails — including a partial directory rename,
+                whose message lists the files left under ``old_path``.
         """
         old_full, old_kind, old_rest = self._resolve(old_path)
         new_full, new_kind, new_rest = self._resolve(new_path)
@@ -1009,13 +1016,28 @@ class FileStore:
                 existing = await self._store.list_files(new_dir_prefix)
                 if existing:
                     raise StorageError(f'Destination already exists: {new_path}')
+            # No backend offers an atomic directory move, and rolling completed
+            # moves back is itself fallible — a failed reverse move would only
+            # scatter the tree further. Take rmdir's contract instead: attempt
+            # EVERY file, then name the ones that stayed behind, so a directory
+            # split across both paths is visible to the caller rather than
+            # hidden behind whichever file failed first.
+            errors: list[str] = []
             for file_path in all_files:
                 relative_to_old = file_path[len(dir_prefix) :]
                 new_file_path = new_dir_prefix + relative_to_old
                 # Native move per file — no whole-file buffering in this
                 # process, and each destination is untouched until its new
                 # content is in place (same guarantee as the file branch).
-                await self._store.move_file(file_path, new_file_path)
+                try:
+                    await self._store.move_file(file_path, new_file_path)
+                except StorageError as e:
+                    errors.append(f'{file_path}: {e}')
+            if errors:
+                raise StorageError(
+                    f'rename partial failure ({len(errors)} of {len(all_files)} file(s) still under {old_path}): '
+                    f'{"; ".join(errors)}'
+                )
         else:
             # File rename: check both source and destination locks, then
             # check destination existence unless overwrite was requested.

@@ -75,6 +75,9 @@ const INTEGRATION_CONFIG_KEYS: Record<string, string> = {
 export class AgentManager {
 	private readonly installers: BaseAgentInstaller[] = [new CursorInstaller(), new ClaudeCodeInstaller(), new WindsurfInstaller(), new CopilotInstaller(), new ClaudeMdInstaller(), new AgentsMdInstaller()];
 
+	/** The install pass currently running, shared by concurrent callers. */
+	private autoInstallInFlight: Promise<void> | null = null;
+
 	/**
 	 * Run on startup. Two passes:
 	 *
@@ -85,6 +88,27 @@ export class AgentManager {
 	 *   is checked, install that stub if it wasn't already covered by Pass 1.
 	 */
 	async autoInstall(workspaceRoot: vscode.Uri): Promise<void> {
+		// Single-flight: activation starts a pass without awaiting it, and a
+		// shell:connected event starts another. The dedupe state below is
+		// per-call, so overlapping passes would re-run installers and write
+		// the same workspace files at once. Concurrent callers share the
+		// running pass instead; the memo clears when it settles so a LATER
+		// call still installs (settings can change mid-session).
+		if (!this.autoInstallInFlight) {
+			this.autoInstallInFlight = this.runAutoInstall(workspaceRoot).finally(() => {
+				this.autoInstallInFlight = null;
+			});
+		}
+		return this.autoInstallInFlight;
+	}
+
+	/**
+	 * The actual install pass — always entered through {@link autoInstall},
+	 * which serializes it.
+	 *
+	 * @param workspaceRoot - Workspace folder receiving the stubs.
+	 */
+	private async runAutoInstall(workspaceRoot: vscode.Uri): Promise<void> {
 		const logger = getLogger();
 		const workspaceConfig = vscode.workspace.getConfiguration('rocketride');
 		const autoDetect = workspaceConfig.get<boolean>('integrations.autoAgentIntegration', true);

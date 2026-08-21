@@ -255,6 +255,9 @@ export class AppScreenProvider implements vscode.CustomReadonlyEditorProvider {
 						// event BEFORE launching, then forward the credential —
 						// resolving immediately would read the old signed-out
 						// state and leave the preview stuck at its prompt.
+						// Tears the wait down early; assigned inside the executor
+						// where the listener and timer handles exist.
+						let abandonWait = (): void => {};
 						const completed = new Promise<boolean>((resolve) => {
 							const onChanged = () => {
 								clearTimeout(timer);
@@ -265,12 +268,26 @@ export class AppScreenProvider implements vscode.CustomReadonlyEditorProvider {
 								resolve(false);
 							}, 300000);
 							auth.onDidChange.once('changed', onChanged);
+							abandonWait = () => {
+								clearTimeout(timer);
+								auth.onDidChange.removeListener('changed', onChanged);
+								resolve(false);
+							};
 						});
-						await auth.signIn(
-							process.env.RR_ZITADEL_URL || '',
-							process.env.RR_ZITADEL_VSCODE_CLIENT_ID || '',
-							ConfigManager.getInstance().getEffectiveCloudUrl()
-						);
+						try {
+							await auth.signIn(
+								process.env.RR_ZITADEL_URL || '',
+								process.env.RR_ZITADEL_VSCODE_CLIENT_ID || '',
+								ConfigManager.getInstance().getEffectiveCloudUrl()
+							);
+						} catch (err) {
+							// The browser never opened, so no change event is
+							// coming: drop the listener and the five-minute
+							// timer instead of leaving them armed for a token
+							// that cannot arrive.
+							abandonWait();
+							getLogger().output(`[appdev] cloud sign-in could not start: ${err}`);
+						}
 						if (await completed) {
 							try {
 								const token = await this.connectionManager.resolveAuthCredential();
@@ -463,7 +480,11 @@ export class AppScreenProvider implements vscode.CustomReadonlyEditorProvider {
 										canSelectMany: false,
 										defaultUri: vscode.Uri.file(scanned.folder),
 										openLabel: 'Select',
-										filters: kind === 'icon' ? { 'SVG icon': ['svg'] } : { Markdown: ['md'] },
+										// Every format the icon reader inlines (ICON_MEDIA_TYPES),
+										// not SVG alone — the manifest and the overlay
+										// registration accept all of them, so a picker that
+										// showed only .svg refused icons the platform serves.
+										filters: kind === 'icon' ? { Icon: ['svg', 'png', 'jpg', 'jpeg', 'gif', 'webp'] } : { Markdown: ['md'] },
 									});
 									if (!picked || picked.length === 0) {
 										value = null;
@@ -550,8 +571,12 @@ export class AppScreenProvider implements vscode.CustomReadonlyEditorProvider {
 									if (!abs.startsWith(path.resolve(scanned.folder) + path.sep)) {
 										throw new Error('Path escapes the app folder.');
 									}
+									// Stat BEFORE reading: the manifest can name an arbitrarily
+									// large file, and checking byteLength after the read means
+									// the whole thing is already in memory by then.
+									const stat = await vscode.workspace.fs.stat(vscode.Uri.file(abs));
+									if (stat.size > 512 * 1024) throw new Error('File is over the 512KB preview limit.');
 									const bytes = await vscode.workspace.fs.readFile(vscode.Uri.file(abs));
-									if (bytes.byteLength > 512 * 1024) throw new Error('File is over the 512KB preview limit.');
 									value = Buffer.from(bytes).toString('utf8');
 									break;
 								}
@@ -864,8 +889,13 @@ export class AppScreenProvider implements vscode.CustomReadonlyEditorProvider {
 			if (event.event === 'apaevt_build' && event.body) {
 				const b = event.body as { appId?: string; phase?: string; lines?: string[] };
 				if (b.appId && Array.isArray(b.lines) && b.lines.length > 0) {
+					// One row PER LINE: notifyConsole's contract is a single
+					// line and each call makes one row, so a joined string
+					// would land in the Console pane as one row carrying
+					// embedded newlines. watchManager feeds the same pane
+					// line by line.
 					const prefix = `[build:${b.phase || '?'}]`;
-					this.notifyConsole(b.appId, 'log', b.lines.map((l) => `${prefix} ${l}`).join('\n'));
+					for (const line of b.lines) this.notifyConsole(b.appId, 'log', `${prefix} ${line}`);
 				}
 			}
 			// Server BUILD status ticker (apaevt_build_status): one short

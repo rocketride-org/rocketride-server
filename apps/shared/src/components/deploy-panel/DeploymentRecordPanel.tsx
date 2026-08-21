@@ -82,6 +82,12 @@ const S = {
 /** The loaded record: the DeploymentView prop set (minus the page title the
     drawer header replaces) plus the record verbs the footer runs. */
 export interface IDeploymentRecordData extends Omit<IDeploymentViewProps, 'documentTitle'> {
+	/** Team display name (e.g. 'Production'). The DRAWER names the record
+	    with it — the view itself never renders it. */
+	teamName: string;
+	/** sourceId -> true while a run of that source is live on the server.
+	    Read by the footer verbs (Run/Stop); the view never reads it. */
+	runningSources?: Record<string, boolean>;
 	/** The focused source's schedule paused flag; undefined = no schedule
 	    (the Pause/Resume verb renders only when a schedule exists). */
 	sourcePaused?: boolean;
@@ -196,15 +202,17 @@ export const DeploymentRecordPanel: React.FC<IDeploymentRecordPanelProps> = ({ o
 		);
 	}
 
-	const { sourcePaused, onSetSchedulePaused, sourceConfig, onSetSourceConfig, onRunSource, onStopSource, ...viewProps } = data;
-	const sourceRunning = Boolean(viewProps.runningSources?.[viewProps.sourceId]);
+	// teamName and runningSources are DRAWER inputs (title + footer verbs), so
+	// they are peeled off here — what remains is exactly the view's prop set.
+	const { teamName, runningSources, sourcePaused, onSetSchedulePaused, sourceConfig, onSetSourceConfig, onRunSource, onStopSource, ...viewProps } = data;
+	const sourceRunning = Boolean(runningSources?.[viewProps.sourceId]);
 	// Effective Execution settings = staged edits over server truth; dirty
 	// only when they actually differ (re-selecting the same values is a
 	// no-op, so Save/Cancel stay hidden).
 	const serverConfig = sourceConfig ?? { traceLevel: null, debugOut: false };
 	const effectiveConfig = stagedConfig ?? serverConfig;
 	const configDirty = stagedConfig !== null && (stagedConfig.traceLevel !== serverConfig.traceLevel || stagedConfig.debugOut !== serverConfig.debugOut);
-	const { teamName, deployment } = viewProps;
+	const { deployment } = viewProps;
 
 	// Pure inspect without task.control: NO footer (the guideline). The
 	// verbs are the SOURCE-schedule pair — [Pause|Resume][Run|Stop], the

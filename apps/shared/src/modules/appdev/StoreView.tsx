@@ -204,6 +204,11 @@ const styles: Record<string, React.CSSProperties> = {
 	submitMsg: {
 		marginTop: 10,
 	},
+	// Save-failure banner — sits above the grid, on the view's gutters.
+	errorWrap: {
+		margin: '14px 26px 0',
+		maxWidth: 1060,
+	},
 	checkRow: {
 		display: 'flex',
 		alignItems: 'center',
@@ -309,6 +314,9 @@ export const StoreView: React.FC<IStoreViewProps> = ({ host, app, readOnly, onNa
 	const [saved, setSaved] = useState<ListingDraft | null>(null);
 	const [checks, setChecks] = useState<PreflightCheck[]>([]);
 	const [saving, setSaving] = useState(false);
+	// Save-failure text — a silent catch leaves the footer dirty with no
+	// reason on screen, so the user presses Save into the void.
+	const [error, setError] = useState('');
 	// Footer-Cancel discard confirm (the standard's guard before reverting).
 	const [confirmDiscard, setConfirmDiscard] = useState(false);
 
@@ -337,11 +345,12 @@ export const StoreView: React.FC<IStoreViewProps> = ({ host, app, readOnly, onNa
 	const onSave = useCallback(async (): Promise<void> => {
 		if (!draft || !host.saveListing || readOnly) return;
 		setSaving(true);
+		setError('');
 		try {
 			await host.saveListing(draft);
 			await refresh();
 		} catch (e) {
-			console.log('[appdev] store save failed:', e);
+			setError(e instanceof Error ? e.message : String(e));
 		} finally {
 			setSaving(false);
 		}
@@ -402,6 +411,14 @@ export const StoreView: React.FC<IStoreViewProps> = ({ host, app, readOnly, onNa
 					<div style={styles.h1}>{app.name}</div>
 					<div style={styles.sub}>Store — the commerce posture and the public rung: pricing mode, plans, and the requirements every public version must pass. Only needed to distribute on the App Store; @me and @team deploys skip all of this. Every public version is reviewed — submission happens on the Deploy tab.</div>
 				</div>
+
+				{/* Save failure — the footer stays dirty, so the reason has to
+				    be on screen or the retry looks like a no-op. */}
+				{error ? (
+					<div style={styles.errorWrap}>
+						<Banner variant="error">{error}</Banner>
+					</div>
+				) : null}
 
 				<div style={styles.grid}>
 					{/* ── Left: the listing card ─────────────────────────────── */}

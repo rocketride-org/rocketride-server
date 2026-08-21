@@ -31,8 +31,10 @@ resolution patched, and pin:
   - the payload is EXACTLY the safe subset (data minimization is a
     contract — a new field must consciously edit this test),
   - the caller's /apps cookie is the resolution identity,
-  - invisible apps and dev-overlay-only entries fall through to the
-    static tree's 404 (the endpoint is not an existence oracle),
+  - invisible apps, dev-overlay-only entries and versions outside the
+    caller's servable set fall through to the static tree's 404 (the
+    endpoint is not an existence oracle, and never advertises an entry
+    URL that would 404),
   - two-segment asset paths and versioned bundle paths are untouched.
 """
 
@@ -49,7 +51,7 @@ import ai.modules.shell.shell as shell_mod
 # =============================================================================
 
 
-def _client(monkeypatch, tmp_path, apps, capture=None):
+def _client(monkeypatch, tmp_path, apps, capture=None, servable=(7,)):
     """A TestClient over apps_static with the manifest resolution faked.
 
     Args:
@@ -57,6 +59,8 @@ def _client(monkeypatch, tmp_path, apps, capture=None):
         tmp_path:    Stands in for the static assets tree (_apps_root).
         apps:        Manifest entries _apps_for_token should resolve.
         capture:     Optional list collecting the tokens resolution saw.
+        servable:    Registry versions the caller may actually fetch — what
+                     _version_dirs_for reports (built AND entitled).
 
     Returns:
         TestClient with GET /apps/{path} wired to the real handler.
@@ -68,7 +72,12 @@ def _client(monkeypatch, tmp_path, apps, capture=None):
             capture.append(token)
         return apps
 
+    async def fake_version_dirs_for(token: str, app_id: str) -> dict:
+        """The canned servable map: version -> dist dir (dir never read)."""
+        return {version: f'{app_id}/v{version}/dist' for version in servable}
+
     monkeypatch.setattr(shell_mod, '_apps_for_token', fake_apps_for_token)
+    monkeypatch.setattr(shell_mod, '_version_dirs_for', fake_version_dirs_for)
     monkeypatch.setattr(shell_mod, '_apps_root', str(tmp_path))
 
     app = FastAPI()
@@ -143,6 +152,16 @@ def test_dev_overlay_only_entry_is_not_resolvable(monkeypatch, tmp_path):
     overlay = {'id': 'me.dev', 'name': 'Dev', 'entry': 'http://localhost:3100/remoteEntry.js'}
     client = _client(monkeypatch, tmp_path, [overlay])
     assert client.get('/apps/me.dev').status_code == 404
+
+
+def test_unservable_version_is_not_resolvable(monkeypatch, tmp_path):
+    """A registryVersion the caller cannot actually fetch — unbuilt, failed
+    or unentitled, so absent from the servable map _serve_versioned uses —
+    must not be advertised: the probe 404s instead of handing back an entry
+    URL that would itself 404.
+    """
+    client = _client(monkeypatch, tmp_path, [HOME], servable=())
+    assert client.get('/apps/rocketride.home').status_code == 404
 
 
 def test_asset_paths_are_untouched(monkeypatch, tmp_path):

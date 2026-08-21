@@ -1477,6 +1477,13 @@ pattern; theme CSS for the initial paint belongs in the srcdoc itself.
 **Rule:** The bridge forwards shell events only AFTER the frame signals
 `view:ready` — an iframe that skips the handshake receives nothing.
 
+**Rule:** Host the frame with `srcdoc` or a same-origin URL. The shell side
+ignores any inbound message whose `source` is not the managed frame's
+`contentWindow`, and posts outbound with the shell's own origin (never
+`'*'`) — a cross-origin `src` therefore never receives `shell:init`'s
+`user`/`apiConfig`. The frame side must guard the same way: only accept
+messages posted by `window.parent`.
+
 ```tsx
 // Shell side - the hosting view wires the bridge to its frame:
 import { useRef } from 'react';
@@ -1490,8 +1497,10 @@ function EmbeddedView({ src }) {
 
 // Iframe side - the handshake:
 window.parent.postMessage({ type: 'view:ready' }, '*');
-window.addEventListener('message', ({ data }) => {
-	if (data.type === 'shell:init') applyTheme(data.theme);
+window.addEventListener('message', (e) => {
+	// Only the hosting shell document may drive this frame.
+	if (e.source !== window.parent) return;
+	if (e.data.type === 'shell:init') applyTheme(e.data.theme);
 });
 ```
 

@@ -280,7 +280,17 @@ function walkDir(absDir: string, relDir: string, containRoot: string, matchers: 
 	const own = gitignoreMatcherOf(absDir, relDir);
 	const active = own ? [...matchers, own] : matchers;
 
-	for (const entry of fs.readdirSync(absDir, { withFileTypes: true })) {
+	// step: a directory this process cannot list (EACCES, or removed
+	// mid-walk) is skipped rather than aborting the pack — the Python
+	// mirror's os.scandir does the same
+	let entries: fs.Dirent[];
+	try {
+		entries = fs.readdirSync(absDir, { withFileTypes: true });
+	} catch {
+		return;
+	}
+
+	for (const entry of entries) {
 		const rel = relDir === '' ? entry.name : `${relDir}/${entry.name}`;
 		const abs = path.join(absDir, entry.name);
 
@@ -811,9 +821,12 @@ export async function createAppWorkspace(workspaceRoot: string, slug: string, op
 		installed = await new Promise<boolean>((resolve) => {
 			// Single command string when a shell is involved: passing an args
 			// array with shell:true concatenates unescaped (Node DEP0190).
+			// stdio:'ignore' because nobody reads these pipes — a full pipe
+			// buffer would block pnpm forever and the timer below would kill
+			// an install that was in fact succeeding.
 			const proc = process.platform === 'win32'
-				? spawn('pnpm install --prefer-offline', { cwd: wsAbs, shell: true, env: { ...process.env, NO_COLOR: '1' } })
-				: spawn('pnpm', ['install', '--prefer-offline'], { cwd: wsAbs, env: { ...process.env, NO_COLOR: '1' } });
+				? spawn('pnpm install --prefer-offline', { cwd: wsAbs, shell: true, stdio: 'ignore', env: { ...process.env, NO_COLOR: '1' } })
+				: spawn('pnpm', ['install', '--prefer-offline'], { cwd: wsAbs, stdio: 'ignore', env: { ...process.env, NO_COLOR: '1' } });
 			const timer = setTimeout(() => {
 				proc.kill();
 				resolve(false);

@@ -2722,14 +2722,16 @@ export class RocketRideClient extends DAPClient {
 	 *
 	 * Answered by role: the developer org sees its FULL rail (published or
 	 * not); other callers see only the versions serving on rows visible to
-	 * them. Each entry carries its deployment `state`, its `buildStatus`
-	 * ('ok' = servable bytes exist), and the `rungs` naming the audiences
-	 * serving it.
+	 * them. Each entry carries its deployment `state`, its build lifecycle
+	 * (`buildStatus` — 'ok' = servable bytes exist — plus the `buildPhase`
+	 * it reached and `buildEndedAt`), and the `rungs` naming the audiences
+	 * serving it. No error text rides the rail: build detail is served on
+	 * demand by the build-log verb.
 	 *
 	 * @param appId - App id
 	 * @returns Rail entries, newest first
 	 */
-	async listDeployments(appId: string): Promise<Array<{ registryVersion: number; appVersion: string; sha256: string; publishedAt: number; author: string; message: string; state: string; buildStatus: string; rungs: string[] }>> {
+	async listDeployments(appId: string): Promise<Array<{ registryVersion: number; appVersion: string; sha256: string; publishedAt: number; author: string; message: string; state: string; buildStatus: string; buildPhase: string; buildEndedAt?: number | null; rungs: string[] }>> {
 		const body = await this.call('rrext_deploy_app', { subcommand: 'versions', appId });
 		return (body as any)?.versions ?? [];
 	}

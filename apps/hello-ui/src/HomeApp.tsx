@@ -342,7 +342,8 @@ const styles = {
 		borderRadius: 12,
 		boxSizing: 'border-box' as const,
 		backgroundColor: 'var(--rr-bg-paper)',
-		cursor: 'pointer',
+		// No cursor/role here: the card is a plain container. The launch
+		// button inside it carries the pointer and the activation.
 		// transform is ALWAYS present ('none' at rest) so every hover key
 		// exists in both states — React diffs the pair reliably.
 		transform: 'none',
@@ -429,11 +430,34 @@ const styles = {
 		overflow: 'hidden',
 	} as CSSProperties,
 
-	/** Bottom row of the card — hosts the version chip, pinned bottom-left. */
+	/** The launch control — a bare button covering the card.
+
+	    The CARD is not the control: a role="button" card would make the
+	    version chip an interactive descendant of a button, which assistive
+	    technologies expose incorrectly. This overlay keeps the launch target
+	    the size of the whole card while the chip stays a SIBLING control,
+	    and it leaves the heading/description markup untouched (a button may
+	    not contain flow content either). */
+	launch: {
+		position: 'absolute' as const,
+		inset: 0,
+		zIndex: 0,
+		margin: 0,
+		padding: 0,
+		border: 'none',
+		borderRadius: 12,
+		backgroundColor: 'transparent',
+		cursor: 'pointer',
+	} as CSSProperties,
+
+	/** Bottom row of the card — hosts the version chip, pinned bottom-left.
+	    Raised above the launch overlay so the chip takes its own clicks. */
 	versionRow: {
 		display: 'flex',
 		alignItems: 'center',
 		marginTop: 'auto',
+		position: 'relative' as const,
+		zIndex: 1,
 	} as CSSProperties,
 
 	/** Faint version chip — click opens the version drop list. */
@@ -796,14 +820,15 @@ const AppCard: React.FC<{ app: AppManifestEntry; onLaunch: (app: AppManifestEntr
 
 	return (
 		<div
-			role="button"
-			tabIndex={0}
 			style={{ ...styles.card, ...(hover ? styles.cardHover : {}) }}
-			onClick={() => onLaunch(app)}
-			onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onLaunch(app); } }}
 			onMouseEnter={() => setHover(true)}
 			onMouseLeave={() => setHover(false)}
 		>
+			{/* Launch control — a sibling of the version chip, not its
+			    ancestor: the card itself is inert, this overlay carries the
+			    activation over the card's whole area. */}
+			<button type="button" style={styles.launch} aria-label={`Open ${app.name}`} onClick={() => onLaunch(app)} />
+
 			{/* Top row — icon chip + name/category */}
 			<div style={styles.cardHeader}>
 				<div style={styles.iconChip}>

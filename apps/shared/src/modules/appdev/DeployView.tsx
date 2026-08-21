@@ -37,7 +37,7 @@
  * states instead of dead chrome.
  */
 
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Button, ConfirmDialog, EmptyState, InputField, Modal, StatusBadge } from 'shell';
 import type { AppSummary, AppVersionInfo, BuildStatusTick, IAppBuilderHost, RungPin } from './types';
 
@@ -528,6 +528,9 @@ export const DeployView: React.FC<IDeployViewProps> = ({ host, app, readOnly }) 
 	// its text (null = loading).
 	const [logFor, setLogFor] = useState<AppVersionInfo | null>(null);
 	const [logText, setLogText] = useState<string | null>(null);
+	// The registry version whose log fetch may still write text. A fetch that
+	// resolves after the viewer moved on (or closed) is dropped.
+	const logRequestRef = useRef<number | null>(null);
 
 	/**
 	 * Load versions + pins. The two queries run INDEPENDENTLY so the versions
@@ -649,17 +652,30 @@ export const DeployView: React.FC<IDeployViewProps> = ({ host, app, readOnly }) 
 		(v: AppVersionInfo): void => {
 			setLogFor(v);
 			setLogText(null);
+			// Stamp the request: a close/reopen while the first fetch is in
+			// flight must not paint the previous version's log over the new one.
+			logRequestRef.current = v.registryVersion;
 			if (!host.loadBuildLog) {
 				setLogText('Build-log reading is not wired up on this host.');
 				return;
 			}
+			/** Write log text only while this version's request is still the open one. */
+			const write = (text: string): void => {
+				if (logRequestRef.current === v.registryVersion) setLogText(text);
+			};
 			void host
 				.loadBuildLog(v.registryVersion)
-				.then((text) => setLogText(text || 'No build log exists for this version.'))
-				.catch((e) => setLogText(`Could not load the build log: ${e instanceof Error ? e.message : String(e)}`));
+				.then((text) => write(text || 'No build log exists for this version.'))
+				.catch((e) => write(`Could not load the build log: ${e instanceof Error ? e.message : String(e)}`));
 		},
 		[host]
 	);
+
+	/** Close the build-log viewer and retire the in-flight request stamp. */
+	const closeBuildLog = useCallback((): void => {
+		logRequestRef.current = null;
+		setLogFor(null);
+	}, []);
 
 	/** Open the "Publish v<N> to…" audience dialog (the pipe deploy dialog's
 	 * picker pattern) and lazily load the team roster for its rows. */
@@ -967,9 +983,9 @@ export const DeployView: React.FC<IDeployViewProps> = ({ host, app, readOnly }) 
 					// 80% of the pane: build-log lines are long — the stock 440px
 					// box wraps them into porridge.
 					width={Math.floor(window.innerWidth * 0.8)}
-					onClose={() => setLogFor(null)}
+					onClose={closeBuildLog}
 					footer={
-						<Button variant="secondary" onClick={() => setLogFor(null)}>
+						<Button variant="secondary" onClick={closeBuildLog}>
 							Close
 						</Button>
 					}
