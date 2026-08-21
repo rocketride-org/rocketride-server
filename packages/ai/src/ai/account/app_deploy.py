@@ -937,6 +937,9 @@ def manifest_snapshot(entry: Dict[str, Any], artifact: Dict[str, Any]) -> Dict[s
     manifest = metadata.get('manifest') if isinstance(metadata.get('manifest'), dict) else {}
     return {
         'name': str(manifest.get('name') or artifact.get('name') or artifact.get('appId') or ''),
+        # Who makes it, shown under the name in the store. Empty when the
+        # manifest declares none — the cards fall back to the first category.
+        'publisher': str(manifest.get('publisher') or ''),
         'description': str(manifest.get('description') or ''),
         'iconPath': str(manifest.get('icon') or ''),
         'readmePath': str(manifest.get('readme') or ''),
@@ -1165,9 +1168,13 @@ async def resolve_app_pins(org_id: str, user_id: Optional[str], team_ids: List[s
             'onDesktop': audience_type != 'public',
         }
         # Omitted (not None) when absent — a present None fails the client
-        # AppManifestEntry dict validation.
+        # AppManifestEntry dict validation. `publisher` is omitted rather than
+        # sent empty for the same reason the store cards want: absence is what
+        # makes them fall back to the first category.
         if snapshot.get('configuration'):
             entry['configuration'] = snapshot.get('configuration')
+        if snapshot.get('publisher'):
+            entry['publisher'] = snapshot.get('publisher')
         resolved[app_id] = entry
     return list(resolved.values())
 
