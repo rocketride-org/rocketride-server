@@ -118,6 +118,35 @@ async def _validate_pipeline(client, tasks, args: Dict[str, Any]) -> dict:
     return {'ok': not errors, 'errors': errors, 'warnings': warnings}
 
 
+async def _resolve_config(client, tasks, args: Dict[str, Any]) -> dict:
+    provider = args.get('provider')
+    if not provider:
+        return _bad('provider is required', 'pick a provider from list_components')
+
+    # Default only an absent config: `or {}` would coerce [] and skip this check.
+    config = args.get('config')
+    if config is None:
+        config = {}
+    if not isinstance(config, dict):
+        return _bad('config must be an object', "pass the component's config block, or omit it for defaults")
+
+    resolved, err = await engine_call(client.resolve_config(provider, config), 'resolve_config')
+    if err:
+        return err
+
+    result = resolved or {}
+    # Surface the discard rather than leaving it to be inferred from an absence:
+    # a key written beside 'profile' instead of inside it never reaches the node.
+    dropped = result.get('dropped') or []
+    out = {'ok': True, **result}
+    if dropped:
+        out['hint'] = (
+            f'{len(dropped)} config key(s) were discarded because a profile is set: {", ".join(dropped)}. '
+            f'Move them inside the "{result.get("profile")}" object to take effect.'
+        )
+    return out
+
+
 async def _describe_pipeline(client, tasks, args: Dict[str, Any]) -> dict:
     pipeline = load_pipeline(args)  # raises ValueError -> normalized by the dispatch layer
 
@@ -161,7 +190,7 @@ async def _describe_pipeline(client, tasks, args: Dict[str, Any]) -> dict:
 
 
 def register(registry: ToolRegistry) -> None:
-    """Register the 4 authoring/introspection tools against ``registry``."""
+    """Register the authoring/introspection tools against ``registry``."""
     registry.register(
         'list_components',
         'List RocketRide components ready to use now (zero-config plus integrations you have configured). '
@@ -180,6 +209,20 @@ def register(registry: ToolRegistry) -> None:
             'required': ['name'],
         },
     )(_describe_component)
+
+    registry.register(
+        'resolve_config',
+        'Show what a component config resolves to at load: the engine applies profile and default '
+        'merging, so the .pipe rarely says what the node receives. Reports discarded keys.',
+        {
+            'type': 'object',
+            'properties': {
+                'provider': {'type': 'string', 'description': 'Component provider, e.g. llm_openai'},
+                'config': {'type': 'object', 'description': "The component's config block; omit for defaults"},
+            },
+            'required': ['provider'],
+        },
+    )(_resolve_config)
 
     registry.register(
         'validate_pipeline',

@@ -17,6 +17,7 @@ EXPECTED_TOOL_NAMES = (
     # introspection
     'list_components',
     'describe_component',
+    'resolve_config',
     'validate_pipeline',
     'describe_pipeline',
     # execution
@@ -60,6 +61,7 @@ class FakeEngineClient:
         services=None,
         service_defs=None,
         validate_result=None,
+        resolve_config_result=None,
         task_statuses=None,
         public_token='pub-1',
         base_url='http://localhost:5565',
@@ -135,6 +137,8 @@ class FakeEngineClient:
         )
         self._service_defs = service_defs if service_defs is not None else dict(self._services.get('services', {}))
         self._validate_result = validate_result if validate_result is not None else {'errors': [], 'warnings': []}
+        self._resolve_config_result = resolve_config_result or {}
+        self.resolve_config_calls = []
         self.get_services_calls = 0
         self.get_service_calls = []
         self.validate_calls = []
@@ -181,6 +185,10 @@ class FakeEngineClient:
     async def validate(self, pipeline, source=None):
         self.validate_calls.append({'pipeline': pipeline, 'source': source})
         return dict(self._validate_result)
+
+    async def resolve_config(self, provider, config=None):
+        self.resolve_config_calls.append({'provider': provider, 'config': config})
+        return dict(self._resolve_config_result)
 
     async def use(self, **kwargs):
         self.used.append(kwargs)

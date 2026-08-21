@@ -105,6 +105,31 @@ class ServicesMixin(DAPClient):
 
         return await self.call('rrext_services', service=service)
 
+    async def resolve_config(self, provider: str, config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """
+        Resolve a component config the way the node will receive it.
+
+        Applies the engine's own profile and default merging, so an author can
+        see the effective config instead of inferring it. Resolution is
+        engine-side because the service catalog does not carry ``preconfig``.
+
+        Args:
+            provider: Component provider, e.g. 'llm_openai'.
+            config: The component's config block. Defaults to empty.
+
+        Returns:
+            ``{'provider', 'profile', 'resolved', 'dropped'}``, where ``dropped``
+            lists top-level keys the resolver discarded.
+
+        Raises:
+            ValueError: If provider is empty.
+            RuntimeError: If the service is unknown or has no preconfig section.
+        """
+        if not provider:
+            raise ValueError('Provider name is required')
+
+        return await self.call('rrext_resolve_config', provider=provider, config=config or {})
+
     async def validate(
         self,
         pipeline: PipelineConfig,

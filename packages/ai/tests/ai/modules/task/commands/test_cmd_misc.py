@@ -838,3 +838,78 @@ def test_misc_commands_init_is_noop():
     """The mixin's __init__ accepts the standard arguments without setting state."""
     instance = MiscCommands.__new__(MiscCommands)
     MiscCommands.__init__(instance, connection_id=1, server=None, transport=None)
+
+
+# ---------------------------------------------------------------------------
+# on_rrext_resolve_config
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_on_rrext_resolve_config_returns_what_the_node_receives(monkeypatch):
+    """Resolution runs through the engine's own getNodeConfig, not a reimplementation."""
+    monkeypatch.setattr(cmd_misc.Config, 'getNodeConfig', staticmethod(lambda p, c: {'model': 'gpt-4o', 'temp': 0}))
+
+    conn = _make_conn()
+    request = {'arguments': {'provider': 'llm_openai', 'config': {'model': 'gpt-4o'}}}
+    result = await MiscCommands.on_rrext_resolve_config(conn, request)
+
+    body = result['body']
+    assert body['provider'] == 'llm_openai'
+    assert body['profile'] == 'default'
+    assert body['resolved'] == {'model': 'gpt-4o', 'temp': 0}
+    assert body['dropped'] == []
+
+
+@pytest.mark.asyncio
+async def test_on_rrext_resolve_config_reports_keys_a_profile_discards(monkeypatch):
+    """
+    The #1839 shape: with a profile set, sibling top-level keys never reach the node.
+
+    Reporting them is the point of the tool. Inferring it from an absence is what
+    cost the issue author a day.
+    """
+    monkeypatch.setattr(cmd_misc.Config, 'getNodeConfig', staticmethod(lambda p, c: {'host': 'localhost'}))
+
+    conn = _make_conn()
+    request = {
+        'arguments': {
+            'provider': 'store_chroma',
+            'config': {'profile': 'local', 'apikey': 'sk-x', 'local': {'host': 'localhost'}},
+        },
+    }
+    result = await MiscCommands.on_rrext_resolve_config(conn, request)
+
+    body = result['body']
+    assert body['profile'] == 'local'
+    assert body['dropped'] == ['apikey'], 'the profile sub-object itself is not a dropped key'
+
+
+@pytest.mark.asyncio
+async def test_on_rrext_resolve_config_requires_a_provider():
+    conn = _make_conn()
+
+    with pytest.raises(ValueError):
+        await MiscCommands.on_rrext_resolve_config(conn, {'arguments': {}})
+
+
+@pytest.mark.asyncio
+async def test_on_rrext_resolve_config_rejects_a_non_object_config():
+    conn = _make_conn()
+
+    with pytest.raises(ValueError):
+        await MiscCommands.on_rrext_resolve_config(conn, {'arguments': {'provider': 'ocr', 'config': []}})
+
+
+@pytest.mark.asyncio
+async def test_on_rrext_resolve_config_propagates_an_unknown_service(monkeypatch):
+    """An unknown service raises out of getNodeConfig; the caller should see that, not a blank."""
+
+    def _raise(provider, config):
+        raise Exception(f'The service {provider} was not found')
+
+    monkeypatch.setattr(cmd_misc.Config, 'getNodeConfig', staticmethod(_raise))
+
+    conn = _make_conn()
+    with pytest.raises(Exception, match='was not found'):
+        await MiscCommands.on_rrext_resolve_config(conn, {'arguments': {'provider': 'nope'}})
