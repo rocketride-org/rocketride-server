@@ -132,7 +132,7 @@ class IGlobal(IGlobalBase):
         # Was 20, but it never reached the decoder — 0 is what actually runs today.
         self._whisper_max_speech_duration_s = float(config.get('vad_max_speech_duration_s', 0))
 
-        debug(f'    Audio transcribe: model={self.model_name}, language={language}')
+        debug(f'    Audio transcribe: model={self.model_name}, language={language}, compute_type={compute_type}')
 
     def endGlobal(self):
         """Clean up global state."""
