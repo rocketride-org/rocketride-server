@@ -1120,9 +1120,13 @@ function makeBuildAction() {
 			// The shell platform ships WITH the server (static/shell bundle,
 			// /client/shell tgz, the materialized .rocketride/shell package),
 			// so the server build carries it. The TS SDK builds first —
-			// pack-shell vendors its dist inside the shell package.
+			// pack-shell vendors its dist inside the shell package (and its
+			// build chains client-docs:agent, which stages the /client/docs bundle).
 			'client-typescript:build',
 			'shell:build',
+			// The workspace bootstrap shim also ships with the server
+			// (/client/typescript-init).
+			'client-init:build',
 		],
 	};
 }

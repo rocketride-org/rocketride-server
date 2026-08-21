@@ -41,6 +41,12 @@ const SERVER_DIR = path.join(DIST_ROOT, 'server');
 const SERVER_CLIENTS_DIR = path.join(SERVER_DIR, 'rocketride');
 const SERVER_STATIC_DIR = path.join(SERVER_DIR, 'static', 'clients', 'python');
 
+// client-common source library (rocketride_common): compiled/staged in
+// wherever the rocketride package goes — the wheel carries it as a second
+// top-level package, and the engine-side sync places it beside rocketride.
+const COMMON_SRC_DIR = path.join(PROJECT_ROOT, 'packages', 'client-common', 'python', 'src', 'rocketride_common');
+const SERVER_COMMON_DIR = path.join(SERVER_DIR, 'rocketride_common');
+
 // Glob patterns to ignore when copying to build
 const IGNORE = ['**/node_modules/**', '**/__pycache__/**', '**/.pytest_cache/**', '**/tests/**', '**/.git/**', '**/scripts/**'];
 
@@ -70,7 +76,10 @@ function makeSyncClientPythonAction() {
 		run: async (ctx, task) => {
 			task.output = 'Scanning for changes...';
 			const stats = await syncDir(SRC_DIR, SERVER_CLIENTS_DIR, { package: true });
-			task.output = formatSyncStats(stats);
+			// The shared library rides beside the package so `import
+			// rocketride_common` resolves wherever `import rocketride` does
+			const commonStats = await syncDir(COMMON_SRC_DIR, SERVER_COMMON_DIR, { package: true });
+			task.output = `${formatSyncStats(stats)} (+common ${formatSyncStats(commonStats)})`;
 		},
 	};
 }
@@ -80,22 +89,28 @@ function makeWheelSourceAction() {
 		run: async (ctx, task) => {
 			task.output = 'Scanning for changes...';
 			const stats = await syncDir(PACKAGE_DIR, BUILD_DIR, { ignore: IGNORE });
-			task.output = formatSyncStats(stats);
+			// Stage the shared library as a second top-level package under
+			// src/ — pyproject's packages.find(where=["src"]) picks it up, so
+			// the ONE shipped wheel carries both packages.
+			const commonStats = await syncDir(COMMON_SRC_DIR, path.join(BUILD_DIR, 'src', 'rocketride_common'), { ignore: IGNORE });
+			task.output = `${formatSyncStats(stats)} (+common ${formatSyncStats(commonStats)})`;
 		},
 	};
 }
 
-// State key for source fingerprint
+// State keys for source fingerprints
 const SRC_HASH_KEY = 'client-python.srcHash';
+const COMMON_HASH_KEY = 'client-python.commonHash';
 
 function makeWheelBuildAction() {
 	return {
 		run: async (ctx, task) => {
-			// Check if source changed
+			// Check if the package OR the staged shared library changed
 			const { changed, hash } = await hasSourceChanged(SRC_DIR, SRC_HASH_KEY);
+			const common = await hasSourceChanged(COMMON_SRC_DIR, COMMON_HASH_KEY);
 			const outputExists = await exists(DIST_DIR);
 
-			if (!changed && outputExists) {
+			if (!changed && !common.changed && outputExists) {
 				task.output = 'No changes detected';
 				return;
 			}
@@ -104,8 +119,9 @@ function makeWheelBuildAction() {
 			await mkdir(DIST_DIR);
 			await execCommand(ENGINE, ['-m', 'build', '--no-isolation', BUILD_DIR, '--outdir', DIST_DIR], { task, cwd: SERVER_DIR });
 
-			// Save hash after successful build
+			// Save hashes after successful build
 			await saveSourceHash(SRC_HASH_KEY, hash);
+			await saveSourceHash(COMMON_HASH_KEY, common.hash);
 		},
 	};
 }
@@ -251,7 +267,7 @@ module.exports = {
 			name: 'client-python:build',
 			action: () => ({
 				description: 'Build client-python',
-				steps: ['server:build', 'client-python:sync-source', 'client-python:wheel-source', 'client-python:copy-readme', 'client-python:wheel-build', 'client-python:sync'],
+				steps: ['server:build', 'client-docs:agent', 'client-common:stamp', 'client-python:sync-source', 'client-python:wheel-source', 'client-python:copy-readme', 'client-python:wheel-build', 'client-python:sync'],
 			}),
 		},
 		{

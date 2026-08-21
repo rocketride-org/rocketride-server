@@ -230,6 +230,7 @@ module.exports = {
             description: 'Build client-mcp',
             steps: [
                 'server:build',
+                'client-docs:agent',
                 'client-mcp:sync-source',
                 'client-mcp:copy-readme',
                 'client-mcp:build-wheel',
