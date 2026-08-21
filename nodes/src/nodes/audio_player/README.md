@@ -42,7 +42,9 @@ No configuration options: the node exposes no fields and uses a single empty `de
 
 Decoded PCM is accumulated into 16 KB chunks and placed into a bounded queue. When the queue holds 32 chunks, upstream writes block, providing natural backpressure that prevents unbounded memory growth.
 
-On stop, the node polls until the queue and the internal playback buffer are both fully drained before closing the stream, so buffered audio plays to completion. One known limitation: the final partial frame smaller than the callback blocksize (1024 frames, about 24 ms at 44.1 kHz) is dropped rather than padded with silence. Roughly the last 24 ms of a stream may be cut off.
+At end of stream, whatever is left in the accumulator — a partial chunk, or the whole stream when it is shorter than 16 KB — is queued ahead of the end-of-stream marker, so short streams and stream tails are never discarded.
+
+On stop, the node polls until the queue and the internal playback buffer are both fully drained before closing the stream, so buffered audio plays to completion. The final callback always fills its output buffer as required by `sounddevice`: a partial block is played in full and padded with silence, while an exact-boundary end writes silence before stopping. The callback stops immediately after committing that terminal block.
 
 ---
 
