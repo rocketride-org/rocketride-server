@@ -409,7 +409,7 @@ export class SettingsProvider {
 			if (workspaceFolder) {
 				try {
 					const agentManager = new AgentManager();
-					await agentManager.installFromSettings(this.extensionUri.fsPath, workspaceFolder.uri);
+					await agentManager.installFromSettings(workspaceFolder.uri);
 				} catch (agentErr) {
 					vscode.window.showWarningMessage(`Agent documentation install failed: ${agentErr}`);
 				}

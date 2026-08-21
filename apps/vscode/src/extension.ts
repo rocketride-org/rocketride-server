@@ -400,12 +400,15 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 				}
 
 				//-------------------------------------
-				// Auto-install agent documentation (non-blocking)
+				// Auto-install agent documentation (non-blocking). Docs come
+				// from the connected server (/client/docs); with no
+				// connection yet, existing workspace docs are kept and the
+				// sync re-runs on shell:connected.
 				//-------------------------------------
 				const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
 				if (workspaceFolder) {
 					const agentMgr = new AgentManager();
-					agentMgr.autoInstall(context.extensionPath, workspaceFolder.uri).catch((error) => {
+					agentMgr.autoInstall(workspaceFolder.uri).catch((error) => {
 						logger.output(`${icons.warning} Auto agent integration failed: ${error}`);
 					});
 
@@ -524,7 +527,7 @@ function registerUtilityCommands(context: vscode.ExtensionContext): void {
 				return;
 			}
 			try {
-				await agentManager.installAll(context.extensionPath, workspaceFolder.uri);
+				await agentManager.installAll(workspaceFolder.uri);
 				vscode.window.showInformationMessage('RocketRide agent documentation installed successfully.');
 			} catch (err) {
 				vscode.window.showErrorMessage(`Failed to install agent documentation: ${err}`);
@@ -627,8 +630,19 @@ function setupConnectionEventHandlers(): void {
 	// — the boot pass may have used the offline fallbacks (or a previous
 	// server's packages), and the session memo would otherwise keep them.
 	connectionManager?.on('shell:connected', () => {
-		if (!vscode.workspace.workspaceFolders?.[0] || !extensionContext) return;
+		const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+		if (!workspaceFolder || !extensionContext) return;
 		void refreshVendoredPlatform(extensionContext);
+
+		// Sync agent docs + stubs against the freshly connected server —
+		// the boot pass may have run before any connection existed (docs
+		// come from GET /client/docs, never from the vsix). Hash-stamped,
+		// so an unchanged bundle is a no-op.
+		const agentMgr = new AgentManager();
+		agentMgr.autoInstall(workspaceFolder.uri).catch((error) => {
+			const logger = getLogger();
+			logger.output(`${icons.warning} Agent docs sync on connect failed: ${error}`);
+		});
 	});
 
 	// Sync service catalog + schemas to .rocketride/ when services are fetched
