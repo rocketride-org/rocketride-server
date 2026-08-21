@@ -58,7 +58,7 @@
 		"background_removal.maxEdge": {
 			"type": "number",
 			"title": "Max input edge (px)",
-			"description": "Downscale source so long edge <= this value before inference; alpha is upsampled back to the (capped) source size for compositing. Lower = faster + less VRAM; higher = sharper edges.",
+			"description": "Downscale source so long edge <= this value before inference; alpha is upsampled back to the original source size for compositing. Lower = faster + less VRAM; higher = sharper edges.",
 			"default": 1024,
 			"minimum": 256,
 			"maximum": 4096

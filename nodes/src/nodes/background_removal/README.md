@@ -57,7 +57,7 @@ For each successful image, `mean_alpha` is the alpha matte's average after scali
 
 | Field | Type | Description | Default |
 |---|---|---|---|
-| `background_removal.maxEdge` | `number` | **Max input edge (px)**<br/>Downscale source so long edge <= this value before inference; alpha is upsampled back to the (capped) source size for compositing. Lower = faster + less VRAM; higher = sharper edges. | `1024` |
+| `background_removal.maxEdge` | `number` | **Max input edge (px)**<br/>Downscale source so long edge <= this value before inference; alpha is upsampled back to the original source size for compositing. Lower = faster + less VRAM; higher = sharper edges. | `1024` |
 | `background_removal.model` | `string` | **Model**<br/>HuggingFace model identifier for background removal (overrides the profile default) |  |
 | `background_removal.profile` | `string` | **Model**<br/>BiRefNet variant — default is 1K, HR is 2K for finer edges. | `"birefnet-default"` |
 
