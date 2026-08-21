@@ -36,6 +36,7 @@ object closes; tables are split as they arrive.
 | `latex` | `LatexTextSplitter` |
 | `nltk` | `NLTKTextSplitter` |
 | `spacy` | `SpacyTextSplitter` |
+| `custom` | `RecursiveCharacterTextSplitter` |
 
 ## Configuration
 

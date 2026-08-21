@@ -23,6 +23,7 @@ The node buffers a video stream, extracts frames with OpenCV, and emits one Imag
 | `openai-patch16` *(default)* | `openai/clip-vit-base-patch16` | Default frame model. |
 | `openai-patch32` | `openai/clip-vit-base-patch32` | Alternative CLIP profile. |
 | `google16x224` | `google/vit-base-patch16-224` | ViT profile. |
+| `custom` | User-provided | Enter a compatible Hugging Face model identifier. |
 
 ## Configuration
 
