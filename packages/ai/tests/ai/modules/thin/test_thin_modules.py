@@ -280,6 +280,48 @@ async def test_client_python_file_latest_returns_404_when_none(monkeypatch, tmp_
 
 
 @pytest.mark.asyncio
+async def test_client_docs_returns_404_when_missing(monkeypatch, tmp_path):
+    """No staged docs bundle -> 404 JSONResponse."""
+    monkeypatch.setattr(clients_mod, '_get_static_clients_root', lambda: tmp_path)
+    result = await clients_mod.client_docs(MagicMock())
+    assert result.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_client_docs_serves_stable_named_bundle(monkeypatch, tmp_path):
+    """The staged docs.zip is served via FileResponse under its stable name."""
+    staged = tmp_path / 'docs'
+    staged.mkdir(parents=True)
+    bundle = staged / 'docs.zip'
+    bundle.write_bytes(b'zip-bytes')
+    monkeypatch.setattr(clients_mod, '_get_static_clients_root', lambda: tmp_path)
+
+    result = await clients_mod.client_docs(MagicMock())
+    assert Path(getattr(result, 'path', '')) == bundle
+
+
+@pytest.mark.asyncio
+async def test_client_typescript_init_returns_404_when_missing(monkeypatch, tmp_path):
+    """No staged bootstrap shim -> 404 JSONResponse."""
+    monkeypatch.setattr(clients_mod, '_get_static_clients_root', lambda: tmp_path)
+    result = await clients_mod.client_typescript_init(MagicMock())
+    assert result.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_client_typescript_init_serves_stable_named_shim(monkeypatch, tmp_path):
+    """The staged shim is served via FileResponse under its stable name."""
+    staged = tmp_path / 'init'
+    staged.mkdir(parents=True)
+    shim = staged / 'typescript-init.tgz'
+    shim.write_bytes(b'tgz-bytes')
+    monkeypatch.setattr(clients_mod, '_get_static_clients_root', lambda: tmp_path)
+
+    result = await clients_mod.client_typescript_init(MagicMock())
+    assert Path(getattr(result, 'path', '')) == shim
+
+
+@pytest.mark.asyncio
 async def test_client_python_file_refuses_traversal(monkeypatch, tmp_path):
     """Separators and parent segments in the filename 404 before the join —
     a backslash in a URL path segment traverses on Windows.

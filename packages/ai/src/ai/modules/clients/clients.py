@@ -12,6 +12,11 @@ from pathlib import Path
 from fastapi.responses import FileResponse, JSONResponse
 from ai.web import Request
 
+# Served artifacts change under stable URLs when the server upgrades —
+# tell HTTP caches (pip, curl-based tooling, proxies) to revalidate every
+# time instead of heuristically serving a stale copy.
+CACHE_HEADERS = {'Cache-Control': 'no-cache'}
+
 
 def _find_latest_file(directory: Path, pattern: str) -> Path | None:
     """
@@ -83,7 +88,87 @@ async def client_shell(request: Request):
         )
 
     # Serve the tgz file with appropriate headers
-    return FileResponse(tgz_file, media_type='application/gzip', filename=tgz_file.name)
+    return FileResponse(tgz_file, media_type='application/gzip', filename=tgz_file.name, headers=CACHE_HEADERS)
+
+
+async def client_typescript_init(request: Request):
+    """
+    Serve the workspace bootstrap shim (typescript-init.tgz).
+
+    The shim is the supported TypeScript bootstrap:
+
+        pnpm install <server>/client/typescript-init
+        pnpm exec typescript-init
+
+    It is deliberately tiny and STABLE — pnpm's URL-keyed cache of it
+    stays correct — and everything server-versioned (the real client
+    tarball) arrives by plain HTTP inside the shim's own run, so a
+    rebuilt server package is always picked up.
+
+    Args:
+        request (Request): The incoming HTTP request object
+
+    Returns:
+        FileResponse: The bootstrap shim package
+        JSONResponse: Error message if file not found (404)
+
+    Example:
+        GET /client/typescript-init
+        -> Downloads: typescript-init.tgz
+    """
+    # Stable name: the version rides inside the package, not the filename
+    tgz_file = _get_static_clients_root() / 'init' / 'typescript-init.tgz'
+
+    if not tgz_file.exists():
+        return JSONResponse(
+            status_code=404,
+            content={
+                'error': 'Bootstrap shim not found',
+                'message': 'typescript-init.tgz could not be found in the static clients directory.',
+            },
+        )
+
+    # Serve the tgz file with appropriate headers
+    return FileResponse(tgz_file, media_type='application/gzip', filename=tgz_file.name, headers=CACHE_HEADERS)
+
+
+async def client_docs(request: Request):
+    """
+    Serve the agent documentation bundle (docs.zip).
+
+    The server build packs docs/agents/ROCKETRIDE_*.md and docs/stubs/*
+    into a stable-named docs.zip under static/clients/docs/, together with
+    a manifest.json carrying the bundle's content hash. The CLI's
+    `rocketride init` and the VS Code extension download the bundle from
+    here and install it into the workspace's .rocketride/docs, so agent
+    docs always match the server the client is connected to instead of a
+    frozen copy shipped inside a client package.
+
+    Args:
+        request (Request): The incoming HTTP request object
+
+    Returns:
+        FileResponse: The agent docs bundle file
+        JSONResponse: Error message if file not found (404)
+
+    Example:
+        GET /client/docs
+        -> Downloads: docs.zip
+    """
+    # Stable name: consumers diff the manifest hash, not the filename
+    zip_file = _get_static_clients_root() / 'docs' / 'docs.zip'
+
+    if not zip_file.exists():
+        return JSONResponse(
+            status_code=404,
+            content={
+                'error': 'Agent docs bundle not found',
+                'message': 'docs.zip could not be found in the static clients directory.',
+            },
+        )
+
+    # Serve the zip file with appropriate headers
+    return FileResponse(zip_file, media_type='application/zip', filename=zip_file.name, headers=CACHE_HEADERS)
 
 
 async def client_python_file(request: Request, filename: str):
@@ -146,7 +231,7 @@ async def client_python_file(request: Request, filename: str):
 
     # Serve the wheel file with appropriate headers
     # Use application/zip since wheel files are zip archives
-    return FileResponse(wheel_file, media_type='application/zip', filename=wheel_file.name)
+    return FileResponse(wheel_file, media_type='application/zip', filename=wheel_file.name, headers=CACHE_HEADERS)
 
 
 async def client_typescript(request: Request):
@@ -183,7 +268,7 @@ async def client_typescript(request: Request):
         )
 
     # Serve the tgz file with appropriate headers
-    return FileResponse(tgz_file, media_type='application/gzip', filename=tgz_file.name)
+    return FileResponse(tgz_file, media_type='application/gzip', filename=tgz_file.name, headers=CACHE_HEADERS)
 
 
 async def client_vscode(request: Request):
@@ -220,4 +305,6 @@ async def client_vscode(request: Request):
         )
 
     # Serve the vsix file with appropriate headers
-    return FileResponse(vsix_file, media_type='application/octet-stream', filename=vsix_file.name)
+    return FileResponse(
+        vsix_file, media_type='application/octet-stream', filename=vsix_file.name, headers=CACHE_HEADERS
+    )
