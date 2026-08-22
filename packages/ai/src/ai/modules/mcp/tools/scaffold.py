@@ -154,6 +154,16 @@ def _lane_names(services: Dict[str, Any]) -> set:
     return found
 
 
+def _defaulted(args: Dict[str, Any], key: str, fallback: Any) -> Any:
+    """Return the supplied argument, falling back only when it is absent or null.
+
+    `or` would coerce a supplied falsy value such as 0 or '' into the fallback and
+    hide it from the type check, which is the mistake worth reporting.
+    """
+    value = args.get(key)
+    return fallback if value is None else value
+
+
 async def _scaffold_node(client, tasks, args: Dict[str, Any]) -> dict:
     name = args.get('name')
     if not name:
@@ -166,9 +176,9 @@ async def _scaffold_node(client, tasks, args: Dict[str, Any]) -> dict:
             'the engine imports local_nodes.<name>, so it has to be importable',
         )
 
-    lane_in = args.get('lane_in') or 'text'
-    lane_out = args.get('lane_out') or lane_in
-    class_type = args.get('class_type') or lane_in
+    lane_in = _defaulted(args, 'lane_in', 'text')
+    lane_out = _defaulted(args, 'lane_out', lane_in)
+    class_type = _defaulted(args, 'class_type', lane_in)
     for label, value in (('lane_in', lane_in), ('lane_out', lane_out), ('class_type', class_type)):
         if not isinstance(value, str):
             return _bad(f'{label} must be a string, got {value!r}', 'call list_components for the names in use')

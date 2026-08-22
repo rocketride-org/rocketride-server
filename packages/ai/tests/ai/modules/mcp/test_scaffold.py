@@ -171,10 +171,12 @@ async def test_a_non_string_argument_is_refused_rather_than_raised(catalog_engin
     assert result['ok'] is False
     assert 'identifier' in result['message']
 
+    # Falsy values included: `or` defaulting would swallow these before the check.
     for field in ('lane_in', 'lane_out', 'class_type'):
-        result = await _scaffold(catalog_engine, **{field: 42})
-        assert result['ok'] is False, f'{field} accepted a non-string'
-        assert field in result['message']
+        for value in (42, 0, [], False):
+            result = await _scaffold(catalog_engine, **{field: value})
+            assert result['ok'] is False, f'{field} accepted {value!r}'
+            assert field in result['message']
 
 
 @pytest.mark.asyncio
