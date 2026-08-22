@@ -110,11 +110,14 @@ results when complete coverage is required.
 
 ### Classifier input
 
-When classification data arrives, the node reads the classifier's text-match
-offsets, extracts rule names from the local Nucleuz rule pack, and adds
-`<Term>` values from classification rules to the GLiNER labels. If that rule
-pack is absent, unavailable rule names simply contribute no labels; GLiNER
-detection still runs with labels extracted from the classification rules.
+When classification data arrives, the node uses three independent inputs.
+`classificationPolicy` `idRef` values become GLiNER labels only when the local
+Nucleuz `rulePack.dat` maps them; if the rule pack is unavailable, those labels
+are omitted. `<Term>` values from `classificationRules` remain GLiNER labels
+without the rule pack. Classifier-reported `textMatches` are redacted directly,
+independent of both label sources. If neither source produces labels, GLiNER
+adds no classification-derived detections, but the reported text matches are
+still redacted.
 
 ## Upstream docs
 
