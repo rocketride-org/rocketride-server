@@ -26,9 +26,9 @@
 _PATH_SEPARATORS = '/\\'
 
 
-def strip_exclude_prefix(path: str, exclude: str) -> str | None:
+def strip_exclude_prefix(path: str, exclude: str | None) -> str | None:
     """Remove one complete leading exclude prefix, or return None when it does not match."""
-    if exclude in ('N/A', ''):
+    if exclude in (None, 'N/A', ''):
         return path
 
     if not path.startswith(exclude):

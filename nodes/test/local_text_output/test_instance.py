@@ -94,6 +94,16 @@ def test_close_writes_normal_file(tmp_path):
     assert _read(expected) == 'hello world'
 
 
+def test_close_with_unset_exclude_preserves_source_path(tmp_path):
+    """An omitted exclude value behaves like no exclusion instead of skipping output."""
+    inst = _make_instance(str(tmp_path))
+    inst.IGlobal.exclude = None
+    _drive(inst, '/data/folder/report.md', 'content')
+
+    expected = os.path.join(str(tmp_path), 'data', 'folder', 'report.txt')
+    assert _read(expected) == 'content'
+
+
 def test_close_removes_only_leading_exclude_prefix(tmp_path):
     """A repeated path segment after the accepted prefix remains in the destination."""
     inst = _make_instance(str(tmp_path))

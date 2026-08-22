@@ -19,6 +19,10 @@ def test_no_exclude_preserves_complete_source_path():
     assert path_prefix.strip_exclude_prefix('/data/folder/report.md', 'N/A') == '/data/folder/report.md'
 
 
+def test_unset_exclude_preserves_complete_source_path():
+    assert path_prefix.strip_exclude_prefix('/data/folder/report.md', None) == '/data/folder/report.md'
+
+
 def test_empty_exclude_preserves_existing_behavior():
     assert path_prefix.strip_exclude_prefix('/data/folder/report.md', '') == '/data/folder/report.md'
 
