@@ -45,24 +45,40 @@ class _InvalidJsonAnswer:
         raise ValueError('Answer is not in JSON format.')
 
 
-def _stub_module(monkeypatch, name):
-    module = sys.modules.get(name)
-    if module is None:
-        module = types.ModuleType(name)
+def _install_stubs(monkeypatch):
+    """Force deterministic stubs, regardless of modules left by earlier tests."""
+    rocketlib = types.ModuleType('rocketlib')
+    rocketlib.__path__ = []
+    rocketlib.IInstanceBase = object
+    rocketlib.IGlobalBase = object
+    rocketlib.Entry = object
+    rocketlib.OPEN_MODE = types.SimpleNamespace(CONFIG='config')
+
+    rocketlib_types = types.ModuleType('rocketlib.types')
+    rocketlib_types.IInvokeLLM = MagicMock()
+    rocketlib.types = rocketlib_types
+
+    ai = types.ModuleType('ai')
+    ai.__path__ = []
+    ai_common = types.ModuleType('ai.common')
+    ai_common.__path__ = []
+    ai_schema = types.ModuleType('ai.common.schema')
+    ai_schema.Answer = object
+    ai_schema.Doc = _StubDoc
+    ai_schema.DocMetadata = _StubDocMetadata
+    ai_schema.Question = MagicMock()
+    ai_schema.QuestionType = types.SimpleNamespace(QUESTION='question')
+    ai.common = ai_common
+    ai_common.schema = ai_schema
+
+    for name, module in {
+        'rocketlib': rocketlib,
+        'rocketlib.types': rocketlib_types,
+        'ai': ai,
+        'ai.common': ai_common,
+        'ai.common.schema': ai_schema,
+    }.items():
         monkeypatch.setitem(sys.modules, name, module)
-
-        parent_name, _, child_name = name.rpartition('.')
-        if parent_name:
-            parent = _stub_module(monkeypatch, parent_name)
-            monkeypatch.setattr(parent, child_name, module, raising=False)
-
-    return module
-
-
-def _ensure_attrs(monkeypatch, module, **attrs):
-    for name, value in attrs.items():
-        if not hasattr(module, name):
-            monkeypatch.setattr(module, name, value, raising=False)
 
 
 @pytest.fixture
@@ -90,26 +106,9 @@ def dictionary_module(monkeypatch, request):
     request.addfinalizer(restore_import_state)
 
     with monkeypatch.context() as patch:
-        _ensure_attrs(
-            patch,
-            _stub_module(patch, 'rocketlib'),
-            IInstanceBase=object,
-            IGlobalBase=object,
-            Entry=object,
-            OPEN_MODE=types.SimpleNamespace(CONFIG='config'),
-        )
-        _ensure_attrs(patch, _stub_module(patch, 'rocketlib.types'), IInvokeLLM=MagicMock())
-        _stub_module(patch, 'ai')
-        _stub_module(patch, 'ai.common')
-        _ensure_attrs(
-            patch,
-            _stub_module(patch, 'ai.common.schema'),
-            Answer=object,
-            Doc=_StubDoc,
-            DocMetadata=_StubDocMetadata,
-            Question=MagicMock(),
-            QuestionType=types.SimpleNamespace(QUESTION='question'),
-        )
+        _install_stubs(patch)
+        for name in original_node_modules:
+            patch.delitem(sys.modules, name)
 
         patch.syspath_prepend(str(_NODE_ROOT))
         yield importlib.import_module('dictionary.IInstance')
