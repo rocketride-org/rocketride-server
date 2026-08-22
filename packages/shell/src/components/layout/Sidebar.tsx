@@ -54,6 +54,49 @@ import { useCompactNav } from './CompactNavContext';
 
 const EXPANDED_WIDTH = 260;
 const COLLAPSED_WIDTH = 56;
+
+/** Where an app's answered sidebar preference is kept, by app id. */
+const MEMORY_KEY = 'rr.shell.sidebar';
+
+/**
+ * Whether this app asked for the rail closed, last time it was here.
+ *
+ * Read during the first render, so the answer costs nothing and arrives before
+ * the first paint. Storage can throw — a locked-down profile, private mode in
+ * some browsers — and a sidebar is not worth failing a boot over, so anything
+ * unreadable means "no answer" and the rail opens as it always did.
+ *
+ * @param appId - The app about to be shown.
+ * @returns True when it asked to be collapsed.
+ */
+function remembered(appId: string): boolean {
+	if (!appId) return false;
+	try {
+		return window.localStorage.getItem(`${MEMORY_KEY}:${appId}`) === 'collapsed';
+	} catch {
+		return false;
+	}
+}
+
+/**
+ * Remember what an app asked for.
+ *
+ * The APP's preference, not the person's: expanding the rail by hand is a
+ * decision about this visit, and writing it here would quietly turn "opens
+ * closed" into "opens however you left it".
+ *
+ * @param appId - The app that asked.
+ * @param collapsed - What it asked for.
+ */
+function remember(appId: string, collapsed: boolean): void {
+	if (!appId) return;
+	try {
+		window.localStorage.setItem(`${MEMORY_KEY}:${appId}`, collapsed ? 'collapsed' : 'expanded');
+	} catch {
+		// Nothing to do and nothing worth saying: the rail still works, it just
+		// collapses on the way in each time rather than arriving collapsed.
+	}
+}
 const MIN_WIDTH = 200;
 const MAX_WIDTH = 480;
 const SNAP_THRESHOLD = 100;
@@ -333,7 +376,15 @@ const Sidebar: React.FC<SidebarProps> = ({ themeConfig: _themeConfig, account, h
 
 	// --- Collapse / resize state ---------------------------------------------
 
-	const [collapsed, setCollapsed] = useState(false);
+	// Closed on the FIRST FRAME for an app already known to want it closed.
+	//
+	// The preference itself arrives with the app's descriptor, which is loaded
+	// after the shell has painted — so honouring it only from there means the
+	// rail opens and then shuts on every visit, and means nothing at all if the
+	// descriptor is slow or never lands. Remembering the answer turns that into
+	// a one-time event: the first ever visit to an app collapses on the way in,
+	// every visit after renders closed.
+	const [collapsed, setCollapsed] = useState(() => remembered(activeAppId));
 	const [width, setWidth] = useState(EXPANDED_WIDTH);
 	const [isResizing, setIsResizing] = useState(false);
 	const [handleHover, setHandleHover] = useState(false);
@@ -379,15 +430,37 @@ const Sidebar: React.FC<SidebarProps> = ({ themeConfig: _themeConfig, account, h
 	 * every app switch overrode a rail the person had deliberately collapsed.
 	 */
 	const wanted = loadedApps[activeAppId]?.sidebar;
+
+	/**
+	 * Take a preference, and remember it for next time.
+	 *
+	 * Below the breakpoint the sidebar is a drawer, and a drawer is never
+	 * collapsed — see `effectiveCollapsed` above. The answer is still REMEMBERED
+	 * there, so a phone that later becomes a wide window opens the way the app
+	 * asked; only the flag is left alone.
+	 */
+	const prefer = useCallback((next: boolean) => {
+		remember(activeAppId, next);
+		if (isCompact) return;
+		setCollapsed(next);
+	}, [activeAppId, isCompact]);
+
 	useEffect(() => {
 		if (!wanted) return;
-		// Below the breakpoint the sidebar is a drawer, and a drawer is never
-		// collapsed — see `effectiveCollapsed` above. Setting the flag anyway
-		// would spring the rail closed on the way back to a wide window.
-		if (isCompact) return;
-		setCollapsed(wanted === 'collapsed');
-		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [activeAppId, wanted, isCompact]);
+		prefer(wanted === 'collapsed');
+	}, [wanted, prefer]);
+
+	// The same preference, asked for directly.
+	//
+	// An app can reach this on its own first render, which is earlier and more
+	// certain than its descriptor reaching the shell's `loadedApps` map — and it
+	// is the path that works when that map does not have what it wants.
+	useEffect(() => (
+		ConnectionManager.getInstance().on(
+			'shell:setSidebarCollapsed',
+			({ collapsed: next }: { collapsed: boolean }) => prefer(next),
+		)
+	), [prefer]);
 
 	// --- Collapse toggle -----------------------------------------------------
 

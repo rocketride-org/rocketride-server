@@ -225,6 +225,21 @@ export interface ShellConnectionEventMap {
 	'shell:sidebarCollapsing': Record<string, never>;
 
 	/**
+	 * An app asking for the rail collapsed or expanded.
+	 *
+	 * The counterpart to `shell:sidebarCollapsing`, which only ever ran the
+	 * other way: the shell announced, and nothing an app could reach answered.
+	 * `AppDescriptor.sidebar` states the same preference declaratively and is
+	 * the better place for it — this exists because a descriptor is read only
+	 * once the app's bundle has loaded, and an app that wants the rail closed
+	 * wants it closed on the first frame, not after its own code arrives.
+	 *
+	 * The shell remembers the answer per app, so every later load of that app
+	 * renders closed rather than collapsing on the way in.
+	 */
+	'shell:setSidebarCollapsed': { collapsed: boolean };
+
+	/**
 	 * Theme tokens changed.
 	 *
 	 * Contains the full set of CSS custom property key/value pairs
