@@ -125,7 +125,7 @@ The 29 tools are organized into 8 groups (plus 2 resources), matching
 (see History: the 3 convenience query tools were removed pending their cloud DB
 backend), plus the Run log (DVR) group and `list_integrations` added below.
 
-**Introspection (5)** — `tools/introspection.py` plus `tools/integrations.py`, read-only/static-analysis, no task tokens:
+**Introspection (7)** — `tools/introspection.py` plus `tools/scaffold.py` and `tools/integrations.py`, read-only/static-analysis, no task tokens:
 
 | Tool | Purpose | Key args |
 | --- | --- | --- |

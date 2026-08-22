@@ -134,8 +134,9 @@ def _class_types(services: Dict[str, Any]) -> set:
     """Every classType in use across the catalog, so the allowed set cannot drift."""
     found = set()
     for service in (services or {}).values():
-        if isinstance(service, dict):
-            found.update(v for v in service.get('classType') or [] if isinstance(v, str))
+        types = service.get('classType') if isinstance(service, dict) else None
+        if isinstance(types, list):
+            found.update(v for v in types if isinstance(v, str))
     return found
 
 
@@ -157,7 +158,9 @@ async def _scaffold_node(client, tasks, args: Dict[str, Any]) -> dict:
     name = args.get('name')
     if not name:
         return _bad('name is required', 'pick a lowercase identifier, e.g. my_node')
-    if not _NAME_RE.match(name) or keyword.iskeyword(name):
+    # Dispatch does not apply the tool's inputSchema, so a non-string arrives intact
+    # and would reach the regex as a TypeError instead of an actionable answer.
+    if not isinstance(name, str) or not _NAME_RE.match(name) or keyword.iskeyword(name):
         return _bad(
             f'name must be a lowercase Python identifier, got {name!r}',
             'the engine imports local_nodes.<name>, so it has to be importable',
@@ -166,6 +169,9 @@ async def _scaffold_node(client, tasks, args: Dict[str, Any]) -> dict:
     lane_in = args.get('lane_in') or 'text'
     lane_out = args.get('lane_out') or lane_in
     class_type = args.get('class_type') or lane_in
+    for label, value in (('lane_in', lane_in), ('lane_out', lane_out), ('class_type', class_type)):
+        if not isinstance(value, str):
+            return _bad(f'{label} must be a string, got {value!r}', 'call list_components for the names in use')
 
     if lane_in not in _LANE_HANDLERS:
         return _bad(
@@ -188,11 +194,12 @@ async def _scaffold_node(client, tasks, args: Dict[str, Any]) -> dict:
         )
 
     known_lanes = _lane_names(catalog)
-    if known_lanes and lane_out not in known_lanes:
-        return _bad(
-            f'unknown lane_out {lane_out!r}',
-            f'lanes in service today: {", ".join(sorted(known_lanes))}',
-        )
+    for label, lane in (('lane_in', lane_in), ('lane_out', lane_out)):
+        if known_lanes and lane not in known_lanes:
+            return _bad(
+                f'unknown {label} {lane!r}',
+                f'lanes in service today: {", ".join(sorted(known_lanes))}',
+            )
 
     handler, arg = _LANE_HANDLERS[lane_in]
     title = name.replace('_', ' ').title()

@@ -142,3 +142,45 @@ async def test_the_tool_writes_nothing_itself(catalog_engine):
 
     assert isinstance(result['files'], dict)
     assert all(isinstance(c, str) for c in result['files'].values())
+
+
+@pytest.mark.asyncio
+async def test_a_malformed_class_type_entry_is_ignored(fake_engine):
+    """A catalog entry holding a bare string must not widen the allowed set.
+
+    Iterating it yields characters, so 'text' would admit 't', 'e' and 'x' as
+    class types and reject the real one.
+    """
+    fake_engine._services = {
+        'services': {
+            'broken': {'classType': 'text', 'lanes': {'text': ['text']}},
+            'good': {'classType': ['documents'], 'lanes': {'text': ['text']}},
+        }
+    }
+
+    assert scaffold._class_types(fake_engine._services['services']) == {'documents'}
+
+    result = await _scaffold(fake_engine, lane_in='text', class_type='x')
+    assert result['ok'] is False, 'a character from a malformed entry is not a class type'
+
+
+@pytest.mark.asyncio
+async def test_a_non_string_argument_is_refused_rather_than_raised(catalog_engine):
+    """Dispatch does not apply inputSchema, so arguments arrive with any type."""
+    result = await _scaffold(catalog_engine, name=123)
+    assert result['ok'] is False
+    assert 'identifier' in result['message']
+
+    for field in ('lane_in', 'lane_out', 'class_type'):
+        result = await _scaffold(catalog_engine, **{field: 42})
+        assert result['ok'] is False, f'{field} accepted a non-string'
+        assert field in result['message']
+
+
+@pytest.mark.asyncio
+async def test_lane_in_is_checked_against_the_live_catalog(catalog_engine):
+    """A lane with a local template still has to be one the engine serves."""
+    result = await _scaffold(catalog_engine, lane_in='table', lane_out='text', class_type='text')
+
+    assert result['ok'] is False
+    assert 'lane_in' in result['message'], result
