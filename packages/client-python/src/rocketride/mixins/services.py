@@ -128,7 +128,9 @@ class ServicesMixin(DAPClient):
         if not provider:
             raise ValueError('Provider name is required')
 
-        return await self.call('rrext_resolve_config', provider=provider, config=config or {})
+        # Default only an absent config: `or {}` would coerce a falsy non-object
+        # such as [] and hide it from the engine's type check.
+        return await self.call('rrext_resolve_config', provider=provider, config={} if config is None else config)
 
     async def validate(
         self,
