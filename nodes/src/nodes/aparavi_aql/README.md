@@ -87,11 +87,13 @@ the Aparavi database-query API. It sends POST requests to
 
 ## Limitations
 
-This noremote node must run where it can reach the configured Aparavi server
-with its Basic Auth credentials. It only retrieves from the fixed STORE schema:
-the safety check permits one SELECT statement, rejects embedded multi-statement
-input, and blocks mutation and execution keywords before sending AQL to the
-server. The API request uses a fixed 250-object limit and a 30-second timeout.
+This node runs on the RocketRide engine host and does not support remote
+execution. The engine host must be able to reach the configured Aparavi server
+using the supplied Basic Auth credentials. It only retrieves from the fixed
+STORE schema: the safety check permits one SELECT statement, rejects embedded
+multi-statement input, and blocks mutation and execution keywords before
+sending AQL to the server. The API request uses a fixed 250-object limit and a
+30-second timeout.
 
 ## Notes
 
