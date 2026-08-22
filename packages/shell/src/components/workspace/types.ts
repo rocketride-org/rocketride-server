@@ -279,6 +279,23 @@ export interface AppDescriptor {
 	 */
 	app: React.ComponentType<ShellAppProps>;
 	/**
+	 * How this app would like the shell's sidebar to open.
+	 *
+	 * `'collapsed'` opens the rail collapsed each time the app becomes active;
+	 * the person can still expand it, and expanding it lasts until they leave
+	 * and come back. Absent means the app has no opinion and the sidebar is
+	 * left exactly as it is — an app that says nothing can never disturb the
+	 * state another app or the person chose.
+	 *
+	 * For an app whose own content is the reason to open the sidebar rather
+	 * than the shell's navigation: a chat list is worth a column when you want
+	 * it and a stolen quarter of the window when you do not.
+	 *
+	 * Ignored below the compact breakpoint, where the sidebar is a drawer and
+	 * "collapsed" has no meaning.
+	 */
+	sidebar?: 'expanded' | 'collapsed';
+	/**
 	 * Optional cross-app component catalog. Never mounted by the shell —
 	 * entries are loadable by other apps via `useAppComponent()`.
 	 */

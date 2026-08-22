@@ -328,7 +328,7 @@ const Sidebar: React.FC<SidebarProps> = ({ themeConfig: _themeConfig, account, h
 	// `CompactNavContext`.
 	const { isCompact, drawerOpen, requestClose } = useCompactNav();
 	const identity = useContext(ShellIdentityContext);
-	const { prefs, updatePrefs: _updatePrefs, setTheme, themeOptions, activeAppId, appManifest } = useWorkspace();
+	const { prefs, updatePrefs: _updatePrefs, setTheme, themeOptions, activeAppId, appManifest, loadedApps } = useWorkspace();
 	const { isOnDesktop } = useSubscriptions();
 
 	// --- Collapse / resize state ---------------------------------------------
@@ -364,6 +364,30 @@ const Sidebar: React.FC<SidebarProps> = ({ themeConfig: _themeConfig, account, h
 	// responsive path, so crossing back to desktop restores exactly the rail the
 	// user had.
 	const effectiveCollapsed = isCompact ? false : collapsed;
+
+	// --- The active app's own preference -------------------------------------
+
+	/**
+	 * Open the way the app being opened asks to be opened.
+	 *
+	 * Keyed on the app id, so it fires when an app becomes active and not on
+	 * every render: inside an app the person's own toggle wins, and it keeps
+	 * winning until they leave and come back.
+	 *
+	 * An app that declares NOTHING is not an app that declares 'expanded' — it
+	 * leaves the sidebar alone. Treating silence as a preference would mean
+	 * every app switch overrode a rail the person had deliberately collapsed.
+	 */
+	const wanted = loadedApps[activeAppId]?.sidebar;
+	useEffect(() => {
+		if (!wanted) return;
+		// Below the breakpoint the sidebar is a drawer, and a drawer is never
+		// collapsed — see `effectiveCollapsed` above. Setting the flag anyway
+		// would spring the rail closed on the way back to a wide window.
+		if (isCompact) return;
+		setCollapsed(wanted === 'collapsed');
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [activeAppId, wanted, isCompact]);
 
 	// --- Collapse toggle -----------------------------------------------------
 
