@@ -48,7 +48,7 @@ pass through untouched.
 | `category_metric_mismatch` | **error** | The metric label implies one category but the fact declares another — the headline "cost row stored as revenue" guard. |
 | `ambiguous_metric` | warning | The metric label matches keywords from two or more categories, so the declared category can't be corroborated (suppresses the mismatch check). |
 | `sign_category_mismatch` | configurable (`sign`, default warning) | The amount's sign contradicts its class (an expense/liability with a positive amount, or revenue/asset with a negative amount). Zero never fires. Applies only to the four built-in signed classes (revenue/expense/asset/liability); a custom category has no sign convention and is not sign-checked. |
-| `unknown_category` | warning | `category_field` is present but is not a recognised classification. |
+| `unknown_category` | warning | `category_field` is present but is not a recognized classification. |
 | `missing_provenance` | configurable (`require_provenance`, default error) | The **incoming** fact has no usable `provenance` list — the value is absent, `null`, an **empty list** `[]`, or not a list at all. |
 | `malformed_provenance` | warning | `provenance` is present but is not a list (the original value is preserved, never discarded). |
 
@@ -61,7 +61,7 @@ two or more categories resolves to `ambiguous` (and suppresses the mismatch chec
 guessing, and a label matching none is simply not classified. Because it is heuristic, tune
 `category_metric_map` to your corpus: e.g. a label containing `"tax"` (expense) and `"income"`
 (revenue) is treated as ambiguous, and `"deferred tax asset"` matches the `"tax"` keyword. Declared
-categories are recognised from the built-in aliases **plus** the keys of `category_metric_map`, so a
+categories are recognized from the built-in aliases **plus** the keys of `category_metric_map`, so a
 custom category (e.g. `equity`) added to the map is accepted rather than flagged `unknown_category`.
 
 ### Example
