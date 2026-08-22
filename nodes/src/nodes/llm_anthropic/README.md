@@ -58,32 +58,40 @@ database node validates and executes.
 
 ## Profiles
 
-Default profile: **Claude Sonnet 4.6**.
+Default: **Claude Sonnet 4.6** (`claude-sonnet-4-6`).
 
-| Profile                            | Model ID               | Context tokens     | Output tokens |
-| ---------------------------------- | ---------------------- | ------------------ | ------------- |
-| Claude Sonnet 4.6 _(default)_      | `claude-sonnet-4-6`    | 1,000,000          | 128,000       |
-| Claude Opus 4.6                    | `claude-opus-4-6`      | 1,000,000          | 128,000       |
-| Claude Haiku 4.5                   | `claude-haiku-4-5`     | 200,000            | 64,000        |
-| Claude Sonnet 4.5                  | `claude-sonnet-4-5`    | 1,000,000          | 64,000        |
-| Claude Opus 4.5                    | `claude-opus-4-5`      | 200,000            | 64,000        |
-| Claude Opus 5                      | `claude-opus-5`        | 1,000,000          | 128,000       |
-| Claude Opus 5 (Fast)               | `claude-opus-5-fast`   | 1,000,000          | 128,000      |
-| Anthropic: Claude Fable 5          | `claude-fable-5`       | 1,000,000          | 128,000       |
-| Anthropic: Claude Sonnet 5         | `claude-sonnet-5`      | 1,000,000          | 128,000       |
-| Anthropic: Claude Opus 4.8         | `claude-opus-4-8`      | 1,000,000          | 128,000       |
-| Anthropic: Claude Opus 4.8 (Fast)  | `claude-opus-4-8-fast` | 1,000,000          | 128,000       |
-| Anthropic: Claude Opus 4.7         | `claude-opus-4-7`      | 1,000,000          | 128,000       |
-| Anthropic: Claude Opus 4.7 (Fast)  | `claude-opus-4-7-fast` | 1,000,000          | 128,000       |
-| Anthropic: Claude Opus 4.1         | `claude-opus-4-1`      | 200,000            | 32,000        |
-| Anthropic: Claude Opus 4           | `claude-opus-4`        | 200,000            | 32,000        |
-| Anthropic: Claude Sonnet 4         | `claude-sonnet-4`      | 1,000,000          | 64,000        |
-| Anthropic: Claude 3 Haiku          | `claude-3-haiku`       | 200,000            | 4,096         |
-| Anthropic: Claude Fable Latest     | `claude-fable-latest`  | 1,000,000          | 128,000       |
-| Anthropic: Claude Opus Latest      | `claude-opus-latest`   | 1,000,000          | 128,000       |
-| Anthropic Claude Sonnet Latest     | `claude-sonnet-latest` | 1,000,000          | 128,000       |
-| Anthropic Claude Haiku Latest      | `claude-haiku-latest`  | 200,000            | 64,000        |
-| Custom                             | _(user-specified)_     | 200,000 (editable) | _(none set)_  |
+| Profile | Model ID | Context tokens | Output tokens |
+| ------- | -------- | -------------- | ------------- |
+| Claude Sonnet 4.6 **(default)** | `claude-sonnet-4-6` | 1,000,000 | 128,000 |
+| Anthropic: Claude Fable 5 | `claude-fable-5` | 1,000,000 | 128,000 |
+| Anthropic: Claude Sonnet 5 | `claude-sonnet-5` | 1,000,000 | 128,000 |
+| Claude Opus 5 | `claude-opus-5` | 1,000,000 | 128,000 |
+| Claude Opus 5 (Fast) | `claude-opus-5-fast` | 1,000,000 | 128,000 |
+| Anthropic: Claude Opus 4.8 | `claude-opus-4-8` | 1,000,000 | 128,000 |
+
+<details>
+<summary><strong>View 16 more models</strong></summary>
+
+| Profile | Model ID | Context tokens | Output tokens |
+| ------- | -------- | -------------- | ------------- |
+| `custom` | _(user-specified)_ | 200,000 (editable) | — |
+| Claude Opus 4.6 | `claude-opus-4-6` | 1,000,000 | 128,000 |
+| Claude Haiku 4.5 | `claude-haiku-4-5` | 200,000 | 64,000 |
+| Claude Sonnet 4.5 | `claude-sonnet-4-5` | 1,000,000 | 64,000 |
+| Claude Opus 4.5 | `claude-opus-4-5` | 200,000 | 64,000 |
+| Anthropic: Claude Opus 4.7 | `claude-opus-4-7` | 1,000,000 | 128,000 |
+| Anthropic: Claude 3 Haiku | `claude-3-haiku` | 200,000 | 4,096 |
+| Anthropic: Claude Fable Latest | `claude-fable-latest` | 1,000,000 | 128,000 |
+| Anthropic Claude Haiku Latest | `claude-haiku-latest` | 200,000 | 64,000 |
+| Anthropic: Claude Opus 4 | `claude-opus-4` | 200,000 | 32,000 |
+| Anthropic: Claude Opus 4.1 | `claude-opus-4-1` | 200,000 | 32,000 |
+| Anthropic: Claude Opus 4.7 (Fast) | `claude-opus-4-7-fast` | 1,000,000 | 128,000 |
+| Anthropic: Claude Opus 4.8 (Fast) | `claude-opus-4-8-fast` | 1,000,000 | 128,000 |
+| Anthropic: Claude Opus Latest | `claude-opus-latest` | 1,000,000 | 128,000 |
+| Anthropic: Claude Sonnet 4 | `claude-sonnet-4` | 1,000,000 | 64,000 |
+| Anthropic Claude Sonnet Latest | `claude-sonnet-latest` | 1,000,000 | 128,000 |
+
+</details>
 
 The `*-latest` profiles track Anthropic's current model aliases and update as
 Anthropic promotes new versions; pin a specific profile when reproducibility

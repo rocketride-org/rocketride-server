@@ -22,90 +22,66 @@ When you save the node configuration, it is validated with a minimal live API ca
 (`"Hi"`) against the selected model, so credential, model, and region problems surface
 immediately instead of at pipeline runtime.
 
----
-
-## Configuration
-
-### Lanes
+## Lanes
 
 | Lane in     | Lane out  | Description                                          |
 | ----------- | --------- | ---------------------------------------------------- |
 | `questions` | `answers` | Send a question directly, receive a generated answer |
 
-### Fields
-
-| Field | Type | Description |
-|---|---|---|
-| `model` | string | Bedrock LLM model name or ARN for custom or provisioned models |
-| `modelTotalTokens` | number | Total Tokens |
-| `profile` | string | Default "meta_llama3_3-70b". LLM model |
-
-`model` and `modelTotalTokens` only appear when the **Custom** profile is selected; the
-built-in profiles set both for you.
-
----
-
 ## Profiles
 
-The default profile is **Llama 3.3 70B Instruct** (`meta_llama3_3-70b`). All profiles
-default to region `us-east-1`.
+Default: **Llama 3.3 70B Instruct** (`meta_llama3_3-70b`).
 
-### Anthropic
+| Profile | Model ID | Context tokens |
+| ------- | -------- | -------------- |
+| Llama 3.3 70B Instruct **(default)** | `meta.llama3-3-70b-instruct-v1:0` | 128,000 |
+| Nova 2 Lite | `amazon.nova-2-lite-v1:0` | 1,000,000 |
+| Claude Sonnet 4.5 | `anthropic.claude-sonnet-4-5-20250929-v1:0` | 200,000 |
+| Claude Haiku 4.5 | `anthropic.claude-haiku-4-5-20251001-v1:0` | 200,000 |
+| Claude Opus 4.5 | `anthropic.claude-opus-4-5-20251101-v1:0` | 200,000 |
 
-| Profile           | Model ID                                    | Context     |
-| ----------------- | ------------------------------------------- | ----------- |
-| Claude Sonnet 4.5 | `anthropic.claude-sonnet-4-5-20250929-v1:0` | 200K tokens |
-| Claude Haiku 4.5  | `anthropic.claude-haiku-4-5-20251001-v1:0`  | 200K tokens |
-| Claude Opus 4     | `anthropic.claude-opus-4-20250514-v1:0`     | 200K tokens |
-| Claude Opus 4.5   | `anthropic.claude-opus-4-5-20251101-v1:0`   | 200K tokens |
-| Claude Sonnet 3.7 | `anthropic.claude-3-7-sonnet-20250219-v1:0` | 200K tokens |
-| Claude Haiku 3.5  | `anthropic.claude-3-5-haiku-20241022-v1:0`  | 200K tokens |
+<details>
+<summary><strong>View 17 more models</strong></summary>
 
-### Meta
+| Profile | Model ID | Context tokens |
+| ------- | -------- | -------------- |
+| Custom | _(user-specified)_ | 256,000 (editable) |
+| Jamba 1.5 Large | `ai21.jamba-1-5-large-v1:0` | 256,000 |
+| Jamba 1.5 Mini | `ai21.jamba-1-5-mini-v1:0` | 256,000 |
+| Titan Text Express | `amazon.titan-text-express-v1` | 8,192 |
+| Claude Sonnet 3.7 | `anthropic.claude-3-7-sonnet-20250219-v1:0` | 200,000 |
+| Claude Haiku 3.5 | `anthropic.claude-3-5-haiku-20241022-v1:0` | 200,000 |
+| Claude Opus 4 | `anthropic.claude-opus-4-20250514-v1:0` | 200,000 |
+| Command R+ | `cohere.command-r-plus-v1:0` | 128,000 |
+| Command R | `cohere.command-r-v1:0` | 128,000 |
+| Llama 3.1 8B Instruct | `meta.llama3-1-8b-instruct-v1:0` | 128,000 |
+| Llama 3.1 70B Instruct | `meta.llama3-1-70b-instruct-v1:0` | 128,000 |
+| Llama 3.2 1B Instruct | `meta.llama3-2-1b-instruct-v1:0` | 128,000 |
+| Llama 3.2 3B Instruct | `meta.llama3-2-3b-instruct-v1:0` | 128,000 |
+| Llama 3.2 11B Vision Instruct | `meta.llama3-2-11b-instruct-v1:0` | 128,000 |
+| Llama 3.2 90B Vision Instruct | `meta.llama3-2-90b-instruct-v1:0` | 128,000 |
+| Llama 4 Scout 17B Instruct | `meta.llama4-scout-17b-instruct-v1:0` | 3,500,000 |
+| Llama 4 Maverick 17B Instruct | `meta.llama4-maverick-17b-instruct-v1:0` | 1,000,000 |
 
-| Profile                            | Model ID                                 | Context     |
-| ---------------------------------- | ---------------------------------------- | ----------- |
-| Llama 3.3 70B Instruct *(default)* | `meta.llama3-3-70b-instruct-v1:0`        | 128K tokens |
-| Llama 4 Scout 17B Instruct         | `meta.llama4-scout-17b-instruct-v1:0`    | 3.5M tokens |
-| Llama 4 Maverick 17B Instruct      | `meta.llama4-maverick-17b-instruct-v1:0` | 1M tokens   |
-| Llama 3.2 90B Vision Instruct      | `meta.llama3-2-90b-instruct-v1:0`        | 128K tokens |
-| Llama 3.2 11B Vision Instruct      | `meta.llama3-2-11b-instruct-v1:0`        | 128K tokens |
-| Llama 3.2 3B Instruct              | `meta.llama3-2-3b-instruct-v1:0`         | 128K tokens |
-| Llama 3.2 1B Instruct              | `meta.llama3-2-1b-instruct-v1:0`         | 128K tokens |
-| Llama 3.1 70B Instruct             | `meta.llama3-1-70b-instruct-v1:0`        | 128K tokens |
-| Llama 3.1 8B Instruct              | `meta.llama3-1-8b-instruct-v1:0`         | 128K tokens |
+</details>
 
-### Amazon
+All built-in profiles default to region `us-east-1`.
 
-| Profile            | Model ID                       | Context   |
-| ------------------ | ------------------------------ | --------- |
-| Nova 2 Lite        | `amazon.nova-2-lite-v1:0`      | 1M tokens |
-| Titan Text Express | `amazon.titan-text-express-v1` | 8K tokens |
+## Configuration
 
-### AI21
+Choose a built-in profile and the AWS region where that model is available. The
+profile supplies the model identifier and context limit; most pipelines do not need
+to edit those values.
 
-| Profile         | Model ID                    | Context     |
-| --------------- | --------------------------- | ----------- |
-| Jamba 1.5 Large | `ai21.jamba-1-5-large-v1:0` | 256K tokens |
-| Jamba 1.5 Mini  | `ai21.jamba-1-5-mini-v1:0`  | 256K tokens |
+### Custom models
 
-### Cohere
-
-| Profile    | Model ID                     | Context     |
-| ---------- | ---------------------------- | ----------- |
-| Command R+ | `cohere.command-r-plus-v1:0` | 128K tokens |
-| Command R  | `cohere.command-r-v1:0`      | 128K tokens |
-
-### Custom
-
-Select the **Custom** profile to use any Bedrock model not in the list. Provide the full
-provider-prefixed model ID (e.g. `anthropic.claude-3-7-sonnet-20250219-v1:0`) or an ARN
-for a custom or provisioned model, plus the model's total token limit. Bare model names
-without a provider prefix are rejected at save time with a validation warning. See the
+Select **Custom** to use a Bedrock model not listed above. Provide its full
+provider-prefixed model ID (for example,
+`anthropic.claude-3-7-sonnet-20250219-v1:0`) or an ARN for a custom or
+provisioned model, plus the model's total token limit. Bare model names without a
+provider prefix produce a save-time warning. See the
 [Bedrock model IDs reference](https://docs.aws.amazon.com/bedrock/latest/userguide/model-ids.html)
 for available identifiers.
-
----
 
 ## Authentication
 

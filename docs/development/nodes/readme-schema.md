@@ -185,11 +185,69 @@ name and one row per exposed function.
 
 **Trigger:** `preconfig.profiles` contains ≥ 2 entries other than `custom`.
 
-| Profile | Model | Context |
-|---|---|---|
+Every declared profile appears exactly once. The introductory sentence names
+the declared default profile and its key; the default row is marked
+`(default)`. Column names after `Profile` may be adapted to the provider, but
+when `Model`/`Model ID`, `Context`/`Context tokens`, or `Output`/`Output tokens`
+is present, its values must match `model`, `modelTotalTokens`, or
+`modelOutputTokens` in the profile metadata.
 
-- List exactly the declared profiles, default marked `*(default)*`. Column
-  names after the first may be adapted to the node.
+For a node whose merged `classType` does not contain `llm`, or whose merged
+metadata declares six or fewer profiles, use one ordinary table. A `<details>`
+block is forbidden in this layout.
+
+For a node whose merged `classType` contains `llm` and whose merged metadata
+declares more than six profiles, use two tables:
+
+1. A visible table containing at most six unique profiles. Put the declared
+   default first, then profiles from the provider's two newest recognizable
+   release groups, newest group first, until the table reaches six rows.
+2. A table inside one native `<details>` block containing every remaining
+   profile. `custom` and profiles marked `deprecated` must be here.
+
+Use this exact shape (the columns after `Profile` may be adapted, but both
+tables use the same columns):
+
+```markdown
+## Profiles
+
+Default: **GPT-5.2** (`openai-5-2`).
+
+| Profile | Model | Context | Output |
+| ------- | ----- | ------- | ------ |
+| `openai-5-2` **(default)** | `gpt-5.2` | 400,000 | 128,000 |
+| `gpt-5-6-sol` | `gpt-5.6-sol` | 1,050,000 | 128,000 |
+| `gpt-5-6-terra` | `gpt-5.6-terra` | 1,050,000 | 128,000 |
+| `gpt-5-6-luna` | `gpt-5.6-luna` | 1,050,000 | 128,000 |
+| `gpt-5-5` | `gpt-5.5` | 1,050,000 | 128,000 |
+
+<details>
+<summary><strong>View 2 more models</strong></summary>
+
+| Profile | Model | Context | Output |
+| ------- | ----- | ------- | ------ |
+| `openai-5-4` | `gpt-5.4` | 400,000 | 128,000 |
+| `custom` | _(user-specified)_ | editable | editable |
+
+</details>
+```
+
+The summary text is exactly `View N more models`, where `N` is the number of
+rows in the collapsed table. Keep the blank line after `</summary>` and the
+blank line before `</details>`; both are required for CommonMark renderers to
+parse the nested table. A large-layout default cannot be `custom` or
+deprecated, because the default must be visible while those profiles must be
+collapsed; correct inconsistent metadata rather than changing the documented
+default.
+
+Profile counts and row parity in a multi-service directory use the combined
+profiles from all protocol-bearing `services*.json` entries. `###` service
+labels may be added when useful, but the combined profile set is validated
+once for the directory.
+
+Release recency is review judgment. Service metadata has no dependable
+release dates or newest-first order, so the deterministic validator does not
+infer whether the visible release groups are the newest.
 
 ## 7. `## Configuration` — CORE
 
@@ -263,8 +321,20 @@ are shared fragments and are ignored):
 - H1 equals the directory name; a summary paragraph follows it
 - required sections present; conditional sections absent when untriggered
 - section order; no unknown `##` headings in the hand-written region
-- table parity: Connections rows = `invoke` keys, Lanes rows = declared
-  lanes, Profiles rows = declared profiles
+- table parity: Connections rows = `invoke` keys and Lanes rows = declared
+  lanes
+- exact Profiles parity across merged services: every declared profile appears
+  once, with separate failures for missing, duplicate, and unknown rows
+- the declared profile default appears in the introduction and is marked on
+  its row; for large LLM lists it is also the first visible row
+- ordinary profile sections have one table and no `<details>`; large LLM
+  sections have one visible table plus one collapsed table, at most six
+  visible rows, and `custom`/deprecated rows collapsed
+- the large-layout summary uses the exact hidden-row count, and the required
+  blank lines surround the nested table
+- rendered model identifiers and context/output token values match declared
+  profile metadata when those semantic columns are present (Markdown
+  decoration and numeric thousands separators are ignored)
 - the generated region, when present, is last and unmodified in shape
 - `## About` ≤ 80 words, first section, with `## Upstream docs` present
 - warns when a field with objective complexity signals (a `textarea`
