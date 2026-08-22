@@ -910,17 +910,33 @@ async def test_on_rrext_resolve_config_reports_a_key_the_profile_overwrote(monke
 
 
 @pytest.mark.asyncio
-async def test_on_rrext_resolve_config_stays_quiet_when_the_value_survives(monkeypatch):
-    """A key that reaches the node unchanged is not a discard, profile or not."""
-    monkeypatch.setattr(cmd_misc.Config, 'getNodeConfig', staticmethod(lambda p, c: {'apikey': 'sk-authors-key'}))
+async def test_on_rrext_resolve_config_reports_a_sibling_that_matches_the_profile(monkeypatch):
+    """A sibling whose value coincides with the profile's is still never read.
+
+    Comparing values would stay quiet here and leave the author believing the
+    line is in effect, when the same key inside the profile is what applied.
+    """
+    monkeypatch.setattr(cmd_misc.Config, 'getNodeConfig', staticmethod(lambda p, c: {'model': 'gpt-5.4'}))
 
     conn = _make_conn()
     request = {
         'arguments': {
             'provider': 'llm_openai',
-            'config': {'profile': 'openai-5-4', 'apikey': 'sk-authors-key'},
+            'config': {'profile': 'openai-5-4', 'model': 'gpt-5.4'},
         },
     }
+    result = await MiscCommands.on_rrext_resolve_config(conn, request)
+
+    assert result['body']['dropped'] == ['model']
+
+
+@pytest.mark.asyncio
+async def test_on_rrext_resolve_config_reports_nothing_without_a_profile(monkeypatch):
+    """Without a profile the user layer is read from the top level, so nothing is lost."""
+    monkeypatch.setattr(cmd_misc.Config, 'getNodeConfig', staticmethod(lambda p, c: {'model': 'gpt-5.4'}))
+
+    conn = _make_conn()
+    request = {'arguments': {'provider': 'llm_openai', 'config': {'model': 'gpt-5.4'}}}
     result = await MiscCommands.on_rrext_resolve_config(conn, request)
 
     assert result['body']['dropped'] == []
