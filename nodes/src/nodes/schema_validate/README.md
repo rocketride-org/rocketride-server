@@ -129,7 +129,7 @@ appends its own entry, so the guard can actually fire.
 
 | Lane in | Lane out | Description |
 |---|---|---|
-| `answers` | `answers` | Annotates fact dictionaries and re-emits every record; non-fact values pass through. |
+| `answers` | `answers` | Annotates fact dictionaries and re-emits every record. Non-fact payloads retain their content; JSON-lane scalar values are re-emitted as text (`expectJson=False`). |
 
 ## Configuration
 
