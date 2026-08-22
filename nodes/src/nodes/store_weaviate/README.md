@@ -1,113 +1,118 @@
 # store_weaviate
 
-A RocketRide store node that persists embedded document chunks in a Weaviate instance and retrieves them by semantic or keyword search, and exposes search/upsert/delete as agent-callable tools.
+A RocketRide vector-store node that stores embedded document chunks in Weaviate and retrieves them by semantic or keyword search. Use it when a pipeline or agent needs a Weaviate-backed document store.
+
+## About Weaviate
+
+Weaviate is a vector database for storing data with embeddings and structured
+properties. It supports vector search and filtered retrieval over collections.
+Use it when a team has selected Weaviate for its retrieval data and wants a
+RocketRide pipeline or agent to use the same collection.
 
 ## What it does
 
-Stores pre-embedded documents in a Weaviate collection and answers searches against them. Supports both self-hosted Weaviate and Weaviate Cloud, selected via a profile.
+The node accepts embedded documents on its `documents` lane and can retrieve matching documents for incoming questions. It also exposes the store to an agent as tools. A collection is created when documents are first added, and incoming chunks without embeddings are rejected. Pick it over the sibling vector stores when Weaviate is the database the workload already operates, including when the node should use Weaviate's local REST and gRPC connection or its cloud connection.
 
-Uses the official **weaviate-client** Python SDK (v4 API): `connect_to_local` for self-hosted instances and `connect_to_weaviate_cloud` for cloud clusters, with connection timeouts of 30 s (init), 60 s (query), and 120 s (insert).
+The driver creates the collection without a vectorizer and gives it an HNSW vector index. It stores document content and metadata as collection properties, allowing semantic or keyword retrieval with the same metadata filters.
 
-Key behavior to know:
+## Lanes
 
-- **Documents must arrive pre-embedded.** Run them through an embedding node first: the collection is created with `Vectorizer.none()`, so Weaviate never embeds anything itself; the pipeline supplies all vectors. A document without an embedding raises an error on ingest.
-- **The collection is created automatically** on first write if it does not exist, with an HNSW vector index using the configured distance metric.
-- **Re-ingesting is idempotent per document.** Before inserting, all existing chunks with the same `objectId` are deleted, then the new chunks are written via Weaviate's dynamic batch API. If any batch objects fail, the node raises an error.
-- **Deletes are soft by default.** Documents can be marked deleted (`isDeleted: true`) and later re-activated; soft-deleted chunks are excluded from every search and get unless the filter explicitly asks for deleted documents. Hard removal by `objectId` is also supported.
-- The configured `host` is normalized automatically: leading `http://` / `https://` and trailing slashes are stripped, and the API key is trimmed of whitespace.
+| Lane in | Lane out | Description |
+| --- | --- | --- |
+| `documents` | — | Store embedded document chunks. |
+| `questions` | `documents` | Return matching documents. |
+| `questions` | `answers` | Return matching documents as answers. |
+| `questions` | `questions` | Enrich questions with matching documents. |
 
----
+## As a tool
 
-## Configuration
+The configured tool-server name defaults to `weaviate`.
 
-### Lanes
+| Function | Description |
+| --- | --- |
+| `search` | Searches the store for a non-empty `query`; accepts optional `top_k` and metadata `filter`, and returns matching content, metadata, and scores. |
+| `upsert` | Adds or updates a non-empty `documents` array. Each document requires content and an object ID; it can provide an embedding and embedding model or use the bound embedding provider. |
+| `delete` | Deletes documents for a non-empty `object_ids` array and returns the deleted count. |
 
-| Lane in     | Lane out    | Description                                                      |
-| ----------- | ----------- | ---------------------------------------------------------------- |
-| `documents` | -           | Ingest pre-embedded documents into the collection                |
-| `questions` | `documents` | Return matching documents                                        |
-| `questions` | `answers`   | Return matching documents as an answer                           |
-| `questions` | `questions` | Enrich the question with matching documents for downstream nodes |
-
-The node can also render a stored object back to text: given an object id, it rehydrates all chunks in `chunkId` order (fetched in windows of `renderChunkSize`) and streams the joined text to the text lane.
-
-### Fields
-
-| Field        | Type / Default                  | Description                                                                                  |
-| ------------ | ------------------------------- | -------------------------------------------------------------------------------------------- |
-| `host`       | string                          | Weaviate server address. Cloud: `<your-instance-name>.weaviate.cloud`. Local default: `localhost`. Scheme and trailing slashes are stripped automatically. |
-| `port`       | int: `8080` local, `443` cloud | REST port                                                                                     |
-| `grpc_port`  | int: `50051`                   | gRPC port (local profile only)                                                                |
-| `apikey`     | string                          | API key. Required for cloud; optional for local (used only when non-empty)                    |
-| `score`      | number: `0.5`                  | Minimum retrieval similarity threshold                                                        |
-| `collection` | string: `ROCKETRIDE`           | Collection name: must start with an uppercase letter and contain only letters, numbers, and underscores |
-| `similarity` | string: `cosine`               | Distance metric: `cosine` · `dot` · `l2-squared` · `hamming` · `manhattan`. Any other value raises an error at startup |
-| `renderChunkSize` | int: `33554432`           | Number of chunk ids fetched per window when rendering a full document                          |
-| `mode`       | string (set by profile)         | `local` or `cloud`: selects the connection method                                            |
-
-Each ingested chunk is stored with these properties alongside its vector: `content`, `objectId`, `nodeId`, `parent`, `permissionId`, `isDeleted`, `chunkId`, `isTable`, `tableId`, `vectorSize`, `modelName`.
-
----
+`search` requires a bound embedding provider for semantic similarity search. The three functions return a failure object when their required input or an embedding cannot be obtained.
 
 ## Profiles
 
-| Profile                    | Mode    | Default host                     | Port   |
-| -------------------------- | ------- | -------------------------------- | ------ |
-| Weaviate cloud server      | `cloud` | _(your Weaviate Cloud endpoint)_ | `443`  |
-| Your own Weaviate server   | `local` | `localhost`                      | `8080` |
+| Profile | Default host | Default port |
+| --- | --- | --- |
+| Weaviate cloud server *(default)* | Empty | `443` |
+| Your own Weaviate server | `localhost` | `8080` |
 
-The preconfig default profile is `cloud`. The cloud profile exposes host, API key, score, and collection; the local profile exposes host, port, gRPC port, score, and collection.
+## Configuration
 
----
+Choose the cloud or local profile, then configure the host and collection. The cloud profile connects to the configured cluster URL; the local profile also uses the configured gRPC port, which defaults to `50051`. The profile changes the connection method, so decide which service you are connecting to before adjusting search settings.
 
-## Agent tools
+### Host, ports, and API key
 
-When wired to an agent, the node exposes three tools via `VectorStoreToolMixin`. Each tool is named `<serverName>.<tool>` (defaults: `weaviate.search`, `weaviate.upsert`, `weaviate.delete`).
+The runtime trims whitespace, strips a leading `http://` or `https://`, and
+removes trailing slashes from the entered host. Cloud mode calls the cloud
+connection with the API key. Local mode passes the configured REST and gRPC
+ports, and uses the API key only when one is supplied. Use the local profile for
+a service that exposes both local endpoints; a startup or validation failure can
+mean the selected profile does not match the service, or that the local gRPC
+port is unavailable.
 
-| Tool     | Key inputs                                                                                                                            | Description                                                                                                              |
-| -------- | ------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| `search` | `query` (required); `top_k` (default 10, max 100); `filter` (optional dict, keys `objectId`/`nodeId`/`parent` are honored)           | Semantic search over stored documents; returns content, metadata, and score per result. Falls back to keyword search if semantic search fails. |
-| `upsert` | `documents` array, each with `content` and `object_id`; optional `metadata`, `embedding`, and `embedding_model`                      | Add or update documents. Embeddings are computed automatically via the bound embedding provider, or pre-computed vectors can be supplied. |
-| `delete` | `object_ids` (non-empty string array)                                                                                                 | Hard-delete documents by object ID. Returns `deleted_count`.                                                             |
+### Collection
 
-Tool calls run on the control plane and do not flow through the pipeline's embedding lanes. Semantic search in the `search` tool and automatic embedding in `upsert` require an embedding provider bound to the node (the `all.embedding` block in its parameters). Without one, those calls return `{"success": false, "error": ...}`.
+The collection is the destination for stored chunks and is created with no vectorizer and an HNSW vector index when first needed. The save-time probe requires a name that begins with an uppercase letter and then contains only letters, digits, or underscores. Change it to isolate a corpus or embedding space; it directs the node to a different collection rather than creating a logical partition. A name that begins lowercase or contains punctuation stops configuration before the pipeline starts.
 
----
+### Similarity and retrieval score
 
-## Search behavior
+The runtime accepts `cosine`, `dot`, `l2-squared`, `hamming`, or `manhattan` as the similarity setting, defaulting to `cosine`; another value stops initialization. It passes the selected value to the HNSW index when it creates a collection, so make the choice match the embedding space before the first ingest. Changing the setting does not recreate an existing collection's index.
 
-- **Semantic search** runs a `near_vector` query with the question's embedding. The question must carry an embedding (bind an embedding node), and a non-zero result offset is not supported. When the requested limit is 10 or less, the node queries with a limit of 25.
-- **Keyword search** matches the question text against chunk content with a `*query*` wildcard `like` filter.
-- Both searches apply the document filter (node id, parent, permissions, object ids, chunk id ranges, table flags) and exclude soft-deleted chunks unless deleted documents are requested.
-- **Scoring:** with the `cosine` metric the returned distance is mapped to `(distance + 1) / 2`; for all other metrics a sigmoid `1 / (1 + exp(distance / -100))` is used. Results scoring below `0.20` are discarded outright, before the configured `score` threshold is applied.
+The retrieval score defaults to `0.5`, while the conversion code also drops results below a hard `0.20` before returning them. Raise the configured threshold if weak documents crowd the context; lower it when expected material is omitted, remembering that nothing below `0.20` can be returned. Cosine scores are converted as `(distance + 1) / 2`; the other supported metrics use a sigmoid conversion, so threshold values are not directly comparable after a metric change.
 
----
+### Connection timeouts
 
-## Configuration validation
+The client uses separate initialization, query, and insert timeouts of 30, 60,
+and 120 seconds. They are fixed by this node's implementation, so a slow
+connection cannot be tuned from this panel. If only large writes time out while
+queries work, reduce the ingest workload or investigate the service path; if
+all operations time out, start with the selected profile, host, ports, and API
+key instead of treating it as a retrieval-score problem.
 
-When the node config is saved, a fast probe validates it and surfaces problems as warnings:
+### Tool Server Name
 
-- The collection name is checked against the official Weaviate rule (`^[A-Z][_0-9A-Za-z]*$`): start with an uppercase letter; only letters, numbers, and underscores; no spaces or special characters.
-- Hosts of `localhost` / `127.*` are treated as local, anything else as cloud.
-- **Cloud:** an HTTP GET to `/v1/meta` with the API key as a Bearer token (3 s timeout).
-- **Local:** the SDK lists collections over REST, then verifies the gRPC port is reachable (channel-ready check, falling back to a plain TCP connect if `grpc` is unavailable).
-
-HTTP error responses are surfaced with their status code and the server's `message`/`error` body so misconfigurations are easy to diagnose.
-
----
+The tool-server name defaults to `weaviate` and prefixes the three agent functions. Change it when multiple Weaviate stores are connected to the same agent so their functions do not share a namespace.
 
 ## Authentication
 
-- **Cloud profile:** set `apikey` to your Weaviate Cloud API key, it is passed as `Auth.api_key` credentials.
-- **Local profile:** anonymous by default. If `apikey` is set to a non-empty value, it is sent as API-key credentials to the local instance.
+For a cloud profile, provide the API key; the runtime uses it for the cloud connection. For a local profile, the key is optional: an empty key connects without credentials, while a supplied key is used for local authentication.
 
----
+## Notes
+
+### Search and document lifecycle
+
+Semantic search requires an embedding and does not accept a non-zero offset. Keyword search matches content with the metadata filters. Re-ingesting an object deletes its existing chunks before replacement chunks are added. The store can mark chunks deleted or active, and its default filters exclude marked-deleted chunks.
+
+Before semantic search, the driver checks that the collection is compatible with
+the query's embedding model. The collection's batch import reports an error if
+any objects failed to import, instead of silently treating a partial write as a
+successful ingest.
+
+Filters cover node, parent, permissions, object IDs, chunks, table fields, and
+the deletion flag. Normal queries add `isDeleted = false`, so marked-deleted
+content is hidden unless a caller requests it. This lets a shared collection be
+scoped at query time without using collection names as routine access filters.
+
+### Rendering
+
+Rendering retrieves an object's chunks in `chunkId` order and sends joined text to the callback in `renderChunkSize` groups. The node's document count is a count of stored vectors (chunks).
+
+When an object is re-ingested, the driver deletes its existing objects before
+adding replacements through Weaviate's dynamic batch API. A batch with failed
+objects raises an error after the batch ends. Keep the original source
+available for a retry, since the replacement behavior is not an all-or-nothing
+transaction across the prior objects and the new batch.
 
 ## Upstream docs
 
-- [Weaviate documentation](https://weaviate.io/developers/weaviate)
-
----
+- [Weaviate documentation](https://docs.weaviate.io/)
 
 <!-- ROCKETRIDE:GENERATED:PARAMS START -->
 <!-- Generated by nodes:docs-generate. Do not edit by hand. -->

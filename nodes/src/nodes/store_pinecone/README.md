@@ -1,105 +1,119 @@
 # store_pinecone
 
-A RocketRide vector store node that stores and retrieves embedded documents in a Pinecone index, with agent-callable search, upsert, and delete tools.
+A RocketRide vector-store node that stores embedded document chunks in a Pinecone index and retrieves them by semantic or keyword search. Use it when a pipeline or agent needs a Pinecone-backed document store.
+
+## About Pinecone
+
+Pinecone is a managed vector database for applications that search embedding
+data. It organizes vectors into indexes and supports vector queries with
+metadata filters. Use it when Pinecone is the service your application uses for
+retrieval and you want RocketRide to store and query the same index.
 
 ## What it does
 
-Stores pre-embedded document chunks in a Pinecone index and retrieves them by semantic (vector) similarity or keyword search. Documents must pass through an embedding node before reaching this node - chunks without an embedding are rejected at write time.
+The node accepts embedded documents on its `documents` lane and can retrieve matching documents for incoming questions. It also exposes the store to an agent as tools. It creates a Pinecone index when documents are first added, and rejects incoming chunks without embeddings. Pick it over a self-managed store when the retrieval corpus belongs in a Pinecone index and its selected deployment mode is already part of the intended Pinecone setup.
 
-Uses the **Pinecone gRPC SDK** (`PineconeGRPC`) for all data-plane operations and the HTTP client during configuration validation. What RocketRide calls a *collection* maps to a Pinecone **index** (Pinecone's own "collections" feature is not used).
+The driver treats its Collection setting as the Pinecone index name. When it has to create that index, the supplied embeddings determine its dimension and the selected similarity setting determines its metric.
 
-The index is created automatically on first write if it does not yet exist, with the vector dimension taken from the incoming embeddings. Re-ingesting documents whose `objectId` already exists removes the old chunks before writing the new ones, making writes effectively upserts. Vectors are upserted in batches of 50 (well below Pinecone's 100-vector bulk limit) with a 32 MiB payload cap per batch.
+## Lanes
 
-The node carries `classType: ["store", "tool"]` and the `invoke` capability. In addition to its data lanes it exposes vector-DB tools to agent nodes in the same pipeline.
+| Lane in | Lane out | Description |
+| --- | --- | --- |
+| `documents` | — | Store embedded document chunks. |
+| `questions` | `documents` | Return matching documents. |
+| `questions` | `answers` | Return matching documents as answers. |
+| `questions` | `questions` | Enrich questions with matching documents. |
 
----
+## As a tool
 
-## Configuration
+The configured tool-server name defaults to `pinecone`.
 
-### Lanes
+| Function | Description |
+| --- | --- |
+| `search` | Searches the store for a non-empty `query`; accepts optional `top_k` and metadata `filter`, and returns matching content, metadata, and scores. |
+| `upsert` | Adds or updates a non-empty `documents` array. Each document requires content and an object ID; it can provide an embedding and embedding model or use the bound embedding provider. |
+| `delete` | Deletes documents for a non-empty `object_ids` array and returns the deleted count. |
 
-| Lane in     | Lane out    | Description                                                      |
-| ----------- | ----------- | ---------------------------------------------------------------- |
-| `documents` | (none)      | Ingest pre-embedded documents into the index                     |
-| `questions` | `documents` | Run a search and return matching documents                       |
-| `questions` | `answers`   | Run a search and return matching documents as an answer          |
-| `questions` | `questions` | Enrich the question with matching documents for downstream nodes |
-
-Semantic search requires the incoming question to carry an embedding (bind an embedding node upstream) and returns up to the filter's `limit` (default 25) top matches scored above the configured threshold. Non-zero offsets are not supported for semantic search and raise an error. Keyword search adds a `$contains` metadata filter on document content.
-
-### Fields
-
-| Field | Type | Description |
-|---|---|---|
-| `collection` | string | Default "rocketride". Enter the name of the collection. Accepted are: Lower case, alphanumeric characters, hyphens |
-| `serverName` | string | Default "pinecone". Namespace for agent-facing tool names, e.g. 'pinecone' exposes tools as pinecone.search / pinecone.upsert / pinecone.delete. Change this when running multiple Pinecone nodes in the same pipeline so their tool names do not collide. |
-| `profile` | string | Default "pod-based". Connect to... |
-| `provider` | string | Default "pinecone".  |
-
-### Collection naming rules
-
-Configuration validation checks all of the following and reports violations together:
-
-- lowercase letters, numbers, and hyphens only
-- no leading or trailing hyphen
-- no consecutive hyphens (`--`)
-- maximum 45 characters
-
-Validation also authenticates with the API key, and if the index already exists it checks that its deployment type matches the selected profile: a serverless index cannot be used with the pod-based profile and vice versa.
-
----
+`search` requires a bound embedding provider for semantic similarity search. The three functions return a failure object when their required input or an embedding cannot be obtained.
 
 ## Profiles
 
-| Profile                                     | Default | Description                                                                        |
-| ------------------------------------------- | ------- | ---------------------------------------------------------------------------------- |
-| `serverless-dense`                          | yes     | Serverless deployment. New indexes are created in AWS `us-east-1`.                |
-| `pod-based`                                 | no      | Pod-based deployment. New indexes are created in `us-east1-gcp` with 1 x `p1.x1` pod. |
+| Profile | Deployment mode | Context |
+| --- | --- | --- |
+| Pinecone Pod-Based Index | `pod-based` | Creates a pod-based index. |
+| Pinecone Serverless Dense Index *(default)* | `serverless-dense` | Creates a serverless index. |
 
-The default profile is `serverless-dense`.
+## Configuration
 
----
+Choose the profile that matches the target index, then provide the API key and collection name. New indexes use the selected profile; an existing index is checked against it during the save-time probe. The profile selection matters at creation time, while the key and collection select which existing Pinecone resource this node connects to.
 
-## Agent tools
+### Index profile
 
-When an agent node is wired to this node, the following tools become callable, namespaced by the configured `serverName` (default `pinecone`):
+`Pinecone Serverless Dense Index` is the default profile and creates an index
+with the driver's serverless specification; `Pinecone Pod-Based Index` uses its
+pod-based specification. Select the one that matches an index you already have,
+or the kind of index you intend the node to create. The save-time probe compares
+an existing index's specification with the selected profile and warns if they do
+not agree; change the profile rather than assuming the node can change the
+existing index's deployment type.
 
-### Search
+### Collection
 
-| Tool              | Description                                                                                                                                    |
-| ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
-| `pinecone.search` | Semantic similarity search. Takes `query` text, optional `top_k` (default 10), and an optional metadata `filter` object. Returns matching documents with content, metadata, and score. |
+The collection is the Pinecone index name and defaults to `rocketride`. Validation requires lowercase letters, numbers, and hyphens only; it rejects leading or trailing hyphens, consecutive hyphens, and names over 45 characters. Choose a name that identifies the one index this node will use. Change it to direct the node to a different Pinecone index, not to split a corpus inside one index. A validation warning flags a name that cannot be used by the configured service.
 
-### Write
+### Similarity and retrieval score
 
-| Tool              | Description                                                                                                                                                                             |
-| ----------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `pinecone.upsert` | Add or update documents. Each document requires `content` and an `object_id` (used for deduplication). Accepts optional `metadata`, or a pre-computed `embedding` plus `embedding_model` pair to skip automatic embedding computation. |
+The runtime accepts `cosine`, `euclidean`, or `dotproduct` as the similarity setting, defaulting to `cosine`; another value stops initialization. This value becomes the metric when the driver creates an index, so make it agree with the embedding data and leave an existing index's metric alone. Choosing the wrong metric changes ranking and can make good matches appear weak.
 
-### Delete
+Although the configuration value `score` is read with a default of `0.5`, the semantic-search filtering code reads the separately named `threshhold_search` attribute, whose initial value is `0.0`; therefore the configured score is not applied by this implementation. Do not rely on this setting to suppress weak Pinecone results. If relevance needs stricter filtering, apply a downstream constraint or use a store whose retrieval threshold is enforced until this implementation changes.
 
-| Tool              | Description                                    |
-| ----------------- | ---------------------------------------------- |
-| `pinecone.delete` | Delete documents by a list of `object_ids`.    |
+### API key
 
-The tool path runs on the control plane and does not pass through the pipeline's embedding lanes. The node wires its own query embedder from the pipeline's embedding configuration. `pinecone.search` requires that embedder; if none is configured, the call returns `{"success": false, "error": ...}`. `pinecone.upsert` computes embeddings the same way, or accepts pre-computed vectors per document to skip auto-computation.
+The API key is trimmed before the Pinecone client is created. It is needed both
+to open the store and for the save-time probe that lists indexes. Rotate or
+replace it when authentication fails rather than changing the collection name;
+the probe can also reveal a key that reaches Pinecone but cannot inspect the
+chosen index. Keep one key per intended service boundary when the node should
+not see every index available to a broader application credential.
 
----
+### Tool Server Name
 
-## Behavior notes
-
-- **Soft delete:** documents can be marked deleted (`isDeleted: true`) rather than physically removed. They are excluded from all search results unless the filter explicitly requests deleted documents. Documents that reappear are automatically marked active again.
-- **Metadata updates:** applied per record in batches of 1000, querying only records whose metadata still differs from the target state so the loop converges safely and does not re-process already-updated records.
-- **Rendering:** rehydrates a complete document from its chunks in `chunkId` order, streaming the joined text to the output callback in ranges of 32 MiB.
-- **Pagination:** Pinecone has no native query offset. Path listing emulates pagination by over-fetching (`offset + limit`) records and slicing client-side.
-
----
+The tool-server name defaults to `pinecone` and prefixes the three agent functions. Change it when multiple Pinecone stores are connected to the same agent so their functions do not share a namespace.
 
 ## Authentication
 
-Set `apikey` to your Pinecone API key. The key is used during both config validation (HTTP client) and runtime data operations (gRPC client). There are no additional auth modes - Pinecone uses API-key-only authentication.
+Set the API key for the selected Pinecone profile. The runtime creates its client with that key, and the save-time probe uses it to list indexes and check an existing index's deployment mode.
 
----
+## Notes
+
+### Search and document lifecycle
+
+Semantic search requires an embedding and does not accept a non-zero offset. Keyword search adds a content filter to the metadata filters. Re-ingesting an object deletes its existing chunks before replacement chunks are upserted. The store can mark chunks deleted or active, and its default filters exclude marked-deleted chunks.
+
+The node retrieves semantic results with the requested limit (or 25 when no
+limit is supplied). It runs the collection-existence and embedding-model checks
+before searching, which makes a missing index or incompatible model fail before
+results are returned.
+
+Index creation is intentionally opinionated: the serverless branch supplies an
+AWS `us-east-1` specification, while the pod branch supplies one `p1.x1` pod in
+`us-east1-gcp`. Those are creation-time defaults in this node, not settings
+that alter an existing index. Choose an already compatible index when those
+defaults are not appropriate for the intended deployment.
+
+### Rendering and paths
+
+Rendering retrieves an object's chunks in `chunkId` order and sends joined text to the callback in `renderChunkSize` groups. For path listing, the driver requests enough records for the requested offset and limit, then slices the results locally.
+
+Metadata filters include document identity, parent path, permissions, table
+information, and deletion state. The driver defaults `isDeleted` to false in
+its Pinecone filter, so a soft-deleted source does not appear in normal
+retrieval. That makes reactivating or explicitly including deleted material a
+separate caller choice rather than an accidental result of broad searching.
+
+## Upstream docs
+
+- [Pinecone documentation](https://docs.pinecone.io/)
 
 <!-- ROCKETRIDE:GENERATED:PARAMS START -->
 <!-- Generated by nodes:docs-generate. Do not edit by hand. -->

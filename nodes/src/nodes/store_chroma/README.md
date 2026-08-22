@@ -1,96 +1,112 @@
 # store_chroma
 
-A RocketRide vector store node backed by ChromaDB that ingests pre-embedded documents, answers questions via semantic or keyword search, and exposes search/upsert/delete as agent-callable tools.
+A RocketRide vector store for Chroma that stores embedded document chunks and retrieves matching content in a pipeline or through an agent tool.
+
+## About Chroma
+
+Chroma is a vector database used here through its HTTP client. This node keeps document text, metadata, and vectors in a Chroma collection and queries that server over the network. It does not run an embedded Chroma database inside RocketRide.
 
 ## What it does
 
-Stores pre-embedded document chunks in a ChromaDB collection and retrieves them against incoming questions by semantic (vector) or keyword search. The node is registered with `classType: ["store", "tool"]` and the `invoke` capability, so an agent in the same pipeline can also call it directly as a tool (for example `chroma.search`, `chroma.upsert`, `chroma.delete`).
+The node stores pre-embedded chunks in a Chroma collection and retrieves them by vector similarity or keyword containment for incoming questions. It can also be connected as an agent tool. Choose it when a reachable Chroma server is the store for your pipeline and you need both pipeline lanes and agent access; choose a sibling store when the database you operate is not Chroma.
 
-Uses the **`chromadb-client`** package (the lightweight HTTP client only, not the full embedded database) and connects via `chromadb.HttpClient`. A ChromaDB server (self-hosted or ChromaDB Cloud) must therefore be reachable at the configured host and port.
+The node uses the lightweight `chromadb-client` HTTP client and creates the collection on its first write. It requires an embedding on every incoming document, so wire an embedding node ahead of its document lane. It can use a self-managed server or a token-authenticated cloud server, but both are remote HTTP connections.
 
-Documents must pass through an embedding node before reaching this node; chunks without an embedding are rejected with an error. The collection is created on first write via `get_or_create_collection`, with the configured similarity metric stored as `hnsw:space`. Soft deletes are supported: documents can be marked `isDeleted` in metadata and are then excluded from search results unless the filter explicitly requests deleted records.
+## Lanes
 
----
+| Lane in | Lane out | Description |
+| --- | --- | --- |
+| `documents` | — | Store pre-embedded document chunks. |
+| `questions` | `documents` | Emit matching documents. |
+| `questions` | `answers` | Emit matching documents as answers. |
+| `questions` | `questions` | Enrich the question with matching documents. |
 
-## Configuration
+## As a tool
 
-### Lanes
+The configured tool server name is the namespace for the functions below; it defaults to `chroma`.
 
-| Lane in     | Lane out    | Description                                                      |
-| ----------- | ----------- | ---------------------------------------------------------------- |
-| `documents` | (none)      | Ingest pre-embedded documents into the collection                |
-| `questions` | `documents` | Return matching documents                                        |
-| `questions` | `answers`   | Return matching documents as an answer                           |
-| `questions` | `questions` | Enrich the question with matching documents for downstream nodes |
+| Function | Description |
+| --- | --- |
+| `search` | Search the collection for matching documents. |
+| `upsert` | Add or update documents in the collection. |
+| `delete` | Remove documents by object ID. |
 
-### Fields
-
-| Field | Type | Description |
-|---|---|---|
-| `serverName` | string | Default "chroma". Namespace for agent-facing tool names, e.g. 'chroma' exposes tools as chroma.search / chroma.upsert / chroma.delete. Change this when running multiple Chroma nodes in the same pipeline so their tool names do not collide. |
-| `profile` | string | Default "cloud". Connect to... |
-| `provider` | string |  |
-
----
+`search` and an `upsert` without a supplied embedding use the node's bound embedding provider. These calls are separate from the data lanes, so a pipeline embedding upstream does not by itself provide vectors to a tool call. Use different server names when an agent has access to multiple Chroma nodes.
 
 ## Profiles
 
-| Profile | Description                                                                                            |
-| ------- | ------------------------------------------------------------------------------------------------------ |
-| `local` | Your own ChromaDB server. Connects with plain `HttpClient(host, port)`, no authentication.             |
-| `cloud` | ChromaDB Cloud. Requires `host` and `apikey`; authenticates using ChromaDB's `TokenAuthClientProvider`. |
+| Profile | Connection | Authentication |
+| --- | --- | --- |
+| Your own ChromaDB server *(default)* | Host and port | None configured by the node |
+| ChromaDB Cloud Server | Host and port | Token authentication with the API key |
 
----
+## Configuration
 
-## Agent tools
+Start with the local or cloud profile, then provide the host, port, collection, similarity, retrieval score, and—when using cloud—the API key. Most fields can remain at their profile values after the server address is set. The collection's similarity is established when it is first created, so choose it before writing the first documents.
 
-When wired to an agent, the node exposes three tools via `VectorStoreToolMixin`. Each tool is named `<serverName>.<tool>` (defaults: `chroma.search`, `chroma.upsert`, `chroma.delete`).
+### Connection profile and port
 
-| Tool     | Key inputs                                                                                                                            | Description                                                                                                              |
-| -------- | ------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| `search` | `query` (required); `top_k` (default 10, max 100); `filter` (optional dict, keys `objectId`/`nodeId`/`parent` are honored)           | Semantic search over stored documents; returns content, metadata, and score per result. Falls back to keyword search if semantic search fails. |
-| `upsert` | `documents` array, each with `content` and `object_id`; optional `metadata`, `embedding`, and `embedding_model`                      | Add or update documents. Embeddings are computed automatically via the bound embedding provider, or pre-computed vectors can be supplied. |
-| `delete` | `object_ids` (non-empty string array)                                                                                                 | Hard-delete documents by object ID. Returns `deleted_count`.                                                             |
+The local profile creates a plain HTTP client; the cloud profile creates an HTTP client with token authentication. Use the cloud profile only when you have the token that Chroma expects; the local profile deliberately supplies no credentials. The implementation removes an `http://` or `https://` prefix and trailing slash from the configured host before connecting, so enter the host once rather than trying to encode a path in it.
 
-Tool calls run on the control plane and do not flow through the pipeline's embedding lanes. Semantic search in the `search` tool and automatic embedding in `upsert` require an embedding provider bound to the node (the `all.embedding` block in its parameters). Without one, those calls return `{"success": false, "error": ...}`.
+Ports may be literal integers, numeric strings, or interpolated environment values. A whole-number value in the TCP range is used; a boolean, fractional value, unresolved placeholder, non-numeric value, or out-of-range value silently falls back to `8000`. This is useful for an environment placeholder, but it can also send a cloud connection to the wrong port: if a connection unexpectedly targets `8000`, check the resolved value first.
 
----
+### Collection and similarity
 
-## Search behavior
+The collection is created on first write with the selected similarity in its `hnsw:space` metadata. `cosine` is the default; `l2` and `ip` are the only other accepted values. Keep that setting aligned with your embedding model, and do not expect changing it later to rewrite an existing collection's index. Use a separate collection if the new model needs a different vector shape or distance metric.
 
-- **Semantic search** requires the question to carry an embedding; it raises an error otherwise. Non-zero result offsets are not supported in semantic search.
-- **Keyword search** uses ChromaDB's `$contains` document filter and supports offset/limit paging.
-- Raw distances are normalized to scores: cosine distances map to `(distance + 1) / 2`; `l2`/`ip` distances pass through a sigmoid. Results scoring below **0.20** are always dropped before they leave the node, regardless of the `score` threshold.
-- Filters on `nodeId`, `parent`, `objectId`, `tableId`, `chunkId` ranges, and permissions are translated to ChromaDB `where` clauses. Documents marked deleted are excluded with `$ne: true`, so records that never had an `isDeleted` key still match (they are treated as active).
+Semantic retrieval needs a question embedding and does not support a non-zero offset. Use keyword search when you need paged text matching: it uses Chroma's document-contains filter and supports offset and limit. Semantic scores are converted from Chroma distances and hits below `0.20` are always discarded. Raise the requested score when marginal chunks are harming a prompt; lower it for recall, knowing the hard floor still applies.
 
----
+### Retrieval score and document filters
 
-## Ingestion behavior
+The retrieval score controls which semantic hits are emitted after distance conversion. It affects semantic questions only, not keyword containment. Default filters exclude records with `isDeleted` metadata set to true, while records without that key are treated as active. The same filter conversion supports node, parent, object, table, chunk range, and permission constraints, so prefer filters over copying data into many collections merely to narrow a query.
 
-- Chunks are upserted in batches, flushed every **500 chunks** or when the accumulated payload exceeds `payloadLimit` (32 MiB by default).
-- When a chunk with `chunkId: 0` arrives, all existing chunks sharing the same `objectId` are deleted first, so re-ingesting a document replaces it rather than duplicating it.
-- Each stored chunk receives a fresh UUID as its ChromaDB record id; `objectId` and `chunkId` in metadata are the stable application-level identifiers.
-- Rendering a full document re-assembles chunks in `chunkId` order, fetching `renderChunkSize` chunks per round trip and tolerating gaps in the sequence.
+### Profile choice and collection creation
 
----
+Use **Your own ChromaDB server** when you control a reachable server and do not need token authentication. Use **ChromaDB Cloud Server** when that server expects the configured API key. The profile determines how the HTTP client is constructed, so switching profiles is not just a different display label for the same connection.
+
+The first document write calls Chroma's get-or-create collection operation and attaches the chosen `hnsw:space` metadata. Make the similarity decision before the first write. If you need to move an existing collection to a different distance metric, create and migrate to a new collection instead of expecting this node to alter the existing index.
+
+### Document lane and tool embeddings
+
+Every document-lane chunk needs an embedding; the store raises an error when it is absent. A semantic question needs an embedding too, while keyword containment works from the question text. This is intentionally different from an agent `upsert`, which can ask the node's bound embedding provider to create a missing vector.
+
+Use the bound provider for an agent that must add or search information without manually supplying embeddings. If an agent tool fails for a vector-related reason while document-lane storage succeeds, inspect that binding and the tool payload before changing Chroma configuration.
+
+### Tool Server Name
+
+This value namespaces the agent functions: `chroma.search`, `chroma.upsert`, and `chroma.delete` by default. Change it for distinct Chroma stores exposed to the same agent.
 
 ## Authentication
 
-### Local profile
+The cloud profile passes **API Key** to Chroma's token-authentication client. The local profile constructs the HTTP client without those authentication settings. A failed connection reports the host and port and points to connectivity, credentials, or an incompatible server as possible causes.
 
-No authentication is required. The node connects with `chromadb.HttpClient(host, port)`.
+## Notes
 
-### Cloud profile
+### Server compatibility
 
-Set `profile` to `cloud`, provide the ChromaDB Cloud `host` and your `apikey`. The node authenticates using `chromadb.auth.token_authn.TokenAuthClientProvider` configured via ChromaDB's `Settings` object.
+When the server reports a version, this node requires Chroma 0.6 or later. An unparseable or unavailable version does not block connection, but an identified older server is rejected with an upgrade message. This protects against an older server failing later with a confusing client compatibility error.
 
----
+### Ingestion, replacement, and rendering
 
-## Port
+Every ingested chunk needs an embedding. Inserts are batched and flush at 500 chunks or when the accumulated payload exceeds the configured limit. A chunk with `chunkId` 0 causes older chunks with the same `objectId` to be deleted before the new chunks are upserted, so a re-ingest replaces an object rather than adding a second copy. Chroma record IDs are generated UUIDs; use `objectId` and `chunkId` as the stable application identifiers.
 
-The `port` field accepts either a number or a string. Enter a plain integer such as `8000` for a local server or `443` for Cloud, or an env-var placeholder like `${ROCKETRIDE_CHROMA_PORT}`. Env-var interpolation resolves to a string at run time, which is why the field accepts a string as well as a number; the node coerces the value to an integer before opening the ChromaDB connection, so a literal integer, a numeric string, and an interpolated placeholder all work. An unresolved or non-numeric placeholder falls back to `8000` rather than failing.
+Soft deletion marks the metadata and hides a document from default search; hard deletion removes it. Rendering reconstructs an object in chunk-ID order and reads it in configured windows, tolerating gaps in the sequence. That makes the render path appropriate for a large stored document, not a guarantee that all chunks are contiguous.
 
----
+The node gives each Chroma record a fresh UUID, even when an object is being re-ingested. The stable identifiers for lifecycle operations are therefore the metadata `objectId` and `chunkId`, not an internal Chroma record ID. Keep those metadata values consistent across imports to make replacement, filters, and rendering predictable.
+
+### Search result interpretation
+
+Chroma reports distances, which the node converts to the score carried by a returned document. The conversion differs for cosine versus `l2` or `ip`, so a numeric threshold has meaning only alongside the selected similarity. Compare retrieval-score behavior within one collection and metric; do not treat the same threshold as equivalent after changing metrics.
+
+When semantic results are unexpectedly empty, verify the query embedding, the collection metric, the `isDeleted` filter, and the `0.20` hard floor in that order. When keyword results are unexpectedly empty, verify the search text and document containment rather than the vector score.
+
+### Agent tool dependency
+
+Agent semantic search and automatic tool upserts require the node's bound embedding provider unless the tool request supplies an embedding itself. If a tool returns an embedding-related error while the pipeline path works, check the tool binding rather than the Chroma host configuration.
+
+## Upstream docs
+
+- [Chroma documentation](https://docs.trychroma.com/)
 
 <!-- ROCKETRIDE:GENERATED:PARAMS START -->
 <!-- Generated by nodes:docs-generate. Do not edit by hand. -->

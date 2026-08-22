@@ -1,131 +1,121 @@
 # store_elasticsearch
 
-Store and retrieve documents by keyword (BM25) or by meaning (vectors), backed by Elasticsearch or OpenSearch.
+A RocketRide store node that indexes text or embedded document chunks in Elasticsearch or OpenSearch and retrieves them through pipeline lanes.
+
+## About Elasticsearch and OpenSearch
+
+Elasticsearch and OpenSearch are search backends that index text and can search embedding vectors. This directory provides a RocketRide service for each backend, choosing one from configuration at runtime. Both services can use either text-index or vector-store mode, but their deployment and index-management behavior is not interchangeable.
 
 ## What it does
 
-One node, two service variants (Elasticsearch and OpenSearch) that ingest documents and retrieve them at query time. Each variant operates in one of two modes, selected by the Store Mode toggle; no pipeline rewiring is required to switch between them:
+This directory provides two services: Elasticsearch and OpenSearch. Both ingest raw text for BM25-style index search or embedded documents for vector retrieval, then emit matching text, documents, or answers for incoming questions. Elasticsearch also supports a `questions` → `questions` lane for retrieved-context enrichment; OpenSearch does not declare that lane.
 
-- **Index mode:** classic BM25 full-text search over the index, with a configurable match operator (`or`, `and`, `exact` phrase) and optional contextual snippet highlighting. Text arrives on the `text` lane and results are returned via scan/scroll with a batch size of 500 and a scroll window of `1m`, so all matches are returned rather than just the first page.
-- **Vector store mode:** semantic similarity search over embedded documents. Documents must pass through an embedding node before reaching this one. Hits below the configured Retrieval Score threshold are dropped.
+Pick this node when Elasticsearch or OpenSearch is already the searchable index for your pipeline, especially when the same lane layout must support either keyword or embedding retrieval. Choose a dedicated vector-store sibling when its database is where your vectors belong and you do not need the dual-mode search behavior.
 
-Uses the official **elasticsearch** Python client (8.x, `dense_vector` + kNN, cosine similarity by default; `l2_norm` and `dot_product` are also accepted) and **opensearch-py** (`knn_vector` indices with HNSW / FAISS / `cosinesimil`). The backend is resolved automatically from the node config at startup.
+In **index mode**, use the `text` lane for raw text and queries run BM25-style matching. In **vector-store mode**, use the `documents` lane after an embedding node. Changing mode changes how the inputs are handled; it is not merely a different ranking option on one index.
 
-Elasticsearch covers self-managed, Elastic Cloud Hosted, and Elastic Cloud Serverless deployments. OpenSearch covers self-managed OpenSearch. Default mode differs per variant: Elasticsearch starts in **vector store** mode (`store_enabled: true`); OpenSearch starts in **index** mode (`mode: false`).
+## Lanes
 
-Saving the node config runs a fast connectivity probe: the index/collection name format is checked, then the cluster is contacted (Elasticsearch: `cluster.health` with a 10 s timeout; OpenSearch: `ping`). Failures surface as warnings with the backend's inner error `reason` extracted.
+| Lane in | Lane out | Description |
+| --- | --- | --- |
+| `text` | — | Ingest raw text for index mode. |
+| `documents` | — | Ingest embedded documents for vector-store mode. |
+| `questions` | `text` | Emit matching text. |
+| `questions` | `documents` | Emit matching documents. |
+| `questions` | `answers` | Emit matching content as answers. |
+| `questions` | `questions` | Enrich the question with matching documents for the Elasticsearch service. |
 
----
+## Profiles
+
+| Profile | Backend | Mode |
+| --- | --- | --- |
+| Self-managed Elasticsearch *(default)* | Elasticsearch | Vector store |
+| Elastic Cloud Hosted | Elasticsearch | Vector store |
+| Elastic Cloud Serverless | Elasticsearch | Vector store |
+| Local OpenSearch *(default)* | OpenSearch | Index |
 
 ## Configuration
 
-### Lanes
-
-| Lane in     | Lane out    | Description                                                                                  |
-| ----------- | ----------- | -------------------------------------------------------------------------------------------- |
-| `text`      | (none)      | Ingest raw text (index mode)                                                                 |
-| `documents` | (none)      | Ingest pre-embedded documents (vector store mode only)                                       |
-| `questions` | `text`      | Search and stream matching text                                                               |
-| `questions` | `documents` | Search and stream matching documents                                                          |
-| `questions` | `answers`   | Search and stream matching documents as answers                                               |
-| `questions` | `questions` | Enrich question with matching documents for downstream nodes (Elasticsearch variant only)     |
-
-The `documents` input lane is only processed in vector store mode; documents arriving in index mode are silently ignored. Documents without an embedding are skipped in vector store mode.
-
-Index and collection names must be 1-255 characters of lowercase letters, digits, `.`, `_`, or `-`; slashes and spaces are not allowed.
-
-### Elasticsearch variant
-
-The Deployment Type field selects a connection profile:
-
-| Field | Type | Description |
-|---|---|---|
-| `host` | string | Default "http://localhost:9200". Localhost URL for OpenSearch. |
-| `enabled` | boolean | Default true. Enable basic authentication when connecting. |
-| `username` | string | Default "admin".  |
-| `password` | string | Default empty.  |
-| `collection` | string | Default "rocketride". The name of the collection to use for the OpenSearch index. Only lowercase letters, numbers, and underscores are allowed. |
-| `mode` | boolean | Default false. Toggle between index and vector store. |
-| `search` | boolean | Default false. Customize the search behavior of the index. This option does not affect the ingestion and creation of the index. You can switch between behaviors when searching between pipeline runs. |
-| `matchOperator` | string | Default "or". Controls how multiple query terms are matched: 'or' (default) matches documents containing ANY of the query terms, 'and' matches documents containing ALL of the query terms, 'exact' requires the exact phrase to appear in order (phrase matching). |
-| `slop` | number | Default 0. The number of words to allow between terms when exact phrase search is enabled. |
-| `highlight` | boolean | Default false. Use the unified highlighter to return snippets around matches. |
-| `fragment_size` | number | Default 250. Maximum characters in the returned highlight snippet (context window) per hit. |
-| `score` | number | Default 0.5. Minimum retrieval score for vector stores |
-| `dim` | integer | Default 768. Required in vector store mode; dimension of embedding vectors. |
-| `index_label` | object |  |
-| `vstore_label` | object |  |
-| `provider` | string | Default "opensearch".  |
-| `index` | string | Default "rocketride". Enter the name of the Elasticsearch index (must be lowercase) |
-| `type` | string | Default "vector_database". Elasticsearch operation type |
-| `store_enabled` | boolean | Default true. Enable document storage |
-| `profile` | string | Default "self-managed". Connect to... |
-
-| Field                   | Type / Default       | Description                                                                                        |
-| ----------------------- | -------------------- | -------------------------------------------------------------------------------------------------- |
-| `elasticsearch.profile` | enum, `self-managed` | `self-managed` / `cloud-hosted` / `cloud-serverless`                                               |
-| `vector.local.host`     | string, `localhost`  | Server address (self-managed)                                                                      |
-| `vector.local.port`     | number, `9200`       | Server port (self-managed)                                                                         |
-| `vector.cloud.host`     | string, empty        | Cloud host URL, e.g. `<deployment-id>.es.<region>.cloud.es.io` (cloud profiles)                   |
-| `vector.cloud.port`     | number, `9243`/`443` | Cloud port (9243 for cloud-hosted, 443 for cloud-serverless)                                       |
-| `vector.apikey`         | string, empty        | Elastic Cloud API key (cloud profiles)                                                             |
-| `vector.index`          | string, `rocketride` | Elasticsearch index name (lowercase)                                                               |
-| `elasticsearch.mode`    | boolean, `true`      | `true` = vector store (semantic search); `false` = index (BM25)                                    |
-| `vector.score`          | number, `0.5`        | Minimum similarity threshold in vector store mode (0.0-1.0)                                        |
-
-### OpenSearch variant
-
-| Field                            | Type / Default                  | Description                                                         |
-| -------------------------------- | ------------------------------- | ------------------------------------------------------------------- |
-| `opensearch.host`                | string, `http://localhost:9200` | OpenSearch server URL                                               |
-| `opensearch.collection`          | string, `rocketride`            | Index name (lowercase letters, digits, underscores)                 |
-| `opensearch.auth.enabled`        | boolean, `true`                 | Enable basic authentication                                         |
-| `opensearch.auth.username`       | string, `admin`                 | Basic auth username (shown when auth is enabled)                    |
-| `opensearch.auth.password`       | string, empty                   | Basic auth password (shown when auth is enabled)                    |
-| `opensearch.mode`                | boolean, `false`                | `true` = vector store (kNN); `false` = index (BM25)                 |
-| `opensearch.dim`                 | integer, `768`                  | Embedding dimension (required in vector store mode; must be > 0)    |
-| `opensearch.score`               | number, `0.5`                   | Minimum similarity score to include a result (0-1)                  |
-
----
-
-## Modes
-
-### Index mode
-
-Raw text from the `text` lane is stored in a plain `content` text field. Questions trigger a BM25 match query; every hit is streamed out on the `answers`, `text`, and `documents` lanes (using the hit `_id` as `objectId`).
-
-The Customize Indexing Search Behavior toggle exposes additional search options. These affect querying only, never ingestion or index creation, so they can be changed between pipeline runs without re-ingesting data.
-
-| Field                              | Default | Description                                                                          |
-| ---------------------------------- | ------- | ------------------------------------------------------------------------------------ |
-| `elasticsearch.matchOperator` / `opensearch.matchOperator` | `or` | `or` matches any term; `and` matches all terms; `exact` is phrase match |
-| `elasticsearch.search.exact.slop` / `opensearch.search.exact.slop` | `0` | Words allowed between terms in `exact` phrase match             |
-| `elasticsearch.search.highlight` / `opensearch.search.highlight`   | `false` | Use the unified highlighter to return snippets around matches instead of the full document |
-| `elasticsearch.search.highlight.fragment_size` / `opensearch.search.highlight.fragment_size` | `250` | Maximum characters per highlight snippet per hit   |
-
-### Vector store mode
-
-Pre-embedded documents from the `documents` lane are upserted into a vector index. Questions are answered by kNN similarity search; hits below the Retrieval Score threshold are dropped.
-
-For Elasticsearch, the index uses a `dense_vector` field with cosine similarity by default. Similarity can be changed via the `similarity` config value (`cosine`, `l2_norm`, or `dot_product`). Search dispatches through the `DocumentStoreBase` using kNN with `num_candidates` set to 10x the requested limit.
-
-For OpenSearch, the vector index uses `knn_vector` with HNSW / FAISS / `cosinesimil`. The top 10 nearest neighbours are returned and filtered against the Retrieval Score threshold.
-
-> **Gotcha (OpenSearch vector store):** the vector index is created automatically with the configured Embedding Dimension. If an index with the same name already exists but is not a `knn_vector` index, or its dimension does not match the configured value, the index is deleted and recreated, and all existing data in that index is lost. Keep the dimension in sync with your embedding model.
-
----
-
-## Authentication
+Select the service and deployment profile before choosing the index or collection and search mode. Elasticsearch and OpenSearch have separate connection fields and separate index implementations, even though both expose the same core input lanes. Set the mode and index deliberately before first ingest; otherwise data can be written to an index with mappings intended for the other mode.
 
 ### Elasticsearch
 
-Self-managed instances connect without credentials (`http://` is assumed for `localhost`, `127.*`, and self-managed mode). Elastic Cloud Hosted and Serverless profiles require the host URL plus an API key; connections use `https://`.
+The Elasticsearch profiles are self-managed, cloud-hosted, and cloud-serverless. Self-managed starts with `localhost:9200`; cloud-hosted uses port `9243`, and cloud-serverless uses port `443`. Pick the cloud profile for an Elastic Cloud endpoint so the client uses the correct connection values; keep self-managed for a local or independently hosted cluster.
+
+The index name defaults to `rocketride` and must be 1–255 lowercase letters, digits, `.`, `_`, or `-`. Slashes and spaces are invalid. Configuration validation warns about a bad name or a zero port and then makes a short cluster-health request, so a warning about connectivity is a cue to correct the endpoint or credentials before attempting ingestion.
+
+### Elasticsearch Store Mode and retrieval
+
+Elasticsearch starts in vector-store mode. Turn **Store Mode** off to ingest and search raw text instead. In index mode, documents arriving on the `documents` lane are ignored; use `text`. In vector-store mode, documents must contain embeddings, and semantic questions need an embedding as well. If a pipeline appears to accept input but returns no results, first verify that its lane matches the selected mode.
+
+The Elasticsearch vector store uses a dense-vector mapping, and its similarity defaults to cosine. Use another supported similarity only when the stored embedding model calls for it; an existing vector index should not be treated as metric-agnostic. The standard retrieval-score setting is the cutoff for semantic results: raise it when unrelated chunks contaminate context and lower it when recall is too sparse.
+
+### Retrieval Score
+
+The retrieval-score control is meaningful only for vector-store retrieval. Start with the default when bringing up a new embedding corpus, then raise it if the documents injected into an answer are merely adjacent in topic rather than useful context. Lower it when a precise question has no supporting chunks, but check the embedding model and index dimension first—threshold changes cannot make incompatible vectors comparable.
+
+Tune the score after testing queries that represent the vocabulary and specificity of the actual pipeline. Text-index matches use the BM25-style path instead, so changing this field will not repair unexpectedly broad or narrow keyword results. Use the match operator and phrase controls for that job.
+
+### Elasticsearch text search behavior
+
+Enable **Customize Indexing Search Behavior** only when the default broad matching needs refinement. `or` is the default and is useful for recall; `and` requires all terms when queries are returning too much; `exact` performs phrase matching. **Slop** applies only to `exact` and defaults to `0`; increase it when the same phrase is expected with intervening words.
+
+Enable contextual snippets when downstream consumers need just the matching passage instead of the full stored text. The default snippet size is 250 characters; increase it for more surrounding context and reduce it to keep answer payloads focused. These choices alter searching only, so they can be adjusted between runs without re-ingesting the text index.
+
+The node scans every matching text hit in batches of 500 with a one-minute scroll context. That favors a pipeline which intentionally processes the complete matching set rather than a small top-k result page. Constrain the query or select a more specific index when a broad keyword search would make that full result set too large for downstream processing.
 
 ### OpenSearch
 
-Basic auth (username and password). When basic auth is enabled, an `http://` host is automatically upgraded to `https://`, and TLS certificate verification is disabled (`verify_certs=False`), which is suitable for self-managed clusters with self-signed certificates. Both username and password are required when auth is on.
+OpenSearch uses the configured host, collection, and optional basic-auth credentials. Its local profile starts in index mode, unlike Elasticsearch's vector-store default. The collection defaults to `rocketride` and allows lowercase letters, numbers, and underscores. Choose a new collection before switching a production workload between modes, rather than relying on a common name to be safe for both mappings.
 
----
+When basic authentication is enabled, a host without a scheme gets `http://`, then an `http://` URL is upgraded to `https://`. The client also disables certificate verification in that branch. This accommodates self-managed clusters with self-signed certificates, but it means the host and authentication toggle jointly determine the connection—not just the text entered in **Host**.
+
+### OpenSearch Store Mode, embedding dimension, and score
+
+Turn **Store Mode** on to create and use an OpenSearch vector index. **Embedding Dimension** is required in that mode and defaults to `768`; it must match every vector you send. A missing, non-numeric, or wrong-sized question embedding is skipped rather than searched, and a document without an embedding is skipped rather than indexed. If a vector query produces nothing without an error, compare the model dimension to this setting first.
+
+**Retrieval Score** defaults to `0.5` and filters lower-scoring OpenSearch vector hits. Raise it for a more precise context window, or lower it when useful matches are missing. The same optional index-search controls—match operator, slop, and contextual snippets—apply only when index mode is active; do not expect them to tune k-NN ranking.
+
+OpenSearch verifies the existing vector mapping before using it. If the index is not a `knn_vector` index or its dimension differs, the implementation deletes and recreates the index. Treat an embedding-dimension change as destructive for that index: use a new collection name when preserving existing data matters.
+
+### OpenSearch text search behavior
+
+With **Store Mode** off, raw `text` input creates a text mapping when the collection does not already exist, and questions use the shared BM25-style search path. Configure match operator, phrase slop, and snippets for the query shape rather than the ingest shape: none of these fields changes how the text is indexed. This makes them safe controls to experiment with between pipeline runs.
+
+The OpenSearch text path emits every matching hit it scans, as answers, text, and documents when the corresponding listeners exist. If a large result set is surprising, narrow the query or use a more restrictive match operator; the node is not limiting text hits to the ten k-NN neighbors used by the vector path.
+
+## Authentication
+
+Elasticsearch cloud profiles use the configured API key. OpenSearch optionally uses the configured username and password when **Use basic auth** is enabled; the connection normalizes the host to HTTPS in that case. Self-managed Elasticsearch supplies no credentials to its client configuration. When OpenSearch authentication is disabled, the implementation does not pass the entered username or password to the client.
+
+## Notes
+
+### Index-mode output behavior
+
+In index mode, the node writes text from the `text` lane and searches it with BM25-style queries. Text search scans all matching results in batches of 500 using a one-minute scroll window, instead of returning only an initial page. Each result can be emitted as an answer, text, and document; with highlighting enabled, the highlighted fragments are emitted in place of the full content.
+
+The `questions` → `questions` lane belongs only to the Elasticsearch service. Do not wire downstream behavior that depends on that enrichment lane when the configured service is OpenSearch, even though both services can emit text, documents, and answers.
+
+In both backends, a highlighted text result replaces the otherwise emitted full content with each returned fragment. This is useful for prompt-sized evidence windows, but it also means a downstream consumer needing the whole source should leave snippets off or retrieve the source through a different flow.
+
+### Vector ingestion and lifecycle
+
+For OpenSearch vector ingest, an application document ID is built from `objectId` and `chunkId`, so writing the same pair updates that record. The vector mapping uses a k-NN field with an HNSW/FAISS cosine setup. Elasticsearch uses its document-store implementation, which batches writes at 500 actions or its payload limit, supports soft deletion through `meta.isDeleted`, and permanently removes matching object IDs with a delete-by-query operation.
+
+The OpenSearch vector path does not silently coerce a bad question vector into a compatible query. It skips missing, non-numeric, or wrong-dimensional vectors, then applies the score threshold to the ten returned k-NN hits. That behavior protects the index from invalid input but can look like an empty retrieval result; confirm the embedding before reducing the score.
+
+Elasticsearch can reconstruct a stored object by fetching chunk ranges in chunk-ID order. That render path is Elasticsearch-only; the OpenSearch service does not implement the equivalent object rendering path in this node.
+
+### Mode-switching checklist
+
+Before switching a pipeline, confirm the selected backend, mode, index name, and—when using OpenSearch vectors—embedding dimension. Then send data on the correct input lane: `text` for index mode or embedded `documents` for vector mode. This avoids the two silent skips in the implementation: document-lane input in index mode and invalid OpenSearch vector input in vector mode.
+
+For a destructive migration, use a new OpenSearch collection name and ingest the new vectors before retiring the old one. Reusing a collection while changing its dimension gives the node a reason to delete and recreate its vector index, which removes the existing indexed data.
+
+## Upstream docs
+
+- [Elasticsearch documentation](https://www.elastic.co/guide/index.html)
+- [OpenSearch documentation](https://docs.opensearch.org/)
 
 <!-- ROCKETRIDE:GENERATED:PARAMS START -->
 <!-- Generated by nodes:docs-generate. Do not edit by hand. -->
