@@ -32,6 +32,7 @@ Start with Basic to observe violations without interrupting a pipeline, or use S
 |--------------------|-------------------------------------------------------------------------------------------------------------|
 | Basic *(default)*  | Prompt injection + PII detection, `warn` mode. Only `policy_mode` is configurable in the UI.               |
 | Strict             | All checks enabled, `block` on violation, `max_input_length` 50000, `max_tokens_estimate` 4096. Exposes `policy_mode`, `max_tokens_estimate`, and `expected_format`. |
+| Custom             | All checks enabled with no size limit, `warn` mode. Exposes every individual check, limit, topic, format, and policy control. |
 
 ## Configuration
 
