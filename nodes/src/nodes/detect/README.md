@@ -52,7 +52,7 @@ The image output draws lime rectangles and labels containing each detection's la
 
 ## Upstream docs
 
-- [RF-DETR model page](https://huggingface.co/PekingU/rtdetr_r50vd)
+- [RT-DETR fallback model page](https://huggingface.co/PekingU/rtdetr_r50vd)
 - [Grounding DINO model page](https://huggingface.co/IDEA-Research/grounding-dino-tiny)
 
 <!-- ROCKETRIDE:GENERATED:PARAMS START -->
