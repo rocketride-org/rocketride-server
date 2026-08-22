@@ -886,6 +886,47 @@ async def test_on_rrext_resolve_config_reports_keys_a_profile_discards(monkeypat
 
 
 @pytest.mark.asyncio
+async def test_on_rrext_resolve_config_reports_a_key_the_profile_overwrote(monkeypatch):
+    """The discard that hides itself: the profile defines the key, so it stays present.
+
+    Reporting only absent keys misses this, which is the common shape in the
+    catalog: nearly every profile declares apikey, so an apikey written beside
+    'profile' is silently replaced rather than dropped from the result.
+    """
+    monkeypatch.setattr(cmd_misc.Config, 'getNodeConfig', staticmethod(lambda p, c: {'apikey': '', 'model': 'gpt-5'}))
+
+    conn = _make_conn()
+    request = {
+        'arguments': {
+            'provider': 'llm_openai',
+            'config': {'profile': 'openai-5-4', 'apikey': 'sk-authors-key'},
+        },
+    }
+    result = await MiscCommands.on_rrext_resolve_config(conn, request)
+
+    body = result['body']
+    assert body['resolved']['apikey'] == '', 'the profile value wins, which is the bug being surfaced'
+    assert body['dropped'] == ['apikey'], 'present-but-overwritten still means the author key never lands'
+
+
+@pytest.mark.asyncio
+async def test_on_rrext_resolve_config_stays_quiet_when_the_value_survives(monkeypatch):
+    """A key that reaches the node unchanged is not a discard, profile or not."""
+    monkeypatch.setattr(cmd_misc.Config, 'getNodeConfig', staticmethod(lambda p, c: {'apikey': 'sk-authors-key'}))
+
+    conn = _make_conn()
+    request = {
+        'arguments': {
+            'provider': 'llm_openai',
+            'config': {'profile': 'openai-5-4', 'apikey': 'sk-authors-key'},
+        },
+    }
+    result = await MiscCommands.on_rrext_resolve_config(conn, request)
+
+    assert result['body']['dropped'] == []
+
+
+@pytest.mark.asyncio
 async def test_on_rrext_resolve_config_requires_a_provider():
     conn = _make_conn()
 

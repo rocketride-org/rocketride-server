@@ -288,7 +288,11 @@ class MiscCommands(DAPConn):
             # sibling top-level keys never reach the node (#1839).
             dropped = []
             if profile:
-                dropped = [k for k in config if k != 'profile' and k != profile and k not in resolved]
+                # A key counts as discarded when what the node receives is not what the
+                # author wrote beside 'profile'. Absence is not the only shape: a profile
+                # that defines the same key overwrites it and leaves it present, which is
+                # the case that hides the bug rather than showing it.
+                dropped = [k for k in config if k not in ('profile', profile) and resolved.get(k) != config[k]]
 
             body = {
                 'provider': provider,
