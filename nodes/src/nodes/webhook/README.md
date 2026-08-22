@@ -45,13 +45,13 @@ Use **Webhook** when another system can send an HTTP request, **Chat** when peop
 
 ## Authentication
 
-On startup, Webhook, Chat, and Dropper publish an interface URL plus a public authorization key and private token in the monitor information. The Chat and Dropper button URLs include the public authorization key as the `auth` query parameter; Tools does not publish a user-facing URL.
+On startup, Webhook, Chat, and Dropper publish an interface URL plus a public authorization key and private token in the monitor information. The Chat and Dropper button URLs include the public authorization key as the `auth` query parameter; Tools does not publish a user-facing URL. Treat the private token as a secret and restrict access to monitor information that contains it.
 
 ## Notes
 
 ### Shared server lifecycle
 
-The endpoint registers its target with the shared web server initialized by `ai.node` and waits until shutdown. It does not create a server itself. If that shared server is unavailable, startup raises an explanatory error; run these services through the RocketRide pipeline process that provides it.
+The endpoint registers its target with the shared web server initialized by `ai.node` and waits until shutdown. It does not create a server itself. If that shared server is unavailable, startup raises an explanatory error; run these services through the RocketRide pipeline process that provides it. The published interface is reachable only where deployment networking, firewalls, and reverse proxies permit access.
 
 ## Upstream docs
 
