@@ -160,8 +160,9 @@ built-in default.
 `sign` and `require_provenance` accept `off`, `warning`, or `error`; their
 defaults are `warning` and `error`. Set either to `off` when that check is not
 meaningful for an input source, use `warning` for review queues, and use
-`error` when the check must make the record invalid. Any other value logs a
-warning and falls back to the default. A pre-existing `validation` field is
+`error` when the check must make the record invalid. Missing or `null` values
+retain their defaults without a warning; any other invalid non-null value logs
+a warning and falls back to the default. A pre-existing `validation` field is
 replaced when the fact is re-validated.
 
 ## Notes
