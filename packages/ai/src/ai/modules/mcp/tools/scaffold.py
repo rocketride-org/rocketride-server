@@ -130,29 +130,26 @@ class IInstance(IInstanceBase):
 '''
 
 
-def _catalog_values(services: Dict[str, Any], key: str) -> set:
-    """Collect the distinct values a catalog key takes across every service.
-
-    Args:
-        services: The engine's service catalog.
-        key: Service key to collect, 'classType' or 'lanes'.
-
-    Returns:
-        Every value in use, so the allowed set follows the catalog rather than a
-        hardcoded list that drifts.
-    """
+def _class_types(services: Dict[str, Any]) -> set:
+    """Every classType in use across the catalog, so the allowed set cannot drift."""
     found = set()
     for service in (services or {}).values():
-        if not isinstance(service, dict):
+        if isinstance(service, dict):
+            found.update(v for v in service.get('classType') or [] if isinstance(v, str))
+    return found
+
+
+def _lane_names(services: Dict[str, Any]) -> set:
+    """Every lane name in use, on either side of a catalog lane map."""
+    found = set()
+    for service in (services or {}).values():
+        lanes = service.get('lanes') if isinstance(service, dict) else None
+        if not isinstance(lanes, dict):
             continue
-        value = service.get(key)
-        if key == 'lanes' and isinstance(value, dict):
-            found.update(value.keys())
-            for outs in value.values():
-                if isinstance(outs, list):
-                    found.update(outs)
-        elif isinstance(value, list):
-            found.update(v for v in value if isinstance(v, str))
+        found.update(k for k in lanes if isinstance(k, str))
+        for outs in lanes.values():
+            if isinstance(outs, list):
+                found.update(v for v in outs if isinstance(v, str))
     return found
 
 
@@ -183,14 +180,14 @@ async def _scaffold_node(client, tasks, args: Dict[str, Any]) -> dict:
     # Validate against the live catalog so the allowed sets follow the engine
     # rather than a list here that drifts as nodes are added.
     catalog = (services or {}).get('services') or {}
-    known_types = _catalog_values(catalog, 'classType')
+    known_types = _class_types(catalog)
     if known_types and class_type not in known_types:
         return _bad(
             f'unknown class_type {class_type!r}',
             f'call list_components, or use one in service today: {", ".join(sorted(known_types))}',
         )
 
-    known_lanes = _catalog_values(catalog, 'lanes')
+    known_lanes = _lane_names(catalog)
     if known_lanes and lane_out not in known_lanes:
         return _bad(
             f'unknown lane_out {lane_out!r}',
