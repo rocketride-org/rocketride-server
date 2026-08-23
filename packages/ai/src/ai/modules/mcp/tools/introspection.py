@@ -100,6 +100,41 @@ async def _describe_component(client, tasks, args: Dict[str, Any]) -> dict:
     return result
 
 
+async def _unknown_provider_errors(client, pipeline: Dict[str, Any]):
+    """Report components naming a provider the engine has no service for.
+
+    The engine validates a whole pipeline structurally. Its provider lookup lives
+    in the single-component path (`validate_pipeline.cpp`), which the pipeline path
+    never reaches, so a typed provider name validates clean and fails at run time.
+    The names come from the engine's own catalog, so this adds no client-side rule.
+
+    Args:
+        client: The engine client.
+        pipeline: The pipeline body, already unwrapped from its envelope.
+
+    Returns:
+        A ``(errors, engine_error)`` pair; ``engine_error`` is set only when the
+        catalog could not be read.
+    """
+    components = [c for c in (pipeline.get('components') or []) if isinstance(c, dict)]
+    if not components:
+        return [], None
+
+    services, err = await engine_call(client.get_services(), 'validate_pipeline')
+    if err:
+        return [], err
+
+    catalog = (services or {}).get('services') or {}
+    if not catalog:
+        return [], None
+
+    return [
+        {'component': c.get('id'), 'message': f'unknown provider {c.get("provider")!r}'}
+        for c in components
+        if c.get('provider') and c['provider'] not in catalog
+    ], None
+
+
 async def _validate_pipeline(client, tasks, args: Dict[str, Any]) -> dict:
     pipeline = load_pipeline(args)  # raises ValueError -> normalized by the dispatch layer
     # The engine requires the {'pipeline': {...}} envelope and treats a missing
@@ -113,8 +148,13 @@ async def _validate_pipeline(client, tasks, args: Dict[str, Any]) -> dict:
     if err:
         return err
     result = validated or {}
-    errors = result.get('errors') or []
+    errors = list(result.get('errors') or [])
     warnings = result.get('warnings') or []
+
+    unknown, err = await _unknown_provider_errors(client, payload['pipeline'])
+    if err:
+        return err
+    errors.extend(unknown)
     return {'ok': not errors, 'errors': errors, 'warnings': warnings}
 
 

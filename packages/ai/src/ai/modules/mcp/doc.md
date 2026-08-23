@@ -133,7 +133,7 @@ backend), plus the Run log (DVR) group and `list_integrations` added below.
 | `describe_component` | Full metadata/config schema for one component; catalog nodes also get a `credentials` block (same readiness vocabulary as `list_integrations`). | `name` (required) |
 | `resolve_config` | What a component config resolves to at load, after the engine applies profile and default merging. Reports keys the resolver discarded, which a schema cannot express. | `provider` (required), `config` |
 | `scaffold_node` | Emit a local node skeleton that loads on the first try, with the manifest keys and file layout the engine requires. Returns files to write. | `name` (required), `lane_in`, `lane_out`, `class_type` |
-| `validate_pipeline` | Validate a pipeline against the engine's own rules (engine-authoritative, zero client-side drift). | `pipeline` |
+| `validate_pipeline` | Validate a pipeline against the engine's own rules (engine-authoritative, zero client-side drift), plus a check that every component names a provider the engine has a service for, which the engine's pipeline path does not cover. | `pipeline` |
 | `describe_pipeline` | Statically describe a pipeline's source and components (id, provider, title, classType, inputs); synthesized client-side, no backing SDK method. | `pipeline` |
 | `list_integrations` | Credential readiness for catalog integrations this engine has a matching node for. Bare call: terse per-integration rows (`name`/`title`/`status`/`missing_count`). With `name`: full field detail, `missing`, `candidates`, the caller's own variable names (`caller_variables`), and either `setup` (not configured) or `wiring` (configured). | `name` (optional) |
 
