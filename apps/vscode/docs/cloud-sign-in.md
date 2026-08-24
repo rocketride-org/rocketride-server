@@ -25,7 +25,7 @@ editor's URI scheme, and only the native registration lists those. A web
 registration does not, so an authorization request that mixes the two is
 rejected before any browser window opens:
 
-```
+```json
 {"error":"invalid_request",
  "error_description":"The requested redirect_uri is missing in the client configuration."}
 ```
@@ -51,6 +51,17 @@ client id is a registration *inside* a tenant, so the built-in id means nothing
 against a different one — the request would reach the new tenant carrying an id
 it has never heard of, and fail with the same message as above. Rejecting it
 early gives a reason instead of a puzzle.
+
+The mirror case is **not** symmetric, and the asymmetry is deliberate. Supplying
+only `clientId` is not rejected — it is **ignored**, and sign-in proceeds with
+both built-in values. A client id names a registration inside a tenant, so an id
+with no tenant to read it against has nothing to select; discarding it is what
+makes the extension reach its own native registration instead of whatever the
+caller happened to hold. That is precisely the bug this contract exists to
+prevent, so the lone id is dropped on purpose rather than honoured.
+
+It is dropped silently, though. If you pass a `clientId` and sign in as an
+application you did not name, that is why.
 
 ```ts
 // both — sign in against another tenant
