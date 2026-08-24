@@ -46,7 +46,9 @@
 
 'use strict';
 
+const crypto = require('crypto');
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const {
 	execCommand,
@@ -103,6 +105,60 @@ function readAppId(appRoot, fallback) {
 		console.warn(`  Warning: could not read appManifest.id from ${appRoot} package.json — serving under "${fallback}"; apps_static will 403 at runtime (no matching catalog entry)`);
 		return fallback;
 	}
+}
+
+/**
+ * SHA-256 of a file, or '' when it is not there.
+ *
+ * @param {string} file - Absolute path.
+ * @returns {string} Hex digest, or '' when absent.
+ */
+function sha256(file) {
+	try {
+		return crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
+	} catch {
+		return '';
+	}
+}
+
+/**
+ * The newest published snapshot of one app in the local file store.
+ *
+ * Versions live at `<store>/orgs/<org>/files/.deployments/<appId>/v0000NN-<sha>/dist/`,
+ * which is exactly the tree the versioned serving route streams. Every org is
+ * searched because the developer namespace that owns an app is not knowable
+ * from here — a laptop has one, and taking the highest version across them is
+ * the same answer the seed's own "latest" is.
+ *
+ * @param {string} appId - The app id.
+ * @returns {{version: number, dir: string}|null} The newest snapshot, or null.
+ */
+function latestSnapshot(appId) {
+	const store = process.env.ROCKETLIB_STORE || path.join(os.homedir(), '.rocketlib', 'store');
+	const orgs = path.join(store, 'orgs');
+	let best = null;
+	let orgDirs = [];
+	try {
+		orgDirs = fs.readdirSync(orgs);
+	} catch {
+		return null;
+	}
+	for (const org of orgDirs) {
+		const appDir = path.join(orgs, org, 'files', '.deployments', appId);
+		let entries = [];
+		try {
+			entries = fs.readdirSync(appDir);
+		} catch {
+			continue;
+		}
+		for (const entry of entries) {
+			const match = /^v(\d+)-/.exec(entry);
+			if (!match) continue;
+			const version = Number.parseInt(match[1], 10);
+			if (!best || version > best.version) best = { version, dir: path.join(appDir, entry) };
+		}
+	}
+	return best;
 }
 
 /**
@@ -179,6 +235,52 @@ function createAppModule({ name, description, appRoot, dev = false }) {
 		};
 	}
 
+	/**
+	 * Compare what the browser would be served against what was just built.
+	 *
+	 * The shell loads every remote from `/apps/<appId>/v<N>/remoteEntry.js`, and
+	 * a version is an IMMUTABLE SNAPSHOT taken by the seed — not a view of
+	 * build/. So a build that lands without a seed is invisible: the toolchain
+	 * reports success at every step and the page keeps running the last
+	 * snapshot, which is indistinguishable from a change that "did not work".
+	 * Whole evenings have gone into that gap.
+	 *
+	 * Local files only, deliberately: the check must work with the server down,
+	 * and the snapshot on disk IS what the versioned route streams.
+	 */
+	function makeVerifyAction() {
+		return {
+			run: async (ctx, task) => {
+				const built = path.join(buildDir, 'remoteEntry.js');
+				if (!fs.existsSync(built)) {
+					throw new Error(`${name}: nothing built yet — run ${name}:build first`);
+				}
+
+				const snapshot = latestSnapshot(appId);
+				if (!snapshot) {
+					throw new Error(
+						`${name}: no published version found in the store for "${appId}" — ` +
+						'seed one with `engine extension/saas/tools/appseed.py --force`',
+					);
+				}
+
+				const a = sha256(built);
+				const b = sha256(path.join(snapshot.dir, 'dist', 'remoteEntry.js'));
+				if (a !== b) {
+					throw new Error(
+						`${name}: v${snapshot.version} does NOT carry this build ` +
+						`(built ${a.slice(0, 10)}, published ${b.slice(0, 10)}). ` +
+						'Re-seed: `engine extension/saas/tools/appseed.py --force`',
+					);
+				}
+				// The version number is the point of the success line: it is what
+				// the browser's network tab shows, so a tab loading any other
+				// version is loading a bundle nobody here built.
+				task.output = `v${snapshot.version} carries this build (${a.slice(0, 10)})`;
+			},
+		};
+	}
+
 	// =========================================================================
 	// MODULE DEFINITION
 	// =========================================================================
@@ -188,6 +290,16 @@ function createAppModule({ name, description, appRoot, dev = false }) {
 		{ name: `${name}:bundle`,   action: makeBundleAction },
 		{ name: `${name}:register`, action: () => registerApp(appRoot) },
 		{ name: `${name}:copy`,     action: makeCopyAction },
+
+		// "Is what the browser gets what I just built?" — the one question the
+		// rest of this pipeline cannot answer. Its own action rather than a
+		// step of :build, because the answer only becomes true after the SEED,
+		// which is a separate command run against a running database.
+		{
+			name: `${name}:verify`,
+			action: makeVerifyAction,
+			description: `Check the published version of ${name} carries this build`,
+		},
 
 		// Full build: bundle → register → copy. Every app depends on the
 		// shell, so in repos that CARRY the shell module its build runs
