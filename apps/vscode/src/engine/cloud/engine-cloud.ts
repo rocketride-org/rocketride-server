@@ -122,9 +122,31 @@ export class EngineCloud extends EngineBackend {
 		try {
 			switch (command) {
 				case 'signin':
+					// The BAKED client id wins over anything the caller passes.
+					//
+					// esbuild.js inlines RR_ZITADEL_VSCODE_CLIENT_ID at build time and
+					// it is the NATIVE Zitadel app — public client, PKCE, and the only
+					// registration that lists the `${vscode.env.uriScheme}://
+					// rocketride.rocketride/auth/callback` redirects this extension
+					// actually uses.
+					//
+					// The caller is the environment webview, which does
+					// authProvider.initialize({ clientId: RR_ZITADEL_CLIENT_ID }) — the
+					// WEB app. With params winning, every sign-in ran PKCE against the
+					// web registration with a native redirect and Zitadel answered
+					// "The requested redirect_uri is missing in the client
+					// configuration". It failed for every user, on every editor and
+					// every version; the whole India hackathon was stopped by it on
+					// 2026-08-24.
+					//
+					// zitadelUrl keeps caller precedence deliberately: pointing the
+					// extension at a different tenant is a legitimate thing to ask for,
+					// and the tenant is the same for staging and production anyway. The
+					// client id is not — it identifies THIS application, so a caller
+					// overriding it is always wrong.
 					await cloudAuth.signIn(
 						(params?.zitadelUrl as string) || process.env.RR_ZITADEL_URL || '',
-						(params?.clientId as string) || process.env.RR_ZITADEL_VSCODE_CLIENT_ID || ''
+						process.env.RR_ZITADEL_VSCODE_CLIENT_ID || (params?.clientId as string) || ''
 					);
 					return { success: true };
 				case 'signout':
