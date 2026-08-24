@@ -14,6 +14,7 @@ _SERVICES_PATH = Path(__file__).resolve().parents[2] / 'src' / 'nodes' / 'llm_pe
 
 
 def _load_services() -> dict:
+    """Load and parse the Perplexity service configuration."""
     services = _parse_service_json(str(_SERVICES_PATH))
     assert services is not None
     return services
