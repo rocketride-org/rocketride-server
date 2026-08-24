@@ -517,7 +517,7 @@ export const shellApi = {
 	get BxDownload() { return BxDownload; },
 	get BxRefresh() { return BxRefresh; },
 	get AppLayout() { return AppLayout; },
-	// Desktop version selector — session override read + apply/clear
+	// Desktop version selector — version pin read + apply/clear (URL-backed)
 	get getAppVersionOverride() { return getAppVersionOverride; },
 	get applyAppVersionOverride() { return applyAppVersionOverride; },
 	// Stable versioned entry URL (constructed, never minted — the server
@@ -564,7 +564,7 @@ export {
 	BxRefresh,
 	// The one app-root layout
 	AppLayout,
-	// Desktop version selector — session override read + apply/clear
+	// Desktop version selector — version pin read + apply/clear (URL-backed)
 	getAppVersionOverride, applyAppVersionOverride, versionedEntryUrl,
 };
 

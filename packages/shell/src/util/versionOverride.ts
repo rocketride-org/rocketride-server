@@ -21,17 +21,24 @@
 // SOFTWARE.
 
 /**
- * App version overrides — the desktop version selector's session state.
+ * App version overrides — a pin that lives in the ADDRESS BAR.
  *
  * A user picking a specific app version (tile drop list, or a
- * `?appid=X&version=1.3.0` deep link) creates a SESSION-ONLY override:
- * stored in sessionStorage, dies with the tab, never persisted server-side
- * (persistent personal pins were rejected — they go stale silently).
+ * `?appid=X&version=7` deep link) pins that app to that registry version.
+ * The pin is held in the URL and nowhere else, which is a deliberate change
+ * from the sessionStorage map this used to be.
  *
- * Resolution order (top wins): URL `?version=` → session override →
- * dev overlay → the server's scope-walk default in the manifest entry.
- * URL parsing simply seeds/replaces the session override at boot, so the
- * rest of the shell only ever consults ONE place.
+ * WHY THE URL. A pin in sessionStorage is state with no address: invisible,
+ * unshareable, surviving every reload and dying only with the tab. Bytes are
+ * immutable per version, so a pinned app keeps working perfectly — it is
+ * simply the app as it was on the day it was pinned, and no error, no failed
+ * request and no amount of rebuilding says otherwise. Days have gone into
+ * "my change will not show" that were one forgotten pin. In the URL the pin
+ * can be seen, copied, sent to someone else, and left behind by navigating —
+ * which is what everyone already assumes a temporary choice does.
+ *
+ * Resolution order (top wins): URL pin → dev overlay → the server's
+ * scope-walk default in the manifest entry.
  *
  * Entry URLs are CONSTRUCTED, never minted: every version serves from the
  * stable immutable `/apps/<appId>/v<N>/remoteEntry.js` route, entitlement
@@ -48,11 +55,45 @@
 import { repointRemote, isRemoteLoaded, invalidateAppDescriptor, isDevRemote } from './appLoader';
 
 // =============================================================================
-// STORAGE
+// STORAGE — the query string
 // =============================================================================
 
-/** sessionStorage key holding the per-app override map. */
-const SS_OVERRIDES_KEY = 'rr:appVersionOverrides';
+/** The app a pin names. Already the deep-link parameter for "open this app". */
+const APP_PARAM = 'appid';
+/** The registry version it is pinned to. Ints only. */
+const VERSION_PARAM = 'version';
+/** The artifact's semver, carried only so the chip can print it. */
+const APPVER_PARAM = 'appver';
+
+/**
+ * Read the query string of the document.
+ *
+ * @returns The params, or an empty set when there is no document (SSR/tests).
+ */
+function params(): URLSearchParams {
+	try {
+		return new URLSearchParams(window.location.search);
+	} catch {
+		return new URLSearchParams();
+	}
+}
+
+/**
+ * Rewrite the query string in place, without navigating.
+ *
+ * `replaceState` rather than `pushState`: a pin is a property of what you are
+ * looking at, not a place you travelled to, so Back should leave the app —
+ * not step through the versions you tried.
+ *
+ * @param next - The params to put in the address bar.
+ */
+function writeParams(next: URLSearchParams): void {
+	try {
+		const query = next.toString();
+		const url = `${window.location.pathname}${query ? `?${query}` : ''}${window.location.hash}`;
+		window.history.replaceState(window.history.state, '', url);
+	} catch { /* no history API — the pin simply does not stick */ }
+}
 
 /**
  * The stable serving URL of one registry version's entry.
@@ -71,7 +112,7 @@ export function versionedEntryUrl(appId: string, version: number): string {
 }
 
 /**
- * One app's session version override.
+ * One app's version pin.
  *
  * `version` is the registry version number (a `?version=` semver deep link
  * is resolved to its registry int before it lands here). The record holds
@@ -87,16 +128,26 @@ export interface AppVersionOverride {
 }
 
 /**
- * Reads the full override map from sessionStorage.
+ * Reads the pins in the address bar.
  *
- * @returns App id → override; empty object when none or storage unavailable.
+ * ONE app at a time, by construction: the URL names an app and a version. The
+ * map shape is kept because every caller reads it by app id, and because a
+ * second pinning scheme could be added here without touching them.
+ *
+ * REGISTRY INTS ONLY — a value with any trailing non-digit (`?version=7abc`)
+ * is rejected outright rather than silently pinned to 7 by prefix parsing.
+ *
+ * @returns App id → pin; empty object when nothing is pinned.
  */
 export function getAppVersionOverrides(): Record<string, AppVersionOverride> {
-	try {
-		return JSON.parse(sessionStorage.getItem(SS_OVERRIDES_KEY) ?? '{}') as Record<string, AppVersionOverride>;
-	} catch {
-		return {};
-	}
+	const search = params();
+	const appId = search.get('appId') || search.get(APP_PARAM) || '';
+	const raw = search.get(VERSION_PARAM) ?? '';
+	if (!appId || !/^\d+$/.test(raw)) return {};
+	const version = Number.parseInt(raw, 10);
+	if (!(version > 0)) return {};
+	const appVersion = search.get(APPVER_PARAM) || undefined;
+	return { [appId]: appVersion ? { version, appVersion } : { version } };
 }
 
 /**
@@ -110,30 +161,39 @@ export function getAppVersionOverride(appId: string): AppVersionOverride | null 
 }
 
 /**
- * Writes (or replaces) one app's session version override.
+ * Pins one app to one version, by putting it in the address bar.
+ *
+ * The app parameter is written too: a version without the app it belongs to
+ * means nothing, and the pair is exactly the existing deep-link shape, so a
+ * pinned URL opens the same thing when it is pasted somewhere else.
  *
  * @param appId - The app id.
- * @param override - The override record to store.
+ * @param override - The version to pin to.
  */
 export function setAppVersionOverride(appId: string, override: AppVersionOverride): void {
-	try {
-		const map = getAppVersionOverrides();
-		map[appId] = override;
-		sessionStorage.setItem(SS_OVERRIDES_KEY, JSON.stringify(map));
-	} catch { /* storage unavailable — override lasts this page only */ }
+	const next = params();
+	next.delete('appId');           // the accepted alternate spelling, so one wins
+	next.set(APP_PARAM, appId);
+	next.set(VERSION_PARAM, String(override.version));
+	if (override.appVersion) next.set(APPVER_PARAM, override.appVersion);
+	else next.delete(APPVER_PARAM);
+	writeParams(next);
 }
 
 /**
- * Removes one app's session version override.
+ * Unpins one app: the version leaves the address bar.
  *
- * @param appId - The app id.
+ * The app parameter STAYS — it is also "which app is open", and dropping it
+ * would navigate away from the thing being unpinned.
+ *
+ * @param appId - The app id. Ignored when a different app is pinned.
  */
 export function clearAppVersionOverride(appId: string): void {
-	try {
-		const map = getAppVersionOverrides();
-		delete map[appId];
-		sessionStorage.setItem(SS_OVERRIDES_KEY, JSON.stringify(map));
-	} catch { /* storage unavailable */ }
+	if (!getAppVersionOverrides()[appId]) return;
+	const next = params();
+	next.delete(VERSION_PARAM);
+	next.delete(APPVER_PARAM);
+	writeParams(next);
 }
 
 // =============================================================================
