@@ -121,34 +121,36 @@ export class EngineCloud extends EngineBackend {
 		const cloudAuth = CloudAuthProvider.getInstance();
 		try {
 			switch (command) {
-				case 'signin':
-					// The BAKED client id wins over anything the caller passes.
+				case 'signin': {
+					// zitadelUrl and clientId are ONE setting, not two.
 					//
-					// esbuild.js inlines RR_ZITADEL_VSCODE_CLIENT_ID at build time and
-					// it is the NATIVE Zitadel app — public client, PKCE, and the only
-					// registration that lists the `${vscode.env.uriScheme}://
-					// rocketride.rocketride/auth/callback` redirects this extension
-					// actually uses.
+					// A Zitadel client id is a registration inside a specific tenant and
+					// project. Pointing the extension at tenant B while keeping an id
+					// that names an application in tenant A sends A's client id to B,
+					// which fails with the same class of error this change exists to
+					// kill. So they travel together: either the caller supplies the
+					// pair, or neither is taken from the caller.
 					//
-					// The caller is the environment webview, which does
-					// authProvider.initialize({ clientId: RR_ZITADEL_CLIENT_ID }) — the
-					// WEB app. With params winning, every sign-in ran PKCE against the
-					// web registration with a native redirect and Zitadel answered
-					// "The requested redirect_uri is missing in the client
-					// configuration". It failed for every user, on every editor and
-					// every version; the whole India hackathon was stopped by it on
-					// 2026-08-24.
+					// The default is the BAKED pair. esbuild.js inlines
+					// RR_ZITADEL_VSCODE_CLIENT_ID at build time and it is the NATIVE
+					// app — public client, PKCE, and the only registration listing the
+					// `${vscode.env.uriScheme}://rocketride.rocketride/auth/callback`
+					// redirects this extension uses.
 					//
-					// zitadelUrl keeps caller precedence deliberately: pointing the
-					// extension at a different tenant is a legitimate thing to ask for,
-					// and the tenant is the same for staging and production anyway. The
-					// client id is not — it identifies THIS application, so a caller
-					// overriding it is always wrong.
+					// Before this, params won unconditionally. The caller is the
+					// environment webview, which passes RR_ZITADEL_CLIENT_ID — the WEB
+					// app — so every sign-in ran PKCE against the wrong registration
+					// with a native redirect. It failed for every user on every editor
+					// and every version, and stopped the India hackathon on 2026-08-24.
+					const callerTenant = params?.zitadelUrl as string | undefined;
 					await cloudAuth.signIn(
-						(params?.zitadelUrl as string) || process.env.RR_ZITADEL_URL || '',
-						process.env.RR_ZITADEL_VSCODE_CLIENT_ID || (params?.clientId as string) || ''
+						callerTenant || process.env.RR_ZITADEL_URL || '',
+						callerTenant
+							? ((params?.clientId as string) || '')
+							: (process.env.RR_ZITADEL_VSCODE_CLIENT_ID || '')
 					);
 					return { success: true };
+				}
 				case 'signout':
 					await cloudAuth.signOut();
 					return { success: true };
