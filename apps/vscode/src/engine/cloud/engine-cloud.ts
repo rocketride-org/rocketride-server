@@ -114,7 +114,12 @@ export class EngineCloud extends EngineBackend {
 	 *
 	 * @param _mode - Connection mode (unused, always 'cloud').
 	 * @param command - The command to execute: 'signin' | 'signout' | 'status'.
-	 * @param params - Optional params; signin accepts `zitadelUrl` and `clientId`.
+	 * @param params - Optional params. For `signin`, `zitadelUrl` and `clientId` are
+	 *                 a PAIR: supply both to target another tenant, or neither to
+	 *                 use the values baked in at build time. Supplying only
+	 *                 `zitadelUrl` is rejected — a client id is a registration
+	 *                 inside a tenant, so the baked one is meaningless against a
+	 *                 different one.
 	 * @returns Result with success flag and optional data/error.
 	 */
 	static async ioControl(_mode: ConnectionMode, command: string, params?: Record<string, unknown>, _onProgress?: IoProgressCallback): Promise<IoControlResult> {
@@ -143,10 +148,29 @@ export class EngineCloud extends EngineBackend {
 					// with a native redirect. It failed for every user on every editor
 					// and every version, and stopped the India hackathon on 2026-08-24.
 					const callerTenant = params?.zitadelUrl as string | undefined;
+					const callerClientId = params?.clientId as string | undefined;
+
+					// Half a pair is rejected here rather than passed through. Without
+					// this, a caller supplying zitadelUrl and no clientId sends '' as
+					// the client id, CloudAuthProvider's own guard shows "RocketRide
+					// Cloud sign-in required" — which describes a signed-out user, not
+					// a malformed call — and signIn returns void, so this case fell
+					// through to `success: true`. The caller would be told sign-in
+					// succeeded when no browser ever opened.
+					//
+					// That is the same shape as the failures this whole change came
+					// from: reporting success about work that never happened.
+					if (callerTenant && !callerClientId) {
+						return {
+							success: false,
+							error: 'signin: zitadelUrl was supplied without clientId. They are a pair — a client id is a registration inside a tenant, so the built-in one cannot be used against a different tenant. Pass both, or neither.',
+						};
+					}
+
 					await cloudAuth.signIn(
 						callerTenant || process.env.RR_ZITADEL_URL || '',
 						callerTenant
-							? ((params?.clientId as string) || '')
+							? (callerClientId as string)
 							: (process.env.RR_ZITADEL_VSCODE_CLIENT_ID || '')
 					);
 					return { success: true };
