@@ -13,13 +13,8 @@ cryptography>=46.0.7,<47
 # Pinned to cover GHSA-65pc-fj4g-8rjx (crafted input to idna.encode() can
 # bypass the CVE-2024-3651 fix), patched in 3.10.
 idna>=3.10
-# HTTPAdapter.get_connection_with_tls_context is required by tool_http_request
-# to pin validated DNS addresses and prevent DNS rebinding. 2.32.4 also fixes
-# CVE-2024-47081 for other Requests consumers sharing this environment.
-requests>=2.32.4,<3
-# The pinned-address adapter depends on urllib3 2.7 connection hooks. Keep the
-# minor line bounded so an internal transport change cannot silently bypass it.
-urllib3>=2.7,<2.8
+requests
+urllib3
 numpy
 httpx
 fastapi
