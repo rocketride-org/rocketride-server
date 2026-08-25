@@ -27,9 +27,11 @@ discarded when the run ends. This node is experimental.
 
 ## Profiles
 
+Default: **Z-Score - Standard deviation based detection** (`z_score`).
+
 | Profile | Method | Default window | Warning / critical threshold |
 | --- | --- | --- | --- |
-| `z_score` *(default)* | Z-Score | 100 | 2.0 / 3.0 |
+| `z_score` **(default)** | Z-Score | 100 | 2.0 / 3.0 |
 | `iqr` | Interquartile range | 100 | 1.5 / 3.0 |
 | `rolling_avg` | Rolling Average - Moving average deviation detection | 50 | 2.0 / 3.0 |
 

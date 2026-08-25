@@ -36,12 +36,14 @@ GLiNER match supplies a more specific label.
 
 ## Profiles
 
+Default: **GLiNER Small - Lightweight general-purpose model** (`glinerSmall`).
+
 | Profile | Model |
 | --- | --- |
 | `glinerMultiPII` | `urchade/gliner_multi_pii-v1` |
 | `glinerPIILarge` | `knowledgator/gliner-pii-large-v1.0` |
 | `glinerMergedLarge` | `xomad/gliner-model-merge-large-v1.0` |
-| `glinerSmall` *(default)* | `urchade/gliner_small-v2.1` |
+| `glinerSmall` **(default)** | `urchade/gliner_small-v2.1` |
 | `glinerMedium` | `urchade/gliner_medium-v2.1` |
 | `glinerLarge` | `urchade/gliner_large-v2.1` |
 | `glinerMulti` | `urchade/gliner_multi` |
@@ -55,6 +57,7 @@ GLiNER match supplies a more specific label.
 | `glinerCommunityLarge` | `gliner-community/gliner_large-v2.5` |
 | `glinerBiomedSmall` | `Ihor/gliner-biomed-small-v1.0` |
 | `glinerBiomedLarge` | `Ihor/gliner-biomed-large-v1.0` |
+| `custom` | _(your own GLiNER-compatible model)_ |
 
 ## Configuration
 

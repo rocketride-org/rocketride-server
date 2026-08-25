@@ -19,14 +19,17 @@ The node runs named-entity recognition on incoming text and documents, filtering
 
 ## Profiles
 
+Default: **BERT Large (English) - High accuracy for English text** (`bertLarge`).
+
 | Profile | Model | Context |
 | --- | --- | --- |
-| `bertLarge` *(default)* | `dbmdz/bert-large-cased-finetuned-conll03-english` | English profile; `min_confidence` defaults to `0.9`. |
+| `bertLarge` **(default)** | `dbmdz/bert-large-cased-finetuned-conll03-english` | English profile; `min_confidence` defaults to `0.9`. |
 | `bertBase` | `dslim/bert-base-NER` | English profile; `min_confidence` defaults to `0.9`. |
 | `distilbert` | `Davlan/distilbert-base-multilingual-cased-ner-hrl` | Multilingual profile; `min_confidence` defaults to `0.9`. |
 | `xlmRoberta` | `Davlan/xlm-roberta-base-ner-hrl` | Multilingual profile; `min_confidence` defaults to `0.9`. |
 | `deberta` | `dslim/distilbert-NER` | English profile; `min_confidence` defaults to `0.9`. |
 | `biomedical` | `dmis-lab/biobert-base-cased-v1.1` | Biomedical profile; `min_confidence` defaults to `0.85`. |
+| `custom` | _(your own token-classification model)_ | `min_confidence` defaults to `0.9`. |
 
 ## Configuration
 

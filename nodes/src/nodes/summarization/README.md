@@ -2,12 +2,6 @@
 
 A RocketRide filter node that uses an LLM to distill incoming text into a summary, key points, and named entities.
 
-## About RocketRide
-
-RocketRide is the pipeline runtime that hosts this node and supplies its LLM
-connection and pipeline lanes. Summarization is implemented as a RocketRide
-Python filter that uses the connected LLM for extraction.
-
 ## What it does
 
 Accumulates all text (and table content) of each object flowing through the pipeline, then on close splits the full document into chunks and asks the connected LLM to extract three things from each chunk: a concise summary, a list of key points, and the most significant named entities (people, organizations, products, events, dates, locations). The LLM is instructed to respond as JSON.
@@ -55,10 +49,6 @@ the instructions passed to the LLM. Set a value to `0` to omit that section.
 Use smaller limits for compact indexing output and larger limits when downstream
 readers need more detail. These limits do not change how many source chunks are
 selected; that is controlled by `numberOfSummaries`.
-
-## Upstream docs
-
-- [RocketRide documentation](https://docs.rocketride.org)
 
 ---
 

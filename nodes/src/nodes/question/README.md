@@ -2,12 +2,6 @@
 
 A RocketRide filter node that trims incoming text and wraps it as a `Question` object.
 
-## About RocketRide
-
-RocketRide is the pipeline runtime that hosts this node and provides the lanes
-that move values between components. Question is implemented as a RocketRide
-Python filter.
-
 ## What it does
 
 Takes raw text from the `text` lane, strips surrounding whitespace, and encapsulates it as a `Question` object on the `questions` lane. The content is not generated, rewritten, or altered in any way; the node exists solely to translate unstructured text into the typed question entity that downstream nodes (vector stores, LLMs, agents, and the Prompt node) expect.
@@ -32,13 +26,9 @@ result from `questions`.
 
 ## Requirements
 
-The node is marked GPU-capable in its metadata, but its implementation only
-strips text and creates a `Question`; it does not load or call a model. Any
-hardware requirement belongs to the downstream node that handles the question.
-
-## Upstream docs
-
-- [RocketRide documentation](https://docs.rocketride.org)
+This node needs no hardware of its own: it strips whitespace and wraps the text
+as a `Question`, without loading or calling a model. Any GPU requirement belongs
+to the node downstream that handles the question.
 
 ---
 
