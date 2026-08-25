@@ -1,108 +1,124 @@
 # frame_grabber
 
-A RocketRide filter node that extracts still frames from streamed video and passes them downstream as images, documents, or a timing table.
+A RocketRide video node that extracts selected still frames from an incoming
+video stream and sends them downstream as PNG images, image documents, or a
+frame-timestamp table. Choose it when later pipeline stages need individual
+frames rather than the original video stream.
+
+## About Pillow
+
+Pillow is an image library that frame_grabber imports for optional watermark
+rendering. It opens a selected frame, draws the watermark text, and encodes the
+result as PNG.
 
 ## What it does
 
-Receives video on its `video` input lane and extracts still frames using one of three modes: fixed interval (the default), scene transition detection, or keyframe (I-frame) selection. Each extracted frame is emitted as a PNG image together with its frame number and presentation timestamp.
+The node receives video on the `video` lane and selects frames in interval,
+scene-transition, or keyframe mode. It can produce each selected frame as a
+PNG image stream or as an image document; it can also collect frame numbers and
+timestamps into a table when the video closes. Each output is generated only
+when its corresponding downstream listener is present. Pick this node over a
+single-image transform when a pipeline needs a controlled set of frames and
+their timestamps from a video.
 
-Extraction is performed by FFmpeg, spawned as a subprocess via the `imageio-ffmpeg` bundled binary, so no host `ffmpeg` installation is required on the machine running the engine. Video bytes are piped to FFmpeg's stdin, a mode-specific `select` or `fps` video filter picks the frames, and complete PNG images are parsed back from the `image2pipe` output stream. Frame numbers and timestamps are derived from FFmpeg's `showinfo` filter.
+## Lanes
 
-Each output lane is produced only when a downstream node is listening on it, so unused outputs cost nothing at runtime.
+| Lane in | Lane out | Description |
+| --- | --- | --- |
+| `video` | `image` | Emit each selected frame as an `image/png` stream. |
+| `video` | `table` | Emit a Markdown table of selected frame numbers and timestamps when the video closes. |
+| `video` | `documents` | Emit each selected frame as an image document with frame metadata. |
 
----
+## Profiles
 
-## Modes
+Default: **Extract video frames at intervals** (`interval`).
 
-The active mode is selected by `grabber.profile` (default: `interval`). Timestamps on all output lanes are relative to the start of the video; the configured start time is factored back into FFmpeg's relative output.
-
-### Interval (default)
-
-Extracts frames at a fixed time interval using FFmpeg's `fps` filter. The configured interval in seconds is converted to `fps = 1 / interval` at startup; a zero or negative interval raises an error.
-
-| Field                       | services.json key          | Type / Default | Description                             |
-|-----------------------------|----------------------------|----------------|-----------------------------------------|
-| Interval (seconds)          | `grabber.second.interval`  | number / `5`   | Seconds between extracted frames.       |
-| Start time (seconds)        | `grabber.start_time`       | number / `0`   | Where to begin extraction (0 = start).  |
-| Duration (seconds)          | `grabber.duration`         | number / `0`   | How long to extract (0 = full video).   |
-
-### Transition
-
-Extracts a frame whenever the scene changes by more than a pixel-change threshold, using FFmpeg's `select='gt(scene,<percent>)'` filter.
-
-| Field                       | services.json key          | Type / Default       | Description                                                                                         |
-|-----------------------------|----------------------------|----------------------|-----------------------------------------------------------------------------------------------------|
-| Percentage change           | `grabber.percent`          | number / `0.4` (40%) | Pixel-change threshold that triggers extraction; selectable from 10% to 100% in steps of 10%.       |
-| Minimum scene gap (seconds) | `grabber.min_scene_gap`    | number / `0`         | Minimum time between extracted frames; reduces burst detections in high-motion segments. 0 = off.   |
-| Start time (seconds)        | `grabber.start_time`       | number / `0`         | Where to begin extraction (0 = start).                                                              |
-| Duration (seconds)          | `grabber.duration`         | number / `0`         | How long to extract (0 = full video).                                                               |
-| Maximum frames              | `grabber.max_frames`       | number / `0`         | Cap on total frames extracted (0 = unlimited).                                                      |
-
-### Keyframe
-
-Extracts only video keyframes (I-frames) using FFmpeg's `select='eq(pict_type,I)'` filter.
-
-| Field                       | services.json key          | Type / Default | Description                                    |
-|-----------------------------|----------------------------|----------------|------------------------------------------------|
-| Start time (seconds)        | `grabber.start_time`       | number / `0`   | Where to begin extraction (0 = start).         |
-| Duration (seconds)          | `grabber.duration`         | number / `0`   | How long to extract (0 = full video).          |
-| Maximum frames              | `grabber.max_frames`       | number / `0`   | Cap on total frames extracted (0 = unlimited). |
-
----
+| Profile | Selection mode | Context |
+| --- | --- | --- |
+| `interval` **(default)** | Extract video frames at intervals | Shows the interval, start-time, duration, and watermark settings. |
+| `transition` | Extract video frames at scene transitions | Shows the change percentage, minimum scene gap, time bounds, frame cap, and watermark settings. |
+| `key` | Extract video frames at keyframes | Shows the time bounds, frame cap, and watermark settings. |
 
 ## Configuration
 
-### Lanes
+Start by selecting the frame-grabber mode. The default interval profile is the
+right starting point for regular sampling; use the other profiles only when
+their selection criteria match the video. The generated schema below lists the
+available fields and defaults.
 
-Input lane: `video`. Output lanes:
+### Frame grabber mode
 
-| Lane out    | Description                                                                                                                                       |
-|-------------|---------------------------------------------------------------------------------------------------------------------------------------------------|
-| `image`     | Each extracted frame streamed as a raw `image/png` payload.                                                                                       |
-| `table`     | One markdown table per video, written when the video closes: columns `Frame`, `Seconds`, `Time Stamp` (formatted as `HH:MM:SS.ss`).               |
-| `documents` | One document per frame: `type: "Image"`, base64-encoded PNG as content, with `chunkId` set to the frame number, `time_stamp` (seconds), and a `source` object carrying the originating video's media detail (see Source provenance below) in the metadata. |
+**Frame grabber mode** selects `interval`, `transition`, or `key` and changes
+which settings the configuration panel exposes. Keep the default `interval`
+when frames should be sampled at a regular cadence. Choose `transition` when
+scene changes should control selection, or `key` when keyframes are the desired
+selection points. The transition profile supplies `0.4` as its configured
+percentage default.
 
-### Fields
+### Interval between frames
 
-The `grabber.profile` field selects the active mode and controls which sub-fields are shown in the UI.
+**Interval (in seconds) between frames** is available in interval mode and
+defaults to `5`. At global initialization, the node converts this interval to
+frames per second as `1 / interval`; it must therefore be greater than zero,
+or startup raises a `ValueError`. Lower it for more frequent sampling and raise
+it when fewer frames are sufficient.
 
-| Field | Type | Description |
-|---|---|---|
-| `percent` | number | Default 0.4.  |
-| `interval` | number | Default 5.  |
-| `start_time` | number | Default 0.  |
-| `duration` | number | Default 0.  |
-| `max_frames` | number | Default 0.  |
-| `min_scene_gap` | number | Default 0. Minimum time gap between extracted frames. Helps reduce burst detections in high-motion segments. Set to 0 to disable. |
-| `profile` | string | Default "interval".  |
+### Percentage change for frame and minimum gap
 
-Each profile has a title defined in `preconfig.profiles`: "Extract video frames at intervals" (interval), "Extract video frames at scene transitions" (transition), and "Extract video frames at keyframes" (key). The `transition` profile also sets `percent` to `0.4` as a profile-level default.
+In transition mode, **Percentage change for frame** defaults to `0.4` and can
+be set from `0.1` to `1.0` in the configuration panel. Use a lower percentage
+when smaller changes should select frames; use a higher percentage to require
+a larger change. **Minimum gap between scenes** defaults to `0` (disabled) and
+can be set from `0.5` to `5` seconds to reduce burst detections in
+high-motion segments. Pair a nonzero gap with a low percentage when a busy
+video would otherwise produce closely spaced selections.
+
+### Extraction window and frame cap
+
+**Start time** and **Duration** are available in every profile. Their default
+of `0` starts at the beginning and continues to the end of the video,
+respectively; set them to limit work to a relevant segment. **Maximum number of
+frames** is available in transition and keyframe modes and defaults to `0` for
+no limit. Set a cap when downstream storage or review must be bounded.
 
 ### Watermark
 
-When `grabber.watermark` is set to `Add watermark`, each extracted frame is stamped with a text label before it is emitted on every output lane. The label is white text with a black outline (legible on any background) at a font size scaled to the frame height.
+**Watermark extracted frames** is off by default. When enabled, the node draws
+the selected filename and timestamp parts before sending the frame to any
+output. Choose a corner with **Watermark position**; keep the default
+bottom-right placement unless it covers important content. The filename and
+timestamp switches both default to `yes`; turn either off when that part of the
+label is unwanted. If both are off, the frame is returned unchanged even when
+watermarking is enabled.
 
-| Field | services.json key | Default | Description |
-|---|---|---|---|
-| Watermark extracted frames | `grabber.watermark` | `no` | Enable the watermark; the fields below appear only when enabled. |
-| Watermark position | `grabber.watermark_location` | `bottom_right` | Corner for the label (top/bottom × left/right). |
-| Include file name | `grabber.watermark_filename` | `yes` | Add the source file name (from the stream descriptor). |
-| Include timestamp | `grabber.watermark_timestamp` | `yes` | Add the frame timestamp (`HH:MM:SS.ss`). |
+The timestamp is formatted as `HH:MM:SS.ss`. When the incoming descriptor
+identifies media extracted from a container, the filename label is rendered as
+`file @ container`; otherwise it uses the available file or container name.
+Watermark rendering is best effort: if Pillow raises an exception, the node
+logs the error and emits the original frame.
 
-The file name comes from the stream descriptor attached to the video on `BEGIN`; when it is unavailable the label falls back to the timestamp alone.
+## Notes
 
-### Source provenance
+### Output metadata
 
-Every extracted frame carries a backlink to the video it came from. The frame's own metadata already identifies the source object (`objectId`, `parent`); a nested `source` object adds the video's media detail that the frame itself does not have:
+On the documents lane, every frame is emitted as a `Doc` with type `Image`,
+base64-encoded PNG content, the frame number as `chunkId`, and its timestamp as
+`time_stamp`. The node attaches source-video provenance and gives frames a
+derived PNG name when a source descriptor is available.
 
-`source`: `source_mime`, `duration`, `fps`, `width`, `height`, `resource_name`, `container_mime`, `size`, `stream_index`.
+On the image lane, each frame is a separate `image/png` stream. Its begin
+payload includes the frame's byte size and, when available, its dimensions,
+derived name, and nested source provenance.
 
-- On the `documents` lane the `source` object is attached to each frame document's metadata.
-- On the `image` lane the same detail (plus `origin: extracted`) is sent as the frame's stream-descriptor enrichment on `BEGIN`, so the raw image stream is self-describing too.
+### Table output
 
-`stream_index` distinguishes frames from different videos embedded in one source (e.g. two clips in one presentation). The block is omitted entirely when the incoming video carried no stream descriptor.
+The table lane accumulates a row for every selected frame and writes one
+Markdown table only when the video closes and at least one row was collected.
+Its columns are `Frame`, `Seconds`, and `Time Stamp`.
 
-Each frame document is also given a human-readable `metadata.name` of the form `<video-stem>.frame<N>.png` (e.g. `BBC - Tear down this wall.frame0.png`), where `<video-stem>` is the source video's file name without extension and `N` is the frame index — so frames are individually identifiable downstream. Omitted when the source has no name.
+## Upstream docs
+
+- [Pillow documentation](https://pillow.readthedocs.io/)
 
 ---
 

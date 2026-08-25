@@ -1,73 +1,81 @@
 # audio_transcribe
 
-A RocketRide audio filter node that transcribes spoken audio or video to text using OpenAI Whisper.
+A RocketRide audio node that transcribes incoming audio or video streams into
+text with the configured Whisper backend.
+
+## About Whisper
+
+Whisper is the transcription backend constructed by this node. The node uses
+it to turn buffered PCM audio into timestamped text segments.
 
 ## What it does
 
-Receives an audio or video stream, extracts the audio track as 16 kHz mono PCM, buffers it in 60-second chunks (forced flush at 120 seconds), and runs Whisper with built-in voice activity detection (VAD). Segments are merged until they end in terminal punctuation (`.`, `?`, `!`), so output arrives as whole sentences, each carrying the timestamp of its first segment.
+The node accepts `audio` or `video`, buffers decoded PCM, transcribes it, and
+emits merged sentences on `text`. Pick it when a pipeline needs spoken content
+as text, rather than local playback or speech synthesis. When a `documents`
+listener is attached, it also writes one document per merged sentence; the
+declared lanes remain the `text` outputs below.
 
-Uses `ai.common.models.Whisper`: transcription routes to the model server when the engine is started with `--modelserver`, otherwise it runs locally via `faster-whisper`. No API key is required either way. Whisper is invoked with `beam_size=5` and `vad_filter=True`, and transcription calls are serialized through a global lock so a single loaded model is shared safely across instances.
+## Lanes
 
-Models are downloaded from HuggingFace on first use. GPU is used automatically when available (`compute_type` defaults to `float16`).
-
----
-
-## Configuration
-
-### Lanes
-
-| Input lane | Output lane | Behaviour |
-|------------|-------------|-----------|
-| `audio`    | `text`      | Transcribed sentences, one per segment |
-| `video`    | `text`      | Audio track is extracted from the video and transcribed |
-
-When a `documents` listener is attached, the node also emits one document per merged sentence with `chunkId` (sequential per stream, reset on each new stream) and `time_stamp` (seconds from stream start) in the document metadata, plus `metadata.source` (the source audio's media detail — `source_mime`, `duration`, `sample_rate`, …) and `metadata.name` = `<audio-stem>.segment<N>.txt` when the input carried a stream descriptor.
-
-### Fields
-
-| Field | Type | Description |
-|---|---|---|
-| `model` | string | Default "base". The Whisper model to use for transcription |
-| `silence_threshold` | number | Default 0.25. The silence threshold to detect silence in speech (in seconds) |
-| `min_seconds` | number | Default 240. The minimum seconds of audio to process in a batch and looking for silence |
-| `max_seconds` | number | Default 300. The maximum seconds of audio to buffer to process |
-| `vad_level` | number | Default 1. The VAD level to use for silence detection (0-3) |
-| `profile` | string | Default "default".  |
-
-### VAD levels
-
-| Level | Behaviour |
-|-------|-----------|
-| `0`   | Most permissive: detects the most audio as speech (risk: includes noise) |
-| `1`   | Slightly more aggressive: skips minor background noise (default) |
-| `2`   | Balanced: moderate filtering of non-speech |
-| `3`   | Most aggressive: filters aggressively, may cut off quiet or short speech |
-
----
-
-## Models
-
-| Model      | Notes |
-|------------|-------|
-| `tiny`     | Fastest, least accurate |
-| `base`     | Fast, low accuracy (default) |
-| `small`    | Medium speed and accuracy |
-| `medium`   | Slower, high accuracy |
-| `large-v3` | Slowest, highest accuracy |
-
----
+| Lane in | Lane out | Description |
+| --- | --- | --- |
+| `audio` | `text` | Transcribe the audio stream into merged text sentences. |
+| `video` | `text` | Transcribe audio decoded from the video stream into merged text sentences. |
 
 ## Profiles
 
-The node ships one profile per model size (`tiny`, `base`, `small`, `medium`, `large-v3`) plus `default`, which is an alias for `base`. Every profile uses the same defaults: `language: en`, `silence_threshold: 0.25`, `min_seconds: 240`, `max_seconds: 300`, `vad_level: 1`. Only the model differs between profiles.
+Default: `default`, which loads the `base` model.
 
----
+| Profile | Declared `mode` | Context |
+| --- | --- | --- |
+| `default` **(default)** | `base` | Default profile settings. |
+| `tiny` | `tiny` | Tiny profile settings. |
+| `base` | `base` | Base profile settings. |
+| `small` | `small` | Small profile settings. |
+| `medium` | `medium` | Medium profile settings. |
+| `large-v3` | `large-v3` | Large-v3 profile settings. |
 
-## Language
+## Configuration
 
-Defaults to English (`en`). Change the `language` config value to transcribe other languages. Any language supported by Whisper is accepted.
+The implementation buffers audio in 60-second chunks and forces a flush at 120
+seconds; those timings are fixed in its Python source. Select a profile for
+the declared configuration preset, then test the active runtime configuration
+before relying on any profile-specific behavior.
 
----
+### Model
+
+The schema offers `tiny`, `base`, `small`, `medium`, and `large-v3`, with
+`base` as its default. The runtime code reads a configuration key named
+`model`; the profiles instead declare `mode`. This node source does not show
+the mapping between those names, so confirm the loaded model from the startup
+debug message before changing a profile for speed or accuracy.
+
+### Silence Threshold, Minimum Seconds, Maximum Seconds, and VAD Level
+
+These configuration fields describe silence and batching controls, but the
+runtime code reads differently named keys: `vad_threshold`,
+`vad_min_silence_duration_ms`, and `vad_max_speech_duration_s`. It always
+calls Whisper with voice-activity detection enabled, a beam size of 5, and
+those runtime values' defaults of 0.5, 500 ms, and 20 seconds respectively.
+Because this node source does not show a mapping from the displayed fields to
+those runtime keys, validate the observed segmentation before depending on a
+panel value to tune pauses or maximum speech length.
+
+## Notes
+
+### Segmentation and documents
+
+The transcriber serializes calls through a shared lock. It combines consecutive
+segments until one ends in `.`, `?`, or `!`, then writes that text with the
+timestamp of its first segment. For document output, it resets `chunkId` for
+each opened stream and attaches source and generated segment-name metadata when
+the input begins with a descriptor.
+
+## Upstream docs
+
+- [Whisper repository](https://github.com/openai/whisper)
+
 
 <!-- ROCKETRIDE:GENERATED:PARAMS START -->
 <!-- Generated by nodes:docs-generate. Do not edit by hand. -->
