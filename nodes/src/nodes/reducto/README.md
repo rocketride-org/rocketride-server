@@ -1,83 +1,87 @@
 # reducto
 
-A RocketRide data node that parses documents with the Reducto cloud API, extracting clean Markdown text and structured tables.
+A RocketRide data node that uploads each incoming document to Reducto, then emits its reconstructed Markdown text and each detected table; use it when Reducto's parsing options match the documents you need to process.
+
+## About Reducto
+
+Reducto provides a document-parsing API for extracting content from files.
+This node uses the Reducto Python client to upload document bytes, request a
+parse, and convert the returned blocks into text and table outputs for a
+RocketRide pipeline.
 
 ## What it does
 
-Sends each incoming document to the Reducto cloud API for parsing and emits results on two output lanes: full extracted text as Markdown and each detected table as a separate Markdown table block. It handles PDFs, images, scanned documents, and mixed-content files.
+Reducto buffers one document from the `tags` lane, uploads it, and calls the
+Reducto parse API. It builds Markdown from the returned blocks and writes each
+table both within that text and as a separate item on `table`. Pick it when you
+want its simple OCR/figure options or can provide its advanced `enhance`
+settings; choose a different parser when the required output is not the
+block-based Markdown this node reconstructs.
 
-Uses the **`reductoai` Python SDK**: each document is uploaded with `reducto.upload()` and parsed with `reducto.parse.run()`, where all parsing behavior is expressed through the `enhance` parameter. A fresh Reducto client is created per document parse so concurrent documents are safe.
+## Lanes
 
-The node buffers the document byte stream from the incoming tag lane and parses it once the stream ends. Output is only produced for lanes that have a downstream listener. If parsing fails, the error is logged and the node emits nothing for that document (empty text, no tables) rather than raising.
-
-The extracted text is assembled as Markdown from Reducto's block types: `title` blocks become `#` headings, `section_header` blocks become `##` headings, `list_item` blocks become `-` bullets, and `table` blocks appear both inline in the text stream and as separate items on the `table` lane. `figure` blocks are included as plain content or, when AI summarization is enabled, prefixed with `[DIAGRAM/IMAGE SUMMARY]:`.
-
----
+| Lane in | Lane out | Description |
+| --- | --- | --- |
+| `tags` | `text` | Markdown reconstructed from returned content blocks. |
+| `tags` | `table` | Each returned `table` block, as separate Markdown content. |
 
 ## Configuration
 
-### Lanes
+The default profile uses Simple mode. Use it for the three built-in enhancement
+choices; switch to Advanced Mode only when you need to send raw Reducto
+`enhance` dictionaries. The simple and advanced settings are mutually
+exclusive in the implementation.
 
-| Lane in | Lane out | Description                               |
-|---------|----------|-------------------------------------------|
-| `data`  | `text`   | Extracted text as Markdown                |
-| `data`  | `table`  | Extracted tables in Markdown table format |
+### Advanced Mode
 
-### Fields
+With **Advanced Mode** off, the node builds the `enhance` request from the
+three simple toggles. With it on, it ignores those toggles and reads **Options**,
+**Advanced Options**, and **Experimental Options** as Python dictionary
+literals. Empty fields are omitted; present dictionaries merge in that order,
+so a later field overrides an earlier key. Use Python syntax such as
+`{'ocr_mode': 'agentic'}`, not JSON syntax such as `{"enabled": true}`:
+validation uses `ast.literal_eval` and rejects a value that is not a dictionary.
 
-| Field | Type | Description |
-|---|---|---|
-| `api_key` | string | Your Reducto API key |
-| `parse_mode` | boolean | Default false. Toggle to use the advanced parse mode, and have access to the full set of options from the Reducto API. |
-| `Contains_Handwritten_Text` | boolean | Default false. Enables Agentic OCR mode for better handwriting recognition and small text/table cell corrections. |
-| `Contains_Non_English_Text` | boolean | Default false. Enables Multilingual OCR system which can parse non-Germanic languages and unicode symbols. |
-| `Summarize_Text` | boolean | Default false. Generate AI summaries for figures, diagrams, and images using vision-language models. |
-| `advanced_documentation` | null | In advanced mode, you can use the full set of options from the Reducto API. For each set of options you must use and only include a python dictionary, e.g., {'key': 'value', 'flag': True}. If no information is provided for a set of options, the default values will be used. For more information on what options are available, see the Reducto API documentation at https://docs.reducto.ai/parsing/default-configurations. This page also contains examples of how to format the options fields. (In Advanced mode your configuration from Simple mode will be ignored) |
-| `options` | string | Options for the Reducto API |
-| `advanced_options` | string | Advanced options for the Reducto API |
-| `experimental_options` | string | Experimental options for the Reducto API |
+### Simple-mode enhancement choices
 
-The default profile uses Simple mode (`parse_mode: false`).
+**Contains Handwritten Text** adds `ocr_mode: 'agentic'`; enable it for
+handwriting or small text and table-cell corrections. **Contains Non-English
+Text** adds `ocr_system: 'multilingual'`; enable it for non-Germanic languages
+or Unicode symbols. **AI Summarize Figures/Images** adds
+`summarize_figures: true`; leave it off when the original figure content is
+more useful than a generated summary. All three default to off.
 
-### Simple mode
-
-When `parse_mode` is `false`, three optional toggles (all defaulting to `false`) control Reducto enhance options:
-
-| Field                       | Default | Effect when enabled                                                                           |
-|-----------------------------|---------|-----------------------------------------------------------------------------------------------|
-| `Contains_Handwritten_Text` | `false` | Sets `ocr_mode: "agentic"`: Agentic OCR for better handwriting recognition and small text/table cell corrections. |
-| `Contains_Non_English_Text` | `false` | Sets `ocr_system: "multilingual"`: Multilingual OCR for non-Germanic languages and Unicode symbols. |
-| `Summarize_Text`            | `false` | Sets `summarize_figures: true`: AI summaries for figures, diagrams, and images using vision-language models. |
-
-Table summarization (`summarize_tables`) is always set to `false` in Simple mode because SDK 0.13.0 does not support it effectively.
-
-### Advanced mode
-
-When `parse_mode` is `true`, the Simple mode toggles are ignored and you get direct access to the Reducto API through three free-text fields:
-
-| Field                  | Description                                                                                  |
-|------------------------|----------------------------------------------------------------------------------------------|
-| `options`              | Options for the Reducto API.                                                                 |
-| `advanced_options`     | Advanced options for the Reducto API.                                                        |
-| `experimental_options` | Experimental options for the Reducto API.                                                    |
-
-Each field must contain a **Python dictionary literal**, for example `{'key': 'value', 'flag': True}`. The values are parsed with `ast.literal_eval`, so JSON-only syntax such as `true` or `null` will fail validation. Empty fields are skipped and Reducto's defaults apply. The three dictionaries are merged in order (options, then advanced_options, then experimental_options; later keys override earlier ones) into the single `enhance` parameter passed to `parse.run()`.
-
-See the [Reducto parsing configurations documentation](https://docs.reducto.ai/v/legacy/parsing/default-configurations) for available parameters and formatting examples.
-
----
+In Simple mode the node always sends `summarize_tables: false`, regardless of
+the figure-summary setting. In Advanced Mode, supply any desired behavior in
+the dictionaries instead.
 
 ## Authentication
 
-Set `api_key` to a valid Reducto API key. Config validation verifies the key by performing a minimal in-memory upload (`ping.txt`, no parsing) against the Reducto API. An invalid key causes validation to fail with the message `Reducto API key validation failed`. Note that validating the config requires network access to Reducto.
+Set **API Key** to a Reducto API key. Configuration validation performs a
+minimal in-memory upload of `ping.txt`; failure raises `Reducto API key
+validation failed`, so saving configuration requires access to Reducto.
 
----
+## Notes
+
+### Output and failure behavior
+
+The node performs a remote parse only when processing a buffered document.
+It writes text or tables only when their respective output lane has a listener.
+If the API key is missing, upload or parsing fails, or the response cannot be
+read, the parser returns empty text and no tables; the instance logs the
+condition and emits no replacement error document.
+
+### Markdown reconstruction
+
+Returned `title`, `section_header`, and `list_item` blocks become Markdown
+headings and bullets. Table blocks are included in the full text and emitted
+separately. A `figure` block is emitted as ordinary content unless figure
+summarization was enabled, in which case it is prefixed with
+`[DIAGRAM/IMAGE SUMMARY]:`.
 
 ## Upstream docs
 
 - [Reducto documentation](https://docs.reducto.ai/overview)
-
----
 
 <!-- ROCKETRIDE:GENERATED:PARAMS START -->
 <!-- Generated by nodes:docs-generate. Do not edit by hand. -->
