@@ -47,6 +47,9 @@ Components:
     Color constants, cursor control sequences, and visual characters
 """
 
+import sys
+
+
 # ANSI Color Codes
 ANSI_RESET = '\033[0m'
 ANSI_RED = '\033[91m'
@@ -59,14 +62,25 @@ ANSI_GRAY = '\033[90m'
 ANSI_CLEAR_SCREEN = '\033[2J'
 ANSI_CURSOR_HOME = '\033[1;1H'
 
+
+def _glyph(unicode_char: str, ascii_char: str) -> str:
+    """Return unicode_char, or ascii_char when stdout's encoding cannot carry it."""
+    encoding = getattr(sys.stdout, 'encoding', None) or 'ascii'
+    try:
+        unicode_char.encode(encoding)
+    except (UnicodeEncodeError, LookupError):
+        return ascii_char
+    return unicode_char
+
+
 # Box Drawing Characters
-CHR_TL = '┌'
-CHR_TR = '┐'
-CHR_BL = '└'
-CHR_BR = '┘'
-CHR_HORIZ = '─'
-CHR_VERT = '│'
-CHR_BLOCK = '█'
-CHR_LIGHT_BLOCK = '░'
-CHR_CHECK = '✓'
-CHR_CROSS = '✗'
+CHR_TL = _glyph('┌', '+')
+CHR_TR = _glyph('┐', '+')
+CHR_BL = _glyph('└', '+')
+CHR_BR = _glyph('┘', '+')
+CHR_HORIZ = _glyph('─', '-')
+CHR_VERT = _glyph('│', '|')
+CHR_BLOCK = _glyph('█', '#')
+CHR_LIGHT_BLOCK = _glyph('░', '.')
+CHR_CHECK = _glyph('✓', 'v')
+CHR_CROSS = _glyph('✗', 'x')
