@@ -34,9 +34,11 @@ consumer needs another kind of result. An empty image stream produces no text.
 
 ## Profiles
 
+Default: **Gemini 2.5 Flash - Fast & Efficient (1M tokens)** (`gemini-2.5-flash`).
+
 | Profile | Model | Context limit |
 | --- | --- | --- |
-| Gemini 2.5 Flash - Fast & Efficient (1M tokens) *(default)* | `gemini-2.5-flash` | `1048576` tokens |
+| Gemini 2.5 Flash - Fast & Efficient (1M tokens) **(default)** | `gemini-2.5-flash` | `1048576` tokens |
 | Gemini 2.5 Pro - High Quality (1M tokens) | `gemini-2.5-pro` | `1048576` tokens |
 | Gemini 2.0 Flash - Balanced (1M tokens) | `gemini-2.0-flash` | `1048576` tokens |
 

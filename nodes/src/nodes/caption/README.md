@@ -8,7 +8,7 @@ Florence-2 is the image captioning model used by this node. The node loads the c
 
 ## What it does
 
-The node buffers each incoming image stream, captions the completed image, and writes the resulting string on the `text` lane. It offers short, detailed, and more-detailed caption tasks through its configuration. Choose it for a general natural-language description of image content; the node metadata directs object-detection use cases to Object Detection and text-reading use cases to OCR.
+The node buffers each incoming image stream, captions the completed image, and writes the resulting string on the `text` lane. It offers short, detailed, and more-detailed caption tasks through its configuration. Choose it for a general natural-language description of image content; reach for Object Detection when you need boxes and OCR when you need the text in the image.
 
 ## Lanes
 
@@ -26,7 +26,7 @@ Granularity selects one of three configured tasks: `caption` (the default, shown
 
 ## Requirements
 
-This node is marked as GPU-capable. Its metadata declares local CPU, Apple Silicon (MPS), and CUDA operation; when a model server is configured the captioning facade uses it, otherwise it runs locally. Local inference is guarded by a device lock, which serializes caption generation. The source does not state VRAM requirements or a CPU-versus-accelerator speed comparison.
+With a model server configured, captioning runs there. Otherwise it runs locally on CPU, Apple Silicon (MPS), or CUDA, and a device lock serializes local caption generation.
 
 ## Notes
 

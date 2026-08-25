@@ -27,7 +27,7 @@ This setting limits the input image's long edge before depth inference; its defa
 
 ## Requirements
 
-This node is marked as GPU-capable. Its metadata declares local CPU, Apple Silicon (MPS), and CUDA operation; it uses a configured model server when one is available and otherwise performs local inference. A device lock serializes local model use. The source does not give VRAM requirements, speed figures, or a calibration from output values to physical distance.
+With a model server configured, inference runs there. Otherwise it runs locally on CPU, Apple Silicon (MPS), or CUDA, and a device lock serializes local model use. Output values are relative depth, not a calibrated physical distance.
 
 ## Notes
 

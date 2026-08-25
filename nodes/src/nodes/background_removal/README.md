@@ -19,9 +19,11 @@ The node accepts an image stream, runs background removal for each completed ima
 
 ## Profiles
 
+Default: **BiRefNet — default, 1K (MIT)** (`birefnet-default`).
+
 | Profile | Model | Maximum input edge |
 | --- | --- | --- |
-| BiRefNet — default, 1K (MIT) *(default)* | `ZhengPeng7/BiRefNet` | `1024` px |
+| BiRefNet — default, 1K (MIT) **(default)** | `ZhengPeng7/BiRefNet` | `1024` px |
 | BiRefNet HR — 2K, finer hair / edge detail (MIT) | `ZhengPeng7/BiRefNet_HR` | `2048` px |
 
 ## Configuration
@@ -38,7 +40,7 @@ This caps the source image's long edge before inference. The default is `1024`; 
 
 ## Requirements
 
-This node is marked as GPU-capable. Its metadata declares local CPU, Apple Silicon (MPS), and CUDA operation; local inference is used when no model server is configured, while a configured model server is used instead. Local model access is serialized with a device lock, so concurrent frames do not run model inference at the same time. The source does not specify VRAM requirements or relative CPU performance.
+With a model server configured, inference runs there. Otherwise it runs locally on CPU, Apple Silicon (MPS), or CUDA, and a device lock serializes local inference so concurrent frames never run through the model at once.
 
 ## Notes
 

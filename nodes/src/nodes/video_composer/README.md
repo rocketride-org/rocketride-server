@@ -18,9 +18,11 @@ The node receives image frames, buffers them until the current object closes, th
 
 ## Profiles
 
+Default: **Standard quality (H.264, CRF 23)** (`standard`).
+
 | Profile | Codec | Quality (CRF) | Frame rate |
 | ------- | ----- | ------------- | ---------- |
-| Standard quality (H.264, CRF 23) *(default)* | `libx264` | `23` | `1.0` fps |
+| Standard quality (H.264, CRF 23) **(default)** | `libx264` | `23` | `1.0` fps |
 | High quality (H.264, CRF 18) | `libx264` | `18` | `1.0` fps |
 
 ## Configuration

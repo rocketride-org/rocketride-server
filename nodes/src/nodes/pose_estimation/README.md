@@ -19,10 +19,12 @@ For every input image frame, the node estimates people and emits a JSON array of
 
 ## Profiles
 
+Default: **RTMPose Medium** (`rtmpose-medium`).
+
 | Profile | Default keypoint threshold | Default maximum persons |
 | ------- | -------------------------- | ----------------------- |
 | RTMPose Tiny | `0.3` | `20` |
-| RTMPose Medium *(default)* | `0.3` | `20` |
+| RTMPose Medium **(default)** | `0.3` | `20` |
 | RTMPose Large | `0.3` | `20` |
 
 ## Configuration

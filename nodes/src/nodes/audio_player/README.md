@@ -38,8 +38,8 @@ into 16 KiB chunks and enqueues at most 32 chunks; a full queue blocks incoming
 writes. When stopped, it waits for the queue and callback buffer to drain.
 
 If playback has ended with less than a complete callback frame buffered, the
-callback stops rather than padding silence. The source notes that this can cut
-off the final roughly 24 ms of audio.
+callback stops rather than padding silence. This can cut off the final ~24 ms of
+audio.
 
 
 <!-- ROCKETRIDE:GENERATED:PARAMS START -->

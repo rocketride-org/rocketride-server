@@ -25,9 +25,11 @@ declared lanes remain the `text` outputs below.
 
 ## Profiles
 
+Default: `default`, which loads the `base` model.
+
 | Profile | Declared `mode` | Context |
 | --- | --- | --- |
-| `default` *(default)* | `base` | Default profile settings. |
+| `default` **(default)** | `base` | Default profile settings. |
 | `tiny` | `tiny` | Tiny profile settings. |
 | `base` | `base` | Base profile settings. |
 | `small` | `small` | Small profile settings. |

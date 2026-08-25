@@ -19,9 +19,11 @@ The node buffers each completed image stream, runs the selected detector, and ca
 
 ## Profiles
 
+Default: **RF-DETR — Common Objects (COCO, 80 classes, default)** (`rfdetr`).
+
 | Profile | Backend | Use |
 | --- | --- | --- |
-| RF-DETR — Common Objects (COCO, 80 classes, default) *(default)* | `rfdetr` | Closed-set common-object detection. |
+| RF-DETR — Common Objects (COCO, 80 classes, default) **(default)** | `rfdetr` | Closed-set common-object detection. |
 | MM-Grounding-DINO — Open-Vocabulary (any prompt) | `mmgdino` | Prompt-driven open-vocabulary detection. |
 
 ## Configuration
@@ -42,7 +44,7 @@ The threshold is a `0.0`–`1.0` minimum confidence for including a detection, w
 
 ## Requirements
 
-This node is marked as GPU-capable. Its metadata declares local CPU, Apple Silicon (MPS), and CUDA operation; the detector uses a configured model server when one is available and otherwise runs locally. A device lock serializes local inference. The source does not specify VRAM requirements or a relative CPU-performance figure.
+With a model server configured, detection runs there. Otherwise it runs locally on CPU, Apple Silicon (MPS), or CUDA, and a device lock serializes local inference.
 
 ## Notes
 

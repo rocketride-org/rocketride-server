@@ -31,9 +31,11 @@ their timestamps from a video.
 
 ## Profiles
 
+Default: **Extract video frames at intervals** (`interval`).
+
 | Profile | Selection mode | Context |
 | --- | --- | --- |
-| `interval` *(default)* | Extract video frames at intervals | Shows the interval, start-time, duration, and watermark settings. |
+| `interval` **(default)** | Extract video frames at intervals | Shows the interval, start-time, duration, and watermark settings. |
 | `transition` | Extract video frames at scene transitions | Shows the change percentage, minimum scene gap, time bounds, frame cap, and watermark settings. |
 | `key` | Extract video frames at keyframes | Shows the time bounds, frame cap, and watermark settings. |
 

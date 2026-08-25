@@ -19,9 +19,11 @@ The node consumes each image frame, runs the configured Mask2Former segmentation
 
 ## Profiles
 
+Default: **Mask2Former — Object Instances (COCO, 80 classes, default)** (`mask2former-instance`).
+
 | Profile | Mode | Default confidence threshold | Default max input edge |
 | ------- | ---- | ---------------------------- | ---------------------- |
-| Mask2Former — Object Instances (COCO, 80 classes, default) *(default)* | `instance` | `0.3` | `1024` px |
+| Mask2Former — Object Instances (COCO, 80 classes, default) **(default)** | `instance` | `0.3` | `1024` px |
 | Mask2Former — Scene Regions (ADE20K, 150 classes) | `semantic` | `0.0` | `1024` px |
 
 ## Configuration
