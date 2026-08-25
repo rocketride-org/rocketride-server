@@ -1,62 +1,78 @@
 # preprocessor_llm
 
-A RocketRide preprocessor node that uses an LLM to split document text into semantically coherent chunks for downstream vector embedding storage.
+A RocketRide preprocessor node that uses a connected LLM to split document text
+into chunks for vector embedding storage. Choose it over rule-based text
+splitters when the LLM's document-level chunking guidance is worth the model
+call.
+
+## About LangChain
+
+LangChain is a library for language-model applications. This node's package
+declares `langchain` and `langchain-core` dependencies while obtaining model
+operations through RocketRide's LLM connection.
 
 ## What it does
 
-Splits incoming text into semantically coherent chunks by asking a connected LLM to detect context boundaries. Unlike rule-based splitters, the LLM preserves meaning across chunk boundaries: each chunk contains complete thoughts, respects document structure (paragraphs, sections, lists), and keeps the exact text of the input document. The LLM also appends a short summary chunk for the whole document as the last chunk.
-
-The node accumulates incoming text per object, then chunks the whole document at close time. Documents larger than the LLM's context window are first pre-split locally with a hierarchical splitter (paragraphs, then lines, then sentences, then words, capped at 64 KB of text per piece) so every piece fits within the connected LLM's context and output limits; each piece is then chunked by the LLM.
-
-Table content arriving on the `table` lane bypasses the LLM entirely: tables are split locally at row boundaries to stay under the chunk token limit, and every resulting chunk is tagged with table metadata.
-
-Output chunks are emitted as documents using the LangChain document format (`page_content` plus metadata) via the `langchain` and `langchain-core` libraries. Requires an LLM connection (min 1).
-
----
-
-## Configuration
-
-### Lanes
-
-| Lane in | Lane out    | Description                                                      |
-|---------|-------------|------------------------------------------------------------------|
-| `text`  | `documents` | Split text into semantically chunked documents via LLM           |
-| `table` | `documents` | Split table content into documents with table metadata preserved |
-
-### Fields
-
-| Field | Type | Description |
-|---|---|---|
-| `numberOfTokens` | number | Default 384.  |
-| `profile` | string | Default "default".  |
-
-The node ships a single preconfig profile, `default`, which sets `numberOfTokens: 384`.
-
----
+Accumulates text for an object and, when it closes, asks the required LLM
+connection for a JSON `chunks` array. The prompt requests coherent chunks that
+preserve the input text plus a final summary chunk. Choose the general-text
+preprocessor when deterministic local splitting is preferable, or the code
+preprocessor for source-code syntax.
 
 ## Connections
 
-| Channel | Required    | Description                                |
-|---------|-------------|--------------------------------------------|
-| `llm`   | yes (min 1) | LLM used to analyze and chunk the document |
+| Connection | Required | Description |
+| --- | --- | --- |
+| `llm` | yes | LLM used to process document text. |
 
-The node queries the connected LLM at runtime for its context length, output length, and token counter, and sizes its requests accordingly (reserving room for the chunking prompt itself plus a 500-token margin for JSON formatting). This initialization happens on the first document processed.
+## Lanes
 
----
+| Lane in | Lane out | Description |
+| --- | --- | --- |
+| `text` | `documents` | Accumulate and LLM-chunk text when the object closes. |
+| `table` | `documents` | Split tables locally into document chunks. |
 
-## Chunk metadata
+## Configuration
 
-Each emitted document carries the following metadata fields:
+The default configuration uses 384 tokens as the prompt's target chunk size.
+Connect an LLM before processing, because the node reads that connection's
+context length, output length, and token counter on its first object.
 
-| Field       | Description                                                         |
-|-------------|---------------------------------------------------------------------|
-| `chunkId`   | Sequential index of the chunk within the document, starting at `0` |
-| `isSummary` | `true` for the LLM-generated document summary chunk                 |
-| `isTable`   | `true` for chunks produced from `table`-lane content                |
-| `tableId`   | Index of the source table; chunks split from one table share an id  |
-| `isDeleted` | Always `false` on emit                                              |
+### Number of tokens per document chunk
 
-Chunks whose content is empty after trimming are dropped and never emitted.
+This setting is included in the LLM prompt as the target size, with a
+three-quarters-as-many-words fallback. Set it to the chunk capacity appropriate
+for the embedding model that will receive the documents. It also sets the
+budget used to divide tables at line boundaries, so reduce it when table chunks
+are too large for the downstream embedding model. It is not the limit used to
+pre-split text for the LLM request: that limit comes from the connected LLM's
+context and output capacities.
+
+## Notes
+
+### Text and table processing
+
+Before calling the LLM, the node reserves its prompt size and 500 tokens for
+JSON formatting, then uses the smaller of the remaining context budget and the
+model's output capacity. It begins splitting oversized text at a 65,536-character
+threshold, working through paragraphs, lines, sentences, and finally words. A
+single oversized word can remain intact rather than being cut further.
+
+Tables bypass the LLM. They are split only between lines; a line that is longer
+than the configured token budget remains a chunk by itself. Empty output
+content is discarded. Each emitted document gets a `chunkId`; LLM summary
+chunks are marked as summaries, and chunks made from tables are marked as
+tables with a shared `tableId` for their source table.
+
+### LLM response shape
+
+The node reads `chunks` from the LLM's JSON response. If that key is absent or
+empty, text input produces no text documents; table chunks already collected
+can still be emitted.
+
+## Upstream docs
+
+- [LangChain documentation](https://python.langchain.com/docs/)
 
 ---
 

@@ -1,121 +1,183 @@
 # agent_crewai
 
-Run CrewAI agents inside RocketRide: as a standalone agent, as a hierarchical manager that orchestrates a crew of sub-agents, or as a managed sub-agent worker.
+A RocketRide family of CrewAI nodes for a standalone agent, a manager that
+delegates work to CrewAI subagents, and subagents used only by that manager.
+Choose the Agent for one task, or the Manager and Subagent pair when work needs
+named specialists.
+
+## About CrewAI
+
+CrewAI is a framework whose Agent, Task, and Crew objects organize language
+model work and tool use. These nodes use those objects with RocketRide-provided
+LLM and tool connections instead of configuring a model provider in CrewAI.
 
 ## What it does
 
-Three node variants share the same base driver (`crewai_base.py`), each loaded from its own sub-package:
+The standalone CrewAI Agent receives a question, builds a one-agent sequential
+crew, and sends its result to `answers`; it can also serve as a parent agent's
+tool. The CrewAI Manager collects descriptors from connected CrewAI Subagents,
+builds a hierarchical crew, and returns its synthesized result on the same
+lane or as a tool result. A Subagent is not directly runnable: the Manager
+builds its Agent and Task and uses the Subagent's own LLM and optional tool
+connections while delegated work runs. Choose the Agent for an independent
+task and the Manager plus Subagents for explicit division of work.
 
-- **CrewAI Agent** (`agent_crewai`): a standalone single agent. Assembles a CrewAI `Agent` + `Task` into a one-agent, sequential-process `Crew` and runs it to answer the incoming question.
-- **CrewAI Manager** (`agent_crewai_manager`): orchestrates a crew using CrewAI's hierarchical process. Fans out a `describe` invoke to connected CrewAI Subagent nodes, assembles a `Crew` with the manager as delegator, and synthesizes sub-agent outputs into one answer. CrewAI's planner is opt-in via the **Crew Planning** field and off by default.
-- **CrewAI Subagent** (`agent_crewai_subagent`): a managed worker. Wired into a Manager via the `crewai` channel and delegated to by name (its `role`); it has no `questions` lane and cannot be invoked directly.
-
-Uses the **crewai** library (`>=1.14.1`). The node never calls a model provider directly: the wrapped CrewAI `BaseLLM` and `BaseTool` instances route every LLM and tool call back through the pipeline's own `llm` and `tool` channels, so each agent uses exactly the LLM and tools wired to its own node.
-
-All crew kickoffs are funneled onto one shared asyncio event loop running on a single daemon thread (`crewai_runner.py`). This is necessary because CrewAI's process-global singletons (event bus, telemetry, console formatter) are not safe under concurrent kickoffs from multiple threads. Concurrent chats still overlap their IO at await points. A persistent event listener (`crewai_listener.py`) forwards CrewAI bus events (task started, agent thinking, tool calls, LLM calls, and so on) to the originating run as `thinking` SSE messages, routed per-run via a `ContextVar`.
-
-CrewAI 1.14.x planning and delegation are patched at import time (`crewai_base.py`) to run safely inside the shared asyncio loop: planning is offloaded to a worker thread, and delegation tools gain async variants that use `aexecute_task()`. Without these patches, hierarchical crews raise `RuntimeError` when they detect a running event loop.
-
----
-
-## Configuration
-
-### Lanes
-
-| Variant | Lanes | `llm` channel | `tool` channel | `crewai` channel |
-|---|---|---|---|---|
-| CrewAI Agent | `questions` -> `answers` | required (min 1) | optional | n/a |
-| CrewAI Manager | `questions` -> `answers` | required (min 1) | n/a | required (min 1 Subagent) |
-| CrewAI Subagent | none | required (min 1) | optional | n/a |
-
-The Agent and Manager are registered as tools too (`classType: ["agent", "tool"]`) and expose themselves as `<nodeId>.run_agent`, so a parent agent can delegate to them in hierarchical pipelines. The `run_agent` tool accepts `{query: string, context?: object}` and returns `{content, meta, stack}`. Tools attach through the `tool` invoke channel (control-plane invoke), not through lanes.
-
-The Subagent's `classType` is `["crewai"]`: it can only be wired into a Manager's `crewai` channel and cannot be called via `run_agent`. A CrewAI Agent node cannot be used as a sub-agent under a Manager (its `classType` does not include `crewai`), and a Manager cannot be nested under another Manager via the `crewai` channel. Cross-Manager composition goes through `run_agent` instead.
-
-A Subagent can be connected to multiple Managers simultaneously: each Manager independently includes it in its own hierarchical Crew, enabling shared specialist sub-agents across delegation hierarchies.
-
-Each variant shows only its description/instructions fields by default. Toggle **Advanced Mode** (`advanced_mode`, default `false`) to expose the CrewAI Agent and Task fields. Blank `goal`, `backstory`, and `expected_output` values fall back to built-in defaults at run time.
+## Connections
 
 ### CrewAI Agent
 
-| Field | Type | Description |
-|---|---|---|
-| `instructions` | array | Additional instructions to guide this sub-agent when the Manager delegates to it. |
-| `advanced_mode` | boolean | Default false. Expose CrewAI Agent and Task configuration directly. |
-| `agent_config_header` | null |  |
-| `role` | string | Sub-agent role name (e.g. 'Financial Analyst'). The Manager uses this name when routing delegation. Maps to CrewAI Agent(role=...). |
-| `goal` | string | What this sub-agent aims to achieve when delegated to. Maps to CrewAI Agent(goal=...). |
-| `backstory` | string | Background context for this sub-agent's expertise. Helps the Manager and the sub-agent's own LLM reason about when it's the right choice. Maps to CrewAI Agent(backstory=...). |
-| `task_config_header` | null |  |
-| `task_description` | string | What this sub-agent does when delegated to by the Manager. The user's request is passed as additional context at run time. Maps to CrewAI Task(description=...). |
-| `expected_output` | string | Description of the expected output format. Maps to CrewAI Task(expected_output=...). |
-| `agent_description` | string | Default empty. What does this agent do? Describe its purpose and capabilities, this helps parent agents select and invoke it correctly. |
+| Connection | Required | Description |
+| --- | --- | --- |
+| `llm` | yes | LLM used by the standalone agent. |
+| `tool` | no | Tools available to the agent through control-plane invocation. |
 
 ### CrewAI Manager
 
-| Field | Type/Default | Description |
-|---|---|---|
-| `agent_description` | string, `""` | What this manager and its sub-agent crew does. Used by parent agents that call it as a tool via `<nodeId>.run_agent`. |
-| `instructions` | array, `[]` | Additional instructions to guide the manager's delegation strategy. Appended to the manager's backstory. |
-| `advanced_mode` | boolean, `false` | When On, exposes the manager Agent config fields below. |
-| `goal` | string, `""` | What the manager is trying to achieve. Maps to `Agent(goal=...)`. |
-| `backstory` | string, `""` | Background context for the manager's persona. Maps to `Agent(backstory=...)`. |
-
-The Manager requires at least one connected CrewAI Subagent on the `crewai` channel (min 1). It raises an error at run time if no sub-agents are connected or none respond to the `describe` fan-out.
+| Connection | Required | Description |
+| --- | --- | --- |
+| `llm` | yes | LLM used by the manager agent. |
+| `crewai` | yes | Connected CrewAI Subagent nodes to describe and delegate to. |
 
 ### CrewAI Subagent
 
-| Field | Type/Default | Description |
-|---|---|---|
-| `instructions` | array, `[]` | Additional instructions for this sub-agent when the Manager delegates to it. Appended to its backstory. |
-| `advanced_mode` | boolean, `false` | When On, exposes the Agent and Task config fields below. |
-| `role` | string, `"Specialist"` | Sub-agent role name. The Manager uses this name when routing delegation. Maps to `Agent(role=...)`. |
-| `goal` | string, `""` | What this sub-agent aims to achieve. Maps to `Agent(goal=...)`. |
-| `backstory` | string, `""` | Background context and expertise. Helps the Manager and the sub-agent's own LLM reason about when it is the right choice. Maps to `Agent(backstory=...)`. |
-| `task_description` | string, `""` | What this sub-agent does when delegated to. Supports CrewAI template variables: `{user_request}` resolves to the raw user prompt; if blank, the task is just `{user_request}`. Maps to `Task(description=...)`. |
-| `expected_output` | string, `""` | Description of the expected output format. Maps to `Task(expected_output=...)`. |
+| Connection | Required | Description |
+| --- | --- | --- |
+| `llm` | yes | LLM used when the Manager delegates to this subagent. |
+| `tool` | no | Tools available to this subagent through control-plane invocation. |
 
----
+The Manager stops with an error if no Subagent is connected or if none respond
+to its `describe` fan-out. A Subagent's `tool` connection belongs to the
+delegated specialist, not to the Manager.
 
-## How the Manager works
+## Lanes
 
-1. Fans out a `describe` invoke to each node on the `crewai` channel individually. Each Subagent responds with its role, goal, backstory, task description, expected output, instructions, and a handle to its own engine channels.
-2. Builds a CrewAI `Agent` + `Task` per descriptor (`max_iter=5`, `allow_delegation=False`), routing LLM and tool calls back through that sub-agent's own `llm`/`tool` channels. The sub-agents' channels are fully independent of the Manager's.
-3. Builds the manager agent (`allow_delegation=True`, `max_iter=5`) from this node's `llm` channel and config. The user's prompt is placed in the manager's backstory as background context, keeping the goal generic.
-4. Kicks off a `Process.hierarchical` Crew and returns the synthesized result. Planning runs only when **Crew Planning** is enabled.
+| Lane in | Lane out | Description |
+| --- | --- | --- |
+| `questions` | `answers` | CrewAI Agent: run the standalone crew and emit its result. |
+| `questions` | `answers` | CrewAI Manager: run the hierarchical crew and emit its result. |
 
-### Result extraction
+CrewAI Subagent declares no lanes. Wire it to a Manager's `crewai` connection;
+a direct question is rejected as an invalid use of the subagent.
 
-In hierarchical mode CrewAI's `result.raw` often contains the manager's full ReAct trace (delegations and observations) rather than just the answer. The Manager therefore prefers the last completed task's output and strips any ReAct preamble: everything after the last `Final Answer:` marker, or, when the agent ended on a tool observation, the last complete top-level JSON block. Non-ReAct output is returned as-is.
+## As a tool
 
----
+The CrewAI Agent and CrewAI Manager each register
+`<nodeId>.run_agent`, using their own pipeline node ID as the prefix. The
+CrewAI Subagent is not a tool and exposes no `run_agent` function.
 
-## Observability
+| Function | Description |
+| --- | --- |
+| `<nodeId>.run_agent` | CrewAI Agent: run the standalone agent for a delegated query and return its agent result. |
+| `<nodeId>.run_agent` | CrewAI Manager: run the manager and its connected subagent crew for a delegated query and return its agent result. |
 
-Every CrewAI bus event from a kickoff (crew/task/agent lifecycle, tool usage, LLM calls) is forwarded to the originating run's invoker as a `thinking` SSE message with a human-friendly label (for example, "Agent thinking...", "Calling <tool>..."). LLM stream chunks and CrewAI's terminal-formatter log events are skipped to avoid flooding the UI. Routing is per-run via a `ContextVar`, so concurrent chats never see each other's events.
+Both functions require an object with a non-empty `query: string` and accept
+an optional `context: object`. Context is encoded as a
+`RocketRide.agent.tool_context.v1` entry, and the result is
+`{content, meta, stack}` rather than an `answers`-lane write. Non-object
+input, a blank query, or non-object context raises `ValueError`. When an
+agent description is configured, it is prepended to the registered tool
+description that a parent agent sees.
 
----
+## Configuration
 
-## Known limitations
+Each variant has the `default` profile. Begin by wiring the LLM and, where
+applicable, the Manager-to-Subagent and tool connections; use **Advanced Mode**
+only after the basic role is clear. Empty advanced text fields fall back to the
+drivers' built-in goal, backstory, and expected-output text where that driver
+uses those fields.
 
-- When the LLM uses native function calling, CrewAI invokes tools synchronously on the shared kickoff loop, so tool calls serialize across concurrent runs in that path. The ReAct tool path (`_arun`) offloads to a thread and does not block the loop.
-- CrewAI 1.14.x planning and delegation are patched at import time to run safely inside the shared asyncio loop. Without these patches, hierarchical crews raise `RuntimeError` when they detect a running event loop.
-- **Crew Planning is off by default.** CrewAI's planner runs a task with `output_pydantic` set and drives it with the host LLM wrapper, but the host channel is text-in / text-out and cannot promise JSON. When the plan text does not parse, CrewAI's converter dead-ends and `planning_handler` raises `Failed to get the Planning output`, failing a run that would otherwise have succeeded. Enable it only with a model that reliably emits well-formed JSON.
-- The LLM wrapper reports `supports_function_calling() == False`, so every tool call takes CrewAI's ReAct path. The host channel returns plain text and ignores `tools` / `response_model`, so claiming native tool support would advertise a capability the wrapper cannot honour.
+### Agent description
 
----
+CrewAI Agent and CrewAI Manager expose this field to parent agents through
+their `run_agent` tool descriptions. Describe the actual job, inputs, and
+expertise of the standalone agent or of the manager-and-crew as a whole, so a
+parent can decide when to delegate. A specific value such as “Coordinates
+research and fact-checking specialists” is useful; leave it empty when nothing
+will call the node as a tool.
 
-## Fabrication guard
+### Instructions
 
-Smaller or weaker planning models occasionally **narrate** a multi-step tool chain in
-prose instead of actually calling the tools, producing a plausible-looking but ungrounded
-answer. The optional **Require tool call** (`require_tool_call`) config field guards against
-this: when enabled, any run that produces an answer without invoking at least one tool fails
-with a `RocketRide.agent.guard.v1` error instead of delivering the ungrounded text. It is off by
-default; enable it for determinism-critical pipelines. The guard counts real tool invocations
-only — internal/local reads (for example the wave agent’s `memory.peek`) do not satisfy it.
+Instructions are appended as a bullet list to the CrewAI Agent's backstory.
+For a Manager, they guide its delegation strategy through the manager
+backstory; for a Subagent, they become part of the specialist's backstory.
+Use short, durable constraints such as “cite the evidence supplied by tools,”
+rather than duplicating the role and task text configured in Advanced Mode.
 
----
+### Require tool call
+
+This setting is off by default on the Agent and Manager. Enable it when a
+response must be based on at least one real tool invocation, rather than an
+answer produced without external work. For a Manager, tool invocations made by
+delegated Subagents count toward the same guard. Leave it off when a valid
+answer may require no tool call.
+
+### Advanced Mode
+
+Advanced Mode is off by default and reveals the CrewAI Agent and Task fields.
+Turn it on only when the default Assistant/Specialist behavior and built-in
+fallbacks are insufficient. It does not make a Subagent independently
+runnable: that node remains a Manager-only component.
+
+### Agent and task fields
+
+For the standalone Agent, **Role**, **Goal**, **Backstory**, **Task**, and
+**Expected Output** map to the CrewAI Agent and Task built for each question.
+When Task is blank, the incoming question becomes the task; when it is set,
+the question is appended as `User request:` context. Set Task when each run
+has a stable assignment, and leave it blank for a general-purpose assistant.
+
+For a Subagent, **Role** is the specialist name the Manager gives to CrewAI;
+**Goal**, **Backstory**, **Task**, and **Expected Output** define the delegated
+Agent and Task. A blank Subagent Task becomes `{user_request}`, while a
+configured task can use CrewAI template variables such as `{user_request}`.
+Use a unique, descriptive Role and a task that names the specialist's output;
+the Manager uses the descriptor to assemble its crew.
+
+For the Manager, **Manager Goal** and **Manager Backstory** configure its
+delegator Agent. Set them when the Manager needs a particular delegation
+policy or domain framing; otherwise it uses its built-in management goal and
+backstory.
+
+### Crew Planning
+
+This Manager-only option is off by default. When enabled, CrewAI runs a planner
+before the hierarchical crew and supplies the resulting plan to tasks; it also
+adds an LLM call. Enable it only when the connected LLM reliably returns the
+JSON CrewAI's planning conversion requires: a prose plan can make the whole run
+fail with `Failed to get the Planning output`.
+
+## Notes
+
+### Manager execution
+
+The Manager invokes `describe` on each explicitly connected Subagent, then
+creates an Agent and Task for every descriptor. It gives the manager
+`allow_delegation=True` and each specialist `allow_delegation=False`; the
+specialist tasks have their direct tool lists cleared so the manager delegates
+rather than using a specialist's tools itself. The Manager prefers the last
+completed task's cleaned output to avoid returning its whole hierarchical
+ReAct trace.
+
+### Runtime and progress
+
+All CrewAI kickoffs share one daemon-thread asyncio loop because the driver
+treats CrewAI's process-wide internals as unsafe across multiple threads.
+Concurrent kickoffs can still interleave at await points. A process-wide
+listener forwards relevant CrewAI events to the initiating run as `thinking`
+SSE messages; stream chunks and terminal formatter events are intentionally
+not forwarded.
+
+### Tool execution
+
+The CrewAI LLM wrapper delegates through the node's `llm` connection and
+reports no native function-calling support, so CrewAI uses its ReAct tool path.
+Each connected tool is wrapped with an argument schema made from its declared
+JSON input schema; exceptions from a wrapped tool are returned to CrewAI as an
+object containing `error` and `type`.
+
+## Upstream docs
+
+- [CrewAI documentation](https://docs.crewai.com/)
 
 <!-- ROCKETRIDE:GENERATED:PARAMS START -->
 <!-- Generated by nodes:docs-generate. Do not edit by hand. -->

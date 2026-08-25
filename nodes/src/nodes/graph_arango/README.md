@@ -1,80 +1,68 @@
 # graph_arango
 
-A RocketRide database and tool node that answers natural-language questions against an ArangoDB multi-model database by translating them to read-only AQL with a connected LLM.
+A RocketRide graph database node that translates questions into validated AQL for ArangoDB; choose it for an ArangoDB multi-model database rather than a Cypher graph service.
+
+## About ArangoDB
+
+ArangoDB is a database designed to work with document and graph data. It supports AQL for querying documents, edges, graphs, and search views through one database interface.
 
 ## What it does
 
-Connects to ArangoDB over HTTP using the official **python-arango** driver and plays two roles. As a **pipeline node**, it receives natural-language questions on the `questions` lane, asks the connected LLM to generate an AQL query, executes it against the database, and emits results downstream on `table`, `text`, and `answers`. As a **tool node**, it exposes `get_data`, `get_schema`, and `get_aql` directly to an agent. Because ArangoDB is multi-model, the same node serves document retrieval, graph traversal, and ArangoSearch — designed for document and graph-based RAG workflows.
-
-The schema is reflected once at pipeline start and included in every LLM prompt so AQL is generated against the real structure: user **collections** (classified as `document` or `edge`) with sampled fields and indexed fields, **named graphs** with their edge definitions (`from → edge → to`), and **ArangoSearch views**.
-
-The node is **read-only by design**. Every generated query is validated with ArangoDB's `EXPLAIN`, and the resulting execution plan is inspected for data-modification nodes (`InsertNode`, `UpdateNode`, `ReplaceNode`, `RemoveNode`, `UpsertNode`) — this plan-level check is the **authoritative** read-only gate. A coarse keyword scan (`INSERT`, `UPDATE`, `REPLACE`, `REMOVE`, `UPSERT`; string literals and comments stripped) runs as a defence-in-depth backstop at execution time; because a write keyword can also be a collection or attribute name, on a match it defers to the same `EXPLAIN`-plan check before refusing, so a legitimate read is never blocked. Queries are bounded by a runtime limit, a per-query memory limit, and a maximum result-row cap. The only escape hatch is the opt-in `QuestionType.EXECUTE` path, gated by `allow_execute`, which is **off by default**.
-
----
+The node reflects collections, named graphs, and ArangoSearch views, then uses its required LLM connection to build read-only AQL from a question. It can run in a pipeline or as an agent tool. Generated AQL is checked with `EXPLAIN`, which rejects plans containing data-modification nodes; choose it over `graph_falkordb` when the data is in ArangoDB and AQL is the target query language.
 
 ## Connections
 
 | Connection | Required | Description |
-|------------|----------|-------------|
-| `llm` | yes (min 1) | LLM used to generate AQL from natural language |
+|---|---|---|
+| `llm` | yes | LLM used to craft AQL from a question. |
 
----
+## Lanes
+
+| Lane in | Lane out | Description |
+|---|---|---|
+| `questions` | `table` | Emits a Markdown table result. |
+| `questions` | `text` | Emits a text result. |
+| `questions` | `answers` | Emits the answer result. |
+
+## As a tool
+
+The server-name prefix defaults to `arango`; the registered functions are `arango.get_data`, `arango.get_schema`, and `arango.get_aql`.
+
+| Function | Description |
+|---|---|
+| `arango.get_data` | Requires a non-empty `question`; optional `limit` is clamped. Returns rows, executed AQL, and the applied row limit, or an `error` with empty rows. |
+| `arango.get_schema` | Accepts an optional `collection` filter and returns the database, collections, graphs, and views. An unknown collection returns `error`. |
+| `arango.get_aql` | Requires a non-empty `question`; returns a validated read-only AQL query and `valid: true`, or `error`/`answer` with `valid: false`. |
 
 ## Configuration
 
-### Lanes
+Configure the endpoint, database, credentials, and an accurate database description before using natural-language queries. The description and reflected schema are provided to the LLM, so improve it when generated AQL targets the wrong collections or relationships.
 
-| Lane in | Lanes out | Description |
-|---------|-----------|-------------|
-| `questions` | `table`, `text`, `answers` | Translate question to AQL, execute, emit results on each connected lane |
+### Database description and validation attempts
 
-For a normal question, results are emitted as a Markdown table on `table` and `answers`, and as plain text on `text`. If the LLM judges the question unrelated to the database, its text reply is forwarded in place of a query result.
+`db_description` gives the LLM domain context. Start with a concise explanation of the collections and relationships, then add detail if retries produce invalid AQL. `max_attempts` defaults to five and controls re-generation after `EXPLAIN` rejects a query; raise it for a difficult schema only if the connected LLM needs more repair attempts.
 
-Two special question types are handled on the `questions` lane:
+### Result limits and direct execution
 
-- **`QuestionType.DIALECT`**: emits `{"dialect": "arango"}` on the `answers` lane so SDK callers can detect they are talking to ArangoDB.
-- **`QuestionType.EXECUTE`**: treats the question text as raw AQL and runs it without LLM translation or the read-only safety check. Requires `allow_execute: true`; otherwise the request is silently rejected with a warning. Results are capped at `max_execute_rows` (the query fails if exceeded), and when a write returns no rows the emitted JSON reports `affected_rows` derived from the cursor statistics.
-
----
-
-## Available tools
-
-When connected to an agent, the node exposes three functions namespaced under the node's prefix (e.g. `arango.get_data`):
-
-| Tool | Description |
-|---|---|
-| `get_data` | Accepts a natural-language description of the data you want, converts it to a safe read-only AQL query, executes it against the ArangoDB database, and returns the result rows. Works across documents and graphs. No schema lookup or AQL knowledge required. |
-| `get_schema` | Returns the multi-model schema: collections (document and edge) with sampled fields, indexed fields, named graphs with edge definitions, and ArangoSearch views. Optional `collection` argument filters to a single collection. Intended for recovery when `get_data` fails or returns unexpected results. |
-| `get_aql` | Translates a natural-language question to a read-only AQL query without executing it. Returns `{aql, valid: true}` on success, an `error` key if the generated AQL is unsafe, or an `answer` text reply when the question is not a database query. Use only when the caller explicitly needs to see the AQL. |
-
----
-
-## AQL generation and validation
-
-Each generated query goes through a validate-and-retry loop:
-
-1. The LLM is prompted with the question, the reflected multi-model schema, the optional database description, and strict instructions: only read operations (`FOR`, `FILTER`, `SORT`, `LIMIT`, `LET`, `COLLECT`, `RETURN`, and graph traversals) are permitted, and a `LIMIT` clause must bound the query.
-2. The generated AQL is validated with `EXPLAIN` against the live database. `EXPLAIN` both verifies syntax and yields the execution plan, which is inspected for data-modification nodes — this is the authoritative read-only gate, so a write query is rejected while a read that merely references a field or collection named like a write keyword is accepted. Any syntax error or modification rejection is fed back to the LLM together with the failing query, and the LLM retries up to `max_attempts` times (default 5, range 1-20).
-
-As defence-in-depth, a coarse keyword scan (`_is_aql_safe`) also runs at execution time inside `_run_query`; because a write keyword can double as a collection or attribute name, on a match it defers to the same `EXPLAIN`-plan check before refusing — so an unsafe statement is still blocked even if a caller bypasses the generation path, while a legitimate read is not. Reads are additionally bounded by a 30-second runtime limit, a 1 GiB per-query memory limit, and the `max_execute_rows` result cap.
-
-ArangoDB returns JSON-native documents, so result rows are emitted as-is with no special serialisation.
-
----
+`max_execute_rows` caps raw `QuestionType.EXECUTE` results; a query above the cap fails rather than streaming unbounded rows. `allow_execute` is false by default. Enable it only for a trusted caller, because that path runs raw AQL without LLM translation or the normal read-only gate.
 
 ## Authentication
 
-### Username and password
+The default `userpass` method uses `user` and `password`; a blank user falls back to `root`. The `token` method passes the configured bearer/JWT token to the ArangoDB client. Startup verifies the configured database and performs a `RETURN 1` probe, so connection and permission failures surface before processing questions.
 
-Set `auth_method: userpass` (the default), then provide `user` and `password`. A blank username falls back to `root`.
+## Limitations
 
-### Bearer / JWT token
+The node declares `noremote`, so it is intended for a deployment that can directly reach its ArangoDB endpoint. Normal natural-language and tool queries are read-only; direct execution is a separate trusted-caller option and must be explicitly enabled.
 
-Set `auth_method: token` and provide `token`. The node passes it as a python-arango user token. Use this for token-based setups such as ArangoGraph cloud.
+## Notes
 
-Connectivity and authentication are verified at pipeline start (`verify=True` plus an explicit `RETURN 1` probe of the configured database), so a wrong database name or missing permissions fail fast rather than mid-pipeline. Self-host, Docker, and ArangoGraph cloud (HTTPS/TLS) endpoints are all supported via the `endpoint` field.
+### Pipeline question types
 
----
+`QuestionType.DIALECT` emits `{"dialect": "arango"}` on `answers`. `QuestionType.EXECUTE` is rejected with a warning until `allow_execute` is enabled; when enabled, it may report `affected_rows` for writes that return no rows.
+
+## Upstream docs
+
+- [ArangoDB documentation](https://docs.arangodb.com/)
 
 <!-- ROCKETRIDE:GENERATED:PARAMS START -->
 <!-- Generated by nodes:docs-generate. Do not edit by hand. -->

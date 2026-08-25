@@ -497,3 +497,43 @@ def test_multi_service_requires_every_default_in_the_intro(tmp_path):
     checks = [check for check, _ in failures(node)]
     assert 'Profiles default appears in intro' in checks
     assert 'Profiles default title appears in intro' in checks
+
+
+PADDED_PROFILES = {
+    'small': {'title': 'Text Small   - A highly efficient model'},
+    'large': {'title': 'Text Large   - A larger and more powerful model'},
+}
+
+PADDED_SECTION = """## Profiles
+
+Default: **Text Small - A highly efficient model** (`small`).
+
+| Profile | Model |
+| ------- | ----- |
+| Text Small - A highly efficient model **(default)** | `model-small` |
+| Text Large - A larger and more powerful model | `model-large` |"""
+
+
+def test_profile_titles_match_with_dropdown_padding_collapsed(tmp_path):
+    """Titles are padded to align in the config panel; prose writes them normally."""
+    node = write_node(
+        tmp_path,
+        class_type=('embedding',),
+        profiles=PADDED_PROFILES,
+        default='small',
+        profile_section=PADDED_SECTION,
+    )
+    assert failures(node) == []
+
+
+def test_profile_title_mismatch_still_fails_when_words_differ(tmp_path):
+    section = PADDED_SECTION.replace('A highly efficient model**', 'A highly efficient encoder**')
+    node = write_node(
+        tmp_path,
+        class_type=('embedding',),
+        profiles=PADDED_PROFILES,
+        default='small',
+        profile_section=section,
+    )
+    checks = [check for check, _ in failures(node)]
+    assert 'Profiles default title appears in intro' in checks

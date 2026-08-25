@@ -1,81 +1,54 @@
 # embedding_image
 
-A RocketRide embedding node that generates vector embeddings from images using local vision models.
+A RocketRide embedding node that turns image documents or image streams into vectors for a multimodal vector store; choose it when the source is an image rather than text or video.
+
+## About Hugging Face
+
+Hugging Face develops widely used open-source tooling and model repositories for machine learning. Its Transformers library provides common interfaces for loading and running pretrained models, including vision models.
 
 ## What it does
 
-Transforms image content into normalized embedding vectors that capture the semantic and
-structural characteristics of the image, enabling similarity search, clustering, and other
-multimodal workflows. Output documents have an `embedding` vector and an `embedding_model`
-name attached, ready for ingestion into a vector store.
+The node accepts image documents or a raw image stream and adds an `embedding` plus the producing `embedding_model`. Choose it over `embedding_transformer` for visual content and over `embedding_video` when frames have already been extracted. For the `documents` lane, every document must be an Image document; another type raises `ValueError`.
 
-Uses Hugging Face `transformers` vision models and supports two model families, selected
-automatically from the model name:
+## Lanes
 
-- **CLIP** (model name contains `clip`, e.g. `openai/clip-vit-base-patch16`): embeds the
-  image via `get_image_features`, normalized.
-- **ViT** (anything else, e.g. `google/vit-base-patch16-224`): embeds the image as the
-  normalized CLS token of the last hidden state.
-
-The model runs through a proxy that transparently routes inference either locally or to the
-model server: no API key is required, and both paths return identical results. The node is
-GPU-capable, so inference is GPU-accelerated when a GPU is available.
-
-The default model is `openai/clip-vit-base-patch16`.
-
----
-
-## Configuration
-
-### Lanes
-
-| Lane in     | Lane out    | Description                              |
-|-------------|-------------|------------------------------------------|
-| `documents` | `documents` | Embed images carried in document objects |
-| `image`     | `documents` | Embed raw image data                     |
-
-### documents lane
-
-Each incoming document must have `type: "Image"`; any other type raises a `ValueError`.
-The document's `page_content` is expected to be a base64-encoded image, which is decoded
-to a Pillow image and embedded. The enriched document (with `embedding` and
-`embedding_model` set) is forwarded on the `documents` lane; the original image is not
-re-routed through the raw image path.
-
-### image lane
-
-Raw image bytes are streamed in chunks (begin / write / end). On completion the
-accumulated bytes are decoded, embedded, and wrapped in a new document of type `Image`
-whose `page_content` is the base64-encoded image. Each image in the stream receives a
-unique `chunkId` in its metadata.
-
-### Source provenance
-
-Documents produced from the **image lane** carry the source image's media detail under
-`metadata.source` (`source_mime`, `width`, `height`, `size`, `resource_name`, …) and a
-`metadata.name` of the source stem (e.g. `photo`). Both are omitted when the incoming image
-carried no stream descriptor. Documents from the **documents lane** keep the `source`/`name`
-their upstream node already set.
-
-### Fields
-
-| Field | Type | Description |
+| Lane in | Lane out | Description |
 |---|---|---|
-| `model` | string | Hugging face model to use for embedding |
-| `profile` | string | Default "openai-patch16". Embedding model |
-
----
+| `documents` | `documents` | Decodes Image documents and enriches them with an embedding. |
+| `image` | `documents` | Buffers a raw image stream and emits an embedded Image document. |
 
 ## Profiles
 
-| Profile key      | Model                          | Notes                                  |
-|------------------|--------------------------------|----------------------------------------|
-| `openai-patch16` (default) | `openai/clip-vit-base-patch16` | Good performance, lower memory         |
-| `openai-patch32` | `openai/clip-vit-base-patch32` | Lower performance, better recognition  |
-| `google16x224`   | `google/vit-base-patch16-224`  | Fast, accurate, general-purpose        |
-| `custom`         | _(user-specified)_             | Any Hugging Face vision model, via `embedding.model` |
+Default: **OpenAI - 16x16 - good performance, lower memory** (`openai-patch16`).
 
----
+| Profile | Model | Context |
+|---|---|---|
+| `openai-patch16` *(default)* | `openai/clip-vit-base-patch16` | Default vision model. |
+| `openai-patch32` | `openai/clip-vit-base-patch32` | Alternative CLIP profile. |
+| `google16x224` | `google/vit-base-patch16-224` | ViT profile. |
+| `custom` | User-provided | Enter a compatible Hugging Face model identifier. |
+
+## Configuration
+
+Choose a supplied profile for the corresponding bundled model; use Custom only when the exact model identifier is known to work with the implementation. The output vector shape comes from the chosen model, so select the same profile used when building the target vector index.
+
+### Model
+
+The default is `openai/clip-vit-base-patch16`. Model names containing `clip` use image features from the CLIP path; other names use the model output path. Change this only when the destination index and retrieval configuration can accommodate the new vector shape; a mismatch will make stored and query vectors incompatible.
+
+## Requirements
+
+The node declares GPU capability. Its embedding model is loaded through the model provider; the source does not define a CPU-only fallback, so provision a compatible model runtime when using this node.
+
+## Notes
+
+### Image stream output
+
+On completion of an `image` stream, the node emits a base64-backed Image document and assigns a `chunkId`. Stream source details and the source stem are retained when supplied; documents on the `documents` lane retain their upstream provenance.
+
+## Upstream docs
+
+- [Hugging Face Transformers documentation](https://huggingface.co/docs/transformers)
 
 <!-- ROCKETRIDE:GENERATED:PARAMS START -->
 <!-- Generated by nodes:docs-generate. Do not edit by hand. -->
