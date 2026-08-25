@@ -66,7 +66,7 @@ Exposes these functions to an agent (namespaced under `n8n`):
 | `n8n.activate_workflow` | Activate a workflow (blocked in read-only mode) — needs API key          |
 | `n8n.deactivate_workflow` | Deactivate a workflow (blocked in read-only mode) — needs API key      |
 
-The agent never chooses the host — every request targets the configured Base URL — and `workflow` arguments are sanitised to a plain webhook path.
+The agent never chooses the host — every request targets the configured Base URL — and `workflow` arguments are sanitized to a plain webhook path.
 
 Tool calls return a `success` flag and an `error` message on validation or API
 failure. `trigger_workflow` uses its optional `workflow` argument or the
