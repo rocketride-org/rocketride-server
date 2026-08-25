@@ -894,6 +894,7 @@ export class RocketRideCLI {
 					...options,
 					pipeline: options.pipeline,
 					threads: parseInt(options.threads),
+					pipeline_args: options.args,
 				};
 				this.uri = options.uri;
 
@@ -1305,7 +1306,7 @@ export class RocketRideCLI {
 			this.monitor.setCommandStatus(['Connected to server', 'Starting pipeline execution...']);
 			this.monitor.draw();
 
-			const taskToken = await this.client!.use({
+			const { token: taskToken } = await this.client!.use({
 				pipeline: pipelineData,
 				threads: this.args.threads,
 				token: this.args.token,
