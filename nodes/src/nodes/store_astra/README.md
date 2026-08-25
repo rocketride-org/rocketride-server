@@ -1,96 +1,110 @@
 # store_astra
 
-A RocketRide store node that persists embedded documents in DataStax Astra DB and retrieves them by semantic or keyword search, and exposes search/upsert/delete as agent-callable tools.
+A RocketRide vector store for Astra DB that stores embedded document chunks and retrieves matching content in a pipeline or through an agent tool.
+
+## About Astra DB
+
+Astra DB is a database service with a Data API for application access. This node uses that API to create and query a collection whose vector and lexical search features are enabled. It is a storage and retrieval backend: it does not create embeddings or host a local database.
 
 ## What it does
 
-Connects to an Astra DB collection via the **astrapy** `DataAPIClient` and exposes it as a standard RocketRide document store. Documents arriving on the `documents` lane are written to the collection; questions arriving on the `questions` lane are answered by searching that collection and emitting matching documents downstream.
+The node writes embedded documents from the `documents` lane to an Astra collection and searches that collection for incoming questions. Semantic questions use the question embedding as the collection's vector sort; keyword questions use Astra's lexical sort. It can also bind `search`, `upsert`, and `delete` to an agent.
 
-Collections are created on demand: the vector dimension is taken from the first incoming embedding, the similarity metric comes from configuration, and **BM25 lexical search is enabled automatically** with the `standard` analyzer. No manual collection setup is required.
+Choose it when the data must live behind an Astra Data API endpoint and you want Astra to provide both vector and lexical retrieval. Pick a sibling store instead when your existing collection lives in that sibling's database; this node creates and manages an Astra collection rather than adapting another store's protocol.
 
-Key defaults every user should know:
+The collection is created only on the first write. Its vector dimension comes from those first incoming embeddings, its configured similarity is applied at creation, and lexical search is enabled with Astra's `standard` analyzer. A question or read against a collection that has not been created simply returns no documents.
 
-- Documents must be run through an embedding node before reaching this node: a chunk without an embedding raises an error at ingest time.
-- Semantic search results with a similarity score **below 0.20 are silently dropped**.
-- Inserts are batched **500 documents at a time**; chunks with a near-zero vector magnitude are skipped.
-- Writing chunk `0` of an object **deletes all existing chunks with the same `objectId`** before inserting (upsert semantics for re-ingested documents).
-- Deletion is soft by default: `markDeleted` sets `meta.isDeleted: true` and those chunks are excluded from every query unless the filter explicitly requests them.
+## Lanes
 
----
+| Lane in | Lane out | Description |
+| --- | --- | --- |
+| `documents` | — | Store pre-embedded document chunks. |
+| `questions` | `documents` | Emit matching documents. |
+| `questions` | `answers` | Emit matching documents as answers. |
+| `questions` | `questions` | Enrich the question with matching documents. |
 
-## Configuration
+## As a tool
 
-### Lanes
+The configured tool server name is the namespace for the functions below; it defaults to `astra`.
 
-| Lane in     | Lane out    | Description                                                      |
-| ----------- | ----------- | ---------------------------------------------------------------- |
-| `documents` | (none)      | Ingest pre-embedded documents into the collection                |
-| `questions` | `documents` | Return matching documents                                        |
-| `questions` | `answers`   | Return matching documents as an answer                           |
-| `questions` | `questions` | Enrich the question with matching documents for downstream nodes |
+| Function | Description |
+| --- | --- |
+| `search` | Search the collection for matching documents. |
+| `upsert` | Add or update documents in the collection. |
+| `delete` | Remove documents by object ID. |
 
-### Fields
-
-| Field | Type | Description |
-|---|---|---|
-| `api_endpoint` | string | Enter the server API endpoint e.g. <instance-name>.<region>.apps.astra.datastax.com |
-| `application_token` | string | Enter the server API application token |
-| `provider` | string | Default "astra_db".  |
-
----
+`search` and an `upsert` without a supplied embedding use the node's bound embedding provider. These calls are on the agent tool channel, not the document lanes. Give each Astra node a distinct tool server name when an agent can reach more than one of them.
 
 ## Profiles
 
-Two profiles are built in; `cloud` is the default.
+Default: **Astra DB cloud server** (`cloud`).
 
-| Profile | Description                                                                                      |
-| ------- | ------------------------------------------------------------------------------------------------ |
-| `cloud` | Astra DB cloud server, requires `api_endpoint` and `application_token`                           |
-| `local` | Local test server at `http://localhost:8080` with token `test-token` and collection `ROCKETRIDE` |
+| Profile | Endpoint | Collection |
+| --- | --- | --- |
+| Local test server | `http://localhost:8080` | `ROCKETRIDE` |
+| Astra DB cloud server **(default)** | Set an API endpoint | `ROCKETRIDE` |
 
----
+## Configuration
 
-## Search modes
+Choose the profile, then provide the endpoint, token, collection, similarity, and retrieval score for the Astra database. The profile supplies the initial connection values; most deployments only need to replace the cloud endpoint and token. Feed an embedding node before this store: an arriving document without an embedding raises an error instead of being stored.
 
-Both modes are available without extra configuration. The pipeline's question type determines which runs:
+### Endpoint, token, and collection
 
-- **Semantic**: vector similarity search using the `$vector` sort on the question's embedding. Results carry similarity scores; anything scoring below 0.20 is discarded before results are returned.
-- **Keyword**: native BM25 lexical search using the `$lexical` sort on the question's text.
+Set **API Endpoint** to the Astra Data API endpoint and **Application Token** to the token used by `DataAPIClient`. The local profile deliberately starts with a local endpoint and test token, so replace both values when it is not your test server. A bad endpoint or token surfaces when the client uses the API; this node does not make a save-time connection probe.
 
-Both modes honour the standard document filter: node id, parent path, permissions, object ids, table ids, chunk-id ranges, and the soft-delete flag.
+Set a collection name before ingesting. It must start with a letter or number, and the remaining characters may only be letters, numbers, or underscores; startup rejects any other name. This matters before the first write because that write creates the collection—correct the name rather than expecting a later query to create it.
 
----
+### Similarity and embedding dimension
 
-## Document lifecycle
+The first successful ingest fixes the collection's vector dimension from the incoming embedding, and uses the selected similarity metric. `cosine` is the default; `euclidean` and `dot_product` are the only alternatives accepted by the implementation. Leave the default for ordinary normalized embedding vectors; change it only when the embedding model and the collection's intended metric agree. Reusing a collection with a different embedding length or an incompatible metric is a reason to create a separate collection rather than mix vectors.
 
-- **Ingest**: each chunk is inserted with a generated UUID `_id`, the embedding stored as `$vector`, the text stored as `content`, and all metadata stored under `meta`. Re-ingesting an object (chunk `0` received again) first deletes that object's previous chunks, then inserts the new batch.
-- **Soft delete / restore**: `markDeleted` / `markActive` flip `meta.isDeleted` on all chunks for the given object ids. Soft-deleted chunks are hidden from default queries.
-- **Hard delete**: `remove` permanently deletes all chunks matching the given object ids.
-- **Render**: rebuilds a full document by fetching all non-deleted chunks for an object id, sorting them by `chunkId` in application code (Astra DB does not guarantee order), and concatenating the content in order.
+### Retrieval score
 
-All read operations return empty results when the collection does not yet exist; the collection is not created until the first ingest.
+The generated configuration supplies the requested retrieval score, while the store also has a hard floor: semantic hits below `0.20` are discarded before they reach any output lane. Raise the configured score when loosely related context is polluting answers; lower it when relevant content is absent, while remembering that values below the hard floor cannot restore those results. Keyword search does not carry this vector-similarity filter.
 
----
+### Profile choice and first write
+
+The cloud profile is the default and begins with empty endpoint and token values, which is the right starting point for an Astra deployment. The local profile is specifically a test-server preset: it uses `http://localhost:8080`, `test-token`, and the `ROCKETRIDE` collection. Select it only when that is the server you intend to reach; it is not a discovery mode for a cloud database.
+
+The first write has two responsibilities: it creates the collection and supplies the vector dimension used for it. Send a small, representative embedded document after configuration rather than letting the first production batch establish an accidental dimension. Reads, deletes, and renders before that first creation are safe but return no stored content.
+
+### Collection lifecycle controls
+
+This store treats `chunkId` 0 as the beginning of a full object. If an ingest batch contains that chunk, the store schedules the object's existing chunks for deletion before inserting the new batch. Use a stable `objectId` across re-ingests to get replacement behavior; changing it creates another independently stored object.
+
+Soft deletion is a separate lifecycle action. It leaves the chunks in Astra and changes `meta.isDeleted`, while a hard removal deletes the matching records. Choose soft deletion when a caller may need to inspect or restore the object; choose hard deletion when its data must no longer be stored.
+
+### Tool Server Name
+
+This is the namespace for agent functions, so the default exposes `astra.search`, `astra.upsert`, and `astra.delete`. Change it when multiple Astra nodes are connected to the same agent to prevent name collisions.
 
 ## Authentication
 
-Set `api_endpoint` to the database's Data API URL and `application_token` to the token generated in the Astra DB console. The token is passed directly to `DataAPIClient` at pipeline startup. No other authentication modes are supported.
+Set **API Endpoint** to the Astra Data API endpoint and **Application Token** to the token passed to the Data API client. The local profile also has endpoint and token values, so replace them when connecting to a different local server. The node passes the configured token directly to the Data API client; it does not offer a second authentication mode.
 
----
+## Notes
 
-## Agent tools
+### Search behavior and filters
 
-When wired to an agent, the node exposes three tools via `VectorStoreToolMixin`. Each tool is named `<serverName>.<tool>` (defaults: `astra.search`, `astra.upsert`, `astra.delete`).
+Keyword search uses Astra's native lexical sort and supports the requested offset and limit. Semantic search uses the question embedding, includes a similarity score, and uses the requested result limit. Both paths apply the standard document filters for node, parent, permissions, object, table, and chunk selection. By default they also require `meta.isDeleted` to be false, so marked-deleted content stays hidden unless a caller explicitly requests it.
 
-| Tool     | Key inputs                                                                                                                            | Description                                                                                                              |
-| -------- | ------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| `search` | `query` (required); `top_k` (default 10, max 100); `filter` (optional dict, keys `objectId`/`nodeId`/`parent` are honored)           | Semantic search over stored documents; returns content, metadata, and score per result. Falls back to keyword search if semantic search fails. |
-| `upsert` | `documents` array, each with `content` and `object_id`; optional `metadata`, `embedding`, and `embedding_model`                      | Add or update documents. Embeddings are computed automatically via the bound embedding provider, or pre-computed vectors can be supplied. |
-| `delete` | `object_ids` (non-empty string array)                                                                                                 | Hard-delete documents by object ID. Returns `deleted_count`.                                                             |
+The two search modes are selected by the incoming question rather than by a second connection setting. Use a semantic question when the vocabulary may differ from the stored text, and use keyword search when exact words, paging, or the lexical index are more important. A semantic query with no collection returns an empty set; a document with no embedding is rejected at ingestion rather than being converted to keyword-only content.
 
-Tool calls run on the control plane and do not flow through the pipeline's embedding lanes. Semantic search in the `search` tool and automatic embedding in `upsert` require an embedding provider bound to the node (the `all.embedding` block in its parameters). Without one, those calls return `{"success": false, "error": ...}`.
+### Ingestion, replacement, and deletion
 
----
+The node stores each chunk with a generated `_id`, the content, metadata, and its vector. It collects up to 500 chunks before inserting. If a chunk with `chunkId` 0 arrives, all existing chunks with the same `objectId` are deleted first, so a complete re-ingest replaces that object instead of duplicating it. Near-zero vectors are omitted from the insert batch; the special zero-vector schema control document is adjusted to a tiny non-zero vector.
+
+`markDeleted` and `markActive` update the `meta.isDeleted` flag for all chunks of the supplied object IDs, while `remove` permanently deletes those chunks. Rendering an object fetches its non-deleted chunks, sorts them by `chunkId` in the node, and joins their content because Astra does not guarantee the returned order.
+
+That ordering detail matters when rendering a document whose chunks were written in parallel: do not rely on Astra's natural return order to reproduce the source text. The node makes the ordering decision itself, then calls the render callback with the combined text.
+
+### Tool embedding dependency
+
+Agent `search` needs an embedding for semantic retrieval, and agent `upsert` needs one to write a vector. Supplying an embedding in the tool call avoids that dependency; otherwise bind an embedding provider to the node. Do not assume the pipeline's document lane will supply it to a tool invocation—the two paths are separate.
+
+## Upstream docs
+
+- [Astra DB documentation](https://docs.datastax.com/en/astra-db/)
 
 <!-- ROCKETRIDE:GENERATED:PARAMS START -->
 <!-- Generated by nodes:docs-generate. Do not edit by hand. -->

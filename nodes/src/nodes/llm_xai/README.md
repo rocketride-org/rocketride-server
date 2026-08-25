@@ -6,67 +6,65 @@ A RocketRide LLM node that connects xAI Grok models to a pipeline.
 
 Provides xAI's Grok models as an `llm` invoke connection for agents and other nodes that need a language model. The node can also be used directly via lanes: send text on the `questions` lane and receive a generated completion on the `answers` lane.
 
-Uses **langchain-xai** (`ChatXAI`) under the hood. The chat client is always initialized with `temperature=0`, and `max_tokens` is set from the selected profile's output-token limit. The default profile is **Grok 3** (`grok-3`).
+Uses **langchain-xai** (`ChatXAI`) under the hood. The chat client is always initialized with `temperature=0`, and `max_tokens` is set from the selected profile's output-token limit.
 
 When the node config is saved, a minimal validation probe (a single-word prompt) is sent to the xAI API to verify the API key and model. Provider and HTTP errors are parsed into a readable `Error <code>: <message>` warning instead of failing silently.
 
----
-
-## Configuration
-
-### Lanes
+## Lanes
 
 | Lane in     | Lane out  | Description                                          |
 | ----------- | --------- | ---------------------------------------------------- |
 | `questions` | `answers` | Send a question directly, receive a generated answer |
 
-### Fields
-
-| Field              | Type / Default           | Description                                                                         |
-| ------------------ | ------------------------ | ----------------------------------------------------------------------------------- |
-| `profile`          | string, default `grok-3` | Which Grok model profile to use (see Profiles below)                                |
-| `apikey`           | string                   | xAI API key; must begin with `xai-`                                                 |
-| `model`            | string                   | xAI model id (Custom profile only)                                                  |
-| `modelTotalTokens` | number, default `131072` | Total token (context) limit (Custom profile only); must be greater than 0           |
-
-For all built-in profiles, `model`, `modelTotalTokens`, and `modelOutputTokens` are preset and only the API key needs to be supplied. The Custom profile additionally exposes `model` and `modelTotalTokens` so any xAI model id can be used.
-
----
-
 ## Profiles
 
-### xAI-hosted
+Default: **Grok 3** (`grok-3`).
 
-| Profile                       | Model                         | Context (tokens) | Max output (tokens) |
-| ----------------------------- | ----------------------------- | ---------------- | ------------------- |
-| Grok 3 _(default)_            | `grok-3`                      | 131,072          | 131,072             |
-| Grok 3 Mini                   | `grok-3-mini`                 | 131,072          | 131,072             |
-| Grok 4                        | `grok-4-0709`                 | 256,000          | 256,000             |
-| Grok 4 Fast                   | `grok-4-fast-reasoning`       | 2,000,000        | 4,096               |
-| Grok 4 Fast Non-Reasoning     | `grok-4-fast-non-reasoning`   | 2,000,000        | 4,096               |
-| Grok 4.1 Fast                 | `grok-4-1-fast-reasoning`     | 2,000,000        | 4,096               |
-| Grok 4.1 Fast Non-Reasoning   | `grok-4-1-fast-non-reasoning` | 2,000,000        | 4,096               |
-| Grok Code Fast 1              | `grok-code-fast-1`            | 256,000          | 10,000              |
-| Custom Model                  | _(user-specified)_            | configurable     | _(not preset)_      |
+| Profile | Model | Context | Output |
+| ------- | ----- | ------- | ------ |
+| `grok-3` **(default)** | `grok-3` | 131,072 | 131,072 |
+| `grok-4-5` | `grok-4.5` | 500,000 | 500,000 |
+| `grok-4-20` | `grok-4.20` | 2,000,000 | 4,096 |
+| `grok-4-20-multi-agent` | `grok-4.20-multi-agent` | 2,000,000 | 4,096 |
 
-### OpenRouter-sourced
+<details>
+<summary><strong>View 15 more models</strong></summary>
 
-These profiles use `modelSource: openrouter` and carry OpenRouter-style model ids. The `apikey` field is also exposed for each of these profiles.
+| Profile | Model | Context | Output |
+| ------- | ----- | ------- | ------ |
+| `custom` | _(user-specified)_ | 131,072 | editable |
+| `grok-4-1-fast-reasoning` | `grok-4-1-fast-reasoning` | 2,000,000 | 4,096 |
+| `grok-4-1-fast-non-reasoning` | `grok-4-1-fast-non-reasoning` | 2,000,000 | 4,096 |
+| `grok-code-fast-1` | `grok-code-fast-1` | 256,000 | 10,000 |
+| `grok-4-fast-reasoning` | `grok-4-fast-reasoning` | 2,000,000 | 4,096 |
+| `grok-4-fast-non-reasoning` | `grok-4-fast-non-reasoning` | 2,000,000 | 4,096 |
+| `grok-4` | `grok-4-0709` | 256,000 | 256,000 |
+| `grok-3-mini` | `grok-3-mini` | 131,072 | 131,072 |
+| `grok-3-beta` **(deprecated)** | `grok-3-beta` | 131,072 | 131,072 |
+| `grok-3-mini-beta` **(deprecated)** | `grok-3-mini-beta` | 131,072 | 131,072 |
+| `grok-4-1-fast` **(deprecated)** | `grok-4.1-fast` | 2,000,000 | 30,000 |
+| `grok-4-fast` **(deprecated)** | `grok-4-fast` | 2,000,000 | 30,000 |
+| `grok-4-3` | `grok-4.3` | 1,000,000 | 1,000,000 |
+| `grok-build-0-1` | `grok-build-0.1` | 256,000 | 4,096 |
+| `grok-latest` | `grok-latest` | 500,000 | 4,096 |
 
-| Profile                    | Model                   | Context (tokens) | Max output (tokens) |
-| -------------------------- | ----------------------- | ---------------- | ------------------- |
-| xAI: Grok 3 Beta           | `grok-3-beta`           | 131,072          | 131,072             |
-| xAI: Grok 3 Mini Beta      | `grok-3-mini-beta`      | 131,072          | 131,072             |
-| xAI: Grok 4 Fast           | `grok-4-fast`           | 2,000,000        | 30,000              |
-| xAI: Grok 4.1 Fast         | `grok-4.1-fast`         | 2,000,000        | 30,000              |
-| xAI: Grok 4.20             | `grok-4.20`             | 2,000,000        | 4,096               |
-| xAI: Grok 4.20 Multi-Agent | `grok-4.20-multi-agent` | 2,000,000        | 4,096               |
+</details>
 
----
+The `grok-3-beta`, `grok-3-mini-beta`, `grok-4-fast`, `grok-4-1-fast`,
+`grok-4-20`, and `grok-4-20-multi-agent` profiles use OpenRouter-style model
+IDs and expose the API key field for that source.
+
+## Configuration
+
+Choose a profile to set the model, context limit, and output limit. Built-in profiles keep those values fixed, while `custom` exposes the model ID and context limit for another xAI model.
+
+### Custom models
+
+For `custom`, enter an xAI model ID and a positive context limit. The initial context value is 131,072 tokens; the output limit is not preset.
 
 ## Authentication
 
-Provide an xAI API key in the `apikey` field. The key is validated at pipeline start: it must begin with the `xai-` prefix, otherwise the node raises `Invalid XAI API key format, please check your API key.`
+For xAI-hosted profiles, provide an xAI API key in the `apikey` field. The key is validated at pipeline start: it must begin with the `xai-` prefix, otherwise the node raises `Invalid XAI API key format, please check your API key.` OpenRouter-sourced profiles use the key field exposed for that source instead.
 
 The key is also checked at save time with a minimal probe request, so invalid keys, unknown models, or network problems surface as warnings in the UI before the pipeline runs.
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate node READMEs against docs/development/node-readme-schema.md.
+"""Validate node READMEs against docs/development/nodes/readme-schema.md.
 
 Deterministic, no LLM. For each node directory:
   1. Parse and merge services*.json (JSONC: // comments + trailing commas).
@@ -40,6 +40,15 @@ OPTIONAL = {'About', 'Authentication', 'Notes', 'Upstream docs'}
 LIMITATION_CAPS = {'nosaas', 'noremote', 'security', 'filesystem'}
 GEN_START = '<!-- ROCKETRIDE:GENERATED:PARAMS START -->'
 GEN_END = '<!-- ROCKETRIDE:GENERATED:PARAMS END -->'
+PROFILE_HEADERS = {
+    'profile': 'profile',
+    'model': 'model',
+    'model id': 'model',
+    'context': 'modelTotalTokens',
+    'context tokens': 'modelTotalTokens',
+    'output': 'modelOutputTokens',
+    'output tokens': 'modelOutputTokens',
+}
 
 
 def strip_jsonc(s: str) -> str:
@@ -91,6 +100,17 @@ def load_services(node_dir: Path):
         return None
     merged = dict(entries[0])
     merged['_service_count'] = len(entries)
+    # Each protocol-bearing service declares its own default. A branded preset or
+    # a second provider registration (cloud_tts, store_elasticsearch,
+    # llm_openai_api) is a different node from the engine's point of view, so its
+    # default is a fact about that service, not a competing claim about this one.
+    # Order follows file order, primary service first.
+    defaults = []
+    for e in entries:
+        d = (e.get('preconfig') or {}).get('default')
+        if d and d not in defaults:
+            defaults.append(d)
+    merged['_defaults'] = defaults
     for e in entries[1:]:
         merged['classType'] = sorted(set(merged.get('classType') or []) | set(e.get('classType') or []))
         merged['capabilities'] = sorted(set(merged.get('capabilities') or []) | set(e.get('capabilities') or []))
@@ -111,6 +131,245 @@ def real_profiles(svc) -> dict:
     return {k: v for k, v in profs.items() if k != 'custom'}
 
 
+def declared_profiles(svc) -> dict:
+    return (svc.get('preconfig') or {}).get('profiles') or {}
+
+
+def section_body(text: str, section: str) -> str:
+    match = re.search(rf'^## {re.escape(section)}.*?$(.*?)(?=^## |\Z)', text, re.M | re.S)
+    return match.group(1) if match else ''
+
+
+def parse_profile_tables(section: str) -> list[dict]:
+    details_start = list(re.finditer(r'^<details>\s*$', section, re.M))
+    details_end = list(re.finditer(r'^</details>\s*$', section, re.M))
+    details_bounds = None
+    if len(details_start) == len(details_end) == 1 and details_start[0].start() < details_end[0].start():
+        details_bounds = (details_start[0].start(), details_end[0].start())
+
+    pattern = re.compile(
+        r'^(?P<header>\|[^\n]*\|)[ \t]*\n'
+        r'(?P<separator>\|(?:[ \t]*:?-+:?[ \t]*\|)+)[ \t]*(?:\n|\Z)'
+        r'(?P<rows>(?:\|[^\n]*\|[ \t]*(?:\n|\Z))*)',
+        re.M,
+    )
+    tables = []
+    for match in pattern.finditer(section):
+        raw_headers = [cell.strip() for cell in match.group('header').strip()[1:-1].split('|')]
+        headers = []
+        for header in raw_headers:
+            normalized = re.sub(r'\s+', ' ', _clean_cell(header)).lower()
+            headers.append(PROFILE_HEADERS.get(normalized, normalized))
+        rows = []
+        for line in match.group('rows').splitlines():
+            cells = [cell.strip() for cell in line.strip()[1:-1].split('|')]
+            rows.append(dict(zip(headers, cells)))
+        offset = match.start()
+        tables.append(
+            {
+                'headers': headers,
+                'rows': rows,
+                'collapsed': bool(details_bounds and details_bounds[0] < offset < details_bounds[1]),
+                'offset': offset,
+            }
+        )
+    return tables
+
+
+def resolve_profile_row(row: dict, profiles: dict) -> str | None:
+    raw = row.get('profile', '')
+    cleaned = _clean_cell(raw)
+    if cleaned in profiles:
+        return cleaned
+    for key, metadata in profiles.items():
+        if isinstance(metadata, dict) and _collapse_ws(cleaned) == _collapse_ws(metadata.get('title') or key):
+            return key
+    for key in re.findall(r'`([^`]+)`', raw):
+        if key in profiles:
+            return key
+    return None
+
+
+def profile_results(svc: dict, hand: str) -> list[tuple[str, str, str]]:
+    profiles = declared_profiles(svc)
+    section = section_body(hand, 'Profiles')
+    if len({key for key in profiles if key != 'custom'}) < 2 or not section:
+        return []
+
+    defaults = [key for key in (svc.get('_defaults') or []) if key in profiles]
+    if not defaults:
+        fallback = (svc.get('preconfig') or {}).get('default')
+        defaults = [fallback] if fallback else []
+    # The primary service's default leads the visible table in the large layout.
+    default = defaults[0] if defaults else None
+    large = 'llm' in (svc.get('classType') or []) and len(profiles) > 6
+    tables = parse_profile_tables(section)
+    visible = [table for table in tables if not table['collapsed']]
+    collapsed = [table for table in tables if table['collapsed']]
+    details_start = list(re.finditer(r'^<details>\s*$', section, re.M))
+    details_end = list(re.finditer(r'^</details>\s*$', section, re.M))
+    results = []
+
+    def add(ok, check, detail=''):
+        results.append(('PASS' if ok else 'FAIL', check, '' if ok else detail))
+
+    if large:
+        layout_ok = (
+            len(details_start) == len(details_end) == 1
+            and len(tables) == 2
+            and len(visible) == 1
+            and len(collapsed) == 1
+            and visible[0]['offset'] < details_start[0].start()
+        )
+        layout_detail = 'large LLM profile sections require one visible table and one table inside <details>'
+    else:
+        layout_ok = not details_start and not details_end and len(tables) == 1 and len(visible) == 1
+        layout_detail = 'ordinary profile sections require one table and no <details> block'
+    add(layout_ok, 'Profiles details layout', layout_detail)
+
+    if large and len(visible) == len(collapsed) == 1:
+        visible_headers = visible[0]['headers']
+        collapsed_headers = collapsed[0]['headers']
+        add(
+            visible_headers == collapsed_headers,
+            'Profiles table headers match',
+            f'visible: {visible_headers}; collapsed: {collapsed_headers}',
+        )
+
+    row_records = []
+    for table in tables:
+        for row in table['rows']:
+            row_records.append(
+                {
+                    'row': row,
+                    'key': resolve_profile_row(row, profiles),
+                    'headers': table['headers'],
+                    'collapsed': table['collapsed'],
+                }
+            )
+
+    resolved = [record['key'] for record in row_records if record['key'] is not None]
+    missing = sorted(set(profiles) - set(resolved))
+    duplicates = sorted({key for key in resolved if resolved.count(key) > 1})
+    unknown = [_clean_cell(record['row'].get('profile', '')) for record in row_records if record['key'] is None]
+    add(not missing, 'Profiles missing rows', f'missing: {missing}')
+    add(not duplicates, 'Profiles duplicate rows', f'duplicate: {duplicates}')
+    add(not unknown, 'Profiles unknown rows', f'unknown: {unknown}')
+
+    semantic_fields = (
+        ('model', 'Profiles model matches preconfig'),
+        ('modelTotalTokens', 'Profiles context tokens match preconfig'),
+        ('modelOutputTokens', 'Profiles output tokens match preconfig'),
+    )
+    for field, check in semantic_fields:
+        mismatches = []
+        for record in row_records:
+            key = record['key']
+            metadata = profiles.get(key) if key is not None else None
+            if key == 'custom' or not isinstance(metadata, dict) or field not in metadata:
+                continue
+            if field not in record['headers']:
+                continue
+            rendered = _clean_cell(record['row'].get(field, '')).replace(',', '')
+            expected = _clean_cell(str(metadata[field])).replace(',', '')
+            if rendered != expected:
+                mismatches.append(f"{key}: '{rendered}' != '{expected}'")
+        add(not mismatches, check, '; '.join(mismatches))
+
+    marked = [record['key'] for record in row_records if '(default)' in record['row'].get('profile', '')]
+    add(
+        sorted(filter(None, marked)) == sorted(defaults) and len(marked) == len(defaults),
+        'Profiles default is marked',
+        f'expected exactly {defaults}, got: {marked}',
+    )
+    first_table_offset = min((table['offset'] for table in tables), default=len(section))
+    intro = section[:first_table_offset]
+    absent = [key for key in defaults if not re.search(rf'(?<![\w.-]){re.escape(key)}(?![\w.-])', intro)]
+    add(
+        bool(defaults) and not absent,
+        'Profiles default appears in intro',
+        f'default key(s) {absent or defaults} not found before first table',
+    )
+    missing_titles = []
+    intro_ws = _collapse_ws(intro)
+    for key in defaults:
+        metadata = profiles.get(key)
+        title = metadata.get('title') if isinstance(metadata, dict) else None
+        if title and f'**{_collapse_ws(title)}**' not in intro_ws:
+            missing_titles.append(title)
+    if missing_titles:
+        add(
+            False,
+            'Profiles default title appears in intro',
+            f'default title(s) {missing_titles} not found before first table',
+        )
+    else:
+        add(True, 'Profiles default title appears in intro')
+
+    if large:
+        visible_rows = visible[0]['rows'] if len(visible) == 1 else []
+        visible_keys = [resolve_profile_row(row, profiles) for row in visible_rows]
+        add(
+            len(visible_rows) <= 6,
+            'Profiles visible row count',
+            f'{len(visible_rows)} visible rows; at most 6 allowed',
+        )
+        add(
+            bool(visible_keys) and visible_keys[0] == default,
+            'Profiles default is visible and first',
+            f"expected '{default}' first, got: {visible_keys[:1]}",
+        )
+        hidden_defaults = sorted(set(defaults) - set(visible_keys))
+        add(
+            not hidden_defaults,
+            'Profiles defaults are all visible',
+            f'declared default(s) {hidden_defaults} are collapsed',
+        )
+
+        forced_collapsed = {
+            key
+            for key, metadata in profiles.items()
+            if key == 'custom' or (isinstance(metadata, dict) and metadata.get('deprecated'))
+        }
+        misplaced = sorted(
+            record['key'] for record in row_records if record['key'] in forced_collapsed and not record['collapsed']
+        )
+        add(
+            not misplaced,
+            'Profiles custom/deprecated rows collapsed',
+            f'visible: {misplaced}',
+        )
+        bad_defaults = sorted(set(defaults) & forced_collapsed)
+        add(
+            not bad_defaults,
+            'Profiles default metadata is compatible with large layout',
+            f'default(s) {bad_defaults} are custom or deprecated',
+        )
+
+        hidden_rows = collapsed[0]['rows'] if len(collapsed) == 1 else []
+        summaries = re.findall(r'^<summary><strong>View (\d+) more models</strong></summary>\s*$', section, re.M)
+        hidden_count_ok = len(summaries) == 1 and int(summaries[0]) == len(hidden_rows)
+        add(
+            hidden_count_ok,
+            'Profiles hidden row count',
+            f'summary: {summaries[0] if len(summaries) == 1 else "(invalid)"}; hidden rows: {len(hidden_rows)}',
+        )
+        details_text = ''
+        if len(details_start) == len(details_end) == 1:
+            details_text = section[details_start[0].start() : details_end[0].end()]
+        blank_lines_ok = bool(
+            re.search(r'</summary>\n[ \t]*\n\|', details_text)
+            and re.search(r'\|[^\n]*\|\n[ \t]*\n</details>', details_text)
+        )
+        add(
+            blank_lines_ok,
+            'Profiles details blank lines',
+            'a blank line is required after </summary> and before </details>',
+        )
+
+    return results
+
+
 def required_sections(svc):
     # 'Example pipelines' is PARKED: still allowed in its slot, no longer
     # required. Restore it here and un-park the bundle checks below together.
@@ -128,6 +387,18 @@ def required_sections(svc):
 
 def canon(h: str) -> str:
     return 'About' if h.startswith('About') else h.strip()
+
+
+def _collapse_ws(value: str) -> str:
+    """Collapse whitespace runs so prose need not reproduce dropdown padding.
+
+    Profile titles are padded to align in the configuration panel's dropdown
+    ('Text Small   - ...', 'Text Large   - ...', 'Text Ada     - ...'). That
+    alignment is deliberate and belongs in services.json, but a README should
+    write the title as an ordinary sentence, so runs of whitespace compare
+    equal to a single space on both sides.
+    """
+    return re.sub(r'\s+', ' ', value).strip()
 
 
 def _clean_cell(c: str) -> str:
@@ -277,23 +548,7 @@ def validate(node_dir: Path):
             'Lanes rows match declared lanes',
             f'missing lane-in: {sorted(want - got)}' if not want <= got else '',
         )
-    profs = real_profiles(svc)
-    if len(profs) >= 2 and 'Profiles' in seen:
-        # Rows may lead with either the profile key or its display title
-        # (checked across the first two columns).
-        got = set(table_col(hand, 'Profiles')) | set(table_col(hand, 'Profiles', 1))
-        missing = set()
-        for k, v in profs.items():
-            if not isinstance(v, dict):
-                continue
-            title = v.get('title') or k
-            if k not in got and not any(title in g or g in title for g in got):
-                missing.add(title)
-        add(
-            'PASS' if not missing else 'FAIL',
-            'Profiles rows match preconfig',
-            f'missing: {sorted(missing)}' if missing else '',
-        )
+    results.extend(profile_results(svc, hand))
 
     # -- Example pipelines (parked section): >=1 flow when present --
     if 'Example pipelines' in seen:
@@ -417,7 +672,7 @@ def main():
             if st in ('FAIL', 'WARN'):
                 print(f'    {st}: {check}' + (f' — {detail}' if detail else ''))
     if any_fail:
-        print('\nSchema: docs/development/node-readme-schema.md')
+        print('\nSchema: docs/development/nodes/readme-schema.md')
     sys.exit(1 if any_fail else 0)
 
 
