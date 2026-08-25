@@ -52,7 +52,7 @@ Messages exchanged between the extension host and the pipeline editor webview:
 The deep link handled by the extension is
 `<uriScheme>://rocketride.rocketride/auth/google` with query parameters
 `tokens`, `state`, and on failure `oauth_error` / `error` /
-`error_description` (see `CloudAuthProvider.handleGoogleOAuth`).
+`error_description` (see `CloudAuthProvider.handleProviderOAuth`, the shared Google/Microsoft handler).
 
 ## Saved config shape
 

@@ -17,15 +17,14 @@ This node has no pipeline lanes: it is a control-plane tool node, connected to a
 
 ## As a tool
 
-The node registers exactly the tools returned by the connected server at
-pipeline startup. Each tool is named `<serverName>.<toolName>`; `serverName`
-defaults to `mcp` (or to the node catalog name when present). The argument
-schema and returned value are the discovered server contract, so a tool that
-is unavailable until after startup requires a pipeline restart. Malformed
-input, an unknown namespace, a disconnected client, or a server failure raises
-an error rather than looking like an empty result.
+The node registers exactly the tools returned by the connected server. Each
+tool is named `<serverName>.<toolName>`; `serverName` defaults to `mcp` (or to
+the node catalog name when present). The argument schema and returned value are
+the discovered server contract. Malformed input, an unknown namespace, a
+disconnected client, or a server failure raises an error rather than looking
+like an empty result.
 
-Tools are namespaced as `serverName.toolName` (e.g. `mcp.search_docs`), where `serverName` is set in configuration. Tools are discovered **once at pipeline startup** and cached; a server that adds tools later requires a pipeline restart to pick them up.
+Tools are namespaced as `serverName.toolName` (e.g. `mcp.search_docs`), where `serverName` is set in configuration. Tools are discovered at pipeline startup and cached, and the cache is re-read from the server whenever an agent discovers its tools or asks for a tool the cache does not know (at most once per second), so a server that adds or renames tools while the pipeline runs is picked up without a restart. A changed catalog is reported as a pipeline warning naming the added and removed tools. A tool that is still unknown after that refresh is refused with an explicit `ToolUnavailableError` and is never sent to the server, so an agent sees a clear failure rather than a plausible-looking answer.
 
 The implementation is pure Python standard library (`subprocess`, `urllib`, JSON-RPC 2.0), no MCP SDK dependency and no extra packages to install. Each request has a 20-second timeout.
 

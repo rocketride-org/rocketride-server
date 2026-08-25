@@ -1,4 +1,5 @@
 {
+  "explorer.excludeGitIgnore": true,
   "search.exclude": {
     "**/build": true,
     "**/dist": true,

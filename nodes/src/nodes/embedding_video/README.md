@@ -53,6 +53,10 @@ The node declares GPU capability and uses a vision model plus OpenCV. The source
 
 Each output contains a base64 PNG Image, `embedding`, `embedding_model`, a frame number, and a timestamp. If the input provides stream details, source metadata and a `<video-stem>.frame<N>` name are retained. A missing reported frame rate falls back to 30 fps for timestamp calculation.
 
+### Supported containers
+
+MP4 (`video/mp4`), AVI (`video/x-msvideo`), QuickTime (`video/quicktime`), and WebM (`video/webm`). An unrecognized MIME type is still processed, treated as MP4.
+
 ## Upstream docs
 
 - [Hugging Face Transformers documentation](https://huggingface.co/docs/transformers)

@@ -18,7 +18,7 @@
     "showStatusBar": true
   },
   "scripts": {
-    "build": "pnpm rsbuild build"
+    "build": "rsbuild build"
   },
   "browserslist": [
     "chrome >= 81",
@@ -30,17 +30,19 @@
     "@module-federation/rsbuild-plugin": "^2.5.1",
     "@monaco-editor/react": "^4.7.0",
     "docx-preview": "^0.3.3",
-    "dompurify": "~3.4.0",
+    "dompurify": "~3.4.13",
     "monaco-editor": "^0.55.1",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
-    "shared": "workspace:*",
-    "shell-ui": "workspace:*",
-    "xlsx": "^0.18.5"
+    "xlsx": "^0.18.5",
+    "rocketride": "workspace:*",
+    "shell": "file:../../.rocketride/shell/shell.tgz"
   },
   "devDependencies": {
     "@rsbuild/core": "~2.0.11",
     "@rsbuild/plugin-react": "~2.0.1",
-    "typescript": "^5.3.0"
+    "typescript": "^5.3.0",
+    "@types/react": "~18.3.31",
+    "@types/react-dom": "~18.3.7"
   }
 }

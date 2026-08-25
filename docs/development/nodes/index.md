@@ -57,6 +57,60 @@ A typical RAG flow chains these types end to end:
 `pinecone (questions → documents)` → `prompt (documents → questions)` →
 `llm_openai (questions → answers)` → `response (answers → -)`.
 
+#### The media lanes are streamed
+
+`image`, `audio` and `video` do not arrive in one piece. They are delivered as a
+`BEGIN` / `WRITE`… / `END` sequence through `writeImage`, `writeAudio` and
+`writeVideo`, so a consumer can work with bounded memory no matter how large the
+payload is. `BEGIN` carries the stream's **descriptor** — its source backlink,
+MIME type and declared byte count — rather than media bytes; the bytes come on
+the `WRITE` calls.
+
+One object can produce **several streams on one lane**: a cropper turning an
+album page into separate photos, a frame grabber pulling frames from a video.
+`IInstanceBase` normalizes that for every node, so as a node author you can rely
+on this:
+
+> A media lane handler receives, per stream, exactly one `BEGIN`, zero or more
+> `WRITE`s, and at most one `END`. That `END` is either the producer's own, passed
+> through exactly as it arrives, or one the base supplies in its place — when the
+> next stream begins on the lane, or as the object closes.
+>
+> The base supplies one only for a stream that received every byte its `BEGIN`
+> declared, so the guarantee is this and no more: a stream **displaced by the next
+> `BEGIN`, or still open when the object closes**, is either ended or reported as
+> lost — never dropped in silence. One case is deliberately left out of that: a
+> stream that neither promised bytes nor delivered any goes without an `END` and
+> without a word, having lost nothing. A producer's own `END` is never checked
+> against the declared size, so if you must know the bytes are whole, check them
+> yourself.
+>
+> A displaced stream that carried no bytes, fell short of what it declared, or
+> declared nothing at all **gets no `END`**; you learn of it from the next `BEGIN`
+> on that lane, or from `open()`, and must release whatever you were holding there.
+
+So a consumer keeps one buffer (or one write handle) per lane, fills it on
+`WRITE`, does its work on `END`, and drops whatever is still pending when a new
+`BEGIN` or an `open()` arrives. It never needs to work out which stream is which
+— the base delivers the `END` a producer failed to send before the next `BEGIN`
+reaches you. A node that holds an operating-system resource, such as an open file
+handle or a decoder, should also release it in `closing()`, which is the last call
+before the instance goes away.
+
+Producers are the other half of the contract: **declare the stream's byte count
+on `BEGIN`**, because that is the only signal telling a complete stream from a
+truncated one. Use the helpers in `ai.common.avi.descriptor` —
+`image_begin_payload`, `audio_begin_payload`, `video_begin_payload`, or the
+`forward_enriched_*` wrappers when you hold the whole payload in memory. A stream
+that declares nothing still completes on its own `END`, and several of them in a
+row are fine as long as each one ends. What the base cannot rescue is the one whose
+`END` never comes: with no byte count to check it against, it stays open until the
+next `BEGIN` displaces it, and is then dropped and reported as lost.
+
+### 2. Tool binding: agents and tools
+
+Nodes whose `classType` is `tool` (and a few infrastructure nodes) **have no data
+
 ### 2. Tool binding: agents and tools
 
 A node whose `classType` includes `tool` **attaches to an agent node's tool

@@ -28,22 +28,26 @@
  */
 const path = require('path');
 const { glob } = require('glob');
-const { execCommand, removeDirs, removeMatching, PROJECT_ROOT, BUILD_ROOT, DIST_ROOT, hasSourceChanged, saveSourceHash, setState, exists, copyFile, mkdir, rm, readFile, writeFile } = require('../../../scripts/lib');
+const { execCommand, removeDirs, removeMatching, PROJECT_ROOT, BUILD_ROOT, DIST_ROOT, hasSourceChanged, saveSourceHash, setState, exists, copyFile, mkdir, rm, readFile, writeFile, syncDir } = require('../../../scripts/lib');
 
 // Paths
 const APP_ROOT = path.join(__dirname, '..');
 const SRC_DIR = path.join(APP_ROOT, 'src');
-const SHARED_UI_SRC = path.join(PROJECT_ROOT, 'packages', 'shared-ui', 'src');
+const SHARED_UI_SRC = path.join(PROJECT_ROOT, 'shared', 'src');
 const DOCS_DIR = path.join(PROJECT_ROOT, 'docs');
 const AGENT_DOCS_DIR = path.join(DOCS_DIR, 'agents');
 const STUBS_DIR = path.join(DOCS_DIR, 'agents', 'stubs');
 const README_SRC = path.join(DOCS_DIR, 'public', 'vscode', 'README.md');
 const README_DEST = path.join(APP_ROOT, 'README.md');
 
-// State keys for source fingerprints (webview bundles shared-ui via Canvas)
+// State keys for source fingerprints (webview bundles shared via Canvas)
 const SRC_HASH_KEY = 'vscode.srcHash';
 const BUNDLE_HASH_KEY = 'vscode.bundleHash';
 const SHARED_UI_HASH_KEY = 'vscode.sharedUiHash';
+// The extension-host bundle's OWN shared fingerprint — esbuild inlines
+// shared (appdev templates) into rocketride.js, and reusing the webview's
+// SHARED_UI_HASH_KEY would let whichever step ran first mark the other clean.
+const BUNDLE_SHARED_UI_HASH_KEY = 'vscode.bundleSharedUiHash';
 
 // All extension build output goes here (bundle, webview, manifest for vsce and F5)
 const BUILD_DIR = path.join(BUILD_ROOT, 'vscode');
@@ -53,7 +57,7 @@ const BUILD_WEBVIEW_DIR = path.join(BUILD_DIR, 'webview');
 const VSCODE_DIST_DIR = path.join(DIST_ROOT, 'vscode');
 
 // =============================================================================
-// Helpers: change detection (vscode src + shared-ui, which webview bundles)
+// Helpers: change detection (vscode src + shared, which webview bundles)
 // =============================================================================
 
 async function hasVscodeOrSharedUiChanged() {
@@ -84,6 +88,12 @@ function makeBuildWebviewAction() {
 				task.output = 'No changes detected';
 				return;
 			}
+
+			// Typecheck the webview project first — rsbuild (SWC) only strips
+			// types, so without this gate webview/protocol drift is invisible
+			// to the build. The hash gate above covers exactly this project's
+			// inputs (vscode src + shared), so cached skips stay skips.
+			await execCommand('npx', ['tsc', '-p', 'tsconfig.webview.json', '--noEmit'], { task, cwd: APP_ROOT });
 
 			await execCommand('pnpm', ['exec', 'rsbuild', 'build'], { task, cwd: APP_ROOT });
 
@@ -117,20 +127,26 @@ function makeCompileTypescriptAction() {
 function makeBundleExtensionAction() {
 	return {
 		run: async (ctx, task) => {
-			// Check if source changed (uses its own hash key so compile-typescript
-			// saving SRC_HASH_KEY doesn't cause this step to skip)
-			const { changed, hash } = await hasSourceChanged(SRC_DIR, BUNDLE_HASH_KEY);
+			// Check vscode src AND shared (own hash keys so compile-typescript /
+			// build-webview saving theirs doesn't cause this step to skip). esbuild
+			// inlines shared (the appdev templates) into rocketride.js, so a
+			// shared-only change must rebuild the host bundle too.
+			const [vsrc, sharedUi] = await Promise.all([
+				hasSourceChanged(SRC_DIR, BUNDLE_HASH_KEY),
+				hasSourceChanged(SHARED_UI_SRC, BUNDLE_SHARED_UI_HASH_KEY),
+			]);
 			const outputExists = await exists(path.join(BUILD_DIR, 'rocketride.js'));
 
-			if (!changed && outputExists) {
+			if (!vsrc.changed && !sharedUi.changed && outputExists) {
 				task.output = 'No changes detected';
 				return;
 			}
 
 			await execCommand('node', ['esbuild.js', '--production'], { task, cwd: APP_ROOT });
 
-			// Save hash after successful build
-			await saveSourceHash(BUNDLE_HASH_KEY, hash);
+			// Save hashes after successful build
+			await saveSourceHash(BUNDLE_HASH_KEY, vsrc.hash);
+			await saveSourceHash(BUNDLE_SHARED_UI_HASH_KEY, sharedUi.hash);
 		},
 	};
 }
@@ -139,9 +155,35 @@ function makeStageFilesAction() {
 	return {
 		run: async (ctx, task) => {
 			const { changed, srcHash, sharedUiHash } = await hasVscodeOrSharedUiChanged();
-			const buildHasManifest = await exists(path.join(BUILD_DIR, 'package.json'));
+			const stagedPkgPath = path.join(BUILD_DIR, 'package.json');
+			const buildHasManifest = await exists(stagedPkgPath);
 
-			if (!changed && buildHasManifest) {
+			// Build the transformed manifest FIRST: the extension manifest
+			// (contributes, settings, custom editors) lives OUTSIDE the hashed
+			// src/ trees, so a package.json-only edit must still restage — the
+			// dev host loads build/vscode and would otherwise run a stale
+			// manifest with the old contributions.
+			const pkgPath = path.join(APP_ROOT, 'package.json');
+			const pkg = JSON.parse(await readFile(pkgPath));
+			pkg.main = './rocketride.js';
+			pkg.icon = 'rocketride-dark-icon.png';
+			pkg.files = ['rocketride.js', 'rocketride.js.map', 'webview/**', 'docs/**', 'shell.tgz', 'rocketride-dark-icon.png', 'rocketride-light-icon.png', 'docker.svg', 'onprem.svg', 'package.json', 'LICENSE', 'README.md'];
+			const stagedPkg = JSON.stringify(pkg, null, 2);
+			const manifestChanged = !buildHasManifest || String(await readFile(stagedPkgPath)) !== stagedPkg;
+
+			// The installable shell package (vendored from the server into
+			// .rocketride/): shipped WITH the extension as the OFFLINE
+			// fallback the App Builder extracts to .rocketride/shell/ when
+			// no server is reachable. Synced BEFORE the early return — it
+			// changes when the vendored shell is refreshed, which the
+			// vscode source hash cannot see.
+			const shellTgzSrc = path.join(PROJECT_ROOT, '.rocketride', 'shell.tgz');
+			if (await exists(shellTgzSrc)) {
+				await mkdir(BUILD_DIR);
+				await copyFile(shellTgzSrc, path.join(BUILD_DIR, 'shell.tgz'));
+			}
+
+			if (!changed && !manifestChanged) {
 				task.output = 'No changes detected';
 				return;
 			}
@@ -151,12 +193,7 @@ function makeStageFilesAction() {
 
 			// Copy manifest and assets so build/vscode is a complete extension
 			task.output = 'Staging manifest and assets to build/vscode...';
-			const pkgPath = path.join(APP_ROOT, 'package.json');
-			const pkg = JSON.parse(await readFile(pkgPath));
-			pkg.main = './rocketride.js';
-			pkg.icon = 'rocketride-dark-icon.png';
-			pkg.files = ['rocketride.js', 'rocketride.js.map', 'webview/**', 'docs/**', 'rocketride-dark-icon.png', 'rocketride-light-icon.png', 'docker.svg', 'onprem.svg', 'package.json', 'LICENSE', 'README.md'];
-			await writeFile(path.join(BUILD_DIR, 'package.json'), JSON.stringify(pkg, null, 2));
+			await writeFile(stagedPkgPath, stagedPkg);
 			const iconDark = path.join(APP_ROOT, 'rocketride-dark-icon.png');
 			const iconLight = path.join(APP_ROOT, 'rocketride-light-icon.png');
 			if (await exists(iconDark)) {
@@ -229,6 +266,12 @@ function makePackageVsixAction() {
 function makeCopyReadmeAction() {
 	return {
 		run: async (ctx, task) => {
+			// The marketplace README is authored in the monorepo's docs/;
+			// standalone repos carry the app README directly, so nothing to sync.
+			if (!(await exists(README_SRC))) {
+				task.output = 'docs/README-vscode.md not present - keeping the app README';
+				return;
+			}
 			await copyFile(README_SRC, README_DEST);
 			task.output = 'Copied README from docs/';
 		},
@@ -269,14 +312,22 @@ module.exports = {
 			name: 'vscode:compile',
 			action: () => ({
 				description: 'Compile vscode',
-				steps: ['client-typescript:build', 'vscode:build-webview', 'vscode:compile-typescript', 'vscode:bundle-extension'],
+				steps: ['vscode:build-webview', 'vscode:compile-typescript', 'vscode:bundle-extension'],
 			}),
 		},
 		{
 			name: 'vscode:build',
 			action: () => ({
 				description: 'Build vscode',
-				steps: ['client-typescript:build', 'shared-ui:test', 'vscode:copy-readme', 'vscode:build-webview', 'vscode:compile-typescript', 'vscode:bundle-extension', 'vscode:stage-files', 'vscode:package-vsix'],
+				// shell:build first: the webviews compile against the INSTALLED
+				// shell package, and on a fresh clone the installed artifact is
+				// the bootstrap stub until shell:build replaces it (its chained
+				// install relinks the workspace). Cache-skipped when the shell
+				// is unchanged and the real artifact is in place.
+				// Builds gate on drift CHECKS only (silent unless they fail);
+				// unit tests (shared:test) run under test targets, never as
+				// build steps — a normal build must not stream test output.
+				steps: ['shell:build', 'shared:check-gallery-tokens', 'vscode:copy-readme', 'vscode:build-webview', 'vscode:compile-typescript', 'vscode:bundle-extension', 'vscode:stage-files', 'vscode:package-vsix'],
 			}),
 		},
 		{

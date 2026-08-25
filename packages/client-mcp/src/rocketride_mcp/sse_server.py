@@ -32,7 +32,9 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 import uvicorn
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.lowlevel import Server
+from mcp.server.sse import SseServerTransport
+import mcp.types as types
 
 from rocketride import RocketRideClient
 
@@ -67,47 +69,89 @@ def _get_client() -> RocketRideClient:
     )
 
 
-def create_mcp_server() -> FastMCP:
+async def _list_pipelines() -> str:
+    """List available RocketRide pipelines."""
+    client = _get_client()
+    try:
+        await client.connect()
+        tools = await get_tools(client)
+        names = [t.get('name') or t.get('pipeline', '') for t in tools]
+        names = [n for n in names if n]
+        return f'Available pipelines: {", ".join(names)}' if names else 'No pipelines configured.'
+    finally:
+        await client.disconnect()
+
+
+async def _run_pipeline(name: str, filepath: str) -> str:
+    """Run a RocketRide pipeline on a file."""
+    client = _get_client()
+    try:
+        await client.connect()
+        result = await execute_tool(client=client, name=name, filepath=filepath)
+        if isinstance(result, dict) and result.get('error'):
+            raise RuntimeError(f'{result["error"]} (status {result.get("status", "unknown")})')
+        return str(result)
+    finally:
+        await client.disconnect()
+
+
+_TOOLS: list[types.Tool] = [
+    types.Tool(
+        name='list_pipelines',
+        description='List available RocketRide pipelines.',
+        input_schema={'type': 'object', 'properties': {}},
+    ),
+    types.Tool(
+        name='run_pipeline',
+        description='Run a RocketRide pipeline on a file.',
+        input_schema={
+            'type': 'object',
+            'properties': {
+                'name': {'type': 'string', 'description': 'Pipeline name to execute'},
+                'filepath': {'type': 'string', 'description': 'Path to the input file'},
+            },
+            'required': ['name', 'filepath'],
+        },
+    ),
+]
+
+
+def create_mcp_server() -> Server:
     """Create and configure the MCP server with RocketRide tools."""
-    mcp = FastMCP('rocketride-mcp')
 
-    @mcp.tool()
-    async def list_pipelines() -> str:
-        """List available RocketRide pipelines."""
-        client = _get_client()
+    async def on_list_tools(ctx, params: types.PaginatedRequestParams | None) -> types.ListToolsResult:
+        return types.ListToolsResult(tools=_TOOLS)
+
+    async def on_call_tool(ctx, params: types.CallToolRequestParams) -> types.CallToolResult:
+        arguments = dict(params.arguments or {})
         try:
-            await client.connect()
-            tools = await get_tools(client)
-            names = [t.get('name') or t.get('pipeline', '') for t in tools]
-            names = [n for n in names if n]
-            return f'Available pipelines: {", ".join(names)}' if names else 'No pipelines configured.'
-        finally:
-            await client.disconnect()
+            if params.name == 'list_pipelines':
+                text = await _list_pipelines()
+            elif params.name == 'run_pipeline':
+                text = await _run_pipeline(str(arguments.get('name', '')), str(arguments.get('filepath', '')))
+            else:
+                raise RuntimeError(f'Unknown tool: {params.name}')
+        except Exception as exc:
+            return types.CallToolResult(
+                content=[types.TextContent(type='text', text=str(exc))],
+                is_error=True,
+            )
+        return types.CallToolResult(content=[types.TextContent(type='text', text=text)])
 
-    @mcp.tool()
-    async def run_pipeline(name: str, filepath: str) -> str:
-        """Run a RocketRide pipeline on a file.
-
-        Args:
-            name: Pipeline name to execute.
-            filepath: Path to the input file.
-        """
-        client = _get_client()
-        try:
-            await client.connect()
-            result = await execute_tool(client=client, name=name, filepath=filepath)
-            if isinstance(result, dict) and result.get('error'):
-                raise RuntimeError(f'{result["error"]} (status {result.get("status", "unknown")})')
-            return str(result)
-        finally:
-            await client.disconnect()
-
-    return mcp
+    return Server('rocketride-mcp', on_list_tools=on_list_tools, on_call_tool=on_call_tool)
 
 
 def create_app() -> Starlette:
     """Create the Starlette app with SSE transport and optional auth."""
-    mcp = create_mcp_server()
+    server = create_mcp_server()
+    # Same URLs FastMCP's sse_app() used to expose: GET /sse for the event
+    # stream, POST /messages/ for client->server messages.
+    sse = SseServerTransport('/messages/')
+
+    async def handle_sse(request: Request) -> Response:
+        async with sse.connect_sse(request.scope, request.receive, request._send) as streams:
+            await server.run(streams[0], streams[1], server.create_initialization_options())
+        return Response()
 
     async def health(_request: Request) -> JSONResponse:
         """Return server health status and engine reachability."""
@@ -126,7 +170,8 @@ def create_app() -> Starlette:
     return Starlette(
         routes=[
             Route('/health', health),
-            Mount('/', app=mcp.sse_app()),
+            Route('/sse', endpoint=handle_sse, methods=['GET']),
+            Mount('/messages/', app=sse.handle_post_message),
         ],
         middleware=middleware,
     )
@@ -142,6 +187,11 @@ def main():
     if _API_KEY:
         logger.info('MCP SSE server starting with API key authentication')
     else:
+        # run_pipeline uploads any file the server process can read, so an
+        # unauthenticated non-loopback bind is remote file access. Refuse to
+        # start rather than warn-and-serve.
+        if args.host not in ('localhost', '127.0.0.1', '::1'):
+            parser.error(f'refusing to bind {args.host} without authentication — set MCP_API_KEY (or bind localhost)')
         logger.warning('MCP SSE server starting WITHOUT authentication — set MCP_API_KEY to secure')
 
     app = create_app()

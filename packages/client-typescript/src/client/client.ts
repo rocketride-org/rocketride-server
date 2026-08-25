@@ -1762,9 +1762,14 @@ export class RocketRideClient extends DAPClient {
 			objinfo?: Record<string, unknown>;
 			mimetype?: string;
 		}>,
-		token: string
+		token: string,
+		maxConcurrent = 5
 	): Promise<UPLOAD_RESULT[]> {
 		const results: UPLOAD_RESULT[] = new Array(files.length);
+		if (!Number.isFinite(maxConcurrent) || !Number.isInteger(maxConcurrent) || maxConcurrent < 1) {
+			throw new RangeError('maxConcurrent must be a positive integer');
+		}
+		const concurrency = Math.max(1, Math.floor(maxConcurrent));
 
 		/**
 		 * Helper function to send upload events through the event system.
@@ -1874,16 +1879,20 @@ export class RocketRideClient extends DAPClient {
 			results[index] = finalResult;
 		};
 
-		// Create a promise for every file - let server handle queuing
-		const uploadPromises = files.map((fileData, index) =>
-			uploadFile(fileData, index).catch((err) => {
-				// Ensure errors don't kill the whole batch
-				console.error(`Upload failed for ${fileData.file.name}:`, err);
-			})
-		);
+		let nextIndex = 0;
+		const workers = Array.from({ length: Math.min(concurrency, files.length) }, async () => {
+			while (nextIndex < files.length) {
+				const index = nextIndex;
+				nextIndex += 1;
+				const fileData = files[index]!;
+				await uploadFile(fileData, index).catch((err) => {
+					// Ensure errors don't kill the whole batch
+					console.error(`Upload failed for ${fileData.file.name}:`, err);
+				});
+			}
+		});
 
-		// Wait for all uploads to complete
-		await Promise.all(uploadPromises);
+		await Promise.all(workers);
 
 		return results;
 	}
@@ -2683,6 +2692,132 @@ export class RocketRideClient extends DAPClient {
 		return (body as any).url;
 	}
 
+	/**
+	 * Batch-read many small files in one round trip.
+	 *
+	 * Designed for many-small-file access patterns (the App Builder's
+	 * lockfile-resolved node_modules view, type manifests) where per-file
+	 * open/read/close is too chatty. Missing/unreadable files are per-entry
+	 * results (`ok: false`), never a call failure.
+	 *
+	 * @param paths - Store paths to read (max 256 per call; 32 MiB total).
+	 * @returns One entry per requested path IN ORDER: `{path, ok, data?, error?}`.
+	 */
+	async fsReadMany(paths: string[]): Promise<Array<{ path: string; ok: boolean; data?: Uint8Array; error?: string }>> {
+		// Client-side cap with a clear error before any wire traffic
+		if (paths.length === 0) return [];
+		if (paths.length > 256) {
+			throw new Error(`fsReadMany caps at 256 paths per call (got ${paths.length})`);
+		}
+		for (const p of paths) this.validateStorePath(p);
+
+		// Bypass call(): the blobs ride response.arguments.data as one binary
+		// frame (4-byte big-endian length prefix per blob, in request order);
+		// response.body.entries carries the per-path metadata.
+		const message = this.buildRequest('rrext_store', {
+			arguments: { subcommand: 'fs_read_many', paths },
+		});
+		this._onTrace?.(TraceType.Request, message);
+		const response = await this.request(message);
+		if (response.success === false) {
+			this._onTrace?.(TraceType.Error, response);
+			throw new Error(response.message ?? 'fs_read_many failed');
+		}
+		this._onTrace?.(TraceType.Success, response);
+
+		const entries = ((response as any).body?.entries ?? []) as Array<{ path: string; size: number; ok: boolean; error?: string }>;
+		const frame = ((response as any).arguments?.data as Uint8Array) || new Uint8Array(0);
+
+		// Decode the length-prefixed frame in entry order. Every entry (failed
+		// ones included) contributes one blob, so a short frame is corruption —
+		// fail loudly, never return wrong bytes.
+		const results: Array<{ path: string; ok: boolean; data?: Uint8Array; error?: string }> = [];
+		let offset = 0;
+		for (const entry of entries) {
+			if (offset + 4 > frame.length) {
+				throw new Error('fs_read_many frame truncated (missing length prefix)');
+			}
+			const len = ((frame[offset] << 24) | (frame[offset + 1] << 16) | (frame[offset + 2] << 8) | frame[offset + 3]) >>> 0;
+			offset += 4;
+			if (offset + len > frame.length) {
+				throw new Error('fs_read_many frame truncated (payload shorter than its length prefix)');
+			}
+			const data = frame.slice(offset, offset + len);
+			offset += len;
+			results.push(entry.ok ? { path: entry.path, ok: true, data } : { path: entry.path, ok: false, error: entry.error });
+		}
+		if (offset !== frame.length) {
+			throw new Error(`fs_read_many frame has ${frame.length - offset} trailing bytes`);
+		}
+		return results;
+	}
+
+	// ============================================================================
+	// APP PUBLISH LADDER (rrext_app_deploy)
+	// ============================================================================
+
+	/**
+	 * Publish an immutable app version to the org registry.
+	 *
+	 * Publishing never activates anything — pin a rung with {@link appDeploy}
+	 * to make the version live somewhere.
+	 *
+	 * @param options.appId - App id (appManifest.id, e.g. 'acme.brandy')
+	 * @param options.version - Semver label (e.g. '0.5.0')
+	 * @param options.bundle - The built remoteEntry.js bytes (single-file v1)
+	 * @param options.message - Commit-style "what changed" note (version card)
+	 * @param options.moduleId - MF container name (derived when omitted)
+	 * @param options.name - Display name (defaults to appId)
+	 * @returns The version-rail entry (registryVersion, appVersion, sha256, ...)
+	 */
+	async appPublish(options: { appId: string; version: string; bundle: Uint8Array; message?: string; moduleId?: string; name?: string }): Promise<{ registryVersion: number; appVersion: string; sha256: string; publishedAt: number; author: string; message: string }> {
+		const body = await this.call('rrext_app_deploy', {
+			subcommand: 'publish',
+			appId: options.appId,
+			version: options.version,
+			message: options.message ?? '',
+			moduleId: options.moduleId,
+			name: options.name,
+			data: options.bundle,
+		});
+		return (body as any)?.entry ?? {};
+	}
+
+	/**
+	 * List an app's published versions, newest first (the version rail).
+	 *
+	 * @param appId - App id
+	 * @returns Rail entries; each carries `rungs` naming the rungs pinned to it
+	 */
+	async appVersions(appId: string): Promise<Array<{ registryVersion: number; appVersion: string; sha256: string; publishedAt: number; author: string; message: string; rungs: string[] }>> {
+		const body = await this.call('rrext_app_deploy', { subcommand: 'versions', appId });
+		return (body as any)?.versions ?? [];
+	}
+
+	/**
+	 * Pin a rung to a published version — deploy, promote, and rollback are
+	 * all this one verb ("repoint, never rebuild").
+	 *
+	 * @param appId - App id
+	 * @param registryVersion - Registry version number from the rail
+	 * @param target - '@user', '@team/<name-or-id>', or '@org'
+	 * @returns The updated deployment record and the rung word
+	 */
+	async appDeploy(appId: string, registryVersion: number, target: string): Promise<{ deployment: Record<string, unknown>; rung: string }> {
+		return (await this.call('rrext_app_deploy', { subcommand: 'deploy', appId, version: registryVersion, target })) as any;
+	}
+
+	/**
+	 * The reverse index: which rungs run which version of an app.
+	 *
+	 * @param appId - App id
+	 * @returns Pin rows ({rung, handle, version, appVersion, state, deployedAt})
+	 */
+	async appWhere(appId: string): Promise<Array<{ rung: string; handle: string; version: number; appVersion: string; state: string; deployedAt?: number }>> {
+		const body = await this.call('rrext_app_deploy', { subcommand: 'where', appId });
+		return (body as any)?.pins ?? [];
+	}
+
 	// ============================================================================
 	// CONVENIENCE WRAPPERS (text/JSON over binary, handle open/close internally)
 	// ============================================================================
@@ -2983,28 +3118,32 @@ export class RocketRideClient extends DAPClient {
 	// ============================================================================
 
 	/**
-	 * Retrieve all available service definitions from the server.
+	 * Retrieve all service summaries from the server.
 	 *
-	 * Returns a dictionary containing all service definitions available on
-	 * the connected RocketRide server. Each service definition includes schemas,
-	 * UI schemas, and configuration metadata.
+	 * Returns the server's cached service catalog: one SUMMARY per service
+	 * with the display fields (title, classType, lanes, ...) plus a
+	 * deduplicated icon table (`icons`) that each summary's `icon` id
+	 * points into. Configuration schema is not included — call
+	 * {@link getService} when the user opens the configure panel.
 	 *
-	 * @returns Promise resolving to object mapping service names to their definitions
+	 * @returns Promise resolving to `{ services, icons, version }` where
+	 *          services maps service names to their summaries
 	 * @throws Error if the request fails or server returns an error
 	 *
 	 * @example
 	 * ```typescript
 	 * // Get all available services
-	 * const services = await client.getServices();
+	 * const { services, icons } = await client.getServices();
 	 *
 	 * // List available service names
 	 * for (const name of Object.keys(services)) {
 	 *   console.log(`Available service: ${name}`);
 	 * }
 	 *
-	 * // Access a specific service's schema
-	 * if (services['ocr']) {
-	 *   console.log('OCR schema:', services['ocr'].schema);
+	 * // Render a node's icon
+	 * const iconId = services['ocr']?.icon;
+	 * if (iconId && icons?.[iconId]) {
+	 *   renderSvg(icons[iconId]);
 	 * }
 	 * ```
 	 */
@@ -3013,28 +3152,25 @@ export class RocketRideClient extends DAPClient {
 	}
 
 	/**
-	 * Retrieve a specific service definition from the server.
+	 * Retrieve a specific service's FULL definition from the server.
 	 *
-	 * Returns the definition for a specific service (connector) by name.
-	 * The definition includes schemas, UI schemas, and configuration metadata.
+	 * Returns the complete definition for one service (connector) by name:
+	 * the summary fields plus the dynamic configuration sections (schema +
+	 * UI schema per section) the configure panel needs.
 	 *
 	 * @param service - Name of the service to retrieve (e.g., 'ocr', 'embed', 'chat')
-	 * @returns Promise resolving to service definition or undefined if not found
-	 * @throws Error if the request fails or server returns an error
+	 * @returns Promise resolving to the service definition
+	 * @throws Error if the request fails or server returns an error — an
+	 *         unknown service name is an error, not an undefined result
 	 *
 	 * @example
 	 * ```typescript
-	 * // Get OCR service definition
+	 * // Get OCR service definition (config sections included)
 	 * const ocr = await client.getService('ocr');
-	 * if (ocr) {
-	 *   console.log('OCR schema:', ocr.schema);
-	 *   console.log('OCR UI schema:', ocr.uiSchema);
-	 * } else {
-	 *   console.log('OCR service not available');
-	 * }
+	 * console.log('OCR sections:', Object.keys(ocr));
 	 * ```
 	 */
-	async getService(service: string): Promise<ServiceDefinition | undefined> {
+	async getService(service: string): Promise<ServiceDefinition> {
 		if (!service) {
 			throw new Error('Service name is required');
 		}

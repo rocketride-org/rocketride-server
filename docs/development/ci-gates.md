@@ -120,7 +120,7 @@ Per-module equivalents when you only touched one area:
 ```bash
 node scripts/build.js shell:check
 node scripts/build.js shell:regen && git diff --exit-code -- \
-  apps/shell-ui/src/contract-check.generated.ts \
+  packages/shell/src/contract-check.generated.ts \
   packages/shell-api/index.ts packages/shell-api/latest.ts
 ```
 

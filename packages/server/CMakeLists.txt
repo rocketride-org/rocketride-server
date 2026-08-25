@@ -156,7 +156,7 @@ add_subdirectory(engine-core)
 add_subdirectory(engine-lib)
 
 # Main engine executable (external to packages/server)
-add_subdirectory(${ROCKETRIDE_PROJECT_ROOT}/apps/engine ${CMAKE_BINARY_DIR}/apps/engine)
+add_subdirectory(${ROCKETRIDE_PROJECT_ROOT}/packages/engine ${CMAKE_BINARY_DIR}/packages/engine)
 
 # -----------------------------------------------------------------------------
 # Testing configuration

@@ -6,6 +6,7 @@ from typing import Callable, List, Optional
 from rocketlib import IInstanceBase, invoke_function, warning
 from ai.common.schema import Question, Answer
 from ai.common.llm_native_stream import STOP_SEQUENCES_VAR
+from ai.common.llm_adapter import turn_usage
 
 
 class LLMBase(IInstanceBase):
@@ -81,22 +82,35 @@ class LLMBase(IInstanceBase):
             elif sum(len(p) for p in buf) >= 120:
                 _flush_reasoning(force=True)
 
-        try:
-            answer = self._question(
-                question,
-                on_chunk=_noop,
-                on_reasoning_chunk=on_reasoning_chunk,
-            )
-        except Exception as e:
-            err_msg = f'**LLM error** — {type(e).__name__}: {e}'
-            warning(f'writeQuestions: LLM call failed: {type(e).__name__}: {e}')
-            answer = Answer()
-            answer.setAnswer(err_msg)
-            self.instance.writeAnswers(answer)
-            return
+        # Scope this turn's model calls so a prior call's usage can't bleed into this
+        # answer and the collector stays bounded to one turn.
+        with turn_usage() as read_usage:
+            try:
+                answer = self._question(
+                    question,
+                    on_chunk=_noop,
+                    on_reasoning_chunk=on_reasoning_chunk,
+                )
+            except Exception as e:
+                err_msg = f'**LLM error** — {type(e).__name__}: {e}'
+                warning(f'writeQuestions: LLM call failed: {type(e).__name__}: {e}')
+                answer = Answer()
+                answer.setAnswer(err_msg)
+                # A turn that failed after burning tokens still spent them: the adapters
+                # report from their own finally, so the scope holds what was billed —
+                # hang it on the error answer or the Trace shows nothing for exactly the
+                # turn the user opens.
+                failed_usage = read_usage()
+                if failed_usage:
+                    answer.tokens = failed_usage
+                self.instance.writeAnswers(answer)
+                return
 
-        _flush_reasoning(force=True)  # emit any trailing partial line
-        self.instance.writeAnswers(answer)
+            _flush_reasoning(force=True)  # emit any trailing partial line
+            usage = read_usage()  # turn total: summed across every model call this turn
+            if usage:
+                answer.tokens = usage  # shown in the Trace "Tokens" grid on the answers lane
+            self.instance.writeAnswers(answer)
 
     @invoke_function
     def getContextLength(self, _param):
@@ -112,4 +126,13 @@ class LLMBase(IInstanceBase):
 
     @invoke_function
     def ask(self, param):
-        return self._question(param.question, stop=getattr(param, 'stop', None))
+        # Each invoke shows its own cost: the scope reads only the calls made while it
+        # was open (its own, plus any nested sub-agent calls it drove). When an agent
+        # drives this invoke, the agent's outer scope still sees the same calls for the
+        # turn total; the outermost scope bounds and clears the collector.
+        with turn_usage() as read_usage:
+            answer = self._question(param.question, stop=getattr(param, 'stop', None))
+            usage = read_usage()
+            if usage:
+                answer.tokens = usage  # shown in the Trace "Tokens" grid on this invoke's row
+        return answer

@@ -98,8 +98,11 @@ export class ConnectionManager extends EventEmitter {
 	protected disposables: vscode.Disposable[] = [];
 	protected isDisposing: boolean = false;
 
-	// Services list cache
+	// Services list cache (summaries + the deduplicated icon table that
+	// each summary's `icon` id points into — cached together because the
+	// ids are only meaningful within the response they arrived in)
 	private cachedServices: Record<string, unknown> | null = null;
+	private cachedIcons: Record<string, string> | null = null;
 	private cachedServicesError: string | null = null;
 	private servicesRefresh = new GenerationOwnedOperationSlot();
 
@@ -186,24 +189,28 @@ export class ConnectionManager extends EventEmitter {
 				// Ignore events from other modes (e.g., docker event while connected to local).
 				if (!this.connectedMode || event.mode !== this.connectedMode) return;
 
-				const generation = this.invalidateConnectionAttempts();
-				this.connectedMode = undefined;
-				this.engineUri = undefined;
-				this.client?.disconnect().catch(() => { /* best effort */ });
-				if (event.phase === 'error') {
-					this.updateConnectionStatus({
-						state: ConnectionState.DISCONNECTED,
-						lastError: event.error ?? event.message,
-						progressLogLine: undefined,
-					});
-				} else {
-					this.updateConnectionStatus({
-						state: ConnectionState.DISCONNECTED,
-						progressLogLine: undefined,
-					});
-				}
-				if (this.isCurrentConnectionGeneration(generation)) {
-					this.emit('shell:disconnected');
+				{
+					// Invalidate BEFORE tearing down so an in-flight connect attempt
+					// cannot publish through the connection this event just retired.
+					const generation = this.invalidateConnectionAttempts();
+					this.connectedMode = undefined;
+					this.engineUri = undefined;
+					this.client?.disconnect().catch(() => { /* best effort */ });
+					if (event.phase === 'error') {
+						this.updateConnectionStatus({
+							state: ConnectionState.DISCONNECTED,
+							lastError: event.error ?? event.message,
+							progressLogLine: undefined,
+						});
+					} else {
+						this.updateConnectionStatus({
+							state: ConnectionState.DISCONNECTED,
+							progressLogLine: undefined,
+						});
+					}
+					if (this.isCurrentConnectionGeneration(generation)) {
+						this.emit('shell:disconnected');
+					}
 				}
 				break;
 
@@ -226,6 +233,7 @@ export class ConnectionManager extends EventEmitter {
 				this.connectedMode = event.mode;
 				this.engineUri = event.uri;
 				this.connectToEngine(event.uri, generation).catch((err) => {
+					// A superseded/cancelled attempt must not publish its failure.
 					if (!this.isCurrentConnectionAttempt(generation) || err instanceof LoginAttemptCancelledError) return;
 					const msg = err instanceof Error ? err.message : String(err);
 					this.logger.output(`${icons.error} Failed to connect to engine: ${msg}`);
@@ -255,24 +263,13 @@ export class ConnectionManager extends EventEmitter {
 		if (!this.isCurrentConnectionAttempt(generation)) return;
 		this.updateConnectionStatus({ state: ConnectionState.CONNECTING, progressMessage: 'Connecting...' });
 
-		const groupConfig = this.getGroupConfig();
-		const mode = groupConfig.connectionMode ?? 'local';
+		const mode = this.getGroupConfig().connectionMode ?? 'local';
+		const auth = await this.resolveAuthCredential();
+		// Credential resolution awaited — a newer attempt may have started since.
+		if (!this.isCurrentConnectionAttempt(generation)) return;
 
-		// Resolve auth credential — each mode has different auth requirements
-		let auth: string;
-		if (connectionModeUsesOAuth(mode)) {
-			const cloudAuth = CloudAuthProvider.getInstance();
-			const token = await cloudAuth.getToken();
-			if (!this.isCurrentConnectionAttempt(generation)) return;
-			if (!token) throw new Error('Please sign in to RocketRide Cloud to connect.');
-			auth = token;
-		} else if (connectionModeRequiresApiKey(mode) && groupConfig.apiKey) {
-			auth = groupConfig.apiKey;
-		} else {
-			// Local, service, docker: use default key
-			auth = groupConfig.apiKey || 'MYAPIKEY';
-		}
-
+		// Hand callback publication rights to this attempt immediately before
+		// the SDK call so stale onConnected/onDisconnected callbacks go silent.
 		if (!this.connectionGeneration.activateAttemptCallbacks(generation)) return;
 		await this.client.connect(auth, { uri });
 		if (!this.isCurrentConnectionAttempt(generation)) return;
@@ -284,21 +281,53 @@ export class ConnectionManager extends EventEmitter {
 		await this.syncEnvFile(mode, auth, generation);
 	}
 
+	/** Start a new connection attempt generation (invalidates older attempts). */
 	private beginConnectionAttempt(): number {
 		return this.connectionGeneration.beginAttempt();
 	}
 
+	/** Invalidate ALL attempts (disconnect/dispose/config change paths). */
 	private invalidateConnectionAttempts(): number {
 		return this.connectionGeneration.invalidateAttempts();
 	}
 
+	/** True while `generation` is still the active connection attempt. */
 	private isCurrentConnectionAttempt(generation: number | undefined): boolean {
 		return this.connectionGeneration.isCurrentAttempt(generation)
 			&& !this.isDisposing;
 	}
 
+	/** True while `generation` is the newest lifecycle generation of any kind. */
 	private isCurrentConnectionGeneration(generation: number): boolean {
 		return this.connectionGeneration.isCurrentGeneration(generation) && !this.isDisposing;
+	}
+
+	/**
+	 * Resolves this connection's auth credential — the OAuth token for cloud
+	 * modes, the configured API key otherwise (default key for self-hosted).
+	 * This is the SAME credential connect() presents to the engine, so it
+	 * also serves as the session handoff for embedded previews: the App
+	 * Builder passes it into the preview shell so apps that require
+	 * authentication render with a real signed-in session + live connection.
+	 *
+	 * @throws If cloud mode and no token is available (user must sign in).
+	 */
+	public async resolveAuthCredential(): Promise<string> {
+		const groupConfig = this.getGroupConfig();
+		const mode = groupConfig.connectionMode ?? 'local';
+
+		// Resolve auth credential — each mode has different auth requirements
+		if (connectionModeUsesOAuth(mode)) {
+			const cloudAuth = CloudAuthProvider.getInstance();
+			const token = await cloudAuth.getToken();
+			if (!token) throw new Error('Please sign in to RocketRide Cloud to connect.');
+			return token;
+		}
+		if (connectionModeRequiresApiKey(mode) && groupConfig.apiKey) {
+			return groupConfig.apiKey;
+		}
+		// Local, service, docker: use default key
+		return groupConfig.apiKey || 'MYAPIKEY';
 	}
 
 	/**
@@ -317,6 +346,9 @@ export class ConnectionManager extends EventEmitter {
 		apiKey: string,
 		generation: number,
 	): Promise<void> {
+		// Serialized per generation: an older sync either observes lost
+		// ownership before writing, or finishes before a newer one begins —
+		// so two reconnects can never interleave .env reads and writes.
 		await this.connectionGeneration.serializeAttemptPublication(generation, async (isCurrent) => {
 			try {
 				if (!isCurrent()) return;
@@ -387,6 +419,8 @@ export class ConnectionManager extends EventEmitter {
 			return;
 		}
 
+		// A config change retires every older connection lifecycle first, so a
+		// half-finished connect can't publish into the reconfigured connection.
 		const generation = this.invalidateConnectionAttempts();
 		this.logger.output(`${icons.info} Configuration changed, reconnecting...`);
 		await this.updateCredentialsStatus(generation);
@@ -458,6 +492,7 @@ export class ConnectionManager extends EventEmitter {
 		await this.initializeForGeneration();
 	}
 
+	/** initialize() body, skippable when a newer generation took over mid-await. */
 	private async initializeForGeneration(generation?: number): Promise<void> {
 		if (this.isDisposing) return;
 		if (generation !== undefined && !this.isCurrentConnectionGeneration(generation)) return;
@@ -615,6 +650,8 @@ export class ConnectionManager extends EventEmitter {
 			try {
 				await this.connectToEngine(this.engineUri, generation);
 			} catch (error) {
+				// Swallow failures of a superseded/cancelled attempt — its
+				// replacement owns error reporting for the live connection.
 				if (!this.isCurrentConnectionAttempt(generation) || error instanceof LoginAttemptCancelledError) return;
 				throw error;
 			}
@@ -631,9 +668,17 @@ export class ConnectionManager extends EventEmitter {
 		await this.disconnectForGeneration(generation);
 	}
 
+	/**
+	 * disconnect() body bound to a generation: publishes the DISCONNECTED state
+	 * and event only while that generation is still the newest.
+	 *
+	 * @returns True when this generation still owned the lifecycle at the end.
+	 */
 	private async disconnectForGeneration(generation: number): Promise<boolean> {
 		this.logger.output(`${icons.warning} Disconnecting WebSocket...`);
 
+		// Always disconnect (not just when isConnected()) so a mid-handshake
+		// SDK operation is cancelled rather than left to complete stale.
 		if (this.client) {
 			await this.client.disconnect();
 		}
@@ -761,26 +806,28 @@ export class ConnectionManager extends EventEmitter {
 	// SERVICES CACHE
 	// =========================================================================
 
-	public getCachedServices(): { services: Record<string, unknown>; servicesError?: string } {
+	public getCachedServices(): { services: Record<string, unknown>; icons: Record<string, string>; servicesError?: string } {
 		if (!this.isConnected()) {
-			return { services: {}, servicesError: 'Not connected' };
+			return { services: {}, icons: {}, servicesError: 'Not connected' };
 		}
 		if (this.cachedServicesError) {
-			return { services: this.cachedServices ?? {}, servicesError: this.cachedServicesError };
+			return { services: this.cachedServices ?? {}, icons: this.cachedIcons ?? {}, servicesError: this.cachedServicesError };
 		}
-		return { services: this.cachedServices ?? {} };
+		return { services: this.cachedServices ?? {}, icons: this.cachedIcons ?? {} };
 	}
 
 	public async refreshServices(
 		generation = this.connectionGeneration.callbackGeneration,
 	): Promise<void> {
+		// Ownership: publish only while `generation` still owns callbacks and
+		// the connection is live — a stale refresh never touches the cache.
 		const ownsGeneration = () => this.connectionGeneration.isCurrentCallback(generation)
 			&& !this.isDisposing;
 		const isCurrent = () => ownsGeneration() && this.isConnected();
 		if (!ownsGeneration()) return;
 		if (!this.isConnected() || !this.client) {
 			this.clearServicesCache();
-			this.emit('shell:servicesUpdated', { services: {}, servicesError: 'Not connected' });
+			this.emit('shell:servicesUpdated', { services: {}, icons: {}, servicesError: 'Not connected' });
 			return;
 		}
 
@@ -791,23 +838,27 @@ export class ConnectionManager extends EventEmitter {
 			(outcome) => {
 				if (outcome.status === 'fulfilled') {
 					const services: Record<string, unknown> = outcome.value.services ?? {};
+					const icons: Record<string, string> = (outcome.value as { icons?: Record<string, string> }).icons ?? {};
 					this.cachedServices = services;
+					this.cachedIcons = icons;
 					this.cachedServicesError = null;
-					this.emit('shell:servicesUpdated', { services, servicesError: undefined });
+					this.emit('shell:servicesUpdated', { services, icons, servicesError: undefined });
 					return;
 				}
 				const msg = outcome.reason instanceof Error
 					? outcome.reason.message
 					: String(outcome.reason);
 				this.cachedServices = null;
+				this.cachedIcons = null;
 				this.cachedServicesError = msg;
-				this.emit('shell:servicesUpdated', { services: {}, servicesError: msg });
+				this.emit('shell:servicesUpdated', { services: {}, icons: {}, servicesError: msg });
 			},
 		);
 	}
 
 	protected clearServicesCache(): void {
 		this.cachedServices = null;
+		this.cachedIcons = null;
 		this.cachedServicesError = null;
 		this.servicesRefresh.clear();
 	}
@@ -852,6 +903,7 @@ export class ConnectionManager extends EventEmitter {
 			hasCredentials = true;
 		}
 
+		// The awaits above can lose the lifecycle to a newer generation.
 		if (generation !== undefined && !this.isCurrentConnectionGeneration(generation)) return;
 		this.updateConnectionStatus({ hasCredentials });
 	}
@@ -862,6 +914,7 @@ export class ConnectionManager extends EventEmitter {
 
 	public async dispose(): Promise<void> {
 		this.isDisposing = true;
+		// Retire every in-flight lifecycle so late completions go silent.
 		const generation = this.invalidateConnectionAttempts();
 
 		if (this.configChangeTimeout) {
@@ -874,6 +927,8 @@ export class ConnectionManager extends EventEmitter {
 			this.engineStatusHandler = undefined;
 		}
 
+		// Always disconnect (not just when isConnected()) so a mid-handshake
+		// SDK operation is cancelled rather than left to complete stale.
 		if (this.client) {
 			await this.client.disconnect();
 		}

@@ -64,7 +64,7 @@ The shell mounts two components from your app:
 
 You build a shell app in your own repository: `npm install rocketride`, export
 an `AppDescriptor` through Module Federation, and deploy the bundle to any
-shell-ui host.
+shell host.
 
 ### 1. Create a new project
 
@@ -328,7 +328,7 @@ interface ShellBrandingConfig {
 3. Manifest `icon` URL (from `package.json`)
 4. 2-letter monogram fallback
 
-Pre-built theme-aware SVGs are available in `shared-ui/assets/rocketride/`:
+Pre-built theme-aware SVGs are available in `shared/assets/rocketride/`:
 - `rocketride-dark.svg`: light body (`#E0DDF0`) for dark backgrounds
 - `rocketride-light.svg`: dark body (`#1E1A34`) for light backgrounds
 - `rocketride.svg`: `currentColor` body, CSS-controlled

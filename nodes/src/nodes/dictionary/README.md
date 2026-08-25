@@ -4,7 +4,7 @@ A RocketRide text-processing node that asks a connected LLM to turn text or tabl
 
 ## What it does
 
-The node accepts text or table content and sends each incoming chunk to its required LLM connection with instructions to return a JSON array of definitions. It writes one document for every returned definition; each document contains the JSON-serialized definition and is marked as non-table content. Use it instead of `extract_data` when the output should be a reusable vocabulary of terms and descriptions, not rows with a predefined schema.
+The node accepts text or table content and sends each incoming chunk to its required LLM connection with a structured prompt (`expectJson: true`) and instructions to return a single JSON array of definitions. It writes one document for every returned definition; each document contains the JSON-serialized definition and is marked as non-table content. Use it instead of `extract_data` when the output should be a reusable vocabulary of terms and descriptions, not rows with a predefined schema.
 
 ## Connections
 
@@ -26,7 +26,11 @@ This node has no local configuration fields. Connect an LLM and supply text on i
 
 ### Definition output
 
-The built-in prompt asks the LLM to include company-specific language, acronyms, and terms whose in-company meaning differs from common usage. It always requests one JSON array, so a malformed or non-array LLM response cannot be converted into definition documents by this node. The example shape used by the prompt is `{\"term\": \"...\", \"description\": \"...\"}`, but the node serializes each returned object without imposing additional fields.
+The built-in prompt asks the LLM to include company-specific language, acronyms, and terms whose in-company meaning differs from common usage — including terms that are ambiguous. It always requests one JSON array: if the LLM response is valid JSON but is not an array, the node raises a descriptive `ValueError` before emitting any documents, and invalid JSON continues to surface the response parsing error. The example shape used by the prompt is `{\"term\": \"...\", \"description\": \"...\"}`, but the node serializes each returned object without imposing additional fields.
+
+### Dependencies
+
+The node has no Python package requirements of its own: it relies entirely on the separately installed AI module.
 
 ### Chunk metadata
 

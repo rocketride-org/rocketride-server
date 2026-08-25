@@ -116,6 +116,12 @@ The table lane accumulates a row for every selected frame and writes one
 Markdown table only when the video closes and at least one row was collected.
 Its columns are `Frame`, `Seconds`, and `Time Stamp`.
 
+Each frame document is also given a human-readable `metadata.name` of the form
+`<video-stem>.frame<N>.png`, where `<video-stem>` is the source video's file
+name without extension and `N` counts the object's frames — the same number as
+`chunkId`, so an object carrying several videos is numbered straight through
+and no two frames share a name. Omitted when the source has no name.
+
 ## Upstream docs
 
 - [Pillow documentation](https://pillow.readthedocs.io/)

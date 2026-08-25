@@ -1,6 +1,6 @@
-# Building Shell-UI Apps in the Monorepo
+# Building Shell Apps in the Monorepo
 
-First-party shell apps built inside the `saas` workspace, alongside `shell-ui`
+First-party shell apps built inside the `saas` workspace, alongside `shell`
 and `shared`.
 
 The app API — `AppManifest`, `AppDescriptor`, shell props, screen zones, hooks,
@@ -15,13 +15,13 @@ and that difference is what this page covers.
 
 | | Standalone | Monorepo |
 |---|---|---|
-| **Import types from** | `rocketride/app-sdk` | `shell-ui` |
-| **Install** | `npm install rocketride` | `shell-ui: workspace:*` |
-| **MF shared** | `rocketride/app-sdk` | `shell-ui` + `shared` |
+| **Import types from** | `rocketride/app-sdk` | `shell` (surface) + `rocketride` (SDK) |
+| **Install** | `npm install rocketride` | workspace link (`shell` override) + `rocketride: workspace:*` |
+| **MF shared** | `rocketride/app-sdk` | `shell` + `rocketride` |
 | **Build** | `npx rsbuild build` | `./builder my-app:build` |
 | **Deploy** | Upload `dist/` to CDN | Builder copies to server static |
 
-Monorepo apps import types from `shell-ui` rather than `rocketride/app-sdk`; the
+Monorepo apps import types from `shell` rather than `rocketride/app-sdk`; the
 type names, hooks, and functions are identical.
 
 ---
@@ -59,10 +59,10 @@ apps/my-app/
   },
   "dependencies": {
     "@module-federation/rsbuild-plugin": "^2.5.1",
-    "shell-ui": "workspace:*",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
-    "shared": "workspace:*"
+    "rocketride": "workspace:*",
+    "shell": "file:../../.rocketride/shell/shell.tgz"
   },
   "devDependencies": {
     "@rsbuild/core": "~2.0.11",
@@ -72,16 +72,24 @@ apps/my-app/
 }
 ```
 
+The `shell` spec stays in the portable `file:` form so the app can be lifted
+into its own repo unchanged; inside the monorepo, the workspace root's
+`overrides: { shell: 'workspace:*' }` resolves it to the in-tree platform
+package instead — a plain link, so fresh clones and CI install without any
+prebuilt artifact. `rocketride` is the SDK door: import protocol classes,
+enums, constants, and API types from it. Client *instances* still come only
+from `useShellConnection()` — the shell owns the connection.
+
 `rsbuild.config.ts` imports `@rsbuild/core` and `@rsbuild/plugin-react` directly,
 so both have to be declared here — pnpm's isolated `node_modules` will not resolve
 them from another workspace package. Match the versions the existing apps pin
 (`apps/hello-ui/package.json` is the reference); a different major of
 `@rsbuild/core` will not share a Module Federation runtime with the shell.
 
-### 3. AppDescriptor: import from `shell-ui`
+### 3. AppDescriptor: import from `shell`
 
 ```typescript
-import type { AppDescriptor } from 'shell-ui';
+import type { AppDescriptor } from 'shell';
 import MyApp from './MyApp';
 import MySidebar from './MySidebar';
 
@@ -101,8 +109,8 @@ export default MY_APP;
 ### 4. App and Sidebar: same as standalone
 
 ```typescript
-// MyApp.tsx — import from 'shell-ui' instead of 'rocketride/app-sdk'
-import type { ShellAppProps } from 'shell-ui';
+// MyApp.tsx — import from 'shell' instead of 'rocketride/app-sdk'
+import type { ShellAppProps } from 'shell';
 ```
 
 ### 5. Add to workspace and build
@@ -149,7 +157,9 @@ module.exports = {
 
 ### rsbuild.config.ts
 
-This adds `shared` to the MF config and uses path aliases:
+This consumes `shell` and `rocketride` as host-provided MF singletons
+(`import: false` — nothing bundled; the `shared` library is static and needs no
+share entry):
 
 ```typescript
 import fs from 'node:fs';
@@ -172,17 +182,13 @@ export default defineConfig(() => ({
       shared: {
         react:       { singleton: true, eager: true, requiredVersion: '^18.2.0' },
         'react-dom': { singleton: true, eager: true, requiredVersion: '^18.2.0' },
-        'shell-ui':  { singleton: true, requiredVersion: false },
-        'shared':    { singleton: true, requiredVersion: false },
+        // import: false — the host always provides these at runtime, so no
+        // fallback copy is bundled into the remote.
+        'shell':      { singleton: true, requiredVersion: false, import: false },
+        'rocketride': { singleton: true, requiredVersion: false, import: false },
       },
     }),
   ],
-  resolve: {
-    alias: {
-      shared: path.resolve(__dirname, '../../rocketride-server/packages/shared-ui/src'),
-      'shell-ui': path.resolve(__dirname, '../../rocketride-server/apps/shell-ui/src/index.ts'),
-    },
-  },
   server: { port: 3014 },
   source: { entry: { index: './src/index.ts' } },
   output: {

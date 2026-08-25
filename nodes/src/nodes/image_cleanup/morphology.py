@@ -27,15 +27,15 @@ import numpy as np
 
 def morph_image(png_bytes: bytes) -> bytes:
     """
-    Perform morphological closing to remove small holes and noise in the binary JPEG image (in bytes).
+    Perform morphological closing to remove small holes and noise in the binary PNG image.
 
     Args:
-        png_bytes (bytes): The input binary png image as bytes.
+        png_bytes (bytes): The input binary PNG image as bytes.
 
     Returns:
-        bytes: The cleaned image encoded as png bytes.
+        bytes: The cleaned image encoded as PNG bytes.
     """
-    # Decode the JPEG bytes into a grayscale image
+    # Decode the PNG bytes into a grayscale image
     image = cv2.imdecode(np.frombuffer(png_bytes, np.uint8), cv2.IMREAD_GRAYSCALE)
 
     # Create a small 2x2 square kernel for morphological operation
@@ -46,7 +46,7 @@ def morph_image(png_bytes: bytes) -> bytes:
     # It helps close small holes (e.g., in text characters like 'o') and remove noise.
     cleaned = cv2.morphologyEx(image, cv2.MORPH_CLOSE, kernel)
 
-    # Encode the cleaned image back to png
+    # Encode the cleaned image back to PNG
     success, output_bytes = cv2.imencode('.png', cleaned)
     if not success:
         raise ValueError('Failed to encode morph image to PNG.')

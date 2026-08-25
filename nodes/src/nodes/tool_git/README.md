@@ -101,8 +101,17 @@ passphrase. Secret fields are stored as secure configuration fields.
 
 `write_file` and `stage` reject traversal and `.git` paths, but a local configured
 repository is otherwise writable once read-only mode is disabled. Use a temporary clone or a
-sandboxed working copy when an agent should not alter the original checkout. Merge conflicts
-are aborted and reset to HEAD.
+sandboxed working copy when an agent should not alter the original checkout.
+
+### Merge safety
+
+`merge` first checks whether the requested branch is already incorporated into the current
+branch; that read-only check succeeds even when the repository contains local changes. If the
+merge would change the repository, the index and working tree must be clean — no staged,
+unstaged, or untracked changes — so commit, stash, or remove them before retrying. When a
+merge starts from a clean repository and encounters conflicts, the node aborts it and restores
+the index and working tree to the original `HEAD`; because the clean-worktree check runs
+before the merge begins, conflict cleanup cannot discard pre-existing local work.
 
 ## Upstream docs
 
@@ -178,7 +187,7 @@ freshly added node can only inspect a repository until you turn read-only mode o
 | `branch_create` | Create a new branch, optionally from a specific ref. |
 | `checkout` | Check out an existing local branch. |
 | `branch_delete` | Delete a branch. Normal deletion is always allowed. Force deletion (force=true) is blocked when safeMode=true. |
-| `merge` | Merge a branch into the current branch. Fast-forwards if possible, otherwise creates a merge commit. Raises on conflicts. |
+| `merge` | Merge a branch into the current branch. A merge that would change the repository requires a clean working tree. Fast-forwards if possible, otherwise creates a merge commit. Raises on conflicts. |
 | `fetch` | Fetch updates from a remote without merging. |
 | `pull` | Fetch from a remote and fast-forward merge the current branch. |
 | `push` | Push the current (or specified) branch to a remote. Force-push is blocked unless safeMode=false. |
@@ -269,6 +278,19 @@ Blocked tools: `clone`, `init`, `write_file`, `stage`, `commit`, `stash` (op `pu
 Always allowed: `status`, `log`, `show`, `diff`, `blame`, `file_at`, `branch_list`, `grep`, `ls_files`, and `stash` with `op: "list"`.
 
 Set `readOnlyMode: false` in the node config to allow write operations (subject to `safeMode`).
+
+---
+
+### Merge safety
+
+`merge` first checks whether the requested branch is already incorporated into the current
+branch. That read-only check succeeds even when the repository contains local changes. If the
+merge would change the repository, the index and working tree must be clean: no staged,
+unstaged, or untracked changes. Commit, stash, or remove those changes before retrying.
+
+When a merge starts from a clean repository and encounters conflicts, the node aborts it and
+restores the index and working tree to the original `HEAD`. Because the clean-worktree check
+runs before the merge begins, conflict cleanup cannot discard pre-existing local work.
 
 ---
 

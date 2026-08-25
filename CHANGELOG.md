@@ -5,10 +5,419 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]: since 2026-06-08
+## [Unreleased]
+
+<!-- Everything below ships in the next release. There is deliberately no
+     [3.4.0] section here: that release was cut on `stage` (#1654) and then
+     cancelled, so no 3.4.0 was ever published. Its notes are folded in
+     below rather than left under a version header that would claim a
+     release that does not exist. -->
+
+### Added
+- **ai**: every subprocess exposes /task/data via a shared web server (#912)
+- **analytics**: shared, transport-agnostic telemetry core (loose report + app) (#1523)
+- **anonymize**: configurable entity types + token redaction style (#1447)
+- **ci**: migrate Discord notifier workflows to forum channels (tags + auto-archive) (#1510)
+- **ci**: on-demand + monthly multi-OS compile/test matrix (#1537)
+- **ci**: keep Discord forum tags live (re-apply on state/label change via bot) (#1722)
+- **database**: Sequelize ORM over pipes + server-side DB transactions (#1467)
+- **deploy-2**: teams-as-environments deploy, owner-scoped task identity, push-driven surfaces (#1764)
+- **events-ui**: real-time DAP event monitor micro-frontend (#1484)
+- **explorer**: File Explorer app with rich media viewers, Monaco editor, hex viewer, and Open with… menu (#1356)
+- **llm**: virtualize provider interface behind a normalized Adapter (#1683)
+- **n8n-nodes**: add n8n-nodes-rocketride community node package (#1255)
+- **nodes**: add answer_documents node to bridge answers into documents (#1506)
+- **nodes**: add cognee node (#1501)
+- **nodes**: add currency_convert_explicit node (#1497)
+- **nodes**: add extract_facts node — document-context + cell-by-cell reader + validator (#1426) (#1545)
+- **nodes**: add n8n workflow-automation node (#1231)
+- **nodes**: add tool_oura Oura Ring connector (#1625)
+- **nodes**: add tool_slack — Slack agent-tool node (post messages, list channels, read history) (#1575)
+- **nodes**: tool_filesystem pipeline-sink lanes (#1651)
+- **nodes**: tool_google_workspace — shared Google client + gmail, sheets, docs, calendar, drive services (#1570)
+- **nodes**: add Guild.ai tool node (#1689)
+- **nodes**: add tool_pipedrive CRM tool node (#1687)
+- **nodes**: add LaserData memory tool node (tool_laserdata_memory) (#1760)
+- **nodes**: add a FalkorDB URL connection profile to graph_falkordb (#1786)
+- **nodes**: add schema_validate node (#1520)
+- **nodes**: add normalize_facts node (#1518)
+- **nodes, ai**: add graph base class; make FalkorDB a real graph node (#1584)
+- **nodes, server**: migrate neo4j onto the graph base class (#1611)
+- **nodes,ai**: RocketRide cloud DB nodes — sql, vector, graph (#1713)
+- **nodes,vscode**: add Gmail tool node + Google user-OAuth broker (RR-1055, RR-1142) (#1334)
+- **run-logging**: task-event continuum, DVR sessions, permanent trace identity (#1661)
+- **server**: replace Breakpad with Crashpad crash reporting (#1476) (#1524)
+- **server, nodes**: add json lane (#1297)
+- **shared-ui**: pipeline TTL settings — toolbar cog + modal, VS Code support (RR-309) (#1521)
+- **status**: server-computed run report card, pipe-idle analytics, and DVR transport rework (#1678)
+- **storage**: joined filesystem, in-store authorization, task-file identity, and rocketlib.getTask (#1686)
+- **test-ui**: stress/chaos testing app for RocketRide backend (#1462)
+- **ui**: Tabulator DataGrid + record-panel standard, unified usePrefs, shell-api v1 freeze (#1632)
+- **ui**: UI consistency program: unify all apps on shared archetypes, components, and a versioned shell contract (#1540)
+- add HydraDB database node (db_hydradb) (#1499)
+- media stream descriptors + end-to-end source provenance (#1525)
+
+### Fixed
+- **agent**: optional require_tool_call runtime fabrication guard (#1490)
+- **ai**: install test deps via depends() so engine constraints apply (#1466) (#1471)
+- **ai**: migrate GPU import guard to find_spec/exec_module (Python 3.12+) (#1460)
+- **ai**: stop Surya `languages` from splitting model identity (#1749)
+- **ai**: keep GLiNER inference params out of model identity (#1750)
+- **ai**: send Whisper `language` per request instead of at load (#1751)
+- **auth**: register /auth/vscode/google outside standardEndpoints gate (#1543)
+- **auth**: log why has_permission denies instead of swallowing silently (#1670)
+- **build**: compare content, not mtime, when sync file sizes match (#1477) (#1567)
+- **build**: linux build improvement (#1473)
+- **build**: make Breakpad symbol generation non-fatal (#1595) (#1596)
+- **check-externals**: disable NLTK's CWE-427 import guard for the import checks (#1783)
+- **chroma**: validate server version and surface silent index failures (#1494)
+- **ci**: read full marker body in Discord issue/PR notifiers (#1530)
+- **client**: make connection lifecycle generation-safe (#1668)
+- **depends**: pin bootstrap tools and pydantic to stop downgrade churn (#1536)
+- **deps**: restore a resolvable onnxruntime pin — 1.20.1 is gone from PyPI (#1725)
+- **docs**: normalize Discord invite links to a single code (#1746)
+- **docs**: unblock docs deploys broken by tool_google_workspace's docs/ variant dir (#1757)
+- **endpoints**: unique stable per-pipe endpoint URLs ({host}/{type}/{project_id}/{source}) (#1557)
+- **explorer-ui**: correct hex viewer virtual scrolling for large files (#1633)
+- **llm_anthropic**: disable extended thinking at the node as an interim stop-gap (#1681)
+- **nodes**: accept documents input lane in extract_data (#1504)
+- **nodes**: friendlier chroma port + splitter-profile config (RR-1416) (#1496)
+- **nodes**: handle Windows MAX_PATH in Python output nodes (#1546)
+- **nodes**: reclassify FalkorDB as database, not store (classType) (#1580)
+- **nodes**: render Prompt node instructions as multi-line textarea (#1516) (#1564)
+- **nodes**: simplify n8n configuration UX (#1588)
+- **nodes**: warn that parse/llamaparse are not provenance-preserving (RR-1406) (#1507)
+- **nodes**: ocr tests (#1807)
+- **nodes**: gate currency_convert_explicit on isJson() (#1744)
+- **nodes, test**: scope core-module stubs so they don't leak across tests (#1642)
+- **ocr**: reader stringified the image bytearray instead of decoding it (#1796)
+- **ocr**: route node diagnostics to the engine log instead of discarding them (#1799)
+- **ocr**: documents lane called a non-callable reader and dropped its text (#1801)
+- **server**: bind Python instance.closing() to cb_closing (#1667)
+- **server**: dispatch pipeline lifecycle in topological order, including control sub-pipelines (#1669)
+- **server**: simplify pipeline config validation (#1791)
+- **shared-ui**: persist Google OAuth tokens to node config and stop authType flip (#1548)
+- **shared-ui,dropper-ui**: render media lanes as players instead of dumping base64 into the trace webview (#1619)
+- **shared-ui,vscode**: key OAuth tier scopes by node provider for least privilege (#1579)
+- **shell-ui**: define REACT_APP_OAUTH_ROOT_URL (ReferenceError: process is not defined) (#1486)
+- **shell-ui**: route all auth entries to the Zitadel login page (register via its built-in link) (#1556)
+- **shell-ui**: surface dashboard fetch failures instead of loading forever (#1673)
+- **shell-ui**: distinguish network from auth failures and surface both in a recovery banner (#1553)
+- **storage**: version the /task/fetch claim so pre-upgrade tokens cannot be reinterpreted (#1770)
+- **tool_mcp_client**: normalize zero-argument tool schemas for reasoning-model agents (#1491)
+- **vscode**: auto-populate .env with resolved engine URI/key on connect (#1492)
+- **vscode**: group Deep Agent Subagent under AGENT in node picker (#1505) (#1517)
+- **vscode**: repoint dead example links to awesome-rocketride (#1422) (#1448)
+- **vscode**: wire native file dialog for embedded-app Browse button (#1011) (#1235)
+- **weaviate**: pin grpcio-health-checking<1.80 to match protobuf runtime (#1472)
+- bind engine to explicit 127.0.0.1 instead of the ambiguous localhost name (#1649)
+
+### Changed
+- **nodes**: rename vector stores to store_* and graph-first db to graph_* (#1636)
+- **nodes**: unify vector stores on a shared StoreBase (#1663)
+
+### Documentation
+- **readme**: add RocketRide Cloud links and section (#1444)
+- **readme**: revamp landing README with Cloud + On-Prem sections (#1528)
+- agent/crawler readiness — robots.txt, sitemap lastmod, ship the LLM surface (#1616)
+
+### Internal
+- **lockfile**: use RELEASE_BOT_* App secrets (rocketride-server naming) (#1587)
+- **models**: sync LLM model lists (#987)
+- **nodes**: classify FalkorDB as store (classType ["store","tool"]) (#1474)
+- **os-matrix**: fix the container env so the distro matrix actually runs (#1603)
+- universal node-deps constraints lockfile (CI-built, committed) (#1368)
+
+<!-- ── folded in from the cancelled 3.4.0 cut on `stage` (#1654) ── -->
 
 ### Added
 
+- #429 Add Exa search node and working sample pipeline [FRONTIER TOWER HACKATHON]
+- **agent** — Crewai orchestrator
+- **agent** — Extract task engine and cmd_data from feat/base-ui
+- **agent_deepagent** — Concurrent subagent fan-out via async LangGraph
+- **agent_llamaindex** — Single-agent node using LlamaIndex ReAct loop
+- **aparavi** — AQL node, multi-tab chat app, auth page removal, reconnect fix
+- **audio_tts** — Add Kokoro-only Text To Speech node (RR-411)
+- **billing** — Promo codes — SDK methods, CheckoutModal promo box, host wiring (#1475)
+- **billing-3** — Billing, validation, shell infra, and SDK sync
+- **billing-4** — Profiler visualizations, waitlist gate, subscribe CTA, canvas edge refactor
+- **billing-6** — Admin app support, build tooling, profiler security
+- **build** — Fedora / RHEL-family (dnf) build-from-source support
+- **build** — Upgrade to Rsbuild v2, Module Federation v2, Rslib v0.22
+- **check-externals** — CI framework to detect 3rd-party Python interface drift
+- **checkout** — Round monthly-equivalent price up to whole dollars
+- **ci** — Experimental-release workflow for non-develop builds
+- **cloud_tts** — OpenAI + ElevenLabs cloud TTS on a shared engine (RR-411)
+- **dap** — Add BillingCommands mixin — stub for rrext_account_billing
+- **database** — Add QuestionType.DIALECT for engine discovery
+- **database** — Add QuestionType.EXECUTE for direct SQL/Cypher execution
+- **depends** — Add load_depends() helper
+- **deploy** — Deployment infrastructure
+- **discord** — Add live CI check status and PR state tracking to embed
+- **docs** — Add and update documentation for each node
+- **docs** — Co-located, build-integrated documentation site
+- **docs** — Docs-site star caching & UX robustness (RR-1218)
+- **engine** — Add docker-compose and healthcheck for local development
+- **engine** — Add Kubernetes Helm chart for production deployment
+- **engine** — Load workspace-local nodes via --node_path
+- **engine** — Support for experimental capability
+- **llm** — Add GMI Cloud LLM connector
+- **llm** — Stream model reasoning over the 'thinking' SSE lane
+- **llm_minimax** — Add MiniMax M3 model profile
+- **mcp** — Add MCP Resources and Prompts to RocketRide MCP server
+- **node** — Add ClickHouse database node (db_postgres clone)
+- **node** — Add llm_nebius as a branded preset of llm_openai_api
+- **node** — Add Mem0 long-term memory tool
+- **node** — Add Supabase as a branded preset of db_postgres
+- **node** — Add tool_tavily web-search agent tool
+- **nodes** — Add anomaly detection node for pipeline output monitoring
+- **nodes** — Add ArangoDB db_arango node
+- **nodes** — Add Baidu Qianfan ERNIE LLM node
+- **nodes** — Add Cohere Rerank pipeline node
+- **nodes** — Add DeepL translate + write tool node (tool_deepl)
+- **nodes** — Add Exa semantic web search node for real-time data enrichment
+- **nodes** — Add GitHub tool
+- **nodes** — Add guardrails node for AI safety with input/output validation
+- **nodes** — Add Kimi (Moonshot) LLM node + model-sync registration
+- **nodes** — Add Landing.ai ADE document-extraction nodes (Parse + Extract)
+- **nodes** — Add persistent cross-session memory node with Redis and in-memory backends
+- **nodes** — Add self-contained Git tool node (#654)
+- **nodes** — Add shared Google access/scope resolver (RR-1054)
+- **nodes** — Add Telegram Bot source node
+- **nodes** — Add tool interface for vector DB operations
+- **nodes** — Add v0 by Vercel tool node for UI generation
+- **nodes** — Add video embedding node for semantic search and RAG pipelines
+- **nodes** — Config - add deprecation pathway for deprecated profiles
+- **nodes** — Emit profile token limits in generated tables, fix Anthropic drift (RR-1220)
+- **nodes** — Improve Milvus vector DB node — address all TODOs
+- **nodes** — New node - openai compatible
+- **nodes** — Parallelize nodes:test with pytest-xdist
+- **nodes, ai** — Add graph base class; make FalkorDB a real graph node
+- **phase3** — Capabilities probe, shared connection UI, settings overhaul
+- **profiler** — Replace cProfile with yappi, snakeviz-style UI
+- **registerApp** — Pass requiredPermissions array through to apps.json
+- **shared-ui** — Chat module
+- **shared-ui** — Replace MUI with plain CSS/HTML, add runtime theme system with light/dark JSON tokens
+- **shell** — Branded waitlist button, loading screen, OAuth-loop guard
+- **shell-ui** — Apply saved theme on init to prevent tan loading flash
+- **store** — Handle-based streaming I/O for file store
+- **sync** — Stamp capabilities.reasoning from OpenRouter
+- **task** — Scheduled pipeline deployments (deploy v2)
+- **tool** — Add DAP tool subcommand for direct @tool_function invocation
+- **tool_apify** — Expose Apify Actors as an agent tool
+- **tool_daytona** — Run agent code in an isolated Daytona cloud sandbox
+- **tool_falkordb** — Query FalkorDB graphs with Cypher as an agent tool
+- **tools** — Add automated LLM model sync tool and update provider profiles
+- **tools** — Replace tool declarations @tool_function decorators on IInstanceBase
+- **ui** — Unify sidebar footer, add engine progress log
+- **vision** — 7-node suite — RF-DETR, Mask2Former, DA-V2, BlazeFace + more
+- **vscode** — Add Parameters tab to set pipeline trace level
+- **vscode** — Change play button to show actionable text instead of current state
+- **vscode** — ETag-based conditional requests for GitHub releases API
+- **vscode** — Improve stop button feedback in Pipeline Observability screen
+- **vscode,engine** — Add server monitor
+- Add Bland AI voice call tool node
+- Add MiniMax LLM node
+- Filesystem Tool
+- Pipeline tool
+- Save button in canvas toolbar with dirty-state tracking
+- Shared-ui migration, ProjectView architecture, agent framework overhaul
+- Tool subcommand API, Qdrant fixes, chat provider flexibility
+
+### Fixed
+
+- **agent** — CrewAI reliability — stop, trace, config shape (RR-1363)
+- **ai** — Cap matplotlib<3.11 — 3.11.0 ft2font aborts model server on detection load
+- **ai** — Install test deps via depends() so engine constraints apply
+- **ai** — Map server RR_* env vars to ROCKETRIDE_* for sys.admin pipelines
+- **ai** — Preserve parallel tool-call identity in transcript replay
+- **ai** — Return generic auth errors, log exception details server-side
+- **ai** — Stub matplotlib.pyplot before rfdetr import (ft2font aborts engine)
+- **audio** — Force docopt/num2words to wheels for Windows engine install (#1358)
+- **autoinstall** — Align clang to distro default — unblocks repo-wide Ubuntu CI
+- **autoinstall** — Detect root + cover libc++ runtime in compiler-unix.sh
+- **autoinstall** — Make gnupg apt install non-interactive
+- **billing/shell** — Resilient event bus + plan-aware checkout/upgrade UI
+- **build** — Add missing libuuid vcpkg config template
+- **build** — Fail the build when Linux dependency install fails
+- **build** — Gate server:compile-tests on persisted download state
+- **build** — Include shell-ui and apps.json in release packages, fix restart token
+- **build** — Make Breakpad symbol generation non-fatal
+- **build** — Make cc/c++ symlinking idempotent and fail gracefully without sudo
+- **build** — Restore cmake >= 3.19 version gate
+- **builder** — Prevent deadlock when conditional skips a dedup branch
+- **canvas** — Forward drag events through CreateNodePanel backdrop
+- **canvas** — Improve QuickAdd popup label copy
+- **canvas** — Pipeline render-loop fix + sidebar logo home nav
+- **checkout** — Carry validated promo into preselected-plan checkout (#1604)
+- **checkout** — Open plan CTA links externally in the VS Code extension
+- **chroma** — Exclude soft-deleted documents from default searches
+- **ci** — Add build passthrough for docs-only PRs
+- **ci** — Add id-token: write to nightly docker job to unblock prereleases
+- **ci** — Add id-token: write to release docker job (preemptive fix)
+- **ci** — Allow Nightly workflow_dispatch from stage and main
+- **ci** — Block shell injection in _build.yaml via env-var indirection
+- **ci** — Drop artifact retention to 1 day to fit in 0.5 GB storage cap
+- **ci** — Grant nightly workflow workflows:write to publish prereleases
+- **ci** — Match GraphQL github-actions author login in marker search
+- **ci** — Pin all actions to immutable commit hash
+- **ci** — Pin cryptography at build + UV_LINK_MODE=copy to stop Windows nodes:test _rust.pyd lock
+- **ci** — Prevent duplicate Discord posts on discussion edits
+- **ci** — Push release/prerelease tags via WORKFLOW_PAT (repo+workflow scope)
+- **ci** — Scope nightly.yaml writes to per-job permissions
+- **ci** — Stop Discord discussions notifier from posting blank bot comments
+- **ci** — Stop Discord notifier from posting blank bot comments
+- **ci** — Use literal ROCKETRIDE_APIKEY in Test step instead of secret
+- **ci/cd, nodes** — Full tests
+- **cli** — Catch ValueError from json5.loads, not non-existent json5.JSONError (#1379)
+- **cli** — Implement signal handlers for graceful shutdown (RR-655)
+- **client-python** — Bound truncate_filename for small widths (#1385)
+- **client-python** — Break drain cycle causing RecursionError on disconnect
+- **client-python** — Clean pending DAP request on send failure
+- **client-python** — Remove token='*' from restart command
+- **client-ts** — Preserve user-specified port in normalizeUri
+- **clients** — Pipe errors (Python + TS), SSE rollback, getTaskStatus timeout
+- **connection** — Handle missing hostname in URI parsing
+- **core** — _message_tasks set is accessed from multiple async contexts without a lock
+- **crewai** — Patch async compatibility issues for CrewAI 1.14.x hierarchical crews
+- **dap** — Don't let an oversized subprocess stdout line kill the pipeline task
+- **database** — Bound Neo4j EXECUTE rows, parse allow_execute strictly
+- **database** — Gate EXECUTE path, bound results, validate SDK inputs
+- **deepagent** — Avoid transformers dependency for token counting
+- **depends** — Bootstrap setuptools alongside wheel
+- **depends,whisper** — Unicode encoding + whisper GPU probe in server mode
+- **deps** — Restore libc fields in pnpm-lock.yaml
+- **deps** — Update pnpm-lock.yaml for lucide-react dependency
+- **discord-discussions** — Normalize webhook base, at-most-once POST
+- **docker** — Provision /opt/data and use /version for healthcheck
+- **docs** — Documenation update
+- **docs** — Trigger workflow on README.md changes to keep llms.txt current
+- **docs** — Update source connector docs
+- **easyocr** — Unwrap DataParallel to prevent SIGABRT under concurrent load
+- **engine** — Forward --node_path to task subprocess so workspace-local nodes load
+- **engine** — In-process clients connect to wrong port when engine binds to OS-assigned port
+- **engine** — Pass uv --excludes relative to cwd so spaced install paths resolve
+- **engine** — Pass uv -c constraints relative to cwd so spaced install paths resolve
+- **engine** — Progress sidecar for depends.py, remove dry-run, exclude crewai-cli
+- **git** — Lefthook sequential
+- **guardrails** — Reject '|' in email TLD char class
+- **home-ui** — SaaS pipeline export, host-slot sidebar refactor & shell/canvas polish
+- **icons** — Add auto-currentcolor theming and fix node icon assets
+- **icons** — Preserve original colors for Baidu Qianfan node icon
+- **llm** — Clear correct _chat reference in endGlobal across all LLM nodes
+- **llm_anthropic** — Drop temperature, removed on Opus 4.7+
+- **llm_ollama** — Auto-configure reasoning models (temperature + reasoning_effort)
+- **milvus** — Apply retrieval_score_threshold filter in searchSemantic (#642)
+- **mixins** — Error handling for missing pipeline configuration files
+- **nodes** — Add input validation/sanitization to LLM chat drivers
+- **nodes** — Add rate limiting to tool_http_request node
+- **nodes** — Agent keyword search returns nothing (RR-1363)
+- **nodes** — Bootstrap deps in agent_rocketride and drop transformers from llm_anthropic
+- **nodes** — Correct GMI Cloud Gemini model IDs (#996)
+- **nodes** — Enforce LF for .md files and harden doc generator on Windows
+- **nodes** — Improve error handling in remote node execution
+- **nodes** — Openai - add latest openai models
+- **nodes** — Reclassify FalkorDB as database, not store (classType) [stage]
+- **nodes** — Remove caption + face_detection nodes ahead of release
+- **nodes** — Remove deprecated gemini models
+- **nodes** — Remove llm_vertex, fix llm_gemini key handling, migrate vision nodes to LLMBase
+- **nodes** — Remove redundant full-res image encode/decode round-trips
+- **nodes** — User-configured interval ignored in frame grabber
+- **ocr** — Support img2table 2.0 OCRInstance API rewrite
+- **profiler-ui** — Rehydrate report on mount so split panes keep the chart
+- **qdrant** — Correct score-space mismatch and isDeleted filter
+- **release** — Drop orphaned TWINE_USERNAME/PASSWORD lines inside MCP PyPI run block
+- **release** — Durable CHANGELOG-sourced GitHub Release notes
+- **rocketlib** — Satisfy ruff D204/Q000 in __init__.pyi stub
+- **scripts** — Guard state.js dot-paths against prototype pollution
+- **scripts** — Resolve undefined BUILD_ROOT and DIST_DIR in licenses.js
+- **scripts** — Skip pytest tasks when target dir has no test files
+- **sdk** — Align CreditBalance type with backend camelCase wire shape
+- **security** — Expand sensitive field redaction patterns in VS Code logger
+- **security** — Explicit branch check on nightly workflow_run trigger
+- **security** — Prevent arbitrary module injection via /use endpoint (RCE)
+- **security** — Prevent filter expression injection in Milvus vector store
+- **security** — Require authentication for profiler endpoints and escape HTML output
+- **security** — Restrict environment variable expansion in pipeline configs
+- **security** — Switch SQL safety check from blacklist to whitelist approach
+- **security** — Use pathlib.is_relative_to for path traversal checks
+- **security** — Use secure temporary file creation in task engine
+- **shared-ui** — Explorer empty-state create + annotation double-click editor
+- **shared-ui** — Use named React hook imports in Account panels
+- **shell-ui** — Clear pending app on abandoned OAuth back-nav
+- **shell-ui** — Force prompt=login on web sign-in so users can switch accounts
+- **shell-ui** — Logout flow + guest overlays, monitor branding
+- **shell-ui** — Only show Aparavi AQL Settings in sidebar when the AQL app is installed
+- **shell-ui** — Scope app settings to installed apps; keep global Settings always visible
+- **shell-ui** — Surface MF app load failures instead of hanging on "Loading..."
+- **sidebar** — Wire docs link to browser and update announcements
+- **store/azure** — Allow wildcard (*) in the Azure blob endpoint
+- **store/services** — Respect explicit default in combo field provider resolution
+- **task** — Use singular `organization` in pk_/tk_ account info
+- **template** — Route RAG chat query through embedding before vector store
+- **test** — Fix parallel test server isolation — remove shared ctx.port fallback
+- **test** — Resolve flaky timeouts and hanging in concurrent pipeline tests
+- **test** — Skip HF-downloading embedding nodes in default CI lane (#1120)
+- **test,build** — Unblock test-full pipelines + saas overlay consolidation
+- **test/mocks** — Resolve Python truthiness and isinstance traps
+- **tests** — Make test_tool_v0 mock import-order independent
+- **text-output** — Correct text output handling
+- **tika** — Extract media from standalone files and large archives
+- **tool_git** — Eliminate pytest-xdist race in path-traversal tests
+- **tool_http_request** — Insert path-param values literally (#1369)
+- **ui** — Address PR #1191 CodeRabbit review comments
+- **ui** — Fix icons and coloring for bland, gmi, and trash bin
+- **ui** — Resolve dark mode icon and edge visibility in flow builder (…
+- **vision** — Optimize the vision suite — downscale-for-inference, fast PNG, GPU onnxruntime
+- **vscode** — Add osx python path for Python-EaaS debugger
+- **vscode** — Add Product Hunt badge as PNG — marketplace rejects SVGs
+- **vscode** — Allow GitHub raw host in webview CSP so announcements load
+- **vscode** — Bake dedicated NATIVE Zitadel app client_id for cloud login (#89)
+- **vscode** — Bake production server URL and Stripe key into the VSIX
+- **vscode** — Loop-strip HTML tags in firstSentence to handle nesting
+- **vscode** — Project editor missing status events and stale serverHost
+- **vscode** — Realign view:ready handshake — chat webview blank screen
+- **vscode** — Register canvas-played pipelines in sidebar menu
+- **vscode** — Remove Product Hunt SVG badge from VS Code README — marketplace rejects SVGs
+- **vscode** — Sidebar polish, env variables, autocomplete, and startup fixes
+- **weaviate** — Pin grpcio-health-checking<1.80 to match protobuf runtime
+- **whisper** — Add version guard to GPU probe for ctranslate2 4.7.x + CUDA 12.8
+- **whisper** — Bound version guard to < 4.8 + guard explicit CUDA devices
+- **workflows** — Add retry/backoff to Discord webhook calls
+- Address CodeRabbit review - score assignment and first-chunk aliasing
+- Address PR #1148 CodeRabbit review comments
+- Address PR #1149 CodeRabbit review comments
+- Align client-python requires-python with monorepo target (py310)
+- Guard against falsy-value traps in psycopg2, chromadb, weaviate mocks
+- LLM providers small clean-up
+- MF stability, ModelClient SDK refactor, settings UX, billing, and UI polish
+- Normalize_tool_input function receives list of params to drop
+- Replace mutable default arguments with None
+- SDK connect error callback type
+- Use chunk reference in _processFullTables to resolve chunkId scoping bug
+
+### Changed
+
+- **ai.common** — Consolidate node helpers; drop dead code
+- **database** — Hoist max_execute_rows default to a single constant per module
+- **database** — Reference DEFAULT_MAX_EXECUTE_ROWS in get_data limits
+- **engine, nodes** — Extract duplicate helper from tool nodes
+- **icons** — Move SVGs to node dirs, auto-tint monochromes
+- **nodes** — Ruff format llm_vision_gemini + llm_vision_openai
+- **objstore** — Paginate S3 scan and share a cached scanner client
+- **tools** — Nest `sync_models` under `tools/sync_models/`
+- **vscode** — Restructure engine management with ioControl pattern
+- Migrate llm providers to ai.common.LLMBase
+
+### Maintenance
+
+- 65 chore, 23 docs, 12 CI, 3 test and 55 uncategorised commits are omitted from the list above.
+
+
+### Added
+
+- **`tool_gohighlevel` node**: exposes the GoHighLevel (LeadConnector) v2 REST API to agents as 101 tools across 18 groups (contacts, notes, tasks, opportunities, pipelines, conversations, messages, message sending, calendars, appointments, custom fields, custom values, tags, businesses, locations, users), plus a generic `request` escape hatch. Authenticates with a sub-account Private Integration Token, publishes a 71-tool default group set that keeps outbound message sending opt-in, and can hide every write tool in read-only mode (#1676)
 - **`tool_pipedrive` node**: exposes the Pipedrive CRM REST API v1 to agents — deals, persons, organizations, activities, pipelines, stages, notes, leads, products, fields, files, users, roles, permission sets, teams, goals, filters, webhooks, subscriptions, mail threads, call logs and projects. 256 tools across 24 resource groups, plus a generic `request` tool that reaches any remaining v1 endpoint through the same auth, rate-limit and read-only layer. Because the full surface is larger than an LLM can choose between reliably, `pipedrive.toolGroups` controls which groups are published (default: the eight core CRM groups, 108 tools; `all` publishes everything). Supports personal API tokens and OAuth bearer tokens, company-domain base URLs, offset and cursor pagination, custom fields via an `extra` passthrough, and read-only mode (#1675)
 
 ## [3.3.0] - 2026-06-08
@@ -85,7 +494,7 @@ These changes affect code that imports and calls the Python or TypeScript client
 - **Other task viewer via ProjectWebview**: `PageStatusProvider` completely rewritten. Previously opened a lightweight `StatusWebview` that couldn't show the node graph (nodes squashed at top, no toolbar, missing servicesJson). Now fetches unresolved pipeline via `getTaskToken` + `getTaskPipeline`, creates panel using the full Canvas/ProjectView stack, sends `project:load` with `isReadonly:true`. Falls back to synthesized single-node project if fetch fails. `StatusWebview` deleted (#803)
 - **Readonly canvas**: single `isReadonly` prop replaces two inconsistent lock mechanisms (14-boolean `IFlowFeatures` and partially-implemented `isLocked`). `effectiveLock = isReadonly || internalIsLocked`. Guards added to `addNode()`, `updateNode()`, `deleteNode()`, paste, context-menu, lane click, config panel Save, all previously unguarded. Lock button hidden when `isReadonly` (#803)
 - **Save button in canvas toolbar**: always-visible floppy disk icon with dirty-state tracking; grayed when clean, brand-colored when dirty. `isDirty`/`isNew`/`onSave` threaded through `IFlowProps` → `FlowContainer` → `FlowProvider` → `FlowProjectProvider`. `FlowCanvas` defers ReactFlow render until container has non-zero dimensions via `ResizeObserver`. `canvas:requestSave` calls `document.save()` directly (#678)
-- **Dirty-state save pattern for settings**: card header starts clean (no buttons); on edit, Cancel and Save appear; on save, buttons disappear and "Saved" flashes for 5 seconds then fades; Cancel reverts to last-saved snapshot. Applied to all 5 VS Code settings tabs and shell-ui settings page (#877)
+- **Dirty-state save pattern for settings**: card header starts clean (no buttons); on edit, Cancel and Save appear; on save, buttons disappear and "Saved" flashes for 5 seconds then fades; Cancel reverts to last-saved snapshot. Applied to all 5 VS Code settings tabs and shell settings page (#877)
 - **Play button shows actionable text**: renamed idle label from "Play" to "Run Pipeline". Added STOPPING state with "Stopping..." disabled button to prevent double-clicks. Widened hover expansion for longer label. Smooth CSS transitions with easing functions (#575)
 - **Improved stop button feedback**: Pipeline Observability screen handles `TASK_STATE.STOPPING` with "Stopping..." disabled state and distinct orange styling, preventing duplicate clicks (#549)
 - **Simplified sidebar footer**: replaced popup menu (three redundant gear icons all opening Settings) with flat layout when connection is shared and no cloud account. Documentation and Settings buttons rendered directly, connection status inline, announcements ticker rotates cards every 7 seconds. Full popup preserved for cloud account or independent connections. Panel sash restyled with native `--vscode-sash-hoverBorder` token, widened from 2px to 4px
@@ -99,7 +508,7 @@ These changes affect code that imports and calls the Python or TypeScript client
 
 #### Shell UI (Web Host)
 - **Shell-ui replaces cloud-ui**: new Module Federation host application served by Python `shell` module (`ai.modules.shell`) with public HTTP routes for SPA and all static assets under `/shell/`. Unifies OSS and SaaS into single codebase. Server-side app manifest delivery via `get_public_apps()` / `get_apps_for_user()` on AccountBase. Pre-auth info probe returns public apps for marketplace. Connect response includes authenticated user's full entitled app list (#803)
-- **MUI removal**: replaced Material UI with plain CSS/HTML across entire shared-ui package; runtime theme system with light/dark JSON tokens
+- **MUI removal**: replaced Material UI with plain CSS/HTML across entire shared package; runtime theme system with light/dark JSON tokens
 - **Theme rebrand**: replaced legacy purple (#5900FF) with cyan (#00b9ec) TOKENS palette. Light theme updated to warm-neutral (cream/stone backgrounds instead of pure white) (#803)
 - **Theme flash fix**: `index.html` inline script sets `--rr-bg-default` and body background synchronously before React renders. `createShellConfig` reads saved theme from localStorage instead of always defaulting to rocketride-light, eliminating tan background during 1.5s OAuth code-exchange window (#878)
 - **Chat module**: host-agnostic chat surface following established module pattern (props-in, callbacks-out, `--rr-*` CSS tokens). `ChatView` (MessageList + ChatInputField), `MessageBubble` (user/bot/system/status with markdown), `MarkdownRenderer` (react-markdown + GFM + syntax highlighting + charts), `ChartRenderer` (chart.js with circular-reference guard), `TypingIndicator` (animated bouncing dots), `useChatMessages` hook (message state + sendMessage + monotonic IDs) (#724)
@@ -127,14 +536,14 @@ These changes affect code that imports and calls the Python or TypeScript client
 - **DAP-based cProfile system**: replaced HTTP-endpoint profiler module with per-process cProfile profiling over DAP connections. Any connected client can profile any process (task server, data engine subprocesses, model server). `CProfileManager` singleton with start/stop/status/report/release API. Owner tracking per connection with disconnect cleanup. SDK methods: `cprofileStart`/`cprofileStop`/`cprofileStatus`/`cprofileReport` (TS + Python) with optional `target` parameter for pipeline profiling. New `profiler-ui` Module Federation remote app with `ProfilerView`, `ConnectionManagerView`, and `ProfilerSidebar` (#803)
 
 #### Module Federation
-- **MF stability**: added `runtime: false` to all remote apps (shell-ui provides shared runtime; without it each remote embeds its own runtime copy, causing remoteEntry.js to change on every rebuild and version-mismatch errors during HMR). Added `eager: true` to react/react-dom shared configs (breaks async shared-scope negotiation deadlock where host waits for remote's async chunk and remote waits for host). App loader filters out server-only entries with no `remoteEntry` URL (prevents `normalizeRemote()` crash on `undefined`) (#877)
+- **MF stability**: added `runtime: false` to all remote apps (shell provides shared runtime; without it each remote embeds its own runtime copy, causing remoteEntry.js to change on every rebuild and version-mismatch errors during HMR). Added `eager: true` to react/react-dom shared configs (breaks async shared-scope negotiation deadlock where host waits for remote's async chunk and remote waits for host). App loader filters out server-only entries with no `remoteEntry` URL (prevents `normalizeRemote()` crash on `undefined`) (#877)
 
 #### Engine & Core
 - **Database EXECUTE**: direct SQL/Cypher execution via `QuestionType.EXECUTE` with `client.database.query()` namespace on both SDKs, bypassing LLM translation and safety gating. Gated behind opt-in `allow_execute` config (default off). Results bounded with `fetchmany(max_execute_rows+1)` (default 25000). Neo4j results capped at same limit. `allow_execute` parses strings strictly: only `'1'`, `'true'`, `'yes'`, `'on'` (case-insensitive). EXECUTE output wrapped in try/except; serialized with `default=str`. SDK validates non-empty token/sql before dispatching
 - **Database DIALECT**: `QuestionType.DIALECT` for engine capability discovery. SDK callers can ask which engine a database pipeline is connected to (`DatabaseDialect` enum). `_db_dialect()` abstract method on `DatabaseInstanceBase`. `services.json` now exposes UI-toggleable `allow_execute` boolean
 - **Handle-based streaming I/O**: generic filesystem-style interface (`open`/`read`/`write`/`close`/`delete`/`stat`/`mkdir`/`list_dir`) on `FileStore`, replacing monolithic in-memory buffering. Domain methods become thin convenience wrappers on client SDKs. Supports S3 multipart upload (5 MB buffer), Azure staged blocks (4 MB buffer), and local filesystem. Handles tagged with owning `connection_id` and force-closed on connection termination (#600)
 - **`@tool_function` decorators**: collapsed the two-class pattern (IInstance + ToolsBase driver) into a single class. Any `IInstanceBase` subclass can declare tool entry points with a decorator; the method name becomes the tool ID, decorator carries schema/description, base class `invoke()` dispatches automatically. Eliminates parallel driver classes, factory methods, and boilerplate delegation (#599)
-- **Experimental + Deprecated capability flags**: `DEPRECATED = BIT(15)`, `EXPERIMENTAL = BIT(16)` in `PROTOCOL_CAPS`. Both flags wired through C++ parser, pybind11 bindings, both client SDKs, and shared-ui. Yellow "EXPERIMENTAL" badge rendered on canvas nodes, Add Node slider, and Quick Add popup (#606)
+- **Experimental + Deprecated capability flags**: `DEPRECATED = BIT(15)`, `EXPERIMENTAL = BIT(16)` in `PROTOCOL_CAPS`. Both flags wired through C++ parser, pybind11 bindings, both client SDKs, and shared. Yellow "EXPERIMENTAL" badge rendered on canvas nodes, Add Node slider, and Quick Add popup (#606)
 - **Docker-compose and healthcheck**: `HEALTHCHECK` instruction in `Dockerfile.engine` using curl to `/ping`. `docker-compose.yml` with engine, PostgreSQL+pgvector, Milvus (+ etcd, MinIO), ChromaDB. Override file for dev hot-reloading. All images pinned to specific versions. Security warnings in `.env.example` (#496)
 - **Billing commands mixin**: `BillingCommands` in TaskConn's MRO for `rrext_account_billing`. OSS implementation routes on `arguments.subcommand` with stubs so UI doesn't hang in half-rendered state (#692)
 - **Task engine extraction**: `task_engine` and `cmd_data` extracted as standalone modules (#661)
@@ -206,13 +615,13 @@ These changes affect code that imports and calls the Python or TypeScript client
 - **MCP Resources and Prompts**: `rocketride://` URI resources (pipeline list, server status, node registry) with graceful error handling for disconnected clients. Three prompt templates (analyze-document, chat-with-data, evaluate-pipeline) with required argument validation and message rendering. 44 tests (#541)
 
 #### Agents & Pipelines
-- **Agent framework overhaul**: ProjectView architecture with shared-ui migration (#670)
+- **Agent framework overhaul**: ProjectView architecture with shared migration (#670)
 - **Example pipeline templates** for common AI workflows (#572)
 
 #### Build System
 - **Rsbuild upgrade**: all UI apps upgraded from pinned 0.4/1.1 to ~1.7.5, eliminating Node.js `DEP0180` deprecation warnings in Node 22+. ESM config migration (`.ts` → `.mts`). cmake minimum bumped from 3.14 to 3.19. `@rspack/binding-*` platform pins removed. Service config renamed `config.json` → `service-config.json` with migration (#905)
-- **Build-input caching**: source fingerprinting (`buildInputHash()` + `hasBuildInputChanged()`) skips UI modules whose inputs haven't changed. `appModule.js` factory eliminates ~80 lines of boilerplate per app. Shell-ui tracks own src/ + shared-ui/src + package.json. `--force` flag bypasses caching. Clean actions clear cached hashes (#877)
-- **Builder CLI**: `server:run` action (build + run without shell-ui dev server). `--taskserver=ADDR` replaces `--testport`. `--modelserver` semantics clarified (bare flag = start local, `=ADDR` = use existing). `--simulate-gpus=N` forwarded to model server. `parseServerAddress()` utility (#803, #877)
+- **Build-input caching**: source fingerprinting (`buildInputHash()` + `hasBuildInputChanged()`) skips UI modules whose inputs haven't changed. `appModule.js` factory eliminates ~80 lines of boilerplate per app. Shell-ui tracks own src/ + shared/src + package.json. `--force` flag bypasses caching. Clean actions clear cached hashes (#877)
+- **Builder CLI**: `server:run` action (build + run without shell dev server). `--taskserver=ADDR` replaces `--testport`. `--modelserver` semantics clarified (bare flag = start local, `=ADDR` = use existing). `--simulate-gpus=N` forwarded to model server. `parseServerAddress()` utility (#803, #877)
 
 #### CI/CD
 - **Cosign container signing**: keyless signing of rocketride-engine image via Sigstore + GitHub OIDC (signs by digest). GPG detached-signature step for server tarballs/zips, gated on `GPG_SIGNING_KEY` secret (#798)
@@ -359,7 +768,7 @@ These changes affect code that imports and calls the Python or TypeScript client
   - **Minimatch**: all 4 major lines patched (3→≥3.1.4, 5→≥5.1.8, 9→≥9.0.7, 10→≥10.2.3) (#887)
   - **Core**: undici→≥7.24.0 (6 advisories), lodash→≥4.18.0, lodash-es→≥4.18.0 (#888)
   - handlebars→≥4.7.9, protobufjs→≥7.5.5 (#783)
-- Bumped: aiohttp, pygit2 1.15→1.19, soundfile 0.12→0.13, requests, ws 8.19→8.20, postcss 8.5.6→8.5.10, nltk, spacy, spacy-transformers, cymem, murmurhash, preshed, srsly, thinc, psycopg2-binary, pymysql, opensearch-py, npm-production group (adm-zip, tar, lucide-react, dockerode, web-vitals), shared-ui devDependencies (rollup, @types/react, @types/react-dom), cosign-installer, ossf/scorecard-action, gh-actions group (pnpm/action-setup, github/codeql-action, softprops/action-gh-release, dorny/paths-filter)
+- Bumped: aiohttp, pygit2 1.15→1.19, soundfile 0.12→0.13, requests, ws 8.19→8.20, postcss 8.5.6→8.5.10, nltk, spacy, spacy-transformers, cymem, murmurhash, preshed, srsly, thinc, psycopg2-binary, pymysql, opensearch-py, npm-production group (adm-zip, tar, lucide-react, dockerode, web-vitals), shared devDependencies (rollup, @types/react, @types/react-dom), cosign-installer, ossf/scorecard-action, gh-actions group (pnpm/action-setup, github/codeql-action, softprops/action-gh-release, dorny/paths-filter)
 
 ## [1.0.3] - 2026-03-01
 

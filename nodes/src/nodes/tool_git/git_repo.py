@@ -222,6 +222,29 @@ def _entry_to_dict(entry: pygit2.IndexEntry) -> Dict[str, str]:
     return {'path': entry.path, 'id': str(entry.id)}
 
 
+def _conflict_path(conflict: Any) -> str:
+    """Return a useful path from either pygit2 conflict representation."""
+    if isinstance(conflict, tuple):
+        ancestor, ours, theirs = conflict
+    else:
+        ancestor = getattr(conflict, 'ancestor', None)
+        ours = getattr(conflict, 'our', None) or getattr(conflict, 'ours', None)
+        theirs = getattr(conflict, 'their', None) or getattr(conflict, 'theirs', None)
+    for entry in (ours, theirs, ancestor):
+        if entry is not None and getattr(entry, 'path', None):
+            return entry.path
+    return '<unknown>'
+
+
+def _bounded_paths(paths: List[str], limit: int = 10) -> str:
+    """Return a comma-separated path list capped at *limit* entries."""
+    shown = ', '.join(paths[:limit])
+    remaining = len(paths) - limit
+    if remaining > 0:
+        shown += f' (+{remaining} more)'
+    return shown
+
+
 # ---------------------------------------------------------------------------
 # Main class
 # ---------------------------------------------------------------------------
@@ -818,6 +841,13 @@ class GitRepo:
         if analysis & _GIT_MERGE_ANALYSIS_UP_TO_DATE:
             return {'status': 'up_to_date', 'branch': branch}
 
+        dirty_paths = sorted(repo.status())
+        if dirty_paths:
+            raise GitError(
+                'Merge requires a clean working tree; commit, stash, or remove changes first. '
+                f'Dirty paths: {_bounded_paths(dirty_paths)}'
+            )
+
         if analysis & _GIT_MERGE_ANALYSIS_FASTFORWARD:
             repo.checkout_tree(repo.get(their_branch.target))
             repo.head.set_target(their_branch.target)
@@ -830,15 +860,14 @@ class GitRepo:
         if analysis & _GIT_MERGE_ANALYSIS_NORMAL:
             repo.merge(their_branch.target)
             if repo.index.conflicts:
-                conflicts = [c.our.path for c in repo.index.conflicts if c.our]
-                # Abort cleanly: clear MERGE_HEAD/MERGE_MSG and reset the index
-                # and worktree to HEAD. Leaving the repo half-merged would
-                # silently corrupt the next commit (which would create a
-                # non-merge commit containing conflict markers).
+                conflicts = sorted({_conflict_path(conflict) for conflict in repo.index.conflicts})
+                # The clean-worktree guard above makes this hard reset safe:
+                # only merge artifacts exist to discard. Clear MERGE_HEAD /
+                # MERGE_MSG and restore both the index and worktree to HEAD.
                 repo.state_cleanup()
                 repo.reset(repo.head.target, _GIT_RESET_HARD)
                 raise GitError(
-                    f'Merge conflict in: {", ".join(conflicts)}. '
+                    f'Merge conflict in: {_bounded_paths(conflicts)}. '
                     'Merge aborted (state reset to HEAD); resolve conflicts manually outside the agent and retry.'
                 )
             tree = repo.index.write_tree()

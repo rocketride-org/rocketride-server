@@ -49,6 +49,7 @@ Usage::
 """
 
 import os
+import secrets
 import signal
 import sys
 import threading
@@ -62,6 +63,7 @@ from contextlib import asynccontextmanager, contextmanager
 from typing import Dict, Any, Callable, Awaitable, List, Optional, Union, Tuple
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import HTMLResponse, PlainTextResponse
+from ai.web import oauth_resource
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.routing import compile_path
 from rocketlib import debug
@@ -96,6 +98,39 @@ from ai.logo import LOGO as logo
 def _is_restorable_signal_handler(handler: Any) -> bool:
     """Return True when Python's signal.signal() accepts the saved handler."""
     return handler in (signal.SIG_IGN, signal.SIG_DFL) or callable(handler)
+
+
+def _ensure_signing_key() -> None:
+    """Provision an ephemeral ``RR_SIGNING_KEY`` if the operator set none.
+
+    The key signs FileStore fetch URLs (``FileStore.get_url`` -> ``/task/fetch``)
+    and the JWT is the capability — nothing is re-resolved at serve time — so
+    self-provisioning is deliberately narrow:
+
+    - An operator-provided value always wins (and is never logged).
+    - Provision only when the filesystem storage backend is in use
+      (``RR_STORE_URL`` unset or ``filesystem://``). Cloud backends presign
+      natively and never read the key, and a deployment on another backend
+      that left the key unset keeps signed fetch URLs switched off, as
+      before.
+    - The generated key lives only in this process environment (inherited
+      by task subprocesses): signed URLs stop verifying after a restart and
+      are not valid across replicas — each process mints its own. The log
+      line below is what turns "signed URL 401s on the other replica" into
+      a one-line diagnosis.
+    """
+    if os.environ.get('RR_SIGNING_KEY'):
+        return
+    store_url = os.environ.get('RR_STORE_URL', '').strip()
+    if store_url and not store_url.startswith('filesystem://'):
+        return
+    os.environ['RR_SIGNING_KEY'] = secrets.token_hex(32)
+    debug(
+        'RR_SIGNING_KEY not configured; generated an ephemeral per-process key '
+        '(filesystem storage backend). Signed fetch URLs will not survive a '
+        'restart and are not valid across replicas; set RR_SIGNING_KEY to '
+        'share one key.'
+    )
 
 
 def _build_signal_safe_capture(server: uvicorn.Server):
@@ -310,7 +345,10 @@ class WebServer:
         self.add_route('/version', version, ['GET'], public=True)
         # OAuth bounce endpoints must stay registered even when standardEndpoints
         # is off (cloud/eaas), else the Gmail-tool Google OAuth deep-link 401s.
+        # One route per provider: the bounce derives the editor deep-link path
+        # (/auth/<provider>) from the route's last segment.
         self.add_route('/auth/vscode/google', vscode_oauth_bounce, ['GET'], public=True)
+        self.add_route('/auth/vscode/microsoft', vscode_oauth_bounce, ['GET'], public=True)
 
         # Configure the Uvicorn server immediately upon initialization
         self.server = self._configure_server()
@@ -452,6 +490,14 @@ class WebServer:
                 os.environ['RR_BASE_URL'] = f'{self._base_url_scheme}://{self._base_url_host}:{port}'
             # When port is 0 the OS assigns the real port at bind time;
             # RR_BASE_URL will be set lazily by get_port() once resolved.
+
+        # Self-provision the FileStore URL-signing secret alongside RR_BASE_URL,
+        # so local (filesystem-backend) deployments work with zero configuration.
+        # Task subprocesses inherit it from this environment, the same channel
+        # RR_BASE_URL already relies on. Ephemeral by design: signed URLs die on
+        # restart, which is acceptable at the 1-hour TTL cap. Cloud backends
+        # (S3/Azure) presign natively and never read this.
+        _ensure_signing_key()
 
         # Setup the Uvicorn configuration
         config = uvicorn.Config(
@@ -644,18 +690,35 @@ class WebServer:
             """
             Format authentication error (401 Unauthorized).
 
+            For paths belonging to an OAuth protected resource, the response
+            carries an RFC 6750 `WWW-Authenticate` challenge advertising the
+            RFC 9728 metadata document. That header is how a client which has
+            never been configured (Claude, ChatGPT) discovers which
+            authorization server to authenticate against.
+
             Args:
                 message: Specific error message describing why auth failed
 
             Returns:
                 Response with 401 status and formatted error message
             """
-            return _format_error(
+            result = _format_error(
                 message,
                 error_code=401,
                 text_message=CONST_ACCESS_DENIED_TEXT,
                 html_message=CONST_ACCESS_DENIED_HTML,
             )
+            # _format_error hands back a bare (code, message) tuple when the
+            # caller asked for one; only a real Response can carry headers.
+            if isinstance(result, Response) and oauth_resource.covers_request_path(request.url.path):
+                # RFC 6750 3.1: a challenge for a *missing* credential carries
+                # no error code; only a rejected one does.
+                missing = message == 'No authorization provided'
+                result.headers['WWW-Authenticate'] = oauth_resource.www_authenticate_value(
+                    error=None if missing else 'invalid_token',
+                    description='' if missing else message,
+                )
+            return result
 
         def _format_other_error(message: str, error_code: int = 400) -> Response:
             """
@@ -899,9 +962,36 @@ class WebServer:
 
         Example:
             >>> server.addRoute('/hello', hello_handler, ['GET', 'POST'])
+
+        Raises:
+            ValueError: If any (method, path) pair was already registered.
+                FastAPI accepts duplicates silently and serves whichever
+                route was registered first, so a clash (e.g. a marketing
+                deep link vs. a future API endpoint on the same path) would
+                otherwise shadow one handler without any signal.
         """
+        # (method, path) pairs already registered — FastAPI accepts
+        # duplicates silently, so track them here. Created lazily to keep
+        # the duplicate check self-contained within add_route().
+        if not hasattr(self, '_registered_routes'):
+            self._registered_routes: set = set()
+
+        # Reject duplicate (method, path) registrations before touching the
+        # router so a failed call leaves no partial state behind. Track pairs
+        # seen within this call too, so e.g. methods=['GET', 'get'] is caught.
+        pending_routes: set = set()
+        for method in methods:
+            route_key = (method.upper(), path)
+            if route_key in self._registered_routes or route_key in pending_routes:
+                raise ValueError(f'Route already registered: {method.upper()} {path}')
+            pending_routes.add(route_key)
+
         # Add the route to the FastAPI application's router
         self.app.router.add_api_route(path, routeHandler, methods=methods, deprecated=deprecated)
+
+        # Record the pairs only once the router has accepted them, so a
+        # rejected registration stays retryable.
+        self._registered_routes.update(pending_routes)
 
         # Reset the OpenAPI schema to reflect the new route in documentation
         self.app.openapi_schema = None

@@ -363,18 +363,26 @@
 			"auth_header": "Authorization",
 			"auth_prefix": "Bearer",
 			"smoke_test": "chat",
+			// "qwen-" alone excludes every current model: DashScope names the modern
+			// families qwen3-max, qwen3.6-plus, qwen3.7-max, qwen3.8-max-preview —
+			// all of which start with "qwen3", not "qwen-". Match on the bare vendor
+			// name so new generations are picked up without another config change.
 			"model_filter": {
-				"include_prefixes": ["qwen-"],
+				"include_prefixes": ["qwen"],
 				"exclude_prefixes": [],
-				"exclude_patterns": ["embed", "vision", "audio", "vl"]
+				"exclude_patterns": ["embed", "vision", "audio", "vl", "omni", "ocr", "asr", "tts"]
 			},
-			// qwen-flash and qwen-plus are DashScope short aliases. OpenRouter uses
-			// full HuggingFace IDs (qwen-2.5-7b-instruct etc.) and doesn't list these
-			// aliases — protect them so the OpenRouter fallback won't deprecate them.
+			// qwen-max, qwen-plus, qwen-flash and qwen-turbo are DashScope stable
+			// aliases that always resolve to the current snapshot. OpenRouter lists
+			// full HuggingFace IDs (qwen-2.5-7b-instruct etc.) and not these aliases,
+			// so without protection the OpenRouter fallback deprecates working models
+			// — which is exactly what happened to qwen-max and qwen-turbo.
 			"protected_profiles": [
 				["custom", "2126-04-09"],
-				["qwen-plus", "2026-10-09"],
-				["qwen-flash", "2026-10-09"]
+				["qwen-max", "2126-04-09"],
+				["qwen-plus", "2126-04-09"],
+				["qwen-flash", "2126-04-09"],
+				["qwen-turbo", "2126-04-09"]
 			],
 			"token_limit_overrides": {
 				// "qwen-plus": 131072,

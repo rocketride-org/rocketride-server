@@ -2,21 +2,25 @@
 Tests for tool_git.
 
 Unit tests mock pygit2 and run without any git binary or real repository.
-Integration tests require a real git repository path via the environment variable:
+Merge-safety integration tests create isolated temporary repositories. The optional
+read-only smoke tests can also inspect a repository supplied through:
 
     export GIT_TEST_REPO_PATH=/path/to/some/local/repo
     pytest nodes/test/tool_git/test_tools.py -v
 
-Integration tests are automatically skipped when the variable is unset.
+Only those optional smoke tests are skipped when the variable is unset.
 """
 
 from __future__ import annotations
 
+import importlib.util
 import os
+import runpy
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from types import ModuleType
 from typing import Any, Dict, Optional
 from unittest.mock import MagicMock, create_autospec, patch
 
@@ -74,6 +78,17 @@ _ai_stub.common = _ai_common_stub
 _rocketlib_lib = Path(__file__).resolve().parents[3] / 'packages' / 'server' / 'engine-lib' / 'rocketlib-python' / 'lib'
 sys.path.insert(0, str(_rocketlib_lib))
 
+# Load only the lightweight production utility modules used by tool_git. Importing
+# ai.common.utils normally would also import optional image, HTTP, and LangChain
+# dependencies that are unrelated to these unit tests.
+_utils_dir = Path(__file__).resolve().parents[3] / 'packages' / 'ai' / 'src' / 'ai' / 'common' / 'utils'
+_tool_args = runpy.run_path(str(_utils_dir / 'tool_args.py'))
+_config_utils = runpy.run_path(str(_utils_dir / 'config_utils.py'))
+_ai_utils_stub = ModuleType('ai.common.utils')
+for _name in ('normalize_tool_input', 'optional_bool', 'optional_int', 'validate_tool_input_schema'):
+    setattr(_ai_utils_stub, _name, _tool_args[_name])
+_ai_utils_stub.parse_bool = _config_utils['parse_bool']
+
 with patch.dict(
     sys.modules,
     {
@@ -82,6 +97,7 @@ with patch.dict(
         'ai': _ai_stub,
         'ai.common': _ai_common_stub,
         'ai.common.config': _ai_config_stub,
+        'ai.common.utils': _ai_utils_stub,
     },
 ):
     _src = Path(__file__).resolve().parents[2] / 'src' / 'nodes' / 'tool_git'
@@ -89,6 +105,14 @@ with patch.dict(
     from tool_git.git_repo import (  # noqa: E402
         GitError,
         GitRepo,
+        _GIT_MERGE_ANALYSIS_FASTFORWARD,
+        _GIT_MERGE_ANALYSIS_NORMAL,
+        _GIT_MERGE_ANALYSIS_UP_TO_DATE,
+        _GIT_RESET_HARD,
+        _GIT_STATUS_INDEX_MODIFIED,
+        _GIT_STATUS_WT_MODIFIED,
+        _GIT_STATUS_WT_NEW,
+        _conflict_path,
         _filter_diff_by_path,
     )
     from tool_git.IInstance import IInstance  # noqa: E402
@@ -200,6 +224,11 @@ class TestToolQuery(unittest.TestCase):
             self.assertEqual(meta['input_schema'].get('type'), 'object', f'{name}: schema type != object')
             self.assertIsInstance(meta['description'], str, f'{name}: description not a string')
             self.assertGreater(len(meta['description']), 10, f'{name}: description too short')
+
+    def test_merge_tool_description_discloses_clean_worktree_requirement(self) -> None:
+        """The agent-facing merge contract tells callers how to avoid a rejected operation."""
+        description = IInstance.merge.__tool_meta__['description']
+        self.assertIn('requires a clean working tree', description)
 
     def test_no_legacy_dispatcher_attributes(self) -> None:
         """The old custom-dispatch surface (_TOOLS, _dispatch, _call, ...) is gone."""
@@ -809,6 +838,383 @@ def _repo_with_workdir(workdir: str) -> GitRepo:
     repo._repo_path = workdir
     repo.safe_mode = True
     return repo
+
+
+def _repo_for_merge(analysis: int, status: Optional[Dict[str, int]] = None) -> tuple[GitRepo, MagicMock]:
+    """Build a GitRepo with a mocked backend for merge-safety tests."""
+    wrapper = GitRepo.__new__(GitRepo)
+    backend = MagicMock()
+    wrapper._repo = backend
+    wrapper._repo_path = '/tmp/repo'
+    wrapper.safe_mode = True
+    wrapper.read_only_mode = False
+
+    their_branch = MagicMock()
+    their_branch.target = 'their-target'
+    backend.branches.__getitem__.return_value = their_branch
+    backend.merge_analysis.return_value = (analysis, None)
+    backend.status.return_value = status or {}
+    backend.head.target = 'head-target'
+    return wrapper, backend
+
+
+class TestMergeSafety(unittest.TestCase):
+    """Verify merge refuses to mutate a repository containing user work."""
+
+    def test_up_to_date_merge_allows_dirty_repository_without_mutation(self) -> None:
+        """An up-to-date merge is read-only, so existing work does not block it."""
+        wrapper, backend = _repo_for_merge(
+            _GIT_MERGE_ANALYSIS_UP_TO_DATE,
+            {'draft.py': _GIT_STATUS_WT_MODIFIED},
+        )
+
+        result = wrapper.merge('feature')
+
+        self.assertEqual(result, {'status': 'up_to_date', 'branch': 'feature'})
+        backend.status.assert_not_called()
+        backend.merge.assert_not_called()
+        backend.checkout_tree.assert_not_called()
+        backend.reset.assert_not_called()
+
+    def test_fast_forward_rejects_staged_changes_before_checkout(self) -> None:
+        """A staged tracked change cannot be overwritten by a fast-forward merge."""
+        wrapper, backend = _repo_for_merge(
+            _GIT_MERGE_ANALYSIS_FASTFORWARD,
+            {'staged.py': _GIT_STATUS_INDEX_MODIFIED},
+        )
+
+        with self.assertRaisesRegex(GitError, 'clean working tree') as ctx:
+            wrapper.merge('feature')
+
+        self.assertIn('staged.py', str(ctx.exception))
+        backend.checkout_tree.assert_not_called()
+        backend.head.set_target.assert_not_called()
+
+    def test_fast_forward_rejects_unstaged_changes_before_checkout(self) -> None:
+        """An unstaged tracked change cannot be overwritten by a fast-forward merge."""
+        wrapper, backend = _repo_for_merge(
+            _GIT_MERGE_ANALYSIS_FASTFORWARD,
+            {'working.py': _GIT_STATUS_WT_MODIFIED},
+        )
+
+        with self.assertRaisesRegex(GitError, 'commit, stash, or remove'):
+            wrapper.merge('feature')
+
+        backend.checkout_tree.assert_not_called()
+        backend.head.set_target.assert_not_called()
+
+    def test_fast_forward_rejects_untracked_files_before_checkout(self) -> None:
+        """Untracked files also make the worktree dirty and must be handled explicitly."""
+        wrapper, backend = _repo_for_merge(
+            _GIT_MERGE_ANALYSIS_FASTFORWARD,
+            {'notes.txt': _GIT_STATUS_WT_NEW},
+        )
+
+        with self.assertRaisesRegex(GitError, 'notes.txt'):
+            wrapper.merge('feature')
+
+        backend.checkout_tree.assert_not_called()
+        backend.head.set_target.assert_not_called()
+
+    def test_normal_merge_rejects_dirty_repository_before_merge_starts(self) -> None:
+        """The normal merge path does not create merge state in a dirty repository."""
+        wrapper, backend = _repo_for_merge(
+            _GIT_MERGE_ANALYSIS_NORMAL,
+            {
+                'unstaged.py': _GIT_STATUS_WT_MODIFIED,
+                'staged.py': _GIT_STATUS_INDEX_MODIFIED,
+            },
+        )
+
+        with self.assertRaises(GitError) as ctx:
+            wrapper.merge('feature')
+
+        message = str(ctx.exception)
+        self.assertIn('staged.py', message)
+        self.assertIn('unstaged.py', message)
+        backend.merge.assert_not_called()
+        backend.state_cleanup.assert_not_called()
+        backend.reset.assert_not_called()
+
+    def test_clean_fast_forward_still_updates_head(self) -> None:
+        """The safety guard does not change a valid clean fast-forward merge."""
+        wrapper, backend = _repo_for_merge(_GIT_MERGE_ANALYSIS_FASTFORWARD)
+        target = backend.branches.__getitem__.return_value.target
+        backend.get.return_value = 'target-commit'
+
+        result = wrapper.merge('feature')
+
+        self.assertEqual(result['status'], 'fast_forwarded')
+        backend.checkout_tree.assert_called_once_with('target-commit')
+        backend.head.set_target.assert_called_once_with(target)
+
+    def test_clean_normal_merge_still_creates_two_parent_commit(self) -> None:
+        """A clean, non-conflicting normal merge still creates its merge commit."""
+        wrapper, backend = _repo_for_merge(_GIT_MERGE_ANALYSIS_NORMAL)
+        backend.index.conflicts = None
+        backend.index.write_tree.return_value = 'merged-tree'
+        backend.create_commit.return_value = 'merged-commit-id'
+        target = backend.branches.__getitem__.return_value.target
+
+        result = wrapper.merge('feature')
+
+        self.assertEqual(result, {'status': 'merged', 'branch': 'feature', 'sha': 'merged-c'})
+        backend.merge.assert_called_once_with(target)
+        create_args = backend.create_commit.call_args.args
+        self.assertEqual(create_args[0], 'HEAD')
+        self.assertEqual(create_args[4], 'merged-tree')
+        self.assertEqual(create_args[5], ['head-target', target])
+        backend.state_cleanup.assert_called_once_with()
+
+    def test_clean_conflict_still_aborts_to_original_head(self) -> None:
+        """Conflict cleanup remains safe because the repository was clean at entry."""
+        wrapper, backend = _repo_for_merge(_GIT_MERGE_ANALYSIS_NORMAL)
+        conflict = MagicMock()
+        conflict.our.path = 'conflict.py'
+        backend.index.conflicts = [conflict]
+
+        with self.assertRaisesRegex(GitError, 'Merge conflict in: conflict.py'):
+            wrapper.merge('feature')
+
+        backend.state_cleanup.assert_called_once_with()
+        backend.reset.assert_called_once_with('head-target', _GIT_RESET_HARD)
+
+    def test_clean_conflict_supports_pygit2_tuple_entries(self) -> None:
+        """Current pygit2 conflict tuples are reported and cleaned up correctly."""
+        wrapper, backend = _repo_for_merge(_GIT_MERGE_ANALYSIS_NORMAL)
+        ancestor = MagicMock(path='conflict.py')
+        ours = MagicMock(path='conflict.py')
+        theirs = MagicMock(path='conflict.py')
+        backend.index.conflicts = [(ancestor, ours, theirs)]
+
+        with self.assertRaisesRegex(GitError, 'Merge conflict in: conflict.py'):
+            wrapper.merge('feature')
+
+        backend.state_cleanup.assert_called_once_with()
+        backend.reset.assert_called_once_with('head-target', _GIT_RESET_HARD)
+
+    def test_conflict_path_falls_back_when_our_entry_is_absent(self) -> None:
+        """Add/delete conflicts still return a concrete path from another side."""
+        ancestor = MagicMock(path='removed.py')
+        theirs = MagicMock(path='removed.py')
+
+        self.assertEqual(_conflict_path((ancestor, None, theirs)), 'removed.py')
+
+    def test_dirty_path_error_is_sorted_and_bounded(self) -> None:
+        """Large repositories get a deterministic error without an unbounded path dump."""
+        dirty = {f'file-{index:02d}.txt': _GIT_STATUS_WT_NEW for index in range(12, -1, -1)}
+        wrapper, _ = _repo_for_merge(_GIT_MERGE_ANALYSIS_FASTFORWARD, dirty)
+
+        with self.assertRaises(GitError) as ctx:
+            wrapper.merge('feature')
+
+        message = str(ctx.exception)
+        self.assertIn('file-00.txt, file-01.txt', message)
+        self.assertIn('file-09.txt (+3 more)', message)
+        self.assertNotIn('file-10.txt', message)
+
+    def test_conflict_path_error_is_deduplicated_sorted_and_bounded(self) -> None:
+        """Conflict output stays deterministic and bounded for wide merges."""
+        wrapper, backend = _repo_for_merge(_GIT_MERGE_ANALYSIS_NORMAL)
+        conflicts = []
+        for index in range(12, -1, -1):
+            entry = MagicMock(path=f'file-{index:02d}.txt')
+            conflicts.append((None, entry, entry))
+        duplicate = MagicMock(path='file-00.txt')
+        conflicts.append((None, duplicate, duplicate))
+        backend.index.conflicts = conflicts
+
+        with self.assertRaises(GitError) as ctx:
+            wrapper.merge('feature')
+
+        message = str(ctx.exception)
+        self.assertIn('file-00.txt, file-01.txt', message)
+        self.assertIn('file-09.txt (+3 more)', message)
+        self.assertNotIn('file-10.txt', message)
+        backend.state_cleanup.assert_called_once_with()
+        backend.reset.assert_called_once_with('head-target', _GIT_RESET_HARD)
+
+
+# ---------------------------------------------------------------------------
+# Self-contained integration tests — temporary real repositories
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(scope='module')
+def real_git_modules():
+    """Load real pygit2 and a fresh copy of git_repo.py without its package imports."""
+    real_pygit2 = pytest.importorskip('pygit2')
+    source = Path(__file__).resolve().parents[2] / 'src' / 'nodes' / 'tool_git' / 'git_repo.py'
+    spec = importlib.util.spec_from_file_location('_tool_git_merge_safety_real', source)
+    module = importlib.util.module_from_spec(spec)  # type: ignore[arg-type]
+    with patch.dict(sys.modules, {'depends': _depends_stub}):
+        spec.loader.exec_module(module)  # type: ignore[union-attr]
+    return real_pygit2, module
+
+
+def _commit_files(pygit2_module, repo, workdir: Path, changes: Dict[str, str], message: str):
+    """Write and commit *changes* to the currently checked-out branch."""
+    for name, content in changes.items():
+        path = workdir / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding='utf-8')
+    repo.index.add_all()
+    repo.index.write()
+    tree = repo.index.write_tree()
+    signature = pygit2_module.Signature('RocketRide Test', 'test@rocketride.local')
+    parents = [] if repo.head_is_unborn else [repo.head.target]
+    return repo.create_commit('HEAD', signature, signature, message, tree, parents)
+
+
+def _temporary_repo(pygit2_module, tmp_path: Path):
+    """Create a repository with a main branch and a baseline commit."""
+    repo = pygit2_module.init_repository(str(tmp_path), initial_head='main')
+    base = _commit_files(
+        pygit2_module,
+        repo,
+        tmp_path,
+        {
+            'conflict.txt': 'base\n',
+            'staged.txt': 'base staged\n',
+            'unstaged.txt': 'base unstaged\n',
+        },
+        'base',
+    )
+    return repo, base
+
+
+def _checkout(repo, branch: str) -> None:
+    """Check out a local branch by its full reference name."""
+    repo.checkout(f'refs/heads/{branch}')
+
+
+@pytest.mark.integration
+def test_real_fast_forward_rejects_and_preserves_all_dirty_files(tmp_path, real_git_modules) -> None:
+    """A real fast-forward attempt preserves staged, unstaged, and untracked bytes."""
+    pygit2_module, module = real_git_modules
+    repo, base = _temporary_repo(pygit2_module, tmp_path)
+    repo.branches.create('feature', repo.get(base))
+    _checkout(repo, 'feature')
+    _commit_files(pygit2_module, repo, tmp_path, {'feature.txt': 'feature\n'}, 'feature')
+    _checkout(repo, 'main')
+
+    (tmp_path / 'staged.txt').write_text('protected staged\n', encoding='utf-8')
+    repo.index.add('staged.txt')
+    repo.index.write()
+    (tmp_path / 'unstaged.txt').write_text('protected unstaged\n', encoding='utf-8')
+    (tmp_path / 'untracked.txt').write_text('protected untracked\n', encoding='utf-8')
+    before_status = repo.status()
+
+    wrapper = module.GitRepo(repo_path=str(tmp_path), read_only_mode=False)
+    with pytest.raises(module.GitError, match='clean working tree'):
+        wrapper.merge('feature')
+
+    assert repo.head.target == base
+    assert (tmp_path / 'staged.txt').read_text(encoding='utf-8') == 'protected staged\n'
+    assert (tmp_path / 'unstaged.txt').read_text(encoding='utf-8') == 'protected unstaged\n'
+    assert (tmp_path / 'untracked.txt').read_text(encoding='utf-8') == 'protected untracked\n'
+    assert repo.status() == before_status
+
+
+@pytest.mark.integration
+def test_real_normal_merge_rejects_dirty_tree_before_merge_state(tmp_path, real_git_modules) -> None:
+    """A diverged real repository remains outside merge state when it is dirty."""
+    pygit2_module, module = real_git_modules
+    repo, base = _temporary_repo(pygit2_module, tmp_path)
+    repo.branches.create('feature', repo.get(base))
+    _checkout(repo, 'feature')
+    _commit_files(pygit2_module, repo, tmp_path, {'feature.txt': 'feature\n'}, 'feature')
+    _checkout(repo, 'main')
+    main_tip = _commit_files(pygit2_module, repo, tmp_path, {'main.txt': 'main\n'}, 'main')
+    (tmp_path / 'unstaged.txt').write_text('protected\n', encoding='utf-8')
+
+    wrapper = module.GitRepo(repo_path=str(tmp_path), read_only_mode=False)
+    with pytest.raises(module.GitError, match='unstaged.txt'):
+        wrapper.merge('feature')
+
+    assert repo.head.target == main_tip
+    assert int(repo.state()) == 0
+    assert (tmp_path / 'unstaged.txt').read_text(encoding='utf-8') == 'protected\n'
+
+
+@pytest.mark.integration
+def test_real_clean_fast_forward_still_succeeds(tmp_path, real_git_modules) -> None:
+    """The guard preserves normal fast-forward behavior in a real repository."""
+    pygit2_module, module = real_git_modules
+    repo, base = _temporary_repo(pygit2_module, tmp_path)
+    repo.branches.create('feature', repo.get(base))
+    _checkout(repo, 'feature')
+    feature_tip = _commit_files(pygit2_module, repo, tmp_path, {'feature.txt': 'feature\n'}, 'feature')
+    _checkout(repo, 'main')
+
+    wrapper = module.GitRepo(repo_path=str(tmp_path), read_only_mode=False)
+    result = wrapper.merge('feature')
+
+    assert result['status'] == 'fast_forwarded'
+    assert repo.head.target == feature_tip
+    assert (tmp_path / 'feature.txt').read_text(encoding='utf-8') == 'feature\n'
+    assert repo.status() == {}
+
+
+@pytest.mark.integration
+def test_real_clean_normal_merge_creates_two_parent_commit(tmp_path, real_git_modules) -> None:
+    """The guard preserves non-conflicting two-parent merges in a real repository."""
+    pygit2_module, module = real_git_modules
+    repo, base = _temporary_repo(pygit2_module, tmp_path)
+    repo.branches.create('feature', repo.get(base))
+    _checkout(repo, 'feature')
+    feature_tip = _commit_files(pygit2_module, repo, tmp_path, {'feature.txt': 'feature\n'}, 'feature')
+    _checkout(repo, 'main')
+    main_tip = _commit_files(pygit2_module, repo, tmp_path, {'main.txt': 'main\n'}, 'main')
+
+    wrapper = module.GitRepo(repo_path=str(tmp_path), read_only_mode=False)
+    result = wrapper.merge('feature')
+
+    merge_commit = repo.get(repo.head.target)
+    assert result['status'] == 'merged'
+    assert [parent.id for parent in merge_commit.parents] == [main_tip, feature_tip]
+    assert (tmp_path / 'main.txt').read_text(encoding='utf-8') == 'main\n'
+    assert (tmp_path / 'feature.txt').read_text(encoding='utf-8') == 'feature\n'
+    assert repo.status() == {}
+
+
+@pytest.mark.integration
+def test_real_clean_conflict_aborts_to_original_head(tmp_path, real_git_modules) -> None:
+    """A clean conflicting merge restores HEAD, files, index, and repository state."""
+    pygit2_module, module = real_git_modules
+    repo, base = _temporary_repo(pygit2_module, tmp_path)
+    repo.branches.create('feature', repo.get(base))
+    _checkout(repo, 'feature')
+    _commit_files(pygit2_module, repo, tmp_path, {'conflict.txt': 'feature\n'}, 'feature')
+    _checkout(repo, 'main')
+    main_tip = _commit_files(pygit2_module, repo, tmp_path, {'conflict.txt': 'main\n'}, 'main')
+
+    wrapper = module.GitRepo(repo_path=str(tmp_path), read_only_mode=False)
+    with pytest.raises(module.GitError, match='Merge conflict in: conflict.txt'):
+        wrapper.merge('feature')
+
+    assert repo.head.target == main_tip
+    assert int(repo.state()) == 0
+    assert (tmp_path / 'conflict.txt').read_text(encoding='utf-8') == 'main\n'
+    assert repo.status() == {}
+
+
+@pytest.mark.integration
+def test_real_up_to_date_merge_preserves_dirty_tree(tmp_path, real_git_modules) -> None:
+    """A no-op merge stays available and leaves dirty content untouched."""
+    pygit2_module, module = real_git_modules
+    repo, base = _temporary_repo(pygit2_module, tmp_path)
+    repo.branches.create('already-merged', repo.get(base))
+    (tmp_path / 'unstaged.txt').write_text('keep me\n', encoding='utf-8')
+    before_status = repo.status()
+
+    wrapper = module.GitRepo(repo_path=str(tmp_path), read_only_mode=False)
+    result = wrapper.merge('already-merged')
+
+    assert result == {'status': 'up_to_date', 'branch': 'already-merged'}
+    assert repo.head.target == base
+    assert (tmp_path / 'unstaged.txt').read_text(encoding='utf-8') == 'keep me\n'
+    assert repo.status() == before_status
 
 
 class TestPathTraversalGuards(unittest.TestCase):

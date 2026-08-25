@@ -928,13 +928,18 @@ export class RocketRideCLI {
 					console.error('Error: Either --pipeline or --token must be specified for upload command. Use --pipeline/--token or set ROCKETRIDE_PIPELINE/ROCKETRIDE_TOKEN in .env file');
 					process.exit(1);
 				}
+				const maxConcurrent = Number(options.maxConcurrent || '5');
+				if (!Number.isInteger(maxConcurrent) || maxConcurrent < 1) {
+					console.error('Error: --max-concurrent must be a positive integer');
+					process.exit(1);
+				}
 
 				this.args = {
 					command: 'upload',
 					...options,
 					files,
 					threads: parseInt(options.threads),
-					max_concurrent: parseInt(options.maxConcurrent || '5'),
+					max_concurrent: maxConcurrent,
 					pipeline_args: options.args,
 				};
 				this.uri = options.uri;
@@ -1452,8 +1457,7 @@ export class RocketRideCLI {
 			});
 
 			// Upload files - progress events come through event subscription
-			// Server handles concurrency automatically
-			const results = await this.client!.sendFiles(fileObjects, taskToken!);
+			const results = await this.client!.sendFiles(fileObjects, taskToken!, this.args.max_concurrent);
 
 			const endTime = Date.now();
 

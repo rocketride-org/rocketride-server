@@ -6,7 +6,7 @@ A RocketRide LLM node that connects Alibaba Cloud Qwen models to a pipeline via 
 
 Provides Qwen chat completions to the pipeline. Used primarily as an `llm` invoke connection by agents and other nodes that need an LLM, and can also be used directly via lanes.
 
-Uses **LangChain's `ChatOpenAI`** client pointed at DashScope's OpenAI-compatible endpoint. The regional endpoint is resolved from the `region` field at startup. Temperature is fixed at `0`, and `max_tokens` is taken from the profile's `modelOutputTokens`.
+Uses **LangChain's `ChatOpenAI`** client pointed at DashScope's OpenAI-compatible endpoint. The endpoint is resolved at startup from the `base_url` field if set, otherwise from the `region` field. Temperature is fixed at `0`, and `max_tokens` is taken from the profile's `modelOutputTokens`.
 
 When the node configuration is validated, the node performs a live 1-token test request against the API to verify the key, model, and region actually work. Failures surface as configuration warnings with the provider's error message.
 
@@ -18,27 +18,34 @@ When the node configuration is validated, the node performs a live 1-token test 
 
 ## Profiles
 
-Default: **Qwen Flash** (`qwen-flash`).
+Default: **Qwen Flash (latest)** (`qwen-flash`).
+
+The visible `(latest)` stable aliases always resolve to DashScope's current snapshot for their tier, so they do not go stale as new generations ship — prefer these unless you need to pin a specific release, which the first four collapsed profiles do.
 
 | Profile | Model | Context | Output |
 | ------- | ----- | ------- | ------ |
 | `qwen-flash` **(default)** | `qwen-flash` | 131,072 | 4,096 |
 | `qwen-plus` | `qwen-plus` | 1,000,000 | 32,768 |
-| `qwen-plus-2025-07-28` | `qwen-plus-2025-07-28` | 1,000,000 | 32,768 |
-| `qwen-plus-2025-07-28-thinking` | `qwen-plus-2025-07-28:thinking` | 1,000,000 | 32,768 |
+| `qwen-max` | `qwen-max` | 32,768 | 8,192 |
+| `qwen-turbo` | `qwen-turbo` | 131,072 | 8,192 |
 
 <details>
-<summary><strong>View 5 more models</strong></summary>
+<summary><strong>View 8 more models</strong></summary>
 
 | Profile | Model | Context | Output |
 | ------- | ----- | ------- | ------ |
+| `qwen3-7-max` | `qwen3.7-max` | 1,000,000 | 65,536 |
+| `qwen3-7-plus` | `qwen3.7-plus` | 1,000,000 | 65,536 |
+| `qwen3-6-flash` | `qwen3.6-flash` | 1,000,000 | 65,536 |
+| `qwen-plus-2025-07-28` | `qwen-plus-2025-07-28` | 1,000,000 | 32,768 |
 | `qwen-2-5-72b-instruct` | `qwen-2.5-72b-instruct` | 32,768 | 16,384 |
 | `qwen-2-5-7b-instruct` | `qwen-2.5-7b-instruct` | 32,768 | 32,768 |
 | `qwen-2-5-coder-32b-instruct` | `qwen-2.5-coder-32b-instruct` | 32,768 | 32,768 |
-| `qwen-max` **(deprecated)** | `qwen-max` | 32,768 | 8,192 |
-| `qwen-turbo` **(deprecated)** | `qwen-turbo` | 131,072 | 8,192 |
+| `qwen-plus-2025-07-28-thinking` | `qwen-plus-2025-07-28:thinking` | 1,000,000 | 32,768 |
 
 </details>
+
+The last four collapsed profiles are **deprecated**: they remain selectable so saved pipelines keep loading, but DashScope rejects their model IDs. They were introduced by OpenRouter fallback discovery in the model sync and carry OpenRouter/HuggingFace IDs rather than DashScope ones (e.g. DashScope uses `qwen2.5-72b-instruct`, not `qwen-2.5-72b-instruct`, and has no `:thinking` model variants — reasoning is controlled with the `enable_thinking` request parameter instead). Migrate to a live profile above.
 
 ## Configuration
 
@@ -62,6 +69,8 @@ Provide a DashScope API key in `apikey`. The key must start with `sk-`; anything
 
 The default is `us`. An unrecognised value falls back to the US endpoint. DashScope API keys are region-specific, so a key issued for one endpoint will fail against another.
 
+Setting `base_url` overrides this table entirely, which is how you reach a DashScope host Alibaba Cloud serves outside the three above — another Alibaba Cloud region, for instance. It is available on every live profile, including `custom`; the deprecated profiles above do not expose it. Leave it empty to use the regional endpoint.
+
 ### Error handling
 
 Provider exceptions are mapped to friendly messages instead of raw stack traces:
@@ -73,11 +82,22 @@ Provider exceptions are mapped to friendly messages instead of raw stack traces:
 
 Rate-limit and connection errors are classified as retryable by the shared chat base; authentication and generic API errors are not retried.
 
+### Keeping the model list current
+
+Profiles are maintained by the model sync tool, see [tools/sync_models](https://github.com/rocketride-org/rocketride-server/tree/develop/tools/sync_models):
+
+```bash
+python tools/sync_models/src/sync_models.py --provider llm_qwen --enable-discovery --apply
+```
+
+Discovery — adding profiles — requires `ROCKETRIDE_QWEN_KEY`. Without it the command above still runs, but only enriches profiles that already exist: OpenRouter and LiteLLM can supply token counts, and neither may add a profile unless you also pass `--allow-fallback-discovery`. Avoid that flag here — it lets OpenRouter contribute the HuggingFace-style IDs DashScope does not accept, which is what the deprecated profiles above are. The stable aliases are listed in `protected_profiles` so a non-authoritative source cannot deprecate them.
+
 ---
 
 ## Upstream docs
 
 - [DashScope API reference](https://help.aliyun.com/zh/dashscope/)
+- [Alibaba Cloud Model Studio models](https://www.alibabacloud.com/help/en/model-studio/models)
 
 ---
 

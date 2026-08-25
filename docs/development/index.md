@@ -180,7 +180,7 @@ is unpublished — it never reaches docs.rocketride.org.
 
 - [Client README Schema](clients/readme-schema.md) -- the client-docs contract
 - [Shell Apps in the Monorepo](apps/index.md) -- building a first-party app
-  alongside `shell-ui`
+  alongside `shell`
 
 ### Project infrastructure
 

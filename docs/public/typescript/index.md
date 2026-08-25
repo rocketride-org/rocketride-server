@@ -259,6 +259,7 @@ Read, write, and manage files in your account's server-side store. All paths are
 | Method     | Signature                                                     | Returns           | Description                                                                                                                                                                                                                        |
 | ---------- | ------------------------------------------------------------- | ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `fsGetUrl` | `fsGetUrl(path: string, expiresIn?: number, downloadName?: string): Promise<string>` | `Promise<string>` | Time-limited HTTP(S) URL for direct browser access. Cloud backends (S3/Azure) return a presigned/SAS URL; the local filesystem backend returns a JWT-signed `/task/fetch` URL. Served **inline** by default (use as an `<img>`/`<video>`/`<audio>` source). Pass `downloadName` to force a download with that filename via `Content-Disposition: attachment` — the only reliable way to set the download filename for cross-origin cloud URLs (where the `<a download>` attribute is ignored). `expiresIn` is in seconds (default 3600). |
+| `fsReadMany` | `fsReadMany(paths: string[]): Promise<Array<{path, ok, data?, error?}>>` | `Promise<Array>` | Batch-read many small files in ONE round trip (max 256 paths / 32 MiB total per call) — for many-small-file access patterns where per-file open/read/close is too chatty. Missing/unreadable files are per-entry results (`ok: false` + `error`), never a call failure; results come back in request order with `data` as `Uint8Array`. |
 
 **Examples:**
 
@@ -291,6 +292,21 @@ const streamUrl = await client.fsGetUrl('uploads/video.mp4', 600);
 // Force a download with a friendly filename (works cross-origin on S3/Azure too)
 const downloadUrl = await client.fsGetUrl('uploads/video.mp4', undefined, 'my video.mp4');
 ```
+
+
+### App publish ladder
+
+Typed wrappers over `rrext_app_deploy` — the publish ladder for RocketRide apps.
+**Publish** snapshots an immutable version (never activates anything); **Deploy**
+pins a rung (`@user`, `@team/<name>`, `@org`) to a version — first publish,
+update, promote, and rollback are all this one verb.
+
+| Method | Signature | Description |
+| ------ | --------- | ----------- |
+| `appPublish` | `appPublish({appId, version, bundle, message?, moduleId?, name?}): Promise<RailEntry>` | Publish an immutable version to the org registry (single-file `remoteEntry.js` bundle; commit-style `message` shows on the version card). |
+| `appVersions` | `appVersions(appId): Promise<RailEntry[]>` | The version rail, newest first; each entry carries `rungs` naming the rungs currently pinned to it. |
+| `appDeploy` | `appDeploy(appId, registryVersion, target): Promise<{deployment, rung}>` | Pin a rung to a version. Personal deploys resolve into your own manifest immediately. |
+| `appWhere` | `appWhere(appId): Promise<Pin[]>` | The reverse index: `{rung, handle, version, appVersion, state, deployedAt}` per rung. |
 
 ### Events
 

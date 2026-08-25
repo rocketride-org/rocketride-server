@@ -61,6 +61,16 @@ REQUIREMENTS_GLOBS = [
     'ai/**/requirement*.txt',
 ]
 
+# Override files: unlike constraints, uv overrides REPLACE what packages
+# declare. Discovered like requirement files; see packages/ai/src/ai/overrides.txt
+# for the policy comment. Named 'overrides.txt' so REQUIREMENTS_GLOBS
+# ('requirement*.txt') never sweeps them into the combined requirements.
+OVERRIDES_GLOBS = [
+    'overrides.txt',
+    'nodes/**/overrides.txt',
+    'ai/**/overrides.txt',
+]
+
 # Bootstrap tools install outside any constraint, so pin them or they float to 'latest' and a
 # later install downgrades them. Lockstep with packages/server/scripts/tasks.js.
 _BOOTSTRAP_TOOL_VERSIONS: dict[str, str] = {
@@ -328,6 +338,22 @@ def _constraints_args(constraints_path: str, exe_dir: str) -> list[str]:
     """
     if os.path.exists(constraints_path) and os.path.getsize(constraints_path) > 0:
         return ['-c', os.path.relpath(constraints_path, exe_dir)]
+    return []
+
+
+def _get_overrides_path() -> str:
+    """Path of the combined overrides file in the engine cache."""
+    return os.path.join(engine_cache_dir(), 'overrides-combined.txt')
+
+
+def _override_args(exe_dir: str) -> list[str]:
+    """Return uv ``--override`` args if the combined overrides file is non-empty, else ``[]``.
+
+    Relative to exe_dir (the subprocess cwd) — uv splits the value on whitespace.
+    """
+    overrides_path = _get_overrides_path()
+    if os.path.exists(overrides_path) and os.path.getsize(overrides_path) > 0:
+        return ['--override', os.path.relpath(overrides_path, exe_dir)]
     return []
 
 
@@ -649,6 +675,19 @@ def _find_requirement_files() -> list[str]:
     return found
 
 
+def _find_override_files() -> list[str]:
+    """Find all override files matching OVERRIDES_GLOBS."""
+    executable_dir = _get_executable_dir()
+    found = []
+    for pattern in OVERRIDES_GLOBS:
+        full_pattern = os.path.join(executable_dir, pattern)
+        for path in glob(full_pattern, recursive=True):
+            abs_path = os.path.abspath(path)
+            if os.path.isfile(abs_path) and abs_path not in found:
+                found.append(abs_path)
+    return found
+
+
 def _compute_hash(file_paths: list[str]) -> str:
     """Compute a fast hash from file metadata (mtime + size)."""
     hasher = hashlib.md5()
@@ -706,6 +745,7 @@ def _compile_constraints(constraints_path: str):
         '--no-build-isolation',  # Don't create temp venvs (engine.exe can't create venvs)
         '--emit-index-url',  # Preserve --extra-index-url etc. so install/dry-run can find packages (e.g. torch+cu128)
     ]
+    args.extend(_override_args(exe_dir))
     debug(f'Compile: {args}')
     result = subprocess.run(
         args,
@@ -740,16 +780,27 @@ def ensure_constraints() -> str:
 
     # Find all requirement files
     req_files = _find_requirement_files()
+    override_files = _find_override_files()
     if not req_files:
         debug('No requirement files found')
         return constraints_path
 
     # Compute current hash
-    current_hash = _compute_hash(req_files)
+    current_hash = _compute_hash(req_files + override_files)
     stored_hash = _load_stored_hash(hash_file)
 
-    # Check if rebuild is needed
-    if current_hash == stored_hash and os.path.exists(constraints_path):
+    # Check if rebuild is needed. The derived overrides cache is part of the
+    # predicate: install-time _override_args() reads that file, so a missing
+    # one (partially cleared cache) while override files exist — or a stale
+    # non-empty one after overrides were removed — must trigger a rebuild,
+    # not be silently reused.
+    overrides_path = _get_overrides_path()
+    overrides_cache_nonempty = os.path.exists(overrides_path) and os.path.getsize(overrides_path) > 0
+    if (
+        current_hash == stored_hash
+        and os.path.exists(constraints_path)
+        and bool(override_files) == overrides_cache_nonempty
+    ):
         debug('Constraints are up to date')
         return constraints_path
 
@@ -758,6 +809,9 @@ def ensure_constraints() -> str:
 
     # Combine all requirements
     _combine_requirements(req_files, combined_path)
+
+    # Combine all overrides (empty file list yields a zero-byte file, treated as absent)
+    _combine_requirements(override_files, _get_overrides_path())
 
     # Compile with uv
     _compile_constraints(constraints_path)
@@ -821,6 +875,7 @@ def _install_dry_run(requirements_path: str, constraints_path: str) -> list[str]
     args.extend(['--excludes', os.path.relpath(_write_excludes_file(), exe_dir)])
 
     args.extend(_constraints_args(constraints_path, exe_dir))
+    args.extend(_override_args(exe_dir))
 
     debug(f'Dry-run: {args}')
     result = subprocess.run(
@@ -922,6 +977,7 @@ def _install_requirements_inner(requirements_path: str, constraints_path: str):
     uv_args.extend(['--excludes', os.path.relpath(_write_excludes_file(), exe_dir)])
 
     uv_args.extend(_constraints_args(constraints_path, exe_dir))
+    uv_args.extend(_override_args(exe_dir))
 
     # Run uv and stream output (heartbeat is already running from the caller)
     debug(f'Install: {uv_args}')

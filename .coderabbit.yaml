@@ -13,7 +13,7 @@ reviews:
       # the doc path_instructions below are live only for pull requests into
       # fix/docs. PRs into develop use develop's own copy and are unaffected.
       - fix/docs
-    drafts: false
+    drafts: true
     ignore_title_keywords:
       - '[bot]'
       - 'renovate'

@@ -124,6 +124,65 @@ class S3Store(IStore):
         retry=retry_if_exception_type((ConnectionError, TimeoutError)),
         reraise=True,
     )
+    async def write_bytes(self, filename: str, data: bytes) -> None:
+        """
+        Write binary data to S3 with retry logic.
+
+        Overrides the base implementation, which routes bytes through
+        ``str`` via latin-1 and would re-encode them as UTF-8 on the way
+        out -- doubling every byte above 0x7F in the stored object.
+        """
+        try:
+            client = self._get_client()
+            key = self._get_key(filename)
+
+            await asyncio.to_thread(client.put_object, Bucket=self._bucket, Key=key, Body=data)
+
+        except (ConnectionError, TimeoutError):
+            # Let these bubble up for retry
+            raise
+        except Exception as e:
+            raise StorageError(f'Failed to write file {filename} to S3: {e}') from e
+
+    @retry(
+        stop=stop_after_attempt(STORE_MAX_RETRY_ATTEMPTS),
+        wait=wait_exponential(multiplier=1, min=1),
+        retry=retry_if_exception_type((ConnectionError, TimeoutError)),
+        reraise=True,
+    )
+    async def read_bytes(self, filename: str) -> bytes:
+        """
+        Read binary data from S3 with retry logic.
+
+        Overrides the base implementation, which calls :meth:`read_file`
+        and therefore UTF-8 decodes the object body. Any object that is
+        not valid UTF-8 -- a zip, an image, a font -- raises
+        ``UnicodeDecodeError`` there before the caller sees a byte.
+        """
+        try:
+            client = self._get_client()
+            key = self._get_key(filename)
+
+            def _read():
+                response = client.get_object(Bucket=self._bucket, Key=key)
+                return response['Body'].read()
+
+            return await asyncio.to_thread(_read)
+
+        except (ConnectionError, TimeoutError):
+            # Let these bubble up for retry
+            raise
+        except Exception as e:
+            if self._is_no_such_key_error(e):
+                raise StorageError(f'File not found: {filename}')
+            raise StorageError(f'Failed to read file {filename} from S3: {e}') from e
+
+    @retry(
+        stop=stop_after_attempt(STORE_MAX_RETRY_ATTEMPTS),
+        wait=wait_exponential(multiplier=1, min=1),
+        retry=retry_if_exception_type((ConnectionError, TimeoutError)),
+        reraise=True,
+    )
     async def read_file_with_metadata(self, filename: str) -> tuple:
         """
         Read data from S3 with ETag metadata.
@@ -272,6 +331,48 @@ class S3Store(IStore):
             raise
         except Exception as e:
             raise StorageError(f'Failed to delete file {filename} from S3: {e}') from e
+
+    @retry(
+        stop=stop_after_attempt(STORE_MAX_RETRY_ATTEMPTS),
+        wait=wait_exponential(multiplier=1, min=1),
+        retry=retry_if_exception_type((ConnectionError, TimeoutError)),
+        reraise=True,
+    )
+    async def move_file(self, src: str, dst: str) -> None:
+        """Move an object onto ``dst``, replacing it if it exists.
+
+        ``CopyObject`` runs inside S3 and the destination key is replaced only once the copy
+        has succeeded, so a failure leaves the old object as it was.
+
+        Args:
+            src: Source path, relative to the store prefix.
+            dst: Destination path, relative to the store prefix.
+
+        Raises:
+            StorageError: If the source is missing or the move fails.
+        """
+        try:
+            client = self._get_client()
+            src_key = self._get_key(src)
+            dst_key = self._get_key(dst)
+            try:
+                await asyncio.to_thread(
+                    client.copy_object,
+                    Bucket=self._bucket,
+                    Key=dst_key,
+                    CopySource={'Bucket': self._bucket, 'Key': src_key},
+                )
+            except Exception as e:
+                if self._is_no_such_key_error(e):
+                    raise StorageError(f'File not found: {src}')
+                raise
+            await asyncio.to_thread(client.delete_object, Bucket=self._bucket, Key=src_key)
+        except (ConnectionError, TimeoutError):
+            raise
+        except StorageError:
+            raise
+        except Exception as e:
+            raise StorageError(f'Failed to move {src} to {dst} in S3: {e}') from e
 
     @retry(
         stop=stop_after_attempt(STORE_MAX_RETRY_ATTEMPTS),

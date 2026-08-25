@@ -4,9 +4,9 @@ Looking for help with RocketRide? Here's where to go.
 
 ## Documentation
 
-- **[Documentation site](https://docs.rocketride.ai)**: guides, tutorials, API reference
+- **[Documentation site](https://docs.rocketride.org)**: guides, tutorials, API reference
 - **[Build system docs](../docs/development/builder/reference.md)**: building from source
-- **[Client library docs](https://docs.rocketride.ai/develop/clients)**: TypeScript, Python, MCP SDKs
+- **[Client library docs](https://docs.rocketride.org/develop/clients)**: TypeScript, Python, MCP SDKs
 
 ## Getting Help
 

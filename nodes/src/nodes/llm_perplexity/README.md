@@ -72,7 +72,7 @@ After all retries are exhausted, raw API errors are translated into concise user
 |---|---|---|---|
 | `model` | `string` | **Model**<br/>Perplexity AI model |  |
 | `modelTotalTokens` | `number` | **Tokens**<br/>Total Tokens |  |
-| `perplexity.profile` | `string` | **Model**<br/>Perplexity AI model | `"sonar-pro"` |
+| `perplexity.profile` | `string` | **Model**<br/>Perplexity AI model | `"sonar"` |
 
 ## Dependencies
 

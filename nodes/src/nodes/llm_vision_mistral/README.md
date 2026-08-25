@@ -44,6 +44,8 @@ types and images with empty content are skipped with a warning. The document's
 `page_content` is expected to be base64-encoded PNG. Each answer is emitted as a
 `Text` document that preserves the original metadata (`chunkId`, `time_stamp`, and
 other fields). A failed chunk is logged and skipped without stopping the batch.
+Documents the node does not convert — the original `Image` documents, skipped
+types, and failed chunks — do not flow downstream.
 
 ### System Instructions and Analysis Prompt
 

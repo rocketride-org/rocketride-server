@@ -48,11 +48,12 @@ import os
 import time
 from typing import TYPE_CHECKING, Dict, Any, List, Tuple
 from rocketride import EVENT_TYPE
-from rocketlib import getServiceDefinitions, getServiceDefinition, validatePipeline
+from rocketlib import validatePipeline
 from ai.common.dap import DAPConn, TransportBase
 from ai.common.list_rows import paginate_rows
 from ai.account.models import resolve_task_permissions
 from ..pipeline import resolve_implied_source, resolve_pipeline_env
+from .. import services_catalog
 from .cmd_monitor import owner_key
 
 # Only import for type checking to avoid circular import errors
@@ -104,9 +105,12 @@ class MiscCommands(DAPConn):
         """
         Handle DAP 'rrext_services' command to retrieve service definitions.
 
-        This method provides access to connector service definitions including
-        schemas, UI schemas, and other metadata. It can return either a single
-        service definition by name or all available service definitions.
+        Serves the cached service catalog (see ``services_catalog``): the
+        bulk call returns each service's SUMMARY — display fields plus the
+        deduplicated ``icons`` table (each summary's ``icon`` field is an
+        id into it) — which is everything a client needs to render the
+        canvas. The single-service call returns the FULL entry with the
+        configuration schema, fetched by the configure panel on demand.
 
         Args:
             request (Dict[str, Any]): DAP request containing:
@@ -115,16 +119,16 @@ class MiscCommands(DAPConn):
 
         Returns:
             Dict[str, Any]: DAP response containing:
-                - body: Service definition(s) as JSON object
-                    - If service specified: single service definition
-                    - If no service specified: all service definitions
+                - body: If service specified, that service's full entry
+                  (config schema included); otherwise
+                  ``{'services': {name: summary}, 'icons': {id: svg}, 'version': N}``.
 
         Raises:
             Exception: If the specified service is not found
 
         Usage Examples:
-        - Get all services: { "command": "rrext_services" }
-        - Get specific service: { "command": "rrext_services", "arguments": { "service": "ocr" } }
+        - Get all summaries: { "command": "rrext_services" }
+        - Get one full entry: { "command": "rrext_services", "arguments": { "service": "ocr" } }
         """
         try:
             # Extract optional service name from request arguments
@@ -132,15 +136,15 @@ class MiscCommands(DAPConn):
             service = args.get('service', None)
 
             if service:
-                # Retrieve specific service definition by name
-                schema = getServiceDefinition(service)
+                # Retrieve the full cached entry (config schema included)
+                schema = await services_catalog.get_service(service)
 
                 # Validate the service exists
                 if not schema:
                     raise ValueError(f"Service '{service}' not found. Please check the service name and try again.")
             else:
-                # Retrieve all available service definitions
-                schema = getServiceDefinitions()
+                # The cached summary view: display fields + inline icons
+                schema = await services_catalog.get_summary()
 
             # Return successful response with service definition(s)
             return self.build_response(request, body=schema)

@@ -32,6 +32,7 @@ from typing import Any, Callable, Dict, List, Tuple
 import pytest
 
 from ai.common.agent import AgentBase, AgentContext
+from ai.common.llm_adapter import report_llm_tokens
 from ai.common.utils import parse_bool
 
 
@@ -210,6 +211,97 @@ def test_guard_answer_is_emitted_on_the_answers_lane():
 
     # Even a tripped guard still emits exactly one answer downstream.
     assert len(ii.instance.written) == 1
+
+
+# ---------------------------------------------------------------------------
+# Token usage on the emitted answer
+# ---------------------------------------------------------------------------
+
+
+def _report_two_calls(_driver, _context, _question):
+    """Driver body that reports two model calls, as report_llm_tokens does at the seam."""
+    report_llm_tokens(10, 4, model='claude-haiku-4-5')
+    report_llm_tokens(20, 8, model='claude-haiku-4-5')
+    return ('It is sunny in NYC.', {'raw': 'grounded'})
+
+
+def test_answer_carries_the_turn_token_usage():
+    """An agentic turn calls the model N times; the answer must carry the total.
+
+    Without this the Trace "Tokens" grid renders for a plain LLM node but never for
+    an agent, because the agent emits its own Answer here rather than going through the
+    LLM node's questions lane. Usage accrues DURING the run (report_llm_tokens at the
+    Adapter seam), read back by run_agent's turn scope.
+    """
+    from ai.web.metrics.metrics import metrics
+
+    metrics.reset()
+    ii = _FakeIInstance()
+    driver = _make_driver(_report_two_calls, require_tool_call=False)
+    driver.run_agent(ii, _FakeQuestion(), emit_answers_lane=True)
+
+    tokens = ii.instance.written[0].tokens
+    assert tokens['input'] == 30 and tokens['output'] == 12 and tokens['calls'] == 2
+    assert len(tokens['breakdown']) == 2
+
+
+def test_answer_has_no_tokens_when_none_were_reported():
+    """A run with no model call must not invent an empty grid."""
+    from ai.web.metrics.metrics import metrics
+
+    metrics.reset()
+    ii = _FakeIInstance()
+    driver = _make_driver(_call_one_tool, require_tool_call=False)
+    driver.run_agent(ii, _FakeQuestion(), emit_answers_lane=True)
+
+    assert ii.instance.written[0].tokens is None
+
+
+def test_a_prior_turn_does_not_bleed_into_the_next():
+    """Two questions in a row: the second answer carries only its own calls.
+
+    The agent reaches the model through ask(), which never cleared the old contextvar;
+    the turn scope now bounds each run so question 2 can't inherit question 1's tokens.
+    """
+    from ai.web.metrics.metrics import metrics
+
+    metrics.reset()
+    driver = _make_driver(_report_two_calls, require_tool_call=False)
+
+    ii1 = _FakeIInstance()
+    driver.run_agent(ii1, _FakeQuestion(), emit_answers_lane=True)
+    ii2 = _FakeIInstance()
+    driver.run_agent(ii2, _FakeQuestion(), emit_answers_lane=True)
+
+    # Not 4 calls / 60 input — each turn is independent.
+    assert ii2.instance.written[0].tokens['calls'] == 2
+    assert ii2.instance.written[0].tokens['input'] == 30
+
+
+def test_outer_agent_total_includes_sub_agent_calls():
+    """An agent can drive sub-agents; the outer answer's total includes theirs.
+
+    The sub-agent's run_agent opens a nested turn scope: it reads only its own calls,
+    but the outer scope still sees them for the turn total (the collector is shared and
+    cleared only by the outermost scope).
+    """
+    from ai.web.metrics.metrics import metrics
+
+    metrics.reset()
+    sub_driver = _make_driver(_report_two_calls, require_tool_call=False)  # 2 calls: 30 in / 12 out
+
+    def _outer_run(_driver, _context, _question):
+        report_llm_tokens(5, 2, model='outer')  # the outer agent's own call
+        sub_driver.run_agent(_FakeIInstance(), _FakeQuestion(), emit_answers_lane=False)
+        return ('done', {'raw': 'x'})
+
+    ii = _FakeIInstance()
+    outer = _make_driver(_outer_run, require_tool_call=False)
+    outer.run_agent(ii, _FakeQuestion(), emit_answers_lane=True)
+
+    tokens = ii.instance.written[0].tokens
+    assert tokens['calls'] == 3  # outer's 1 + sub-agent's 2
+    assert tokens['input'] == 35 and tokens['output'] == 14
 
 
 # ---------------------------------------------------------------------------

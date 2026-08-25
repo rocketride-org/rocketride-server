@@ -10,7 +10,7 @@ The deploy surfaces (the file view's DEPLOY page and the team-deployment
 record drawer) are rendered by shared UI components inside the Project
 webview; the extension host owns the SDK connection and does ALL
 SDK-to-view-model mapping before anything crosses `postMessage`. The
-contract lives in `src/providers/views/deployTypes.ts` — this page mirrors
+contract lives in `src/providers/types/deployTypes.ts` — this page mirrors
 its exported surface.
 
 Conventions shared by both protocols:
@@ -19,7 +19,7 @@ Conventions shared by both protocols:
   `TeamDeploymentRowDTO`, `TeamDeploymentScheduleDTO`,
   `DeployHistoryRowDTO`, `DeployScheduleRowDTO`, `DeploymentInfoDTO`,
   `SchedulePreviewResultDTO`) mirror
-  `packages/shared-ui/src/components/deploy-panel/types.ts` — the contract
+  `apps/shared/src/components/deploy-panel/types.ts` — the contract
   of record — field-for-field, so the webview hands them to the shared
   `DeployPanel` / `DeploymentView` components unchanged.
 - **Two correlation styles**: MUTATION and RPC-style requests
