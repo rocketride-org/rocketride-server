@@ -28,14 +28,17 @@ backend, or configurable expiry is needed.
 
 ## Profiles
 
+Default: `memory`, the in-process store.
+
 | Profile | Backend | Session lifetime |
 | --- | --- | --- |
 | `memory` *(default)* | In-memory | No expiry. |
 | `redis` | Redis at `localhost:6379` | 24 hours. |
+| `custom` | Redis at a supplied connection | 24 hours. |
 
-The omitted `custom` profile is for supplying Redis connection values. Start
-with `memory` for a local test, then select `redis` when a process-local store
-is not sufficient.
+Start with `memory` for a local test, then select `redis` when a process-local
+store is not sufficient, or `custom` to point at a Redis instance other than
+the default `localhost:6379`.
 
 ## Configuration
 

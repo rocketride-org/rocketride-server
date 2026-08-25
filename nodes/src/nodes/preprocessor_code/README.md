@@ -25,6 +25,8 @@ function can coexist with chunks for nested constructs, so output may overlap.
 
 ## Profiles
 
+Default: `auto`, which detects the language from the source text.
+
 | Profile | Language |
 | --- | --- |
 | `auto` *(default)* | Detect from source text |

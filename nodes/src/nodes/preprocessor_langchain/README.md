@@ -27,6 +27,8 @@ object closes; tables are split as they arrive.
 
 ## Profiles
 
+Default: `default`, the recursive character splitter.
+
 | Profile | Splitter |
 | --- | --- |
 | `default` *(default)* | `RecursiveCharacterTextSplitter` |

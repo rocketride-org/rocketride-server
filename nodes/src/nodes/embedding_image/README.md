@@ -19,6 +19,8 @@ The node accepts image documents or a raw image stream and adds an `embedding` p
 
 ## Profiles
 
+Default: **OpenAI - 16x16 - good performance, lower memory** (`openai-patch16`).
+
 | Profile | Model | Context |
 |---|---|---|
 | `openai-patch16` *(default)* | `openai/clip-vit-base-patch16` | Default vision model. |

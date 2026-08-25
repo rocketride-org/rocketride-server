@@ -18,6 +18,8 @@ The node buffers a video stream, extracts frames with OpenCV, and emits one Imag
 
 ## Profiles
 
+Default: **OpenAI CLIP - 16x16 - good performance, lower memory** (`openai-patch16`).
+
 | Profile | Model | Context |
 |---|---|---|
 | `openai-patch16` *(default)* | `openai/clip-vit-base-patch16` | Default frame model. |

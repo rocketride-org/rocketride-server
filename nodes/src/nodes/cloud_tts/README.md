@@ -21,17 +21,22 @@ Accepts content on any of four lanes, turns the resulting text into speech throu
 
 ## Profiles
 
+The directory registers two providers and each keeps its own default: the
+OpenAI service defaults to **GPT-4o mini TTS - Fast, steerable, multilingual**
+(`gpt-4o-mini-tts`), the ElevenLabs service to **Multilingual v2 - High
+quality, 29 languages** (`eleven_multilingual_v2`). Both are marked below;
+which one applies depends on the service you added to the pipeline.
+
 | Profile | Vendor model | Default voice |
 | --- | --- | --- |
-| `gpt-4o-mini-tts` *(default)* | `gpt-4o-mini-tts` | `alloy` |
-| `tts-1` | `tts-1` | `alloy` |
-| `tts-1-hd` | `tts-1-hd` | `alloy` |
-| `eleven_multilingual_v2` — Multilingual v2 - High quality, 29 languages *(default)* | `eleven_multilingual_v2` | `EXAVITQu4vr4xnSDxMaL` |
-| `eleven_turbo_v2_5` — Turbo v2.5      - Low latency, 32 languages | `eleven_turbo_v2_5` | `EXAVITQu4vr4xnSDxMaL` |
-| `eleven_flash_v2_5` — Flash v2.5      - Lowest latency | `eleven_flash_v2_5` | `EXAVITQu4vr4xnSDxMaL` |
-| `eleven_v3` — Eleven v3       - Most expressive | `eleven_v3` | `EXAVITQu4vr4xnSDxMaL` |
+| GPT-4o mini TTS - Fast, steerable, multilingual **(default)** | `gpt-4o-mini-tts` | `alloy` |
+| TTS-1 - Low latency, standard quality | `tts-1` | `alloy` |
+| TTS-1 HD - Higher quality, slower | `tts-1-hd` | `alloy` |
+| Multilingual v2 - High quality, 29 languages **(default)** | `eleven_multilingual_v2` | `EXAVITQu4vr4xnSDxMaL` |
+| Turbo v2.5 - Low latency, 32 languages | `eleven_turbo_v2_5` | `EXAVITQu4vr4xnSDxMaL` |
+| Flash v2.5 - Lowest latency | `eleven_flash_v2_5` | `EXAVITQu4vr4xnSDxMaL` |
+| Eleven v3 - Most expressive | `eleven_v3` | `EXAVITQu4vr4xnSDxMaL` |
 
-The OpenAI and ElevenLabs registrations each select a profile independently; the defaults above apply to their respective registrations.
 
 ## Configuration
 

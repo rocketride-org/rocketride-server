@@ -19,17 +19,19 @@ The node adds an `embedding` and `embedding_model` to documents and questions. C
 
 ## Profiles
 
-| Profile | Model | Context |
+Default: **Text Small - A highly efficient model** (`text-embedding-3-small`).
+
+| Profile | Model | Context tokens |
 |---|---|---|
-| `text-embedding-3-small` *(default)* | `text-embedding-3-small` | 8191 tokens. |
-| `text-embedding-3-large` | `text-embedding-3-large` | 8191 tokens. |
-| `text-embedding-ada-002` | `text-embedding-ada-002` | 8191 tokens. |
-| `text-embedding-004` | `text-embedding-004` | 2048 tokens. |
-| `text-embedding-005` | `text-embedding-005` | 2048 tokens. |
-| `text-embedding-3-small-inference` | `text-embedding-3-small-inference` | 8191 tokens. |
-| `text-embedding-ada-002-v2` | `text-embedding-ada-002-v2` | 8191 tokens. |
-| `text-embedding-large-exp-03-07` | `text-embedding-large-exp-03-07` | 8192 tokens. |
-| `text-embedding-preview-0409` | `text-embedding-preview-0409` | 3072 tokens. |
+| `text-embedding-3-small` *(default)* | `text-embedding-3-small` | 8,191 |
+| `text-embedding-3-large` | `text-embedding-3-large` | 8,191 |
+| `text-embedding-ada-002` | `text-embedding-ada-002` | 8,191 |
+| `text-embedding-004` | `text-embedding-004` | 2,048 |
+| `text-embedding-005` | `text-embedding-005` | 2,048 |
+| `text-embedding-3-small-inference` | `text-embedding-3-small-inference` | 8,191 |
+| `text-embedding-ada-002-v2` | `text-embedding-ada-002-v2` | 8,191 |
+| `text-embedding-large-exp-03-07` | `text-embedding-large-exp-03-07` | 8,192 |
+| `text-embedding-preview-0409` | `text-embedding-preview-0409` | 3,072 |
 
 This node currently supports `text-embedding-3-small`, `text-embedding-3-large`,
 and `text-embedding-ada-002`. The other declared profiles require LiteLLM

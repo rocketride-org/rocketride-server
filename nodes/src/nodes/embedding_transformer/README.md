@@ -19,11 +19,14 @@ The node embeds the `documents` and `questions` lanes, storing each result as a 
 
 ## Profiles
 
+Default: **miniLM - General use embeddings, good performance** (`miniLM`).
+
 | Profile | Model | Context |
 |---|---|---|
 | `miniLM` *(default)* | `sentence-transformers/multi-qa-MiniLM-L6-cos-v1` | Default model. |
 | `miniAll` | `sentence-transformers/all-MiniLM-L6-v2` | Alternative model. |
 | `mpnet` | `sentence-transformers/multi-qa-mpnet-base-cos-v1` | Alternative model. |
+| `custom` | User-provided | Enter a compatible Hugging Face model identifier. |
 
 ## Configuration
 

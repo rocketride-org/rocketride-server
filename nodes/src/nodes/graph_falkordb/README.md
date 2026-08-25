@@ -40,6 +40,8 @@ The server-name prefix defaults to `falkordb`. It registers its FalkorDB-specifi
 
 ## Profiles
 
+Default: **Manual configuration (host and port)** (`default`).
+
 | Profile | Model | Context |
 |---|---|---|
 | `default` *(default)* | Manual configuration | Uses host and port fields. |
