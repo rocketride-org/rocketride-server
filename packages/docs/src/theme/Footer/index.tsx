@@ -19,8 +19,8 @@ const COLUMNS: FooterColumn[] = [
 			{ label: 'Quickstart', href: '/quickstart' },
 			{ label: 'Concepts', href: '/concepts/pipelines' },
 			{ label: 'Components', href: '/nodes' },
-			{ label: 'Pipeline reference', href: '/pipeline-reference' },
-			{ label: 'Troubleshooting', href: '/troubleshooting' },
+			{ label: 'Pipeline reference', href: '/reference/pipeline-reference' },
+			{ label: 'Troubleshooting', href: '/operate/troubleshooting' },
 		],
 	},
 	{
@@ -31,7 +31,7 @@ const COLUMNS: FooterColumn[] = [
 			{ label: 'MCP', href: '/protocols/mcp' },
 			{ label: 'Server protocol', href: '/protocols/websocket' },
 			{ label: 'Nodes', href: '/nodes' },
-			{ label: 'Glossary', href: '/glossary' },
+			{ label: 'Glossary', href: '/reference/glossary' },
 		],
 	},
 	{
@@ -39,7 +39,7 @@ const COLUMNS: FooterColumn[] = [
 		items: [
 			{ label: 'Changelog', href: 'https://github.com/rocketride-org/rocketride-server/releases' },
 			{ label: 'IDE Extensions', href: '/ide-extensions/overview' },
-			{ label: 'Self-hosting', href: '/self-hosting' },
+			{ label: 'Self-hosting', href: '/operate/self-hosting' },
 		],
 	},
 	{

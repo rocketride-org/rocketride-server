@@ -89,7 +89,7 @@ const ANATOMY_PROSE = [
 	'| `config` | The configuration schema: the fields a pipeline author fills in. |',
 	'',
 	'A node\'s public contract is its `classType`, config schema, and the input/output',
-	'lanes it supports. The [pipeline JSON reference](/pipeline-reference) documents how a',
+	'lanes it supports. The [pipeline JSON reference](/reference/pipeline-reference) documents how a',
 	'node is referenced from a `.pipe` file (`id`, `provider`, `config`, `input`).'
 ].join('\n');
 

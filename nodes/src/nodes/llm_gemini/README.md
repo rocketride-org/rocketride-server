@@ -22,69 +22,66 @@ full message. Image-output models that reject a text-only probe with an
 artifact rather than a configuration problem. The probe is skipped entirely when no API
 key is present (secure fields are not decrypted at validate time).
 
----
-
-## Configuration
-
-### Lanes
+## Lanes
 
 | Lane in     | Lane out  | Description                                          |
 | ----------- | --------- | ---------------------------------------------------- |
 | `questions` | `answers` | Send a question directly, receive a generated answer |
 
-### Fields
-
-The node is configured by picking a model profile and supplying an API key.
-
-| Field              | Type / Default                         | Description                                                                 |
-| ------------------ | -------------------------------------- | --------------------------------------------------------------------------- |
-| `profile`          | enum, default `gemini-3_1-pro-preview` | Gemini model profile (see table below), or `custom`                         |
-| `apikey`           | string (secure)                        | Google AI Developer API key                                                 |
-| `model`            | string                                 | Custom profile only: Gemini model identifier (e.g. `models/gemini-2.5-pro`) |
-| `modelTotalTokens` | number, default `1114112` (custom)     | Custom profile only: maximum input + output tokens                          |
-| `outputTokens`     | number, default `65536` (custom)       | Custom profile only: maximum output tokens                                  |
-
----
-
 ## Profiles
 
-Each preconfigured profile pins a model with its context window and output limit
-(values from `services.json`):
+Default: **Gemini 3.1 Pro** (`gemini-3_1-pro-preview`).
 
-| Profile                                       | Model                                          | Total tokens | Output tokens |
-| --------------------------------------------- | ---------------------------------------------- | ------------ | ------------- |
-| Gemini 3.1 Pro _(default)_                    | `models/gemini-3.1-pro-preview`                | 1,048,576    | 65,536        |
-| Gemini 3.1 Flash Image Preview                | `models/gemini-3.1-flash-image-preview`        | 131,072      | 65,536        |
-| Gemini 3.1 Flash Lite                         | `models/gemini-3.1-flash-lite-preview`         | 1,048,576    | 65,536        |
-| Gemini 3 Flash Preview                        | `models/gemini-3-flash-preview`                | 1,048,576    | 65,536        |
-| Gemini 3 Pro Image Preview                    | `models/gemini-3-pro-image-preview`            | 65,536       | 32,768        |
-| Gemini 2.5 Pro                                | `models/gemini-2.5-pro`                        | 1,048,576    | 65,536        |
-| Gemini 2.5 Flash                              | `models/gemini-2.5-flash`                      | 1,048,576    | 65,535        |
-| Gemini 2.5 Flash Lite                         | `models/gemini-2.5-flash-lite`                 | 1,048,576    | 65,535        |
-| Gemini 2.5 Flash Image                        | `models/gemini-2.5-flash-image`                | 32,768       | 32,768        |
-| Google: Gemini 2.5 Flash Lite Preview 09-2025 | `models/gemini-2.5-flash-lite-preview-09-2025` | 1,048,576    | 65,535        |
-| Google: Gemini 2.5 Pro Preview 06-05          | `models/gemini-2.5-pro-preview`                | 1,048,576    | 65,536        |
-| Google: Gemini 2.5 Pro Preview 05-06          | `models/gemini-2.5-pro-preview-05-06`          | 1,048,576    | 65,535        |
-| Google: Gemini 3.1 Pro Preview Custom Tools   | `models/gemini-3.1-pro-preview-customtools`    | 1,048,576    | 65,536        |
-| Google Gemini Flash Latest                    | `models/gemini-flash-latest`                   | 1,048,576    | 65,536        |
-| Google Gemini Pro Latest                      | `models/gemini-pro-latest`                     | 1,048,576    | 65,536        |
-| Custom                                        | _(user-specified)_                             | configurable | configurable  |
+| Profile | Model | Context tokens | Output tokens |
+| ------- | ----- | -------------- | ------------- |
+| Gemini 3.1 Pro **(default)** | `models/gemini-3.1-pro-preview` | 1,048,576 | 65,536 |
+| Google: Gemini 3.6 Flash | `models/gemini-3.6-flash` | 1,048,576 | 65,536 |
+| Google: Gemini 3.5 Flash | `models/gemini-3.5-flash` | 1,048,576 | 65,536 |
+| Google: Gemini 3.5 Flash Lite | `models/gemini-3.5-flash-lite` | 1,048,576 | 65,536 |
 
-Profiles marked **Image** support image generation output.
+<details>
+<summary><strong>View 22 more models</strong></summary>
 
-### Deprecated profiles
+| Profile | Model | Context tokens | Output tokens |
+| ------- | ----- | -------------- | ------------- |
+| `custom` | _(user-specified)_ | editable | editable |
+| Gemini 3.1 Flash Image Preview | `models/gemini-3.1-flash-image-preview` | 131,072 | 65,536 |
+| Gemini 3.1 Flash Lite | `models/gemini-3.1-flash-lite-preview` | 1,048,576 | 65,536 |
+| Gemini 3 Flash Preview | `models/gemini-3-flash-preview` | 1,048,576 | 65,535 |
+| Gemini 3 Pro Image Preview | `models/gemini-3-pro-image-preview` | 65,536 | 32,768 |
+| Gemini 2.5 Pro | `models/gemini-2.5-pro` | 1,048,576 | 65,536 |
+| Gemini 2.5 Flash | `models/gemini-2.5-flash` | 1,048,576 | 65,535 |
+| Gemini 2.5 Flash Lite | `models/gemini-2.5-flash-lite` | 1,048,576 | 65,535 |
+| Gemini 2.5 Flash Image | `models/gemini-2.5-flash-image` | 32,768 | 8,192 |
+| Gemini 3 Pro Preview | `models/gemini-3-pro-preview` | 1,048,576 | 65,536 |
+| Gemini 3 Pro Image | `models/gemini-3-pro-image` | 131,072 | 32,768 |
+| Gemini 2.0 Flash | `models/gemini-2.0-flash` | 1,048,576 | 65,535 |
+| Gemini 2.0 Flash Lite | `models/gemini-2.0-flash-lite` | — | 65,536 |
+| Google: Gemini 2.5 Flash Lite Preview 09-2025 | `models/gemini-2.5-flash-lite-preview-09-2025` | 1,048,576 | 65,535 |
+| Google: Gemini 2.5 Pro Preview 06-05 | `models/gemini-2.5-pro-preview` | 1,048,576 | 65,536 |
+| Google: Gemini 2.5 Pro Preview 05-06 | `models/gemini-2.5-pro-preview-05-06` | 1,048,576 | 65,535 |
+| Google: Gemini 3.1 Pro Preview Custom Tools | `models/gemini-3.1-pro-preview-customtools` | 1,048,576 | 65,536 |
+| Google Gemini Flash Latest | `models/gemini-flash-latest` | 1,048,576 | 65,536 |
+| Google Gemini Pro Latest | `models/gemini-pro-latest` | 1,048,576 | 65,536 |
+| Google: Nano Banana 2 (Gemini 3.1 Flash Image) | `models/gemini-3.1-flash-image` | 131,072 | 32,768 |
+| Google: Gemini 3.1 Flash Lite | `models/gemini-3.1-flash-lite` | 1,048,576 | 65,536 |
+| Google: Nano Banana 2 Lite (Gemini 3.1 Flash Lite Image) | `models/gemini-3.1-flash-lite-image` | 65,536 | 66,000 |
 
-These remain selectable for existing pipelines but are deprecated; switch to the
-suggested replacement:
+</details>
 
-| Deprecated profile    | Replacement                  |
-| --------------------- | ---------------------------- |
-| Gemini 3 Pro Preview  | `gemini-3.1-pro-preview`     |
-| Gemini 3 Pro Image    | `gemini-3-pro-image-preview` |
-| Gemini 2.0 Flash      | `gemini-2.5-flash`           |
-| Gemini 2.0 Flash Lite | `gemini-2.5-flash-lite`      |
+Profiles whose titles contain **Image** support image generation output.
 
----
+## Configuration
+
+Choose a model profile and supply an API key. Named profiles pin the model,
+context window, and output limit, so most pipelines need no other settings.
+
+### Custom model
+
+Select `custom` to enter a Gemini model identifier such as
+`models/gemini-2.5-pro`, its combined input and output token limit, and its output
+token limit. The custom defaults are 1,114,112 total tokens and 65,536 output
+tokens; set both to the actual limits of the model you select.
 
 ## Authentication
 
@@ -102,16 +99,23 @@ Vertex AI is not used by this node; it targets the Gemini Developer API only. (T
 google-genai client also supports Vertex AI via `genai.Client(vertexai=True, ...)`; a
 future refactor could unify the separate Vertex node with this one.)
 
----
+## Notes
 
-## Running the tests
+### Deprecated profiles
+
+The following profiles remain selectable for existing pipelines but are deprecated:
+
+- Gemini 3 Pro Preview; use `gemini-3_1-pro-preview`.
+- Gemini 3 Pro Image; use `gemini-3-pro-image-preview`.
+- Gemini 2.0 Flash; use `gemini-2_5-flash`.
+- Gemini 2.0 Flash Lite; use `gemini-2_5-flash-lite`.
+
+### Running the tests
 
 The node ships a `test` block in `services.json` that runs against a local test server
 with a mocked `google.genai`, so no real API key is required. Set `ROCKETRIDE_MOCK` to
 `nodes/test/mocks`; the test sends "What is 2+2?" on `questions` (profile
 `gemini-2_5-flash`) and expects `answers` to contain "Mock LLM response".
-
----
 
 <!-- ROCKETRIDE:GENERATED:PARAMS START -->
 <!-- Generated by nodes:docs-generate. Do not edit by hand. -->

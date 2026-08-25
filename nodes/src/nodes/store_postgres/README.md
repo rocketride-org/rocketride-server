@@ -1,116 +1,123 @@
 # store_postgres
 
-A RocketRide store node that keeps document embeddings in PostgreSQL with the pgvector extension and retrieves them by semantic or keyword search, and exposes search/upsert/delete as agent-callable tools.
+A RocketRide vector-store node that stores embedded document chunks in PostgreSQL with pgvector and retrieves them by semantic or keyword search. Use it when a pipeline or agent needs vector retrieval in a PostgreSQL database.
+
+## About PostgreSQL
+
+PostgreSQL is a relational database that stores structured data and supports SQL
+queries. The pgvector extension adds a vector data type and vector-distance
+operators to PostgreSQL. This combination is useful when vector retrieval should
+live beside the relational data and operational practices a team already uses.
 
 ## What it does
 
-Stores embedded document chunks in a regular PostgreSQL table with a pgvector `vector` column, then serves retrieval queries against it. Use this when you want vector storage inside an existing PostgreSQL database rather than a dedicated vector database.
+The node accepts embedded documents on its `documents` lane and can retrieve matching documents for incoming questions. It also exposes the store to an agent as tools. The target table is created when documents are first added, and semantic retrieval requires question embeddings. Pick it over a dedicated vector database when the corpus should remain in a PostgreSQL database and the operator can provide pgvector there.
 
-Uses **psycopg2** and the **pgvector** Python adapter (`register_vector`). The pgvector extension must already be installed in the target database, the node verifies this at config time by probing `SELECT NULL::vector`.
+The created table contains content, document metadata, the embedding, its model name, and its vector size. That makes one table the store for both vector retrieval and keyword lookup, while the configured database retains PostgreSQL's normal connection and access controls.
 
-Key behavior to know:
+## Lanes
 
-- **The table is created automatically** (`CREATE TABLE IF NOT EXISTS`) on first ingest, with the vector dimension taken from the incoming embeddings.
-- **Re-ingesting a document replaces it**: before inserting chunks, all existing rows with the same `objectId` are deleted, so updates do not accumulate duplicates.
-- **Documents must be embedded upstream.** Semantic search raises an error if the question carries no embedding, bind an embedding node before this one.
-- **A hard minimum similarity floor of `0.20`** is applied to semantic results in addition to the configurable retrieval score; matches below it are always dropped.
-- Soft-deleted rows (`isDeleted = true`) are excluded from search results by default.
+| Lane in | Lane out | Description |
+| --- | --- | --- |
+| `documents` | — | Store embedded document chunks. |
+| `questions` | `documents` | Return matching documents. |
+| `questions` | `answers` | Return matching documents as answers. |
+| `questions` | `questions` | Enrich questions with matching documents. |
 
----
+## As a tool
+
+The configured tool-server name defaults to `postgres`.
+
+| Function | Description |
+| --- | --- |
+| `search` | Searches the store for a non-empty `query`; accepts optional `top_k` and metadata `filter`, and returns matching content, metadata, and scores. |
+| `upsert` | Adds or updates a non-empty `documents` array. Each document requires content and an object ID; it can provide an embedding and embedding model or use the bound embedding provider. |
+| `delete` | Deletes documents for a non-empty `object_ids` array and returns the deleted count. |
+
+`search` requires a bound embedding provider for semantic similarity search. The three functions return a failure object when their required input or an embedding cannot be obtained.
 
 ## Configuration
 
-### Lanes
+Enter the PostgreSQL connection details and choose the table that will hold the chunks. The local profile supplies the initial values, including a retrieval score of `0.5` and `cosine` similarity. Start by confirming that these credentials reach a database where the `vector` type is available; the save-time probe opens a short-lived connection, runs `SELECT 1`, and tests that type before this node is used in a pipeline.
 
-| Lane in     | Lane out    | Description                                                      |
-| ----------- | ----------- | ---------------------------------------------------------------- |
-| `documents` | -           | Ingest pre-embedded documents into the table                     |
-| `questions` | `documents` | Return matching documents                                        |
-| `questions` | `answers`   | Return matching documents as an answer                           |
-| `questions` | `questions` | Enrich the question with matching documents for downstream nodes |
+### Connection and database
 
-### Fields
+Host, port, user, password, and database are passed directly to the PostgreSQL
+client. Use a dedicated database or role when you want the retrieval corpus to
+have separate ownership from other application tables. Connection or permission
+errors during the save-time probe point to these fields; an error about the
+`vector` type means pgvector is not available in the selected database.
 
-| Field             | Type / Default                          | Description                                            |
-| ----------------- | --------------------------------------- | ------------------------------------------------------ |
-| Host              | string                                   | Host name or IP address of the PostgreSQL server       |
-| Port              | number · `5432`                          | Port number of the PostgreSQL server                   |
-| User              | string · `postgres`                      | User to connect to the PostgreSQL server               |
-| Password          | string (secure)                          | Password to connect to the PostgreSQL server           |
-| Database          | string · `postgres`                      | Name of the database                                   |
-| Table             | string · `rocketride`                    | Name of the table to store vectors                     |
-| Retrieval Score   | number · `0.5`                           | Minimum similarity threshold for returned matches      |
-| Similarity Metric | enum · `cosine`                          | `cosine`, `l2`, or `inner_product`                     |
+### Table
 
-### Table name rules
+The Table field names the table used for vectors; its default is `rocketride`. It must be a valid unquoted PostgreSQL identifier: at most 63 characters, starting with a letter or underscore, and thereafter containing only letters, digits, or underscores. The driver also accepts the legacy `collection` key, but the panel uses Table.
 
-The table name must be a valid unquoted PostgreSQL identifier: start with a letter or
-underscore, contain only letters, digits, and underscores, and be at most 63 characters.
-Anything else (spaces, dashes, dots, quotes) is rejected at config validation and at
-startup. This is enforced deliberately, because the table name is interpolated into SQL.
+Change the table when a corpus needs its own physical store. The runtime uses the
+name in its SQL statements and does not quote it, which is why punctuation,
+spaces, and a leading digit are rejected instead of being escaped. A valid new
+name produces a new table at first ingest; it does not migrate rows from the
+old table.
 
-### Similarity metrics and scoring
+### Similarity Metric
 
-The metric selects the pgvector distance operator and how raw distance is converted to a
-0–1-style score:
+Choose `cosine`, `l2`, or `inner_product`; the runtime maps them to PostgreSQL's vector-distance operators and rejects any other value. Use the setting that matches how the vectors are meant to be compared, because it determines ranking for semantic searches. `cosine` maps to `<=>`, `l2` to `<->`, and `inner_product` to `<#>`.
 
-| Metric          | Operator | Score formula      |
-| --------------- | -------- | ------------------ |
-| `cosine`        | `<=>`    | `1 - distance`     |
-| `l2`            | `<->`    | `1 / (1 + distance)` |
-| `inner_product` | `<#>`    | `-distance`        |
+The retrieval score defaults to `0.5`, and the driver always removes results
+whose converted score is below its hard `0.20` floor. Raise the configured
+threshold to give downstream prompts fewer, more selective documents; lower it
+when relevant documents are missing. The conversion differs by metric—cosine
+uses `1 - distance`, L2 uses `1 / (1 + distance)`, and inner product negates
+the returned distance—so do not carry a score threshold across a metric change
+without retesting the retrieval quality.
 
-The metric must match how the table was populated, switching metrics on an existing
-table changes ranking semantics without re-embedding anything.
+### Retrieval and embedding compatibility
 
----
+The first write creates the table with a vector column sized for its incoming
+embedding. Later semantic searches check the requested embedding model against
+the existing collection before executing. Keep documents produced by compatible
+embedding configurations in the same table; a model or vector-size mismatch is
+a sign to create or select a separate table, rather than to treat the failure
+as an ordinary relevance-tuning issue.
 
-## Profiles
+### Tool Server Name
 
-| Profile           | Description                   |
-| ----------------- | ----------------------------- |
-| Local _(default)_ | Your own PostgreSQL server    |
+The tool-server name defaults to `postgres` and prefixes the three agent functions. Change it when multiple PostgreSQL stores are connected to the same agent so their functions do not share a namespace.
 
----
+## Authentication
 
-## Table schema
+Provide the configured PostgreSQL host, port, user, password, and database. The save-time probe opens a PostgreSQL connection with those values and verifies that the database supports the `vector` type.
 
-The auto-created table has these columns:
+## Notes
 
-`id` (bigserial primary key), `content`, `objectId`, `nodeId`, `parent`, `permissionId`,
-`isDeleted`, `chunkId`, `isTable`, `tableId`, `vectorSize`, `modelName`, and
-`embedding vector(N)` where `N` is the embedding dimension of the first ingested batch.
+### Search and document lifecycle
 
----
+Semantic search requires an embedding. Keyword search performs a `LIKE` match on content with the metadata filters. Re-ingesting an object deletes its existing rows before replacement chunks are inserted. The store can mark chunks deleted or active, and its default filters exclude marked-deleted chunks.
 
-## Requirements
+Semantic search orders by the chosen pgvector distance operator and checks that
+the stored embedding model is compatible before searching. Unlike the other
+paths, it cannot take a non-zero result offset. This matters for callers that
+try to paginate semantic results: use a limit or a separate retrieval strategy
+instead of expecting SQL-style offset pagination.
 
-The pgvector extension must be installed in the target PostgreSQL database before
-connecting (`CREATE EXTENSION vector;`). Config validation connects with a 3-second
-timeout, runs `SELECT 1`, and casts `NULL::vector`, a clear provider error is surfaced
-if the extension is missing or the connection fails.
+The metadata filters are translated to SQL predicates for node, parent,
+permissions, object IDs, chunk IDs, table data, and deletion state. Normal
+searches exclude marked-deleted rows. Use those filters to narrow one shared
+table to an eligible corpus; changing the table name is for an independently
+managed store, not the routine way to restrict a query.
 
----
+### Rendering
+
+Rendering retrieves an object's chunks in `chunkId` order and sends joined text to the callback in `renderChunkSize` groups. The node's document count is a count of rows in the table.
+
+The runtime removes an object's existing rows and commits that deletion before
+it inserts the replacement chunks. Retain a source of truth that can be
+ingested again: if a replacement write fails, the previous rows have already
+been removed rather than preserved as a fallback copy.
 
 ## Upstream docs
 
+- [PostgreSQL documentation](https://www.postgresql.org/docs/)
 - [pgvector documentation](https://github.com/pgvector/pgvector)
-
----
-
-## Agent tools
-
-When wired to an agent, the node exposes three tools via `VectorStoreToolMixin`. Each tool is named `<serverName>.<tool>` (defaults: `postgres.search`, `postgres.upsert`, `postgres.delete`).
-
-| Tool     | Key inputs                                                                                                                            | Description                                                                                                              |
-| -------- | ------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| `search` | `query` (required); `top_k` (default 10, max 100); `filter` (optional dict, keys `objectId`/`nodeId`/`parent` are honored)           | Semantic search over stored documents; returns content, metadata, and score per result. Falls back to keyword search if semantic search fails. |
-| `upsert` | `documents` array, each with `content` and `object_id`; optional `metadata`, `embedding`, and `embedding_model`                      | Add or update documents. Embeddings are computed automatically via the bound embedding provider, or pre-computed vectors can be supplied. |
-| `delete` | `object_ids` (non-empty string array)                                                                                                 | Hard-delete documents by object ID. Returns `deleted_count`.                                                             |
-
-Tool calls run on the control plane and do not flow through the pipeline's embedding lanes. Semantic search in the `search` tool and automatic embedding in `upsert` require an embedding provider bound to the node (the `all.embedding` block in its parameters). Without one, those calls return `{"success": false, "error": ...}`.
-
----
 
 <!-- ROCKETRIDE:GENERATED:PARAMS START -->
 <!-- Generated by nodes:docs-generate. Do not edit by hand. -->

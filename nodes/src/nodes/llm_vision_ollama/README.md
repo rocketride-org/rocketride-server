@@ -10,61 +10,62 @@ Uses **langchain-openai** (`ChatOpenAI`) against Ollama's OpenAI-compatible `/v1
 
 Each inference attempt is capped by a 30-second hard timeout; a timed-out or retryable failure is retried once with exponential backoff (a fresh HTTP client is created per attempt so a hung request cannot exhaust the connection pool). API errors are translated into actionable user-facing messages (see Troubleshooting).
 
----
-
-## Configuration
-
-### Lanes
+## Lanes
 
 | Lane in     | Lane out    | Description                                                                    |
 | ----------- | ----------- | ------------------------------------------------------------------------------ |
 | `image`     | `text`      | Analyze a single image, receive text                                           |
 | `documents` | `documents` | Analyze image documents, return text analysis with original metadata preserved |
 
+## Profiles
+
+Default: **Llama 3.2 Vision 11B** (`llama3_2-vision-11b`).
+
+| Profile | Model | Context tokens |
+| ------- | ----- | -------------- |
+| `custom` | _(user-specified)_ | 16,385 |
+| `llama3_2-vision-11b` **(default)** | `llama3.2-vision:11b` | 128,000 |
+| `llama3_2-vision-90b` | `llama3.2-vision:90b` | 128,000 |
+| `llava-7b` | `llava:7b` | 32,768 |
+| `llava-13b` | `llava:13b` | 4,096 |
+| `llava-34b` | `llava:34b` | 4,096 |
+| `moondream` | `moondream` | 2,048 |
+| `minicpm-v` | `minicpm-v` | 8,192 |
+| `qwen2_5vl-3b` | `qwen2.5vl:3b` | 128,000 |
+| `qwen2_5vl-7b` | `qwen2.5vl:7b` | 128,000 |
+
+## Configuration
+
+Choose a bundled profile for a known Ollama model or `custom` for another multimodal
+model. All profiles expose the server URL and prompts; `custom` also exposes the model
+name and context limit. The default server is `http://localhost:11434/v1`.
+
 ### Image to text
 
-Raw image bytes arrive in chunks over the AVI protocol, are accumulated, encoded as a base64 data URL with the incoming MIME type, and sent to the model together with the configured analysis prompt. The model's answer is written to the `text` lane.
+Raw image bytes arrive in chunks over the AVI protocol, are accumulated, encoded as a
+base64 data URL with the incoming MIME type, and sent to the model with the configured
+analysis prompt. The model's answer is written to the `text` lane.
 
 ### Documents to documents
 
-Each incoming `Doc` of type `Image` (its `page_content` is base64-encoded PNG, since the frame grabber always outputs PNG) is analyzed individually. The answer is emitted as a `Text` Doc that preserves the original document metadata (`chunkId`, `time_stamp`, etc.). Non-`Image` documents and `Image` documents with empty content are skipped with a warning; a per-document inference failure is logged and skipped rather than failing the batch. The original image documents do not flow downstream.
+Each incoming `Doc` of type `Image` is analyzed individually. Its `page_content` is
+expected to be base64-encoded PNG. The answer is emitted as a `Text` document that
+preserves the original metadata (`chunkId`, `time_stamp`, and other fields). Non-image
+documents and images with empty content are skipped with a warning; a per-document
+failure is logged and skipped instead of failing the batch. The original image
+documents do not flow downstream.
 
-If no analysis prompt is configured, the question text from the request is used; if that is also empty, the prompt defaults to `Describe this image.`
+### System Instructions and Analysis Prompt
 
-### Fields
+Use **System Instructions** to define the model's role and **Analysis Prompt** for the
+image task. If the analysis prompt is empty, the node uses question text from the
+request; if that is also empty, it uses `Describe this image.`
 
-The node is configured by selecting a profile in the **Vision Model** field (`image_vision_ollama.profile`, default `llama3_2-vision-11b`). All profiles expose the same connection and prompt fields; the **Custom** profile additionally exposes the model name and token limit.
+The selected model must already be pulled into Ollama (`ollama pull <model>`).
 
-| Field | Type | Description |
-|---|---|---|
-| `model` | string | Ollama vision model name |
-| `modelTotalTokens` | number | Total Tokens |
-| `systemPrompt` | string | Define the model's role and behavior for image analysis |
-| `prompt` | string | Describe what you want to analyze or extract from the image |
-| `profile` | string | Default "llama3_2-vision-11b". Select the Ollama vision model to use |
+## Notes
 
----
-
-## Profiles
-
-| Profile                          | Model                 | Context tokens |
-| -------------------------------- | --------------------- | -------------- |
-| Llama 3.2 Vision 11B _(default)_ | `llama3.2-vision:11b` | 128,000        |
-| Llama 3.2 Vision 90B             | `llama3.2-vision:90b` | 128,000        |
-| Qwen 2.5 VL 3B                   | `qwen2.5vl:3b`        | 128,000        |
-| Qwen 2.5 VL 7B                   | `qwen2.5vl:7b`        | 128,000        |
-| LLaVA 7B                         | `llava:7b`            | 32,768         |
-| LLaVA 13B                        | `llava:13b`           | 4,096          |
-| LLaVA 34B                        | `llava:34b`           | 4,096          |
-| MiniCPM-V                        | `minicpm-v`           | 8,192          |
-| Moondream 2                      | `moondream`           | 2,048          |
-| Custom                           | _(user-specified)_    | configurable   |
-
-See the [Ollama model library](https://ollama.com/library) for available models. The selected model must be pulled into Ollama before use (`ollama pull <model>`).
-
----
-
-## Troubleshooting
+### Troubleshooting
 
 The node maps common API failures to clear messages:
 
@@ -77,7 +78,9 @@ The node maps common API failures to clear messages:
 | "Vision request timed out"            | Inference exceeded the 30 s hard timeout; large models may need a warm-up run or a smaller model |
 | "Image processing error"              | Use a supported image format: JPEG, PNG, GIF, WEBP                                                |
 
----
+## Upstream docs
+
+- [Ollama model library](https://ollama.com/library)
 
 <!-- ROCKETRIDE:GENERATED:PARAMS START -->
 <!-- Generated by nodes:docs-generate. Do not edit by hand. -->

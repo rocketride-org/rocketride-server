@@ -91,7 +91,7 @@ webhook -> tool_n8n (triggers n8n workflow "rocketride-demo") -> response
 
 - Lane input is POSTed to the n8n workflow's webhook; the workflow's response flows downstream
 - Import the companion `n8n-call-rocketride.workflow.json` into n8n for the other half of an RR→n8n→RR round-trip
-- See the [n8n integration guide](../docs/product/integrations/n8n.md) for setup, activation, and Docker-reachability notes
+- See the [n8n integration guide](../docs/public/product/integrations/n8n.md) for setup, activation, and Docker-reachability notes
 
 **Required env vars:** `ROCKETRIDE_N8N_URL` (e.g. `http://localhost:5678`), `ROCKETRIDE_N8N_KEY` (only for async mode / listing)
 

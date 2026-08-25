@@ -1,115 +1,150 @@
 # db_mysql
 
-A RocketRide database node that answers natural-language questions against a MySQL database and inserts structured pipeline data into a MySQL table.
+A RocketRide database node for asking natural-language questions of MySQL and
+inserting structured answers into a MySQL table. Choose it when your pipeline
+needs both MySQL query tools and an `answers`-lane destination for rows.
+
+## About MySQL
+
+MySQL is the database product this node connects to. This implementation uses
+SQLAlchemy with the PyMySQL driver to connect and reflect MySQL table schemas.
 
 ## What it does
 
-The node operates in two roles. As a pipeline node, it receives natural-language questions on the `questions` lane, uses a connected LLM to translate them into SQL, executes the query, and emits results on the `table`, `text`, and `answers` output lanes; it also receives structured data on the `answers` input lane and inserts rows into the configured table. As a tool node, it exposes `get_data`, `get_schema`, and `get_sql` to an agent so the agent can query the database by describing the data it wants.
-
-Connects via SQLAlchemy with the pymysql driver (`mysql+pymysql://` DSN; user, password, and database name are URL-encoded so reserved characters don't break the connection string). The connection pool allows up to 30 concurrent connections (`pool_size=10`, `max_overflow=20`). The full database schema (tables, columns, types, primary keys, and foreign keys) is reflected once at startup and supplied to the LLM as context for every query.
-
-Only `SELECT` statements are permitted for queries; all generated SQL passes a whitelist safety check before execution. Inserts go through the `answers` lane, not through SQL. Saving the node config probes the server with `SELECT 1` (5-second connect timeout) and surfaces the driver error verbatim if the connection fails.
-
----
-
-## Configuration
-
-### Lanes
-
-| Lane in | Lanes out | Description |
-|---------|-----------|-------------|
-| `questions` | `table`, `text`, `answers` | Translate question to SQL, execute it. Results go to `text` as a string, to `table` as a markdown table (valid queries only), and to `answers` as a markdown table (or the LLM's text response when the question is not a database query). |
-| `answers` | (none) | Parse structured JSON data and insert it into the configured table |
-
-Two special question types are handled on the `questions` lane:
-
-- **`QuestionType.DIALECT`**: emits `{"dialect": "mysql"}` on the `answers` lane so SDK callers can branch on the underlying engine.
-- **`QuestionType.EXECUTE`**: runs the question text as raw SQL, bypassing LLM translation and the safety check. Disabled unless `allow_execute` is on; see the "Direct SQL execution" section below.
-
-### Fields
-
-| Field | Type | Description |
-|---|---|---|
-| `host` | string | Default "localhost". Host name or IP address of the MySQL server |
-| `user` | string | Default "root". User to connect to the MySQL server |
-| `password` | string | Password to connect to the MySQL server |
-| `database` | string | Default "database". Name of database |
-| `table` | string | Default "table". Name of table |
-| `db_description` | string | Default empty. What is this database used for? Describe its content and purpose, this helps the LLM generate more accurate queries. |
-| `max_attempts` | integer | Default 5. Maximum number of times to re-ask the LLM if EXPLAIN rejects the generated SQL |
-| `allow_execute` | boolean | Default false. Permit QuestionType.EXECUTE callers to run raw SQL without LLM translation or safety checks. Leave OFF unless a trusted application explicitly needs to issue SQL directly. |
-| `profile` | string | Default "default".  |
-
-The node has a single `default` profile containing all fields above.
-
----
+On the `questions` lane, the node gives a connected LLM its startup-reflected
+schema and optional database description, validates generated `SELECT` queries
+with `EXPLAIN`, and emits results as a table, text, or answer. On the `answers`
+lane, it inserts structured rows into the configured table, creating that table
+from the first incoming data shape when necessary. It is also an agent tool
+node, making it a better fit than a pipeline-only SQL destination when an agent
+must decide what to retrieve or needs gated raw SQL.
 
 ## Connections
 
 | Connection | Required | Description |
-|------------|----------|-------------|
-| `llm` | yes (min 1) | LLM used to craft SQL queries from natural-language questions |
+| --- | --- | --- |
+| `llm` | yes | LLM used to craft SQL queries from questions |
 
----
+## Lanes
 
-## Available tools
+| Lane in | Lane out | Description |
+| --- | --- | --- |
+| `answers` | — | Insert structured answer data into the configured table. |
+| `questions` | `table` | Send query results as a Markdown table. |
+| `questions` | `text` | Send the result as text. |
+| `questions` | `answers` | Send the result as an answer. |
 
-When connected to an agent, the node exposes three functions:
+## As a tool
 
-| Tool | Description |
-|------|-------------|
-| `get_data` | Natural language to SQL `SELECT`, executed; returns result rows plus the generated SQL. `limit` defaults to 250 rows, max 25,000. |
-| `get_schema` | Returns the database schema: tables, columns, types, primary keys, and foreign keys. Pass a `table` name for a single table, or omit it for the full schema. |
-| `get_sql` | Natural language to SQL only: returns the generated `SELECT` statement without executing it |
+The registered tool names are bare method names; this node declares no
+configurable server-name prefix.
 
----
+| Function | Description |
+| --- | --- |
+| `get_data` | Generate a safe `SELECT` from a question and execute it. |
+| `get_schema` | Return the schema reflected when the node started. |
+| `get_sql` | Generate a safe `SELECT` without executing it. |
+| `execute` | Run raw SQL, bypassing LLM translation and the safety check. |
+| `begin` | Open a transaction and return its session ID. |
+| `commit` | Commit and close a transaction session. |
+| `rollback` | Roll back and close a transaction session. |
+| `dialect` | Return `{ "dialect": "mysql" }`. |
 
-## Transaction tool functions
+`get_data` and `get_sql` require a non-empty `question`; `get_data` accepts an
+optional `limit`, defaulting to 250 and clamped to 1–25,000. `get_schema`
+accepts an optional `table`; an unknown table returns an `error` field, while
+omitting it returns all reflected tables. `get_data` returns `{valid, rows,
+sql, row_limit}` on success; a non-database question returns `{valid: false,
+answer}`, and a query execution failure returns `{valid: false, error, sql,
+rows: []}`.
 
-Three additional tool functions support explicit database transactions. All three require `allow_execute=true` on the node (the same gate as `QuestionType.EXECUTE`); requests are silently dropped when the gate is off.
+`execute` requires non-empty `sql` and optionally accepts a transaction
+`session_id` plus positional values for `$1`, `$2`, and so on. It returns
+`{rows, affected_rows}`. `begin` takes no arguments and returns `{session_id}`;
+`commit` and `rollback` require that ID and return `{ok: true}`. These four
+write-capable operations fail when **Allow direct query execution** is off;
+unknown or expired session IDs also fail. Invalid tool input raises an error.
 
-| Tool       | Input                     | Returns                    | Description                                                                                                   |
-| ---------- | ------------------------- | -------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| `begin`    | _(none)_                  | `{"session_id": "<id>"}`   | Opens a new transaction and reserves a dedicated connection for it. Returns a `session_id` that callers must thread through subsequent `execute`, `commit`, and `rollback` calls. |
-| `commit`   | `{"session_id": "<id>"}` | `{"ok": true}`             | Commits all statements made on the given session, releases the held connection back to the pool, and removes the session entry. |
-| `rollback` | `{"session_id": "<id>"}` | `{"ok": true}`             | Discards all statements made on the given session, releases the held connection, and removes the session entry. |
+## Configuration
 
-To run a statement inside an open transaction, pass the `session_id` returned by `begin` as the `session_id` field of an `execute` tool call. Statements without a `session_id` run on a fresh auto-commit connection and are not part of any transaction.
+Start with the default connection values, then set the database endpoint and
+target table. The generated schema below is the complete field reference;
+describe the data well and leave direct execution disabled unless a trusted
+caller truly needs it.
 
-Sessions are server-scoped: the `session_id` is only valid on the node instance that issued it. Idle sessions are reaped automatically after a configurable timeout; the engine also closes all sessions when the pipeline is torn down.
+### Database description
 
-The Python SDK exposes these as `client.database.begin_transaction()`, `client.database.commit()`, and `client.database.rollback()`. The TypeScript SDK exposes them as `client.database.beginTransaction()`, `client.database.commit()`, and `client.database.rollback()`.
+This text is added to every LLM SQL-generation request alongside the reflected
+schema. Describe the data's purpose, meanings, and conventions when names
+alone are ambiguous—for example, explain whether `amount` is a gross or net
+value. Change it when queries choose the wrong interpretation; it does not
+replace the actual table and column information collected at startup.
 
-To run a statement **inside** an open session from the SDK, pass the `session_id` (and any positional `$1..$n` `params`) to the database query method — Python `client.database.query(token=..., sql=..., session_id=..., params=[...])`, TypeScript `client.database.query({ token, sql, sessionId, params })`. Parameters are bound server-side. A `query(...)` call without a `session_id` runs on a fresh auto-commit connection and is not part of any transaction.
+### Connection and target table
 
----
+Set the host, user, password, database, and table to the MySQL server and
+target table. User, password, and database are URL-encoded before the PyMySQL
+DSN is built, so reserved characters in those values are safe. The node
+reflects the complete database for query context at startup, then separately
+checks the target table: if it is absent, it warns and waits to create it from
+the first incoming `answers` data.
 
-## SQL generation and validation
+### Max validation attempts
 
-Generated SQL goes through two gates before execution:
+The default of five gives the LLM several chances to repair a query rejected by
+`EXPLAIN`. Lower it when fast failure matters more than recovery; raise it for
+complex schemas that need another correction cycle. The configuration field
+allows 1–20, while the runtime accepts any positive configured number and
+falls back to five for an invalid value. After the final rejected attempt it
+returns the last generated result, so retries improve generated SQL but do not
+guarantee that a subsequent execution will succeed.
 
-1. **Safety whitelist**: only `SELECT` statements (optionally prefixed by `EXPLAIN`) are allowed. Comments are stripped first so embedded keywords can't fool the check, each statement in a multi-statement string is checked separately, `SELECT ... INTO OUTFILE` / `INTO DUMPFILE` is blocked, and `WITH` (CTE) is deliberately rejected because CTEs can wrap mutations.
-2. **`EXPLAIN` validation**: the query is validated by running `EXPLAIN` against the live database without executing it. If `EXPLAIN` rejects the query, the rejected SQL and the database error are fed back to the LLM for a corrected attempt. This repeats up to `max_attempts` times (default 5) before the last result is returned as-is.
+### Allow direct query execution
 
-If the LLM decides the question is not a database query at all, it answers in plain text instead, and that text is returned on the `text` and `answers` lanes (or in the tool result's `answer` field).
+Leave this off by default. When on, the `execute`, `begin`, `commit`, and
+`rollback` tools can bypass LLM translation and the generated-query safety
+check. A raw call without a session uses a transaction that commits on success;
+use `begin` followed by `execute` with its session ID when several statements
+must share a transaction. Enable it only for trusted callers that need writes
+or dialect-specific SQL; use `get_data` for ordinary read-only retrieval.
 
----
+## Limitations
 
-## Inserting data
+This node declares the `noremote` capability, so it cannot run in a remote
+execution environment. It requires network reachability to the MySQL server
+from the environment where the pipeline runs.
 
-Rows arriving on the `answers` lane are inserted into the configured `table`:
+## Notes
 
-- The table is auto-created on first insert if it doesn't exist, with column types inferred from the data (int, float, datetime, and text detection; short strings become `VARCHAR(255)`, long ones `TEXT`) and an auto-increment `id` primary key prepended. A startup warning is logged when the table is missing.
-- Incoming keys are matched to schema columns case-insensitively (`UserName` maps to `username`); schema columns absent from the data are inserted as `NULL`, and keys not in the schema are dropped.
-- Lists and dicts are serialised to JSON strings; booleans are stored as `0`/`1`.
+### Generated-query safety
 
----
+For LLM-generated SQL, the node only accepts `SELECT`, optionally preceded by
+`EXPLAIN`. It strips comments, checks every semicolon-separated statement, and
+rejects CTEs plus `SELECT ... INTO OUTFILE` or `INTO DUMPFILE`. It validates
+each safe candidate with `EXPLAIN` and feeds database errors to the LLM for the
+next attempt. If the LLM decides a question is not a database query, its text
+answer is emitted instead of executing SQL.
 
-## Direct SQL execution
+### Inserting answers
 
-When `allow_execute` is `true`, callers sending `QuestionType.EXECUTE` can run raw SQL (reads or writes) with no LLM translation and no safety whitelist. Writes auto-commit; results are emitted on the `text`, `table`, and `answers` lanes, with the `answers` payload containing `rows` and `affected_rows`. `SELECT` results are capped at 25,000 rows (configurable via the `max_execute_rows` config key); exceeding the cap fails the query rather than truncating it.
+Incoming JSON rows are matched to the target schema case-insensitively; missing
+schema columns become `NULL`, and unknown incoming keys are ignored. Lists and
+dictionaries are serialized as JSON strings and booleans as `0` or `1`. For a
+new table, the node adds an auto-increment `id` primary key and infers integer,
+float, datetime, or text columns; short text becomes `VARCHAR(255)` and longer
+text becomes `TEXT`.
 
-This is off by default. Leave it off unless a trusted application explicitly needs to issue SQL directly: with it enabled, any pipeline caller that can reach the node can run arbitrary statements against the database.
+### Connection checks and transactions
+
+Saving configuration probes the server with `SELECT 1` using a five-second
+connect timeout and reports the driver error when it cannot connect. The
+runtime connection pool allows 30 concurrent connections. It retains at most
+20 transaction sessions by default, rolls idle ones back after five minutes,
+and rolls all open sessions back when the pipeline closes.
+
+## Upstream docs
+
+- [MySQL documentation](https://dev.mysql.com/doc/)
 
 ---
 
