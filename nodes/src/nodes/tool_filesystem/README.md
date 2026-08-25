@@ -1,8 +1,106 @@
 # tool_filesystem
 
-A RocketRide tool node that gives an AI agent read/write access to the account-scoped RocketRide file store.
+A RocketRide node that lets an AI agent manage files in its account-scoped RocketRide file store, or persist pipeline data to that same store.
+
+## About RocketRide file storage
+
+RocketRide file storage is the account-scoped store used by the platform and its client
+SDK file methods. It keeps task data under the storage anchor supplied by the running task
+instead of exposing an arbitrary host filesystem.
 
 ## What it does
+
+Choose this node when an agent must read or produce files that should remain available in
+the RocketRide file store, or when a pipeline needs to persist lane data there. Unlike a
+host-filesystem tool, it is scoped to the task's storage anchor. It acts both as an agent
+tool and as a pipeline sink that emits document references for files it writes.
+
+## Lanes
+
+| Lane in | Lane out | Description |
+| --- | --- | --- |
+| `documents` | `documents` | Writes each document's parsed text as a `.txt` file and emits a reference. |
+| `text` | `documents` | Writes Markdown text and emits a reference. |
+| `table` | `documents` | Writes the table as Markdown and emits a reference. |
+| `image` | `documents` | Streams image data to storage and emits a reference when complete. |
+| `audio` | `documents` | Streams audio data to storage and emits a reference when complete. |
+| `video` | `documents` | Streams video data to storage and emits a reference when complete. |
+
+Lane writes follow the same write permission and path-whitelist checks as the tool. Text
+and tables use `.md`; documents use `.txt`; media derives an extension from MIME type,
+then the source extension, then `.bin`. If a name exists, the sink tries numbered suffixes
+through `_100`; it does not write an empty media stream. References are emitted only when
+the `documents` output is connected.
+
+## As a tool
+
+The tool server prefix is `fs` by default. It registers these functions, subject to their
+corresponding allow switches:
+
+| Function | Description |
+| --- | --- |
+| `fs.read_file` | Reads decoded file content. |
+| `fs.write_file` | Writes or overwrites text content. |
+| `fs.delete_file` | Deletes one file. |
+| `fs.list_directory` | Lists a directory's immediate children. |
+| `fs.create_directory` | Creates a directory and intermediate segments. |
+| `fs.stat_file` | Returns file or directory metadata. |
+
+`read_file` requires `path`; `encoding` defaults to UTF-8, and `maxBytes` defaults to
+256 KiB and is capped at 4 MiB. It returns `{path, content, size}`. `write_file` requires
+`path` and `content`, accepts optional UTF-8 `encoding`, and returns `{path, bytesWritten}`.
+`delete_file`, `create_directory`, and `stat_file` require `path`; the first two return
+their path plus `deleted` or `created`. `list_directory` accepts an optional path, which
+defaults to the account root.
+
+Disabled functions are omitted from agent discovery and direct calls fail. Invalid paths,
+unavailable storage, whitelist rejection, read-size/decode problems, and store errors
+propagate as tool errors rather than being represented as empty results.
+
+## Configuration
+
+Start by granting only the operations an agent needs, then constrain its writable paths.
+The default permits reading, writing, listing, directory creation, and metadata lookup;
+deletion is disabled. Sink-specific fields control the paths and references created by
+pipeline lanes.
+
+### Operation permissions
+
+Each `allow*` switch controls one agent function and applies at both discovery and call
+time. Enable deletion only for a trusted agent because it removes account files. Disable
+write when the node is only an inspection tool; lane persistence obeys the same write
+switch.
+
+### Path Whitelist
+
+Each non-empty tool path must match at least one configured pattern. Patterns use Python
+`re.search`, so `secret` matches any path containing that text; use anchors such as
+`^docs/.*$` to restrict a whole path. Invalid individual patterns are skipped with a
+warning, so verify the configured list after editing it. An empty `list_directory` path
+means the account root and does not undergo this match.
+
+### Lane destination and download URLs
+
+`targetDir` defaults to `output/` and prefixes sink-written files. Enable `emitUrl` only
+when downstream consumers need a signed download URL in the reference metadata. Its TTL
+defaults to 3600 seconds; non-positive or invalid values use that default, while larger
+positive values are capped at 3600.
+
+## Notes
+
+### Storage availability
+
+The store is initialized from the running task's identity and storage anchor. If it cannot
+be initialized, all file functions are hidden from the agent and calls report that the
+filesystem tool is unavailable.
+
+## Upstream docs
+
+- [RocketRide documentation](https://docs.rocketride.org)
+
+<!-- Legacy pre-schema prose retained below only while the generated documentation is preserved. -->
+
+### What it does
 
 Exposes the account file store, the same storage area the client SDK reaches via its
 `fs_*` methods, to an agent as a set of callable tools. All paths are plain and
@@ -28,7 +126,7 @@ may touch.
 
 ---
 
-## Configuration
+### Configuration
 
 
 | Field | Type | Description |
@@ -59,7 +157,7 @@ non-trivial regex).
 
 ---
 
-## Pipeline sink (lanes)
+### Pipeline sink (lanes)
 
 Besides the agent tools, the node doubles as a **pipeline sink**. Each input lane —
 `documents`, `text`, `table`, `image`, `audio`, `video` — writes whatever flows in to the
@@ -103,7 +201,7 @@ permission needed); **URL expiry (seconds)** (default 3600, max 3600) sets its T
 
 ---
 
-## Available tools
+### Available tools
 
 Each tool is namespaced by the node id: e.g. an agent sees `tool_filesystem_1.read_file`.
 Disabled tools are filtered out of discovery, and the allow-flag is re-checked at
@@ -145,7 +243,7 @@ subprocess long before the LLM ever sees the result.
 
 ---
 
-## Storage location
+### Storage location
 
 Files land under the configured storage backend (defaults to `~/.rocketlib/store/`).
 For the default filesystem backend the absolute path is the task's storage anchor
@@ -161,13 +259,15 @@ the current task automatically, no configuration needed.
 
 ---
 
-## Running the tests
+### Running the tests
 
 ```bash
 pytest nodes/test/tool_filesystem/test_read_size_cap.py -v
 ```
 
 ---
+
+-->
 
 <!-- ROCKETRIDE:GENERATED:PARAMS START -->
 <!-- Generated by nodes:docs-generate. Do not edit by hand. -->

@@ -2,6 +2,12 @@
 
 A RocketRide agent tool node that exposes the [Oura API v2](https://cloud.ouraring.com/v2/docs) as read-only tools. Bind it to any agent (`agent_rocketride`, `agent_langchain`, `agent_crewai`, `agent_deepagent`) and the agent can query the token owner's Oura Ring data on demand.
 
+## About Oura
+
+Oura makes a wearable ring and companion service for personal health and
+activity data. Its API gives applications access to the token owner's records,
+including sleep, readiness, activity, and other health measurements.
+
 ## What it does
 
 Wraps every current Oura v2 `usercollection` endpoint behind 21 tool functions (the deprecated `tag` endpoint is skipped in favor of its successor, `enhanced_tag`). All operations are **read-only** — the Oura v2 API offers no write endpoints for personal data, so an agent bound to this node can never modify anything.
@@ -10,7 +16,10 @@ Responses are compacted before they reach the agent: heavy time-series fields (`
 
 Pagination is followed transparently (up to 10 pages per call). If a range is truncated, the response carries a `next_token` the agent can pass back to continue — Oura returns documents date-ascending, so the missing pages hold the most recent data. `daily_summary` cannot paginate; it instead flags a page-cap hit with a `truncated` key so the agent knows to narrow the range.
 
-### Tools
+## As a tool
+
+Tools use the `oura` prefix by default. They return API data or raise a
+descriptive error; they do not modify the token owner's data.
 
 | Tool | Oura collection | Description |
 |---|---|---|
@@ -41,15 +50,16 @@ Date-range tools accept `start_date` / `end_date` (ISO `YYYY-MM-DD`); when omitt
 
 ## Configuration
 
-### Lanes
+Set the access token and leave the rest of the behavior to the agent's tool
+calls. This is a tool-only node with no data lanes, so bind it to an agent
+rather than wiring it into a data-flow branch.
 
-This is a `tool` node: it has **no data lanes**. Bind it to an agent's tool channel instead of wiring it into the data flow.
+### Access Token
 
-### Fields
-
-| Field | Type | Description |
-|---|---|---|
-| `token` | string | Oura API bearer token — OAuth2 access token, or a legacy personal access token (secure field) |
+Supply an Oura API bearer token in the secure field. Use the environment
+fallback only when deployment configuration cannot hold the token; a missing
+token prevents the node from starting, while an expired or insufficiently
+scoped token produces a descriptive tool error.
 
 ---
 
@@ -71,7 +81,9 @@ If your pipeline only needs a subset of the data, you can still pass an explicit
 
 ---
 
-## Error handling
+## Notes
+
+### Error handling
 
 Oura HTTP errors are mapped to descriptive failures the agent can act on:
 
@@ -82,6 +94,10 @@ Oura HTTP errors are mapped to descriptive failures the agent can act on:
 - **426**: `Oura subscription required` — the data needs an active Oura membership
 - **429**: `Oura rate limit exceeded` — Oura allows 5000 requests per 5-minute window
 - Network timeout / connection failures raise with an explicit message
+
+## Upstream docs
+
+- [Oura API documentation](https://cloud.ouraring.com/v2/docs)
 
 ---
 
