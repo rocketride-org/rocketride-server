@@ -416,3 +416,84 @@ Default: **Profile 1** (`profile-1`).
 
     assert failures(non_llm) == []
     assert failures(six_llm) == []
+
+
+def write_multi_service_node(tmp_path, *, profile_section, class_type=('llm',)):
+    """A directory with two protocol-bearing services, each with its own default.
+
+    Mirrors cloud_tts, store_elasticsearch and llm_openai_api: a second
+    registration is a different node to the engine, so its default is a fact
+    about that service rather than a competing claim about the primary one.
+    """
+    node = tmp_path / 'fixture_node'
+    node.mkdir()
+    base = {
+        'classType': list(class_type),
+        'capabilities': [],
+        'lanes': {},
+        'fields': {},
+    }
+    primary = {
+        **base,
+        'protocol': 'fixture_primary',
+        'preconfig': {
+            'default': 'primary-a',
+            'profiles': {'primary-a': {'title': 'Primary A'}, 'primary-b': {'title': 'Primary B'}},
+        },
+    }
+    secondary = {
+        **base,
+        'protocol': 'fixture_secondary',
+        'preconfig': {
+            'default': 'secondary-a',
+            'profiles': {'secondary-a': {'title': 'Secondary A'}, 'secondary-b': {'title': 'Secondary B'}},
+        },
+    }
+    (node / 'services.json').write_text(json.dumps(primary))
+    (node / 'services.secondary.json').write_text(json.dumps(secondary))
+    (node / 'README.md').write_text(
+        '# fixture_node\n\nA fixture node used to test documentation validation.\n\n'
+        '## What it does\n\nRuns fixture prompts.\n\n'
+        f'{profile_section}\n\n'
+        '## Configuration\n\nChoose a profile.\n'
+    )
+    return node
+
+
+MULTI_SERVICE_SECTION = """## Profiles
+
+Primary default: **Primary A** (`primary-a`). Secondary default: **Secondary A** (`secondary-a`).
+
+| Profile | Model |
+| ------- | ----- |
+| `primary-a` **(default)** | `model-pa` |
+| `primary-b` | `model-pb` |
+| `secondary-a` **(default)** | `model-sa` |
+| `secondary-b` | `model-sb` |"""
+
+
+def test_multi_service_accepts_one_default_per_service(tmp_path):
+    node = write_multi_service_node(tmp_path, profile_section=MULTI_SERVICE_SECTION)
+    assert failures(node) == []
+
+
+def test_multi_service_rejects_a_missing_service_default(tmp_path):
+    section = MULTI_SERVICE_SECTION.replace('| `secondary-a` **(default)** |', '| `secondary-a` |')
+    node = write_multi_service_node(tmp_path, profile_section=section)
+    checks = [check for check, _ in failures(node)]
+    assert 'Profiles default is marked' in checks
+
+
+def test_multi_service_rejects_marking_a_non_default(tmp_path):
+    section = MULTI_SERVICE_SECTION.replace('| `secondary-b` |', '| `secondary-b` **(default)** |')
+    node = write_multi_service_node(tmp_path, profile_section=section)
+    checks = [check for check, _ in failures(node)]
+    assert 'Profiles default is marked' in checks
+
+
+def test_multi_service_requires_every_default_in_the_intro(tmp_path):
+    section = MULTI_SERVICE_SECTION.replace(' Secondary default: **Secondary A** (`secondary-a`).', '')
+    node = write_multi_service_node(tmp_path, profile_section=section)
+    checks = [check for check, _ in failures(node)]
+    assert 'Profiles default appears in intro' in checks
+    assert 'Profiles default title appears in intro' in checks

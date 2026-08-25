@@ -29,7 +29,7 @@ and message, truncated to 500 characters.
 ## Profiles
 
 Generic endpoint default: **Custom OpenAI-compatible endpoint** (`custom`).
-Nebius preset default: **Llama 3.3 70B** (`llama-3-3-70b`).
+Nebius preset default: **Llama 3.3 70B Instruct** (`llama-3-3-70b`).
 
 The directory documents the generic endpoint and the Nebius branded preset in one
 combined profile table.
@@ -37,7 +37,7 @@ combined profile table.
 | Profile | Model | Context tokens | Source |
 | ------- | ----- | -------------- | ------ |
 | Generic `custom` **(default)** | _(user-specified)_ | 32,768 | Any OpenAI-compatible API |
-| `llama-3-3-70b` | `meta-llama/Llama-3.3-70B-Instruct` | 131,072 | Nebius Token Factory |
+| `llama-3-3-70b` **(default)** | `meta-llama/Llama-3.3-70B-Instruct` | 131,072 | Nebius Token Factory |
 | `qwen3-235b` | `Qwen/Qwen3-235B-A22B` | 131,072 | Nebius Token Factory |
 | `deepseek-v3` | `deepseek-ai/DeepSeek-V3` | 131,072 | Nebius Token Factory |
 

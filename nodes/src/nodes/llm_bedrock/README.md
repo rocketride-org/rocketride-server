@@ -35,17 +35,19 @@ Default: **Llama 3.3 70B Instruct** (`meta_llama3_3-70b`).
 | Profile | Model ID | Context tokens |
 | ------- | -------- | -------------- |
 | Llama 3.3 70B Instruct **(default)** | `meta.llama3-3-70b-instruct-v1:0` | 128,000 |
+| Llama 4 Scout 17B Instruct | `meta.llama4-scout-17b-instruct-v1:0` | 3,500,000 |
+| Llama 4 Maverick 17B Instruct | `meta.llama4-maverick-17b-instruct-v1:0` | 1,000,000 |
 | Nova 2 Lite | `amazon.nova-2-lite-v1:0` | 1,000,000 |
 | Claude Sonnet 4.5 | `anthropic.claude-sonnet-4-5-20250929-v1:0` | 200,000 |
-| Claude Haiku 4.5 | `anthropic.claude-haiku-4-5-20251001-v1:0` | 200,000 |
 | Claude Opus 4.5 | `anthropic.claude-opus-4-5-20251101-v1:0` | 200,000 |
 
 <details>
-<summary><strong>View 17 more models</strong></summary>
+<summary><strong>View 16 more models</strong></summary>
 
 | Profile | Model ID | Context tokens |
 | ------- | -------- | -------------- |
 | Custom | _(user-specified)_ | 256,000 (editable) |
+| Claude Haiku 4.5 | `anthropic.claude-haiku-4-5-20251001-v1:0` | 200,000 |
 | Jamba 1.5 Large | `ai21.jamba-1-5-large-v1:0` | 256,000 |
 | Jamba 1.5 Mini | `ai21.jamba-1-5-mini-v1:0` | 256,000 |
 | Titan Text Express | `amazon.titan-text-express-v1` | 8,192 |
@@ -60,8 +62,6 @@ Default: **Llama 3.3 70B Instruct** (`meta_llama3_3-70b`).
 | Llama 3.2 3B Instruct | `meta.llama3-2-3b-instruct-v1:0` | 128,000 |
 | Llama 3.2 11B Vision Instruct | `meta.llama3-2-11b-instruct-v1:0` | 128,000 |
 | Llama 3.2 90B Vision Instruct | `meta.llama3-2-90b-instruct-v1:0` | 128,000 |
-| Llama 4 Scout 17B Instruct | `meta.llama4-scout-17b-instruct-v1:0` | 3,500,000 |
-| Llama 4 Maverick 17B Instruct | `meta.llama4-maverick-17b-instruct-v1:0` | 1,000,000 |
 
 </details>
 

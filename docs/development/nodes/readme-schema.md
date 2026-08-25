@@ -185,11 +185,26 @@ name and one row per exposed function.
 
 **Trigger:** `preconfig.profiles` contains ≥ 2 entries other than `custom`.
 
-Every declared profile appears exactly once. The introductory sentence names
-the declared default profile and its key; the default row is marked
-`(default)`. Column names after `Profile` may be adapted to the provider, but
-when `Model`/`Model ID`, `Context`/`Context tokens`, or `Output`/`Output tokens`
-is present, its values must match `model`, `modelTotalTokens`, or
+Every declared profile appears exactly once.
+
+The `Profile` cell identifies the profile by **either its declared key, written
+as code (`gpt-5-5`), or its declared `title` reproduced exactly**. A cell may
+carry both (`` Profile 1 (`profile-1`) ``). Anything else — a display name the
+metadata does not declare, an abbreviation, a re-cased title — is an unknown
+row and fails, because a reader cannot map it back to what the configuration
+panel shows. Pick one of the two forms and use it for every row in a node;
+`custom` is always written as `` `custom` ``. Correct a metadata `title` that
+reads badly in a table rather than paraphrasing it here.
+
+The introductory sentence names the declared default profile, bolding its title
+and giving its key: `Default: **Profile 1** (`profile-1`).` The default's own
+row is marked `**(default)**` after the profile name. The validator accepts any
+markdown decoration around `(default)` so that older pages keep passing, but
+bold is the form to write.
+
+Column names after `Profile` may be adapted to the provider, but when
+`Model`/`Model ID`, `Context`/`Context tokens`, or `Output`/`Output tokens` is
+present, its values must match `model`, `modelTotalTokens`, or
 `modelOutputTokens` in the profile metadata.
 
 For a node whose merged `classType` does not contain `llm`, or whose merged
@@ -199,9 +214,16 @@ block is forbidden in this layout.
 For a node whose merged `classType` contains `llm` and whose merged metadata
 declares more than six profiles, use two tables:
 
-1. A visible table containing at most six unique profiles. Put the declared
-   default first, then profiles from the provider's two newest recognizable
-   release groups, newest group first, until the table reaches six rows.
+1. A visible table containing **up to six** unique profiles — six is a ceiling,
+   not a quota. Put the declared default first, then profiles from the two
+   newest recognizable release groups, newest group first. Stop when those
+   groups are exhausted or the table reaches six rows, whichever comes first;
+   padding the table with older models to reach six defeats the point of the
+   collapse. For a node that fronts several vendors' catalogues (`llm_bedrock`,
+   `llm_ollama`, `llm_gmi_cloud`), "release group" is read per vendor: show the
+   newest group of each vendor a reader is likely to be choosing between, and
+   never leave a vendor's newest generation collapsed while an older one from
+   the same vendor is visible.
 2. A table inside one native `<details>` block containing every remaining
    profile. `custom` and profiles marked `deprecated` must be here.
 
@@ -244,6 +266,23 @@ Profile counts and row parity in a multi-service directory use the combined
 profiles from all protocol-bearing `services*.json` entries. `###` service
 labels may be added when useful, but the combined profile set is validated
 once for the directory.
+
+**Each protocol-bearing service keeps its own default.** A second registration
+is a separate node to the engine — a branded preset (`llm_openai_api`'s Nebius
+service), a second provider (`cloud_tts`'s OpenAI and ElevenLabs), or a second
+backend (`store_elasticsearch`'s Elasticsearch and OpenSearch) — so its
+`preconfig.default` is a fact about that service, not a competing claim about
+the primary one. In a combined table, mark **every** service's default row and
+name each one in the introduction:
+
+```markdown
+Primary default: **Primary A** (`primary-a`). Secondary default: **Secondary A** (`secondary-a`).
+```
+
+Say in one sentence which registration each default belongs to; two unexplained
+`**(default)**` markers read as a contradiction. In the large layout the primary
+service's default still leads the visible table, and no service's default may be
+collapsed.
 
 Release recency is review judgment. Service metadata has no dependable
 release dates or newest-first order, so the deterministic validator does not
@@ -325,8 +364,10 @@ are shared fragments and are ignored):
   lanes
 - exact Profiles parity across merged services: every declared profile appears
   once, with separate failures for missing, duplicate, and unknown rows
-- the declared profile default appears in the introduction and is marked on
-  its row; for large LLM lists it is also the first visible row
+- every protocol-bearing service's declared default appears in the introduction
+  (key, and title in bold) and is marked on its row, with nothing else marked;
+  for large LLM lists the primary service's default is also the first visible
+  row and no service's default is collapsed
 - ordinary profile sections have one table and no `<details>`; large LLM
   sections have one visible table plus one collapsed table, at most six
   visible rows, and `custom`/deprecated rows collapsed

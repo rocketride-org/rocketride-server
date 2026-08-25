@@ -100,6 +100,17 @@ def load_services(node_dir: Path):
         return None
     merged = dict(entries[0])
     merged['_service_count'] = len(entries)
+    # Each protocol-bearing service declares its own default. A branded preset or
+    # a second provider registration (cloud_tts, store_elasticsearch,
+    # llm_openai_api) is a different node from the engine's point of view, so its
+    # default is a fact about that service, not a competing claim about this one.
+    # Order follows file order, primary service first.
+    defaults = []
+    for e in entries:
+        d = (e.get('preconfig') or {}).get('default')
+        if d and d not in defaults:
+            defaults.append(d)
+    merged['_defaults'] = defaults
     for e in entries[1:]:
         merged['classType'] = sorted(set(merged.get('classType') or []) | set(e.get('classType') or []))
         merged['capabilities'] = sorted(set(merged.get('capabilities') or []) | set(e.get('capabilities') or []))
@@ -185,7 +196,12 @@ def profile_results(svc: dict, hand: str) -> list[tuple[str, str, str]]:
     if len({key for key in profiles if key != 'custom'}) < 2 or not section:
         return []
 
-    default = (svc.get('preconfig') or {}).get('default')
+    defaults = [key for key in (svc.get('_defaults') or []) if key in profiles]
+    if not defaults:
+        fallback = (svc.get('preconfig') or {}).get('default')
+        defaults = [fallback] if fallback else []
+    # The primary service's default leads the visible table in the large layout.
+    default = defaults[0] if defaults else None
     large = 'llm' in (svc.get('classType') or []) and len(profiles) > 6
     tables = parse_profile_tables(section)
     visible = [table for table in tables if not table['collapsed']]
@@ -261,19 +277,33 @@ def profile_results(svc: dict, hand: str) -> list[tuple[str, str, str]]:
         add(not mismatches, check, '; '.join(mismatches))
 
     marked = [record['key'] for record in row_records if '(default)' in record['row'].get('profile', '')]
-    add(marked == [default], 'Profiles default is marked', f"expected only '{default}', got: {marked}")
+    add(
+        sorted(filter(None, marked)) == sorted(defaults) and len(marked) == len(defaults),
+        'Profiles default is marked',
+        f'expected exactly {defaults}, got: {marked}',
+    )
     first_table_offset = min((table['offset'] for table in tables), default=len(section))
     intro = section[:first_table_offset]
-    default_in_intro = bool(default and re.search(rf'(?<![\w.-]){re.escape(default)}(?![\w.-])', intro))
-    add(default_in_intro, 'Profiles default appears in intro', f"default key '{default}' not found before first table")
-    default_metadata = profiles.get(default)
-    default_title = default_metadata.get('title') if isinstance(default_metadata, dict) else None
-    if default_title:
+    absent = [key for key in defaults if not re.search(rf'(?<![\w.-]){re.escape(key)}(?![\w.-])', intro)]
+    add(
+        bool(defaults) and not absent,
+        'Profiles default appears in intro',
+        f'default key(s) {absent or defaults} not found before first table',
+    )
+    missing_titles = []
+    for key in defaults:
+        metadata = profiles.get(key)
+        title = metadata.get('title') if isinstance(metadata, dict) else None
+        if title and f'**{title}**' not in intro:
+            missing_titles.append(title)
+    if missing_titles:
         add(
-            f'**{default_title}**' in intro,
+            False,
             'Profiles default title appears in intro',
-            f"default title '{default_title}' not found before first table",
+            f'default title(s) {missing_titles} not found before first table',
         )
+    else:
+        add(True, 'Profiles default title appears in intro')
 
     if large:
         visible_rows = visible[0]['rows'] if len(visible) == 1 else []
@@ -287,6 +317,12 @@ def profile_results(svc: dict, hand: str) -> list[tuple[str, str, str]]:
             bool(visible_keys) and visible_keys[0] == default,
             'Profiles default is visible and first',
             f"expected '{default}' first, got: {visible_keys[:1]}",
+        )
+        hidden_defaults = sorted(set(defaults) - set(visible_keys))
+        add(
+            not hidden_defaults,
+            'Profiles defaults are all visible',
+            f'declared default(s) {hidden_defaults} are collapsed',
         )
 
         forced_collapsed = {
@@ -302,10 +338,11 @@ def profile_results(svc: dict, hand: str) -> list[tuple[str, str, str]]:
             'Profiles custom/deprecated rows collapsed',
             f'visible: {misplaced}',
         )
+        bad_defaults = sorted(set(defaults) & forced_collapsed)
         add(
-            default not in forced_collapsed,
+            not bad_defaults,
             'Profiles default metadata is compatible with large layout',
-            f"default '{default}' is custom or deprecated",
+            f'default(s) {bad_defaults} are custom or deprecated',
         )
 
         hidden_rows = collapsed[0]['rows'] if len(collapsed) == 1 else []
