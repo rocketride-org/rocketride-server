@@ -1,94 +1,64 @@
 # tool_bland_ai
 
-A RocketRide tool node that lets an AI agent make and manage AI-powered phone calls via Bland AI.
+A RocketRide tool node that lets an AI agent initiate an outbound Bland AI call, inspect a call, and request analysis of a completed call.
+
+## About Bland AI
+
+Bland AI is the third-party phone-call service this node invokes over its HTTP API. The node uses it for outbound AI calls, call retrieval, and post-call analysis.
 
 ## What it does
 
-Gives an agent the ability to place outbound voice calls and work with the results. The
-agent can initiate a call with instructions for the Bland AI voice agent, retrieve the
-call's status, transcript, recording URL, duration, and summary, and run post-call AI
-analysis against a goal and a set of questions. Useful for automating outbound calls:
-scheduling, surveys, follow-ups, or any task that requires a voice interaction.
+Use this node when an agent must make and follow up on an AI-powered outbound phone call. It exposes tools only, with no pipeline lanes, and keeps the configured call defaults in one provider driver. Choose it over a generic HTTP tool when the agent needs the node's input checks, call defaults, or optional completion polling.
 
-Talks to the Bland AI REST API (`https://api.bland.ai/v1`) over HTTPS using **requests**.
-Calls are placed with the `base` model, `wait_for_greeting: true`, and temperature `0.7`.
+## As a tool
 
-A Bland AI API key is **required**: the node refuses to start without one. Recording
-(default **on**) and language (default **en**) are set in the node config and apply to
-every call; the agent cannot override them per call.
+The server name defaults to `bland`, registering the following functions as `bland.make_call`, `bland.get_call`, and `bland.analyze_call`.
 
----
+| Function | Description |
+|---|---|
+| `bland.make_call` | Initiates an outbound AI phone call. |
+| `bland.get_call` | Retrieves the details of a call, with optional waiting for completion. |
+| `bland.analyze_call` | Requests post-call analysis for a call. |
+
+### `bland.make_call`
+
+`phone_number` and `task` are required. The number is expected in E.164 form, while `task` gives the voice agent its instructions. Optional `first_sentence`, `voice`, and positive-integer `max_duration` override or supplement configured call defaults; optional `webhook` must begin with `https://`. The function returns the provider response, including the call ID used by later tools. Invalid input and API request failures raise errors.
+
+### `bland.get_call`
+
+`call_id` is required. Set optional `wait_for_completion` to true to poll every 10 seconds for up to 300 seconds; otherwise the current call details are returned immediately. The provider response supplies call status and details. A missing call ID, a polling timeout, or an API request failure raises an error.
+
+### `bland.analyze_call`
+
+`call_id` is required. Optional `goal` describes the analysis purpose, and optional `questions` is an array of `[question, expected_type]` pairs. Without `questions`, the client sends its built-in questions about caller mood, key information, and action items. The function returns the provider response; invalid input and request failures raise errors.
 
 ## Configuration
 
+Supply the API key, then set defaults that should apply to every `make_call` invocation. Per-call voice and duration can override their defaults; recording and language remain node-level settings.
 
-| Field | Type | Description |
-|---|---|---|
-| `serverName` | string | Default "bland". Namespace prefix for the tools: <serverName>.make_call, <serverName>.get_call, <serverName>.analyze_call |
-| `apikey` | string | Default empty. Bland AI API key (org_xxx). Get one at https://www.bland.ai |
-| `voice` | string | Default "June". Default AI voice for calls |
-| `maxDuration` | integer | Default 5. Maximum call length in minutes (positive integer) |
-| `record` | boolean | Default true.  |
-| `language` | string | Default "en".  |
+### Server name
 
+This hidden field controls the tool namespace and defaults to `bland`. Change it only when multiple Bland AI nodes share an agent and their names must differ.
 
-The node has no lanes: it is invoked purely as an agent tool.
+### Default Voice and Language
 
----
+The node passes **Default Voice** to a call unless that call supplies `voice`; the default is `June`. **Language** defaults to `en` and is sent on every call. Change either only when the voice or language should be consistent for this node's calls; the call schema does not expose a per-call language override.
 
-## Available tools
+### Max Call Duration
 
-Tool names are prefixed with the configured `serverName` (default `bland`).
+This is the default positive duration in minutes for `make_call` and defaults to 5. A call's `max_duration` overrides it when supplied. Increase it for interactions that need more time, but keep it bounded for short tasks; non-positive, boolean, or non-integer configuration prevents node startup.
 
-### bland.make_call
+### Record Calls
 
-Initiate an outbound AI phone call. Returns a `call_id` for use with `get_call` and
-`analyze_call`.
-
-| Parameter        | Required | Description                                              |
-|------------------|----------|----------------------------------------------------------|
-| `phone_number`   | yes      | Phone number in E.164 format (e.g. `+14155551234`)       |
-| `task`           | yes      | Instructions for the AI voice agent: what to say, ask, and accomplish |
-| `first_sentence` | no       | Opening sentence spoken by the agent                     |
-| `voice`          | no       | Voice ID; overrides the configured default               |
-| `max_duration`   | no       | Max call length in minutes (positive integer); overrides the configured default |
-| `webhook`        | no       | URL to receive call results when the call ends, **must be HTTPS**, otherwise the call is rejected |
-
-### bland.get_call
-
-Get full details for a call: status, transcript, recording URL, duration, and summary.
-
-| Parameter             | Required | Description                                            |
-|-----------------------|----------|--------------------------------------------------------|
-| `call_id`             | yes      | The call ID returned by `make_call`                    |
-| `wait_for_completion` | no       | Default `false`. If `true`, polls every 10 seconds until the call completes, up to 5 minutes, recommended in pipelines to avoid manual polling. Raises a timeout error if the call has not completed in time. |
-
-### bland.analyze_call
-
-Run AI analysis on a completed call to extract structured insights from the transcript.
-
-| Parameter   | Required | Description                                                       |
-|-------------|----------|-------------------------------------------------------------------|
-| `call_id`   | yes      | The call ID to analyze                                            |
-| `goal`      | no       | Overall purpose of the call, used as analysis context (default: `"Analyze the phone call"`) |
-| `questions` | no       | Array of `[question, expected_type]` pairs. Defaults to three string questions: the caller's mood, key information discussed, and action items. |
-
----
+This boolean defaults to enabled and is sent on every `make_call` request. Set it according to whether calls made through this node should request recording; unlike duration, an individual tool call cannot override it.
 
 ## Authentication
 
-Set `apikey` to a Bland AI API key (`org_xxx`), available from https://www.bland.ai.
-The key is sent in the `authorization` header on every request. If the key is missing
-the node fails at startup with `Bland AI API key not configured`, and any tool
-invocation reports that the driver is not initialized.
-
----
+Provide a Bland AI API key in **API Key**. The node does not initialize without a non-empty key.
 
 ## Upstream docs
 
 - [Bland AI documentation](https://docs.bland.ai)
-
----
 
 <!-- ROCKETRIDE:GENERATED:PARAMS START -->
 <!-- Generated by nodes:docs-generate. Do not edit by hand. -->

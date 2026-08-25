@@ -18,7 +18,7 @@ const DOC_GENERATORS = ['nodes:docs-generate', 'client-typescript:docs-generate'
 
 const DOCS_DIR = path.join(__dirname, '..');
 // Spine pages now live in the top-level docs/ tree (docs consolidation).
-const CONTENT_STATIC_DIR = path.join(PROJECT_ROOT, 'docs', 'product');
+const CONTENT_STATIC_DIR = path.join(PROJECT_ROOT, 'docs', 'public', 'product');
 const STATIC_DIR = path.join(DOCS_DIR, 'static');
 
 // Assembled content tree Docusaurus reads (gather populates it).
@@ -43,8 +43,12 @@ function docsEnv(options = {}) {
 function makeGatherAction(mode = 'copy') {
 	return {
 		run: async (ctx, task) => {
-			const { gather } = require('./lib/gather');
-			await gather({ projectRoot: PROJECT_ROOT, contentStaticDir: CONTENT_STATIC_DIR, contentDir: CONTENT_DIR, staticDir: STATIC_DIR, mode, task });
+			const { gather, assertNoUnexpectedPlaceholders } = require('./lib/gather');
+			const manifest = await gather({ projectRoot: PROJECT_ROOT, contentStaticDir: CONTENT_STATIC_DIR, contentDir: CONTENT_DIR, staticDir: STATIC_DIR, mode, task });
+			// Guardrail: an unexpected placeholder means a spine id and a file path
+			// drifted apart, which otherwise publishes a live "coming soon" URL in
+			// silence. Fails docs:build (and so CI) instead.
+			assertNoUnexpectedPlaceholders(manifest);
 		}
 	};
 }

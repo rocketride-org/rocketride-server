@@ -10,65 +10,51 @@ The MiniMax API is OpenAI-compatible, so the node uses **langchain-openai** (`Ch
 
 MiniMax M2-series models return chain-of-thought wrapped in `<think>...</think>` inside the `content` field; the node strips that block so downstream pipeline nodes only see the final answer.
 
----
-
-## Configuration
-
-### Lanes
+## Lanes
 
 | Lane in     | Lane out  | Description                                          |
 | ----------- | --------- | ---------------------------------------------------- |
 | `questions` | `answers` | Send a question directly, receive a generated answer |
 
-### Fields
-
-| Field              | Type / Default                              | Description                                                                 |
-| ------------------ | ------------------------------------------- | --------------------------------------------------------------------------- |
-| `profile`          | enum, default `minimax-m2`                  | MiniMax model profile (see below)                                           |
-| `model`            | string (set by profile)                     | MiniMax model id (editable on the Custom profile)                           |
-| `modelTotalTokens` | number (set by profile)                     | Total token (context) budget for the model                                  |
-| `serverbase`       | string, default `https://api.minimax.io/v1` | OpenAI-compatible base URL: `https://api.minimax.io/v1` for cloud (international), `https://api.minimaxi.com/v1` for China, local URLs for self-hosted servers (Custom and Local profiles only) |
-| `apikey`           | string                                      | MiniMax API key (cloud profiles only; local profiles don't require one, the node passes a dummy token) |
-
----
-
 ## Profiles
 
-### Cloud
+Default: **MiniMax M2** (`minimax-m2`).
 
-| Profile                | Model                    | Context      |
-| ---------------------- | ------------------------ | ------------ |
-| MiniMax M3             | `MiniMax-M3`             | 1M tokens    |
-| MiniMax M2 _(default)_ | `MiniMax-M2`             | 200K tokens  |
-| MiniMax M2.1           | `MiniMax-M2.1`           | 200K tokens  |
-| MiniMax M2.1 Highspeed | `MiniMax-M2.1-highspeed` | 200K tokens  |
-| MiniMax M2.5           | `MiniMax-M2.5`           | 200K tokens  |
-| MiniMax M2.5 Highspeed | `MiniMax-M2.5-highspeed` | 200K tokens  |
-| MiniMax M2.7           | `MiniMax-M2.7`           | 200K tokens  |
-| MiniMax M2.7 Highspeed | `MiniMax-M2.7-highspeed` | 200K tokens  |
-| Custom Model           | User-defined             | User-defined |
+| Profile | Model | Context | Output |
+| ------- | ----- | ------- | ------ |
+| `minimax-m2` **(default)** | `MiniMax-M2` | 204,800 | 65,536 |
+| `minimax-m3` | `MiniMax-M3` | 1,000,000 | 131,072 |
+| `minimax-m2-7` | `MiniMax-M2.7` | 204,800 | 65,536 |
+| `minimax-m2-7-highspeed` | `MiniMax-M2.7-highspeed` | 204,800 | 65,536 |
+| `minimax-m2-7-local` | `MiniMaxAI/MiniMax-M2.7` | 204,800 | 8,192 |
 
-The `-highspeed` variants are MiniMax's faster/cheaper tier of the same generation. MiniMax M3 is MiniMax's frontier multimodal coding model, with 5x the M2-family context (1M tokens) and a 128K-token recommended output limit (max 512K). M3 is multimodal at the API level (text + image + video), though the `llm_minimax` node only exposes the text path.
+<details>
+<summary><strong>View 10 more models</strong></summary>
 
-### Local deploy
+| Profile | Model | Context | Output |
+| ------- | ----- | ------- | ------ |
+| `custom` | _(user-specified)_ | 200,000 | 8,192 |
+| `minimax-m2-1` | `MiniMax-M2.1` | 204,800 | 65,536 |
+| `minimax-m2-1-highspeed` | `MiniMax-M2.1-highspeed` | 204,800 | 65,536 |
+| `minimax-m2-5` | `MiniMax-M2.5` | 204,800 | 65,536 |
+| `minimax-m2-5-highspeed` | `MiniMax-M2.5-highspeed` | 204,800 | 65,536 |
+| `minimax-m2-local` | `MiniMaxAI/MiniMax-M2` | 204,800 | 8,192 |
+| `minimax-m2-5-local` | `MiniMaxAI/MiniMax-M2.5` | 204,800 | 8,192 |
+| `minimax-01` | `minimax-01` | 1,000,192 | 1,000,192 |
+| `minimax-m1` | `minimax-m1` | 1,000,000 | 40,000 |
+| `minimax-m2-her` | `minimax-m2-her` | 65,536 | 2,048 |
 
-Defaults target vLLM / SGLang on `http://localhost:8000/v1` with the HuggingFace model path, which is the configuration MiniMax itself documents in its local deployment guide.
+</details>
 
-| Profile              | Model (HF path)          | Server base URL (default)  | Context     |
-| -------------------- | ------------------------ | -------------------------- | ----------- |
-| MiniMax M2 (Local)   | `MiniMaxAI/MiniMax-M2`   | `http://localhost:8000/v1` | 200K tokens |
-| MiniMax M2.5 (Local) | `MiniMaxAI/MiniMax-M2.5` | `http://localhost:8000/v1` | 200K tokens |
-| MiniMax M2.7 (Local) | `MiniMaxAI/MiniMax-M2.7` | `http://localhost:8000/v1` | 200K tokens |
+The `-highspeed` variants are MiniMax's faster tier of the same generation. MiniMax M3 is multimodal at the API level, though this node exposes only text.
 
-**Hardware notes.** MiniMax's open-weight models are MIT-licensed but large: M2 / M2.5 / M2.7 are all 230B-parameter MoE architectures (~10B active per token). The recommended local setups are:
+## Configuration
 
-- **Linux + GPU (>=96 GB VRAM total)**: vLLM or SGLang on port `8000`. Use the HF model path as shown above.
-- **Apple Silicon Mac Studio (>=128 GB unified memory)**: MLX on port `8080`. Edit the Server base URL to `http://localhost:8080/v1` and change the model to a quantized MLX build, e.g. `mlx-community/MiniMax-M2.7-4bit`.
-- **Ollama (<128 GB systems, fallback only)**: listed in MiniMax's docs as an alternative for low-memory setups. Edit the Server base URL to `http://localhost:11434/v1` and the model to whatever tag you pulled (verify with `ollama pull <tag>` before use; tags may not yet exist for every M2 variant).
+Choose a profile to set the model and token limits. Cloud profiles target MiniMax's API; local profiles prefill the Hugging Face model path and a local OpenAI-compatible server, while `custom` exposes the model, context budget, and server URL for manual configuration.
 
-These models will not fit on a typical laptop without aggressive quantization. M2.7 is the only variant whose local-deploy steps are formally documented today; the M2 and M2.5 entries are scaffolded against the same HuggingFace naming so they work as soon as their upstream guides land. M2.7 is a reasoning model: its responses split `message.content` (final answer) from `message.reasoning_content` (chain of thought), so set generous output token budgets (`max_tokens >= ~200`) even for short prompts.
+### Server base URL
 
----
+Use `https://api.minimax.io/v1` for the international cloud API or `https://api.minimaxi.com/v1` for China. Local profiles default to vLLM or SGLang at `http://localhost:8000/v1`; change the URL when using MLX, Ollama, or another OpenAI-compatible server.
 
 ## Authentication
 
@@ -76,7 +62,17 @@ Cloud profiles require a MiniMax API key in `apikey`. The key requirement is enf
 
 Local profiles (vLLM / SGLang / MLX / Ollama) have no `apikey` field; local OpenAI-compatible servers accept any token, so the node passes a dummy key (`sk-local-dummy-key`).
 
----
+## Notes
+
+### Local deployment
+
+MiniMax's open-weight M2-family models are MIT-licensed 230B-parameter MoE models with about 10B parameters active per token. They require substantial memory:
+
+- **Linux + GPU (at least 96 GB total VRAM):** Run vLLM or SGLang on port `8000` and use the profile's Hugging Face model path.
+- **Apple Silicon Mac Studio (at least 128 GB unified memory):** Run MLX on port `8080`, set the server URL to `http://localhost:8080/v1`, and use a quantized build such as `mlx-community/MiniMax-M2.7-4bit`.
+- **Ollama on lower-memory systems:** Set the server URL to `http://localhost:11434/v1` and use the tag you pulled. Verify that the tag exists before configuring it.
+
+These models do not fit on a typical laptop without aggressive quantization. M2.7 is a reasoning model whose API separates `message.content` from `message.reasoning_content`, so allow a generous output budget even for short prompts.
 
 ## Upstream docs
 

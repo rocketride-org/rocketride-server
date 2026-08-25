@@ -12,53 +12,51 @@ Each API call runs in a daemon thread with a **30-second hard timeout** and is r
 
 When both lanes carry the same frame, the node makes only **one** API call per frame: the first lane to process the frame caches the answer, and the second lane reuses it. The cache is cleared at the start of each new frame.
 
----
-
-## Configuration
-
-### Lanes
+## Lanes
 
 | Lane in     | Lane out    | Description                                                                      |
-|-------------|-------------|----------------------------------------------------------------------------------|
+| ----------- | ----------- | -------------------------------------------------------------------------------- |
 | `image`     | `text`      | Analyze a single image frame and emit the model's text response                  |
 | `documents` | `documents` | Analyze image documents and emit text analysis with original metadata preserved  |
 
-On the `documents` lane, each incoming `Image` document is replaced by a `Text` document containing the model's answer; the original metadata (frame number, timestamp, chunk id) is carried over. The original `Image` documents do not flow downstream. Documents with a type other than `Image` or with empty content are skipped with a warning. Image document content is expected to be base64-encoded PNG: all Image document producers (frame_grabber, thumbnail, embedding_image) normalize to PNG.
-
-If inference fails for a document after retries, the node logs a warning and continues with the next document. On the `image` lane, a failure logs a warning and emits nothing for that frame. Empty image frames on the `image` lane are also skipped with a warning.
-
-### Fields
-
-| Field | Type | Description |
-|---|---|---|
-| `apikey` | string | OpenAI API key. Get one at https://platform.openai.com/api-keys |
-| `model` | string | OpenAI Vision model |
-| `modelTotalTokens` | number | Maximum context length in tokens |
-| `systemPrompt` | string | Define the model's role and behavior for image analysis |
-| `prompt` | string | Describe what you want to analyze or extract from the image |
-| `profile` | string | Default "openai-4-1". Select the OpenAI vision model to use |
-
-The selected profile supplies the `model` identifier and `modelTotalTokens` context limit. The API key, system prompt, and analysis prompt are configured per profile.
-
----
-
 ## Profiles
 
-| Profile                  | Model          | Context (tokens) |
-|--------------------------|----------------|------------------|
-| `openai-4-1` _(default)_ | `gpt-4.1`      | 1,047,576        |
-| `openai-4-1-mini`        | `gpt-4.1-mini` | 1,047,576        |
-| `openai-4-1-nano`        | `gpt-4.1-nano` | 1,047,576        |
-| `openai-4o`              | `gpt-4o`       | 128,000          |
-| `openai-4o-mini`         | `gpt-4o-mini`  | 128,000          |
+Default: **GPT-4.1** (`openai-4-1`).
 
----
+| Profile | Model | Context tokens |
+| ------- | ----- | -------------- |
+| `openai-4-1` **(default)** | `gpt-4.1` | 1,047,576 |
+| `openai-4-1-mini` | `gpt-4.1-mini` | 1,047,576 |
+| `openai-4-1-nano` | `gpt-4.1-nano` | 1,047,576 |
+| `openai-4o` | `gpt-4o` | 128,000 |
+| `openai-4o-mini` | `gpt-4o-mini` | 128,000 |
+
+## Configuration
+
+Choose a profile, then provide the API key and prompts for the analysis task. The
+profile supplies the model identifier and context limit.
+
+On the `documents` lane, each incoming `Image` document is replaced by a `Text`
+document containing the model's answer, with the original frame, timestamp, and chunk
+metadata carried over. Other document types and images with empty content are skipped
+with a warning. Image document content is expected to be base64-encoded PNG, and the
+original image documents do not flow downstream.
+
+If inference fails for a document after retries, the node logs a warning and continues
+with the next document. On the `image` lane, a failure logs a warning and emits nothing
+for that frame. Empty image frames are also skipped with a warning.
+
+### System Instructions and Analysis Prompt
+
+Use **System Instructions** to define the model's role and **Analysis Prompt** to
+describe the task for each image. When no analysis prompt is configured, the node uses
+`Describe this image in detail.`
 
 ## Authentication
 
 Provide an OpenAI API key in `image_vision_openai.apikey`. The key is validated at pipeline start: it must be present and must begin with `sk-`, otherwise the node raises a configuration error before any image is processed.
 
-Upstream references:
+## Upstream docs
 
 - [OpenAI Vision documentation](https://platform.openai.com/docs/guides/vision)
 - [OpenAI API keys](https://platform.openai.com/api-keys)

@@ -24,14 +24,13 @@ const NODES_GLOB = 'nodes/src/nodes/*/README.md';
 const GENERATED_START = '<!-- ROCKETRIDE:GENERATED:PARAMS START -->';
 const DOCS_GLOB = '{nodes,packages,apps}/**/docs/**/*.{md,mdx}';
 // Top-level docs/ tree mounts (docs consolidation): source dir -> spine slot.
-// readme.md files inside these roots are package-README export sources
+// README.md files inside these roots are package-README export sources
 // (docs:export), never site pages.
 const DOCS_ROOT_MOUNTS = [
-	{ source: 'docs/clients/typescript', mount: 'develop/typescript' },
-	{ source: 'docs/clients/python', mount: 'develop/python' },
-	{ source: 'docs/clients/vscode', mount: 'ide-extensions/vscode' },
-	{ source: 'docs/protocols/mcp', mount: 'protocols/mcp' },
-	{ source: 'docs/protocols/websocket', mount: 'protocols/websocket' },
+	{ source: 'docs/public/typescript', mount: 'develop/typescript' },
+	{ source: 'docs/public/python', mount: 'develop/python' },
+	{ source: 'docs/public/vscode', mount: 'ide-extensions/vscode' },
+	{ source: 'docs/public/mcp', mount: 'protocols/mcp' },
 ];
 // Node sources and node tests are excluded from the package-mount pass: node
 // markdown is the nodes contributor's domain (staged when the node's top-level
@@ -42,6 +41,25 @@ const DOCS_ROOT_MOUNTS = [
 const IGNORE = ['**/node_modules/**', '**/build/**', '**/dist/**', 'packages/docs/**', 'nodes/src/nodes/**', 'nodes/test/**'];
 
 const PLACEHOLDER_NOTE = '> **Placeholder.** Generated stub for the documentation spine. Real content lands in a later phase.';
+
+// Doc ids allowed to publish as a placeholder ("coming soon") page.
+//
+// A doc id is also the public URL, so a placeholder is almost never intentional:
+// ensurePlaceholders() writes one for any spine slot with no backing file, which
+// is exactly what a page moved without its spine.js id (or the reverse) looks
+// like. The gate below turns that silent publish into a build failure.
+//
+// Seeded EMPTY on 2026-08-14: `docs:gather` staged 180 pages, none of them a
+// placeholder. Add an id here only when a stub page is genuinely wanted, with a
+// comment naming who fills it in — do not add ids to quiet a failing build.
+const EXPECTED_PLACEHOLDERS = [];
+
+// Structural, never a spine/path desync: ensurePlaceholders() emits
+// `nodes/example` only when the node corpus produced no pages at all (docs-only
+// checkout, or nodes:docs-generate never ran). That condition is already visible
+// in the task's "Staged N pages, N nodes" line, so it must not be reported as a
+// broken spine id.
+const STRUCTURAL_PLACEHOLDERS = [`${NODES_DIR}/example`];
 
 // Node category grouping for the "Nodes" sidebar — mirrors the
 // editor canvas palette. Each node's primary `classType` (from its
@@ -571,13 +589,20 @@ async function gather({ projectRoot, contentStaticDir, contentDir, staticDir, mo
 	}
 
 	// 3. Declared per-package mounts, plus the central top-level docs/ tree mounts
-	//    (DOCS_ROOT_MOUNTS). readme.md files under a root mount are skipped — they
-	//    are future package-README export sources (docs:export), never site pages.
+	//    (DOCS_ROOT_MOUNTS). README.md files under a root mount are skipped — they
+	//    are package-README export sources (docs:export), never site pages.
+	//    The sweep covers all of docs/public/, so any new .md there without a
+	//    covering mount aborts the build. docs/development/ is never swept — it
+	//    is unpublished contributor documentation, with no exceptions. Exclusions:
+	//    docs/public/product/ is the shell-authored spine (staged in pass 1, not a
+	//    mount), and docs/public/n8n/ holds only the exported README. Non-markdown
+	//    files (per-client assets/, docs/public/assets/) are never swept — the
+	//    globs match .md/.mdx only, so images need no mount coverage.
 	const contributors = discoverContributors().concat(
 		DOCS_ROOT_MOUNTS.map((m) => ({ sourceDir: path.join(projectRoot, m.source), mount: m.mount, module: 'docs' }))
 	);
 	const packageDocsFiles = await glob(DOCS_GLOB, { cwd: projectRoot, nodir: true, ignore: IGNORE });
-	const rootDocsFiles = await glob('docs/{clients,protocols}/**/*.{md,mdx}', { cwd: projectRoot, nodir: true, ignore: ['**/readme.md'] });
+	const rootDocsFiles = await glob(['docs/public/**/*.{md,mdx}'], { cwd: projectRoot, nodir: true, ignore: ['**/README.md', 'docs/public/product/**'] });
 	const allDocsFiles = [...packageDocsFiles, ...rootDocsFiles];
 	for (const rel of allDocsFiles) {
 		const abs = path.join(projectRoot, rel);
@@ -657,4 +682,30 @@ async function ensurePlaceholders({ contentDir, staticDir, routes, manifest }) {
 	}
 }
 
-module.exports = { gather, docIdFor, pageDescription, stampLastUpdate };
+/**
+ * Fail the build when the staged manifest carries a placeholder page nobody
+ * asked for. Called by the docs:gather action (packages/docs/scripts/tasks.js)
+ * rather than by gather() itself, so gather stays callable against a partial
+ * tree (tests, tooling) while every real build is gated.
+ * @param {Array<object>} manifest - manifest entries produced by gather().
+ * @param {string[]} [allowed] - doc ids permitted to be placeholders.
+ * @return {void}
+ * @throws {Error} listing the offending ids and the likely cause.
+ */
+function assertNoUnexpectedPlaceholders(manifest, allowed = EXPECTED_PLACEHOLDERS) {
+	const permitted = new Set([...allowed, ...STRUCTURAL_PLACEHOLDERS]);
+	const offenders = (manifest || []).filter((e) => e && e.placeholder && !permitted.has(e.id)).map((e) => e.id);
+	if (!offenders.length) return;
+	throw new Error(
+		[
+			`docs:gather: ${offenders.length} page(s) would publish as an empty "coming soon" placeholder:`,
+			...offenders.map((id) => `  /${id}`),
+			'A doc id IS the public URL, so this almost always means a spine id and a file path are out of sync:',
+			'a page was moved or renamed without updating its id in packages/docs/scripts/lib/spine.js, or a spine',
+			'id was changed without moving the file under docs/. Fix whichever is wrong so the two match.',
+			'If a stub page really is intended, add its id to EXPECTED_PLACEHOLDERS in packages/docs/scripts/lib/gather.js.',
+		].join('\n')
+	);
+}
+
+module.exports = { gather, docIdFor, pageDescription, stampLastUpdate, assertNoUnexpectedPlaceholders, EXPECTED_PLACEHOLDERS };

@@ -18,13 +18,22 @@ const NODES_DIR = 'nodes';
 
 const SPINE = [
 	{ id: 'index', label: 'Home' },
-	{ id: 'quickstart', label: 'Quickstart' },
+	{
+		// The category itself renders no link (toSidebar emits no `link` for a
+		// category), so the overview is a plain leaf whose id is `quickstart` —
+		// docIdFor() collapses quickstart/index.mdx to that id, keeping /quickstart.
+		label: 'Quickstart',
+		items: [
+			{ id: 'quickstart', label: 'Overview' },
+			{ id: 'quickstart/ide-walkthrough', label: 'Build in your IDE' },
+			{ id: 'quickstart/sdk-integration', label: 'Integrate with an SDK' }
+		]
+	},
 	{
 		label: 'Evaluate',
 		items: [
 			{ id: 'evaluate/why-rocketride', label: 'Why RocketRide' },
 			{ id: 'evaluate/understanding', label: 'Understanding RocketRide' },
-			{ id: 'evaluate/use-cases', label: 'Use Cases' },
 			{ id: 'evaluate/security', label: 'Security' }
 		]
 	},
@@ -54,7 +63,7 @@ const SPINE = [
 	{
 		label: 'Protocols',
 		items: [
-			{ id: 'protocols/websocket', label: 'WebSocket', mount: true },
+			{ id: 'protocols/websocket', label: 'WebSocket' },
 			{ id: 'protocols/websocket/observability', label: 'Observability' },
 			{ id: 'protocols/mcp', label: 'MCP', mount: true }
 		]
@@ -63,20 +72,16 @@ const SPINE = [
 	{
 		label: 'Integrations',
 		items: [
-			{ id: 'integrations/anthropic', label: 'Anthropic' },
-			{ id: 'integrations/aparavi-aql', label: 'Aparavi AQL' },
-			{ id: 'integrations/firecrawl', label: 'Firecrawl' },
-			{ id: 'integrations/n8n', label: 'n8n' },
-			{ id: 'integrations/neo4j', label: 'Neo4j' },
-			{ id: 'integrations/postgres', label: 'PostgreSQL' },
-			{ id: 'integrations/qdrant', label: 'Qdrant' }
+			{ id: 'integrations/n8n', label: 'n8n' }
 		]
 	},
 	{
 		label: 'Develop',
 		items: [
+			{ id: 'develop/clients', label: 'Client Libraries' },
 			{ id: 'develop/typescript', label: 'TypeScript', mount: true },
-			{ id: 'develop/python', label: 'Python', mount: true }
+			{ id: 'develop/python', label: 'Python', mount: true },
+			{ id: 'develop/apps', label: 'Shell Apps' }
 		]
 	},
 	{
@@ -86,12 +91,22 @@ const SPINE = [
 			{ id: 'ide-extensions/vscode', label: 'VS Code', mount: true }
 		]
 	},
-	{ id: 'pipeline-reference', label: 'Pipeline JSON Reference', mount: true },
-	{ id: 'cli', label: 'CLI Reference' },
-	{ id: 'cloud', label: 'Cloud' },
-	{ id: 'self-hosting', label: 'Self-hosting' },
-	{ id: 'troubleshooting', label: 'Troubleshooting' },
-	{ id: 'glossary', label: 'Glossary' }
+	{
+		label: 'Operate',
+		items: [
+			{ id: 'operate/cloud', label: 'Cloud' },
+			{ id: 'operate/self-hosting', label: 'Self-hosting' },
+			{ id: 'operate/troubleshooting', label: 'Troubleshooting' }
+		]
+	},
+	{
+		label: 'Reference',
+		items: [
+			{ id: 'reference/pipeline-reference', label: 'Pipeline JSON Reference', mount: true },
+			{ id: 'reference/cli', label: 'CLI Reference' },
+			{ id: 'reference/glossary', label: 'Glossary' }
+		]
+	}
 ];
 
 /** Walk every leaf node (depth-first), invoking fn(node). */

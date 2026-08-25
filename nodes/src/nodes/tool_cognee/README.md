@@ -1,120 +1,71 @@
-# Cognee node
+# tool_cognee
 
-Adds persistent semantic memory to agents through three tools:
-`cognee.remember`, `cognee.recall`, and `cognee.memory_status`.
+A RocketRide tool node that gives agents persistent semantic memory through a Cognee server, with explicit storage, retrieval, and processing-status tools.
 
-This is a `tool` node (`classType: ["tool"]`, invoke capability, no data lanes). Multiple agents
-can connect to the same Cognee node and share its operator-configured dataset.
+## About Cognee
+
+Cognee is the external semantic-memory service this node accesses through its REST API. Its memory workflow stores plain text, builds a semantic knowledge graph, and recalls results with references.
 
 ## What it does
 
-Cognee turns plain text into a semantic knowledge graph and embeddings. Recall always requests
-references from Cognee, but this node does not require every returned result to contain references.
-The graph represents semantic relationships. It is not an AST, import graph, or call graph, and the
-node does not accept repository URLs for generic source ingestion.
+Use this node when agents need durable semantic memory that outlives a single tool call or agent run. It exposes agent tools only—there are no pipeline lanes—and keeps the configured dataset as the default memory scope. Pick it over run-scoped agent memory when another agent or a later call must deliberately store and retrieve semantic memory; it does not inspect source-code ASTs, import graphs, or call graphs.
 
-Memory is grouped by dataset. By default, every tool call is locked to the dataset configured on
-the node. Per-call dataset selection works only when `allow_dataset_override` is set to `true`.
+## As a tool
 
-## Tools
+The registered prefix is `cognee`, so the agent sees `cognee.remember`, `cognee.recall`, and `cognee.memory_status`.
 
-- **`cognee.remember`** sends plain text to `POST /api/v1/remember`, storing and processing it in
-  one operation. Set `run_in_background` to return while processing continues.
-- **`cognee.recall`** sends a natural-language query to `POST /api/v1/recall`. It always requests
-  references and defaults to `GRAPH_COMPLETION_DECOMPOSITION`.
-- **`cognee.memory_status`** resolves the selected dataset name to its UUID and checks the Cognify
-  pipeline. It returns `pending`, `running`, `completed`, or `failed`.
+| Function | Description |
+|---|---|
+| `cognee.remember` | Stores plain text in a dataset and starts semantic-memory processing. |
+| `cognee.recall` | Retrieves memory results for a natural-language query, always requesting references. |
+| `cognee.memory_status` | Reports whether the configured dataset's processing is pending, running, completed, or failed. |
 
-There is no destructive clear/reset tool.
+### `cognee.remember`
 
-## REST API contract provenance
+`text` is required and must be non-empty plain text. Optional `dataset` must be the configured dataset unless dataset override is enabled; optional boolean `run_in_background` returns after queuing processing when true. The server response must contain a non-empty `status` and may include dataset and pipeline-run identifiers. Invalid input raises an error; failed requests raise redacted Cognee errors, and this non-idempotent request is not retried.
 
-This node follows Cognee's [Recall API reference](https://docs.cognee.ai/api-reference/recall/recall) and [Get Datasets API reference](https://docs.cognee.ai/api-reference/datasets/get-datasets), checked 2026-07-21. `POST /api/v1/recall` uses the documented camelCase JSON fields `searchType`, `topK`, and `includeReferences`; this node always sends `includeReferences: true`. `GET /api/v1/datasets` is called without pagination parameters and expects Cognee's documented bare JSON list response.
+### `cognee.recall`
 
-## Setup
+`query` is required and non-empty. Optional `dataset` follows the same scope rule; optional `search_type` must be one of the configured supported strategies, and optional `top_k` must be an integer. The result is `results` plus `count`; references are always requested from the server. Invalid input or server failures raise errors rather than returning an empty recall result.
 
-Configure these node settings:
+### `cognee.memory_status`
 
-- `base_url`: Cognee server URL. Self-hosted Cognee defaults to `http://localhost:8000`; a
-  containerized engine needs an address reachable from the container. For Cognee Cloud, use the
-  instance URL from [platform.cognee.ai](https://platform.cognee.ai).
-- `api_key`: optional for self-hosted servers with access control disabled. Otherwise set the
-  secure field or the `COGNEE_API_KEY` environment variable. Never commit a key.
-- `dataset`: shared default dataset for all connected agents. Defaults to `main`.
-- `allow_dataset_override`: permits a tool call to select a different dataset. Defaults to `false`.
-- `search_type`: default recall strategy. Defaults to `GRAPH_COMPLETION_DECOMPOSITION`.
-- `top_k`: default recall result limit from 1 through 100. Defaults to 15.
-- `request_timeout`: per-request timeout from 5 through 600 seconds. Defaults to 120.
+`dataset` is optional and defaults to the configured dataset, subject to the same override rule. Before requesting status, the node lists datasets and resolves the name by exact match. It returns the dataset name and ID plus one of `pending`, `running`, `completed`, or `failed`. An unresolved dataset or an invalid server response raises an error.
 
-## Shared-agent example
+## Configuration
 
-See the copyable
-[`cognee-shared-memory-agents.pipe`](../../../../examples/cognee-shared-memory-agents.pipe)
-pipeline. A RocketRide component can have multiple tool/control entries, so one `tool_cognee` node
-can be controlled by both the writer and researcher agents. Prefer one shared Cognee node to
-duplicating it for each agent: one component keeps the server, credentials, dataset, and retrieval
-settings from drifting apart.
+Set the server URL and dataset first. The remaining settings control which data an agent may select, how recall is requested, and how much time each request can consume.
 
-Shared recall requires all participants to use the same Cognee server, an authenticated identity
-with permissions to the shared memory, and the same dataset. Leave `allow_dataset_override`
-disabled to keep every call in the operator-controlled dataset; per-call dataset drift is rejected
-unless the setting is explicitly enabled.
+### Server URL and API Key
 
-Wiring agents to Cognee does not automatically copy their prompts, transcripts, or tool results.
-An agent must explicitly call `cognee.remember` to create durable memory, and another agent must
-explicitly call `cognee.recall` to retrieve it. Each `agent_rocketride` still needs its own
-`memory_internal` control for run-scoped working memory. Cognee adds durable cross-agent memory; it
-does not replace that working memory.
+**Server URL** defaults to `http://localhost:8000`; trailing slashes are removed before requests. An absent or empty field uses that default, while a whitespace-only configured URL prevents startup. **API Key** is optional for a self-hosted server that accepts unauthenticated requests; when the field is blank, the node falls back to `COGNEE_API_KEY` and sends it as the `X-Api-Key` header. Set the URL to the reachable server from the engine environment and add a key when that server requires access control.
 
-Simultaneous writes from shared agents may overlap. This node provides no transaction,
-serialization, or ordering guarantee across tool calls, and recall is eventually consistent with
-processing. Prefer a sequential handoff: let the storing agent finish, wait for
-`cognee.memory_status` to report `completed`, and only then have the receiving agent recall.
+### Dataset and Allow dataset override
 
-To test the example sequentially:
+**Dataset** defaults to `main` and is the scope used whenever a call omits `dataset`. Keep **Allow dataset override** disabled to stop agents from selecting a different dataset; it is enabled only by the boolean value `true`. Enable it only when the agent is intentionally allowed to work across separate memory scopes.
 
-1. Set `COGNEE_BASE_URL`, `COGNEE_API_KEY`, and `ROCKETRIDE_ANTHROPIC_KEY`, then open the example.
-2. Send this prompt. It gives the writer only a research subject, not the fact that must cross the
-   agent boundary:
+### Default recall strategy and Recall results (top_k)
 
-   ```text
-   Ask the researcher to identify one lesser-known fact about Grace Hopper and store it in shared
-   memory. The researcher must return only a storage confirmation, not the fact. After processing
-   completes, recover the fact yourself from shared memory and tell me what it is.
-   ```
+The default strategy is `GRAPH_COMPLETION_DECOMPOSITION`. Configuration is normalized to uppercase and falls back to that default if it is unsupported; a tool-call override must be a supported strategy or the call fails. **Recall results (top_k)** defaults to 15 and is clamped from 1 through 100 in configuration; a call override must be an integer and is then clamped to the same range. Raise it when broader recall is needed, while keeping it lower when an agent needs a focused result set.
 
-   The researcher independently determines the fact, calls `cognee.remember`, and returns only a
-   storage confirmation.
-3. If remember ran in the background, have the writer call `cognee.memory_status` until the shared
-   dataset reports `completed`.
-4. Have the writer call `cognee.recall` for the fact and produce the final response from recalled
-   memory, without receiving the fact directly from the researcher.
+### Request timeout (s)
 
-## Limits
+This is the timeout for every Cognee request and defaults to 120 seconds. Configuration is clamped from 5 through 600 seconds; increase it only for a server whose processing or retrieval normally takes longer, because every tool call waits up to this bound.
 
-- `remember` accepts plain text only and is not retried automatically because retrying a write
-  could duplicate ingestion.
-- `recall` requests references and is also single-attempt because it may perform generation.
-- Dataset discovery and status checks are idempotent GETs and use RocketRide's shared retry helper.
-- `memory_status` requires the dataset to exist and resolve by exact name.
-- Per-call dataset values are rejected unless `allow_dataset_override` is enabled.
-- No destructive dataset operation is exposed to an agent.
+## Authentication
 
-## Troubleshooting
+For an access-controlled Cognee server, provide **API Key** or set `COGNEE_API_KEY`. The node does not send an `X-Api-Key` header when neither source supplies a key, which supports self-hosted servers configured for unauthenticated access.
 
-- **Dataset not found:** verify the exact configured dataset name and that `remember` created it.
-- **Dataset override rejected:** enable `allow_dataset_override`, or omit the per-call `dataset` so
-  the configured dataset is used.
-- **Recall is empty:** wait for `memory_status` to report `completed`, then query the same dataset.
-- **401 / 403:** set a valid API key for Cognee Cloud or an access-controlled self-hosted server.
-- **402:** the Cognee token budget is exhausted; add capacity before retrying paid processing.
-- **Connection refused / timeout:** verify `base_url` from the engine's network environment.
+## Notes
+
+### Request behavior
+
+`remember` and `recall` use one POST attempt. Dataset listing and status checks use the shared retrying GET helper. For background storage, call `memory_status` and wait for `completed` before relying on a recall result.
 
 ## Upstream docs
 
-- Cognee docs: https://docs.cognee.ai
-- Cognee API reference: https://docs.cognee.ai/api-reference/introduction
-- Cognee Cloud: https://platform.cognee.ai
+- [Cognee documentation](https://docs.cognee.ai)
+- [Cognee API reference](https://docs.cognee.ai/api-reference/introduction)
 
 <!-- ROCKETRIDE:GENERATED:PARAMS START -->
 <!-- ROCKETRIDE:GENERATED:PARAMS END -->
