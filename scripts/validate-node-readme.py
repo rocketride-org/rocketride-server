@@ -182,7 +182,7 @@ def resolve_profile_row(row: dict, profiles: dict) -> str | None:
     if cleaned in profiles:
         return cleaned
     for key, metadata in profiles.items():
-        if isinstance(metadata, dict) and cleaned == (metadata.get('title') or key):
+        if isinstance(metadata, dict) and _collapse_ws(cleaned) == _collapse_ws(metadata.get('title') or key):
             return key
     for key in re.findall(r'`([^`]+)`', raw):
         if key in profiles:
@@ -291,10 +291,11 @@ def profile_results(svc: dict, hand: str) -> list[tuple[str, str, str]]:
         f'default key(s) {absent or defaults} not found before first table',
     )
     missing_titles = []
+    intro_ws = _collapse_ws(intro)
     for key in defaults:
         metadata = profiles.get(key)
         title = metadata.get('title') if isinstance(metadata, dict) else None
-        if title and f'**{title}**' not in intro:
+        if title and f'**{_collapse_ws(title)}**' not in intro_ws:
             missing_titles.append(title)
     if missing_titles:
         add(
@@ -386,6 +387,18 @@ def required_sections(svc):
 
 def canon(h: str) -> str:
     return 'About' if h.startswith('About') else h.strip()
+
+
+def _collapse_ws(value: str) -> str:
+    """Collapse whitespace runs so prose need not reproduce dropdown padding.
+
+    Profile titles are padded to align in the configuration panel's dropdown
+    ('Text Small   - ...', 'Text Large   - ...', 'Text Ada     - ...'). That
+    alignment is deliberate and belongs in services.json, but a README should
+    write the title as an ordinary sentence, so runs of whitespace compare
+    equal to a single space on both sides.
+    """
+    return re.sub(r'\s+', ' ', value).strip()
 
 
 def _clean_cell(c: str) -> str:

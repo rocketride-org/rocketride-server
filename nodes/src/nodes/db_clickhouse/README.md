@@ -1,98 +1,144 @@
 # db_clickhouse
 
-A RocketRide database node that answers natural-language questions against a ClickHouse database by translating them into SQL with an LLM.
+A RocketRide database node for asking natural-language questions of ClickHouse
+with an LLM, either on pipeline lanes or through agent tools. Choose it when
+your data is in ClickHouse and you need its native-protocol connection.
+
+## About ClickHouse
+
+ClickHouse is the database product this node connects to. This implementation
+uses the `clickhouse-sqlalchemy` dialect with the `clickhouse-driver` backend
+over ClickHouse's native TCP protocol.
 
 ## What it does
 
-Plays two roles: a pipeline node (natural-language questions arrive on a lane, results leave as a table, text, or structured answers) and a tool node (an agent calls `get_data`, `get_schema`, or `get_sql` directly).
-
-Connects over ClickHouse's native TCP protocol (default port 9000) using **clickhouse-sqlalchemy** with the **clickhouse-driver** backend (`clickhouse+native://` DSN). Generated SQL is validated with `EXPLAIN` against the live database before execution; if validation fails the error is fed back to the LLM for a corrected query, repeating up to `max_attempts` times.
-
-The node is read-only by default: the natural-language path only ever runs `SELECT`. Raw SQL execution (`QuestionType.EXECUTE`) is gated behind the `allow_execute` toggle, which is off by default and intended only for trusted callers. This is also a query/read node: it does not expose a pipeline ingestion (insert) lane (see [Ingestion](#ingestion)).
-
----
+On the `questions` lane, the node gives its reflected database schema and
+optional database description to the connected LLM, asks it for a `SELECT`,
+validates that query with `EXPLAIN`, and sends the result to the requested
+`table`, `text`, or `answers` lane. It is also an agent tool node, so an agent
+can retrieve data, inspect the startup-reflected schema, generate SQL, or—when
+explicitly enabled—run raw SQL. Unlike a write-oriented relational database
+node, its declared lanes contain no data-ingestion input.
 
 ## Connections
 
-| Connection | Required    | Description                                     |
-|------------|-------------|-------------------------------------------------|
-| `llm`      | yes (min 1) | LLM used to generate SQL from natural language  |
+| Connection | Required | Description |
+| --- | --- | --- |
+| `llm` | yes | LLM used to craft SQL queries from questions |
 
----
+## Lanes
 
-## Available tools
+| Lane in | Lane out | Description |
+| --- | --- | --- |
+| `questions` | `table` | Send query results as a Markdown table. |
+| `questions` | `text` | Send the result as text. |
+| `questions` | `answers` | Send the result as an answer. |
 
-When connected to an agent, the node exposes three functions:
+## As a tool
 
-| Tool         | Description                                                                    |
-|--------------|--------------------------------------------------------------------------------|
-| `get_data`   | Natural language to SQL, executes it, returns rows (default 250, max 25 000)  |
-| `get_schema` | Returns tables, columns, types, and primary keys                               |
-| `get_sql`    | Natural language to SQL only, no execution                                     |
+The registered tool names are bare method names; this node declares no
+configurable server-name prefix.
 
-Only `SELECT` is permitted for generated queries.
+| Function | Description |
+| --- | --- |
+| `get_data` | Generate a safe `SELECT` from a question and execute it. |
+| `get_schema` | Return the schema reflected when the node started. |
+| `get_sql` | Generate a safe `SELECT` without executing it. |
+| `execute` | Run raw SQL, bypassing LLM translation and the safety check. |
+| `begin` | Open a transaction and return its session ID. |
+| `commit` | Commit and close a transaction session. |
+| `rollback` | Roll back and close a transaction session. |
+| `dialect` | Return `{ "dialect": "clickhouse" }`. |
 
----
+`get_data` and `get_sql` require a non-empty `question`; `get_data` accepts an
+optional `limit`, defaulting to 250 and clamped to 1–25,000. `get_schema`
+accepts an optional `table`; an unknown table returns an `error` field, while
+omitting it returns all reflected tables. `get_data` returns `{valid, rows,
+sql, row_limit}` on success; a non-database question returns `{valid: false,
+answer}`, and a query execution failure returns `{valid: false, error, sql,
+rows: []}`.
+
+`execute` requires non-empty `sql` and optionally accepts a transaction
+`session_id` plus positional values for `$1`, `$2`, and so on. It returns
+`{rows, affected_rows}`. `begin` takes no arguments and returns `{session_id}`;
+`commit` and `rollback` require that ID and return `{ok: true}`. These four
+write-capable operations fail when **Allow direct query execution** is off;
+unknown or expired session IDs also fail. Invalid tool input raises an error.
 
 ## Configuration
 
-### Lanes
+Start with the default connection values, then set the database endpoint and
+target table. Most question-answering setups need the host, credentials,
+database, and a useful database description; the generated schema below is the
+complete field reference.
 
-| Lane in     | Lane out  | Description                                            |
-|-------------|-----------|--------------------------------------------------------|
-| `questions` | `table`   | Translate question to SQL, execute, return as table    |
-| `questions` | `text`    | Translate question to SQL, execute, return as text     |
-| `questions` | `answers` | Translate question to SQL, execute, return as answers  |
+### Database description
 
-### Fields
+This text is added to every LLM SQL-generation request alongside the reflected
+schema. Describe the data's purpose, meanings, and conventions when names
+alone are ambiguous—for example, explain whether `amount` is a gross or net
+value. Change it when queries choose the wrong interpretation; it does not
+replace the actual table and column information collected at startup.
 
-| Field | Type | Description |
-|---|---|---|
-| `host` | string | Default "localhost". Host name or IP address of the ClickHouse server, optionally including a native-protocol port (e.g. localhost:9440). Defaults to port 9000 when none is given. |
-| `user` | string | Default "default". User to connect to the ClickHouse server |
-| `password` | string | Password to connect to the ClickHouse server |
-| `database` | string | Default "default". Name of database |
-| `tls` | boolean | Default false. Connect over TLS. Required for managed services such as ClickHouse Cloud (native TLS port 9440 is assumed when the host has no explicit port). Leave OFF for a plaintext local server on port 9000. ClickHouse-specific, MySQL/PostgreSQL nodes do not expose this. |
-| `table` | string | Default "table". Name of table |
-| `db_description` | string | Default empty. What is this database used for? Describe its content and purpose, this helps the LLM generate more accurate queries. |
-| `max_attempts` | integer | Default 5. Maximum number of times to re-ask the LLM if EXPLAIN rejects the generated SQL |
-| `allow_execute` | boolean | Default false. Permit QuestionType.EXECUTE callers to run raw SQL without LLM translation or safety checks. Leave OFF unless a trusted application explicitly needs to issue SQL directly. |
-| `profile` | string | Default "default".  |
+### ClickHouse host and TLS
 
-The node ships a single `default` profile that pre-sets `database: default`.
+With TLS off, a host without an explicit port uses ClickHouse's native default
+of 9000. Turn TLS on for a TLS endpoint: the node adds `secure=true` to the
+native DSN and supplies port 9440 if no port is present. Keep TLS off for a
+plaintext local server. User, password, and database are URL-encoded when the
+connection string is built, so reserved characters in those values are safe.
 
----
+### Target database and table
 
-## SQL validation
+The database selects the connection's database; the table identifies the
+target table whose schema is also cached at startup. Set both to the exact
+objects the LLM should use. The node reflects the full database for LLM context,
+but it warns if this particular target table does not exist. Since the declared
+lanes do not accept data for insertion, create and populate ClickHouse tables
+outside this node.
 
-Generated SQL is validated by running `EXPLAIN` against the live database. If validation fails, the error is fed back to the LLM for a corrected query. This repeats up to `max_attempts` times before the node raises an error. The retry limit is clamped to 1-20 regardless of the value stored in config.
+### Max validation attempts
 
----
+The default of five gives the LLM several chances to repair a query rejected by
+`EXPLAIN`. Lower it when fast failure matters more than recovery; raise it for
+complex schemas that need another correction cycle. The runtime clamps this
+setting to 1–20. After the final rejected attempt it returns the last generated
+result, so `EXPLAIN` retries improve generated SQL but do not guarantee that a
+subsequent execution will succeed.
 
-## ClickHouse Cloud
+### Allow direct query execution
 
-To connect to a ClickHouse Cloud service:
+Leave this off by default. When on, the `execute`, `begin`, `commit`, and
+`rollback` tools can bypass LLM translation and the generated-query safety
+check, and raw statements use a transaction that commits on success. Enable it
+only for trusted callers that need writes or dialect-specific SQL; use
+`get_data` for ordinary read-only retrieval.
 
-1. In the Cloud console, open your service, choose **Connect**, and copy the **native** endpoint host (e.g. `abc123.us-east-1.aws.clickhouse.cloud`) and the `default` user password.
-2. Configure the node with: `host` = that hostname (no port needed, TLS port 9440 is assumed), `user` = `default`, `password` = your service password, `tls` = ON.
-3. Make sure your machine's IP is allowed under the service's **IP Access List** (or set it to "Anywhere" for testing).
+## Limitations
 
----
-
-## Ingestion
-
-Unlike the MySQL/PostgreSQL nodes, this node intentionally does not expose the ingestion/input `answers` lane (used for pipeline inserts). This removes only that input lane, not the `questions` to `answers` output lane used for querying, which still works. The shared auto-create-table helper builds tables with an auto-increment integer primary key and no table engine, neither of which exists in ClickHouse (tables require an explicit engine such as `MergeTree`), so the inherited insert/auto-create path cannot work here. Create your tables in ClickHouse directly, and use this node for querying. A ClickHouse-correct ingestion path can be added later as a separate feature.
-
----
+This node declares the `noremote` capability, so it cannot run in a remote
+execution environment. It requires network reachability to the ClickHouse
+server from the environment where the pipeline runs.
 
 ## Notes
 
-- ClickHouse is column-oriented and has no foreign keys; the reflected schema therefore exposes columns and (best-effort) primary keys but no FK relationships.
-- The `tls` config field is distinct from clickhouse-driver's `?secure=true` DSN parameter (which the node sets on the wire when TLS is enabled) and from the field-level `"secure": true` attribute on the password field, which only marks the value as a masked secret.
-- `user`, `password`, and `database` are URL-encoded when building the connection string, so reserved characters (`@`, `/`, `#`, `:`) in credentials are safe.
-- Bracketed IPv6 literals (e.g. `[::1]`) are supported in `host`; a port is only detected when a `:` follows the closing `]`.
+### Generated-query safety
 
----
+For LLM-generated SQL, the node only accepts `SELECT`, optionally preceded by
+`EXPLAIN`. It strips comments, checks every semicolon-separated statement, and
+rejects CTEs plus `SELECT ... INTO OUTFILE` or `INTO DUMPFILE`. It validates
+each safe candidate with `EXPLAIN` and feeds database errors to the LLM for the
+next attempt.
+
+### ClickHouse schema details
+
+The ClickHouse driver reports no foreign keys, so reflected schema output has
+columns and best-effort primary keys but no foreign-key relationships.
+
+## Upstream docs
+
+- [ClickHouse documentation](https://clickhouse.com/docs/)
+
 
 <!-- ROCKETRIDE:GENERATED:PARAMS START -->
 <!-- Generated by nodes:docs-generate. Do not edit by hand. -->

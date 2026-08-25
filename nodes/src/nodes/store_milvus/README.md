@@ -1,131 +1,116 @@
 # store_milvus
 
-A RocketRide store node that persists embedded documents in a Milvus vector database and retrieves them by semantic or keyword similarity search, and exposes search/upsert/delete as agent-callable tools.
+A RocketRide vector-store node that stores embedded document chunks in Milvus and retrieves them by semantic or keyword search. Use it when a pipeline or agent needs a Milvus-backed document store.
+
+## About Milvus
+
+Milvus is a vector database for storing embeddings and finding similar vectors.
+It is designed for vector-search workloads and supports structured fields alongside
+vector data. Use it when your team has chosen Milvus as the place to operate its
+retrieval data, whether the service is self-managed or hosted.
 
 ## What it does
 
-Stores pre-embedded document chunks in a Milvus collection and answers questions against
-them using semantic (vector) or keyword search. Supports both self-hosted Milvus and
-Zilliz Cloud. Documents must be run through an embedding node before reaching this node:
-ingesting a chunk without an embedding raises an error.
+The node accepts embedded documents on its `documents` lane and can retrieve matching documents for incoming questions. It also exposes the same store to an agent as tools. The collection is created when documents are first added, and incoming chunks without embeddings are rejected. Pick it over the other vector-store nodes when Milvus is the database already available to the workload, or when its collection and index model is the model your operators need to manage.
 
-Uses **pymilvus** (`MilvusClient`). The collection is created automatically on first
-document ingest if it does not exist, with the vector dimension taken from the incoming
-embeddings. Re-ingesting a document replaces it: all existing entities with the same
-`objectId` are deleted before the new chunks are upserted in batches (default: 50 chunks
-per batch).
+At creation, the driver makes an `id` scalar index and an `IVF_FLAT` vector index with `nlist` 1024. It stores the document content and metadata with the vector, so metadata filters and keyword retrieval can operate over the same collection.
 
-Documents removed at the source are soft-deleted by default. A `markDeleted` call flips
-the `isDeleted` metadata flag rather than dropping the entities, and searches exclude
-soft-deleted documents unless the filter explicitly asks for them. `markActive` reverses
-the flag if a document comes back. A hard `remove` deletes the entities outright.
+## Lanes
 
-When the node configuration is saved, the engine probes the connection (5-second timeout)
-and validates the collection name: 1-255 characters, letters, digits, and underscores
-only, starting with a letter or underscore.
+| Lane in | Lane out | Description |
+| --- | --- | --- |
+| `documents` | — | Store embedded document chunks. |
+| `questions` | `documents` | Return matching documents. |
+| `questions` | `answers` | Return matching documents as answers. |
+| `questions` | `questions` | Enrich questions with matching documents. |
 
----
+## As a tool
 
-## Configuration
+The configured tool-server name defaults to `milvus`.
 
-### Lanes
+| Function | Description |
+| --- | --- |
+| `search` | Searches the store for a non-empty `query`; accepts optional `top_k` and metadata `filter`, and returns matching content, metadata, and scores. |
+| `upsert` | Adds or updates a non-empty `documents` array. Each document requires content and an object ID; it can provide an embedding and embedding model or use the bound embedding provider. |
+| `delete` | Deletes documents for a non-empty `object_ids` array and returns the deleted count. |
 
-| Lane in     | Lane out    | Description                                                      |
-| ----------- | ----------- | ---------------------------------------------------------------- |
-| `documents` | *(none)*    | Ingest pre-embedded documents into the collection                |
-| `questions` | `documents` | Return matching documents                                        |
-| `questions` | `answers`   | Return matching documents as an answer                           |
-| `questions` | `questions` | Enrich the question with matching documents for downstream nodes |
-
-### Fields
-
-| Field | Type | Description |
-|---|---|---|
-| `profile` | string | Default "cloud". Connect to... |
-| `provider` | string | Default "milvus".  |
-
-### Advanced settings
-
-These keys are read from the node config but have no dedicated UI field:
-
-| Key                   | Default      | Description                                                               |
-| --------------------- | ------------ | ------------------------------------------------------------------------- |
-| `similarity`          | `COSINE`     | Metric type for the vector index. Accepted values: `L2`, `IP`, `COSINE`, `JACCARD`, `HAMMING`, `BM25`. Any other value raises an error at startup. |
-| `timeout`             | `60`         | Connection and operation timeout in seconds (minimum 1).                  |
-| `bulkInsertBatchSize` | `50`         | Number of chunks per bulk upsert batch (minimum 1).                       |
-| `renderChunkSize`     | `33554432`   | Number of chunks fetched per group when rendering a full document.        |
-
----
+`search` requires a bound embedding provider for semantic similarity search. The three functions return a failure object when their required input or an embedding cannot be obtained.
 
 ## Profiles
 
-| Profile                         | `mode`  | Default host             | Default port | Connection                                |
-| ------------------------------- | ------- | ------------------------ | ------------ | ----------------------------------------- |
-| Milvus cloud server *(default)* | `cloud` | *(your Zilliz endpoint)* | `443`        | `https://<host>` with `apikey` as token   |
-| Your own Milvus server          | `local` | `localhost`              | `19530`      | `http://<host>:<port>`, no token required |
+Default: **Milvus cloud server** (`cloud`).
 
----
+| Profile | Default host | Default port |
+| --- | --- | --- |
+| Milvus cloud server **(default)** | Empty | `443` |
+| Your own Milvus server | `localhost` | `19530` |
 
-## Collection schema & indexing
+## Configuration
 
-The auto-created collection has four fields:
+Choose the cloud or local profile first, then configure the host, port, and collection. The profile controls how the runtime forms the connection: cloud mode uses HTTPS and the token, while local mode uses HTTP with the configured host and port. Most installations only need to name the destination collection and replace the cloud endpoint or the local defaults.
 
-| Field     | Type                         | Notes                                                              |
-| --------- | ---------------------------- | ------------------------------------------------------------------ |
-| `id`      | `INT64`, primary key         | Generated per chunk from the UUID1 timestamp combined with 27 random bits |
-| `vector`  | `FLOAT_VECTOR`               | Dimension taken from the first ingested embeddings                 |
-| `content` | `VARCHAR` (max length 65535) | The chunk text                                                     |
-| `meta`    | `JSON`                       | Chunk metadata used for filtering (`objectId`, `nodeId`, `parent`, `chunkId`, `permissionId`, `isDeleted`, and others) |
+### Host, port, and API key
 
-Indexes: an `IVF_FLAT` vector index (`nlist: 1024`) using the configured `similarity`
-metric, and an `STL_SORT` scalar index on `id`.
+The driver trims whitespace, removes a leading `http://` or `https://`, and removes
+trailing slashes from the host you enter. For cloud mode it always constructs an
+HTTPS URI and supplies the trimmed API key as the Milvus token; for local mode it
+constructs an HTTP URI from host and port without a token. Use the cloud profile
+only for an endpoint that accepts that HTTPS/token connection. A connection error
+at startup usually means that the selected profile does not match the endpoint,
+or that the host was entered with an incompatible port.
 
----
+### Collection
 
-## Agent tools
+The collection is the destination for stored chunks. The save-time probe accepts names from 1 to 255 characters that begin with a letter or underscore and then use only letters, digits, or underscores. A collection is created when the first documents are added, using their vector size. Change it to isolate a corpus or embedding space; changing it points this node at a different store, rather than partitioning data within the old one. A save warning about the name means the collection will not start successfully until it follows the identifier rule.
 
-When wired to an agent, the node exposes three tools via `VectorStoreToolMixin`. Each tool is named `<serverName>.<tool>` (defaults: `milvus.search`, `milvus.upsert`, `milvus.delete`).
+### Similarity and retrieval score
 
-| Tool     | Key inputs                                                                                                                            | Description                                                                                                              |
-| -------- | ------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| `search` | `query` (required); `top_k` (default 10, max 100); `filter` (optional dict, keys `objectId`/`nodeId`/`parent` are honored)           | Semantic search over stored documents; returns content, metadata, and score per result. Falls back to keyword search if semantic search fails. |
-| `upsert` | `documents` array, each with `content` and `object_id`; optional `metadata`, `embedding`, and `embedding_model`                      | Add or update documents. Embeddings are computed automatically via the bound embedding provider, or pre-computed vectors can be supplied. |
-| `delete` | `object_ids` (non-empty string array)                                                                                                 | Hard-delete documents by object ID. Returns `deleted_count`.                                                             |
+The runtime accepts `L2`, `IP`, `COSINE`, `JACCARD`, `HAMMING`, or `BM25` as the similarity setting, defaulting to `COSINE`; another value stops initialization. It builds the vector index using this metric, so select the metric that matches the embeddings already in the collection before writing its first data. Changing it later does not rebuild an existing index.
 
-Tool calls run on the control plane and do not flow through the pipeline's embedding lanes. Semantic search in the `search` tool and automatic embedding in `upsert` require an embedding provider bound to the node (the `all.embedding` block in its parameters). Without one, those calls return `{"success": false, "error": ...}`.
+The retrieval score defaults to `0.5` and filters converted result scores. For cosine results the driver converts the returned distance to `(distance + 1) / 2`; for other metrics it applies a sigmoid conversion. Raise the score when retrieved context is noisy or unrelated; lower it when the expected source material is absent. The tradeoff is recall versus the amount of weak context passed downstream, and a threshold can only be meaningful with the same metric used to create the collection.
 
----
+### Write batch size and timeout
 
-## Search behavior
+The driver uses a 60-second connection timeout and writes chunks in batches of
+50 by default. These settings are read from the node configuration even though
+most deployments can leave them alone. Increase a batch size only when a larger
+write has been demonstrated to be reliable for the endpoint; reduce it when
+bulk writes fail partway through or the service cannot absorb the requested
+load. Increase the timeout for a slow but healthy remote service, rather than
+using it to mask a host, port, or authentication mismatch.
 
-**Semantic search** requires the question to carry an embedding (bind the pipeline to an
-embedding node) and verifies the embedding model matches the collection. Non-zero result
-offsets are not supported and raise an error. The query limit is raised to 25 whenever
-the requested limit is 10 or lower.
+### Tool Server Name
 
-**Scoring:** with the `COSINE` metric, the raw Milvus distance is rescaled to `[0, 1]`
-via `(distance + 1) / 2`, where 1 means most similar. For other metrics a sigmoid of
-`distance / -100` is used. Results below the `score` threshold are discarded.
+The tool-server name defaults to `milvus` and prefixes the three agent functions. Change it when multiple Milvus stores are connected to the same agent so their functions do not share a namespace.
 
-**Keyword search** runs a substring match (`content like '%query%'`) combined with the
-same metadata filters as semantic search.
+## Authentication
 
-All filter values (object IDs, node IDs, parents, permissions, and the keyword query) are
-escaped before interpolation into Milvus filter expressions.
+For a cloud profile, provide the API key; the runtime passes it as the Milvus token. The local profile connects with the configured host and port without a token.
 
----
+## Notes
 
-## Rendering
+### Search and document lifecycle
 
-Given an `objectId`, the node can rehydrate the complete document text by fetching its
-chunks in `chunkId` order, in groups of `renderChunkSize`, and streaming the joined text
-to the output callback. Rendering only applies to objects that were vectorized by this
-pipeline (objects without a vector batch ID fall through to the next driver).
+Semantic search requires an embedding and does not accept a non-zero offset. Keyword search uses the same metadata filters as retrieval. Re-ingesting an object deletes its existing chunks before the replacement chunks are inserted. The store can mark chunks deleted or active, and its default filters exclude marked-deleted chunks.
 
-The store counts **vectors (chunks)**, not documents: the node-reported document count is
-the number of entities in the collection.
+Milvus inserts chunks in batches of 50. A semantic search against an existing
+collection also checks the embedding model before querying, so a model or vector
+dimension mismatch is surfaced instead of silently mixing incompatible vectors.
 
----
+The store maps metadata such as node, parent, object, permission, table, and
+deletion state into Milvus filter expressions. Searches exclude soft-deleted
+chunks unless a caller explicitly requests deleted content. This is useful when
+one collection holds multiple sources: use the normal metadata filters to scope
+retrieval instead of creating a collection per source unless you need hard data
+separation.
+
+### Rendering
+
+Rendering retrieves an object's chunks in `chunkId` order and sends joined text to the callback in `renderChunkSize` groups. The node's document count is a count of stored vectors (chunks).
+
+## Upstream docs
+
+- [Milvus documentation](https://milvus.io/docs)
 
 <!-- ROCKETRIDE:GENERATED:PARAMS START -->
 <!-- Generated by nodes:docs-generate. Do not edit by hand. -->

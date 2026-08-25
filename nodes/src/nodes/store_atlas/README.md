@@ -1,71 +1,103 @@
 # store_atlas
 
-A RocketRide vector store node that stores embedded document chunks in MongoDB Atlas and retrieves them by semantic or keyword search, and exposes search/upsert/delete as agent-callable tools.
+A RocketRide vector store for MongoDB Atlas that stores embedded document chunks and retrieves matching content in a pipeline or through an agent tool.
+
+## About MongoDB Atlas
+
+MongoDB Atlas is a managed database service. This node stores documents in an Atlas collection, uses MongoDB text search for keyword queries, and creates an Atlas vector search index for embedding queries. It is the Atlas-specific option in the vector-store family, not a general connector for arbitrary MongoDB deployments.
 
 ## What it does
 
-Ingests pre-embedded document chunks into a MongoDB Atlas collection and searches them in response to questions. Semantic search runs an Atlas `$vectorSearch` aggregation against the question's embedding; keyword search uses MongoDB full-text search (`$text`) against the question's text.
+The node ingests embedded chunks into a MongoDB Atlas collection and searches them for incoming questions. Semantic questions use an Atlas `$vectorSearch` aggregation; keyword questions use MongoDB full-text search. It also exposes `search`, `upsert`, and `delete` when bound to an agent.
 
-Uses **pymongo** (with **dnspython** for `mongodb+srv://` URI resolution), so no local MongoDB tooling is required on the machine running the engine.
+Choose it when your RocketRide store belongs in an Atlas collection and you want both retrieval paths from one node. Use a different store node for a collection hosted by a different database engine; this implementation creates Atlas-specific metadata, text, and vector indexes on first ingest.
 
-Requires a MongoDB Atlas **M10+** cluster or a **serverless** instance: Atlas Vector Search indexes are not available on free-tier (M0) clusters. On first ingest, the node automatically creates the collection, regular indexes on all metadata fields (`meta.nodeId`, `meta.objectId`, `meta.parent`, `meta.permissionId`, `meta.isDeleted`, `meta.isTable`, `meta.chunkId`, `meta.tableId`), a text index for keyword search, and a `knnVector` search index sized to the embedding dimensions. If Atlas rejects the search-index creation, the node logs the error and continues; in that case, create the vector search index manually in the Atlas UI.
+An embedding node must run before the document lane. Ingesting a chunk without an embedding fails, while semantic questions likewise require an embedding. The first write creates the collection when needed and sizes the vector search index from that embedding's dimension.
 
-Documents must be run through an embedding node before reaching this node. A chunk without an embedding raises an error at ingest.
+## Lanes
 
----
+| Lane in | Lane out | Description |
+| --- | --- | --- |
+| `documents` | — | Store pre-embedded document chunks. |
+| `questions` | `documents` | Emit matching documents. |
+| `questions` | `answers` | Emit matching documents as answers. |
+| `questions` | `questions` | Enrich the question with matching documents. |
+
+## As a tool
+
+The configured tool server name is the namespace for the functions below; it defaults to `atlas`.
+
+| Function | Description |
+| --- | --- |
+| `search` | Search the collection for matching documents. |
+| `upsert` | Add or update documents in the collection. |
+| `delete` | Remove documents by object ID. |
+
+`search` and an `upsert` without a supplied embedding use the node's bound embedding provider. Tool invocations do not flow through the pipeline's embedding lane, so bind that provider when agents should create or search vectors automatically. Choose a distinct tool server name for each Atlas node an agent can access.
 
 ## Configuration
 
-### Lanes
+Provide the Atlas connection URI, database, collection, similarity, and retrieval score. The node creates the collection and its indexes when it first receives documents. Keep those index choices stable for an existing collection; this implementation checks for an index name but does not rebuild a differently shaped vector index for you.
 
-| Lane in     | Lane out    | Description                                                      |
-|-------------|-------------|------------------------------------------------------------------|
-| `documents` | (none)      | Ingest pre-embedded documents into the collection                |
-| `questions` | `documents` | Return matching documents                                        |
-| `questions` | `answers`   | Return matching documents as an answer                           |
-| `questions` | `questions` | Enrich the question with matching documents for downstream nodes |
+### Connection URI, database, and collection
 
-### Fields
+The host must be a non-empty MongoDB SRV URI in the form `mongodb+srv://user:password@cluster.example.mongodb.net/?...`, and a non-empty API key value is required when the configuration is saved. The runtime client is constructed from the URI, including its credentials. Use this node only with an Atlas endpoint that supports the indexes it creates; a connection string for some other MongoDB deployment is not an equivalent replacement.
 
-| Field | Type | Description |
-|---|---|---|
-| `provider` | string | Default "atlas".  |
+Database names cannot contain `/`, `\\`, spaces, quotes, `$`, `*`, `<`, `>`, `:`, `|`, or `?`, and are at most 64 characters. Collection names cannot start with `system.`, cannot contain `$`, and are at most 120 characters. Correct invalid names before saving: the validation is intended to catch a doomed deployment rather than let the first ingest fail later.
 
-Configuration is validated when the pipeline is saved: the host must match the `mongodb+srv://user:pass@cluster.xxxxx.mongodb.net/?...` URI pattern and all field-length and character restrictions listed above are checked at that time.
+### Vector indexes and similarity
 
----
+On first ingestion the node creates ordinary metadata indexes, a text index on `content`, and a vector search index named `vector_index`. That vector index takes its dimension from the incoming embeddings. Similarity defaults to `cosine`; `euclidean` and `dotproduct` are the other accepted values. Keep the selected metric and embedding dimension aligned with the vectors you will query; changing either after collection creation calls for a new compatible index or collection.
 
-## Search modes
+The implementation logs and continues if Atlas rejects vector-index creation, with a message that it may need to be created in Atlas. If semantic retrieval then fails while keyword retrieval works, inspect the Atlas vector index rather than changing the question text. The node also builds metadata indexes and a text index, so first ingest is doing setup work as well as writing data.
 
-**Semantic** uses Atlas Vector Search against the question's embedding. The pipeline requests `limit x 10` candidates (`numCandidates`) and returns up to `limit` results (default 25). A non-zero offset is not supported and raises an error.
+### Retrieval score and result windows
 
-**Keyword** uses MongoDB full-text search against the question's text, sorted by text score, with offset/limit paging (default limit 25).
+Semantic search requests ten candidates for every requested result and returns the requested limit (25 when none is supplied). It does not support a non-zero offset. Use keyword search when you need offset/limit paging; it uses text score, supports both, and defaults its limit to 25.
 
-Raw scores are normalized to a `0-1` range before being returned. Cosine scores are mapped with `(score + 1) / 2`; other metrics pass through a sigmoid. Results that normalize below `0.20` are discarded regardless of the configured `score` threshold.
+The configured score should be tuned for relevance, but it is not the only safeguard: returned semantic scores are normalized and anything below `0.20` is dropped. Raise the score when unrelated chunks reach a prompt; lower it when useful context is missing, but do not expect a setting below the hard floor to return weaker hits. Cosine results are normalized differently from the other supported metrics, another reason not to change the metric casually on an established collection.
 
----
+### First ingest and index readiness
 
-## Ingest behavior
+The first ingest both stores documents and attempts the Atlas setup: ordinary metadata indexes, a `content` text index, and the vector search index. For an established collection, make sure the configured vector-index name and metric describe the index you already operate. The node checks whether that named search index exists; it does not assume that a different existing index is usable.
 
-Before inserting, any existing documents whose `meta.objectId` matches an incoming top-level chunk (chunkId of 0) are deleted, so re-ingesting a document replaces it rather than duplicating it. Inserts are batched: a batch is flushed at 500 documents or when its accumulated size exceeds `payloadLimit`. Each stored document gets a generated UUID `_id` and carries `embedding`, `content`, and the chunk metadata under `meta`.
+Atlas may reject creation of the vector index while leaving the collection available. The implementation logs that condition and continues, which can make keyword search appear healthy while semantic search is unavailable. Treat that split result as an index-readiness issue, and create or repair the Atlas vector index before tuning retrieval settings.
 
-Documents can be marked deleted or active in place via `meta.isDeleted`. Filters exclude deleted documents by default. The node can also reassemble a full document from its chunks in `chunkId` order and stream the text to the `renderData` lane.
+### Object replacement and batch sizing
 
----
+An incoming `chunkId` 0 identifies the start of an object replacement. The node deletes stored chunks for each such `objectId` before inserting the batch, then stores every new chunk with generated `_id`, embedding, text, and metadata. Send complete replacement batches together; sending only a new top-level chunk removes the older object chunks by design.
 
-## Agent tools
+The implementation flushes an insert batch at 500 documents or when its accumulated object size exceeds the payload limit. That makes large imports incremental without changing retrieval semantics. When diagnosing a partial import, check the source batch and the first chunk's metadata rather than assuming every call is one atomic object write.
 
-When wired to an agent, the node exposes three tools via `VectorStoreToolMixin`. Each tool is named `<serverName>.<tool>` (defaults: `atlas.search`, `atlas.upsert`, `atlas.delete`).
+### Tool Server Name
 
-| Tool     | Key inputs                                                                                                                            | Description                                                                                                              |
-| -------- | ------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| `search` | `query` (required); `top_k` (default 10, max 100); `filter` (optional dict, keys `objectId`/`nodeId`/`parent` are honored)           | Semantic search over stored documents; returns content, metadata, and score per result. Falls back to keyword search if semantic search fails. |
-| `upsert` | `documents` array, each with `content` and `object_id`; optional `metadata`, `embedding`, and `embedding_model`                      | Add or update documents. Embeddings are computed automatically via the bound embedding provider, or pre-computed vectors can be supplied. |
-| `delete` | `object_ids` (non-empty string array)                                                                                                 | Hard-delete documents by object ID. Returns `deleted_count`.                                                             |
+This is the namespace for the three agent functions: `atlas.search`, `atlas.upsert`, and `atlas.delete` by default. Change it to avoid collisions between multiple Atlas tool nodes.
 
-Tool calls run on the control plane and do not flow through the pipeline's embedding lanes. Semantic search in the `search` tool and automatic embedding in `upsert` require an embedding provider bound to the node (the `all.embedding` block in its parameters). Without one, those calls return `{"success": false, "error": ...}`.
+## Authentication
 
----
+Supply the MongoDB SRV URI, including its credentials, as the host value. The save-time check also requires a non-empty API key value; the runtime client is constructed from the configured URI. The node has no separate local or unauthenticated profile.
+
+## Notes
+
+### Filters, lifecycle, and rendering
+
+Both search modes apply filters for node, parent, permissions, object, table, and chunk information. Default filters also require `meta.isDeleted` to be false, so soft-deleted chunks remain stored but do not appear in ordinary searches. `markDeleted` and `markActive` toggle that flag, while `remove` permanently deletes the selected objects.
+
+When a batch includes `chunkId` 0 for an object, the node removes all older chunks for that object before inserting the new batch. This is replacement behavior for a full re-ingest, not an append-only import. Inserts flush at 500 documents or when their accumulated Python object size passes the configured payload limit. Rendering an object rebuilds its text by chunk ID in windows, so it can handle large multi-chunk documents.
+
+Rendering does not query an application-level full-text document. Instead, it fetches matching chunks by object and chunk range, places them into their chunk-ID positions, and joins the available content. Gaps therefore remain gaps rather than shifting later chunks into earlier positions.
+
+### Search-mode selection
+
+Semantic search is appropriate when matching meaning across different wording, but it requires a compatible question embedding and cannot page with a non-zero offset. Keyword search uses the collection's text index and is the better choice for literal terms or page-by-page inspection. Both modes honor the document filters, so a missing result can be caused by metadata selection or soft deletion as well as ranking.
+
+### Agent tool behavior
+
+The agent `search` function performs semantic retrieval and the agent `upsert` function can use a supplied vector or a bound embedding provider. `delete` permanently removes by object ID. Keep the tool server name unique when several Atlas stores are attached to one agent; otherwise the same function names would collide.
+
+## Upstream docs
+
+- [MongoDB Atlas documentation](https://www.mongodb.com/docs/atlas/)
 
 <!-- ROCKETRIDE:GENERATED:PARAMS START -->
 <!-- Generated by nodes:docs-generate. Do not edit by hand. -->
