@@ -1,0 +1,1564 @@
+[
+ {
+  "name": "accessibility_describe",
+  "classType": [
+   "image"
+  ],
+  "lanes": {
+   "image": [
+    "text"
+   ]
+  }
+ },
+ {
+  "name": "agent_crewai",
+  "classType": [
+   "agent",
+   "tool"
+  ],
+  "lanes": {
+   "questions": [
+    "answers"
+   ]
+  },
+  "invoke": {
+   "llm": {
+    "min": 1
+   },
+   "tool": {
+    "min": 0
+   }
+  }
+ },
+ {
+  "name": "agent_crewai_manager",
+  "classType": [
+   "agent",
+   "tool"
+  ],
+  "lanes": {
+   "questions": [
+    "answers"
+   ]
+  },
+  "invoke": {
+   "crewai": {
+    "min": 1
+   },
+   "llm": {
+    "min": 1
+   }
+  }
+ },
+ {
+  "name": "agent_crewai_subagent",
+  "classType": [
+   "crewai"
+  ],
+  "lanes": {},
+  "invoke": {
+   "llm": {
+    "min": 1
+   },
+   "tool": {
+    "min": 0
+   }
+  }
+ },
+ {
+  "name": "agent_deepagent",
+  "classType": [
+   "agent",
+   "tool"
+  ],
+  "lanes": {
+   "questions": [
+    "answers"
+   ]
+  },
+  "invoke": {
+   "deepagent": {
+    "min": 0
+   },
+   "llm": {
+    "min": 1
+   },
+   "tool": {
+    "min": 0
+   }
+  }
+ },
+ {
+  "name": "agent_deepagent_subagent",
+  "classType": [
+   "deepagent"
+  ],
+  "lanes": {},
+  "invoke": {
+   "llm": {
+    "min": 1
+   },
+   "tool": {
+    "min": 0
+   }
+  }
+ },
+ {
+  "name": "agent_langchain",
+  "classType": [
+   "agent",
+   "tool"
+  ],
+  "lanes": {
+   "questions": [
+    "answers"
+   ]
+  },
+  "invoke": {
+   "llm": {
+    "min": 1
+   },
+   "tool": {
+    "min": 0
+   }
+  }
+ },
+ {
+  "name": "agent_llamaindex",
+  "classType": [
+   "agent",
+   "tool"
+  ],
+  "lanes": {
+   "questions": [
+    "answers"
+   ]
+  },
+  "invoke": {
+   "llm": {
+    "min": 1
+   },
+   "tool": {
+    "min": 0
+   }
+  }
+ },
+ {
+  "name": "agent_rocketride",
+  "classType": [
+   "agent",
+   "tool"
+  ],
+  "lanes": {
+   "questions": [
+    "answers"
+   ]
+  },
+  "invoke": {
+   "llm": {
+    "max": 1,
+    "min": 1
+   },
+   "memory": {
+    "max": 1,
+    "min": 1
+   },
+   "tool": {
+    "min": 0
+   }
+  }
+ },
+ {
+  "name": "anomaly_detector",
+  "classType": [
+   "text"
+  ],
+  "lanes": {
+   "documents": [
+    "documents"
+   ],
+   "text": [
+    "text"
+   ]
+  }
+ },
+ {
+  "name": "anonymize_text",
+  "classType": [
+   "text"
+  ],
+  "lanes": {
+   "text": [
+    "text"
+   ]
+  }
+ },
+ {
+  "name": "aparavi_aql",
+  "classType": [
+   "database",
+   "tool"
+  ],
+  "lanes": {},
+  "invoke": {
+   "llm": {
+    "min": 1
+   }
+  }
+ },
+ {
+  "name": "astra_db",
+  "classType": [
+   "store"
+  ],
+  "lanes": {
+   "documents": [],
+   "questions": [
+    "documents",
+    "answers",
+    "questions"
+   ]
+  }
+ },
+ {
+  "name": "audio_player",
+  "classType": [
+   "audio"
+  ],
+  "lanes": {
+   "audio": [],
+   "video": []
+  }
+ },
+ {
+  "name": "audio_transcribe",
+  "classType": [
+   "audio"
+  ],
+  "lanes": {
+   "audio": [
+    "text"
+   ],
+   "video": [
+    "text"
+   ]
+  }
+ },
+ {
+  "name": "audio_tts",
+  "classType": [
+   "audio"
+  ],
+  "lanes": {
+   "answers": [
+    "audio"
+   ],
+   "documents": [
+    "audio"
+   ],
+   "questions": [
+    "audio"
+   ],
+   "text": [
+    "audio"
+   ]
+  }
+ },
+ {
+  "name": "background_removal",
+  "classType": [
+   "image"
+  ],
+  "lanes": {
+   "image": [
+    "text",
+    "image"
+   ]
+  }
+ },
+ {
+  "name": "chat",
+  "classType": [
+   "source"
+  ],
+  "lanes": {
+   "_source": [
+    "questions"
+   ]
+  }
+ },
+ {
+  "name": "chroma",
+  "classType": [
+   "store",
+   "tool"
+  ],
+  "lanes": {
+   "documents": [],
+   "questions": [
+    "documents",
+    "answers",
+    "questions"
+   ]
+  }
+ },
+ {
+  "name": "db_arango",
+  "classType": [
+   "database",
+   "tool"
+  ],
+  "lanes": {
+   "questions": [
+    "table",
+    "text",
+    "answers"
+   ]
+  },
+  "invoke": {
+   "llm": {
+    "min": 1
+   }
+  }
+ },
+ {
+  "name": "db_clickhouse",
+  "classType": [
+   "database",
+   "tool"
+  ],
+  "lanes": {
+   "questions": [
+    "table",
+    "text",
+    "answers"
+   ]
+  },
+  "invoke": {
+   "llm": {
+    "min": 1
+   }
+  }
+ },
+ {
+  "name": "db_mysql",
+  "classType": [
+   "database",
+   "tool"
+  ],
+  "lanes": {
+   "answers": [],
+   "questions": [
+    "table",
+    "text",
+    "answers"
+   ]
+  },
+  "invoke": {
+   "llm": {
+    "min": 1
+   }
+  }
+ },
+ {
+  "name": "db_neo4j",
+  "classType": [
+   "database",
+   "tool"
+  ],
+  "lanes": {
+   "questions": [
+    "table",
+    "text",
+    "answers"
+   ]
+  },
+  "invoke": {
+   "llm": {
+    "min": 1
+   }
+  }
+ },
+ {
+  "name": "db_postgres",
+  "classType": [
+   "database",
+   "tool"
+  ],
+  "lanes": {
+   "answers": [],
+   "questions": [
+    "table",
+    "text",
+    "answers"
+   ]
+  },
+  "invoke": {
+   "llm": {
+    "min": 1
+   }
+  }
+ },
+ {
+  "name": "db_supabase",
+  "classType": [
+   "database",
+   "tool"
+  ],
+  "lanes": {
+   "answers": [],
+   "questions": [
+    "table",
+    "text",
+    "answers"
+   ]
+  },
+  "invoke": {
+   "llm": {
+    "min": 1
+   }
+  }
+ },
+ {
+  "name": "depth_estimate",
+  "classType": [
+   "image"
+  ],
+  "lanes": {
+   "image": [
+    "text",
+    "image"
+   ]
+  }
+ },
+ {
+  "name": "detect",
+  "classType": [
+   "image"
+  ],
+  "lanes": {
+   "image": [
+    "text",
+    "image"
+   ]
+  }
+ },
+ {
+  "name": "detect_segment",
+  "classType": [
+   "image"
+  ],
+  "lanes": {
+   "image": [
+    "text",
+    "image"
+   ]
+  }
+ },
+ {
+  "name": "dictionary",
+  "classType": [
+   "text"
+  ],
+  "lanes": {
+   "text": [
+    "documents"
+   ]
+  },
+  "invoke": {
+   "llm": {
+    "min": 1
+   }
+  }
+ },
+ {
+  "name": "dropper",
+  "classType": [
+   "source"
+  ],
+  "lanes": {
+   "_source": [
+    "tags"
+   ]
+  }
+ },
+ {
+  "name": "elasticsearch",
+  "classType": [
+   "store"
+  ],
+  "lanes": {
+   "documents": [],
+   "questions": [
+    "text",
+    "documents",
+    "answers",
+    "questions"
+   ],
+   "text": []
+  }
+ },
+ {
+  "name": "embedding_image",
+  "classType": [
+   "embedding"
+  ],
+  "lanes": {
+   "documents": [
+    "documents"
+   ],
+   "image": [
+    "documents"
+   ]
+  }
+ },
+ {
+  "name": "embedding_openai",
+  "classType": [
+   "embedding"
+  ],
+  "lanes": {
+   "documents": [
+    "documents"
+   ],
+   "questions": [
+    "questions"
+   ]
+  }
+ },
+ {
+  "name": "embedding_transformer",
+  "classType": [
+   "embedding"
+  ],
+  "lanes": {
+   "documents": [
+    "documents"
+   ],
+   "questions": [
+    "questions"
+   ]
+  }
+ },
+ {
+  "name": "embedding_video",
+  "classType": [
+   "embedding"
+  ],
+  "lanes": {
+   "video": [
+    "documents"
+   ]
+  }
+ },
+ {
+  "name": "extract_data",
+  "classType": [
+   "text"
+  ],
+  "lanes": {
+   "table": [
+    "answers",
+    "documents"
+   ],
+   "text": [
+    "answers",
+    "documents"
+   ]
+  },
+  "invoke": {
+   "llm": {
+    "min": 1
+   }
+  }
+ },
+ {
+  "name": "filesys",
+  "classType": [
+   "source"
+  ],
+  "lanes": {
+   "_source": [
+    "tags"
+   ]
+  }
+ },
+ {
+  "name": "frame_grabber",
+  "classType": [
+   "video"
+  ],
+  "lanes": {
+   "video": [
+    "image",
+    "table",
+    "documents"
+   ]
+  }
+ },
+ {
+  "name": "guardrails",
+  "classType": [
+   "guard"
+  ],
+  "lanes": {
+   "answers": [
+    "answers"
+   ],
+   "documents": [
+    "documents"
+   ],
+   "questions": [
+    "questions"
+   ]
+  }
+ },
+ {
+  "name": "hash",
+  "classType": [
+   "data"
+  ],
+  "lanes": {
+   "tags": [
+    "tags"
+   ]
+  }
+ },
+ {
+  "name": "image_cleanup",
+  "classType": [
+   "image"
+  ],
+  "lanes": {
+   "image": [
+    "image"
+   ]
+  }
+ },
+ {
+  "name": "image_vision_gemini",
+  "classType": [
+   "image"
+  ],
+  "lanes": {
+   "documents": [
+    "documents"
+   ],
+   "image": [
+    "text"
+   ]
+  }
+ },
+ {
+  "name": "image_vision_mistral",
+  "classType": [
+   "image"
+  ],
+  "lanes": {
+   "documents": [
+    "documents"
+   ],
+   "image": [
+    "text"
+   ]
+  }
+ },
+ {
+  "name": "image_vision_ollama",
+  "classType": [
+   "image"
+  ],
+  "lanes": {
+   "documents": [
+    "documents"
+   ],
+   "image": [
+    "text"
+   ]
+  }
+ },
+ {
+  "name": "image_vision_openai",
+  "classType": [
+   "image"
+  ],
+  "lanes": {
+   "documents": [
+    "documents"
+   ],
+   "image": [
+    "text"
+   ]
+  }
+ },
+ {
+  "name": "landing_ai_extract",
+  "classType": [
+   "data"
+  ],
+  "lanes": {
+   "text": [
+    "answers",
+    "documents"
+   ]
+  }
+ },
+ {
+  "name": "landing_ai_parse",
+  "classType": [
+   "data"
+  ],
+  "lanes": {
+   "tags": [
+    "text",
+    "table"
+   ]
+  }
+ },
+ {
+  "name": "llamaparse",
+  "classType": [
+   "data"
+  ],
+  "lanes": {
+   "tags": [
+    "text",
+    "table"
+   ]
+  }
+ },
+ {
+  "name": "llm_anthropic",
+  "classType": [
+   "llm"
+  ],
+  "lanes": {
+   "questions": [
+    "answers"
+   ]
+  }
+ },
+ {
+  "name": "llm_baidu_qianfan",
+  "classType": [
+   "llm"
+  ],
+  "lanes": {
+   "questions": [
+    "answers"
+   ]
+  }
+ },
+ {
+  "name": "llm_bedrock",
+  "classType": [
+   "llm"
+  ],
+  "lanes": {
+   "questions": [
+    "answers"
+   ]
+  }
+ },
+ {
+  "name": "llm_deepseek",
+  "classType": [
+   "llm"
+  ],
+  "lanes": {
+   "questions": [
+    "answers"
+   ]
+  }
+ },
+ {
+  "name": "llm_gemini",
+  "classType": [
+   "llm"
+  ],
+  "lanes": {
+   "questions": [
+    "answers"
+   ]
+  }
+ },
+ {
+  "name": "llm_gmi_cloud",
+  "classType": [
+   "llm"
+  ],
+  "lanes": {
+   "questions": [
+    "answers"
+   ]
+  }
+ },
+ {
+  "name": "llm_kimi",
+  "classType": [
+   "llm"
+  ],
+  "lanes": {
+   "questions": [
+    "answers"
+   ]
+  }
+ },
+ {
+  "name": "llm_minimax",
+  "classType": [
+   "llm"
+  ],
+  "lanes": {
+   "questions": [
+    "answers"
+   ]
+  }
+ },
+ {
+  "name": "llm_mistral",
+  "classType": [
+   "llm"
+  ],
+  "lanes": {
+   "questions": [
+    "answers"
+   ]
+  }
+ },
+ {
+  "name": "llm_nebius",
+  "classType": [
+   "llm"
+  ],
+  "lanes": {
+   "questions": [
+    "answers"
+   ]
+  }
+ },
+ {
+  "name": "llm_ollama",
+  "classType": [
+   "llm"
+  ],
+  "lanes": {
+   "questions": [
+    "answers"
+   ]
+  }
+ },
+ {
+  "name": "llm_openai",
+  "classType": [
+   "llm"
+  ],
+  "lanes": {
+   "questions": [
+    "answers"
+   ]
+  }
+ },
+ {
+  "name": "llm_openai_api",
+  "classType": [
+   "llm"
+  ],
+  "lanes": {
+   "questions": [
+    "answers"
+   ]
+  }
+ },
+ {
+  "name": "llm_perplexity",
+  "classType": [
+   "llm"
+  ],
+  "lanes": {
+   "questions": [
+    "answers"
+   ]
+  }
+ },
+ {
+  "name": "llm_qwen",
+  "classType": [
+   "llm"
+  ],
+  "lanes": {
+   "questions": [
+    "answers"
+   ]
+  }
+ },
+ {
+  "name": "llm_xai",
+  "classType": [
+   "llm"
+  ],
+  "lanes": {
+   "questions": [
+    "answers"
+   ]
+  }
+ },
+ {
+  "name": "local-text-output",
+  "classType": [
+   "target"
+  ],
+  "lanes": {
+   "text": []
+  }
+ },
+ {
+  "name": "mcp_client",
+  "classType": [
+   "tool"
+  ],
+  "lanes": {}
+ },
+ {
+  "name": "memory_internal",
+  "classType": [
+   "memory"
+  ],
+  "lanes": {}
+ },
+ {
+  "name": "memory_persistent",
+  "classType": [
+   "memory"
+  ],
+  "lanes": {
+   "answers": [
+    "answers"
+   ],
+   "questions": [
+    "questions"
+   ]
+  }
+ },
+ {
+  "name": "milvus",
+  "classType": [
+   "store"
+  ],
+  "lanes": {
+   "documents": [],
+   "questions": [
+    "documents",
+    "answers",
+    "questions"
+   ]
+  }
+ },
+ {
+  "name": "mongodb+srv",
+  "classType": [
+   "store"
+  ],
+  "lanes": {
+   "documents": [],
+   "questions": [
+    "documents",
+    "answers",
+    "questions"
+   ]
+  }
+ },
+ {
+  "name": "ner",
+  "classType": [
+   "text"
+  ],
+  "lanes": {
+   "documents": [
+    "documents"
+   ],
+   "text": [
+    "text"
+   ]
+  }
+ },
+ {
+  "name": "ocr",
+  "classType": [
+   "image"
+  ],
+  "lanes": {
+   "documents": [
+    "text"
+   ],
+   "image": [
+    "text",
+    "table"
+   ]
+  }
+ },
+ {
+  "name": "opensearch",
+  "classType": [
+   "store"
+  ],
+  "lanes": {
+   "documents": [],
+   "questions": [
+    "text",
+    "answers",
+    "documents"
+   ],
+   "text": []
+  }
+ },
+ {
+  "name": "parse",
+  "classType": [
+   "data"
+  ],
+  "lanes": {
+   "tags": [
+    "text",
+    "table",
+    "image",
+    "video",
+    "audio"
+   ]
+  }
+ },
+ {
+  "name": "pinecone",
+  "classType": [
+   "store",
+   "tool"
+  ],
+  "lanes": {
+   "documents": [],
+   "questions": [
+    "documents",
+    "answers",
+    "questions"
+   ]
+  }
+ },
+ {
+  "name": "pose_estimation",
+  "classType": [
+   "image"
+  ],
+  "lanes": {
+   "image": [
+    "text",
+    "image"
+   ]
+  }
+ },
+ {
+  "name": "postgres",
+  "classType": [
+   "store"
+  ],
+  "lanes": {
+   "documents": [],
+   "questions": [
+    "documents",
+    "answers",
+    "questions"
+   ]
+  }
+ },
+ {
+  "name": "preprocessor_code",
+  "classType": [
+   "preprocessor"
+  ],
+  "lanes": {
+   "text": [
+    "documents"
+   ]
+  }
+ },
+ {
+  "name": "preprocessor_langchain",
+  "classType": [
+   "preprocessor"
+  ],
+  "lanes": {
+   "table": [
+    "documents"
+   ],
+   "text": [
+    "documents"
+   ]
+  }
+ },
+ {
+  "name": "preprocessor_llm",
+  "classType": [
+   "preprocessor"
+  ],
+  "lanes": {
+   "table": [
+    "documents"
+   ],
+   "text": [
+    "documents"
+   ]
+  },
+  "invoke": {
+   "llm": {
+    "min": 1
+   }
+  }
+ },
+ {
+  "name": "prompt",
+  "classType": [
+   "text"
+  ],
+  "lanes": {
+   "documents": [],
+   "questions": [
+    "questions"
+   ],
+   "table": [],
+   "text": []
+  }
+ },
+ {
+  "name": "qdrant",
+  "classType": [
+   "store",
+   "tool"
+  ],
+  "lanes": {
+   "documents": [],
+   "questions": [
+    "documents",
+    "answers",
+    "questions"
+   ]
+  }
+ },
+ {
+  "name": "question",
+  "classType": [
+   "text"
+  ],
+  "lanes": {
+   "text": [
+    "questions"
+   ]
+  }
+ },
+ {
+  "name": "reducto",
+  "classType": [
+   "data"
+  ],
+  "lanes": {
+   "tags": [
+    "text",
+    "table"
+   ]
+  }
+ },
+ {
+  "name": "remote",
+  "classType": [
+   "infrastructure"
+  ],
+  "lanes": {}
+ },
+ {
+  "name": "rerank_cohere",
+  "classType": [
+   "rerank"
+  ],
+  "lanes": {
+   "questions": [
+    "documents",
+    "answers"
+   ]
+  }
+ },
+ {
+  "name": "response_answers",
+  "classType": [
+   "infrastructure"
+  ],
+  "lanes": {
+   "answers": []
+  }
+ },
+ {
+  "name": "response_audio",
+  "classType": [
+   "infrastructure"
+  ],
+  "lanes": {
+   "audio": []
+  }
+ },
+ {
+  "name": "response_documents",
+  "classType": [
+   "infrastructure"
+  ],
+  "lanes": {
+   "documents": []
+  }
+ },
+ {
+  "name": "response_image",
+  "classType": [
+   "infrastructure"
+  ],
+  "lanes": {
+   "image": []
+  }
+ },
+ {
+  "name": "response_questions",
+  "classType": [
+   "infrastructure"
+  ],
+  "lanes": {
+   "questions": []
+  }
+ },
+ {
+  "name": "response_table",
+  "classType": [
+   "infrastructure"
+  ],
+  "lanes": {
+   "table": []
+  }
+ },
+ {
+  "name": "response_text",
+  "classType": [
+   "infrastructure"
+  ],
+  "lanes": {
+   "text": []
+  }
+ },
+ {
+  "name": "response_video",
+  "classType": [
+   "infrastructure"
+  ],
+  "lanes": {
+   "video": []
+  }
+ },
+ {
+  "name": "search_exa",
+  "classType": [
+   "search"
+  ],
+  "lanes": {
+   "questions": [
+    "answers",
+    "text"
+   ]
+  }
+ },
+ {
+  "name": "summarization",
+  "classType": [
+   "text"
+  ],
+  "lanes": {
+   "text": [
+    "text",
+    "documents"
+   ]
+  },
+  "invoke": {
+   "llm": {
+    "min": 1
+   }
+  }
+ },
+ {
+  "name": "telegram",
+  "classType": [
+   "source"
+  ],
+  "lanes": {
+   "_source": [
+    "text",
+    "image",
+    "audio",
+    "video",
+    "tags"
+   ]
+  }
+ },
+ {
+  "name": "text-output",
+  "classType": [
+   "target"
+  ],
+  "lanes": {
+   "text": []
+  }
+ },
+ {
+  "name": "thumbnail",
+  "classType": [
+   "image"
+  ],
+  "lanes": {
+   "documents": [
+    "documents"
+   ],
+   "image": [
+    "documents",
+    "image"
+   ]
+  }
+ },
+ {
+  "name": "tool_apify",
+  "classType": [
+   "tool"
+  ],
+  "lanes": {}
+ },
+ {
+  "name": "tool_bland_ai",
+  "classType": [
+   "tool"
+  ],
+  "lanes": {}
+ },
+ {
+  "name": "tool_butterbase",
+  "classType": [
+   "tool"
+  ],
+  "lanes": {}
+ },
+ {
+  "name": "tool_chartjs",
+  "classType": [
+   "tool"
+  ],
+  "lanes": {},
+  "invoke": {
+   "llm": {
+    "min": 1
+   }
+  }
+ },
+ {
+  "name": "tool_daytona",
+  "classType": [
+   "tool"
+  ],
+  "lanes": {}
+ },
+ {
+  "name": "tool_deepl",
+  "classType": [
+   "tool"
+  ],
+  "lanes": {}
+ },
+ {
+  "name": "tool_exa_search",
+  "classType": [
+   "tool"
+  ],
+  "lanes": {}
+ },
+ {
+  "name": "tool_falkordb",
+  "classType": [
+   "tool"
+  ],
+  "lanes": {}
+ },
+ {
+  "name": "tool_filesystem",
+  "classType": [
+   "tool"
+  ],
+  "lanes": {}
+ },
+ {
+  "name": "tool_firecrawl",
+  "classType": [
+   "tool"
+  ],
+  "lanes": {}
+ },
+ {
+  "name": "tool_git",
+  "classType": [
+   "tool"
+  ],
+  "lanes": {}
+ },
+ {
+  "name": "tool_github",
+  "classType": [
+   "tool"
+  ],
+  "lanes": {}
+ },
+ {
+  "name": "tool_http_request",
+  "classType": [
+   "tool"
+  ],
+  "lanes": {}
+ },
+ {
+  "name": "tool_mem0",
+  "classType": [
+   "tool"
+  ],
+  "lanes": {}
+ },
+ {
+  "name": "tool_pipe",
+  "classType": [
+   "tool"
+  ],
+  "lanes": {
+   "_source": [
+    "text",
+    "questions",
+    "documents",
+    "table",
+    "answers"
+   ]
+  }
+ },
+ {
+  "name": "tool_python",
+  "classType": [
+   "tool"
+  ],
+  "lanes": {}
+ },
+ {
+  "name": "tool_tavily",
+  "classType": [
+   "tool"
+  ],
+  "lanes": {}
+ },
+ {
+  "name": "tool_v0",
+  "classType": [
+   "tool"
+  ],
+  "lanes": {}
+ },
+ {
+  "name": "tool_xtrace_memory",
+  "classType": [
+   "tool"
+  ],
+  "lanes": {}
+ },
+ {
+  "name": "tts_elevenlabs",
+  "classType": [
+   "audio"
+  ],
+  "lanes": {
+   "answers": [
+    "audio"
+   ],
+   "documents": [
+    "audio"
+   ],
+   "questions": [
+    "audio"
+   ],
+   "text": [
+    "audio"
+   ]
+  }
+ },
+ {
+  "name": "tts_openai",
+  "classType": [
+   "audio"
+  ],
+  "lanes": {
+   "answers": [
+    "audio"
+   ],
+   "documents": [
+    "audio"
+   ],
+   "questions": [
+    "audio"
+   ],
+   "text": [
+    "audio"
+   ]
+  }
+ },
+ {
+  "name": "twelvelabs",
+  "classType": [
+   "video"
+  ],
+  "lanes": {
+   "video": [
+    "text"
+   ]
+  }
+ },
+ {
+  "name": "video_composer",
+  "classType": [
+   "video"
+  ],
+  "lanes": {
+   "image": [
+    "video"
+   ]
+  }
+ },
+ {
+  "name": "weaviate",
+  "classType": [
+   "store"
+  ],
+  "lanes": {
+   "documents": [],
+   "questions": [
+    "documents",
+    "answers",
+    "questions"
+   ]
+  }
+ },
+ {
+  "name": "webhook",
+  "classType": [
+   "source"
+  ],
+  "lanes": {
+   "_source": [
+    "tags",
+    "text",
+    "audio",
+    "video",
+    "image",
+    "questions"
+   ]
+  }
+ }
+]
