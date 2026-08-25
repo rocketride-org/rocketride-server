@@ -27,12 +27,18 @@ In **index mode**, use the `text` lane for raw text and queries run BM25-style m
 
 ## Profiles
 
+The directory registers two backends and each keeps its own default: the
+Elasticsearch service defaults to **Self-managed Elasticsearch**
+(`self-managed`), the OpenSearch service to **Local OpenSearch** (`local`).
+Both are marked below; which one applies depends on the service you added
+to the pipeline.
+
 | Profile | Backend | Mode |
 | --- | --- | --- |
-| Self-managed Elasticsearch *(default)* | Elasticsearch | Vector store |
+| Self-managed Elasticsearch **(default)** | Elasticsearch | Vector store |
 | Elastic Cloud Hosted | Elasticsearch | Vector store |
 | Elastic Cloud Serverless | Elasticsearch | Vector store |
-| Local OpenSearch *(default)* | OpenSearch | Index |
+| Local OpenSearch **(default)** | OpenSearch | Index |
 
 ## Configuration
 

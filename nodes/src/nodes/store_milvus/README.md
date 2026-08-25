@@ -38,9 +38,11 @@ The configured tool-server name defaults to `milvus`.
 
 ## Profiles
 
+Default: **Milvus cloud server** (`cloud`).
+
 | Profile | Default host | Default port |
 | --- | --- | --- |
-| Milvus cloud server *(default)* | Empty | `443` |
+| Milvus cloud server **(default)** | Empty | `443` |
 | Your own Milvus server | `localhost` | `19530` |
 
 ## Configuration

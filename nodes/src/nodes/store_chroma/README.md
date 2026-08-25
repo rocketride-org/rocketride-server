@@ -35,9 +35,11 @@ The configured tool server name is the namespace for the functions below; it def
 
 ## Profiles
 
+Default: **Your own ChromaDB server** (`local`).
+
 | Profile | Connection | Authentication |
 | --- | --- | --- |
-| Your own ChromaDB server *(default)* | Host and port | None configured by the node |
+| Your own ChromaDB server **(default)** | Host and port | None configured by the node |
 | ChromaDB Cloud Server | Host and port | Token authentication with the API key |
 
 ## Configuration

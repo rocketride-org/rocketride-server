@@ -37,10 +37,12 @@ The configured tool server name is the namespace for the functions below; it def
 
 ## Profiles
 
+Default: **Astra DB cloud server** (`cloud`).
+
 | Profile | Endpoint | Collection |
 | --- | --- | --- |
 | Local test server | `http://localhost:8080` | `ROCKETRIDE` |
-| Astra DB cloud server *(default)* | Set an API endpoint | `ROCKETRIDE` |
+| Astra DB cloud server **(default)** | Set an API endpoint | `ROCKETRIDE` |
 
 ## Configuration
 

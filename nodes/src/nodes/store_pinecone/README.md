@@ -38,10 +38,12 @@ The configured tool-server name defaults to `pinecone`.
 
 ## Profiles
 
+Default: **Pinecone Serverless Dense Index** (`serverless-dense`).
+
 | Profile | Deployment mode | Context |
 | --- | --- | --- |
 | Pinecone Pod-Based Index | `pod-based` | Creates a pod-based index. |
-| Pinecone Serverless Dense Index *(default)* | `serverless-dense` | Creates a serverless index. |
+| Pinecone Serverless Dense Index **(default)** | `serverless-dense` | Creates a serverless index. |
 
 ## Configuration
 

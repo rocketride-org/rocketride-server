@@ -38,9 +38,11 @@ The configured tool-server name defaults to `weaviate`.
 
 ## Profiles
 
+Default: **Weaviate cloud server** (`cloud`).
+
 | Profile | Default host | Default port |
 | --- | --- | --- |
-| Weaviate cloud server *(default)* | Empty | `443` |
+| Weaviate cloud server **(default)** | Empty | `443` |
 | Your own Weaviate server | `localhost` | `8080` |
 
 ## Configuration

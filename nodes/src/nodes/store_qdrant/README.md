@@ -93,9 +93,11 @@ Takes a required `object_ids` string array and removes all points whose `meta.ob
 
 ## Profiles
 
+Default: **Qdrant cloud server** (`cloud`).
+
 | Profile                         | Default host                   | Default port |
 | ------------------------------- | ------------------------------ | ------------ |
-| Qdrant cloud server _(default)_ | _(your Qdrant Cloud endpoint)_ | `6333`       |
+| Qdrant cloud server **(default)** | _(your Qdrant Cloud endpoint)_ | `6333`       |
 | Your own Qdrant server          | `localhost`                    | `6333`       |
 
 ## Configuration
