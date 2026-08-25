@@ -1,57 +1,46 @@
 # local_text_output
 
-A RocketRide target node that writes pipeline text output to the local filesystem as `.txt` files.
+A RocketRide target node that writes pipeline text to files on the machine running the pipeline; choose it when local filesystem output is required instead of an SMB export.
 
 ## What it does
 
-Receives text arriving on its `text` lane and saves each source object as a `.txt` file under a configured output directory, preserving the source directory structure. Text is accumulated per object while the object is open and flushed in a single UTF-8 write when the object closes. This is a sink node with no output lane.
+The node accumulates text for each object and, when the object closes, writes it as a `.txt` file below the configured output directory. It consumes the `text` lane and produces no output lane. Choose `text_output` instead when the destination is an SMB network share rather than the pipeline host’s filesystem.
 
-Uses only the Python standard library (`os`) with no external dependencies.
+## Lanes
 
-The node is restricted to self-hosted deployments (capability `nosaas`). It also carries the `filesystem` and `security` capabilities.
-
-Safety behavior that applies to every object:
-
-- Objects that failed upstream (`objectFailed`) are skipped entirely.
-- A path-traversal guard rejects any resolved target path that escapes the configured output directory.
-- Directory creation failures and write errors log a warning and skip the object rather than failing the whole pipeline.
-- Files are only written when the accumulated text is non-empty.
-- If `storePath` is not set, every object is skipped with a warning.
-
----
+| Lane in | Lane out | Description |
+| --- | --- | --- |
+| `text` | — | Text content to write to the configured local output directory. |
 
 ## Configuration
 
-### Lanes
+Set the output directory, then decide whether a prefix should be removed from each source path before it becomes the destination-relative path. Most users can leave **exclude** at its default of `N/A`.
 
-| Lane in | Description                   |
-| ------- | ----------------------------- |
-| `text`  | Text content to write to disk |
+### Destination path
 
-No output lanes: this is a terminal (target) node.
+The node reads `storePath` as the output directory. It resolves this directory and each candidate target path before writing, then rejects a candidate that would resolve outside the output directory. Use an explicit directory the pipeline process is allowed to create and write to; an empty output path causes a warning and the object is skipped.
 
-### Fields
+On Windows, configuration validation rejects `storePath` values containing `< > : " / | ? *`. The node also shortens over-long path components before the write and uses extended-length local paths on Windows.
 
-Both fields live under the node's `parameters` key (shown as "Destination path" in the UI).
+### Exclude
 
-| Field | Type | Description |
-|---|---|---|
-| `exclude` | string | Default "N/A". Which paths to exclude from the output path, if not required put N/A. e.g Users/Downloads/ or N/A |
+The default `N/A` preserves the complete source path below the output directory. Set a prefix only when that leading source-path portion should not appear in the output hierarchy. If an object path does not begin with the configured prefix, the node logs a warning and skips that object rather than guessing a relative path.
 
-On Windows, config validation rejects a `storePath` or `exclude` value that contains any of the characters `< > : " / | ? *`. An `exclude` value of `N/A` is exempt from this check.
+When a prefix is accepted, the node removes it, replaces the source extension with `.txt`, and creates the necessary directory hierarchy. On Windows, the same invalid-character validation applies to a non-`N/A` exclude value.
 
----
+## Limitations
 
-## Output path resolution
+This node is unavailable in SaaS deployments and writes directly to the pipeline host’s filesystem. Its filesystem and security capabilities mean the configured output location must be intentionally writable by that process; path traversal outside the resolved output directory is rejected.
 
-For each object the target file path is constructed from the object's source path:
+## Notes
 
-1. If `exclude` is `N/A`, the full source path is used as the relative sub-path. Otherwise the `exclude` prefix is stripped from the source path. If the source path does not start with the `exclude` prefix, the node logs a warning and skips the object.
-2. The source file extension is replaced with `.txt` (for example, `Hackathon/folder1/report.pdf` becomes `Hackathon/folder1/report.txt`).
-3. The relative path is joined under `storePath` (for example, `/Users/username/Desktop/Hackathon/folder1/report.txt`). The fully resolved path must remain inside `storePath`; any path that escapes it is rejected with a path-traversal error.
-4. All necessary subdirectories are created automatically before the file is written.
+### Write behavior
 
----
+Objects already marked failed upstream are not written. The node writes only non-empty accumulated text in UTF-8. Directory-creation and write failures are logged as warnings and leave the pipeline running; the per-object state is then reset.
+
+## Upstream docs
+
+- [Python `os` module](https://docs.python.org/3/library/os.html)
 
 <!-- ROCKETRIDE:GENERATED:PARAMS START -->
 <!-- Generated by nodes:docs-generate. Do not edit by hand. -->

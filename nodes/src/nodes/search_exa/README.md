@@ -2,38 +2,40 @@
 
 A RocketRide search node that submits a user question to the Exa web search API and returns the raw results as pipeline output.
 
+## About Exa
+
+Exa provides the search API called by this node. The node posts a query and the configured search options to Exa, then returns the response body as formatted JSON after applying its local URL-safety checks.
+
 ## What it does
 
 Takes a question from the `questions` lane, sends it as a single query to the Exa REST endpoint (`https://api.exa.ai/search`), and writes the pretty-printed Exa JSON response to the `answers` and `text` lanes.
 
 Uses the **requests** library directly against the Exa REST API; no Exa SDK is required. Each HTTP request has a 30-second timeout. The node expects exactly one question per invocation: an empty question or a multi-question payload raises an error immediately.
 
-Result URLs are sanitized before leaving the node. Every `url`, `image`, and `favicon` field in the Exa response is validated to be an `http`/`https` URL whose host resolves to a public IP address. Results whose primary `url` resolves to a private, loopback, link-local, reserved, multicast, or unspecified address are dropped entirely; invalid `image` and `favicon` fields are removed from the result without dropping the whole result. This guards downstream nodes against SSRF via attacker-influenced search content. Sanitization is skipped when the `ROCKETRIDE_MOCK` environment variable is set, which is useful for local testing.
+Result URLs are sanitized before leaving the node, guarding downstream nodes against SSRF via attacker-influenced search content; see **URL safety** under Notes for what is checked and dropped.
 
 ---
 
-## Configuration
-
-### Lanes
+## Lanes
 
 | Lane in     | Lane out  | Description                                                    |
 |-------------|-----------|----------------------------------------------------------------|
 | `questions` | `answers` | Search results as answers (pretty-printed Exa JSON)            |
 | `questions` | `text`    | Search results as plain text                                   |
-| `questions` | `questions` | Original question passed through unchanged (when a downstream listener is connected) |
 
-### Fields
+## Configuration
 
-| Field | Type | Description |
-|---|---|---|
-| `profile` | string | Default "default".  |
-| `apikey` | string | Default empty. Exa API key |
-| `type` | string | Default "auto".  |
-| `numResults` | integer | Default 5.  |
-| `includeHighlights` | boolean | Default true.  |
-| `highlightChars` | integer | Default 600.  |
+The single default profile starts with automatic search, five results, and highlights enabled. Supply credentials, then tune the search options only when the result style or response size needs to change.
 
-The node ships a single `default` profile containing the search settings (`type`, `numResults`, `includeHighlights`, `highlightChars`). The `apikey` field sits outside the profile and is set once per connection config.
+### Search Type
+
+Choose `auto` for the default request behavior. Select `keyword` or `neural` when the query should explicitly use that Exa search type. The selected value is passed as the API request's `type`; it does not change how RocketRide interprets the returned payload.
+
+### Results and highlights
+
+`numResults` controls how many results the request asks for and accepts values from 1 through 20. Keep the default 5 for a compact response; increase it when later stages need a broader result set, bearing in mind that the entire raw response is sent to both output lanes.
+
+When highlights are enabled, the node sends a `contents.highlights` request with the configured maximum character count. The default is 600 characters; the allowed range is 100 through 4,000. Turn highlights off when result metadata is sufficient, or reduce their size when downstream context is more valuable than excerpts.
 
 ---
 
@@ -49,7 +51,9 @@ If none of these sources provides a non-empty value, the pipeline fails at start
 
 ---
 
-## Error handling
+## Notes
+
+### Request failures
 
 Exa HTTP errors are mapped to descriptive failures:
 
@@ -58,6 +62,14 @@ Exa HTTP errors are mapped to descriptive failures:
 - Other 4xx/5xx: `Exa request failed (<status>)` with the upstream message body
 - Network timeout: `search_exa: Exa request timed out`
 - Connection failure: `search_exa: Unable to reach Exa`
+
+### URL safety
+
+Before serializing results, the node validates every `url`, `image`, and `favicon` field. Each must use `http` or `https` and resolve to a public IP address. A result whose primary `url` resolves to a private, loopback, link-local, reserved, multicast, or unspecified address is dropped entirely; invalid `image` and `favicon` fields are removed while their result is retained. This sanitization is skipped when `ROCKETRIDE_MOCK` is set. That bypass is intended only for controlled tests and must never be enabled in production.
+
+## Upstream docs
+
+- [Exa documentation](https://docs.exa.ai/)
 
 ---
 

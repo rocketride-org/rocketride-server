@@ -1,67 +1,53 @@
 # webhook
 
-A RocketRide source node that lets external input reach a pipeline over HTTP: three variants (Webhook, Chat, and Dropper) served by a single shared implementation.
+A RocketRide source-node directory offering raw HTTP intake, browser chat and upload interfaces, and a tool-only endpoint; choose the service that matches how a client should enter the pipeline.
 
 ## What it does
 
-Exposes an HTTP endpoint and forwards incoming data into the attached pipeline. All three variants are `source` nodes registered as endpoints and share the same code (`nodes.webhook`); they differ only in protocol and in the surface they expose:
+The directory provides four endpoint services that share a long-running, engine-provided web server: Webhook, Chat, Dropper, and Tools. Choose **Webhook** for programmatic HTTP intake, **Chat** for browser-submitted questions, **Dropper** for browser file uploads, or **Tools** when an application needs to call connected tools without adding an agent or data lane. Each service is a source, so it starts work rather than consuming a preceding pipeline lane.
 
-- **Webhook** (`webhook://`): a raw HTTP intake. External tools, scripts, or services POST documents, media, or data to the URL, triggering the pipeline to process the uploaded content. The same endpoint also backs the RocketRide DataToolchain (`adtoolchain`) flow.
-- **Chat** (`chat://`): serves a web-based chat UI. Users open the chat URL in a browser and type questions; each submission flows through the pipeline and results are returned in the chat window.
-- **Dropper** (`dropper://`): serves a web-based drag-and-drop file upload UI. Users drop files onto the page; each upload is sent through the pipeline, and results are displayed in the browser across JSON, text, table, and image tabs.
+## Connections
 
-The server is a **FastAPI / Uvicorn** wrapper (`ai.web.WebServer`), but the node no longer creates it. One shared server is started per pipeline subprocess by `ai/node.py`, bound to the address the engine passes on the command line (`--data_host`, `--data_port`). That server loads the `data` module, which registers a `/task/data` websocket as the data plane between the public endpoint and the pipeline; the node simply registers its target endpoint on it.
+### Tools (`tools://`)
 
-Because the shared server only exists when `node.py` is the process entry point and `--data_port` is supplied — which is what the task manager does for every pipeline subprocess — a pipeline sourced by this node cannot run outside that path. If the shared server is missing, the node fails immediately with an error saying so rather than a `NoneType` attribute error.
+| Connection | Required | Description |
+| --- | --- | --- |
+| `tool` | no | Tool nodes hosted by this endpoint through the control-plane invoke channel. |
 
-The node keeps running until the pipeline is stopped; the source task completes only when the process shuts down.
+The Tools service has no data outputs. It keeps the endpoint alive so a client can reach the connected tools directly.
 
-After the pipeline starts, the Project Log displays a stable, pipe-specific interface URL, the public authorization key, and the private token, so callers know how to reach the endpoint. The URL forms are `{host}/chat/{project_id}/{source}?auth={public_auth}`, `{host}/dropper/{project_id}/{source}?auth={public_auth}`, and `{host}/webhook/{project_id}/{source}`. The legacy `/chat`, `/dropper`, `/webhook`, and `/task/data` URLs continue to work for existing integrations.
+## Lanes
 
----
+| Lane in | Lane out | Description |
+| --- | --- | --- |
+| `_source` | `questions` | **Chat** emits each browser-submitted message as a question. |
+| `_source` | `tags` | **Dropper** emits uploaded files as tagged data. |
+| `_source` | — | **Tools** is an invoke host and emits no data lane. |
+| `_source` | `tags` | **Webhook** can emit tagged input. |
+| `_source` | `text` | **Webhook** can emit text input. |
+| `_source` | `json` | **Webhook** can emit JSON input. |
+| `_source` | `audio` | **Webhook** can emit audio input. |
+| `_source` | `video` | **Webhook** can emit video input. |
+| `_source` | `image` | **Webhook** can emit image input. |
+| `_source` | `questions` | **Webhook** can emit question input. |
 
 ## Configuration
 
-### Lanes
+These services expose no node-specific settings beyond the standard source properties. Select the service whose interaction model fits the caller, then wire its declared output lane to the downstream node that handles that data type.
 
-Each variant takes the internal `_source` input and emits to its declared output lanes:
+### Endpoint service
 
-| Variant  | Lane in | Lanes out                                            |
-| -------- | ------- | ---------------------------------------------------- |
-| Webhook  | -       | `tags`, `text`, `json`, `audio`, `video`, `image`, `questions` |
-| Chat     | -       | `questions`                                          |
-| Dropper  | -       | `tags`                                               |
-
-- **Webhook**: data received from the HTTP request, routed by content type.
-- **Chat**: each message submitted via the chat UI becomes a question.
-- **Dropper**: each uploaded file enters the pipeline for processing.
-
-None. There are no node-specific config fields, the shape exposes only the standard source properties (`source.mode` and an empty `parameters` object), and the single `default` profile is empty. The endpoint URL, public authorization key, and private token are generated automatically when the pipeline starts.
-
----
-
-## Startup status
-
-When the server is up, the node emits a ready status to the monitor. Because this is the source component, the message also means every downstream component (embedding, LLM, etc.) has already been initialized:
-
-| Variant  | Status message                                          |
-| -------- | ------------------------------------------------------- |
-| Webhook  | `Webhook ready - system is ready to accept requests`    |
-| Chat     | `Chat ready - system is ready to accept questions`      |
-| Dropper  | `Dropper ready - system is ready to process files`      |
-
----
+Use **Webhook** when another system can send an HTTP request, **Chat** when people should enter questions in a web UI, and **Dropper** when people should upload files in a web UI. Use **Tools** only to host invoke-connected tool nodes for direct client calls: it intentionally has neither a user-facing URL nor a data lane.
 
 ## Authentication
 
-Two credentials are published to the Project Log on startup:
+On startup, Webhook, Chat, and Dropper publish an interface URL plus a public authorization key and private token in the monitor information. The Chat and Dropper button URLs include the public authorization key as the `auth` query parameter; Tools does not publish a user-facing URL. Treat the private token as a secret and restrict access to monitor information that contains it.
 
-- **Public authorization key**: passed by clients reaching the public interface (e.g. the `auth` query parameter on the chat URL).
-- **Private token**: the private credential for the endpoint.
+## Notes
 
-Both are generated per pipeline; there is nothing to configure on the node.
+### Shared server lifecycle
 
----
+The endpoint registers its target with the shared web server initialized by `ai.node` and waits until shutdown. It does not create a server itself. If that shared server is unavailable, startup raises an explanatory error; run these services through the RocketRide pipeline process that provides it. The published interface is reachable only where deployment networking, firewalls, and reverse proxies permit access.
 
 <!-- ROCKETRIDE:GENERATED:PARAMS START -->
 <!-- Generated by nodes:docs-generate. Do not edit by hand. -->

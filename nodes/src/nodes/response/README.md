@@ -20,7 +20,7 @@ The node has no Python dependencies of its own (`requirements.txt` is empty); it
 
 ---
 
-## Service variants
+### Service variants
 
 The same implementation is registered as ten services. The generic **HTTP Results** service (`response://`) accepts all nine lane types and lets you map each lane to its own result key. Nine single-lane variants accept exactly one lane each and expose a single `laneName` field:
 
@@ -41,9 +41,7 @@ All variants are `classType: infrastructure` and register as a `filter`. The gen
 
 ---
 
-## Configuration
-
-### Lanes
+## Lanes
 
 All lanes are inputs; the node produces no output lanes.
 
@@ -59,27 +57,19 @@ All lanes are inputs; the node produces no output lanes.
 | `video`     | -        | Captured under the configured key (base64-encoded stream + descriptor `metadata`) |
 | `image`     | -        | Captured under the configured key (base64-encoded stream + descriptor `metadata`) |
 
-### HTTP Results (generic service)
+## Configuration
 
-| Field | Type | Description |
-|---|---|---|
-| `laneId` | string |  |
-| `laneName` | string |  |
-| `lanes` | array | Each lane maps pipeline data to a custom JSON key in the response. Select the data type (text, documents, answers, etc.) for Lane Name, and enter a custom JSON key name (1-32 characters) for Result Key. |
+Choose the generic HTTP Results service when one response needs several lane types, and use a single-lane variant when a pipeline has one terminal output. The generated schema contains the field definitions; the guidance below covers the effect of the result-key setting.
 
-Multiple lane-to-key mappings can be added to return several outputs in a single response. When no mapping is configured for a lane, its data is stored under the lane type name as the default key.
+### Lane name and result key
 
-### Single-lane variants (Return Answers, Return Text, ...)
-
-| Field      | Type / Default                    | Description |
-|------------|-----------------------------------|-------------|
-| `laneName` | string, defaults to the lane type | The JSON key under which this lane's data appears in the response body (1-32 characters). |
-
-When `laneName` is set at the top level of the node config (the style used by all single-lane variants), it overrides the `lanes` array and every lane type arriving at the node is written under that one key. The per-lane `lanes` mapping only applies when no top-level `laneName` is configured.
+For HTTP Results, each `lanes` entry maps a lane identifier to a result key of one to 32 characters. Use distinct keys when a client needs to distinguish returned types without consulting `result_types`; leave a lane unmapped to use its lane type as the key. In a single-lane service, the top-level `laneName` takes precedence over the `lanes` mapping, so set it only when every arriving result should use the same key.
 
 ---
 
-## Response format
+## Notes
+
+### Response format
 
 The JSON object returned to the client has the following structure:
 

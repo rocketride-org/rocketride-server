@@ -1,96 +1,54 @@
 # text_output
 
-A RocketRide target node that writes the pipeline's extracted text to an SMB network share, with optional anonymization of classified (sensitive) data.
+A RocketRide target node that writes a pipeline object’s text to an SMB share; choose it when the destination is network storage rather than the engine’s local filesystem.
+
+## About SMB
+
+SMB is the network file-sharing protocol used by this node to reach its target. The implementation connects to the configured server and share through Python SMB client libraries.
 
 ## What it does
 
-Saves your pipeline's text to networked storage over SMB. Each upstream object becomes a
-`.txt` file, mirroring the source directory layout under the store path. It is the end of
-the line, it consumes the `text` lane and emits nothing.
+The node consumes text, writes non-empty output as UTF-8 `.txt` files on the configured SMB share, and produces no downstream lane. It retains the source-derived directory structure and skips unchanged objects, making it appropriate for incremental exports to a reachable share. Choose `local_text_output` instead when the desired destination is the pipeline host’s local filesystem rather than a network server.
 
-Uses **smbclient / smbprotocol**: a pure-Python SMB client, so no host SMB mount or
-`smbclient` binary is required on the machine running the engine.
+## Lanes
 
-Output is UTF-8, the source file extension is replaced with `.txt`, and target
-subdirectories are created automatically. Empty objects are skipped ("no text extracted"),
-and so are objects unchanged since the last run, so the same file is never rewritten twice.
-
-Optionally, the node can **anonymize PII**: classification hits in the text are replaced
-with a masking character before the file is written.
-
-Requires the `network` capability and is not available in remote (`noremote`) or SaaS
-(`nosaas`) deployments.
-
----
+| Lane in | Lane out | Description |
+| --- | --- | --- |
+| `text` | — | Text content to write to the SMB share. |
 
 ## Configuration
 
-### Lanes
+Configure the SMB server and destination path first. Authentication is optional for a guest-accessible share; anonymization settings only matter when sensitive content should be masked before export.
 
-| Lane in | Description                            |
-| ------- | -------------------------------------- |
-| `text`  | Text content to write to the SMB share |
+### SMB destination
 
-The node is a pure target (`classType: ["target"]`), it produces no output lanes.
+The node validates the server name as a hostname or IP address and requires a store path between 3 and 256 characters. The first store-path segment identifies the share; it may be followed by folders. The path cannot be rooted, contain empty or dot folders, or contain `<>:"|?*`.
 
-### Fields
+At action startup, the node configures SMB credentials only when both username and password are supplied, verifies the share, and checks the full destination path. Use a `DOMAIN\\user` username when credentials are needed; supplying only one credential fails validation. Choose a share that the running task can reach, because configuration validation deliberately does not make the SMB connection.
 
-| Field           | Type / Default      | Description                                                                                          |
-| --------------- | ------------------- | ---------------------------------------------------------------------------------------------------- |
-| `server`        | string, required    | SMB server hostname or IP address (validated against RFC-1123).                                       |
-| `username`      | string              | SMB user in domain format: `DOMAIN\user`. Required when `password` is set.                            |
-| `password`      | string              | SMB password, max 127 characters. Required when `username` is set.                                    |
-| `storePath`     | string, required    | Share name plus optional subfolders, e.g. `share/folder/subfolder`. 3–256 characters.                  |
-| `anonymize`     | boolean, `false`    | Mask sensitive data in the text before writing. Enabling it reveals the two fields below.             |
-| `anonymizeChar` | string (1 char), `█` | The character used to mask each character of a classification hit. Required when `anonymize` is on.   |
-| `anonymizeAll`  | boolean, `false`    | Collapse every hit to a fixed length instead of masking character-for-character (`SSN: ***` vs `SSN: ***********`). |
+### Anonymization
 
-### storePath rules
+With anonymization off (the default), the node writes the incoming text unchanged. Turn it on when the pipeline’s classification output must be masked before the file is written: the node requests classification and applies the `anonymize_text` filter. The masking character defaults to `█`; it must be exactly one character when anonymization is enabled.
 
-The path must not be rooted, must not contain empty or dot (`.` / `..`) folders, and must
-not contain the characters `<>:"|?*`. The first segment is the share name (1–80
-characters). When the pipeline starts, the node verifies that `//server/share` is
-reachable; missing subfolders under the share are created on first write.
-
----
-
-## Anonymization
-
-When `anonymize` is enabled, the node injects the classification filter plus an
-`anonymize_text` pipe filter, so classification hits in the incoming text are replaced
-with `anonymizeChar` before the file is written. With `anonymizeAll` enabled, each hit is
-collapsed to a fixed length (3 masking characters) instead of being masked
-character-for-character.
-
-Changing any anonymization setting (the classify policies, `anonymizeChar`, or
-`anonymizeAll`) changes the settings key the node keeps in its key-value store, which
-forces **all** objects to be re-transformed on the next run, not just new and changed ones.
-
----
-
-## Change detection
-
-The node performs incremental writes. For each object it builds a transform key of the form
-`flags;sourceChangeKey;targetChangeKey`, where the source change key comes from the
-object's change key (or its modify time and size) and the target change key from the
-existing target file's mtime and size (`0;0` when the file does not exist yet). The key is
-stored in the object's instance tags under `text-output://<server>/<storePath>/status`.
-
-On the next run an object is skipped ("object transformed and not changed") when its
-transform key matches the stored one and the anonymization settings have not changed.
-Failed objects record the exception as their completion code instead of writing a file.
-
----
+Enable **anonymize all** when every classified match should become a fixed three-character mask instead of a character-for-character replacement. Changing the classification policies, masking character, or this setting changes the stored settings key and causes all objects to be transformed again, including objects that would otherwise be unchanged.
 
 ## Authentication
 
-Authentication is optional, leave `username` and `password` blank for shares that allow
-anonymous/guest access. When credentials are provided, both fields are required and the
-username must use the domain format `DOMAIN\user`. Credentials are registered with the SMB
-client globally at connection time; the connection (and reachability of the share) is
-tested when the action starts, not during configuration validation.
+Credentials are optional. For a protected SMB share, set both username and password; the username must contain a domain-like prefix and the password may be at most 127 characters. For a guest-accessible share, leave both blank.
 
----
+## Limitations
+
+This node is excluded from SaaS and remote deployments. It opens a direct SMB connection from the running task to the configured server, so the task environment must have network access to that share and the required SMB dependencies; use a deployment located where that share is reachable.
+
+## Notes
+
+### Incremental writes
+
+For each object, the node derives a target path, hash-truncates over-long path components, and records a transformation key containing object flags, the source change key, and the target file’s modification time and size. An object is skipped when that key still matches and anonymization settings have not changed. Empty text is skipped, while write or SMB errors are stored as the object’s completion error.
+
+## Upstream docs
+
+- [smbprotocol project](https://github.com/jborean93/smbprotocol)
 
 <!-- ROCKETRIDE:GENERATED:PARAMS START -->
 <!-- Generated by nodes:docs-generate. Do not edit by hand. -->
