@@ -71,9 +71,11 @@ as tables; each object starts its `chunkId` at 0. C and C++ header declarations
 and whole `extern "C"` linkage blocks are included, while preprocessor lines
 such as `#include` and `#define` are skipped.
 
-The parser cache is retained for the lifetime of the global node instance. If
-the optional `tree_sitter_languages` package is available it is used to load a
-grammar; otherwise the node loads the installed per-language grammar module.
+The parser cache is a class attribute on `PreProcessor`, so a grammar loaded
+once is reused by every instance in the process and outlives any single global
+node instance. If the optional `tree_sitter_languages` package is available it
+is used to load a grammar; otherwise the node loads the installed per-language
+grammar module.
 
 ## Upstream docs
 
