@@ -42,9 +42,11 @@ destructive clear/reset tool.
 
 ## Profiles
 
+Default: **Your own Apache Iggy server** (`local`).
+
 | Profile | Deployment | Context |
 |---|---|---|
-| `local` *(default)* | Your own Apache Iggy server | Uses the local connection-string field |
+| `local` **(default)** | Your own Apache Iggy server | Uses the local connection-string field |
 | `cloud` | LaserData Cloud | Uses the cloud connection-string field |
 
 ### SDK contract provenance
