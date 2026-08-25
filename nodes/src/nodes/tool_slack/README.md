@@ -1,142 +1,53 @@
 # tool_slack
 
-A RocketRide tool node that lets an AI agent act on a Slack workspace.
+A RocketRide tool node that lets an agent post to and inspect a Slack workspace. Pick it when an agent needs recent channel context or must notify a team; use a webhook-only setup for a deliberately post-only integration.
+
+## About Slack
+
+Slack is a work communication platform organized around channels and message threads. Teams use it for discussions, notifications, and integrations that report work into shared spaces.
 
 ## What it does
 
-Gives an agent the core Slack operations: post messages to channels or threads,
-list public channels, read channel history, and verify the connection. Useful for
-agents that announce results, notify a team channel, or read recent discussion
-before answering.
+The node has no data lanes and exposes four Slack operations to an agent. Bot-token mode can test the connection, post messages, list public channels, and read channel history; incoming-webhook mode exposes posting only. This is a narrower, task-oriented surface than a generic HTTP client, with channel-name handling and Slack-specific failures.
 
-Uses the official **slack_sdk** package — `WebClient` for the Slack Web API in
-bot-token mode, `WebhookClient` in incoming-webhook mode. API responses are
-stripped down to compact, agent-useful fields (channel ids and names, message
-`ts`/`user`/`text`) instead of raw Slack JSON.
+## As a tool
 
-Exactly one of the two auth modes must be configured; the pipeline fails to
-start with both or neither:
+The server-name prefix is `slack`, producing these registered functions.
 
-| Mode | Configured with | Tools available |
-|---|---|---|
-| **Bot token** | `token` (starts with `xoxb-`) | all four tools |
-| **Incoming webhook** | `webhookUrl` | `message_post` only |
+| Function | Description |
+|---|---|
+| `slack.check_connection` | Verify the connection and return workspace and bot identity details. |
+| `slack.message_post` | Post required `text` to a channel or thread. In webhook mode the webhook's channel is used. |
+| `slack.channels_list` | List public channels. |
+| `slack.channel_history` | Return recent messages for a required channel. |
 
----
+`message_post` requires `text`; `channel` is required in bot-token mode and can be an ID or a name. `thread_ts` replies in a thread. `channels_list` accepts `limit`; `channel_history` accepts required `channel`, plus `limit`, `oldest`, and `latest`. Errors are raised as Slack-specific failures: invalid credentials, missing OAuth scope, rate limiting, bad requests, and server failures. In webhook mode the three inspection functions reject the call because they require a bot token.
 
 ## Configuration
 
-| Field | Type | Description |
-|---|---|---|
-| `token` | string | Default empty. Bot User OAuth Token from the app's **OAuth & Permissions** page. Needs `chat:write` to post, `channels:read` to list channels, and `channels:history` to read history. Leave empty when using a webhook URL. |
-| `webhookUrl` | string | Default empty. Slack incoming-webhook URL for zero-scope, post-only setups. Messages always go to the channel the webhook was created for. Configure either this or a bot token, not both. |
+Configure exactly one credential mode. A configured value wins over the corresponding environment fallback; configuring both token and webhook URL, or neither, prevents startup.
 
-Both fields are secure (masked in the UI). Reference secrets with the engine's
-environment substitution instead of pasting literals, e.g.
-`"token": "${ROCKETRIDE_SLACK_TOKEN}"`. When **neither** field is set, the node
-falls back to the `ROCKETRIDE_SLACK_TOKEN` / `ROCKETRIDE_SLACK_WEBHOOK_URL`
-environment variables; explicitly configured values always win, so a stray
-environment variable can never override the configured mode.
+### Bot User OAuth Token
 
----
+Use this mode when the agent needs channel discovery or history. The bot token supports posting with `chat:write`, listing public channels with `channels:read`, and history with `channels:history`; invite the bot to every channel it must read. Choose it rather than a webhook whenever the agent needs more than post-only behavior.
 
-## Available tools
+### Incoming Webhook URL
 
-| Tool | Description |
-|---|---|
-| `check_connection` | Verify the credentials via `auth.test`. Returns the workspace (`team`, `team_id`, `url`) and bot identity (`user`, `user_id`, `bot_id`). |
-| `message_post` | Post a message via `chat.postMessage`. `text` is required; `channel` is required in token mode. Optional `thread_ts` replies in a thread; `unfurl_links` (default `true`) controls link previews. Returns `channel`/`ts` (plus `thread_ts` when replying in a thread). |
-| `channels_list` | List **public** channels via `conversations.list`. `limit` 1–1000 (default 200); cursor pagination is handled internally with a hard cap of 1000 channels. Returns `id`, `name`, `is_private`, `is_archived`, and `num_members` per channel. |
-| `channel_history` | Read recent messages via `conversations.history`, newest first. `channel` is required (the bot must be a member); `limit` 1–200 (default 50); optional `oldest`/`latest` timestamps bound the window. Returns `ts`, `user`, and `text` (plus `thread_ts` for threaded messages) per message. |
-
-Channel parameters accept a channel ID (e.g. `C0123ABCDEF`) or a name (e.g.
-`#general`). If a call fails with `channel_not_found` for a name, resolve the ID
-with `channels_list` first — some Slack endpoints only accept IDs.
-
-### Webhook mode
-
-With `webhookUrl` configured, only `message_post` is available. `channel` and
-`thread_ts` are ignored — the message always goes to the channel the webhook was
-created for — and the result carries an explicit `note` saying so. The other
-three tools fail with a `SlackBadRequestError` explaining that they require a
-bot token.
-
----
+Use a webhook for a fixed-channel, post-only agent. `message_post` ignores its `channel` and `thread_ts` arguments in this mode, because Slack delivers to the webhook's configured channel. Do not pair it with a bot token.
 
 ## Authentication
 
-### Bot token
+Set either a bot OAuth token or an incoming-webhook URL. Both are secrets. Slack authentication and authorization errors reach the agent as typed failures; a missing scope error identifies the required scope.
 
-1. Create an app at [api.slack.com/apps](https://api.slack.com/apps) (**From scratch**).
-2. Under **OAuth & Permissions → Scopes → Bot Token Scopes**, add the scopes below.
-3. **Install App** to the workspace and copy the **Bot User OAuth Token**
-   (starts with `xoxb-`) into `token`.
-4. Invite the bot to every channel it should post to or read: `/invite @your-bot`.
+## Notes
 
-| Tool | Required scope |
-|---|---|
-| `message_post` | `chat:write` |
-| `channels_list` | `channels:read` |
-| `channel_history` | `channels:history` |
-| `check_connection` | none (any valid bot token) |
+### Channel lookup
 
-A missing scope surfaces as a `SlackMissingScopeError` naming the exact scope to
-add. The node only lists public channels; reading a channel's history requires
-the bot to be a member of it.
+Channel arguments may be IDs such as `C0123ABCDEF` or names such as `#general`. If a name cannot be resolved, call `slack.channels_list` and retry with the returned ID.
 
-### Incoming webhook
+## Upstream docs
 
-For post-only setups without granting any OAuth scopes: in the app, open
-**Incoming Webhooks**, activate them, click **Add New Webhook to Workspace**,
-pick the target channel, and copy the generated URL into `webhookUrl`. Treat the
-webhook URL itself as a secret — anyone holding it can post to the channel.
-
----
-
-## Errors
-
-Failures are raised as a typed hierarchy (all subclasses of `SlackError`), named
-so retry/circuit-breaker heuristics can classify them:
-
-| Error | Raised on | Retryable |
-|---|---|---|
-| `SlackAuthenticationError` | `invalid_auth`, `not_authed`, `account_inactive`, `token_revoked`, `token_expired`; webhook `invalid_token`/`forbidden` | no — fix the token or webhook URL |
-| `SlackMissingScopeError` | `missing_scope` — the message names the missing OAuth scope from Slack's `needed` field | no — add the scope and reinstall the app |
-| `SlackRateLimitError` | `ratelimited` / HTTP 429 — `retry_after` carries the wait in seconds from Slack's `Retry-After` header | yes, after `retry_after` |
-| `SlackBadRequestError` | invalid requests, e.g. `channel_not_found` (check the ID or name), `not_in_channel` (invite the bot), `is_archived`; also any non-post tool in webhook mode | no — fix the request |
-| `SlackServerError` | `internal_error`, `service_unavailable`, `fatal_error`, HTTP 5xx, and unexpected failures | yes |
-
-Error messages are built exclusively from Slack's structured response fields
-(error code, `needed` scope, `Retry-After` header) — never from raw exception
-text — so the configured token or webhook URL can never leak into an error or
-log message.
-
----
-
-## Example
-
-[`examples/slack-agent.pipe`](../../../../examples/slack-agent.pipe) wires
-`chat → agent_rocketride → response` with this node attached on the tool
-channel, so the agent can post its answers to a channel, list channels, and read
-recent history.
-
----
-
-## Running the tests
-
-```bash
-# Self-contained unit tests (no credentials, no network)
-pytest nodes/test/tool_slack/test_slack.py -v
-```
-
-The dynamic services test (part of `builder nodes:test-full`) needs no
-credentials: in mock mode (`ROCKETRIDE_MOCK`) the test framework injects a
-placeholder token and the canonical mock under `nodes/test/mocks/slack_sdk/`
-answers the API calls. With a real `ROCKETRIDE_SLACK_TOKEN` exported and mock
-mode off, the same test runs against the live Slack API via the node's
-env-var fallback.
-
----
+- [Slack API documentation](https://api.slack.com/docs)
 
 <!-- ROCKETRIDE:GENERATED:PARAMS START -->
 <!-- Generated by nodes:docs-generate. Do not edit by hand. -->
