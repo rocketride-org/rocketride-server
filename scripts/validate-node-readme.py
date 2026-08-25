@@ -42,6 +42,10 @@ GEN_START = '<!-- ROCKETRIDE:GENERATED:PARAMS START -->'
 GEN_END = '<!-- ROCKETRIDE:GENERATED:PARAMS END -->'
 PROFILE_HEADERS = {
     'profile': 'profile',
+    # A table that gives the key and the title their own columns (ocr) heads the
+    # first one 'Profile key'. Without the alias every row resolves to an empty
+    # cell and a well-formed table reports every profile missing.
+    'profile key': 'profile',
     'model': 'model',
     'model id': 'model',
     'context': 'modelTotalTokens',

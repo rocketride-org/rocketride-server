@@ -33,12 +33,17 @@ The implementation is pure Python standard library (`subprocess`, `urllib`, JSON
 
 ## Profiles
 
+The directory registers two services and each keeps its own default: MCP Client
+defaults to **RocketRide MCP server (stdio)** (`RocketRide`), and the Butterbase
+MCP Client preset to **Butterbase MCP server** (`butterbase`). Both are marked
+below; which one applies depends on the service you added to the pipeline.
+
 | Profile | Transport | Notes |
 |---|---|---|
-| RocketRide MCP server (stdio) *(default)* | `stdio` | Launches `python -m rocketride_mcp` |
+| RocketRide MCP server (stdio) **(default)** | `stdio` | Launches `python -m rocketride_mcp` |
 | Generic MCP server (Streamable HTTP) | `streamable-http` | Enter endpoint URL |
 | Generic MCP server (legacy HTTP+SSE) | `sse` | Enter SSE endpoint URL |
-| Butterbase MCP server | `streamable-http` | Branded Butterbase preset |
+| Butterbase MCP server **(default)** | `streamable-http` | Branded Butterbase preset |
 
 ## Configuration
 

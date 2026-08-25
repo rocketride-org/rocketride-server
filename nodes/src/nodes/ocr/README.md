@@ -57,11 +57,12 @@ On the `documents` lane, every incoming document must be of type `Image` (the no
 
 ## Profiles
 
-Profiles are preconfigured combinations of engine, script family, and table engine. Selecting a profile sets all three at once. The default profile is `latin`.
+Profiles are preconfigured combinations of engine, script family, and table engine. Selecting a profile sets all three at once. Default: **Latin (English)**
+(`latin`).
 
 | Profile key            | Title                         | Engine  | Script family         | Table engine |
 | ---------------------- | ----------------------------- | ------- | --------------------- | ------------ |
-| `latin`                | Latin (English)               | EasyOCR | `latin`               | DocTR        |
+| `latin` **(default)**  | Latin (English)               | EasyOCR | `latin`               | DocTR        |
 | `latin-extended`       | Latin Extended (European)     | EasyOCR | `latin-extended`      | DocTR        |
 | `cyrillic`             | Cyrillic (Russian, etc.)      | EasyOCR | `cyrillic`            | DocTR        |
 | `arabic`               | Arabic/Persian/Urdu           | EasyOCR | `arabic`              | DocTR        |

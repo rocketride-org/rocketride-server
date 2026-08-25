@@ -537,3 +537,30 @@ def test_profile_title_mismatch_still_fails_when_words_differ(tmp_path):
     )
     checks = [check for check, _ in failures(node)]
     assert 'Profiles default title appears in intro' in checks
+
+
+KEY_AND_TITLE_PROFILES = {
+    'latin': {'title': 'Latin (English)'},
+    'cyrillic': {'title': 'Cyrillic (Russian, etc.)'},
+}
+
+KEY_AND_TITLE_SECTION = """## Profiles
+
+Default: **Latin (English)** (`latin`).
+
+| Profile key | Title | Engine |
+| ----------- | ----- | ------ |
+| `latin` **(default)** | Latin (English) | EasyOCR |
+| `cyrillic` | Cyrillic (Russian, etc.) | EasyOCR |"""
+
+
+def test_profile_key_column_heading_resolves_rows(tmp_path):
+    """A table giving key and title separate columns heads the first 'Profile key'."""
+    node = write_node(
+        tmp_path,
+        class_type=('ocr',),
+        profiles=KEY_AND_TITLE_PROFILES,
+        default='latin',
+        profile_section=KEY_AND_TITLE_SECTION,
+    )
+    assert failures(node) == []
