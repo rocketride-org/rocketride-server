@@ -255,7 +255,7 @@ class S3Store(IStore):
     @retry(
         stop=stop_after_attempt(STORE_MAX_RETRY_ATTEMPTS),
         wait=wait_exponential(multiplier=1, min=1),
-        retry=retry_if_exception_type((ConnectionError, TimeoutError, _RaceConditionError)),
+        retry=retry_if_exception_type(TRANSIENT_ERRORS + (_RaceConditionError,)),
         reraise=True,
     )
     async def write_file_atomic(self, filename: str, data: str, expected_version: Optional[str] = None) -> str:
@@ -313,7 +313,7 @@ class S3Store(IStore):
             new_etag = response.get('ETag', '').strip('"')
             return new_etag
 
-        except (ConnectionError, TimeoutError, self._RaceConditionError):
+        except TRANSIENT_ERRORS + (self._RaceConditionError,):
             # Let tenacity handle retries
             raise
         except Exception as e:
