@@ -57,8 +57,8 @@ The agent discovers the `word_*` tools and calls them per its instructions.
 Register an app in the **Entra admin center** (`entra.microsoft.com` → App
 registrations), grant it the Graph permission matching the auth mode —
 delegated `Files.Read` / `Files.ReadWrite` for user OAuth, or application
-`Files.Read.All` / `Files.ReadWrite.All` (admin consent) for the Entra app
-flow — and admin consent. See
+`Files.Read.All` / `Files.ReadWrite.All` for the Entra app flow, which
+requires admin consent. See
 `microsoft-oauth.md` for the full setup shared by every Microsoft 365 tool
 service (excel, word, onedrive, outlook mail, outlook calendar).
 
