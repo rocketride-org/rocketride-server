@@ -2,11 +2,28 @@
 
 A RocketRide tool node that connects to an external [Model Context Protocol](https://modelcontextprotocol.io/) server and exposes its tools to AI agents.
 
+## About Model Context Protocol
+
+Model Context Protocol is a protocol for connecting AI applications to tools
+and data sources. MCP servers publish their available tools and accept calls
+using the protocol; this node makes those published tools available in a
+RocketRide agent.
+
 ## What it does
 
 Connects to an MCP server over one of three transports (STDIO (local subprocess), Streamable HTTP, or legacy HTTP+SSE), performs the MCP `initialize` handshake, discovers the server's tools via `tools/list` when the pipeline starts, and exposes them to agent nodes. Agents then discover and invoke these tools during their reasoning loop; each call is forwarded to the server as `tools/call` and the raw MCP result is returned.
 
 This node has no pipeline lanes: it is a control-plane tool node, connected to agents via the `tools` invoke channel.
+
+## As a tool
+
+The node registers exactly the tools returned by the connected server at
+pipeline startup. Each tool is named `<serverName>.<toolName>`; `serverName`
+defaults to `mcp` (or to the node catalog name when present). The argument
+schema and returned value are the discovered server contract, so a tool that
+is unavailable until after startup requires a pipeline restart. Malformed
+input, an unknown namespace, a disconnected client, or a server failure raises
+an error rather than looking like an empty result.
 
 Tools are namespaced as `serverName.toolName` (e.g. `mcp.search_docs`), where `serverName` is set in configuration. Tools are discovered **once at pipeline startup** and cached; a server that adds tools later requires a pipeline restart to pick them up.
 
@@ -14,27 +31,31 @@ The implementation is pure Python standard library (`subprocess`, `urllib`, JSON
 
 ---
 
+## Profiles
+
+| Profile | Transport | Notes |
+|---|---|---|
+| RocketRide MCP server (stdio) *(default)* | `stdio` | Launches `python -m rocketride_mcp` |
+| Generic MCP server (Streamable HTTP) | `streamable-http` | Enter endpoint URL |
+| Generic MCP server (legacy HTTP+SSE) | `sse` | Enter SSE endpoint URL |
+| Butterbase MCP server | `streamable-http` | Branded Butterbase preset |
+
 ## Configuration
 
+Choose the transport first, then provide only the connection values it uses.
+The default profile starts the RocketRide MCP server over STDIO; use an HTTP
+profile when the server runs elsewhere.
 
-| Field | Type | Description |
-|---|---|---|
-| `serverName` | string | Default "mcp". Namespace prefix for tools: <serverName>.<toolName> (example: local.echo) |
-| `transport` | string | Default "streamable-http". How to connect to the MCP server |
-| `commandLine` | string | Default "python -m rocketride_mcp". Command line to launch MCP server (stdio transport). Example: python -m rocketride_mcp |
-| `endpoint` | string | Default empty. MCP Streamable HTTP endpoint URL. Example: http(s)://host:port/mcp |
-| `sse_endpoint` | string | Default empty. Legacy MCP SSE URL (old transport). Example: http://127.0.0.1:8000/sse |
-| `headers` | object | Default {}. Extra HTTP headers for streamable-http/sse transports |
-| `bearer` | string | Default empty. Optional Authorization bearer token |
+### Server name
 
+The server name controls the agent-visible `<serverName>.<toolName>` prefix.
+Leave the default `mcp` when one MCP server is attached, and choose a distinct
+name when an agent has tools from multiple MCP Client nodes so their names do
+not collide.
 
 ### STDIO transport
 
 Launches a local subprocess as the MCP server and speaks JSON-RPC over its stdin/stdout. The subprocess inherits the engine's environment (with `PYTHONUNBUFFERED=1` set).
-
-| Field | Type / Default | Description |
-|-------|----------------|-------------|
-| `commandLine` | string, default `python -m rocketride_mcp` | Command line to launch the MCP server. Parsed with shell-style quoting. |
 
 Older configs that used separate `command` + `args` fields are still accepted for backwards compatibility.
 
@@ -42,33 +63,11 @@ Older configs that used separate `command` + `args` fields are still accepted fo
 
 Connects to a modern Streamable HTTP MCP endpoint (spec 2025-03-26 transport). Handles both plain-JSON and SSE-streamed responses, tracks the `Mcp-Session-Id` returned by the server, and sends a best-effort `DELETE` to terminate the session when the pipeline stops.
 
-| Field | Type / Default | Description |
-|-------|----------------|-------------|
-| `endpoint` | string, default empty | MCP Streamable HTTP endpoint URL. Example: `http(s)://host:port/mcp` |
-| `headers` | object, default `{}` | Extra HTTP headers |
-| `bearer` | string, optional, secure | Optional Authorization bearer token |
-
 ### Legacy HTTP+SSE transport
 
 Connects to an older two-channel MCP server: a long-lived SSE `GET` stream for responses (read on a background thread) plus an `endpoint` event that supplies the session-specific POST URL for requests.
 
-| Field | Type / Default | Description |
-|-------|----------------|-------------|
-| `sse_endpoint` | string, default empty | Legacy MCP SSE URL. Example: `http://127.0.0.1:8000/sse` |
-| `headers` | object, default `{}` | Extra HTTP headers |
-| `bearer` | string, optional, secure | Optional Authorization bearer token |
-
 Configuration is validated at save time: `commandLine` is required for `stdio`, `endpoint` for `streamable-http`, and `sse_endpoint` for `sse`.
-
----
-
-## Profiles
-
-| Profile | Transport | Notes |
-|---------|-----------|-------|
-| RocketRide MCP server (stdio) _(default)_ | `stdio` | Launches `python -m rocketride_mcp` |
-| Generic MCP server (Streamable HTTP) | `streamable-http` | Enter endpoint URL |
-| Generic MCP server (legacy HTTP+SSE) | `sse` | Enter SSE endpoint URL |
 
 ---
 
@@ -80,13 +79,15 @@ The STDIO transport has no authentication fields: the subprocess runs locally wi
 
 ---
 
-## Butterbase preset
+## Notes
+
+### Butterbase preset
 
 `services.butterbase.json` in this directory defines **Butterbase MCP Client**, a branded preset that reuses this node's implementation (not a separate node). It pins the transport to `streamable-http` with endpoint `https://api.butterbase.ai/mcp`, namespaces tools as `butterbase.<tool>` (e.g. `butterbase.init_app`), and surfaces the bearer field as a Butterbase API key (`bb_sk_...`, created in the Butterbase dashboard). Prerequisite: enable Developer Mode on your Butterbase app so the agent can create and modify resources.
 
 ---
 
-## Notes
+### Runtime behavior
 
 - Protocol versions advertised during `initialize`: `2024-11-05` for STDIO, `2025-11-25` for Streamable HTTP and SSE.
 - Tool calls must use the fully namespaced `server.tool` form; a call addressed to a different `serverName` than this node's is rejected.
@@ -94,7 +95,7 @@ The STDIO transport has no authentication fields: the subprocess runs locally wi
 
 ---
 
-## Zero-argument tools
+### Zero-argument tools
 
 Some MCP tools take no arguments (their input schema is empty). Strict reasoning-model agents can silently drop such a tool from their catalog when it is advertised with an empty JSON Schema. To keep these tools usable everywhere, the client normalizes an empty input schema to carry a single optional placeholder argument (`rr_no_args`) before presenting the tool to an agent. RocketRide records which cached tools received that synthesized placeholder and strips it only for those tools before the call, so the MCP server never receives it. A tool that genuinely declares an argument named `rr_no_args` continues to receive that argument unchanged.
 

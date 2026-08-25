@@ -10,49 +10,47 @@ Uses **LangChain's `ChatOpenAI`** client pointed at DashScope's OpenAI-compatibl
 
 When the node configuration is validated, the node performs a live 1-token test request against the API to verify the key, model, and region actually work. Failures surface as configuration warnings with the provider's error message.
 
----
-
-## Configuration
-
-### Lanes
+## Lanes
 
 | Lane in     | Lane out  | Description                                          |
 |-------------|-----------|------------------------------------------------------|
 | `questions` | `answers` | Send a question directly, receive a generated answer |
 
-### Fields
-
-The main setting is the **profile** (model selection, default `qwen-flash`). Each profile exposes the API key, region, and model-source fields. The `custom` profile additionally exposes the model name and context length.
-
-| Field              | Type / Default      | Description                                                              |
-|--------------------|---------------------|--------------------------------------------------------------------------|
-| `profile`          | enum, `qwen-flash`  | Qwen AI model selection (see profiles below, or `custom`)                |
-| `apikey`           | string              | DashScope API key. Must start with `sk-`.                                |
-| `region`           | enum, `us`          | DashScope regional endpoint: `us`, `intl`, or `cn` (see regions below)   |
-| `model`            | string              | Qwen model name (custom profile only)                                    |
-| `modelTotalTokens` | number              | Maximum context length in tokens (custom profile only, must be > 0)      |
-
----
-
 ## Profiles
 
-| Profile                         | Model                           | Context tokens | Output tokens |
-|---------------------------------|---------------------------------|----------------|---------------|
-| Qwen Flash *(default)*          | `qwen-flash`                    | 131,072        | 4,096         |
-| Qwen Plus                       | `qwen-plus`                     | 1,000,000      | 32,768        |
-| Qwen2.5 72B Instruct            | `qwen-2.5-72b-instruct`         | 32,768         | 16,384        |
-| Qwen2.5 7B Instruct             | `qwen-2.5-7b-instruct`          | 32,768         | 32,768        |
-| Qwen2.5 Coder 32B Instruct      | `qwen-2.5-coder-32b-instruct`   | 32,768         | 4,096         |
-| Qwen-Max                        | `qwen-max`                      | 32,768         | 8,192         |
-| Qwen Plus 0728                  | `qwen-plus-2025-07-28`          | 1,000,000      | 32,768        |
-| Qwen Plus 0728 (thinking)       | `qwen-plus-2025-07-28:thinking` | 1,000,000      | 32,768        |
-| Qwen-Turbo                      | `qwen-turbo`                    | 131,072        | 8,192         |
+Default: **Qwen Flash** (`qwen-flash`).
 
-Choose `custom` to set the model name and context length manually.
+| Profile | Model | Context | Output |
+| ------- | ----- | ------- | ------ |
+| `qwen-flash` **(default)** | `qwen-flash` | 131,072 | 4,096 |
+| `qwen-plus` | `qwen-plus` | 1,000,000 | 32,768 |
+| `qwen-plus-2025-07-28` | `qwen-plus-2025-07-28` | 1,000,000 | 32,768 |
+| `qwen-plus-2025-07-28-thinking` | `qwen-plus-2025-07-28:thinking` | 1,000,000 | 32,768 |
 
----
+<details>
+<summary><strong>View 5 more models</strong></summary>
 
-## Regions
+| Profile | Model | Context | Output |
+| ------- | ----- | ------- | ------ |
+| `qwen-2-5-72b-instruct` | `qwen-2.5-72b-instruct` | 32,768 | 16,384 |
+| `qwen-2-5-7b-instruct` | `qwen-2.5-7b-instruct` | 32,768 | 32,768 |
+| `qwen-2-5-coder-32b-instruct` | `qwen-2.5-coder-32b-instruct` | 32,768 | 32,768 |
+| `qwen-max` **(deprecated)** | `qwen-max` | 32,768 | 8,192 |
+| `qwen-turbo` **(deprecated)** | `qwen-turbo` | 131,072 | 8,192 |
+
+</details>
+
+## Configuration
+
+Choose a profile to set the Qwen model and token limits, then select the DashScope region that issued your API key. Profiles keep the model and token values fixed while exposing the API key, region, and model-source settings.
+
+## Authentication
+
+Provide a DashScope API key in `apikey`. The key must start with `sk-`; anything else is rejected before any request is made. Make sure the key was issued for the region you select.
+
+## Notes
+
+### Regions
 
 `region` selects the DashScope regional endpoint used for all API calls:
 
@@ -62,19 +60,9 @@ Choose `custom` to set the model name and context length manually.
 | `intl` | Singapore       | `https://dashscope-intl.aliyuncs.com/compatible-mode/v1` |
 | `cn`   | China (Beijing) | `https://dashscope.aliyuncs.com/compatible-mode/v1`       |
 
-The default is `us`. An unrecognised value falls back to the US endpoint.
+The default is `us`. An unrecognised value falls back to the US endpoint. DashScope API keys are region-specific, so a key issued for one endpoint will fail against another.
 
-Note: DashScope API keys are not interchangeable between regions. A key issued for one region will fail authentication against another region's endpoint.
-
----
-
-## Authentication
-
-Provide a DashScope API key in `apikey`. The key must start with `sk-`; anything else is rejected before any request is made. Make sure the key was issued for the region you select.
-
----
-
-## Error handling
+### Error handling
 
 Provider exceptions are mapped to friendly messages instead of raw stack traces:
 

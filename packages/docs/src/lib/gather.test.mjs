@@ -7,7 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 const require = createRequire(import.meta.url);
-const { pageDescription, stampLastUpdate, gather } = require('../../scripts/lib/gather.js');
+const { pageDescription, stampLastUpdate, gather, assertNoUnexpectedPlaceholders, EXPECTED_PLACEHOLDERS } = require('../../scripts/lib/gather.js');
 
 describe('pageDescription', () => {
 	it('prefers a front-matter description when the page declares one', () => {
@@ -102,6 +102,52 @@ describe('stampLastUpdate', () => {
 	});
 });
 
+// The placeholder gate is the guardrail that makes doc moves safe: a doc id is
+// the public URL, so a spine id and a file path drifting apart silently
+// publishes a "coming soon" page instead of failing.
+describe('assertNoUnexpectedPlaceholders', () => {
+	const page = (id, extra = {}) => ({ id, route: `/${id}`, title: id, ...extra });
+
+	it('throws for an unexpected placeholder, naming the id and the likely cause', () => {
+		const manifest = [page('product/quickstart'), page('product/operate/cloud', { placeholder: true })];
+		assert.throws(
+			() => assertNoUnexpectedPlaceholders(manifest),
+			(err) => {
+				assert.match(err.message, /product\/operate\/cloud/);
+				assert.match(err.message, /spine/i);
+				assert.doesNotMatch(err.message, /quickstart/);
+				return true;
+			}
+		);
+	});
+
+	it('names every offender, not just the first', () => {
+		const manifest = [page('a/one', { placeholder: true }), page('b/two', { placeholder: true })];
+		assert.throws(() => assertNoUnexpectedPlaceholders(manifest), /a\/one[\s\S]*b\/two/);
+	});
+
+	it('passes an allowlisted id so intentional stubs need no wholesale opt-out', () => {
+		const manifest = [page('product/operate/cloud', { placeholder: true })];
+		assert.doesNotThrow(() => assertNoUnexpectedPlaceholders(manifest, ['product/operate/cloud']));
+	});
+
+	// Emitted only when the node corpus produced no pages at all (docs-only
+	// checkout), which the "Staged N nodes" count already reports — not a desync.
+	it('tolerates the structural nodes/example placeholder', () => {
+		assert.doesNotThrow(() => assertNoUnexpectedPlaceholders([page('nodes/example', { placeholder: true, node: 'example' })]));
+	});
+
+	it('passes a manifest with no placeholder at all', () => {
+		assert.doesNotThrow(() => assertNoUnexpectedPlaceholders([page('index'), page('nodes/llm_anthropic')]));
+	});
+
+	// Seeded empty deliberately: today's build stages zero placeholders. A
+	// growing allowlist is the failure mode this gate exists to prevent.
+	it('ships an empty default allowlist', () => {
+		assert.deepEqual(EXPECTED_PLACEHOLDERS, []);
+	});
+});
+
 // gather() itself is exercised end-to-end (not stubbed) against a temp
 // project, mirroring llms.test.mjs's temp-project pattern. discoverContributors()
 // reads the real (in-process) module registry, but docs:test runs this file via
@@ -119,9 +165,9 @@ describe('gather — top-level docs/ root mounts', () => {
 		projectRoot = path.join(root, 'project');
 		contentDir = path.join(root, 'content');
 		const staticDir = path.join(root, 'static');
-		await mkdir(path.join(projectRoot, 'docs/clients/typescript'), { recursive: true });
-		await writeFile(path.join(projectRoot, 'docs/clients/typescript/index.md'), '# TypeScript SDK\n\nThe TypeScript client library.\n');
-		await writeFile(path.join(projectRoot, 'docs/clients/typescript/readme.md'), '# Package README\n\nExport source for docs:export, never a site page.\n');
+		await mkdir(path.join(projectRoot, 'docs/public/typescript'), { recursive: true });
+		await writeFile(path.join(projectRoot, 'docs/public/typescript/index.md'), '# TypeScript SDK\n\nThe TypeScript client library.\n');
+		await writeFile(path.join(projectRoot, 'docs/public/typescript/README.md'), '# Package README\n\nExport source for docs:export, never a site page.\n');
 		manifest = await gather({ projectRoot, contentStaticDir: path.join(root, 'no-such-static-dir'), contentDir, staticDir });
 	});
 
@@ -137,9 +183,9 @@ describe('gather — top-level docs/ root mounts', () => {
 		assert.equal(entry.route, '/develop/typescript');
 	});
 
-	it('stages no page or route for readme.md', () => {
-		assert.equal(existsSync(path.join(contentDir, 'develop', 'typescript', 'readme.md')), false);
-		const entry = manifest.find((m) => m.source && m.source.endsWith('readme.md'));
-		assert.equal(entry, undefined, 'no manifest entry sourced from readme.md');
+	it('stages no page or route for README.md', () => {
+		assert.equal(existsSync(path.join(contentDir, 'develop', 'typescript', 'README.md')), false);
+		const entry = manifest.find((m) => m.source && m.source.endsWith('README.md'));
+		assert.equal(entry, undefined, 'no manifest entry sourced from README.md');
 	});
 });

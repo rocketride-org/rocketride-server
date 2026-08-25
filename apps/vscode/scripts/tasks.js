@@ -36,8 +36,8 @@ const SRC_DIR = path.join(APP_ROOT, 'src');
 const SHARED_UI_SRC = path.join(PROJECT_ROOT, 'packages', 'shared-ui', 'src');
 const DOCS_DIR = path.join(PROJECT_ROOT, 'docs');
 const AGENT_DOCS_DIR = path.join(DOCS_DIR, 'agents');
-const STUBS_DIR = path.join(DOCS_DIR, 'stubs');
-const README_SRC = path.join(DOCS_DIR, 'clients', 'vscode', 'readme.md');
+const STUBS_DIR = path.join(DOCS_DIR, 'agents', 'stubs');
+const README_SRC = path.join(DOCS_DIR, 'public', 'vscode', 'README.md');
 const README_DEST = path.join(APP_ROOT, 'README.md');
 
 // State keys for source fingerprints (webview bundles shared-ui via Canvas)
