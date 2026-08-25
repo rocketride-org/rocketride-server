@@ -4,12 +4,6 @@ A RocketRide vector store node that stores embedded document chunks and retrieve
 them by keyword or semantic similarity from the managed tenant database. Pick it
 over the SQL and graph nodes for retrieval-augmented document search.
 
-## About RocketRide
-
-RocketRide provisions a per-tenant database for its managed database nodes.
-This node resolves that database from the signed-in RocketRide identity instead
-of requiring the user to configure a host, user, password, or database name.
-
 ## What it does
 
 The node writes documents from the documents lane into a pgvector-backed table,
@@ -31,9 +25,11 @@ execution surface.
 ## Configuration
 
 The single cloud profile provides a table, cosine similarity, a score threshold,
-and HNSW index defaults. Bind an embedding module for semantic search; the
-embedding dimension is taken from the first stored document rather than from a
-configuration field.
+and HNSW index defaults. RocketRide provisions a per-tenant database for its
+managed database nodes, and this node resolves it from the signed-in RocketRide
+identity instead of a host, user, password, or database name you enter. Bind an
+embedding module for semantic search; the embedding dimension is taken from the
+first stored document rather than from a configuration field.
 
 ### Table
 
@@ -83,10 +79,6 @@ Deleted objects are excluded by default, while document rendering reassembles
 stored chunks by chunkId. The store removes all existing chunks for incoming
 object IDs before inserting the replacement chunks, preventing duplicate data
 for a re-ingested object.
-
-## Upstream docs
-
-- [RocketRide documentation](https://docs.rocketride.org)
 
 <!-- ROCKETRIDE:GENERATED:PARAMS START -->
 <!-- ROCKETRIDE:GENERATED:PARAMS END -->

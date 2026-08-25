@@ -5,12 +5,6 @@ structured pipeline data to, the relational database provisioned for the signed-
 RocketRide tenant. Pick it instead of a connection-configured PostgreSQL node when
 the data belongs in that managed tenant database.
 
-## About RocketRide
-
-RocketRide provisions a per-tenant database for its managed database nodes. This
-node resolves that database from the signed-in RocketRide identity rather than from
-a host, user, password, or database name entered in the node configuration.
-
 ## What it does
 
 On the questions lane, the node asks its connected LLM to produce a SQL query,
@@ -66,9 +60,11 @@ returns {session_id} and transaction completion returns {ok: true}.
 
 ## Configuration
 
-There is one built-in profile and no connection panel: the node resolves its
-tenant DSN itself. Configure the table and the context supplied to the LLM;
-leave direct execution disabled unless a trusted caller needs it.
+There is one built-in profile and no connection panel. RocketRide provisions a
+per-tenant database for its managed database nodes, and this node resolves it
+from the signed-in RocketRide identity instead of a host, user, password, or
+database name you enter. Configure the table and the context supplied to the
+LLM; leave direct execution disabled unless a trusted caller needs it.
 
 ### Table name and database description
 
@@ -111,10 +107,6 @@ For QuestionType.DIALECT, the questions lane emits the PostgreSQL dialect on
 answers. For QuestionType.EXECUTE, a disabled direct-execution setting logs and
 drops the request; successful raw SELECT results are bounded by the shared
 execution-row maximum, while writes report affected_rows.
-
-## Upstream docs
-
-- [RocketRide documentation](https://docs.rocketride.org)
 
 <!-- ROCKETRIDE:GENERATED:PARAMS START -->
 <!-- ROCKETRIDE:GENERATED:PARAMS END -->

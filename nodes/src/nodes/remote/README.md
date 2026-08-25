@@ -58,9 +58,12 @@ All HTTP and WebSocket requests carry an `Authorization: Bearer <apikey>` header
 
 ## Profiles
 
+Default: `local`, which inlines the sub-pipeline without opening a network
+connection.
+
 | Profile | Description |
 |---------|-------------|
-| `local` *(default)* | Inlines the sub-pipeline locally; no network connection is created. |
+| `local` **(default)** | Inlines the sub-pipeline locally; no network connection is created. |
 | `remote` | Uses the preset `localhost:5565` and `xxx` API key as placeholders; replace them with the remote server details. |
 
 ## Configuration

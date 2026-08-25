@@ -12,7 +12,7 @@ Takes a question from the `questions` lane, sends it as a single query to the Ex
 
 Uses the **requests** library directly against the Exa REST API; no Exa SDK is required. Each HTTP request has a 30-second timeout. The node expects exactly one question per invocation: an empty question or a multi-question payload raises an error immediately.
 
-Result URLs are sanitized before leaving the node. Every `url`, `image`, and `favicon` field in the Exa response is validated to be an `http`/`https` URL whose host resolves to a public IP address. Results whose primary `url` resolves to a private, loopback, link-local, reserved, multicast, or unspecified address are dropped entirely; invalid `image` and `favicon` fields are removed from the result without dropping the whole result. This guards downstream nodes against SSRF via attacker-influenced search content. Sanitization is skipped when the `ROCKETRIDE_MOCK` environment variable is set. This bypass is intended only for controlled tests and must never be enabled in production.
+Result URLs are sanitized before leaving the node, guarding downstream nodes against SSRF via attacker-influenced search content; see **URL safety** under Notes for what is checked and dropped.
 
 ---
 
@@ -65,7 +65,7 @@ Exa HTTP errors are mapped to descriptive failures:
 
 ### URL safety
 
-Before serializing results, the node validates every `url`, `image`, and `favicon` field. Each must use `http` or `https` and resolve to a public IP address. A result with an invalid primary `url` is removed; invalid images and favicons are removed while retaining their result. This sanitization is skipped when `ROCKETRIDE_MOCK` is set. This bypass is intended only for controlled tests and must never be enabled in production.
+Before serializing results, the node validates every `url`, `image`, and `favicon` field. Each must use `http` or `https` and resolve to a public IP address. A result whose primary `url` resolves to a private, loopback, link-local, reserved, multicast, or unspecified address is dropped entirely; invalid `image` and `favicon` fields are removed while their result is retained. This sanitization is skipped when `ROCKETRIDE_MOCK` is set. That bypass is intended only for controlled tests and must never be enabled in production.
 
 ## Upstream docs
 

@@ -26,13 +26,17 @@ Question text is assembled from both the question objects and any attached conte
 
 ## Profiles
 
-Start with Basic to observe violations without interrupting a pipeline, or use Strict when rejected content must not continue. Choose Custom when the checks need to be selected individually.
+Default: **Basic: Prompt injection + PII detection** (`basic`).
 
-| Profile            | Behaviour                                                                                                   |
-|--------------------|-------------------------------------------------------------------------------------------------------------|
-| Basic *(default)*  | Prompt injection + PII detection, `warn` mode. Only `policy_mode` is configurable in the UI.               |
-| Strict             | All checks enabled, `block` on violation, `max_input_length` 50000, `max_tokens_estimate` 4096. Exposes `policy_mode`, `max_tokens_estimate`, and `expected_format`. |
-| Custom             | All checks enabled with no size limit, `warn` mode. Exposes every individual check, limit, topic, format, and policy control. |
+Start with `basic` to observe violations without interrupting a pipeline, or
+`strict` when rejected content must not continue. Choose `custom` when the
+checks need to be selected individually.
+
+| Profile | Behaviour |
+| --- | --- |
+| `basic` **(default)** | Prompt injection + PII detection, `warn` mode. Only `policy_mode` is configurable in the UI. |
+| `strict` | All checks enabled, `block` on violation, `max_input_length` 50000, `max_tokens_estimate` 4096. Exposes `policy_mode`, `max_tokens_estimate`, and `expected_format`. |
+| `custom` | All checks enabled with no size limit, `warn` mode. Exposes every individual check, limit, topic, format, and policy control. |
 
 ## Configuration
 

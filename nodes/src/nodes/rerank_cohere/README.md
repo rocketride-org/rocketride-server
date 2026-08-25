@@ -34,14 +34,17 @@ The `documents` lane is written only when at least one document survives the `mi
 
 ## Profiles
 
-The **Model** dropdown selects a preconfigured profile:
+Default: **Rerank v3.0** (`rerank-english-v3.0`). The **Model** dropdown
+selects a preconfigured profile:
 
 | Profile               | Title       | Model                           |
 |-----------------------|-------------|---------------------------------|
-| `rerank-english-v3.0` *(default)* | Rerank v3.0 | `rerank-english-v3.0` |
+| `rerank-english-v3.0` **(default)** | Rerank v3.0 | `rerank-english-v3.0` |
 | `rerank-v3.5`         | Rerank v3.5 | `rerank-v3.5`                   |
+| `custom`              | Custom      | _(free-form model name)_        |
 
-All preset profiles expose `top_n`, `min_score`, and the API key. Custom is available in the configuration panel for a free-form model name.
+All preset profiles expose `top_n`, `min_score`, and the API key; `custom`
+additionally takes a free-form model name.
 
 ## Configuration
 

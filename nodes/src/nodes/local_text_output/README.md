@@ -2,10 +2,6 @@
 
 A RocketRide target node that writes pipeline text to files on the machine running the pipeline; choose it when local filesystem output is required instead of an SMB export.
 
-## About Python
-
-Python provides the filesystem functions used by this node to create directories, resolve paths, and write UTF-8 text files. The node uses those local filesystem operations rather than a network file client.
-
 ## What it does
 
 The node accumulates text for each object and, when the object closes, writes it as a `.txt` file below the configured output directory. It consumes the `text` lane and produces no output lane. Choose `text_output` instead when the destination is an SMB network share rather than the pipeline host’s filesystem.

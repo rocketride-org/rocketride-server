@@ -4,12 +4,6 @@ A RocketRide graph database node for natural-language Cypher queries against
 the Apache AGE graph in the signed-in tenant's managed database. Pick it over
 rocketride_sql when relationships and traversals are the data model.
 
-## About RocketRide
-
-RocketRide provisions a per-tenant database for its managed database nodes.
-This node resolves that database from the signed-in RocketRide identity instead
-of accepting a host, user, password, or database name in its configuration.
-
 ## What it does
 
 The node accepts questions, asks its required LLM to generate read-only Cypher,
@@ -58,10 +52,12 @@ the input is invalid, and otherwise returns {rows, affected_rows}.
 
 ## Configuration
 
-The single built-in profile supplies the default graph name and the node
-resolves its tenant connection automatically. Start with the defaults, then
-tune the graph context and read limits around the size and shape of the graph
-your LLM must query.
+The single built-in profile supplies the default graph name. RocketRide
+provisions a per-tenant database for its managed database nodes, and this node
+resolves it from the signed-in RocketRide identity instead of a host, user,
+password, or database name you enter. Start with the defaults, then tune the
+graph context and read limits around the size and shape of the graph your LLM
+must query.
 
 ### Graph name and graph description
 
@@ -115,10 +111,6 @@ the base Cypher safety check, and a transaction-local statement timeout.
 Schema reflection is best effort: it lists AGE labels, samples node properties,
 and samples relationship endpoints; an individual reflection failure warns and
 returns partial rather than blocking all schema output.
-
-## Upstream docs
-
-- [RocketRide documentation](https://docs.rocketride.org)
 
 <!-- ROCKETRIDE:GENERATED:PARAMS START -->
 <!-- ROCKETRIDE:GENERATED:PARAMS END -->
