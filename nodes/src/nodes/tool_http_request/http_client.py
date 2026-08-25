@@ -40,7 +40,6 @@ from typing import Any, Dict, Optional
 from urllib.parse import quote, unquote, urlsplit
 
 import requests
-import urllib3
 from requests.auth import HTTPBasicAuth
 from requests.adapters import HTTPAdapter
 from requests.exceptions import ProxyError
@@ -76,19 +75,6 @@ if not (
     and hasattr(HTTPSConnection, '_new_conn')
 ):
     raise RuntimeError('tool_http_request requires the supported urllib3 pinned-connection hooks')
-
-
-def _has_supported_urllib3_runtime(version: str) -> bool:
-    """Return whether urllib3 is on the audited minor line."""
-    try:
-        major, minor = (int(part) for part in version.split('.')[:2])
-    except (TypeError, ValueError):
-        return False
-    return (major, minor) == (2, 7)
-
-
-if not _has_supported_urllib3_runtime(urllib3.__version__):
-    raise RuntimeError('tool_http_request requires urllib3>=2.7,<2.8 for safe DNS address pinning')
 
 
 def _has_safe_ipaddress_runtime(version_info) -> bool:

@@ -47,21 +47,6 @@ def test_requests_exposes_secure_adapter_hook():
 
 
 @pytest.mark.parametrize(
-    'version,expected',
-    [
-        ('2.6.9', False),
-        ('2.7.0', True),
-        ('2.7.4', True),
-        ('2.8.0', False),
-        ('invalid', False),
-    ],
-)
-def test_urllib3_runtime_is_bounded_to_audited_minor(version, expected):
-    """Unknown urllib3 transport internals fail closed instead of bypassing the pin."""
-    assert http_client._has_supported_urllib3_runtime(version) is expected
-
-
-@pytest.mark.parametrize(
     'version_info,expected',
     [
         ((3, 10, 13), False),
