@@ -60,7 +60,8 @@ proxies or implicit `.netrc` credentials. `REQUESTS_CA_BUNDLE` and `CURL_CA_BUND
 remain supported for custom HTTPS certificate authorities. A caller-supplied `Host`
 header is rejected because it could route an allowlisted URL to a different virtual host.
 The network classifier requires Python `3.10.14+`, `3.11.9+`, `3.12.4+`, or `3.13+`
-and the transport is bounded to the audited urllib3 `2.7.x` line.
+and the transport requires the Requests and urllib3 connection hooks used for
+validated-address pinning.
 
 Keep an outbound firewall or equivalent egress policy around the engine as a second
 boundary. RFC 6052 permits operator-chosen NAT64 prefixes that cannot be identified from
