@@ -70,7 +70,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as glob from 'glob';
-import * as process from 'process';
+import process from 'node:process';
 import { Command } from 'commander';
 import { RocketRideClient } from '../client/client';
 import { DAPMessage, PipelineConfig, UPLOAD_RESULT } from '../client/types';
