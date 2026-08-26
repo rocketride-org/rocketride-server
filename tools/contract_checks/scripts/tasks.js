@@ -34,7 +34,7 @@
  */
 
 const path = require('path');
-const { execCommand, runPytest, unlink, removeDir, DIST_ROOT } = require('../../../scripts/lib');
+const { execCommand, runPytest, unlink, removeDir, exists, DIST_ROOT } = require('../../../scripts/lib');
 
 const PACKAGE_DIR = path.join(__dirname, '..');
 const TEST_DIR = path.join(PACKAGE_DIR, 'test');
@@ -68,7 +68,16 @@ function makeRunChecksAction(options = {}) {
                 // identical constraints leaves every verdict valid, so without
                 // this the flag cannot force a resolve — and a verdict that is
                 // wrong for an unforeseen reason would have no supported way out.
-                await removeDir(path.join(ENGINE_CACHE_DIR, 'satisfied'));
+                const verdicts = path.join(ENGINE_CACHE_DIR, 'satisfied');
+                await removeDir(verdicts);
+                // removeDir only warns when the directory is in use (EPERM/EBUSY),
+                // so confirm it is gone rather than reporting a reset that did not
+                // happen: a surviving verdict means the flag did not force the
+                // re-resolve it promises. Checked here rather than on removeDir's
+                // return value, which reports success for an absent directory too.
+                if (await exists(verdicts)) {
+                    throw new Error(`Could not clear the satisfied-verdict cache at ${verdicts}; the re-resolve would be skipped`);
+                }
                 task.output = 'Constraint and verdict caches cleared; depends() will recompile and re-resolve';
             }
 

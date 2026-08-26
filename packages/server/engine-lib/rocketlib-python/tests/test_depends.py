@@ -361,6 +361,17 @@ class TestSatisfiedVerdict:
         assert len(env.resolves) == 2
         assert depends._verdict_key(str(env.req), str(env.constraints)) is None
 
+    def test_include_naming_a_directory_is_never_cached(self, exe_dir, env):
+        """An include that is not a readable file refuses the key, like a missing one."""
+        (exe_dir / 'nodes' / 'demo' / 'base.txt').mkdir(parents=True)
+        env.req.write_text('-r base.txt\nrequests\n', encoding='utf-8')
+
+        self._cold_process(env)
+        self._cold_process(env)
+
+        assert len(env.resolves) == 2
+        assert depends._verdict_key(str(env.req), str(env.constraints)) is None
+
     def test_schema_bump_invalidates_every_verdict(self, env, monkeypatch):
         """Bumping the schema retires verdicts recorded under the old resolve semantics."""
         self._cold_process(env)

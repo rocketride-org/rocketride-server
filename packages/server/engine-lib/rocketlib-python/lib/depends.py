@@ -948,14 +948,15 @@ def _verdict_key(requirements_path: str, constraints_path: str) -> Optional[str]
     including every file the requirements file includes through ``-r`` / ``-c``.
 
     Returns ``None`` when the key cannot be computed honestly — a directive
-    names a file that does not exist, or site-packages cannot be listed. In
+    names something that is not a readable file, or site-packages cannot be
+    listed. In
     both cases something the resolve depends on is invisible here, so the key
     would be stable over changing inputs. Refusing it degrades to resolving
     every time, which is the safe direction — a stable key over an unseen
     input keeps reporting "satisfied" after that input gains a dependency.
     """
     closure = _requirements_closure(requirements_path)
-    if not all(os.path.exists(path) for path in closure):
+    if not all(os.path.isfile(path) for path in closure):
         return None
 
     installed = _installed_fingerprint()
