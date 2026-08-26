@@ -162,6 +162,31 @@ function latestSnapshot(appId) {
 }
 
 /**
+ * Whether the newest published version already carries what is built.
+ *
+ * The question `<app>:verify` asks, minus the throwing — a caller deciding
+ * WHETHER to seed wants a boolean, not an exception.
+ *
+ * Compares the file the seeder would actually copy, out of
+ * `dist/server/static/apps/<id>/`, rather than `build/apps/<id>/`. The two are
+ * the same after a `:copy` step, but dist is what gets published, so dist is
+ * the honest answer to "would seeding change anything".
+ *
+ * @param {string} appId - The app id, as the store names its deployment dir.
+ * @param {string} distAppsDir - The served `apps` directory under dist.
+ * @returns {boolean} True when a seed would publish nothing new.
+ */
+function publishedCarriesBuild(appId, distAppsDir) {
+	const built = path.join(distAppsDir, appId, 'remoteEntry.js');
+	// Nothing built under this id — not something a seed would change either way.
+	if (!fs.existsSync(built)) return true;
+	const snap = latestSnapshot(appId);
+	// Never published at all: it has to be seeded.
+	if (!snap) return false;
+	return sha256(built) === sha256(path.join(snap.dir, 'dist', 'remoteEntry.js'));
+}
+
+/**
  * Create a standard builder module for an MF remote app.
  *
  * Generates actions: bundle, register, copy, build, clean, and optionally dev.
@@ -359,4 +384,4 @@ function createAppModule({ name, description, appRoot, dev = false }) {
 	return { name, description, actions };
 }
 
-module.exports = { createAppModule };
+module.exports = { createAppModule, publishedCarriesBuild };
