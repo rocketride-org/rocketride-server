@@ -29,7 +29,7 @@ manager-pipeline.pipe
 
 The [`agent_rocketride`](/nodes/agent_rocketride) node supports this pattern
 natively — expose any running pipeline as an MCP tool (see
-[MCP Server](/protocols/mcp)) and the manager agent can call it.
+[MCP Server](/protocols/mcp/stdio)) and the manager agent can call it.
 
 This is useful when different specialists need different models, memory, or
 tool sets. Keep each specialist pipeline small and single-purpose.
@@ -48,7 +48,7 @@ tool latencies.
 ## Agent-as-tool via MCP
 
 Any running RocketRide pipeline is automatically exposed as an MCP tool by the
-[MCP server](/protocols/mcp). This means a Claude Desktop or Cursor session can
+[MCP server](/protocols/mcp/stdio). This means a Claude Desktop or Cursor session can
 invoke your pipeline as a tool, making your pipeline an agent capability in an
 external system.
 
@@ -108,6 +108,6 @@ about and may make unexpected tool calls. Keep the tool set small and specific:
 ## Related
 
 - [Concepts: Agents & Tools](/concepts/agents-tools-skills): control connections, wiring.
-- [MCP Server](/protocols/mcp): exposing pipelines as MCP tools.
+- [MCP Server](/protocols/mcp/stdio): exposing pipelines as MCP tools.
 - [Concepts: Error Handling](/concepts/error-handling): handling agent failures.
 - [Best Practices](/concepts/best-practices): agents vs. direct LLM calls.

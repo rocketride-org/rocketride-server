@@ -28,7 +28,7 @@ const COLUMNS: FooterColumn[] = [
 		items: [
 			{ label: 'TypeScript SDK', href: '/develop/typescript' },
 			{ label: 'Python SDK', href: '/develop/python' },
-			{ label: 'MCP', href: '/protocols/mcp' },
+			{ label: 'MCP', href: '/protocols/mcp/stdio' },
 			{ label: 'Server protocol', href: '/protocols/websocket' },
 			{ label: 'Nodes', href: '/nodes' },
 			{ label: 'Glossary', href: '/reference/glossary' },

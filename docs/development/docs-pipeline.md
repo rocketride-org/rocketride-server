@@ -134,14 +134,19 @@ and each backend variant a nested page.
   | `docs/public/typescript` | `develop/typescript` |
   | `docs/public/python` | `develop/python` |
   | `docs/public/vscode` | `ide-extensions/vscode` |
-  | `docs/public/mcp` | `protocols/mcp` |
+  | `docs/public/mcp/stdio` | `protocols/mcp/stdio` |
+  | `docs/public/mcp/http` | `protocols/mcp/http` |
 
 The sweep covers **all** of `docs/public/`, so a new `.md` there with no covering
 mount aborts the build rather than being silently dropped. `docs/public/product/`
 is excluded (pass 1 owns it) and `README.md` files are excluded everywhere under
-`docs/public/` — those are package-README export sources, never site pages. That
-is why `docs/public/n8n/README.md`, which sits under no mount at all, does not
-trip the sweep.
+`docs/public/` — those are package-README export sources — with one exception: a
+`README.md` at a mount root that has no `index.md`/`index.mdx` sibling is
+gathered as that mount's page (it may simultaneously be an export source; the
+MCP docs use this, `docs/public/mcp/stdio/README.md` being both the
+`protocols/mcp/stdio` page and the `packages/client-mcp` README source). The
+blanket exclusion is why `docs/public/n8n/README.md`, which sits under no mount
+at all, does not trip the sweep.
 
 **`docs/development/` is never swept, with no exceptions.** It is unpublished
 contributor documentation. A page whose audience is outside the repo belongs in

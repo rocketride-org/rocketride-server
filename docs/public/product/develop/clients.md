@@ -26,7 +26,7 @@ URIs: clients accept `http`/`https` or `ws`/`wss` and convert to WebSocket (`htt
 | -------------- | ---------------- | ------------------------------------- |
 | **TypeScript** | `rocketride`     | [TypeScript SDK](/develop/typescript) |
 | **Python**     | `rocketride`     | [Python SDK](/develop/python)         |
-| **MCP**        | `rocketride-mcp` | [MCP server](/protocols/mcp)          |
+| **MCP**        | `rocketride-mcp` | [MCP server](/protocols/mcp/stdio)          |
 
 Each document lists every constructor option, method, type, and usage example for that client.
 

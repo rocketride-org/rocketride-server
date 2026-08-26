@@ -35,7 +35,7 @@ production.
 - **Swap providers freely**: change an LLM or vector store by editing config, not code.
 - **Observability built in**: trace call trees, token usage, and memory as pipelines run.
 - **Open protocols**: drive pipelines over [WebSocket](/protocols/websocket) or expose them
-  as tools over [MCP](/protocols/mcp).
+  as tools over [MCP](/protocols/mcp/stdio).
 - **Deploy anywhere**: locally, on-premises with Docker, or managed on
   [RocketRide Cloud](/operate/cloud).
 - **MIT licensed**: fully open-source and OSI-compliant.

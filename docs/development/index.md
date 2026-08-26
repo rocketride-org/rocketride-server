@@ -166,6 +166,8 @@ is unpublished — it never reaches docs.rocketride.org.
   task types, configuration
 - [Crash Reporting](engine/crash-reporting.md) -- Crashpad, symbols, reading a
   minidump
+- [MCP Module](engine/mcp-module.md) -- the built-in HTTP MCP server: engine-client
+  seam, credentials catalog gates, widget workspace
 
 ### Nodes
 

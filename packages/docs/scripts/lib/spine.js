@@ -65,7 +65,13 @@ const SPINE = [
 		items: [
 			{ id: 'protocols/websocket', label: 'WebSocket' },
 			{ id: 'protocols/websocket/observability', label: 'Observability' },
-			{ id: 'protocols/mcp', label: 'MCP', mount: true }
+			{
+				label: 'MCP',
+				items: [
+					{ id: 'protocols/mcp/stdio', label: 'stdio (PyPI package)', mount: true },
+					{ id: 'protocols/mcp/http', label: 'HTTP server', mount: true }
+				]
+			}
 		]
 	},
 	{ label: 'Nodes', autogen: NODES_DIR },

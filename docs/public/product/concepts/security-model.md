@@ -62,7 +62,7 @@ credentials automatically.
 
 ## MCP authentication
 
-The [MCP server](/protocols/mcp) authenticates callers in two ways:
+The [MCP server](/protocols/mcp/stdio) authenticates callers in two ways:
 
 - **`ROCKETRIDE_AUTH` / `ROCKETRIDE_APIKEY`** — the API key used to connect the
   MCP server to the RocketRide engine. Required; set in the environment.
@@ -98,5 +98,5 @@ vulnerability reporting process and SLA.
 
 - [Best Practices](/concepts/best-practices): credential management patterns.
 - [Self-hosting](/operate/self-hosting): network configuration.
-- [MCP Server](/protocols/mcp): MCP-specific authentication.
+- [MCP Server](/protocols/mcp/stdio): MCP-specific authentication.
 - [Security policy](/evaluate/security): vulnerability reporting.

@@ -37,13 +37,14 @@ describe('toSidebar', () => {
 
 describe('isValidMount', () => {
 	it('accepts an exact mount slot', () => {
-		assert.equal(isValidMount('protocols/mcp'), true);
+		assert.equal(isValidMount('protocols/mcp/stdio'), true);
+		assert.equal(isValidMount('protocols/mcp/http'), true);
 		assert.equal(isValidMount(NODES_DIR), true);
 	});
 
 	it('accepts a descendant of a slot and tolerates slashes', () => {
 		assert.equal(isValidMount('develop/typescript/reference'), true);
-		assert.equal(isValidMount('/protocols/mcp/'), true);
+		assert.equal(isValidMount('/protocols/mcp/stdio/'), true);
 	});
 
 	it('rejects a path that is not a slot', () => {
