@@ -435,10 +435,17 @@ body {
 	font-weight: 700;
 	letter-spacing: 0.12em;
 	text-transform: uppercase;
-	color: var(--rr-offwhite);
+	/* Star by default: this menu is REUSED by the mobile navbar drawer, whose
+	 * surface is light — white text would vanish there. The dark desktop
+	 * panel re-whitens the kickers below. */
+	color: var(--rr-red);
 	background: transparent;
 	margin-top: 1.1rem;
 	padding-left: 0.7rem;
+}
+
+.theme-doc-sidebar-container .theme-doc-sidebar-menu > .menu__list-item > .menu__list-item-collapsible > .menu__link--sublist:not(#\#):not(#\#) {
+	color: var(--rr-offwhite);
 }
 
 /* Group headers flip like everything else: paper field, star text. The
