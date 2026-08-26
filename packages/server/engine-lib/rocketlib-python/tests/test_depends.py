@@ -246,9 +246,11 @@ class TestSatisfiedVerdict:
 
     @staticmethod
     def _cold_process(env, req=None):
+        """One cold engine process: a fresh call into ``_install_requirements``."""
         depends._install_requirements(str(req or env.req), str(env.constraints))
 
     def test_second_process_skips_the_resolve(self, exe_dir, env):
+        """The second process finds the verdict and never resolves."""
         self._cold_process(env)
         self._cold_process(env)
 
@@ -256,6 +258,7 @@ class TestSatisfiedVerdict:
         assert os.listdir(exe_dir / 'cache' / 'satisfied') != []
 
     def test_verdict_is_per_requirements_file(self, exe_dir, env):
+        """Each requirements file gets its own verdict; neither shadows the other."""
         other = _write(exe_dir / 'nodes' / 'other' / 'requirements.txt', 'pyjwt\n')
 
         self._cold_process(env)
@@ -266,6 +269,7 @@ class TestSatisfiedVerdict:
         assert env.resolves == [str(env.req), str(other)]
 
     def test_requirements_change_reruns_the_resolve(self, env):
+        """Editing the requirements file invalidates its verdict."""
         self._cold_process(env)
         env.req.write_text('requests\nhttpx\n', encoding='utf-8')
         self._cold_process(env)
@@ -273,6 +277,7 @@ class TestSatisfiedVerdict:
         assert len(env.resolves) == 2
 
     def test_constraints_change_reruns_the_resolve(self, env):
+        """A recompiled constraints file invalidates every verdict."""
         self._cold_process(env)
         env.constraints.write_text('requests==2.33.0\n', encoding='utf-8')
         self._cold_process(env)
@@ -280,6 +285,7 @@ class TestSatisfiedVerdict:
         assert len(env.resolves) == 2
 
     def test_overrides_change_reruns_the_resolve(self, exe_dir, env):
+        """A changed overrides file invalidates every verdict."""
         self._cold_process(env)
         _write(exe_dir / 'cache' / 'overrides-combined.txt', 'urllib3==2.5.0\n')
         self._cold_process(env)
@@ -287,6 +293,7 @@ class TestSatisfiedVerdict:
         assert len(env.resolves) == 2
 
     def test_installed_set_change_reruns_the_resolve(self, env):
+        """Any change to the installed dist-info set invalidates the verdict."""
         self._cold_process(env)
         # An upgrade, an uninstall or a manual install all rename a dist-info entry.
         (env.site / 'requests-2.32.4.dist-info').rename(env.site / 'requests-2.33.0.dist-info')
@@ -294,7 +301,29 @@ class TestSatisfiedVerdict:
 
         assert len(env.resolves) == 2
 
+    def test_included_requirements_change_reruns_the_resolve(self, exe_dir, env):
+        """A file pulled in through ``-r`` is part of the verdict, so editing it invalidates."""
+        base = _write(exe_dir / 'nodes' / 'demo' / 'base.txt', 'pyjwt\n')
+        env.req.write_text('-r base.txt\nrequests\n', encoding='utf-8')
+
+        self._cold_process(env)
+        self._cold_process(env)
+        base.write_text('pyjwt\nhttpx\n', encoding='utf-8')
+        self._cold_process(env)
+
+        assert len(env.resolves) == 2
+
+    def test_requirements_closure_follows_includes_once(self, exe_dir):
+        """Nested and cyclic ``-r`` / ``-c`` includes each appear once, relative to the including file."""
+        root = _write(exe_dir / 'nodes' / 'demo' / 'requirements.txt', '-r base.txt\nrequests\n')
+        base = _write(exe_dir / 'nodes' / 'demo' / 'base.txt', '--constraint=../pins.txt\n-r requirements.txt\n')
+        pins = _write(exe_dir / 'nodes' / 'pins.txt', 'pyjwt==2.13.0\n')
+
+        assert depends._requirements_closure(str(root)) == [str(root), str(base), str(pins)]
+
     def test_failed_resolve_records_no_verdict(self, exe_dir, env, monkeypatch):
+        """A resolve that raises leaves nothing behind, so the next process resolves again."""
+
         def failing_dry_run(requirements_path, constraints_path):
             env.resolves.append(requirements_path)
             raise RuntimeError('Dependency resolution failed')

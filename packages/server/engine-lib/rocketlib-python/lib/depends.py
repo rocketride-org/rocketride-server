@@ -35,6 +35,7 @@ from __future__ import annotations
 import hashlib
 import os
 import platform
+import re
 import subprocess
 import sys
 import threading
@@ -872,6 +873,36 @@ def _file_digest(path: str) -> str:
         return ''
 
 
+# A requirements line that pulls in another file: ``-r``/``--requirement`` and
+# ``-c``/``--constraint``, with the path after whitespace or ``=``.
+_INCLUDE_DIRECTIVE = re.compile(r'^\s*(?:-r|--requirement|-c|--constraint)(?:\s+|=)(\S+)')
+
+
+def _requirements_closure(requirements_path: str) -> list[str]:
+    """``requirements_path`` plus every file it pulls in through ``-r`` / ``-c``, recursively.
+
+    Included paths resolve relative to the including file, as pip and uv resolve
+    them. Each file is visited once, so an include cycle terminates.
+    """
+    closure: list[str] = []
+    pending = [os.path.abspath(requirements_path)]
+    while pending:
+        path = pending.pop(0)
+        if path in closure:
+            continue
+        closure.append(path)
+        try:
+            with open(path, 'r', encoding='utf-8') as f:
+                lines = f.read().splitlines()
+        except OSError:
+            continue
+        for line in lines:
+            match = _INCLUDE_DIRECTIVE.match(line)
+            if match:
+                pending.append(os.path.normpath(os.path.join(os.path.dirname(path), match.group(1))))
+    return closure
+
+
 def _installed_fingerprint() -> str:
     """Digest of the *.dist-info / *.egg-info names in site-packages — the names carry versions."""
     try:
@@ -882,16 +913,21 @@ def _installed_fingerprint() -> str:
 
 
 def _verdict_key(requirements_path: str, constraints_path: str) -> str:
-    """Key under which a satisfied verdict stays valid."""
-    parts = [
-        sys.executable,
-        sys.version,
-        _file_digest(requirements_path),
-        _file_digest(constraints_path),
-        _file_digest(_get_overrides_path()),
-        _excludes_content(),
-        _installed_fingerprint(),
-    ]
+    """Key under which a "satisfied" verdict for ``requirements_path`` is valid.
+
+    Everything that can change what a resolve concludes is part of it,
+    including every file the requirements file includes through ``-r`` / ``-c``.
+    """
+    parts = [sys.executable, sys.version]
+    parts.extend(_file_digest(path) for path in _requirements_closure(requirements_path))
+    parts.extend(
+        [
+            _file_digest(constraints_path),
+            _file_digest(_get_overrides_path()),
+            _excludes_content(),
+            _installed_fingerprint(),
+        ]
+    )
     # NUL-separated: none of the parts can contain it, so field boundaries
     # stay unambiguous even though two of them are multi-line text.
     return hashlib.md5('\0'.join(parts).encode('utf-8')).hexdigest()
