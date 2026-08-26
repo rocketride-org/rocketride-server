@@ -143,8 +143,8 @@ describe('assertNoUnexpectedPlaceholders', () => {
 
 	// Seeded empty deliberately: today's build stages zero placeholders. A
 	// growing allowlist is the failure mode this gate exists to prevent.
-	it('ships an empty default allowlist', () => {
-		assert.deepEqual(EXPECTED_PLACEHOLDERS, []);
+	it('allowlists only the IA-restructure content-pass stubs', () => {
+		assert.deepEqual(EXPECTED_PLACEHOLDERS, ['guides/observability', 'operate/self-hosting/docker', 'operate/self-hosting/kubernetes', 'support/get-help', 'support/contributing', 'support/release-notes']);
 	});
 });
 
@@ -175,16 +175,16 @@ describe('gather — top-level docs/ root mounts', () => {
 		await rm(root, { recursive: true, force: true });
 	});
 
-	it('stages a page for the develop/typescript mount sourced from index.md', async () => {
-		const staged = await readFile(path.join(contentDir, 'develop', 'typescript.md'), 'utf8');
+	it('stages a page for the clients/typescript mount sourced from index.md', async () => {
+		const staged = await readFile(path.join(contentDir, 'clients', 'typescript.md'), 'utf8');
 		assert.match(staged, /The TypeScript client library\./);
-		const entry = manifest.find((m) => m.id === 'develop/typescript');
-		assert.ok(entry, 'manifest entry for develop/typescript');
-		assert.equal(entry.route, '/develop/typescript');
+		const entry = manifest.find((m) => m.id === 'clients/typescript');
+		assert.ok(entry, 'manifest entry for clients/typescript');
+		assert.equal(entry.route, '/clients/typescript');
 	});
 
 	it('stages no page or route for README.md', () => {
-		assert.equal(existsSync(path.join(contentDir, 'develop', 'typescript', 'README.md')), false);
+		assert.equal(existsSync(path.join(contentDir, 'clients', 'typescript', 'README.md')), false);
 		const entry = manifest.find((m) => m.source && m.source.endsWith('README.md'));
 		assert.equal(entry, undefined, 'no manifest entry sourced from README.md');
 	});

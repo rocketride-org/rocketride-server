@@ -6,7 +6,7 @@ sidebar_label: Integrate with an SDK
 # Integrate a pipeline with an SDK
 
 Once you have a `.pipe` file, run it from your own application with the
-[Python](/develop/python) or [TypeScript](/develop/typescript) SDK. Both connect to a
+[Python](/clients/python) or [TypeScript](/clients/typescript) SDK. Both connect to a
 running engine, a local server (`ws://localhost:5565`) or RocketRide Cloud
 (`https://api.rocketride.ai`), start the pipeline with `use()`, stream data with
 `send()`, and stop it with `terminate()`.
@@ -35,7 +35,7 @@ async def main():
 asyncio.run(main())
 ```
 
-See the [Python SDK reference](/develop/python) for chat, file uploads, streaming pipes,
+See the [Python SDK reference](/clients/python) for chat, file uploads, streaming pipes,
 events, and persist-mode reconnection.
 
 ## TypeScript
@@ -56,10 +56,10 @@ await client.terminate(token);
 await client.disconnect();
 ```
 
-See the [TypeScript SDK reference](/develop/typescript) for chat, file uploads, streaming
+See the [TypeScript SDK reference](/clients/typescript) for chat, file uploads, streaming
 pipes, events, and persist-mode reconnection.
 
 ## Next
 
 - [Pipeline JSON reference](/reference/pipeline-reference): every field of a `.pipe` file.
-- [Troubleshooting](/operate/troubleshooting): what to check when a run does not behave.
+- [Troubleshooting](/support/troubleshooting): what to check when a run does not behave.

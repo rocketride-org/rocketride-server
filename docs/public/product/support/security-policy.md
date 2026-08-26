@@ -1,9 +1,9 @@
 ---
-title: Security
-sidebar_label: Security
+title: Security Policy
+sidebar_label: Security Policy
 ---
 
-# Security
+# Security Policy
 
 RocketRide is open-source and developed in the open with a documented security process. This
 page summarizes it; the authoritative policy is

@@ -1,18 +1,18 @@
 ---
-title: Observability
+title: WebSocket Events
 ---
 
-# Observability
+# WebSocket Events
 
 RocketRide exposes runtime observability (task lifecycle, periodic status,
 resource metrics, and per-component flow traces) as a **live event stream over
-the same [WebSocket](/protocols/websocket) the engine already speaks**. You open a
+the same [WebSocket](/connect/websocket) the engine already speaks**. You open a
 socket, subscribe to the event types you care about, and the engine pushes events
 as a run unfolds. There is no separate metrics endpoint to scrape and no history
 database to query: it is **not** OpenTelemetry, Prometheus, Sentry, or webhooks. To
 keep history, connect, subscribe, and persist the events as they arrive.
 
-The [TypeScript](/develop/typescript) and [Python](/develop/python) SDKs frame all
+The [TypeScript](/clients/typescript) and [Python](/clients/python) SDKs frame all
 of this for you (`getTaskStatus()`, `onEvent`, `setEvents()` / `add_monitor`), so
 you rarely touch the wire directly. This page documents the protocol surface so you
 can debug it, build a dashboard, or write your own ingester.
@@ -25,10 +25,10 @@ can debug it, build a dashboard, or write your own ingester.
 ## Subscribing: `rrext_monitor`
 
 Subscriptions are managed with the `rrext_monitor` [DAP
-request](/protocols/websocket#requests). The engine keeps a per-connection registry
+request](/connect/websocket#requests). The engine keeps a per-connection registry
 of which event types you want and which tasks they cover. Send it once the
 connection is authenticated (the initial `auth` handshake described on the
-[WebSocket](/protocols/websocket#connection) page):
+[WebSocket](/connect/websocket#connection) page):
 
 ```json
 {
@@ -109,7 +109,7 @@ run. When you start the pipeline (`use()` / `execute`), pass:
 
 ## Events
 
-The engine pushes [events](/protocols/websocket#events) whose `event` field is the
+The engine pushes [events](/connect/websocket#events) whose `event` field is the
 type discriminator and whose `body` carries the payload. Authoritative type
 definitions live in the SDK type modules
 (`packages/client-typescript/src/client/types/events.ts`,
@@ -239,8 +239,8 @@ Besides `rrext_monitor`, sent the same way over the socket:
 
 ## Related
 
-- [WebSocket](/protocols/websocket): the protocol this stream rides on.
-- [TypeScript SDK](/develop/typescript) · [Python SDK](/develop/python): clients
+- [WebSocket](/connect/websocket): the protocol this stream rides on.
+- [TypeScript SDK](/clients/typescript) · [Python SDK](/clients/python): clients
   that wrap subscriptions behind `getTaskStatus()`, `onEvent`, and `setEvents()` /
   `add_monitor`.
 - [Execution model](/concepts/execution-model): how a run streams once started.

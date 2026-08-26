@@ -47,16 +47,10 @@ retrieve more precisely but increase the number of embeddings to store and query
 ## Selecting a memory node
 
 Memory nodes give an agent conversational context across turns. Choose based on
-whether that context needs to survive pipeline restarts:
-
-| Node | Scope | Use when |
-| --- | --- | --- |
-| [`memory_internal`](/nodes/memory_internal) | In-process, single session | The conversation is self-contained and can reset on restart. Zero external dependencies. |
-| [`memory_persistent`](/nodes/memory_persistent) | Persisted to a store, cross-session | The agent must remember previous conversations. Requires a configured backing store. |
-| `tool_mem0` | Semantic, long-term | The agent benefits from extracted facts and preferences rather than raw history. Requires a Mem0 account or self-hosted instance. |
-
-If you don't need cross-session memory, `memory_internal` is the right default —
-it has no dependencies and no latency overhead.
+whether that context needs to survive pipeline restarts — the full strategy
+table lives in [Advanced Agents](/guides/advanced-agents#memory-strategies).
+If you don't need cross-session memory, `memory_internal` is the right
+default — it has no external dependencies and no latency overhead.
 
 ## Agents vs. direct LLM calls
 
@@ -81,16 +75,9 @@ requires tool use.
 ## Lane typing
 
 Data in RocketRide flows through typed lanes. Wiring the wrong lane type is the
-most common configuration error.
-
-| Lane | Carries | Accepted by |
-| --- | --- | --- |
-| `questions` | User queries / prompts | LLMs, vector stores (for retrieval), agents |
-| `answers` | LLM responses | `response` target, downstream nodes expecting generated text |
-| `text` | Raw or parsed text | Preprocessors, embedding nodes, LLMs |
-| `tags` | File metadata objects | Parsers, embedding nodes |
-| `documents` | Vector-ready chunks | Vector store `documents` input |
-| `image` / `audio` / `video` | Media | Vision/audio/video nodes |
+most common configuration error — the canonical lane table (what each lane
+carries and which nodes accept it) lives on the
+[Execution Model](/concepts/execution-model#lane-types) page.
 
 **Common mistake:** wiring `text` to a node that expects `questions`. Text
 arrives but the node waits for a question signal and never processes it. Check
@@ -104,4 +91,4 @@ run the pipeline.
 
 - [Concepts: Execution Model](/concepts/execution-model): how lanes carry data.
 - [Concepts: Agents & Tools](/concepts/agents-tools-skills): when agents are the right abstraction.
-- [Concepts: Error Handling](/concepts/error-handling): what happens when things go wrong.
+- [Concepts: Error Handling](/guides/error-handling): what happens when things go wrong.

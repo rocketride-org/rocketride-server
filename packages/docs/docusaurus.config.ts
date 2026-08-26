@@ -2,7 +2,7 @@ import path from 'path';
 import { themes as prismThemes } from 'prism-react-renderer';
 import type { Config } from '@docusaurus/types';
 import type * as Preset from '@docusaurus/preset-classic';
-import redirects from './redirects';
+import redirects, { createRedirects } from './redirects';
 
 // Use Algolia DocSearch when credentials are present; otherwise fall back to the
 // local search index (matches the previous site).
@@ -90,7 +90,7 @@ const config: Config = {
 				],
 			],
 
-	plugins: [['@docusaurus/plugin-client-redirects', { redirects }]],
+	plugins: [['@docusaurus/plugin-client-redirects', { redirects, createRedirects }]],
 
 	themeConfig: {
 		...(algolia ? { algolia } : {}),

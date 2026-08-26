@@ -35,31 +35,26 @@ When a pipeline starts, the engine:
 For the full picture of how data and control flow at step 4, see the
 [Execution model](/concepts/execution-model).
 
-## One engine, three places to run it
+## One engine, anywhere
 
-The pipeline JSON never changes across environments, only where the engine
-lives does:
-
-- **Locally**: the engine runs on your machine while you build and debug, e.g.
-  behind the [VS Code extension](/ide-extensions/overview).
-- **On-premises**: self-host the engine with Docker inside your own network.
-  See [Self-hosting](/operate/self-hosting).
-- **RocketRide Cloud**: a managed engine you connect to instead of running your
-  own. See [Cloud](/operate/cloud).
+The pipeline JSON never changes across environments — only where the engine
+lives does: locally behind the [VS Code extension](/clients/vscode) while you
+build, self-hosted in your own network, or managed on RocketRide Cloud. See
+[Choose How to Run RocketRide](/operate) for the comparison.
 
 ## Talking to the engine
 
 You never call the engine's internals directly. Clients connect over one of two
 protocols and the engine handles the rest:
 
-- **[WebSocket](/protocols/websocket)**: the native engine protocol. The
-  [TypeScript](/develop/typescript) and [Python](/develop/python) SDKs speak it
+- **[WebSocket](/connect/websocket)**: the native engine protocol. The
+  [TypeScript](/clients/typescript) and [Python](/clients/python) SDKs speak it
   for you.
-- **[MCP](/protocols/mcp)**: exposes running pipelines as tools for AI
+- **[MCP](/connect/mcp)**: exposes running pipelines as tools for AI
   assistants.
 
 As pipelines run, the engine reports call trees, token usage, and memory so you
-can observe what happened. See [Troubleshooting](/operate/troubleshooting) for reading
+can observe what happened. See [Troubleshooting](/support/troubleshooting) for reading
 that signal.
 
 ## Next steps

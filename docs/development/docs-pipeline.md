@@ -71,8 +71,8 @@ environment variable, which `docsEnv()` sets alongside `DOCS_VERSION`,
 **both** `sidebars.ts` (the rendered navigation) and `docs:gather` (mount
 validation and placeholder generation), so the two can never drift apart.
 
-`routeBasePath` is `/`, so **a doc id *is* the public URL**. `evaluate/security`
-is `https://docs.rocketride.org/evaluate/security`. There is no separate route
+`routeBasePath` is `/`, so **a doc id *is* the public URL**. `operate/security`
+is `https://docs.rocketride.org/operate/security`. There is no separate route
 table to keep in step — and no way to move a page without moving its URL.
 
 Node shapes:
@@ -131,10 +131,10 @@ and each backend variant a nested page.
 
   | Source | Mount |
   | --- | --- |
-  | `docs/public/typescript` | `develop/typescript` |
-  | `docs/public/python` | `develop/python` |
-  | `docs/public/vscode` | `ide-extensions/vscode` |
-  | `docs/public/mcp` | `protocols/mcp` |
+  | `docs/public/typescript` | `clients/typescript` |
+  | `docs/public/python` | `clients/python` |
+  | `docs/public/vscode` | `clients/vscode` |
+  | `docs/public/mcp` | `connect/mcp` |
 
 The sweep covers **all** of `docs/public/`, so a new `.md` there with no covering
 mount aborts the build rather than being silently dropped. `docs/public/product/`

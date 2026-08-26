@@ -1,9 +1,8 @@
 ---
-title: Security Model
-sidebar_position: 8
+title: Security
 ---
 
-# Security Model
+# Security
 
 An overview of how RocketRide handles credentials, network exposure, and
 authentication across its components.
@@ -23,7 +22,7 @@ credential store, and no key that grants access to more than one provider.
 ```
 
 Nodes use `${ENV_VAR}` substitution so the key itself never has to appear in the
-`.pipe` file. See [Best Practices: Credential management](/concepts/best-practices#credential-management)
+`.pipe` file. See [Best Practices: Credential management](/guides/best-practices#credential-management)
 for how to keep keys out of version control.
 
 ## Network exposure
@@ -62,7 +61,7 @@ credentials automatically.
 
 ## MCP authentication
 
-The [MCP server](/protocols/mcp) authenticates callers in two ways:
+The [MCP server](/connect/mcp) authenticates callers in two ways:
 
 - **`ROCKETRIDE_AUTH` / `ROCKETRIDE_APIKEY`** — the API key used to connect the
   MCP server to the RocketRide engine. Required; set in the environment.
@@ -91,12 +90,12 @@ use `${...}` references.
 ## Dependency scanning
 
 The RocketRide codebase runs automated dependency scanning (CodeQL, Trivy,
-OpenSSF Scorecard) on every commit. See [Security](/evaluate/security) for the
+OpenSSF Scorecard) on every commit. See [Security](/support/security-policy) for the
 vulnerability reporting process and SLA.
 
 ## Related
 
-- [Best Practices](/concepts/best-practices): credential management patterns.
+- [Best Practices](/guides/best-practices): credential management patterns.
 - [Self-hosting](/operate/self-hosting): network configuration.
-- [MCP Server](/protocols/mcp): MCP-specific authentication.
-- [Security policy](/evaluate/security): vulnerability reporting.
+- [MCP Server](/connect/mcp): MCP-specific authentication.
+- [Security policy](/support/security-policy): vulnerability reporting.

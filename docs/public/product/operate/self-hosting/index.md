@@ -8,7 +8,7 @@ Run the RocketRide [engine](/concepts/runtime-engine) on your own machine when y
 want full control over where data and model calls go. It is the same engine that
 powers [Cloud](/operate/cloud); only the operator changes.
 
-> **Fastest path:** the [VS Code extension](/ide-extensions/overview) manages a
+> **Fastest path:** the [VS Code extension](/clients/vscode) manages a
 > local runtime for you while you build, with no manual setup. Use the steps below
 > when you want to run the engine as a standalone service.
 
@@ -69,7 +69,7 @@ From inside the runtime directory, start the engine. This binds to `127.0.0.1`
 engine.exe ./ai/eaas.py --host=127.0.0.1
 ```
 
-The engine now listens for the [WebSocket protocol](/protocols/websocket) on port
+The engine now listens for the [WebSocket protocol](/connect/websocket) on port
 **5565**. Only pass `--host=0.0.0.0` (all interfaces) once the engine sits behind
 TLS and authentication — see [Connect a client](#connect-a-client) below.
 
@@ -83,7 +83,7 @@ curl http://localhost:5565/ping
 
 ## Connect a client
 
-Point any [SDK](/develop/typescript) or the [CLI](/reference/cli) at the engine. A local
+Point any [SDK](/clients/typescript) or the [CLI](/connect/cli) at the engine. A local
 engine typically needs no auth token:
 
 ```bash
@@ -111,6 +111,6 @@ a node's `config` references the variable rather than the literal secret. See
 ## Related
 
 - [Cloud](/operate/cloud): the managed alternative.
-- [WebSocket protocol](/protocols/websocket): what clients speak to the engine.
+- [WebSocket protocol](/connect/websocket): what clients speak to the engine.
 - [Runtime & engine](/concepts/runtime-engine): what the engine does with a
   pipeline.

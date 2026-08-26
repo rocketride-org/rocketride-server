@@ -37,17 +37,17 @@ describe('toSidebar', () => {
 
 describe('isValidMount', () => {
 	it('accepts an exact mount slot', () => {
-		assert.equal(isValidMount('protocols/mcp'), true);
+		assert.equal(isValidMount('connect/mcp'), true);
 		assert.equal(isValidMount(NODES_DIR), true);
 	});
 
 	it('accepts a descendant of a slot and tolerates slashes', () => {
-		assert.equal(isValidMount('develop/typescript/reference'), true);
-		assert.equal(isValidMount('/protocols/mcp/'), true);
+		assert.equal(isValidMount('clients/typescript/reference'), true);
+		assert.equal(isValidMount('/connect/mcp/'), true);
 	});
 
 	it('rejects a path that is not a slot', () => {
-		assert.equal(isValidMount('protocols'), false);
+		assert.equal(isValidMount('connect'), false);
 		assert.equal(isValidMount('not/a/slot'), false);
 	});
 });
@@ -56,7 +56,7 @@ describe('sectionFor', () => {
 	it('maps a doc id to its owning top-level section', () => {
 		assert.equal(sectionFor('concepts/pipelines'), 'Concepts');
 		assert.equal(sectionFor('nodes/webhook'), 'Nodes');
-		assert.equal(sectionFor('protocols/websocket'), 'Protocols');
+		assert.equal(sectionFor('connect/websocket'), 'Connect');
 	});
 
 	it('falls back to Other for an unknown id', () => {

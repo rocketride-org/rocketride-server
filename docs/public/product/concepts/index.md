@@ -34,16 +34,16 @@ locally, on-premises, and on RocketRide Cloud. See [Runtime & engine](/concepts/
 
 You start and feed pipelines through one of two protocols:
 
-- **[WebSocket](/protocols/websocket)**: the native engine protocol (port 5565). The
-  [TypeScript](/develop/typescript) and [Python](/develop/python) SDKs speak it for you:
+- **[WebSocket](/connect/websocket)**: the native engine protocol (port 5565). The
+  [TypeScript](/clients/typescript) and [Python](/clients/python) SDKs speak it for you:
   `use()` to start a pipeline, `send()`/`pipe()` to stream data, `chat()` for conversational
   flows, `terminate()` to stop.
-- **[MCP](/protocols/mcp)**: expose a pipeline as a tool for AI assistants like Claude and
+- **[MCP](/connect/mcp)**: expose a pipeline as a tool for AI assistants like Claude and
   Cursor.
 
 ## How you build
 
-- **Visually**: the VS Code [extension](/ide-extensions/overview) opens `.pipe` files on a
+- **Visually**: the VS Code [extension](/clients/vscode) opens `.pipe` files on a
   canvas; wire nodes by connecting lanes and press Run.
 - **In code**: author or run the same pipeline from your application with the SDKs.
 

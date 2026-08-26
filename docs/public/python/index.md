@@ -73,7 +73,7 @@ You build your `.pipe` - and you run it against the fastest AI runtime available
 - **Project storage** - Save, retrieve, and version-control pipelines on the server
 - **Async-first** - Built on `asyncio` and `websockets`; supports `async with` context manager
 - **CLI included** - Manage pipelines from the command line
-- **Telemetry reporting** - The shared loose `report()` core via `rocketride.analytics`; each app owns its own event taxonomy ([Analytics / Telemetry Reporting](/develop/python/analytics))
+- **Telemetry reporting** - The shared loose `report()` core via `rocketride.analytics`; each app owns its own event taxonomy ([Analytics / Telemetry Reporting](/clients/python/analytics))
 
 ---
 
@@ -699,7 +699,7 @@ feeds, monitors, and stops pipelines from a shell — no client code required.
 
 Every command and flag, and the places where the Python CLI's arguments differ
 from the TypeScript one's, are documented in the
-[CLI Reference](/reference/cli).
+[CLI Reference](/connect/cli).
 
 ## Configuration
 

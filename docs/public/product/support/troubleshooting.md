@@ -6,22 +6,47 @@ title: Troubleshooting
 
 Common issues when building and running pipelines, and how to fix them.
 
+## How errors are classified
+
+Errors fall into two categories depending on when they occur:
+
+- **Startup errors (init-time)** happen while the engine validates and
+  initialises the pipeline, before any data flows: invalid configuration (a
+  required field missing, a value out of range, a referenced profile that does
+  not exist), a missing Python dependency, a failed validation call (nodes like
+  `llm_openai` make a test API call on startup to verify the key and model),
+  or a lane mismatch. The engine reports the error immediately and the
+  pipeline does not run — no data is processed.
+- **Runtime errors** happen during execution: an LLM API error (rate limit,
+  context overflow, outage), a vector store timeout, a malformed document that
+  cannot be chunked, or an agent exceeding its iteration cap. A runtime error
+  **stops the current pipeline run**; nodes that already streamed output are
+  not rolled back, and concurrent runs on the same pipeline are unaffected.
+
+Either way the engine emits a structured error event over the
+[WebSocket protocol](/connect/websocket) with the node ID, message and type,
+and a stack trace for Python-level errors. The CLI prints these as they
+arrive; SDK clients receive them on the event stream. The full schema is in
+[WebSocket Events](/connect/websocket/observability), and recovery patterns
+(retries, fallbacks, guardrails) live in
+[Error Handling](/guides/error-handling).
+
 ## Can't connect to the engine
 
 - **Connection refused / timeout.** Nothing is listening on the URI. Start a
-  local engine (the [VS Code extension](/ide-extensions/overview) or a
+  local engine (the [VS Code extension](/clients/vscode) or a
   [self-hosted](/operate/self-hosting) container on port 5565), or point
   `ROCKETRIDE_URI` at your [Cloud](/operate/cloud) endpoint.
 - **Unauthorized against Cloud.** Set `ROCKETRIDE_AUTH` (or `ROCKETRIDE_APIKEY`)
   to a valid API token.
 - **Silent insecure downgrade.** Against Cloud, an `http://`/`ws://` (or bare
   `host:port`) URI drops to an unencrypted connection. Use `https://` or
-  `wss://`, see the [WebSocket protocol](/protocols/websocket).
+  `wss://`, see the [WebSocket protocol](/connect/websocket).
 
 ## Pipeline starts but no output comes back
 
 - **Wrong source for the job.** A `chat` source expects `chat()`; a `webhook` /
-  file source expects `send()` / `pipe()` (or [`upload`](/reference/cli)). Driving a chat
+  file source expects `send()` / `pipe()` (or [`upload`](/connect/cli)). Driving a chat
   pipeline with `send()` (or vice versa) produces nothing. Match the method to
   the source node.
 - **Pipeline isn't actually running.** Uploads against a stale or terminated

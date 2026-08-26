@@ -11,6 +11,13 @@ sidebar_position: 1
   Build, debug, and deploy AI pipelines - without leaving your IDE.
 </p>
 
+> **Works in every VS Code-based editor.** The same build supports VS Code and
+> forks such as **Cursor**, **Windsurf**, and **VSCodium** — the visual canvas,
+> runtime management, and pipeline tooling behave identically everywhere. On
+> Cursor and Windsurf the extension additionally writes **RocketRide agent
+> rules** into your workspace so the editor's AI understands how to build
+> RocketRide pipelines.
+
 <p align="center">
   <a href="https://marketplace.visualstudio.com/items?itemName=RocketRide.rocketride"><img src="https://img.shields.io/visual-studio-marketplace/v/RocketRide.rocketride?color=222223&label=Marketplace" alt="VS Code Marketplace" /></a>
   <a href="https://github.com/rocketride-org/rocketride-server"><img src="https://img.shields.io/github/stars/rocketride-org/rocketride-server?style=flat&color=238636&label=GitHub&logo=github&logoColor=white" alt="GitHub" /></a>
@@ -33,7 +40,7 @@ using a visual drag-and-drop canvas or code-first with TypeScript and Python SDK
 
 You build your `.pipe` - and you run it against the fastest AI runtime available.
 
-- **50+ ready-to-use nodes** - 13 LLM providers, 8 vector databases, OCR, NER, PII anonymization, and more
+- **140+ ready-to-use nodes** - 15+ LLM providers, 10+ vector stores, OCR, NER, PII anonymization, and more
 - **High-performance C++ engine** - production-grade speed and reliability
 - **Deploy anywhere** - locally, on-premises, or self-hosted with Docker
 - **MIT licensed** - fully open-source, OSI-compliant

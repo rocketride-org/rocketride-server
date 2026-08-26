@@ -24,20 +24,20 @@ This reads: _take the `questions` lane produced by `qdrant_1` as my input._
 
 ### Lane types
 
-Lanes are typed, and the type must match across a connection. This table is not
-exhaustive — individual nodes can define additional lanes (see each node's
-entry in [Nodes](/nodes)):
+Lanes are typed, and the type must match across a connection. This is the
+canonical lane table; it is not exhaustive — individual nodes can define
+additional lanes (see each node's entry in [Nodes](/nodes)):
 
-| Lane        | Carries                          |
-| ----------- | -------------------------------- |
-| `questions` | Queries flowing toward a model   |
-| `answers`   | Model responses flowing back     |
-| `documents` | Vector-ready chunks              |
-| `text`      | Plain text content               |
-| `tags`      | Structured metadata / parameters |
-| `image`     | Image content                    |
-| `audio`     | Audio streams                    |
-| `video`     | Video streams                    |
+| Lane        | Carries                          | Accepted by                                              |
+| ----------- | -------------------------------- | -------------------------------------------------------- |
+| `questions` | Queries flowing toward a model   | LLMs, vector stores (for retrieval), agents              |
+| `answers`   | Model responses flowing back     | `response` target, nodes expecting generated text        |
+| `documents` | Vector-ready chunks              | Vector store `documents` input                           |
+| `text`      | Plain text content               | Preprocessors, embedding nodes, LLMs                     |
+| `tags`      | Structured metadata / parameters | Parsers, embedding nodes                                 |
+| `image`     | Image content                    | Vision nodes                                             |
+| `audio`     | Audio streams                    | Audio nodes                                              |
+| `video`     | Video streams                    | Video nodes                                              |
 
 ### Lane flow rules
 
@@ -84,12 +84,42 @@ Because data streams rather than buffering, results can begin returning before
 the whole input is consumed, which is what makes conversational `chat()` flows
 feel live.
 
+## How the engine parallelises
+
+The engine is written in C++ and runs each pipeline run on its own thread pool.
+Concurrent requests to the same pipeline do not queue behind each other —
+the engine spawns an independent execution context for each incoming task. A
+slow request (a large document going through OCR, embedding, and an LLM call)
+does not block a fast one (a short question answered directly by the LLM).
+
+### Streaming execution
+
+Nodes process data **as it arrives**, not after the full upstream output is
+available. When a preprocessor splits a 100-page document into 200 chunks, the
+embedding node starts embedding chunk 1 while the preprocessor is still
+producing chunk 2. The vector store starts upserting while the embedder is
+computing later chunks. This keeps memory usage low and reduces end-to-end
+latency, especially for large documents.
+
+### Vector store batching
+
+Vector stores (Qdrant, Pinecone, Milvus, Weaviate, etc.) accumulate chunks and
+flush them in batches rather than upserting one at a time. A batch flushes when
+it reaches either a chunk-count limit or a payload-size limit, whichever comes
+first. The exact thresholds are backend-specific: for example, Qdrant flushes at
+500 points or its payload limit, while Pinecone and Milvus use different
+chunk-count defaults.
+
+For small documents that produce few chunks, the flush happens at pipeline
+completion. For large document sets, flushing starts mid-run and reduces peak
+memory. Tuning batch size is covered in [Performance](/guides/performance).
+
 ## Next steps
 
 - [Agents & tools](/concepts/agents-tools-skills): control connections in
   depth.
 - [Nodes](/concepts/nodes): what sits on each lane.
-- [WebSocket protocol](/protocols/websocket): how clients feed and read a run.
-- [Observability](/protocols/websocket/observability): watch a run stream, with lifecycle, status, metrics, and flow traces.
+- [WebSocket protocol](/connect/websocket): how clients feed and read a run.
+- [Observability](/connect/websocket/observability): watch a run stream, with lifecycle, status, metrics, and flow traces.
 - [Pipeline JSON reference](/reference/pipeline-reference): the `input`, `lane`, and
   `control` fields.

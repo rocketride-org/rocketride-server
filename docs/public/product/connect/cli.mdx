@@ -8,9 +8,13 @@ import { SiPython, SiTypescript } from 'react-icons/si';
 
 The `rocketride` command-line tool starts pipelines, streams files through them,
 and manages the engine's file store — the same operations the
-[SDKs](/develop/typescript) expose, from a terminal. It ships with both the
-[TypeScript](/develop/typescript) and [Python](/develop/python) clients, so
+[SDKs](/clients/typescript) expose, from a terminal. It ships with both the
+[TypeScript](/clients/typescript) and [Python](/clients/python) clients, so
 installing either package puts `rocketride` on your path.
+
+> Driving the engine from an AI assistant instead of a terminal? The
+> [MCP server](/connect/mcp) exposes the same pipeline operations as tools for
+> Claude, Cursor, and other MCP clients.
 
 > **Python vs TypeScript CLI:** Both packages ship a `rocketride` command. The
 > core commands (`start`, `upload`, `status`, `stop`, `store`) are available in
@@ -24,96 +28,20 @@ Install either SDK to get `rocketride` on your path:
 
 <div className="rr-card-grid">
 
-<a className="rr-side-card" href="/develop/python">
+<a className="rr-side-card" href="/clients/python">
   <span className="rr-side-card__head"><SiPython className="rr-card-icon" /><span className="rr-side-card__title">Python SDK</span></span>
   <span className="rr-side-card__body"><code>pip install rocketride</code> — installs the CLI alongside the Python client.</span>
 </a>
 
-<a className="rr-side-card" href="/develop/typescript">
+<a className="rr-side-card" href="/clients/typescript">
   <span className="rr-side-card__head"><SiTypescript className="rr-card-icon" /><span className="rr-side-card__title">TypeScript SDK</span></span>
   <span className="rr-side-card__body"><code>npm install rocketride</code> — installs the CLI alongside the Node.js client.</span>
 </a>
 
 </div>
 
-## Quick Start
-
-The steps below assume you've installed one of the SDKs above. They take you
-from a fresh install to a running pipeline.
-
-### 1. Point at an engine
-
-Set your connection once with environment variables so you don't have to repeat
-them on every command:
-
-```bash
-# Local engine (default — no API key needed)
-export ROCKETRIDE_URI=ws://localhost:5565
-
-# RocketRide Cloud — generate an API key from the online editor
-export ROCKETRIDE_URI=wss://api.rocketride.ai
-export ROCKETRIDE_APIKEY=your-api-key
-```
-
-See [Cloud](/operate/cloud) or [Self-hosting](/operate/self-hosting) for engine setup.
-
-### 2. Start a pipeline
-
-Pass a `.pipe` file and watch events stream back live:
-
-```bash
-# TypeScript CLI
-rocketride start --pipeline ./my-pipeline.pipe
-
-# Python CLI
-rocketride start ./my-pipeline.pipe
-```
-
-The CLI prints a **task token** at the start of the run — copy it, you'll use it
-in the next steps.
-
-```
-task token: ey...
-```
-
-### 3. Upload files through a pipeline
-
-Use `upload` to push one or more files through an extraction or processing
-pipeline:
-
-```bash
-# TypeScript CLI
-rocketride upload --pipeline ./extract.pipe ./document.pdf
-
-# Python CLI
-rocketride upload --pipeline_path ./extract.pipe ./document.pdf
-```
-
-Or feed files into a task that's already running by passing its token:
-
-```bash
-rocketride upload --token <task-token> ./report-q1.pdf ./report-q2.pdf
-```
-
-### 4. Monitor progress
-
-Use the token from step 2 to watch a long-running task in real time:
-
-```bash
-rocketride status --token <task-token>
-```
-
-Press `Ctrl+C` to stop watching — the task keeps running.
-
-### 5. Stop a task
-
-When you're done, or need to cancel early:
-
-```bash
-rocketride stop --token <task-token>
-```
-
----
+New to the CLI? [Run from the CLI](/quickstart/cli) walks from a fresh install
+to a running pipeline in five steps; this page is the command reference.
 
 ## Connecting
 
@@ -312,7 +240,9 @@ Sub-commands:
 
 ## Related
 
-- [TypeScript SDK](/develop/typescript) · [Python SDK](/develop/python): the
+- [Run from the CLI](/quickstart/cli): the five-step tutorial.
+- [TypeScript SDK](/clients/typescript) · [Python SDK](/clients/python): the
   same operations, in code.
-- [WebSocket protocol](/protocols/websocket): what the CLI sends to the engine.
+- [MCP server](/connect/mcp): the same operations, as AI-assistant tools.
+- [WebSocket protocol](/connect/websocket): what the CLI sends to the engine.
 - [Cloud](/operate/cloud) · [Self-hosting](/operate/self-hosting): where the engine runs.

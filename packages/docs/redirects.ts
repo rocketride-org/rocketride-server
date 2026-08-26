@@ -309,47 +309,47 @@ const redirects: RedirectItem[] = [
 		from: ['/source/drag-drop/drag-drop'],
 	},
 	{
-		to: '/develop/typescript',
+		to: '/clients/typescript',
 		from: ['/sdk/node-sdk'],
 	},
 	{
-		to: '/develop/python',
+		to: '/clients/python',
 		from: ['/sdk/python-sdk'],
 	},
 	{
-		to: '/protocols/mcp',
+		to: '/connect/mcp',
 		from: ['/mcp_server/rocketride-mcp-server/rocketride-mcp-server', '/mcp_server/rocketride-mcp-server'],
 	},
 	{
-		to: '/ide-extensions/vscode',
+		to: '/clients/vscode',
 		from: ['/vscode-extension/overview'],
 	},
 	{
-		to: '/ide-extensions/vscode/installation',
+		to: '/clients/vscode/installation',
 		from: ['/vscode-extension/installation'],
 	},
 	{
-		to: '/ide-extensions/vscode/usage',
+		to: '/clients/vscode/usage',
 		from: ['/vscode-extension/usage'],
 	},
 	{
-		to: '/develop/typescript/methods/send',
+		to: '/clients/typescript/methods/send',
 		from: ['/api/send-method/send-method'],
 	},
 	{
-		to: '/develop/typescript/methods/use',
+		to: '/clients/typescript/methods/use',
 		from: ['/api/use-method/use-method'],
 	},
 	{
-		to: '/develop/typescript/methods/validate',
+		to: '/clients/typescript/methods/validate',
 		from: ['/api/validate-method/validate-method'],
 	},
 	{
-		to: '/develop/typescript/methods/get-task-status',
+		to: '/clients/typescript/methods/get-task-status',
 		from: ['/api/get-task-status-method/get-task-status-method'],
 	},
 	{
-		to: '/develop/typescript/methods/terminate',
+		to: '/clients/typescript/methods/terminate',
 		from: ['/api/terminate-method/terminate-method'],
 	},
 	{
@@ -361,7 +361,7 @@ const redirects: RedirectItem[] = [
 		from: ['/nodes-overview'],
 	},
 	{
-		to: '/ide-extensions/overview',
+		to: '/clients/vscode',
 		from: ['/ide-extensions/cursor', '/ide-extensions/windsurf'],
 	},
 	{
@@ -389,12 +389,17 @@ const redirects: RedirectItem[] = [
 		from: ['/integrations/qdrant'],
 	},
 	{
-		to: '/protocols/websocket',
+		to: '/connect/websocket',
 		from: ['/protocols/websocket/crash-reporting'],
 	},
 	{
 		to: '/quickstart/ide-walkthrough',
 		from: ['/evaluate/use-cases'],
+	},
+	{
+		// IA restructure phase 1: page retired, pitch folded into the homepage.
+		to: '/',
+		from: ['/evaluate/why-rocketride'],
 	},
 	{
 		to: '/operate/cloud',
@@ -405,7 +410,7 @@ const redirects: RedirectItem[] = [
 		from: ['/self-hosting'],
 	},
 	{
-		to: '/operate/troubleshooting',
+		to: '/support/troubleshooting',
 		from: ['/troubleshooting'],
 	},
 	{
@@ -413,13 +418,91 @@ const redirects: RedirectItem[] = [
 		from: ['/pipeline-reference'],
 	},
 	{
-		to: '/reference/cli',
+		to: '/connect/cli',
 		from: ['/cli'],
 	},
 	{
 		to: '/reference/glossary',
 		from: ['/glossary'],
 	},
+	// IA restructure phase 3 (claude/tasks/docs-ia-restructure/plan.md): the
+	// journey-order spine renamed these routes; mounted subtrees are covered by
+	// createRedirects below.
+	{
+		to: '/concepts',
+		from: ['/evaluate/understanding'],
+	},
+	{
+		to: '/support/security-policy',
+		from: ['/evaluate/security'],
+	},
+	{
+		to: '/operate/security',
+		from: ['/concepts/security-model'],
+	},
+	{
+		to: '/guides/performance',
+		from: ['/concepts/performance'],
+	},
+	{
+		to: '/guides/error-handling',
+		from: ['/concepts/error-handling'],
+	},
+	{
+		to: '/guides/advanced-agents',
+		from: ['/concepts/advanced-agents'],
+	},
+	{
+		to: '/guides/best-practices',
+		from: ['/concepts/best-practices'],
+	},
+	{
+		to: '/clients',
+		from: ['/develop/clients'],
+	},
+	{
+		to: '/guides/apps',
+		from: ['/develop/apps'],
+	},
+	{
+		to: '/connect/websocket',
+		from: ['/protocols/websocket'],
+	},
+	{
+		to: '/connect/websocket/observability',
+		from: ['/protocols/websocket/observability'],
+	},
+	{
+		to: '/connect/n8n',
+		from: ['/integrations/n8n'],
+	},
+	{
+		to: '/clients/vscode',
+		from: ['/ide-extensions/overview'],
+	},
+	{
+		to: '/support/troubleshooting',
+		from: ['/operate/troubleshooting'],
+	},
+	{
+		to: '/connect/cli',
+		from: ['/reference/cli'],
+	},
 ];
+
+// Mounted subtrees renamed by the IA restructure: for every page under a new
+// prefix, emit the matching old-prefix URL as a redirect source. Covers the
+// generated/mounted pages an exact list can't enumerate.
+const MOVED_PREFIXES: Array<[oldPrefix: string, newPrefix: string]> = [
+	['/develop/typescript', '/clients/typescript'],
+	['/develop/python', '/clients/python'],
+	['/ide-extensions/vscode', '/clients/vscode'],
+	['/protocols/mcp', '/connect/mcp'],
+];
+
+export function createRedirects(existingPath: string): string[] | undefined {
+	const sources = MOVED_PREFIXES.filter(([, newPrefix]) => existingPath === newPrefix || existingPath.startsWith(`${newPrefix}/`)).map(([oldPrefix, newPrefix]) => oldPrefix + existingPath.slice(newPrefix.length));
+	return sources.length ? sources : undefined;
+}
 
 export default redirects;

@@ -19,6 +19,8 @@ import { VscVscode } from 'react-icons/vsc';
 
 RocketRide is an open-source runtime for AI pipelines. Pipelines are portable JSON — version-controlled, shareable, and executed by a multithreaded C++ core that runs the same way on your laptop, your servers, or RocketRide Cloud.
 
+Batteries included, nothing locked in: [140+ ready-to-use nodes](/nodes) spanning 15+ LLM providers, 10+ vector stores, OCR, NER, PII anonymization, transcription, and web tools. Swap providers by editing config, not code, trace every call and token as pipelines run, and ship it all under the MIT license.
+
 <div className="rr-hero-actions">
   <a className="rr-btn rr-btn--primary" href="/quickstart">Get Started</a>
   <a className="rr-btn rr-btn--secondary" href="/concepts/pipelines">Core Concepts</a>
@@ -56,19 +58,19 @@ New to RocketRide? Start here: run a working pipeline and pick up the core conce
 ## Explore more
 
 <CardGrid columns={3}>
-  <Card href="/develop/typescript" title="TypeScript SDK" icon={<SiTypescript />}>
+  <Card href="/clients/typescript" title="TypeScript SDK" icon={<SiTypescript />}>
     Deploy, run, and observe pipelines from your TypeScript app.
   </Card>
-  <Card href="/develop/python" title="Python SDK" icon={<SiPython />}>
+  <Card href="/clients/python" title="Python SDK" icon={<SiPython />}>
     The same client surface, native to Python.
   </Card>
   <Card href="/nodes" title="Nodes" icon={<LuBlocks />}>
     The full catalog: LLMs, vector stores, parsers, tools, and more.
   </Card>
-  <Card href="/protocols/mcp" title="MCP" icon={<LuPlug />}>
+  <Card href="/connect/mcp" title="MCP" icon={<LuPlug />}>
     Expose any pipeline as an MCP tool for AI assistants.
   </Card>
-  <Card href="/ide-extensions/vscode" title="VS Code Extension" icon={<VscVscode />}>
+  <Card href="/clients/vscode" title="VS Code Extension" icon={<VscVscode />}>
     Build, run, and debug pipelines visually in your editor.
   </Card>
   <Card href="/reference/pipeline-reference" title="Pipeline Reference" icon={<LuBookOpen />}>

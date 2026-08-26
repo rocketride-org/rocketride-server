@@ -5,8 +5,8 @@ title: WebSocket
 # WebSocket protocol
 
 The RocketRide [engine](/concepts/runtime-engine) speaks a native **WebSocket**
-protocol. Every consumer (the [TypeScript](/develop/typescript) and
-[Python](/develop/python) SDKs and the [MCP server](/protocols/mcp)) connects
+protocol. Every consumer (the [TypeScript](/clients/typescript) and
+[Python](/clients/python) SDKs and the [MCP server](/connect/mcp)) connects
 over this one socket to start pipelines and stream results. You rarely touch it
 directly; the SDKs frame the messages for you. This page documents what they
 send so you can debug, trace, or build your own client.
@@ -113,7 +113,7 @@ the client matches it to the task it started.
 
 The engine can also push a dedicated monitoring stream (task lifecycle, periodic
 status snapshots, resource metrics, and per-component flow traces) over this same
-socket. See [Observability](/protocols/websocket/observability).
+socket. See [Observability](/connect/websocket/observability).
 
 ## A session, end to end
 
@@ -149,11 +149,11 @@ command.
 
 ## Related
 
-- [Observability](/protocols/websocket/observability): monitoring events and
+- [Observability](/connect/websocket/observability): monitoring events and
   metrics over this socket.
-- [MCP](/protocols/mcp): pipelines-as-tools for AI assistants, transported over
+- [MCP](/connect/mcp): pipelines-as-tools for AI assistants, transported over
   this socket.
-- [TypeScript SDK](/develop/typescript) · [Python SDK](/develop/python): the
+- [TypeScript SDK](/clients/typescript) · [Python SDK](/clients/python): the
   clients that speak this protocol.
 - [Pipeline JSON Reference](/reference/pipeline-reference): the `.pipe` payload shape.
 - [Execution model](/concepts/execution-model): how a run streams once started.

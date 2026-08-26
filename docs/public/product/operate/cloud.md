@@ -11,7 +11,7 @@ pipelines, no infrastructure to provision.
 
 ## Connecting
 
-Set two values and any [SDK](/develop/typescript) or the [CLI](/reference/cli) connects:
+Set two values and any [SDK](/clients/typescript) or the [CLI](/connect/cli) connects:
 
 | Variable          | Value                                            |
 | ----------------- | ------------------------------------------------ |
@@ -26,23 +26,15 @@ ROCKETRIDE_AUTH=your-api-token
 > **Always use `https://` or `wss://` for Cloud.** An `http://`, `ws://`, or
 > bare `host:port` URI silently downgrades to an unencrypted connection. The
 > secure scheme upgrades to `wss://` under the hood, see the
-> [WebSocket protocol](/protocols/websocket).
+> [WebSocket protocol](/connect/websocket).
 
-## Cloud vs. self-hosting
-
-|          | Cloud                             | [Self-hosting](/operate/self-hosting)          |
-| -------- | --------------------------------- | -------------------------------------- |
-| Engine   | Managed for you                   | You run it (Docker / on-prem)          |
-| Endpoint | `https://api.rocketride.ai`       | `ws://localhost:5565` (or your host)   |
-| Auth     | API token required                | Optional locally                       |
-| Best for | Getting started, hosted workloads | Private data, full control, air-gapped |
-
-The pipeline JSON is identical either way: the same `.pipe` file runs unchanged
-against Cloud or your own engine.
+Weighing Cloud against running the engine yourself? The comparison lives on
+[Choose How to Run RocketRide](/operate).
 
 ## Related
 
 - [Quickstart](/quickstart): run your first pipeline.
+- [Choose How to Run RocketRide](/operate): Cloud vs. self-hosting.
 - [Self-hosting](/operate/self-hosting): run the engine yourself.
-- [TypeScript SDK](/develop/typescript) · [Python SDK](/develop/python) ·
-  [CLI](/reference/cli): clients that connect to Cloud.
+- [TypeScript SDK](/clients/typescript) · [Python SDK](/clients/python) ·
+  [CLI](/connect/cli): clients that connect to Cloud.

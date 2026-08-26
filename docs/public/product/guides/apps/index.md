@@ -25,7 +25,7 @@ A complete guide for developers building micro-frontend applications for the Roc
 13. [Cross-App Component Loading](#cross-app-component-loading)
 14. [Theming](#theming)
 15. [Build Configuration](#build-configuration)
-16. [Reference: Complete API Surface](#reference-complete-api-surface)
+16. [Reference: Complete API Surface](/guides/apps/reference)
 
 ---
 
@@ -924,26 +924,6 @@ Key points:
 
 ---
 
-## Reference: Complete API Surface
-
-Everything below is exported from `'rocketride/app-sdk'`.
-
-### Types
-
-`ShellAppProps`, `ShellSidebarProps`, `WorkspacePrefs`, `WorkspaceState`, `AppWorkspaceState`, `AppManifestEntry`, `AppDescriptor`, `AppSettingDefinition`, `ShellConfig`, `ShellBrandingConfig`, `ShellThemeConfig`, `ShellThemeOption`, `ShellAccountConfig`, `ShellApiConfig`, `ShellEventMap`, `DebugLogEntry`, `WorkspaceAction`, `IWorkspaceContext`, `AuthUser`, `Document`, `Editor`, `EditorGroup`, `SplitOrientation`, `DocumentsState`, `IVirtualFileSystem`, `DocExplorerProps`, `DocExplorerConfig`, `DocEntry`, `DocEntryChild`, `DocEntryStatus`, `DocTabsProps`, `UseAppComponentResult`, `ShellToIframeMsg`, `IframeToShellMsg`, `ShellInitMsg`, `InitClientOptions`, `ShellProps`, `SidebarProps`
-
-### Hooks
-
-`useShellConnection()`, `useShellApiConfig()`, `useWorkspace()`, `useAuthUser()`, `useLogout()`, `useSubscriptions()`, `useAppComponent()`, `useShellEvents()`, `useShellEvent()`, `useClient()`, `useConnectionStatus()`, `usePolling()`, `useClickOutside()`, `useFixedPopupPosition()`
-
-### Functions
-
-`connectionManager.emit()`, `connectionManager.on()`, `connectionManager.getClient()`, `connectionManager.isConnected()`, `getDebugLog()`, `clearDebugLog()`, `onAny()`, `getClient()`
-
-### Classes
-
-`Documents`: instantiable document model with methods: `openDocument()`, `openStaticDocument()`, `createDocument()`, `closeEditor()`, `updateContent()`, `saveDocument()`, `revertDocument()`, `splitGroup()`, `splitGroupWithDocument()`, `moveEditor()`, `closeGroup()`, `updateSplitSizes()`, `setActiveEditor()`, `setActiveGroup()`, `updateEditorViewport()`, `updateEditorViewState()`, `getState()`, `getDocument()`, `useStore()`, `destroy()`
-
-### Components
-
-`Shell`, `Sidebar`, `NavButton`, `BottomPanel`, `ConfirmDialog`, `DebugPanel`, `PopupRow`, `AccountPage`, `BillingPage`, `SettingsPage`, `DocExplorer`, `DocTabs`, `DocSplitLayout`
+The complete export list — every type, hook, function, class, and component in
+`'rocketride/app-sdk'` — lives on the
+[Shell Apps API reference](/guides/apps/reference).

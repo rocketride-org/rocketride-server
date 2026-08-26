@@ -22,13 +22,17 @@ URIs: clients accept `http`/`https` or `ws`/`wss` and convert to WebSocket (`htt
 
 ## Client SDK Documentation
 
-| Client         | Package          | Document                              |
-| -------------- | ---------------- | ------------------------------------- |
-| **TypeScript** | `rocketride`     | [TypeScript SDK](/develop/typescript) |
-| **Python**     | `rocketride`     | [Python SDK](/develop/python)         |
-| **MCP**        | `rocketride-mcp` | [MCP server](/protocols/mcp)          |
+| Client         | Package          | Document                                    |
+| -------------- | ---------------- | ------------------------------------------- |
+| **TypeScript** | `rocketride`     | [TypeScript SDK](/clients/typescript)       |
+| **Python**     | `rocketride`     | [Python SDK](/clients/python)               |
+| **VS Code**    | `rocketride` (extension) | [VS Code Extension](/clients/vscode) |
+| **MCP**        | `rocketride-mcp` | [MCP server](/connect/mcp)                  |
 
 Each document lists every constructor option, method, type, and usage example for that client.
+
+Both SDK packages also install the [`rocketride` CLI](/connect/cli) — the same
+operations from a terminal.
 
 ---
 
