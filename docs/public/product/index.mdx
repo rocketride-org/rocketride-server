@@ -9,67 +9,81 @@ pagination_next: null
 pagination_prev: null
 ---
 
-import { LuZap, LuCode, LuRocket, LuCloud, LuPlug, LuTimer } from 'react-icons/lu';
+import { LuZap, LuCode, LuRocket, LuCloud, LuPlug, LuBlocks, LuBookOpen } from 'react-icons/lu';
 import { SiPython, SiTypescript, SiDiscord, SiGithub } from 'react-icons/si';
+import { VscVscode } from 'react-icons/vsc';
 
-# RocketRide Docs
+<div className="rr-hero">
 
-<div className="rr-sdk-icons">
-  <a href="/develop/python" title="Python SDK" aria-label="Python SDK"><SiPython style={{color: '#3776AB'}} /></a>
-  <a href="/develop/typescript" title="TypeScript SDK" aria-label="TypeScript SDK"><SiTypescript style={{color: '#3178C6'}} /></a>
+# Build it once. Run it <span className="rr-accent">anywhere</span>.
+
+RocketRide is an open-source runtime for AI pipelines. Pipelines are portable JSON — version-controlled, shareable, and executed by a multithreaded C++ core that runs the same way on your laptop, your servers, or RocketRide Cloud.
+
+<div className="rr-hero-actions">
+  <a className="rr-btn rr-btn--primary" href="/quickstart">Get Started</a>
+  <a className="rr-btn rr-btn--secondary" href="/concepts/pipelines">Core Concepts</a>
 </div>
 
-<div className="row">
-<div className="col col--7 rr-hero-summary">
-
-## Build AI workflows that run anywhere
-
-RocketRide is an open-source runtime for AI pipelines. Pipelines are portable JSON: version-controlled, shareable, and executed by a multithreaded C++ core that runs the same way on your laptop, your servers, or RocketRide Cloud. Build visually in VS Code, integrate with a few lines of TypeScript or Python, and trace every LLM call, token, and millisecond as it happens.
-
-RocketRide sits one layer below your application and your agent framework. It handles the models, vector stores, observability, and orchestration that come after the code, so you can swap providers, scale workloads, and ship production AI without rebuilding your stack every time the landscape shifts.
-
-<a className="button button--primary button--lg rr-quickstart-btn" href="/quickstart"><LuTimer className="rr-quickstart-btn__icon" /> Quickstart</a>
-
-</div>
-<div className="col col--5">
-
-<a className="rr-side-card" href="/quickstart">
-  <span className="rr-side-card__head"><LuZap className="rr-card-icon" /><span className="rr-side-card__title">Quickstart</span></span>
-  <span className="rr-side-card__body">Install the extension, deploy a local runtime, and run your first pipeline in minutes.</span>
-</a>
-
-<a className="rr-side-card" href="/develop/typescript">
-  <span className="rr-side-card__head"><LuCode className="rr-card-icon" /><span className="rr-side-card__title">Developer Guides</span></span>
-  <span className="rr-side-card__body">Drop pipelines into your TypeScript or Python application with the SDKs.</span>
-</a>
-
-<a className="rr-side-card" href="/operate/self-hosting">
-  <span className="rr-side-card__head"><LuRocket className="rr-card-icon" /><span className="rr-side-card__title">Deploy</span></span>
-  <span className="rr-side-card__body">Run on Docker, on-prem, or one-click deploy to RocketRide Cloud.</span>
-</a>
-
-<a className="rr-side-card" href="https://discord.gg/PMXrtenMsY">
-  <span className="rr-side-card__head"><SiDiscord className="rr-card-icon" /><span className="rr-side-card__title">Discord Community</span></span>
-  <span className="rr-side-card__body">Join the Discord, ask questions, show what you built.</span>
-</a>
-
-</div>
 </div>
 
-<div className="rr-features">
-  <div className="rr-feature">
-    <LuPlug />
-    <span className="rr-feature__title">Protocols</span>
-    <span className="rr-feature__body">Connect over <a href="/protocols/websocket">WebSocket</a>, or expose any pipeline as an MCP tool for AI assistants.</span>
-  </div>
-  <div className="rr-feature">
-    <LuCloud />
-    <span className="rr-feature__title">RocketRide Cloud</span>
-    <span className="rr-feature__body">Managed hosting at <a href="/operate/cloud">rocketride.ai</a>. Same pipeline JSON, zero infrastructure.</span>
-  </div>
-  <div className="rr-feature">
-    <SiGithub />
-    <span className="rr-feature__title">Contribute</span>
-    <span className="rr-feature__body">Chart the course to the next frontier. Join the RocketRide journey on <a href="https://github.com/rocketride-org">GitHub</a>.</span>
-  </div>
-</div>
+<span className="rr-kicker">01 · Build</span>
+## Build your first pipeline
+
+New to RocketRide? Start here: run a working pipeline and pick up the core concepts along the way.
+
+<CardGrid>
+  <Card href="/quickstart/ide-walkthrough" title="Build in your IDE" icon={<LuZap />}>
+    Install the VS Code extension, deploy a local runtime, and assemble a pipeline visually in minutes.
+  </Card>
+  <Card href="/quickstart/sdk-integration" title="Integrate with an SDK" icon={<LuCode />}>
+    Drop pipelines into your TypeScript or Python application with a few lines of code.
+  </Card>
+</CardGrid>
+
+<span className="rr-kicker">02 · Run</span>
+## Choose how you run RocketRide
+
+<CardGrid>
+  <Card href="/operate/cloud" title="RocketRide Cloud" icon={<LuCloud />}>
+    Start building right away on the managed platform. Same pipeline JSON, zero infrastructure to manage.
+  </Card>
+  <Card href="/operate/self-hosting" title="Self-host" icon={<LuRocket />}>
+    Run the runtime on your own infrastructure — Docker, on-prem, or anywhere the engine builds.
+  </Card>
+</CardGrid>
+
+<span className="rr-kicker">03 · Explore</span>
+## Explore more
+
+<CardGrid columns={3}>
+  <Card href="/develop/typescript" title="TypeScript SDK" icon={<SiTypescript />}>
+    Deploy, run, and observe pipelines from your TypeScript app.
+  </Card>
+  <Card href="/develop/python" title="Python SDK" icon={<SiPython />}>
+    The same client surface, native to Python.
+  </Card>
+  <Card href="/nodes" title="Nodes" icon={<LuBlocks />}>
+    The full catalog: LLMs, vector stores, parsers, tools, and more.
+  </Card>
+  <Card href="/protocols/mcp" title="MCP" icon={<LuPlug />}>
+    Expose any pipeline as an MCP tool for AI assistants.
+  </Card>
+  <Card href="/ide-extensions/vscode" title="VS Code Extension" icon={<VscVscode />}>
+    Build, run, and debug pipelines visually in your editor.
+  </Card>
+  <Card href="/reference/pipeline-reference" title="Pipeline Reference" icon={<LuBookOpen />}>
+    Every field of the portable pipeline JSON format.
+  </Card>
+</CardGrid>
+
+<span className="rr-kicker">04 · Community</span>
+## Community
+
+<CardGrid>
+  <Card href="https://discord.gg/PMXrtenMsY" title="Discord" icon={<SiDiscord />}>
+    Share what you're building, swap ideas, and get help from the community.
+  </Card>
+  <Card href="https://github.com/rocketride-org" title="GitHub" icon={<SiGithub />}>
+    RocketRide is open source. Report bugs, discuss in issues, and contribute code.
+  </Card>
+</CardGrid>

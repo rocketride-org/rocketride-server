@@ -1,11 +1,15 @@
 /**
  * RocketRide documentation theme.
  *
- * Primary accent: Horizon Blue (#41b6e6). Imperial Indigo (#370b7a) lights the
- * ambient background glow; Night Amethyst (#5f2167) tints highlights and text
- * selection. RocketRide red (#F93822) is reserved for the logo. Layout models the
- * Devdocs X reference: a floating, rounded Graphite panel on a deep Abyss
- * background. Dark is the default; light mode mirrors the surfaces.
+ * Design language ported from the RocketRide marketing/cloud landing:
+ * RocketRide red-orange (#F93822) is the single star accent against either a
+ * warm paper field with a faint dot grid (light) or the near-black purple
+ * Abyss Deep field (dark). Uppercase Ubuntu Mono kickers label groups and
+ * controls; surfaces are squared with hairline ink borders; linked cards
+ * invert their contrast on hover; the primary CTA is a dark block with a
+ * hard orange offset shadow. Layout keeps the Dify/Mintlify docs skeleton:
+ * slim navbar with centered search, group-header sidebar with pill items, a
+ * centered reading column, and an "On this page" rail on the right.
  */
 
 :root {
@@ -13,36 +17,36 @@
 	--rr-red: #f93822;
 	--rr-offwhite: #fafbf8;
 	--rr-abyss: #1e1a34;
-	--rr-graphite: #222223;
-	--rr-amethyst: #5f2167;
-	--rr-indigo: #370b7a;
-	--rr-horizon: #41b6e6;
+	--rr-abyss-deep: #14111d; /* marketing hero/dark-section field */
+	--rr-paper: #f0efea; /* warm grey page field behind the dot grid */
+	--rr-ink: #16131c;
 
-	/* On-surface accent ramp. The saturated brand hexes read well on white, so
-	 * light mode uses them directly (Horizon darkened to match --ifm-color-primary);
-	 * dark mode lightens indigo/amethyst so they stay legible on the Abyss field. */
-	--rr-accent-horizon: #1f9fd0;
-	--rr-accent-indigo: #370b7a;
-	--rr-accent-amethyst: #5f2167;
+	/* Single-accent system: every --card-accent consumer follows the star. */
+	--rr-accent: var(--rr-red);
 
 	--ifm-font-family-base: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
 	--ifm-heading-font-family: var(--ifm-font-family-base);
+	--rr-font-mono: 'Ubuntu Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+	--ifm-font-family-monospace: var(--rr-font-mono);
 	--ifm-code-font-size: 92%;
 
-	/* Light mode: Horizon darkened for contrast on white */
-	--ifm-color-primary: #1f9fd0;
-	--ifm-color-primary-dark: #1c8ebb;
-	--ifm-color-primary-darker: #1a86b1;
-	--ifm-color-primary-darkest: #156e92;
-	--ifm-color-primary-light: #34a8d6;
-	--ifm-color-primary-lighter: #41aed8;
-	--ifm-color-primary-lightest: #67c0e1;
+	/* NOTE: the --ifm-color-primary ramp is set in the :not(#\#) blocks below —
+	 * Infima build-injects its default blue ramp at specificity (2,0,1), so a
+	 * plain :root definition here would silently lose to it. */
 
-	--rr-outer-bg: linear-gradient(135deg, #eef1f6 0%, #e6ebf3 100%);
+	--rr-outer-bg: var(--rr-paper);
+	--rr-grid-dot: rgba(20, 17, 29, 0.1);
 	--ifm-background-color: #ffffff;
-	--ifm-background-surface-color: #f5f7fb;
-	--rr-panel-border: rgba(30, 26, 52, 0.08);
+	--ifm-background-surface-color: #f5f4f0;
+	--rr-panel-border: rgba(20, 17, 29, 0.12);
 	--ifm-toc-border-color: transparent;
+
+	/* Dify-style reading rhythm: a measured column with generous leading. */
+	--ifm-line-height-base: 1.7;
+	--ifm-h1-font-size: 2.1rem;
+	--ifm-h2-font-size: 1.45rem;
+	--ifm-h3-font-size: 1.15rem;
+	--rr-content-measure: 46rem;
 
 	/* Private surface token. Infima forces --ifm-background-color via a
 	 * build-injected :root:not(#\#):not(#\#) rule (specificity 2,0,1) that our
@@ -54,35 +58,22 @@
 }
 
 [data-theme='dark'] {
-	/* Horizon Blue accent ramp */
-	--ifm-color-primary: #41b6e6;
-	--ifm-color-primary-dark: #2aa9de;
-	--ifm-color-primary-darker: #1f9fd0;
-	--ifm-color-primary-darkest: #1982ac;
-	--ifm-color-primary-light: #5cc0ea;
-	--ifm-color-primary-lighter: #6ac6ec;
-	--ifm-color-primary-lightest: #8fd4f1;
+	/* Near-black purple field (marketing dark sections), faint white grid. */
+	--rr-outer-bg: var(--rr-abyss-deep);
+	--rr-grid-dot: rgba(250, 251, 248, 0.06);
+	--ifm-background-color: var(--rr-abyss-deep);
+	--ifm-background-surface-color: #1a1626;
+	--rr-panel-border: rgba(255, 255, 255, 0.09);
 
-	/* Indigo glow fading into the Abyss field; Graphite panel floats on top. */
-	--rr-outer-bg: radial-gradient(1200px 600px at 50% -10%, var(--rr-indigo) 0%, var(--rr-abyss) 55%, var(--rr-abyss) 100%);
-	--ifm-background-color: var(--rr-abyss);
-	--ifm-background-surface-color: var(--rr-abyss);
-	--rr-panel-border: rgba(255, 255, 255, 0.07);
-
-	--ifm-font-color-base: #e7e6f0;
+	--ifm-font-color-base: #e9e7ef;
 	--ifm-heading-color: var(--rr-offwhite);
-	--rr-surface: var(--rr-graphite);
+	--rr-surface: #191524;
 	--ifm-menu-color: rgba(250, 251, 248, 0.72);
 	--ifm-menu-color-background-hover: rgba(255, 255, 255, 0.05);
 	--ifm-toc-border-color: transparent;
 	--ifm-hr-background-color: rgba(255, 255, 255, 0.08);
 
-	--docusaurus-highlighted-code-line-bg: rgba(95, 33, 103, 0.28);
-
-	/* Lightened accents so indigo/amethyst read on the dark Abyss field. */
-	--rr-accent-horizon: #41b6e6;
-	--rr-accent-indigo: #9d86f0; /* periwinkle */
-	--rr-accent-amethyst: #c77ad6; /* orchid */
+	--docusaurus-highlighted-code-line-bg: rgba(249, 56, 34, 0.16);
 }
 
 /* Infima ships the surface tokens via build-injected :root:not(#\#):not(#\#) and
@@ -91,31 +82,52 @@
  * table headers, mobile sidebar, search modal) on Infima's off-palette #1b1b1d /
  * #242526. Match the hack (and the `html` prefix for dark) to force them on-palette. */
 :root:not(#\#):not(#\#) {
+	/* Primary ramp: RocketRide red-orange, darkened a step for link contrast
+	 * on the light paper field. Lives here (not plain :root) because Infima
+	 * injects its default blue ramp at the same (2,0,1) specificity. */
+	--ifm-color-primary: #db2c12;
+	--ifm-color-primary-dark: #c52710;
+	--ifm-color-primary-darker: #ba250f;
+	--ifm-color-primary-darkest: #991e0c;
+	--ifm-color-primary-light: #ef3b1f;
+	--ifm-color-primary-lighter: #f93822;
+	--ifm-color-primary-lightest: #fb6a58;
+
 	--ifm-background-color: #ffffff;
-	--ifm-background-surface-color: #f5f7fb;
+	--ifm-background-surface-color: #f5f4f0;
+	--ifm-heading-color: var(--rr-ink);
 	/* Infima build-injects --ifm-heading-font-weight: var(--ifm-font-weight-bold)
 	 * at (2,0,1), beating our plain :root — match the hack so headings render at
-	 * the intended 500. */
-	--ifm-heading-font-weight: 500;
+	 * the marketing weight. */
+	--ifm-heading-font-weight: 700;
 	/* Infima also boosts its .navbar/.footer element rules to (2,1,0), so they
 	 * win over class overrides — feed their tokens the surface color instead, so
 	 * navbar and footer paint identically. */
 	--ifm-navbar-background-color: var(--rr-surface);
 	--ifm-footer-background-color: var(--rr-surface);
-	/* Imperial Indigo links on the light surfaces; Horizon Blue in dark (below). */
-	--ifm-link-color: var(--rr-indigo);
-	/* Active sidebar item follows the link color, not the primary ramp; no
-	 * background fill (Infima's default is a grey hover-overlay). */
+	/* The star carries the links (contrast-darkened ramp in light mode). */
+	--ifm-link-color: var(--ifm-color-primary);
+	/* Active sidebar item follows the star with a soft pill fill. */
 	--ifm-menu-color-active: var(--ifm-link-color);
-	--ifm-menu-color-background-active: transparent;
+	--ifm-menu-color-background-active: color-mix(in srgb, var(--rr-red) 9%, transparent);
 }
 
 html[data-theme='dark']:not(#\#):not(#\#) {
-	--ifm-background-color: var(--rr-abyss);
-	--ifm-background-surface-color: var(--rr-abyss);
+	/* The star lightened a step so links read on the Abyss Deep field. */
+	--ifm-color-primary: #ff5a41;
+	--ifm-color-primary-dark: #f93822;
+	--ifm-color-primary-darker: #ef3b1f;
+	--ifm-color-primary-darkest: #db2c12;
+	--ifm-color-primary-light: #ff7057;
+	--ifm-color-primary-lighter: #ff7d66;
+	--ifm-color-primary-lightest: #ffa294;
+
+	--ifm-background-color: var(--rr-abyss-deep);
+	--ifm-background-surface-color: #1a1626;
+	--ifm-heading-color: var(--rr-offwhite);
 	--ifm-navbar-background-color: var(--rr-surface);
 	--ifm-footer-background-color: var(--rr-surface);
-	--ifm-link-color: var(--rr-horizon);
+	--ifm-link-color: var(--ifm-color-primary);
 }
 
 /* ----------------------------------------------------------------------------
@@ -139,33 +151,34 @@ html[data-theme='dark']:not(#\#):not(#\#) {
  *   - breadcrumb active (current page) crumb color
  *   - right TOC "on this page": resting = body text, active = link color + bold
  *   - home/quickstart side cards: no underline on hover; accent border
- *   - quickstart CTA button background
  *   - no doubled page title (see the .rr-doc-header rule below)
  * If any reverts, the Infima selector specificity changed; re-match the hack.
  * ------------------------------------------------------------------------- */
 
 /* ----------------------------------------------------------------------------
- * Floating rounded panel on a deep background (Devdocs X look)
+ * Page field: warm paper (light) / Abyss Deep (dark) with a faint dot grid,
+ * exactly like the marketing hero background. The app shell is transparent so
+ * the grid shows behind sidebar and content; the navbar stays a solid surface.
  * ------------------------------------------------------------------------- */
-html,
+/* Docusaurus injects `html:not(#\#):not(#\#) { background-color: var(--ifm-
+ * background-color) }` at (2,0,1) — match the hack so the paper field (not
+ * white) paints the viewport all the way down, however short the body is. */
+html:not(#\#):not(#\#),
 body {
-	background: var(--rr-outer-bg);
-	background-attachment: fixed;
+	background-color: var(--rr-outer-bg);
+	background-image: radial-gradient(var(--rr-grid-dot) 1px, transparent 1.5px);
+	background-size: 26px 26px;
 }
 
 ::selection {
-	background: rgba(95, 33, 103, 0.4); /* Night Amethyst (dark mode) */
-}
-
-[data-theme='light'] ::selection {
-	background: rgba(65, 182, 230, 0.4); /* Horizon Blue — matches dark-mode text accent */
+	background: rgba(249, 56, 34, 0.3); /* the star, softened */
 }
 
 #__docusaurus {
 	max-width: none;
 	margin: 0;
 	min-height: 100vh;
-	background: var(--rr-surface);
+	background: transparent;
 	border: none;
 	border-radius: 0;
 	overflow: clip;
@@ -175,7 +188,7 @@ body {
 .navbar {
 	position: static;
 	box-shadow: none;
-	border-bottom: none;
+	border-bottom: 1px solid var(--rr-panel-border);
 	background: var(--rr-surface);
 	backdrop-filter: none;
 	/* No hide/reveal-on-scroll animation. */
@@ -204,14 +217,15 @@ body {
 	display: inline-flex;
 	align-items: center;
 	gap: 0.35rem;
+	font-family: var(--rr-font-mono);
 	font-variant-numeric: tabular-nums;
 	font-size: 0.8rem;
-	font-weight: 600;
+	font-weight: 700;
 	line-height: 1;
-	padding: 0.25rem 0.55rem;
-	border-radius: 999px;
+	padding: 0.3rem 0.55rem;
+	border-radius: 4px;
 	border: 1px solid var(--rr-panel-border);
-	background: var(--ifm-color-emphasis-200);
+	background: var(--ifm-background-color);
 	color: var(--ifm-font-color-base);
 }
 
@@ -243,9 +257,9 @@ body {
 /* Search box themed to the brand (local search uses Infima's .navbar__search-input;
    background-color, not background, so Infima's search-glyph image is preserved). */
 .navbar__search-input {
-	background-color: var(--ifm-color-emphasis-100);
+	background-color: var(--ifm-background-color);
 	border: 1px solid var(--rr-panel-border);
-	border-radius: 999px;
+	border-radius: 4px;
 	color: var(--ifm-font-color-base);
 	transition:
 		border-color 0.15s ease,
@@ -259,20 +273,151 @@ body {
 
 .navbar__search-input:focus {
 	outline: none;
-	border-color: var(--ifm-color-primary);
-	box-shadow: 0 0 0 3px rgba(65, 182, 230, 0.25);
+	border-color: var(--rr-red);
+	box-shadow: 0 0 0 3px rgba(249, 56, 34, 0.2);
+}
+
+/* Right-aligned navbar cluster (marketing style): search, Discord, GitHub,
+ * and the theme toggle sit on one vertical center line with even gaps. The
+ * search keeps the plugin's own (relative) positioning so its ⌘K hint stays
+ * anchored inside the input. */
+.navbar__items--right {
+	gap: 0.4rem;
+	align-items: center;
+}
+
+.navbar__search-input {
+	width: 15rem;
+	height: 2.25rem;
 }
 
 /* ----------------------------------------------------------------------------
- * Sidebar
+ * Sidebar: a floating dark panel (the marketing dark-section field) inset
+ * from the left edge with slightly rounded corners, in both themes. Items are
+ * light-on-dark; hovering an item runs the same contrast inversion as the
+ * cards (flips to paper with ink text); the active item carries the star.
  * ------------------------------------------------------------------------- */
+/* Docusaurus styles these three nested elements at injected (2,1,0)-ish
+ * specificity: the container is pulled up under the navbar by a negative
+ * margin, the middle child is a full-height sticky viewport, and the inner
+ * column pads itself by the navbar height. Match the hack to unwind all
+ * three, and make the STICKY VIEWPORT the panel — that way the box always
+ * fits the viewport with a visible gap on every side, at any page length. */
+/* Triple :not(#\#) — these rules FIGHT properties Docusaurus sets on the
+ * same elements at (2,1,0) (negative margin-top, sticky top:0, inner
+ * padding-top), and at equal specificity the bundle order decides, not us.
+ * One extra :not makes the win unconditional. */
+.theme-doc-sidebar-container:not(#\#):not(#\#):not(#\#) {
+	margin-top: 0;
+	border-right: none;
+	background: transparent;
+	clip-path: none;
+	padding-left: 1.25rem;
+	/* Gap below the navbar so the panel's top corners never touch it. */
+	padding-top: 1.25rem;
+	/* Solid-white caret glyph for the dark panel (the stock one is 50%-black,
+	 * which reads grey however it is filtered), and no theme filter on it. */
+	--ifm-menu-link-sublist-icon: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='16px' height='16px' viewBox='0 0 24 24'><path fill='rgb(250,251,248)' d='M7.41 15.41L12 10.83l4.59 4.58L18 14l-6-6-6 6z'/></svg>");
+	--ifm-menu-link-sublist-icon-filter: none;
+}
+
+.theme-doc-sidebar-container:not(#\#):not(#\#):not(#\#) > div {
+	position: sticky;
+	top: 1.25rem;
+	/* Form-fitting: the panel hugs its menu content; the max-height caps it
+	 * to the viewport (long menus scroll inside — see the menu rule below). */
+	height: auto;
+	max-height: calc(100vh - 2.5rem);
+	background: var(--rr-abyss-deep);
+	border: 1px solid var(--rr-panel-border);
+	border-radius: 14px;
+	overflow: hidden;
+	display: flex;
+	flex-direction: column;
+}
+
+[data-theme='dark'] .theme-doc-sidebar-container:not(#\#):not(#\#):not(#\#) > div {
+	/* On the dark page the panel separates by being a step lighter. */
+	background: var(--rr-surface);
+}
+
+/* !important on the geometry: cascade layers can flip the win on width /
+ * padding regardless of specificity (the inner element otherwise keeps its
+ * fixed 300px width and overflows the panel's right edge, clipping the
+ * pills' right padding). */
+.theme-doc-sidebar-container:not(#\#):not(#\#):not(#\#) > div > div {
+	padding-top: 0 !important;
+	height: auto;
+	min-height: 0;
+	max-height: 100%;
+	width: 100% !important;
+}
+
+/* The panel is dark in BOTH themes, so its menu colors are fixed rather than
+ * theme-driven: white text resting, star for the active item. Hovering any
+ * row runs the inversion in miniature — paper background, star text — the
+ * card treatment scaled down. Infima's menu rules are build-injected at
+ * (2,1,0), so every override here matches the :not(#\#) hack to outrank
+ * them. The active item is exempt from the flip (it marks where you ARE). */
+.theme-doc-sidebar-container .menu__link:not(#\#):not(#\#) {
+	color: var(--rr-offwhite);
+	transition:
+		background-color 0.2s ease,
+		color 0.2s ease;
+}
+
+.theme-doc-sidebar-container .menu__link--active:not(.menu__link--sublist):not(#\#):not(#\#) {
+	color: #ff5a41;
+	background: rgba(249, 56, 34, 0.12);
+}
+
+.theme-doc-sidebar-container .menu__link:not(#\#):not(#\#):hover:not(.menu__link--active) {
+	background: var(--rr-offwhite);
+	color: #db2c12;
+}
+
+/* No extra Infima overlay behind the flipping rows. */
+.theme-doc-sidebar-container {
+	--ifm-menu-color-background-hover: transparent;
+}
+
+/* The caret glyph is the white SVG declared on the container above; while
+ * its row is flipped to paper it swaps to a star-orange copy (a background-
+ * image glyph cannot be tinted by `color`, so the hover swaps the SVG). */
+.theme-doc-sidebar-container .menu__link--sublist-caret:hover {
+	--ifm-menu-link-sublist-icon: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='16px' height='16px' viewBox='0 0 24 24'><path fill='rgb(219,44,18)' d='M7.41 15.41L12 10.83l4.59 4.58L18 14l-6-6-6 6z'/></svg>");
+}
+
+.theme-doc-sidebar-container .menu__link--sublist-caret:not(#\#):not(#\#):hover:after {
+	filter: none !important;
+}
+
+/* Hide the menu scrollbar inside the panel — the styled 7px webkit scrollbar
+ * is a classic (space-consuming) one, which ate the right-hand padding and
+ * made the hover pills sit asymmetrically. Wheel/trackpad scrolling keeps
+ * working. */
+.theme-doc-sidebar-container .menu:not(#\#):not(#\#) {
+	scrollbar-width: none;
+	/* With the panel form-fitting, the menu is the scroll region when the
+	 * capped panel is shorter than its content. */
+	overflow-y: auto;
+}
+
+.theme-doc-sidebar-container .menu:not(#\#):not(#\#)::-webkit-scrollbar {
+	display: none;
+}
+
 .menu {
-	padding: 1rem 0.75rem;
-	font-size: 0.92rem;
+	/* Symmetric air around the pills inside the panel (pinned: layered theme
+	 * CSS also sets .menu padding). */
+	padding: 1.25rem 0.9rem !important;
+	font-size: 0.875rem;
 }
 
 .menu__link {
-	border-radius: 8px;
+	border-radius: 4px;
+	padding: 0.32rem 0.7rem;
+	line-height: 1.45;
 }
 
 .menu__link--active:not(.menu__link--sublist) {
@@ -280,8 +425,40 @@ body {
 	font-weight: 600;
 }
 
-.theme-doc-sidebar-container {
-	border-right: none !important;
+/* Top-level category labels render as marketing-style mono kickers (the
+ * "01 · DEPLOY" treatment) rather than pill rows. Depth is selected
+ * structurally (direct children of the root .menu__list), so nested
+ * categories keep the normal pill treatment. */
+.theme-doc-sidebar-menu > .menu__list-item > .menu__list-item-collapsible > .menu__link--sublist:not(#\#):not(#\#) {
+	font-family: var(--rr-font-mono);
+	font-size: 0.76rem;
+	font-weight: 700;
+	letter-spacing: 0.12em;
+	text-transform: uppercase;
+	color: var(--rr-offwhite);
+	background: transparent;
+	margin-top: 1.1rem;
+	padding-left: 0.7rem;
+}
+
+/* Group headers flip like everything else: paper field, star text. The
+ * !important is deliberate: the docs build layers its CSS (future.v4 cascade
+ * layers), where rule order can beat specificity for background/color on
+ * these rows — !important settles it regardless of layer order. */
+.theme-doc-sidebar-menu > .menu__list-item > .menu__list-item-collapsible > .menu__link--sublist:not(#\#):not(#\#):hover {
+	background: var(--rr-offwhite) !important;
+	color: var(--rr-red) !important;
+}
+
+/* First group hugs the top of the rail. */
+.theme-doc-sidebar-menu > .menu__list-item:first-child > .menu__list-item-collapsible > .menu__link--sublist:not(#\#):not(#\#) {
+	margin-top: 0;
+}
+
+/* Items inside a group sit flush (no extra nesting indent at depth 1). */
+.theme-doc-sidebar-menu > .menu__list-item > .menu__list {
+	margin-left: 0;
+	padding-left: 0;
 }
 
 /* Breadcrumbs: the active (current-page) crumb follows the link color
@@ -294,10 +471,86 @@ body {
 	font-weight: 600;
 }
 
-/* No divider between the right table-of-contents and the content. */
-.theme-doc-toc-desktop,
+/* ----------------------------------------------------------------------------
+ * Reading column: cap the article at a Dify-like measure and center it in the
+ * doc column, pagination included, so pages read as one calm column.
+ * ------------------------------------------------------------------------- */
+.theme-doc-markdown,
+.rr-breadcrumbs-row,
+.rr-doc-header,
+.pagination-nav {
+	max-width: var(--rr-content-measure);
+	margin-left: auto;
+	margin-right: auto;
+}
+
+/* The homepage gets a wider stage for its hero and card sections (DocItem
+ * stamps docs-doc-id-<id> on <html>; the home doc's id is `index`). */
+html.docs-doc-id-index .theme-doc-markdown {
+	max-width: 56rem;
+}
+
+/* ----------------------------------------------------------------------------
+ * Right "On this page" rail (Dify style): small caps header, hairline rail,
+ * active item picks up the link color on a highlighted rail segment.
+ * ------------------------------------------------------------------------- */
+.theme-doc-toc-desktop::before {
+	content: 'On this page';
+	display: block;
+	font-family: var(--rr-font-mono);
+	font-size: 0.76rem;
+	font-weight: 700;
+	letter-spacing: 0.12em;
+	text-transform: uppercase;
+	color: var(--rr-red);
+	padding: 0.4rem 0 0.2rem 1.4rem;
+}
+
 .table-of-contents {
+	font-size: 0.8rem;
 	border-left: none !important;
+}
+
+.table-of-contents__link {
+	display: block;
+	border-left: none;
+	border-radius: 0;
+	margin-left: 0;
+	/* The left padding is the rocket marker's parking spot — the marker sits
+	 * inside the link box, so the scroll container never clips it. */
+	padding: 0.15rem 0 0.15rem 1.4rem;
+}
+
+/* The current section is marked by a tiny RocketRide rocket in the links'
+ * left padding — no rail lines, the rocket alone points at where you are.
+ * Dark mode swaps in the white mark (the colored one's navy body would
+ * vanish on the Abyss field). */
+.table-of-contents__link--active {
+	position: relative;
+}
+
+.table-of-contents__link--active::before {
+	content: '';
+	position: absolute;
+	left: 0.05rem;
+	top: 50%;
+	transform: translateY(-50%);
+	width: 16px;
+	height: 16px;
+	background: url('/img/rocketride-icon-colored.svg') no-repeat center / contain;
+}
+
+[data-theme='dark'] .table-of-contents__link--active::before {
+	background-image: url('/img/rocketride-icon-white.svg');
+}
+
+/* Nested lists indent via their links' own padding, not the ul. */
+.table-of-contents ul {
+	padding-left: 0;
+}
+
+.table-of-contents ul .table-of-contents__link {
+	padding-left: 2.25rem;
 }
 
 /* Breadcrumb row with a right-aligned "View source" action (node pages).
@@ -354,10 +607,30 @@ body {
 }
 
 /* ----------------------------------------------------------------------------
- * Content: cards, callouts, tables, code
+ * Content: type, cards, callouts, tables, code (squared marketing surfaces)
  * ------------------------------------------------------------------------- */
+/* Marketing headline voice: heavy weight, tight tracking. */
+.markdown h1,
+.markdown h2,
+.markdown h3,
+.rr-doc-header h1 {
+	letter-spacing: -0.02em;
+}
+
+/* Mono kicker utility — the "01 · DEPLOY" label. Drop above a heading. */
+.rr-kicker {
+	display: block;
+	font-family: var(--rr-font-mono);
+	font-size: 0.8rem;
+	font-weight: 700;
+	letter-spacing: 0.14em;
+	text-transform: uppercase;
+	color: var(--rr-red);
+	margin-bottom: 0.4rem;
+}
+
 .theme-admonition {
-	border-radius: 12px;
+	border-radius: 4px;
 	border: 1px solid var(--rr-panel-border);
 }
 
@@ -365,7 +638,7 @@ body {
 	display: block;
 	width: max-content;
 	max-width: 100%;
-	border-radius: 12px;
+	border-radius: 4px;
 	overflow: hidden;
 	border: 1px solid var(--rr-panel-border);
 }
@@ -376,7 +649,7 @@ body {
 
 div[class^='codeBlockContainer'],
 .theme-code-block {
-	border-radius: 12px;
+	border-radius: 4px;
 	border: 1px solid var(--rr-panel-border);
 }
 
@@ -400,129 +673,179 @@ article a {
 	vertical-align: -0.15em;
 }
 
-/* Home left column: lift the section heading to the hero h1 size and enlarge
- * the summary paragraphs to fill the space above the feature trio. */
-.rr-hero-summary h2 {
-	font-size: var(--ifm-h1-font-size);
-	line-height: 1.15;
+/* Home hero, marketing voice: heavy tight headline with a star-accented word,
+ * sub-copy beside an orange bar, mono CTA row beneath. */
+.rr-hero {
+	margin: 1.5rem 0 3rem;
 }
 
-.rr-hero-summary p {
-	font-size: 1.2rem;
-	line-height: 1.7;
+.rr-hero h1 {
+	font-size: 3rem;
+	font-weight: 800;
+	line-height: 1.08;
+	letter-spacing: -0.03em;
+	margin-bottom: 1.1rem;
 }
 
-/* SDK shortcut icons under the home-page header (Python / TypeScript). */
-.rr-sdk-icons {
+/* Star-accented word inside a heading (the marketing "scale." treatment). */
+.rr-accent {
+	color: var(--rr-red);
+}
+
+.rr-hero p {
+	font-size: 1.1rem;
+	line-height: 1.65;
+	color: var(--ifm-color-emphasis-700);
+	max-width: 40rem;
+	border-left: 3px solid var(--rr-red);
+	padding-left: 1.1rem;
+}
+
+.rr-hero-actions {
 	display: flex;
-	gap: 1rem;
 	align-items: center;
-	margin: 0.5rem 0 1.75rem;
+	gap: 1rem;
+	margin-top: 1.75rem;
 }
 
-/* Brand-colored logos (set inline per icon); only lift on hover, never recolor. */
-.rr-sdk-icons a {
-	display: inline-flex;
-	transition: transform 0.15s ease;
-}
-
-.rr-sdk-icons a:hover {
-	transform: translateY(-2px);
-}
-
-.rr-sdk-icons svg {
-	width: 2.25rem;
-	height: 2.25rem;
-}
-
-/* Home Quickstart CTA: paint from the link color (indigo light / horizon dark)
- * like the home icons, not Infima's primary ramp. The #\# hack beats Infima's
- * .button--primary background rule. */
-.rr-quickstart-btn {
+/* Marketing CTA buttons: squared mono-caps blocks. The primary is a dark
+ * block carried on a hard orange offset shadow (the "GET STARTED" look);
+ * the secondary is a hairline-bordered ghost. */
+.rr-btn {
 	display: inline-flex;
 	align-items: center;
 	gap: 0.5rem;
-	overflow: hidden;
+	font-family: var(--rr-font-mono);
+	font-size: 0.85rem;
+	font-weight: 700;
+	letter-spacing: 0.14em;
+	text-transform: uppercase;
+	line-height: 1;
+	padding: 0.95rem 1.5rem;
+	border-radius: 0;
+	transition:
+		transform 0.12s ease,
+		box-shadow 0.12s ease,
+		background-color 0.12s ease,
+		color 0.12s ease;
 }
 
-.rr-quickstart-btn:not(#\#):not(#\#),
-.rr-quickstart-btn:not(#\#):not(#\#):hover {
-	background: linear-gradient(135deg, var(--rr-horizon) 0%, var(--rr-amethyst) 100%);
-	background-color: var(--rr-amethyst);
-	background-clip: padding-box;
-	border: 0;
-	color: #fff;
+.rr-btn:hover {
+	text-decoration: none;
 }
 
-.rr-quickstart-btn:not(#\#):not(#\#):hover {
-	filter: brightness(1.12);
+.rr-btn--primary:not(#\#):not(#\#) {
+	background: var(--rr-abyss-deep);
+	color: var(--rr-offwhite);
+	box-shadow: -5px 5px 0 0 var(--rr-red);
 }
 
-.rr-quickstart-btn__icon {
-	width: 1.15em;
-	height: 1.15em;
-	position: relative;
-	top: 0.15em;
+.rr-btn--primary:not(#\#):not(#\#):hover {
+	transform: translate(-2px, 2px);
+	box-shadow: -3px 3px 0 0 var(--rr-red);
+	color: var(--rr-offwhite);
 }
 
-/* Never underline the side-card links. Infima's `a:hover:not(#\#):not(#\#)`
- * has specificity (2,0,1); match its double `:not(#\#)` to reach (2,2,0) so we
- * win on the anchor itself. Killing it on the <a> stops the underline from
- * propagating to the inner title/body/code spans (a descendant text-decoration
+[data-theme='dark'] .rr-btn--primary:not(#\#):not(#\#) {
+	background: var(--rr-offwhite);
+	color: var(--rr-abyss-deep);
+}
+
+.rr-btn--secondary:not(#\#):not(#\#) {
+	background: var(--ifm-background-color);
+	color: var(--ifm-font-color-base);
+	border: 1px solid var(--rr-panel-border);
+}
+
+.rr-btn--secondary:not(#\#):not(#\#):hover {
+	border-color: var(--ifm-font-color-base);
+	color: var(--ifm-font-color-base);
+}
+
+/* Card anchor color + underline control. Infima's injected `a` /`a:hover`
+ * rules run at (2,0,1); match the double `:not(#\#)` to beat them, so the
+ * card's resting text inherits body ink (not link orange) and its hover text
+ * takes the inverted field's foreground. Killing the underline on the <a>
+ * stops it propagating to the inner spans (a descendant text-decoration
  * cannot remove a line drawn by an ancestor). */
 .rr-side-card:not(#\#):not(#\#),
 .rr-side-card:not(#\#):not(#\#):hover {
 	text-decoration: none;
 }
 
-/* Home: right-column guide cards (bordered, stacked beside the summary). Each
- * card cycles a palette accent (Horizon -> Indigo -> Amethyst) via --card-accent
- * so the stack isn't uniformly blue; the icon and hover border follow it. */
+.rr-side-card:not(#\#):not(#\#) {
+	color: inherit;
+	/* The field fades in slower and gentler than the text (text keeps its own
+	 * 0.28s ease) so the inversion swells up rather than snapping. Lives here
+	 * because Infima's injected `a` rule sets its own transition at (2,0,1). */
+	transition:
+		background-color 0.35s cubic-bezier(0.25, 0.1, 0.25, 1),
+		border-color 0.35s cubic-bezier(0.25, 0.1, 0.25, 1),
+		color 0.28s ease-out;
+}
+
+.rr-side-card:not(#\#):not(#\#):hover {
+	color: rgba(250, 251, 248, 0.85);
+}
+
+html[data-theme='dark'] .rr-side-card:not(#\#):not(#\#):hover {
+	color: rgba(20, 17, 29, 0.85);
+}
+
+/* Linked guide cards, marketing-style: squared, hairline ink border, and the
+ * signature contrast inversion on hover — the card flips to the opposite
+ * field (dark in light mode, paper in dark mode) and its title takes the
+ * star, exactly like the landing page's feature grid. */
 .rr-side-card {
+	--card-accent: var(--rr-accent);
 	display: block;
-	padding: 1.1rem 1.35rem;
+	padding: 1.25rem 1.35rem;
 	border: 1px solid var(--rr-panel-border);
-	border-radius: 12px;
+	border-radius: 2px;
 	margin-bottom: 1rem;
 	color: inherit;
-	transition:
-		border-color 0.15s ease,
-		transform 0.15s ease;
+	background: var(--ifm-background-color);
+	/* NOTE: the card's transition lives in the hacked :not(#\#) rule below —
+	 * Infima's injected anchor rule sets `transition: color …` at (2,0,1),
+	 * which would override a transition declared here and snap the flip. */
 }
 
-.rr-side-card:nth-child(3n + 1) {
-	--card-accent: var(--rr-accent-horizon);
-}
-
-.rr-side-card:nth-child(3n + 2) {
-	--card-accent: var(--rr-accent-indigo);
-}
-
-.rr-side-card:nth-child(3n + 3) {
-	--card-accent: var(--rr-accent-amethyst);
-}
-
+/* Icon sits in a squared tile washed with the star. The class lands either
+ * directly on an SVG (raw-HTML pages) or on the Card component's span
+ * wrapper; the child rule sizes the SVG in the wrapper case. */
 .rr-side-card .rr-card-icon {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	box-sizing: content-box;
+	padding: 0.4rem;
+	border-radius: 2px;
+	margin-right: 0;
 	color: var(--card-accent);
+	background: color-mix(in srgb, var(--card-accent) 11%, transparent);
 }
 
-.rr-side-card:hover {
-	border-color: var(--card-accent);
-	transform: translateY(-2px);
-	text-decoration: none;
-	color: inherit;
+.rr-side-card .rr-card-icon > svg {
+	width: 100%;
+	height: 100%;
 }
 
 .rr-side-card__head {
 	display: flex;
 	align-items: center;
-	gap: 0.55rem;
-	margin-bottom: 0.35rem;
+	gap: 0.65rem;
+	margin-bottom: 0.45rem;
+}
+
+.rr-side-card__title,
+.rr-side-card__body {
+	transition: color 0.28s ease-out;
 }
 
 .rr-side-card__title {
 	font-size: 1.15rem;
-	font-weight: 650;
+	font-weight: 700;
+	letter-spacing: -0.01em;
 	color: var(--ifm-heading-color);
 }
 
@@ -531,6 +854,33 @@ article a {
 	font-size: 0.92rem;
 	line-height: 1.5;
 	color: var(--ifm-color-emphasis-700);
+}
+
+/* The inversion. Light mode flips to the near-black Abyss Deep field (the
+ * marketing dark), eased in over ~a quarter second. */
+.rr-side-card:hover {
+	background: var(--rr-abyss-deep);
+	border-color: var(--rr-abyss-deep);
+	text-decoration: none;
+}
+
+.rr-side-card:hover .rr-side-card__title {
+	color: var(--rr-red);
+}
+
+.rr-side-card:hover .rr-side-card__body {
+	color: rgba(250, 251, 248, 0.8);
+}
+
+/* Dark mode inverts the other way: flip to the paper field (the anchor's
+ * foreground is set by the hacked rule above). */
+[data-theme='dark'] .rr-side-card:hover {
+	background: var(--rr-offwhite);
+	border-color: var(--rr-offwhite);
+}
+
+[data-theme='dark'] .rr-side-card:hover .rr-side-card__body {
+	color: rgba(20, 17, 29, 0.75);
 }
 
 /* Quickstart: hub of linked cards in a responsive 2-column grid. Reuses the
@@ -548,92 +898,53 @@ article a {
 	margin-bottom: 0;
 }
 
-@media (max-width: 768px) {
-	.rr-card-grid {
-		grid-template-columns: 1fr;
-	}
-}
-
-/* Home: bottom feature trio (centered icon + title + blurb). */
-.rr-features {
-	display: grid;
+/* Three-up variant for dense "explore" sections. */
+.rr-card-grid--3 {
 	grid-template-columns: repeat(3, 1fr);
-	gap: 2.5rem;
-	margin: 4rem 0 1.5rem;
 }
 
-.rr-feature {
-	display: flex;
-	flex-direction: column;
-	align-items: center;
-	text-align: center;
-	color: inherit;
-}
-
-/* Each card's icon takes a distinct palette accent so the trio isn't all-blue.
- * The body keyword stays a normal link (--ifm-link-color), per "like our links". */
-.rr-feature:nth-child(1) {
-	--card-accent: var(--rr-accent-horizon);
-}
-
-.rr-feature:nth-child(2) {
-	--card-accent: var(--rr-accent-indigo);
-}
-
-.rr-feature:nth-child(3) {
-	--card-accent: var(--rr-accent-amethyst);
-}
-
-.rr-feature svg {
-	width: 2rem;
-	height: 2rem;
-	margin-bottom: 0.7rem;
-	color: var(--card-accent);
-}
-
-.rr-feature__body a {
-	text-decoration: underline;
-}
-
-.rr-feature__title {
-	font-size: 1.1rem;
-	font-weight: 650;
-	margin-bottom: 0.4rem;
-	color: var(--ifm-heading-color);
-}
-
-.rr-feature__body {
-	font-size: 0.9rem;
-	line-height: 1.5;
-	color: var(--ifm-color-emphasis-700);
+@media (max-width: 996px) {
+	.rr-card-grid--3 {
+		grid-template-columns: repeat(2, 1fr);
+	}
 }
 
 @media (max-width: 768px) {
-	.rr-features {
+	.rr-card-grid,
+	.rr-card-grid--3 {
 		grid-template-columns: 1fr;
-		gap: 2rem;
 	}
+}
+
+/* Home section headers: roomy lead-in between card bands (Dify rhythm). A
+ * kicker owns the gap for its section and hugs its heading. */
+html.docs-doc-id-index .theme-doc-markdown h2 {
+	margin-top: 3rem;
+}
+
+html.docs-doc-id-index .theme-doc-markdown .rr-kicker {
+	margin-top: 3.25rem;
+}
+
+.rr-kicker + h2 {
+	margin-top: 0 !important;
 }
 
 /* ----------------------------------------------------------------------------
- * Secondary palette accents in body chrome. Horizon stays the primary link/CTA
- * color and Docusaurus admonition semantics (note/tip/warning/danger) are left
- * alone; these surface Amethyst + Indigo so the page isn't uniformly blue.
+ * Body chrome accents. Docusaurus admonition semantics (note/tip/warning/
+ * danger) are left alone; everything else follows the star.
  * ------------------------------------------------------------------------- */
+/* The marketing hero's sub-copy treatment: an orange bar beside quiet text. */
 .markdown blockquote {
-	border-left: 3px solid var(--rr-accent-amethyst);
-	background: rgba(95, 33, 103, 0.06);
+	border-left: 3px solid var(--rr-red);
+	background: transparent;
 }
 
-[data-theme='dark'] .markdown blockquote {
-	background: rgba(199, 122, 214, 0.08);
-}
-
-/* Section divider: a thin Indigo -> Horizon gradient instead of a flat line. */
+/* Section divider: a plain ink hairline (marketing surfaces use hairlines). */
 .markdown hr {
-	height: 2px;
+	height: 1px;
 	border: 0;
-	background: linear-gradient(90deg, var(--rr-accent-indigo), var(--rr-accent-horizon));
+	background: var(--rr-panel-border);
 }
 
 /* ----------------------------------------------------------------------------
@@ -791,16 +1102,30 @@ article a {
 	height: 1em;
 }
 
+/* Mono-caps ghost controls that invert to the dark block on hover. */
 .docs-md-actions .button {
-	--ifm-button-border-color: var(--ifm-color-primary);
-	border-color: var(--ifm-color-primary);
-	color: var(--ifm-color-primary);
-	background: transparent;
+	--ifm-button-border-color: var(--rr-panel-border);
+	border-color: var(--rr-panel-border);
+	border-radius: 2px;
+	color: var(--ifm-font-color-base);
+	background: var(--ifm-background-color);
+	font-family: var(--rr-font-mono);
+	font-size: 0.72rem;
+	font-weight: 700;
+	letter-spacing: 0.1em;
+	text-transform: uppercase;
 }
 
 .docs-md-actions .button:hover {
-	background: var(--ifm-color-primary);
-	color: #fff;
+	background: var(--rr-abyss-deep);
+	border-color: var(--rr-abyss-deep);
+	color: var(--rr-offwhite);
+}
+
+[data-theme='dark'] .docs-md-actions .button:hover {
+	background: var(--rr-offwhite);
+	border-color: var(--rr-offwhite);
+	color: var(--rr-abyss-deep);
 }
 
 /* ----------------------------------------------------------------------------
