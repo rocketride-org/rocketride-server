@@ -32,6 +32,7 @@
 
 import { DataPipe, RocketRideClient } from '../src/client/client';
 import { DAPException, PipeException } from '../src/client/exceptions';
+import type { Question } from '../src/client/schema/Question';
 
 /** A client stub: enough surface for DataPipe.open(), no transport. */
 function stubClient(response: Record<string, unknown>): RocketRideClient {
@@ -52,6 +53,8 @@ async function openAndCatch(response: Record<string, unknown>): Promise<PipeExce
 	}
 	throw new Error('expected open() to reject');
 }
+
+const notRunning = { success: false, message: 'Your pipeline is not running', code: 'TASK_NOT_REGISTERED' };
 
 describe('task error codes', () => {
 	it('exposes code and hint from the server packet', () => {
@@ -92,5 +95,45 @@ describe('task error codes', () => {
 		expect(err.message).toBe('Failed to open a data pipe.');
 		expect(err.code).toBeUndefined();
 		expect(err.hint).toMatch(/^Common causes:/);
+	});
+});
+
+describe('RocketRideClient.chat() failure', () => {
+	/** A real client whose pipe open() always fails with the given DAP response. */
+	function clientThatFailsOpen(response: Record<string, unknown>): RocketRideClient {
+		const client = new RocketRideClient({ env: {} });
+		const stub = client as unknown as Record<string, unknown>;
+		stub.buildRequest = () => ({ seq: 1, type: 'request', command: 'rrext_process' });
+		stub.request = async () => response;
+		stub.didFail = (r: Record<string, unknown>) => r.success === false;
+		return client;
+	}
+
+	/** Run chat() against a stub and return whatever it threw. */
+	async function chatAndCatch(client: RocketRideClient, question: Question): Promise<unknown> {
+		try {
+			await client.chat({ token: 'tk_dead', question });
+		} catch (err) {
+			return err;
+		}
+		throw new Error('expected chat() to reject');
+	}
+
+	it('rethrows the typed PipeException so chat callers keep code and hint', async () => {
+		const caught = await chatAndCatch(clientThatFailsOpen(notRunning), {} as Question);
+
+		expect(caught).toBeInstanceOf(PipeException);
+		const e = caught as PipeException;
+		expect(e.message).toBe('Your pipeline is not running');
+		expect(e.code).toBe('TASK_NOT_REGISTERED');
+		expect(e.hint).toContain('Common causes:');
+	});
+
+	it('still normalises a non-DAP failure to a plain Error', async () => {
+		const caught = await chatAndCatch(clientThatFailsOpen(notRunning), undefined as unknown as Question);
+
+		expect(caught).toBeInstanceOf(Error);
+		expect(caught).not.toBeInstanceOf(DAPException);
+		expect((caught as Error).message).toBe('Question cannot be empty');
 	});
 });
