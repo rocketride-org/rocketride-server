@@ -302,7 +302,7 @@ copy knows to edit upstream.
 | --- | --- |
 | `docs/public/typescript/README.md` | `packages/client-typescript/README.md` |
 | `docs/public/python/README.md` | `packages/client-python/README.md` |
-| `docs/public/mcp/README.md` | `packages/client-mcp/README.md` |
+| `docs/public/mcp/stdio/README.md` | `packages/client-mcp/README.md` |
 | `docs/public/n8n/README.md` | `packages/n8n-nodes/README.md` |
 | `docs/agents/*.md` (top level only) | `.rocketride/docs/` |
 

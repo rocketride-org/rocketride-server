@@ -16,7 +16,7 @@ Save this as `chat.pipe`:
 ```json
 {
   "project_id": "webhook-example",
-  "nodes": [
+  "components": [
     {
       "id": "source_1",
       "provider": "webhook"
@@ -114,7 +114,7 @@ Give the LLM a persona by adding a `prompt` node:
   "id": "prompt_1",
   "provider": "prompt",
   "config": {
-    "text": "You are a helpful assistant that answers questions concisely."
+    "instructions": ["You are a helpful assistant that answers questions concisely."]
   },
   "input": [
     { "lane": "questions", "from": "source_1" }

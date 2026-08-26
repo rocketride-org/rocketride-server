@@ -112,7 +112,7 @@ rocketride-mcp
 ```
 
 ```bash
-rocketride start --pipeline ./chat.pipe
+rocketride start ./chat.pipe
 ```
 
 **3. Ask Claude to use it.** Open Claude Desktop (configured with the
@@ -322,10 +322,11 @@ For remote or Docker deployments, the server can run as an HTTP/SSE server inste
 
 ```bash
 pip install rocketride-mcp[sse]
+export MCP_API_KEY=your-secret-token
 rocketride-mcp-sse --host 0.0.0.0 --port 8080
 ```
 
-SSE mode supports optional Bearer token authentication via the `MCP_API_KEY` environment variable. The `/health` endpoint is always accessible for monitoring.
+SSE mode supports Bearer token authentication via the `MCP_API_KEY` environment variable — optional when binding localhost, but mandatory for non-loopback binds (the server refuses to start on hosts like `0.0.0.0` without it). The `/health` endpoint is always accessible for monitoring.
 
 ## Configuration
 
@@ -336,7 +337,7 @@ Set these environment variables (required; no config file is used):
 | `ROCKETRIDE_URI`    | Yes      | WebSocket URI of the RocketRide engine (e.g. `ws://localhost:5565`) |
 | `ROCKETRIDE_AUTH`   | Yes\*    | API authentication token                                            |
 | `ROCKETRIDE_APIKEY` | Yes\*    | Alternative to `ROCKETRIDE_AUTH`                                    |
-| `MCP_API_KEY`       | No       | Bearer token for SSE server authentication                          |
+| `MCP_API_KEY`       | No (loopback) / Yes (non-loopback binds) | Bearer token for SSE server authentication      |
 
 \*Either `ROCKETRIDE_AUTH` or `ROCKETRIDE_APIKEY` must be set.
 

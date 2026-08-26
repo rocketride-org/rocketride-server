@@ -11,7 +11,9 @@ record drawer) are rendered by shared UI components inside the Project
 webview; the extension host owns the SDK connection and does ALL
 SDK-to-view-model mapping before anything crosses `postMessage`. The
 contract lives in `src/providers/types/deployTypes.ts` — this page mirrors
-its exported surface.
+its exported surface. (One exception: `shell:connectionChange` is
+deliberately not declared in `deployTypes.ts`; it comes from
+`ShellHostToWebview`, composed into the per-view unions in `types.ts`.)
 
 Conventions shared by both protocols:
 

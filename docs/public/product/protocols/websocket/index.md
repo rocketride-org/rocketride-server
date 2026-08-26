@@ -22,7 +22,8 @@ send so you can debug, trace, or build your own client.
   key (`{ "auth": "$ROCKETRIDE_APIKEY", "clientName": "...", "clientVersion": "..." }`);
   the SDKs read the key from the `ROCKETRIDE_APIKEY` env var (engine URI from
   `ROCKETRIDE_URI`). If `auth` fails the request errors. Once authenticated, each
-  task request carries the task `token` returned by `open` in its `arguments`.
+  task request carries the task `token` returned by `execute` (the SDK's `use()`)
+  in its `arguments`.
   Cloud requires a key; a local engine typically does not.
 
 The default port is applied only when the URI omits one, point the client at a
@@ -48,14 +49,14 @@ then the raw bytes, so the frame on the wire is `<json-header>\n<binary-payload>
 	"type": "request",
 	"seq": 1,
 	"command": "rrext_process",
-	"arguments": { "subcommand": "open", "token": "$ROCKETRIDE_APIKEY" }
+	"arguments": { "subcommand": "open", "object": "...", "mimeType": "...", "provider": "...", "token": "$TASK_TOKEN" }
 }
 ```
 
-This particular request -- opening a data pipe -- intentionally sends the API
-key as its `token`: it's the first request on the pipe, so no task token exists
-yet. Requests that operate on an already-running task (`write`, `close`, ...)
-carry that task's own `token` in `arguments` instead, for example:
+This particular request -- opening a data pipe -- carries the task's own
+`token` (returned by `execute`): a pipe is always opened on an already-running
+task. Every request on the pipe (`write`, `close`, ...) carries that same
+`token` in `arguments`, for example:
 
 ```json
 {
@@ -82,7 +83,7 @@ whether the command worked; a successful response carries a `body`.
 	"request_seq": 1,
 	"command": "rrext_process",
 	"success": true,
-	"body": { "task": "<task-id>" }
+	"body": { "pipe_id": 1 }
 }
 ```
 
@@ -108,7 +109,7 @@ pipeline output streams back. An event names an `event` and carries a `body`;
 the client matches it to the task it started.
 
 ```json
-{ "type": "event", "seq": 7, "event": "data", "body": { "lane": "answers", "text": "..." } }
+{ "type": "event", "seq": 7, "event": "apaevt_sse", "body": { "pipe_id": 1, "type": "...", "data": {} } }
 ```
 
 The engine can also push a dedicated monitoring stream (task lifecycle, periodic
@@ -121,16 +122,17 @@ A typical run is one request/response/event conversation over a single open
 socket, opened with the `auth` handshake above. The SDK methods map onto engine
 commands:
 
-1. **Start**: `use()` opens a task on a running pipeline
-   (`rrext_process` / `open`) and gets back a task id.
+1. **Start**: `use()` starts the pipeline (`execute`) and gets back a task
+   token.
 2. **Feed**: `send()` / `pipe()` push input (`rrext_process` / `write`), with
    file bytes in the request's `data` field; `chat()` drives a streaming,
    conversational exchange.
 3. **Stream**: the engine emits `event` frames as nodes produce output, so
    responses arrive incrementally rather than in one block (see the
    [Execution model](/concepts/execution-model)).
-4. **Stop**: `terminate()` closes the task (`rrext_process` / `close`) and
-   releases its resources.
+4. **Stop**: `terminate()` closes the task (`terminate`) and releases its
+   resources; closing a data pipe (`rrext_process` / `close`) returns that
+   pipe's result.
 
 The pipeline JSON sent over the socket is identical to the JSON you author
 visually or by hand, the protocol just transports it.
@@ -144,8 +146,8 @@ command.
 | Setting             | Default | Meaning                                                 |
 | ------------------- | ------- | ------------------------------------------------------- |
 | Ping interval       | 15 s    | How often a ping frame is sent.                         |
-| Ping timeout        | 60 s    | No pong within this window → the connection is closed.  |
-| Idle/socket timeout | 180 s   | No communication within this window → treated as stale. |
+| Ping timeout        | 60 s (TypeScript) / 300 s (Python) | No pong within this window → the connection is closed. |
+| Socket timeout      | 180 s   | Connection open/close timeout in both SDKs; Python also applies it to sends. |
 
 ## Related
 

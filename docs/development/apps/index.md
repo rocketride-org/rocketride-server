@@ -1,7 +1,7 @@
 # Building Shell Apps in the Monorepo
 
-First-party shell apps built inside the `saas` workspace, alongside `shell`
-and `shared`.
+First-party shell apps built inside this monorepo's workspace, alongside
+`packages/shell` and `apps/shared`.
 
 The app API — `AppManifest`, `AppDescriptor`, shell props, screen zones, hooks,
 `connectionManager`, the documents system, the virtual file system,
@@ -130,7 +130,7 @@ pnpm install
 
 ```javascript
 const path = require('path');
-const { execCommand, syncDir, formatSyncStats, removeDir, BUILD_ROOT, DIST_ROOT } = require('../../../rocketride-server/scripts/lib');
+const { execCommand, syncDir, formatSyncStats, removeDir, BUILD_ROOT, DIST_ROOT } = require('../../../scripts/lib');
 const { registerApp } = require('../../../scripts/lib/registerApp');
 
 const APP_ROOT = path.join(__dirname, '..');

@@ -61,8 +61,9 @@ page documents the event schema.
 
 ### Agent retry loops
 
-Agent nodes have a configurable `max_attempts` (or similar) parameter. When a
-tool call fails, the agent can retry with a modified call. This handles
+`agent_rocketride` has a configurable `max_waves` parameter that caps the
+number of reasoning cycles (it is not a per-tool retry count). When a tool call
+fails, the agent can retry with a modified call in a later wave. This handles
 transient failures in external APIs without propagating an error to the
 pipeline level.
 

@@ -11,8 +11,9 @@ every call, without leaving your IDE.
 
 The same build supports **VS Code and every editor built on it**: forks such as **Cursor**,
 **Windsurf**, and **VSCodium** get the identical extension, and the visual canvas, runtime
-management, and pipeline tooling behave the same everywhere. On Cursor and Windsurf the
-extension additionally writes **RocketRide agent rules** into your workspace so the editor's
+management, and pipeline tooling behave the same everywhere. The extension also auto-detects
+your coding agent — GitHub Copilot, Claude Code, Cursor, or Windsurf — and writes
+**RocketRide agent rules** into your workspace so the editor's
 AI understands how to build RocketRide pipelines.
 
 Start at **[VS Code](/ide-extensions/vscode)** for installation (Marketplace and Open VSX),

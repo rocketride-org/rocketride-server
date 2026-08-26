@@ -18,7 +18,7 @@ from rocketride import RocketRideClient
 
 
 async def main():
-    client = RocketRideClient(host='localhost', port=5565)
+    client = RocketRideClient(uri='ws://localhost:5565')
     await client.connect()
 
     # The stream's chapters (runs): begin/end/outcome per run.
@@ -72,7 +72,7 @@ into the body at decode, so consumers read one shape.
 | --- | --- |
 | `chapters(project_id, source, *, team_id='')` | Runs (tracks) + segment spans + stream extents |
 | `read(project_id, source, *, team_id='', ...)` | Ranged event read: `from_seq`/`to_seq`, `from_time`/`to_time`, `types`, paging via `nextSeq` cursor |
-| `segment(project_id, source, segment_id, *, team_id='', ...)` | Raw whole-line-aligned segment bytes (bulk replay path) |
+| `segment(project_id, source, segment, *, team_id='', ...)` | Raw whole-line-aligned segment bytes (bulk replay path) |
 | `delete(project_id, source, *, team_id='', ...)` | Drop history: `before_time` or everything |
 | `open_event_stream(project_id, source, *, team_id='')` | The DVR session (below) |
 

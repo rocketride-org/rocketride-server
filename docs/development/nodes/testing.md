@@ -62,6 +62,7 @@ Run tests:
 | `chain` | `string[]` | No | Pipeline chain. Use `*` for the node under test. Default: `["*"]` |
 | `outputs` | `string[]` | No | Output lanes to capture. If omitted, automatically inferred from the `expect` keys in your test cases. |
 | `timeout` | `number` | No | Test timeout in seconds. Default: 60 |
+| `requiresLibs` | `object` or `string[]` | No | Native libraries that must be present (e.g., `{"Linux": ["libGLESv2.so.2"]}`; a plain array applies to all OSes). Test is skipped if any are missing. |
 | `cases` | `object[]` | Yes | Array of test cases. |
 
 ---
@@ -440,10 +441,10 @@ Integration tests execute the test cases defined in `services*.json` through a l
 ./builder nodes:test-full --pytest="-k question"
 
 # Filter by pytest markers
-./builder nodes:test-full --markers="slow"
+./builder nodes:test-full --pytest="-m slow"
 
 # Filter by test pattern
-./builder nodes:test-full --pattern="llm"
+./builder nodes:test-full --pytest-pattern="llm"
 ```
 
 ### Mock support

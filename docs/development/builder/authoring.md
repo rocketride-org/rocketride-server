@@ -182,13 +182,17 @@ your-package/
 
 The build system searches these directories:
 
-- `packages/*/scripts/tasks.js`
-- `apps/*/scripts/tasks.js`
-- `nodes/scripts/tasks.js`
-- `examples/*/scripts/tasks.js`
+- `packages/**/scripts/tasks.js`
+- `apps/**/scripts/tasks.js`
+- `nodes/**/scripts/tasks.js`
+- `examples/**/scripts/tasks.js`
 - `extension/**/scripts/tasks.js`
 - `tools/**/scripts/tasks.js`
+- `shared/**/scripts/tasks.js`
 - `scripts/tasks.js` (root-level)
+
+All trees are searched at any depth, and a `tasks.cjs` variant is also
+discovered (mcp-widgets uses one).
 
 ### Required imports
 
@@ -981,8 +985,8 @@ run: async (ctx, task) => {
     }
 
     const { os, arch, ext } = getPlatform();
-    // os: 'windows' | 'darwin' | 'linux'
-    // arch: 'x64' | 'arm64'
+    // os: 'windows' | 'mac' | 'linux'
+    // arch: 'x64' | 'aarch64' (linux always reports 'x64')
     // ext: 'zip' | 'tar.gz'
 }
 ```
@@ -1377,7 +1381,7 @@ function makeBuildAction() {
 
 **Problem:** You want a single `./builder build` command that builds everything, but each package owns its own `:build` action.
 
-**Solution:** Use the naming convention. Any action named `*:build` is included in global `./builder build`:
+**Solution:** Use the naming convention. Any *public* action named `*:build` — one whose action object carries a `description` — is included in global `./builder build` (description-less actions such as `docs:build` are deliberately excluded):
 
 ```javascript
 // server/scripts/tasks.js
@@ -1393,7 +1397,7 @@ function makeBuildAction() {
 })}
 ```
 
-Now `./builder build` runs all `*:build` actions. Same for `./builder test` (runs all `*:test` actions).
+Now `./builder build` runs all described `*:build` actions. Same for `./builder test` (runs all described `*:test` actions).
 
 ### Pattern: passing options to actions
 
@@ -1404,7 +1408,8 @@ Now `./builder build` runs all `*:build` actions. Same for `./builder test` (run
 ```javascript
 // In action:
 run: async (ctx, task) => {
-    const pytestArgs = ctx.options?.pytest?.split(' ') || [];
+    // --pytest= accumulates into an array (it can be passed more than once)
+    const pytestArgs = (ctx.options?.pytest || []).flatMap((o) => o.split(' '));
     await execCommand('python', ['-m', 'pytest', ...pytestArgs], { task });
 }
 ```
@@ -1418,7 +1423,7 @@ run: async (ctx, task) => {
 
 - `ctx.options.force` -- `--force` flag was passed
 - `ctx.options.verbose` -- `--verbose` flag was passed
-- `ctx.options.<name>` -- custom `--<name>=value` arguments
+- `ctx.options.<name>` -- only the flags `parseArgs` (scripts/build.js) knows are accepted; any other `--flag` exits with `Unknown argument`. A new option needs a `parseArgs` case.
 
 ### Pattern: sharing data between actions
 

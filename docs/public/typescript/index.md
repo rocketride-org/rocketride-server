@@ -98,6 +98,10 @@ Configuration object passed to `new RocketRideClient(config)`.
 | `onTrace`           | `(type: TraceType, message: DAPMessage) => void`         | No       | Called around high-level SDK requests with a credential-redacted message copy for logging or telemetry.                                                                                                                                                                             |
 | `onDebugMessage`    | `(message: string) => void`                              | No       | Optional; for debug output.                                                                                                                                                                                                                                                       |
 | `module`            | `string`                                                 | No       | Client name for logging. Default: `CLIENT-0`, `CLIENT-1`, ...                                                                                                                                                                                                                     |
+| `public`            | `boolean`                                                | No       | Open a public (unauthenticated) connection. Only `rrext_public_*` commands may be sent; the connection is permanently public — use a separate client to authenticate.                                                                                                              |
+| `wsPath`            | `string`                                                 | No       | Custom WebSocket path override (default: `/task/service`). Use `/models` for the model server.                                                                                                                                                                                    |
+| `clientName`        | `string`                                                 | No       | Friendly client name sent during auth (e.g. "VS Code", "Cursor").                                                                                                                                                                                                                 |
+| `clientVersion`     | `string`                                                 | No       | Client version sent during auth (e.g. "0.9.4").                                                                                                                                                                                                                                   |
 
 **Example - long-lived app with persist and status:**
 
@@ -144,7 +148,7 @@ await client.connect();
 | `connect`         | `connect(credential?: string \| { code: string; verifier: string; redirectUri: string }, options?: { uri?: string; timeout?: number }): Promise<ConnectResult>` | `Promise<ConnectResult>` | Compatibility method that performs attach and login as one foreground operation.                                                                                                                                                                                  |
 | `disconnect`      | `disconnect(): Promise<void>`                                                                                                                                  | `Promise<void>`          | Compatibility method that performs best-effort logout/deauthentication, then cancels pending work and detaches. Call it when the user explicitly disconnects or the app is shutting down.                                                                         |
 | `isConnected`     | `isConnected(): boolean`                                                                                                                                       | `boolean`                | Compatibility alias for `isAttached()`; it does not imply authentication.                                                                                                                                                                                         |
-| `setEnv`          | `setEnv(env: Record<string, string>): void`                                                                                                                    | `void`                   | Replaces the client's environment map. `use()`/`validate()` use it for `ROCKETRIDE_*` substitution; `login()` consults `ROCKETRIDE_APIKEY` when no explicit credential is supplied.                                                                                |
+| `setEnv`          | `setEnv(env: Record<string, string>): void`                                                                                                                    | `void`                   | Replaces the client's environment map. `use()` uses it for `ROCKETRIDE_*` substitution; `login()` consults `ROCKETRIDE_APIKEY` when no explicit credential is supplied.                                                                                |
 
 Concurrent foreground `login()` or `connect()` calls for the same final WebSocket endpoint and resolved credential join one operation: they share one attachment, one authentication request, and one result. A different foreground login supersedes the earlier operation. A foreground login also supersedes an automatic background reconnect, while background work never supersedes foreground work. Superseded waiters reject with `LoginAttemptCancelledError('superseded')`.
 
@@ -160,7 +164,7 @@ With `persist: true`, an unexpected loss schedules a generation-owned background
 | -------------- | ------------------------------------------------------------------------------------------------------------------------------------------- | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `buildRequest` | `buildRequest(command: string, options?: { token?: string; arguments?: Record<string, unknown>; data?: Uint8Array \| string }): DAPMessage` | `DAPMessage`          | Builds a DAP request message with the next sequence number. Use when you need a custom command not wrapped by `use()`, `send()`, etc.                                                       |
 | `request`      | `request(request: DAPMessage, timeout?: number): Promise<DAPMessage>`                                                                       | `Promise<DAPMessage>` | Sends the request and returns the response. Pass `timeout` (ms) to override the config default for this call. Check `didFail(response)` or `response.success` before using `response.body`. |
-| `dapRequest`   | `dapRequest(command: string, args?: Record<string, unknown>, token?: string, timeout?: number): Promise<DAPMessage>`                        | `Promise<DAPMessage>` | Shorthand: builds a request and sends it in one call. Equivalent to `buildRequest()` + `request()`.                                                                                         |
+| `call`         | `call<T>(command: string, args?: Record<string, unknown>, options?: { token?: string; timeout?: number }): Promise<T>`                      | `Promise<T>`          | Shorthand: builds a request, sends it, and returns the response body in one call. Equivalent to `buildRequest()` + `request()` + error check.                                               |
 | `didFail`      | `didFail(response: DAPMessage): boolean`                                                                                                    | `boolean`             | Returns `true` when the server indicated failure (`success === false`). Use after `request()` to decide whether to use `body` or surface `message` as an error.                             |
 
 **Example - custom DAP command:**
@@ -175,8 +179,8 @@ if (client.didFail(res)) throw new Error(res.message);
 
 | Method          | Signature                                                                                                                                                                                                                    | Returns                            | Description                                                                                                                                                                                                                                                                                                                    |
 | --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `use`           | `use(options?: { token?: string; filepath?: string; pipeline?: PipelineConfig; source?: string; threads?: number; useExisting?: boolean; args?: string[]; ttl?: number }): Promise<Record<string, any> & { token: string }>` | `Promise<{ token: string, ... }>`  | Starts a pipeline. You must pass either `pipeline` (object) or `filepath` (path to a JSON file; Node only). The client substitutes `${ROCKETRIDE_*}` in the config from its configured environment map. Returns at least `token`; use that token for `send()`, `sendFiles()`, `pipe()`, `chat()`, `getTaskStatus()`, and `terminate()`. |
-| `validate`      | `validate(options: { pipeline: PipelineConfig \| Record<string, unknown>; source?: string }): Promise<Record<string, unknown>>`                                                                                              | `Promise<Record<string, unknown>>` | Validates a pipeline configuration without starting it. Returns validation results (e.g. errors, warnings). Use to check pipeline correctness before `use()`.                                                                                                                                                                  |
+| `use`           | `use(options?: { token?: string; filepath?: string; pipeline?: PipelineConfig; source?: string; threads?: number; useExisting?: boolean; args?: string[]; ttl?: number; pipelineTraceLevel?: 'none' \| 'metadata' \| 'summary' \| 'full'; name?: string; env?: Record<string, string> }): Promise<Record<string, any> & { token: string }>` | `Promise<{ token: string, ... }>`  | Starts a pipeline. You must pass either `pipeline` (object) or `filepath` (path to a JSON file; Node only). The client sends its `ROCKETRIDE_*` environment values (plus any per-use `env` overrides) with the request, and the server substitutes `${ROCKETRIDE_*}` in the config. Returns at least `token`; use that token for `send()`, `sendFiles()`, `pipe()`, `chat()`, `getTaskStatus()`, and `terminate()`. |
+| `validate`      | `validate(options: { pipeline: PipelineConfig \| Record<string, unknown>; source?: string }): Promise<ValidationResult>`                                                                                              | `Promise<ValidationResult>` | Validates a pipeline configuration without starting it. Returns validation results (e.g. errors, warnings). Use to check pipeline correctness before `use()`.                                                                                                                                                                  |
 | `terminate`     | `terminate(token: string): Promise<void>`                                                                                                                                                                                    | -                                  | Stops the pipeline for that token and frees server resources. Call when the user cancels or when you are done sending data.                                                                                                                                                                                                    |
 | `getTaskStatus` | `getTaskStatus(token: string, options?: { timeout?: number \| false }): Promise<TASK_STATUS>`                                                                                                                                | `Promise<TASK_STATUS>`             | Returns current task status: e.g. `completedCount`, `totalCount`, `completed`, `state`, `exitCode`. Use to poll until `completed` is true or to show progress.                                                                                                                                                                 |
 
@@ -200,9 +204,9 @@ await client.terminate(token);
 
 | Method      | Signature                                                                                                                                  | Returns                                 | Description                                                                                                                                                                                                         |
 | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `pipe`      | `pipe(token: string, objinfo?: Record<string, any>, mimeType?: string, provider?: string): Promise<DataPipe>`                              | `Promise<DataPipe>`                     | Creates a **streaming** data pipe. Use when you have large payloads or chunks arriving over time; you call `open()`, then one or more `write()`, then `close()`. Default MIME: `application/octet-stream`.          |
-| `send`      | `send(token: string, data: string \| Uint8Array, objinfo?: Record<string, any>, mimetype?: string): Promise<PIPELINE_RESULT \| undefined>` | `Promise<PIPELINE_RESULT \| undefined>` | Sends data in **one shot** (internally: open pipe, write once, close). Use for small payloads when you have the full buffer in memory.                                                                              |
-| `sendFiles` | `sendFiles(files: Array<{ file: File; objinfo?: Record<string, any>; mimetype?: string }>, token: string): Promise<UPLOAD_RESULT[]>`       | `Promise<UPLOAD_RESULT[]>`              | Uploads multiple browser `File` objects. Results are in the same order as `files`. Progress is reported via `onEvent` as `apaevt_status_upload` events (e.g. `body.filepath`, `body.bytes_sent`, `body.file_size`). |
+| `pipe`      | `pipe(token: string, objinfo?: Record<string, any>, mimeType?: string, provider?: string, onSSE?: (type, data) => Promise<void>): Promise<DataPipe>`                              | `Promise<DataPipe>`                     | Creates a **streaming** data pipe. Use when you have large payloads or chunks arriving over time; you call `open()`, then one or more `write()`, then `close()`. Default MIME: `application/octet-stream`.          |
+| `send`      | `send(token: string, data: string \| Uint8Array, objinfo?: Record<string, any>, mimetype?: string, onSSE?: (type, data) => Promise<void>): Promise<PIPELINE_RESULT \| undefined>` | `Promise<PIPELINE_RESULT \| undefined>` | Sends data in **one shot** (internally: open pipe, write once, close). Use for small payloads when you have the full buffer in memory.                                                                              |
+| `sendFiles` | `sendFiles(files: Array<{ file: File; objinfo?: Record<string, any>; mimetype?: string }>, token: string, maxConcurrent?: number): Promise<UPLOAD_RESULT[]>`       | `Promise<UPLOAD_RESULT[]>`              | Uploads multiple browser `File` objects with a positive integer concurrency limit (default `5`). Results are in the same order as `files`. Progress is reported via `onEvent` as `apaevt_status_upload` events (e.g. `body.filepath`, `body.bytes_sent`, `body.file_size`). |
 
 **When to use `pipe` vs `send`:** Use `send()` when you have a single blob (e.g. a string or one `Uint8Array`) and don't need to stream. Use `pipe()` when you are reading a large file in chunks, or when data arrives incrementally (e.g. from a stream or multiple buffers).
 
@@ -303,10 +307,10 @@ update, promote, and rollback are all this one verb.
 
 | Method | Signature | Description |
 | ------ | --------- | ----------- |
-| `appPublish` | `appPublish({appId, version, bundle, message?, moduleId?, name?}): Promise<RailEntry>` | Publish an immutable version to the org registry (single-file `remoteEntry.js` bundle; commit-style `message` shows on the version card). |
-| `appVersions` | `appVersions(appId): Promise<RailEntry[]>` | The version rail, newest first; each entry carries `rungs` naming the rungs currently pinned to it. |
+| `appPublish` | `appPublish({appId, version, bundle, message?, moduleId?, name?}): Promise<{registryVersion, appVersion, sha256, publishedAt, author, message}>` | Publish an immutable version to the org registry (single-file `remoteEntry.js` bundle; commit-style `message` shows on the version card). |
+| `appVersions` | `appVersions(appId): Promise<Array<{registryVersion, appVersion, sha256, publishedAt, author, message, rungs}>>` | The version rail, newest first; each entry carries `rungs` naming the rungs currently pinned to it. |
 | `appDeploy` | `appDeploy(appId, registryVersion, target): Promise<{deployment, rung}>` | Pin a rung to a version. Personal deploys resolve into your own manifest immediately. |
-| `appWhere` | `appWhere(appId): Promise<Pin[]>` | The reverse index: `{rung, handle, version, appVersion, state, deployedAt}` per rung. |
+| `appWhere` | `appWhere(appId): Promise<Array<{rung, handle, version, appVersion, state, deployedAt?}>>` | The reverse index: one pin row per rung. |
 
 ### Events
 
@@ -319,16 +323,16 @@ update, promote, and rollback are all this one verb.
 | Method        | Signature                                                                | Returns                                     | Description                                                                                                                                      |
 | ------------- | ------------------------------------------------------------------------ | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `getServices` | `getServices(): Promise<Record<string, any>>`                            | `Promise<Record<string, any>>`              | Returns all service/connector definitions from the server (schemas, UI schemas). Use to discover what pipelines or features the server supports. |
-| `getService`  | `getService(service: string): Promise<Record<string, any> \| undefined>` | `Promise<Record<string, any> \| undefined>` | Returns the definition for one service by name. Throws if the request fails.                                                                     |
+| `getService`  | `getService(service: string): Promise<ServiceDefinition>` | `Promise<ServiceDefinition>` | Returns the definition for one service by name. An unknown service name is an error (throws), not an `undefined` result.                         |
 | `ping`        | `ping(token?: string): Promise<void>`                                    | -                                           | Lightweight liveness check. Throws if the server responds with an error. Optional `token` for task-scoped ping.                                  |
 
 ### Chat
 
 | Method | Signature                                                                        | Returns                    | Description                                                                                                                                                                                                                                            |
 | ------ | -------------------------------------------------------------------------------- | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `chat` | `chat(options: { token: string; question: Question }): Promise<PIPELINE_RESULT>` | `Promise<PIPELINE_RESULT>` | Sends the `Question` to the AI for the given pipeline token and returns the pipeline result. The answer content is in the result body (e.g. fields described by `result_types`); you can use `Answer.parseJson()` on raw text if the AI returned JSON. |
+| `chat` | `chat(options: { token: string; question: Question; onSSE?: (type, data) => Promise<void> }): Promise<PIPELINE_RESULT>` | `Promise<PIPELINE_RESULT>` | Sends the `Question` to the AI for the given pipeline token and returns the pipeline result. The answer content is in the result body (e.g. fields described by `result_types`); if the AI returned JSON as raw text, parse it with `new Answer(true).setAnswer(text)` followed by `getJson()`. |
 
-**How it works:** The client opens a pipe with MIME type `application/rocketride-question`, writes the serialized `Question`, closes the pipe, and returns the server's result. The pipeline must support the chat provider for that token.
+**How it works:** The client opens a pipe with MIME type `application/rocketride-question`, writes the serialized `Question`, closes the pipe, and returns the server's result. The pipe is opened without a provider filter, so `chat()` works with chat, webhook, and dropper sources.
 
 ### Convenience
 
@@ -389,18 +393,32 @@ constructor(options?: {
 | `addHistory`     | `addHistory(item: QuestionHistory): void`                             | Adds a history item (`{ role, content }`) for multi-turn chat.   |
 | `addQuestion`    | `addQuestion(question: string): void`                                 | Appends the main question text.                                  |
 | `addDocuments`   | `addDocuments(documents: Doc \| Doc[]): void`                         | Adds documents for the AI to reference.                          |
+| `addGoal`        | `addGoal(goal: string): void`                                         | Adds a goal statement for the AI.                                |
 | `getPrompt`      | `getPrompt(hasPreviousJsonFailed?: boolean): string`                  | Returns the full prompt (internal use).                          |
 
 ---
 
 ## Answer
 
-Used to parse chat response content. The client does not attach an `Answer` instance to the pipeline result; you read the response body and, if needed, use these static helpers to extract JSON or code from AI text (which often includes markdown or code fences).
+Used to parse chat response content. The client does not attach an `Answer` instance to the pipeline result; you read the response body and, if needed, construct an `Answer` (or use the static helper) to normalize and extract JSON or text from AI content (which often includes markdown or code fences).
 
-| Method               | Signature                            | Description                                             |
-| -------------------- | ------------------------------------ | ------------------------------------------------------- |
-| `Answer.parseJson`   | `parseJson(value: string): any`      | Parses JSON from AI text (strips markdown/code blocks). |
-| `Answer.parsePython` | `parsePython(value: string): string` | Extracts Python code from a code block in the response. |
+### Constructor
+
+```typescript
+constructor(expectJson?: boolean)
+```
+
+Defaults to `false`. When `true`, `setAnswer()` requires (and `getJson()` returns) JSON-compatible content.
+
+### Methods
+
+| Method                | Signature                                              | Description                                                                     |
+| ---------------------- | -------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| `setAnswer`            | `setAnswer(value: string \| object \| unknown[]): void`   | Stores the response value, validating/parsing it as JSON when `expectJson` is `true`. |
+| `getText`               | `getText(): string`                                       | Returns the stored answer as plain text.                                           |
+| `getJson`               | `getJson(): unknown`                                       | Returns the stored answer as parsed JSON; throws if it is not JSON-compatible.     |
+| `isJson`                | `isJson(): boolean`                                        | Returns the `expectJson` flag this `Answer` was constructed with.                  |
+| `Answer.parsePython`   | `parsePython(value: string): string`                       | Static. Extracts Python code from a code block in the response.                    |
 
 ---
 
@@ -450,7 +468,7 @@ await client.disconnect();
 import { RocketRideClient } from 'rocketride';
 
 const status = await RocketRideClient.withConnection({ auth: 'my-key', uri: 'wss://api.rocketride.ai' }, async (client) => {
-	const { token } = await client.use({ pipeline: { pipeline: myPipelineConfig } });
+	const { token } = await client.use({ pipeline: myPipelineConfig });
 	await client.send(token, JSON.stringify({ data: 1 }));
 	return await client.getTaskStatus(token);
 });
@@ -513,7 +531,7 @@ import { createInterface } from 'readline';
 
 const client = new RocketRideClient({ auth, uri });
 await client.connect();
-const { token } = await client.use({ pipeline: { pipeline: config } });
+const { token } = await client.use({ pipeline: config });
 
 const pipe = await client.pipe(token, { name: 'large.csv' }, 'text/csv');
 await pipe.open();
@@ -534,7 +552,7 @@ import { RocketRideClient, Question, Answer } from 'rocketride';
 
 const client = new RocketRideClient({ auth, uri });
 await client.connect();
-const { token } = await client.use({ pipeline: { pipeline: chatPipelineConfig } });
+const { token } = await client.use({ pipeline: chatPipelineConfig });
 
 const question = new Question({ expectJson: true });
 question.addInstruction('Format', 'Return a JSON object with keys: summary, keywords.');
@@ -543,7 +561,9 @@ question.addQuestion('Summarize the main points and list keywords.');
 
 const response = await client.chat({ token, question });
 const answerText = response?.data?.answer ?? response?.answers?.[0];
-const structured = answerText ? Answer.parseJson(answerText) : null;
+const answer = new Answer(true);
+answer.setAnswer(answerText);
+const structured = answer.getJson();
 console.log(structured);
 
 await client.terminate(token);

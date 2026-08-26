@@ -51,7 +51,8 @@ const result = await client.send(token, data, objinfo?, mimetype?);
 | `token` | `str` / `string` | Yes | Pipeline task token from `use()` |
 | `data` | `str \| bytes` / `string \| Uint8Array` | Yes | Data to send for processing |
 | `objinfo` | `dict` / `Record<string, unknown>` | No | Metadata about the data (e.g., `{"name": "data.txt"}`) |
-| `mimetype` | `str` / `string` | No | MIME type of the data (auto-detected if not specified) |
+| `mimetype` | `str` / `string` | No | MIME type of the data (defaults to `application/octet-stream`) |
+| `on_sse` / `onSSE` | `callable` / `(type, data) => Promise<void>` | No | Streaming callback invoked for server-sent events during processing |
 
 ### Returns
 
@@ -120,7 +121,7 @@ results = await client.send_files(files, token)
 **TypeScript:**
 
 ```typescript
-const results = await client.sendFiles(files, token);
+const results = await client.sendFiles(files, token, maxConcurrent?);
 ```
 
 ### Parameters
@@ -143,6 +144,7 @@ Each file entry can be:
 | --- | --- | --- | --- |
 | `files` | `Array<{ file: File, objinfo?, mimetype? }>` | Yes | Array of File objects with optional metadata |
 | `token` | `string` | Yes | Pipeline task token |
+| `maxConcurrent` | `number` | No | Maximum parallel uploads (positive integer, default `5`) |
 
 ### Returns
 
@@ -239,6 +241,7 @@ const pipe = await client.pipe(token, objinfo?, mimeType?, provider?);
 | `objinfo` | `dict` / `Record<string, unknown>` | No | Metadata about the data |
 | `mime_type` / `mimeType` | `str` / `string` | No | MIME type of the data |
 | `provider` | `str` / `string` | No | Optional provider specification |
+| `onSSE` | `(type, data) => Promise<void>` (TypeScript only) | No | Streaming callback invoked for server-sent events during processing |
 
 ### DataPipe Methods
 

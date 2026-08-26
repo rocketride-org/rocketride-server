@@ -53,22 +53,22 @@ The engine serves the latest client packages via HTTP endpoints. Once the server
 
 | Endpoint                 | Package                | Response                                |
 | ------------------------ | ---------------------- | --------------------------------------- |
-| `GET /client/python/{filename}` | Python SDK wheel | `rocketride-{version}-py3-none-any.whl` |
-| `GET /client/typescript` | TypeScript SDK tarball | `rocketride-{version}.tgz`              |
-| `GET /client/vscode`     | VSCode extension       | `rocketride-{version}.vsix`             |
+| `GET /client/python/{filename}` | Python SDK wheel | `rocketlib_client_python-{version}-py3-none-any.whl` |
+| `GET /client/typescript` | TypeScript SDK tarball | `rocketlib-client-typescript-{version}.tgz`          |
+| `GET /client/vscode`     | VSCode extension       | `rocketlib-{version}.vsix`                           |
 
 ```bash
 # Download and install Python client (use "latest" as filename for newest version)
-curl -o rocketride-latest.whl http://localhost:5565/client/python/latest
-pip install rocketride-latest.whl
+curl -o rocketlib_client_python-latest.whl http://localhost:5565/client/python/latest
+pip install rocketlib_client_python-latest.whl
 
 # Download and install TypeScript client
 curl -O http://localhost:5565/client/typescript
-npm install rocketride-*.tgz
+npm install rocketlib-client-typescript-*.tgz
 
 # Download and install VSCode extension
 curl -O http://localhost:5565/client/vscode
-code --install-extension rocketride-*.vsix
+code --install-extension rocketlib-*.vsix
 ```
 
 These endpoints are public (no authentication required) and automatically serve the latest version. Returns 404 with a JSON error if packages are not found.

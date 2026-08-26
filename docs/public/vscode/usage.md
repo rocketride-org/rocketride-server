@@ -6,24 +6,22 @@ sidebar_position: 3
 
 ## Creating a Pipeline
 
-1. Right-click in the Explorer or click **+** in the RocketRide sidebar.
-2. Choose **Create Pipeline** to create a new `.pipe` file.
-3. The visual editor opens automatically for `.pipe` files.
-4. Drag components from the component palette onto the canvas.
-5. Configure each component's properties in the properties panel.
-6. Connect component outputs to inputs by drawing connections between lanes.
-7. Save the file, changes are auto-saved.
+1. Use **File > New File > RocketRide Pipeline**, or click **+** in the RocketRide sidebar, to create a new `.pipe` file.
+2. The visual editor opens automatically for `.pipe` files.
+3. Drag components from the component palette onto the canvas.
+4. Configure each component's properties in the properties panel.
+5. Connect component outputs to inputs by drawing connections between lanes.
+6. Save the file, changes are auto-saved.
 
 ## Running a Pipeline
 
-1. Right-click a `.pipe` file in the Explorer or sidebar.
-2. Select **Run Pipeline**, or use `Ctrl+Shift+P` and search for **RocketRide: Run Pipeline**.
-3. The **Status** page opens with real-time execution monitoring.
-4. Watch data flow through components, view completion metrics, and check for errors.
+1. Click the inline **Run** button on the pipeline item in the RocketRide sidebar, or press **Play** on the source node in the canvas.
+2. The **Status** page opens with real-time execution monitoring.
+3. Watch data flow through components, view completion metrics, and check for errors.
 
 ## Debugging a Pipeline
 
-1. Right-click a `.pipe` file and select **Debug Pipeline**.
+1. In the **Run and Debug** view, start the **RocketRide: Launch Pipeline** debug configuration (a `rocketride`-type launch configuration).
 2. The debugger opens with breakpoint support.
 3. Set breakpoints on components to pause execution.
 4. Step through the pipeline and inspect variable values at each breakpoint.
@@ -32,15 +30,14 @@ sidebar_position: 3
 
 If a pipeline is already running on the server:
 
-1. Right-click a `.pipe` file and select **Attach to Pipeline**.
+1. In the **Run and Debug** view, start the **RocketRide: Attach to Pipeline** debug configuration.
 2. The **Status** page opens and streams real-time data from the running pipeline.
 
 ## Deploying to Cloud
 
-1. Right-click a `.pipe` file and select **Deploy Pipeline**.
-2. The **Deploy** page opens.
-3. Configure deployment settings.
-4. Click **Deploy** to push the pipeline to RocketRide.ai cloud.
+1. Open the pipeline's **DEPLOY** page from the RocketRide sidebar (the file view's DEPLOY page).
+2. Configure deployment settings.
+3. Click **Deploy** to push the pipeline to RocketRide.ai cloud.
 
 ## Pipeline Editor
 
@@ -55,7 +52,7 @@ The visual editor provides:
 
 Trace verbosity, the idle timeout (TTL), task arguments, and debug output for pipeline runs are configured once in **Settings → Pipeline** — they are workspace settings, not per-pipeline options:
 
-- **Pipeline Trace Level** (`rocketride.pipelineTraceLevel`, default `summary`): how much execution-trace data the engine emits — `full`, `summary`, `metadata`, or `none`. Higher levels populate the **Flow** and **Trace** tabs, but `full` inlines entire payloads (including images), which can noticeably slow runs that process large images.
+- **Pipeline Trace Level** (`rocketride.pipelineTraceLevel`, default `full`): how much execution-trace data the engine emits — `full`, `summary`, `metadata`, or `none`. Higher levels populate the **Flow** and **Trace** tabs, but `full` inlines entire payloads (including images), which can noticeably slow runs that process large images.
 - **Pipeline TTL** (`rocketride.pipelineTTL`, default `900` = 15 minutes): how long the engine keeps a pipeline alive without activity before stopping it. Fixed choices from 15 minutes to 8 hours, plus "Run forever or until you stop it" (`0` = no timeout).
 - **Task Arguments** (`rocketride.taskArguments`, default empty): additional command-line arguments passed to each pipeline task process. The engine splits the string using shell parsing rules, so quoted paths are preserved.
 - **Pipeline Debug Output** (`rocketride.pipelineDebugOutput`, default `false`): appends `--trace=debugOut` to the task arguments (unless they already contain a `--trace=` flag) for detailed task trace logging.

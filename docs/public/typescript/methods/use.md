@@ -57,7 +57,7 @@ const result = await client.use({
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
 | `pipeline` | `dict` / `PipelineConfig` | One of `pipeline` or `filepath` required | Pipeline configuration object |
-| `filepath` | `str` / `string` | One of `pipeline` or `filepath` required | Path to a JSON or JSON5 pipeline configuration file |
+| `filepath` | `str` / `string` | One of `pipeline` or `filepath` required | Path to a JSON pipeline configuration file (`.pipe`/`.json`). TypeScript requires strict JSON; Python additionally accepts JSON5 when the optional `json5` package is installed (falls back to strict JSON otherwise) |
 | `token` | `str` / `string` | No | Custom task token (server generates one if not provided) |
 | `source` | `str` / `string` | No | Override the source component specified in the pipeline config |
 | `threads` | `int` / `number` | No | Number of processing threads (server decides default) |
@@ -65,6 +65,8 @@ const result = await client.use({
 | `args` | `list[str]` / `string[]` | No | Command-line style arguments to pass to the pipeline |
 | `ttl` | `int` / `number` | No | Time-to-live in seconds for idle pipelines (0 = no timeout) |
 | `pipelineTraceLevel` | `str` / `string` | No | Trace level: `'none'`, `'metadata'`, `'summary'`, or `'full'` |
+| `name` | `str` / `string` | No | Display name for the pipeline (derived from `filepath` if omitted) |
+| `env` | `dict[str, str]` / `Record<string, string>` | No | Per-use environment overrides merged over the client's `ROCKETRIDE_*` environment map |
 
 ## **Returns**
 
@@ -200,7 +202,7 @@ Pipeline configuration files define the processing workflow:
 
 ### Environment Variable Substitution
 
-The SDK automatically substitutes `${ROCKETRIDE_*}` patterns in pipeline configs with values from your `.env` file:
+`${ROCKETRIDE_*}` patterns in pipeline configs are substituted server-side: the client sends its `ROCKETRIDE_*` environment values (from the client's env map or `process.env`) along with the request, and the server performs the substitution. The SDK does not load `.env` files itself — load them into the process environment yourself (e.g. `node --env-file=.env`):
 
 ```json
 {
@@ -208,9 +210,14 @@ The SDK automatically substitutes `${ROCKETRIDE_*}` patterns in pipeline configs
   "components": [
     {
       "id": "processor",
-      "provider": "transform",
+      "provider": "webhook",
       "config": {
-        "apiKey": "${ROCKETRIDE_APIKEY}"
+        "hideForm": true,
+        "mode": "Source",
+        "type": "webhook",
+        "parameters": {
+          "apiKey": "${ROCKETRIDE_APIKEY}"
+        }
       }
     }
   ]
@@ -223,14 +230,11 @@ The SDK automatically substitutes `${ROCKETRIDE_*}` patterns in pipeline configs
 
 ```json
 {
-  "status": "OK",
-  "data": {
-    "token": "${TASK_TOKEN}"
-  }
+  "token": "${TASK_TOKEN}"
 }
 ```
 
-The SDK returns the `body` of this response directly, so `result['token']` gives you the task token.
+The SDK returns this object directly, so `result['token']` gives you the task token.
 
 ## **Error Handling**
 

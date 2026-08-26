@@ -15,7 +15,7 @@ This guide walks you through setting up a local development environment for the 
 ### C++ toolchain details (engine builds only)
 
 - **macOS** -- Xcode Command Line Tools (`xcode-select --install`)
-- **Linux** -- GCC 10+ or Clang 13+ (`sudo apt install build-essential cmake`)
+- **Linux** -- clang 16-18 with libc++ (the engine does not build with clang >= 19; GCC is not supported) -- provisioned by `server:setup-tools`
 - **Windows** -- Visual Studio 2019+ with the "Desktop development with C++" workload
 
 > Most contributors do **not** need the C++ toolchain. The builder downloads a pre-built engine binary by default.

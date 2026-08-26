@@ -16,7 +16,7 @@ Save this as `extract.pipe`:
 
 ```json
 {
-  "nodes": [
+  "components": [
     {
       "id": "source_1",
       "provider": "filesys",
@@ -38,16 +38,26 @@ Save this as `extract.pipe`:
       "provider": "extract_data",
       "config": {
         "profile": "default",
-        "apikey": "${OPENAI_API_KEY}",
         "fields": [
-          { "name": "invoice_number", "description": "The invoice or reference number" },
-          { "name": "total_amount",   "description": "The total amount due including tax" },
-          { "name": "due_date",       "description": "The payment due date in ISO 8601 format" },
-          { "name": "vendor_name",    "description": "The name of the vendor or supplier" }
+          { "column": "invoice_number", "type": "text", "defval": "" },
+          { "column": "total_amount",   "type": "text", "defval": "" },
+          { "column": "due_date",       "type": "date", "defval": "" },
+          { "column": "vendor_name",    "type": "text", "defval": "" }
         ]
       },
       "input": [
         { "lane": "text", "from": "parser_1" }
+      ]
+    },
+    {
+      "id": "llm_1",
+      "provider": "llm_openai",
+      "config": {
+        "profile": "openai-4o-mini",
+        "apikey": "${OPENAI_API_KEY}"
+      },
+      "control": [
+        { "classType": "llm", "from": "extract_1" }
       ]
     },
     {
@@ -68,6 +78,7 @@ Save this as `extract.pipe`:
 | `source_1` | `filesys` | Scans `/data/invoices` and emits each file as a tagged object on the `tags` lane. |
 | `parser_1` | `parse` | Converts each file (PDF, Word, image, etc.) into clean text on the `text` lane. |
 | `extract_1` | `extract_data` | Uses an LLM to pull the four named fields out of each document and emits the result as structured JSON on the `answers` lane. |
+| `llm_1` | `llm_openai` | Answers `extract_1`'s extraction prompts over the `llm` invoke channel. |
 | `target_1` | `response` | Returns the extracted JSON to the caller. |
 
 ## Start the pipeline

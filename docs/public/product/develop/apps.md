@@ -54,9 +54,8 @@ Apps are independent packages that export an `AppDescriptor` via Module Federati
 └─────────────────────────────────────────────────┘
 ```
 
-The shell mounts two components from your app:
-- `components.App` → Client Area (required)
-- `components.Sidebar` → Sidebar zone (optional; sidebar hidden if absent)
+The shell mounts one component from your app:
+- `app` → Client Area (required). Your app composes its own layout inside (columns, sidebar, status bar) with `<AppLayout>`.
 
 ---
 
@@ -85,8 +84,7 @@ my-app/
 └── src/
     ├── index.ts           # MF async boundary
     ├── AppDescriptor.ts   # What the shell loads
-    ├── MyApp.tsx           # Client area component
-    └── MySidebar.tsx       # Sidebar component (optional)
+    └── MyApp.tsx           # Client area component
 ```
 
 ### 3. Define the manifest in `package.json`
@@ -117,16 +115,12 @@ Import types from `rocketride/app-sdk`:
 ```typescript
 import type { AppDescriptor } from 'rocketride/app-sdk';
 import MyApp from './MyApp';
-import MySidebar from './MySidebar';
 
 const MY_APP: AppDescriptor = {
   id: 'mycompany.myApp',
   name: 'My App',
   branding: { appName: 'My App' },
-  components: {
-    App: MyApp,
-    Sidebar: MySidebar,  // omit for full-screen (no sidebar)
-  },
+  app: MyApp,
 };
 
 export default MY_APP;
@@ -151,31 +145,13 @@ const MyApp: React.FC<ShellAppProps> = ({ isConnected, identity }) => {
 export default MyApp;
 ```
 
-### 6. Create the Sidebar component (`src/MySidebar.tsx`)
-
-```typescript
-import React from 'react';
-import type { ShellSidebarProps } from 'rocketride/app-sdk';
-
-const MySidebar: React.FC<ShellSidebarProps> = ({ collapsed }) => {
-  if (collapsed) return null;
-  return (
-    <div style={{ padding: 12, fontSize: 12, color: 'var(--rr-text-secondary)' }}>
-      My sidebar content
-    </div>
-  );
-};
-
-export default MySidebar;
-```
-
-### 7. Async boundary (`src/index.ts`)
+### 6. Async boundary (`src/index.ts`)
 
 ```typescript
 import('./AppDescriptor');
 ```
 
-### 8. rsbuild.config.ts
+### 7. rsbuild.config.ts
 
 ```typescript
 import fs from 'node:fs';
@@ -210,7 +186,7 @@ export default defineConfig(() => ({
 }));
 ```
 
-### 9. Build and deploy
+### 8. Build and deploy
 
 ```bash
 npx rsbuild build
@@ -246,8 +222,8 @@ interface AppManifest {
   showHeader?: boolean;
   /** When false, the status bar is hidden for this app. Default: true. */
   showStatusBar?: boolean;
-  /** Settings the app requires. Shown in the shell's Settings overlay. */
-  settings?: AppSettingDefinition[];
+  /** Settings contribution (VSCode `contributes.configuration` shape). Shown in the shell's Settings overlay. */
+  contributes?: { configuration?: AppConfiguration };
   /** Internal: MF module identifier (derived from id). */
   moduleId?: string;
   /** App lifecycle status (e.g. 'auth', 'free', 'unsubscribed', 'subscribed', 'trialing', 'past_due', 'canceled'). */
@@ -259,27 +235,33 @@ interface AppManifest {
 
 ### Settings
 
-Apps can declare runtime settings (API keys, config values) that the shell manages:
+Apps can declare runtime settings (API keys, config values) that the shell manages. The declaration lives under `appManifest.contributes.configuration` — the exact `contributes.configuration` shape from the VSCode extension manifest specification, with setting keys dotted and prefixed with the app id:
 
 ```json
 {
   "appManifest": {
-    "settings": [
-      {
-        "key": "MY_API_KEY",
-        "label": "API Key",
-        "description": "Your API key for the external service",
-        "required": true
+    "contributes": {
+      "configuration": {
+        "title": "My App",
+        "properties": {
+          "mycompany.myApp.apiKey": {
+            "type": "string",
+            "description": "Your API key for the external service",
+            "required": true
+          }
+        }
       }
-    ]
+    }
   }
 }
 ```
 
+Each property is a `SettingSchema` (`type`, `default`, `description`, `enum`, `required`, ...). Display labels derive from the setting key, VSCode-style — there is no label field (`apiKey` renders as "Api Key").
+
 Settings are:
 - Rendered in the shell's Settings overlay (grouped by app)
 - Persisted to `.workspace/settings.json`
-- Available to your app via `useShellApiConfig()`, access as `config.MY_API_KEY`
+- Available to your app via `useShellApiConfig()`, access as `config['mycompany.myApp.apiKey']`
 
 ---
 
@@ -294,17 +276,18 @@ interface AppDescriptor {
   icon?: React.ReactNode;                  // Icon in app switcher
   branding: ShellBrandingConfig;           // Sidebar header branding
 
-  components: {
-    App: React.ComponentType<ShellAppProps>;          // Required — client area
-    Sidebar?: React.ComponentType<ShellSidebarProps>; // Optional — sidebar zone
-    [key: string]: React.ComponentType<any>;          // Additional — for cross-app loading
+  /** The app's ONE mount point — rendered raw in the client area. */
+  app: React.ComponentType<ShellAppProps>;
+
+  /** Optional cross-app component catalog. Never mounted by the shell. */
+  components?: {
+    [key: string]: React.ComponentType<any>;
   };
 }
 ```
 
-The `components` object serves double duty:
-- **`App`** and **`Sidebar`** are well-known names the shell mounts in its screen zones
-- **Any other keys** (e.g. `Canvas`, `Toolbar`, `DataGrid`) are ignored by the shell but accessible to other apps via `loadedApps` in the workspace context
+- **`app`** is the single component the shell mounts in the client area; the app composes its own layout inside (columns, sidebar, status bar) with `<AppLayout>`
+- **`components`** entries (e.g. `Canvas`, `Toolbar`, `DataGrid`) are never mounted by the shell but are loadable by other apps via `useAppComponent()`
 
 ### ShellBrandingConfig
 
@@ -348,30 +331,19 @@ interface ShellAppProps {
 }
 ```
 
-### ShellSidebarProps (your Sidebar component)
-
-```typescript
-interface ShellSidebarProps {
-  /** True when the sidebar is in collapsed (icon-only) mode. */
-  collapsed: boolean;
-}
-```
-
-When `collapsed` is true, hide your sidebar content or show only icons.
-
 ---
 
 ## Screen Zones
 
 | Zone | Owner | Content |
 |------|-------|---------|
-| **Sidebar** | Shell frame + your `Sidebar` component | App switcher header, your sidebar content, theme/account/settings footer |
-| **Client Area** | Your `App` component | Whatever your app renders |
+| **Sidebar** | Your `app` component's layout (`AppLayout`) | App switcher header, your sidebar content, theme/account/settings footer |
+| **Client Area** | Your `app` component | Whatever your app renders |
 | **Debug Panel** | Shell (ALT+D toggle) | Live event log, postMessage traffic |
 | **Status Bar** | Shell | Connection status, app name, ready state |
 | **Overlays** | Shell | Account, Billing, Settings (triggered from sidebar footer) |
 
-If your app omits `components.Sidebar`, the sidebar zone is hidden entirely, your app gets the full window width.
+If your app's layout renders no sidebar, the client area gets the full window width.
 
 ---
 
@@ -397,7 +369,7 @@ import { useShellConnection, useShellApiConfig, useWorkspace, connectionManager 
 |------|---------|---------|
 | `useAuthUser()` | `ConnectResult \| null` | Current authenticated user identity |
 | `useLogout()` | `() => void` | Trigger logout |
-| `useSubscriptions()` | `{ subscribedAppIds, subscriptionStatuses }` | User's active subscriptions |
+| `useSubscriptions()` | `{ desktopApps, isOnDesktop(appId), getStatus(appId) }` | User's desktop apps and subscription state |
 
 ### Workspace
 
@@ -416,7 +388,7 @@ The workspace context provides:
 - `appLoading`: Whether the active app is currently loading
 - `loadedApps`: Map of already-loaded app descriptors (for cross-app component loading)
 - `loadApp(appId)`: Trigger lazy loading of an app's descriptor
-- `updateAppState(patch)`: Update per-app state
+- `updateAppState(updater)`: Update per-app state — pass a function receiving the previous state and returning the next
 - `updateSetting(key, value)`: Update a single setting
 - `updatePrefs(patch)`: Update workspace preferences
 - `themeOptions`: Available theme choices
@@ -497,13 +469,17 @@ useEffect(() => {
 | `shell:subscribe` | `{ app: AppManifestEntry, plan?: CheckoutPlan }` | Apps → Shell | Open subscription checkout for an app; optional `plan` preselects a tier and skips the picker (straight to payment) |
 | `shell:myApps` | `{}` | Apps → Shell | Navigate to My Apps |
 | `shell:accountUpdate` | `ConnectResult` | Server → Shell | Server-pushed account/subscription change |
-| `shell:servicesUpdated` | `{ services: Record<string, unknown>; servicesError?: string }` | Shell → Apps | Service catalog fetch completed |
 | `shell:sidebarCollapsing` | `{}` | Shell → Apps | Sidebar is collapsing (for layout adjustments) |
 | `shell:themeChange` | `{ tokens: Record<string, string> }` | Shell → Apps | Theme CSS tokens changed |
-| `shell:statusMessage` | `{ message: string \| null }` | Shell → Apps | Transient status bar text changed |
-| `shell:statusChange` | `{ connected: boolean; ... }` | Shell → Apps | Full connection state machine update |
-| `shell:error` | `{ error: Error \| unknown }` | Shell → Apps | Connection or operation error |
+| `shell:statusChange` | `{ message: string \| null }` | Shell → Apps | Transient status bar text changed |
 | `shell:event` | `{ event: unknown }` | Server → Apps | Raw server event forwarded from WebSocket |
+| `shell:appsUpdated` | `{ apps: ShellAppEntry[] }` | Shell-internal | App list updated |
+| `shell:manifestRefresh` | `{ source: string }` | Shell-internal | App manifest re-fetched |
+| `shell:openOverlay` | `{ id: 'account' \| 'settings' \| 'environment' }` | Shell-internal | Open a shell overlay |
+| `shell:unsubscribe` | `{ appId: string }` | Shell-internal | Cancel an app subscription |
+| `shell:viewActivated` | `{ viewId: string }` | Shell-internal | A shell view became active |
+
+The events marked **Shell-internal** exist only in the shell package's internal event map — they are not part of the `ShellEventMap` exported from `rocketride/app-sdk`, so external apps cannot emit or subscribe to them type-safely.
 
 ### Extending the event map
 
@@ -637,14 +613,16 @@ All operations are methods on the `Documents` instance:
 | `closeGroup(groupId)` | Close all editors in a group |
 | `setActiveEditor(groupId, index)` | Activate an editor within a group |
 | `setActiveGroup(groupId)` | Focus a group |
-| `openStaticDocument(uri, label, content?, groupId?)` | Open a read-only static document with a display label |
-| `splitGroupWithDocument(groupId, orientation)` | Split a group, moving the active document to the new pane |
-| `updateSplitSizes(splitNodeId, sizes)` | Update the sizes of a split layout node |
+| `openStaticDocument(uri, label, content?, groupId?)`\* | Open a read-only static document with a display label |
+| `splitGroupWithDocument(groupId, orientation)`\* | Split a group, moving the active document to the new pane |
+| `updateSplitSizes(splitNodeId, sizes)`\* | Update the sizes of a split layout node |
 | `updateEditorViewport(editorId, patch)` | Merge an editor's scroll position and cursor coordinates |
-| `updateEditorViewState(editorId, viewState)` | Persist an editor's opaque view state (the app owns its shape) |
+| `updateEditorViewState(editorId, viewState)`\* | Persist an editor's opaque view state (the app owns its shape) |
 | `getState()` | Read state without subscribing |
 | `getDocument(uri)` | Get a single document by URI |
 | `destroy()` | Clean up the instance |
+
+\* Available on the `shell` package's `Documents` implementation but not yet declared on the `rocketride/app-sdk` `Documents` typing — external TypeScript builds referencing them will fail to type-check.
 
 ### React subscription
 
@@ -663,9 +641,9 @@ const MyComponent: React.FC = () => {
 };
 ```
 
-### Sharing between App and Sidebar
+### Sharing across your app's tree
 
-Your `App` and `Sidebar` components are React siblings, they can't share a React context. Instead, they share the same `Documents` instance via the module-level `getDocs()` function:
+Components in different parts of your app's layout (e.g. your editor area and your sidebar) can share the same `Documents` instance via the module-level `getDocs()` function:
 
 ```text
 MyApp (creates instance)     MySidebar (uses same instance)
@@ -759,8 +737,9 @@ A generic file tree panel (like VS Code's EXPLORER). Renders a hierarchical file
 - Keyboard navigation
 
 ```typescript
-import { DocExplorer } from 'rocketride/app-sdk';
-import type { DocExplorerConfig, DocEntry, IVirtualFileSystem } from 'rocketride/app-sdk';
+import { DocExplorer } from 'shell';
+import type { DocExplorerConfig, DocEntry } from 'shell';
+import type { IVirtualFileSystem } from 'rocketride/app-sdk';
 
 const config: DocExplorerConfig = {
   title: 'My Files',
@@ -800,7 +779,7 @@ const config: DocExplorerConfig = {
 A tab bar UI for a single editor group. Takes a `Documents` instance as a prop.
 
 ```typescript
-import { DocTabs } from 'rocketride/app-sdk';
+import { DocTabs } from 'shell';
 import { getDocs } from './docs';
 
 <DocTabs
@@ -834,10 +813,9 @@ const MY_APP: AppDescriptor = {
   id: 'rocketride.myApp',
   name: 'My App',
   branding: { appName: 'My App' },
+  app: MyApp,
   components: {
-    App: MyApp,
-    Sidebar: MySidebar,
-    // Additional components — shell ignores these, but other apps can access them
+    // Shell never mounts these, but other apps can access them
     SpecialChart: MySpecialChartComponent,
     DataGrid: MyDataGridComponent,
   },
@@ -930,11 +908,11 @@ Everything below is exported from `'rocketride/app-sdk'`.
 
 ### Types
 
-`ShellAppProps`, `ShellSidebarProps`, `WorkspacePrefs`, `WorkspaceState`, `AppWorkspaceState`, `AppManifestEntry`, `AppDescriptor`, `AppSettingDefinition`, `ShellConfig`, `ShellBrandingConfig`, `ShellThemeConfig`, `ShellThemeOption`, `ShellAccountConfig`, `ShellApiConfig`, `ShellEventMap`, `DebugLogEntry`, `WorkspaceAction`, `IWorkspaceContext`, `AuthUser`, `Document`, `Editor`, `EditorGroup`, `SplitOrientation`, `DocumentsState`, `IVirtualFileSystem`, `DocExplorerProps`, `DocExplorerConfig`, `DocEntry`, `DocEntryChild`, `DocEntryStatus`, `DocTabsProps`, `UseAppComponentResult`, `ShellToIframeMsg`, `IframeToShellMsg`, `ShellInitMsg`, `InitClientOptions`, `ShellProps`, `SidebarProps`
+`ShellAppProps`, `ConnectResult`, `AppDescriptor`, `AppManifestEntry`, `SettingValue`, `SettingSchema`, `AppConfiguration`, `ShellBrandingConfig`, `WorkspacePrefs`, `IWorkspaceContext`, `ShellApiConfig`, `ShellThemeConfig`, `ShellThemeOption`, `IVirtualFileSystem`, `Document`, `Editor`, `EditorGroup`, `SplitOrientation`, `DocumentsState`, `ShellEventMap`
 
 ### Hooks
 
-`useShellConnection()`, `useShellApiConfig()`, `useWorkspace()`, `useAuthUser()`, `useLogout()`, `useSubscriptions()`, `useAppComponent()`, `useShellEvents()`, `useShellEvent()`, `useClient()`, `useConnectionStatus()`, `usePolling()`, `useClickOutside()`, `useFixedPopupPosition()`
+`useShellConnection()`, `useShellApiConfig()`, `useWorkspace()`, `useAuthUser()`, `useLogout()`, `useSubscriptions()`, `useAppComponent()`
 
 ### Functions
 
@@ -942,8 +920,8 @@ Everything below is exported from `'rocketride/app-sdk'`.
 
 ### Classes
 
-`Documents`: instantiable document model with methods: `openDocument()`, `openStaticDocument()`, `createDocument()`, `closeEditor()`, `updateContent()`, `saveDocument()`, `revertDocument()`, `splitGroup()`, `splitGroupWithDocument()`, `moveEditor()`, `closeGroup()`, `updateSplitSizes()`, `setActiveEditor()`, `setActiveGroup()`, `updateEditorViewport()`, `updateEditorViewState()`, `getState()`, `getDocument()`, `useStore()`, `destroy()`
+`Documents`: instantiable document model with methods: `openDocument()`, `createDocument()`, `closeEditor()`, `updateContent()`, `saveDocument()`, `revertDocument()`, `splitGroup()`, `moveEditor()`, `closeGroup()`, `setActiveEditor()`, `setActiveGroup()`, `updateEditorViewport()`, `getState()`, `getDocument()`, `useStore()`, `destroy()`
 
 ### Components
 
-`Shell`, `Sidebar`, `NavButton`, `BottomPanel`, `ConfirmDialog`, `DebugPanel`, `PopupRow`, `AccountPage`, `BillingPage`, `SettingsPage`, `DocExplorer`, `DocTabs`, `DocSplitLayout`
+The app-sdk exports no components. `AppLayout`, `DocExplorer`, `DocTabs`, and `DocSplitLayout` (along with the shell frame components) are exported from the `shell` package.

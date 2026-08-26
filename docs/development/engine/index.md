@@ -25,7 +25,7 @@ This downloads a pre-built engine when available (preferred), or compiles from s
 | `BUILD_TESTS`                 | `ON`    | Build test suites           |
 | `BUILD_DOCS`                  | `OFF`   | Generate documentation      |
 | `ENABLE_PYTHON`               | `ON`    | Enable Python integration   |
-| `SHOW_BUILD_TIME`             | `ON`    | Show build time measurement |
+| `SHOW_BUILD_TIME`             | `OFF`   | Show build time measurement |
 | `ROCKETRIDE_UNITY_BATCH_SIZE` | -       | Unity build batch size      |
 
 ---
@@ -33,7 +33,7 @@ This downloads a pre-built engine when available (preferred), or compiles from s
 ## Usage
 
 ```bash
-rocketride [options] [task-files...]
+engine [options] [task-files...]
 ```
 
 Task files can be:
@@ -47,7 +47,7 @@ Task files can be:
 ### Streaming Mode
 
 ```bash
-rocketride --stream
+engine --stream
 ```
 
 Reads JSON task configuration from stdin for interactive or debugger-driven execution.
@@ -66,7 +66,6 @@ Reads JSON task configuration from stdin for interactive or debugger-driven exec
 | `--args`     | Output command-line arguments for debugging  |
 | `--break`    | Debug break on start                         |
 | `--diag`     | Enable diagnostic mode                       |
-| `--testArgs` | Enable test argument mode                    |
 
 ### Path Configuration
 
@@ -86,13 +85,15 @@ Path resolution supports `~` for the user home directory on both Unix and Window
 | ----------------------- | ------------------------------------------------ |
 | `--monitor TYPE`        | Monitor type: `Console`, `App`, or `TestConsole` |
 | `--pipeline CONFIG`     | Pipeline configuration override                  |
-| `--nodeId ID`           | Set engine node identifier                       |
 | `--java`                | Enable Java/Tika support                         |
 | `--python`              | Enable Python integration                        |
 | `--tika`                | External Tika service support                    |
 | `--serviceCategory CAT` | Service category filter                          |
 | `--serviceName NAME`    | Service name filter                              |
-| `--url.keystorenet URL` | Remote keystore URL                              |
+| `--node_path PATH`      | Load local node prototypes from PATH             |
+
+`--testArgs`, `--nodeId`, and `--url.keystorenet` are options of the engine-lib
+test binaries, not of the engine executable.
 
 ### Logging Options
 
@@ -229,9 +230,9 @@ Set with `--monitor TYPE`.
 
 ```text
 packages/engine/
+├── CMakeLists.txt                  # Build config
 ├── src/
 │   ├── main.cpp                    # Entry point
-│   ├── CMakeLists.txt              # Build config
 │   └── res/                        # Resources (version info)
 
 packages/server/

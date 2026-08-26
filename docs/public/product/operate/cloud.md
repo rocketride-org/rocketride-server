@@ -13,15 +13,20 @@ pipelines, no infrastructure to provision.
 
 Set two values and any [SDK](/develop/typescript) or the [CLI](/reference/cli) connects:
 
-| Variable          | Value                                            |
-| ----------------- | ------------------------------------------------ |
-| `ROCKETRIDE_URI`  | `https://api.rocketride.ai`                      |
-| `ROCKETRIDE_AUTH` | Your API token (`ROCKETRIDE_APIKEY` also works). |
+| Variable            | Value                       |
+| ------------------- | --------------------------- |
+| `ROCKETRIDE_URI`    | `https://api.rocketride.ai` |
+| `ROCKETRIDE_APIKEY` | Your API token.             |
 
 ```bash
 ROCKETRIDE_URI=https://api.rocketride.ai
-ROCKETRIDE_AUTH=your-api-token
+ROCKETRIDE_APIKEY=your-api-token
 ```
+
+The SDKs and CLIs read `ROCKETRIDE_APIKEY`. The MCP servers (the standalone
+`rocketride-mcp` server and the engine's MCP module) additionally read
+`ROCKETRIDE_AUTH`; in the standalone MCP server it takes precedence over
+`ROCKETRIDE_APIKEY`.
 
 > **Always use `https://` or `wss://` for Cloud.** An `http://`, `ws://`, or
 > bare `host:port` URI silently downgrades to an unencrypted connection. The

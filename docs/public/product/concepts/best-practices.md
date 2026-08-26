@@ -15,10 +15,20 @@ A `.pipe` file is plain JSON. If you hard-code an API key, it will end up in
 version control. Use `${ENV_VAR}` substitution in the config instead:
 
 ```json
-{ "provider": "llm_openai", "config": { "apikey": "${OPENAI_API_KEY}" } }
+{
+  "provider": "llm_openai",
+  "config": {
+    "profile": "openai-4o",
+    "openai-4o": { "apikey": "${ROCKETRIDE_OPENAI_KEY}" }
+  }
+}
 ```
 
-The engine expands `${...}` references at startup from the process environment.
+`${...}` references are expanded server-side when the run is submitted: the SDK
+sends `ROCKETRIDE_`-prefixed variables from the client environment, the server
+merges them over its stored secrets, and only `ROCKETRIDE_`-prefixed references
+are substituted. References to any other variable (such as `${OPENAI_API_KEY}`)
+are replaced with `<REDACTED>`, not passed through.
 
 Credentials are **per-node**: each node holds only its own key, and nodes do not
 share credential state. A compromised node config does not expose keys belonging
@@ -52,7 +62,7 @@ whether that context needs to survive pipeline restarts:
 | Node | Scope | Use when |
 | --- | --- | --- |
 | [`memory_internal`](/nodes/memory_internal) | In-process, single session | The conversation is self-contained and can reset on restart. Zero external dependencies. |
-| [`memory_persistent`](/nodes/memory_persistent) | Persisted to a store, cross-session | The agent must remember previous conversations. Requires a configured backing store. |
+| [`memory_persistent`](/nodes/memory_persistent) | Persisted to a store, cross-session | The agent must remember previous conversations. Requires the Redis backend for persistence; the default in-memory backend does not survive restarts. |
 | `tool_mem0` | Semantic, long-term | The agent benefits from extracted facts and preferences rather than raw history. Requires a Mem0 account or self-hosted instance. |
 
 If you don't need cross-session memory, `memory_internal` is the right default —
@@ -87,8 +97,8 @@ most common configuration error.
 | --- | --- | --- |
 | `questions` | User queries / prompts | LLMs, vector stores (for retrieval), agents |
 | `answers` | LLM responses | `response` target, downstream nodes expecting generated text |
-| `text` | Raw or parsed text | Preprocessors, embedding nodes, LLMs |
-| `tags` | File metadata objects | Parsers, embedding nodes |
+| `text` | Raw or parsed text | Preprocessors |
+| `tags` | File metadata objects | Parsers |
 | `documents` | Vector-ready chunks | Vector store `documents` input |
 | `image` / `audio` / `video` | Media | Vision/audio/video nodes |
 

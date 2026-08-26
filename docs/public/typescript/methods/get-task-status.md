@@ -87,6 +87,9 @@ client.getTaskStatus(token: string, options?: { timeout?: number | false }): Pro
 | `peak_cpu_percent` | `float` | Peak CPU utilization |
 | `peak_cpu_memory_mb` | `float` | Peak RAM usage in MB |
 | `peak_gpu_memory_mb` | `float` | Peak GPU VRAM usage in MB |
+| `avg_cpu_percent` | `float` | Average CPU utilization over task lifetime |
+| `avg_cpu_memory_mb` | `float` | Average RAM usage in MB over task lifetime |
+| `avg_gpu_memory_mb` | `float` | Average GPU VRAM usage in MB over task lifetime |
 
 ### Token Usage Fields (`tokens`)
 
@@ -95,6 +98,8 @@ client.getTaskStatus(token: string, options?: { timeout?: number | false }): Pro
 | `cpu_utilization` | `float` | Cumulative CPU utilization tokens |
 | `cpu_memory` | `float` | Cumulative CPU memory tokens |
 | `gpu_memory` | `float` | Cumulative GPU memory tokens |
+| `gpu_inference` | `float` | Cumulative GPU inference timing tokens |
+| `custom` | `dict[str, float]` | Custom node billing counters converted to tokens (counter name → tokens) |
 | `total` | `float` | Total cumulative tokens |
 
 ### Run Analytics Fields

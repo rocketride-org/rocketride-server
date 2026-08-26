@@ -360,8 +360,8 @@ are shared fragments and are ignored):
 - H1 equals the directory name; a summary paragraph follows it
 - required sections present; conditional sections absent when untriggered
 - section order; no unknown `##` headings in the hand-written region
-- table parity: Connections rows = `invoke` keys and Lanes rows = declared
-  lanes
+- table parity: every `invoke` key must appear in Connections and every
+  declared lane in Lanes (extra rows are not flagged)
 - exact Profiles parity across merged services: every declared profile appears
   once, with separate failures for missing, duplicate, and unknown rows
 - every protocol-bearing service's declared default appears in the introduction

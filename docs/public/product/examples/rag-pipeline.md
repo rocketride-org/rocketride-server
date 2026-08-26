@@ -23,10 +23,33 @@ Save this as `rag.pipe`:
 
 ```json
 {
-  "nodes": [
+  "project_id": "rag-example",
+  "components": [
     {
       "id": "source_1",
       "provider": "webhook"
+    },
+    {
+      "id": "parser_1",
+      "provider": "parse",
+      "input": [
+        { "lane": "tags", "from": "source_1" }
+      ]
+    },
+    {
+      "id": "prep_1",
+      "provider": "preprocessor_langchain",
+      "config": {
+        "profile": "default",
+        "default": {
+          "mode": "strlen",
+          "splitter": "RecursiveCharacterTextSplitter",
+          "strlen": 512
+        }
+      },
+      "input": [
+        { "lane": "text", "from": "parser_1" }
+      ]
     },
     {
       "id": "embed_1",
@@ -36,20 +59,24 @@ Save this as `rag.pipe`:
         "apikey": "${OPENAI_API_KEY}"
       },
       "input": [
-        { "lane": "text", "from": "source_1" }
+        { "lane": "documents", "from": "prep_1" },
+        { "lane": "questions", "from": "source_1" }
       ]
     },
     {
       "id": "store_1",
       "provider": "qdrant",
       "config": {
-        "profile": "self-hosted",
-        "serverName": "localhost",
-        "collection": "rag-docs"
+        "profile": "local",
+        "local": {
+          "host": "localhost",
+          "port": 6333,
+          "collection": "rag-docs"
+        }
       },
       "input": [
         { "lane": "documents", "from": "embed_1" },
-        { "lane": "questions", "from": "source_1" }
+        { "lane": "questions", "from": "embed_1" }
       ]
     },
     {
@@ -78,9 +105,11 @@ Save this as `rag.pipe`:
 
 | Node | Provider | Role |
 | --- | --- | --- |
-| `source_1` | `webhook` | Exposes an HTTP endpoint. Incoming documents arrive on the `text` lane; incoming questions arrive on the `questions` lane. |
-| `embed_1` | `embedding_openai` | Turns document text into vectors using `text-embedding-3-small`. Emits `documents` (vectors + metadata). |
-| `store_1` | `qdrant` | Upserts vectors from `embed_1` into the `rag-docs` collection. When a question arrives, it retrieves the top matching chunks and re-emits them as `questions` with context injected. |
+| `source_1` | `webhook` | Exposes an HTTP endpoint. Incoming documents arrive on the `tags` lane; incoming questions arrive on the `questions` lane. |
+| `parser_1` | `parse` | Converts each uploaded file (PDF, Word, etc.) into clean text on the `text` lane. |
+| `prep_1` | `preprocessor_langchain` | Splits the text into chunks and emits them on the `documents` lane. |
+| `embed_1` | `embedding_openai` | Turns document chunks into vectors using `text-embedding-3-small` and emits `documents` (vectors + metadata). Also embeds incoming questions before retrieval. |
+| `store_1` | `qdrant` | Upserts vectors from `embed_1` into the `rag-docs` collection. When an embedded question arrives, it retrieves the top matching chunks and re-emits them as `questions` with context injected. |
 | `llm_1` | `llm_openai` | Receives the question + retrieved context and generates an answer using GPT-4o. |
 | `target_1` | `response` | Returns the answer to the caller. |
 
@@ -94,7 +123,7 @@ The engine prints the webhook URL and public auth key:
 
 ```text
 Webhook ready - system is ready to accept requests
-  URL:  http://localhost:5567/task/data
+  URL:  http://localhost:5567/webhook/rag-example/source_1
   Auth: abc123...
 ```
 
@@ -103,7 +132,7 @@ Webhook ready - system is ready to accept requests
 POST a document to the webhook URL. The pipeline embeds and stores it:
 
 ```bash
-curl -X POST http://localhost:5567/task/data \
+curl -X POST http://localhost:5567/webhook/rag-example/source_1 \
   -H "Authorization: Bearer abc123..." \
   -F "file=@./my-document.pdf"
 ```
@@ -113,7 +142,7 @@ curl -X POST http://localhost:5567/task/data \
 Send a plain-text question to the same endpoint:
 
 ```bash
-curl -X POST http://localhost:5567/task/data \
+curl -X POST http://localhost:5567/webhook/rag-example/source_1 \
   -H "Authorization: Bearer abc123..." \
   -H "Content-Type: text/plain" \
   -d "What does the document say about refund policy?"

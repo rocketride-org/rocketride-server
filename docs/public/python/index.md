@@ -100,7 +100,7 @@ RocketRideClient(
 )
 ```
 
-**Why the options matter:** `uri` and `auth` tell the client _where_ and _how_ to authenticate. `persist` and `max_retry_time` control what happens when the connection fails or the server is not ready yet: with `persist=True` the client retries with exponential backoff and calls `on_connect_error` on each failure, so you can show "Still connecting..." or "Connection failed" without implementing retry logic yourself. Use `on_disconnected` only for "we were connected and then dropped"; use `on_connect_error` for "failed to connect" or "gave up after max retry time."
+**Why the options matter:** `uri` and `auth` tell the client _where_ and _how_ to authenticate. `persist` controls what happens when the connection fails or the server is not ready yet: with `persist=True` the client retries with linear backoff (+0.25s per failure, capped at 15s, indefinitely) and calls `on_connect_error` on each background failure, so you can show "Still connecting..." or "Connection failed" without implementing retry logic yourself. `connect()` itself still raises the first error to the caller while the client keeps re-attaching in the background (transport only — it does not re-authenticate unless `login()` had succeeded before); an auth rejection stops the retries. Use `on_disconnected` only for "we were connected and then dropped"; use `on_connect_error` for "failed to connect."
 
 | Argument              | Type                      | Required | Description                                                                                                                                          |
 | --------------------- | ------------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -109,7 +109,7 @@ RocketRideClient(
 | `env`                 | `dict`                    | No       | Override env; if omitted, `.env` is loaded. Use when passing config in code instead of env files.                                                    |
 | `module`              | `str`                     | No       | Client name for logging.                                                                                                                             |
 | `request_timeout`     | `float`                   | No       | Default timeout in ms for requests. Prevents a single DAP call from hanging.                                                                         |
-| `max_retry_time`      | `float`                   | No       | Max time in ms to keep retrying connection. Use (e.g. 300000) so the app can show "gave up" after a bounded time.                                    |
+| `max_retry_time`      | `float`                   | No       | Deprecated — accepted but ignored. Reconnection retries indefinitely.                                                                                |
 | `persist`             | `bool`                    | No       | Enable automatic reconnection. Default: `False`. Set `True` for long-lived scripts or UIs.                                                           |
 | `on_event`            | async callable            | No       | Called with each server event dict. Use for progress or status updates.                                                                              |
 | `on_connected`        | async callable            | No       | Called when connection is established.                                                                                                               |
@@ -118,7 +118,7 @@ RocketRideClient(
 | `on_protocol_message` | callable `(message: str)` | No       | Optional; for logging raw DAP messages. Helpful when debugging protocol issues.                                                                      |
 | `on_debug_message`    | callable `(message: str)` | No       | Optional; for debug output.                                                                                                                          |
 
-Raises `ValueError` if both `uri` and `ROCKETRIDE_URI` are empty or if `auth` is missing and not in env.
+If `uri` is empty and `ROCKETRIDE_URI` is unset, the client defaults to the RocketRide cloud (`https://api.rocketride.ai`). A missing `auth` does not raise at construction — authentication fails at `connect()`.
 
 **Example - client with persist and callbacks:**
 
@@ -127,7 +127,6 @@ client = RocketRideClient(
     uri='https://api.rocketride.ai',
     auth='my-key',
     persist=True,
-    max_retry_time=300000,
     on_connect_error=lambda msg: print('Connect error:', msg),
     on_event=handle_event,
 )
@@ -165,12 +164,19 @@ asyncio.run(main())
 
 | Method                  | Signature                                                                                   | Returns       | Description                                                                                                                                                                                                                                                                                                                           |
 | ----------------------- | ------------------------------------------------------------------------------------------- | ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `connect`               | `async def connect(self, uri: str = None, auth: str = None, timeout: float = None) -> None` | -             | Opens the WebSocket and performs DAP auth. Optional `uri`/`auth` override the constructor values for this connection attempt. Optional `timeout` (ms) bounds the connect + auth handshake (non-persist only). In **persist** mode, on failure the client calls `on_connect_error` and retries; on **auth** failure it does not retry. |
+| `attach`                | `async def attach(self, uri: Optional[str] = None, *, timeout: Optional[float] = None) -> None` | -         | Opens the WebSocket without authenticating. If `uri` is provided and differs from the current URI, detaches first; if already attached to the same URI, this is a no-op.                                                                                                                                                              |
+| `detach`                | `async def detach(self) -> None`                                                            | -             | Closes the transport and leaves the client detached.                                                                                                                                                                                                                                                                                  |
+| `is_attached`           | `def is_attached(self) -> bool`                                                             | `bool`        | Whether the WebSocket transport is open, regardless of authentication.                                                                                                                                                                                                                                                                |
+| `login`                 | `async def login(self, credential: Optional[str] = None, *, uri: Optional[str] = None, timeout: Optional[float] = None) -> ConnectResult` | `ConnectResult` | Authenticates over an attached transport (attaching first if needed). A differing `uri` detaches and re-attaches; a differing `credential` logs out (best-effort) before logging in; logging in again with the same credential is a no-op.                                                              |
+| `logout`                | `async def logout(self) -> None`                                                            | -             | Deauthenticates (sends `deauth`) and clears client auth state while keeping the attachment.                                                                                                                                                                                                                                           |
+| `is_authenticated`      | `def is_authenticated(self) -> bool`                                                        | `bool`        | Whether the auth handshake has succeeded on the current connection.                                                                                                                                                                                                                                                                   |
+| `connect`               | `async def connect(self, credential: Optional[str] = None, *, timeout: Optional[float] = None) -> ConnectResult` | `ConnectResult` | Opens the WebSocket and performs DAP auth. Optional `credential` overrides the constructor `auth` for this connection attempt. Optional `timeout` (ms) bounds the connect + auth handshake (non-persist only). In **persist** mode, on failure the client calls `on_connect_error` and retries; on **auth** failure it does not retry. To change the URI, use `attach(uri=...)` or `login(uri=...)`. |
 | `disconnect`            | `async def disconnect(self) -> None`                                                        | -             | Closes the connection and cancels reconnection. Call when the user disconnects or the script is done.                                                                                                                                                                                                                                 |
 | `is_connected`          | `def is_connected(self) -> bool`                                                            | `bool`        | Whether the client is connected. Check before calling `use()` or `send()` if needed.                                                                                                                                                                                                                                                  |
-| `set_connection_params` | `async def set_connection_params(self, uri: str = None, auth: str = None) -> None`          | -             | Updates server URI and/or auth at runtime. If currently connected, disconnects and reconnects with the new params (in persist mode, reconnection is scheduled; otherwise reconnects once). Use when the user changes server or credentials without creating a new client.                                                             |
 | `get_connection_info`   | `def get_connection_info(self) -> dict`                                                     | `dict`        | Current connection state and URI. Returns `{ 'connected': bool, 'transport': str, 'uri': str }`. Useful for debugging or displaying "Connected to ..." in the UI.                                                                                                                                                                     |
 | `get_apikey`            | `def get_apikey(self) -> Optional[str]`                                                     | `str \| None` | The API key in use. For debugging only; avoid logging in production.                                                                                                                                                                                                                                                                  |
+| `set_env`               | `def set_env(self, env: Dict[str, str]) -> None`                                            | -             | Replaces the client's environment map, used for `ROCKETRIDE_*` substitution and credential lookup.                                                                                                                                                                                                                                    |
+| `get_account_info`      | `def get_account_info(self) -> Optional[ConnectResult]`                                     | `ConnectResult \| None` | The `ConnectResult` from the last successful `login()`, or `None` if not authenticated.                                                                                                                                                                                                                                     |
 
 ### Low-level DAP
 
@@ -199,7 +205,7 @@ if client.did_fail(res):
 
 | Method            | Signature                                                                                                                                                                                                | Returns | Description                                                                                                                                                                                              |
 | ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `use`             | `async def use(self, *, token: str = None, filepath: str = None, pipeline: dict = None, source: str = None, threads: int = None, use_existing: bool = None, args: list = None, ttl: int = None) -> dict` | `dict`  | Starts a pipeline. Requires `filepath` or `pipeline`. The client substitutes `${ROCKETRIDE_*}` from its env. Returns a dict with at least `'token'`; use that token for all data and control operations. |
+| `use`             | `async def use(self, *, token: str = None, filepath: str = None, pipeline: dict = None, source: str = None, threads: int = None, use_existing: bool = None, args: list = None, ttl: int = None, pipelineTraceLevel: str = None, name: str = None, env: dict = None) -> dict` | `dict`  | Starts a pipeline. Requires `filepath` or `pipeline`. The client sends its `ROCKETRIDE_*` env with the request and the server substitutes `${ROCKETRIDE_*}` placeholders. Returns a dict with at least `'token'`; use that token for all data and control operations. |
 | `terminate`       | `async def terminate(self, token: str) -> None`                                                                                                                                                          | -       | Stops the pipeline and frees server resources.                                                                                                                                                           |
 | `get_task_status` | `async def get_task_status(self, token: str) -> dict`                                                                                                                                                    | `dict`  | Returns current task status (e.g. completed count, total, state). Poll until `completed` or use for progress display.                                                                                    |
 
@@ -209,8 +215,8 @@ if client.did_fail(res):
 
 | Method       | Signature                                                                                                                      | Returns               | Description                                                                                                                                        |
 | ------------ | ------------------------------------------------------------------------------------------------------------------------------ | --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `pipe`       | `async def pipe(self, token: str, objinfo: dict = None, mime_type: str = None, provider: str = None) -> DataPipe`              | `DataPipe`            | Creates a **streaming** pipe: open, then one or more write, then close. Use for large or chunked data. Default MIME: `'application/octet-stream'`. |
-| `send`       | `async def send(self, token: str, data: str \| bytes, objinfo: dict = None, mimetype: str = None) -> PIPELINE_RESULT`          | `PIPELINE_RESULT`     | Sends data in **one shot** (open pipe, write once, close). Use when you have the full payload in memory.                                           |
+| `pipe`       | `async def pipe(self, token: str, objinfo: dict = None, mime_type: str = None, provider: str = None, on_sse=None) -> DataPipe` | `DataPipe`            | Creates a **streaming** pipe: open, then one or more write, then close. Use for large or chunked data. Default MIME: `'application/octet-stream'`. `on_sse` receives streamed SSE events. |
+| `send`       | `async def send(self, token: str, data: str \| bytes, objinfo: dict = None, mimetype: str = None, on_sse=None) -> PIPELINE_RESULT` | `PIPELINE_RESULT` | Sends data in **one shot** (open pipe, write once, close). Use when you have the full payload in memory. `on_sse` receives streamed SSE events.    |
 | `send_files` | `async def send_files(self, files: List[str \| Tuple[str, dict] \| Tuple[str, dict, str]], token: str) -> List[UPLOAD_RESULT]` | `List[UPLOAD_RESULT]` | Uploads files. Each item: path `str`, or `(path, objinfo)`, or `(path, objinfo, mimetype)`. Progress via `on_event` as `apaevt_status_upload`.     |
 
 **When to use pipe vs send:** Use `send()` for a single string or bytes. Use `pipe()` when you read a file in chunks, or when data arrives incrementally.
@@ -319,16 +325,18 @@ update, promote, and rollback are all this one verb.
 
 ### Events
 
-| Method       | Signature                                                                | Returns | Description                                                                                                                                                          |
-| ------------ | ------------------------------------------------------------------------ | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `set_events` | `async def set_events(self, token: str, event_types: List[str]) -> None` | -       | Subscribes this task to the given event types. After this, those events are delivered to `on_event`. Call after `use()` when you need upload or processing progress. |
+| Method           | Signature                                                                                       | Returns | Description                                                                                                                                                          |
+| ---------------- | ----------------------------------------------------------------------------------------------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `set_events`     | `async def set_events(self, token: str, event_types: List[str], pipe_id: int = None) -> None`   | -       | **Deprecated** — use `add_monitor` / `remove_monitor`. Subscribes this task to the given event types. After this, those events are delivered to `on_event`. Call after `use()` when you need upload or processing progress. |
+| `add_monitor`    | `async def add_monitor(self, key: Dict[str, Any], types: List[str]) -> None`                    | -       | Adds a monitor subscription. Types for an existing key are merged via reference counting.                                                                            |
+| `remove_monitor` | `async def remove_monitor(self, key: Dict[str, Any], types: List[str]) -> None`                 | -       | Removes a monitor subscription. A type is unsubscribed from the server only when its reference count reaches 0.                                                      |
 
 ### Services, validation, and ping
 
 | Method         | Signature                                                                           | Returns        | Description                                                                                                                                                   |
 | -------------- | ----------------------------------------------------------------------------------- | -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `get_services` | `async def get_services(self) -> dict`                                              | `dict`         | Returns all service definitions. Use to discover what the server supports.                                                                                    |
-| `get_service`  | `async def get_service(self, service: str) -> Optional[dict]`                       | `dict \| None` | Returns one service by name; `None` if not found or on error.                                                                                                 |
+| `get_service`  | `async def get_service(self, service: str) -> dict`                                 | `dict`         | Returns one service by name. Raises `ValueError` if `service` is empty and `RuntimeError` on a server error — an unknown name is an error, not `None`.        |
 | `validate`     | `async def validate(self, pipeline: PipelineConfig, *, source: str = None) -> dict` | `dict`         | Validates a pipeline configuration without starting it. Returns validation results (e.g. errors, warnings). Use to check pipeline correctness before `use()`. |
 | `ping`         | `async def ping(self, token: str = None) -> None`                                   | -              | Liveness check; raises on failure.                                                                                                                            |
 
@@ -336,7 +344,7 @@ update, promote, and rollback are all this one verb.
 
 | Method | Signature                                                                    | Returns           | Description                                                                                                                                                                                       |
 | ------ | ---------------------------------------------------------------------------- | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `chat` | `async def chat(self, *, token: str, question: Question) -> PIPELINE_RESULT` | `PIPELINE_RESULT` | Sends the `Question` to the AI for the given token and returns the pipeline result. The answer is in the result body; use the schema's answer helpers if you need to parse JSON from the AI text. |
+| `chat` | `async def chat(self, *, token: str, question: Question, on_sse=None) -> PIPELINE_RESULT` | `PIPELINE_RESULT` | Sends the `Question` to the AI for the given token and returns the pipeline result. The answer is in the result body; use the schema's answer helpers if you need to parse JSON from the AI text. |
 
 **How it works:** The client opens a pipe with the question MIME type, writes the serialized `Question`, closes the pipe, and returns the server result. The pipeline must support the chat provider.
 
@@ -365,6 +373,9 @@ history.
 | `deploy.pause_schedule` | `async def pause_schedule(self, project_id, source_id, team_id) -> Deployment`                                 | `Deployment`           | Pauses ONE source's schedule — cron/ttl kept, it just stops firing.                                                 |
 | `deploy.resume_schedule` | `async def resume_schedule(self, project_id, source_id, team_id) -> Deployment`                               | `Deployment`           | Resumes a paused source schedule.                                                                                   |
 | `deploy.preview`      | `async def preview(self, schedule, count=None) -> SchedulePreview`                                               | `SchedulePreview`      | THE single cron evaluator: validity + next occurrences. Never parse cron client-side.                               |
+| `deploy.run`          | `async def run(self, project_id, source_id, team_id) -> dict`                                                    | `dict`                 | Starts one deployed source NOW (manual trigger).                                                                    |
+| `deploy.artifact`     | `async def artifact(self, project_id, version) -> PipelineConfig`                                                | `PipelineConfig`       | Fetches one immutable artifact's pipeline JSON from the registry.                                                   |
+| `deploy.set_source_config` | `async def set_source_config(self, project_id, source_id, team_id, *, trace_level=None, debug_out=False) -> Deployment` | `Deployment`  | Sets per-source run config (trace level, debug output) on a team deployment.                                        |
 
 **States:** `state` is `'enabled'` (schedules fire per cron), `'disabled'` (the kill switch),
 `'errored'` (a scheduled dispatch failed on permissions and the scheduler
@@ -435,6 +446,7 @@ Question(
 | `addHistory`     | `addHistory(self, item: QuestionHistory)`                           | Adds a history item for multi-turn chat.                                   |
 | `addQuestion`    | `addQuestion(self, question: str)`                                  | Appends the question text.                                                 |
 | `addDocuments`   | `addDocuments(self, documents: Doc \| List[Doc])`                   | Adds documents for the AI to reference.                                    |
+| `addGoal`        | `addGoal(self, goal: str)`                                          | Adds a goal statement for the AI.                                          |
 | `getPrompt`      | `getPrompt(self, has_previous_json_failed: bool = False) -> str`    | Returns the full prompt (internal).                                        |
 
 ---
@@ -446,9 +458,9 @@ From `rocketride.schema`. Used to parse chat response content. The client does n
 | Method        | Signature                              | Description                                                      |
 | ------------- | -------------------------------------- | ---------------------------------------------------------------- |
 | `getText`     | `getText(self) -> str`                 | Get the answer as plain text.                                    |
-| `getJson`     | `getJson(self) -> Optional[dict]`      | Get the answer as parsed JSON; returns `None` if not valid JSON. |
-| `isJson`      | `isJson(self) -> bool`                 | Whether the answer contains valid JSON.                          |
-| `parseJson`   | `parseJson(self, value: str) -> Any`   | Parses JSON from AI text (strips markdown/code blocks).          |
+| `getJson`     | `getJson(self) -> Optional[dict]`      | Get the answer as parsed JSON; raises `ValueError` if the answer is not valid JSON, and returns `None` only when no answer is set. |
+| `isJson`      | `isJson(self) -> bool`                 | `True` when the answer was requested as JSON (`expectJson`); does not inspect the answer content. |
+| `setAnswer`   | `setAnswer(self, value: str \| dict \| list)` | Stores the response value, validating/parsing it as JSON when `expectJson` is `True`. |
 | `parsePython` | `parsePython(self, value: str) -> Any` | Extracts Python code from a code block in the response.          |
 
 ---
@@ -486,7 +498,9 @@ DAPException                    # Base DAP protocol error (has dap_result dict)
 
 All exceptions expose a `dap_result` dict with detailed server error context.
 
-`AuthenticationException` is thrown on DAP auth failure. In persist mode the client catches it, calls `on_connect_error`, and does not retry so the app can fix credentials and call `connect()` again.
+Of this hierarchy, the SDK currently raises `AuthenticationException` and `PipeException`. Network failures surface as the built-in `ConnectionError`, and `use()` raises `ValueError`, `FileNotFoundError`, or `RuntimeError`; `ConnectionException`, `ExecutionException`, and `ValidationException` are declared but not raised today.
+
+`AuthenticationException` is thrown on DAP auth failure. `connect()` and `login()` raise it to the caller regardless of persist mode; only during automatic reconnect attempts does the client catch it, call `on_connect_error`, and stop retrying so the app can fix credentials and call `connect()` again.
 
 **Example:**
 
@@ -563,7 +577,6 @@ async def main():
         uri='https://api.rocketride.ai',
         auth='my-key',
         persist=True,
-        max_retry_time=300000,
         on_connected=lambda info: print('Connected:', info),
         on_disconnected=lambda reason, has_error: print('Disconnected:', reason, has_error),
         on_connect_error=lambda msg: print('Connect error:', msg),
@@ -657,7 +670,12 @@ async def main():
         question.addQuestion('Summarize the main points and list keywords.')
         response = await client.chat(token=token, question=question)
         answer_text = response.get('data', {}).get('answer') or (response.get('answers') or [None])[0]
-        structured = Answer().parseJson(answer_text) if answer_text else None
+        answer = Answer(expectJson=True)
+        try:
+            answer.setAnswer(answer_text or '')
+            structured = answer.getJson()
+        except ValueError:
+            structured = answer_text  # model did not return valid JSON
         print(structured)
         await client.terminate(token)
 
@@ -676,10 +694,11 @@ async def main():
     client = RocketRideClient(uri='https://api.rocketride.ai', auth='my-key')
     await client.connect()
     services = await client.get_services()
-    print('Available:', list(services.keys()))
+    print('Available:', list(services['services'].keys()))
     ocr = await client.get_service('ocr')
     if ocr:
         print('OCR schema:', ocr.get('schema'))
+    my_token = 'existing-task-token'  # token from an earlier client.use() call
     req = client.build_request('rrext_ping', token=my_token)
     res = await client.request(req, timeout=5000)
     if client.did_fail(res):

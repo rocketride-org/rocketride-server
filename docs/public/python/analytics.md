@@ -29,7 +29,7 @@ from rocketride.analytics import init_report, report
 
 ```python
 # Once, at app init: wire the emitting app id + transport.
-init_report('rocket-ui', lambda event, props: client.report(event, props))
+init_report('rocket-ui', lambda event, props: send_to_backend(event, props))
 
 # Anywhere after that:
 report('pipeline:run', {'node_count': 4})

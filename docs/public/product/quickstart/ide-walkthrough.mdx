@@ -25,7 +25,9 @@ Click the RocketRide
 icon in your IDE sidebar, then choose how to run the runtime:
 
 - **Local (recommended)**: pulls the server straight into your IDE, no extra setup.
-- **On-premises**: run on your own hardware via Docker or build from source.
+- **Docker**: run the server in a local Docker container.
+- **Service**: connect to the server running as a local system service.
+- **On-premises**: run on your own hardware and connect by URL.
 - **RocketRide Cloud**: managed hosting.
 
 ## 3. Create a pipeline file
@@ -48,8 +50,8 @@ automatically.
 ## 5. Run it
 
 Press the **<LuPlay className="rr-inline-icon" /> Run button** on the source node, or launch
-from the **Connection Manager** panel. Open the chat interface, send a message, and watch
-the LLM respond in real time. Use the Connection Manager to trace call trees, token usage,
+from the **RocketRide sidebar**. Open the chat interface, send a message, and watch
+the LLM respond in real time. Use the **Server Monitor** page to trace call trees, token usage,
 and memory consumption.
 
 Save the `.pipe` file, you'll run it from code in the next walkthrough.

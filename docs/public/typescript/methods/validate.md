@@ -50,7 +50,7 @@ If `source` is not provided, the server resolves it in this order:
 
 ## **Returns**
 
-- **Type**: `Dict[str, Any]` (Python) / `Record<string, unknown>` (TypeScript)
+- **Type**: `Dict[str, Any]` (Python) / `ValidationResult` (TypeScript)
 - **Description**: Validation result containing errors, warnings, and the resolved source component
 
 ## **Usage Examples**

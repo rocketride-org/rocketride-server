@@ -52,32 +52,42 @@ Need inspiration? Check out [awesome-rocketride](https://github.com/rocketride-o
 
 | Setting                              | Type       | Default                          | Description                                                                                                                               |
 | ------------------------------------ | ---------- | -------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
-| `rocketride.connectionMode`          | `string`   | `"local"`                        | Connection mode: `"local"` (your machine), `"onprem"` (your own hosted server), or `"cloud"` (coming soon)                                |
-| `rocketride.hostUrl`                 | `string`   | `"http://localhost:5565"`        | Host URL for RocketRide service. Host and port will be parsed from this URL.                                                              |
+| `rocketride.development.connectionMode` | `string` | `"local"`                        | Connection mode: `"local"` (your machine), `"docker"`, `"service"`, `"onprem"` (your own hosted server), or `"cloud"`                     |
+| `rocketride.development.hostUrl`     | `string`   | `""`                             | Host URL for on-prem or direct connections. Host and port will be parsed from this URL.                                                   |
+| `rocketride.deployment.connectionMode` | `string \| null` | `null`                   | Deployment connection mode (`null` = same as development)                                                                                 |
+| `rocketride.deployment.hostUrl`      | `string`   | `""`                             | Host URL for the deployment connection                                                                                                    |
 | `rocketride.defaultPipelinePath`     | `string`   | `"${workspaceFolder}/pipelines"` | Default directory path for creating new pipeline files                                                                                    |
-| `rocketride.local.engineVersion`     | `string`   | `"latest"`                       | Engine version to download. `"latest"` for newest stable, `"prerelease"` for newest prerelease, or a specific tag like `"server-v3.1.1"`. |
+| `rocketride.development.local.engineVersion` | `string` | `"latest"`                 | Engine version to download. `"latest"` for newest stable, `"prerelease"` for newest prerelease, or a specific tag like `"server-v3.1.1"`. |
+| `rocketride.deployment.local.engineVersion` | `string` | `"latest"`                  | Engine version for the local deployment target                                                                                            |
 | `rocketride.taskArguments`           | `string`   | `""`                             | Additional command-line arguments passed to each pipeline task                                                                            |
 | `rocketride.pipelineDebugOutput`     | `boolean`  | `false`                          | Enable full debug output for pipeline tasks (`--trace=debugOut`)                                                                          |
 | `rocketride.pipelineRestartBehavior` | `string`   | `"prompt"`                       | Behavior when a `.pipe` file changes while the pipeline is running: `"auto"`, `"manual"`, or `"prompt"`                                   |
+| `rocketride.pipelineTTL`             | `integer`  | `900`                            | Default idle timeout (seconds) before a running pipeline is shut down; `0` = run forever                                                  |
+| `rocketride.pipelineTraceLevel`      | `string`   | `"full"`                         | Tracing verbosity for pipeline execution: `"full"`, `"summary"`, `"metadata"`, or `"none"`                                                |
+| `rocketride.welcomeDismissed`        | `boolean`  | `false`                          | Set to `true` to skip the welcome page on startup                                                                                         |
+| `rocketride.integrations.autoAgentIntegration` | `boolean` | `true`                  | Auto-detect and install RocketRide documentation for coding agents (Copilot, Claude Code, Cursor, Windsurf) on startup                    |
 | `rocketride.integrations.copilot`    | `boolean`  | `false`                          | Enable RocketRide integration with GitHub Copilot                                                                                         |
 | `rocketride.integrations.claudeCode` | `boolean`  | `false`                          | Enable RocketRide integration with Claude Code                                                                                            |
 | `rocketride.integrations.cursor`     | `boolean`  | `false`                          | Enable RocketRide integration with Cursor                                                                                                 |
 | `rocketride.integrations.windsurf`   | `boolean`  | `false`                          | Enable RocketRide integration with Windsurf                                                                                               |
+| `rocketride.integrations.claudeMd`   | `boolean`  | `false`                          | Install RocketRide instructions to `CLAUDE.md` at the repo root                                                                           |
+| `rocketride.integrations.agentsMd`   | `boolean`  | `false`                          | Install RocketRide instructions to `AGENTS.md` at the repo root                                                                           |
+| `rocketride.appdev.shellUrl`         | `string`   | `""`                             | App Builder: override the preview shell base URL (empty = the Development Mode engine)                                                    |
+| `rocketride.appdev.autoWatch`        | `boolean`  | `true`                           | App Builder: start the app watch/rebuild session automatically when an App Builder screen opens                                           |
 
 ## Commands
 
 | Command                                    | Description                      |
 | ------------------------------------------ | -------------------------------- |
-| `RocketRide: Connect to Server`            | Connect to the RocketRide engine |
-| `RocketRide: Disconnect from Server`       | Disconnect from the engine       |
-| `RocketRide: Reconnect to Server`          | Reconnect to the engine          |
-| `RocketRide: Open RocketRide Settings`     | Open extension settings          |
-| `RocketRide: Open Status Page`             | View server and pipeline status  |
+| `RocketRide: Settings`                     | Open extension settings          |
+| `RocketRide: Server Monitor`               | View server and pipeline status  |
 | `RocketRide Pipeline: Create New Pipeline` | Create a new `.pipe` file        |
 | `RocketRide Pipeline: Run`                 | Run the selected pipeline        |
 | `RocketRide Pipeline: Stop Pipeline`       | Stop a running pipeline          |
 | `RocketRide: Open as Text`                 | Open a `.pipe` file as raw JSON  |
 | `RocketRide: Welcome`                      | Open the welcome page            |
+
+Connect, disconnect, and reconnect are buttons in the sidebar connection panel, not command-palette commands.
 
 ## Links
 

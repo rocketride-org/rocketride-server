@@ -12,8 +12,8 @@ Common issues when building and running pipelines, and how to fix them.
   local engine (the [VS Code extension](/ide-extensions/overview) or a
   [self-hosted](/operate/self-hosting) container on port 5565), or point
   `ROCKETRIDE_URI` at your [Cloud](/operate/cloud) endpoint.
-- **Unauthorized against Cloud.** Set `ROCKETRIDE_AUTH` (or `ROCKETRIDE_APIKEY`)
-  to a valid API token.
+- **Unauthorized against Cloud.** Set `ROCKETRIDE_APIKEY` to a valid API token
+  (`ROCKETRIDE_AUTH` is read only by the MCP servers, not the SDKs or CLI).
 - **Silent insecure downgrade.** Against Cloud, an `http://`/`ws://` (or bare
   `host:port`) URI drops to an unencrypted connection. Use `https://` or
   `wss://`, see the [WebSocket protocol](/protocols/websocket).
