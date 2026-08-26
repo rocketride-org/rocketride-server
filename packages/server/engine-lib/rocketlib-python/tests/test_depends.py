@@ -321,6 +321,13 @@ class TestSatisfiedVerdict:
 
         assert depends._requirements_closure(str(root)) == [str(root), str(base), str(pins)]
 
+    def test_requirements_closure_joins_continued_lines(self, exe_dir):
+        """A ``-r`` directive split over a backslash continuation still names its target."""
+        root = _write(exe_dir / 'nodes' / 'demo' / 'requirements.txt', '-r \\\n    base.txt\nrequests\n')
+        base = _write(exe_dir / 'nodes' / 'demo' / 'base.txt', 'pyjwt\n')
+
+        assert depends._requirements_closure(str(root)) == [str(root), str(base)]
+
     def test_failed_resolve_records_no_verdict(self, exe_dir, env, monkeypatch):
         """A resolve that raises leaves nothing behind, so the next process resolves again."""
 

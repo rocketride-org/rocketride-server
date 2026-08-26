@@ -893,7 +893,8 @@ def _requirements_closure(requirements_path: str) -> list[str]:
         closure.append(path)
         try:
             with open(path, 'r', encoding='utf-8') as f:
-                lines = f.read().splitlines()
+                # A trailing backslash continues the line, as in pip and uv.
+                lines = f.read().replace('\\\n', '').splitlines()
         except OSError:
             continue
         for line in lines:
