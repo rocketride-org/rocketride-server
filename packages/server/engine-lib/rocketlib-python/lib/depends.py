@@ -922,12 +922,22 @@ def _requirements_closure(requirements_path: str) -> list[str]:
     return closure
 
 
-def _installed_fingerprint() -> str:
-    """Digest of the *.dist-info / *.egg-info names in site-packages — the names carry versions."""
+def _installed_fingerprint() -> Optional[str]:
+    """Digest of the *.dist-info / *.egg-info names in site-packages, or ``None``.
+
+    The names carry versions, so an install, upgrade or uninstall changes it.
+
+    ``None`` when the directory cannot be listed. Hashing an empty list instead
+    would return the same digest every time, so the key would stop noticing
+    installs and every verdict would stay satisfied for ever — a silent stale
+    hit. Refusing the key resolves every time instead, which is the safe
+    direction. ``bootstrap()`` creates this directory before any key is
+    computed, so on the real path it always exists.
+    """
     try:
         entries = [e for e in os.listdir(_get_site_packages()) if e.endswith(('.dist-info', '.egg-info'))]
     except OSError:
-        entries = []
+        return None
     return hashlib.md5('\n'.join(sorted(entries)).encode('utf-8')).hexdigest()
 
 
@@ -949,6 +959,8 @@ def _verdict_key(requirements_path: str, constraints_path: str) -> Optional[str]
         return None
 
     installed = _installed_fingerprint()
+    if installed is None:
+        return None
 
     parts = [_VERDICT_SCHEMA, sys.executable, sys.version]
     parts.extend(_file_digest(path) for path in closure)

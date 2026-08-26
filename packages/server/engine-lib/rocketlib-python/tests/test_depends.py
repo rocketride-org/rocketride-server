@@ -369,6 +369,17 @@ class TestSatisfiedVerdict:
 
         assert len(env.resolves) == 2
 
+    def test_unlistable_site_packages_is_never_cached(self, env, monkeypatch):
+        """A site-packages that cannot be listed refuses the key instead of hashing nothing."""
+        monkeypatch.setattr(depends, '_get_site_packages', lambda: str(env.site / 'gone'))
+
+        self._cold_process(env)
+        self._cold_process(env)
+
+        assert len(env.resolves) == 2
+        assert depends._installed_fingerprint() is None
+        assert depends._verdict_key(str(env.req), str(env.constraints)) is None
+
     def test_failed_resolve_records_no_verdict(self, exe_dir, env, monkeypatch):
         """A resolve that raises leaves nothing behind, so the next process resolves again."""
 
