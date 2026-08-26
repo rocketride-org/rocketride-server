@@ -13,6 +13,8 @@ The gate rules and forcing functions are in
 You work from the **node index** (L1): `LAYER1_NODE_INDEX.json` (bundled), or the live
 `get_services()` / `.rocketride/services-catalog.json`. Each entry is `name · classType · lanes ·
 invoke`. The index is enough to **select and wire**; it carries no config fields (that's Phase 2).
+The bundled index is reconciled against this repo's node corpus (`nodes/src/nodes/`), so it can
+drift from the set a particular live engine actually has registered.
 The live MCP `list_components` tool lists names/summaries only (**no lanes**) and hides nodes whose
 integration isn't configured — use it to check availability, but **wire from the bundled index +
 per-node schemas**. If a node you expect is missing from it, check `list_integrations` first.

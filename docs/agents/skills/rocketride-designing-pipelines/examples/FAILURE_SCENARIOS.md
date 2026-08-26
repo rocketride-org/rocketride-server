@@ -6,7 +6,7 @@ Each shows a tempting mistake, what happens, and the correct move.
 ## ❌ Fabricating a node that isn't in the index
 > User: "add a `transform` node to clean the data."
 A `transform` node does **not** exist in the catalog (it appears in an old doc as a placeholder).
-**Wrong:** wire in `transform` anyway → `Component not found` at run time.
+**Wrong:** wire in `transform` anyway → `The service transform was not found` at run time.
 **Right:** check the index. There's no `transform`. STOP and offer real options: a `preprocessor_*`
 node, `anonymize_text`, `extract_data` (needs an LLM), or ask what cleanup is needed. Never invent
 a node — if it's not in the index, it doesn't exist.

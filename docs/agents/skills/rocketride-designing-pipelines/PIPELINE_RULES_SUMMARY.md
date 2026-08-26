@@ -91,8 +91,8 @@ Always read the node's `invoke` cardinality in the index and satisfy min/max.
 managed by the editor; omit it when hand-writing.
 
 ## Freshness notes (reconcile against the live engine / docs)
-- **Env substitution:** the engine expands **any** `${VAR}` from the environment (e.g.
-  `${OPENAI_API_KEY}`) — a `ROCKETRIDE_` prefix is not required.
+- **Env substitution:** the task server resolves only `${ROCKETRIDE_*}` variables (e.g.
+  `${ROCKETRIDE_OPENAI_KEY}`) — any non-prefixed `${VAR}` is replaced with `<REDACTED>`.
 - **Response node:** the current docs show a single `response` provider with `config.laneName`
   (e.g. `{ "provider": "response", "config": { "laneName": "answers" } }`). Our bundled catalog
   snapshot still lists lane-specific variants (`response_answers`, `response_text`, …). Use whatever

@@ -194,6 +194,18 @@
   }
  },
  {
+  "name": "answer_documents",
+  "classType": [
+   "text"
+  ],
+  "lanes": {
+   "answers": [
+    "documents",
+    "answers"
+   ]
+  }
+ },
+ {
   "name": "aparavi_aql",
   "classType": [
    "database",
@@ -209,7 +221,8 @@
  {
   "name": "astra_db",
   "classType": [
-   "store"
+   "store",
+   "tool"
   ],
   "lanes": {
    "documents": [],
@@ -265,6 +278,13 @@
   }
  },
  {
+  "name": "autopipe",
+  "classType": [
+   "other"
+  ],
+  "lanes": {}
+ },
+ {
   "name": "background_removal",
   "classType": [
    "image"
@@ -273,6 +293,17 @@
    "image": [
     "text",
     "image"
+   ]
+  }
+ },
+ {
+  "name": "caption",
+  "classType": [
+   "image"
+  ],
+  "lanes": {
+   "image": [
+    "text"
    ]
   }
  },
@@ -303,8 +334,20 @@
   }
  },
  {
+  "name": "currency_convert_explicit",
+  "classType": [
+   "text"
+  ],
+  "lanes": {
+   "answers": [
+    "answers"
+   ]
+  }
+ },
+ {
   "name": "db_arango",
   "classType": [
+   "graph",
    "database",
    "tool"
   ],
@@ -341,7 +384,7 @@
   }
  },
  {
-  "name": "db_mysql",
+  "name": "db_hotdata",
   "classType": [
    "database",
    "tool"
@@ -361,12 +404,22 @@
   }
  },
  {
-  "name": "db_neo4j",
+  "name": "db_hydradb",
+  "classType": [
+   "graph",
+   "database",
+   "tool"
+  ],
+  "lanes": {}
+ },
+ {
+  "name": "db_mysql",
   "classType": [
    "database",
    "tool"
   ],
   "lanes": {
+   "answers": [],
    "questions": [
     "table",
     "text",
@@ -557,6 +610,10 @@
    "text"
   ],
   "lanes": {
+   "documents": [
+    "answers",
+    "documents"
+   ],
    "table": [
     "answers",
     "documents"
@@ -570,6 +627,76 @@
    "llm": {
     "min": 1
    }
+  }
+ },
+ {
+  "name": "extract_facts",
+  "classType": [
+   "text"
+  ],
+  "lanes": {
+   "documents": [
+    "answers",
+    "documents"
+   ],
+   "table": [
+    "answers",
+    "documents"
+   ]
+  },
+  "invoke": {
+   "llm": {
+    "min": 1
+   }
+  }
+ },
+ {
+  "name": "face_detection",
+  "classType": [
+   "image"
+  ],
+  "lanes": {
+   "image": [
+    "text",
+    "image"
+   ]
+  }
+ },
+ {
+  "name": "filestore",
+  "classType": [
+   "store"
+  ],
+  "lanes": {
+   "audio": [
+    "json"
+   ],
+   "documents": [
+    "json"
+   ],
+   "image": [
+    "json"
+   ],
+   "table": [
+    "json"
+   ],
+   "text": [
+    "json"
+   ],
+   "video": [
+    "json"
+   ]
+  }
+ },
+ {
+  "name": "filestore_source",
+  "classType": [
+   "source"
+  ],
+  "lanes": {
+   "_source": [
+    "tags"
+   ]
   }
  },
  {
@@ -594,6 +721,44 @@
     "table",
     "documents"
    ]
+  }
+ },
+ {
+  "name": "graph_falkordb",
+  "classType": [
+   "graph",
+   "tool"
+  ],
+  "lanes": {
+   "questions": [
+    "table",
+    "text",
+    "answers"
+   ]
+  },
+  "invoke": {
+   "llm": {
+    "min": 1
+   }
+  }
+ },
+ {
+  "name": "graph_neo4j",
+  "classType": [
+   "graph",
+   "tool"
+  ],
+  "lanes": {
+   "questions": [
+    "table",
+    "text",
+    "answers"
+   ]
+  },
+  "invoke": {
+   "llm": {
+    "min": 1
+   }
   }
  },
  {
@@ -632,6 +797,18 @@
   "lanes": {
    "image": [
     "image"
+   ]
+  }
+ },
+ {
+  "name": "image_orient",
+  "classType": [
+   "image"
+  ],
+  "lanes": {
+   "image": [
+    "image",
+    "text"
    ]
   }
  },
@@ -690,6 +867,11 @@
     "text"
    ]
   }
+ },
+ {
+  "name": "indexer",
+  "classType": [],
+  "lanes": {}
  },
  {
   "name": "landing_ai_extract",
@@ -943,7 +1125,8 @@
  {
   "name": "milvus",
   "classType": [
-   "store"
+   "store",
+   "tool"
   ],
   "lanes": {
    "documents": [],
@@ -957,7 +1140,8 @@
  {
   "name": "mongodb+srv",
   "classType": [
-   "store"
+   "store",
+   "tool"
   ],
   "lanes": {
    "documents": [],
@@ -979,6 +1163,26 @@
    ],
    "text": [
     "text"
+   ]
+  }
+ },
+ {
+  "name": "normalize_facts",
+  "classType": [
+   "text"
+  ],
+  "lanes": {
+   "answers": [
+    "answers"
+   ]
+  }
+ },
+ {
+  "name": "null",
+  "classType": [],
+  "lanes": {
+   "source": [
+    "tags"
    ]
   }
  },
@@ -1057,7 +1261,8 @@
  {
   "name": "postgres",
   "classType": [
-   "store"
+   "store",
+   "tool"
   ],
   "lanes": {
    "documents": [],
@@ -1172,6 +1377,11 @@
   "lanes": {}
  },
  {
+  "name": "remote_server",
+  "classType": [],
+  "lanes": {}
+ },
+ {
   "name": "rerank_cohere",
   "classType": [
    "rerank"
@@ -1181,6 +1391,23 @@
     "documents",
     "answers"
    ]
+  }
+ },
+ {
+  "name": "response",
+  "classType": [
+   "infrastructure"
+  ],
+  "lanes": {
+   "answers": [],
+   "audio": [],
+   "documents": [],
+   "image": [],
+   "json": [],
+   "questions": [],
+   "table": [],
+   "text": [],
+   "video": []
   }
  },
  {
@@ -1220,6 +1447,15 @@
   }
  },
  {
+  "name": "response_json",
+  "classType": [
+   "infrastructure"
+  ],
+  "lanes": {
+   "json": []
+  }
+ },
+ {
   "name": "response_questions",
   "classType": [
    "infrastructure"
@@ -1253,6 +1489,82 @@
   ],
   "lanes": {
    "video": []
+  }
+ },
+ {
+  "name": "rocketride_graph",
+  "classType": [
+   "graph",
+   "tool"
+  ],
+  "lanes": {
+   "questions": [
+    "table",
+    "text",
+    "answers"
+   ]
+  },
+  "invoke": {
+   "llm": {
+    "min": 1
+   }
+  }
+ },
+ {
+  "name": "rocketride_sql",
+  "classType": [
+   "database",
+   "tool"
+  ],
+  "lanes": {
+   "answers": [],
+   "questions": [
+    "table",
+    "text",
+    "answers"
+   ]
+  },
+  "invoke": {
+   "llm": {
+    "min": 1
+   }
+  }
+ },
+ {
+  "name": "rocketride_vector",
+  "classType": [
+   "store"
+  ],
+  "lanes": {
+   "documents": [],
+   "questions": [
+    "documents",
+    "answers",
+    "questions"
+   ]
+  }
+ },
+ {
+  "name": "scan_cropper",
+  "classType": [
+   "image"
+  ],
+  "lanes": {
+   "image": [
+    "image",
+    "text"
+   ]
+  }
+ },
+ {
+  "name": "schema_validate",
+  "classType": [
+   "text"
+  ],
+  "lanes": {
+   "answers": [
+    "answers"
+   ]
   }
  },
  {
@@ -1345,6 +1657,13 @@
   "lanes": {}
  },
  {
+  "name": "tool_calendar",
+  "classType": [
+   "tool"
+  ],
+  "lanes": {}
+ },
+ {
   "name": "tool_chartjs",
   "classType": [
    "tool"
@@ -1355,6 +1674,13 @@
     "min": 1
    }
   }
+ },
+ {
+  "name": "tool_cognee",
+  "classType": [
+   "tool"
+  ],
+  "lanes": {}
  },
  {
   "name": "tool_daytona",
@@ -1371,6 +1697,20 @@
   "lanes": {}
  },
  {
+  "name": "tool_docs",
+  "classType": [
+   "tool"
+  ],
+  "lanes": {}
+ },
+ {
+  "name": "tool_drive",
+  "classType": [
+   "tool"
+  ],
+  "lanes": {}
+ },
+ {
   "name": "tool_exa_search",
   "classType": [
    "tool"
@@ -1378,7 +1718,7 @@
   "lanes": {}
  },
  {
-  "name": "tool_falkordb",
+  "name": "tool_excel",
   "classType": [
    "tool"
   ],
@@ -1413,6 +1753,44 @@
   "lanes": {}
  },
  {
+  "name": "tool_gmail",
+  "classType": [
+   "tool"
+  ],
+  "lanes": {}
+ },
+ {
+  "name": "tool_gohighlevel",
+  "classType": [
+   "tool"
+  ],
+  "lanes": {}
+ },
+ {
+  "name": "tool_guild",
+  "classType": [
+   "data",
+   "tool"
+  ],
+  "lanes": {
+   "documents": [
+    "documents",
+    "text",
+    "table"
+   ],
+   "questions": [
+    "answers",
+    "text",
+    "table"
+   ],
+   "text": [
+    "text",
+    "answers",
+    "table"
+   ]
+  }
+ },
+ {
   "name": "tool_http_request",
   "classType": [
    "tool"
@@ -1420,7 +1798,84 @@
   "lanes": {}
  },
  {
+  "name": "tool_laserdata_memory",
+  "classType": [
+   "tool"
+  ],
+  "lanes": {}
+ },
+ {
   "name": "tool_mem0",
+  "classType": [
+   "tool"
+  ],
+  "lanes": {}
+ },
+ {
+  "name": "tool_n8n",
+  "classType": [
+   "data",
+   "tool"
+  ],
+  "lanes": {
+   "audio": [
+    "audio",
+    "text",
+    "answers",
+    "table"
+   ],
+   "documents": [
+    "documents",
+    "text",
+    "table"
+   ],
+   "image": [
+    "image",
+    "text",
+    "answers",
+    "table"
+   ],
+   "questions": [
+    "answers",
+    "text",
+    "table"
+   ],
+   "text": [
+    "text",
+    "answers",
+    "table"
+   ],
+   "video": [
+    "video",
+    "text",
+    "answers",
+    "table"
+   ]
+  }
+ },
+ {
+  "name": "tool_onedrive",
+  "classType": [
+   "tool"
+  ],
+  "lanes": {}
+ },
+ {
+  "name": "tool_oura",
+  "classType": [
+   "tool"
+  ],
+  "lanes": {}
+ },
+ {
+  "name": "tool_outlook_calendar",
+  "classType": [
+   "tool"
+  ],
+  "lanes": {}
+ },
+ {
+  "name": "tool_outlook_mail",
   "classType": [
    "tool"
   ],
@@ -1442,7 +1897,28 @@
   }
  },
  {
+  "name": "tool_pipedrive",
+  "classType": [
+   "tool"
+  ],
+  "lanes": {}
+ },
+ {
   "name": "tool_python",
+  "classType": [
+   "tool"
+  ],
+  "lanes": {}
+ },
+ {
+  "name": "tool_sheets",
+  "classType": [
+   "tool"
+  ],
+  "lanes": {}
+ },
+ {
+  "name": "tool_slack",
   "classType": [
    "tool"
   ],
@@ -1463,11 +1939,32 @@
   "lanes": {}
  },
  {
+  "name": "tool_word",
+  "classType": [
+   "tool"
+  ],
+  "lanes": {}
+ },
+ {
   "name": "tool_xtrace_memory",
   "classType": [
    "tool"
   ],
   "lanes": {}
+ },
+ {
+  "name": "tools",
+  "classType": [
+   "source"
+  ],
+  "lanes": {
+   "_source": []
+  },
+  "invoke": {
+   "tool": {
+    "min": 0
+   }
+  }
  },
  {
   "name": "tts_elevenlabs",
@@ -1521,6 +2018,11 @@
   }
  },
  {
+  "name": "vectorizer",
+  "classType": [],
+  "lanes": {}
+ },
+ {
   "name": "video_composer",
   "classType": [
    "video"
@@ -1534,7 +2036,8 @@
  {
   "name": "weaviate",
   "classType": [
-   "store"
+   "store",
+   "tool"
   ],
   "lanes": {
    "documents": [],
@@ -1554,11 +2057,19 @@
    "_source": [
     "tags",
     "text",
+    "json",
     "audio",
     "video",
     "image",
     "questions"
    ]
   }
+ },
+ {
+  "name": "zip",
+  "classType": [
+   "target"
+  ],
+  "lanes": {}
  }
 ]

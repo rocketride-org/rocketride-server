@@ -50,7 +50,7 @@ optional. Check each agent's `invoke` cardinality in the index. This is the most
 shape — design it slowly, cite every invoke requirement. See the `agentic-chat` worked example.
 
 ## Pattern 6 — NL→database query (chat/webhook → db_* → response)
-`db_postgres`/`db_mysql`/`db_neo4j`/etc. take `questions` and an attached `llm` (via control plane)
+`db_postgres`/`db_mysql`/`graph_neo4j`/etc. take `questions` and an attached `llm` (via control plane)
 to craft SQL/Cypher. They appear in both `database` and `tool` classTypes — confirm with the user
 which they want (a data-flow node in a pipeline vs a tool an agent calls).
 

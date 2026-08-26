@@ -7,7 +7,7 @@ guessing or ingesting the whole manual.
 
 ## How to use it
 - Find the topic below, take its `/path.md`, and fetch **only that page**:
-  `python3 ../../rocketride-building-pipelines/tools/fetch-doc.py "<topic or /path.md>"`
+  `python3 tools/fetch-doc.py "<topic or /path.md>"`
   (or your client's web-fetch on `https://docs.rocketride.org<path>`).
 - **NEVER fetch `llms-full.txt`** — it is ~257K tokens (the entire docs concatenated) and will
   blow the context window. Fetch the single relevant page instead. This holds **by any method**
@@ -97,7 +97,7 @@ Base URL: `https://docs.rocketride.org`  ·  Pinned: 2026 (refresh with `tools/g
 - [Parser](/nodes/core/parser.md)
 - [ClickHouse](/nodes/db_clickhouse.md)
 - [MySQL](/nodes/db_mysql.md)
-- [Neo4J](/nodes/db_neo4j.md)
+- [Neo4J](/nodes/graph_neo4j.md)
 - [PostgreSQL](/nodes/db_postgres.md)
 - [Dictionary](/nodes/dictionary.md)
 - [Image](/nodes/embedding_image.md)
@@ -160,7 +160,7 @@ Base URL: `https://docs.rocketride.org`  ·  Pinned: 2026 (refresh with `tools/g
 - [Daytona](/nodes/tool_daytona.md)
 - [DeepL](/nodes/tool_deepl.md)
 - [Exa Search](/nodes/tool_exa_search.md)
-- [FalkorDB](/nodes/tool_falkordb.md)
+- [FalkorDB](/nodes/graph_falkordb.md)
 - [File System](/nodes/tool_filesystem.md)
 - [Firecrawl](/nodes/tool_firecrawl.md)
 - [Git](/nodes/tool_git.md)

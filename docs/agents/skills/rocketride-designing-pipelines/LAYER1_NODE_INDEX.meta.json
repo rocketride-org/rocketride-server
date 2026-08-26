@@ -1,5 +1,5 @@
 {
- "generated_at": "2026-08-25T22:59:12.431425+00:00",
- "node_count": 124,
- "source": "engine (get_services)"
+ "generated_at": "2026-08-26T00:00:00+00:00",
+ "node_count": 167,
+ "source": "engine (get_services) 2026-08-25; reconciled by hand against the branch node corpus (nodes/src/nodes) on 2026-08-26"
 }

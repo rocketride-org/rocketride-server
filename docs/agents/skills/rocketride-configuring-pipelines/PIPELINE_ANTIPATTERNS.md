@@ -21,9 +21,9 @@ The real, observed mistakes when building RocketRide pipelines (condensed from t
 7. **Lane types match across every edge** — output lane type of `from` = input lane type here, or
    a converter sits between them.
 8. **Acyclic, no orphans** — no loops; every node reachable from the source.
-9. **Secrets via `${ENV_VAR}` substitution** — never literal API keys. The engine expands any
-   `${VAR}` from the environment at startup (e.g. `${OPENAI_API_KEY}`); a `ROCKETRIDE_` prefix is
-   **not** required (older docs claimed it was — that's outdated).
+9. **Secrets via `${ROCKETRIDE_*}` substitution** — never literal API keys. The task server only
+   resolves env vars whose names start with `ROCKETRIDE_` (e.g. `${ROCKETRIDE_OPENAI_KEY}`); any
+   non-prefixed `${VAR}` is replaced with `<REDACTED>`.
 
 ## Configuration anti-patterns
 - **Empty source config.** Source nodes need the full block, not `{}`:
@@ -62,9 +62,9 @@ truth** in `../rocketride-debugging-pipelines/ERROR_TABLE.md`. The three you'll 
 configuring:
 | Error | Likely cause | Fix |
 |---|---|---|
-| `Component not found` | bad/misspelled `provider` | check the node index (cite it) |
-| `Lane not supported` | wrong lane type on an edge | match lanes / add a converter |
-| `project_id must be a GUID` | variable in `project_id` | use a literal GUID |
+| `The service <provider> was not found` | bad/misspelled `provider` | check the node index (cite it) |
+| validate error contains `input has unknown lane` | wrong lane type on an edge | match lanes / add a converter |
+| validate/run failure mentioning `project_id` | variable in `project_id` | use a literal GUID |
 
 > Note: the "Common Mistakes" doc also numbers SDK/runtime mistakes (event-loop blocking,
 > `use_existing`, resource cleanup, `ROCKETRIDE_` prefix). Those belong to running the pipeline —

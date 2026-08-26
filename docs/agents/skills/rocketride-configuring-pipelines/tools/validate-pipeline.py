@@ -1,4 +1,26 @@
 #!/usr/bin/env python3
+# =============================================================================
+# MIT License
+# Copyright (c) 2026 Aparavi Software AG
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+# =============================================================================
 """Validate a RocketRide pipeline (Layer 3 — the backstop).
 
 CONSTRAINT (agent contract / future MCP tool description): run this before ANY pipeline run and
@@ -56,7 +78,8 @@ def staleness_note():
             d = p
     if not os.path.isfile(cand):
         return (
-            'node index has no freshness stamp — run tools/generate-index.py against a live '
+            'node index has no freshness stamp — run '
+            '../rocketride-building-pipelines/tools/generate-index.py against a live '
             'engine to stamp + refresh it. Proceeding with the bundled snapshot.'
         )
     try:
@@ -68,13 +91,14 @@ def staleness_note():
         if age > STALE_DAYS:
             return (
                 f'node index snapshot is {age} days old ({meta.get("node_count")} nodes) — '
-                f'run tools/generate-index.py against a live engine before trusting node '
-                f'selection. Proceeding with the bundled snapshot.'
+                f'run ../rocketride-building-pipelines/tools/generate-index.py against a '
+                f'live engine before trusting node selection. Proceeding with the bundled snapshot.'
             )
     except Exception:
         return (
             'node index freshness stamp unreadable — consider re-running '
-            'tools/generate-index.py. Proceeding with the bundled snapshot.'
+            '../rocketride-building-pipelines/tools/generate-index.py. '
+            'Proceeding with the bundled snapshot.'
         )
     return None
 
@@ -88,8 +112,25 @@ def load_catalog(start):
     for _ in range(8):
         cand = os.path.join(here, '.rocketride', 'services-catalog.json')
         if os.path.isfile(cand):
-            data = json.load(open(cand))
-            return {e['name']: e for e in data}
+            try:
+                data = json.load(open(cand))
+                return {e['name']: e for e in data}
+            except (json.JSONDecodeError, OSError, TypeError, KeyError) as e:
+                # Corrupt/truncated cache: treat as a cache miss and fall through
+                # to the bundled index instead of crashing.
+                sys.stderr.write(f'[validate] catalog cache unreadable ({cand}: {e}); ignoring it\n')
+                sys.stderr.write(
+                    'ERROR_JSON: '
+                    + json.dumps(
+                        {
+                            'code': 'CACHE_CORRUPT',
+                            'retriable': False,
+                            'fallback': 'using the bundled LAYER1_NODE_INDEX.json instead; delete the corrupt cache file to silence this',
+                        }
+                    )
+                    + '\n'
+                )
+                break
         parent = os.path.dirname(here)
         if parent == here:
             break
@@ -102,7 +143,21 @@ def load_catalog(start):
         'LAYER1_NODE_INDEX.json',
     )
     if os.path.isfile(bundled):
-        return {e['name']: e for e in json.load(open(bundled))}
+        try:
+            return {e['name']: e for e in json.load(open(bundled))}
+        except (json.JSONDecodeError, OSError, TypeError, KeyError) as e:
+            sys.stderr.write(f'[validate] bundled index unreadable ({bundled}: {e})\n')
+            sys.stderr.write(
+                'ERROR_JSON: '
+                + json.dumps(
+                    {
+                        'code': 'CACHE_CORRUPT',
+                        'retriable': False,
+                        'fallback': 'lane checks will be skipped; regenerate the index with ../rocketride-building-pipelines/tools/generate-index.py',
+                    }
+                )
+                + '\n'
+            )
     return None
 
 

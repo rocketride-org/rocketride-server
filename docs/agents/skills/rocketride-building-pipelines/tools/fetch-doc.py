@@ -1,9 +1,32 @@
 #!/usr/bin/env python3
+# =============================================================================
+# MIT License
+# Copyright (c) 2026 Aparavi Software AG
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+# =============================================================================
 """Fetch ONE RocketRide documentation page (deep-docs layer).
 
 CONSTRAINT (agent contract / future MCP tool description): fetch exactly ONE page; NEVER
 llms-full.txt (~257K tokens — it blows the context window), by any method, even if the user asks
-for "all the docs". Resolve URLs from the bundled doc-map; do not invent paths or hosts.
+for "all the docs". Topic lookups resolve ONLY through the bundled doc-map — do not invent paths
+or hosts; an explicit /path.md argument is fetched as-given (and may 404 if it is not in the map).
 
 The token-economical pattern: the resident doc-map (llms.txt) lists ~156 pages; this tool
 resolves a topic to the single relevant page and fetches only that. It will NEVER fetch
@@ -11,13 +34,14 @@ llms-full.txt (~257K tokens) and caps any response so the context window is safe
 
 Usage:
   python3 fetch-doc.py "<topic>"        # e.g. "llm_openai", "use method", "error handling"
-  python3 fetch-doc.py /nodes/llm_openai.md   # explicit path (must exist in the map)
+  python3 fetch-doc.py /nodes/llm_openai.md   # explicit path (fetched as-given; may 404 if unmapped)
   python3 fetch-doc.py --list "<topic>"       # just list matching pages, don't fetch
 
 Live-first (fetches the fresh page from docs.rocketride.org); on no-network / non-200 it falls
-back to the mapped bundled snapshot and tells you which file to read. Resolves URLs from the
-bundled doc-map only — it does not invent paths (e.g. /develop/use.md is a 404; the real path
-is /develop/typescript/methods/use.md).
+back to the mapped bundled snapshot and tells you which file to read. Topic lookups resolve URLs
+from the bundled doc-map only — the tool does not invent paths. An explicit /path.md argument is
+the exception: it is fetched as-given even when unmapped, and an unmapped path may simply 404
+(e.g. /develop/use.md is a 404; the real path is /develop/typescript/methods/use.md).
 """
 
 import sys
@@ -86,7 +110,23 @@ def load_map():
     mp = find_doc_map()
     if not mp:
         return [], None
-    links = [(t.strip(), p.strip()) for t, p in LINK_RE.findall(open(mp).read())]
+    try:
+        text = open(mp).read()
+    except OSError as e:
+        sys.stderr.write(f'[fetch-doc] doc-map unreadable ({mp}: {e})\n')
+        sys.stderr.write(
+            'ERROR_JSON: '
+            + json.dumps(
+                {
+                    'code': 'DOC_MAP_UNREADABLE',
+                    'retriable': False,
+                    'fallback': 'read the bundled .rocketride/docs/ROCKETRIDE_*.md snapshots instead',
+                }
+            )
+            + '\n'
+        )
+        return [], None
+    links = [(t.strip(), p.strip()) for t, p in LINK_RE.findall(text)]
     return links, mp
 
 
@@ -243,7 +283,22 @@ def main():
         fb = offline_fallback(path, docs_dir)
         if fb:
             sys.stderr.write(f'[fetch-doc] OFFLINE FALLBACK — read this bundled file: {fb}\n')
-            print(open(fb).read())
+            try:
+                print(open(fb).read())
+            except OSError as read_err:
+                sys.stderr.write(f'[fetch-doc] bundled fallback unreadable ({fb}: {read_err})\n')
+                sys.stderr.write(
+                    'ERROR_JSON: '
+                    + json.dumps(
+                        {
+                            'code': 'FALLBACK_UNREADABLE',
+                            'retriable': False,
+                            'fallback': 'read the doc-map / the bundled .rocketride/docs/ROCKETRIDE_*.md directly',
+                        }
+                    )
+                    + '\n'
+                )
+                sys.exit(1)
         else:
             sys.stderr.write(
                 f'[fetch-doc] no bundled fallback for {path}. Read the doc-map / '

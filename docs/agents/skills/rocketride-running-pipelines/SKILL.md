@@ -70,7 +70,7 @@ state that truthfully, you have not earned the run — do the missing step inste
 
 **NEVER block the async event loop** (the #1 runtime failure). No `input()`, `time.sleep`,
 `requests.get`, `readFileSync` inside the async flow — they freeze the websocket keepalive and the
-connection drops (~60s) with `Connection closed` / `Websocket closed unexpectedly`. Use async
+connection drops (~60s) with `Connection closed` / `Connection closed unexpectedly`. Use async
 equivalents. Secrets stay in `${ROCKETRIDE_*}` env vars (loaded from `.env`), never in code.
 
 ## Gate D — after a successful run (optional, menu)

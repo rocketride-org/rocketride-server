@@ -36,13 +36,13 @@ fix to the right phase. No re-running until the cause is identified and the fix 
    the owning phase. **Do not re-run until the fix is made and `validate()` is clean again.**
 
 ## Common diagnoses (full table in ERROR_TABLE.md)
-- `Connection closed` / `Websocket closed unexpectedly` → **event loop blocked by sync I/O** (most
+- `Connection closed` / `Connection closed unexpectedly` → **event loop blocked by sync I/O** (most
   common runtime failure) — fix the run code, not the pipeline.
-- `Component not found` → misspelled `provider`; check the index.
-- `Lane not supported` → lane mismatch; add a converter or pick compatible nodes.
+- `The service <provider> was not found` → misspelled `provider`; check the index.
+- `input has unknown lane` (validate) → lane mismatch; add a converter or pick compatible nodes.
 - `KeyError: '<key>'` → response key vs `laneName` mismatch; read `result_types`.
-- `Pipeline already running` → `use_existing=True` or `terminate()` first.
-- `Invalid API key` / `project_id must be a GUID` → config fix.
+- `Pipeline is already running.` → `use_existing=True` or `terminate()` first.
+- `Invalid API key` / a `project_id` rejection → config fix.
 
 ## Red flags
 

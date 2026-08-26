@@ -13,20 +13,21 @@ the row, route the fix.
 | Error message | Cause | Owning phase | Fix |
 |---|---|---|---|
 | `Connection closed` / `Connection timeout` | **event loop blocked** by sync I/O (input(), time.sleep, requests, readFileSync) | running | use async I/O; never block the async loop |
-| `Websocket closed unexpectedly` | same — blocked event loop | running | same |
-| `Component not found` | `provider` misspelled / not in catalog | designing | check the node index; fix the name |
-| `Lane not supported` | output lane ≠ input lane on an edge | designing | add a converter or pick compatible nodes |
+| `Connection closed unexpectedly` | same — blocked event loop | running | same |
+| `The service <provider> was not found` | `provider` misspelled / not in catalog | designing | check the node index; fix the name |
+| validate error contains `references unknown component id` | a `source`/`input`/`control` entry names a component `id` that doesn't exist | designing | fix the component id in the wiring |
+| validate error contains `input has unknown lane` | output lane ≠ input lane on an edge (input names a lane the node doesn't provide) | designing | add a converter or pick compatible nodes |
 | `KeyError: '<key>'` | response key ≠ `laneName` | configuring/running | read `result_types`; use defaults or match client code |
-| `Pipeline already running` | `use()` called twice on same token | running | `use_existing=True`, or `terminate(token)` then `use()` |
+| `Pipeline is already running.` | `use()` called twice on same token | running | `use_existing=True`, or `terminate(token)` then `use()` |
 | `Invalid API key` | wrong/missing key | configuring | set `${ROCKETRIDE_*}` env var correctly |
-| `project_id must be a GUID` | variable used in `project_id` | configuring | use a literal GUID |
+| run/validate failure mentioning `project_id` (no single verbatim message) | variable used in `project_id` | configuring | use a literal GUID |
 | empty / wrong output, no error | wrong wiring or wrong input data | designing/data | trace the first node with empty output; check input + lanes |
 | store returns nothing | data not embedded before store, or different embedding model for ingest vs query | designing | embed before store; same model both sides |
 | agent does nothing / errors on invoke | control plane wrong, or `invoke` min not met | designing | put `control:[{from:<agent>}]` on the controlled node; satisfy invoke min/max |
 
 ## Reading the trace
-- Start the run with `pipelineTraceLevel="summary"` (or `"full"`) to get per-node traces; `"none"`
-  (default) gives you only the final status.
+- Per-node traces are on by default (`pipelineTraceLevel` server default `"summary"`; pass `"full"`
+  for more detail). `"none"` still yields chapters/console logs, but the traces come back empty.
 - Status fields that tell the story: `state`, `exitCode`, `exitMessage`, `errors[]` (capped at 50),
   `failedCount`, `completedCount`. The `apaevt_flow` events show `op` (begin/enter/leave/end) per
   pipe with `trace.lane` / `trace.error`.

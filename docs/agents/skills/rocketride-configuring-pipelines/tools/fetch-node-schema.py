@@ -1,4 +1,26 @@
 #!/usr/bin/env python3
+# =============================================================================
+# MIT License
+# Copyright (c) 2026 Aparavi Software AG
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+# =============================================================================
 """Fetch one node's config schema (Layer 2).
 
 CONSTRAINT (agent contract / future MCP tool description): configure a node using ONLY the fields
@@ -35,7 +57,23 @@ def from_files(name):
     for _ in range(8):
         cand = os.path.join(here, '.rocketride', 'schema', f'{name}.json')
         if os.path.isfile(cand):
-            return json.load(open(cand))
+            try:
+                return json.load(open(cand))
+            except (json.JSONDecodeError, OSError) as e:
+                # Corrupt/truncated cache file: treat as a cache miss (keep walking up)
+                # instead of crashing with a traceback.
+                sys.stderr.write(f'[fetch-node-schema] cached schema unreadable ({cand}: {e}); ignoring it\n')
+                sys.stderr.write(
+                    'ERROR_JSON: '
+                    + json.dumps(
+                        {
+                            'code': 'CACHE_CORRUPT',
+                            'retriable': False,
+                            'fallback': 'treated as a cache miss — refetch from the engine (delete the corrupt file to silence this)',
+                        }
+                    )
+                    + '\n'
+                )
         parent = os.path.dirname(here)
         if parent == here:
             break

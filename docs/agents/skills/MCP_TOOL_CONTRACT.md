@@ -7,7 +7,7 @@ this file; anything not listed here does not exist — never invent a tool.
 
 ## Result envelope (every tool)
 
-Every result is a JSON object with `ok`. `ok: false` carries `error` and usually a `hint`;
+Every result is a JSON object with `ok`. `ok: false` carries `error_type`, `message`, and usually a `hint`;
 the MCP `is_error` flag mirrors it, and `structured_content` mirrors the text JSON.
 **Check `ok` — a successful tool *call* is not a successful *result*.**
 
@@ -24,8 +24,8 @@ the MCP `is_error` flag mirrors it, and `structured_content` mirrors the text JS
 
 | Tool | Input | Result / semantics |
 |---|---|---|
-| `run_pipeline` | `{pipeline, inputs?, ttl?, use_existing?, source?, threads?}` | `{ok, task_token, projectId, source, result?}`. Inline pipeline **only** (no filepath). With `inputs` it is a **one-shot**: the string is sent, `result` comes back inline, and the token is finished — don't poll it. **Keep `projectId` + `source`**: they key the log tools. |
-| `run_dropper_pipe` | like `run_pipeline`, minus `inputs` | `{ok, task_token, upload_url, dropper_url, projectId, source}`. Out-of-band file ingress: multipart-POST files to `upload_url`, or hand the user `dropper_url` (browser drag-drop). URLs carry only the public `pk_` key — never the control token. |
+| `run_pipeline` | `{pipeline, inputs?, ttl?, use_existing?, source?, threads?, pipelineTraceLevel?}` | `{ok, task_token, projectId, source, result?}`. Inline pipeline **only** (no filepath). With `inputs` it is a **one-shot**: the string is sent, `result` comes back inline, and the token is finished — don't poll it. **Keep `projectId` + `source`**: they key the log tools. `pipelineTraceLevel?`: `none\|metadata\|summary\|full`, server default `summary`. |
+| `run_dropper_pipe` | like `run_pipeline` (incl. `pipelineTraceLevel?`), minus `inputs` | `{ok, task_token, upload_url, dropper_url, projectId, source}`. Out-of-band file ingress: multipart-POST files to `upload_url`, or hand the user `dropper_url` (browser drag-drop). URLs carry only the public `pk_` key — never the control token. |
 | `send_data` | `{task_token, input}` | Sends to a running task; result inline. `input` is a **string** — serialize JSON; there is no chat operation (chat pipelines → SDK fallback). |
 | `send_files` | `{task_token, files: [path]}` | Store-resolvable paths only — not a host-file upload; for host files use `run_dropper_pipe`. |
 | `terminate` | `{task_token}` | Stops the task. |
@@ -64,7 +64,7 @@ chapters/console but **empty traces**.
 
 | Tool | Purpose |
 |---|---|
-| `list_integrations` | Bare: per-integration readiness rows. With `{name}`: field detail + `setup_block` instructions to relay to the user. Secret **values never transit MCP** — there is no `set_env`; credentials are configured out-of-band (env/account), and pipelines still reference `${ROCKETRIDE_*}`. |
+| `list_integrations` | Bare: per-integration readiness rows. With `{name}`: field detail + `setup` instructions to relay to the user. Secret **values never transit MCP** — there is no `set_env`; credentials are configured out-of-band (env/account), and pipelines still reference `${ROCKETRIDE_*}`. |
 
 ## Gaps the skills must compensate for (server-verified, current)
 

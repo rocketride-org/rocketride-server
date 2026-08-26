@@ -31,7 +31,7 @@ the contract and the skills together.
 
 Each skill directory is self-contained: `SKILL.md` plus its reference files,
 worked examples, and offline shims under `tools/`. The bundled
-`LAYER1_NODE_INDEX.json` (124 nodes) regenerates from a live engine via
+`LAYER1_NODE_INDEX.json` (167 nodes, corpus-reconciled) regenerates from a live engine via
 `rocketride-building-pipelines`' ladder — the engine remains the authority.
 
 Not exported: `docs:export` copies only the `.md` files sitting directly in
