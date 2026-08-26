@@ -129,11 +129,22 @@ describe('RocketRideClient.chat() failure', () => {
 		expect(e.hint).toContain('Common causes:');
 	});
 
-	it('still normalises a non-DAP failure to a plain Error', async () => {
-		const caught = await chatAndCatch(clientThatFailsOpen(notRunning), undefined as unknown as Question);
+	it('still normalises a non-DAP failure from the pipe to a plain Error', async () => {
+		// The failure has to come from inside the pipe interaction: a guard that
+		// trips before the pipe exists would exercise the catch without ever
+		// reaching the code path this test is about.
+		const client = new RocketRideClient({ env: {} });
+		const stub = client as unknown as Record<string, unknown>;
+		stub.buildRequest = () => ({ seq: 1, type: 'request', command: 'rrext_process' });
+		stub.request = async () => {
+			throw new Error('socket closed');
+		};
+		stub.didFail = (r: Record<string, unknown>) => r.success === false;
+
+		const caught = await chatAndCatch(client, {} as Question);
 
 		expect(caught).toBeInstanceOf(Error);
 		expect(caught).not.toBeInstanceOf(DAPException);
-		expect((caught as Error).message).toBe('Question cannot be empty');
+		expect((caught as Error).message).toBe('socket closed');
 	});
 });
