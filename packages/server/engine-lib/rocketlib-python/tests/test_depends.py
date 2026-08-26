@@ -328,6 +328,47 @@ class TestSatisfiedVerdict:
 
         assert depends._requirements_closure(str(root)) == [str(root), str(base)]
 
+    def test_non_utf8_included_file_does_not_fail_the_install(self, exe_dir, env):
+        """A non-UTF-8 include is scanned, not decoded strictly: it must not fail the node."""
+        (exe_dir / 'nodes' / 'demo' / 'base.txt').write_bytes(b'caf\xe9-pkg==1.0\n')
+        env.req.write_text('-r base.txt\nrequests\n', encoding='utf-8')
+
+        self._cold_process(env)
+        self._cold_process(env)
+
+        assert len(env.resolves) == 1
+
+    def test_quoted_include_path_is_tracked(self, exe_dir, env):
+        """A quoted path with a space is the file uv reads, so it belongs to the key."""
+        spaced = _write(exe_dir / 'nodes' / 'demo' / 'my pins.txt', 'pyjwt\n')
+        env.req.write_text('-r "my pins.txt"\nrequests\n', encoding='utf-8')
+
+        self._cold_process(env)
+        self._cold_process(env)
+        spaced.write_text('pyjwt\nhttpx\n', encoding='utf-8')
+        self._cold_process(env)
+
+        assert len(env.resolves) == 2
+
+    def test_unresolvable_include_is_never_cached(self, exe_dir, env):
+        """An include this parser cannot follow degrades to resolving, never to a stale hit."""
+        _write(exe_dir / 'nodes' / 'demo' / 'my pins.txt', 'pyjwt\n')
+        env.req.write_text('-r my pins.txt\nrequests\n', encoding='utf-8')
+
+        self._cold_process(env)
+        self._cold_process(env)
+
+        assert len(env.resolves) == 2
+        assert depends._verdict_key(str(env.req), str(env.constraints)) is None
+
+    def test_schema_bump_invalidates_every_verdict(self, env, monkeypatch):
+        """Bumping the schema retires verdicts recorded under the old resolve semantics."""
+        self._cold_process(env)
+        monkeypatch.setattr(depends, '_VERDICT_SCHEMA', '2')
+        self._cold_process(env)
+
+        assert len(env.resolves) == 2
+
     def test_failed_resolve_records_no_verdict(self, exe_dir, env, monkeypatch):
         """A resolve that raises leaves nothing behind, so the next process resolves again."""
 

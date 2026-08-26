@@ -856,6 +856,20 @@ def _write_excludes_file() -> str:
 # ``_processed`` spans one process, so every cold engine re-ran the 20-40s uv
 # resolve only to conclude that nothing was missing (#2089). Persist that
 # verdict instead, keyed by everything a resolve consults.
+#
+# Two consequences worth knowing. The fingerprint is the whole installed set,
+# so installing anything invalidates every file's verdict: on a host where
+# nodes install lazily, each install costs one extra resolve per requirements
+# file before things settle again. And the key cannot see the resolve's own
+# arguments, so _VERDICT_SCHEMA below is bumped whenever those change.
+#
+# The check and the write both run under the engine-global ``install.lock``
+# via depends(), which is what makes the non-atomic _save_hash write safe.
+# Per-node locks (#2089 ask 2) would remove that guarantee.
+
+# Bump when the resolve's inputs or semantics change (uv arguments, what the
+# key covers), so verdicts recorded under the old behaviour are not reused.
+_VERDICT_SCHEMA = '1'
 
 
 def _verdict_path(requirements_path: str) -> str:
@@ -875,7 +889,7 @@ def _file_digest(path: str) -> str:
 
 # A requirements line that pulls in another file: ``-r``/``--requirement`` and
 # ``-c``/``--constraint``, with the path after whitespace or ``=``.
-_INCLUDE_DIRECTIVE = re.compile(r'^\s*(?:-r|--requirement|-c|--constraint)(?:\s+|=)(\S+)')
+_INCLUDE_DIRECTIVE = re.compile(r'^\s*(?:-r|--requirement|-c|--constraint)(?:\s+|=)(?:"([^"]+)"|\'([^\']+)\'|(\S+))')
 
 
 def _requirements_closure(requirements_path: str) -> list[str]:
@@ -892,7 +906,10 @@ def _requirements_closure(requirements_path: str) -> list[str]:
             continue
         closure.append(path)
         try:
-            with open(path, 'r', encoding='utf-8') as f:
+            # errors='replace' because this decode only feeds directive
+            # scanning: the digest is taken from the bytes in _file_digest, so a
+            # non-UTF-8 requirements file must not fail the node it belongs to.
+            with open(path, 'r', encoding='utf-8', errors='replace') as f:
                 # A trailing backslash continues the line, as in pip and uv.
                 lines = f.read().replace('\\\n', '').splitlines()
         except OSError:
@@ -900,7 +917,8 @@ def _requirements_closure(requirements_path: str) -> list[str]:
         for line in lines:
             match = _INCLUDE_DIRECTIVE.match(line)
             if match:
-                pending.append(os.path.normpath(os.path.join(os.path.dirname(path), match.group(1))))
+                target = match.group(1) or match.group(2) or match.group(3)
+                pending.append(os.path.normpath(os.path.join(os.path.dirname(path), target)))
     return closure
 
 
@@ -913,20 +931,33 @@ def _installed_fingerprint() -> str:
     return hashlib.md5('\n'.join(sorted(entries)).encode('utf-8')).hexdigest()
 
 
-def _verdict_key(requirements_path: str, constraints_path: str) -> str:
+def _verdict_key(requirements_path: str, constraints_path: str) -> Optional[str]:
     """Key under which a "satisfied" verdict for ``requirements_path`` is valid.
 
     Everything that can change what a resolve concludes is part of it,
     including every file the requirements file includes through ``-r`` / ``-c``.
+
+    Returns ``None`` when the key cannot be computed honestly — a directive
+    names a file that does not exist, or site-packages cannot be listed. In
+    both cases something the resolve depends on is invisible here, so the key
+    would be stable over changing inputs. Refusing it degrades to resolving
+    every time, which is the safe direction — a stable key over an unseen
+    input keeps reporting "satisfied" after that input gains a dependency.
     """
-    parts = [sys.executable, sys.version]
-    parts.extend(_file_digest(path) for path in _requirements_closure(requirements_path))
+    closure = _requirements_closure(requirements_path)
+    if not all(os.path.exists(path) for path in closure):
+        return None
+
+    installed = _installed_fingerprint()
+
+    parts = [_VERDICT_SCHEMA, sys.executable, sys.version]
+    parts.extend(_file_digest(path) for path in closure)
     parts.extend(
         [
             _file_digest(constraints_path),
             _file_digest(_get_overrides_path()),
             _excludes_content(),
-            _installed_fingerprint(),
+            installed,
         ]
     )
     # NUL-separated: none of the parts can contain it, so field boundaries
@@ -937,13 +968,19 @@ def _verdict_key(requirements_path: str, constraints_path: str) -> str:
 def _verdict_cached(requirements_path: str, constraints_path: str) -> bool:
     """True when a previous resolve recorded this requirements file as satisfied under the current key.
 
-    An unreadable cache is a miss, never an error: the resolve simply runs.
+    An unreadable cache, or a key the closure refuses to produce, is a miss —
+    never an error. The cache is an optimisation: anything it cannot answer
+    must fall back to resolving, not fail the node that asked.
     """
     try:
         stored = _load_stored_hash(_verdict_path(requirements_path))
-    except OSError:
+        if stored is None:
+            return False
+        key = _verdict_key(requirements_path, constraints_path)
+        return key is not None and stored == key
+    except Exception as e:  # noqa: BLE001 - a cache read must never fail an install
+        debug(f'  Could not read the satisfied verdict ({e}); resolving instead')
         return False
-    return stored is not None and stored == _verdict_key(requirements_path, constraints_path)
 
 
 def _save_verdict(requirements_path: str, constraints_path: str):
@@ -953,11 +990,15 @@ def _save_verdict(requirements_path: str, constraints_path: str):
     process a resolve, so a cache that cannot be written must not fail an
     install that succeeded.
     """
-    verdict_file = _verdict_path(requirements_path)
     try:
+        key = _verdict_key(requirements_path, constraints_path)
+        if key is None:
+            debug(f'  Not recording a verdict: an include of {requirements_path} does not resolve')
+            return
+        verdict_file = _verdict_path(requirements_path)
         os.makedirs(os.path.dirname(verdict_file), exist_ok=True)
-        _save_hash(verdict_file, _verdict_key(requirements_path, constraints_path))
-    except OSError as e:
+        _save_hash(verdict_file, key)
+    except Exception as e:  # noqa: BLE001 - a cache write must never fail an install
         debug(f'  Could not record the satisfied verdict ({e}); the next process will resolve again')
 
 

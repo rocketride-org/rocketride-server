@@ -34,7 +34,7 @@
  */
 
 const path = require('path');
-const { execCommand, runPytest, unlink, DIST_ROOT } = require('../../../scripts/lib');
+const { execCommand, runPytest, unlink, removeDir, DIST_ROOT } = require('../../../scripts/lib');
 
 const PACKAGE_DIR = path.join(__dirname, '..');
 const TEST_DIR = path.join(PACKAGE_DIR, 'test');
@@ -64,7 +64,12 @@ function makeRunChecksAction(options = {}) {
                 const hashFile = path.join(ENGINE_CACHE_DIR, 'requirements.hash');
                 await unlink(constraints);
                 await unlink(hashFile);
-                task.output = 'Constraint cache cleared; ensure_constraints() will recompile';
+                // The satisfied-verdict cache too: a recompile that produces
+                // identical constraints leaves every verdict valid, so without
+                // this the flag cannot force a resolve — and a verdict that is
+                // wrong for an unforeseen reason would have no supported way out.
+                await removeDir(path.join(ENGINE_CACHE_DIR, 'satisfied'));
+                task.output = 'Constraint and verdict caches cleared; depends() will recompile and re-resolve';
             }
 
             // Invoke the CLI directly — no pytest. The CLI implements the
