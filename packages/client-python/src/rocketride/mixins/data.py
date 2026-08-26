@@ -192,7 +192,7 @@ class DataMixin(DAPClient):
                     'Common causes:\n'
                     "- Pipeline isn't running (wrong token or task terminated)\n"
                     '- Pipeline source must be chat, webhook, or dropper\n'
-                    '- MIME type doesn\'t match the source lane (try `mimetype="text/plain"`)\n'
+                    '- MIME type doesn\'t match the source lane (try `mime_type="text/plain"`)\n'
                 )
                 raise PipeException(response)
 

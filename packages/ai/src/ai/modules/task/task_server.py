@@ -600,7 +600,7 @@ class TaskServer(DAPBase):
                         control,
                         ['task.data'],
                     )
-            raise ValueError('Your pipeline is not running')
+            raise TaskError(TaskError.NOT_REGISTERED, 'Your pipeline is not running')
 
         if authorization.startswith('tk_'):
             control = self._task_control.get(authorization)
@@ -610,7 +610,7 @@ class TaskServer(DAPBase):
                     control,
                     ['task.control', 'task.data', 'task.monitor', 'task.debug', 'task.store'],
                 )
-            raise ValueError('Your pipeline is not running')
+            raise TaskError(TaskError.NOT_REGISTERED, 'Your pipeline is not running')
 
         # Not a task key — delegate to account layer
         return None

@@ -37,6 +37,7 @@ import { LogApi } from './log.js';
 import {
 	AuthenticationException,
 	ConnectionException,
+	DAPException,
 	LoginAttemptCancelledError,
 	type LoginAttemptCancellationReason,
 	PipeException,
@@ -1953,7 +1954,10 @@ export class RocketRideClient extends DAPClient {
 				}
 			}
 		} catch (error) {
-			// Return error response in standard format
+			// A typed SDK exception carries `code` and `hint` a caller can act on;
+			// rewrapping it as a plain Error would throw that away. Anything else
+			// is normalised to an Error as before.
+			if (error instanceof DAPException) throw error;
 			throw new Error(error instanceof Error ? error.message : String(error));
 		}
 	}

@@ -421,7 +421,8 @@ Used to parse chat response content. The client does not attach an `Answer` inst
 
 ## Exceptions
 
-Every exception extends `DAPException`, which exposes `dapResult` plus two
+DAP-backed exceptions extend `DAPException` (`LoginAttemptCancelledError`
+extends `Error` directly, see below), which exposes `dapResult` plus two
 optional fields:
 
 - `code` — the server's machine-readable classification, absent when the failure
