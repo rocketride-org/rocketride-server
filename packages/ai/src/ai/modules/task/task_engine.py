@@ -67,7 +67,7 @@ from rocketride import (
 from .dbg_debugpy import DbgDebugpy
 from .dbg_stdio import DbgStdio
 from .pipeline import resolve_pipeline_env
-from .types import LAUNCH_TYPE
+from .types import LAUNCH_TYPE, TaskError
 from .task_conn import TaskConn
 from .task_metrics import TaskMetrics
 
@@ -1660,11 +1660,11 @@ class Task(DAPBase):
 
             # We completed it, so raise an error -- this is about being read to accept data
             if current_state == TASK_STATE.COMPLETED.value:
-                raise RuntimeError('Task has already completed')
+                raise TaskError(TaskError.COMPLETED, 'Task has already completed')
 
             # If we were cancelled, throw an error
             if current_state == TASK_STATE.CANCELLED.value:
-                raise RuntimeError(self._status.exitMessage)
+                raise TaskError(TaskError.STOPPED, self._status.exitMessage)
 
             # Calculate timeouts
             time_since_last_event = time.time() - self._last_event_time

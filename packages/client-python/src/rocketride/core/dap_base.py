@@ -741,7 +741,10 @@ class DAPBase:
 
         Returns:
             Dict[str, Any]: A complete DAP error response with trace information
-                        following the DAP specification format.
+                        following the DAP specification format. Carries a
+                        ``code`` next to ``message`` when the exception has a
+                        machine-readable one, so a client can classify the
+                        failure without matching the prose.
         """
         # Build the basic error response structure
         response = {
@@ -752,6 +755,12 @@ class DAPBase:
             'success': False,  # Indicate failure
             'message': str(e),  # Human-readable error description
         }
+
+        # A machine-readable code, when the exception carries one (the engine's
+        # TaskError does): clients classify on it instead of on the prose.
+        code = getattr(e, 'code', None)
+        if isinstance(code, str) and code:
+            response['code'] = code
 
         # Extract traceback information from the exception
         if hasattr(e, '__traceback__') and e.__traceback__ is not None:

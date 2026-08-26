@@ -50,7 +50,7 @@ Usage:
         # Handle any other RocketRide errors
 """
 
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 
 class DAPException(Exception):
@@ -99,6 +99,29 @@ class DAPException(Exception):
 
         # Store complete DAP result for detailed error analysis
         self.dap_result = dap_result or {}
+
+    @property
+    def code(self) -> Optional[str]:
+        """
+        Machine-readable error code sent by the server, or None.
+
+        Task failures carry one (``TASK_NOT_REGISTERED``, ``TASK_AMBIGUOUS``,
+        ``TASK_COMPLETED``, ``TASK_STOPPED``); classify on it rather than on
+        the message text, which is written for people.
+        """
+        code = self.dap_result.get('code')
+        return code if isinstance(code, str) else None
+
+    @property
+    def hint(self) -> Optional[str]:
+        """
+        Troubleshooting text the SDK attached for a developer, or None.
+
+        Kept apart from the message so an application can show the message
+        to an end user without the developer checklist.
+        """
+        hint = self.dap_result.get('hint')
+        return hint if isinstance(hint, str) else None
 
 
 class RocketRideException(DAPException):

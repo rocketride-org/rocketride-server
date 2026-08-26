@@ -421,6 +421,29 @@ Used to parse chat response content. The client does not attach an `Answer` inst
 
 ## Exceptions
 
+Every exception extends `DAPException`, which exposes `dapResult` plus two
+optional fields:
+
+- `code` — the server's machine-readable classification, absent when the failure
+  has none. Task failures carry one: `TASK_NOT_REGISTERED` (the token names no
+  live task — never started, terminated, replaced, or the engine restarted),
+  `TASK_AMBIGUOUS`, `TASK_COMPLETED`, `TASK_STOPPED`. **Classify on `code`, not
+  on `message`**, which is written for people and may be reworded.
+- `hint` — troubleshooting text the SDK attached for a developer, absent when
+  there is none. Kept out of `message` so an application can show the message
+  to an end user without the developer checklist.
+
+```ts
+try {
+	await pipe.open();
+} catch (err) {
+	if (err instanceof PipeException) {
+		if (err.code === 'TASK_NOT_REGISTERED') await restartPipeline();
+		else console.error(err.message, err.hint);
+	}
+}
+```
+
 `AuthenticationException` extends `ConnectionException`; thrown on DAP auth failure. In persist mode the client calls `onConnectError` and does not retry authentication so the app can fix credentials and call `login()` or `connect()` again.
 
 `LoginAttemptCancelledError` extends `Error` directly. Its `reason` is the `LoginAttemptCancellationReason` union `'superseded' | 'logout' | 'detached'`. Catch it when overlapping lifecycle actions are expected; transport loss and other connection failures remain `ConnectionException` instances.

@@ -30,6 +30,7 @@ import pytest
 
 from ai.modules.task import task_server as task_server_module
 from ai.modules.task.task_server import TaskServer
+from ai.modules.task.types import TaskError
 
 
 def _make_server(*, config=None, web_server=None):
@@ -486,6 +487,23 @@ def test_get_task_control_unknown_token_raises_runtime():
     ts = _make_server()
     with pytest.raises(RuntimeError, match='not running'):
         ts.get_task_control('tk_unknown')
+
+
+def test_get_task_control_unknown_token_carries_a_code():
+    """The failure is classifiable without matching the English message (#2097)."""
+    ts = _make_server()
+    with pytest.raises(TaskError) as excinfo:
+        ts.get_task_control('tk_unknown')
+    assert excinfo.value.code == TaskError.NOT_REGISTERED
+    assert isinstance(excinfo.value, RuntimeError)  # existing handlers still catch it
+
+
+def test_get_task_control_by_public_key_unknown_carries_a_code():
+    """A public key naming no live task reports TASK_NOT_REGISTERED."""
+    ts = _make_server()
+    with pytest.raises(TaskError) as excinfo:
+        ts.get_task_control_by_public_key('pk_unknown')
+    assert excinfo.value.code == TaskError.NOT_REGISTERED
 
 
 def test_get_task_control_with_require_denies_without_membership(monkeypatch):

@@ -90,7 +90,7 @@ from ai.account.models import AccountInfo, resolve_task_permissions
 from ai.account.store import Store
 from .task_conn import TaskConn
 from .task_engine import Task
-from .types import LAUNCH_TYPE
+from .types import LAUNCH_TYPE, TaskError
 from .pipeline import resolve_implied_source
 from .commands.cmd_monitor import owner_key
 
@@ -673,7 +673,7 @@ class TaskServer(DAPBase):
                     and control.source == source
                 ):
                     return _verify(control)
-            raise RuntimeError('Your pipeline is not running')
+            raise TaskError(TaskError.NOT_REGISTERED, 'Your pipeline is not running')
 
         # Dev scope: the caller's own run — unique per user by construction.
         if account_info is not None:
@@ -685,7 +685,7 @@ class TaskServer(DAPBase):
                     and control.source == source
                 ):
                     return _verify(control)
-            raise RuntimeError('Your pipeline is not running')
+            raise TaskError(TaskError.NOT_REGISTERED, 'Your pipeline is not running')
 
         # Legacy unscoped scan (OSS single-user / HTTP fallback): tolerate a
         # unique match; refuse to guess between several runs.
@@ -697,8 +697,8 @@ class TaskServer(DAPBase):
         if len(matches) == 1:
             return matches[0]
         if matches:
-            raise RuntimeError('Multiple pipelines are running for this project; specify a scope')
-        raise RuntimeError('Your pipeline is not running')
+            raise TaskError(TaskError.AMBIGUOUS, 'Multiple pipelines are running for this project; specify a scope')
+        raise TaskError(TaskError.NOT_REGISTERED, 'Your pipeline is not running')
 
     def get_task_control_by_public_key(self, public_auth: str) -> TASK_CONTROL:
         """
@@ -719,7 +719,7 @@ class TaskServer(DAPBase):
                 return control
 
         # Couldn't find it
-        raise RuntimeError('Your pipeline is not running')
+        raise TaskError(TaskError.NOT_REGISTERED, 'Your pipeline is not running')
 
     def get_task_control(
         self,
@@ -743,7 +743,7 @@ class TaskServer(DAPBase):
 
         control = self._task_control.get(token, None)
         if not control:
-            raise RuntimeError('Your pipeline is not running')
+            raise TaskError(TaskError.NOT_REGISTERED, 'Your pipeline is not running')
 
         # Resolve against the TASK'S team (the old resolve_team_permissions
         # call raised on foreign teams instead of denying uniformly).
@@ -1074,7 +1074,7 @@ class TaskServer(DAPBase):
 
         # If not there, it wasn't running
         if not control:
-            raise RuntimeError('Your pipeline is not running')
+            raise TaskError(TaskError.NOT_REGISTERED, 'Your pipeline is not running')
 
         # Ensure task is properly stopped and resources are cleaned up
         await control.task.stop_task()
