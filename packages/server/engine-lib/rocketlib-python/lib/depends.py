@@ -827,20 +827,87 @@ def ensure_constraints() -> str:
 # ---------------------------------------------------------------------------
 
 
-def _write_excludes_file() -> str:
-    """Write uv's resolution-excludes file (rewritten each call) and return its path.
+def _excludes_content() -> str:
+    """Content of uv's resolution-excludes file for this platform.
 
     Excludes `uv` (bootstrapped by depends.py; pip-installing it crashes on Windows)
     and, on non-Darwin, plain `onnxruntime` (it clobbers onnxruntime-gpu in the same
     folder; the gpu build provides `import onnxruntime`).
     """
-    excludes_path = os.path.join(engine_cache_dir(), 'excludes.txt')
     excludes = 'uv\n'
     if platform.system() != 'Darwin':
         excludes += 'onnxruntime\n'
+    return excludes
+
+
+def _write_excludes_file() -> str:
+    """Write uv's resolution-excludes file (rewritten each call) and return its path."""
+    excludes_path = os.path.join(engine_cache_dir(), 'excludes.txt')
     with open(excludes_path, 'w', encoding='utf-8') as f:
-        f.write(excludes)
+        f.write(_excludes_content())
     return excludes_path
+
+
+# ---------------------------------------------------------------------------
+# Satisfied-verdict cache
+# ---------------------------------------------------------------------------
+#
+# ``_processed`` spans one process, so every cold engine re-ran the 20-40s uv
+# resolve only to conclude that nothing was missing (#2089). Persist that
+# verdict instead, keyed by everything a resolve consults.
+
+
+def _verdict_path(requirements_path: str) -> str:
+    """Path of the cached verdict for a requirements file."""
+    digest = hashlib.md5(os.path.abspath(requirements_path).encode('utf-8')).hexdigest()
+    return os.path.join(engine_cache_dir(), 'satisfied', f'{digest}.hash')
+
+
+def _file_digest(path: str) -> str:
+    """Content digest of a file, or empty string when it does not exist."""
+    try:
+        with open(path, 'rb') as f:
+            return hashlib.md5(f.read()).hexdigest()
+    except OSError:
+        return ''
+
+
+def _installed_fingerprint() -> str:
+    """Digest of the *.dist-info / *.egg-info names in site-packages — the names carry versions."""
+    try:
+        entries = [e for e in os.listdir(_get_site_packages()) if e.endswith(('.dist-info', '.egg-info'))]
+    except OSError:
+        entries = []
+    return hashlib.md5('\n'.join(sorted(entries)).encode('utf-8')).hexdigest()
+
+
+def _verdict_key(requirements_path: str, constraints_path: str) -> str:
+    """Key under which a satisfied verdict stays valid."""
+    parts = [
+        sys.executable,
+        sys.version,
+        _file_digest(requirements_path),
+        _file_digest(constraints_path),
+        _file_digest(_get_overrides_path()),
+        _excludes_content(),
+        _installed_fingerprint(),
+    ]
+    # NUL-separated: none of the parts can contain it, so field boundaries
+    # stay unambiguous even though two of them are multi-line text.
+    return hashlib.md5('\0'.join(parts).encode('utf-8')).hexdigest()
+
+
+def _verdict_cached(requirements_path: str, constraints_path: str) -> bool:
+    """True when a previous resolve recorded this file as satisfied under the current key."""
+    stored = _load_stored_hash(_verdict_path(requirements_path))
+    return stored is not None and stored == _verdict_key(requirements_path, constraints_path)
+
+
+def _save_verdict(requirements_path: str, constraints_path: str):
+    """Record requirements_path as satisfied under the current key."""
+    verdict_file = _verdict_path(requirements_path)
+    os.makedirs(os.path.dirname(verdict_file), exist_ok=True)
+    _save_hash(verdict_file, _verdict_key(requirements_path, constraints_path))
 
 
 def _install_dry_run(requirements_path: str, constraints_path: str) -> list[str]:
@@ -928,6 +995,12 @@ def _install_requirements(requirements_path: str, constraints_path: str):
         debug(f'  Empty requirements file, skipping: {requirements_path}')
         return
 
+    # A previous process already resolved this file against this environment
+    # and found it satisfied: nothing to install, and nothing to resolve.
+    if _verdict_cached(requirements_path, constraints_path):
+        debug(f'  Satisfied verdict cached, skipping resolve: {requirements_path}')
+        return
+
     # Start heartbeat early — the dry-run can block on uv's internal lock
     # for minutes, and we need monitorStatus events to keep the task startup
     # timeout alive during that time.
@@ -949,6 +1022,7 @@ def _install_requirements_inner(requirements_path: str, constraints_path: str):
     # If dry-run returned empty list, all packages are satisfied
     if len(packages) == 0:
         debug(f'All requirements satisfied: {requirements_path}')
+        _save_verdict(requirements_path, constraints_path)
         return
 
     # Format status message: show up to 5 packages, or 4 + "..." if more than 5
@@ -1011,6 +1085,9 @@ def _install_requirements_inner(requirements_path: str, constraints_path: str):
 
     # Clear path importer cache for site-packages to force re-scan
     sys.path_importer_cache.pop(_get_site_packages(), None)
+
+    # The install changed the installed set: record the verdict against it.
+    _save_verdict(requirements_path, constraints_path)
 
     debug(f'Installed: {requirements_path}')
 

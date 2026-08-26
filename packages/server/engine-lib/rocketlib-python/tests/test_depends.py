@@ -7,6 +7,7 @@ directory" into ``tmp_path`` so nothing touches a real engine cache.
 """
 
 import os
+from types import SimpleNamespace
 
 import pytest
 
@@ -208,6 +209,134 @@ class TestInstallRequirements:
         monkeypatch.setattr(depends, '_install_requirements_inner', lambda *a: pytest.fail('should not install'))
 
         depends._install_requirements(str(req), str(tmp_path / 'constraints.txt'))
+
+
+class TestSatisfiedVerdict:
+    """The resolve verdict outlives the process (#2089).
+
+    ``_install_requirements`` is called once per cold process; a second call
+    with the same requirements file, constraints and installed set must not
+    resolve again, and any change to one of them must.
+    """
+
+    @pytest.fixture
+    def env(self, exe_dir, monkeypatch):
+        """A requirements file, its constraints, a fake site-packages, and a resolve recorder."""
+        site = exe_dir / 'site-packages'
+        (site / 'requests-2.32.4.dist-info').mkdir(parents=True)
+        monkeypatch.setattr(depends, '_get_site_packages', lambda: str(site))
+        monkeypatch.setattr(depends, 'updateProgress', lambda message: None)
+        monkeypatch.setattr(depends, '_start_heartbeat', lambda: None)
+        monkeypatch.setattr(depends, '_stop_heartbeat', lambda: None)
+
+        resolves = []
+
+        def fake_dry_run(requirements_path, constraints_path):
+            resolves.append(requirements_path)
+            return []  # everything already installed
+
+        monkeypatch.setattr(depends, '_install_dry_run', fake_dry_run)
+
+        return SimpleNamespace(
+            req=_write(exe_dir / 'nodes' / 'demo' / 'requirements.txt', 'requests\n'),
+            constraints=_write(exe_dir / 'cache' / 'constraints.txt', 'requests==2.32.4\n'),
+            site=site,
+            resolves=resolves,
+        )
+
+    @staticmethod
+    def _cold_process(env, req=None):
+        depends._install_requirements(str(req or env.req), str(env.constraints))
+
+    def test_second_process_skips_the_resolve(self, exe_dir, env):
+        self._cold_process(env)
+        self._cold_process(env)
+
+        assert len(env.resolves) == 1
+        assert os.listdir(exe_dir / 'cache' / 'satisfied') != []
+
+    def test_verdict_is_per_requirements_file(self, exe_dir, env):
+        other = _write(exe_dir / 'nodes' / 'other' / 'requirements.txt', 'pyjwt\n')
+
+        self._cold_process(env)
+        self._cold_process(env, req=other)
+        self._cold_process(env)
+        self._cold_process(env, req=other)
+
+        assert env.resolves == [str(env.req), str(other)]
+
+    def test_requirements_change_reruns_the_resolve(self, env):
+        self._cold_process(env)
+        env.req.write_text('requests\nhttpx\n', encoding='utf-8')
+        self._cold_process(env)
+
+        assert len(env.resolves) == 2
+
+    def test_constraints_change_reruns_the_resolve(self, env):
+        self._cold_process(env)
+        env.constraints.write_text('requests==2.33.0\n', encoding='utf-8')
+        self._cold_process(env)
+
+        assert len(env.resolves) == 2
+
+    def test_overrides_change_reruns_the_resolve(self, exe_dir, env):
+        self._cold_process(env)
+        _write(exe_dir / 'cache' / 'overrides-combined.txt', 'urllib3==2.5.0\n')
+        self._cold_process(env)
+
+        assert len(env.resolves) == 2
+
+    def test_installed_set_change_reruns_the_resolve(self, env):
+        self._cold_process(env)
+        # An upgrade, an uninstall or a manual install all rename a dist-info entry.
+        (env.site / 'requests-2.32.4.dist-info').rename(env.site / 'requests-2.33.0.dist-info')
+        self._cold_process(env)
+
+        assert len(env.resolves) == 2
+
+    def test_failed_resolve_records_no_verdict(self, exe_dir, env, monkeypatch):
+        def failing_dry_run(requirements_path, constraints_path):
+            env.resolves.append(requirements_path)
+            raise RuntimeError('Dependency resolution failed')
+
+        monkeypatch.setattr(depends, '_install_dry_run', failing_dry_run)
+
+        with pytest.raises(RuntimeError):
+            self._cold_process(env)
+        with pytest.raises(RuntimeError):
+            self._cold_process(env)
+
+        assert len(env.resolves) == 2
+        assert not (exe_dir / 'cache' / 'satisfied').exists()
+
+    def test_install_records_the_verdict_against_the_installed_set(self, env, monkeypatch):
+        """A verdict written after an install must key on the post-install site-packages."""
+        pending = ['httpx']
+
+        def dry_run_then_satisfied(requirements_path, constraints_path):
+            env.resolves.append(requirements_path)
+            return list(pending)
+
+        class FakeInstall:
+            """Stands in for the uv install Popen: installs one dist-info, exits 0."""
+
+            returncode = 0
+            stdout = iter(())
+
+            def __init__(self, *args, **kwargs):
+                (env.site / 'httpx-0.28.1.dist-info').mkdir()
+                pending.clear()
+
+            def wait(self):
+                return 0
+
+        monkeypatch.setattr(depends, '_install_dry_run', dry_run_then_satisfied)
+        monkeypatch.setattr(depends.subprocess, 'Popen', FakeInstall)
+
+        self._cold_process(env)  # resolves, installs httpx, records the verdict
+        self._cold_process(env)  # the recorded verdict matches the installed set
+
+        assert len(env.resolves) == 1
 
 
 class TestDepends:
