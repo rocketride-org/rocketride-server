@@ -345,6 +345,15 @@ class TestSatisfiedVerdict:
         assert len(env.resolves) == 2
         assert not (exe_dir / 'cache' / 'satisfied').exists()
 
+    def test_unwritable_verdict_does_not_fail_the_resolve(self, exe_dir, env):
+        """The verdict is best effort: a cache that cannot be written never turns success into failure."""
+        _write(exe_dir / 'cache' / 'satisfied', '')  # a file where the verdict directory must go
+
+        self._cold_process(env)
+        self._cold_process(env)
+
+        assert len(env.resolves) == 2
+
     def test_install_records_the_verdict_against_the_installed_set(self, env, monkeypatch):
         """A verdict written after an install must key on the post-install site-packages."""
         pending = ['httpx']

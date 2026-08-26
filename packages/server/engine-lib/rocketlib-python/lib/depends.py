@@ -935,16 +935,30 @@ def _verdict_key(requirements_path: str, constraints_path: str) -> str:
 
 
 def _verdict_cached(requirements_path: str, constraints_path: str) -> bool:
-    """True when a previous resolve recorded this file as satisfied under the current key."""
-    stored = _load_stored_hash(_verdict_path(requirements_path))
+    """True when a previous resolve recorded this requirements file as satisfied under the current key.
+
+    An unreadable cache is a miss, never an error: the resolve simply runs.
+    """
+    try:
+        stored = _load_stored_hash(_verdict_path(requirements_path))
+    except OSError:
+        return False
     return stored is not None and stored == _verdict_key(requirements_path, constraints_path)
 
 
 def _save_verdict(requirements_path: str, constraints_path: str):
-    """Record requirements_path as satisfied under the current key."""
+    """Record that ``requirements_path`` is satisfied under the current key.
+
+    Best effort, like the progress sidecar: the verdict only saves the next
+    process a resolve, so a cache that cannot be written must not fail an
+    install that succeeded.
+    """
     verdict_file = _verdict_path(requirements_path)
-    os.makedirs(os.path.dirname(verdict_file), exist_ok=True)
-    _save_hash(verdict_file, _verdict_key(requirements_path, constraints_path))
+    try:
+        os.makedirs(os.path.dirname(verdict_file), exist_ok=True)
+        _save_hash(verdict_file, _verdict_key(requirements_path, constraints_path))
+    except OSError as e:
+        debug(f'  Could not record the satisfied verdict ({e}); the next process will resolve again')
 
 
 def _install_dry_run(requirements_path: str, constraints_path: str) -> list[str]:
