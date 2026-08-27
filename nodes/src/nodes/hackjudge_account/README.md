@@ -50,7 +50,21 @@ Records addressed to other stages of the verify flow (`{"flow": "verify",
 
 | Field | Meaning |
 | --- | --- |
-| `database_url` | Postgres connection string (the shared Hack Judge store) |
+| `database_url` | Postgres connection string. Blank falls back to `HACKJUDGE_DATABASE_URL` only; the node refuses to start without one (no generic `DATABASE_URL` fallback, so it can never write into an unrelated database) |
+
+## Schema
+
+The suite's shared DDL ships with this node as `schema.sql` (idempotent;
+identical copies ship with hackjudge_store and hackjudge_tokens so each PR is
+self-contained). Apply it once per environment:
+
+```
+psql "$HACKJUDGE_DATABASE_URL" -f schema.sql
+```
+
+The unique indexes on `tenants.marketplace_org_id` and `users.external_id` are
+load-bearing: first-sight creation uses `INSERT ... ON CONFLICT` against them
+so concurrent first logins converge on one row.
 
 ## Validation
 

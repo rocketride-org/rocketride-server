@@ -147,27 +147,29 @@ class IInstance(IInstanceBase):
         new_tenant_id, new_user_id = uuid.uuid4().hex, uuid.uuid4().hex
 
         def tx(cur):
+            # first-sight creation is insert-first with ON CONFLICT + re-select,
+            # so two concurrent requests for a new org/user converge on one row
+            # instead of racing SELECT-then-INSERT (needs the unique indexes in
+            # schema.sql on tenants.marketplace_org_id and users.external_id)
+            cur.execute(
+                'INSERT INTO tenants (id, name, marketplace_org_id, created_at)'
+                ' VALUES (%s, %s, %s, now()) ON CONFLICT (marketplace_org_id) DO NOTHING',
+                (new_tenant_id, org_name, org),
+            )
             cur.execute('SELECT id, tier, name FROM tenants WHERE marketplace_org_id = %s', (org,))
             t = cur.fetchone()
-            if not t:
-                cur.execute(
-                    'INSERT INTO tenants (id, name, marketplace_org_id, created_at) VALUES (%s, %s, %s, now())',
-                    (new_tenant_id, org_name, org),
-                )
-                cur.execute(
-                    'INSERT INTO balances (tenant_id) VALUES (%s) ON CONFLICT DO NOTHING',
-                    (new_tenant_id,),
-                )
-                t = {'id': new_tenant_id, 'tier': None, 'name': org_name}
+            cur.execute(
+                'INSERT INTO balances (tenant_id) VALUES (%s) ON CONFLICT DO NOTHING',
+                (t['id'],),
+            )
+            cur.execute(
+                'INSERT INTO users (id, external_id, tenant_id, name, email, role,'
+                " is_active, created_at) VALUES (%s, %s, %s, %s, %s, 'member', TRUE, now())"
+                ' ON CONFLICT (external_id) DO NOTHING',
+                (new_user_id, ext, t['id'], name, email),
+            )
             cur.execute('SELECT id, is_active, name, email FROM users WHERE external_id = %s', (ext,))
             u = cur.fetchone()
-            if not u:
-                cur.execute(
-                    'INSERT INTO users (id, external_id, tenant_id, name, email, role,'
-                    " is_active, created_at) VALUES (%s, %s, %s, %s, %s, 'member', TRUE, now())",
-                    (new_user_id, ext, t['id'], name, email),
-                )
-                u = {'id': new_user_id, 'is_active': True, 'name': name, 'email': email}
             if not u['is_active']:
                 return {'ok': False, 'error': 'account is deactivated'}
             return {
