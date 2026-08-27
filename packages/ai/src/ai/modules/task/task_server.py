@@ -554,6 +554,15 @@ class TaskServer(DAPBase):
         except Exception as e:
             self.debug_message(f'Error closing file handles for connection {connection_id}: {e}')
 
+        # Live media handles are MediaCommands' own spool readers, not in the Store's handle
+        # registry, so close_all_handles above never reaches them. Release them here or a
+        # dropped connection leaks an OS file descriptor per live handle (and on Windows the
+        # held descriptor blocks the producer's spool unlink).
+        try:
+            await conn.close_media_handles()
+        except Exception as e:
+            self.debug_message(f'Error closing media handles for connection {connection_id}: {e}')
+
         # Log successful disconnection cleanup
         self.debug_message(f'Connection {connection_id} disconnected and cleaned up.')
 

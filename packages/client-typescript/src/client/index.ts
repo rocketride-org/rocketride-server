@@ -46,6 +46,9 @@ export * from './constants.js';
 // Export the main client and utilities
 export * from './client.js';
 
+// Export the live WHEP media helper (client-side WebRTC egress)
+export * from './whep.js';
+
 // Export the database API namespace (DatabaseApi class, DatabaseDialect enum)
 export * from './database.js';
 

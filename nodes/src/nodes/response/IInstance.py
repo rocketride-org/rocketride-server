@@ -23,14 +23,38 @@
 
 from typing import List
 import os
+import re
 import base64
+import asyncio
+import mimetypes
+import secrets
+import uuid
 
-from rocketlib import IInstanceBase, IJson
+from rocketlib import IInstanceBase, IJson, warning, debug
+from ai.account.live_media import LiveWriter
+from ai.account.media_publish import MediaPublisher, sfu_hosts
+from ai.account.file_store import MAX_CHUNK_SIZE
 from ai.common.schema import Doc, Question, Answer
 from ai.common.avi.descriptor import descriptor_from_payload, source_media_detail
 from rocketlib import AVI_ACTION, Entry
 
 from .IGlobal import IGlobal
+
+_MEDIA_OFF_HINTED = False
+
+
+def _hint_media_plane_off(lane: str) -> None:
+    """Once per process, note that live streaming is available but off, and how to turn it on.
+    Debug-level and one-shot so the common file-delivery path stays quiet.
+    """
+    global _MEDIA_OFF_HINTED
+    if _MEDIA_OFF_HINTED:
+        return
+    _MEDIA_OFF_HINTED = True
+    debug(
+        f'media-plane off: ROCKETRIDE_MEDIA_SFU is unset, so {lane} is delivered as a whole-file '
+        "artifact. Set it to 'managed' (local) or an SFU host to stream it live over WHEP."
+    )
 
 
 class IInstance(IInstanceBase):
@@ -40,8 +64,8 @@ class IInstance(IInstanceBase):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        # Per-lane buffers + descriptors; per-instance, not class-level mutables (shared).
-        self._media_buffers = {}
+        # Per-lane spool writers + stream descriptors; per-instance, not class-level mutables.
+        self._media: dict = {}
         self._media_descriptors = {}
 
     def _getkey(self, type: str):
@@ -84,8 +108,8 @@ class IInstance(IInstanceBase):
             object (Entry): The object to initialize processing for.
         """
         self.text = ''  # Reset the text buffer
-        # Per-lane media buffers + descriptors; each lane's BEGIN (re)initializes its entry.
-        self._media_buffers = {}
+        # Per-lane spool writers + descriptors; each lane's BEGIN (re)creates its entry.
+        self._media = {}
         self._media_descriptors = {}
 
     def close(self):
@@ -213,60 +237,188 @@ class IInstance(IInstanceBase):
             self.instance.currentObject.response[key].append(answer.getText())
 
     def _write_media(self, lane: str, action: int, mimeType: str, data: bytes):
-        """Shared handler for the image/audio/video stream lanes.
-
-        All three multimedia lanes behave identically: accumulate the stream across
-        BEGIN/WRITE/END and emit a single entry ``{mime_type, <lane>, metadata}`` where
-        ``<lane>`` is the base64 payload (key ``'image'``/``'audio'``/``'video'``) and
-        ``metadata`` is the stream descriptor parsed from that stream's own BEGIN payload
-        (present only when one arrived).
-
-        State is per lane, which separates image from audio from video. Several streams on
-        one lane within a single object — a producer fanning one scan out into several
-        images — arrive already separated: ``IInstanceBase`` delivers each stream's END
-        before the next BEGIN, so every one of them reaches :meth:`_emit_media` in turn.
-
-        Args:
-            lane (str): The media lane — ``'image'``, ``'audio'`` or ``'video'``.
-            action (int): The AVI stream action (BEGIN/WRITE/END).
-            mimeType (str): The media MIME type.
-            data (bytes): The BEGIN descriptor payload, or a WRITE data chunk.
+        """Spool the image/audio/video lanes as they arrive, announcing on BEGIN.
+        A consumer reads along behind the producer; nothing is held whole in memory.
         """
         if action == AVI_ACTION.BEGIN:
             # BEGIN carries the stream descriptor, not media bytes.
-            self._media_buffers[lane] = bytearray()
             self._media_descriptors[lane] = descriptor_from_payload(data)
+            self._begin_media(lane, mimeType)
 
         elif action == AVI_ACTION.WRITE:
-            self._media_buffers[lane] += data
+            if entry := self._media.get(lane):
+                entry['writer'].append(data)
+                entry['bytes'] += len(data)
+                if publisher := entry.get('publisher'):
+                    publisher.feed(data)
 
         elif action == AVI_ACTION.END:
-            # An empty stream has nothing to return, and the file sink creates no file for
-            # one either, so it produces no entry rather than a blank one.
-            if not self._media_buffers.get(lane):
+            entry = self._media.pop(lane, None)
+            if entry is None:
                 return
-            self._emit_media(lane, mimeType)
+            if not entry['bytes']:
+                # An empty stream produces no file and no entry (a producer that emitted
+                # nothing, not a blank result). Close the push and drop the empty spool.
+                if publisher := entry.get('publisher'):
+                    publisher.finish()
+                entry['writer'].discard()
+                return
+            key = self._getkey(lane)
+            if key not in self.instance.currentObject.response:
+                self.instance.currentObject.response[key] = []
+            result = self._end_media(lane, entry)
+            # source_media_detail() strips the identity/security backlink from the response.
+            detail = source_media_detail(self._media_descriptors.get(lane))
+            if detail:
+                result['metadata'] = detail
+            self.instance.currentObject.response[key].append(result)
 
-    def _emit_media(self, lane: str, mimeType: str) -> None:
-        """Append one completed stream to the response, labelled with its own descriptor.
+    def _begin_media(self, lane: str, mimeType: str) -> None:
+        """Open the spool, start the live push, and announce the artifact before its bytes exist."""
+        path = self._media_path(lane, mimeType)
+        writer = LiveWriter(self.IGlobal.client_id or 'anonymous', path)
+        try:
+            writer.begin()
+        except OSError as e:
+            # The spool dir may be unwritable; the old in-memory path couldn't fail here, and
+            # _init_file_store already treats storage failures as non-fatal. Drop this lane (no
+            # entry) so the object doesn't abort over a temp-file error.
+            warning(f'response: spool open failed for {lane}; skipping its media: {e}')
+            return
+        entry = {'writer': writer, 'path': path, 'mime': mimeType, 'publisher': None, 'bytes': 0}
 
-        Args:
-            lane (str): The media lane — ``'image'``, ``'audio'`` or ``'video'``.
-            mimeType (str): The media MIME type.
+        # Live media-plane: push the stream to the SFU so the client pulls it over WHEP,
+        # never bytes over the control WS. Resolve the SFU only for a streamable lane with
+        # transmit_media on — so an image lane or transmit_media off never even touches it.
+        # No SFU configured => the spool path still stands and the media is delivered as a
+        # normal (whole-file) artifact instead.
+        if self.IGlobal.transmit_media and mimeType.startswith(('audio/', 'video/')):
+            hosts = sfu_hosts()
+            if hosts:
+                whep_host, rtsp_host = hosts
+                stream_id = self._stream_id()
+                publisher = MediaPublisher(whep_host, stream_id, mimeType, rtsp_host=rtsp_host)
+                if publisher.begin():
+                    entry['publisher'] = publisher
+                    self._trace_media_publish(lane, mimeType, whep_host, stream_id, publisher.whep_url)
+            else:
+                _hint_media_plane_off(lane)  # once: how to turn live streaming on
+        self._media[lane] = entry
+
+        if self.IGlobal.transmit_media and self.IGlobal.client_id:
+            publisher = entry['publisher']
+            whep = publisher.whep_url if publisher else None
+            # Announce a pull path only if the client can resolve it later — a live WHEP url, or a
+            # persisted object (file_store). With neither, the media is base64-inlined in the
+            # response, so an announced outputs/ path would point at nothing after END.
+            if whep or self.IGlobal.file_store is not None:
+                self._announce_artifact(lane, mimeType, path, whep)
+
+    def _trace_media_publish(self, kind: str, mime: str, sfu: str, stream_id: str, whep_url: str) -> None:
+        """Surface the live push in the monitor (Flow/Trace + Log) as proof it went over WebRTC."""
+        try:
+            self.instance.sendSSE(
+                'media_publish',
+                kind=kind,
+                mime_type=mime,
+                stream_id=stream_id,
+                sfu=sfu,
+                whep_url=whep_url,
+                transport='RTSP->WHEP',
+            )
+        except Exception as e:
+            warning(f'response: media_publish trace failed: {e}')
+        debug(f'media-plane -> SFU: streaming {kind} ({mime}) as {stream_id} via WHEP {whep_url}')
+
+    def _end_media(self, lane: str, entry: dict) -> dict:
+        """Close the live push and persist the spool. Discarded last: base64 fallback reads it."""
+        writer, path, mime = entry['writer'], entry['path'], entry['mime']
+        if publisher := entry.get('publisher'):
+            publisher.finish()
+            if publisher.failed:
+                warning(
+                    f'response: media-plane push died for {mime}; client falls back to storage. ffmpeg: {publisher.stderr_tail}'
+                )
+        writer.finish()
+        try:
+            if self.IGlobal.file_store is not None:
+                try:
+                    _run_async(self._persist_spool(path))
+                    return {'mime_type': mime, 'path': path}
+                except Exception as e:
+                    warning(f'response: persisting {path!r} failed; falling back to base64: {e}')
+
+            return {'mime_type': mime, lane: base64.b64encode(self._read_spool(lane, path)).decode('utf-8')}
+        finally:
+            writer.discard()
+
+    async def _persist_spool(self, path: str) -> None:
+        """Copy the spool into the account store, one chunk at a time."""
+        store = self.IGlobal.file_store
+        handle = await store.open_write(path)
+        try:
+            with open(self._spool_part(path), 'rb') as fh:
+                while chunk := fh.read(MAX_CHUNK_SIZE):
+                    await store.write_chunk(handle, chunk)
+        except BaseException:
+            try:
+                await store.close_write(handle)
+            except Exception:
+                pass
+            raise
+        await store.close_write(handle)
+
+    def _spool_part(self, path: str) -> str:
+        from ai.account.live_media import spool_paths
+
+        return spool_paths(self.IGlobal.client_id or 'anonymous', path)[0]
+
+    def _read_spool(self, lane: str, path: str) -> bytes:
+        """Read the whole spool back. Only the base64 fallback pays this cost."""
+        try:
+            with open(self._spool_part(path), 'rb') as fh:
+                return fh.read()
+        except OSError as e:
+            warning(f'response: reading spool for {lane} failed: {e}')
+            return b''
+
+    def _announce_artifact(self, kind: str, mime: str, path: str, url: str | None = None) -> None:
+        """Announce the artifact before it exists: a WHEP url for live, else the pull path."""
+        try:
+            self.instance.sendSSE(
+                'artifact_path',
+                kind=kind,
+                mime_type=mime,
+                path=path,
+                name=path.rsplit('/', 1)[-1],
+                streaming=True,
+                url=url,
+                live=bool(url),
+            )
+        except Exception as e:
+            warning(f'response: artifact_path SSE failed for {path!r}: {e}')
+
+    def _stream_id(self) -> str:
+        """SFU stream name as a capability token: a per-client prefix plus 128 bits of
+        randomness. The WHEP url only travels the authenticated control channel (SSE to this
+        client), so an unguessable id keeps one client from reaching another's live stream by
+        guessing. The prefix lets the SFU scope path-based auth rules per client — see the
+        media-sfu deploy kit.
         """
-        key = self._getkey(lane)
-        if key not in self.instance.currentObject.response:
-            self.instance.currentObject.response[key] = []
+        tenant = re.sub(r'[^A-Za-z0-9]+', '', self.IGlobal.client_id or 'anon')[:24] or 'anon'
+        return f'{tenant}-{secrets.token_hex(16)}'
 
-        payload = base64.b64encode(self._media_buffers.get(lane, bytearray())).decode('utf-8')
-        self._media_buffers[lane] = bytearray()
-
-        # source_media_detail() strips the identity/security backlink from the response.
-        entry = {'mime_type': mimeType, lane: payload}
-        detail = source_media_detail(self._media_descriptors.get(lane))
-        if detail:
-            entry['metadata'] = detail
-        self.instance.currentObject.response[key].append(entry)
+    def _media_path(self, kind: str, mime: str) -> str:
+        """Unique logical FileStore path under ``outputs/<kind>/`` for this media."""
+        ext = mimetypes.guess_extension(mime or '') or ''
+        if not ext and mime and '/' in mime:
+            # guess_extension misses common audio/video types (e.g. audio/wav);
+            # fall back to the MIME subtype so the file keeps a usable extension.
+            ext = '.' + mime.split(';')[0].split('/')[-1].strip()
+        base = 'output'
+        if self.instance.currentObject.hasName and self.instance.currentObject.name:
+            base = os.path.splitext(os.path.basename(self.instance.currentObject.name))[0] or 'output'
+        return f'outputs/{kind}/{base}-{uuid.uuid4().hex[:8]}{ext}'
 
     def writeAudio(self, aviAction: int, mimeType: str, data: bytes):
         self._write_media('audio', aviAction, mimeType, data)
@@ -276,3 +428,15 @@ class IInstance(IInstanceBase):
 
     def writeImage(self, action: int, mimeType: str, buffer: bytes):
         self._write_media('image', action, mimeType, buffer)
+
+
+def _run_async(coro):
+    """Run a coroutine from the synchronous AVI callbacks, which own no event loop."""
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        pass
+    else:
+        raise RuntimeError('_run_async must not be called from a thread with a running event loop')
+
+    return asyncio.run(coro)

@@ -1084,13 +1084,28 @@ export const TraceDetail: React.FC<ITraceDetailProps> = ({ traceId, projectId, f
 			if (sseMs < nodeMs) {
 				flushRun();
 				const body = (sse.body ?? {}) as Record<string, unknown>;
-				const text = typeof body.message === 'string' && body.message ? body.message : JSON.stringify(body.data ?? body);
-				interleaved.push(
-					<div key={`sse-${sse.body.logSeq}`} style={S.sseRow}>
-						<span style={S.sseTime}>{new Date(sseMs).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</span>
-						{text}
-					</div>,
-				);
+				const sseTime = new Date(sseMs).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+				if (body.type === 'media_publish') {
+					// The media-plane push, structured: proof the media went over WebRTC.
+					const d = (body.data ?? {}) as Record<string, unknown>;
+					interleaved.push(
+						<div key={`sse-${sse.body.logSeq}`} style={S.sseRow}>
+							<span style={S.sseTime}>{sseTime}</span>
+							<span>
+								<strong>media-plane {'→'} SFU (WebRTC)</strong> {String(d.mime_type ?? '')} {'·'} {String(d.transport ?? '')} {'·'} {String(d.stream_id ?? '')}
+								{d.whep_url ? <> {'·'} WHEP <code>{String(d.whep_url)}</code></> : null}
+							</span>
+						</div>,
+					);
+				} else {
+					const text = typeof body.message === 'string' && body.message ? body.message : JSON.stringify(body.data ?? body);
+					interleaved.push(
+						<div key={`sse-${sse.body.logSeq}`} style={S.sseRow}>
+							<span style={S.sseTime}>{sseTime}</span>
+							{text}
+						</div>,
+					);
+				}
 				sseIdx += 1;
 			} else {
 				run.push(node);

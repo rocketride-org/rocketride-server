@@ -22,19 +22,39 @@
 # =============================================================================
 
 from typing import Dict
-from rocketlib import IGlobalBase
+
+from rocketlib import IGlobalBase, warning
+
+from ai.account.store import Store
 
 
 class IGlobal(IGlobalBase):
     lanes: Dict[str, str] = {}
+    # Account FileStore for persisting media outputs; None => fall back to base64.
+    client_id = None
+    file_store = None
+    # When True, produced media is announced live for streaming; False persists only.
+    transmit_media = True
 
     def beginGlobal(self):
         # This will create a local copy
         self.lanes = {}
         self.laneName = None
+        self.client_id = None
+        self.file_store = None
+        self.transmit_media = True
+
+        # Build the account FileStore so media outputs are persisted and served
+        # by URL (fsGetUrl) instead of inlined as base64 in the result.
+        self._init_file_store()
 
         # Get this nodes config
         config = self.glb.connConfig
+
+        # Toggle live media transmission (default on). Off => persist without
+        # announcing, so clients won't stream it over the reliable channel.
+        if 'transmit_media' in config:
+            self.transmit_media = bool(config['transmit_media'])
 
         # If the is a laneName
         if 'laneName' in config:
@@ -55,3 +75,20 @@ class IGlobal(IGlobalBase):
 
                 # Add the lane to the global lanes dictionary
                 self.lanes[laneId] = laneName
+
+    def _init_file_store(self):
+        """Resolve the account FileStore for the current engine task (best-effort).
+        Identity and the storage anchor come from the task file, not the environment, so
+        deploy runs write into the task's team subtree — same as the read side in cmd_media.
+        On failure it stays None and media falls back to base64, never breaking a pipeline.
+        """
+        try:
+            store = Store.engine_file_store()
+            if store is None:
+                return
+            self.file_store = store
+            self.client_id = store._client_id  # spool namespace: same identity the store scopes to
+        except Exception as e:
+            warning(f'response: FileStore init failed; media falls back to base64: {e}')
+            self.file_store = None
+            self.client_id = None

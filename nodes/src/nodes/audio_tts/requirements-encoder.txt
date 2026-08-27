@@ -1,0 +1,6 @@
+# LAME encoder: PCM -> MP3, frame by frame, so audio streams as it is synthesised.
+# The encode runs in-process in BOTH local and model-server mode (only synthesis is
+# offloaded to the model server), so this must install on both paths. Ships wheels for
+# every supported platform — no compiler needed.
+--only-binary lameenc
+lameenc>=1.8.1

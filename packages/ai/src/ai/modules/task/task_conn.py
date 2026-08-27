@@ -77,6 +77,7 @@ from .commands.cmd_public import PublicCommands
 from .commands.cmd_deploy import DeployCommands
 from .commands.cmd_log import LogCommands
 from .commands.cmd_store import StoreCommands
+from .commands.cmd_media import MediaCommands
 from ai.account.models import AccountInfo, RequestContext, resolve_task_permissions, resolve_team_permissions
 from ai.common.account import AccountPipelineValidation
 
@@ -108,6 +109,7 @@ class TaskConn(
     DeployCommands,
     LogCommands,
     StoreCommands,
+    MediaCommands,
     DAPConn,
 ):
     """
@@ -199,6 +201,7 @@ class TaskConn(
         DeployCommands.__init__(self, connection_id, server, transport, **kwargs)
         LogCommands.__init__(self, connection_id, server, transport, **kwargs)
         StoreCommands.__init__(self, connection_id, server, transport, **kwargs)
+        MediaCommands.__init__(self, connection_id, server, transport, **kwargs)
 
         # Store connection identifier for tracking and logging
         self._connection_id = connection_id

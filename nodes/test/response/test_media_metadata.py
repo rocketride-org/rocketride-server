@@ -15,6 +15,7 @@ import base64
 import sys
 from pathlib import Path
 
+import pytest
 from rocketlib import AVI_ACTION
 from ai.common.avi.descriptor import build_stream_descriptor, descriptor_to_payload
 
@@ -26,6 +27,12 @@ while str(NODES_SRC) in sys.path:
 sys.path.insert(0, str(NODES_SRC))
 
 from response.IInstance import IInstance  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _spool_dir(tmp_path, monkeypatch):
+    # The response node spools each lane to disk before persisting; point it at tmp.
+    monkeypatch.setenv('ROCKETRIDE_LIVE_MEDIA_DIR', str(tmp_path))
 
 
 class _Obj:
@@ -49,6 +56,9 @@ class _Glob:
 
     laneName = None
     lanes = None
+    file_store = None
+    client_id = None
+    transmit_media = False
 
 
 def _descriptor_payload(kind, source_mime):

@@ -21,20 +21,32 @@
 # SOFTWARE.
 # =============================================================================
 
-# NOTE: Frames are buffered in memory (self._frames). Peak RAM is roughly
-# frame_count × frame_size. Acceptable for <500 frames at typical resolutions.
-# For larger workloads, revisit with PyAV (Option 2) or object store (Option 3).
+# Frames stream straight through ffmpeg: one in on stdin, fragments out on stdout.
+# Peak RAM is a frame plus whatever the engine has not yet drained.
 
-import base64
 import logging
+import queue
 import subprocess
+import threading
 from typing import ClassVar
 
-from rocketlib import IInstanceBase, AVI_ACTION, Entry
+from rocketlib import IInstanceBase, AVI_ACTION, Entry, warning
+from ai.common.utils.subprocess_utils import close_stdin
 
 from .IGlobal import IGlobal
 
 _logger = logging.getLogger(__name__)
+
+_VIDEO_MIME = 'video/mp4'
+
+# How much of ffmpeg's stdout to take per read. Each read becomes one AVI WRITE.
+_STDOUT_CHUNK = 64 * 1024
+
+# Longest we wait for the encoder to drain and exit once its input is closed.
+_ENCODE_TIMEOUT = 300
+
+# Only the tail of ffmpeg's diagnostics is worth keeping when it fails.
+_STDERR_TAIL = 4096
 
 
 def _log(msg: str) -> None:
@@ -57,15 +69,7 @@ def _plog(msg: str) -> None:
 
 
 class IInstance(IInstanceBase):
-    """Pipeline instance for the video composer node.
-
-    Accumulates incoming image frames in memory and encodes them into an
-    MP4 video via FFmpeg when the object is closed. The encoded video is
-    streamed to downstream nodes via AVI and to the UI client via SSE chunks.
-
-    Attributes:
-        IGlobal: Shared global state providing FFmpeg encoding configuration.
-    """
+    """Encodes incoming image frames into MP4 with FFmpeg, forwarding fragments as they appear."""
 
     IGlobal: IGlobal
 
@@ -81,13 +85,19 @@ class IInstance(IInstanceBase):
 
     def beginInstance(self):
         """Initialise per-instance state and load encoding settings from IGlobal.config."""
-        self._frames: list[bytes] = []
         self._image_buf = bytearray()
         self._image_mime = 'image/png'
         self._filename = 'output.mp4'
+        self._proc = None
+        self._stdout_queue: queue.Queue = queue.Queue()
+        self._stdout_thread = None
+        self._stderr_tail = b''
+        self._stderr_thread = None
+        self._frame_count = 0
+        self._video_open = False
 
         cfg = self.IGlobal.config
-        # Normalize numeric types up front so the range checks in _encode_video
+        # Normalize numeric types up front so the range checks in _start_encode
         # can't blow up with TypeError/ValueError on non-numeric config values.
         try:
             self._fps = float(cfg.get('fps', 1.0))
@@ -101,39 +111,40 @@ class IInstance(IInstanceBase):
         self._cleanup()
 
     def open(self, obj: Entry):
-        """Reset the frame buffer and capture the output filename from the entry."""
-        self._frames = []
+        """Reset per-object state and capture the output filename from the entry."""
+        self._frame_count = 0
         self._filename = (obj.name if obj.hasName else None) or 'output.mp4'
-        _log('open: in-memory frame buffer initialised')
+        _log('open: streaming encoder ready')
         _plog(f'open: filename={self._filename!r} obj.hasName={obj.hasName}')
 
     def close(self):
-        """Encode accumulated frames to MP4 and stream the result; no-op if no frames."""
-        frame_count = len(self._frames)
-        _log(f'close: frame_count={frame_count}')
-        _plog(f'close: frame_count={frame_count} filename={self._filename!r}')
-        if frame_count == 0:
-            _plog('close: no frames -- skipping encode')
+        """Finish the encode and close the video stream; no-op if no frames arrived."""
+        _log(f'close: frame_count={self._frame_count}')
+        _plog(f'close: frame_count={self._frame_count} filename={self._filename!r}')
+        if self._proc is None:
+            _plog('close: no frames -- nothing was encoded')
             self._cleanup()
             return
 
-        mp4_bytes = self._encode_video()
-        if mp4_bytes:
-            _log(f'close: encoded ok size={len(mp4_bytes)} bytes, streaming')
-            _plog(f'close: encoded ok size={len(mp4_bytes)} bytes -- sending SSE')
-            self._output_video(mp4_bytes)
-        else:
-            _log('close: encode failed')
-            _plog('close: ENCODE FAILED')
-
-        self._cleanup()
-
-    # ------------------------------------------------------------------
-    # Image stream handling -- accumulate each frame in memory
-    # ------------------------------------------------------------------
+        ok = False
+        try:
+            ok = self._finish_encode()
+        finally:
+            if self._video_open:
+                if ok:
+                    self.instance.writeVideo(AVI_ACTION.END, _VIDEO_MIME, b'')
+                else:
+                    # Encode died mid-stream: the forwarded fragments are a truncated MP4.
+                    # Skip the clean END so the response node never persists/announces a
+                    # corrupt artifact as finished (the old "only a good encode leaves" rule).
+                    warning('video_composer: encode failed; dropping the truncated stream (no END emitted)')
+                self._video_open = False
+            self._cleanup()
 
     def writeImage(self, action: AVI_ACTION, mimeType: str, buffer: bytes):
-        """Accumulate image data into a frame buffer; append completed frames on END."""
+        """Accumulate one image; on END feed it to the encoder and forward its output.
+        The encoder starts on the first frame, so fragments leave while frames arrive.
+        """
         if action == AVI_ACTION.BEGIN:
             self._image_buf = bytearray()
             self._image_mime = mimeType
@@ -143,9 +154,71 @@ class IInstance(IInstanceBase):
                 self._image_buf.extend(buffer)
 
         elif action == AVI_ACTION.END:
-            if self._image_buf:
-                self._frames.append(bytes(self._image_buf))
+            frame = bytes(self._image_buf)
             self._image_buf = bytearray()
+            if not frame:
+                return
+            if self._proc is None and not self._start_encode():
+                return
+            self._feed_frame(frame)
+            self._drain_stdout()
+
+    def _feed_frame(self, frame: bytes) -> None:
+        """Write one frame to ffmpeg. A dead encoder ends the stream, it never raises."""
+        if self._proc is None or self._proc.stdin.closed:
+            return
+        try:
+            self._proc.stdin.write(frame)
+            self._proc.stdin.flush()
+            self._frame_count += 1
+        except (BrokenPipeError, OSError, ValueError) as e:
+            _log(f'_feed_frame: encoder went away after {self._frame_count} frames: {e}')
+            self._close_stdin()
+
+    def _drain_stdout(self) -> None:
+        """Forward what the encoder produced so far, without blocking.
+        A thread reads stdout, but writeVideo only ever runs here, on the engine thread.
+        """
+        while True:
+            try:
+                chunk = self._stdout_queue.get_nowait()
+            except queue.Empty:
+                return
+            if not self._video_open:
+                self.instance.writeVideo(AVI_ACTION.BEGIN, _VIDEO_MIME, b'')
+                self._video_open = True
+            self.instance.writeVideo(AVI_ACTION.WRITE, _VIDEO_MIME, chunk)
+
+    def _close_stdin(self) -> None:
+        close_stdin(self._proc)
+
+    def _finish_encode(self) -> bool:
+        """Close the input, drain the rest of the encoder's output, and reap it.
+        Returns True only on a clean exit — a nonzero code means the forwarded fragments
+        are a truncated stream the caller must not close with a normal END.
+        """
+        self._close_stdin()
+        if self._stdout_thread is not None:
+            self._stdout_thread.join(timeout=_ENCODE_TIMEOUT)
+        self._drain_stdout()
+
+        try:
+            self._proc.wait(timeout=_ENCODE_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            _log('_finish_encode: encoder did not exit; killing it')
+            self._proc.kill()
+            self._proc.wait()
+
+        if self._stderr_thread is not None:
+            self._stderr_thread.join(timeout=5)
+        if self._proc.returncode != 0:
+            warning(
+                f'video_composer: encode failed (returncode={self._proc.returncode}) after '
+                f'{self._frame_count} frames; stderr={self._stderr_tail.decode(errors="replace")[-500:]}'
+            )
+            return False
+        _log(f'_finish_encode: ok, {self._frame_count} frames encoded')
+        return True
 
     # ------------------------------------------------------------------
     # FFmpeg encoding via stdin/stdout pipe -- no temp files
@@ -165,17 +238,18 @@ class IInstance(IInstanceBase):
         }
     )
 
-    def _encode_video(self) -> bytes | None:
+    def _start_encode(self) -> bool:
+        """Launch ffmpeg with pipes on both ends. Returns False if it cannot start."""
         # Validate config values before building the subprocess command.
         if self._codec not in self._ALLOWED_CODECS:
-            _log(f'_encode_video: unsupported codec={self._codec!r}')
-            return None
+            _log(f'_start_encode: unsupported codec={self._codec!r}')
+            return False
         if not (0 <= self._crf <= 51):
-            _log(f'_encode_video: crf={self._crf} out of range [0, 51]')
-            return None
+            _log(f'_start_encode: crf={self._crf} out of range [0, 51]')
+            return False
         if not (0 < self._fps <= 240):
-            _log(f'_encode_video: fps={self._fps} out of valid range (0, 240]')
-            return None
+            _log(f'_start_encode: fps={self._fps} out of valid range (0, 240]')
+            return False
 
         try:
             import imageio_ffmpeg as iff
@@ -206,78 +280,59 @@ class IInstance(IInstanceBase):
             str(self._crf),
             '-pix_fmt',
             'yuv420p',
-            # frag_keyframe+empty_moov allows MP4 to be written to a
-            # non-seekable stdout without needing to rewrite the moov atom.
+            # frag_keyframe+empty_moov: playable before the encode ends, no moov to
+            # rewrite. default_base_moof: MSE rejects a tfhd base-data-offset.
             '-movflags',
-            'frag_keyframe+empty_moov',
+            'frag_keyframe+empty_moov+default_base_moof',
             '-f',
             'mp4',
             'pipe:1',
         ]
 
-        stdin_data = b''.join(self._frames)
-        _log(f'_encode_video: frame_count={len(self._frames)} input_codec={input_codec} cmd={" ".join(cmd)}')
+        _log(f'_start_encode: input_codec={input_codec} cmd={" ".join(cmd)}')
         try:
-            proc = subprocess.Popen(
+            self._proc = subprocess.Popen(
                 cmd,
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
             )
-            stdout, stderr = proc.communicate(input=stdin_data, timeout=300)
-            _log(f'_encode_video: returncode={proc.returncode}')
-            if proc.returncode != 0:
-                _log(f'_encode_video: stderr={stderr.decode(errors="replace")[-500:]}')
-                return None
-            return stdout
-        except subprocess.TimeoutExpired as e:
-            _log(f'_encode_video: timed out: {e}')
-            proc.kill()
-            proc.wait()
-            return None
-        except OSError as e:
-            _log(f'_encode_video: ffmpeg not found or not executable: {e}')
-            return None
-        except subprocess.SubprocessError as e:
-            _log(f'_encode_video: subprocess error: {e}')
-            return None
+        except (OSError, subprocess.SubprocessError) as e:
+            _log(f'_start_encode: ffmpeg failed to start: {e}')
+            self._proc = None
+            return False
 
-    # ------------------------------------------------------------------
-    # Write the encoded video to downstream nodes via the engine AVI mechanism
-    # ------------------------------------------------------------------
+        self._stdout_thread = threading.Thread(target=self._pump_stdout, daemon=True)
+        self._stdout_thread.start()
+        self._stderr_thread = threading.Thread(target=self._pump_stderr, daemon=True)
+        self._stderr_thread.start()
+        return True
 
-    def _output_video(self, video_data: bytes) -> None:
-        chunk_size = 48 * 1024
-        total_chunks = (len(video_data) + chunk_size - 1) // chunk_size
+    def _pump_stdout(self) -> None:
+        """Drain ffmpeg's stdout into the queue. ffmpeg stalls if nobody reads it."""
+        try:
+            while chunk := self._proc.stdout.read(_STDOUT_CHUNK):
+                self._stdout_queue.put(chunk)
+        except (OSError, ValueError):
+            pass
 
-        self.instance.writeVideo(AVI_ACTION.BEGIN, 'video/mp4', b'')
-        offset = 0
-        chunk_index = 0
-        while offset < len(video_data):
-            chunk = video_data[offset : offset + chunk_size]
-            self.instance.writeVideo(AVI_ACTION.WRITE, 'video/mp4', chunk)
-            try:
-                self.instance.sendSSE(
-                    'video_chunk',
-                    filename=self._filename,
-                    chunk_index=chunk_index,
-                    total_chunks=total_chunks,
-                    mime_type='video/mp4',
-                    data=base64.b64encode(chunk).decode('ascii'),
-                )
-            except Exception as e:
-                # A transport hiccup on one SSE send shouldn't abort the whole stream.
-                _log(f'_output_video: sendSSE failed at chunk {chunk_index}: {e}')
-            offset += chunk_size
-            chunk_index += 1
-        self.instance.writeVideo(AVI_ACTION.END, 'video/mp4', b'')
-        self.instance.sendSSE('video_complete', filename=self._filename)
-        _plog(f'output_video: done -- sent {total_chunks} SSE chunks filename={self._filename!r}')
-
-    # ------------------------------------------------------------------
-    # Cleanup
-    # ------------------------------------------------------------------
+    def _pump_stderr(self) -> None:
+        """Keep the last of ffmpeg's diagnostics, and keep its stderr pipe from filling."""
+        try:
+            self._stderr_tail = self._proc.stderr.read()[-_STDERR_TAIL:]
+        except (OSError, ValueError):
+            pass
 
     def _cleanup(self) -> None:
-        self._frames = []
+        """Reap a leftover encoder and reset per-object state."""
+        if self._proc is not None and self._proc.poll() is None:
+            self._close_stdin()
+            self._proc.kill()
+            self._proc.wait()
+        self._proc = None
+        self._stdout_thread = None
+        self._stderr_thread = None
+        self._stdout_queue = queue.Queue()
+        self._stderr_tail = b''
+        self._image_buf = bytearray()
         self._filename = 'output.mp4'

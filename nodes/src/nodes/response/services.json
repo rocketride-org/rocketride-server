@@ -128,6 +128,16 @@
 			},
 			"ui:options:inline": true,
 			"description": ["Each lane maps pipeline data to a custom JSON key in the response. ", "Select the data type (text, documents, answers, etc.) for Lane Name, ", "and enter a custom JSON key name (1-32 characters) for Result Key."]
+		},
+		"transmit_media": {
+			"type": "boolean",
+			"title": "Stream media to clients",
+			"description": ["When on, produced media (audio/video/image) is announced live so connected clients can stream it over the reliable channel. Turn off to persist the media without live transmission."],
+			"default": true,
+			"enum": [
+				[false, "Off"],
+				[true, "On"]
+			]
 		}
 	},
 	//
@@ -139,7 +149,7 @@
 		{
 			"section": "Pipe",
 			"title": "Response",
-			"properties": ["lanes"]
+			"properties": ["lanes", "transmit_media"]
 		}
 	]
 }

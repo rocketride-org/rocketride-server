@@ -4,11 +4,67 @@
  * See LICENSE file for details.
  */
 
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { RocketRideClient, UPLOAD_RESULT } from 'rocketride';
-import { UploadedFile, ProcessedResults } from '../types/dropper.types';
-import { parseDropperResults, generateFileId } from '../utils/dropperUtils';
+import { UploadedFile, ProcessedResults, GroupedContent } from '../types/dropper.types';
+import { parseDropperResults, extractMediaArtifacts, generateFileId } from '../utils/dropperUtils';
 import { subscribeToClient } from './clientSingleton';
+
+/** Empty results structure used to seed media merges before a parse exists. */
+const emptyResults = (): ProcessedResults => ({
+	rawJson: [],
+	textContent: [],
+	documents: [],
+	tables: [],
+	images: [],
+	questions: [],
+	answers: [],
+	video: [],
+	audio: []
+});
+
+/** Map an artifact kind to its ProcessedResults list key. */
+const listKeyForKind = (kind: string): 'images' | 'audio' | 'video' =>
+	kind === 'video' ? 'video' : kind === 'audio' ? 'audio' : 'images';
+
+/**
+ * Merge a media artifact (received live over SSE) into the results, appending a
+ * resolved URL under the matching list (images/audio/video).
+ */
+const mergeArtifact = (prev: ProcessedResults | null, kind: string, filename: string, url: string): ProcessedResults => {
+	const base = prev ? { ...prev } : emptyResults();
+	const key = listKeyForKind(kind);
+	const list: GroupedContent[] = (base[key] as GroupedContent[]).map(g => ({ ...g, contents: [...g.contents] }));
+	const existing = list.find(g => g.filename === filename);
+	if (existing) {
+		existing.contents.push({ content: url, fieldName: kind });
+	} else {
+		list.push({ filename, contents: [{ content: url, fieldName: kind }] });
+	}
+	return { ...base, [key]: list };
+};
+
+/** Union two media lanes, deduping by content url — so SSE-delivered and parsed media both
+ * survive instead of one replacing the whole lane (which dropped every parsed entry). */
+const mergeLane = <T extends { contents: { content: string }[] }>(parsed: T[], prev: T[] | undefined): T[] => {
+	if (!prev?.length) return parsed;
+	const seen = new Set(parsed.flatMap(g => g.contents.map(c => c.content)));
+	const out = [...parsed];
+	for (const group of prev) {
+		const contents = group.contents.filter(c => !seen.has(c.content));
+		for (const c of contents) seen.add(c.content);
+		if (contents.length) out.push({ ...group, contents });
+	}
+	return out;
+};
+
+/** Keep SSE-delivered media when a (media-less) parse result arrives — merged, not replaced. */
+const withPreservedMedia = (parsed: ProcessedResults, prev: ProcessedResults | null): ProcessedResults => ({
+	...parsed,
+	images: mergeLane(parsed.images, prev?.images),
+	video: mergeLane(parsed.video, prev?.video),
+	audio: mergeLane(parsed.audio, prev?.audio)
+});
 
 /**
  * useFileProcessing - React hook for managing file upload and processing workflow
@@ -75,6 +131,36 @@ export const useFileProcessing = (
 
 	/** Parsed and organized results from processing */
 	const [results, setResults] = useState<ProcessedResults | null>(null);
+
+	/** Artifact paths already merged from an SSE announcement. */
+	const announcedPaths = useRef(new Set<string>());
+
+	// Aborted on unmount so any in-flight media pull closes its server-side handle.
+	const mediaAbort = useRef(new AbortController());
+	useEffect(() => () => mediaAbort.current.abort(), []);
+
+	/**
+	 * Pull any artifact the result names but SSE never announced.
+	 *
+	 * The announcement bus is lossy; the result is not. Without this, a dropped event
+	 * silently costs the user their media.
+	 */
+	const recoverMissedArtifacts = useCallback(
+		async (uploadResults: UPLOAD_RESULT[]) => {
+			if (!client) return;
+			for (const artifact of extractMediaArtifacts(uploadResults)) {
+				if (announcedPaths.current.has(artifact.path)) continue;
+				try {
+					const url = await client.mediaPlaybackUrl(artifact.path, artifact.mime, mediaAbort.current.signal);
+					announcedPaths.current.add(artifact.path);
+					setResults(prev => mergeArtifact(prev, artifact.kind, artifact.name, url));
+				} catch (err) {
+					console.error('Failed to recover media artifact:', err);
+				}
+			}
+		},
+		[client]
+	);
 
 	/** Flag indicating if files are currently being processed */
 	const [isProcessing, setIsProcessing] = useState(false);
@@ -185,12 +271,13 @@ export const useFileProcessing = (
 		if (isProcessing && remainingFiles === 0 && uploadedFiles.length > 0) {
 			// Parse results if we have any
 			if (uploadResults.length > 0) {
-				const parsedResults = parseDropperResults(uploadResults);
-				setResults(parsedResults);
+				const parsed = parseDropperResults(uploadResults);
+				setResults(prev => withPreservedMedia(parsed, prev));
+				void recoverMissedArtifacts(uploadResults);
 			}
 			setIsProcessing(false);
 		}
-	}, [remainingFiles, isProcessing, uploadedFiles.length, uploadResults]);
+	}, [remainingFiles, isProcessing, uploadedFiles.length, uploadResults, recoverMissedArtifacts]);
 
 	// ============= FILE PROCESSING =============
 
@@ -224,8 +311,48 @@ export const useFileProcessing = (
 				mimetype: file.type || 'application/octet-stream'
 			}));
 
+			// The response node announces an artifact on BEGIN — before its first byte
+			// exists. mediaPlaybackUrl returns immediately with a MediaSource url, and
+			// the player starts on the first chunk while the node is still producing.
+			// A browser without MediaSource for this MIME falls back to a whole Blob.
+			const onSSE = async (type: string, data: Record<string, unknown>) => {
+				if (type === 'artifact_path' && typeof data.path === 'string') {
+					const path = data.path;
+					let kind = typeof data.kind === 'string' ? data.kind : '';
+					const name = typeof data.name === 'string' ? data.name : 'media';
+					const mime = typeof data.mime_type === 'string' ? data.mime_type : undefined;
+					if (!kind && mime) {
+						// The announce may omit kind; without deriving it here an audio/video artifact
+						// falls through listKeyForKind into the images list and renders inside an <img>.
+						kind = mime.startsWith('audio/')
+							? 'audio'
+							: mime.startsWith('video/')
+								? 'video'
+								: mime.startsWith('image/')
+									? 'image'
+									: '';
+					}
+					if (announcedPaths.current.has(path)) return;
+					// Live media-plane: the announce carries a WHEP url; the view opens the stream.
+					if (data.live === true && typeof data.url === 'string') {
+						announcedPaths.current.add(path);
+						setResults(prev => mergeArtifact(prev, kind, name, `whep:${data.url}`));
+						return;
+					}
+					try {
+						const content = await client.mediaPlaybackUrl(path, mime, mediaAbort.current.signal);
+						// Marked only on success: a live pull that fails is retried once the
+						// artifact is persisted, when reconciliation runs.
+						announcedPaths.current.add(path);
+						setResults(prev => mergeArtifact(prev, kind, name, content));
+					} catch (err) {
+						console.error('Failed to resolve media artifact:', err);
+					}
+				}
+			};
+
 			// Send files to pipeline (results will come via events)
-			await client.sendFiles(filesWithMimeTypes, authToken);
+			await client.sendFiles(filesWithMimeTypes, authToken, undefined, onSSE);
 		} catch (error) {
 			console.error('Error sending files to pipeline:', error);
 			throw error;
@@ -352,8 +479,8 @@ export const useFileProcessing = (
 
 		// Re-parse remaining results or clear if none remain
 		if (updatedUploadResults.length > 0) {
-			const parsedResults = parseDropperResults(updatedUploadResults);
-			setResults(parsedResults);
+			const parsed = parseDropperResults(updatedUploadResults);
+			setResults(prev => withPreservedMedia(parsed, prev));
 		} else {
 			setResults(null);
 		}
@@ -372,6 +499,9 @@ export const useFileProcessing = (
 	 * Use when user wants to start completely fresh
 	 */
 	const clearAll = useCallback((): void => {
+		// Reset the announced-path set too, or a later run that reuses a fixed output path
+		// keeps its artifact filtered out of the result-side reconciliation as "already announced".
+		announcedPaths.current.clear();
 		setUploadedFiles([]);
 		setResults(null);
 		setUploadResults([]);

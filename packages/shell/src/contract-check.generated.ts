@@ -16,6 +16,7 @@
 import type { ShellApiShape } from './api';
 import type { ShellApiV0 } from '../contract/versions/v0';
 import type { ShellApiV1 } from '../contract/versions/v1';
+import type { ShellApiV2 } from '../contract/versions/v2';
 import type { DAPException as Frozen_DAPException } from '../contract/versions/v0';
 import type { DAPException as Current_DAPException } from './api';
 import type { RocketRideException as Frozen_RocketRideException } from '../contract/versions/v0';
@@ -272,6 +273,8 @@ import type { MonitorKey as Frozen_MonitorKey } from '../contract/versions/v0';
 import type { MonitorKey as Current_MonitorKey } from './api';
 import type { RocketRideClient as Frozen_RocketRideClient } from '../contract/versions/v0';
 import type { RocketRideClient as Current_RocketRideClient } from './api';
+import type { WhepStream as Frozen_WhepStream } from '../contract/versions/v0';
+import type { WhepStream as Current_WhepStream } from './api';
 import type { ShellAppProps as Frozen_ShellAppProps } from '../contract/versions/v0';
 import type { ShellAppProps as Current_ShellAppProps } from './api';
 import type { WorkspacePrefs as Frozen_WorkspacePrefs } from '../contract/versions/v0';
@@ -598,6 +601,8 @@ const _floor_v0: ShellApiV0 = {} as ShellApiShape;
 void _floor_v0;
 const _floor_v1: ShellApiV1 = {} as ShellApiShape;
 void _floor_v1;
+const _floor_v2: ShellApiV2 = {} as ShellApiShape;
+void _floor_v2;
 
 // TYPE floors — each frozen exported type must still be satisfied.
 // Generic floors are emitted APPLIED (<any, …> at the frozen arity):
@@ -858,6 +863,8 @@ const _t_MonitorKey: Frozen_MonitorKey = {} as Current_MonitorKey;
 void _t_MonitorKey;
 const _t_RocketRideClient: Frozen_RocketRideClient = {} as Current_RocketRideClient;
 void _t_RocketRideClient;
+const _t_WhepStream: Frozen_WhepStream = {} as Current_WhepStream;
+void _t_WhepStream;
 const _t_ShellAppProps: Frozen_ShellAppProps = {} as Current_ShellAppProps;
 void _t_ShellAppProps;
 const _t_WorkspacePrefs: Frozen_WorkspacePrefs = {} as Current_WorkspacePrefs;
