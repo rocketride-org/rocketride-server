@@ -1,0 +1,58 @@
+{
+	//
+	// Hack Judge app-owned authentication node (Blueprint Rev 2, section 03).
+	// classType "search" mirrors hackjudge_engine's proven lane-processor shape.
+	//
+	"title": "Hack Judge Account",
+	"protocol": "hackjudge_account://",
+	"classType": ["search"],
+	"capabilities": ["invoke"],
+	"register": "filter",
+	"node": "python",
+	"path": "nodes.hackjudge_account",
+	"prefix": "hjaccount",
+	"icon": "account.svg",
+	"description": [
+		"App-owned authentication for Hack Judge: signup, signin, session validation, signout, profile.",
+		"Input (questions): a JSON job {op, ...}. Output (answers): a JSON result {ok, ...}.",
+		"Passwords are scrypt-hashed; sessions are DB-backed (revocable), stored as SHA-256 hashes."
+	],
+	"lanes": {
+		"questions": ["questions", "answers", "text"]
+	},
+	"preconfig": {
+		"default": "default",
+		"profiles": {
+			"default": {
+				"database_url": "",
+				"session_ttl_hours": 168
+			}
+		}
+	},
+	"fields": {
+		"hackjudge_account.database_url": {
+			"type": "string",
+			"title": "Database URL",
+			"description": "Postgres connection string. Blank falls back to HACKJUDGE_DATABASE_URL / DATABASE_URL.",
+			"default": "",
+			"secure": true,
+			"ui": {
+				"ui:widget": "ApiKeyWidget"
+			}
+		},
+		"hackjudge_account.session_ttl_hours": {
+			"type": "integer",
+			"title": "Session TTL (hours)",
+			"default": 168,
+			"minimum": 1,
+			"maximum": 8760
+		}
+	},
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Hack Judge Account",
+			"properties": ["hackjudge_account.database_url", "hackjudge_account.session_ttl_hours"]
+		}
+	]
+}
