@@ -33,7 +33,7 @@
 		"hackjudge_tokens.database_url": {
 			"type": "string",
 			"title": "Database URL",
-			"description": "Postgres connection string. Blank falls back to HACKJUDGE_DATABASE_URL / DATABASE_URL.",
+			"description": "Postgres connection string. Blank falls back to HACKJUDGE_DATABASE_URL only; the node refuses to start without one.",
 			"default": "",
 			"secure": true,
 			"ui": {

@@ -44,7 +44,17 @@ and the `role` config field decides which stage each one answers to: the
 
 | Field | Meaning |
 | --- | --- |
-| `database_url` | Postgres connection string (the shared Hack Judge store) |
+| `database_url` | Postgres connection string. Blank falls back to `HACKJUDGE_DATABASE_URL` only; the node refuses to start without one |
+
+## Schema
+
+The suite's shared DDL ships with this node as `schema.sql` (idempotent;
+identical copies ship with the other hackjudge DB nodes so each PR is
+self-contained). Apply once per environment:
+
+```
+psql "$HACKJUDGE_DATABASE_URL" -f schema.sql
+```
 | `role` | `gate` or `settle`: which verify-flow stage this instance answers |
 
 ## Validation
