@@ -876,6 +876,19 @@ async def test_monitor_ttl_skips_task_with_zero_ttl(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_remove_task_unknown_token_carries_a_code():
+    """An unknown token reaches the TaskError guard, not a bare KeyError.
+
+    The registry pop had no default, so the guard below it was unreachable
+    for the one case it was written for.
+    """
+    ts = _make_server()
+    with pytest.raises(TaskError) as excinfo:
+        await ts.remove_task('tk_unknown')
+    assert excinfo.value.code == TaskError.NOT_REGISTERED
+
+
+@pytest.mark.asyncio
 async def test_remove_task_calls_stop_and_broadcasts():
     """remove_task pops the control, stops the task, and broadcasts a dashboard event."""
     ts = _make_server()
