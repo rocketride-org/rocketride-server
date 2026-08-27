@@ -54,6 +54,7 @@ _TREE = {
         {'path': 'package.json', 'type': 'blob'},
         {'path': 'src/app.js', 'type': 'blob'},
         {'path': 'src/api.js', 'type': 'blob'},
+        {'path': 'src/My Component.js', 'type': 'blob'},
     ]
 }
 _MANIFEST = json.dumps({'dependencies': {'rocketride': '^1.0.0'}})
@@ -78,6 +79,7 @@ def _fake_gh(broken_paths=()):
             ('package.json', _MANIFEST),
             ('src/app.js', _APP_JS),
             ('src/api.js', _API_JS),
+            ('src/My%20Component.js', 'const x = new RocketRideClient();\n'),
         ):
             if url.endswith('/main/' + path):
                 if path in broken_paths:
@@ -112,6 +114,14 @@ class VerdictOffline(unittest.TestCase):
             'a failed file fetch must defer the repo, not shrink its evidence',
         )
         self.assertNotIn('sdk', ev, 'no partial evidence may escape a deferred gather')
+
+    def test_paths_with_spaces_are_url_encoded_not_deferred(self):
+        # 'src/My Component.js' is only served at its percent-encoded URL; an
+        # unencoded fetch 404s on every attempt and would wrongly defer the repo
+        # forever. file_spread proves the file was really fetched and scanned.
+        ev = eng.gather('https://github.com/acme/demo', _fake_gh())
+        self.assertFalse(ev.get('fetch_incomplete', False))
+        self.assertGreaterEqual(ev['sdk']['file_spread'], 3)
 
     def test_unreachable_repo_is_inaccessible_not_deferred(self):
         ev = eng.gather('https://github.com/acme/demo', lambda url: (404, ''))

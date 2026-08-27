@@ -25,7 +25,7 @@
 	//
 	"node": "python",
 	"path": "nodes.hackjudge_engine",
-	"prefix": "hackjudge",
+	"prefix": "hackjudge_engine",
 	"icon": "hackjudge.svg",
 	"description": [
 		"Runs the Hack Judge deterministic verification engine in-process.",
