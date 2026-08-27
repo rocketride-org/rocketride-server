@@ -755,3 +755,61 @@ body {
 	margin: 0;
 	opacity: 0.8;
 }
+
+/* ===== Inline media (pipeline file outputs rendered in chat) ===== */
+.inline-media {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+	max-width: 100%;
+}
+
+.inline-media-video,
+.inline-media-image {
+	max-width: 100%;
+	max-height: 360px;
+	border-radius: 8px;
+	background: var(--bg-tertiary);
+}
+
+.inline-media-audio {
+	width: 100%;
+}
+
+
+
+.inline-media-footer {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	font-size: 11px;
+	color: var(--text-secondary);
+}
+
+.inline-media-name {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.inline-media-loading,
+.inline-media-error {
+	flex-direction: row;
+	align-items: center;
+	gap: 8px;
+	font-size: 12px;
+	color: var(--text-secondary);
+}
+
+.inline-media-error .inline-media-errortext {
+	color: var(--error-color);
+}
+
+.inline-media-spinner {
+	width: 12px;
+	height: 12px;
+	border: 2px solid var(--border-color);
+	border-top-color: var(--accent-primary);
+	border-radius: 50%;
+	animation: spin 0.8s linear infinite;
+}

@@ -94,6 +94,16 @@
 			"minLength": 1,
 			"default": "image",
 			"maxLength": 32
+		},
+		"transmit_media": {
+			"type": "boolean",
+			"title": "Stream media to clients",
+			"description": ["When on, produced media (audio/video/image) is announced live so connected clients can stream it over the reliable channel. Turn off to persist the media without live transmission."],
+			"default": true,
+			"enum": [
+				[false, "Off"],
+				[true, "On"]
+			]
 		}
 	},
 	//
@@ -105,7 +115,7 @@
 		{
 			"section": "Pipe",
 			"title": "Return Image",
-			"properties": ["laneName"]
+			"properties": ["laneName", "transmit_media"]
 		}
 	]
 }

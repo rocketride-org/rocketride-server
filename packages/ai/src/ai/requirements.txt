@@ -14,8 +14,11 @@ croniter
 filetype
 mcp>=2.0.0,<3
 
-# JWT for /task/fetch capability tokens (ai/modules/task/fetch.py) and the
-# local file-store URL signer (ai/account/file_store.py). Declared here, not
+# JWT for /task/fetch capability tokens (ai/modules/task/fetch.py), the local
+# file-store URL signer (ai/account/file_store.py), and the media-plane's
+# per-stream WHEP auth (ai/account/media_auth.py, RS256). Declared here, not
 # per-module: task/__init__.py imports .fetch before its own depends() runs,
-# so the package must already be present when `import ai` finishes.
+# so the package must already be present when `import ai` finishes. cryptography
+# is the RS256 backend PyJWT needs, and media_auth also loads the signing key with it.
 pyjwt
+cryptography
