@@ -16,7 +16,10 @@ def resolve_dsn(cfg: dict, conn_config: dict) -> str:
     if not dsn:
         dsn = str(conn_config.get('database_url') or '').strip()
     if not dsn:
-        dsn = str(os.environ.get('HACKJUDGE_DATABASE_URL') or os.environ.get('DATABASE_URL') or '').strip()
+        # only the node's own variable: a generic DATABASE_URL in the engine's
+        # environment likely points at an unrelated database, and silently
+        # writing app data there is far worse than failing closed here
+        dsn = str(os.environ.get('HACKJUDGE_DATABASE_URL') or '').strip()
     return dsn
 
 
