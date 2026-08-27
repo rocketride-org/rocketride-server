@@ -38,9 +38,9 @@ session = client.log.open_event_stream('proj-1', 'chat_1')
 
 # Canonical startup: position, seed the panels, then roll.
 await session.seek('live')
-status = await session.get_status()          # state as of the position
+status = await session.get_status()  # state as of the position
 console_lines = await session.get_console(500)  # exactly what the console showed
-traces = await session.get_traces(50)        # all in-flight + last 50 closed
+traces = await session.get_traces(50)  # all in-flight + last 50 closed
 await session.play(None, 0, lambda item: fold(item['event']))
 
 # Replay a past run at 10x from its beginning.
@@ -51,7 +51,7 @@ await session.play(chapters[0]['beginTime'], 10, lambda item: fold(item['event']
 # the segments that contain it).
 detail = await session.get_trace(traces['closed'][0]['beginSeq'])
 
-session.pause()             # freeze the position
+session.pause()  # freeze the position
 session.close_event_stream()  # dispose
 ```
 

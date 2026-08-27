@@ -23,12 +23,12 @@ probes mirror the layers: `is_attached()` (socket open) and `is_authenticated()`
 the same meaning as `is_attached()` — it does **not** imply authentication.
 
 ```python
-result = await client.connect()          # attach + login
+result = await client.connect()  # attach + login
 print(result['displayName'])
 
-await client.logout()                    # drop auth, keep the socket
-await client.login('other-credential')   # re-auth on the same connection
-await client.detach()                    # tear down the socket
+await client.logout()  # drop auth, keep the socket
+await client.login('other-credential')  # re-auth on the same connection
+await client.detach()  # tear down the socket
 ```
 
 Calling `login()` with a different credential logs out first (best-effort); with the
@@ -71,15 +71,18 @@ With `persist=True` the client survives drops: it reconnects with linear backoff
 async def on_connected(info):
     print('Connected:', info)
 
+
 async def on_disconnected(reason, has_error):
     # Fires only after a successful connection drops.
     # Do NOT call disconnect() here if you want auto-reconnect.
     print('Disconnected:', reason, has_error)
 
+
 async def on_connect_error(message):
     # Fires on each failed RECONNECT attempt; an initial connect() failure
     # raises to the caller instead.
     print('Connect error:', message)
+
 
 client = RocketRideClient(
     uri='https://api.rocketride.ai',

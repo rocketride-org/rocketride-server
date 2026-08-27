@@ -57,8 +57,10 @@ raises `TypeError` when the client awaits it).
 async def handle_event(event):
     print(event.get('event'), event.get('body'))
 
+
 async def handle_connect_error(message):
     print('Connect error:', message)
+
 
 client = RocketRideClient(
     uri='https://api.rocketride.ai',

@@ -26,11 +26,11 @@ cfg = await client.fs_read_json('config/app.json')
 ## Browse and inspect
 
 ```python
-listing = await client.fs_list_dir('reports')     # {entries: [{name, type, size?, modified?}], count}
+listing = await client.fs_list_dir('reports')  # {entries: [{name, type, size?, modified?}], count}
 for entry in listing['entries']:
     print(entry['name'], entry['type'])
 
-meta = await client.fs_stat('reports/q3.pdf')     # {exists, type, size, modified}
+meta = await client.fs_stat('reports/q3.pdf')  # {exists, type, size, modified}
 await client.fs_mkdir('reports/2026')
 await client.fs_rename('reports/q3.pdf', 'archive/q3.pdf')
 await client.fs_delete('archive/q3.pdf')

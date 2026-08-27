@@ -83,7 +83,7 @@ Note `get_service` **raises** on failure (`ValueError` for an empty name,
 
 ```python
 services = await client.get_services()
-ocr = await client.get_service('ocr')     # raises if unknown
+ocr = await client.get_service('ocr')  # raises if unknown
 ```
 
 ## Liveness
