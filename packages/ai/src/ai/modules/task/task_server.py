@@ -713,7 +713,7 @@ class TaskServer(DAPBase):
             TASK_CONTROL: Complete task control structure with metadata and references
 
         Raises:
-            ValueError: If task doesn't exist
+            TaskError: Code TASK_NOT_REGISTERED if the key names no live task
         """
         # Look for it
         for control in self._task_control.values():
@@ -775,7 +775,8 @@ class TaskServer(DAPBase):
             Task: The authenticated task instance ready for operations
 
         Raises:
-            ValueError: If task doesn't exist
+            ValueError: If token is not specified
+            TaskError: Code TASK_NOT_REGISTERED if the token names no live task
 
         Usage:
         This method is the primary way to access task instances throughout
@@ -1038,7 +1039,8 @@ class TaskServer(DAPBase):
                         performance metrics, and completion information
 
         Raises:
-            ValueError: If task doesn't exist or API key validation fails
+            ValueError: If token is not specified
+            TaskError: Code TASK_NOT_REGISTERED if the token names no live task
         """
         # Perform secure task lookup with authentication
         task = self.get_task(token)
@@ -1061,7 +1063,7 @@ class TaskServer(DAPBase):
             TASK_CONTROL: The removed task control structure for caller cleanup
 
         Raises:
-            ValueError: If task doesn't exist or API key validation fails
+            TaskError: Code TASK_NOT_REGISTERED if the token names no live task
 
         Cleanup Process:
         1. Validate task ownership and existence
@@ -1072,7 +1074,9 @@ class TaskServer(DAPBase):
         6. Return control structure for additional caller-specific cleanup
         """
         # Remove task from central registry
-        control = self._task_control.pop(token)
+        # pop with a default: without one an unknown token raises KeyError and the
+        # TaskError below never runs, so the failure reaches the caller unclassified.
+        control = self._task_control.pop(token, None)
 
         # If not there, it wasn't running
         if not control:
@@ -1443,8 +1447,9 @@ class TaskServer(DAPBase):
                 - provider: Provider name (may be updated)
 
         Raises:
-            ValueError: If task doesn't exist, pipeline invalid, source not found,
+            ValueError: If pipeline invalid, source not found,
                     project_id/source don't match existing values, or token not provided
+            TaskError: Code TASK_NOT_REGISTERED if the token names no live task
             RuntimeError: If pipeline configuration missing, debugger attached,
                         apikey mismatch, or connection is not the launch owner
 
@@ -1595,7 +1600,8 @@ class TaskServer(DAPBase):
             Pipeline configuration information for the attached task
 
         Raises:
-            ValueError: If task doesn't exist or API key validation fails
+            ValueError: If token is not specified
+            TaskError: Code TASK_NOT_REGISTERED if the token names no live task
 
         Attachment Process:
         1. Validate task existence and ownership
