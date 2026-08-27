@@ -75,10 +75,10 @@ TLS and authentication — see [Connect a client](#connect-a-client) below.
 
 ## Verify it is running
 
-The engine serves a health endpoint on port 5565:
+The engine serves a public version endpoint on port 5565:
 
 ```bash
-curl http://localhost:5565/ping
+curl http://localhost:5565/version
 ```
 
 ## Connect a client
