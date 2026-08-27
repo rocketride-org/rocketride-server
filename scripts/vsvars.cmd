@@ -38,8 +38,8 @@ echo No vcvars64.bat or VsDevCmd.bat found under: %VSROOT%
 exit /b 1
 
 :vsvars
-set VSWHERE="%ProgramFiles(x86)%\\Microsoft Visual Studio\\Installer\\vswhere.exe"
-if not exist %VSWHERE% (
+set "VSWHERE=%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe"
+if not exist "%VSWHERE%" (
   echo Visual Studio Installer not found
   exit /b 1
 )
@@ -53,7 +53,7 @@ exit /b 1
 
 
 :vswhere
-for /f "usebackq delims=" %%i in (`%VSWHERE% %*`) do (
+for /f "usebackq delims=" %%i in (`"%VSWHERE%" %*`) do (
   set "VSROOT=%%i"
 )
 
