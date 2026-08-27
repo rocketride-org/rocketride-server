@@ -42,7 +42,7 @@ There are two ways to invoke the framework: via `builder` (recommended; handles 
 
 | Flag | Applies to | What it does |
 | ---- | ---------- | ------------ |
-| `--rebuild-cache` | `:run` | Deletes `<engine>/cache/constraints.txt` AND `<engine>/cache/requirements.hash`, forcing `ensure_constraints()` to recompile via `uv pip compile` from scratch. Used by the nightly cron lane to catch fresh upstream releases. |
+| `--rebuild-cache` | `:run` | Deletes `<engine>/cache/constraints.txt`, `<engine>/cache/requirements.hash` AND `<engine>/cache/satisfied/`, forcing `ensure_constraints()` to recompile via `uv pip compile` from scratch and every requirements file to be resolved again. Used by the nightly cron lane to catch fresh upstream releases. |
 | `--pattern=SUBSTR` | `:run`, `:test` | Generic substring filter passed to the underlying invocation. For `:run` it filters triple ids (`<tree>/<component>/<package>`). For `:test` it maps to pytest's `-k` expression. **Repeatable**, multiple `--pattern=` values combine with OR semantics for `:run` (forwarded as separate `--pattern` flags to the CLI), and are joined with ` or ` into a single `-k` expression for `:test` (pytest only accepts one `-k`). |
 | `--pytest-pattern=EXPR` | `:run`, `:test` | Back-compat alias. Single-value (overwrites on repeat). Same behavior as `--pattern` for `:run`; reaches pytest's `-k` for `:test`. Prefer `--pattern` going forward, especially when you want repeat semantics. |
 

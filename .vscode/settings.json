@@ -1,21 +1,33 @@
 {
+  "cmake.configureOnOpen": false,
+  "cmake.sourceDirectory": "${workspaceFolder}/packages/server",
   "explorer.excludeGitIgnore": true,
-  "search.exclude": {
-    "**/build": true,
-    "**/dist": true,
-    "**/downloads": true,
-    "**/.*": true,
-    "**/__pycache__": true,
-    "**/node_modules": true,
-  },
+  "python.analysis.exclude": [
+    "**/.*",
+    "**/__pycache__",
+    "**/dist",
+    "**/build",
+    "**/downloads",
+    "**/node_modules"
+  ],
+  "python.analysis.extraPaths": [
+    "packages/server/engine-lib/rocketlib-python/lib",
+    "packages/ai/src"
+  ],
   // This workspace IS rocketride-server, so the extension's agent stubs — which
   // tell a reader to consult the customer-facing .rocketride/docs/ SDK guides —
   // are wrong here and contradict AGENTS.md, the contributor router. Off by
   // default for everyone who opens the repo.
   "rocketride.integrations.autoAgentIntegration": false,
-  "cmake.sourceDirectory": "${workspaceFolder}/packages/server",
-  "python.analysis.extraPaths": [
-    "packages/server/engine-lib/rocketlib-python/lib",
-    "packages/ai/src"
-  ]
+  "search.exclude": {
+    "**/.git": true,
+    "**/.mypy_cache": true,
+    "**/.pytest_cache": true,
+    "**/.ruff_cache": true,
+    "**/__pycache__": true,
+    "**/build": true,
+    "**/dist": true,
+    "**/downloads": true,
+    "**/node_modules": true
+  }
 }
