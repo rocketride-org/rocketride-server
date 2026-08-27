@@ -31,10 +31,15 @@ exception:** report them privately via
 or security@rocketride.ai, never as a public issue
 ([security policy](/support/security-policy)).
 
-## What to open an issue for first
+## Every change starts with an issue
 
-- **Docs and examples**: pull requests welcome directly — no issue needed.
-- **New nodes, engine core, and protocol changes**: open an issue first and
+Every pull request must be linked to an issue (`Fixes #123` — enforced by
+CI), and branch names embed the issue number. The difference is how long to
+wait:
+
+- **Docs and examples**: open the issue and PR right away — no discussion
+  needed.
+- **New nodes, engine core, and protocol changes**: open the issue first and
   get a nod before building. It protects your time — a node or engine change
   that conflicts with platform direction is hard to accept after the fact.
 
