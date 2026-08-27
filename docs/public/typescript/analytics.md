@@ -1,6 +1,6 @@
 ---
-title: "Analytics / Telemetry Reporting"
-date: 2026-07-15
+title: Analytics
+sidebar_position: 12
 ---
 
 - [Overview](#overview)
@@ -32,7 +32,9 @@ import { initReport, report, type ReportSink } from 'rocketride/analytics';
 // Once, at app init: wire the emitting app id + transport.
 initReport('home-ui', (event, props) => posthog.capture(event, props));
 // or, on the product side:
-initReport('rocket-ui', (event, props) => client.report(event, props));
+// Once, at app init: wire the emitting app id + transport. The sink is
+// whatever function your app uses to ship events (HTTP, queue, logger, ...).
+initReport('rocket-ui', (event, props) => mySink.send(event, props));
 
 // Anywhere after that:
 report('nav:click', { target: 'pricing' });

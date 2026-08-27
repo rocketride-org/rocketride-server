@@ -5,14 +5,12 @@ title: Quickstart
 hide_table_of_contents: true
 ---
 
-import { LuLayoutDashboard, LuBlocks, LuServer, LuCode } from 'react-icons/lu';
-import { SiPython, SiTypescript } from 'react-icons/si';
+import { LuLayoutDashboard, LuCode, LuTerminal } from 'react-icons/lu';
 
 # Quickstart
 
-Pick the path that matches how you want to build. Build visually in your IDE, or drop
-RocketRide into your app with a code-first SDK, each path takes you from zero to a running
-pipeline.
+Pick the path that matches how you want to build. Each one takes you from zero
+to a running pipeline.
 
 <div className="rr-card-grid">
 
@@ -26,24 +24,9 @@ pipeline.
   <span className="rr-side-card__body">Run the <code>.pipe</code> file you built from your own Python or TypeScript application.</span>
 </a>
 
-<a className="rr-side-card" href="/develop/python">
-  <span className="rr-side-card__head"><SiPython className="rr-card-icon" /><span className="rr-side-card__title">Python SDK</span></span>
-  <span className="rr-side-card__body"><code>pip install rocketride</code> and run a pipeline from Python in a few lines.</span>
-</a>
-
-<a className="rr-side-card" href="/develop/typescript">
-  <span className="rr-side-card__head"><SiTypescript className="rr-card-icon" /><span className="rr-side-card__title">TypeScript SDK</span></span>
-  <span className="rr-side-card__body"><code>npm install rocketride</code> and integrate pipelines into your Node.js or browser app.</span>
-</a>
-
-<a className="rr-side-card" href="/nodes">
-  <span className="rr-side-card__head"><LuBlocks className="rr-card-icon" /><span className="rr-side-card__title">Browse nodes</span></span>
-  <span className="rr-side-card__body">100+ ready-to-use nodes: LLM providers, vector stores, OCR, NER, and more.</span>
-</a>
-
-<a className="rr-side-card" href="/operate/self-hosting">
-  <span className="rr-side-card__head"><LuServer className="rr-card-icon" /><span className="rr-side-card__title">Deploy a server</span></span>
-  <span className="rr-side-card__body">Run locally, on-premises with Docker, or one-click deploy to RocketRide Cloud.</span>
+<a className="rr-side-card" href="/quickstart/cli">
+  <span className="rr-side-card__head"><LuTerminal className="rr-card-icon" /><span className="rr-side-card__title">Run from the CLI</span></span>
+  <span className="rr-side-card__body">Start, feed, and monitor pipelines from a terminal — no code required.</span>
 </a>
 
 </div>
@@ -54,7 +37,9 @@ Start with **[Build in your IDE](/quickstart/ide-walkthrough)**, it installs the
 spins up a local runtime, and walks you through a `Chat → LLM` pipeline you can run in
 minutes. Once you have a pipeline, the
 **[SDK walkthrough](/quickstart/sdk-integration)** shows how to run it from your own
-[Python](/develop/python) or [TypeScript](/develop/typescript) application.
+[Python](/clients/python) or [TypeScript](/clients/typescript) application. Not sure
+where it should run long-term? See
+[Choose How to Run RocketRide](/operate).
 
 ## More examples
 

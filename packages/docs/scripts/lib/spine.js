@@ -8,6 +8,9 @@
  * Node shapes:
  *   { id, label }                        a single authored doc page (leaf)
  *   { id, label, mount: true }           a leaf that packages may mount into
+ *   { id, label, mount: true, nest: true } a mount rendered as a sidebar category
+ *                                          listing every page staged under it
+ *                                          (ordered by sidebar_position)
  *   { label, items: [...] }              a category of leaves / nested categories
  *   { label, autogen: 'nodes' }          a category whose pages are generated
  *
@@ -16,103 +19,126 @@
 
 const NODES_DIR = 'nodes';
 
+// IA restructure phase 3 (claude/tasks/docs-ia-restructure/plan.md):
+// journey-ordered sections whose ids now match their section prefixes — the
+// docs/public/product/ folder tree, the doc ids, and the public URLs are one
+// namespace again. Old routes 301 via packages/docs/redirects.ts.
 const SPINE = [
 	{ id: 'index', label: 'Home' },
 	{
 		// The category itself renders no link (toSidebar emits no `link` for a
 		// category), so the overview is a plain leaf whose id is `quickstart` —
 		// docIdFor() collapses quickstart/index.mdx to that id, keeping /quickstart.
-		label: 'Quickstart',
+		label: 'Get Started',
 		items: [
 			{ id: 'quickstart', label: 'Overview' },
 			{ id: 'quickstart/ide-walkthrough', label: 'Build in your IDE' },
-			{ id: 'quickstart/sdk-integration', label: 'Integrate with an SDK' }
-		]
-	},
-	{
-		label: 'Evaluate',
-		items: [
-			{ id: 'evaluate/why-rocketride', label: 'Why RocketRide' },
-			{ id: 'evaluate/understanding', label: 'Understanding RocketRide' },
-			{ id: 'evaluate/security', label: 'Security' }
-		]
+			{ id: 'quickstart/sdk-integration', label: 'Integrate with an SDK' },
+			{ id: 'quickstart/cli', label: 'Run from the CLI' },
+		],
 	},
 	{
 		label: 'Concepts',
 		items: [
+			{ id: 'concepts', label: 'Understanding RocketRide' },
 			{ id: 'concepts/pipelines', label: 'Pipelines' },
 			{ id: 'concepts/runtime-engine', label: 'Runtime & Engine' },
 			{ id: 'concepts/nodes', label: 'Nodes' },
 			{ id: 'concepts/agents-tools-skills', label: 'Agents & Tools' },
 			{ id: 'concepts/execution-model', label: 'Execution Model' },
-			{ id: 'concepts/error-handling', label: 'Error Handling' },
-			{ id: 'concepts/performance', label: 'Performance' },
-			{ id: 'concepts/security-model', label: 'Security Model' },
-			{ id: 'concepts/advanced-agents', label: 'Advanced Agents' },
-			{ id: 'concepts/best-practices', label: 'Best Practices' }
-		]
+		],
+	},
+	{
+		label: 'Clients',
+		items: [
+			{ id: 'clients', label: 'Overview' },
+			{ id: 'clients/typescript', label: 'TypeScript SDK', mount: true, nest: true },
+			{ id: 'clients/python', label: 'Python SDK', mount: true, nest: true },
+			{ id: 'clients/vscode', label: 'VS Code Extension', mount: true, nest: true },
+		],
+	},
+	{
+		label: 'Guides',
+		items: [
+			{ id: 'guides/error-handling', label: 'Error Handling' },
+			{ id: 'guides/performance', label: 'Performance' },
+			{ id: 'guides/advanced-agents', label: 'Advanced Agents' },
+			{ id: 'guides/best-practices', label: 'Best Practices' },
+			// Placeholder until the content pass (plan phase 2).
+			{ id: 'guides/observability', label: 'Observability' },
+			{
+				label: 'Shell Apps',
+				items: [
+					{ id: 'guides/apps', label: 'Guide' },
+					{ id: 'guides/apps/reference', label: 'Reference' },
+				],
+			},
+		],
 	},
 	{
 		label: 'Examples',
 		items: [
 			{ id: 'examples/rag-pipeline', label: 'RAG Pipeline' },
 			{ id: 'examples/webhook-pipeline', label: 'Webhook Pipeline' },
-			{ id: 'examples/document-extraction', label: 'Document Extraction' }
-		]
-	},
-	{
-		label: 'Protocols',
-		items: [
-			{ id: 'protocols/websocket', label: 'WebSocket' },
-			{ id: 'protocols/websocket/observability', label: 'Observability' },
-			{
-				label: 'MCP',
-				items: [
-					{ id: 'protocols/mcp/stdio', label: 'stdio (PyPI package)', mount: true },
-					{ id: 'protocols/mcp/http', label: 'HTTP server', mount: true }
-				]
-			}
-		]
+			{ id: 'examples/document-extraction', label: 'Document Extraction' },
+		],
 	},
 	{ label: 'Nodes', autogen: NODES_DIR },
 	{
-		label: 'Integrations',
+		label: 'Connect',
 		items: [
-			{ id: 'integrations/n8n', label: 'n8n' }
-		]
+			{
+				label: 'MCP',
+				items: [
+					{ id: 'connect/mcp/stdio', label: 'stdio (PyPI package)', mount: true },
+					{ id: 'connect/mcp/http', label: 'HTTP Server', mount: true, nest: true },
+				],
+			},
+			{ id: 'connect/cli', label: 'CLI' },
+			{ id: 'connect/websocket', label: 'WebSocket' },
+			{ id: 'connect/websocket/observability', label: 'WebSocket Events' },
+			{ id: 'connect/n8n', label: 'n8n' },
+		],
 	},
 	{
-		label: 'Develop',
+		label: 'Deploy & Operate',
 		items: [
-			{ id: 'develop/clients', label: 'Client Libraries' },
-			{ id: 'develop/typescript', label: 'TypeScript', mount: true },
-			{ id: 'develop/python', label: 'Python', mount: true },
-			{ id: 'develop/apps', label: 'Shell Apps' }
-		]
-	},
-	{
-		label: 'IDE Extensions',
-		items: [
-			{ id: 'ide-extensions/overview', label: 'Overview' },
-			{ id: 'ide-extensions/vscode', label: 'VS Code', mount: true }
-		]
-	},
-	{
-		label: 'Operate',
-		items: [
+			{ id: 'operate', label: 'Choose How to Run' },
 			{ id: 'operate/cloud', label: 'Cloud' },
-			{ id: 'operate/self-hosting', label: 'Self-hosting' },
-			{ id: 'operate/troubleshooting', label: 'Troubleshooting' }
-		]
+			{
+				label: 'Self-hosting',
+				items: [
+					{ id: 'operate/self-hosting', label: 'Overview' },
+					// Docker/Kubernetes are placeholders until the content pass
+					// (plan phase 2); production is seeded from the old
+					// performance page's topology section.
+					{ id: 'operate/self-hosting/docker', label: 'Docker' },
+					{ id: 'operate/self-hosting/kubernetes', label: 'Kubernetes' },
+					{ id: 'operate/self-hosting/production', label: 'Production' },
+				],
+			},
+			{ id: 'operate/security', label: 'Security' },
+		],
 	},
 	{
 		label: 'Reference',
 		items: [
 			{ id: 'reference/pipeline-reference', label: 'Pipeline JSON Reference', mount: true },
-			{ id: 'reference/cli', label: 'CLI Reference' },
-			{ id: 'reference/glossary', label: 'Glossary' }
-		]
-	}
+			{ id: 'reference/glossary', label: 'Glossary' },
+		],
+	},
+	{
+		label: 'Support & Community',
+		items: [
+			{ id: 'support/troubleshooting', label: 'Troubleshooting' },
+			// Placeholders until the content pass; release-notes later becomes a
+			// generated page (plan phase 4, deferred).
+			{ id: 'support/get-help', label: 'FAQ / Get Help' },
+			{ id: 'support/contributing', label: 'Contributing' },
+			{ id: 'support/security-policy', label: 'Security Policy' },
+			{ id: 'support/release-notes', label: 'Release Notes' },
+		],
+	},
 ];
 
 /** Walk every leaf node (depth-first), invoking fn(node). */
@@ -188,11 +214,20 @@ function toSidebar() {
 			return {
 				type: 'category',
 				label: node.label,
-				items: [{ type: 'autogenerated', dirName: node.autogen }]
+				items: [{ type: 'autogenerated', dirName: node.autogen }],
 			};
 		}
 		if (node.items) {
 			return { type: 'category', label: node.label, items: node.items.map(render) };
+		}
+		// Multi-page mount: a category over everything staged under the slot, so
+		// mounted subpages live in the sidebar tree. The slot's index page is the
+		// first item (its own sidebar_position / sidebar_label front matter apply).
+		if (node.mount && node.nest) {
+			// The category itself links to the slot's index page (the only category
+			// with a link on the site — a mount's landing IS its overview), and the
+			// autogenerated items list the remaining pages by sidebar_position.
+			return { type: 'category', label: node.label, link: { type: 'doc', id: node.id }, items: [{ type: 'autogenerated', dirName: node.id }] };
 		}
 		// Leaf: honor the spine label so it (not the mounted doc's front matter)
 		// drives the sidebar entry — the spine is the single source of truth.
@@ -210,5 +245,5 @@ module.exports = {
 	isValidMount,
 	sections,
 	sectionFor,
-	toSidebar
+	toSidebar,
 };

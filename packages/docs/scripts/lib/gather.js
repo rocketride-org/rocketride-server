@@ -29,11 +29,11 @@ const DOCS_GLOB = '{nodes,packages,apps}/**/docs/**/*.{md,mdx}';
 // has no index.md/mdx, in which case its README.md doubles as the mount's page
 // (GitHub-standard naming; see the sweep below).
 const DOCS_ROOT_MOUNTS = [
-	{ source: 'docs/public/typescript', mount: 'develop/typescript' },
-	{ source: 'docs/public/python', mount: 'develop/python' },
-	{ source: 'docs/public/vscode', mount: 'ide-extensions/vscode' },
-	{ source: 'docs/public/mcp/stdio', mount: 'protocols/mcp/stdio' },
-	{ source: 'docs/public/mcp/http', mount: 'protocols/mcp/http' },
+	{ source: 'docs/public/typescript', mount: 'clients/typescript' },
+	{ source: 'docs/public/python', mount: 'clients/python' },
+	{ source: 'docs/public/vscode', mount: 'clients/vscode' },
+	{ source: 'docs/public/mcp/stdio', mount: 'connect/mcp/stdio' },
+	{ source: 'docs/public/mcp/http', mount: 'connect/mcp/http' },
 ];
 // Node sources and node tests are excluded from the package-mount pass: node
 // markdown is the nodes contributor's domain (staged when the node's top-level
@@ -55,7 +55,11 @@ const PLACEHOLDER_NOTE = '> **Placeholder.** Generated stub for the documentatio
 // Seeded EMPTY on 2026-08-14: `docs:gather` staged 180 pages, none of them a
 // placeholder. Add an id here only when a stub page is genuinely wanted, with a
 // comment naming who fills it in — do not add ids to quiet a failing build.
-const EXPECTED_PLACEHOLDERS = [];
+const EXPECTED_PLACEHOLDERS = [
+	// Placeholder at gather time only: docs:release-notes overwrites it with a
+	// page generated from GitHub releases, unless the API is unreachable.
+	'support/release-notes',
+];
 
 // Structural, never a spine/path desync: ensurePlaceholders() emits
 // `nodes/example` only when the node corpus produced no pages at all (docs-only
@@ -138,7 +142,11 @@ function extractDescription(text) {
 	const m = /"description"\s*:\s*\[([^\]]*)\]/.exec(text);
 	if (!m) return '';
 	const parts = m[1].match(/"((?:[^"\\]|\\.)*)"/g) || [];
-	const full = parts.map((s) => s.slice(1, -1)).join(' ').replace(/\s+/g, ' ').trim();
+	const full = parts
+		.map((s) => s.slice(1, -1))
+		.join(' ')
+		.replace(/\s+/g, ' ')
+		.trim();
 	const dot = full.indexOf('. ');
 	return dot >= 0 ? full.slice(0, dot + 1) : full;
 }
@@ -291,7 +299,10 @@ function pageDescription(content) {
 				// YAML block scalar (`description: >`, `|`, `>-`, …). The text is the
 				// indented run that follows; the indicator itself is not the value.
 				const block = [];
-				for (const line of fm[1].slice(d.index + d[0].length).split(/\r?\n/).slice(1)) {
+				for (const line of fm[1]
+					.slice(d.index + d[0].length)
+					.split(/\r?\n/)
+					.slice(1)) {
 					if (!/^[ \t]+\S/.test(line)) break;
 					block.push(line.trim());
 				}
@@ -323,7 +334,11 @@ function pageDescription(content) {
 		}
 		para.push(t);
 	}
-	const prose = para.join(' ').replace(/\[([^\]]+)\]\([^)]*\)/g, '$1').replace(/[*`_]/g, '').trim();
+	const prose = para
+		.join(' ')
+		.replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+		.replace(/[*`_]/g, '')
+		.trim();
 	const m = /^(.+?[.!?])(\s|$)/.exec(prose);
 	return (m ? m[1] : prose).slice(0, 200).trim();
 }
@@ -407,9 +422,12 @@ function gitLastUpdate(srcAbs) {
 	if (_gitDateCache.has(srcAbs)) return _gitDateCache.get(srcAbs);
 	let date = null;
 	try {
-		date = execFileSync('git', ['log', '-1', '--format=%cs', '--', srcAbs], {
-			cwd: path.dirname(srcAbs), encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'],
-		}).trim() || null;
+		date =
+			execFileSync('git', ['log', '-1', '--format=%cs', '--', srcAbs], {
+				cwd: path.dirname(srcAbs),
+				encoding: 'utf8',
+				stdio: ['ignore', 'pipe', 'ignore'],
+			}).trim() || null;
 	} catch {
 		/* not a git checkout — leave null; the page simply carries no date */
 	}
@@ -604,20 +622,14 @@ async function gather({ projectRoot, contentStaticDir, contentDir, staticDir, mo
 	//    mount), and docs/public/n8n/ holds only the exported README. Non-markdown
 	//    files (per-client assets/, docs/public/assets/) are never swept — the
 	//    globs match .md/.mdx only, so images need no mount coverage.
-	const contributors = discoverContributors().concat(
-		DOCS_ROOT_MOUNTS.map((m) => ({ sourceDir: path.join(projectRoot, m.source), mount: m.mount, module: 'docs' }))
-	);
+	const contributors = discoverContributors().concat(DOCS_ROOT_MOUNTS.map((m) => ({ sourceDir: path.join(projectRoot, m.source), mount: m.mount, module: 'docs' })));
 	const packageDocsFiles = await glob(DOCS_GLOB, { cwd: projectRoot, nodir: true, ignore: IGNORE });
 	const rootDocsFiles = await glob(['docs/public/**/*.{md,mdx}'], { cwd: projectRoot, nodir: true, ignore: ['**/README.md', 'docs/public/product/**'] });
 	// The mount-root README exception described above: gather <source>/README.md
 	// as the mount's page when the mount root carries no index.md/mdx.
 	for (const m of DOCS_ROOT_MOUNTS) {
 		const readmeRel = `${m.source}/README.md`;
-		if (
-			(await exists(path.join(projectRoot, readmeRel))) &&
-			!(await exists(path.join(projectRoot, m.source, 'index.md'))) &&
-			!(await exists(path.join(projectRoot, m.source, 'index.mdx')))
-		) {
+		if ((await exists(path.join(projectRoot, readmeRel))) && !(await exists(path.join(projectRoot, m.source, 'index.md'))) && !(await exists(path.join(projectRoot, m.source, 'index.mdx')))) {
 			rootDocsFiles.push(readmeRel);
 		}
 	}
@@ -714,16 +726,7 @@ function assertNoUnexpectedPlaceholders(manifest, allowed = EXPECTED_PLACEHOLDER
 	const permitted = new Set([...allowed, ...STRUCTURAL_PLACEHOLDERS]);
 	const offenders = (manifest || []).filter((e) => e && e.placeholder && !permitted.has(e.id)).map((e) => e.id);
 	if (!offenders.length) return;
-	throw new Error(
-		[
-			`docs:gather: ${offenders.length} page(s) would publish as an empty "coming soon" placeholder:`,
-			...offenders.map((id) => `  /${id}`),
-			'A doc id IS the public URL, so this almost always means a spine id and a file path are out of sync:',
-			'a page was moved or renamed without updating its id in packages/docs/scripts/lib/spine.js, or a spine',
-			'id was changed without moving the file under docs/. Fix whichever is wrong so the two match.',
-			'If a stub page really is intended, add its id to EXPECTED_PLACEHOLDERS in packages/docs/scripts/lib/gather.js.',
-		].join('\n')
-	);
+	throw new Error([`docs:gather: ${offenders.length} page(s) would publish as an empty "coming soon" placeholder:`, ...offenders.map((id) => `  /${id}`), 'A doc id IS the public URL, so this almost always means a spine id and a file path are out of sync:', 'a page was moved or renamed without updating its id in packages/docs/scripts/lib/spine.js, or a spine', 'id was changed without moving the file under docs/. Fix whichever is wrong so the two match.', 'If a stub page really is intended, add its id to EXPECTED_PLACEHOLDERS in packages/docs/scripts/lib/gather.js.'].join('\n'));
 }
 
 module.exports = { gather, docIdFor, pageDescription, stampLastUpdate, assertNoUnexpectedPlaceholders, EXPECTED_PLACEHOLDERS };

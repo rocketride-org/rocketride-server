@@ -2,7 +2,7 @@ import path from 'path';
 import { themes as prismThemes } from 'prism-react-renderer';
 import type { Config } from '@docusaurus/types';
 import type * as Preset from '@docusaurus/preset-classic';
-import redirects from './redirects';
+import redirects, { createRedirects } from './redirects';
 
 // Use Algolia DocSearch when credentials are present; otherwise fall back to the
 // local search index (matches the previous site).
@@ -27,8 +27,9 @@ const config: Config = {
 	url: 'https://docs.rocketride.org/',
 	baseUrl: '/',
 
-	// Inter for body + headings (loaded from Google Fonts).
-	stylesheets: ['https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap'],
+	// Inter for body + headings; Ubuntu Mono for the marketing-style uppercase
+	// labels, buttons, and code (matches the cloud shell's --rr-font-mono).
+	stylesheets: ['https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Ubuntu+Mono:wght@400;700&display=swap'],
 
 	onBrokenLinks: 'throw',
 	onBrokenMarkdownLinks: 'warn',
@@ -89,7 +90,7 @@ const config: Config = {
 				],
 			],
 
-	plugins: [['@docusaurus/plugin-client-redirects', { redirects }]],
+	plugins: [['@docusaurus/plugin-client-redirects', { redirects, createRedirects }]],
 
 	themeConfig: {
 		...(algolia ? { algolia } : {}),

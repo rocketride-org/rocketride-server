@@ -47,7 +47,7 @@ function main() {
 		'',
 		'A `.pipe` file is JSON conforming to the interfaces below. The schema is the',
 		'contract the [engine](/concepts/runtime-engine) loads and the SDKs send over',
-		'the [WebSocket protocol](/protocols/websocket) — the same JSON whether you',
+		'the [WebSocket protocol](/connect/websocket) — the same JSON whether you',
 		'author it visually or by hand. For the concepts behind these fields, see',
 		'[Pipelines](/concepts/pipelines) and the [Execution model](/concepts/execution-model).',
 		'',

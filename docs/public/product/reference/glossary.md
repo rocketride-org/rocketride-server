@@ -79,14 +79,14 @@ every environment.
 ## Task
 
 A single running instance of a pipeline on the engine, identified by a token and
-controlled over the [WebSocket protocol](/protocols/websocket).
+controlled over the [WebSocket protocol](/connect/websocket).
 
 ## MCP
 
 The Model Context Protocol: exposes running pipelines as tools for AI
-assistants. See [MCP](/protocols/mcp/stdio).
+assistants. See [MCP](/connect/mcp/stdio).
 
 ## WebSocket protocol
 
 The engine's native protocol (port 5565) that SDKs and the MCP server use to
-start pipelines and stream results. See [WebSocket](/protocols/websocket).
+start pipelines and stream results. See [WebSocket](/connect/websocket).

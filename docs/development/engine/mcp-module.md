@@ -1,8 +1,8 @@
 # MCP Module (`ai.modules.mcp`)
 
 Contributor notes for the engine's built-in HTTP MCP server. The public doc —
-endpoint, auth, setup, the tool surface — is `docs/public/mcp/http/README.md`
-(site page `/protocols/mcp/http`); this page covers only what a contributor
+endpoint, auth, setup, the tool surface — lives in `docs/public/mcp/http/`
+(site page `/connect/mcp/http`); this page covers only what a contributor
 needs that lives nowhere else. Deep design history: `git log` on
 `packages/ai/src/ai/modules/mcp/`.
 

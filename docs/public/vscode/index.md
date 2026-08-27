@@ -1,5 +1,6 @@
 ---
 title: Introduction
+sidebar_label: Overview
 sidebar_position: 1
 ---
 
@@ -10,6 +11,13 @@ sidebar_position: 1
 <p align="center">
   Build, debug, and deploy AI pipelines - without leaving your IDE.
 </p>
+
+> **Works in every VS Code-based editor.** The same build supports VS Code and
+> forks such as **Cursor**, **Windsurf**, and **VSCodium** — the visual canvas,
+> runtime management, and pipeline tooling behave identically everywhere. The
+> extension also auto-detects your coding agent — GitHub Copilot, Claude Code,
+> Cursor, or Windsurf — and writes **RocketRide agent rules** into your
+> workspace so the editor's AI understands how to build RocketRide pipelines.
 
 <p align="center">
   <a href="https://marketplace.visualstudio.com/items?itemName=RocketRide.rocketride"><img src="https://img.shields.io/visual-studio-marketplace/v/RocketRide.rocketride?color=222223&label=Marketplace" alt="VS Code Marketplace" /></a>
@@ -33,7 +41,7 @@ using a visual drag-and-drop canvas or code-first with TypeScript and Python SDK
 
 You build your `.pipe` - and you run it against the fastest AI runtime available.
 
-- **50+ ready-to-use nodes** - 13 LLM providers, 8 vector databases, OCR, NER, PII anonymization, and more
+- **140+ ready-to-use nodes** - 15+ LLM providers, 10+ vector stores, OCR, NER, PII anonymization, and more
 - **High-performance C++ engine** - production-grade speed and reliability
 - **Deploy anywhere** - locally, on-premises, or self-hosted with Docker
 - **MIT licensed** - fully open-source, OSI-compliant
@@ -43,6 +51,7 @@ You build your `.pipe` - and you run it against the fastest AI runtime available
 - **Visual canvas builder** - Drag, drop, and wire up AI workflows directly in VS Code. Create `.pipe` files to get started.
 - **Debugging & live traces** - Monitor running pipelines in real time with execution traces, token usage, and memory stats, see exactly what your agents are doing at every step.
 
+- **App Builder** - Scaffold, live-preview, publish, and deploy [Shell Apps](/guides/apps) from a template, without leaving VS Code.
 - **Connection manager** - Connect to a local engine (one click, no setup) or your own on-premises server.
 - **SDKs for TypeScript, Python & MCP** - Embed pipelines in your apps or expose them as tools for AI assistants.
 

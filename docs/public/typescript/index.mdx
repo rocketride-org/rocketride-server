@@ -1,0 +1,121 @@
+---
+title: TypeScript SDK
+sidebar_position: 0
+sidebar_label: Overview
+---
+
+import { LuSettings, LuPlug, LuPlay, LuRocket, LuSend, LuFolderOpen, LuMessageSquare, LuActivity, LuShieldAlert, LuBookOpen, LuFlaskConical, LuChartLine, LuDatabase } from 'react-icons/lu';
+
+# TypeScript SDK
+
+Build, run, and manage AI pipelines from Node.js or the browser. The `rocketride`
+package ships complete type definitions and speaks the engine's native
+[WebSocket protocol](/connect/websocket): you author a `.pipe`
+([visually](/clients/vscode) or [by hand](/reference/pipeline-reference)) and run it
+against the engine from your own application.
+
+## Install
+
+```bash
+npm install rocketride    # or: yarn add rocketride / pnpm add rocketride
+```
+
+The [`rocketride` CLI](/connect/cli) is installed with the package.
+
+## Quickstart
+
+```typescript
+import { RocketRideClient } from 'rocketride';
+
+const client = new RocketRideClient({
+	auth: process.env.ROCKETRIDE_APIKEY!,
+	uri: 'https://api.rocketride.ai',
+});
+await client.connect();
+const { token } = await client.use({ filepath: './pipeline.pipe' });
+const result = await client.send(token, 'Hello, pipeline!', { name: 'input.txt' }, 'text/plain');
+console.log(result);
+await client.terminate(token);
+await client.disconnect();
+```
+
+`send()` / `sendFiles()` target pipelines whose **source** is `webhook` or
+`dropper`; if your pipeline source is `chat`, use
+[`client.chat()`](/clients/typescript/chat). No pipeline yet? The
+[IDE walkthrough](/quickstart/ide-walkthrough) builds one in minutes.
+
+## Explore the SDK
+
+<div className="rr-card-grid">
+
+<a className="rr-side-card" href="/clients/typescript/configuration">
+  <span className="rr-side-card__head"><LuSettings className="rr-card-icon" /><span className="rr-side-card__title">Configuration</span></span>
+  <span className="rr-side-card__body">Client config, environment variables, timeouts, and reconnection.</span>
+</a>
+
+<a className="rr-side-card" href="/clients/typescript/connection">
+  <span className="rr-side-card__head"><LuPlug className="rr-card-icon" /><span className="rr-side-card__title">Connection</span></span>
+  <span className="rr-side-card__body">The attach/login layers, persist mode, concurrent-login semantics, and callbacks.</span>
+</a>
+
+<a className="rr-side-card" href="/clients/typescript/pipelines">
+  <span className="rr-side-card__head"><LuPlay className="rr-card-icon" /><span className="rr-side-card__title">Running Pipelines</span></span>
+  <span className="rr-side-card__body">Start with <code>use()</code>, watch progress, validate, and terminate.</span>
+</a>
+
+<a className="rr-side-card" href="/clients/typescript/deploy">
+  <span className="rr-side-card__head"><LuRocket className="rr-card-icon" /><span className="rr-side-card__title">Deployments</span></span>
+  <span className="rr-side-card__body">Publish immutable versions, point team environments at them, and schedule runs.</span>
+</a>
+
+<a className="rr-side-card" href="/clients/typescript/data">
+  <span className="rr-side-card__head"><LuSend className="rr-card-icon" /><span className="rr-side-card__title">Sending Data</span></span>
+  <span className="rr-side-card__body">One-shot sends, concurrent file uploads with progress, and chunked streaming.</span>
+</a>
+
+<a className="rr-side-card" href="/clients/typescript/storage">
+  <span className="rr-side-card__head"><LuFolderOpen className="rr-card-icon" /><span className="rr-side-card__title">File Storage</span></span>
+  <span className="rr-side-card__body">Read, write, and manage your server-side store; signed URLs for direct access.</span>
+</a>
+
+<a className="rr-side-card" href="/clients/typescript/chat">
+  <span className="rr-side-card__head"><LuMessageSquare className="rr-card-icon" /><span className="rr-side-card__title">Chat</span></span>
+  <span className="rr-side-card__body">Build a <code>Question</code>, stream the response, parse it with <code>Answer</code>.</span>
+</a>
+
+<a className="rr-side-card" href="/clients/typescript/logs">
+  <span className="rr-side-card__head"><LuActivity className="rr-card-icon" /><span className="rr-side-card__title">Run Logs</span></span>
+  <span className="rr-side-card__body">The log continuum and the DVR session: live monitoring and replay with one API.</span>
+</a>
+
+<a className="rr-side-card" href="/clients/typescript/errors">
+  <span className="rr-side-card__head"><LuShieldAlert className="rr-card-icon" /><span className="rr-side-card__title">Error Handling</span></span>
+  <span className="rr-side-card__body">What the SDK throws, when, and how to catch it.</span>
+</a>
+
+<a className="rr-side-card" href="/clients/typescript/reference">
+  <span className="rr-side-card__head"><LuBookOpen className="rr-card-icon" /><span className="rr-side-card__title">API Reference</span></span>
+  <span className="rr-side-card__body">Every public class and method, in one place.</span>
+</a>
+
+<a className="rr-side-card" href="/clients/typescript/examples">
+  <span className="rr-side-card__head"><LuFlaskConical className="rr-card-icon" /><span className="rr-side-card__title">Examples</span></span>
+  <span className="rr-side-card__body">Seven complete programs, from hello-pipeline to custom DAP requests.</span>
+</a>
+
+<a className="rr-side-card" href="/clients/typescript/database-sequelize">
+  <span className="rr-side-card__head"><LuDatabase className="rr-card-icon" /><span className="rr-side-card__title">Sequelize over Pipelines</span></span>
+  <span className="rr-side-card__body">A Sequelize ORM whose SQL rides a pipeline instead of a TCP socket.</span>
+</a>
+
+<a className="rr-side-card" href="/clients/typescript/analytics">
+  <span className="rr-side-card__head"><LuChartLine className="rr-card-icon" /><span className="rr-side-card__title">Analytics</span></span>
+  <span className="rr-side-card__body">Report client-side analytics events through the SDK.</span>
+</a>
+
+</div>
+
+## Links
+
+- [GitHub](https://github.com/rocketride-org/rocketride-server) · [npm](https://www.npmjs.com/package/rocketride) · [Discord](https://discord.gg/PMXrtenMsY)
+- [Release notes](/support/release-notes) · [Get help](/support/get-help)

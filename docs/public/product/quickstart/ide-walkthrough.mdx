@@ -22,13 +22,10 @@ extension also works in VS Code forks (Cursor, Windsurf, VSCodium) via the
 
 Click the RocketRide
 (<ThemedImage alt="RocketRide" className="rr-inline-icon" sources={{ light: '/img/rocketride-icon-colored.svg', dark: '/img/rocketride-icon-white.svg' }} />)
-icon in your IDE sidebar, then choose how to run the runtime:
-
-- **Local (recommended)**: pulls the server straight into your IDE, no extra setup.
-- **Docker**: run the server in a local Docker container.
-- **Service**: connect to the server running as a local system service.
-- **On-premises**: run on your own hardware and connect by URL.
-- **RocketRide Cloud**: managed hosting.
+icon in your IDE sidebar, then choose how to run the runtime. **Local** is the
+right choice here — it pulls the server straight into your IDE with no extra
+setup. (The other options are covered in
+[Choose How to Run RocketRide](/operate).)
 
 ## 3. Create a pipeline file
 
@@ -60,5 +57,5 @@ Save the `.pipe` file, you'll run it from code in the next walkthrough.
 
 - [Integrate a pipeline with an SDK](/quickstart/sdk-integration): run the `.pipe` file you
   just built from your own Python or TypeScript application.
-- [VS Code extension](/ide-extensions/vscode): the full extension guide (canvas, runtime
+- [VS Code extension](/clients/vscode): the full extension guide (canvas, runtime
   management, tracing).

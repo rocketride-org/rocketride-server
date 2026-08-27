@@ -1,13 +1,18 @@
 #!/usr/bin/env python3
-"""Validate the Python/TypeScript client readmes against
+"""Validate the Python/TypeScript client docs against
 docs/development/clients/readme-schema.md.
 
-Deterministic, no LLM. Checks section order and API symbol parity between
-docs/public/python/README.md and docs/public/typescript/README.md.
-Symbols are harvested from the first backticked cell of table rows inside
-the shared API sections and normalized across naming conventions
-(snake_case == camelCase). Rows ending with an HTML comment containing
-"language-specific" are exempt, as are Python dunder methods.
+Deterministic, no LLM. Two layers:
+
+1. READMEs (docs/public/{python,typescript}/README.md — the PyPI/npm sources):
+   exactly the schema sections, in order, plus env-var parity between the two
+   Configuration tables.
+2. Site pages (the rest of each folder): both folders publish the same page
+   set (declared single-language extras aside), and the two reference.md files
+   document the same API symbols — harvested from the first backticked cell of
+   table rows and normalized across naming conventions (snake_case ==
+   camelCase). Rows ending with an HTML comment containing "language-specific"
+   are exempt, as are Python dunder methods.
 
 Usage: validate-client-docs.py [repo-root]
 """
@@ -16,31 +21,34 @@ import re
 import sys
 from pathlib import Path
 
-SHARED_SECTIONS = [
+README_SECTIONS = [
     'Quick Start',
     'What is RocketRide?',
-    'Features',
-    'RocketRideClient',
-    'DataPipe',
-    'Question',
-    'Answer',
-    'Types',
-    'Exceptions',
-    'Examples (Full API Usage)',
+    'Configuration',
+    'Documentation',
     'Links',
     'License',
 ]
-LANG_SECTIONS = {
-    'python': {'CLI', 'Configuration'},
-    'typescript': {'RocketRideClientConfig'},
-}
-# Where language-specific sections must sit (section they follow).
-LANG_POSITION = {
-    'RocketRideClientConfig': 'Features',
-    'CLI': 'Examples (Full API Usage)',
-    'Configuration': 'CLI',
-}
-PARITY_SECTIONS = ['RocketRideClient', 'DataPipe', 'Question', 'Answer', 'Types', 'Exceptions']
+
+# The shared site page set (filenames, extension-insensitive: index is .mdx).
+SHARED_PAGES = [
+    'index',
+    'configuration',
+    'connection',
+    'pipelines',
+    'deploy',
+    'data',
+    'storage',
+    'chat',
+    'logs',
+    'errors',
+    'reference',
+    'examples',
+    'analytics',
+]
+# Declared single-language extras (surface that exists in one SDK only).
+TS_ONLY_PAGES = {'database-sequelize'}
+PY_ONLY_PAGES = set()
 
 
 def norm(symbol: str) -> str:
@@ -48,26 +56,17 @@ def norm(symbol: str) -> str:
     return re.sub(r'[^a-z0-9]', '', symbol.lower())
 
 
-def sections(text: str):
-    parts = {}
-    matches = list(re.finditer(r'^## (.+?)\s*$', text, re.M))
-    for i, m in enumerate(matches):
-        end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
-        parts[m.group(1)] = text[m.end() : end]
-    return parts
-
-
-def harvest(section_text: str):
+def harvest(text: str):
     """Backticked first-column table cells -> {normalized: display}.
 
     Constructor subsections are excluded: constructor options are
-    structurally language-divergent (Python kwargs vs the TypeScript
-    RocketRideClientConfig object, which has its own section). Dotted names
-    compare by their final segment (`Answer.parsePython` == `parsePython`).
+    structurally language-divergent and live on configuration.md. Dotted
+    names compare by their final segment (`Answer.parsePython` ==
+    `parsePython`).
     """
-    section_text = re.sub(r'^### Constructor.*?(?=^### |\Z)', '', section_text, flags=re.M | re.S)
+    text = re.sub(r'^#+ Constructor.*?(?=^#+ |\Z)', '', text, flags=re.M | re.S)
     out = {}
-    for line in section_text.splitlines():
+    for line in text.splitlines():
         m = re.match(r'^\|\s*`([^`]+)`\s*\|', line)
         if not m:
             continue
@@ -84,59 +83,76 @@ def harvest(section_text: str):
     return out
 
 
+def env_vars(text: str):
+    """`ROCKETRIDE_*` first-column cells from the README Configuration table."""
+    return {m.group(1) for m in re.finditer(r'^\|\s*`(ROCKETRIDE_\w+)`\s*\|', text, re.M)}
+
+
 def main():
     root = Path(sys.argv[1]) if len(sys.argv) > 1 else Path('.')
-    files = {
-        'python': root / 'docs/public/python/README.md',
-        'typescript': root / 'docs/public/typescript/README.md',
+    dirs = {
+        'python': root / 'docs/public/python',
+        'typescript': root / 'docs/public/typescript',
     }
     failures = []
 
-    docs = {}
-    for lang, path in files.items():
+    # -- layer 1: READMEs --
+    readmes = {}
+    for lang, d in dirs.items():
+        path = d / 'README.md'
         if not path.exists():
             print(f'FAIL: {path} does not exist')
             sys.exit(1)
-        docs[lang] = path.read_text()
+        readmes[lang] = path.read_text()
 
-    # -- section presence, order, and ownership --
-    for lang, text in docs.items():
+    for lang, text in readmes.items():
         heads = re.findall(r'^## (.+?)\s*$', text, re.M)
-        for s in SHARED_SECTIONS:
-            if s not in heads:
-                failures.append(f"{lang}: missing shared section '## {s}'")
-        allowed = set(SHARED_SECTIONS) | LANG_SECTIONS[lang]
-        for h in heads:
-            if h not in allowed:
-                other = [name for name, ss in LANG_SECTIONS.items() if h in ss]
-                if other:
-                    failures.append(f"{lang}: section '## {h}' belongs to {other[0]} only")
-                else:
-                    failures.append(f"{lang}: unknown section '## {h}'")
-        order = [h for h in heads if h in SHARED_SECTIONS]
-        expected = [s for s in SHARED_SECTIONS if s in heads]
-        if order != expected:
-            failures.append(f'{lang}: shared sections out of schema order')
-        for extra, after in LANG_POSITION.items():
-            if extra in heads and after in heads:
-                if heads.index(extra) != heads.index(after) + 1:
-                    failures.append(f"{lang}: '## {extra}' must directly follow '## {after}'")
+        if heads != README_SECTIONS:
+            missing = [s for s in README_SECTIONS if s not in heads]
+            unknown = [h for h in heads if h not in README_SECTIONS]
+            for s in missing:
+                failures.append(f"{lang} README: missing section '## {s}'")
+            for h in unknown:
+                failures.append(f"{lang} README: unknown section '## {h}'")
+            if not missing and not unknown:
+                failures.append(f'{lang} README: sections out of schema order')
+        if 'Full documentation:' not in text:
+            failures.append(f"{lang} README: missing the bold 'Full documentation:' deferral line")
 
-    # -- API symbol parity --
-    parts = {lang: sections(text) for lang, text in docs.items()}
-    for sec in PARITY_SECTIONS:
-        py = harvest(parts['python'].get(sec, ''))
-        ts = harvest(parts['typescript'].get(sec, ''))
-        for key in sorted(set(py) - set(ts)):
-            failures.append(
-                f'parity[{sec}]: `{py[key]}` documented in python only '
-                f'(add to typescript or mark <!-- language-specific -->)'
-            )
-        for key in sorted(set(ts) - set(py)):
-            failures.append(
-                f'parity[{sec}]: `{ts[key]}` documented in typescript only '
-                f'(add to python or mark <!-- language-specific -->)'
-            )
+    py_env, ts_env = env_vars(readmes['python']), env_vars(readmes['typescript'])
+    for var in sorted(py_env ^ ts_env):
+        where = 'python' if var in py_env else 'typescript'
+        failures.append(f'README env parity: `{var}` documented in {where} only')
+
+    # -- layer 2: site page set --
+    page_sets = {}
+    for lang, d in dirs.items():
+        page_sets[lang] = {p.stem for p in d.iterdir() if p.suffix in ('.md', '.mdx') and p.stem != 'README'}
+    expected = set(SHARED_PAGES)
+    for lang, extras in (('python', PY_ONLY_PAGES), ('typescript', TS_ONLY_PAGES)):
+        want = expected | extras
+        for missing in sorted(want - page_sets[lang]):
+            failures.append(f'{lang}: missing site page {missing}.md')
+        for unknown in sorted(page_sets[lang] - want):
+            failures.append(f'{lang}: undeclared site page {unknown}.md (add to the schema + validator page set)')
+
+    # -- layer 2: reference.md symbol parity --
+    refs = {}
+    for lang, d in dirs.items():
+        path = d / 'reference.md'
+        refs[lang] = path.read_text() if path.exists() else ''
+    py = harvest(refs['python'])
+    ts = harvest(refs['typescript'])
+    for key in sorted(set(py) - set(ts)):
+        failures.append(
+            f'parity[reference]: `{py[key]}` documented in python only '
+            f'(add to typescript or mark <!-- language-specific -->)'
+        )
+    for key in sorted(set(ts) - set(py)):
+        failures.append(
+            f'parity[reference]: `{ts[key]}` documented in typescript only '
+            f'(add to python or mark <!-- language-specific -->)'
+        )
 
     if failures:
         print(f'FAIL ({len(failures)} problems):')
@@ -146,8 +162,8 @@ def main():
         sys.exit(1)
     print(
         'ok: client docs conform to the schema '
-        f'({len(SHARED_SECTIONS)} shared sections, parity across '
-        f'{len(PARITY_SECTIONS)} API sections)'
+        f'({len(README_SECTIONS)} README sections, {len(SHARED_PAGES)} shared site pages, '
+        'symbol parity across reference.md)'
     )
 
 

@@ -11,9 +11,10 @@ Everything here lives in `packages/docs/`:
 
 | Path | Role |
 | ---- | ---- |
-| `scripts/tasks.js` | The builder module: `docs:gather`, `docs:index`, `docs:compile`, `docs:build`, `docs:dev`, `docs:serve`, `docs:test`, `docs:export`, `docs:check`, `docs:clean` |
+| `scripts/tasks.js` | The builder module: `docs:gather`, `docs:release-notes`, `docs:index`, `docs:compile`, `docs:build`, `docs:dev`, `docs:serve`, `docs:test`, `docs:export`, `docs:check`, `docs:clean` |
 | `scripts/lib/spine.js` | The information-architecture spine — the single source of truth for routes and navigation |
 | `scripts/lib/gather.js` | Discovery + staging: finds every doc source and assembles the content tree |
+| `scripts/lib/release-notes.js` | The `/support/release-notes` page, generated from GitHub releases at build time |
 | `scripts/lib/llms.js` | The `/nodes` catalog page and the `llms.txt` / `llms-full.txt` surfaces |
 | `scripts/lib/export.js` | Copies docs-owned files out to the package destinations that consume them |
 | `redirects.ts` | Old-URL → new-route map |
@@ -24,7 +25,7 @@ Everything here lives in `packages/docs/`:
 ## The actions
 
 ```bash
-./builder docs:build     # gather -> index -> compile  (the whole site)
+./builder docs:build     # gather -> release-notes -> index -> compile  (the whole site)
 ./builder docs:dev       # gather-dev (symlinks) + docusaurus start, live reload
 ./builder docs:serve     # preview the built site from dist/docs
 ./builder docs:test      # unit tests for the docs helpers
@@ -37,7 +38,7 @@ Everything here lives in `packages/docs/`:
 
 ```text
 parallel(nodes:docs-generate, client-typescript:docs-generate)
-  -> docs:gather -> docs:index -> docs:compile
+  -> docs:gather -> docs:release-notes -> docs:index -> docs:compile
 ```
 
 Only the two light in-tree generators run as part of it. Heavier emitters (the
@@ -71,8 +72,8 @@ environment variable, which `docsEnv()` sets alongside `DOCS_VERSION`,
 **both** `sidebars.ts` (the rendered navigation) and `docs:gather` (mount
 validation and placeholder generation), so the two can never drift apart.
 
-`routeBasePath` is `/`, so **a doc id *is* the public URL**. `evaluate/security`
-is `https://docs.rocketride.org/evaluate/security`. There is no separate route
+`routeBasePath` is `/`, so **a doc id *is* the public URL**. `operate/security`
+is `https://docs.rocketride.org/operate/security`. There is no separate route
 table to keep in step — and no way to move a page without moving its URL.
 
 Node shapes:
@@ -81,6 +82,7 @@ Node shapes:
 | --- | --- |
 | `{ id, label }` | A single authored page (leaf) |
 | `{ id, label, mount: true }` | A leaf that a package may mount a whole subtree into |
+| `{ id, label, mount: true, nest: true }` | A multi-page mount rendered as a sidebar category: the category links to the slot's index page and lists every staged page under it, ordered by `sidebar_position` (the SDK and VS Code mounts) |
 | `{ label, items: [...] }` | A category of leaves or nested categories |
 | `{ label, autogen: 'nodes' }` | A category whose pages are generated (the node catalog) |
 
@@ -131,11 +133,11 @@ and each backend variant a nested page.
 
   | Source | Mount |
   | --- | --- |
-  | `docs/public/typescript` | `develop/typescript` |
-  | `docs/public/python` | `develop/python` |
-  | `docs/public/vscode` | `ide-extensions/vscode` |
-  | `docs/public/mcp/stdio` | `protocols/mcp/stdio` |
-  | `docs/public/mcp/http` | `protocols/mcp/http` |
+  | `docs/public/typescript` | `clients/typescript` |
+  | `docs/public/python` | `clients/python` |
+  | `docs/public/vscode` | `clients/vscode` |
+  | `docs/public/mcp/stdio` | `connect/mcp/stdio` |
+  | `docs/public/mcp/http` | `connect/mcp/http` |
 
 The sweep covers **all** of `docs/public/`, so a new `.md` there with no covering
 mount aborts the build rather than being silently dropped. `docs/public/product/`
@@ -190,6 +192,24 @@ Two allowlists in `gather.js`:
   corpus produced no pages at all (a docs-only checkout, or `nodes:docs-generate`
   never ran), which is already visible in the task's "Staged N pages, N nodes"
   line, so it is not a spine desync.
+
+---
+
+## `docs:release-notes`
+
+`docs:release-notes` (`scripts/lib/release-notes.js`) fetches the repo's GitHub
+releases (public API; `GITHUB_TOKEN`/`GH_TOKEN` honoured when set to dodge rate
+limits) and generates `/support/release-notes`: stable releases only, newest
+first, one entry per release with a component/version/date byline. Release tags
+are `<component>-v<semver>`, and the component prefix maps to a display label
+(`COMPONENT_LABELS`). The page carries `format: md` front matter because release
+bodies are GitHub-flavored markdown, not MDX-safe.
+
+It runs between gather and index: gather stages a placeholder for the slot
+(allowlisted in `EXPECTED_PLACEHOLDERS`), this step overwrites it and clears the
+manifest's `placeholder` flag, and `docs:index` then inlines the generated page
+into `llms-full.txt`. If the API is unreachable the placeholder ships instead —
+offline builds never break.
 
 ---
 
