@@ -1664,7 +1664,7 @@ class Task(DAPBase):
 
             # If we were cancelled, throw an error
             if current_state == TASK_STATE.CANCELLED.value:
-                raise TaskError(TaskError.STOPPED, self._status.exitMessage)
+                raise TaskError(TaskError.STOPPED, self._status.exitMessage or 'Task was stopped')
 
             # Calculate timeouts
             time_since_last_event = time.time() - self._last_event_time
