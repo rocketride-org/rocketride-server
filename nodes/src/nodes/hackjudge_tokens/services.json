@@ -1,0 +1,51 @@
+{
+	//
+	// Hack Judge token gate + settle node (Blueprint Rev 2, sections 02/04).
+	// One provider used at two pipeline positions: gate before Verify, settle after.
+	// classType "search" mirrors hackjudge_engine's proven lane-processor shape.
+	//
+	"title": "Hack Judge Tokens",
+	"protocol": "hackjudge_tokens://",
+	"classType": ["search"],
+	"capabilities": ["invoke"],
+	"register": "filter",
+	"node": "python",
+	"path": "nodes.hackjudge_tokens",
+	"prefix": "hjtokens",
+	"icon": "tokens.svg",
+	"description": [
+		"Token gate + settlement for Hack Judge's prepaid, KB-metered balance.",
+		"gate: check balance vs threshold; low triggers auto-recharge (Stripe placeholder); halt only if recharge fails or is off.",
+		"settle: deduct actual KB after a run (never negative). credit/config/balance manage the account."
+	],
+	"lanes": {
+		"questions": ["questions", "answers", "text"]
+	},
+	"preconfig": {
+		"default": "default",
+		"profiles": {
+			"default": {
+				"database_url": ""
+			}
+		}
+	},
+	"fields": {
+		"hackjudge_tokens.database_url": {
+			"type": "string",
+			"title": "Database URL",
+			"description": "Postgres connection string. Blank falls back to HACKJUDGE_DATABASE_URL / DATABASE_URL.",
+			"default": "",
+			"secure": true,
+			"ui": {
+				"ui:widget": "ApiKeyWidget"
+			}
+		}
+	},
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Hack Judge Tokens",
+			"properties": ["hackjudge_tokens.database_url"]
+		}
+	]
+}
