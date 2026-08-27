@@ -188,7 +188,14 @@ module.exports = {
 	actions: [
 		// Internal actions
 		{ name: 'docs:gather', action: () => makeGatherAction('copy') },
-		{ name: 'docs:gather-dev', action: () => makeGatherAction('symlink') },
+		// Dev must copy too, not symlink: Docusaurus hardcodes webpack
+		// `resolve.symlinks: true`, so symlinked MDX compiles under its real
+		// source path outside the docs plugin's content dir. The plugin's
+		// mdx-loader rule then never attaches the doc metadata export and every
+		// page crashes at runtime with "Cannot read properties of undefined
+		// (reading 'id')" in DocItem. Source edits need a re-run of docs:dev
+		// (or docs:gather) to show up.
+		{ name: 'docs:gather-dev', action: () => makeGatherAction('copy') },
 		{ name: 'docs:release-notes', action: makeReleaseNotesAction },
 		{ name: 'docs:index', action: makeIndexAction },
 		{ name: 'docs:compile', action: makeCompileAction },
