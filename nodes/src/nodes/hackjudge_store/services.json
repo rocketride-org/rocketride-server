@@ -1,0 +1,50 @@
+{
+	//
+	// Hack Judge system-of-record node (Blueprint Rev 2, section 03).
+	// classType "search" mirrors hackjudge_engine's proven lane-processor shape.
+	//
+	"title": "Hack Judge Store",
+	"protocol": "hackjudge_store://",
+	"classType": ["search"],
+	"capabilities": ["invoke"],
+	"register": "filter",
+	"node": "python",
+	"path": "nodes.hackjudge_store",
+	"prefix": "hjstore",
+	"icon": "store.svg",
+	"description": [
+		"Tenant-scoped reads/writes for Hack Judge: targets, runs, results, balances, usage ledger.",
+		"Input (questions): a JSON job {op, tenant_id, ...}. Output (answers): a JSON result {ok, ...}.",
+		"Every query is tenant-scoped in SQL; cross-tenant ids return not-found."
+	],
+	"lanes": {
+		"questions": ["questions", "answers", "text"]
+	},
+	"preconfig": {
+		"default": "default",
+		"profiles": {
+			"default": {
+				"database_url": ""
+			}
+		}
+	},
+	"fields": {
+		"hackjudge_store.database_url": {
+			"type": "string",
+			"title": "Database URL",
+			"description": "Postgres connection string. Blank falls back to HACKJUDGE_DATABASE_URL / DATABASE_URL.",
+			"default": "",
+			"secure": true,
+			"ui": {
+				"ui:widget": "ApiKeyWidget"
+			}
+		}
+	},
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Hack Judge Store",
+			"properties": ["hackjudge_store.database_url"]
+		}
+	]
+}
