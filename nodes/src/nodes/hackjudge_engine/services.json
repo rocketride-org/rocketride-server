@@ -1,0 +1,72 @@
+{
+	//
+	// The displayable name of this node.
+	//
+	"title": "Hack Judge Engine",
+	//
+	// Endpoint protocol for this node.
+	//
+	"protocol": "hackjudge_engine://",
+	//
+	// Class type - a deterministic scoring node: takes a job on the questions lane
+	// and returns a verdict on the answers lane.
+	//
+	"classType": ["search"],
+	//
+	// invoke = a per-request processing node (not an ingestion sink).
+	//
+	"capabilities": ["invoke"],
+	//
+	// filter = a lane processor (as opposed to an endpoint/source).
+	//
+	"register": "filter",
+	//
+	// Runtime + import path. Built into the engine's node set (nodes.<name>).
+	//
+	"node": "python",
+	"path": "nodes.hackjudge_engine",
+	"prefix": "hackjudge",
+	"icon": "hackjudge.svg",
+	"description": [
+		"Runs the Hack Judge deterministic verification engine in-process.",
+		"Input (questions): a JSON job {repo_url, target_config?, event_date?, history_penalty?, target_name?}.",
+		"Output (answers): the full deterministic verdict (tag, backbone, score, breakdown, evidence)."
+	],
+	//
+	// Data flow: consume a question envelope, produce an answer (and optionally text).
+	//
+	"lanes": {
+		"questions": ["questions", "answers", "text"]
+	},
+	//
+	// Driver configuration. github_token authenticates GitHub REST/raw fetches;
+	// blank falls back to the ROCKETRIDE_GITHUB_TOKEN env var.
+	//
+	"preconfig": {
+		"default": "default",
+		"profiles": {
+			"default": {
+				"github_token": ""
+			}
+		}
+	},
+	"fields": {
+		"hackjudge_engine.github_token": {
+			"type": "string",
+			"title": "GitHub Token",
+			"description": "GitHub token for repo fetches (read-only public scope is enough). Blank falls back to ROCKETRIDE_GITHUB_TOKEN.",
+			"default": "",
+			"secure": true,
+			"ui": {
+				"ui:widget": "ApiKeyWidget"
+			}
+		}
+	},
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Hack Judge Engine",
+			"properties": ["hackjudge_engine.github_token"]
+		}
+	]
+}

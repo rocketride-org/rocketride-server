@@ -1,0 +1,41 @@
+{
+  "slug": "rocketride",
+  "name": "RocketRide",
+  "types": ["code", "platform"],
+  "pipeline_scoring": true,
+  "regex": {
+    "sdk_call": "\\b(RocketRideClient|client\\.use|client\\.chat|client\\.send|client\\.connect)",
+    "dependency": "rocketride|@rocketride/sdk",
+    "inline_pipe": "client\\.use\\(\\s*\\{\\s*pipeline\\b",
+    "runner": "client\\.use\\(\\s*\\{?\\s*(?:file)?path\\s*[=:]\\s*(?!['\"])",
+    "http": "api\\.rocketride\\.ai|rocketride\\.ai/[\\w/-]*(pipeline|webhook|hook|run|invoke)",
+    "hosted_env": "rocketride_\\w*(url|webhook|endpoint|hook)",
+    "src_hint": "rocket|pipeline|integration|agent|engine|config|api|route|server|main|index|app|relay|deploy",
+    "name_in_path": "rocketride"
+  },
+  "tokens": {
+    "invoke": ["client.use", "client.send", "client.chat", "rocketride start"],
+    "import_hints": ["from rocketride", "import rocketride", "@rocketride"],
+    "hosted": ["rocketride_pipeline", "lib/rocketride"],
+    "engine": ["ws://localhost:5565", "/v1/pipelines"]
+  },
+  "artifact_extensions": [".pipe"],
+  "json_pipelines": true,
+  "competitors": ["langchain", "crewai"],
+  "scaffold_paths": [".claude/rules/rocketride.md"],
+  "platform": { "domains": [], "files": [], "markers": [] },
+  "weights": {
+    "dependency": 1.0,
+    "pipeline_called": 2.0,
+    "agent_node": 1.0,
+    "complexity_mid": 0.5,
+    "complexity_high": 1.0,
+    "tool_or_llm": 0.5,
+    "hosted": 1.0,
+    "sdk_callsites": 0.5,
+    "file_spread": 0.5,
+    "uncalled_penalty": 1.0,
+    "predates_penalty": 1.0
+  },
+  "thresholds": { "significant": 4.0, "moderate": 2.0, "less": 1.0 }
+}

@@ -1,0 +1,2 @@
+# The Hack Judge engine is pure standard library (urllib, json, re, datetime,
+# dataclasses). No third-party dependencies.
