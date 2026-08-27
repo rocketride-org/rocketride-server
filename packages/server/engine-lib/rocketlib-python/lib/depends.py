@@ -689,8 +689,27 @@ def _find_override_files() -> list[str]:
 
 
 def _compute_hash(file_paths: list[str]) -> str:
-    """Compute a fast hash from file metadata (mtime + size)."""
+    """Compute a fast hash from file metadata (mtime + size) AND the resolve mode.
+
+    The resolve mode is part of the key because it changes the OUTPUT for
+    identical inputs: with ``ROCKETRIDE_CPU_ONLY_DEPS`` set, the combined
+    requirements gain a ``--extra-index-url .../cpu`` line and resolve to the
+    CPU ``torch`` instead of the CUDA one. Hashing only the requirement files
+    would make the flag a no-op on any host that already built
+    ``constraints.txt`` — the early return in ``ensure_constraints()`` fires,
+    ``_combine_requirements()`` never re-runs, and the resolve stays CUDA while
+    reporting success. Unsetting the flag afterwards would likewise fail to
+    restore GPU.
+
+    Worse, ``_write_excludes_file()`` is rewritten on every call and *does*
+    honour the flag, so a stale cache lets the two disagree: excludes saying
+    ``onnxruntime-gpu`` while constraints still pin CUDA ``torch``.
+
+    Seeding here rather than at the call site keeps the invariant with the
+    thing it protects — any future caller inherits it.
+    """
     hasher = hashlib.md5()
+    hasher.update(f'cpu_only={_cpu_only()}\n'.encode())
     for path in sorted(file_paths):
         stat = os.stat(path)
         entry = f'{path}:{stat.st_size}:{stat.st_mtime_ns}\n'
@@ -713,9 +732,34 @@ def _save_hash(hash_file: str, hash_value: str):
         f.write(hash_value)
 
 
+def _cpu_only() -> bool:
+    """True when this host should resolve CPU-only wheels.
+
+    Opt-in via ``ROCKETRIDE_CPU_ONLY_DEPS=1``. Deliberately NOT auto-detected:
+    guessing "no GPU visible, therefore CPU" would silently downgrade a machine
+    whose driver simply is not loaded yet, and a silent downgrade of an
+    inference host is far worse than an oversized install.
+    """
+    return os.environ.get('ROCKETRIDE_CPU_ONLY_DEPS', '').strip().lower() in ('1', 'true', 'yes')
+
+
 def _combine_requirements(file_paths: list[str], output_path: str):
     """Concatenate all requirement files into one."""
     with open(output_path, 'w', encoding='utf-8') as out:
+        if _cpu_only():
+            # PyPI's default `torch` wheel is the CUDA build, which drags in
+            # ~13 nvidia-* packages plus triton. On the cloud ALB that measured
+            # 6.6 GB of the pod's 8.2 GB site-packages — on an m7i-flex.large
+            # with no GPU, no /dev/nvidia*, and no models (inference goes out to
+            # the H100). It was downloaded and written on every pod start and
+            # never once executed. See rocketride-server #1697.
+            #
+            # Pointing at the CPU index makes torch resolve to +cpu (~200 MB)
+            # and the nvidia-* packages are never selected at all. Verified with
+            # `uv pip compile` over the four nodes that pull torch transitively:
+            # 119 packages / 13 nvidia-* -> 105 packages / 0 nvidia-*.
+            out.write('# CPU-only resolve: ROCKETRIDE_CPU_ONLY_DEPS is set.\n')
+            out.write('--extra-index-url https://download.pytorch.org/whl/cpu\n\n')
         for path in file_paths:
             out.write(f'# Source: {path}\n')
             with open(path, 'r', encoding='utf-8') as inp:
@@ -836,8 +880,17 @@ def _write_excludes_file() -> str:
     """
     excludes_path = os.path.join(engine_cache_dir(), 'excludes.txt')
     excludes = 'uv\n'
-    if platform.system() != 'Darwin':
+    # The onnxruntime exclusion keys on OS, which is not the question being
+    # asked. "Not a Mac" was used as a proxy for "has CUDA", and it is wrong on
+    # every Linux box without a GPU — including the cloud ALB, where it forces
+    # the GPU build and blocks the CPU one from ever being installed. Excluding
+    # it there would defeat the CPU-only resolve above, so honour that flag.
+    if platform.system() != 'Darwin' and not _cpu_only():
         excludes += 'onnxruntime\n'
+    elif _cpu_only():
+        # Mirror image: on a CPU-only host the GPU build is the one that must
+        # not win, for the same clobbering reason the original comment gives.
+        excludes += 'onnxruntime-gpu\n'
     with open(excludes_path, 'w', encoding='utf-8') as f:
         f.write(excludes)
     return excludes_path
