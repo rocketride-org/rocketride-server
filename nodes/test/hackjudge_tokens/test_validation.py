@@ -30,12 +30,9 @@ which is exactly the property under test.
 
 from __future__ import annotations
 
-import sys
 import unittest
-from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from hackjudge_common_stubs import import_node_module  # noqa: E402
+from ..hackjudge_common_stubs import import_node_module
 
 inst = import_node_module('hackjudge_tokens', 'IInstance')
 
