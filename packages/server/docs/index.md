@@ -96,6 +96,14 @@ than inferring one from the prose.
 | `TASK_COMPLETED` | The task finished before the request could be served. |
 | `TASK_STOPPED` | The task was stopped or cancelled before the request. |
 
+These codes ride command replies. A task key rejected while the connection is
+still being established — on the HTTP request or the WebSocket upgrade — is
+answered by the web layer with a generic `400 Bad request` carrying neither a
+message nor a code, deliberately, so that a rejected credential reveals nothing
+about why it was rejected. A client therefore cannot tell an invalidated task
+key from any other bad credential at connect time; the codes above appear only
+once a command is in flight.
+
 ### Events
 
 The engine pushes **events** that are not replies to any request: this is how

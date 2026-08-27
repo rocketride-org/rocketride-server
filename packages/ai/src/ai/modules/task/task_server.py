@@ -590,7 +590,9 @@ class TaskServer(DAPBase):
             authorization (str): Authentication key
 
         Raises:
-            ValueError: If task doesn't exist
+            TaskError: Code TASK_NOT_REGISTERED if the key names no live task.
+                Subclasses RuntimeError; these two branches raised ValueError
+                before task errors carried codes.
         """
         if authorization.startswith('pk_'):
             for control in self._task_control.values():
