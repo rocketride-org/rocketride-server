@@ -18,7 +18,7 @@ Set your connection once with environment variables so you don't have to repeat
 them on every command:
 
 ```bash
-# Local engine (default — no API key needed)
+# Local engine (no API key needed)
 export ROCKETRIDE_URI=ws://localhost:5565
 
 # RocketRide Cloud — generate an API key from the online editor

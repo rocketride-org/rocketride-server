@@ -14,10 +14,10 @@ sidebar_position: 1
 
 > **Works in every VS Code-based editor.** The same build supports VS Code and
 > forks such as **Cursor**, **Windsurf**, and **VSCodium** — the visual canvas,
-> runtime management, and pipeline tooling behave identically everywhere. On
-> Cursor and Windsurf the extension additionally writes **RocketRide agent
-> rules** into your workspace so the editor's AI understands how to build
-> RocketRide pipelines.
+> runtime management, and pipeline tooling behave identically everywhere. The
+> extension also auto-detects your coding agent — GitHub Copilot, Claude Code,
+> Cursor, or Windsurf — and writes **RocketRide agent rules** into your
+> workspace so the editor's AI understands how to build RocketRide pipelines.
 
 <p align="center">
   <a href="https://marketplace.visualstudio.com/items?itemName=RocketRide.rocketride"><img src="https://img.shields.io/visual-studio-marketplace/v/RocketRide.rocketride?color=222223&label=Marketplace" alt="VS Code Marketplace" /></a>

@@ -81,7 +81,7 @@ Authentication failures are **not** retried automatically — fix credentials an
 | `ROCKETRIDE_TOKEN` | User token, accepted by the [CLI](/connect/cli) as an alternative credential |
 
 The same map drives `${ROCKETRIDE_*}` substitution inside pipeline configs passed to
-`use()`/`validate()`. Replace it at runtime with `setEnv()`.
+`use()` (`validate()` does not substitute). Replace it at runtime with `setEnv()`.
 
 ## Timeouts
 

@@ -28,9 +28,11 @@ LLM nodes send the full accumulated context (system prompt, retrieved chunks,
 conversation history) on every call. Costs scale with context size:
 
 - **Retrieved chunks**: more chunks retrieved from the vector store = more
-  tokens per LLM call. Tune the `top_k` parameter on the store node.
-- **Memory nodes**: conversation history grows each turn. Use `memory_internal`
-  with a window limit to cap history length.
+  tokens per LLM call. The retrieval limit is set by the question's docFilter
+  `limit`, not a store node config field.
+- **Memory nodes**: conversation history grows each turn. Use
+  `memory_persistent` with `max_history` to cap history length
+  (`memory_internal` has no window-limit config).
 - **Model selection**: larger models (GPT-5, Claude Opus) cost more per token.
   Use them for reasoning-heavy tasks; use smaller models for classification and
   extraction where a cheaper model performs just as well.

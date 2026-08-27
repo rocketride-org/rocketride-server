@@ -24,7 +24,7 @@ exceptions on [Error Handling](/clients/typescript/errors).
 | `connect` | `connect(credential?: string \| { code: string; verifier: string; redirectUri: string }, options?: { uri?: string; timeout?: number }): Promise<ConnectResult>` | `Promise<ConnectResult>` | Compatibility method that performs attach and login as one foreground operation. |
 | `disconnect` | `disconnect(): Promise<void>` | `Promise<void>` | Best-effort logout/deauthentication, then cancels pending work and detaches. |
 | `isConnected` | `isConnected(): boolean` | `boolean` | Compatibility **alias for `isAttached()`**; it does not imply authentication. |
-| `setEnv` | `setEnv(env: Record<string, string>): void` | `void` | Replaces the client's environment map. `use()`/`validate()` use it for `ROCKETRIDE_*` substitution; `login()` consults `ROCKETRIDE_APIKEY` when no explicit credential is supplied. |
+| `setEnv` | `setEnv(env: Record<string, string>): void` | `void` | Replaces the client's environment map. `use()` uses it for `ROCKETRIDE_*` substitution; `login()` consults `ROCKETRIDE_APIKEY` when no explicit credential is supplied. |
 
 Join/supersede semantics for concurrent logins are described on
 [Connection](/clients/typescript/connection#concurrent-logins). The client also
@@ -153,10 +153,10 @@ Returns mirror the Python table: `publish` → `PublishResult`; `deploy`, `get`,
 
 | Method | Signature |
 | --- | --- |
-| `appPublish` | `appPublish({ appId, version, bundle, message?, moduleId?, name? }): Promise<RailEntry>` |
-| `appVersions` | `appVersions(appId): Promise<RailEntry[]>` |
+| `appPublish` | `appPublish({ appId, version, bundle, message?, moduleId?, name? }): Promise<{ registryVersion, appVersion, sha256, publishedAt, author, message }>` |
+| `appVersions` | `appVersions(appId): Promise<Array<{ registryVersion, appVersion, sha256, publishedAt, author, message, rungs }>>` |
 | `appDeploy` | `appDeploy(appId, registryVersion, target): Promise<{ deployment, rung }>` |
-| `appWhere` | `appWhere(appId): Promise<Pin[]>` |
+| `appWhere` | `appWhere(appId): Promise<Array<{ rung, handle, version, appVersion, state, deployedAt? }>>` |
 
 ### Run logs (`client.log`)
 

@@ -10,11 +10,11 @@ Everything below is exported from `'rocketride/app-sdk'`. The
 
 ### Types
 
-`ShellAppProps`, `ShellSidebarProps`, `WorkspacePrefs`, `WorkspaceState`, `AppWorkspaceState`, `AppManifestEntry`, `AppDescriptor`, `AppSettingDefinition`, `ShellConfig`, `ShellBrandingConfig`, `ShellThemeConfig`, `ShellThemeOption`, `ShellAccountConfig`, `ShellApiConfig`, `ShellEventMap`, `DebugLogEntry`, `WorkspaceAction`, `IWorkspaceContext`, `AuthUser`, `Document`, `Editor`, `EditorGroup`, `SplitOrientation`, `DocumentsState`, `IVirtualFileSystem`, `DocExplorerProps`, `DocExplorerConfig`, `DocEntry`, `DocEntryChild`, `DocEntryStatus`, `DocTabsProps`, `UseAppComponentResult`, `ShellToIframeMsg`, `IframeToShellMsg`, `ShellInitMsg`, `InitClientOptions`, `ShellProps`, `SidebarProps`
+`ShellAppProps`, `ConnectResult`, `AppDescriptor`, `AppManifestEntry`, `SettingValue`, `SettingSchema`, `AppConfiguration`, `ShellBrandingConfig`, `WorkspacePrefs`, `IWorkspaceContext`, `ShellApiConfig`, `ShellThemeConfig`, `ShellThemeOption`, `IVirtualFileSystem`, `Document`, `Editor`, `EditorGroup`, `SplitOrientation`, `DocumentsState`, `ShellEventMap`
 
 ### Hooks
 
-`useShellConnection()`, `useShellApiConfig()`, `useWorkspace()`, `useAuthUser()`, `useLogout()`, `useSubscriptions()`, `useAppComponent()`, `useShellEvents()`, `useShellEvent()`, `useClient()`, `useConnectionStatus()`, `usePolling()`, `useClickOutside()`, `useFixedPopupPosition()`
+`useShellConnection()`, `useShellApiConfig()`, `useWorkspace()`, `useAuthUser()`, `useLogout()`, `useSubscriptions()`, `useAppComponent()`
 
 ### Functions
 
@@ -22,8 +22,8 @@ Everything below is exported from `'rocketride/app-sdk'`. The
 
 ### Classes
 
-`Documents`: instantiable document model with methods: `openDocument()`, `openStaticDocument()`, `createDocument()`, `closeEditor()`, `updateContent()`, `saveDocument()`, `revertDocument()`, `splitGroup()`, `splitGroupWithDocument()`, `moveEditor()`, `closeGroup()`, `updateSplitSizes()`, `setActiveEditor()`, `setActiveGroup()`, `updateEditorViewport()`, `updateEditorViewState()`, `getState()`, `getDocument()`, `useStore()`, `destroy()`
+`Documents`: instantiable document model with methods: `openDocument()`, `createDocument()`, `closeEditor()`, `updateContent()`, `saveDocument()`, `revertDocument()`, `splitGroup()`, `moveEditor()`, `closeGroup()`, `setActiveEditor()`, `setActiveGroup()`, `updateEditorViewport()`, `getState()`, `getDocument()`, `useStore()`, `destroy()`
 
 ### Components
 
-`Shell`, `Sidebar`, `NavButton`, `BottomPanel`, `ConfirmDialog`, `DebugPanel`, `PopupRow`, `AccountPage`, `BillingPage`, `SettingsPage`, `DocExplorer`, `DocTabs`, `DocSplitLayout`
+The app-sdk exports no components. `AppLayout`, `DocExplorer`, `DocTabs`, and `DocSplitLayout` (along with the shell frame components) are exported from the `shell` package.

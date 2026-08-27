@@ -33,8 +33,8 @@ additional lanes (see each node's entry in [Nodes](/nodes)):
 | `questions` | Queries flowing toward a model   | LLMs, vector stores (for retrieval), agents              |
 | `answers`   | Model responses flowing back     | `response` target, nodes expecting generated text        |
 | `documents` | Vector-ready chunks              | Vector store `documents` input                           |
-| `text`      | Plain text content               | Preprocessors, embedding nodes, LLMs                     |
-| `tags`      | Structured metadata / parameters | Parsers, embedding nodes                                 |
+| `text`      | Plain text content               | Preprocessors                                            |
+| `tags`      | Structured metadata / parameters | Parsers                                                  |
 | `image`     | Image content                    | Vision nodes                                             |
 | `audio`     | Audio streams                    | Audio nodes                                              |
 | `video`     | Video streams                    | Video nodes                                              |
