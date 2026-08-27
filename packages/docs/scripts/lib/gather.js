@@ -60,7 +60,8 @@ const EXPECTED_PLACEHOLDERS = [
 	'operate/self-hosting/kubernetes',
 	'support/get-help',
 	'support/contributing',
-	// Becomes a generated page when the release-notes generator lands (phase 4).
+	// Placeholder at gather time only: docs:release-notes overwrites it with a
+	// page generated from GitHub releases, unless the API is unreachable.
 	'support/release-notes',
 ];
 
