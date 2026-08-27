@@ -65,6 +65,10 @@ You build a shell app in your own repository: `npm install rocketride`, export
 an `AppDescriptor` through Module Federation, and deploy the bundle to any
 shell host.
 
+> **Shortcut:** the VS Code extension's [App Builder](/clients/vscode/app-builder)
+> scaffolds this whole shape from a template and adds a live preview, publish,
+> and deploy loop — the steps below explain what it generates.
+
 ### 1. Create a new project
 
 ```bash
