@@ -82,6 +82,7 @@ Node shapes:
 | --- | --- |
 | `{ id, label }` | A single authored page (leaf) |
 | `{ id, label, mount: true }` | A leaf that a package may mount a whole subtree into |
+| `{ id, label, mount: true, nest: true }` | A multi-page mount rendered as a sidebar category: the category links to the slot's index page and lists every staged page under it, ordered by `sidebar_position` (the SDK and VS Code mounts) |
 | `{ label, items: [...] }` | A category of leaves or nested categories |
 | `{ label, autogen: 'nodes' }` | A category whose pages are generated (the node catalog) |
 

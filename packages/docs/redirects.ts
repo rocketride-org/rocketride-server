@@ -333,24 +333,47 @@ const redirects: RedirectItem[] = [
 		from: ['/vscode-extension/usage'],
 	},
 	{
-		to: '/clients/typescript/methods/send',
+		to: '/clients/typescript/data',
 		from: ['/api/send-method/send-method'],
 	},
 	{
-		to: '/clients/typescript/methods/use',
+		to: '/clients/typescript/pipelines',
 		from: ['/api/use-method/use-method'],
 	},
 	{
-		to: '/clients/typescript/methods/validate',
+		to: '/clients/typescript/pipelines',
 		from: ['/api/validate-method/validate-method'],
 	},
 	{
-		to: '/clients/typescript/methods/get-task-status',
+		to: '/clients/typescript/pipelines',
 		from: ['/api/get-task-status-method/get-task-status-method'],
 	},
 	{
-		to: '/clients/typescript/methods/terminate',
+		to: '/clients/typescript/pipelines',
 		from: ['/api/terminate-method/terminate-method'],
+	},
+	// Client-docs restructure (claude/tasks/client-docs-restructure): the TS
+	// methods/* deep dives merged into the topical guides, and python's log.md
+	// became logs.md alongside a TS twin.
+	{
+		to: '/clients/typescript/data',
+		from: ['/clients/typescript/methods/send', '/develop/typescript/methods/send'],
+	},
+	{
+		to: '/clients/typescript/pipelines',
+		from: ['/clients/typescript/methods/use', '/clients/typescript/methods/deploy', '/clients/typescript/methods/get-task-status', '/clients/typescript/methods/terminate', '/clients/typescript/methods/validate', '/develop/typescript/methods/use', '/develop/typescript/methods/deploy', '/develop/typescript/methods/get-task-status', '/develop/typescript/methods/terminate', '/develop/typescript/methods/validate'],
+	},
+	{
+		to: '/clients/typescript/logs',
+		from: ['/clients/typescript/methods/log', '/develop/typescript/methods/log'],
+	},
+	{
+		to: '/clients/typescript/database-sequelize',
+		from: ['/clients/typescript/methods/database-sequelize', '/develop/typescript/methods/database-sequelize'],
+	},
+	{
+		to: '/clients/python/logs',
+		from: ['/clients/python/log', '/develop/python/log'],
 	},
 	{
 		to: '/',

@@ -1,6 +1,6 @@
 ---
-title: "Analytics / Telemetry Reporting"
-date: 2026-07-15
+title: Analytics
+sidebar_position: 12
 ---
 
 - [Overview](#overview)
@@ -28,8 +28,9 @@ from rocketride.analytics import init_report, report
 ## **API**
 
 ```python
-# Once, at app init: wire the emitting app id + transport.
-init_report('rocket-ui', lambda event, props: client.report(event, props))
+# Once, at app init: wire the emitting app id + transport. The sink is
+# whatever callable your app uses to ship events (HTTP, queue, logger, ...).
+init_report('rocket-ui', lambda event, props: my_sink.send(event, props))
 
 # Anywhere after that:
 report('pipeline:run', {'node_count': 4})
