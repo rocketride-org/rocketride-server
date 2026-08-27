@@ -425,19 +425,15 @@ body {
 	font-weight: 600;
 }
 
-/* Top-level category labels render as marketing-style mono kickers (the
- * "01 · DEPLOY" treatment) rather than pill rows. Depth is selected
+/* Top-level category labels use the same face and size as every other menu
+ * row (the mono-kicker treatment was retired 2026-08-27); only the accent
+ * color, group spacing, and alignment set them apart. Depth is selected
  * structurally (direct children of the root .menu__list), so nested
  * categories keep the normal pill treatment. */
 .theme-doc-sidebar-menu > .menu__list-item > .menu__list-item-collapsible > .menu__link--sublist:not(#\#):not(#\#) {
-	font-family: var(--rr-font-mono);
-	font-size: 0.76rem;
-	font-weight: 700;
-	letter-spacing: 0.12em;
-	text-transform: uppercase;
 	/* Star by default: this menu is REUSED by the mobile navbar drawer, whose
 	 * surface is light — white text would vanish there. The dark desktop
-	 * panel re-whitens the kickers below. */
+	 * panel re-whitens the labels below. */
 	color: var(--rr-red);
 	background: transparent;
 	margin-top: 1.1rem;
@@ -825,6 +821,9 @@ html[data-theme='dark'] .rr-side-card:not(#\#):not(#\#):hover {
 	align-items: center;
 	justify-content: center;
 	box-sizing: content-box;
+	/* The base 1.2em glyph computes against this, not the surrounding 1rem
+	 * text, so the tile holds its own against the bold card title. */
+	font-size: 1.5rem;
 	padding: 0.4rem;
 	border-radius: 2px;
 	margin-right: 0;
@@ -877,6 +876,21 @@ html[data-theme='dark'] .rr-side-card:not(#\#):not(#\#):hover {
 
 .rr-side-card:hover .rr-side-card__body {
 	color: rgba(250, 251, 248, 0.8);
+}
+
+/* Inline code in a card body inherits the inverted text color on hover but
+ * kept its resting background, leaving light-on-light pills in light mode.
+ * Re-field it to match each inversion. The :not(#\#) pair matches Infima's
+ * ID-level specificity hack on its own `code` rule — without it the resting
+ * background always wins. */
+.rr-side-card:hover .rr-side-card__body code:not(#\#):not(#\#) {
+	background: rgba(250, 251, 248, 0.14);
+	border-color: rgba(250, 251, 248, 0.25);
+}
+
+[data-theme='dark'] .rr-side-card:hover .rr-side-card__body code:not(#\#):not(#\#) {
+	background: rgba(20, 17, 29, 0.08);
+	border-color: rgba(20, 17, 29, 0.2);
 }
 
 /* Dark mode inverts the other way: flip to the paper field (the anchor's
