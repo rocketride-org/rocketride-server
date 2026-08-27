@@ -1,6 +1,7 @@
 {
 	//
-	// Hack Judge app-owned authentication node (Blueprint Rev 2, section 03).
+	// Hack Judge account node (Blueprint Rev 2, section 03): resolves the
+	// platform-provided marketplace identity to the app's tenant + tier.
 	// classType "search" mirrors hackjudge_engine's proven lane-processor shape.
 	//
 	"title": "Hack Judge Account",
@@ -13,9 +14,9 @@
 	"prefix": "hjaccount",
 	"icon": "account.svg",
 	"description": [
-		"App-owned authentication for Hack Judge: signup, signin, session validation, signout, profile.",
+		"Marketplace identity resolver for Hack Judge: maps the platform session's org + user to the app tenant and tier.",
 		"Input (questions): a JSON job {op, ...}. Output (answers): a JSON result {ok, ...}.",
-		"Passwords are scrypt-hashed; sessions are DB-backed (revocable), stored as SHA-256 hashes."
+		"Identity comes from the platform (manifest authenticated: true); no passwords or sessions live in the app."
 	],
 	"lanes": {
 		"questions": ["questions", "answers", "text"]
@@ -24,8 +25,7 @@
 		"default": "default",
 		"profiles": {
 			"default": {
-				"database_url": "",
-				"session_ttl_hours": 168
+				"database_url": ""
 			}
 		}
 	},
@@ -39,20 +39,13 @@
 			"ui": {
 				"ui:widget": "ApiKeyWidget"
 			}
-		},
-		"hackjudge_account.session_ttl_hours": {
-			"type": "integer",
-			"title": "Session TTL (hours)",
-			"default": 168,
-			"minimum": 1,
-			"maximum": 8760
 		}
 	},
 	"shape": [
 		{
 			"section": "Pipe",
 			"title": "Hack Judge Account",
-			"properties": ["hackjudge_account.database_url", "hackjudge_account.session_ttl_hours"]
+			"properties": ["hackjudge_account.database_url"]
 		}
 	]
 }

@@ -1,24 +1,32 @@
 # hackjudge_account
 
-Business-account sign-in for the Hack Judge suite: resolves who is asking and
-which tenant they belong to, entirely inside the pipeline.
+Marketplace identity resolver for the Hack Judge suite: turns the platform's
+signed-in user into the app's tenant + tier, inside the pipeline.
 
 ## What it does
 
-Hack Judge is a B2B product; every request must map to a paying tenant before
-any work runs. This node owns that mapping: it creates accounts, signs users in
-and out, validates session tokens, and serves profile reads and updates. In the
-verify flow it runs first, stamps the resolved `tenant_id` and `tier` into the
-envelope, and forwards to the token gate. An invalid or expired session
-short-circuits: the answer goes straight back out and nothing downstream runs.
+Identity is the platform's job, not the app's. A marketplace app declares
+`authenticated: true` in its manifest and the platform hands it the signed-in
+user at launch: no per-app OAuth client, no password store, no session
+machinery in the app (see the app owner runbook).
 
-Security choices, deliberately boring:
+What the pipeline still needs is the step this node provides. Hack Judge keeps
+its own tenant rows (data isolation, tier, prepaid balance), so somebody has
+to map "platform org X, platform user Y" onto "app tenant T with tier D" the
+moment a request enters the pipeline, and refuse requests that arrive without
+a platform identity. That mapping is this node:
 
-- Passwords are hashed with `hashlib.scrypt` (stdlib, no extra dependency),
-  parameters recorded in the stored hash so they can be raised later.
-- Session tokens are returned to the caller once and stored only as SHA-256
-  hashes; a database leak does not leak usable sessions.
-- Sessions expire after `session_ttl_hours` and can be revoked with `signout`.
+- First sight of a platform org creates the app tenant (and its balances row),
+  keyed by `marketplace_org_id`.
+- First sight of a platform user creates the app user row, keyed per org, so
+  one person in two orgs is two app users with separate data and balances.
+- The resolved `tenant_id`, `user_id` and `tier` are stamped into the
+  verify-flow envelope for every downstream node (token gate, engine, store).
+- A request with no platform identity short-circuits: the answer goes straight
+  back out and nothing downstream runs.
+
+Tier is read from the tenant row, not decided here: entitlement
+(`app_subscriptions` via platform billing) owns which tier an org is on.
 
 ## Lanes
 
@@ -31,12 +39,9 @@ Security choices, deliberately boring:
 
 | Op | Does |
 | --- | --- |
-| `signup` | Create a tenant + first user, returns a session token |
-| `signin` | Verify credentials, returns a fresh session token |
-| `validate` | Resolve a session token to `tenant_id`, user and tier |
-| `signout` | Revoke the session |
+| `resolve` | Map platform org + user to `tenant_id`, `user_id`, `tier` (creating both on first sight) |
 | `profile_get` | Read the account profile |
-| `profile_update` | Update company / profile details |
+| `profile_update` | Update company / member display details |
 
 Records addressed to other stages of the verify flow (`{"flow": "verify",
 "next": "..."}` where `next` is not `account`) pass through untouched.
@@ -46,9 +51,10 @@ Records addressed to other stages of the verify flow (`{"flow": "verify",
 | Field | Meaning |
 | --- | --- |
 | `database_url` | Postgres connection string (the shared Hack Judge store) |
-| `session_ttl_hours` | Session lifetime; expired sessions fail `validate` |
 
 ## Validation
 
-Covered by the 12-check in-engine suite (signup, validate, tier resolution)
-and the full-chain verify pipeline including the short-circuit paths.
+Covered by the suite's in-engine run (tenant resolution, tier stamping) and
+the full-chain verify pipeline including the short-circuit paths. Offline
+tests cover the pre-DB identity validation, the per-org user keying and the
+op surface.

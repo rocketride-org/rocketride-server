@@ -1,35 +1,35 @@
-"""Per-request logic for hackjudge_account: app-owned authentication.
+"""Per-request logic for hackjudge_account: marketplace identity -> app tenant.
 
-The app owns its user accounts (no marketplace accounts for app users).
+Identity itself is the platform's job: a marketplace app declares
+``authenticated: true`` in its manifest and the platform hands it the
+signed-in user (see the app owner runbook). No passwords, no sessions, no
+per-app OAuth live here. What the pipeline still needs, and what this node
+does, is resolve that platform identity to the app's own tenant + tier and
+stamp it into the verify-flow envelope, short-circuiting requests that
+arrive without one.
+
 JSON job on the questions lane -> JSON result on the answers lane:
 
-  signup   {op, email, password, company, name?} -> {ok, session_token, tenant_id, user_id}
-  signin   {op, email, password}                 -> {ok, session_token, tenant_id, user_id}
-  validate {op, session_token}                   -> {ok, tenant_id, user_id, email, name, company, tier}
-  signout  {op, session_token}                   -> {ok}
-  profile.get    {op, session_token}             -> {ok, profile}
-  profile.update {op, session_token, name?, company?} -> {ok}
+  resolve  {op, platform_org_id, platform_user_id, org_name?, name?, email?}
+           -> {ok, tenant_id, user_id, tier, company}
+  profile.get    {op, platform_org_id, platform_user_id}        -> {ok, profile}
+  profile.update {op, platform_org_id, platform_user_id, name?, company?} -> {ok}
 
-Passwords: hashlib.scrypt (stdlib, no external hash dependency).
-Sessions: secrets token returned once; only its SHA-256 hash is stored,
-TTL-expired and revocable by row delete (DB-backed, not JWT, so a B2B
-account can kill a session instantly). Phase 1: one user per tenant.
+First sight of a platform org creates the tenant (with its balances row);
+first sight of a platform user creates the user row. Tier lives on the
+tenant and is owned by entitlement (app_subscriptions -> tier), not by
+this node.
 """
 
 from __future__ import annotations
 
-import hashlib
 import json
-import secrets
 import uuid
-from datetime import datetime, timedelta, timezone
 
 from ai.common.schema import Answer, Question
 from rocketlib import IInstanceBase
 
 from .IGlobal import IGlobal
-
-_SCRYPT_N, _SCRYPT_R, _SCRYPT_P = 16384, 8, 1
 
 
 def _job_text(question: Question) -> str:
@@ -47,25 +47,11 @@ def _job_text(question: Question) -> str:
     return '\n'.join(parts).strip()
 
 
-def _hash_password(password: str) -> str:
-    salt = secrets.token_bytes(16)
-    digest = hashlib.scrypt(password.encode('utf-8'), salt=salt, n=_SCRYPT_N, r=_SCRYPT_R, p=_SCRYPT_P)
-    return f'scrypt${_SCRYPT_N}${_SCRYPT_R}${_SCRYPT_P}${salt.hex()}${digest.hex()}'
-
-
-def _verify_password(password: str, stored: str) -> bool:
-    try:
-        algo, n, r, p, salt_hex, digest_hex = str(stored or '').split('$')
-        if algo != 'scrypt':
-            return False
-        digest = hashlib.scrypt(password.encode('utf-8'), salt=bytes.fromhex(salt_hex), n=int(n), r=int(r), p=int(p))
-        return secrets.compare_digest(digest.hex(), digest_hex)
-    except (ValueError, TypeError):
-        return False
-
-
-def _token_hash(token: str) -> str:
-    return hashlib.sha256(token.encode('utf-8')).hexdigest()
+def _external_id(platform_user_id: str, platform_org_id: str) -> str:
+    """App-side user key. Scoped per org so one person in two orgs is two
+    app users (each org is a separate tenant with its own data and balance).
+    """
+    return f'mp:{platform_user_id}@{platform_org_id}'
 
 
 class IInstance(IInstanceBase):
@@ -100,95 +86,20 @@ class IInstance(IInstanceBase):
 
     # ---- ops -----------------------------------------------------------------
 
-    def _op_signup(self, job: dict) -> dict:
-        email = str(job.get('email') or '').strip().lower()
-        password = str(job.get('password') or '')
-        company = str(job.get('company') or '').strip()
-        name = str(job.get('name') or '').strip() or email.split('@')[0]
-        if '@' not in email or '.' not in email.split('@')[-1]:
-            return {'ok': False, 'error': 'a valid email is required'}
-        if len(password) < 8:
-            return {'ok': False, 'error': 'password must be at least 8 characters'}
-        if not company:
-            return {'ok': False, 'error': 'company name is required'}
-
-        pw = _hash_password(password)
-        tenant_id, user_id = uuid.uuid4().hex, uuid.uuid4().hex
-
-        def tx(cur):
-            cur.execute(
-                'SELECT id FROM users WHERE lower(email) = %s AND password_hash IS NOT NULL',
-                (email,),
-            )
-            if cur.fetchone():
-                return {'ok': False, 'error': 'an account with this email already exists'}
-            cur.execute(
-                'INSERT INTO tenants (id, name, created_at) VALUES (%s, %s, now())',
-                (tenant_id, company),
-            )
-            cur.execute(
-                'INSERT INTO users (id, external_id, tenant_id, name, email, role,'
-                ' password_hash, is_active, created_at)'
-                ' VALUES (%s, %s, %s, %s, %s, %s, %s, TRUE, now())',
-                (user_id, 'app:' + email, tenant_id, name, email, 'admin', pw),
-            )
-            cur.execute(
-                'INSERT INTO balances (tenant_id) VALUES (%s) ON CONFLICT DO NOTHING',
-                (tenant_id,),
-            )
-            return None
-
-        err = self.IGlobal.db.run(tx)
-        if err:
-            return err
-        return self._create_session(user_id, tenant_id)
-
-    def _op_signin(self, job: dict) -> dict:
-        email = str(job.get('email') or '').strip().lower()
-        password = str(job.get('password') or '')
-
-        def q(cur):
-            cur.execute(
-                'SELECT id, tenant_id, password_hash, is_active FROM users'
-                ' WHERE lower(email) = %s AND password_hash IS NOT NULL',
-                (email,),
-            )
-            return cur.fetchone()
-
-        row = self.IGlobal.db.run(q)
-        if not row or not row['is_active'] or not _verify_password(password, row['password_hash']):
-            return {'ok': False, 'error': 'invalid email or password'}
-        return self._create_session(row['id'], row['tenant_id'])
-
-    def _op_validate(self, job: dict) -> dict:
-        row = self._session_row(job)
+    def _op_resolve(self, job: dict) -> dict:
+        row = self._resolve(job)
         if isinstance(row, dict) and row.get('ok') is False:
             return row
         return {
             'ok': True,
             'tenant_id': row['tenant_id'],
             'user_id': row['user_id'],
-            'email': row['email'],
-            'name': row['name'],
+            'tier': row['tier'],
             'company': row['company'],
-            'tier': row['tier'] or 'developer',
         }
 
-    def _op_signout(self, job: dict) -> dict:
-        token = str(job.get('session_token') or '')
-        if not token:
-            return {'ok': False, 'error': 'session_token is required'}
-        th = _token_hash(token)
-
-        def tx(cur):
-            cur.execute('DELETE FROM sessions WHERE token_hash = %s', (th,))
-            return cur.rowcount
-
-        self.IGlobal.db.run(tx)
-        return {'ok': True}
-
     def _op_profile_get(self, job: dict) -> dict:
-        row = self._session_row(job)
+        row = self._resolve(job)
         if isinstance(row, dict) and row.get('ok') is False:
             return row
         return {
@@ -197,12 +108,12 @@ class IInstance(IInstanceBase):
                 'email': row['email'],
                 'name': row['name'],
                 'company': row['company'],
-                'tier': row['tier'] or 'developer',
+                'tier': row['tier'],
             },
         }
 
     def _op_profile_update(self, job: dict) -> dict:
-        row = self._session_row(job)
+        row = self._resolve(job)
         if isinstance(row, dict) and row.get('ok') is False:
             return row
         name = str(job.get('name') or '').strip()
@@ -221,66 +132,69 @@ class IInstance(IInstanceBase):
 
     # ---- helpers -------------------------------------------------------------
 
-    def _session_row(self, job: dict):
-        """Resolve a session_token to its user/tenant row, or an error result."""
-        token = str(job.get('session_token') or '')
-        if not token:
-            return {'ok': False, 'error': 'session_token is required'}
-        th = _token_hash(token)
-
-        def q(cur):
-            cur.execute(
-                'SELECT s.user_id, s.tenant_id, s.expires_at, u.email, u.name, u.is_active,'
-                ' t.tier, t.name AS company'
-                ' FROM sessions s'
-                ' JOIN users u ON u.id = s.user_id'
-                ' JOIN tenants t ON t.id = s.tenant_id'
-                ' WHERE s.token_hash = %s',
-                (th,),
-            )
-            return cur.fetchone()
-
-        row = self.IGlobal.db.run(q)
-        if not row or not row['is_active']:
-            return {'ok': False, 'error': 'invalid session'}
-        if row['expires_at'] <= datetime.now(timezone.utc):
-            return {'ok': False, 'error': 'session expired'}
-        return row
-
-    def _create_session(self, user_id: str, tenant_id: str) -> dict:
-        token = secrets.token_urlsafe(32)
-        expires = datetime.now(timezone.utc) + timedelta(hours=self.IGlobal.session_ttl_hours)
-        sid = uuid.uuid4().hex
+    def _resolve(self, job: dict):
+        """Map platform identity to the app tenant/user, creating both on first
+        sight. Validation runs before any DB work.
+        """
+        org = str(job.get('platform_org_id') or '').strip()
+        user = str(job.get('platform_user_id') or '').strip()
+        if not org or not user:
+            return {'ok': False, 'error': 'platform identity is required (platform_org_id and platform_user_id)'}
+        name = str(job.get('name') or '').strip() or 'Member'
+        email = str(job.get('email') or '').strip().lower()
+        org_name = str(job.get('org_name') or '').strip() or f'Org {org[:8]}'
+        ext = _external_id(user, org)
+        new_tenant_id, new_user_id = uuid.uuid4().hex, uuid.uuid4().hex
 
         def tx(cur):
-            cur.execute(
-                'INSERT INTO sessions (id, token_hash, user_id, tenant_id, expires_at) VALUES (%s, %s, %s, %s, %s)',
-                (sid, _token_hash(token), user_id, tenant_id, expires),
-            )
+            cur.execute('SELECT id, tier, name FROM tenants WHERE marketplace_org_id = %s', (org,))
+            t = cur.fetchone()
+            if not t:
+                cur.execute(
+                    'INSERT INTO tenants (id, name, marketplace_org_id, created_at) VALUES (%s, %s, %s, now())',
+                    (new_tenant_id, org_name, org),
+                )
+                cur.execute(
+                    'INSERT INTO balances (tenant_id) VALUES (%s) ON CONFLICT DO NOTHING',
+                    (new_tenant_id,),
+                )
+                t = {'id': new_tenant_id, 'tier': None, 'name': org_name}
+            cur.execute('SELECT id, is_active, name, email FROM users WHERE external_id = %s', (ext,))
+            u = cur.fetchone()
+            if not u:
+                cur.execute(
+                    'INSERT INTO users (id, external_id, tenant_id, name, email, role,'
+                    " is_active, created_at) VALUES (%s, %s, %s, %s, %s, 'member', TRUE, now())",
+                    (new_user_id, ext, t['id'], name, email),
+                )
+                u = {'id': new_user_id, 'is_active': True, 'name': name, 'email': email}
+            if not u['is_active']:
+                return {'ok': False, 'error': 'account is deactivated'}
+            return {
+                'tenant_id': t['id'],
+                'user_id': u['id'],
+                'tier': t['tier'] or 'developer',
+                'company': t['name'],
+                'name': u['name'],
+                'email': u['email'],
+            }
 
-        self.IGlobal.db.run(tx)
-        return {
-            'ok': True,
-            'session_token': token,
-            'tenant_id': tenant_id,
-            'user_id': user_id,
-            'expires_at': expires.isoformat(),
-        }
+        return self.IGlobal.db.run(tx)
 
     # ---- verify-flow stage (full-pipeline wiring) -----------------------------
 
     def _stage_flow(self, question: Question, job: dict) -> None:
-        """Pipeline stage: resolve the session to a tenant and enrich the envelope."""
+        """Pipeline stage: resolve platform identity to a tenant and enrich the envelope."""
         if str(job.get('next') or 'account') != 'account':
             return  # not addressed to this stage; lane delivery is broadcast-like
-        row = self._session_row(job)
+        row = self._resolve(job)
         if isinstance(row, dict) and row.get('ok') is False:
             self._emit(question, {**row, 'stage': 'account'})
             return
         job['auth'] = {
             'tenant_id': row['tenant_id'],
             'user_id': row['user_id'],
-            'tier': row['tier'] or 'developer',
+            'tier': row['tier'],
         }
         job['next'] = 'gate'
         self._forward(question, job)
