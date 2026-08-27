@@ -1,0 +1,114 @@
+---
+title: HTTP MCP Server
+sidebar_position: 0
+sidebar_label: Overview
+---
+
+import { LuPlug, LuWrench, LuLayoutGrid, LuServer } from 'react-icons/lu';
+
+# HTTP MCP Server
+
+The RocketRide engine has a built-in MCP server — nothing to install, nothing to
+run. Connect an AI assistant to it and the assistant can **build, validate, run,
+and observe** RocketRide pipelines, manage deployments, and read your account
+file store.
+
+## Endpoint
+
+```text
+https://api.rocketride.ai/mcp
+```
+
+Self-hosted engines serve the same endpoint automatically at
+`http://<host>:5565/mcp` as soon as the engine is up (see
+[Self-hosting](/connect/mcp/http/self-hosting)).
+
+## Authentication
+
+Clients like Claude and ChatGPT authenticate with OAuth — the first connection
+triggers an interactive login, and users without a RocketRide account can sign
+up from the same screen. Header-capable clients (Cursor, scripts, CLIs) can
+instead send a RocketRide API key: `Authorization: Bearer rr_...`.
+
+Task-scoped keys (`tk_`/`pk_`) are never accepted on this endpoint. Setup steps
+for each client are on [Connect a client](/connect/mcp/http/connect).
+
+## What you can do
+
+The server exposes 27 tools, organized by capability — the full parameter-level
+reference is on [Tools](/connect/mcp/http/tools):
+
+| Capability | Tools |
+| --- | --- |
+| [Discover components](/connect/mcp/http/tools#discover-components) | `list_components`, `describe_component`, `list_integrations` |
+| [Author pipelines](/connect/mcp/http/tools#author-pipelines) | `validate_pipeline`, `describe_pipeline`, `save_template`, `load_template` |
+| [Run pipelines](/connect/mcp/http/tools#run-pipelines) | `run_pipeline`, `run_dropper_pipe`, `send_data`, `send_files`, `terminate` |
+| [Watch what's running](/connect/mcp/http/tools#watch-whats-running) | `monitor`, `list_running_pipelines` |
+| [Read the file store](/connect/mcp/http/tools#read-the-file-store) | `store_read`, `store_list`, `store_stat`, `store_get_url` |
+| [Manage deployments](/connect/mcp/http/tools#manage-deployments) | `deploy_add`, `deploy_list`, `deploy_status`, `deploy_remove`, `deploy_update` |
+| [Replay past runs](/connect/mcp/http/tools#replay-past-runs) | `log_chapters`, `log_read`, `log_traces`, `log_trace` |
+
+Two things to know when working with the tools:
+
+- **Pipelines travel inline.** No tool accepts a pipeline filepath — a client
+  that has a `.pipe` file reads it itself and sends the JSON.
+- **Files come in over a separate channel.** `run_dropper_pipe` returns an
+  `upload_url` for programmatic uploads and a `dropper_url` — a browser page
+  where a person can drag and drop files into the running pipeline.
+
+## Example prompts
+
+> Build and run a pipeline that summarizes the PDFs I upload.
+
+> Which components can I use right now without setting up any credentials?
+
+> Show me what happened in my last run — where did the second document fail?
+
+> Deploy this pipeline to run every night at 2am.
+
+## Security model
+
+- **Inline-only pipelines** — no tool accepts a server-local pipeline path, so
+  a caller can never make the engine read pipeline definitions off its own
+  disk.
+- **Store-scoped reads** — the four `store_*` tools resolve paths through your
+  account's file store on the engine, nothing else. (`send_files` is the one
+  exception: its paths resolve on the machine the engine runs on — see its
+  [reference entry](/connect/mcp/http/tools#send_files).)
+- **Credential names, never values** — integration-readiness tools report which
+  environment variables are configured; the values never transit MCP.
+- **Audience-enforced OAuth** — tokens must be minted for this resource;
+  task-scoped keys and PKCE codes are rejected outright.
+- **Per-caller identity** — every request acts as the account behind the
+  presented credential; tools see that caller's own store, deployments, and
+  environment.
+
+## Explore
+
+<div className="rr-card-grid">
+
+<a className="rr-side-card" href="/connect/mcp/http/connect">
+  <span className="rr-side-card__head"><LuPlug className="rr-card-icon" /><span className="rr-side-card__title">Connect a client</span></span>
+  <span className="rr-side-card__body">Setup for Claude, Claude Code, Cursor, and VS Code; OAuth and API-key auth; transport details.</span>
+</a>
+
+<a className="rr-side-card" href="/connect/mcp/http/tools">
+  <span className="rr-side-card__head"><LuWrench className="rr-card-icon" /><span className="rr-side-card__title">Tools</span></span>
+  <span className="rr-side-card__body">All 27 tools with parameters, return shapes, and the error contract.</span>
+</a>
+
+<a className="rr-side-card" href="/connect/mcp/http/resources-and-widgets">
+  <span className="rr-side-card__head"><LuLayoutGrid className="rr-card-icon" /><span className="rr-side-card__title">Resources &amp; Widgets</span></span>
+  <span className="rr-side-card__body">Live MCP resources and the interactive widgets rendered in MCP Apps hosts.</span>
+</a>
+
+<a className="rr-side-card" href="/connect/mcp/http/self-hosting">
+  <span className="rr-side-card__head"><LuServer className="rr-card-icon" /><span className="rr-side-card__title">Self-hosting</span></span>
+  <span className="rr-side-card__body">OAuth configuration, environment variables, and the dev-mode auth bypass.</span>
+</a>
+
+</div>
+
+Looking for the stdio PyPI package (`rocketride-mcp`) that exposes *running
+pipelines* as tools instead? That's the
+[stdio MCP server](/connect/mcp/stdio).

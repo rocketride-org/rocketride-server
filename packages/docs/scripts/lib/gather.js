@@ -636,11 +636,7 @@ async function gather({ projectRoot, contentStaticDir, contentDir, staticDir, mo
 	// as the mount's page when the mount root carries no index.md/mdx.
 	for (const m of DOCS_ROOT_MOUNTS) {
 		const readmeRel = `${m.source}/README.md`;
-		if (
-			(await exists(path.join(projectRoot, readmeRel))) &&
-			!(await exists(path.join(projectRoot, m.source, 'index.md'))) &&
-			!(await exists(path.join(projectRoot, m.source, 'index.mdx')))
-		) {
+		if ((await exists(path.join(projectRoot, readmeRel))) && !(await exists(path.join(projectRoot, m.source, 'index.md'))) && !(await exists(path.join(projectRoot, m.source, 'index.mdx')))) {
 			rootDocsFiles.push(readmeRel);
 		}
 	}
