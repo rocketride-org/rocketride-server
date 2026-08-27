@@ -115,12 +115,16 @@ For small documents that produce few chunks, the flush happens at pipeline
 completion. For large document sets, flushing starts mid-run and reduces peak
 memory. Tuning batch size is covered in [Performance](/guides/performance).
 
+Every run is also recorded to a durable run log as it executes — chapters,
+traces, and console output you can replay after the run is gone. The
+[Observability guide](/guides/observability) covers that side of execution.
+
 ## Next steps
 
 - [Agents & tools](/concepts/agents-tools-skills): control connections in
   depth.
 - [Nodes](/concepts/nodes): what sits on each lane.
 - [WebSocket protocol](/connect/websocket): how clients feed and read a run.
-- [Observability](/connect/websocket/observability): watch a run stream, with lifecycle, status, metrics, and flow traces.
+- [Observability](/guides/observability): the run-log DVR, trace levels, and every monitoring surface.
 - [Pipeline JSON reference](/reference/pipeline-reference): the `input`, `lane`, and
   `control` fields.
