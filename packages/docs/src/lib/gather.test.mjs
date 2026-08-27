@@ -141,10 +141,11 @@ describe('assertNoUnexpectedPlaceholders', () => {
 		assert.doesNotThrow(() => assertNoUnexpectedPlaceholders([page('index'), page('nodes/llm_anthropic')]));
 	});
 
-	// Seeded empty deliberately: today's build stages zero placeholders. A
-	// growing allowlist is the failure mode this gate exists to prevent.
-	it('allowlists only the IA-restructure content-pass stubs', () => {
-		assert.deepEqual(EXPECTED_PLACEHOLDERS, ['guides/observability', 'operate/self-hosting/docker', 'operate/self-hosting/kubernetes', 'support/get-help', 'support/contributing', 'support/release-notes']);
+	// A growing allowlist is the failure mode this gate exists to prevent. The
+	// content pass (claude/tasks/docs-stub-pages) filled every stub; only the
+	// build-time release-notes placeholder legitimately remains.
+	it('allowlists only the build-time release-notes placeholder', () => {
+		assert.deepEqual(EXPECTED_PLACEHOLDERS, ['support/release-notes']);
 	});
 });
 

@@ -56,13 +56,6 @@ const PLACEHOLDER_NOTE = '> **Placeholder.** Generated stub for the documentatio
 // placeholder. Add an id here only when a stub page is genuinely wanted, with a
 // comment naming who fills it in — do not add ids to quiet a failing build.
 const EXPECTED_PLACEHOLDERS = [
-	// IA restructure (claude/tasks/docs-ia-restructure/plan.md) phase 2: genuine
-	// stubs awaiting Dylan's content pass before the site next deploys.
-	'guides/observability',
-	'operate/self-hosting/docker',
-	'operate/self-hosting/kubernetes',
-	'support/get-help',
-	'support/contributing',
 	// Placeholder at gather time only: docs:release-notes overwrites it with a
 	// page generated from GitHub releases, unless the API is unreachable.
 	'support/release-notes',
