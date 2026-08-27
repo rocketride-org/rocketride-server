@@ -7,12 +7,14 @@ The three folders split by **audience**: `public/` is for people outside the rep
 
 - **`product/`** — the site spine, and the only folder here whose paths are public
   URLs verbatim: `quickstart/`, `evaluate/`, `concepts/`, `examples/`,
-  `integrations/`, `develop/`, `operate/`, `reference/`, plus
+  `integrations/`, `develop/`, `operate/`, `reference/`, `ide-extensions/`, plus
   `protocols/websocket/` (the WebSocket (5565) engine wire protocol, for people
   building their own client).
 - **`typescript/`, `python/`, `vscode/`, `mcp/`** — the per-surface guides, each
   mounted into the docs site. Each folder also holds a `README.md` (the package
-  distribution readme — see Rules) and an `assets/` folder for its own images.
+  distribution readme — see Rules) and an `assets/` folder for its own images;
+  `mcp/` is the exception — it splits into `http/` and `stdio/`, and its readme
+  source lives at `mcp/stdio/README.md`.
 - **`n8n/`** — `README.md` only; the export source for `packages/n8n-nodes/`.
   Nothing here is published to the site.
 - **`assets/`** — images shared by more than one section.
@@ -25,7 +27,8 @@ contributor page has exactly one correct home:
 - **`builder/`** — `reference.md` (run builds: commands, modules, output, CLI flags,
   compiler toolchain), `authoring.md` (write a package's `scripts/tasks.js`),
   `pre-commit-hooks.md`.
-- **`engine/`** — C++ engine internals (`index.md`) and `crash-reporting.md`.
+- **`engine/`** — C++ engine internals (`index.md`), `crash-reporting.md`, and
+  `mcp-module.md`.
 - **`nodes/`** — `index.md` (how nodes connect, adding one, local prototyping),
   `services-schema.md` (the `services*.json` contract), `readme-schema.md`
   (the node README contract), `testing.md`.

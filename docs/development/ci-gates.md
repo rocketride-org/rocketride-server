@@ -2,23 +2,25 @@
 
 What has to pass before a PR can merge, and how to reproduce each check on your
 machine. Sources of truth: `.github/workflows/ci.yml`, `.github/workflows/_build.yaml`,
-and `lefthook.yml`.
+`.github/workflows/docs-schemas.yml`, and `lefthook.yml`.
 
 ## The one required check
 
 **`CI OK`** (job `ci-ok`) is the *only* job marked required in branch protection.
 It aggregates the results of `init`, `changes`, `build`, `helm-changes`,
-`helm-lint`, `ruff-check`, `docs-build`, `gitleaks`, and `shell-contract`, and
+`helm-lint`, `ruff-check`, `gitleaks`, and `shell-contract`, and
 fails if any of them failed or was cancelled. Jobs that were correctly **skipped**
 do not fail it — which is the whole point: a docs-only PR skips the 90-minute
 three-platform build and still merges.
 
-Two jobs are deliberately **outside** `ci-ok` and cannot block a merge:
+One job is deliberately **outside** `ci-ok` and cannot block a merge:
 
-- `node-docs` ("Doc schemas (advisory)") — advisory while the node corpus is
-  migrated to the README schema.
 - `container-scan` — runs on push/schedule only, never on PRs. Adding it to the
   required list would block every merge, since it is always skipped on a PR.
+
+The doc-schema and docs-site-build checks are not in `ci.yml` at all: they live
+in `.github/workflows/docs-schemas.yml`, which triggers only on PRs and pushes
+to `fix/docs` (`ci.yml` deliberately does not carry any of this yet).
 
 CodeQL is GitHub's "Default setup" (repo Settings → Code security), not a job in
 this workflow; findings land in the Security tab.
@@ -27,17 +29,14 @@ this workflow; findings land in the Security tab.
 
 ## What decides which jobs run
 
-The `changes` job (`dorny/paths-filter`) classifies each PR into two independent
-booleans:
+The `changes` job (`dorny/paths-filter`) computes a single boolean:
 
 | Filter | Paths |
 | --- | --- |
 | `code` | `packages/**`, `nodes/**`, `apps/**`, `scripts/**`, `builder`, `builder.cmd`, `.github/workflows/**`, `package.json` |
-| `docs` | `docs/**`, `packages/docs/**`, `nodes/src/nodes/**/README.md`, `packages/*/docs/**`, and the three client `README.md` files |
 
 `code == false` skips `build` (a `build-skip` job reports success under the same
 check names so branch protection stays satisfied) and skips `shell-contract`.
-`docs == false` skips `docs-build`. A PR can trip both filters.
 
 `helm-changes` is a separate filter on `deploy/helm/**` gating `helm-lint`.
 
@@ -55,26 +54,27 @@ ruff format --check
 Runs on every PR with no path gating. It mirrors the local lefthook hook so a
 contributor who commits with `--no-verify` is still caught.
 
-### Docs export drift — `./builder docs:check` (blocking, always runs)
+### Docs export drift — `./builder docs:check` (`fix/docs` PRs and post-merge)
 
 ```bash
 node scripts/build.js docs:check      # or ./builder docs:check
 ```
 
-Piggybacks on the `ruff-check` job on purpose: that is the only always-on PR job,
-so it is the one place that reliably fires on docs-only PRs — exactly the PRs
-this gate exists to catch. It fails when a generated copy under `packages/` has
-drifted from its source under `docs/`. Fix with `./builder docs:export`; never
-hand-edit the destination. See [The Docs Pipeline](docs-pipeline.md).
+Runs in the `Docs site build` job of `docs-schemas.yml` (every PR/push to
+`fix/docs`) and again in `docs.yml` after merge. It fails when a generated copy
+under `packages/` has drifted from its source under `docs/`. Fix with
+`./builder docs:export`; never hand-edit the destination. See
+[The Docs Pipeline](docs-pipeline.md).
 
-### Docs site build — `docs-build` (blocking, docs PRs only)
+### Docs site build — `Docs site build` in `docs-schemas.yml` (blocking, `fix/docs` PRs only)
 
 ```bash
 node scripts/build.js docs:test       # the gather/export helpers themselves
 node scripts/build.js docs:build      # stage + compile the site
 ```
 
-Catches what only a full build can: broken internal links, a file under
+Runs on every PR/push to `fix/docs` (no path filter); it does not run on PRs to
+`develop`. Catches what only a full build can: broken internal links, a file under
 `docs/public/` that no mount covers, and a spine id with no backing page (which
 would otherwise publish a live "coming soon" URL). Without this gate those
 failures surface after merge, in `docs.yml` on `develop`.
@@ -119,15 +119,29 @@ Per-module equivalents when you only touched one area:
 
 ```bash
 node scripts/build.js shell:check
-node scripts/build.js shell:regen && git diff --exit-code -- \
+node scripts/build.js shell:regen-derived && git diff --exit-code -- \
   packages/shell/src/contract-check.generated.ts \
-  packages/shell-api/index.ts packages/shell-api/latest.ts
+  packages/shell/contract/index.ts packages/shell/contract/latest.ts \
+  packages/shell/src/apiver.ts
 ```
 
 `shell:check` fails on a removed or broken frozen export (via per-version tsc
 floors) and on an added export that was never `shell:freeze`d. The second step
 regenerates the floors from the immutable frozen versions and fails on any diff,
 so a floor cannot be hand-edited to launder a removed export past tsc.
+
+The job runs two more gates:
+
+```bash
+node scripts/build.js client-typescript:regen && git diff --exit-code -- \
+  packages/client-typescript/src/contract-check.generated.ts \
+  packages/client-typescript/contract/index.ts \
+  packages/client-typescript/contract/latest.ts
+node nodes/scripts/gen-credentials.mjs --check   # ./builder nodes:credentials-check
+```
+
+The first regen-checks the client-typescript SDK contract floors the same way;
+the second fails if the generated credentials catalog has drifted.
 
 ### Helm — `helm-lint` (blocking, `deploy/helm/**` PRs only)
 
@@ -138,20 +152,20 @@ helm template rocketride deploy/helm/rocketride \
   | kubeconform -strict -summary -kubernetes-version 1.29.0
 ```
 
-### Doc schemas — `node-docs` (**advisory**, always runs)
+### Doc schemas — `schemas` and `corpus` in `docs-schemas.yml` (`fix/docs` PRs only)
 
 ```bash
-python3 scripts/validate-node-readme.py --all nodes/src/nodes
+python3 scripts/validate-node-readme.py <node-dir> ...   # the nodes your PR touched
 python3 scripts/validate-client-docs.py
 ```
 
 Two deterministic checkers: node READMEs against
 [the node README schema](nodes/readme-schema.md), and client-doc parity against
-[the client README schema](clients/readme-schema.md). The job carries
-`continue-on-error: true` and is not in the `ci-ok` needs list, so it cannot
-block a merge today. Once every node README conforms, drop `continue-on-error`
-and add the job to `ci-ok` to make it a hard gate — until then, treat a *new*
-failure in a node you touched as something to fix.
+[the client README schema](clients/readme-schema.md). The `schemas` job
+validates only the nodes the PR touched and is **blocking** — being scoped to
+the diff is what lets it be a hard gate immediately. The separate `corpus` job
+sweeps the whole corpus with `--all` and carries `continue-on-error: true`, so
+it is informational only while the node corpus is migrated.
 
 Check a single node while you work:
 
@@ -188,7 +202,7 @@ ruff check && ruff format --check
 node scripts/build.js docs:check
 node scripts/build.js docs:test && node scripts/build.js docs:build   # if you touched docs
 ./builder build && ./builder test --sequential                        # if you touched code
-python3 scripts/validate-node-readme.py --all nodes/src/nodes         # advisory
+python3 scripts/validate-node-readme.py --all nodes/src/nodes         # corpus sweep (informational)
 python3 scripts/validate-client-docs.py
 ```
 

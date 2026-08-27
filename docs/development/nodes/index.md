@@ -41,15 +41,15 @@ The complete lane-type ontology and who produces / consumes each type:
 
 | Lane type   | Produced by | Consumed by | Meaning                                            |
 | ----------- | :---------: | :---------: | -------------------------------------------------- |
-| `questions` |     17      |     39      | A query/prompt envelope flowing toward a model     |
-| `answers`   |     36      |      6      | A model/agent response                             |
-| `documents` |     29      |     23      | Chunked/embeddable document records                |
-| `text`      |     23      |     15      | Plain text                                         |
-| `table`     |     10      |      5      | Structured/tabular data                            |
-| `image`     |      6      |     10      | Image payloads                                     |
-| `audio`     |      4      |      3      | Audio payloads                                     |
-| `video`     |      3      |      6      | Video payloads                                     |
-| `tags`      |      3      |      3      | Metadata/markers attached to records               |
+| `questions` |     18      |     51      | A query/prompt envelope flowing toward a model     |
+| `answers`   |     53      |     13      | A model/agent response                             |
+| `documents` |     36      |     31      | Chunked/embeddable document records                |
+| `text`      |     41      |     21      | Plain text                                         |
+| `table`     |     18      |      7      | Structured/tabular data                            |
+| `image`     |     15      |     22      | Image payloads                                     |
+| `audio`     |      6      |      5      | Audio payloads                                     |
+| `video`     |      5      |      8      | Video payloads                                     |
+| `tags`      |      4      |      4      | Metadata/markers attached to records               |
 | `_source`   |      0      |      5      | Entry lane of **source** nodes (external triggers) |
 
 A typical RAG flow chains these types end to end:
@@ -109,10 +109,6 @@ next `BEGIN` displaces it, and is then dropped and reported as lost.
 
 ### 2. Tool binding: agents and tools
 
-Nodes whose `classType` is `tool` (and a few infrastructure nodes) **have no data
-
-### 2. Tool binding: agents and tools
-
 A node whose `classType` includes `tool` **attaches to an agent node's tool
 channel** and is invoked on demand by the agent instead of (or as well as) being
 pulled along by the data flow. A tool is agent-agnostic: the same `tool_github`
@@ -128,7 +124,7 @@ combinations are legal:
 | **No `lanes`** | — | Pure tool: `tool_tavily`, `tool_python`, `tool_http_request` |
 | **Has `lanes`** | Ordinary pipeline node: `prompt`, `llm_openai` | Both: `tool_n8n`, `tool_filesystem`, `agent_crewai` |
 
-Roughly a third of the services carrying `tool` also declare lanes. `tool_n8n`
+Roughly two in five of the services carrying `tool` also declare lanes. `tool_n8n`
 (`classType: ["data", "tool"]`) consumes and produces six lane types *and* exposes
 itself to agents; every `agent_*` node is `["agent", "tool"]` with `questions`
 lanes, which is what lets one agent be another agent's tool; `tool_pipe` is

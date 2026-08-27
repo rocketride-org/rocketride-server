@@ -38,7 +38,7 @@ You start and feed pipelines through one of two protocols:
   [TypeScript](/clients/typescript) and [Python](/clients/python) SDKs speak it for you:
   `use()` to start a pipeline, `send()`/`pipe()` to stream data, `chat()` for conversational
   flows, `terminate()` to stop.
-- **[MCP](/connect/mcp)**: expose a pipeline as a tool for AI assistants like Claude and
+- **[MCP](/connect/mcp/stdio)**: expose a pipeline as a tool for AI assistants like Claude and
   Cursor.
 
 ## How you build

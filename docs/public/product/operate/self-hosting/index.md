@@ -32,7 +32,7 @@ Download a release build, no build toolchain required.
    binary and its `ai/` runtime.
 
 ```bash
-tar -xzf rocketride-server-<version>-linux-x64.tar.gz -C rocketride-engine
+mkdir rocketride-engine && tar -xzf rocketride-server-<version>-linux-x64.tar.gz -C rocketride-engine
 cd rocketride-engine
 ```
 

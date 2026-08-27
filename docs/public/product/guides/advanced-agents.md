@@ -29,7 +29,7 @@ manager-pipeline.pipe
 
 The [`agent_rocketride`](/nodes/agent_rocketride) node supports this pattern
 natively — expose any running pipeline as an MCP tool (see
-[MCP Server](/connect/mcp)) and the manager agent can call it.
+[MCP Server](/connect/mcp/stdio)) and the manager agent can call it.
 
 This is useful when different specialists need different models, memory, or
 tool sets. Keep each specialist pipeline small and single-purpose.
@@ -48,7 +48,7 @@ tool latencies.
 ## Agent-as-tool via MCP
 
 Any running RocketRide pipeline is automatically exposed as an MCP tool by the
-[MCP server](/connect/mcp). This means a Claude Desktop or Cursor session can
+[MCP server](/connect/mcp/stdio). This means a Claude Desktop or Cursor session can
 invoke your pipeline as a tool, making your pipeline an agent capability in an
 external system.
 
@@ -64,7 +64,7 @@ what you need to survive and how:
 | Strategy | Node | Persists across | Use when |
 | --- | --- | --- | --- |
 | **Session memory** | [`memory_internal`](/nodes/memory_internal) | Nothing (resets on restart) | Conversation context within one session only |
-| **Persistent memory** | [`memory_persistent`](/nodes/memory_persistent) | Pipeline restarts | Context must survive restarts; backed by a configured store |
+| **Persistent memory** | [`memory_persistent`](/nodes/memory_persistent) | Pipeline restarts (Redis backend only) | Context must survive restarts; the default in-memory backend does not persist |
 | **Long-term semantic memory** | `tool_mem0` | Restarts; searchable | Agent should recall extracted facts and user preferences across many sessions. Requires a Mem0 account or self-hosted instance |
 
 For most conversational agents, `memory_internal` is the right default. Add
@@ -102,12 +102,12 @@ about and may make unexpected tool calls. Keep the tool set small and specific:
 
 - Give each agent only the tools it needs for its task.
 - Use a `prompt` node to explicitly tell the agent which tools to prefer.
-- Use the `max_iterations` config (where available) to cap reasoning loops —
+- Use the `max_waves` config (where available) to cap reasoning loops —
   an unbounded loop is a latency and cost risk.
 
 ## Related
 
 - [Concepts: Agents & Tools](/concepts/agents-tools-skills): control connections, wiring.
-- [MCP Server](/connect/mcp): exposing pipelines as MCP tools.
+- [MCP Server](/connect/mcp/stdio): exposing pipelines as MCP tools.
 - [Concepts: Error Handling](/guides/error-handling): handling agent failures.
 - [Best Practices](/guides/best-practices): agents vs. direct LLM calls.

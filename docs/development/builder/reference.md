@@ -47,23 +47,35 @@ Not all modules support all commands. Run `./builder --help` for the full list.
 | Module | Description | Commands |
 | ------ | ----------- | -------- |
 | `ai` | AI/ML modules | build, clean, test |
+| `aparavi-ui` | Aparavi AQL chat application | build, clean, dev |
+| `builder` | Build system maintenance | inject, update |
 | `chat-ui` | Chat web interface | build, clean, dev |
+| `check-externals` | 3rd-party interface contract test framework | run, test |
 | `client-mcp` | MCP Protocol client | build, clean, test |
 | `client-python` | Python SDK | build, clean, test |
-| `client-typescript` | TypeScript/JavaScript SDK | build, clean, test |
+| `client-typescript` | TypeScript/JavaScript SDK | build, check, clean, freeze, regen, test |
+| `docs` | Documentation site | build, check, clean, dev, export, serve, test |
 | `dropper-ui` | File drop web interface | build, clean, dev |
-| `hello-ui` | Hello world example app | build, clean |
-| `java` | JDK, JRE, and Maven (auto-installed for Tika) | build, clean |
+| `events-ui` | Event monitor application | build, clean, dev |
+| `explorer-ui` | File explorer application | build, clean |
+| `hello-ui` | RocketRide Hello — OSS landing application | build, clean, dev |
+| `java` | JDK, JRE, and Maven (auto-installed for Tika) | setup-jdk, setup-jre, setup-maven |
+| `mcp-widgets` | MCP Apps widgets (embedded UI served by the ai MCP module) | build, clean, test |
+| `models` | LLM model sync | stamp-locals, update |
 | `monitor-ui` | Server monitor web interface | build, clean |
-| `nodes` | Pipeline nodes | build, clean, test, test-contracts |
-| `profiler-ui` | Profiler web interface | build, clean |
-| `server` | C++ engine (downloads pre-built first, or compile from source) | build, compile, clean, test, build-all, clean-all, configure-cmake, package |
-| `shared` | Shared UI component library | build, clean |
-| `shell` | Shell micro-frontend host | build, clean, dev |
-| `tika` | Java document parser | build, clean |
-| `vcpkg` | C++ package manager (auto-installed for server build) | build, clean |
+| `nodes` | Pipeline nodes | build, clean, test, test-contracts, test-full |
+| `profiler-ui` | cProfile process profiler | build, clean |
+| `rocket-ui` | Data toolchain interface application | build, clean, dev |
+| `server` | C++ engine (downloads pre-built first, or compile from source) | build, compile, clean, test, build-all, clean-all, configure-cmake, dev, package, run, setup-test-deps |
+| `shared` | RocketRide shared source library | check-gallery-tokens, gen-gallery-tokens, test |
+| `shell` | Shell platform (host + frozen API surface) | build, check, clean, dev, freeze, regen, regen-derived, test |
+| `sql-ui` | SQL Explorer application | build, clean, dev |
+| `test-ui` | Test UI application | build, clean, dev |
+| `tika` | Java document parser | build-jar, build-dbgconn, sync, test-jar, test-dbgconn |
+| `ui` | All UI applications | build, clean, register |
+| `vcpkg` | C++ package manager (auto-installed for server build) | bootstrap, clone |
 | `vscode` | VSCode extension | build, compile, clean |
-| `world-ui` | World/globe visualization app | build, clean |
+| `world-ui` | Hello World demo application | build, clean |
 
 ### Examples
 
@@ -74,7 +86,7 @@ Not all modules support all commands. Run `./builder --help` for the full list.
 ./builder chat-ui:build dropper-ui:build
 ./builder vscode:build
 ./builder clean
-./builder server:clean tika:clean
+./builder server:clean nodes:clean
 ./builder --help
 ```
 

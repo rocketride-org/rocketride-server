@@ -50,7 +50,7 @@ protocols and the engine handles the rest:
 - **[WebSocket](/connect/websocket)**: the native engine protocol. The
   [TypeScript](/clients/typescript) and [Python](/clients/python) SDKs speak it
   for you.
-- **[MCP](/connect/mcp)**: exposes running pipelines as tools for AI
+- **[MCP](/connect/mcp/stdio)**: exposes running pipelines as tools for AI
   assistants.
 
 As pipelines run, the engine reports call trees, token usage, and memory so you

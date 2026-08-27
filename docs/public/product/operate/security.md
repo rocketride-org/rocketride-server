@@ -17,12 +17,16 @@ credential store, and no key that grants access to more than one provider.
 {
   "id": "llm_1",
   "provider": "llm_openai",
-  "config": { "apikey": "${OPENAI_API_KEY}" }
+  "config": {
+    "profile": "openai-4o",
+    "openai-4o": { "apikey": "${ROCKETRIDE_OPENAI_KEY}" }
+  }
 }
 ```
 
 Nodes use `${ENV_VAR}` substitution so the key itself never has to appear in the
-`.pipe` file. See [Best Practices: Credential management](/guides/best-practices#credential-management)
+`.pipe` file. Only `ROCKETRIDE_`-prefixed variables are substituted — a
+reference to any other variable is replaced with `<REDACTED>`. See [Best Practices: Credential management](/guides/best-practices#credential-management)
 for how to keep keys out of version control.
 
 ## Network exposure
@@ -30,11 +34,13 @@ for how to keep keys out of version control.
 The engine binds to `localhost` by default:
 
 - **Port 5565** — WebSocket API (SDK / CLI connections).
-- **Port 5567** — HTTP endpoint for source nodes (Webhook, Chat, Dropper).
+- **Source-node HTTP endpoints** (Webhook, Chat, Dropper) — the port is set
+  per node in the pipeline config; 5567 is the conventional choice used in
+  examples and integrations, not a fixed engine bind.
 
-Only port 5567 needs to be accessible to external callers when you're using a
-webhook-based source. Port 5565 is a management interface; expose it only to
-trusted clients on a private network or behind a VPN.
+Only the source-node HTTP port needs to be accessible to external callers when
+you're using a webhook-based source. Port 5565 is a management interface;
+expose it only to trusted clients on a private network or behind a VPN.
 
 For production deployments, put the engine behind a reverse proxy (nginx,
 Caddy, AWS ALB) that terminates TLS and enforces rate limiting before traffic
@@ -61,7 +67,7 @@ credentials automatically.
 
 ## MCP authentication
 
-The [MCP server](/connect/mcp) authenticates callers in two ways:
+The [MCP server](/connect/mcp/stdio) authenticates callers in two ways:
 
 - **`ROCKETRIDE_AUTH` / `ROCKETRIDE_APIKEY`** — the API key used to connect the
   MCP server to the RocketRide engine. Required; set in the environment.
@@ -89,13 +95,14 @@ use `${...}` references.
 
 ## Dependency scanning
 
-The RocketRide codebase runs automated dependency scanning (CodeQL, Trivy,
-OpenSSF Scorecard) on every commit. See [Security](/support/security-policy) for the
+The RocketRide codebase runs automated dependency scanning: CodeQL via
+GitHub's default setup, plus Trivy and OpenSSF Scorecard on pushes to
+`develop`/`main` and on scheduled runs. See [Security](/support/security-policy) for the
 vulnerability reporting process and SLA.
 
 ## Related
 
 - [Best Practices](/guides/best-practices): credential management patterns.
 - [Self-hosting](/operate/self-hosting): network configuration.
-- [MCP Server](/connect/mcp): MCP-specific authentication.
+- [MCP Server](/connect/mcp/stdio): MCP-specific authentication.
 - [Security policy](/support/security-policy): vulnerability reporting.

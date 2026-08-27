@@ -133,7 +133,7 @@ Two dynamic features are used heavily:
 
 ## How the canvas consumes this
 
-The visual builder (`packages/shared/src/components/canvas/`) turns these
+The visual builder (`apps/shared/src/components/canvas/`) turns these
 definitions into the editor:
 
 - The node graph is rendered with **ReactFlow**; config panels with **RJSF**.

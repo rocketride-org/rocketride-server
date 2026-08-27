@@ -8,9 +8,11 @@ RocketRide exposes runtime observability (task lifecycle, periodic status,
 resource metrics, and per-component flow traces) as a **live event stream over
 the same [WebSocket](/connect/websocket) the engine already speaks**. You open a
 socket, subscribe to the event types you care about, and the engine pushes events
-as a run unfolds. There is no separate metrics endpoint to scrape and no history
-database to query: it is **not** OpenTelemetry, Prometheus, Sentry, or webhooks. To
-keep history, connect, subscribe, and persist the events as they arrive.
+as a run unfolds. There is no external metrics endpoint to scrape: it is **not**
+OpenTelemetry, Prometheus, Sentry, or webhooks. The engine does keep a persistent
+run-log continuum queryable over this same socket (the `rrext_log` command and its
+subcommands; SDK `LogApi`); you can also connect, subscribe, and persist the
+events yourself as they arrive.
 
 The [TypeScript](/clients/typescript) and [Python](/clients/python) SDKs frame all
 of this for you (`getTaskStatus()`, `onEvent`, `setEvents()` / `add_monitor`), so
@@ -35,8 +37,8 @@ connection is authenticated (the initial `auth` handshake described on the
 	"type": "request",
 	"seq": 2,
 	"command": "rrext_monitor",
-	"token": "*",
 	"arguments": {
+		"token": "*",
 		"types": ["TASK", "SUMMARY", "FLOW", "OUTPUT", "SSE"]
 	}
 }
@@ -124,20 +126,22 @@ modules -- `packages/client-typescript/src/client/types/task.ts` and
 | `apaevt_flow`          | `FLOW`       | Component entry / exit, per pipe, per op          |
 | `output`              | `OUTPUT`     | Engine stdout/stderr-style log lines              |
 | `apaevt_sse`           | `SSE`        | Node-emitted custom messages (`monitorSSE()`)     |
-| `apaevt_status_upload` | `SUMMARY`    | File-upload progress                              |
+| `apaevt_status_upload` | — (SDK-local) | File-upload progress, synthesized by the client SDK during file sends |
 | `apaevt_dashboard`     | `DASHBOARD`  | Server-level connection / monitor-change events   |
 
 ### `apaevt_task`: lifecycle
 
 `body.action` is one of `running`, `begin`, `end`, or `restart`. The `running`
 snapshot lists active tasks with their `id`; `begin` / `end` / `restart` carry
-`name`, `projectId`, and `source` but **no per-event id**: correlate them by
+`name`, `projectId`, and `source` (`begin` also carries `beginSeq`, the run's
+chapter key in the run-log continuum; `end` carries a `reason` when a stop
+reason exists) but **no per-event id**: correlate them by
 `projectId` + `source`, using the `running` snapshot for the id ↔ project+source
 map.
 
 ```json
-{ "action": "running", "tasks": [{ "id": "…", "projectId": "…", "source": "…" }] }
-{ "action": "begin", "name": "…", "projectId": "…", "source": "…" }
+{ "action": "running", "tasks": [{ "id": "…", "name": "…", "projectId": "…", "source": "…", "runKind": "…", "teamId": "…" }] }
+{ "action": "begin", "name": "…", "projectId": "…", "source": "…", "beginSeq": 42 }
 ```
 
 ### `apaevt_status_update`: full status
@@ -152,8 +156,9 @@ map.
 - **Counts:** `totalCount` / `completedCount` / `failedCount`, the matching
   `*Size` fields, `wordsCount` / `wordsSize`.
 - **Rates:** `rateCount`, `rateSize` (instantaneous).
-- **History:** `errors`, `warnings`, `notes`, each **capped at the last 50
-  entries**, so persist them as they arrive or older ones are lost on long runs.
+- **History:** `errors`, `warnings`, `notes`; `errors` and `warnings` are
+  **capped at the last 50 entries**, so persist them as they arrive or older
+  ones are lost on long runs.
 - **Termination:** `exitCode`, `exitMessage`.
 - **Pipeline flow:** `pipeflow.{totalPipes, byPipe}`, where `byPipe` maps each pipe
   id to its currently-active component stack (a live snapshot of what is running).
@@ -211,6 +216,8 @@ The engine's DAP `output` events are re-emitted to subscribers. The body carries
 ### `apaevt_status_upload`: upload progress
 
 `{ action: "begin" | "write" | "complete" | "error", filepath, bytes_sent?, file_size? }`.
+Synthesized locally by the SDK during file sends and delivered to your own event
+callback; the engine never emits it on the wire.
 
 ### `apaevt_dashboard`: admin events
 
@@ -229,9 +236,12 @@ Besides `rrext_monitor`, sent the same way over the socket:
 
 ## Notes
 
-- **No global run id.** There is no `event_id` or global ordering key. Correlate a
-  run by `(project_id, source, startTime)`, and order within a connection by the
-  DAP envelope `seq` (per-connection monotonic).
+- **No global run id.** There is no `event_id`, but task-built event bodies are
+  stamped with `eventTime` and `logSeq` — a per-task sequence, strictly monotonic
+  across runs and engine restarts — and the `apaevt_task` `begin` body carries
+  `beginSeq` as the run's chapter key. Correlate a run by
+  `(project_id, source, startTime)` or `beginSeq`, and order within a task by
+  `body.logSeq` (the DAP envelope `seq` is only per-connection monotonic).
 - **No dead-letter queue.** If your consumer is offline it misses that window; the
   next `running` snapshot is the only crash-recovery handle.
 - **Tenant scoped.** You only receive events for tasks started with your own API

@@ -44,9 +44,10 @@ additional lanes (see each node's entry in [Nodes](/nodes)):
 - **Type compatibility**: the output lane of one node must match the input lane
   of the next. A `text` output feeds a `text` input; mismatched lanes are a
   pipeline error.
-- **Transformation**: many nodes change the lane type. An embedding node turns
-  `text` into `documents` (vector-ready chunks) for a store; an LLM turns
-  `questions` into `answers`.
+- **Transformation**: many nodes change the lane type. A preprocessor turns
+  `text` into `documents` (vector-ready chunks); a text embedding node enriches
+  `documents` with vectors for a store (media embedding nodes turn `image`/
+  `video` into `documents`); an LLM turns `questions` into `answers`.
 - **Fan-in**: a node can consume the same lane from several upstream nodes by
   listing multiple entries in `input`. A `response` node, for example, can merge
   `answers` from several agents.

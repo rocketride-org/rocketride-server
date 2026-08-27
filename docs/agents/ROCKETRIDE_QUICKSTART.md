@@ -38,15 +38,12 @@ Pipeline files **must** use the `.pipe` extension.
 		{
 			"id": "input",
 			"provider": "webhook",
-			"config": {}
+			"config": { "hideForm": true, "mode": "Source", "parameters": {}, "type": "webhook" }
 		},
 		{
 			"id": "processor",
-			"provider": "transform",
-			"config": {
-				"input_path": "${ROCKETRIDE_INPUT_PATH}",
-				"output_path": "${ROCKETRIDE_OUTPUT_PATH}"
-			},
+			"provider": "anonymize_text",
+			"config": {},
 			"input": [{ "lane": "text", "from": "input" }]
 		},
 		{
@@ -150,15 +147,12 @@ Pipeline files **must** use the `.pipe` extension.
 		{
 			"id": "input",
 			"provider": "webhook",
-			"config": {}
+			"config": { "hideForm": true, "mode": "Source", "parameters": {}, "type": "webhook" }
 		},
 		{
 			"id": "processor",
-			"provider": "transform",
-			"config": {
-				"input_path": "${ROCKETRIDE_INPUT_PATH}",
-				"output_path": "${ROCKETRIDE_OUTPUT_PATH}"
-			},
+			"provider": "anonymize_text",
+			"config": {},
 			"input": [{ "lane": "text", "from": "input" }]
 		},
 		{
@@ -226,7 +220,7 @@ Chat pipelines with `chat` source, LLM nodes, and Q&A flow (questions → answer
 	"project_id": "e30fee74-0f71-4af2-8dab-5d89deee8f84",
 	"source": "chat_1",
 	"components": [
-		{ "id": "chat_1", "provider": "chat", "config": {} },
+		{ "id": "chat_1", "provider": "chat", "config": { "hideForm": true, "mode": "Source", "parameters": {}, "type": "chat" } },
 		{ "id": "llm_1", "provider": "llm_openai", "config": { "profile": "openai-5", "openai-5": { "apikey": "${ROCKETRIDE_OPENAI_KEY}" } }, "input": [{ "lane": "questions", "from": "chat_1" }] },
 		{ "id": "response_1", "provider": "response_answers", "config": {}, "input": [{ "lane": "answers", "from": "llm_1" }] }
 	]

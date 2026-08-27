@@ -84,7 +84,7 @@ controlled over the [WebSocket protocol](/connect/websocket).
 ## MCP
 
 The Model Context Protocol: exposes running pipelines as tools for AI
-assistants. See [MCP](/connect/mcp).
+assistants. See [MCP](/connect/mcp/stdio).
 
 ## WebSocket protocol
 

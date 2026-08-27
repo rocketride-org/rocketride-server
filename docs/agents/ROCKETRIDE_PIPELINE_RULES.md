@@ -370,7 +370,7 @@ ROCKETRIDE_COLLECTION_NAME=documents
 ### Rule 1: Source Components
 
 - Every pipeline must have exactly one source component
-- The `source` field must reference this component's `id`
+- The `source` field, if present, must reference this component's `id` (it may be omitted; the extension adds it)
 - Source components typically don't have an `input` array
 - Examples: webhook, chat, dropper
 

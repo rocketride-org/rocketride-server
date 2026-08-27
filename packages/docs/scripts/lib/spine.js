@@ -87,7 +87,13 @@ const SPINE = [
 	{
 		label: 'Connect',
 		items: [
-			{ id: 'connect/mcp', label: 'MCP', mount: true },
+			{
+				label: 'MCP',
+				items: [
+					{ id: 'connect/mcp/stdio', label: 'stdio (PyPI package)', mount: true },
+					{ id: 'connect/mcp/http', label: 'HTTP Server', mount: true, nest: true },
+				],
+			},
 			{ id: 'connect/cli', label: 'CLI' },
 			{ id: 'connect/websocket', label: 'WebSocket' },
 			{ id: 'connect/websocket/observability', label: 'WebSocket Events' },

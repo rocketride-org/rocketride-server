@@ -30,9 +30,9 @@ Open VS Code settings (`Ctrl+,` / `Cmd+,`) and search for `rocketride` to config
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| `rocketride.connectionMode` | - | Connection mode: `cloud`, `onprem`, or `local` |
-| `rocketride.hostUrl` | `http://localhost:5565` | RocketRide server URL |
-| `rocketride.deployment.hostUrl` | `https://api.rocketride.ai` | Cloud deployment API URL |
+| `rocketride.development.connectionMode` | `local` | Connection mode: `local`, `docker`, `service`, `onprem`, or `cloud` |
+| `rocketride.development.hostUrl` | `""` | RocketRide server URL (empty = derived from the connection mode) |
+| `rocketride.deployment.hostUrl` | `""` | Deployment server URL (empty = mode-derived / shared with development). In cloud mode the URL is fixed at build time (effective fallback `https://api.rocketride.ai`) and any user-set value is ignored. |
 
 > Credentials are not a settings key. Enter your API key with the **Settings** page command `rocketride.page.settings.setupCredentials` (update or clear it via `rocketride.page.settings.updateApiKey` / `rocketride.page.settings.clearApiKey`). It is held in VS Code SecretStorage, not in `settings.json`.
 
@@ -49,11 +49,16 @@ Open VS Code settings (`Ctrl+,` / `Cmd+,`) and search for `rocketride` to config
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| `rocketride.local.engineVersion` | `latest` | Engine version: `latest`, `prerelease`, or a specific tag |
+| `rocketride.development.local.engineVersion` | `latest` | Engine version: `latest`, `prerelease`, or a specific tag |
 
 ### Integrations
 
 | Setting | Default | Description |
 |---------|---------|-------------|
+| `rocketride.integrations.autoAgentIntegration` | `true` | Auto-detect and install RocketRide documentation for coding agents (Copilot, Claude Code, Cursor, Windsurf) on startup |
 | `rocketride.integrations.copilot` | - | Enable GitHub Copilot integration for pipeline development |
+| `rocketride.integrations.claudeCode` | - | Enable Claude Code integration |
 | `rocketride.integrations.cursor` | - | Enable Cursor IDE integration |
+| `rocketride.integrations.windsurf` | - | Enable Windsurf IDE integration |
+| `rocketride.integrations.claudeMd` | - | Install RocketRide instructions to `CLAUDE.md` at the repo root |
+| `rocketride.integrations.agentsMd` | - | Install RocketRide instructions to `AGENTS.md` at the repo root |

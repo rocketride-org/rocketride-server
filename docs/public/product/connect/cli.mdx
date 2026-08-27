@@ -50,10 +50,10 @@ so you can set them once:
 
 | Option           | Env var                | Default               | Description                                                            |
 | ---------------- | ---------------------- | --------------------- | ---------------------------------------------------------------------- |
-| `--uri <uri>`    | `ROCKETRIDE_URI`       | `ws://localhost:5565` | Engine endpoint (see [Cloud](/operate/cloud) / [Self-hosting](/operate/self-hosting)). |
+| `--uri <uri>`    | `ROCKETRIDE_URI`       | Python: `https://api.rocketride.ai`; TypeScript: `http://localhost:5565` (normalized to `ws://` at connect time) | Engine endpoint (see [Cloud](/operate/cloud) / [Self-hosting](/operate/self-hosting)). |
 | `--apikey <key>` | `ROCKETRIDE_APIKEY`    | -                     | API token for authentication.                                          |
-| `--pipeline <path>` | `ROCKETRIDE_PIPELINE` | -                  | Default pipeline path for `start`/`upload`. Python CLI only.          |
-| `--token <token>` | `ROCKETRIDE_TOKEN`    | -                     | Default task token for token-bearing commands. Python CLI only.        |
+| `--pipeline <path>` | `ROCKETRIDE_PIPELINE` | -                  | Default pipeline path for `start`/`upload`.                            |
+| `--token <token>` | `ROCKETRIDE_TOKEN`    | -                     | Default task token for token-bearing commands.                         |
 
 Against a [Cloud](/operate/cloud) endpoint use an `https://`/`wss://` URI so the
 connection is encrypted.
@@ -85,9 +85,6 @@ rocketride start ./rag.pipe
 
 # Start with extra worker threads (useful for CPU-bound nodes)
 rocketride start --pipeline ./rag.pipe --threads 8
-
-# Attach to a pipeline that is already running (e.g. a long-lived webhook source)
-rocketride start --token <task-token>
 ```
 
 Key flags:
@@ -96,7 +93,7 @@ Key flags:
 | --- | --- |
 | `--pipeline <path>` (TypeScript) / `<path>` positional (Python) | Path to the `.pipe` JSON file. |
 | `--threads <n>` | Number of worker threads. Default 4. |
-| `--token <token>` | Reuse an existing running task instead of starting a new one. |
+| `--token <token>` | Supply a custom task token for the new run (the server generates one if not provided). A pipeline file is still required — to follow a task that is already running, use `status` or `events`. |
 
 ### upload
 

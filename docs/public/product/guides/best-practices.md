@@ -15,10 +15,20 @@ A `.pipe` file is plain JSON. If you hard-code an API key, it will end up in
 version control. Use `${ENV_VAR}` substitution in the config instead:
 
 ```json
-{ "provider": "llm_openai", "config": { "apikey": "${OPENAI_API_KEY}" } }
+{
+  "provider": "llm_openai",
+  "config": {
+    "profile": "openai-4o",
+    "openai-4o": { "apikey": "${ROCKETRIDE_OPENAI_KEY}" }
+  }
+}
 ```
 
-The engine expands `${...}` references at startup from the process environment.
+`${...}` references are expanded server-side when the run is submitted: the SDK
+sends `ROCKETRIDE_`-prefixed variables from the client environment, the server
+merges them over its stored secrets, and only `ROCKETRIDE_`-prefixed references
+are substituted. References to any other variable (such as `${OPENAI_API_KEY}`)
+are replaced with `<REDACTED>`, not passed through.
 
 Credentials are **per-node**: each node holds only its own key, and nodes do not
 share credential state. A compromised node config does not expose keys belonging

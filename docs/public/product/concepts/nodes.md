@@ -34,7 +34,10 @@ through lanes, while `agent`, `tool`, `llm`, and `memory` nodes participate in
 control connections (see [Agents & tools](/concepts/agents-tools-skills)).
 
 > source · data · text · image · audio · video · embedding · llm · store ·
-> database · tool · agent · memory · infrastructure · target · preprocessor
+> database · graph · tool · agent · memory · guard · rerank · search ·
+> infrastructure · target · preprocessor
+
+The list is not exhaustive — new class types are added as the catalog grows.
 
 ## Connectors
 

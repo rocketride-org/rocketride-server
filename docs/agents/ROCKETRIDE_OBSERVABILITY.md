@@ -90,7 +90,7 @@ Variables the server reads:
 
 - `ROCKETRIDE_APIKEY`: server-side API key (also expected client-side).
 - `ROCKETRIDE_URI`: default URI used by the SDK if not passed in code.
-- `ROCKETRIDE_CORS_ORIGINS`: comma-separated CORS allow-list.
+- `RR_CORS_ORIGINS`: comma-separated CORS allow-list.
 
 ---
 
@@ -169,7 +169,9 @@ Valid values:
 | `TASK`      | 32  | Lifecycle: `running`, `begin`, `end`, `restart`                                   |
 | `SSE`       | 64  | Custom node-to-UI messages emitted by nodes via `monitorSSE()`                    |
 | `DASHBOARD` | 128 | Server-level events (connections, monitor changes)                                |
-| `ALL`       | 255 | Everything above                                                                  |
+| `BILLING`   | 256 | Billing/token-usage events                                                        |
+| `DEPLOY`    | 512 | Deployment events                                                                 |
+| `ALL`       | 1023 | Everything above                                                                 |
 
 You may also send the bitmask as an integer (`"types": 36` = SUMMARY|TASK).
 
@@ -315,7 +317,8 @@ subscription time.
 
   // Cumulative billing tokens (100 tokens = $1)
   tokens: {
-    cpu_utilization: number, cpu_memory: number, gpu_memory: number, total: number
+    cpu_utilization: number, cpu_memory: number, gpu_memory: number,
+    gpu_inference: number, custom: {[counter: string]: number}, total: number
   }
 }
 ```
@@ -408,7 +411,7 @@ clients exist in this repo and ship to npm/PyPI:
 
 - Python: `pip install rocketride`: `RocketRideClient(uri, auth, on_event=...)`,
   then `await client.add_monitor(key={'token': '*'}, types=['summary','flow','task','output','sse'])`.
-- TypeScript: `@rocketride/client`: same shape.
+- TypeScript: `npm install rocketride`: same shape.
 
 Both let you pass an `on_event` async callback that fires for every inbound
 event message. Source: `packages/client-python/src/rocketride/` and
