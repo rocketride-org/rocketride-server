@@ -6,8 +6,8 @@
 """NodeDevCommands: DAP router for the Node Builder (``rrext_node_dev``).
 
 The Node Builder authors custom nodes. Its logic lives in the engine so every
-surface — the VSCode extension, the web builder and Claude — drives it through the
-same ``client.call('rrext_node_dev', ...)`` and gets identical output.
+surface — the VSCode extension and the web builder — drives it through the same
+``client.call('rrext_node_dev', ...)`` and gets identical output.
 
 Subcommands:
   - ``scaffold`` — render a new node folder as a ``{path: contents}`` file map.

@@ -12,9 +12,7 @@ one straight line and the Node Builder and the installer share one destination.
 
 Scope: this module is only the format — ``pack_capsule`` builds a ``.rrc`` and
 ``read_capsule`` reads one back (with a basic path-traversal guard so extraction
-never escapes the node folder). The security *airlock* (a safety verdict, AST scan,
-requirements/capability gating) is intentionally out of scope here — we will design
-it alongside the marketplace, where the verdict becomes a product surface.
+never escapes the node folder). Judging a node's contents is out of scope here.
 
 Kept deliberately self-contained so it is trivial to split into its own PR later.
 """
@@ -72,7 +70,7 @@ def pack_capsule(
         files: ``{relative_path: contents}`` for the node folder.
         version: capsule version recorded in the manifest.
         declares: capabilities the node needs (``network``/``subprocess``/``filesystem``);
-            recorded as metadata for a future airlock, not enforced here.
+            recorded as manifest metadata, not enforced here.
 
     Returns:
         The capsule bytes.
@@ -114,7 +112,7 @@ def read_capsule(zip_bytes: bytes) -> Tuple[dict, Dict[str, bytes]]:
 
     Guards only against a malformed or path-escaping archive (zip-slip), so the
     caller can safely write ``payload`` under a node path. It does **not** judge the
-    node's safety — that airlock comes with the marketplace.
+    node's contents.
 
     Args:
         zip_bytes: the ``.rrc`` bytes.

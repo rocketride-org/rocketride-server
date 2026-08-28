@@ -11,9 +11,8 @@ makes sure ``local_nodes`` is an importable package. The install target is the a
 ``--node_path``, so the same code works in OSS (a VSCode workspace) and in the cloud
 (the engine started against a per-user node path); no store coupling.
 
-This is engine-side, so every surface installs the same way: the VSCode extension,
-the web builder and Claude all send a capsule to ``rrext_node_dev`` install and land
-here. The safety airlock is deferred to the marketplace (see capsule.py).
+This is engine-side, so every surface installs the same way: the VSCode extension
+and the web builder send a capsule to ``rrext_node_dev`` install and land here.
 """
 
 import os

@@ -5,10 +5,9 @@
 
 """Node scaffolder: render a complete, valid custom-node folder from a few inputs.
 
-One source of truth for every surface. The VSCode extension, the web builder and
-Claude all call ``rrext_node_dev`` (subcommand ``scaffold``) and write the returned
-file map, so a node
-scaffolded from any host is byte-identical. A custom node is a folder under a
+One source of truth for every surface. The VSCode extension and the web builder both
+call ``rrext_node_dev`` (subcommand ``scaffold``) and write the returned file map, so
+a node scaffolded from any host is byte-identical. A custom node is a folder under a
 ``--node_path`` ``local_nodes/`` package (a VSCode workspace or an installed
 capsule) holding a ``services.json`` plus Python ``IGlobal``/``IInstance``[/
 ``IEndpoint``] classes; the engine discovers it as ``local_nodes.<name>`` with no
