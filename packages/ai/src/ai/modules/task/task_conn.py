@@ -77,6 +77,7 @@ from .commands.cmd_public import PublicCommands
 from .commands.cmd_deploy import DeployCommands
 from .commands.cmd_log import LogCommands
 from .commands.cmd_store import StoreCommands
+from .commands.cmd_node_dev import NodeDevCommands
 from ai.account.models import AccountInfo, RequestContext, resolve_task_permissions, resolve_team_permissions
 from ai.common.account import AccountPipelineValidation
 
@@ -108,6 +109,7 @@ class TaskConn(
     DeployCommands,
     LogCommands,
     StoreCommands,
+    NodeDevCommands,
     DAPConn,
 ):
     """
