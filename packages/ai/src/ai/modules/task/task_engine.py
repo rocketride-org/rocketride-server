@@ -1562,8 +1562,21 @@ class Task(DAPBase):
             # Send out a status update when needed
             self._status_updated = True
 
-            # If this task is started with tracing
-            if self._pipelineTraceLevel:
+            # If this task is started with tracing.
+            #
+            # `'none'` IS A LEVEL, NOT AN ABSENCE. It is a non-empty string and
+            # so was truthy here, which meant a caller asking for no tracing got
+            # the payload suppressed on the engine side and every enter/leave
+            # still derived, seq-stamped, broadcast and written to the run log —
+            # a flow event carrying `trace: {}`. Roughly 379 bytes of identity
+            # and envelope for no signal, one pair per component per request.
+            #
+            # A settings stream that answers UI clicks and is deliberately kept
+            # out of the Runs timeline had accumulated 325 MB that way, 94% of
+            # it empty-payload flow. The level names are documented as
+            # none/metadata/summary/full, and `none` is documented as "no flow
+            # traces"; this is the code catching up with that.
+            if self._pipelineTraceLevel and self._pipelineTraceLevel != 'none':
                 # Clamp oversized payloads HERE, before the rebuilt body
                 # fans out to the broadcast, the derived flow, and the
                 # run-log continuum.
