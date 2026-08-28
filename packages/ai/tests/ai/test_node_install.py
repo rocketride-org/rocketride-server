@@ -167,6 +167,45 @@ async def test_store_uninstall_missing_errors():
         await uninstall_node_from_store(FakeStore(), 'nope')
 
 
+# --- task_engine materialization (auto-load per run, no manual --node_path) ---
+
+from ai.account import Store
+from ai.modules.task import task_engine
+from ai.modules.task.task_engine import Task
+
+
+def _task():
+    t = Task.__new__(Task)  # bypass the heavy __init__; set only what materialize touches
+    t.client_id = 'tester'
+    t._node_path_dir = None
+    t.debug_message = lambda *a, **k: None
+    return t
+
+
+async def test_materialize_writes_store_nodes_and_cleans_up(monkeypatch):
+    fs = FakeStore()
+    await install_capsule_to_store(fs, _capsule('mat_node'))
+    monkeypatch.setattr(Store, 'file_store', lambda *a, **k: fs)
+    monkeypatch.setattr(task_engine, 'startup_args', lambda: [])  # no parent --node_path
+
+    t = _task()
+    node_dir = await t._materialize_installed_nodes()
+    assert node_dir
+    root = os.path.join(node_dir, 'local_nodes')
+    assert os.path.isfile(os.path.join(root, '__init__.py'))  # importable package
+    assert os.path.isfile(os.path.join(root, 'mat_node', 'services.json'))
+
+    t._cleanup_materialized_nodes()
+    assert not os.path.isdir(node_dir)
+    assert t._node_path_dir is None
+
+
+async def test_materialize_returns_none_when_nothing_installed(monkeypatch):
+    monkeypatch.setattr(Store, 'file_store', lambda *a, **k: FakeStore())
+    monkeypatch.setattr(task_engine, 'startup_args', lambda: [])
+    assert await _task()._materialize_installed_nodes() is None
+
+
 # --- handler verbs (no store needed) -----------------------------------------
 
 from ai.modules.task.commands.cmd_node_dev import NodeDevCommands
