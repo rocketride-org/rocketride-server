@@ -126,7 +126,7 @@ class IInstance(IInstanceBase):
         entirely if this only mutates in place.
         """
         self.instance.{handler}({arg_name})
-        return self.preventDefault()
+        self.preventDefault()
 '''
 
 

@@ -943,6 +943,41 @@ async def test_on_rrext_resolve_config_reports_nothing_without_a_profile(monkeyp
 
 
 @pytest.mark.asyncio
+async def test_on_rrext_resolve_config_ignores_structural_and_unselected_profiles(monkeypatch):
+    """A config shaped like a real .pipe, not a hand-written fixture.
+
+    Every component in the repo's own pipelines that selects a profile also carries
+    `parameters`, and an editor-saved config keeps a sub-object per profile. Neither
+    is user configuration the resolver threw away, and telling an author to move
+    `parameters` inside the profile would break the component.
+    """
+    monkeypatch.setattr(cmd_misc.Config, 'getNodeConfig', staticmethod(lambda p, c: {'model': 'claude-sonnet-4-6'}))
+    monkeypatch.setattr(
+        cmd_misc,
+        '_service_profile_names',
+        lambda provider: frozenset({'claude-sonnet-4-6', 'claude-opus-4-1'}),
+    )
+
+    conn = _make_conn()
+    request = {
+        'arguments': {
+            'provider': 'llm_anthropic',
+            'config': {
+                'profile': 'claude-sonnet-4-6',
+                'claude-sonnet-4-6': {'apikey': '${ROCKETRIDE_ANTHROPIC_KEY}'},
+                'claude-opus-4-1': {'apikey': ''},
+                'name': 'Anthropic',
+                'parameters': {'temperature': 0.2},
+                'apikey': 'sk-written-beside-the-profile',
+            },
+        },
+    }
+    result = await MiscCommands.on_rrext_resolve_config(conn, request)
+
+    assert result['body']['dropped'] == ['apikey'], 'only the key an author actually lost'
+
+
+@pytest.mark.asyncio
 async def test_on_rrext_resolve_config_requires_a_provider():
     conn = _make_conn()
 

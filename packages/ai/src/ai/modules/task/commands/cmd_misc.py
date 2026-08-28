@@ -48,7 +48,7 @@ import os
 import time
 from typing import TYPE_CHECKING, Dict, Any, List, Tuple
 from rocketride import EVENT_TYPE
-from rocketlib import validatePipeline
+from rocketlib import getServiceDefinition, validatePipeline
 from ai.common.config import Config
 from ai.common.dap import DAPConn, TransportBase
 from ai.common.list_rows import paginate_rows
@@ -60,6 +60,32 @@ from .cmd_monitor import owner_key
 # Only import for type checking to avoid circular import errors
 if TYPE_CHECKING:
     from ..task_server import TaskServer
+
+
+# Component-level keys that are not node configuration. The engine validates and
+# consumes these itself, so a profile does not discard them and an author must not be
+# told to move them inside one.
+_STRUCTURAL_CONFIG_KEYS = frozenset({'profile', 'parameters', 'secureParameters', 'name'})
+
+
+def _service_profile_names(provider: str) -> frozenset:
+    """Return every profile name the service declares, or an empty set.
+
+    A config saved by an editor carries one sub-object per profile, so an unselected
+    profile's own block would otherwise read as a key the resolver threw away.
+
+    Args:
+        provider: Component provider, e.g. 'llm_openai'.
+
+    Returns:
+        The declared profile names. Empty when the service or its preconfig is
+        unavailable, which leaves the caller reporting the key rather than hiding it.
+    """
+    try:
+        service = getServiceDefinition(provider)
+        return frozenset((service or {}).get('preconfig', {}).get('profiles', {}) or {})
+    except Exception:
+        return frozenset()
 
 
 class MiscCommands(DAPConn):
@@ -288,10 +314,18 @@ class MiscCommands(DAPConn):
             # sibling top-level keys never reach the node (#1839).
             dropped = []
             if profile:
-                # Every sibling is discarded, so the value is not worth comparing: one
-                # that happens to match the profile's own is still a line the resolver
-                # never read, and staying quiet about it is what hides the bug.
-                dropped = [k for k in config if k not in ('profile', profile)]
+                # Every sibling of the selected profile is discarded, so the value is
+                # not worth comparing: one that happens to match the profile's own is
+                # still a line the resolver never read.
+                #
+                # Two kinds of sibling are not user config and must not be reported.
+                # The structural keys below belong to the component, not the node, and
+                # the engine consumes them on its own path (pipeline_config.cpp Rule 5
+                # and Rule 6); telling an author to move them inside the profile would
+                # break the component. An unselected profile's own sub-object is the
+                # other: an editor-saved config keeps one per profile.
+                profiles = _service_profile_names(provider)
+                dropped = [k for k in config if k != profile and k not in _STRUCTURAL_CONFIG_KEYS and k not in profiles]
 
             body = {
                 'provider': provider,
