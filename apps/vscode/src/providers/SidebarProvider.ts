@@ -173,6 +173,15 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 					case 'openApp':
 						vscode.commands.executeCommand('rocketride.app.open', message.appId);
 						break;
+					case 'node:new':
+						await this.newNode();
+						break;
+					case 'node:import':
+						await this.importCapsule();
+						break;
+					case 'node:uninstall':
+						await this.uninstallNode(message.name);
+						break;
 					case 'setSidebarMode':
 						// Session-scoped persistence: included in every full update
 						// so a reloaded webview restores the user's last mode.
@@ -297,6 +306,83 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 		}
 
 		return [...rows.values()];
+	}
+
+	// =========================================================================
+	// NODE BUILDER (installed custom nodes) — same rrext_node_dev the web host
+	// uses, so uploading a node from the extension lands in the caller's store
+	// and materializes per run, identical to rocket-ui.
+	// =========================================================================
+
+	/** List installed custom nodes from the engine and push them to the webview. */
+	private async refreshNodes(): Promise<void> {
+		if (!this._view) return;
+		let nodes: { name: string; protocol: string }[] = [];
+		try {
+			const client = this.connectionManager.getClient();
+			if (client && this.connectionManager.isConnected()) {
+				const res = (await client.call('rrext_node_dev', { subcommand: 'list' })) as { nodes?: string[] };
+				nodes = (res?.nodes ?? []).map((name) => ({ name, protocol: `${name}://` }));
+			}
+		} catch {
+			/* node dev unavailable (older engine) — leave the list empty */
+		}
+		this._view.webview.postMessage({ type: 'nodesUpdate', nodes });
+	}
+
+	/** New node: prompt for name + kind, then scaffold → pack → install. */
+	private async newNode(): Promise<void> {
+		const client = this.connectionManager.getClient();
+		if (!client) return;
+		const name = (
+			await vscode.window.showInputBox({
+				prompt: 'New node name (lowercase, e.g. my_filter)',
+				validateInput: (v) => (/^[a-z][a-z0-9_]{1,63}$/.test(v.trim()) ? undefined : 'lowercase letters, digits and underscores; start with a letter; 2-64 chars'),
+			})
+		)?.trim();
+		if (!name) return;
+		const kind = await vscode.window.showQuickPick(['filter', 'source'], { placeHolder: 'Node kind' });
+		if (!kind) return;
+		try {
+			const scaffolded = (await client.call('rrext_node_dev', { subcommand: 'scaffold', name, kind })) as { files: Record<string, string> };
+			const packed = (await client.call('rrext_node_dev', { subcommand: 'pack', name, files: scaffolded.files })) as { capsule: string };
+			await client.call('rrext_node_dev', { subcommand: 'install', capsule: packed.capsule });
+			await this.refreshNodes();
+			vscode.window.showInformationMessage(`Installed custom node "${name}".`);
+		} catch (err) {
+			vscode.window.showErrorMessage(`Could not create node: ${err instanceof Error ? err.message : err}`);
+		}
+	}
+
+	/** Import: open a .rrc file dialog, then install the capsule. */
+	private async importCapsule(): Promise<void> {
+		const client = this.connectionManager.getClient();
+		if (!client) return;
+		const picked = await vscode.window.showOpenDialog({ canSelectMany: false, filters: { 'Node capsule': ['rrc'] }, openLabel: 'Import' });
+		if (!picked?.length) return;
+		try {
+			const bytes = await vscode.workspace.fs.readFile(picked[0]!);
+			const capsule = Buffer.from(bytes).toString('base64');
+			await client.call('rrext_node_dev', { subcommand: 'install', capsule });
+			await this.refreshNodes();
+			vscode.window.showInformationMessage('Imported node capsule.');
+		} catch (err) {
+			vscode.window.showErrorMessage(`Could not import capsule: ${err instanceof Error ? err.message : err}`);
+		}
+	}
+
+	/** Uninstall an installed node after confirmation. */
+	private async uninstallNode(name: string): Promise<void> {
+		const client = this.connectionManager.getClient();
+		if (!client) return;
+		const ok = await vscode.window.showWarningMessage(`Remove custom node "${name}"?`, { modal: true }, 'Uninstall');
+		if (ok !== 'Uninstall') return;
+		try {
+			await client.call('rrext_node_dev', { subcommand: 'uninstall', name });
+			await this.refreshNodes();
+		} catch (err) {
+			vscode.window.showErrorMessage(`Could not uninstall node: ${err instanceof Error ? err.message : err}`);
+		}
 	}
 
 	/** Handles a newly created .pipe file — assigns a project_id if missing. */
@@ -562,6 +648,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 				sidebarMode: this.sidebarMode,
 			},
 		});
+
+		// Refresh the installed-node list out-of-band (never awaits the RPC).
+		void this.refreshNodes();
 	}
 
 	/** Sends only updated entries. */

@@ -32,7 +32,7 @@ import { BxUser, BxCog, BxExport, BxLock, BxRocket } from 'shell';
 import { foldTaskEvent } from 'shared/modules/sidebar/taskFold';
 import { SidebarFooter } from 'shell';
 import type { SidebarFooterMenuItem } from 'shell';
-import type { ProjectEntry, ActiveTaskState, UnknownTask, ConnectionInfo, AppListItem, SidebarMode } from 'shared/modules/sidebar/types';
+import type { ProjectEntry, ActiveTaskState, UnknownTask, ConnectionInfo, AppListItem, SidebarMode, NodeListItem } from 'shared/modules/sidebar/types';
 import { useMessaging } from '../hooks/useMessaging';
 
 // =============================================================================
@@ -56,7 +56,7 @@ interface TaskEventBody {
 	tasks?: { id: string; name: string; projectId: string; source: string; runKind?: string }[];
 }
 
-type OutgoingMessage = { type: 'view:ready' } | { type: 'connect' } | { type: 'disconnect' } | { type: 'command'; command: string; args?: unknown[] } | { type: 'openFile'; fsPath: string } | { type: 'runPipeline'; fsPath: string; sourceId?: string } | { type: 'stopPipeline'; projectId: string; sourceId: string } | { type: 'refresh' } | { type: 'openUnknownTask'; projectId: string; sourceId: string; displayName: string } | { type: 'setDevelopmentMode'; mode: string } | { type: 'setDeployTargetMode'; mode: string | null } | { type: 'cloudSignIn' } | { type: 'openApp'; appId: string } | { type: 'setSidebarMode'; mode: SidebarMode };
+type OutgoingMessage = { type: 'view:ready' } | { type: 'connect' } | { type: 'disconnect' } | { type: 'command'; command: string; args?: unknown[] } | { type: 'openFile'; fsPath: string } | { type: 'runPipeline'; fsPath: string; sourceId?: string } | { type: 'stopPipeline'; projectId: string; sourceId: string } | { type: 'refresh' } | { type: 'openUnknownTask'; projectId: string; sourceId: string; displayName: string } | { type: 'setDevelopmentMode'; mode: string } | { type: 'setDeployTargetMode'; mode: string | null } | { type: 'cloudSignIn' } | { type: 'openApp'; appId: string } | { type: 'setSidebarMode'; mode: SidebarMode } | { type: 'node:new' } | { type: 'node:import' } | { type: 'node:uninstall'; name: string };
 
 interface DashboardTaskDTO {
 	id: string;
@@ -98,6 +98,7 @@ type IncomingMessage =
 	  }
 	| { type: 'entriesUpdate'; entries: HostProjectEntry[] }
 	| { type: 'appsUpdate'; apps: AppListItem[] }
+	| { type: 'nodesUpdate'; nodes: NodeListItem[] }
 	| { type: 'taskEvent'; event: TaskEventBody }
 	| { type: 'statusUpdate'; projectId: string; sourceId: string; errors: string[]; warnings: string[] }
 	| { type: 'dashboardSnapshot'; tasks: DashboardTaskDTO[] };
@@ -127,6 +128,8 @@ const SidebarViewWebview: React.FC = () => {
 
 	// ── App Builder (MY APPS) ───────────────────────────────────────────────
 	const [apps, setApps] = useState<AppListItem[]>([]);
+	// ── Node Builder (installed custom nodes) ───────────────────────────────
+	const [installedNodes, setInstalledNodes] = useState<NodeListItem[]>([]);
 	const [sidebarMode, setSidebarMode] = useState<SidebarMode>('pipelines');
 	// The host-persisted mode seeds the strip ONCE: an `update` composed
 	// before the persist round trip completed carries the previous value and
@@ -245,6 +248,10 @@ const SidebarViewWebview: React.FC = () => {
 					setApps(msg.apps);
 					break;
 
+				case 'nodesUpdate':
+					setInstalledNodes(msg.nodes);
+					break;
+
 				case 'taskEvent':
 					handleTaskEvent(msg.event);
 					break;
@@ -355,6 +362,26 @@ const SidebarViewWebview: React.FC = () => {
 	const onOpenApp = useCallback(
 		(appId: string) => {
 			sendMessage({ type: 'openApp', appId });
+		},
+		[sendMessage]
+	);
+
+	// ── Node Builder callbacks (extension host does the client.call) ────────
+
+	/** New node → the host prompts for name/kind, then scaffolds + installs. */
+	const onNewNode = useCallback(() => {
+		sendMessage({ type: 'node:new' });
+	}, [sendMessage]);
+
+	/** Import capsule → the host opens a .rrc file dialog, then installs. */
+	const onImportCapsule = useCallback(() => {
+		sendMessage({ type: 'node:import' });
+	}, [sendMessage]);
+
+	/** Uninstall an installed node by name (host confirms + removes). */
+	const onUninstall = useCallback(
+		(name: string) => {
+			sendMessage({ type: 'node:uninstall', name });
 		},
 		[sendMessage]
 	);
@@ -476,7 +503,7 @@ const SidebarViewWebview: React.FC = () => {
 	// No headerSlot: the VS Code host has no home-app destination, so it injects no
 	// host-specific top nav. The "Home" button is a SaaS-shell concept owned by the
 	// web host (rocket-ui), intentionally absent from shared / this extension.
-	return <SidebarView connection={connection} isSubscribed={subscribed} entries={entries} activeTasks={activeTasks} unknownTasks={unknownTasks} onNavigate={onNavigate} onOpenFile={onOpenFile} onSourceAction={onSourceAction} onRefresh={onRefresh} footerSlot={footerSlot} onOpenUnknownTask={onOpenUnknownTask} appBuilder={{ apps, onNewApp, onOpenApp }} sidebarMode={sidebarMode} onSidebarModeChange={onSidebarModeChange} />;
+	return <SidebarView connection={connection} isSubscribed={subscribed} entries={entries} activeTasks={activeTasks} unknownTasks={unknownTasks} onNavigate={onNavigate} onOpenFile={onOpenFile} onSourceAction={onSourceAction} onRefresh={onRefresh} footerSlot={footerSlot} onOpenUnknownTask={onOpenUnknownTask} appBuilder={{ apps, onNewApp, onOpenApp }} nodeBuilder={{ nodes: installedNodes, onNewNode, onImportCapsule, onUninstall }} sidebarMode={sidebarMode} onSidebarModeChange={onSidebarModeChange} />;
 };
 
 export default SidebarViewWebview;
