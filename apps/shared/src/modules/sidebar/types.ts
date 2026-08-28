@@ -115,6 +115,38 @@ export interface AppBuilderSidebar {
 }
 
 // =============================================================================
+// NODE BUILDER SIDEBAR (NODES)
+// =============================================================================
+
+/** One installed custom node row in the Nodes sidebar mode. */
+export interface NodeListItem {
+	/** Node id / protocol key (e.g. 'my_filter'). */
+	name: string;
+	/** Protocol (e.g. 'my_filter://'). */
+	protocol?: string;
+	/** Installed version, if known. */
+	version?: string;
+}
+
+/**
+ * Node Builder sidebar content. PRESENCE of this prop turns the Nodes tab from
+ * a placeholder into the real surface: a New node / Import capsule nav plus the
+ * installed-node list with per-row uninstall. Hosts wire the callbacks to the
+ * engine's `rrext_node_dev` verbs (scaffold/install/uninstall/list), so the same
+ * view drives the VS Code, web and Claude hosts identically.
+ */
+export interface NodeBuilderSidebar {
+	/** Installed custom nodes (`rrext_node_dev` list). */
+	nodes: NodeListItem[];
+	/** Create a new node (the scaffold → install flow). */
+	onNewNode: () => void;
+	/** Import a `.rrc` capsule (the file-pick → install flow). */
+	onImportCapsule: () => void;
+	/** Uninstall an installed node by name. */
+	onUninstall: (name: string) => void;
+}
+
+// =============================================================================
 // SIDEBAR MODE
 // =============================================================================
 
@@ -204,6 +236,12 @@ export interface ISidebarViewProps {
 	 * placeholder still rides along whenever the mode tabs render).
 	 */
 	appBuilder?: AppBuilderSidebar;
+	/**
+	 * Node Builder sidebar content — presence turns the Nodes tab into the real
+	 * surface (installed-node list + New node / Import capsule) and, like
+	 * appBuilder, makes the mode tabs render. Omitted → the Nodes placeholder.
+	 */
+	nodeBuilder?: NodeBuilderSidebar;
 	/**
 	 * Force the mode tabs visible without appBuilder — Pipelines plus the
 	 * Nodes placeholder (the web host: more modes will land on that strip).

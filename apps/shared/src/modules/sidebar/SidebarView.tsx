@@ -21,7 +21,7 @@
 
 import React, { useState, useCallback, CSSProperties } from 'react';
 import { commonStyles } from 'shell';
-import { BxPlus, BxDesktop, BxChevronRight, BxChevronDown, BxStop, BxGridAlt } from 'shell';
+import { BxPlus, BxDesktop, BxChevronRight, BxChevronDown, BxStop, BxGridAlt, BxDownload, BxTrash } from 'shell';
 import { SidebarMenu, TabControl, TabPanel } from 'shell';
 import { StatusBadge } from 'shell';
 import type { StatusVariant } from 'shell';
@@ -174,7 +174,7 @@ const PIPELINE_CONFIG: ExplorerConfig = {
  * Maps ISidebarViewProps (pipeline-specific) to IExplorerProps (generic).
  * The Explorer component handles all file tree rendering internally.
  */
-export const SidebarView: React.FC<ISidebarViewProps> = ({ connection, isSubscribed = true, entries, activeTasks, unknownTasks, headerSlot, onNavigate, onOpenFile, onFileManage, fileActions, onSourceAction, onRefresh, footerSlot, onOpenUnknownTask, activeFilePath, appBuilder, showModeStrip = false, sidebarMode = 'pipelines', onSidebarModeChange }) => {
+export const SidebarView: React.FC<ISidebarViewProps> = ({ connection, isSubscribed = true, entries, activeTasks, unknownTasks, headerSlot, onNavigate, onOpenFile, onFileManage, fileActions, onSourceAction, onRefresh, footerSlot, onOpenUnknownTask, activeFilePath, appBuilder, nodeBuilder, showModeStrip = false, sidebarMode = 'pipelines', onSidebarModeChange }) => {
 	const [hoveredRow, setHoveredRow] = useState<string | null>(null);
 	const [unknownExpanded, setUnknownExpanded] = useState(true);
 
@@ -184,7 +184,8 @@ export const SidebarView: React.FC<ISidebarViewProps> = ({ connection, isSubscri
 	// whenever the mode tabs render at all. A requested mode is only honored
 	// when its tab actually exists — anything else falls back to Pipelines.
 	const hasAppBuilder = Boolean(appBuilder);
-	const tabsVisible = hasAppBuilder || showModeStrip;
+	const hasNodeBuilder = Boolean(nodeBuilder);
+	const tabsVisible = hasAppBuilder || hasNodeBuilder || showModeStrip;
 	const mode = (sidebarMode === 'apps' && hasAppBuilder) || (sidebarMode === 'nodes' && tabsVisible) ? sidebarMode : 'pipelines';
 	// --- Static nav menus ----------------------------------------------------
 
@@ -361,8 +362,61 @@ export const SidebarView: React.FC<ISidebarViewProps> = ({ connection, isSubscri
 		</div>
 	) : null;
 
-	// Nodes tab body: node-builder placeholder until the real surface lands.
-	const nodesPanel = (
+	// Nodes tab body: the Node Builder surface (New node / Import capsule nav +
+	// the installed-node list with per-row uninstall) when the host wires it;
+	// the placeholder otherwise.
+	const nodesNavMenu: ViewMenu = {
+		entries: [
+			{ id: 'newNode', label: 'New node', icon: <BxPlus size={16} /> },
+			{ id: 'importCapsule', label: 'Import capsule', icon: <BxDownload size={16} /> },
+		],
+	};
+	const nodesPanel = nodeBuilder ? (
+		<div style={S.panelColumn}>
+			<div style={S.navSection}>
+				<SidebarMenu
+					menu={nodesNavMenu}
+					activeId=""
+					onSelect={(id) => {
+						if (id === 'newNode') nodeBuilder.onNewNode();
+						else if (id === 'importCapsule') nodeBuilder.onImportCapsule();
+					}}
+				/>
+			</div>
+			<div style={S.appsLabel}>Installed nodes</div>
+			<div style={S.appsList}>
+				{nodeBuilder.nodes.length === 0 && (
+					<div style={{ padding: '4px 10px', fontSize: 12, color: 'var(--rr-text-secondary)' }}>
+						No custom nodes — create one with New node or Import capsule.
+					</div>
+				)}
+				{nodeBuilder.nodes.map((n) => {
+					const rowKey = `node:${n.name}`;
+					return (
+						<div
+							key={n.name}
+							style={{ ...S.row, ...hoverBg(rowKey) }}
+							onMouseEnter={() => setHoveredRow(rowKey)}
+							onMouseLeave={() => setHoveredRow(null)}
+							title={n.protocol || n.name}
+						>
+							{/* Mirror the app/file row anatomy: 14px chevron slot + 16px glyph. */}
+							<span style={{ width: 14, flexShrink: 0 }} />
+							<BxGridAlt size={16} color="var(--rr-text-secondary)" />
+							<span style={S.rowName}>{n.name}</span>
+							<span style={S.spacer} />
+							<StatusBadge variant="info">catalog</StatusBadge>
+							{hoveredRow === rowKey && (
+								<button type="button" title={`Uninstall ${n.name}`} onClick={(e) => { e.stopPropagation(); nodeBuilder.onUninstall(n.name); }} style={S.actionBtn('var(--rr-text-secondary)')}>
+									<BxTrash size={16} />
+								</button>
+							)}
+						</div>
+					);
+				})}
+			</div>
+		</div>
+	) : (
 		<div style={S.panelColumn}>
 			<div style={S.comingSoon}>Coming soon...</div>
 		</div>
