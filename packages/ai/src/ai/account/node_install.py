@@ -115,3 +115,63 @@ def list_installed(node_path: Optional[str] = None) -> List[str]:
     return sorted(
         d for d in os.listdir(local_nodes) if d != '__pycache__' and os.path.isdir(os.path.join(local_nodes, d))
     )
+
+
+# =============================================================================
+# Store-backed install (primary) — persists per-user and materializes per-run.
+#
+# The primary path writes a capsule into the caller's store under
+# ``local_nodes/<name>/``; task_engine materializes it and passes --node_path to
+# each run, so installed nodes work with no manual flag in docker/SaaS. The
+# ``--node_path`` variants above stay as the VSCode-workspace fallback.
+# =============================================================================
+
+_STORE_ROOT = 'local_nodes'
+
+
+async def install_capsule_to_store(fs, zip_bytes: bytes) -> Dict[str, object]:
+    """Install a ``.rrc`` into the caller's store (``local_nodes/<name>/``).
+
+    Args:
+        fs: a ``FileStore`` bound to the caller (``Store.file_store(ctx)``).
+        zip_bytes: the capsule bytes.
+
+    Returns:
+        ``{'name', 'protocol', 'version', 'files': [relpaths]}``.
+    """
+    manifest, payload = read_capsule(zip_bytes)
+    name = _safe_name(manifest.get('name'))
+    dest = f'{_STORE_ROOT}/{name}'
+    # Clean overwrite so a removed file never lingers across an upgrade.
+    try:
+        await fs.rmdir(dest, recursive=True)
+    except Exception:
+        pass
+    written: List[str] = []
+    for rel, body in payload.items():
+        await fs.write(f'{dest}/{rel}', body)
+        written.append(rel)
+    return {
+        'name': name,
+        'protocol': manifest.get('protocol') or f'{name}://',
+        'version': manifest.get('version'),
+        'files': sorted(written),
+    }
+
+
+async def uninstall_node_from_store(fs, name: str) -> Dict[str, object]:
+    """Remove an installed node from the caller's store."""
+    name = _safe_name(name)
+    if name not in await list_installed_in_store(fs):
+        raise NodeInstallError(f'node {name!r} is not installed')
+    await fs.rmdir(f'{_STORE_ROOT}/{name}', recursive=True)
+    return {'name': name, 'removed': True}
+
+
+async def list_installed_in_store(fs) -> List[str]:
+    """Names of the custom nodes installed in the caller's store (empty if none)."""
+    try:
+        listing = await fs.list_dir(_STORE_ROOT)
+    except Exception:
+        return []
+    return sorted(e['name'] for e in listing.get('entries', []) if e.get('type') == 'dir')

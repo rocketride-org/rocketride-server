@@ -25,9 +25,14 @@ import base64
 from typing import TYPE_CHECKING, Dict, Any
 
 from ai.common.dap import DAPConn
+from ai.account import Store
 from ai.account.node_scaffold import scaffold_node, validate_node
 from ai.account.capsule import pack_capsule
-from ai.account.node_install import install_capsule, uninstall_node, list_installed
+from ai.account.node_install import (
+    install_capsule_to_store,
+    uninstall_node_from_store,
+    list_installed_in_store,
+)
 
 if TYPE_CHECKING:
     pass
@@ -49,11 +54,11 @@ class NodeDevCommands(DAPConn):
         if subcommand == 'pack':
             return self._node_pack(args)
         if subcommand == 'install':
-            return self._node_install(args)
+            return await self._node_install(args)
         if subcommand == 'uninstall':
-            return self._node_uninstall(args)
+            return await self._node_uninstall(args)
         if subcommand == 'list':
-            return {'nodes': list_installed()}
+            return {'nodes': await list_installed_in_store(self._node_store())}
         raise ValueError(f'unknown rrext_node_dev subcommand {subcommand!r}')
 
     def _node_scaffold(self, args: Dict[str, Any]) -> Dict[str, Any]:
@@ -82,13 +87,17 @@ class NodeDevCommands(DAPConn):
         blob = pack_capsule(name, files, version=args.get('version', '0.0.0'), declares=args.get('declares'))
         return {'name': name, 'capsule': base64.b64encode(blob).decode('ascii')}
 
-    def _node_install(self, args: Dict[str, Any]) -> Dict[str, Any]:
-        """Install a base64 .rrc capsule into the engine's local_nodes."""
+    def _node_store(self):
+        """The caller's FileStore — installs persist here and materialize per-run."""
+        return Store.file_store(self.request_context())
+
+    async def _node_install(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Install a base64 .rrc capsule into the caller's store (local_nodes/)."""
         capsule = args.get('capsule')
         if not capsule:
             raise ValueError('capsule (base64 .rrc) is required')
-        return install_capsule(base64.b64decode(capsule))
+        return await install_capsule_to_store(self._node_store(), base64.b64decode(capsule))
 
-    def _node_uninstall(self, args: Dict[str, Any]) -> Dict[str, Any]:
-        """Remove an installed custom node by name."""
-        return uninstall_node(args.get('name'))
+    async def _node_uninstall(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Remove an installed custom node by name from the caller's store."""
+        return await uninstall_node_from_store(self._node_store(), args.get('name'))

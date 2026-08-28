@@ -98,7 +98,76 @@ def test_installed_capsule_is_discovered_by_the_engine(tmp_path):
     assert 'PROTOCOL=e2e_installed://' in out.stdout, f'stdout={out.stdout!r} stderr={out.stderr!r}'
 
 
-# --- handler verbs -----------------------------------------------------------
+# --- store-backed install (primary path) ------------------------------------
+
+from ai.account.node_install import (
+    install_capsule_to_store,
+    list_installed_in_store,
+    uninstall_node_from_store,
+)
+
+
+class FakeStore:
+    """In-memory stand-in for FileStore: write/read/list_dir/rmdir, same shapes."""
+
+    def __init__(self):
+        self.files = {}  # path -> bytes
+
+    async def write(self, path, data):
+        self.files[path] = data
+
+    async def read(self, path):
+        return self.files[path]
+
+    async def rmdir(self, path, recursive=False):
+        prefix = path.rstrip('/') + '/'
+        for k in [k for k in self.files if k.startswith(prefix)]:
+            del self.files[k]
+
+    async def list_dir(self, path=''):
+        prefix = (path.rstrip('/') + '/') if path else ''
+        seen = {}
+        for k in self.files:
+            if not k.startswith(prefix):
+                continue
+            rest = k[len(prefix) :]
+            name = rest.split('/')[0]
+            seen[name] = 'dir' if '/' in rest else 'file'
+        return {'entries': [{'name': n, 'type': t} for n, t in sorted(seen.items())], 'count': len(seen)}
+
+
+async def test_store_install_then_list():
+    fs = FakeStore()
+    result = await install_capsule_to_store(fs, _capsule('store_node', kind='source'))
+    assert result['name'] == 'store_node'
+    assert result['protocol'] == 'store_node://'
+    assert await list_installed_in_store(fs) == ['store_node']
+    # Files live under local_nodes/<name>/ in the store.
+    assert 'local_nodes/store_node/services.json' in fs.files
+
+
+async def test_store_install_overwrites_on_upgrade():
+    fs = FakeStore()
+    await install_capsule_to_store(fs, _capsule('up'))
+    fs.files['local_nodes/up/stale.py'] = b'old'
+    await install_capsule_to_store(fs, _capsule('up'))  # reinstall
+    assert 'local_nodes/up/stale.py' not in fs.files  # clean overwrite
+
+
+async def test_store_uninstall():
+    fs = FakeStore()
+    await install_capsule_to_store(fs, _capsule('sa_node'))
+    await install_capsule_to_store(fs, _capsule('sb_node'))
+    await uninstall_node_from_store(fs, 'sa_node')
+    assert await list_installed_in_store(fs) == ['sb_node']
+
+
+async def test_store_uninstall_missing_errors():
+    with pytest.raises(NodeInstallError):
+        await uninstall_node_from_store(FakeStore(), 'nope')
+
+
+# --- handler verbs (no store needed) -----------------------------------------
 
 from ai.modules.task.commands.cmd_node_dev import NodeDevCommands
 
@@ -116,16 +185,3 @@ async def test_handler_pack_returns_base64_capsule():
 
     manifest, _ = read_capsule(base64.b64decode(result['capsule']))
     assert manifest['name'] == 'packv'
-
-
-async def test_handler_install_routes_to_install(tmp_path):
-    # No --node_path in the test engine's argv, so install routes through and reports it.
-    files = scaffold_node('routed', kind='filter')
-    blob = base64.b64encode(pack_capsule('routed', files)).decode('ascii')
-    with pytest.raises(NodeInstallError):
-        await _conn().on_rrext_node_dev({'arguments': {'subcommand': 'install', 'capsule': blob}})
-
-
-async def test_handler_list_returns_nodes_key():
-    result = await _conn().on_rrext_node_dev({'arguments': {'subcommand': 'list'}})
-    assert 'nodes' in result and isinstance(result['nodes'], list)
