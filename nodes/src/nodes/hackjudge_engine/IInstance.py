@@ -70,7 +70,13 @@ class IInstance(IInstanceBase):
         project = str(job.get('project') or (pr[1] if pr else '') or '(unnamed)')
 
         result = self._verdict(engine, fetch, url, target, tname, event_date, history_penalty, project)
-        if str(job.get('flow') or '') == 'verify' and self.instance.hasListener('questions'):
+        is_flow = str(job.get('flow') or '') == 'verify'
+        if result.get('deferred'):
+            # a deferred repo must never continue down the verify flow: nothing to
+            # persist, nothing to settle - the caller retries the repository
+            self._emit(question, {**result, 'stage': 'engine'} if is_flow else result)
+            return
+        if is_flow and self.instance.hasListener('questions'):
             job['verdict'] = result
             job['next'] = 'store'
             self._forward(question, job)
@@ -101,6 +107,21 @@ class IInstance(IInstanceBase):
             return status, text
 
         evidence = engine.gather(url, gh_metered, event_date, history_penalty, target)
+        if evidence.get('fetch_incomplete'):
+            # deferred, not scored: no tag/score keys at all, so this can never be
+            # mistaken for a verdict downstream, and nothing is billed for the
+            # thrown-away fetch work
+            return {
+                'project': project,
+                'github': url,
+                'repo_accessible': True,
+                'deferred': True,
+                'error': 'evidence fetch incomplete - '
+                f'{evidence.get("note") or "file fetch(es) failed"}; retry this repository',
+                'target_name': tname,
+                'kb_processed': 0.0,
+                'engine_used': 'rocketride-node',
+            }
         if not evidence.get('accessible'):
             return {
                 'project': project,

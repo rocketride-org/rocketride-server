@@ -55,6 +55,11 @@ _TREE = {
         {'path': 'src/app.js', 'type': 'blob'},
         {'path': 'src/api.js', 'type': 'blob'},
         {'path': 'src/My Component.js', 'type': 'blob'},
+        # non-blob entries: a directory named like a source file is the trap - it
+        # 404s on raw fetch, and unfiltered it would defer the repo permanently
+        {'path': 'src/components', 'type': 'tree'},
+        {'path': 'vendor/bundle.js', 'type': 'tree'},
+        {'path': 'deps/sub.pipe', 'type': 'commit'},
     ]
 }
 _MANIFEST = json.dumps({'dependencies': {'rocketride': '^1.0.0'}})
@@ -122,6 +127,12 @@ class VerdictOffline(unittest.TestCase):
         ev = eng.gather('https://github.com/acme/demo', _fake_gh())
         self.assertFalse(ev.get('fetch_incomplete', False))
         self.assertGreaterEqual(ev['sdk']['file_spread'], 3)
+
+    def test_non_blob_tree_entries_are_ignored_not_fetched(self):
+        # 'vendor/bundle.js' is a DIRECTORY: raw fetch would 404 every time and
+        # wrongly defer the repo forever if the tree were not filtered to blobs
+        ev = eng.gather('https://github.com/acme/demo', _fake_gh())
+        self.assertFalse(ev.get('fetch_incomplete', False))
 
     def test_unreachable_repo_is_inaccessible_not_deferred(self):
         ev = eng.gather('https://github.com/acme/demo', lambda url: (404, ''))

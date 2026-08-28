@@ -715,7 +715,9 @@ def gather(
     st, tbody = gh(f'https://api.github.com/repos/{owner}/{repo}/git/trees/{branch}?recursive=1')
     if st != 200:
         return {'accessible': True, 'fetch_incomplete': True, 'note': f'tree fetch failed (HTTP {st})'}
-    paths = [x.get('path', '') for x in json.loads(tbody).get('tree', [])]
+    # blobs only: directories and submodules 404 on raw fetches, and with the
+    # fetch-failure guard a non-file entry would defer the repo permanently
+    paths = [x.get('path', '') for x in json.loads(tbody).get('tree', []) if x.get('type') == 'blob']
 
     fetch_fails = [0]
 
@@ -877,7 +879,9 @@ def _gather_generic(url: str, gh, event_date: str | None, history_penalty: float
     st, tbody = gh(f'https://api.github.com/repos/{owner}/{repo}/git/trees/{branch}?recursive=1')
     if st != 200:
         return {'accessible': True, 'fetch_incomplete': True, 'note': f'tree fetch failed (HTTP {st})'}
-    paths = [x.get('path', '') for x in json.loads(tbody).get('tree', [])]
+    # blobs only: directories and submodules 404 on raw fetches, and with the
+    # fetch-failure guard a non-file entry would defer the repo permanently
+    paths = [x.get('path', '') for x in json.loads(tbody).get('tree', []) if x.get('type') == 'blob']
 
     fetch_fails = [0]
 
