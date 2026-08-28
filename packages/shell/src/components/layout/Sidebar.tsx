@@ -294,6 +294,21 @@ const AppSwitcherButton: React.FC<{ collapsed: boolean }> = ({ collapsed }) => {
 	// App name for display
 	const appLabel = isHome ? 'ROCKETRIDE CLOUD' : (activeManifest?.name.toUpperCase() ?? '');
 
+	// An app may bring its own header lockup.
+	//
+	// `branding.logo` has been in the contract since it was written and was
+	// never read — this is that seam finally being used. An app that supplies
+	// one owns the whole header and says its own name; an app that does not is
+	// untouched and still gets the RocketRide wordmark over its label, which is
+	// every app but the one that asked.
+	if (branding?.logo) {
+		return (
+			<div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 1, padding: '4px 4px 2px', minWidth: 0 }}>
+				{branding.logo}
+			</div>
+		);
+	}
+
 	return (
 		<div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, flex: 1, padding: '4px 4px 2px' }}>
 			<RocketRideWordmark height={22} color={paletteMode === 'dark' ? '#FAFBF8' : '#1E1A34'} />

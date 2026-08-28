@@ -33,6 +33,7 @@ import rehypeSanitize from 'rehype-sanitize';
 import { commonStyles } from '../../themes/styles';
 import { useFixedPopupPosition } from '../../hooks/useFixedPopupPosition';
 import { useAnnouncements } from '../../hooks/useAnnouncements';
+import { useWorkspace } from '../workspace/WorkspaceContext';
 import { PopupRow } from '../PopupRow';
 import { BxBookOpen, BxChevronRight, BxCheck, BxCog } from '../BoxIcon';
 import type { IconComponent } from '../BoxIcon';
@@ -327,6 +328,14 @@ export const SidebarFooter: React.FC<SidebarFooterProps> = ({ collapsed, userNam
 	const topLevelItems = menuItems ?? [];
 
 	// ── Announcements ticker ────────────────────────────────────────────────
+	//
+	// The ticker is the PLATFORM's channel. An app carrying its own brand can
+	// ask for it to stay out of its sidebar, where it otherwise reads as the
+	// host talking over the product. Opting out is the app's choice to make;
+	// an app that says nothing keeps it, so this cannot turn the channel off
+	// for anyone who did not ask for that.
+	const { activeAppId, loadedApps } = useWorkspace();
+	const hideAnnouncements = !!loadedApps[activeAppId]?.branding?.hideAnnouncements;
 	const announcements = useAnnouncements();
 	const [tickerIndex, setTickerIndex] = useState(0);
 	const [tickerFade, setTickerFade] = useState(true);
@@ -348,7 +357,7 @@ export const SidebarFooter: React.FC<SidebarFooterProps> = ({ collapsed, userNam
 	return (
 		<div style={S.wrapper}>
 			{/* ── Announcements ticker (popup mode) ────────────────────── */}
-			{!collapsed && announcements.length > 0 && (() => {
+			{!collapsed && !hideAnnouncements && announcements.length > 0 && (() => {
 				const current = announcements[tickerIndex % announcements.length];
 				return (
 					<>
