@@ -113,7 +113,7 @@ Rate-limit and connection errors are classified as retryable by the shared chat 
 
 ## Keeping the model list current
 
-Profiles are maintained by the model sync tool, see [tools/sync_models](../../../../tools/sync_models/README.md):
+Profiles are maintained by the model sync tool, see [tools/sync_models](https://github.com/rocketride-org/rocketride-server/tree/develop/tools/sync_models#readme):
 
 ```bash
 python tools/sync_models/src/sync_models.py --provider llm_qwen --enable-discovery --apply
