@@ -19,8 +19,9 @@ One job is deliberately **outside** `ci-ok` and cannot block a merge:
   required list would block every merge, since it is always skipped on a PR.
 
 The doc-schema and docs-site-build checks are not in `ci.yml` at all: they live
-in `.github/workflows/docs-schemas.yml`, which triggers only on PRs and pushes
-to `fix/docs` (`ci.yml` deliberately does not carry any of this yet).
+in `.github/workflows/docs-schemas.yml`, which triggers on PRs into `develop`
+(and pushes to it) that touch doc-related paths — `docs/**`, `packages/docs/**`,
+node READMEs and `services*.json`, the validators, and the lockfile.
 
 CodeQL is GitHub's "Default setup" (repo Settings → Code security), not a job in
 this workflow; findings land in the Security tab.
@@ -54,27 +55,27 @@ ruff format --check
 Runs on every PR with no path gating. It mirrors the local lefthook hook so a
 contributor who commits with `--no-verify` is still caught.
 
-### Docs export drift — `./builder docs:check` (`fix/docs` PRs and post-merge)
+### Docs export drift — `./builder docs:check` (doc-path PRs and post-merge)
 
 ```bash
 node scripts/build.js docs:check      # or ./builder docs:check
 ```
 
-Runs in the `Docs site build` job of `docs-schemas.yml` (every PR/push to
-`fix/docs`) and again in `docs.yml` after merge. It fails when a generated copy
+Runs in the `Docs site build` job of `docs-schemas.yml` (PRs into `develop`
+touching doc paths) and again in `docs.yml` after merge. It fails when a generated copy
 under `packages/` has drifted from its source under `docs/`. Fix with
 `./builder docs:export`; never hand-edit the destination. See
 [The Docs Pipeline](docs-pipeline.md).
 
-### Docs site build — `Docs site build` in `docs-schemas.yml` (blocking, `fix/docs` PRs only)
+### Docs site build — `Docs site build` in `docs-schemas.yml` (blocking, doc-path PRs)
 
 ```bash
 node scripts/build.js docs:test       # the gather/export helpers themselves
 node scripts/build.js docs:build      # stage + compile the site
 ```
 
-Runs on every PR/push to `fix/docs` (no path filter); it does not run on PRs to
-`develop`. Catches what only a full build can: broken internal links, a file under
+Runs on PRs into `develop` (and pushes to it) that touch doc-related paths.
+Catches what only a full build can: broken internal links, a file under
 `docs/public/` that no mount covers, and a spine id with no backing page (which
 would otherwise publish a live "coming soon" URL). Without this gate those
 failures surface after merge, in `docs.yml` on `develop`.
@@ -152,7 +153,7 @@ helm template rocketride deploy/helm/rocketride \
   | kubeconform -strict -summary -kubernetes-version 1.29.0
 ```
 
-### Doc schemas — `schemas` and `corpus` in `docs-schemas.yml` (`fix/docs` PRs only)
+### Doc schemas — the `schemas` job in `docs-schemas.yml` (doc-path PRs)
 
 ```bash
 python3 scripts/validate-node-readme.py <node-dir> ...   # the nodes your PR touched
@@ -161,11 +162,12 @@ python3 scripts/validate-client-docs.py
 
 Two deterministic checkers: node READMEs against
 [the node README schema](nodes/readme-schema.md), and client-doc parity against
-[the client README schema](clients/readme-schema.md). The `schemas` job
-validates only the nodes the PR touched and is **blocking** — being scoped to
-the diff is what lets it be a hard gate immediately. The separate `corpus` job
-sweeps the whole corpus with `--all` and carries `continue-on-error: true`, so
-it is informational only while the node corpus is migrated.
+[the client README schema](clients/readme-schema.md). The job validates only
+the nodes the PR touched and is **blocking** — being scoped to the diff is what
+lets it be a hard gate immediately. Its final step sweeps the whole corpus with
+`--all` under `continue-on-error: true`, so the corpus-wide count stays
+informational while the last stragglers are migrated; once it reaches zero,
+`--all` graduates into the gate and the sweep retires.
 
 Check a single node while you work:
 

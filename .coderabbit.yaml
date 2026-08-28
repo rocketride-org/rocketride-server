@@ -8,11 +8,6 @@ reviews:
     base_branches:
       - develop
       - release/.*
-      # TEMPORARY (fix/docs only) — remove in the fix/docs -> develop PR.
-      # CodeRabbit reads this file from a PR's BASE branch, so this entry and
-      # the doc path_instructions below are live only for pull requests into
-      # fix/docs. PRs into develop use develop's own copy and are unaffected.
-      - fix/docs
     drafts: true
     ignore_title_keywords:
       - '[bot]'
@@ -40,7 +35,6 @@ reviews:
       instructions: |
         C++ code: C++17 standard. This is the core engine — review for
         memory safety, thread safety, and performance.
-    # ----- TEMPORARY (fix/docs only) — remove in the fix/docs -> develop PR --
     - path: 'nodes/src/nodes/**/README.md'
       instructions: |
         Node READMEs follow docs/development/nodes/readme-schema.md (structure is
@@ -59,7 +53,6 @@ reviews:
         explicitly marked language-specific. Package READMEs are generated
         from these sources via `builder docs:export` — never review edits to
         packages/client-*/README.md as hand-written files.
-    # ----- end TEMPORARY ----------------------------------------------------
   tools:
     eslint:
       enabled: true

@@ -2,7 +2,6 @@ import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import { mkdtemp, rm, mkdir, writeFile, readFile } from 'node:fs/promises';
-import { existsSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -184,8 +183,14 @@ describe('gather — top-level docs/ root mounts', () => {
 		assert.equal(entry.route, '/clients/typescript');
 	});
 
-	it('stages no page or route for README.md', () => {
-		assert.equal(existsSync(path.join(contentDir, 'clients', 'typescript', 'README.md')), false);
+	it('stages no page or route for README.md', async () => {
+		// A regressed gather would stage README.md at clients/typescript.md
+		// (docIdFor collapses README to the mount id) — the same path the
+		// legitimate index.md page occupies — so assert on the staged page's
+		// content, not on a clients/typescript/README.md path gather could
+		// never produce.
+		const staged = await readFile(path.join(contentDir, 'clients', 'typescript.md'), 'utf8');
+		assert.doesNotMatch(staged, /Export source for docs:export/, 'README.md content not staged as the mount page');
 		const entry = manifest.find((m) => m.source && m.source.endsWith('README.md'));
 		assert.equal(entry, undefined, 'no manifest entry sourced from README.md');
 	});

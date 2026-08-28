@@ -31,11 +31,16 @@ import path from 'node:path';
 const require = createRequire(import.meta.url);
 const { exportDocs, FILE_EXPORTS, DIR_EXPORTS } = require('../../scripts/lib/export.js');
 
-/** Build a fresh temp project root that mirrors every FILE_EXPORTS/DIR_EXPORTS source. */
+/**
+ * Build a fresh temp project root that mirrors every FILE_EXPORTS/DIR_EXPORTS
+ * source, with each FILE_EXPORTS source seeded with known content — every
+ * suite needs the same seed, so it lives here rather than in each before().
+ */
 async function makeProject() {
 	const root = await mkdtemp(path.join(os.tmpdir(), 'rr-export-'));
 	for (const { source } of FILE_EXPORTS) {
 		await mkdir(path.dirname(path.join(root, source)), { recursive: true });
+		await writeFile(path.join(root, source), `# Content of ${source}\n`);
 	}
 	for (const { source } of DIR_EXPORTS) {
 		await mkdir(path.join(root, source), { recursive: true });
@@ -48,9 +53,6 @@ describe('exportDocs — FILE_EXPORTS', () => {
 
 	before(async () => {
 		root = await makeProject();
-		for (const { source } of FILE_EXPORTS) {
-			await writeFile(path.join(root, source), `# Content of ${source}\n`);
-		}
 	});
 
 	after(async () => {
@@ -73,9 +75,6 @@ describe('exportDocs — check mode against a hand-edited dest', () => {
 
 	before(async () => {
 		root = await makeProject();
-		for (const { source } of FILE_EXPORTS) {
-			await writeFile(path.join(root, source), `# Content of ${source}\n`);
-		}
 		await exportDocs({ projectRoot: root });
 		// Hand-edit one exported dest after a clean export.
 		await writeFile(path.join(root, target.dest), '# Someone edited this by hand\n');
@@ -101,9 +100,6 @@ describe('exportDocs — DIR_EXPORTS', () => {
 
 	before(async () => {
 		root = await makeProject();
-		for (const { source } of FILE_EXPORTS) {
-			await writeFile(path.join(root, source), `# Content of ${source}\n`);
-		}
 		await writeFile(path.join(root, agentsSrc, 'keep.md'), '# Keep me\n');
 		// A dest file whose source has since been removed from docs/agents.
 		await mkdir(path.join(root, agentsDest), { recursive: true });
@@ -131,9 +127,6 @@ describe('exportDocs — check mode with a missing dest', () => {
 
 	before(async () => {
 		root = await makeProject();
-		for (const { source } of FILE_EXPORTS) {
-			await writeFile(path.join(root, source), `# Content of ${source}\n`);
-		}
 		// Never run exportDocs — target.dest does not exist yet.
 	});
 
@@ -159,9 +152,6 @@ describe('exportDocs — check mode skips a checked:false DIR_EXPORTS entry', ()
 
 	before(async () => {
 		root = await makeProject();
-		for (const { source } of FILE_EXPORTS) {
-			await writeFile(path.join(root, source), `# Content of ${source}\n`);
-		}
 		await writeFile(path.join(root, dirEntry.source, 'a.md'), '# A\n');
 		// Never run exportDocs — dirEntry.dest (fresh-clone: gitignored, absent) and
 		// fileTarget.dest both do not exist yet.
@@ -175,10 +165,7 @@ describe('exportDocs — check mode skips a checked:false DIR_EXPORTS entry', ()
 		assert.ok(dirEntry, 'DIR_EXPORTS declares a checked:false entry to exercise');
 		assert.equal(existsSync(path.join(root, dirEntry.dest)), false, 'dest absent, as in a fresh clone');
 		const { drifted } = await exportDocs({ projectRoot: root, check: true });
-		assert.ok(
-			!drifted.some((d) => d === dirEntry.dest || d.startsWith(`${dirEntry.dest}/`)),
-			'checked:false dest produced no drift entries'
-		);
+		assert.ok(!drifted.some((d) => d === dirEntry.dest || d.startsWith(`${dirEntry.dest}/`)), 'checked:false dest produced no drift entries');
 		assert.ok(drifted.includes(fileTarget.dest), `${fileTarget.dest} still flagged as drifted`);
 	});
 });

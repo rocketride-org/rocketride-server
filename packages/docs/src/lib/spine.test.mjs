@@ -66,6 +66,9 @@ describe('isValidMount', () => {
 
 	it('rejects a path that is not a slot', () => {
 		assert.equal(isValidMount('connect'), false);
+		// The immediate parent of real slots (connect/mcp/stdio, connect/mcp/http)
+		// — guards against a prefix-matching rewrite accepting slot ancestors.
+		assert.equal(isValidMount('connect/mcp'), false);
 		assert.equal(isValidMount('not/a/slot'), false);
 	});
 });
