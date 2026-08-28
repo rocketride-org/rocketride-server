@@ -175,3 +175,63 @@ async def list_installed_in_store(fs) -> List[str]:
     except Exception:
         return []
     return sorted(e['name'] for e in listing.get('entries', []) if e.get('type') == 'dir')
+
+
+async def installed_node_catalog(fs):
+    """Read the caller's installed nodes as a catalog overlay for the palette.
+
+    Returns ``(services, icons)`` to merge into the ``rrext_services`` summary so
+    installed nodes appear in the canvas palette live — without the design-time
+    engine having loaded them. ``services`` maps node name -> a summary entry (the
+    raw services.json trimmed to the summary fields, tagged ``source:"capsule"``);
+    ``icons`` maps ``capsule:<name>`` -> the node's SVG.
+    """
+    from ai.account.capsule import load_relaxed_json
+    from ai.modules.task.services_catalog import SUMMARY_FIELDS
+
+    services: Dict[str, dict] = {}
+    icons: Dict[str, str] = {}
+    try:
+        listing = await fs.list_dir(_STORE_ROOT)
+    except Exception:
+        return services, icons
+    for entry in listing.get('entries', []):
+        if entry.get('type') != 'dir':
+            continue
+        name = entry['name']
+        try:
+            raw = (await fs.read(f'{_STORE_ROOT}/{name}/services.json')).decode('utf-8')
+            definition = load_relaxed_json(raw)
+        except Exception:
+            continue
+        brief = {k: definition[k] for k in SUMMARY_FIELDS if k in definition}
+        brief['source'] = 'capsule'  # UI badge: distinguishes an installed node
+        if isinstance(brief.get('description'), list):
+            brief['description'] = ''.join(brief['description'])  # match the built-in summary shape
+        icon = definition.get('icon')
+        if isinstance(icon, str) and icon.lower().endswith('.svg'):
+            try:
+                icons[f'capsule:{name}'] = (await fs.read(f'{_STORE_ROOT}/{name}/{icon}')).decode('utf-8')
+                brief['icon'] = f'capsule:{name}'
+            except Exception:
+                brief.pop('icon', None)
+        services[name] = brief
+    return services, icons
+
+
+async def installed_node_definition(fs, name: str):
+    """The full services.json of one installed node (config schema included) or None.
+
+    Backs the single-service ``rrext_services`` lookup so an installed node's config
+    panel resolves. Icon is dropped: full entries carry no icon (see the catalog).
+    """
+    from ai.account.capsule import load_relaxed_json
+
+    try:
+        raw = (await fs.read(f'{_STORE_ROOT}/{name}/services.json')).decode('utf-8')
+    except Exception:
+        return None
+    definition = load_relaxed_json(raw)
+    definition['source'] = 'capsule'
+    definition.pop('icon', None)
+    return definition

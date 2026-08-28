@@ -102,6 +102,8 @@ def test_installed_capsule_is_discovered_by_the_engine(tmp_path):
 
 from ai.account.node_install import (
     install_capsule_to_store,
+    installed_node_catalog,
+    installed_node_definition,
     list_installed_in_store,
     uninstall_node_from_store,
 )
@@ -165,6 +167,36 @@ async def test_store_uninstall():
 async def test_store_uninstall_missing_errors():
     with pytest.raises(NodeInstallError):
         await uninstall_node_from_store(FakeStore(), 'nope')
+
+
+# --- live catalog overlay (installed nodes show in the palette) --------------
+
+
+async def test_installed_node_catalog_overlay():
+    fs = FakeStore()
+    await install_capsule_to_store(fs, _capsule('ov_node'))
+    services, icons = await installed_node_catalog(fs)
+    assert 'ov_node' in services
+    assert services['ov_node']['source'] == 'capsule'  # UI badge
+    assert services['ov_node']['protocol'] == 'ov_node://'
+    # The node's SVG is offered in the icons table under a capsule id.
+    assert services['ov_node']['icon'] == 'capsule:ov_node'
+    assert 'capsule:ov_node' in icons
+
+
+async def test_installed_node_catalog_empty_store():
+    services, icons = await installed_node_catalog(FakeStore())
+    assert services == {} and icons == {}
+
+
+async def test_installed_node_definition_full_entry():
+    fs = FakeStore()
+    await install_capsule_to_store(fs, _capsule('def_node'))
+    definition = await installed_node_definition(fs, 'def_node')
+    assert definition['protocol'] == 'def_node://'
+    assert definition['source'] == 'capsule'
+    assert 'shape' in definition  # full entry, not just the summary fields
+    assert await installed_node_definition(fs, 'missing') is None
 
 
 # --- task_engine materialization (auto-load per run, no manual --node_path) ---
