@@ -22,6 +22,8 @@ import json
 import re
 from typing import Dict, List, Optional
 
+import json5  # the engine parses services.json as JSONC; validate the same way
+
 # The node name is the protocol key the pipe persists — lock it to a safe, stable
 # identifier so a rename never silently breaks saved pipelines.
 _NAME_RE = re.compile(r'^[a-z][a-z0-9_]{1,63}$')
@@ -248,3 +250,82 @@ def scaffold_node(
     else:
         files['IInstance.py'] = _iinstance_filter_py()
     return files
+
+
+# Manifest keys the loader needs to register and place a node on the canvas.
+_REQUIRED_KEYS = ('title', 'protocol', 'classType', 'register', 'path', 'prefix')
+
+
+def validate_node(name: str, files: Dict[str, str]) -> Dict[str, object]:
+    """Check a node folder before it is loaded, tested or deployed.
+
+    Mirrors what the engine loader needs, so a node that validates here is one the
+    canvas can actually register. Errors block; warnings are advisory.
+
+    Args:
+        name: the node id (folder name / protocol key).
+        files: the ``{relative_path: contents}`` map (as scaffold_node returns).
+
+    Returns:
+        ``{'ok': bool, 'errors': [str], 'warnings': [str]}``.
+    """
+    errors: List[str] = []
+    warnings: List[str] = []
+
+    if not _NAME_RE.match(name or ''):
+        errors.append(f'invalid node name {name!r}: it becomes the frozen protocol id')
+
+    raw = files.get('services.json')
+    manifest = None
+    if raw is None:
+        errors.append('services.json is missing')
+    else:
+        try:
+            manifest = json5.loads(raw)  # JSONC, exactly as the engine reads it
+        except Exception as e:
+            errors.append(f'services.json does not parse: {e}')
+
+    if isinstance(manifest, dict):
+        for key in _REQUIRED_KEYS:
+            if key not in manifest:
+                errors.append(f'services.json missing required key {key!r}')
+
+        protocol = manifest.get('protocol')
+        if protocol and protocol != f'{name}://':
+            # The protocol is the id the .pipe stores; a mismatch with the folder breaks loading.
+            errors.append(f"protocol {protocol!r} must be '{name}://' to match the node folder")
+
+        path = manifest.get('path')
+        if path and path != f'nodes.{name}':
+            warnings.append(f"path {path!r} usually is 'nodes.{name}'")
+
+        register = manifest.get('register')
+        if register not in (None, 'filter', 'endpoint'):
+            errors.append(f"register {register!r} must be 'filter', 'endpoint', or omitted")
+
+        lanes = manifest.get('lanes')
+        if lanes is not None:
+            if not isinstance(lanes, dict) or not all(
+                isinstance(v, list) and all(isinstance(o, str) for o in v) for v in lanes.values()
+            ):
+                errors.append('lanes must map each input lane to a list of output lane names')
+
+        # A source registers an endpoint factory; a filter registers a filter.
+        if register == 'endpoint' and 'IEndpoint.py' not in files:
+            errors.append("a source (register 'endpoint') needs IEndpoint.py")
+        if register == 'filter' and 'IInstance.py' not in files:
+            errors.append("a filter (register 'filter') needs IInstance.py")
+
+        icon = manifest.get('icon')
+        if icon and icon not in files:
+            warnings.append(f'icon {icon!r} is referenced but not present in the node folder')
+
+    # Every Python file must compile, or the node cannot import.
+    for path_, body in files.items():
+        if path_.endswith('.py'):
+            try:
+                compile(body, path_, 'exec')
+            except SyntaxError as e:
+                errors.append(f'{path_} has a syntax error: {e}')
+
+    return {'ok': not errors, 'errors': errors, 'warnings': warnings}

@@ -11,6 +11,7 @@ same ``client.call('rrext_node_dev', ...)`` and gets identical output.
 
 Subcommands:
   - ``scaffold`` — render a new node folder as a ``{path: contents}`` file map.
+  - ``validate`` — check a node folder before it is tested or deployed.
 
 The host writes the returned files: the VSCode extension into the user's workspace,
 the cloud/Claude engine into its own node path. Scaffold only produces text and
@@ -21,7 +22,7 @@ or deploy a node carry their own team-permission checks.
 from typing import TYPE_CHECKING, Dict, Any
 
 from ai.common.dap import DAPConn
-from ai.account.node_scaffold import scaffold_node
+from ai.account.node_scaffold import scaffold_node, validate_node
 
 if TYPE_CHECKING:
     pass
@@ -38,6 +39,8 @@ class NodeDevCommands(DAPConn):
             raise ValueError('Subcommand is required')
         if subcommand == 'scaffold':
             return self._node_scaffold(args)
+        if subcommand == 'validate':
+            return self._node_validate(args)
         raise ValueError(f'unknown rrext_node_dev subcommand {subcommand!r}')
 
     def _node_scaffold(self, args: Dict[str, Any]) -> Dict[str, Any]:
@@ -52,3 +55,9 @@ class NodeDevCommands(DAPConn):
             description=args.get('description'),
         )
         return {'name': name, 'protocol': f'{name}://', 'files': files}
+
+    def _node_validate(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Validate a node folder (its file map) and return ok/errors/warnings."""
+        name = args.get('name')
+        files = args.get('files') or {}
+        return validate_node(name, files)

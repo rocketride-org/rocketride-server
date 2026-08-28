@@ -9,7 +9,7 @@ import json
 
 import pytest
 
-from ai.account.node_scaffold import scaffold_node
+from ai.account.node_scaffold import scaffold_node, validate_node
 
 
 def _manifest(files):
@@ -100,6 +100,58 @@ def test_python_stubs_are_syntactically_valid():
                 compile(body, path, 'exec')
 
 
+# --- validate_node ----------------------------------------------------------
+
+
+@pytest.mark.parametrize('kind', ['filter', 'source'])
+def test_scaffolded_node_validates_clean(kind):
+    # Whatever we scaffold must pass our own validator, or the two disagree.
+    files = scaffold_node('round_trip', kind=kind)
+    result = validate_node('round_trip', files)
+    assert result['ok'] is True, result['errors']
+    assert result['errors'] == []
+
+
+def test_validate_rejects_unparseable_manifest():
+    files = scaffold_node('broken')
+    files['services.json'] = '{ this is : not json'
+    result = validate_node('broken', files)
+    assert result['ok'] is False
+    assert any('parse' in e for e in result['errors'])
+
+
+def test_validate_rejects_protocol_folder_mismatch():
+    files = scaffold_node('real_name')
+    files['services.json'] = files['services.json'].replace('real_name://', 'other_name://')
+    result = validate_node('real_name', files)
+    assert result['ok'] is False
+    assert any('protocol' in e for e in result['errors'])
+
+
+def test_validate_flags_source_missing_endpoint():
+    files = scaffold_node('a_source', kind='source')
+    del files['IEndpoint.py']
+    result = validate_node('a_source', files)
+    assert result['ok'] is False
+    assert any('IEndpoint' in e for e in result['errors'])
+
+
+def test_validate_flags_python_syntax_error():
+    files = scaffold_node('bad_py')
+    files['IInstance.py'] = 'def open(:\n    pass'  # deliberate syntax error
+    result = validate_node('bad_py', files)
+    assert result['ok'] is False
+    assert any('syntax error' in e for e in result['errors'])
+
+
+def test_validate_warns_on_missing_icon_but_stays_ok():
+    files = scaffold_node('no_icon')
+    del files['no_icon.svg']
+    result = validate_node('no_icon', files)
+    assert result['ok'] is True  # icon is advisory, not blocking
+    assert any('icon' in w for w in result['warnings'])
+
+
 # --- handler dispatch (rrext_node_dev) --------------------------------------
 
 from ai.modules.task.commands.cmd_node_dev import NodeDevCommands
@@ -115,6 +167,15 @@ async def test_handler_scaffold_returns_file_map():
     assert result['name'] == 'foo'
     assert result['protocol'] == 'foo://'
     assert 'IEndpoint.py' in result['files']
+
+
+async def test_handler_validate_verb():
+    files = scaffold_node('viahandler', kind='filter')
+    result = await _conn().on_rrext_node_dev(
+        {'arguments': {'subcommand': 'validate', 'name': 'viahandler', 'files': files}}
+    )
+    assert result['ok'] is True
+    assert result['errors'] == []
 
 
 async def test_handler_requires_subcommand():
