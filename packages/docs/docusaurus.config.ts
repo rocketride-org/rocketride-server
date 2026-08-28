@@ -27,6 +27,28 @@ const config: Config = {
 	url: 'https://docs.rocketride.org/',
 	baseUrl: '/',
 
+	// Bing Webmaster site verification. Docusaurus injects this into every page's
+	// <head> at build time, which is what Bing's crawler scans. Renders only on
+	// docs.rocketride.org (this package is built and deployed by .github/workflows/
+	// docs.yml to GitHub Pages; the docs subpackage is NOT bundled into any
+	// self-hosted RocketRide install, so the tag does not ride into other people's
+	// deployments).
+	//
+	// The same tag verifies rocketride.org (Webflow head code) and
+	// news.rocketride.ai (Ghost code injection); Bing issues one tag per account.
+	// Public value, safe to commit: it proves domain ownership to Bing but grants
+	// no capability by itself. Do not remove after verification succeeds -- removal
+	// drops the verification per Bing's own guidance.
+	headTags: [
+		{
+			tagName: 'meta',
+			attributes: {
+				name: 'msvalidate.01',
+				content: '3A430890C971A1BA3BAEA33678904734',
+			},
+		},
+	],
+
 	// Inter for body + headings; Ubuntu Mono for the marketing-style uppercase
 	// labels, buttons, and code (matches the cloud shell's --rr-font-mono).
 	stylesheets: ['https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Ubuntu+Mono:wght@400;700&display=swap'],
