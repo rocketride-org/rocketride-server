@@ -619,6 +619,16 @@ function setupConnectionEventHandlers(): void {
 	// Sync service catalog + schemas to .rocketride/ when services are fetched
 	connectionManager?.on('shell:servicesUpdated', (payload: { services: Record<string, unknown>; servicesError?: string }) => {
 		if (payload.servicesError || !payload.services || Object.keys(payload.services).length === 0) {
+			// Not syncing is right — an empty catalogue must not overwrite a good
+			// one on disk. Saying nothing was not: `.rocketride/services-catalog.json`
+			// is written on every successful non-empty fetch, so its ABSENCE is the
+			// reliable signal that a catalogue never arrived. Someone reading the
+			// channel to work out why the palette is empty deserves to be told that
+			// this is why the file they are looking for is not there.
+			getLogger().output(
+				`${icons.warning} Service catalog not synced: ` +
+					`${payload.servicesError ?? 'the engine returned zero services'}.`,
+			);
 			return;
 		}
 		const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
