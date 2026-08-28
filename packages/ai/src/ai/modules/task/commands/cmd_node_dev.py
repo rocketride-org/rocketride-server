@@ -12,17 +12,22 @@ same ``client.call('rrext_node_dev', ...)`` and gets identical output.
 Subcommands:
   - ``scaffold`` — render a new node folder as a ``{path: contents}`` file map.
   - ``validate`` — check a node folder before it is tested or deployed.
+  - ``pack``     — build a ``.rrc`` capsule (base64) from a node file map.
+  - ``install``  — install a ``.rrc`` (base64) into the engine's ``local_nodes``.
+  - ``uninstall``— remove an installed custom node.
+  - ``list``     — list the installed custom nodes.
 
-The host writes the returned files: the VSCode extension into the user's workspace,
-the cloud/Claude engine into its own node path. Scaffold only produces text and
-touches no shared state, so it needs no permission gate; later verbs that persist
-or deploy a node carry their own team-permission checks.
+Scaffold/validate/pack only shuffle bytes; install/uninstall write to the engine's
+node path (the same ``local_nodes`` the capsule installer and ``--node_path`` share).
 """
 
+import base64
 from typing import TYPE_CHECKING, Dict, Any
 
 from ai.common.dap import DAPConn
 from ai.account.node_scaffold import scaffold_node, validate_node
+from ai.account.capsule import pack_capsule
+from ai.account.node_install import install_capsule, uninstall_node, list_installed
 
 if TYPE_CHECKING:
     pass
@@ -41,6 +46,14 @@ class NodeDevCommands(DAPConn):
             return self._node_scaffold(args)
         if subcommand == 'validate':
             return self._node_validate(args)
+        if subcommand == 'pack':
+            return self._node_pack(args)
+        if subcommand == 'install':
+            return self._node_install(args)
+        if subcommand == 'uninstall':
+            return self._node_uninstall(args)
+        if subcommand == 'list':
+            return {'nodes': list_installed()}
         raise ValueError(f'unknown rrext_node_dev subcommand {subcommand!r}')
 
     def _node_scaffold(self, args: Dict[str, Any]) -> Dict[str, Any]:
@@ -61,3 +74,21 @@ class NodeDevCommands(DAPConn):
         name = args.get('name')
         files = args.get('files') or {}
         return validate_node(name, files)
+
+    def _node_pack(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Build a .rrc capsule from a node file map; return it base64-encoded."""
+        name = args.get('name')
+        files = args.get('files') or {}
+        blob = pack_capsule(name, files, version=args.get('version', '0.0.0'), declares=args.get('declares'))
+        return {'name': name, 'capsule': base64.b64encode(blob).decode('ascii')}
+
+    def _node_install(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Install a base64 .rrc capsule into the engine's local_nodes."""
+        capsule = args.get('capsule')
+        if not capsule:
+            raise ValueError('capsule (base64 .rrc) is required')
+        return install_capsule(base64.b64decode(capsule))
+
+    def _node_uninstall(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Remove an installed custom node by name."""
+        return uninstall_node(args.get('name'))
