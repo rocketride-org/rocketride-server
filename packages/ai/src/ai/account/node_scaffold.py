@@ -8,10 +8,11 @@
 One source of truth for every surface. The VSCode extension, the web builder and
 Claude all call ``rrext_node_dev`` (subcommand ``scaffold``) and write the returned
 file map, so a node
-scaffolded from any host is byte-identical. A node is a folder under
-``nodes/src/nodes/<name>/`` (or a workspace ``--node_path``) holding a
-``services.json`` plus Python ``IGlobal``/``IInstance``[/``IEndpoint``] classes; the
-engine discovers it with no central registration (see docs/README-node-schema.md).
+scaffolded from any host is byte-identical. A custom node is a folder under a
+``--node_path`` ``local_nodes/`` package (a VSCode workspace or an installed
+capsule) holding a ``services.json`` plus Python ``IGlobal``/``IInstance``[/
+``IEndpoint``] classes; the engine discovers it as ``local_nodes.<name>`` with no
+central registration (see docs/README-node-schema.md and README-nodes.md).
 
 The ``name`` is the node's frozen identity: it becomes the ``protocol`` key the
 ``.pipe`` stores, so renaming it later breaks every pipe that used the node. We
@@ -57,7 +58,10 @@ def _services_json(
         'capabilities': [],
         'register': register,
         'node': 'python',
-        'path': f'nodes.{name}',
+        # Custom nodes are imported as local_nodes.<name>: they load from a --node_path
+        # 'local_nodes/' folder (VSCode workspace or an installed capsule), never the
+        # built-in 'nodes.' tree. The engine only discovers them under this import path.
+        'path': f'local_nodes.{name}',
         'prefix': _prefix(name),
         'description': [description] if description else [f'{title} node.'],
         'icon': f'{name}.svg',
@@ -296,8 +300,9 @@ def validate_node(name: str, files: Dict[str, str]) -> Dict[str, object]:
             errors.append(f"protocol {protocol!r} must be '{name}://' to match the node folder")
 
         path = manifest.get('path')
-        if path and path != f'nodes.{name}':
-            warnings.append(f"path {path!r} usually is 'nodes.{name}'")
+        if path and path != f'local_nodes.{name}':
+            # A custom node the engine can discover imports as local_nodes.<name>.
+            warnings.append(f"path {path!r} usually is 'local_nodes.{name}' for a custom node")
 
         register = manifest.get('register')
         if register not in (None, 'filter', 'endpoint'):

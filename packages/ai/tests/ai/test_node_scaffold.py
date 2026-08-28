@@ -32,7 +32,7 @@ def test_filter_scaffold_shape():
     m = _manifest(files)
     assert m['register'] == 'filter'
     assert m['protocol'] == 'my_filter://'
-    assert m['path'] == 'nodes.my_filter'
+    assert m['path'] == 'local_nodes.my_filter'  # custom node import path
     assert m['prefix'] == 'MyFilter'
     assert m['classType'] == ['text']
     assert m['icon'] == 'my_filter.svg'
@@ -193,3 +193,41 @@ def test_taskconn_composes_the_node_builder_handler():
     from ai.modules.task.task_conn import TaskConn
 
     assert hasattr(TaskConn, 'on_rrext_node_dev')
+
+
+# --- discovery E2E (the scaffolded node loads in the real engine) -----------
+
+import os
+import subprocess
+from pathlib import Path
+
+_ENGINE = Path(__file__).resolve().parents[4] / 'dist' / 'server' / 'engine'
+
+
+@pytest.mark.skipif(not _ENGINE.exists(), reason='engine binary not built')
+def test_scaffolded_node_is_discovered_by_the_engine(tmp_path):
+    # The end-to-end proof: a scaffolded node, written into a --node_path 'local_nodes'
+    # package, is discovered by the C++ engine's registry (getServiceDefinition).
+    pkg = tmp_path / 'local_nodes'
+    (pkg / 'e2e_node').mkdir(parents=True)
+    (pkg / '__init__.py').write_text('', encoding='utf-8')  # marks local_nodes a package
+    for rel, body in scaffold_node('e2e_node', kind='filter').items():
+        # utf-8 explicitly: the engine may run in an ASCII locale and the stubs are utf-8.
+        (pkg / 'e2e_node' / rel).write_text(body, encoding='utf-8')
+
+    env = {**os.environ, 'PYTHONIOENCODING': 'utf-8'}
+    out = subprocess.run(
+        [
+            str(_ENGINE),
+            f'--node_path={tmp_path}',
+            '-c',
+            'from rocketlib import getServiceDefinition; '
+            "d = getServiceDefinition('e2e_node'); "
+            "print('PROTOCOL=' + (d.get('protocol') if isinstance(d, dict) else str(d)))",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=120,
+        env=env,
+    )
+    assert 'PROTOCOL=e2e_node://' in out.stdout, f'stdout={out.stdout!r} stderr={out.stderr!r}'
