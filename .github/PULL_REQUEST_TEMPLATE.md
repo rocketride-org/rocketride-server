@@ -14,9 +14,7 @@
 - [ ] `./builder test:fast lint:check surfaces:check` passes locally (paste the last lines of output below)
 - [ ] Engine-dependent suites run if touched (`nodes:test`, `ai:test`, `client-python:test`, `client-typescript:test`) — say which, or "not run"
 
-```
-<paste tail of ./builder output here — do not claim runs you did not do>
-```
+<!-- Paste the tail of the ./builder output here (a fenced block). Do not claim runs you did not do. -->
 
 ## Checklist
 

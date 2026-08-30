@@ -7,7 +7,7 @@ This guide walks you through setting up a local development environment for the 
 | Tool              | Version       | Notes                                                          |
 | ----------------- | ------------- | -------------------------------------------------------------- |
 | **Node.js**       | 20+           | Runtime for the build system and TypeScript clients            |
-| **pnpm**          | 8+            | Package manager (`npm install -g pnpm`)                        |
+| **pnpm**          | 10+           | Package manager (`npm install -g pnpm`)                        |
 | **Python**        | 3.10+         | Required for pipeline nodes, AI modules, and the Python SDK    |
 | **C++ toolchain** | C++17-capable | Required only when building the engine from source (see below) |
 | **Git**           | 2.x           | Source control                                                 |
@@ -40,7 +40,7 @@ Edit `.env` and fill in the values relevant to your setup (API keys, model endpo
 
 ## Building
 
-The project uses a unified build system. See [README-builder.md](../README-builder.md) for full details.
+The project uses a unified build system. See [README-builder.md](README-builder.md) for full details.
 
 ```bash
 # Show all available commands
@@ -84,9 +84,11 @@ After building, the engine executable is located in `dist/server/`. Run it direc
 2. Install the generated `.vsix` from `dist/vscode/` in VS Code
 3. Click the RocketRide icon in the sidebar and connect to your running server
 
-For VS Code extension development details, see [README-vscode.md](../README-vscode.md).
+For VS Code extension development details, see [README-vscode.md](README-vscode.md).
 
 ## Testing
+
+The fast, engine-free tier (what CI runs on every PR) is `./builder test:fast lint:check surfaces:check` — see the command table in [AGENTS.md](../AGENTS.md). The full suites below need the engine:
 
 ```bash
 # Run all tests
@@ -107,13 +109,13 @@ For VS Code extension development details, see [README-vscode.md](../README-vsco
 ./builder client-mcp:test
 ```
 
-For information on writing and running node-level tests, see [README-node-testing.md](../README-node-testing.md).
+For information on writing and running node-level tests, see [README-node-testing.md](README-node-testing.md).
 
 ## Further Reading
 
-- [Build System](../README-builder.md) -- declarative build system reference
-- [Engine Reference](../README-engine.md) -- C++ engine architecture, CLI options, task types
-- [Pipeline Nodes](../README-nodes.md) -- writing and extending pipeline nodes
-- [VS Code Extension](../README-vscode.md) -- extension development
-- [Pre-commit Hooks](../README-pre-commit-hooks.md) -- code quality automation
+- [Build System](README-builder.md) -- declarative build system reference
+- [Engine Reference](README-engine.md) -- C++ engine architecture, CLI options, task types
+- [Pipeline Nodes](README-nodes.md) -- writing and extending pipeline nodes
+- [VS Code Extension](README-vscode.md) -- extension development
+- [Pre-commit Hooks](README-pre-commit-hooks.md) -- code quality automation
 - [Contributing Guide](../../CONTRIBUTING.md) -- contribution workflow and code style

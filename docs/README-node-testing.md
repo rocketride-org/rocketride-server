@@ -436,11 +436,11 @@ builder nodes:test-full --pytest="-v -s"
 # Run specific test by name pattern
 builder nodes:test-full --pytest="-k question"
 
-# Filter by pytest markers
-builder nodes:test-full --markers="slow"
+# Filter by pytest markers (any pytest args pass through --pytest=)
+builder nodes:test-full --pytest="-m slow"
 
 # Filter by test pattern
-builder nodes:test-full --pattern="llm"
+builder nodes:test-full --pytest-pattern="llm"
 ```
 
 ### Mock support

@@ -27,8 +27,8 @@ CI if a command or path below stops being true.
 ## The engine, and what you can run without it
 
 The engine is a native binary under `dist/server/` (gitignored build output). `./builder server:build`
-either downloads a prebuilt one (network) or compiles it (≈90 min, full
-toolchain). **Any `<module>:test`, `<module>:build` or `server:*` action
+either downloads a prebuilt one (network) or compiles it (tens of minutes to
+hours; full C++ toolchain). **Any `<module>:test`, `<module>:build` or `server:*` action
 needs it.** In a sandbox without network you cannot get the engine; set
 `ROCKETRIDE_SANDBOX=1` and the builder refuses those actions up front and
 names the alternative instead of failing after a long download.
@@ -37,35 +37,47 @@ Everything below runs without the engine after a one-time setup:
 
 ```bash
 pnpm install
-python3 -m venv .venv && .venv/bin/pip install -r requirements-test.txt   # or set ROCKETRIDE_PYTHON
+python3 -m venv .venv && .venv/bin/pip install -r requirements-test.txt -e packages/client-python
+# (or point ROCKETRIDE_PYTHON at any interpreter with those installed; the SDK install is for lint:pyright)
 ```
 
 ## Commands — run the narrowest one first
 
-| You changed… | Run | Time |
-|---|---|---|
-| anything | `./builder test:fast` | ≈ 30 s |
-| anything | `./builder lint:check` (auto-fix: `./builder lint:fix`) | ≈ 75 s |
-| a node's `services*.json`, a contract, or generated files | `./builder surfaces:check` | ≈ 20 s |
-| node contract structure only | `./builder nodes:test-contracts-local` | ≈ 2 s |
-| shell / shared UI code | `./builder shell:test`, `./builder shared:test` | seconds |
-| one TS workspace's types | `npx tsc --noEmit -p <workspace dir>` (root `tsconfig.json` checks nothing) | seconds |
-| Python style only | `ruff check . && ruff format --check .` | seconds |
-| a node's runtime behaviour | `./builder nodes:test --pytest-pattern=<node_name>` (needs engine + starts a server on :5565) | minutes |
-| AI modules | `./builder ai:test` (engine) | minutes |
-| Python / TS SDK behaviour | `./builder client-python:test`, `./builder client-typescript:test` (engine + server) | minutes |
-| engine C++ | `./builder server:test` (engine build) | long |
+Engine-free (seconds to ~1.5 min; CI runs these three on every PR):
+
+| You changed… | Run |
+|---|---|
+| anything | `./builder test:fast` — contract tests, shell + shared unit tests, credentials catalog, repo invariants |
+| anything | `./builder lint:check` — eslint, prettier, tsc, ruff, pyright ratchet (auto-fix: `./builder lint:fix`) |
+| a node's `services*.json`, a public API, or a generated file | `./builder surfaces:check` — regenerates every derived surface, fails on drift |
+| one node's contract | `pytest nodes/test/test_contracts.py -k <node_name>` (all nodes: `./builder nodes:test-contracts-local`) |
+| shell / shared UI code | `./builder shell:test`, `./builder shared:test` |
+| one TS workspace's types | `npx tsc --noEmit -p <workspace dir>` (a bare root `npx tsc` type-checks everything with root settings and is not what CI runs — use `./builder lint:tsc`) |
+| Python style only | `ruff check . && ruff format --check .` |
+
+Engine-dependent (minutes or more; CI runs them in the Build jobs):
+
+| You changed… | Run |
+|---|---|
+| a node's runtime behaviour | `./builder nodes:test --pytest-pattern=<node_name>` (starts a test server on :5565; mocks and fixtures: `nodes/test/`, sample data: `testdata/`) |
+| AI modules | `./builder ai:test` |
+| Python / TS SDK behaviour | `./builder client-python:test`, `./builder client-typescript:test` |
+| engine C++ | `./builder server:test` |
 
 CI runs exactly `test:fast`, `lint:check` and `surfaces:check` on every PR
 (jobs *Fast tests*, *Lint*, *Generated surfaces*), plus the engine builds and
-suites. Do not run `./builder test` (every suite, 20+ min, needs Docker
-services for parity) to prove a small change — run the row that matches it
-and say which rows you ran in the PR.
+suites. Do not run `./builder test` (every suite; needs the engine and the
+test servers; tens of minutes) to prove a small change — run the row that
+matches it and say which rows you ran in the PR.
 
 ## Surfaces — change one, regenerate the others
 
 A node or contract change fans out. `surfaces:check` regenerates everything
-and fails on drift, so run it and commit what it regenerates:
+in place and then fails if the tree differs from the commit — so when it
+fails, look at `git diff`: if the regenerated output is what you meant,
+commit it; if `shell:check` reports un-frozen drift, the shell's public API
+changed and needs `./builder shell:freeze` (a deliberate contract action),
+not a hand edit.
 
 | You changed | Regenerates / is checked by |
 |---|---|
@@ -85,10 +97,9 @@ and fails on drift, so run it and commit what it regenerates:
 
 ## Conventions
 
-- **Commits**: conventional commits (`feat(scope):`, `fix(scope):`, `chore(scope):`). **Branches**: `<type>/<short-description>`; PRs target `develop`.
+- **Commits**: conventional commits (`feat(scope):`, `fix(scope):`, `chore(scope):`). **Branches**: `<type>/RR-<issue>-<short-description>` with type ∈ feat|fix|hotfix|docs|refactor|chore — a GitHub ruleset rejects anything else at push. PRs target `develop` and link an issue.
 - **Python**: 3.10+, single quotes, ruff (`E,F,Q,D`, pep257) — enforced.
 - **TypeScript**: tabs, single quotes, semicolons — Prettier-enforced on code files (`.prettierrc`).
-- **VS Code extension only** (`apps/vscode/`): wrap errors with `Callout.call()` (no raw try/catch), throw `AppError` (never plain `Error`), log via `logger.*` (never `console.log`). `packages/docs` theme components are exempt by design.
 - **Tests**: a bug fix includes a test that fails without the fix. Never wait on `sleep`/`setTimeout` for a condition; wait on the event.
 - **Timeouts**: every CI job declares `timeout-minutes`; every action `uses:` is pinned to a 40-char SHA (invariant-tested).
 

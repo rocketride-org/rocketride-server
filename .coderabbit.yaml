@@ -44,7 +44,7 @@ reviews:
         index.ts / latest.ts / *.generated.ts are derived by shell:regen-derived
         and client-typescript:regen. Flag any hand edit here — a floor line
         removed or narrowed lets a breaking API change past the tsc gates.
-    - path: '{AGENTS.md,CLAUDE.md,.cursorrules,.cursor/rules/**}'
+    - path: '{AGENTS.md,CLAUDE.md,.cursorrules}'
       instructions: |
         AGENTS.md is the single source of truth for contributor rules; the
         other files must stay pointers. Flag duplicated or contradicting

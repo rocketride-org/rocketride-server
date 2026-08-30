@@ -50,7 +50,6 @@ INSTRUCTION_FILES = [p for p in (REPO / 'AGENTS.md', REPO / 'nodes' / 'AGENTS.md
 INSTRUCTION_FILE_ALLOWLIST = {
     'AGENTS.md',
     'CLAUDE.md',
-    '.claude/CLAUDE.md',
     'nodes/AGENTS.md',
     'docs/stubs/AGENTS.md',
     'docs/stubs/CLAUDE.md',
@@ -73,7 +72,12 @@ STALE_CLAIMS = [
         r'`\./builder test` passes',
         'nobody runs the 20-minute polyglot suite locally; the checkable claim is test:fast + lint:check + surfaces:check',
     ),
-    ('AGENTS.md', r'^\s*npx tsc --noEmit\s*$', 'root tsconfig has no include — use ./builder lint:tsc'),
+    (
+        'AGENTS.md',
+        r'^\s*npx tsc --noEmit\s*$',
+        'a bare root tsc is not what CI runs — use ./builder lint:tsc or the per-workspace form',
+    ),
+    ('docs/README.md', r'\|\s*\*\*pnpm\*\*\s*\|\s*[89]\+', 'package.json engines requires pnpm >= 10'),
 ]
 
 
@@ -107,6 +111,8 @@ def relative_paths_in(text: str) -> List[str]:
             continue
         if token.startswith(('dist/', 'build/', '.venv/')):  # gitignored build outputs
             continue
+        if token.startswith('@'):  # scoped package names, not paths
+            continue
         if '*' in token:
             continue
         if PATH_LIKE_RE.match(token):
@@ -124,7 +130,7 @@ def workflow_jobs(text: str) -> List[Tuple[str, bool, bool]]:
     """
     lines = text.splitlines()
     try:
-        start = next(i for i, line in enumerate(lines) if line.strip() == 'jobs:')
+        start = next(i for i, line in enumerate(lines) if re.match(r'^jobs:\s*(#.*)?$', line))
     except StopIteration:
         return []
     jobs: List[Tuple[str, bool, bool]] = []
@@ -141,7 +147,7 @@ def workflow_jobs(text: str) -> List[Tuple[str, bool, bool]]:
 
     while i < len(lines):
         line = lines[i]
-        m = re.match(r'^  ([A-Za-z0-9_-]+):\s*$', line)
+        m = re.match(r'^  ([A-Za-z0-9_-]+):\s*(#.*)?$', line)
         if m:
             flush()
             current = m.group(1)
@@ -187,8 +193,12 @@ def pinned_version(text: str, tool: str) -> str:
     m = re.search(rf'^{tool}==([\w.]+)\s*$', text, re.MULTILINE)
     if m:
         return m.group(1)
-    m = re.search(rf'{tool}-action@[^\n]*\n(?:\s+with:\s*\n)?(?:\s*#[^\n]*\n)*\s+version:\s*[\'"]?([\w.]+)', text)
-    return m.group(1) if m else ''
+    # Scan the whole `with:` block of the action step (any key order, comments allowed).
+    m = re.search(rf'{tool}-action@[^\n]*\n\s+with:\s*\n((?:[ \t]+\S[^\n]*\n)*)', text)
+    if not m:
+        return ''
+    v = re.search(r'^\s+version:\s*[\'"]?([\w.]+)', m.group(1), re.MULTILINE)
+    return v.group(1) if v else ''
 
 
 # =============================================================================
@@ -315,7 +325,7 @@ class TestCheckers:
         assert relative_paths_in(text) == ['docs/README.md', 'scripts/lib/pytest.js']
 
     def test_workflow_jobs_detects_missing_timeout_and_reusable(self):
-        text = 'name: x\njobs:\n  a:\n    runs-on: ubuntu-latest\n    timeout-minutes: 5\n  b:\n    runs-on: ubuntu-latest\n  c:\n    uses: ./.github/workflows/_init.yaml\n'
+        text = 'name: x\njobs: # all\n  a: # first\n    runs-on: ubuntu-latest\n    timeout-minutes: 5\n  b:\n    runs-on: ubuntu-latest\n  c:\n    uses: ./.github/workflows/_init.yaml\n'
         assert workflow_jobs(text) == [('a', True, False), ('b', False, False), ('c', False, True)]
 
     def test_unpinned_uses_flags_tags_only(self):
@@ -341,12 +351,19 @@ class TestCheckers:
             )
             == '0.16.5'
         )
+        assert (
+            pinned_version(
+                '      - uses: astral-sh/ruff-action@abc # v3\n        with:\n          args: check\n          version: 0.16.5\n',
+                'ruff',
+            )
+            == '0.16.5'
+        )
         assert pinned_version('      - uses: astral-sh/ruff-action@abc # v3\n      - run: ruff check\n', 'ruff') == ''
 
     def test_stale_claim_patterns_match_the_original_text(self):
         # Each regex must hit the wording that was actually in the tree, or the guard is decorative.
         samples = {
-            'docs/README.md': '| **Node.js**       | 18+           | Runtime |',
+            'docs/README.md': '| **Node.js**       | 18+           | Runtime |\n| **pnpm**          | 8+            | x |',
             'docs/README-node-testing.md': '# Contract tests (no server needed)\nbuilder nodes:test\n',
             '.github/PULL_REQUEST_TEMPLATE.md': '- [ ] `./builder test` passes\n- [ ] Wiki updated (if applicable)',
             'AGENTS.md': 'npx tsc --noEmit\n',

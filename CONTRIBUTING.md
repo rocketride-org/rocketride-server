@@ -97,7 +97,7 @@ We follow [Conventional Commits](https://www.conventionalcommits.org/):
 
 2. Open a Pull Request against the `develop` branch
 
-3. **Link the issue**: use `Fixes #123`, `Closes #123`, or `Resolves #123` in the PR description (required by CI)
+3. **Link the issue**: use `Fixes #123`, `Closes #123`, or `Resolves #123` in the PR description
 
 4. Fill out the PR template with:
 
@@ -149,13 +149,13 @@ We follow [Conventional Commits](https://www.conventionalcommits.org/):
 
 ### Running Tests
 
-```bash
-# Fast tier — no engine, no server, runs in CI on every PR (see AGENTS.md)
-./builder test:fast          # contract tests, shell/shared unit tests, repo invariants
-./builder lint:check         # eslint, prettier, tsc, ruff, pyright ratchet
-./builder surfaces:check     # regenerate derived files; fails on drift
+The fast, engine-free tier is `./builder test:fast lint:check surfaces:check`;
+CI runs the same three commands on every PR. The per-change command table
+lives in [AGENTS.md](AGENTS.md) — it is kept true by `tests/test_repo_invariants.py`.
+Engine-dependent suites:
 
-# All tests (needs the engine; 20+ minutes)
+```bash
+# All suites (needs the engine and the test servers; tens of minutes)
 ./builder test
 
 # C++ engine tests only
