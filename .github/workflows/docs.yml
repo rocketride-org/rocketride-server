@@ -28,7 +28,7 @@ jobs:
   build:
     name: Build documentation
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
@@ -53,7 +53,7 @@ jobs:
     name: Deploy to GitHub Pages
     needs: build
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 15
     permissions:
       pages: write # publish the built site to GitHub Pages
       id-token: write # OIDC token to verify the deployment origin

@@ -69,7 +69,7 @@ jobs:
     name: Resolve product matrix
     needs: init
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 5
     outputs:
       include: ${{ steps.build.outputs.include }}
     steps:

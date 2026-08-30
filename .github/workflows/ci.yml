@@ -61,6 +61,18 @@ jobs:
               - 'builder.cmd'
               - '.github/workflows/**'
               - 'package.json'
+              # The checks themselves and what they pin — editing these is a code change.
+              - 'tools/**'
+              - 'tests/**'
+              - 'pnpm-lock.yaml'
+              - 'pnpm-workspace.yaml'
+              - 'requirements-test.txt'
+              - '.nvmrc'
+              - '.prettierignore'
+              - '.prettierrc'
+              - 'eslint.config.*'
+              - 'pyproject.toml'
+              - 'tsconfig*.json'
 
   # ---------------------------------------------------------------------------
   #  Helm lint + schema validation (only on PRs touching deploy/helm/**)
@@ -350,21 +362,23 @@ jobs:
   ci-ok:
     name: CI OK
     needs: [init, changes, build, helm-changes, helm-lint, ruff-check, gitleaks, surfaces, test-fast, ci-lint]
-    if: always()
+    # !cancelled(): when the RUN is cancelled (a newer push superseded it via
+    # cancel-in-progress) this job is skipped instead of reporting red for a
+    # SHA nobody will merge — that spurious red is why CI OK could never be
+    # made required. A single JOB that hits its timeout-minutes still shows
+    # as 'cancelled' in needs.*.result and is treated as a failure below.
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - name: Verify results
-        # `cancelled` is NOT a failure: with cancel-in-progress a newer push
-        # supersedes this run, and the newer run carries the verdict. Treating
-        # it as red made a required CI OK flip spuriously on a third of PR runs.
         run: |
           echo "Results: init=${{ needs.init.result }}, changes=${{ needs.changes.result }}, build=${{ needs.build.result }}, helm-changes=${{ needs.helm-changes.result }}, helm-lint=${{ needs.helm-lint.result }}, ruff-check=${{ needs['ruff-check'].result }}, gitleaks=${{ needs.gitleaks.result }}, surfaces=${{ needs.surfaces.result }}, test-fast=${{ needs['test-fast'].result }}, ci-lint=${{ needs['ci-lint'].result }}"
-          if [[ "${{ contains(needs.*.result, 'failure') }}" == "true" ]]; then
-            echo "❌ One or more CI jobs failed."
+          if [[ "${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}" == "true" ]]; then
+            echo "❌ One or more CI jobs failed or timed out."
             exit 1
           fi
-          echo "✅ All CI checks passed (or were correctly skipped/superseded)."
+          echo "✅ All CI checks passed (or were correctly skipped)."
 
   # ---------------------------------------------------------------------------
   #  Discord — update PR embed with final check counts after CI completes.
