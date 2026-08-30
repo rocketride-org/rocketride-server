@@ -732,7 +732,7 @@ export class Documents {
 			const editor = prev.editors[editorId];
 			if (!editor) return prev;
 
-			let newGroups = { ...prev.groups };
+			const newGroups = { ...prev.groups };
 			let emptyGroupId: string | null = null;
 
 			// Remove editor from its group
@@ -1073,7 +1073,7 @@ export class Documents {
 				}
 			}
 
-			let state: DocumentsState = { ...prev, documents: newDocs, editors: newEditors };
+			const state: DocumentsState = { ...prev, documents: newDocs, editors: newEditors };
 
 			// Collapse the tree using the shared helper
 			const collapsed = collapseEmptyGroup(state, groupId);

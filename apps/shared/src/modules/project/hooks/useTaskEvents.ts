@@ -496,7 +496,7 @@ export function useTaskEvents(options: UseTaskEventsOptions): UseTaskEventsResul
 				}
 			})();
 		},
-		[deliver]
+		[deliver, disarmHunt]
 	);
 
 	/** Resume a runway-paused session (position advanced; more disc needed). */

@@ -82,7 +82,9 @@ async function killPort(port) {
 			for (const pid of pids) {
 				try {
 					execSync(`taskkill /PID ${pid} /F`, { stdio: 'ignore' });
-				} catch {}
+				} catch {
+					/* already gone */
+				}
 			}
 		} else {
 			// lsof -ti :<port> prints one PID per line; xargs kills them all.

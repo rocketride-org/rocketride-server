@@ -133,7 +133,9 @@ function extractNpmLicense(pkgDir, pkgName) {
 	if (licenseFile) {
 		try {
 			licenseText = fs.readFileSync(licenseFile, 'utf8');
-		} catch (e) {}
+		} catch {
+			/* optional lookup: ignore */
+		}
 	}
 
 	return {
@@ -226,7 +228,9 @@ function collectVcpkgLicenses() {
 				try {
 					licenseText = fs.readFileSync(copyrightFile, 'utf8');
 					licenseType = detectLicenseType(licenseText);
-				} catch (e) {}
+				} catch {
+					/* optional lookup: ignore */
+				}
 			}
 
 			// Try to get version from vcpkg.json
@@ -312,7 +316,9 @@ function collectJavaLicenses() {
 				homepage: 'https://tika.apache.org/',
 				licenseText: content,
 			});
-		} catch (e) {}
+		} catch {
+			/* optional lookup: ignore */
+		}
 	}
 
 	console.log(`  Found ${licenses.length} Java license files`);
@@ -348,7 +354,9 @@ function collectProjectLicenses() {
 		if (licenseFile) {
 			try {
 				licenseText = fs.readFileSync(licenseFile, 'utf8');
-			} catch (e) {}
+			} catch {
+				/* optional lookup: ignore */
+			}
 		}
 
 		// Skip if same license as main project

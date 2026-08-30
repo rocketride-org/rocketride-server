@@ -93,6 +93,7 @@ export const useMessaging = <TOutgoing, TIncoming, TState = unknown>(options?: U
 		if (vscodeApi) {
 			vscodeApi.postMessage(readyMessage);
 		}
+		// eslint-disable-next-line react-hooks/exhaustive-deps -- one-shot mount handshake; readyMessage is a fresh literal each render (see above)
 	}, []);
 
 	// --- Send ----------------------------------------------------------------

@@ -461,16 +461,15 @@ export class TransportWebSocket extends TransportBase {
 			const browserSocket = socket as WebSocket;
 			if (browserSocket.readyState === WebSocket.CLOSED) return;
 			await new Promise<void>((resolve) => {
-				let timer: ReturnType<typeof setTimeout> | undefined;
 				const finish = () => {
-					if (timer) clearTimeout(timer);
+					clearTimeout(timer);
 					browserSocket.onclose = null;
 					browserSocket.onerror = null;
 					resolve();
 				};
 				browserSocket.onclose = finish;
 				browserSocket.onerror = () => {};
-				timer = setTimeout(finish, 500);
+				const timer = setTimeout(finish, 500);
 				try {
 					browserSocket.close(1000, 'Disconnected by request');
 				} catch {
@@ -484,16 +483,15 @@ export class TransportWebSocket extends TransportBase {
 		const nodeSocket = socket as NodeWsInstance;
 		if (nodeSocket.readyState === 3) return;
 		await new Promise<void>((resolve) => {
-			let timer: ReturnType<typeof setTimeout> | undefined;
 			const finish = () => {
-				if (timer) clearTimeout(timer);
+				clearTimeout(timer);
 				nodeSocket.removeAllListeners();
 				resolve();
 			};
 			nodeSocket.removeAllListeners();
 			nodeSocket.once('error', () => {});
 			nodeSocket.once('close', finish);
-			timer = setTimeout(() => {
+			const timer = setTimeout(() => {
 				try {
 					nodeSocket.terminate();
 				} catch {

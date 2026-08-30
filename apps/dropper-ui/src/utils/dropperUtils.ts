@@ -213,7 +213,7 @@ export const parseDropperResults = (uploadResults: UPLOAD_RESULT[]): ProcessedRe
 					break;
 
 				case 'image':
-				case 'images':
+				case 'images': {
 					// Process image content (data URLs)
 					const imageUrls = processMediaData(fieldData, 'image');
 					if (imageUrls.length > 0) {
@@ -225,9 +225,10 @@ export const parseDropperResults = (uploadResults: UPLOAD_RESULT[]): ProcessedRe
 						});
 					}
 					break;
+				}
 
 				case 'audio':
-				case 'audios':
+				case 'audios': {
 					// Process produced audio (data URLs)
 					const audioUrls = processMediaData(fieldData, 'audio');
 					if (audioUrls.length > 0) {
@@ -238,9 +239,10 @@ export const parseDropperResults = (uploadResults: UPLOAD_RESULT[]): ProcessedRe
 						});
 					}
 					break;
+				}
 
 				case 'video':
-				case 'videos':
+				case 'videos': {
 					// Process produced video (data URLs)
 					const videoUrls = processMediaData(fieldData, 'video');
 					if (videoUrls.length > 0) {
@@ -251,6 +253,7 @@ export const parseDropperResults = (uploadResults: UPLOAD_RESULT[]): ProcessedRe
 						});
 					}
 					break;
+				}
 
 				case 'question':
 				case 'questions':

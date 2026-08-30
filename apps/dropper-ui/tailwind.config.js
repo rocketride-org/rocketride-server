@@ -11,6 +11,7 @@
  * and utilities specific to the RocketRide brand and dropper needs.
  */
 
+/* eslint-disable @typescript-eslint/no-require-imports -- CommonJS config loaded by tailwind's own loader; plugins are require()d */
 /** @type {import('tailwindcss').Config} */
 module.exports = {
 	content: ['./index.html', './src/**/*.{js,ts,jsx,tsx}', './public/**/*.html'],
@@ -183,7 +184,7 @@ module.exports = {
 		require('@tailwindcss/aspect-ratio'),
 
 		// Custom plugin for dashboard-specific utilities
-		function ({ addUtilities, addComponents, theme }) {
+		function ({ addUtilities, addComponents }) {
 			// Add custom utilities
 			addUtilities({
 				'.text-balance': {

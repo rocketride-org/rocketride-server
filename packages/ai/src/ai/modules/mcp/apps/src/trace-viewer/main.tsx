@@ -11,6 +11,7 @@ import { createRoot } from 'react-dom/client';
 // design-system lands on top so this widget's chrome — header, cards,
 // buttons — matches the dropper and pipelines-table. The two files overlap
 // on exactly one token (--rr-accent), which only the chrome reads.
+// eslint-disable-next-line no-restricted-imports -- theme stylesheet has no barrel form; this bundle resolves 'shell/src/*' to the in-tree sources (vite.config.ts)
 import 'shell/src/themes/rocketride-default.css';
 import '../shared/theme.css';
 import { mountBrandHeader } from '../shared/brand';

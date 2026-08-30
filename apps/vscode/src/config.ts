@@ -202,7 +202,7 @@ export class ConfigManager {
 		const defaultMode = group === 'development' ? 'local' : null;
 		const connectionMode = gc.get<ConnectionMode | null>('connectionMode', defaultMode);
 		let hostUrl = gc.get<string>('hostUrl', '');
-		let apiKey = await this.getApiKeyFromStorage(group);
+		const apiKey = await this.getApiKeyFromStorage(group);
 
 		// Cloud: build-time URI — ignore any stale hostUrl from other modes
 		if (connectionMode === 'cloud') {

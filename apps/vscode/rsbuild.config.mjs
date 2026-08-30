@@ -21,7 +21,6 @@
 // SOFTWARE.
 // =============================================================================
 
-/* global process */
 import { defineConfig } from '@rsbuild/core';
 import { pluginReact } from '@rsbuild/plugin-react';
 import { pluginRocketrideIcons } from '../shared/scripts/rsbuild-plugin-icons.mjs';

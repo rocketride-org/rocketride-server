@@ -635,7 +635,9 @@ export const WorkspaceProvider: React.FC<IWorkspaceProviderProps> = ({ apps, wor
 			onThemeChange?.(themeId);
 			try {
 				localStorage.setItem('rr:theme', themeId);
-			} catch {}
+			} catch {
+				/* storage unavailable (private mode / quota) */
+			}
 		},
 		[updatePrefs, onThemeChange]
 	);

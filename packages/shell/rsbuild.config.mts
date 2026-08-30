@@ -27,7 +27,6 @@ import { defineConfig } from '@rsbuild/core';
 import { pluginReact } from '@rsbuild/plugin-react';
 import { pluginRocketrideIcons } from '../../apps/shared/scripts/rsbuild-plugin-icons.mjs';
 import { pluginModuleFederation } from '@module-federation/rsbuild-plugin';
-import { pluginBasicSsl } from '@rsbuild/plugin-basic-ssl';
 import { pluginTypeCheck } from '@rsbuild/plugin-type-check';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));

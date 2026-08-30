@@ -3236,11 +3236,10 @@ describe('RocketRideClient lifecycle operations', () => {
 	it('does not let a stale disconnect callback schedule work for a newer foreground generation', async () => {
 		jest.useFakeTimers({ doNotFake: ['queueMicrotask'] });
 		let replacement: Promise<LoginOutcome> | undefined;
-		let client!: RocketRideClient;
 		const onDisconnected = jest.fn(async () => {
 			replacement = loginOutcome(client.login('replacement-key'));
 		});
-		client = makeClient({ persist: true, onDisconnected });
+		const client: RocketRideClient = makeClient({ persist: true, onDisconnected });
 
 		const initial = loginOutcome(client.login('initial-key'));
 		await flushLifecycleMicrotasks();
@@ -3357,8 +3356,7 @@ describe('RocketRideClient lifecycle operations', () => {
 
 	it('publishes one disconnected callback when a completed authenticated session is replaced by attach', async () => {
 		const callbacks: string[] = [];
-		let client!: RocketRideClient;
-		client = makeClient({
+		const client: RocketRideClient = makeClient({
 			onConnected: async () => {
 				callbacks.push('connected');
 			},
@@ -3388,11 +3386,10 @@ describe('RocketRideClient lifecycle operations', () => {
 	});
 
 	it('yields attach replacement when its disconnected callback detaches reentrantly', async () => {
-		let client!: RocketRideClient;
 		const onDisconnected = jest.fn(async () => {
 			await client.detach();
 		});
-		client = makeClient({ onDisconnected });
+		const client: RocketRideClient = makeClient({ onDisconnected });
 		const login = loginOutcome(client.login('attach-reentrant-key'));
 		await waitForLifecycle(() => LifecycleBrowserWebSocket.instances.length === 1, 'reentrant source socket');
 		const sourceSocket = LifecycleBrowserWebSocket.instances[0];
@@ -3416,8 +3413,7 @@ describe('RocketRideClient lifecycle operations', () => {
 			releaseConnected = resolve;
 		});
 		const callbacks: string[] = [];
-		let client!: RocketRideClient;
-		client = makeClient({
+		const client: RocketRideClient = makeClient({
 			onConnected: async () => {
 				callbacks.push('connected');
 				await connectedGate;

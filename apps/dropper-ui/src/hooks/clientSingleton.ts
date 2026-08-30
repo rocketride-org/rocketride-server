@@ -280,9 +280,8 @@ export async function startClient(authToken?: string): Promise<void> {
 		throw new Error("Sorry, I couldn't get you authenticated. Please contact your system admin.");
 	}
 
-	// Create client first (before config) so we can reference it in callbacks
-	let client: RocketRideClient;
-
+	// The callbacks below close over `client`, which is assigned right after
+	// the config is built (they only run once the client is connected).
 	const config: RocketRideClientConfig = {
 		auth: token,
 		uri: API_CONFIG.ROCKETRIDE_URI || (typeof window !== 'undefined' ? window.location.origin : ''),
@@ -298,7 +297,7 @@ export async function startClient(authToken?: string): Promise<void> {
 		env: API_CONFIG,
 	};
 
-	client = new RocketRideClient(config);
+	const client = new RocketRideClient(config);
 	await client.connect();
 	clientInstance = client;
 }

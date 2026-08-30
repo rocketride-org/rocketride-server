@@ -81,7 +81,9 @@ async function syncDir(src, dest, options = {}, stats = { added: 0, updated: 0, 
 				if (!dryRun) {
 					await copyFileEnsure(srcPath, destPath);
 				}
-				(++stats.updated, ++stats.changed, (changed = true));
+				++stats.updated;
+				++stats.changed;
+				changed = true;
 			}
 
 			destFiles.delete(name);
@@ -89,7 +91,9 @@ async function syncDir(src, dest, options = {}, stats = { added: 0, updated: 0, 
 			if (!dryRun) {
 				await copyFileEnsure(srcPath, destPath);
 			}
-			(++stats.added, ++stats.changed, (changed = true));
+			++stats.added;
+			++stats.changed;
+			changed = true;
 		}
 	}
 
@@ -100,7 +104,9 @@ async function syncDir(src, dest, options = {}, stats = { added: 0, updated: 0, 
 			if (!dryRun) {
 				await unlink(destPath);
 			}
-			(++stats.deleted, ++stats.changed, (changed = true));
+			++stats.deleted;
+			++stats.changed;
+			changed = true;
 		}
 	}
 
@@ -163,13 +169,17 @@ async function syncFile(src, dest, options = {}, stats = { added: 0, updated: 0,
 			if (!dryRun) {
 				await copyFileEnsure(src, dest);
 			}
-			(++stats.updated, ++stats.changed, (changed = true));
+			++stats.updated;
+			++stats.changed;
+			changed = true;
 		}
 	} else {
 		if (!dryRun) {
 			await copyFileEnsure(src, dest);
 		}
-		(++stats.added, ++stats.changed, (changed = true));
+		++stats.added;
+		++stats.changed;
+		changed = true;
 	}
 
 	// Update list of dest files from this source for packaging

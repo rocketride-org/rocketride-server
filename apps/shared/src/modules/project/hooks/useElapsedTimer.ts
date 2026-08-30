@@ -42,6 +42,11 @@ export function useElapsedTimer(taskStatus: TaskStatus | null | undefined): numb
 	const [currentElapsed, setCurrentElapsed] = useState<number>(0);
 	const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+	// The effect keys on these three fields only (not the status object identity).
+	const state = taskStatus?.state;
+	const startTime = taskStatus?.startTime ?? 0;
+	const completed = taskStatus?.completed;
+
 	useEffect(() => {
 		// Clear any existing interval before deciding whether to start a new one
 		if (intervalRef.current !== null) {
@@ -49,19 +54,19 @@ export function useElapsedTimer(taskStatus: TaskStatus | null | undefined): numb
 			intervalRef.current = null;
 		}
 
-		const isActive = taskStatus != null && (taskStatus.state === TASK_STATE.RUNNING || taskStatus.state === TASK_STATE.INITIALIZING) && taskStatus.startTime > 0 && !taskStatus.completed;
+		const isActive = (state === TASK_STATE.RUNNING || state === TASK_STATE.INITIALIZING) && startTime > 0 && !completed;
 
 		if (isActive) {
 			const updateElapsed = () => {
 				const nowSeconds = Math.floor(Date.now() / 1000);
-				const elapsed = nowSeconds - taskStatus.startTime;
+				const elapsed = nowSeconds - startTime;
 				setCurrentElapsed(Math.max(0, elapsed));
 			};
 
 			// Compute immediately, then tick every second
 			updateElapsed();
 			intervalRef.current = setInterval(updateElapsed, 1000);
-		} else if (taskStatus?.completed) {
+		} else if (completed) {
 			setCurrentElapsed(0);
 		}
 
@@ -71,7 +76,7 @@ export function useElapsedTimer(taskStatus: TaskStatus | null | undefined): numb
 				intervalRef.current = null;
 			}
 		};
-	}, [taskStatus?.completed, taskStatus?.startTime, taskStatus?.state]);
+	}, [completed, startTime, state]);
 
 	return currentElapsed;
 }
