@@ -1,4 +1,4 @@
-# Review log — branch `chore/RR-*-agentic-readiness-fast-checks`
+# Review log — branch `chore/RR-2148-agentic-readiness-fast-checks`
 
 Every finding raised by the four independent Fable 5 reviewers on this
 branch, with what was done about it. Nothing was dismissed silently.
