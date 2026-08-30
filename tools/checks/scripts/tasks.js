@@ -159,13 +159,18 @@ function makeRuffAction(fix) {
 }
 
 /**
- * Pyright as a STRICT RATCHET. packages/client-python had 218 errors under
- * pyright basic when this gate was introduced — too many to fix blind in the
+ * Pyright as a RATCHET. packages/client-python had 225 errors under pyright
+ * basic in CI when this gate was introduced — too many to fix blind in the
  * public SDK — so the committed baseline (tools/checks/pyright-baseline.json)
- * records the count per project and this check fails when the count goes UP
- * or DOWN: up means a regression; down means lower the baseline in the same
- * change so the improvement is locked in. Run `./builder lint:pyright` after
- * `pip install -e packages/client-python` (types need the package's deps).
+ * records the count per project. Above the baseline always fails.
+ *
+ * The count depends on which of the SDK's dependencies pyright can resolve
+ * (an unresolved import hides the errors behind it), so CI — where
+ * `pip install -r requirements-test.txt -e packages/client-python` is the
+ * fixed environment — is the canonical measurement: there (CI=true) a count
+ * BELOW the baseline also fails, with the instruction to lower the baseline
+ * in the same change so the improvement is locked in. Locally a lower count
+ * only prints that hint, since a partially installed venv reports fewer.
  */
 const PYRIGHT_BASELINE = path.join(__dirname, '..', 'pyright-baseline.json');
 
@@ -195,7 +200,9 @@ function makePyrightAction() {
 					throw new Error(`lint:pyright — ${project}: ${actual} errors, baseline is ${expected}. Fix the new errors (run: cd ${project} && python -m pyright --level error src).`);
 				}
 				if (actual < expected) {
-					throw new Error(`lint:pyright — ${project}: ${actual} errors, baseline is ${expected}. Nice — lower the number in tools/checks/pyright-baseline.json to ${actual} in this change.`);
+					const msg = `lint:pyright — ${project}: ${actual} errors, baseline is ${expected}. Nice — lower the number in tools/checks/pyright-baseline.json to ${actual} in this change.`;
+					if (process.env.CI) throw new Error(msg);
+					task.output = `${msg} (not enforced locally: the count depends on which SDK deps are installed; CI is canonical)`;
 				}
 			}
 		},
