@@ -212,14 +212,12 @@ function resolveDocPath(dir) {
 }
 
 function main() {
-	// Only regenerate docs on release-track branches to avoid polluting feature
-	// branch diffs with source-link changes (branch name is baked into URLs).
-	const branch = git(['rev-parse', '--abbrev-ref', 'HEAD'], '');
-	const allowed = new Set(['main', 'stage', 'develop']);
-	if (branch && !allowed.has(branch)) {
-		console.log(`nodes:docs-generate skipped (branch: ${branch}, only runs on ${[...allowed].join('/')})`);
-		return;
-	}
+	// Runs on every branch. Output is a pure function of services*.json and
+	// the repo's DEFAULT branch (resolved above from origin/HEAD, never the
+	// current branch), so feature-branch diffs only change when the node's
+	// contract changes — which is exactly what `surfaces:check` gates on.
+	// (An earlier branch gate skipped this on feature branches and on the
+	// detached HEAD of every PR checkout, which made the CI gate decorative.)
 
 	// Optional CLI args restrict generation to the named node(s); no args = all.
 	const only = new Set(process.argv.slice(2));

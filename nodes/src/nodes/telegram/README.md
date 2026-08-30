@@ -94,7 +94,7 @@ No additional OAuth or API key registration is needed beyond the bot token.
 
 ## Dependencies
 
-- `aiohttp` `>=3.13.5`
+- `aiohttp` `>=3.14.1`
 - `requests`
 - `fastapi`
 

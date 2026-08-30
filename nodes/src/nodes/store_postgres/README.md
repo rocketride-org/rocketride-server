@@ -121,6 +121,7 @@ Tool calls run on the control plane and do not flow through the pipeline's embed
 |---|---|---|---|
 | `postgres.profile` | `string` | **Type of PostgreSQL host**<br/>Connect to... | `"local"` |
 | `postgres.provider` | `string` |  | const: `"postgres"` |
+| `postgres.serverName` | `string` | **Tool Server Name**<br/>Namespace for agent-facing tool names, e.g. 'postgres' exposes tools as postgres.search / postgres.upsert / postgres.delete. Change this when running multiple Postgres nodes in the same pipeline so their tool names do not collide. | `"postgres"` |
 | `vector.collection` | `string` | **Table**<br/>Name of the table to store vectors. | `"rocketride"` |
 | `vector.local.database` | `string` | **Database**<br/>Name of the database | `"postgres"` |
 | `vector.local.host` |  | **Host**<br/>Host name or IP address of the PostgreSQL server | `"your-postgres-host.example.com"` |

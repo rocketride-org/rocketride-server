@@ -80,6 +80,10 @@ Both are generated per pipeline; there is nothing to configure on the node.
 |---|---|---|---|
 | `Pipe.source.parameters` |  |  |  |
 
+### Tools (`services.tools.json`)
+
+_No configuration fields._
+
 ### Webhook (`services.webhook.json`)
 
 _No configuration fields._

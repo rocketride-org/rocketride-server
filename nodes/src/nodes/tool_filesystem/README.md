@@ -221,6 +221,27 @@ pytest nodes/test/tool_filesystem/ -v
 
 ## Schema
 
+### File Store Source (`services.source.json`)
+
+| Field | Type | Description | Default |
+|---|---|---|---|
+| `Pipe.source.parameters` |  |  |  |
+| `filesystem.path` | `string` | **Path**<br/>File or folder to process, relative to the account file store root. A folder processes every file directly inside it. | `""` |
+| `filesystem.recursive` | `boolean` | **Recursive**<br/>When the path is a folder, also process all files in its subfolders. | `false` |
+
+### File Store (`services.store.json`)
+
+| Field | Type | Description | Default |
+|---|---|---|---|
+| `filesystem.emitUrl` | `boolean` | **Emit download URL**<br/>Also include a time-limited signed download URL in the emitted JSON reference. | `false` |
+| `filesystem.onConflict` | `string` | **When the file already exists**<br/>What the sink does when the target path is already taken. 'Replace' is destructive in a way that is easy to miss: names come from the source object's BASENAME, so two inputs from different folders that share a filename resolve to the same target and the second silently replaces the first. Leave it on 'Write under a new name' unless you are deliberately re-running into the same directory. | `"unique"` |
+| `filesystem.pathWhitelist` | `array` | **Path Whitelist**<br/>Regex patterns applied to the relative path of every write using re.search semantics: a partial match anywhere in the path is enough, so a pattern like 'secret' will also match 'notsecret/file.txt'. Anchor with ^ and $ if you need a full-path match (e.g. '^docs/.*$'). If non-empty, a path must match at least one pattern. If empty, all paths under the task's storage anchor are allowed. |  |
+| `filesystem.targetDir` | `string` | **Target directory**<br/>Base directory (relative to the account file store root) that lane-written files are placed under. | `"output/"` |
+| `filesystem.urlExpiresIn` | `integer` | **URL expiry (seconds)**<br/>TTL for the signed URL when 'Emit download URL' is on. Max 3600. | `3600` |
+| `filesystem.whitelistPattern` | `string` | **Path Pattern (regex)** | `""` |
+
+### File System (`services.tool.json`)
+
 | Field | Type | Description | Default |
 |---|---|---|---|
 | `filesystem.allowDelete` | `boolean` | **Delete files**<br/>Destructive: enable only when the agent is trusted to delete account files. | `false` |
@@ -229,7 +250,7 @@ pytest nodes/test/tool_filesystem/ -v
 | `filesystem.allowRead` | `boolean` | **Read files** | `true` |
 | `filesystem.allowStat` | `boolean` | **Stat (metadata)** | `true` |
 | `filesystem.allowWrite` | `boolean` | **Write files** | `true` |
-| `filesystem.pathWhitelist` | `array` | **Path Whitelist**<br/>Regex patterns applied to the relative path of every operation using re.search semantics: a partial match anywhere in the path is enough, so a pattern like 'secret' will also match 'notsecret/file.txt'. Anchor with ^ and $ if you need a full-path match (e.g. '^docs/.*$'). If non-empty, a path must match at least one pattern. If empty, all paths under users/<client_id>/files/ are allowed. |  |
+| `filesystem.pathWhitelist` | `array` | **Path Whitelist**<br/>Regex patterns applied to the relative path of every operation using re.search semantics: a partial match anywhere in the path is enough, so a pattern like 'secret' will also match 'notsecret/file.txt'. Anchor with ^ and $ if you need a full-path match (e.g. '^docs/.*$'). If non-empty, a path must match at least one pattern. If empty, all paths under the task's storage anchor (the owning user's file tree for development runs, the task's team subtree for deployed runs) are allowed. |  |
 | `filesystem.whitelistPattern` | `string` | **Path Pattern (regex)** | `""` |
 
 ## Source

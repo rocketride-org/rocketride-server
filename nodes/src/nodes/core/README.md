@@ -272,6 +272,18 @@ pytest nodes/test/core/test_google_access.py -v
 | `llm.cloud.project` | `string` | **Project (Organization)**<br/>LLM project or organization name |  |
 | `llm.local.serverbase` | `string` | **LLM URL**<br/>Base url the model is hosted under. | `"http://localhost:11434/v1"` |
 
+### `services.common.microsoft.json`
+
+| Field | Type | Description | Default |
+|---|---|---|---|
+| `microsoft.authType` | `string` | **Authentication Type** | `"service"` |
+| `microsoft.clientId` | `string` | **Client ID**<br/>Application (client) ID of your Entra app registration. |  |
+| `microsoft.clientSecret` | `string` | **Client Secret**<br/>Client secret of your Entra app registration. The app needs Microsoft Graph application permissions for this service, with admin consent granted. |  |
+| `microsoft.oAuthButton` | `string` | **Login with Microsoft** |  |
+| `microsoft.tenantId` | `string` | **Tenant ID**<br/>Enter your Microsoft Entra ID tenant (directory) ID.<br/><br/>Found in the Azure portal under Microsoft Entra ID > Overview. |  |
+| `microsoft.userPrincipalName` | `string` | **Acting User (UPN)**<br/>User principal name (e-mail) the app acts as. App-only Graph calls target /users/{upn}; this is required for App authentication. |  |
+| `microsoft.userToken` | `string` | **Access Token**<br/>It is a long term token that allows you to get new access tokens to access the Microsoft Graph API. |  |
+
 ### `services.common.remote.json`
 
 | Field | Type | Description | Default |

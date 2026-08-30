@@ -139,6 +139,7 @@ Discovery — adding profiles — requires `ROCKETRIDE_QWEN_KEY`. Without it the
 |---|---|---|---|
 | `model` | `string` | **Model**<br/>Qwen model |  |
 | `modelTotalTokens` | `number` | **Tokens**<br/>Maximum context length in tokens |  |
+| `qwen.base_url` | `string` | **Base URL override**<br/>Optional. Overrides the endpoint selected by Region. Leave empty to use the regional endpoint. Set this to reach a DashScope host other than the three listed above, for example another Alibaba Cloud region. | `""` |
 | `qwen.profile` | `string` | **Model**<br/>Qwen AI model selection | `"qwen-flash"` |
 | `qwen.region` | `string` | **Region**<br/>DashScope regional endpoint. API keys are not interchangeable between regions. | `"us"` |
 
