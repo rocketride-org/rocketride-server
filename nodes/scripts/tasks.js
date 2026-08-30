@@ -31,7 +31,7 @@
  */
 const path = require('path');
 const os = require('os');
-const { exists, syncDir, formatSyncStats, removeDir, PROJECT_ROOT, DIST_ROOT, startServer, stopServer, execCommand, runPytest, parallel, bracket, parseServerAddress } = require('../../scripts/lib');
+const { exists, syncDir, formatSyncStats, removeDir, PROJECT_ROOT, DIST_ROOT, startServer, stopServer, execCommand, runPytest, resolvePython, parallel, bracket, parseServerAddress } = require('../../scripts/lib');
 
 const PACKAGE_DIR = path.join(__dirname, '..');
 const SRC_DIR = path.join(PACKAGE_DIR, 'src', 'nodes');
@@ -247,6 +247,26 @@ function makeRunContractTestsAction() {
 	};
 }
 
+/**
+ * Contract tests under a PLAIN Python interpreter (see resolvePython) —
+ * no engine download, no server. test_contracts.py imports only pytest and
+ * the standard library, so any interpreter with requirements-test.txt
+ * installed can run it. This is the engine-free tier used by test:fast and
+ * by agents working in sandboxes without network access.
+ */
+function makeRunContractTestsLocalAction() {
+	return {
+		run: async (ctx, task) => {
+			await runPytest({
+				engine: resolvePython(),
+				testsDir: path.join(TEST_DIR, 'test_contracts.py'),
+				extraArgs: ['-q', '--rootdir', PACKAGE_DIR, '-p', 'no:cacheprovider'],
+				execOpts: { task, cwd: PACKAGE_DIR },
+			});
+		},
+	};
+}
+
 function makeTestAction(options = {}) {
 	return {
 		description: 'Testing nodes',
@@ -282,6 +302,7 @@ module.exports = {
 		{ name: 'nodes:start-server', action: makeStartTestServerAction },
 		{ name: 'nodes:stop-server', action: makeStopTestServerAction },
 		{ name: 'nodes:run-contracts', action: makeRunContractTestsAction },
+		{ name: 'nodes:run-contracts-local', action: makeRunContractTestsLocalAction },
 		{ name: 'nodes:docs-generate', action: makeDocsGenerateAction },
 		{ name: 'nodes:credentials-generate', action: makeCredentialsGenerateAction },
 		{ name: 'nodes:credentials-check', action: makeCredentialsCheckAction },
@@ -301,6 +322,13 @@ module.exports = {
 			action: () => ({
 				description: 'Testing nodes (contracts)',
 				steps: ['server:build', 'nodes:run-contracts'],
+			}),
+		},
+		{
+			name: 'nodes:test-contracts-local',
+			action: () => ({
+				description: 'Testing nodes (contracts, plain Python — no engine, no server)',
+				steps: ['nodes:run-contracts-local'],
 			}),
 		},
 		{

@@ -1,0 +1,15 @@
+# Python tooling for the ENGINE-FREE verification tier (./builder test:fast,
+# ./builder lint:check). Install into a plain venv:
+#
+#   python3 -m venv .venv && .venv/bin/pip install -r requirements-test.txt
+#
+# Tests that import engine modules (packages/ai, client-python integration,
+# nodes:test) still run under the engine binary — see docs/README-node-testing.md.
+#
+# ruff is pinned here AND in .github/workflows/ci.yml (ruff-action `version:`);
+# tests/test_repo_invariants.py fails if the two disagree.
+pytest>=8,<9
+pytest-asyncio>=0.24
+python-dotenv>=1.0
+ruff==0.16.5
+pyright==1.1.411

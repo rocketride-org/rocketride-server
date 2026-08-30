@@ -21,10 +21,41 @@
  */
 
 const fs = require('fs').promises;
+const fsSync = require('fs');
 const path = require('path');
 const { glob } = require('glob');
 const { execCommand } = require('./exec');
 const { exists } = require('./fs');
+const { PROJECT_ROOT } = require('./paths');
+
+/**
+ * Resolve a plain Python interpreter for ENGINE-FREE pytest runs.
+ *
+ * Most pytest tasks run under the engine binary (``dist/server/engine``)
+ * because the tests import engine-only modules (``rocketlib``, ``depends``).
+ * A few suites are pure Python — the node contract tests, the repo
+ * invariants — and must stay runnable in a sandbox that cannot download or
+ * compile the engine. Those tasks resolve their interpreter here.
+ *
+ * Resolution order:
+ *   1. ``ROCKETRIDE_PYTHON`` — explicit interpreter path (CI, agents).
+ *   2. ``<repo>/.venv/{bin,Scripts}/python`` — the conventional local venv
+ *      created from ``requirements-test.txt``.
+ *   3. ``python3`` / ``python`` on PATH (``python`` on Windows).
+ *
+ * Nothing here verifies that pytest is importable; a missing dependency
+ * surfaces as pytest's own ``No module named pytest`` so the remediation
+ * (``pip install -r requirements-test.txt``) is obvious.
+ *
+ * @returns {string} Command or absolute path to run as the interpreter.
+ */
+function resolvePython() {
+	if (process.env.ROCKETRIDE_PYTHON) return process.env.ROCKETRIDE_PYTHON;
+	const win = process.platform === 'win32';
+	const venvPython = path.join(PROJECT_ROOT, '.venv', win ? 'Scripts' : 'bin', win ? 'python.exe' : 'python');
+	if (fsSync.existsSync(venvPython)) return venvPython;
+	return win ? 'python' : 'python3';
+}
 
 /**
  * Run pytest with empty-directory skip.
@@ -78,4 +109,4 @@ async function runPytest({ engine, testsDir, extraArgs = [], execOpts = {} }) {
 	return { skipped: false };
 }
 
-module.exports = { runPytest };
+module.exports = { runPytest, resolvePython };
