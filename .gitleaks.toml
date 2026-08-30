@@ -47,4 +47,8 @@ paths = [
     '''downloads/''',
     '''node_modules/''',
     '''\.claude/''',
+    # Engine test pipelines: static fixture tokens for the local test server,
+    # committed long before this scan existed. The Prettier sweep re-touched
+    # those lines, which is what surfaced them in a diff scan.
+    '''packages/server/test/pipelines/''',
 ]
