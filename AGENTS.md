@@ -1,10 +1,9 @@
 # AGENTS.md
 
 Contributor guide for humans and coding agents working **in this repository**.
-This file is the single source of truth for repo-wide rules: `CLAUDE.md` is a
-pointer to it, `.cursorrules` and `.cursor/rules/repo.mdc` point here, and
-`tests/test_repo_invariants.py` fails CI if a command or path below stops
-being true.
+This file is the single source of truth for repo-wide rules: `CLAUDE.md` and
+`.cursorrules` are pointers to it, and `tests/test_repo_invariants.py` fails
+CI if a command or path below stops being true.
 
 > **Not for you if you are *using* RocketRide.** `docs/agents/` and
 > `docs/stubs/` are product docs for people building pipelines *with* the
