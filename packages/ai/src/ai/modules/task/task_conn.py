@@ -68,7 +68,6 @@ from ai.constants import CONST_AUTH_MAX_ATTEMPTS_PER_CONN
 from .commands.cmd_task import TaskCommands
 from .commands.cmd_data import DataCommands
 from .commands.cmd_monitor import MonitorCommands
-from .commands.cmd_debug import DebugCommands
 from .commands.cmd_misc import MiscCommands
 from .commands.cmd_cprofile import CProfileCommands
 from .commands.cmd_account import AccountCommands
@@ -99,7 +98,6 @@ class TaskConn(
     TaskCommands,
     DataCommands,
     MonitorCommands,
-    DebugCommands,
     MiscCommands,
     CProfileCommands,
     AccountCommands,
@@ -134,10 +132,9 @@ class TaskConn(
     - Generic task commands → delegated to task instances
 
     Inheritance Hierarchy:
-    - TaskCommands: Task lifecycle and debugging operations
+    - TaskCommands: Task lifecycle operations
     - DataCommands: Real-time data processing interface
     - MonitorCommands: Event subscription and monitoring
-    - DebugCommands: Debugging session management
     - MiscCommands: Miscellaneous utility commands (services, etc.)
     - CProfileCommands: cProfile process profiling (start, stop, status, report)
     - AccountCommands: Account management (profile, keys, organizations, teams, billing)
@@ -191,7 +188,6 @@ class TaskConn(
         MonitorCommands.__init__(self, connection_id, server, transport, **kwargs)
         DataCommands.__init__(self, connection_id, server, transport, **kwargs)
         TaskCommands.__init__(self, connection_id, server, transport, **kwargs)
-        DebugCommands.__init__(self, connection_id, server, transport, **kwargs)
         MiscCommands.__init__(self, connection_id, server, transport, **kwargs)
         CProfileCommands.__init__(self, connection_id, server, transport, **kwargs)
         AccountCommands.__init__(self, connection_id, server, transport, **kwargs)
@@ -611,95 +607,24 @@ class TaskConn(
         """
         return self._connection_id
 
-    async def request(self, request: Dict[str, Any]) -> Dict[str, Any]:
+    async def on_command(self, request: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Process DAP debugging commands.
+        Reject any DAP command this connection has no handler for.
+
+        DAPConn dispatches ``on_{command}`` first and falls back here. Without
+        this method the fallback in ``dap_conn.on_receive`` builds a default
+        SUCCESS response, so a command that went nowhere would look like it
+        worked — a misspelled ``rrext_*`` in a script, or a stale client still
+        sending the removed debugger commands, would both get ``success: true``.
 
         Args:
-            request: DAP command from debugging client
+            request (Dict[str, Any]): The unhandled DAP request
 
         Returns:
-            DAP-compliant response from debugpy interface
+            Dict[str, Any]: An error response naming the command
         """
-        # Get the command - we may have already done this, but
-        # we need to make sure...
-        request_command = request.get('command', '')
-
-        # Reject internal commands
-        if not request_command or request_command.startswith('rrext_'):
-            return self.build_error(request, f'Invalid command: {request_command}')
-
-        # Get the task
-        task = self.get_task(request, 'task.debug')
-
-        # Validate debug interface
-        if task._debug_python is None:
-            return self.build_error(request, 'Debug interface not available')
-
-        # Make the request to debugpy
-        response = await task._debug_python.request(request)
-
-        # Build the response in our context
-        server_response = self.build_response(
-            request,
-            body=response.get('body', None),
-        )
-
-        # And return the response
-        return server_response
-
-    async def on_command(self, request: Dict[str, Any]) -> None:
-        """
-        Handle generic DAP commands by delegating to appropriate task instances.
-
-        This method serves as the fallback command handler for DAP commands that
-        are not handled by the specialized command mixins. It performs task lookup
-        and delegates the command to the appropriate task instance for processing.
-        This enables standard DAP debugging commands (breakpoints, step, evaluate, etc.)
-        to be forwarded directly to the task's debugging engine. This method is
-        mainly used to forward commands on to the debugger.
-
-        Args:
-            request (Dict[str, Any]): DAP command request containing:
-                - apikey: Authentication key for task access control
-                - token: Unique identifier for the target task instance
-                - command: DAP command type (step, breakpoint, evaluate, etc.)
-                - arguments: Command-specific parameters and options
-
-        Command Flow:
-        1. Extract authentication credentials and task identification
-        2. Locate the target task instance through server registry
-        3. Forward the complete command request to task's request handler
-        4. Return the task's response (handled by task's DAP implementation)
-
-        Delegation Logic:
-        - Commands handled by mixins (launch, ext_process, ext_monitor) bypass this method
-        - Standard DAP commands (step, breakpoint, evaluate, etc.) are routed here
-        - Task instances implement their own DAP command processing
-        - This provides seamless integration with task-specific debugging engines
-
-        Raises:
-            Exception: If task lookup fails, authentication is invalid,
-                      or command processing encounters errors
-
-        Note:
-        - This method assumes the task exists and is accessible with provided credentials
-        - Error handling includes diagnostic logging before re-raising exceptions
-        - The actual command processing logic resides in individual task instances
-        """
-        # Get the command
-        request_command = request.get('command', '')
-
-        # Reject internal commands
-        if not request_command or request_command.startswith('rrext_'):
-            return self.build_error(request, f'Invalid command: {request_command}')
-
-        # We know this is now a vscode debugging command. Inject
-        # the debug token if it was not specified
-        request.setdefault('token', self._debug_token)
-
-        # Call it
-        return await self.request(request)
+        command = request.get('command', '')
+        return self.build_error(request, f'Unsupported command: {command}')
 
     async def on_rrext_identify(self, request: Dict[str, Any]) -> Dict[str, Any]:
         """Update the client display name for this connection.

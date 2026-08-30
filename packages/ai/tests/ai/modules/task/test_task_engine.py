@@ -13,8 +13,7 @@ Focus areas:
 - ``_file_checksum`` — SHA-256 of a real temp file
 - ``_is_debugging`` / ``_get_attach_subprocesses`` — sys.modules probes
 - ``is_task_complete`` / ``is_attached`` / ``has_attached_debugger`` /
-  ``get_connection_count`` / ``is_debug_available`` / ``get_status`` —
-  accessors
+  ``get_connection_count`` / ``get_status`` — accessors
 - ``reset_idle_timer`` / ``send_scheduled_updates`` — state setters
 
 Two methods are already exercised by separate, security-focused tests:
@@ -76,7 +75,6 @@ def _task(*, source='src-id', task_name=None, pipeline=None, status=None):
     t._run_kind = 'dev'
     t._status = status if status is not None else SimpleNamespace(name='', state=0, exitMessage='')
     t._debugger = None
-    t._debug_port = None
     t._idle_time = 5
     t._status_updated = False
     t.public_auth = 'pk_test'
@@ -396,14 +394,6 @@ def test_get_connection_count_is_zero_or_one():
     assert Task.get_connection_count(t) == 0
     t._debugger = MagicMock()
     assert Task.get_connection_count(t) == 1
-
-
-def test_is_debug_available_requires_debug_port():
-    """is_debug_available is True iff ``_debug_port`` is non-None."""
-    t = _task()
-    assert Task.is_debug_available(t) is False
-    t._debug_port = 5566
-    assert Task.is_debug_available(t) is True
 
 
 def test_get_status_returns_the_status_object():

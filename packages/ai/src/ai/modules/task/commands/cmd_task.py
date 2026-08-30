@@ -30,18 +30,19 @@ task execution, debugging sessions, and resource management.
 
 Primary Responsibilities:
 --------------------------
-1. Handles DAP protocol commands for task lifecycle management (launch, execute, attach, terminate)
-2. Manages debugging session initialization and capabilities negotiation
-3. Provides task execution control (pause, continue, disconnect)
-4. Coordinates with a TaskServer to orchestrate backend task engines
-5. Maintains DAP-compliant communication with debugging clients
+1. Handles DAP protocol commands for task lifecycle management (launch, execute,
+   terminate, restart)
+2. Coordinates with a TaskServer to orchestrate backend task engines
+3. Resolves the run team and its owning org before any task is started
+4. Maintains DAP-compliant communication with clients
 
 Architecture:
 -------------
 - Inherits from DAPConn to leverage DAP protocol handling
 - Works in conjunction with TaskServer for actual task management
-- Supports both debugging-enabled ('launch') and debug-free ('execute') task execution
-- Handles attachment to existing task sessions for collaborative debugging
+- Two entry points start a task: 'launch' (the cloud REST path, via the SaaS
+  ALB) and 'execute' (the SDK path). They are deliberately separate — see
+  on_launch's docstring for the three ways they differ
 
 Usage Context:
 --------------
@@ -209,6 +210,113 @@ class TaskCommands(DAPConn):
         except Exception as e:
             # Log execution failure and re-raise
             self.debug_message(f'Failed to execute task: {str(e)}')
+            raise
+
+    async def on_launch(self, request: Dict[str, Any]) -> None:
+        """
+        Handle DAP 'launch' command to start a new task.
+
+        This is the cloud pipeline-launch path: the SaaS ALB forwards a
+        'launch' request here (REST ``PUT /task``), which resolves the run
+        team and its owning org, then delegates to TaskServer.start_task.
+
+        Deliberately NOT a wrapper over on_execute — the two differ in three
+        ways that must not converge silently: on_launch resolves no
+        org/team/user secrets, does not wait for the task to reach RUNNING,
+        and does not classify the run. See the module history before merging
+        them.
+
+        Args:
+            request (Dict[str, Any]): Launch request containing:
+                - arguments: Task configuration and launch parameters
+
+        Returns:
+            None: the reply is sent directly via send_response.
+
+        Raises:
+            Exception: If task creation fails
+        """
+        try:
+            # Launch runs are development runs: they ALWAYS execute under the
+            # user's profile-assigned development team. Clients do not choose
+            # a team at launch; a stray teamId is rejected rather than
+            # silently ignored so the caller is never surprised by which team
+            # the run was billed/authorized under.
+            args = request.get('arguments') or {}
+            team_id = self._account_info.defaultTeam
+            requested_team = args.get('teamId')
+            if requested_team and requested_team != team_id:
+                raise PermissionError('Tasks run in your assigned development team; change it in your profile')
+
+            # Verify task.debug on the development team.
+            self.verify_team_permission(team_id, 'task.debug')
+
+            # Resolve the org that owns the TARGET team. Members resolve via
+            # their own org; callers passing the permission check without
+            # membership (sys.admin, internal) resolve via the account backend
+            # so the task file never carries an empty orgId as trusted
+            # identity (rejected if the team's org cannot be determined).
+            org_id = await self.resolve_org_for_team(team_id)
+
+            # Create and start the new task, obtaining a unique token
+            response = await self._server.start_task(
+                request,
+                self,
+                client_id=self._account_info.userId,
+                user_id=self._account_info.userId,
+                team_id=team_id,
+                org_id=org_id,
+            )
+
+            # Send successful launch response with task token
+            await self.send_response(request, body=response)
+
+        except Exception as e:
+            # Log the error for diagnostics and re-raise
+            self.debug_message(f'Failed to launch task: {str(e)}')
+            raise
+
+    async def on_terminate(self, request: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Handle DAP 'terminate' command to stop task execution and cleanup.
+
+        Forcibly terminates the target task and cleans up associated resources.
+        This is a graceful shutdown that may not always be called if clients
+        disconnect abruptly, so cleanup logic should also be handled in
+        disconnect.
+
+        Args:
+            request (Dict[str, Any]): Terminate request carrying the task token
+
+        Returns:
+            Dict[str, Any]: Acknowledgment of successful termination
+
+        Raises:
+            Exception: If task termination or cleanup fails
+        """
+        # Bound before the try so the failure log below can reference it even
+        # when get_task_token itself raises — otherwise the UnboundLocalError
+        # would replace the real error.
+        token = '<unresolved>'
+
+        try:
+            token = self.get_task_token(request)
+
+            # Validate ownership and permissions via get_task
+            self.get_task(request, 'task.control')
+
+            # Log the termination request
+            self.debug_message('Terminating task and cleaning up resources')
+
+            # Stop the task and perform resource cleanup
+            await self._server.stop_task(token)
+
+            # Acknowledge successful termination
+            return self.build_response(request)
+
+        except Exception as e:
+            # Log termination failure with task context
+            self.debug_message(f'Failed to terminate task "{token}": {str(e)}')
             raise
 
     async def on_restart(self, request: Dict[str, Any]) -> Dict[str, Any]:

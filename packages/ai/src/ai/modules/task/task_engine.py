@@ -8,7 +8,7 @@ data processing systems.
 
 Key Features:
 - Isolated subprocess execution with complete lifecycle management
-- Multi-interface debugging (DAP, debugpy, stdio) with IDE integration
+- Multi-interface communication (DAP, stdio) with the task subprocess
 - Real-time status monitoring and event broadcasting
 - Resource management (ports, temporary files, cleanup)
 - Multi-client support for collaborative debugging
@@ -64,7 +64,6 @@ from rocketride import (
     TASK_STATE,
     EVENT_TYPE,
 )
-from .dbg_debugpy import DbgDebugpy
 from .dbg_stdio import DbgStdio
 from .pipeline import resolve_pipeline_env
 from .types import LAUNCH_TYPE
@@ -155,7 +154,6 @@ class Task(DAPBase):
 
     Communication Interfaces:
         DAP: Debug Adapter Protocol for standardized debugging
-        debugpy: Python debugger for IDE integration
         stdio: Direct subprocess communication
         WebSocket: Real-time event broadcasting
 
@@ -166,10 +164,8 @@ class Task(DAPBase):
         _status (TASK_STATUS): Task state and statistics
         _engine_process (Optional[Process]): Subprocess handle
         _debugger (Optional[TaskConn]): Primary debugging connection
-        _debug_python (Optional[DbgDebugpy]): debugpy interface
         _debug_stdio (Optional[DbgStdio]): stdio interface
         _data_client (Optional[DAPClient]): Data communication client
-        _debug_port (Optional[int]): debugpy communication port
         _data_port (Optional[int]): Data communication port
         _status_update_task (Optional[Task]): Background status broadcasting
         _is_terminating (bool): Termination state flag
@@ -217,38 +213,11 @@ class Task(DAPBase):
             """
             await self._parent_task._terminated()
 
-    class TaskDbgDebugpy(DbgDebugpy):
-        """DAP client for debugpy server connections."""
-
-        def __init__(self, parent_task: 'Task', **kwargs):
-            """Initialize debugpy client with parent task integration."""
-            self._parent_task = parent_task
-            super().__init__(**kwargs)
-
-        async def on_event(self, event: Dict[str, Any]) -> None:
-            """
-            Handle DAP events from debugpy server.
-
-            Routes events to parent Task for broadcasting to connected clients.
-
-            Args:
-                event: DAP event message from debugpy
-            """
-            # Get the type of event
-            event_type = event.get('event', '')
-
-            # Our initialization sequence and termination sequence handles sending these
-            # events when it is ready
-            if event_type == 'initialized' or event_type == 'terminated':
-                return
-
-            await self._parent_task.on_event(event)
-
     class TaskData(DAPClient):
         """DAP client for data communication with pipeline."""
 
         def __init__(self, parent_task: 'Task', **kwargs):
-            """Initialize debugpy client with parent task integration."""
+            """Initialize the data client with parent task integration."""
             self._parent_task = parent_task
             super().__init__(**kwargs)
 
@@ -369,8 +338,6 @@ class Task(DAPBase):
         self._monitors: Dict[TaskConn, EVENT_TYPE] = {}
 
         # Debug interfaces
-        self._debug_port: Optional[int] = None
-        self._debug_python: Optional[Task.TaskDbgDebugpy] = None
         self._debug_stdio: Optional[Task.TaskDbgStdio] = None
 
         # Data communication
@@ -432,9 +399,6 @@ class Task(DAPBase):
 
         # Subprocess debugging flag
         self._debug_subprocess = False
-
-        # Launch configuration
-        self._noDebug = launch_args.get('noDebug', False)
 
         # Termination management
         self._is_restarting = False
@@ -871,19 +835,6 @@ class Task(DAPBase):
             self.debug_message(f'Error cleaning up stdio: {e}')
 
         try:
-            if self._debug_python:
-                try:
-                    await self._debug_python.disconnect()
-                    self.debug_message('debugpy interface cleaned up')
-                except Exception as e:
-                    self.debug_message(f'Error cleaning up debugpy interface: {e}')
-                finally:
-                    self._debug_python = None
-
-        except Exception as e:
-            self.debug_message(f'Error cleaning up debugpy: {e}')
-
-        try:
             if self._data_client:
                 try:
                     await self._data_client.disconnect()
@@ -922,14 +873,6 @@ class Task(DAPBase):
 
         try:
             # Release ports
-            if self._debug_port:
-                self._server.release_port(self._debug_port)
-                self.debug_message('Debug port released')
-                self._debug_port = None
-        except Exception as e:
-            self.debug_message(f'Error cleaning up debug port: {e}')
-
-        try:
             if self._data_port:
                 self._server.release_port(self._data_port)
                 self.debug_message(f'Data port {self._data_port} released')
@@ -1678,15 +1621,6 @@ class Task(DAPBase):
             # Wait before next poll
             await asyncio.sleep(CONST_READY_POLL_INTERVAL)
 
-    def is_debug_available(self) -> bool:
-        """
-        Check if debug interface is available.
-
-        Returns:
-            True if debug interface available, False otherwise
-        """
-        return self._debug_port is not None
-
     def get_status(self) -> TASK_STATUS:
         """
         Get comprehensive task status.
@@ -1704,55 +1638,6 @@ class Task(DAPBase):
         or performs any activity that indicates it's in active use.
         """
         self._idle_time = 0
-
-    async def attach_task(self, conn: TaskConn) -> Dict[str, Any]:
-        """
-        Attach debugging client with debugpy interface setup.
-
-        Args:
-            conn: DAP connection to attach as primary debugger
-
-        Returns:
-            Pipeline configuration for debugging client
-
-        Raises:
-            RuntimeError: If debugger already attached or connection fails
-        """
-        if self._debugger:
-            raise RuntimeError('Debugger is already attached to this task')
-
-        if self._debug_port is None:
-            raise RuntimeError('Debugging on this task is not enabled')
-
-        try:
-            self._debugger = conn
-            self._status.debuggerAttached = True
-
-            uri = f'tcp://localhost:{self._debug_port}'
-
-            self._debug_python = Task.TaskDbgDebugpy(
-                parent_task=self,
-                id=self.id,
-                token=self.token,
-                uri=uri,
-                launch_args=self._launch_args,
-                launch_type=self._launch_type,
-            )
-
-            await self._debug_python.connect()
-            await self._send_status_update()
-
-            self.debug_message('Debugger attached successfully')
-
-            return self._pipeline
-
-        except Exception as e:
-            self._status.debuggerAttached = False
-            self._debug_python = None
-            self._debugger = None
-
-            self.debug_message(f'Failed to attach debugger to task: {e}')
-            raise
 
     async def detach_task(self, conn: TaskConn) -> Dict[str, Any]:
         """
@@ -2076,22 +1961,9 @@ class Task(DAPBase):
 
                 exec_path = execpython
             else:
-                # Production environment with full debug support
+                # Production environment
                 self._debug_subprocess = True
                 exec_path = sys.executable
-
-                if not self._noDebug:
-                    self._debug_port = self._server.assign_port()
-
-                    child_args.extend(
-                        [
-                            f'--debug_port={self._debug_port}',
-                            '--debug_host=localhost',
-                        ]
-                    )
-
-                if self._launch_type == LAUNCH_TYPE.LAUNCH:
-                    child_args.append('--wait_for_client')
 
             # Configure data communication
             self._data_port = self._server.assign_port()

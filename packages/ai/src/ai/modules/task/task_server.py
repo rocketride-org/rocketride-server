@@ -994,32 +994,6 @@ class TaskServer(DAPBase):
                 # Log individual monitor failures but continue broadcasting
                 self.debug_message(f'Failed to broadcast event to connection: {e}')
 
-    def is_debug_available(self, token: str) -> bool:
-        """
-        Handle DAP 'pause' command to suspend task execution.
-
-        Pauses all active threads in the target task, including pipeline
-        execution threads and the main thread. This enables inspection
-        of the current execution state and variables.
-
-        Args:
-            token (str): Task token
-
-        Returns:
-            bool: True if the task supports debugging, False otherwise
-        """
-        try:
-            # Verify permission
-            task = self.get_task(token)
-
-            # Return whether it is available or not
-            return task.is_debug_available()
-
-        except Exception as e:
-            # Log pause failure with task context
-            self.debug_message(f'Failed to get debug state for task: {str(e)}')
-            raise
-
     def get_task_status(self, token: str) -> TASK_STATUS:
         """
         Retrieve comprehensive status information for a specific task.
@@ -1112,7 +1086,6 @@ class TaskServer(DAPBase):
         request: Dict[str, Any],
         conn: TaskConn = None,
         *,
-        attach_debugger=False,
         wait_for_running=False,
         client_id: str = '',
         user_id: str = '',
@@ -1369,10 +1342,6 @@ class TaskServer(DAPBase):
             # Log successful task creation
             self.debug_message(f'Task "{control.id}" started... (type: {control.launch_type.value})')
 
-            # If debugging is available, attach to it
-            if attach_debugger and control.task.is_debug_available():
-                await self.attach_task(control.token, conn)
-
             # Retrieve the task instance for status monitoring
             if wait_for_running:
                 # Block until the task transitions to running state
@@ -1407,7 +1376,6 @@ class TaskServer(DAPBase):
         request: Dict[str, Any],
         conn: TaskConn = None,
         *,
-        attach_debugger=False,
         wait_for_running=False,
     ) -> Dict[str, Any]:
         """
@@ -1428,7 +1396,6 @@ class TaskServer(DAPBase):
                     - token: Task token to restart (required)
                     - pipeline: New pipeline configuration (required)
             conn (TaskConn, optional): Connection requesting restart (must match launch_owner)
-            attach_debugger (bool): Ignored for restart (debugger must be detached)
             wait_for_running (bool): If True, wait for task to reach running state
 
         Returns:
@@ -1575,47 +1542,6 @@ class TaskServer(DAPBase):
         except Exception as e:
             # Log but ignore errors - task may already be stopped or removed
             self.debug_message(f'Task stop request handled (may have been already stopped): {e}')
-
-    async def attach_task(self, token: str, conn: TaskConn) -> None:
-        """
-        Attach a DAP connection to an existing running task.
-
-        This method enables multiple clients to connect to the same task for
-        collaborative debugging, monitoring, or data processing. It establishes
-        the necessary connection state and monitoring subscriptions.
-
-        Args:
-            request (Dict[str, Any]): Attach request containing:
-                - token: Unique identifier for target task
-            conn (TaskConn): Connection to attach to the task
-
-        Returns:
-            Pipeline configuration information for the attached task
-
-        Raises:
-            ValueError: If task doesn't exist or API key validation fails
-
-        Attachment Process:
-        1. Validate task existence and ownership
-        2. Set up passive monitoring for task events
-        3. Attach connection to task's debugging interface
-        4. Return pipeline configuration for client setup
-        """
-        # Validate task existence and ownership
-        control = self.get_task_control(token)
-
-        # Set up passive event monitoring for this connection
-        await conn.set_monitor(
-            token=control.token,
-            type=EVENT_TYPE.SUMMARY,
-        )
-
-        # Attach connection to task and get pipeline configuration
-        pipeline = await control.task.attach_task(conn)
-
-        # Log successful attachment
-        self.debug_message(f'Connection attached to task "{control.id}"')
-        return pipeline
 
     async def detach_task(self, request: Dict[str, Any], conn: TaskConn):
         """

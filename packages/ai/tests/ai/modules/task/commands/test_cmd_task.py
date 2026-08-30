@@ -53,6 +53,9 @@ def _make_conn(*, account_info=None, server=None, connection_id=1):
     conn.verify_team_permission = MagicMock()  # granted by default
     conn.verify_plans = MagicMock(return_value=True)
     conn.get_task = MagicMock()
+    # on_launch replies via send_response; on_terminate resolves its token.
+    conn.send_response = AsyncMock()
+    conn.get_task_token = MagicMock(return_value='tk_x')
     # Bind the REAL org resolver (defined on TaskConn, next to
     # verify_team_permission) so on_execute exercises real membership-based
     # resolution against the stub AccountInfo's organization.
@@ -279,6 +282,123 @@ async def test_on_execute_skips_plan_check_without_pipeline():
     await TaskCommands.on_execute(conn, {'arguments': {}})
 
     conn.verify_plans.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# on_launch
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_on_launch_starts_task_with_resolved_org():
+    """on_launch resolves org_id from defaultTeam and delegates to start_task."""
+    server = MagicMock()
+    server.start_task = AsyncMock(return_value={'id': 'task-99', 'token': 'tk_99'})
+    conn = _make_conn(account_info=_account_info(), server=server)
+
+    await TaskCommands.on_launch(conn, {'arguments': {}})
+
+    server.start_task.assert_awaited_once()
+    assert server.start_task.call_args.kwargs['org_id'] == 'org-1'
+    conn.send_response.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_on_launch_replies_via_send_response_and_returns_none():
+    """on_launch sends its reply itself and returns nothing for the dispatcher
+    to send — there is no 'initialized' event any more.
+    """
+    server = MagicMock()
+    server.start_task = AsyncMock(return_value={'id': 'task-99', 'token': 'tk_99'})
+    conn = _make_conn(account_info=_account_info(), server=server)
+
+    result = await TaskCommands.on_launch(conn, {'arguments': {}})
+
+    assert result is None
+    conn.send_response.assert_awaited_once()
+    assert conn.send_response.call_args.kwargs['body'] == {'id': 'task-99', 'token': 'tk_99'}
+
+
+@pytest.mark.asyncio
+async def test_on_launch_rejects_unpermitted_dev_team():
+    """Lacking the launch permission on the development team denies the launch
+    before any task is started.
+    """
+    server = MagicMock()
+    server.start_task = AsyncMock()
+    conn = _make_conn(account_info=_account_info(), server=server)
+    conn.verify_team_permission = MagicMock(side_effect=PermissionError('denied for team'))
+    with pytest.raises(PermissionError, match='denied for team'):
+        await TaskCommands.on_launch(conn, {'arguments': {}})
+    server.start_task.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_on_launch_rejects_client_team_override():
+    """A client-supplied teamId differing from the development team is
+    rejected outright — launch runs always execute under the profile-assigned
+    development team.
+    """
+    server = MagicMock()
+    server.start_task = AsyncMock()
+    conn = _make_conn(account_info=_account_info(default_team='team-1'), server=server)
+    with pytest.raises(PermissionError, match='development team'):
+        await TaskCommands.on_launch(conn, {'arguments': {'teamId': 'team-foreign'}})
+    server.start_task.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_on_launch_checks_task_debug_on_dev_team():
+    """on_launch verifies task.debug against the development team."""
+    server = MagicMock()
+    server.start_task = AsyncMock(return_value={'id': 'task-1', 'token': 'tk_1'})
+    conn = _make_conn(account_info=_account_info(default_team='team-1'), server=server)
+    await TaskCommands.on_launch(conn, {'arguments': {}})
+    conn.verify_team_permission.assert_called_once_with('team-1', 'task.debug')
+
+
+# ---------------------------------------------------------------------------
+# on_terminate
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_on_terminate_stops_task_with_request_token():
+    """on_terminate stops the task named by the request's token."""
+    server = MagicMock()
+    server.stop_task = AsyncMock()
+    conn = _make_conn(account_info=_account_info(), server=server)
+    conn.get_task_token = MagicMock(return_value='tk_active')
+
+    response = await TaskCommands.on_terminate(conn, {'token': 'tk_active', 'arguments': {}})
+
+    server.stop_task.assert_awaited_once_with('tk_active')
+    assert response['type'] == 'response'
+
+
+@pytest.mark.asyncio
+async def test_on_terminate_denied_does_not_stop_the_task():
+    """A failed authorization must stop the handler before stop_task runs.
+
+    get_task is what enforces task.control ownership here, so a caller
+    without it must not be able to terminate someone else's task — the
+    refusal has to happen before any side effect.
+    """
+    server = MagicMock()
+    server.stop_task = AsyncMock()
+    conn = _make_conn(account_info=_account_info(), server=server)
+    conn.get_task_token = MagicMock(return_value='tk_foreign')
+    conn.get_task = MagicMock(side_effect=PermissionError("Permission 'task.control' denied"))
+
+    request = {'token': 'tk_foreign', 'arguments': {}}
+    with pytest.raises(PermissionError, match='denied'):
+        await TaskCommands.on_terminate(conn, request)
+
+    # Pin the permission itself, not just that some check ran — the mock
+    # raises on any call, so without this the test would pass even if
+    # on_terminate asked for the wrong right.
+    conn.get_task.assert_called_once_with(request, 'task.control')
+    server.stop_task.assert_not_awaited()
 
 
 # ---------------------------------------------------------------------------

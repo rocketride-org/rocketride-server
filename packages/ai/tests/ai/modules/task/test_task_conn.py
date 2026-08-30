@@ -594,44 +594,51 @@ async def test_on_rrext_ping_returns_pong():
 # ---------------------------------------------------------------------------
 
 
+def test_debug_handlers_are_gone():
+    """The VSCode debugger surface is no longer reachable on TaskConn.
+
+    Both the debugpy forwarding path (``request`` / ``on_command``) and every
+    DebugCommands handler were removed with the pipeline debugger; nothing may
+    resurrect them via the mixin chain.
+    """
+    for name in (
+        'request',
+        'on_initialize',
+        'on_attach',
+        'on_pause',
+        'on_continue',
+        'on_configurationDone',
+        'on_threads',
+        'on_disconnect',
+    ):
+        assert not hasattr(TaskConn, name), f'TaskConn still exposes {name}'
+
+
 @pytest.mark.asyncio
-async def test_request_rejects_internal_rrext_command():
-    """Any command starting with ``rrext_`` is rejected as internal-only."""
+async def test_unhandled_command_is_refused_not_silently_accepted():
+    """A command with no handler must come back as an explicit failure.
+
+    DAPConn's own fallback builds a default SUCCESS response, so without
+    on_command a misspelled rrext_* — or a stale client still sending the
+    removed debugger commands — would read as "it worked".
+    """
     conn = _make_conn()
-    response = await TaskConn.request(conn, {'command': 'rrext_internal'})
-    assert response['success'] is False
-    assert 'Invalid command' in response['message']
+
+    for command in ('setBreakpoints', 'pause', 'rrext_bogus_xyz'):
+        response = await TaskConn.on_command(conn, {'command': command})
+        assert response['success'] is False, f'{command} was not refused'
+        assert command in response['message']
 
 
-@pytest.mark.asyncio
-async def test_request_rejects_empty_command():
-    """An empty / missing ``command`` field is rejected."""
-    conn = _make_conn()
-    response = await TaskConn.request(conn, {})
-    assert response['success'] is False
+def test_rrext_handlers_still_dispatch_by_name():
+    """Deleting request()/on_command() also dropped their ``rrext_`` guard.
 
-
-@pytest.mark.asyncio
-async def test_request_errors_when_debug_interface_missing(monkeypatch):
-    """If the underlying task has no `_debug_python`, an error response is built."""
-    from ai.modules.task import task_conn as tc_mod
-
-    # Caller has task.debug on the task's team — get_task() returns the task.
-    monkeypatch.setattr(tc_mod, 'resolve_task_permissions', lambda info, team_id: ['task.debug'])
-
-    fake_task = SimpleNamespace(_debug_python=None)
-    server = MagicMock()
-    server.get_task_control = MagicMock(return_value=SimpleNamespace(teamId='team-1', task=fake_task))
-    conn = _make_conn(account_info=_make_account_info(auth='ak_user-1', user_id='user-1'), server=server)
-
-    response = await TaskConn.request(conn, {'command': 'continue', 'arguments': {'token': 'tk_x'}})
-    assert response['success'] is False
-    assert 'Debug interface not available' in response['message']
-
-
-@pytest.mark.asyncio
-async def test_on_command_rejects_internal_rrext():
-    """on_command also rejects rrext_ commands at the dispatcher level."""
-    conn = _make_conn()
-    response = await TaskConn.on_command(conn, {'command': 'rrext_evil'})
-    assert response['success'] is False
+    That guard only ever rejected *unknown* rrext_ commands on their way to
+    debugpy — every real one dispatches by name via ``on_{command}`` and never
+    reached it. Assert the real handlers all still resolve, so the guard's
+    removal is provably not a loss of admin surface.
+    """
+    handlers = [n for n in dir(TaskConn) if n.startswith('on_rrext_')]
+    assert len(handlers) >= 36, f'rrext surface shrank to {len(handlers)}'
+    for name in ('on_rrext_dashboard', 'on_rrext_deploy', 'on_rrext_store', 'on_rrext_account_me'):
+        assert callable(getattr(TaskConn, name, None)), f'{name} no longer dispatches'
