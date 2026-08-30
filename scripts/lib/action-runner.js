@@ -91,11 +91,27 @@ function resetActionTracking() {
  * @param {object} options - Options
  * @returns {{ name: string, actionObj: object }} Resolved action
  */
+// Actions that need the engine binary — fetched by server:download (network)
+// or produced by a 90-minute native compile. A sandboxed agent (no network,
+// no toolchain) cannot complete either, and today only finds out after a long
+// failure. With ROCKETRIDE_SANDBOX=1 the builder refuses up front and names
+// the engine-free alternative. Every engine-dependent action chains through
+// one of these, so guarding the roots is enough.
+const SANDBOX_BLOCKED = /^server:(build|build-all|build-core|download|compile|compile-engine|configure|configure-cmake|setup-.*|test|package)$/;
+
+function isSandbox() {
+	const v = (process.env.ROCKETRIDE_SANDBOX || '').toLowerCase();
+	return v === '1' || v === 'true' || v === 'yes';
+}
+
 function resolveAction(step, options) {
 	if (typeof step === 'string') {
 		const found = registry.getAction(step);
 		if (!found) {
 			throw new Error(`Action not found in registry: ${step}`);
+		}
+		if (isSandbox() && SANDBOX_BLOCKED.test(step)) {
+			throw new Error(`${step} needs the engine binary (download or native build), which is unavailable when ROCKETRIDE_SANDBOX=1.\n` + `  Engine-free alternatives: ./builder test:fast   ./builder lint:check   ./builder surfaces:check\n` + `  Unset ROCKETRIDE_SANDBOX on a machine with network access to run the full ${step}.`);
 		}
 		const actionObj = typeof found.action === 'function' ? found.action(options) : found.action;
 		return { name: step, actionObj };
