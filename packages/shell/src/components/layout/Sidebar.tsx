@@ -31,9 +31,7 @@
 
 import React, { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { ShellIdentityContext } from '../../hooks/useAuthUser';
-import {
-	BxCog, BxLock, BxPalette, BxUser, BxExport, BxGridAlt, BxDockLeft, BxHome,
-} from '../BoxIcon';
+import { BxCog, BxLock, BxPalette, BxUser, BxExport, BxGridAlt, BxDockLeft, BxHome } from '../BoxIcon';
 import { ConnectionManager } from '../../connection/connection';
 import { getHomeAppId } from '../../constants';
 import type { IconComponent } from '../BoxIcon';
@@ -125,25 +123,30 @@ export const NavButton: React.FC<NavButtonProps> = ({ icon: Icon, label, isActiv
 			onMouseEnter={() => setHovered(true)}
 			onMouseLeave={() => setHovered(false)}
 			style={{
-				display: 'flex', alignItems: 'center', justifyContent: collapsed ? 'center' : 'flex-start',
-				gap: 10, width: collapsed ? COLLAPSED_BTN : '100%', height: collapsed ? COLLAPSED_BTN : 30,
-				padding: collapsed ? 0 : '0 10px', margin: collapsed ? '0 auto' : 0,
-				borderRadius: 8, border: 'none', cursor: 'pointer', fontSize: 13,
+				display: 'flex',
+				alignItems: 'center',
+				justifyContent: collapsed ? 'center' : 'flex-start',
+				gap: 10,
+				width: collapsed ? COLLAPSED_BTN : '100%',
+				height: collapsed ? COLLAPSED_BTN : 30,
+				padding: collapsed ? 0 : '0 10px',
+				margin: collapsed ? '0 auto' : 0,
+				borderRadius: 8,
+				border: 'none',
+				cursor: 'pointer',
+				fontSize: 13,
 				fontWeight: isActive ? 600 : 400,
 				// Active rows use the theme's standard list highlight
 				// (--rr-bg-list-active / --rr-fg-list-active): every theme maps it
 				// to its brand color + alternate foreground.
-				color: isActive ? 'var(--rr-fg-list-active)' : iconColor ?? 'var(--rr-text-secondary)',
-				background: isActive
-					? 'var(--rr-bg-list-active)'
-					: hovered ? 'var(--rr-bg-surface-alt)' : 'transparent',
-				transition: 'background 100ms ease, color 100ms ease', overflow: 'hidden',
+				color: isActive ? 'var(--rr-fg-list-active)' : (iconColor ?? 'var(--rr-text-secondary)'),
+				background: isActive ? 'var(--rr-bg-list-active)' : hovered ? 'var(--rr-bg-surface-alt)' : 'transparent',
+				transition: 'background 100ms ease, color 100ms ease',
+				overflow: 'hidden',
 			}}
 		>
 			<Icon size={ICON_SIZE} />
-			{!collapsed && (
-				<span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{label}</span>
-			)}
+			{!collapsed && <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{label}</span>}
 		</button>
 	);
 };
@@ -157,7 +160,7 @@ export const NavButton: React.FC<NavButtonProps> = ({ icon: Icon, label, isActiv
  * Returns 'dark' or 'light'.
  */
 const usePaletteMode = (): 'dark' | 'light' => {
-	const read = () => getComputedStyle(document.documentElement).getPropertyValue('--rr-palette-mode').trim() as 'dark' | 'light' || 'light';
+	const read = () => (getComputedStyle(document.documentElement).getPropertyValue('--rr-palette-mode').trim() as 'dark' | 'light') || 'light';
 	const [mode, setMode] = useState(read);
 	useEffect(() => {
 		// Re-read whenever the shell applies a new theme (CSS vars change)
@@ -200,10 +203,16 @@ const AppSwitcherButton: React.FC<{ collapsed: boolean }> = ({ collapsed }) => {
 	// Collapsed: show the same icon as the expanded state, centered
 	if (collapsed) {
 		return (
-			<div style={{
-				width: COLLAPSED_BTN, height: COLLAPSED_BTN, margin: '0 auto',
-				display: 'flex', alignItems: 'center', justifyContent: 'center',
-			}}>
+			<div
+				style={{
+					width: COLLAPSED_BTN,
+					height: COLLAPSED_BTN,
+					margin: '0 auto',
+					display: 'flex',
+					alignItems: 'center',
+					justifyContent: 'center',
+				}}
+			>
 				{resolveIcon(20)}
 			</div>
 		);
@@ -215,11 +224,19 @@ const AppSwitcherButton: React.FC<{ collapsed: boolean }> = ({ collapsed }) => {
 	return (
 		<div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, flex: 1, padding: '4px 4px 2px' }}>
 			<RocketRideWordmark height={22} color={paletteMode === 'dark' ? '#FAFBF8' : '#1E1A34'} />
-			<span style={{
-				fontSize: 9, fontWeight: 800, letterSpacing: '0.12em',
-				color: 'var(--rr-text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-				textAlign: 'center', maxWidth: '100%',
-			}}>
+			<span
+				style={{
+					fontSize: 9,
+					fontWeight: 800,
+					letterSpacing: '0.12em',
+					color: 'var(--rr-text-secondary)',
+					overflow: 'hidden',
+					textOverflow: 'ellipsis',
+					whiteSpace: 'nowrap',
+					textAlign: 'center',
+					maxWidth: '100%',
+				}}
+			>
 				{appLabel}
 			</span>
 		</div>
@@ -240,19 +257,18 @@ const AppSwitcherButton: React.FC<{ collapsed: boolean }> = ({ collapsed }) => {
  */
 const AppIcon: React.FC<{ name: string; iconUrl?: string; size?: number }> = ({ name, iconUrl, size = 16 }) => {
 	if (iconUrl) {
-		return (
-			<img
-				src={iconUrl}
-				alt=""
-				width={size}
-				height={size}
-				style={{ borderRadius: 4, objectFit: 'cover', flexShrink: 0, display: 'block' }}
-			/>
-		);
+		return <img src={iconUrl} alt="" width={size} height={size} style={{ borderRadius: 4, objectFit: 'cover', flexShrink: 0, display: 'block' }} />;
 	}
 
 	const words = name.trim().split(/\s+/).filter(Boolean);
-	const monogram = (words.length > 1 ? words.slice(0, 2).map((w) => w[0]).join('') : name.slice(0, 2)).toUpperCase();
+	const monogram = (
+		words.length > 1
+			? words
+					.slice(0, 2)
+					.map((w) => w[0])
+					.join('')
+			: name.slice(0, 2)
+	).toUpperCase();
 
 	return (
 		<span
@@ -334,43 +350,55 @@ const Sidebar: React.FC<SidebarProps> = ({ themeConfig: _themeConfig, account, h
 	 *
 	 * @param e - The mouse event from the resize handle.
 	 */
-	const handleMouseDown = useCallback((e: React.MouseEvent) => {
-		e.preventDefault();
-		isResizingRef.current = true;
-		startXRef.current = e.clientX;
-		startWidthRef.current = collapsed ? COLLAPSED_WIDTH : width;
-		setIsResizing(true);
-		document.body.style.cursor = 'col-resize';
-		document.body.style.userSelect = 'none';
-		document.querySelectorAll('iframe').forEach((f) => { (f as HTMLIFrameElement).style.pointerEvents = 'none'; });
+	const handleMouseDown = useCallback(
+		(e: React.MouseEvent) => {
+			e.preventDefault();
+			isResizingRef.current = true;
+			startXRef.current = e.clientX;
+			startWidthRef.current = collapsed ? COLLAPSED_WIDTH : width;
+			setIsResizing(true);
+			document.body.style.cursor = 'col-resize';
+			document.body.style.userSelect = 'none';
+			document.querySelectorAll('iframe').forEach((f) => {
+				(f as HTMLIFrameElement).style.pointerEvents = 'none';
+			});
 
-		const cleanup = () => {
-			isResizingRef.current = false;
-			setIsResizing(false);
-			document.body.style.cursor = '';
-			document.body.style.userSelect = '';
-			document.querySelectorAll('iframe').forEach((f) => { (f as HTMLIFrameElement).style.pointerEvents = ''; });
-			window.removeEventListener('mousemove', onMouseMove);
-			window.removeEventListener('mouseup', cleanup);
-		};
+			const cleanup = () => {
+				isResizingRef.current = false;
+				setIsResizing(false);
+				document.body.style.cursor = '';
+				document.body.style.userSelect = '';
+				document.querySelectorAll('iframe').forEach((f) => {
+					(f as HTMLIFrameElement).style.pointerEvents = '';
+				});
+				window.removeEventListener('mousemove', onMouseMove);
+				window.removeEventListener('mouseup', cleanup);
+			};
 
-		let snapped = false;
-		const onMouseMove = (ev: MouseEvent) => {
-			if (!isResizingRef.current) return;
-			const delta = ev.clientX - startXRef.current;
-			const newWidth = startWidthRef.current + delta;
-			if (newWidth < SNAP_THRESHOLD) {
-				if (!snapped) { ConnectionManager.getInstance().emit('shell:sidebarCollapsing', {}); snapped = true; }
-				setCollapsed(true); setWidth(COLLAPSED_WIDTH);
-			} else {
-				snapped = false;
-				setCollapsed(false); setWidth(Math.min(Math.max(newWidth, MIN_WIDTH), MAX_WIDTH));
-			}
-		};
+			let snapped = false;
+			const onMouseMove = (ev: MouseEvent) => {
+				if (!isResizingRef.current) return;
+				const delta = ev.clientX - startXRef.current;
+				const newWidth = startWidthRef.current + delta;
+				if (newWidth < SNAP_THRESHOLD) {
+					if (!snapped) {
+						ConnectionManager.getInstance().emit('shell:sidebarCollapsing', {});
+						snapped = true;
+					}
+					setCollapsed(true);
+					setWidth(COLLAPSED_WIDTH);
+				} else {
+					snapped = false;
+					setCollapsed(false);
+					setWidth(Math.min(Math.max(newWidth, MIN_WIDTH), MAX_WIDTH));
+				}
+			};
 
-		window.addEventListener('mousemove', onMouseMove);
-		window.addEventListener('mouseup', cleanup);
-	}, [collapsed, width]);
+			window.addEventListener('mousemove', onMouseMove);
+			window.addEventListener('mouseup', cleanup);
+		},
+		[collapsed, width]
+	);
 
 	// --- Theme selection -----------------------------------------------------
 
@@ -380,9 +408,12 @@ const Sidebar: React.FC<SidebarProps> = ({ themeConfig: _themeConfig, account, h
 	 * @param themeId - The ID of the theme to apply.
 	 */
 	/** Apply a theme — delegates to the context's setTheme which handles both prefs and CSS. */
-	const handleThemeSelect = useCallback((themeId: string) => {
-		setTheme(themeId);
-	}, [setTheme]);
+	const handleThemeSelect = useCallback(
+		(themeId: string) => {
+			setTheme(themeId);
+		},
+		[setTheme]
+	);
 
 	// --- Footer menu items ---------------------------------------------------
 
@@ -401,9 +432,14 @@ const Sidebar: React.FC<SidebarProps> = ({ themeConfig: _themeConfig, account, h
 			// settings), so it's always available. Per-app gating lives in SettingsProvider.
 			{ id: 'settings', label: 'Settings', icon: BxCog, onClick: () => onOverlay('settings') },
 			{
-				id: 'theme', label: 'Theme', icon: BxPalette, dividerBefore: true,
+				id: 'theme',
+				label: 'Theme',
+				icon: BxPalette,
+				dividerBefore: true,
 				submenu: themeOptions.map((t) => ({
-					id: t.id, label: t.name, checked: prefs.theme === t.id,
+					id: t.id,
+					label: t.name,
+					checked: prefs.theme === t.id,
 					onClick: () => handleThemeSelect(t.id),
 				})),
 			},
@@ -421,13 +457,17 @@ const Sidebar: React.FC<SidebarProps> = ({ themeConfig: _themeConfig, account, h
 			};
 
 			items.push({
-				id: 'apps', label: 'Switch App', icon: BxGridAlt,
+				id: 'apps',
+				label: 'Switch App',
+				icon: BxGridAlt,
 				submenu: appManifest
 					.filter((a) => a.id !== 'rocketride.home' && a.id !== 'rocketride.hello')
 					.filter((a) => isOnDesktop(a.id))
 					.sort((a, b) => a.name.localeCompare(b.name))
 					.map((app) => ({
-						id: app.id, label: app.name, checked: activeAppId === app.id,
+						id: app.id,
+						label: app.name,
+						checked: activeAppId === app.id,
 						icon: ({ size }: { size?: number }) => <AppIcon name={app.name} iconUrl={app.icon} size={size} />,
 						onClick: () => handleSwitchApp(app.id),
 					})),
@@ -453,35 +493,31 @@ const Sidebar: React.FC<SidebarProps> = ({ themeConfig: _themeConfig, account, h
 	// --- Render --------------------------------------------------------------
 
 	return (
-		<div style={{
-			width: sidebarWidth, minWidth: sidebarWidth, height: '100%',
-			display: 'flex', flexDirection: 'column',
-			background: 'var(--rr-bg-paper)', borderRight: '1px solid var(--rr-border)',
-			position: 'relative', overflow: 'hidden',
-			transition: isResizing ? 'none' : `width ${TRANSITION_MS}ms ease, min-width ${TRANSITION_MS}ms ease`,
-		}}>
+		<div
+			style={{
+				width: sidebarWidth,
+				minWidth: sidebarWidth,
+				height: '100%',
+				display: 'flex',
+				flexDirection: 'column',
+				background: 'var(--rr-bg-paper)',
+				borderRight: '1px solid var(--rr-border)',
+				position: 'relative',
+				overflow: 'hidden',
+				transition: isResizing ? 'none' : `width ${TRANSITION_MS}ms ease, min-width ${TRANSITION_MS}ms ease`,
+			}}
+		>
 			{/* ================================================================
 			    HEADER — AppSwitcherButton + collapse toggle
 			    ================================================================ */}
-			<div
-				style={{ display: 'flex', alignItems: 'center', justifyContent: collapsed ? 'center' : undefined, height: 52, padding: collapsed ? '8px 8px 0' : '8px 12px 0', flexShrink: 0, marginBottom: 10 }}
-				onMouseEnter={() => setHeaderHover(true)}
-				onMouseLeave={() => setHeaderHover(false)}
-			>
+			<div style={{ display: 'flex', alignItems: 'center', justifyContent: collapsed ? 'center' : undefined, height: 52, padding: collapsed ? '8px 8px 0' : '8px 12px 0', flexShrink: 0, marginBottom: 10 }} onMouseEnter={() => setHeaderHover(true)} onMouseLeave={() => setHeaderHover(false)}>
 				{collapsed ? (
 					// Collapsed: a single always-rendered, focusable button toggles
 					// expansion. It shows the brand mark by default and swaps to the
 					// collapse-sidebar icon on hover/focus (same 40×40 box, so no layout
 					// shift). Always mounted — and focus-reveals the icon — so keyboard
 					// and touch users can expand without hovering.
-					<button
-						title="Expand sidebar"
-						aria-label="Expand sidebar"
-						onClick={toggleCollapse}
-						onFocus={() => setHeaderHover(true)}
-						onBlur={() => setHeaderHover(false)}
-						style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: COLLAPSED_BTN, height: COLLAPSED_BTN, borderRadius: 6, border: 'none', cursor: 'pointer', background: 'transparent', color: 'var(--rr-text-secondary)', flexShrink: 0, padding: 0 }}
-					>
+					<button title="Expand sidebar" aria-label="Expand sidebar" onClick={toggleCollapse} onFocus={() => setHeaderHover(true)} onBlur={() => setHeaderHover(false)} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: COLLAPSED_BTN, height: COLLAPSED_BTN, borderRadius: 6, border: 'none', cursor: 'pointer', background: 'transparent', color: 'var(--rr-text-secondary)', flexShrink: 0, padding: 0 }}>
 						{headerHover ? <BxDockLeft size={20} /> : <AppSwitcherButton collapsed={collapsed} />}
 					</button>
 				) : (
@@ -490,8 +526,12 @@ const Sidebar: React.FC<SidebarProps> = ({ themeConfig: _themeConfig, account, h
 							title="Go to home"
 							aria-label="Go to home"
 							onClick={() => ConnectionManager.getInstance().emit('shell:switchApp', { appId: homeAppId })}
-							onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--rr-bg-list-hover, var(--rr-bg-surface-alt))'; }}
-							onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+							onMouseEnter={(e) => {
+								e.currentTarget.style.background = 'var(--rr-bg-list-hover, var(--rr-bg-surface-alt))';
+							}}
+							onMouseLeave={(e) => {
+								e.currentTarget.style.background = 'transparent';
+							}}
 							style={{ display: 'flex', flex: 1, minWidth: 0, alignItems: 'center', padding: '2px 4px', borderRadius: 6, border: 'none', background: 'transparent', cursor: 'pointer', font: 'inherit', color: 'inherit', textAlign: 'left', transition: 'background 120ms ease' }}
 						>
 							<AppSwitcherButton collapsed={collapsed} />
@@ -500,8 +540,12 @@ const Sidebar: React.FC<SidebarProps> = ({ themeConfig: _themeConfig, account, h
 							title="Collapse sidebar"
 							aria-label="Collapse sidebar"
 							onClick={toggleCollapse}
-							onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--rr-bg-list-hover, var(--rr-bg-surface-alt))'; }}
-							onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+							onMouseEnter={(e) => {
+								e.currentTarget.style.background = 'var(--rr-bg-list-hover, var(--rr-bg-surface-alt))';
+							}}
+							onMouseLeave={(e) => {
+								e.currentTarget.style.background = 'transparent';
+							}}
 							style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 28, height: 28, borderRadius: 6, border: 'none', cursor: 'pointer', background: 'transparent', color: 'var(--rr-text-secondary)', flexShrink: 0, transition: 'background 120ms ease' }}
 						>
 							<BxDockLeft size={18} />
@@ -519,35 +563,19 @@ const Sidebar: React.FC<SidebarProps> = ({ themeConfig: _themeConfig, account, h
 				    collapsed flag; each component inside decides its collapsed form
 				    (SidebarMenu iconifies, free-form content returns null; the
 				    legacy bridge reads it back into the `collapsed` prop). */}
-				<SidebarCollapsedProvider value={collapsed}>
-					{sidebarContent}
-				</SidebarCollapsedProvider>
+				<SidebarCollapsedProvider value={collapsed}>{sidebarContent}</SidebarCollapsedProvider>
 			</div>
 
 			{/* ================================================================
 			    FOOTER — hidden when logged out
 			    ================================================================ */}
-			{identity && (
-				<SidebarFooter
-					collapsed={collapsed}
-					userName={account.userName}
-					userEmail={account.userEmail}
-					menuItems={footerMenuItems}
-				/>
-			)}
+			{identity && <SidebarFooter collapsed={collapsed} userName={account.userName} userEmail={account.userEmail} menuItems={footerMenuItems} />}
 
 			{/* ================================================================
 			    RESIZE HANDLE
 			    ================================================================ */}
-			<div
-				style={{ position: 'absolute', right: 0, top: 0, width: 6, height: '100%', cursor: 'col-resize', zIndex: 10 }}
-				onMouseDown={handleMouseDown}
-				onMouseEnter={() => setHandleHover(true)}
-				onMouseLeave={() => setHandleHover(false)}
-			>
-				{(handleHover || isResizing) && (
-					<div style={{ position: 'absolute', right: 0, top: 0, width: 2, height: '100%', background: 'var(--rr-brand)' }} />
-				)}
+			<div style={{ position: 'absolute', right: 0, top: 0, width: 6, height: '100%', cursor: 'col-resize', zIndex: 10 }} onMouseDown={handleMouseDown} onMouseEnter={() => setHandleHover(true)} onMouseLeave={() => setHandleHover(false)}>
+				{(handleHover || isResizing) && <div style={{ position: 'absolute', right: 0, top: 0, width: 2, height: '100%', background: 'var(--rr-brand)' }} />}
 			</div>
 		</div>
 	);

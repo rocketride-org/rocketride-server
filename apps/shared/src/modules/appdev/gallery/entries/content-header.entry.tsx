@@ -32,13 +32,7 @@ import { ContentHeader } from 'shell';
 import type { IGalleryDemoProps, IGalleryEntry, KnobValues } from '../galleryTypes';
 
 /** Live demo: a ContentHeader driven by the knob values. */
-const ContentHeaderDemo: React.FC<IGalleryDemoProps> = ({ knobs }) => (
-	<ContentHeader
-		title={String(knobs.title)}
-		subtitle={String(knobs.subtitle) || undefined}
-		actions={knobs.actions ? <Button onClick={() => undefined}>New connection</Button> : undefined}
-	/>
-);
+const ContentHeaderDemo: React.FC<IGalleryDemoProps> = ({ knobs }) => <ContentHeader title={String(knobs.title)} subtitle={String(knobs.subtitle) || undefined} actions={knobs.actions ? <Button onClick={() => undefined}>New connection</Button> : undefined} />;
 
 /** Snippet builder mirroring the current knob state. */
 const buildCode = (knobs: KnobValues): string => {

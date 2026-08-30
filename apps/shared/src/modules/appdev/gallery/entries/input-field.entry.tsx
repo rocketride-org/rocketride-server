@@ -66,7 +66,5 @@ export const inputFieldEntry: IGalleryEntry = {
 	],
 	demo: InputFieldDemo,
 	code: buildCode,
-	props: [
-		{ name: '...props', type: 'InputHTMLAttributes<HTMLInputElement>', dir: 'in', note: 'The entire native input attribute surface - value, placeholder, type, disabled, onChange, and the rest pass straight through.' },
-	],
+	props: [{ name: '...props', type: 'InputHTMLAttributes<HTMLInputElement>', dir: 'in', note: 'The entire native input attribute surface - value, placeholder, type, disabled, onChange, and the rest pass straight through.' }],
 };

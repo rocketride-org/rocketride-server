@@ -126,7 +126,7 @@ function packageJson(v: TemplateVars): string {
 			},
 		},
 		null,
-		2,
+		2
 	)}\n`;
 }
 
@@ -220,7 +220,7 @@ function tsconfigJson(): string {
 			include: ['src'],
 		},
 		null,
-		2,
+		2
 	)}\n`;
 }
 

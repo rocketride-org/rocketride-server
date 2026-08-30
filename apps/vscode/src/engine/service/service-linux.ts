@@ -14,12 +14,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { execFile, spawn } from 'child_process';
 import { promisify } from 'util';
-import {
-	ServiceManager,
-	ServiceStatus,
-	SERVICE_DISPLAY_NAME,
-	SERVICE_PORT
-} from './service-manager';
+import { ServiceManager, ServiceStatus, SERVICE_DISPLAY_NAME, SERVICE_PORT } from './service-manager';
 import { icons } from '../../shared/util/icons';
 
 const execFileAsync = promisify(execFile);
@@ -41,7 +36,6 @@ const UNIT_PATH = `/etc/systemd/system/${UNIT_NAME}.service`;
  * {@link setElevationPassword} before any operation that requires elevation.
  */
 export class LinuxServiceManager extends ServiceManager {
-
 	/** Sudo password provided by the UI, piped to `sudo -S` via stdin. */
 	private sudoPassword: string | undefined;
 
@@ -132,13 +126,33 @@ export class LinuxServiceManager extends ServiceManager {
 
 	/** Stops, disables, and removes the systemd unit, then deletes the install root. */
 	public async remove(): Promise<void> {
-		try { await this.runSudo('systemctl', ['stop', UNIT_NAME]); } catch { /* ignore */ }
-		try { await this.runSudo('systemctl', ['disable', UNIT_NAME]); } catch { /* ignore */ }
-		try { await this.runSudo('rm', ['-f', UNIT_PATH]); } catch { /* ignore */ }
-		try { await this.runSudo('systemctl', ['daemon-reload']); } catch { /* ignore */ }
+		try {
+			await this.runSudo('systemctl', ['stop', UNIT_NAME]);
+		} catch {
+			/* ignore */
+		}
+		try {
+			await this.runSudo('systemctl', ['disable', UNIT_NAME]);
+		} catch {
+			/* ignore */
+		}
+		try {
+			await this.runSudo('rm', ['-f', UNIT_PATH]);
+		} catch {
+			/* ignore */
+		}
+		try {
+			await this.runSudo('systemctl', ['daemon-reload']);
+		} catch {
+			/* ignore */
+		}
 
 		// Remove the entire install root
-		try { await this.runSudo('rm', ['-rf', INSTALL_ROOT]); } catch { /* ignore */ }
+		try {
+			await this.runSudo('rm', ['-rf', INSTALL_ROOT]);
+		} catch {
+			/* ignore */
+		}
 
 		this.logger.output(`${icons.success} Service removed`);
 	}
@@ -193,7 +207,9 @@ export class LinuxServiceManager extends ServiceManager {
 		try {
 			const { stdout } = await execFileAsync('systemctl', ['is-active', UNIT_NAME]);
 			processRunning = stdout.trim() === 'active';
-		} catch { /* inactive */ }
+		} catch {
+			/* inactive */
+		}
 
 		let state: 'stopped' | 'starting' | 'running' = 'stopped';
 		if (processRunning) {
@@ -233,7 +249,9 @@ WantedBy=multi-user.target
 			try {
 				await execFileAsync('which', [pm]);
 				return pm;
-			} catch { /* not found */ }
+			} catch {
+				/* not found */
+			}
 		}
 		return null;
 	}
@@ -250,7 +268,7 @@ WantedBy=multi-user.target
 			// -S reads password from stdin; -k forces re-authentication each call
 			// so the cached timestamp does not silently skip a wrong password.
 			const child = spawn('sudo', ['-S', command, ...args], {
-				stdio: ['pipe', 'pipe', 'pipe']
+				stdio: ['pipe', 'pipe', 'pipe'],
 			});
 
 			if (this.sudoPassword !== undefined) {
@@ -258,9 +276,13 @@ WantedBy=multi-user.target
 			}
 			child.stdin!.end();
 
-			child.stdout!.on('data', () => { /* drain stdout to prevent pipe buffer from blocking */ });
+			child.stdout!.on('data', () => {
+				/* drain stdout to prevent pipe buffer from blocking */
+			});
 			let stderr = '';
-			child.stderr!.on('data', (d: Buffer) => { stderr += d.toString(); });
+			child.stderr!.on('data', (d: Buffer) => {
+				stderr += d.toString();
+			});
 			child.on('close', (code: number | null) => {
 				if (code === 0) {
 					resolve();

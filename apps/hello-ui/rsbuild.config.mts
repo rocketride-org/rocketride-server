@@ -45,8 +45,8 @@ export default defineConfig(() => {
 					// the host (the shell) always provides these at runtime.
 					// Without this, MF bundles the entire shared tree
 					// (fonts, Chart.js, MUI) as a "just in case" fallback.
-					'shell': { singleton: true, requiredVersion: false, import: false },
-					'rocketride': { singleton: true, requiredVersion: false, import: false },
+					shell: { singleton: true, requiredVersion: false, import: false },
+					rocketride: { singleton: true, requiredVersion: false, import: false },
 				},
 			}),
 		],

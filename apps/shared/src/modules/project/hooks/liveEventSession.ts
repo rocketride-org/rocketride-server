@@ -192,9 +192,7 @@ export function createLiveEventStore(): LiveEventStore {
 			 * from a rendered row resolves here unchanged.
 			 */
 			async getTrace(traceId: number): Promise<{ events: TaskEventMessage[] }> {
-				const beginIndex = buffer.findIndex(
-					(message) => message.event === 'apaevt_flow' && message.body?.op === 'begin' && seqOf(message) === traceId,
-				);
+				const beginIndex = buffer.findIndex((message) => message.event === 'apaevt_flow' && message.body?.op === 'begin' && seqOf(message) === traceId);
 				if (beginIndex < 0) return { events: [] };
 
 				const pipe = buffer[beginIndex].body?.id;

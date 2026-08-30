@@ -33,12 +33,7 @@ import type { IGalleryDemoProps, IGalleryEntry, KnobValues } from '../galleryTyp
 
 /** Live demo: one Button driven entirely by the knob values. */
 const ButtonDemo: React.FC<IGalleryDemoProps> = ({ knobs }) => (
-	<Button
-		variant={knobs.variant as ButtonVariant}
-		small={Boolean(knobs.small)}
-		disabled={Boolean(knobs.disabled)}
-		onClick={() => undefined}
-	>
+	<Button variant={knobs.variant as ButtonVariant} small={Boolean(knobs.small)} disabled={Boolean(knobs.disabled)} onClick={() => undefined}>
 		{String(knobs.label)}
 	</Button>
 );
@@ -46,11 +41,7 @@ const ButtonDemo: React.FC<IGalleryDemoProps> = ({ knobs }) => (
 /** Snippet builder mirroring the current knob state. */
 const buildCode = (knobs: KnobValues): string => {
 	// Only non-default props appear, so the copied code stays minimal
-	const attrs = [
-		knobs.variant !== 'primary' ? ` variant="${String(knobs.variant)}"` : '',
-		knobs.small ? ' small' : '',
-		knobs.disabled ? ' disabled' : '',
-	].join('');
+	const attrs = [knobs.variant !== 'primary' ? ` variant="${String(knobs.variant)}"` : '', knobs.small ? ' small' : '', knobs.disabled ? ' disabled' : ''].join('');
 	return `import { Button } from 'shell';
 
 <Button${attrs} onClick={handleClick}>${String(knobs.label)}</Button>`;
@@ -78,7 +69,7 @@ export const buttonEntry: IGalleryEntry = {
 		{ name: 'children', type: 'ReactNode', dir: 'in', required: true, note: 'Button label / content.' },
 		{ name: 'title', type: 'string', dir: 'in', note: 'Native tooltip text.' },
 		{ name: 'pressed', type: 'boolean', dir: 'in', note: 'ARIA pressed state for toggle/segmented usage (rendered as aria-pressed).' },
-		{ name: 'ariaExpanded', type: 'boolean', dir: 'in', note: "ARIA expanded state for dropdown-trigger usage (rendered as aria-expanded)." },
+		{ name: 'ariaExpanded', type: 'boolean', dir: 'in', note: 'ARIA expanded state for dropdown-trigger usage (rendered as aria-expanded).' },
 		{ name: 'onClick', type: '() => void', dir: 'out', note: 'Click handler.' },
 	],
 };

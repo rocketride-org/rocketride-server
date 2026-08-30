@@ -31,9 +31,7 @@ import type { IGalleryDemoProps, IGalleryEntry } from '../galleryTypes';
 import { FrameSchematic } from './demos/FrameSchematic';
 
 /** Schematic demo: the sidebar's three vertical zones. */
-const SidebarFrameDemo: React.FC<IGalleryDemoProps> = () => (
-	<FrameSchematic highlight={['sidebarHeader', 'sidebarSlot', 'sidebarFooter']} />
-);
+const SidebarFrameDemo: React.FC<IGalleryDemoProps> = () => <FrameSchematic highlight={['sidebarHeader', 'sidebarSlot', 'sidebarFooter']} />;
 
 /** The Sidebar frame gallery entry. */
 export const sidebarFrameEntry: IGalleryEntry = {

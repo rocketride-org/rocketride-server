@@ -35,7 +35,7 @@ function docsEnv(options = {}) {
 		DOCS_VERSION: options.buildVersion || '',
 		DOCS_HASH: options.buildHash || '',
 		DOCS_STAMP: options.buildStamp || '',
-		DOCS_SAAS: options.saas ? '1' : ''
+		DOCS_SAAS: options.saas ? '1' : '',
 	};
 }
 
@@ -44,7 +44,7 @@ function makeGatherAction(mode = 'copy') {
 		run: async (ctx, task) => {
 			const { gather } = require('./lib/gather');
 			await gather({ projectRoot: PROJECT_ROOT, contentStaticDir: CONTENT_STATIC_DIR, contentDir: CONTENT_DIR, staticDir: STATIC_DIR, mode, task });
-		}
+		},
 	};
 }
 
@@ -53,7 +53,7 @@ function makeIndexAction() {
 		run: async (ctx, task) => {
 			const { buildIndex } = require('./lib/llms');
 			await buildIndex({ contentDir: CONTENT_DIR, staticDir: STATIC_DIR, task });
-		}
+		},
 	};
 }
 
@@ -63,7 +63,7 @@ function makeCompileAction(options = {}) {
 			await mkdir(SITE_OUT);
 			await execCommand('pnpm', ['exec', 'docusaurus', 'build', '--out-dir', SITE_OUT], { task, cwd: DOCS_DIR, env: docsEnv(options) });
 			task.output = `Built docs site at ${SITE_OUT}`;
-		}
+		},
 	};
 }
 
@@ -71,7 +71,7 @@ function makeDevStartAction(options = {}) {
 	return {
 		run: async (ctx, task) => {
 			await execCommand('pnpm', ['exec', 'docusaurus', 'start'], { task, cwd: DOCS_DIR, env: docsEnv(options), stdio: 'inherit' });
-		}
+		},
 	};
 }
 
@@ -92,7 +92,7 @@ function makeServeAction() {
 				throw new Error(`No built docs at ${SITE_OUT}. Run 'builder docs:build' first.`);
 			}
 			await execCommand('pnpm', ['exec', 'docusaurus', 'serve', '--dir', SITE_OUT, '--port', '3000'], { task, cwd: DOCS_DIR, stdio: 'inherit' });
-		}
+		},
 	};
 }
 
@@ -123,7 +123,7 @@ function makeTestAction() {
 				return;
 			}
 			await execCommand('node', ['--test', '--test-reporter=spec', ...testFiles], { task, cwd: DOCS_DIR });
-		}
+		},
 	};
 }
 
@@ -137,7 +137,7 @@ function makeCleanAction() {
 			await rm(path.join(DOCS_DIR, 'build'));
 			await setState(GATHER_HASH_KEY, null);
 			task.output = 'Cleaned docs';
-		}
+		},
 	};
 }
 
@@ -166,8 +166,8 @@ module.exports = {
 		{
 			name: 'docs:build',
 			action: () => ({
-				steps: [parallel(DOC_GENERATORS, 'Generate reference docs'), 'docs:gather', 'docs:index', 'docs:compile']
-			})
+				steps: [parallel(DOC_GENERATORS, 'Generate reference docs'), 'docs:gather', 'docs:index', 'docs:compile'],
+			}),
 		},
 
 		// Public actions (have descriptions)
@@ -175,20 +175,20 @@ module.exports = {
 			name: 'docs:dev',
 			action: () => ({
 				description: 'Start docs dev server',
-				steps: ['docs:gather-dev', 'docs:dev-start']
-			})
+				steps: ['docs:gather-dev', 'docs:dev-start'],
+			}),
 		},
 		{
 			name: 'docs:serve',
-			action: makeServeAction
+			action: makeServeAction,
 		},
 		{
 			name: 'docs:test',
-			action: makeTestAction
+			action: makeTestAction,
 		},
 		{
 			name: 'docs:clean',
-			action: makeCleanAction
-		}
-	]
+			action: makeCleanAction,
+		},
+	],
 };

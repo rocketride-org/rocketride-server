@@ -68,11 +68,7 @@ export interface IUsePollingOptions {
 	gate?: 'shell' | 'none';
 }
 
-export function usePolling(
-	fetcher: () => void | Promise<void>,
-	interval: number,
-	options?: IUsePollingOptions,
-): void {
+export function usePolling(fetcher: () => void | Promise<void>, interval: number, options?: IUsePollingOptions): void {
 	const { isConnected } = useShellConnection();
 	const fetcherRef = useRef(fetcher);
 	fetcherRef.current = fetcher;

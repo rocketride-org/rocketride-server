@@ -108,7 +108,9 @@ export class EngineService extends EngineBackend {
 		try {
 			const session = await vscode.authentication.getSession('github', [], { createIfNone: false });
 			githubToken = session?.accessToken;
-		} catch { /* proceed without token */ }
+		} catch {
+			/* proceed without token */
+		}
 
 		const executablePath = await this.installer.install(versionSpec, progress, token, githubToken);
 		const engineDir = this.installer.dir;
@@ -192,7 +194,9 @@ export class EngineService extends EngineBackend {
 		try {
 			const session = await vscode.authentication.getSession('github', [], { createIfNone: false });
 			githubToken = session?.accessToken;
-		} catch { /* proceed without token */ }
+		} catch {
+			/* proceed without token */
+		}
 
 		await this.installer.install(versionSpec, progress, token, githubToken);
 
@@ -221,20 +225,23 @@ export class EngineService extends EngineBackend {
 	/** Re-emits the current status (ready with URI, or idle). */
 	emitCurrentStatus(): void {
 		// Query actual OS service state
-		this.serviceManager.getStatus().then((status) => {
-			if (status.state === 'running') {
-				this.emitStatus({
-					phase: 'ready',
-					message: 'Service running',
-					uri: `http://localhost:${SERVICE_PORT}`,
-					version: this.installer.getInstalledVersion()?.tag,
-				});
-			} else {
-				this.emitStatus({ phase: 'idle', message: `Service ${status.state}` });
-			}
-		}).catch(() => {
-			this.emitStatus({ phase: 'idle', message: 'Service status unknown' });
-		});
+		this.serviceManager
+			.getStatus()
+			.then((status) => {
+				if (status.state === 'running') {
+					this.emitStatus({
+						phase: 'ready',
+						message: 'Service running',
+						uri: `http://localhost:${SERVICE_PORT}`,
+						version: this.installer.getInstalledVersion()?.tag,
+					});
+				} else {
+					this.emitStatus({ phase: 'idle', message: `Service ${status.state}` });
+				}
+			})
+			.catch(() => {
+				this.emitStatus({ phase: 'idle', message: 'Service status unknown' });
+			});
 	}
 
 	/** Nothing to dispose — service runs independently. */
@@ -252,7 +259,7 @@ export class EngineService extends EngineBackend {
 			const status = await this.serviceManager.getStatus();
 			if (status.state === 'running') return;
 			this.emitStatus({ phase: 'working', message: 'Waiting for service to become ready...' });
-			await new Promise(r => setTimeout(r, 500));
+			await new Promise((r) => setTimeout(r, 500));
 		}
 		throw new Error('Service did not become reachable within 30 seconds');
 	}
@@ -306,7 +313,11 @@ export class EngineService extends EngineBackend {
 		const installRoot = getSystemInstallDir();
 		const installer = new EngineInstaller(installRoot, 'version.service.json');
 		const progress = onProgress
-			? { report: (v: { message?: string }) => { if (v.message) onProgress(v.message); } }
+			? {
+					report: (v: { message?: string }) => {
+						if (v.message) onProgress(v.message);
+					},
+				}
 			: undefined;
 
 		try {

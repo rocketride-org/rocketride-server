@@ -4,8 +4,5 @@
 		"noUnusedLocals": false,
 		"noUnusedParameters": false
 	},
-	"include": [
-		"./src/client/**/*",
-		"./src/contract-check.generated.ts"
-	]
+	"include": ["./src/client/**/*", "./src/contract-check.generated.ts"]
 }

@@ -402,7 +402,9 @@ const PaymentForm: React.FC<PaymentFormProps> = ({ plan, subscriptionId, promo, 
 
 	return (
 		<>
-			<button style={S.backBtn} onClick={onBack}>&#8592; Change plan</button>
+			<button style={S.backBtn} onClick={onBack}>
+				&#8592; Change plan
+			</button>
 
 			{/* Plan recap bar (struck-through list price when discounted) */}
 			<div style={S.planRecap}>
@@ -414,7 +416,10 @@ const PaymentForm: React.FC<PaymentFormProps> = ({ plan, subscriptionId, promo, 
 					{discounted !== null ? (
 						<>
 							<span style={S.planRecapStrike}>{planAmount(plan)}</span>
-							<span style={S.planRecapNow}>{payLabel}{intervalSuffix(plan)}</span>
+							<span style={S.planRecapNow}>
+								{payLabel}
+								{intervalSuffix(plan)}
+							</span>
 						</>
 					) : (
 						planAmount(plan)
@@ -431,7 +436,10 @@ const PaymentForm: React.FC<PaymentFormProps> = ({ plan, subscriptionId, promo, 
 
 			{/* One-off discounts revert to the list price on renewal */}
 			{promo?.duration === 'once' && (
-				<p style={S.renewNote}>Renews at {planAmount(plan)}{intervalSuffix(plan)}.</p>
+				<p style={S.renewNote}>
+					Renews at {planAmount(plan)}
+					{intervalSuffix(plan)}.
+				</p>
 			)}
 		</>
 	);
@@ -446,21 +454,7 @@ const PaymentForm: React.FC<PaymentFormProps> = ({ plan, subscriptionId, promo, 
  *
  * All server communication is via callback props — no SDK imports.
  */
-export const CheckoutModal: React.FC<CheckoutModalProps> = ({
-	appName,
-	appDescription,
-	stripePublishableKey,
-	preselectedPlan,
-	preselectedPromo,
-	onFetchPlans,
-	onCreateCheckout,
-	onConfirmPending,
-	onValidatePromoCode,
-	onRedeemPromoCode,
-	onSuccess,
-	onClose,
-	onActionClick,
-}) => {
+export const CheckoutModal: React.FC<CheckoutModalProps> = ({ appName, appDescription, stripePublishableKey, preselectedPlan, preselectedPromo, onFetchPlans, onCreateCheckout, onConfirmPending, onValidatePromoCode, onRedeemPromoCode, onSuccess, onClose, onActionClick }) => {
 	// Initialise Stripe lazily
 	const [stripePromise] = useState(() => loadStripe(stripePublishableKey));
 
@@ -496,9 +490,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 			.then((fetched) => {
 				// Filter out top-up packs (handled by the TopUpModal) and hidden
 				// promo-base plans (only reachable via promo-code redemption)
-				const subscriptionPlans = fetched.filter(
-					(p) => p.metadata?.kind !== 'topup' && p.metadata?.kind !== 'promo_base' && p.isActive !== false,
-				);
+				const subscriptionPlans = fetched.filter((p) => p.metadata?.kind !== 'topup' && p.metadata?.kind !== 'promo_base' && p.isActive !== false);
 				setPlans(subscriptionPlans);
 				// Default selection (lowest-order billable plan at the visible
 				// interval -- i.e. Starter) is driven by PlanPicker via
@@ -597,13 +589,16 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 	 * previously selected plan's price, so switching plans clears it — the
 	 * user re-applies the code and gets amounts for the new plan.
 	 */
-	const handleSelectPlan = useCallback((plan: CheckoutPlan | null) => {
-		setSelectedPlan(plan);
-		if (appliedPromo) {
-			setAppliedPromo(null);
-			setPromoError(null);
-		}
-	}, [appliedPromo]);
+	const handleSelectPlan = useCallback(
+		(plan: CheckoutPlan | null) => {
+			setSelectedPlan(plan);
+			if (appliedPromo) {
+				setAppliedPromo(null);
+				setPromoError(null);
+			}
+		},
+		[appliedPromo]
+	);
 
 	// When a plan is preselected (web pricing page), skip the picker entirely:
 	// create the subscription immediately so the user lands on the payment step.
@@ -641,7 +636,9 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 		   2026-07-08 design decision — clicking outside must NOT close. */
 		<div style={{ ...commonStyles.modalOverlay, fontFamily: 'var(--rr-font-family)' }}>
 			<div style={S.modal}>
-				<button style={S.closeBtn} onClick={onClose} aria-label="Close">&times;</button>
+				<button style={S.closeBtn} onClick={onClose} aria-label="Close">
+					&times;
+				</button>
 
 				{/* Header banner */}
 				<div style={S.header}>
@@ -657,11 +654,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 						/* Grant/hackathon code redeemed — no plan, no payment */
 						<div style={S.successBlock}>
 							<div style={S.successMark}>{'✓'}</div>
-							<h3 style={S.successTitle}>
-								{grantResult.mode === 'subscribed'
-									? 'No payment required — your plan is active.'
-									: 'Code redeemed.'}
-							</h3>
+							<h3 style={S.successTitle}>{grantResult.mode === 'subscribed' ? 'No payment required — your plan is active.' : 'Code redeemed.'}</h3>
 							<p style={S.successText}>
 								{Object.keys(grantResult.credits).length > 0 && (
 									<>
@@ -671,26 +664,17 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 								)}
 								Code <b>{grantResult.code}</b>
 							</p>
-							<button style={S.submitBtn(false)} onClick={onSuccess}>Start building</button>
+							<button style={S.submitBtn(false)} onClick={onSuccess}>
+								Start building
+							</button>
 						</div>
-
 					) : clientSecret && selectedPlan ? (
 						/* Step 2: payment form */
 						<Elements stripe={stripePromise} options={{ clientSecret, appearance }}>
-							<PaymentForm
-								plan={selectedPlan}
-								subscriptionId={subscriptionId}
-								promo={appliedPromo}
-								onConfirmPending={onConfirmPending}
-								onSuccess={onSuccess}
-								onError={setError}
-								onBack={handleBack}
-							/>
+							<PaymentForm plan={selectedPlan} subscriptionId={subscriptionId} promo={appliedPromo} onConfirmPending={onConfirmPending} onSuccess={onSuccess} onError={setError} onBack={handleBack} />
 						</Elements>
-
 					) : loadingSecret ? (
 						<p style={S.status}>Preparing checkout&hellip;</p>
-
 					) : (
 						/* Step 1: plan picker (+ promo code box when the host wires it) */
 						<PlanPicker
@@ -702,52 +686,56 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 							autoSelectDefault
 							footer={
 								<>
-									{promoEnabled && (appliedPromo ? (
-										<div style={S.promoApplied}>
-											<span style={S.promoAppliedCode}>{appliedPromo.code}</span>
-											<span style={S.promoAppliedDesc}>
-												{appliedPromo.description}
-												{selectedPlan && (
-													<>
-														{' — '}
-														<b style={{ color: 'var(--rr-text-primary)' }}>
-															{formatCents(discountedCents(selectedPlan, appliedPromo), selectedPlan.currency)}{intervalSuffix(selectedPlan)}
-														</b>
-														{appliedPromo.duration !== 'forever' && `, then ${planAmount(selectedPlan)}${intervalSuffix(selectedPlan)}`}
-													</>
-												)}
-											</span>
-											<button style={S.promoRemoveBtn} onClick={handleRemovePromo}>Remove</button>
-										</div>
-									) : (
-										<>
-											<div style={S.promoRow}>
-												<span style={S.promoLabel}>Promo Code</span>
-												<input
-													style={S.promoInput}
-													value={promoInput}
-													placeholder="Enter code"
-													onChange={(e) => { setPromoInput(e.target.value); setPromoError(null); }}
-													onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); void handleApplyPromo(); } }}
-													disabled={promoBusy}
-													aria-label="Promo code"
-												/>
-												<button
-													style={S.promoApplyBtn(promoBusy || !promoInput.trim())}
-													disabled={promoBusy || !promoInput.trim()}
-													onClick={() => void handleApplyPromo()}
-												>
-													{promoBusy ? 'Applying…' : 'Apply'}
+									{promoEnabled &&
+										(appliedPromo ? (
+											<div style={S.promoApplied}>
+												<span style={S.promoAppliedCode}>{appliedPromo.code}</span>
+												<span style={S.promoAppliedDesc}>
+													{appliedPromo.description}
+													{selectedPlan && (
+														<>
+															{' — '}
+															<b style={{ color: 'var(--rr-text-primary)' }}>
+																{formatCents(discountedCents(selectedPlan, appliedPromo), selectedPlan.currency)}
+																{intervalSuffix(selectedPlan)}
+															</b>
+															{appliedPromo.duration !== 'forever' && `, then ${planAmount(selectedPlan)}${intervalSuffix(selectedPlan)}`}
+														</>
+													)}
+												</span>
+												<button style={S.promoRemoveBtn} onClick={handleRemovePromo}>
+													Remove
 												</button>
 											</div>
-											{promoError && <p style={S.promoError}>{promoError}</p>}
-										</>
-									))}
-									<button
-										style={S.continueBtn(!selectedPlan || !!selectedPlan.metadata?.action || promoBusy)}
-										disabled={!selectedPlan || !!selectedPlan.metadata?.action || promoBusy}
-										onClick={handleContinue}
-									>
+										) : (
+											<>
+												<div style={S.promoRow}>
+													<span style={S.promoLabel}>Promo Code</span>
+													<input
+														style={S.promoInput}
+														value={promoInput}
+														placeholder="Enter code"
+														onChange={(e) => {
+															setPromoInput(e.target.value);
+															setPromoError(null);
+														}}
+														onKeyDown={(e) => {
+															if (e.key === 'Enter') {
+																e.preventDefault();
+																void handleApplyPromo();
+															}
+														}}
+														disabled={promoBusy}
+														aria-label="Promo code"
+													/>
+													<button style={S.promoApplyBtn(promoBusy || !promoInput.trim())} disabled={promoBusy || !promoInput.trim()} onClick={() => void handleApplyPromo()}>
+														{promoBusy ? 'Applying…' : 'Apply'}
+													</button>
+												</div>
+												{promoError && <p style={S.promoError}>{promoError}</p>}
+											</>
+										))}
+									<button style={S.continueBtn(!selectedPlan || !!selectedPlan.metadata?.action || promoBusy)} disabled={!selectedPlan || !!selectedPlan.metadata?.action || promoBusy} onClick={handleContinue}>
 										Continue
 									</button>
 								</>

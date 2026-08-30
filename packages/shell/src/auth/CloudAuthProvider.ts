@@ -115,7 +115,9 @@ export class CloudAuthProvider implements IAuthProvider {
 
 		// Store the target app ID so we can restore it after the redirect
 		if (appId) {
-			try { sessionStorage.setItem(SS_PENDING_APP_ID, appId); } catch (e) {
+			try {
+				sessionStorage.setItem(SS_PENDING_APP_ID, appId);
+			} catch (e) {
 				console.error('[CloudAuthProvider] Failed to store pending app ID:', e);
 			}
 		}
@@ -124,13 +126,7 @@ export class CloudAuthProvider implements IAuthProvider {
 		const { challenge } = await generatePkce();
 
 		// Build the authorization URL
-		const url = buildAuthUrl(
-			this.zitadelUrl,
-			this.clientId,
-			window.location.origin,
-			challenge,
-			register,
-		);
+		const url = buildAuthUrl(this.zitadelUrl, this.clientId, window.location.origin, challenge, register);
 
 		// assign() (not replace()) so the landing page stays in history — the
 		// browser back button from Zitadel returns the user to where they came

@@ -65,20 +65,29 @@ export async function publishApp(appId: string, message: string): Promise<Record
 			env: { ...process.env, NO_COLOR: '1' },
 		});
 		let tail = '';
-		proc.stdout?.on('data', (c: Buffer) => { tail = (tail + c.toString('utf8')).slice(-2000); });
-		proc.stderr?.on('data', (c: Buffer) => { tail = (tail + c.toString('utf8')).slice(-2000); });
+		proc.stdout?.on('data', (c: Buffer) => {
+			tail = (tail + c.toString('utf8')).slice(-2000);
+		});
+		proc.stderr?.on('data', (c: Buffer) => {
+			tail = (tail + c.toString('utf8')).slice(-2000);
+		});
 		// Settle exactly once — close, spawn-error, and the timeout race here.
 		let settled = false;
 		const finish = (err?: Error): void => {
 			if (settled) return;
 			settled = true;
 			clearTimeout(timer);
-			if (err) reject(err); else resolve();
+			if (err) reject(err);
+			else resolve();
 		};
 		// A hung build would otherwise leave the panel's publish RPC pending
 		// forever.
 		const timer = setTimeout(() => {
-			try { proc.kill('SIGKILL'); } catch { /* already gone */ }
+			try {
+				proc.kill('SIGKILL');
+			} catch {
+				/* already gone */
+			}
 			finish(new Error(`rsbuild build timed out after ${BUILD_TIMEOUT_MS / 60000} minutes: ${tail.slice(-400)}`));
 		}, BUILD_TIMEOUT_MS);
 		// 'close' (not 'exit') so the stdio tail is complete when a failure

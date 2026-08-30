@@ -111,38 +111,44 @@ export const ConnectionErrorBanner: React.FC<ConnectionErrorBannerProps> = ({ me
 	// Phrase message + action from the failure classification.
 	const isNetworkFailure = failure.kind === 'network';
 	const isOAuthCallbackFailure = !isNetworkFailure && failure.errorKind === 'oauth-callback';
-	const defaultMessage = isNetworkFailure
-		? 'Can\'t reach the server — check your connection and retry.'
-		: isOAuthCallbackFailure
-			? `Sign-in didn't complete: ${failure.lastError}`
-			: 'Your session has expired — please sign in again.';
+	const defaultMessage = isNetworkFailure ? "Can't reach the server — check your connection and retry." : isOAuthCallbackFailure ? `Sign-in didn't complete: ${failure.lastError}` : 'Your session has expired — please sign in again.';
 	const action = isNetworkFailure ? 'Retry' : isOAuthCallbackFailure ? 'Try again' : 'Sign in';
 	const onAction = isNetworkFailure
-		? onRetry ?? (() => {
-			// A reload re-runs bootstrap, which recovers every shape: a stored
-			// token logs back in, tokenless renders the landing, and a still-
-			// unreachable server re-latches this banner. In-place recovery via
-			// ConnectionManager.reconnect() stalls in CONNECTING even against a
-			// healthy server (pre-existing; tracked separately) — don't use it
-			// as the default action.
-			window.location.reload();
-		})
-		: onSignIn ?? (() => {
-			// Route through the shell's edition-aware login dispatcher: SaaS
-			// starts OAuth, OSS opens the API-key form. Calling startOAuth()
-			// directly here would throw "CloudAuthProvider not initialized" on
-			// OSS deployments and turn this button into a silent no-op.
-			ConnectionManager.getInstance().emit('shell:loginRequest', {});
-		});
+		? (onRetry ??
+			(() => {
+				// A reload re-runs bootstrap, which recovers every shape: a stored
+				// token logs back in, tokenless renders the landing, and a still-
+				// unreachable server re-latches this banner. In-place recovery via
+				// ConnectionManager.reconnect() stalls in CONNECTING even against a
+				// healthy server (pre-existing; tracked separately) — don't use it
+				// as the default action.
+				window.location.reload();
+			}))
+		: (onSignIn ??
+			(() => {
+				// Route through the shell's edition-aware login dispatcher: SaaS
+				// starts OAuth, OSS opens the API-key form. Calling startOAuth()
+				// directly here would throw "CloudAuthProvider not initialized" on
+				// OSS deployments and turn this button into a silent no-op.
+				ConnectionManager.getInstance().emit('shell:loginRequest', {});
+			}));
 
 	return (
 		<div style={styles.banner} role="alert">
-			<span style={styles.message} title={failure.lastError}>{message ?? defaultMessage}</span>
-			<button type="button" style={styles.action} onClick={() => {
-				void Promise.resolve().then(onAction).catch((error) => {
-					console.error('[ConnectionErrorBanner] Recovery action failed:', error);
-				});
-			}}>
+			<span style={styles.message} title={failure.lastError}>
+				{message ?? defaultMessage}
+			</span>
+			<button
+				type="button"
+				style={styles.action}
+				onClick={() => {
+					void Promise.resolve()
+						.then(onAction)
+						.catch((error) => {
+							console.error('[ConnectionErrorBanner] Recovery action failed:', error);
+						});
+				}}
+			>
 				{action}
 			</button>
 			<button type="button" style={styles.dismiss} aria-label="Dismiss connection error" onClick={() => setDismissed(true)}>

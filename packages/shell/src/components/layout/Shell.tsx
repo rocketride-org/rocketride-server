@@ -308,7 +308,9 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 					try {
 						const token = cm.loadToken();
 						if (token) new BroadcastChannel('rr:auth').postMessage({ type: 'login', token });
-					} catch { /* channel unavailable — the user closes the popup */ }
+					} catch {
+						/* channel unavailable — the user closes the popup */
+					}
 					window.close();
 					return;
 				}
@@ -328,7 +330,9 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 			}
 		})();
 
-		return () => { mountedRef.current = false; };
+		return () => {
+			mountedRef.current = false;
+		};
 	}, []); // eslint-disable-line react-hooks/exhaustive-deps
 
 	// =====================================================================
@@ -432,7 +436,11 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 		setIdentity(null);
 		// Clear the pending-sign-in flag so HomeApp doesn't get stuck on
 		// the auth transition screen when it mounts after logout.
-		try { sessionStorage.removeItem('rr:auth:pending'); } catch { /* noop */ }
+		try {
+			sessionStorage.removeItem('rr:auth:pending');
+		} catch {
+			/* noop */
+		}
 		if (sessionAppId) {
 			cm.logout().finally(() => {
 				if (mountedRef.current) setRenderPhase('goodbye');
@@ -468,7 +476,11 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 	// the token + session app ids synchronously before its async disconnect, so
 	// those are wiped before the navigation unloads the page.
 	const handleBackToHome = useCallback(() => {
-		try { sessionStorage.removeItem('rr:auth:pending'); } catch { /* noop */ }
+		try {
+			sessionStorage.removeItem('rr:auth:pending');
+		} catch {
+			/* noop */
+		}
 		cm.logout();
 		window.location.href = window.location.origin + window.location.pathname;
 	}, [cm]);
@@ -485,21 +497,24 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 		}
 	}, [cm, isSaas]);
 
-	const handleApiKeySubmit = useCallback(async (apiKey: string) => {
-		const result = await cm.connect(apiKey);
-		if (!result) return;
-		if (mountedRef.current) {
-			const target = loginTargetRef.current;
-			loginTargetRef.current = null;
-			setIdentity(result);
-			setShowApiKeyLogin(false);
-			// Set activeAppId so WorkspaceProvider mounts with the correct
-			// startupAppId — emitting shell:switchApp here would be lost
-			// because WorkspaceContext hasn't mounted its listener yet.
-			if (target) setActiveAppId(target);
-			setRenderPhase('shell');
-		}
-	}, [cm]);
+	const handleApiKeySubmit = useCallback(
+		async (apiKey: string) => {
+			const result = await cm.connect(apiKey);
+			if (!result) return;
+			if (mountedRef.current) {
+				const target = loginTargetRef.current;
+				loginTargetRef.current = null;
+				setIdentity(result);
+				setShowApiKeyLogin(false);
+				// Set activeAppId so WorkspaceProvider mounts with the correct
+				// startupAppId — emitting shell:switchApp here would be lost
+				// because WorkspaceContext hasn't mounted its listener yet.
+				if (target) setActiveAppId(target);
+				setRenderPhase('shell');
+			}
+		},
+		[cm]
+	);
 
 	// =====================================================================
 	// RENDER — AUTH PHASES
@@ -514,9 +529,7 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 			<div style={styles.statusScreen}>
 				<div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 14, textAlign: 'center', maxWidth: 380, padding: '0 24px' }}>
 					<div style={{ fontSize: 15, fontWeight: 600, color: 'var(--rr-text-primary)' }}>Sign in required</div>
-					<div style={{ fontSize: 12.5 }}>
-						This app requires authentication. Sign in opens in a separate window; this preview continues automatically afterwards.
-					</div>
+					<div style={{ fontSize: 12.5 }}>This app requires authentication. Sign in opens in a separate window; this preview continues automatically afterwards.</div>
 					<button
 						style={styles.signInButton}
 						onClick={() => {
@@ -527,13 +540,19 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 							// without an auth flow of their own — if no session
 							// arrived after a grace period, this page is still
 							// here and opens it.
-							try { window.parent.postMessage({ type: 'rrdev:loginRequest' }, '*'); } catch { /* parentless */ }
+							try {
+								window.parent.postMessage({ type: 'rrdev:loginRequest' }, '*');
+							} catch {
+								/* parentless */
+							}
 							loginPopupTimerRef.current = window.setTimeout(() => {
 								loginPopupTimerRef.current = null;
 								window.open(`${window.location.origin}/?rrauth=1`, 'rrauth', 'popup=yes,width=520,height=780');
 							}, 1500);
 						}}
-					>Sign In</button>
+					>
+						Sign In
+					</button>
 				</div>
 			</div>
 		);
@@ -544,7 +563,10 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 		return (
 			<ApiKeyLogin
 				onSubmit={handleApiKeySubmit}
-				onCancel={() => { setShowApiKeyLogin(false); loginTargetRef.current = null; }}
+				onCancel={() => {
+					setShowApiKeyLogin(false);
+					loginTargetRef.current = null;
+				}}
 				appName={config.loginBranding?.appName ?? 'RocketRide'}
 				initialError={apiKeyError}
 			/>
@@ -554,23 +576,24 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 	// Error
 	if (renderPhase === 'error') {
 		if (!isSaas) {
-			return (
-				<ApiKeyLogin
-					onSubmit={handleApiKeySubmit}
-					onCancel={() => setRenderPhase('shell')}
-					appName={config.loginBranding?.appName ?? 'RocketRide'}
-					initialError="Sign in failed. Please try again."
-				/>
-			);
+			return <ApiKeyLogin onSubmit={handleApiKeySubmit} onCancel={() => setRenderPhase('shell')} appName={config.loginBranding?.appName ?? 'RocketRide'} initialError="Sign in failed. Please try again." />;
 		}
 		return (
-			<div style={{
-				display: 'flex', height: '100vh', flexDirection: 'column',
-				alignItems: 'center', justifyContent: 'center', gap: 16,
-				fontFamily: 'var(--rr-font-family)',
-			}}>
+			<div
+				style={{
+					display: 'flex',
+					height: '100vh',
+					flexDirection: 'column',
+					alignItems: 'center',
+					justifyContent: 'center',
+					gap: 16,
+					fontFamily: 'var(--rr-font-family)',
+				}}
+			>
 				<div style={{ color: 'var(--rr-color-error)', fontSize: 15 }}>Sign in failed. Please try again.</div>
-				<button onClick={startSignIn} style={styles.signInButton}>Sign In</button>
+				<button onClick={startSignIn} style={styles.signInButton}>
+					Sign In
+				</button>
 			</div>
 		);
 	}
@@ -580,13 +603,13 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 		return (
 			<div style={styles.goodbyeContainer}>
 				<div style={styles.goodbyeHeader}>
-					<button onClick={startSignIn} style={styles.signInButton}>Sign In</button>
+					<button onClick={startSignIn} style={styles.signInButton}>
+						Sign In
+					</button>
 				</div>
 				<div style={styles.goodbyeBody as CSSProperties}>
 					<div style={{ fontSize: 16, fontWeight: 600 }}>You have been signed out</div>
-					<div style={{ fontSize: 13, color: 'var(--rr-text-secondary)' }}>
-						Close this tab or sign in again to continue.
-					</div>
+					<div style={{ fontSize: 13, color: 'var(--rr-text-secondary)' }}>Close this tab or sign in again to continue.</div>
 				</div>
 			</div>
 		);
@@ -597,33 +620,32 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 		const displayName = identity?.displayName || identity?.email || '';
 		return (
 			<div style={styles.statusScreen}>
-				<div style={{
-					display: 'flex', flexDirection: 'column', alignItems: 'center',
-					gap: 20, textAlign: 'center', maxWidth: 440, padding: '0 24px',
-				}}>
-					<div style={{ fontSize: 28, lineHeight: 1.2 }}>
-						&#x1F389;
-					</div>
-					<div style={{ fontSize: 20, fontWeight: 600, color: 'var(--rr-text-primary)' }}>
-						Thanks for signing up{displayName ? `, ${displayName}` : ''}!
-					</div>
-					<div style={{ fontSize: 14, lineHeight: 1.6, color: 'var(--rr-text-secondary)' }}>
-						Your account is all set. We&apos;re rolling out access in waves and
-						you&apos;re in the queue. We&apos;ll send you an email as soon as
-						your account is activated &mdash; it shouldn&apos;t be long!
-					</div>
+				<div
+					style={{
+						display: 'flex',
+						flexDirection: 'column',
+						alignItems: 'center',
+						gap: 20,
+						textAlign: 'center',
+						maxWidth: 440,
+						padding: '0 24px',
+					}}
+				>
+					<div style={{ fontSize: 28, lineHeight: 1.2 }}>&#x1F389;</div>
+					<div style={{ fontSize: 20, fontWeight: 600, color: 'var(--rr-text-primary)' }}>Thanks for signing up{displayName ? `, ${displayName}` : ''}!</div>
+					<div style={{ fontSize: 14, lineHeight: 1.6, color: 'var(--rr-text-secondary)' }}>Your account is all set. We&apos;re rolling out access in waves and you&apos;re in the queue. We&apos;ll send you an email as soon as your account is activated &mdash; it shouldn&apos;t be long!</div>
 					<button
 						onClick={handleBackToHome}
 						style={styles.elevatedButton}
 						onMouseEnter={(e) => {
 							e.currentTarget.style.backgroundColor = '#0099cc';
-							e.currentTarget.style.transform       = 'translateY(3px)';
-							e.currentTarget.style.boxShadow        = '0 1px 0 0 #00708f';
+							e.currentTarget.style.transform = 'translateY(3px)';
+							e.currentTarget.style.boxShadow = '0 1px 0 0 #00708f';
 						}}
 						onMouseLeave={(e) => {
 							e.currentTarget.style.backgroundColor = '#00b9ec';
-							e.currentTarget.style.transform       = 'translateY(0)';
-							e.currentTarget.style.boxShadow        = '0 3px 0 0 #00708f';
+							e.currentTarget.style.transform = 'translateY(0)';
+							e.currentTarget.style.boxShadow = '0 3px 0 0 #00708f';
 						}}
 					>
 						Back to Home
@@ -642,15 +664,17 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 	// RENDER — SHELL (providers + layout + checkout)
 	// =====================================================================
 
-	const resolvedConfig = identity ? {
-		...config,
-		account: {
-			...config.account,
-			userName: identity.displayName ?? config.account?.userName,
-			userEmail: identity.email ?? config.account?.userEmail,
-			onLogout: handleLogout,
-		},
-	} : config;
+	const resolvedConfig = identity
+		? {
+				...config,
+				account: {
+					...config.account,
+					userName: identity.displayName ?? config.account?.userName,
+					userEmail: identity.email ?? config.account?.userEmail,
+					onLogout: handleLogout,
+				},
+			}
+		: config;
 
 	const stripeKey = config.apiConfig.RR_STRIPE_PUBLISHABLE_KEY ?? '';
 	const orgId = identity?.organization?.id ?? '';
@@ -661,18 +685,23 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 				<WorkspaceProvider
 					apps={apps}
 					workspaceDir={config.workspaceDir}
-					startupAppId={activeAppId || sessionAppId || (() => { try { return sessionStorage.getItem(SS_PENDING_APP_ID); } catch { return null; } })() || defaultAppId}
+					startupAppId={
+						activeAppId ||
+						sessionAppId ||
+						(() => {
+							try {
+								return sessionStorage.getItem(SS_PENDING_APP_ID);
+							} catch {
+								return null;
+							}
+						})() ||
+						defaultAppId
+					}
 					defaultAppId={defaultAppId}
 					themeOptions={config.themeConfig.options}
 					onThemeChange={config.themeConfig.onThemeChange}
 				>
-					<ShellLayout
-						config={resolvedConfig}
-						isConnected={isConnected}
-						statusMessage={statusMessage}
-						hideAppSwitcher={!!sessionAppId}
-						defaultAppId={defaultAppId}
-					/>
+					<ShellLayout config={resolvedConfig} isConnected={isConnected} statusMessage={statusMessage} hideAppSwitcher={!!sessionAppId} defaultAppId={defaultAppId} />
 				</WorkspaceProvider>
 			</ShellApiConfigProvider>
 

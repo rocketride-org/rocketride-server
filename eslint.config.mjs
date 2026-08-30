@@ -123,18 +123,21 @@ export default tseslint.config(
 	{
 		files: ['**/*.{ts,tsx,mts}'],
 		rules: {
-			'no-restricted-imports': ['error', {
-				paths: [
-					{ name: 'shared', message: "The shared root barrel is retired. Surface symbols come from 'shell'; library components use deep 'shared/<group>' specs." },
-					{ name: 'shell-ui', message: "Renamed: import from 'shell'." },
-				],
-				patterns: [
-					// The SDK surface lives in the 'rocketride' package now; the
-					// shell exposes no subpaths besides the theme stylesheet.
-					{ group: ['shell/*'], message: "The shell surface is barrel-only: import the name from 'shell' (SDK values/types come from 'rocketride')." },
-					{ group: ['shell-ui/*'], message: "Renamed: import from 'shell'." },
-				],
-			}],
+			'no-restricted-imports': [
+				'error',
+				{
+					paths: [
+						{ name: 'shared', message: "The shared root barrel is retired. Surface symbols come from 'shell'; library components use deep 'shared/<group>' specs." },
+						{ name: 'shell-ui', message: "Renamed: import from 'shell'." },
+					],
+					patterns: [
+						// The SDK surface lives in the 'rocketride' package now; the
+						// shell exposes no subpaths besides the theme stylesheet.
+						{ group: ['shell/*'], message: "The shell surface is barrel-only: import the name from 'shell' (SDK values/types come from 'rocketride')." },
+						{ group: ['shell-ui/*'], message: "Renamed: import from 'shell'." },
+					],
+				},
+			],
 		},
 	},
 	// The shell package itself: NO 'shell' barrel. Inside the shell it is a
@@ -143,18 +146,21 @@ export default tseslint.config(
 	{
 		files: ['packages/shell/**/*.{ts,tsx,mts}'],
 		rules: {
-			'no-restricted-imports': ['error', {
-				paths: [
-					{ name: 'shell', message: "No 'shell' barrel here: use relative imports (shell package)." },
-					{ name: 'shared', message: "The shared root barrel is retired: use deep 'shared/<group>' specs." },
-					{ name: 'shell-ui', message: "Renamed package: use relative imports." },
-				],
-				patterns: [
-					// The in-tree STATIC path form is legal here: bundled component copies are
-					// bundled copies (no self-barrel in shell).
-					{ group: ['shell/*', '!shell/src/*'], message: "Only shell package sources are deep-importable in-tree (shell/src/<group>); everything else is relative (in-package) or the barrel (elsewhere)." },
-				],
-			}],
+			'no-restricted-imports': [
+				'error',
+				{
+					paths: [
+						{ name: 'shell', message: "No 'shell' barrel here: use relative imports (shell package)." },
+						{ name: 'shared', message: "The shared root barrel is retired: use deep 'shared/<group>' specs." },
+						{ name: 'shell-ui', message: 'Renamed package: use relative imports.' },
+					],
+					patterns: [
+						// The in-tree STATIC path form is legal here: bundled component copies are
+						// bundled copies (no self-barrel in shell).
+						{ group: ['shell/*', '!shell/src/*'], message: 'Only shell package sources are deep-importable in-tree (shell/src/<group>); everything else is relative (in-package) or the barrel (elsewhere).' },
+					],
+				},
+			],
 		},
 	},
 
@@ -164,18 +170,21 @@ export default tseslint.config(
 	{
 		files: ['apps/vscode/**/*.{ts,tsx,mts}'],
 		rules: {
-			'no-restricted-imports': ['error', {
-				paths: [
-					{ name: 'shared', message: "The shared root barrel is retired: use deep 'shared/<group>' specs." },
-					{ name: 'shell-ui', message: "Renamed: import from 'shell'." },
-				],
-				patterns: [
-					// gitignore semantics: a file under an excluded dir cannot be
-					// re-included, so un-ignore shell/themes first, then re-ban its
-					// contents except the one exported stylesheet.
-					{ group: ['shell/*', '!shell/themes', 'shell/themes/*', '!shell/themes/rocketride-default.css'], message: "The shell surface is barrel-only: import the name from 'shell' (the theme stylesheet is the one exported subpath; SDK values/types come from 'rocketride')." },
-				],
-			}],
+			'no-restricted-imports': [
+				'error',
+				{
+					paths: [
+						{ name: 'shared', message: "The shared root barrel is retired: use deep 'shared/<group>' specs." },
+						{ name: 'shell-ui', message: "Renamed: import from 'shell'." },
+					],
+					patterns: [
+						// gitignore semantics: a file under an excluded dir cannot be
+						// re-included, so un-ignore shell/themes first, then re-ban its
+						// contents except the one exported stylesheet.
+						{ group: ['shell/*', '!shell/themes', 'shell/themes/*', '!shell/themes/rocketride-default.css'], message: "The shell surface is barrel-only: import the name from 'shell' (the theme stylesheet is the one exported subpath; SDK values/types come from 'rocketride')." },
+					],
+				},
+			],
 		},
 	},
 
@@ -184,15 +193,16 @@ export default tseslint.config(
 	{
 		files: ['apps/shared/**/*.{ts,tsx,mts}'],
 		rules: {
-			'no-restricted-imports': ['error', {
-				paths: [
-					{ name: 'shared', message: "The shared root barrel is retired: use relative imports inside the library." },
-					{ name: 'shell-ui', message: "Renamed: import from 'shell'." },
-				],
-				patterns: [
-					{ group: ['shell/*', '!shell/src/*'], message: "Only shell package sources are deep-importable in-tree (shell/src/<group>)." },
-				],
-			}],
+			'no-restricted-imports': [
+				'error',
+				{
+					paths: [
+						{ name: 'shared', message: 'The shared root barrel is retired: use relative imports inside the library.' },
+						{ name: 'shell-ui', message: "Renamed: import from 'shell'." },
+					],
+					patterns: [{ group: ['shell/*', '!shell/src/*'], message: 'Only shell package sources are deep-importable in-tree (shell/src/<group>).' }],
+				},
+			],
 		},
 	},
 

@@ -67,9 +67,7 @@ function AccountCard() {
 		},
 		{
 			label: 'Types',
-			rows: [
-				{ name: 'AuthUser', type: 'ConnectResult', dir: 'in', note: 'The full connect payload: identity, subscription, apps, credits.' },
-			],
+			rows: [{ name: 'AuthUser', type: 'ConnectResult', dir: 'in', note: 'The full connect payload: identity, subscription, apps, credits.' }],
 		},
 	],
 };

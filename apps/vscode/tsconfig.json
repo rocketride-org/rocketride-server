@@ -3,9 +3,7 @@
 		"module": "Node16",
 		"target": "ES2022",
 		"outDir": "../../build/vscode/out",
-		"lib": [
-			"ES2022"
-		],
+		"lib": ["ES2022"],
 		"sourceMap": true,
 		"rootDir": "../..",
 		"strict": true,
@@ -15,19 +13,9 @@
 		"moduleResolution": "Node16",
 		"allowSyntheticDefaultImports": true,
 		"paths": {
-			"shared/*": [
-				"../shared/src/*"
-			]
+			"shared/*": ["../shared/src/*"]
 		}
 	},
-	"include": [
-		"src/**/*.ts"
-	],
-	"exclude": [
-		"src/**/*.tsx",
-		"src/providers/views/**",
-		"src/providers/components/**",
-		"src/shared/util/mount.ts",
-		"src/shared/util/useMessaging.ts"
-	]
+	"include": ["src/**/*.ts"],
+	"exclude": ["src/**/*.tsx", "src/providers/views/**", "src/providers/components/**", "src/shared/util/mount.ts", "src/shared/util/useMessaging.ts"]
 }

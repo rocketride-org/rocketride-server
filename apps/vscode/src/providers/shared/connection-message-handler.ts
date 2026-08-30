@@ -92,8 +92,7 @@ export class ConnectionMessageHandler {
 
 		// Hydrate version cache from persistent storage so the first fetch after
 		// a restart can send the saved ETag and get a free 304 (no rate limit hit).
-		const persisted = getExtensionContext().globalState
-			.get<{ etag: string; versions: Array<{ tag_name: string; prerelease: boolean }> }>('versionCache');
+		const persisted = getExtensionContext().globalState.get<{ etag: string; versions: Array<{ tag_name: string; prerelease: boolean }> }>('versionCache');
 		if (persisted) {
 			this.versionCache.etag = persisted.etag;
 			this.versionCache.versions = persisted.versions;
@@ -101,7 +100,6 @@ export class ConnectionMessageHandler {
 			// saved ETag the response is a free 304 when releases haven't changed.
 		}
 	}
-
 
 	/**
 	 * Routes a webview message to the appropriate handler.
@@ -132,10 +130,7 @@ export class ConnectionMessageHandler {
 			case 'fetchVersions':
 				// Fetch GitHub releases + Docker GHCR tags in parallel.
 				// Both are cached, max 2 retries, broadcast to all active webviews.
-				await Promise.all([
-					this.fetchAndBroadcastVersions(),
-					this.fetchAndBroadcastDockerTags(),
-				]);
+				await Promise.all([this.fetchAndBroadcastVersions(), this.fetchAndBroadcastDockerTags()]);
 				return true;
 
 			case 'probeServerInfo':
@@ -227,10 +222,7 @@ export class ConnectionMessageHandler {
 	 */
 	private async pollAndBroadcastStatus(): Promise<void> {
 		try {
-			const [serviceStatus, dockerStatus] = await Promise.all([
-				ConnectionManager.getEngineStatus('service'),
-				ConnectionManager.getEngineStatus('docker'),
-			]);
+			const [serviceStatus, dockerStatus] = await Promise.all([ConnectionManager.getEngineStatus('service'), ConnectionManager.getEngineStatus('docker')]);
 
 			for (const w of this.opts.getActiveWebviews()) {
 				w.postMessage({ type: 'serviceStatus', status: serviceStatus });
@@ -319,7 +311,7 @@ export class ConnectionMessageHandler {
 	private async fetchAndBroadcastVersions(): Promise<void> {
 		// Serve from cache if still fresh
 		const now = Date.now();
-		if (this.versionCache.fetchedAt > 0 && (now - this.versionCache.fetchedAt) < VERSION_CACHE_TTL_MS) {
+		if (this.versionCache.fetchedAt > 0 && now - this.versionCache.fetchedAt < VERSION_CACHE_TTL_MS) {
 			this.broadcastVersions(this.versionCache.versions);
 			return;
 		}
@@ -367,11 +359,7 @@ export class ConnectionMessageHandler {
 
 		for (let attempt = 1; attempt <= MAX_FETCH_ATTEMPTS; attempt++) {
 			try {
-				const result = await this.engineInstaller.getReleases(
-					undefined,
-					githubToken,
-					this.versionCache.etag
-				);
+				const result = await this.engineInstaller.getReleases(undefined, githubToken, this.versionCache.etag);
 
 				if (result.status === 'notModified') {
 					// Data hasn't changed — just refresh the TTL timestamp.
@@ -389,15 +377,14 @@ export class ConnectionMessageHandler {
 				setCachedEngineVersions(result.data);
 				getExtensionContext().globalState.update('versionCache', {
 					etag: result.etag,
-					versions: result.data
+					versions: result.data,
 				});
 				return;
 			} catch (error) {
 				logger.output(`${icons.warning} Version fetch attempt ${attempt}/${MAX_FETCH_ATTEMPTS} failed: ${error}`);
 
 				// If rate-limited, extract reset time from GitHub response headers
-				const rateLimitReset = (error as { response?: { headers?: Record<string, string> } })
-					?.response?.headers?.['x-ratelimit-reset'];
+				const rateLimitReset = (error as { response?: { headers?: Record<string, string> } })?.response?.headers?.['x-ratelimit-reset'];
 				if (rateLimitReset) {
 					const resetDate = new Date(Number(rateLimitReset) * 1000);
 					const minutesLeft = Math.max(1, Math.ceil((resetDate.getTime() - Date.now()) / 60000));
@@ -440,7 +427,7 @@ export class ConnectionMessageHandler {
 	 */
 	private async fetchAndBroadcastDockerTags(): Promise<void> {
 		const now = Date.now();
-		if (this.dockerTagCache.fetchedAt > 0 && (now - this.dockerTagCache.fetchedAt) < VERSION_CACHE_TTL_MS) {
+		if (this.dockerTagCache.fetchedAt > 0 && now - this.dockerTagCache.fetchedAt < VERSION_CACHE_TTL_MS) {
 			this.broadcastDockerTags(this.dockerTagCache.tags);
 			return;
 		}
@@ -490,9 +477,7 @@ export class ConnectionMessageHandler {
 
 				// Filter out CI artifacts (sha-xxxx, branch names) — only keep
 				// user-facing version tags that the Docker dropdown should display
-				const tags = (tagsData.tags || [])
-					.filter((t: string) => /^\d+\.\d+/.test(t) || t === 'latest' || t === 'prerelease')
-					.sort((a: string, b: string) => b.localeCompare(a, undefined, { numeric: true }));
+				const tags = (tagsData.tags || []).filter((t: string) => /^\d+\.\d+/.test(t) || t === 'latest' || t === 'prerelease').sort((a: string, b: string) => b.localeCompare(a, undefined, { numeric: true }));
 
 				this.dockerTagCache.tags = tags;
 				this.dockerTagCache.fetchedAt = Date.now();
@@ -532,14 +517,21 @@ export class ConnectionMessageHandler {
 					return;
 				}
 				let body = '';
-				res.on('data', (chunk) => { body += chunk; });
+				res.on('data', (chunk) => {
+					body += chunk;
+				});
 				res.on('end', () => {
-					try { resolve(JSON.parse(body)); }
-					catch (e) { reject(e); }
+					try {
+						resolve(JSON.parse(body));
+					} catch (e) {
+						reject(e);
+					}
 				});
 			});
 			req.on('error', reject);
-			req.on('timeout', () => { req.destroy(new Error(`Request to ${url} timed out`)); });
+			req.on('timeout', () => {
+				req.destroy(new Error(`Request to ${url} timed out`));
+			});
 		});
 	}
 

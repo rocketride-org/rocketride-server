@@ -34,7 +34,7 @@ interface ChatHeaderProps {
 
 /**
  * Chat header with connection status and action buttons
- * 
+ *
  * Displays:
  * - Bot avatar and title
  * - Connection status (connected/connecting)
@@ -56,9 +56,7 @@ export const ChatHeader: React.FC<ChatHeaderProps> = ({ isConnected, onClearChat
 					</div>
 					<div className="header-text">
 						<h1>RocketRide Chat</h1>
-						<p>
-							{isConnected ? 'Connected' : 'Connecting...'}
-						</p>
+						<p>{isConnected ? 'Connected' : 'Connecting...'}</p>
 					</div>
 				</div>
 				<div className="header-actions">
@@ -66,14 +64,8 @@ export const ChatHeader: React.FC<ChatHeaderProps> = ({ isConnected, onClearChat
 					{mode === 'standalone' && (
 						<div className="theme-selector">
 							<Palette className="w-4 h-4 theme-selector-icon" />
-							<select
-								value={currentTheme}
-								onChange={(e) => setTheme(e.target.value as ThemeName)}
-								className="theme-select"
-								title="Select theme"
-								aria-label="Select application theme"
-							>
-								{availableThemes.map(theme => (
+							<select value={currentTheme} onChange={(e) => setTheme(e.target.value as ThemeName)} className="theme-select" title="Select theme" aria-label="Select application theme">
+								{availableThemes.map((theme) => (
 									<option key={theme} value={theme}>
 										{theme.charAt(0).toUpperCase() + theme.slice(1)}
 									</option>
@@ -81,13 +73,7 @@ export const ChatHeader: React.FC<ChatHeaderProps> = ({ isConnected, onClearChat
 							</select>
 						</div>
 					)}
-					<button
-						onClick={onClearChat}
-						className="header-btn"
-						title="Clear chat"
-						type="button"
-						aria-label="Clear chat"
-					>
+					<button onClick={onClearChat} className="header-btn" title="Clear chat" type="button" aria-label="Clear chat">
 						<Trash2 className="w-5 h-5" />
 					</button>
 				</div>

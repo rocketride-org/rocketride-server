@@ -65,12 +65,7 @@ export interface TaskFoldResult {
  * @param isKnownTask - Host predicate: does projectId+sourceId match a local pipeline file.
  * @returns The next state, or null when the event does not affect the dev view.
  */
-export function foldTaskEvent(
-	event: TaskLifecycleEvent,
-	activeTasks: Map<string, ActiveTaskState>,
-	unknownTasks: UnknownTask[],
-	isKnownTask: (projectId: string, sourceId: string) => boolean,
-): TaskFoldResult | null {
+export function foldTaskEvent(event: TaskLifecycleEvent, activeTasks: Map<string, ActiveTaskState>, unknownTasks: UnknownTask[], isKnownTask: (projectId: string, sourceId: string) => boolean): TaskFoldResult | null {
 	const { action, projectId, source: sourceId } = event;
 
 	// Deploy runs are not dev tasks — see the module docstring.
@@ -90,10 +85,7 @@ export function foldTaskEvent(
 			nextActive.set(key, { running: true, errors: [], warnings: [] });
 			if (projectId && sourceId && !isKnownTask(projectId, sourceId)) {
 				if (!unknownTasks.some((ut) => ut.projectId === projectId && ut.sourceId === sourceId)) {
-					nextUnknown = [
-						...unknownTasks,
-						{ projectId, sourceId, displayName: event.name || sourceId, projectLabel: projectId.substring(0, 8) },
-					];
+					nextUnknown = [...unknownTasks, { projectId, sourceId, displayName: event.name || sourceId, projectLabel: projectId.substring(0, 8) }];
 				}
 			}
 			break;
@@ -175,12 +167,7 @@ export function foldTaskEvent(
  * @param projectId - The deployed project.
  * @returns The next running-source map, or null when nothing changed.
  */
-export function foldDeployRunState(
-	event: TaskLifecycleEvent,
-	running: Record<string, boolean>,
-	teamId: string,
-	projectId: string,
-): Record<string, boolean> | null {
+export function foldDeployRunState(event: TaskLifecycleEvent, running: Record<string, boolean>, teamId: string, projectId: string): Record<string, boolean> | null {
 	const { action } = event;
 
 	// Bulk snapshot: rebuild from the rows that belong to THIS deployment —
@@ -225,11 +212,7 @@ export function foldDeployRunState(
  * @param projectId - The project whose deployments are displayed.
  * @returns The next map, or null when nothing changed.
  */
-export function foldProjectDeployRuns(
-	event: TaskLifecycleEvent,
-	runsByTeam: Record<string, Record<string, boolean>>,
-	projectId: string,
-): Record<string, Record<string, boolean>> | null {
+export function foldProjectDeployRuns(event: TaskLifecycleEvent, runsByTeam: Record<string, Record<string, boolean>>, projectId: string): Record<string, Record<string, boolean>> | null {
 	const { action } = event;
 
 	// Bulk snapshot: rebuild the whole map from this project's deploy rows.

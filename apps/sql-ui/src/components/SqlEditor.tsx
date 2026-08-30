@@ -165,7 +165,9 @@ export const SqlEditor: React.FC<ISqlEditorProps> = ({ value, onChange, dialect,
 	// — outside React's event system — can fire post-commit; a passive
 	// effect leaves a gap where the stale closure would run.
 	const onRunRef = useRef(onRun);
-	useLayoutEffect(() => { onRunRef.current = onRun; }, [onRun]);
+	useLayoutEffect(() => {
+		onRunRef.current = onRun;
+	}, [onRun]);
 
 	// Monaco namespace captured at mount + the app-theme version, so a theme
 	// toggle re-derives the token-based editor theme.
@@ -196,7 +198,9 @@ export const SqlEditor: React.FC<ISqlEditorProps> = ({ value, onChange, dialect,
 			id: 'sql-ui.run',
 			label: 'Run Query',
 			keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter],
-			run: () => { onRunRef.current?.(); },
+			run: () => {
+				onRunRef.current?.();
+			},
 		});
 	}, []);
 

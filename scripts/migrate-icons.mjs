@@ -31,14 +31,7 @@ import { fileURLToPath } from 'node:url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, '..');
 const NODES_DIR = path.join(REPO_ROOT, 'nodes', 'src', 'nodes');
-const LEGACY_DIR = path.join(
-	REPO_ROOT,
-	'packages',
-	'shared',
-	'src',
-	'assets',
-	'nodes',
-);
+const LEGACY_DIR = path.join(REPO_ROOT, 'packages', 'shared', 'src', 'assets', 'nodes');
 const FALLBACK_TARGET = path.join(NODES_DIR, 'core');
 const FALLBACK_NAME = 'unknown.svg';
 

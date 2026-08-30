@@ -131,37 +131,41 @@ export const HostChromeProvider: React.FC<{ children: ReactNode }> = ({ children
 	const [statusBarSlot, setStatusBarSlot] = useState<ContentSlot | null>(null);
 
 	// --- Stable registration API (identity fixed for the provider's life) ---
-	const api = useMemo<HostChromeApi>(() => ({
-		registerSidebarContent: (token, content) => {
-			// Replace only when the owner changed or the node identity changed,
-			// so a stable node registered repeatedly does not churn the chrome.
-			setSidebarSlot((cur) => (cur && cur.token === token && cur.content === content ? cur : { token, content }));
-		},
-		unregisterSidebarContent: (token) => {
-			// Clear only if this token still owns the slot (last-writer-wins).
-			setSidebarSlot((cur) => (cur && cur.token === token ? null : cur));
-		},
-		registerStatusBarContent: (token, content) => {
-			// Same dedupe rule as the sidebar slot.
-			setStatusBarSlot((cur) => (cur && cur.token === token && cur.content === content ? cur : { token, content }));
-		},
-		unregisterStatusBarContent: (token) => {
-			// Same last-writer-wins clearing rule as the sidebar slot.
-			setStatusBarSlot((cur) => (cur && cur.token === token ? null : cur));
-		},
-	}), []);
+	const api = useMemo<HostChromeApi>(
+		() => ({
+			registerSidebarContent: (token, content) => {
+				// Replace only when the owner changed or the node identity changed,
+				// so a stable node registered repeatedly does not churn the chrome.
+				setSidebarSlot((cur) => (cur && cur.token === token && cur.content === content ? cur : { token, content }));
+			},
+			unregisterSidebarContent: (token) => {
+				// Clear only if this token still owns the slot (last-writer-wins).
+				setSidebarSlot((cur) => (cur && cur.token === token ? null : cur));
+			},
+			registerStatusBarContent: (token, content) => {
+				// Same dedupe rule as the sidebar slot.
+				setStatusBarSlot((cur) => (cur && cur.token === token && cur.content === content ? cur : { token, content }));
+			},
+			unregisterStatusBarContent: (token) => {
+				// Same last-writer-wins clearing rule as the sidebar slot.
+				setStatusBarSlot((cur) => (cur && cur.token === token ? null : cur));
+			},
+		}),
+		[]
+	);
 
 	// --- Resolved state the shell chrome consumes --------------------------
-	const state = useMemo<HostChromeState>(() => ({
-		sidebarContent: sidebarSlot ? sidebarSlot.content : null,
-		statusBarContent: statusBarSlot ? statusBarSlot.content : null,
-	}), [sidebarSlot, statusBarSlot]);
+	const state = useMemo<HostChromeState>(
+		() => ({
+			sidebarContent: sidebarSlot ? sidebarSlot.content : null,
+			statusBarContent: statusBarSlot ? statusBarSlot.content : null,
+		}),
+		[sidebarSlot, statusBarSlot]
+	);
 
 	return (
 		<HostChromeApiContext.Provider value={api}>
-			<HostChromeStateContext.Provider value={state}>
-				{children}
-			</HostChromeStateContext.Provider>
+			<HostChromeStateContext.Provider value={state}>{children}</HostChromeStateContext.Provider>
 		</HostChromeApiContext.Provider>
 	);
 };

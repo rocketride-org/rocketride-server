@@ -202,10 +202,7 @@ export class SegmentDecoder {
 					}
 				}
 				if (data !== null && typeof data === 'object' && DELTA_KEY in (data as Record<string, unknown>)) {
-					const fullData = applyShallowDelta(
-						base !== null && typeof base === 'object' ? base : {},
-						(data as Record<string, unknown>)[DELTA_KEY],
-					);
+					const fullData = applyShallowDelta(base !== null && typeof base === 'object' ? base : {}, (data as Record<string, unknown>)[DELTA_KEY]);
 					return { ...msg, body: { ...body, trace: { ...trace, data: fullData } } as unknown as LogEvent['body'] };
 				}
 				return msg;
@@ -250,10 +247,7 @@ export function normalizeStamps(msg: LogEvent): LogEvent {
  * @param decoder - The segment's decoder (carries state across chunks).
  * @returns The keyframe (when this chunk contained it) and decoded events.
  */
-export function parseSegmentChunk(
-	text: string,
-	decoder: SegmentDecoder,
-): { keyframe: SegmentKeyframe | null; events: LogEvent[] } {
+export function parseSegmentChunk(text: string, decoder: SegmentDecoder): { keyframe: SegmentKeyframe | null; events: LogEvent[] } {
 	let keyframe: SegmentKeyframe | null = null;
 	const events: LogEvent[] = [];
 	for (const line of text.split('\n')) {

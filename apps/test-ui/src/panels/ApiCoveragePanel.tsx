@@ -187,7 +187,9 @@ const ApiCoveragePanel: React.FC<Props> = ({ results }) => {
 						{Array.from(categories.entries()).map(([category, methods]) => (
 							<React.Fragment key={category}>
 								<tr>
-									<td colSpan={7} style={t.category}>{category}</td>
+									<td colSpan={7} style={t.category}>
+										{category}
+									</td>
 								</tr>
 								{methods.map((m) => {
 									const r = resultMap.get(m.method);
@@ -197,59 +199,47 @@ const ApiCoveragePanel: React.FC<Props> = ({ results }) => {
 									const max = sorted.length > 0 ? sorted[sorted.length - 1] : 0;
 
 									// Status dot color
-									const dotColor =
-										!r || r.status === 'pending' ? 'var(--rr-text-disabled)' :
-										r.status === 'passed' ? 'var(--rr-color-success)' :
-										r.status === 'failed' ? 'var(--rr-color-error)' :
-										r.status === 'running' ? 'var(--rr-color-warning)' :
-										'var(--rr-text-disabled)';
+									const dotColor = !r || r.status === 'pending' ? 'var(--rr-text-disabled)' : r.status === 'passed' ? 'var(--rr-color-success)' : r.status === 'failed' ? 'var(--rr-color-error)' : r.status === 'running' ? 'var(--rr-color-warning)' : 'var(--rr-text-disabled)';
 
 									// "never called" = no monitor data and no sweep data
 									const hasCalls = r && r.issued > 0;
 									const neverCalled = !hasCalls;
 
 									return (
-										<tr
-											key={m.method}
-											style={{ opacity: neverCalled ? 0.5 : 1 }}
-										>
+										<tr key={m.method} style={{ opacity: neverCalled ? 0.5 : 1 }}>
 											{/* Method name with status dot */}
 											<td style={t.td}>
 												<span style={{ ...t.dot, backgroundColor: dotColor }} />
 												{m.method}
-												{m.mode === 'negative' && (
-													<span style={{ fontSize: 8, color: 'var(--rr-color-warning)', marginLeft: 4 }}>NEG</span>
-												)}
+												{m.mode === 'negative' && <span style={{ fontSize: 8, color: 'var(--rr-color-warning)', marginLeft: 4 }}>NEG</span>}
 											</td>
 
 											{/* Completed / Issued */}
-											<td style={t.tdRight}>
-												{hasCalls ? `${r.completed}/${r.issued}` : '-'}
-											</td>
+											<td style={t.tdRight}>{hasCalls ? `${r.completed}/${r.issued}` : '-'}</td>
 
 											{/* Errors */}
-											<td style={{
-												...t.tdRight,
-												color: r && r.errors > 0 ? 'var(--rr-color-error)' : undefined,
-											}}>
+											<td
+												style={{
+													...t.tdRight,
+													color: r && r.errors > 0 ? 'var(--rr-color-error)' : undefined,
+												}}
+											>
 												{hasCalls ? r.errors : '-'}
 											</td>
 
 											{/* p50 */}
-											<td style={t.tdRight}>
-												{hasCalls ? fmtMs(p50) : '-'}
-											</td>
+											<td style={t.tdRight}>{hasCalls ? fmtMs(p50) : '-'}</td>
 
 											{/* p95 */}
-											<td style={t.tdRight}>
-												{hasCalls ? fmtMs(p95) : '-'}
-											</td>
+											<td style={t.tdRight}>{hasCalls ? fmtMs(p95) : '-'}</td>
 
 											{/* Max */}
-											<td style={{
-												...t.tdRight,
-												color: max > 1000 ? 'var(--rr-color-error)' : max > 200 ? 'var(--rr-color-warning)' : undefined,
-											}}>
+											<td
+												style={{
+													...t.tdRight,
+													color: max > 1000 ? 'var(--rr-color-error)' : max > 200 ? 'var(--rr-color-warning)' : undefined,
+												}}
+											>
 												{hasCalls ? fmtMs(max) : '-'}
 											</td>
 

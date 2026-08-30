@@ -180,7 +180,16 @@ const DiagramCanvas: React.FC<IDiagramViewProps> = ({ endpoint }) => {
 					icon={<DatabaseIcon />}
 					title="Reverse engineering failed"
 					description={snapshot.error ?? 'Schema reflection failed.'}
-					action={<Button variant="primary" onClick={() => { if (client) void refreshSchema(client, endpoint); }}>Retry</Button>}
+					action={
+						<Button
+							variant="primary"
+							onClick={() => {
+								if (client) void refreshSchema(client, endpoint);
+							}}
+						>
+							Retry
+						</Button>
+					}
 				/>
 			</div>
 		);
@@ -189,11 +198,7 @@ const DiagramCanvas: React.FC<IDiagramViewProps> = ({ endpoint }) => {
 	if (snapshot.status !== 'ready' || !laidOut) {
 		return (
 			<div style={styles.emptyWrap}>
-				<EmptyState
-					icon={<DatabaseIcon />}
-					title="Reverse engineering"
-					description={`Reading tables, keys, and relations from ${endpoint.nodeName} and computing the layout...`}
-				/>
+				<EmptyState icon={<DatabaseIcon />} title="Reverse engineering" description={`Reading tables, keys, and relations from ${endpoint.nodeName} and computing the layout...`} />
 			</div>
 		);
 	}
@@ -202,14 +207,24 @@ const DiagramCanvas: React.FC<IDiagramViewProps> = ({ endpoint }) => {
 		<>
 			{/* Floating toolbar (pipeline-canvas convention). */}
 			<div style={styles.toolbar}>
-				<Button variant="ghost" small onClick={() => { void autoLayout(); }}>
+				<Button
+					variant="ghost"
+					small
+					onClick={() => {
+						void autoLayout();
+					}}
+				>
 					Auto-layout
 				</Button>
-				<Button variant="ghost" small onClick={() => fitView({ padding: 0.15 })}>Fit</Button>
+				<Button variant="ghost" small onClick={() => fitView({ padding: 0.15 })}>
+					Fit
+				</Button>
 				<Button
 					variant="secondary"
 					small
-					onClick={() => { if (client) void refreshSchema(client, endpoint); }}
+					onClick={() => {
+						if (client) void refreshSchema(client, endpoint);
+					}}
 					disabled={!client || snapshot.status !== 'ready'}
 				>
 					Reverse Engineer
@@ -220,21 +235,12 @@ const DiagramCanvas: React.FC<IDiagramViewProps> = ({ endpoint }) => {
 			</div>
 
 			{snapshot.schema?.error && (
-				<div style={styles.bannerWrap}><Banner variant="warning">{snapshot.schema.error}</Banner></div>
+				<div style={styles.bannerWrap}>
+					<Banner variant="warning">{snapshot.schema.error}</Banner>
+				</div>
 			)}
 
-			<ReactFlow
-				nodes={nodes}
-				edges={edges}
-				onNodesChange={onNodesChange}
-				onEdgesChange={onEdgesChange}
-				nodeTypes={NODE_TYPES}
-				fitView
-				minZoom={0.15}
-				proOptions={{ hideAttribution: true }}
-				nodesConnectable={false}
-				deleteKeyCode={null}
-			>
+			<ReactFlow nodes={nodes} edges={edges} onNodesChange={onNodesChange} onEdgesChange={onEdgesChange} nodeTypes={NODE_TYPES} fitView minZoom={0.15} proOptions={{ hideAttribution: true }} nodesConnectable={false} deleteKeyCode={null}>
 				<Background gap={18} size={1} />
 				<MiniMap pannable zoomable />
 				<Controls showInteractive={false} />

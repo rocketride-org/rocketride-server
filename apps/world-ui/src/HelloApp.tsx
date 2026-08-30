@@ -83,18 +83,9 @@ const HelloApp: React.FC<ShellAppProps> = ({ identity }) => {
 	return (
 		<AppLayout sidebar={SIDEBAR_FRAME_ONLY} showStatus>
 			<div style={styles.container}>
-				<img
-					src={heroSrc}
-					alt="An astronaut waving by a campfire on the moon, with Earth rising in the sky"
-					style={styles.hero}
-				/>
+				<img src={heroSrc} alt="An astronaut waving by a campfire on the moon, with Earth rising in the sky" style={styles.hero} />
 				<div style={styles.title}>Hello World!</div>
-				<div style={styles.subtitle}>
-					{identity
-						? `Welcome, ${identity.displayName ?? 'user'}!`
-						: 'Not authenticated — running as a public app.'
-					}
-				</div>
+				<div style={styles.subtitle}>{identity ? `Welcome, ${identity.displayName ?? 'user'}!` : 'Not authenticated — running as a public app.'}</div>
 			</div>
 		</AppLayout>
 	);

@@ -43,8 +43,8 @@ export default defineConfig(() => {
 					'react-dom': { singleton: true, eager: true, requiredVersion: '^18.2.0' },
 					// import: false tells MF to NOT bundle a fallback copy —
 					// the host (the shell) always provides these at runtime.
-					'shell': { singleton: true, requiredVersion: false, import: false },
-					'rocketride': { singleton: true, requiredVersion: false, import: false },
+					shell: { singleton: true, requiredVersion: false, import: false },
+					rocketride: { singleton: true, requiredVersion: false, import: false },
 				},
 			}),
 		],

@@ -107,12 +107,17 @@ const s = {
 /** Map phase status to a dot color. */
 function dotColor(status: PhaseResult['status']): string {
 	switch (status) {
-		case 'passed': return 'var(--rr-color-success)';
-		case 'failed': return 'var(--rr-color-error)';
-		case 'running': return 'var(--rr-color-warning)';
-		case 'skipped': return 'var(--rr-text-disabled)';
+		case 'passed':
+			return 'var(--rr-color-success)';
+		case 'failed':
+			return 'var(--rr-color-error)';
+		case 'running':
+			return 'var(--rr-color-warning)';
+		case 'skipped':
+			return 'var(--rr-text-disabled)';
 		case 'pending':
-		default: return 'var(--rr-border)';
+		default:
+			return 'var(--rr-border)';
 	}
 }
 
@@ -158,10 +163,12 @@ const PhaseProgress: React.FC<Props> = ({ phases, selectedPhases }) => {
 							// Remove border on last row
 							...(idx === visible.length - 1 ? { borderBottom: 'none' } : {}),
 							// Running phase gets a subtle pulse background
-							...(phase.status === 'running' ? {
-								background: 'var(--rr-bg-surface-alt)',
-								animation: 'rr-test-pulse 2s infinite',
-							} : {}),
+							...(phase.status === 'running'
+								? {
+										background: 'var(--rr-bg-surface-alt)',
+										animation: 'rr-test-pulse 2s infinite',
+									}
+								: {}),
 						}}
 					>
 						{/* Status dot */}
@@ -174,9 +181,7 @@ const PhaseProgress: React.FC<Props> = ({ phases, selectedPhases }) => {
 						{(phase.status === 'passed' || phase.status === 'failed') && (
 							<div style={s.stats}>
 								<span style={{ color: 'var(--rr-color-success)' }}>{phase.passed} passed</span>
-								{phase.failed > 0 && (
-									<span style={{ color: 'var(--rr-color-error)' }}>{phase.failed} failed</span>
-								)}
+								{phase.failed > 0 && <span style={{ color: 'var(--rr-color-error)' }}>{phase.failed} failed</span>}
 							</div>
 						)}
 

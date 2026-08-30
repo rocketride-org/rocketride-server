@@ -215,7 +215,9 @@ export class WatchManager {
 			} else {
 				session.proc.kill();
 			}
-		} catch { /* already gone */ }
+		} catch {
+			/* already gone */
+		}
 
 		// Drop the overlay entry so the shell returns to the published bundle
 		try {
@@ -223,7 +225,9 @@ export class WatchManager {
 			if (client && this.connectionManager.isConnected()) {
 				await client.call('rrext_app_submission', { subcommand: 'register_dev', moduleId: session.app.moduleId, unregister: true });
 			}
-		} catch { /* engine gone — the overlay's disconnect expiry covers it */ }
+		} catch {
+			/* engine gone — the overlay's disconnect expiry covers it */
+		}
 		this.notify(appId, { state: 'idle' });
 	}
 
@@ -283,8 +287,14 @@ export class WatchManager {
 			// Mirror installer output into every open panel's Console, and
 			// accumulate it so a failure can NAME its cause.
 			let output = '';
-			proc.stdout?.on('data', (chunk: Buffer) => { output += chunk.toString('utf8'); this.consoleAllLines('log', chunk.toString('utf8')); });
-			proc.stderr?.on('data', (chunk: Buffer) => { output += chunk.toString('utf8'); this.consoleAllLines('warn', chunk.toString('utf8')); });
+			proc.stdout?.on('data', (chunk: Buffer) => {
+				output += chunk.toString('utf8');
+				this.consoleAllLines('log', chunk.toString('utf8'));
+			});
+			proc.stderr?.on('data', (chunk: Buffer) => {
+				output += chunk.toString('utf8');
+				this.consoleAllLines('warn', chunk.toString('utf8'));
+			});
 			// Settle exactly once — exit, spawn-error, and the timeout race here.
 			let settled = false;
 			const finish = (ok: boolean): void => {
@@ -298,20 +308,25 @@ export class WatchManager {
 			// shell:true wraps pnpm in cmd.exe on Windows, so SIGKILL fells only
 			// the wrapper while pnpm keeps running — taskkill /T fells the whole
 			// tree, same approach as stop().
-			const timer = setTimeout(() => {
-				try {
-					if (process.platform === 'win32' && proc.pid) {
-						spawn('taskkill', ['/PID', String(proc.pid), '/T', '/F']);
-					} else {
-						proc.kill('SIGKILL');
+			const timer = setTimeout(
+				() => {
+					try {
+						if (process.platform === 'win32' && proc.pid) {
+							spawn('taskkill', ['/PID', String(proc.pid), '/T', '/F']);
+						} else {
+							proc.kill('SIGKILL');
+						}
+					} catch {
+						/* already gone */
 					}
-				} catch { /* already gone */ }
-				const reason = 'pnpm install timed out after 10 minutes';
-				this.logger.output('[appdev] workspace pnpm install timed out after 10 minutes');
-				if (triggerAppId) this.appScreen.notifyError(triggerAppId, reason, 'pnpm install');
-				this.appScreen.notifyWatchAll({ state: 'error', target: 'pnpm install', reason });
-				finish(false);
-			}, 10 * 60 * 1000);
+					const reason = 'pnpm install timed out after 10 minutes';
+					this.logger.output('[appdev] workspace pnpm install timed out after 10 minutes');
+					if (triggerAppId) this.appScreen.notifyError(triggerAppId, reason, 'pnpm install');
+					this.appScreen.notifyWatchAll({ state: 'error', target: 'pnpm install', reason });
+					finish(false);
+				},
+				10 * 60 * 1000
+			);
 			// 'close' (not 'exit'): stdio is flushed first, so extractInstallCause
 			// reads the COMPLETE output — aligns with publish.ts and runRootInstall.
 			proc.on('close', (code) => {

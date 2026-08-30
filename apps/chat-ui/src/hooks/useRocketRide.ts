@@ -98,11 +98,7 @@ import { getClient, subscribeToClient } from './clientSingleton';
  * }
  * ```
  */
-export const useRocketRideClient = (
-	onConnected?: (client: RocketRideClient) => void | Promise<void>,
-	onDisconnected?: (reason: string, hasError: boolean) => void | Promise<void>,
-	onStatusChange?: (message: string | null) => void
-) => {
+export const useRocketRideClient = (onConnected?: (client: RocketRideClient) => void | Promise<void>, onDisconnected?: (reason: string, hasError: boolean) => void | Promise<void>, onStatusChange?: (message: string | null) => void) => {
 	// ============= STATE =============
 
 	/** Tracks whether the WebSocket client is currently connected */

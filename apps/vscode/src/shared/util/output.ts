@@ -23,18 +23,18 @@
 
 /**
  * output.ts - Centralized Logging System for RocketRide VS Code Extension
- * 
+ *
  * This module implements a singleton-based logging system that provides consistent
  * output handling throughout the VS Code extension. The logger writes to a named
  * OutputChannel in VS Code, allowing users to view extension logs in the Output panel.
- * 
+ *
  * Key Features:
  * - Singleton pattern ensures consistent logging across the extension
  * - Named output channel ("RocketRide") for easy identification
  * - Integration with the icons system for visual message categorization
  * - Error throwing capability with automatic logging
  * - Channel visibility management for user interaction
- * 
+ *
  * Usage Pattern:
  * 1. Import getLogger() function in any module
  * 2. Call getLogger() to get the shared logger instance
@@ -47,23 +47,7 @@ import { icons } from './icons';
 /**
  * Case-insensitive regex matching sensitive key names.
  */
-const SENSITIVE_KEY_PATTERN = new RegExp(
-	[
-		'auth[-_]?key',
-		'auth[-_]?token',
-		'authorization',
-		'api[-_]?key',
-		'access[-_]?token',
-		'refresh[-_]?token',
-		'private[-_]?key',
-		'token',
-		'bearer',
-		'password',
-		'secret',
-		'credential',
-	].join('|'),
-	'i'
-);
+const SENSITIVE_KEY_PATTERN = new RegExp(['auth[-_]?key', 'auth[-_]?token', 'authorization', 'api[-_]?key', 'access[-_]?token', 'refresh[-_]?token', 'private[-_]?key', 'token', 'bearer', 'password', 'secret', 'credential'].join('|'), 'i');
 
 /** Prefixes that indicate a secret value regardless of key name. */
 const SENSITIVE_VALUE_PREFIXES = ['sk-', 'pk_', 'tk_', 'rr_'];
@@ -72,7 +56,7 @@ const SENSITIVE_VALUE_PREFIXES = ['sk-', 'pk_', 'tk_', 'rr_'];
  * Returns true if a string value looks like a secret based on its prefix.
  */
 function isSensitiveValue(value: string): boolean {
-	return SENSITIVE_VALUE_PREFIXES.some(p => value.startsWith(p));
+	return SENSITIVE_VALUE_PREFIXES.some((p) => value.startsWith(p));
 }
 
 /**
@@ -118,15 +102,15 @@ function redactSensitiveFields(obj: unknown): void {
 
 /**
  * Safely converts an object to JSON string with sensitive fields redacted.
- * 
+ *
  * This function uses a lazy redaction strategy for optimal performance:
  * 1. Stringify the object first (required anyway for output)
  * 2. Quick regex search for sensitive field patterns
  * 3. Only if found, parse, redact, and re-stringify
- * 
+ *
  * This ensures minimal overhead for the common case where no sensitive
  * data is present, while still protecting keys when they do appear.
- * 
+ *
  * @param obj The object to stringify
  * @returns JSON string with sensitive values redacted
  */
@@ -135,7 +119,7 @@ export function safeJSONStringify(obj: unknown): string {
 	const jsonString = JSON.stringify(obj);
 
 	// Quick check: does the serialized string contain any sensitive field names or value prefixes?
-	if (SENSITIVE_KEY_PATTERN.test(jsonString) || SENSITIVE_VALUE_PREFIXES.some(p => jsonString.includes(p))) {
+	if (SENSITIVE_KEY_PATTERN.test(jsonString) || SENSITIVE_VALUE_PREFIXES.some((p) => jsonString.includes(p))) {
 		// Yes - parse (creating a deep clone), redact, and re-stringify
 		const parsed = JSON.parse(jsonString);
 		redactSensitiveFields(parsed);
@@ -148,11 +132,11 @@ export function safeJSONStringify(obj: unknown): string {
 
 /**
  * Singleton logger class that manages all extension output to VS Code's Output panel.
- * 
+ *
  * This class follows the singleton pattern to ensure that all logging throughout
  * the extension uses the same OutputChannel instance, providing consistency and
  * preventing resource conflicts.
- * 
+ *
  * The logger is designed to be thread-safe and can be safely called from any
  * part of the extension without concerns about multiple instances or conflicting
  * output streams.
@@ -172,15 +156,15 @@ class OutputLogger {
 
 	/**
 	 * Gets the singleton instance of the logger.
-	 * 
+	 *
 	 * This method implements lazy initialization - the logger instance is only
 	 * created when first requested. Subsequent calls return the same instance,
 	 * ensuring consistent logging behavior across the entire extension.
-	 * 
+	 *
 	 * Thread Safety: This implementation is safe for single-threaded JavaScript
 	 * execution but would require additional synchronization in multi-threaded
 	 * environments.
-	 * 
+	 *
 	 * @returns The shared OutputLogger instance
 	 */
 	public static getInstance(): OutputLogger {
@@ -196,14 +180,14 @@ class OutputLogger {
 
 	/**
 	 * Logs a message to the output channel.
-	 * 
+	 *
 	 * Messages are appended as new lines to the output channel, making them
 	 * visible in VS Code's Output panel when the "RocketRide" channel is selected.
-	 * 
+	 *
 	 * The method supports any string content, including formatted messages with
 	 * icons, timestamps, or structured data. No automatic formatting is applied,
 	 * giving callers full control over message presentation.
-	 * 
+	 *
 	 * @param message The message to log - can include emojis, formatting, or plain text
 	 */
 	public output(message: string): void {
@@ -220,19 +204,19 @@ class OutputLogger {
 
 	/**
 	 * Output an exception message and throw an error.
-	 * 
+	 *
 	 * This method combines logging and error throwing to provide consistent
 	 * error handling throughout the extension. It ensures that all fatal errors
 	 * are logged before being thrown, preventing loss of diagnostic information
 	 * if the error isn't caught upstream.
-	 * 
+	 *
 	 * The stop icon is automatically prepended to error messages to provide
 	 * visual distinction in the logs and indicate the severity of the issue.
-	 * 
+	 *
 	 * TypeScript Return Type: The `never` return type indicates this method
 	 * never returns normally (always throws), helping with static analysis
 	 * and dead code detection.
-	 * 
+	 *
 	 * @param message Message to log and include in the thrown error
 	 * @throws Always throws an Error with the provided message
 	 * @returns Never returns (always throws) - indicated by `never` return type
@@ -249,15 +233,15 @@ class OutputLogger {
 
 	/**
 	 * Makes the output channel visible to the user.
-	 * 
+	 *
 	 * This method programmatically opens the Output panel and switches to the
 	 * "RocketRide" channel, bringing it into focus for the user. This is useful
 	 * for drawing attention to important log messages or errors.
-	 * 
+	 *
 	 * The `preserveFocus` parameter (true) ensures that keyboard focus remains
 	 * on the current editor or panel, preventing disruption to the user's
 	 * workflow while still making the logs visible.
-	 * 
+	 *
 	 * Use Cases:
 	 * - After critical errors to show diagnostic information
 	 * - When starting debug sessions to provide real-time feedback
@@ -273,17 +257,17 @@ class OutputLogger {
 
 /**
  * Factory function that returns the shared logger instance.
- * 
+ *
  * This function provides a clean, simple API for accessing the singleton logger
  * without exposing the OutputLogger class directly. It encapsulates the singleton
  * pattern implementation and provides a consistent interface for all extension modules.
- * 
+ *
  * Design Benefits:
  * - Hides the complexity of the singleton pattern from consumers
  * - Provides a functional interface that's easy to import and use
  * - Enables future refactoring of the logger implementation without changing the API
  * - Follows the principle of least privilege by not exposing unnecessary class methods
- * 
+ *
  * @returns The shared OutputLogger instance for consistent logging across the extension
  */
 export function getLogger(): OutputLogger {

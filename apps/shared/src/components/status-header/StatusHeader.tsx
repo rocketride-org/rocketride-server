@@ -162,17 +162,17 @@ export const StatusHeaderInfo: React.FC<Pick<StatusHeaderProps, 'name' | 'taskSt
 
 	return (
 		<div style={styles.stack}>
-				<div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-					<div style={styles.indicatorBox}>
-						<div style={getIndicator(state)} />
-					</div>
-					{name && <span style={styles.stateLabel}>{name}</span>}
-					<span style={{ fontSize: 'var(--rr-font-size-caption)', color: 'var(--rr-text-secondary)' }}>{getTaskStateDisplay(state)}</span>
+			<div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+				<div style={styles.indicatorBox}>
+					<div style={getIndicator(state)} />
 				</div>
-				<div style={{ ...styles.subtitle, visibility: hasStatus ? 'visible' : 'hidden' }}>
-					<div style={styles.indicatorBox} />
-					<span>{taskStatus?.status || '\u00A0'}</span>
-				</div>
+				{name && <span style={styles.stateLabel}>{name}</span>}
+				<span style={{ fontSize: 'var(--rr-font-size-caption)', color: 'var(--rr-text-secondary)' }}>{getTaskStateDisplay(state)}</span>
+			</div>
+			<div style={{ ...styles.subtitle, visibility: hasStatus ? 'visible' : 'hidden' }}>
+				<div style={styles.indicatorBox} />
+				<span>{taskStatus?.status || '\u00A0'}</span>
+			</div>
 		</div>
 	);
 };

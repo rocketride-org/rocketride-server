@@ -38,12 +38,12 @@ export const API_CONFIG: {
 // Function to clear and set the config with new values
 export const setAPIConfig = (config: Record<string, string>) => {
 	// Clear existing keys
-	Object.keys(API_CONFIG).forEach(key => {
+	Object.keys(API_CONFIG).forEach((key) => {
 		delete API_CONFIG[key];
 	});
 
 	// Set new keys from config
-	Object.keys(config).forEach(key => {
+	Object.keys(config).forEach((key) => {
 		API_CONFIG[key] = config[key];
 	});
 };

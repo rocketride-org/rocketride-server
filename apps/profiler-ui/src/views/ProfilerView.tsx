@@ -362,10 +362,7 @@ interface ProfilerViewProps {
  * Find a node in the tree by identity (file + line + name).
  * Returns the path (ancestor chain) from root to the found node.
  */
-function findNodePath(
-	root: ProfileTreeNode,
-	target: ProfileTreeNode,
-): ProfileTreeNode[] | null {
+function findNodePath(root: ProfileTreeNode, target: ProfileTreeNode): ProfileTreeNode[] | null {
 	if (root.name === target.name && root.file === target.file && root.line === target.line) {
 		return [root];
 	}
@@ -463,13 +460,19 @@ const ProfilerView: React.FC<ProfilerViewProps> = ({ host, port, name }) => {
 	/** Start polling status when connected. */
 	useEffect(() => {
 		if (!isConnected) {
-			if (statusIntervalRef.current) { clearInterval(statusIntervalRef.current); statusIntervalRef.current = null; }
+			if (statusIntervalRef.current) {
+				clearInterval(statusIntervalRef.current);
+				statusIntervalRef.current = null;
+			}
 			return;
 		}
 		fetchStatus();
 		statusIntervalRef.current = setInterval(fetchStatus, STATUS_POLL_MS);
 		return () => {
-			if (statusIntervalRef.current) { clearInterval(statusIntervalRef.current); statusIntervalRef.current = null; }
+			if (statusIntervalRef.current) {
+				clearInterval(statusIntervalRef.current);
+				statusIntervalRef.current = null;
+			}
 		};
 	}, [isConnected, fetchStatus]);
 
@@ -492,13 +495,19 @@ const ProfilerView: React.FC<ProfilerViewProps> = ({ host, port, name }) => {
 	/** Start polling task list when connected. */
 	useEffect(() => {
 		if (!isConnected) {
-			if (tasksIntervalRef.current) { clearInterval(tasksIntervalRef.current); tasksIntervalRef.current = null; }
+			if (tasksIntervalRef.current) {
+				clearInterval(tasksIntervalRef.current);
+				tasksIntervalRef.current = null;
+			}
 			return;
 		}
 		fetchTasks();
 		tasksIntervalRef.current = setInterval(fetchTasks, TASKS_POLL_MS);
 		return () => {
-			if (tasksIntervalRef.current) { clearInterval(tasksIntervalRef.current); tasksIntervalRef.current = null; }
+			if (tasksIntervalRef.current) {
+				clearInterval(tasksIntervalRef.current);
+				tasksIntervalRef.current = null;
+			}
 		};
 	}, [isConnected, fetchTasks]);
 
@@ -507,62 +516,65 @@ const ProfilerView: React.FC<ProfilerViewProps> = ({ host, port, name }) => {
 	// =========================================================================
 
 	/** Fetch both the text report and structured tree data. */
-	const fetchReport = useCallback(async (systemCalls?: boolean) => {
-		const client = getClient();
-		if (!client) return;
+	const fetchReport = useCallback(
+		async (systemCalls?: boolean) => {
+			const client = getClient();
+			if (!client) return;
 
-		// Increment fetch ID so stale responses from a previous target are ignored
-		const id = ++fetchIdRef.current;
+			// Increment fetch ID so stale responses from a previous target are ignored
+			const id = ++fetchIdRef.current;
 
-		const args: Record<string, unknown> = {};
-		if (target) args.target = target;
+			const args: Record<string, unknown> = {};
+			if (target) args.target = target;
 
-		// Fetch text report
-		try {
-			const textResult = await client.call<{ report: string }>('rrext_cprofile_report', args);
-			if (fetchIdRef.current !== id) return; // stale response
-			setReport(textResult.report || 'No report available.');
-		} catch (err) {
-			console.log('[ProfilerView] Text report fetch failed:', err);
-			if (fetchIdRef.current !== id) return;
-			setReport('');
-		}
+			// Fetch text report
+			try {
+				const textResult = await client.call<{ report: string }>('rrext_cprofile_report', args);
+				if (fetchIdRef.current !== id) return; // stale response
+				setReport(textResult.report || 'No report available.');
+			} catch (err) {
+				console.log('[ProfilerView] Text report fetch failed:', err);
+				if (fetchIdRef.current !== id) return;
+				setReport('');
+			}
 
-		// Fetch tree data — pass include_system flag to server
-		const treeArgs: Record<string, unknown> = { ...args };
-		const includeSystem = systemCalls ?? showSystemCalls;
-		treeArgs.include_system = includeSystem;
-		try {
-			const treeResult = await client.call<ProfileTreeResponse>('rrext_cprofile_report_tree', treeArgs);
-			if (fetchIdRef.current !== id) return; // stale response
-			setTreeData(treeResult);
-			// Set the original root and initial viz root
-			if (treeResult.tree) {
-				setOriginalRoot(treeResult.tree);
-				setVizRoot(treeResult.tree);
-				setCallStack([treeResult.tree]);
-			} else {
-				// Clear stale roots when tree response is empty
+			// Fetch tree data — pass include_system flag to server
+			const treeArgs: Record<string, unknown> = { ...args };
+			const includeSystem = systemCalls ?? showSystemCalls;
+			treeArgs.include_system = includeSystem;
+			try {
+				const treeResult = await client.call<ProfileTreeResponse>('rrext_cprofile_report_tree', treeArgs);
+				if (fetchIdRef.current !== id) return; // stale response
+				setTreeData(treeResult);
+				// Set the original root and initial viz root
+				if (treeResult.tree) {
+					setOriginalRoot(treeResult.tree);
+					setVizRoot(treeResult.tree);
+					setCallStack([treeResult.tree]);
+				} else {
+					// Clear stale roots when tree response is empty
+					setOriginalRoot(null);
+					setVizRoot(null);
+					setCallStack([]);
+				}
+			} catch (err) {
+				console.log('[ProfilerView] Tree report fetch failed:', err);
+				if (fetchIdRef.current !== id) return;
+				setTreeData(null);
 				setOriginalRoot(null);
 				setVizRoot(null);
 				setCallStack([]);
 			}
-		} catch (err) {
-			console.log('[ProfilerView] Tree report fetch failed:', err);
-			if (fetchIdRef.current !== id) return;
-			setTreeData(null);
-			setOriginalRoot(null);
-			setVizRoot(null);
-			setCallStack([]);
-		}
-	}, [target, showSystemCalls]);
+		},
+		[target, showSystemCalls]
+	);
 
 	// Re-fetch tree when system calls toggle changes (if we have data)
 	useEffect(() => {
 		if (treeData?.tree) {
 			fetchReport();
 		}
-	// eslint-disable-next-line react-hooks/exhaustive-deps
+		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [showSystemCalls]);
 
 	// Rehydrate an existing report when this view mounts (or re-mounts) without
@@ -572,10 +584,13 @@ const ProfilerView: React.FC<ProfilerViewProps> = ({ host, port, name }) => {
 	// available" even though the server still holds a report (status.has_report
 	// stays true because it is server-backed). Fetch it once per target.
 	useEffect(() => {
-		if (!isConnected) { rehydratedTargetRef.current = undefined; return; }
-		if (status?.active === true) return;   // a live session owns the data
-		if (!status?.has_report) return;       // nothing on the server to rehydrate
-		if (treeData?.tree != null) return;    // already have data locally
+		if (!isConnected) {
+			rehydratedTargetRef.current = undefined;
+			return;
+		}
+		if (status?.active === true) return; // a live session owns the data
+		if (!status?.has_report) return; // nothing on the server to rehydrate
+		if (treeData?.tree != null) return; // already have data locally
 		if (rehydratedTargetRef.current === target) return; // already attempted for this target
 		rehydratedTargetRef.current = target;
 		fetchReport();
@@ -589,23 +604,26 @@ const ProfilerView: React.FC<ProfilerViewProps> = ({ host, port, name }) => {
 	 * Handle re-rooting the visualisation (from viz click or table row click).
 	 * Builds the call stack by finding the path from the original root.
 	 */
-	const handleRootChange = useCallback((node: ProfileTreeNode) => {
-		// Find the matching node in the ORIGINAL tree (not a pruned/copied node
-		// from d3 — those lose their full subtree after limitDepth/pruneTree)
-		if (originalRoot) {
-			const path = findNodePath(originalRoot, node);
-			if (path) {
-				// Use the last element of the path — that's the node from the
-				// original tree with its full subtree intact
-				setVizRoot(path[path.length - 1]);
-				setCallStack(path);
-				return;
+	const handleRootChange = useCallback(
+		(node: ProfileTreeNode) => {
+			// Find the matching node in the ORIGINAL tree (not a pruned/copied node
+			// from d3 — those lose their full subtree after limitDepth/pruneTree)
+			if (originalRoot) {
+				const path = findNodePath(originalRoot, node);
+				if (path) {
+					// Use the last element of the path — that's the node from the
+					// original tree with its full subtree intact
+					setVizRoot(path[path.length - 1]);
+					setCallStack(path);
+					return;
+				}
 			}
-		}
-		// Fallback: use the clicked node directly
-		setVizRoot(node);
-		setCallStack([node]);
-	}, [originalRoot]);
+			// Fallback: use the clicked node directly
+			setVizRoot(node);
+			setCallStack([node]);
+		},
+		[originalRoot]
+	);
 
 	// =========================================================================
 	// ACTIONS
@@ -673,7 +691,11 @@ const ProfilerView: React.FC<ProfilerViewProps> = ({ host, port, name }) => {
 
 	// Disconnected state
 	if (!isConnected) {
-		return <div style={styles.disconnected}>Connecting to {name} ({host}:{port})...</div>;
+		return (
+			<div style={styles.disconnected}>
+				Connecting to {name} ({host}:{port})...
+			</div>
+		);
 	}
 
 	const isActive = status?.active === true;
@@ -688,12 +710,7 @@ const ProfilerView: React.FC<ProfilerViewProps> = ({ host, port, name }) => {
 			{/* Controls row */}
 			<div style={styles.controls}>
 				{/* Target selector */}
-				<select
-					style={styles.select}
-					value={target || ''}
-					onChange={(e) => setTarget(e.target.value || null)}
-					disabled={isActive}
-				>
+				<select style={styles.select} value={target || ''} onChange={(e) => setTarget(e.target.value || null)} disabled={isActive}>
 					<option value="">Server Process</option>
 					{tasks.map((t) => (
 						<option key={t.token} value={t.token}>
@@ -703,14 +720,7 @@ const ProfilerView: React.FC<ProfilerViewProps> = ({ host, port, name }) => {
 				</select>
 
 				{/* Session name input */}
-				<input
-					type="text"
-					placeholder="Session name (optional)"
-					value={sessionName}
-					onChange={(e) => setSessionName(e.target.value)}
-					style={styles.sessionInput}
-					disabled={isActive}
-				/>
+				<input type="text" placeholder="Session name (optional)" value={sessionName} onChange={(e) => setSessionName(e.target.value)} style={styles.sessionInput} disabled={isActive} />
 
 				{/* Start or Stop button */}
 				{!isActive ? (
@@ -742,11 +752,7 @@ const ProfilerView: React.FC<ProfilerViewProps> = ({ host, port, name }) => {
 			{/* Status bar */}
 			{status && (
 				<div style={{ ...styles.statusBar, ...(isActive ? styles.statusActive : styles.statusInactive) }}>
-					<strong>Status:</strong>{' '}
-					{isActive
-						? `Profiling "${status.session}" (owned by ${status.owner}, ${status.runtime?.toFixed(1)}s)`
-						: 'Idle'
-					}
+					<strong>Status:</strong> {isActive ? `Profiling "${status.session}" (owned by ${status.owner}, ${status.runtime?.toFixed(1)}s)` : 'Idle'}
 					{!isActive && status.has_report && ' — report available'}
 				</div>
 			)}
@@ -757,11 +763,7 @@ const ProfilerView: React.FC<ProfilerViewProps> = ({ host, port, name }) => {
 					{/* Style dropdown */}
 					<span style={styles.vizLabel}>
 						Style:
-						<select
-							style={styles.smallSelect}
-							value={vizStyle}
-							onChange={(e) => setVizStyle(e.target.value as VizStyle)}
-						>
+						<select style={styles.smallSelect} value={vizStyle} onChange={(e) => setVizStyle(e.target.value as VizStyle)}>
 							<option value="sunburst">Sunburst</option>
 							<option value="icicle">Icicle</option>
 						</select>
@@ -770,13 +772,11 @@ const ProfilerView: React.FC<ProfilerViewProps> = ({ host, port, name }) => {
 					{/* Depth dropdown */}
 					<span style={styles.vizLabel}>
 						Depth:
-						<select
-							style={styles.smallSelect}
-							value={vizDepth}
-							onChange={(e) => setVizDepth(Number(e.target.value))}
-						>
+						<select style={styles.smallSelect} value={vizDepth} onChange={(e) => setVizDepth(Number(e.target.value))}>
 							{DEPTH_OPTIONS.map((d) => (
-								<option key={d} value={d}>{d}</option>
+								<option key={d} value={d}>
+									{d}
+								</option>
 							))}
 						</select>
 					</span>
@@ -784,58 +784,30 @@ const ProfilerView: React.FC<ProfilerViewProps> = ({ host, port, name }) => {
 					{/* Cutoff dropdown */}
 					<span style={styles.vizLabel}>
 						Cutoff:
-						<select
-							style={styles.smallSelect}
-							value={vizCutoff}
-							onChange={(e) => setVizCutoff(Number(e.target.value))}
-						>
+						<select style={styles.smallSelect} value={vizCutoff} onChange={(e) => setVizCutoff(Number(e.target.value))}>
 							{CUTOFF_OPTIONS.map((opt) => (
-								<option key={opt.label} value={opt.value}>{opt.label}</option>
+								<option key={opt.label} value={opt.value}>
+									{opt.label}
+								</option>
 							))}
 						</select>
 					</span>
 
 					{/* System calls checkbox — off by default, only show project code */}
 					<label style={{ ...styles.vizLabel, cursor: 'pointer' }}>
-						<input
-							type="checkbox"
-							checked={showSystemCalls}
-							onChange={(e) => setShowSystemCalls(e.target.checked)}
-						/>
+						<input type="checkbox" checked={showSystemCalls} onChange={(e) => setShowSystemCalls(e.target.checked)} />
 						System calls
 					</label>
 
 					{/* Reset Root button */}
-					<button
-						style={styles.smallButton}
-						onClick={handleResetRoot}
-						disabled={vizRoot === originalRoot}
-					>
+					<button style={styles.smallButton} onClick={handleResetRoot} disabled={vizRoot === originalRoot}>
 						Reset Root
 					</button>
 				</div>
 			)}
 
 			{/* Visualisation area */}
-			<div style={styles.vizArea}>
-				{vizStyle === 'sunburst' ? (
-					<SunburstChart
-						root={vizRoot}
-						totalTime={totalTime}
-						maxDepth={vizDepth}
-						cutoff={vizCutoff}
-						onRootChange={handleRootChange}
-					/>
-				) : (
-					<FlameGraph
-						root={vizRoot}
-						totalTime={totalTime}
-						maxDepth={vizDepth}
-						cutoff={vizCutoff}
-						onRootChange={handleRootChange}
-					/>
-				)}
-			</div>
+			<div style={styles.vizArea}>{vizStyle === 'sunburst' ? <SunburstChart root={vizRoot} totalTime={totalTime} maxDepth={vizDepth} cutoff={vizCutoff} onRootChange={handleRootChange} /> : <FlameGraph root={vizRoot} totalTime={totalTime} maxDepth={vizDepth} cutoff={vizCutoff} onRootChange={handleRootChange} />}</div>
 
 			{/* Call stack — shows path from root to current viz root */}
 			{hasData && callStack.length > 1 && (
@@ -844,10 +816,7 @@ const ProfilerView: React.FC<ProfilerViewProps> = ({ host, port, name }) => {
 					{callStack.map((node, i) => (
 						<React.Fragment key={i}>
 							{i > 0 && <span style={styles.callStackSep}>{'\u2192'}</span>}
-							<button
-								style={styles.callStackLink}
-								onClick={() => handleRootChange(node)}
-							>
+							<button style={styles.callStackLink} onClick={() => handleRootChange(node)}>
 								{node.name === '<root>' ? 'All' : node.name}
 							</button>
 						</React.Fragment>
@@ -857,12 +826,7 @@ const ProfilerView: React.FC<ProfilerViewProps> = ({ host, port, name }) => {
 
 			{/* Stats table — always visible below the viz */}
 			<div style={styles.tableArea}>
-				<StatsTable
-					treeData={treeData}
-					vizRoot={vizRoot}
-					onRootChange={handleRootChange}
-					showSystemCalls={showSystemCalls}
-				/>
+				<StatsTable treeData={treeData} vizRoot={vizRoot} onRootChange={handleRootChange} showSystemCalls={showSystemCalls} />
 			</div>
 
 			{/* Report modal */}
@@ -880,13 +844,11 @@ const ProfilerView: React.FC<ProfilerViewProps> = ({ host, port, name }) => {
 						tabIndex={-1}
 					>
 						<div style={styles.modalHeader}>
-							<h3 id="profiler-report-title" style={{ margin: 0, fontSize: 14 }}>Raw Profile Report</h3>
+							<h3 id="profiler-report-title" style={{ margin: 0, fontSize: 14 }}>
+								Raw Profile Report
+							</h3>
 							{/* Top-right close button. */}
-							<button
-								style={styles.button}
-								onClick={() => setShowReportModal(false)}
-								aria-label="Close"
-							>
+							<button style={styles.button} onClick={() => setShowReportModal(false)} aria-label="Close">
 								✕
 							</button>
 						</div>

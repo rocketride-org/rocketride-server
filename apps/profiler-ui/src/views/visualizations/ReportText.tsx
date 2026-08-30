@@ -131,14 +131,17 @@ const ReportText: React.FC<ReportTextProps> = ({ report }) => {
 	const handleCopy = useCallback(() => {
 		// Try the modern Clipboard API first
 		if (navigator.clipboard?.writeText) {
-			navigator.clipboard.writeText(report).then(() => {
-				setCopied(true);
-				setTimeout(() => setCopied(false), 2000);
-			}).catch((err) => {
-				console.log('[ReportText] Clipboard API failed, trying fallback:', err);
-				// Fall back to execCommand for restricted environments
-				copyViaExecCommand(report, setCopied);
-			});
+			navigator.clipboard
+				.writeText(report)
+				.then(() => {
+					setCopied(true);
+					setTimeout(() => setCopied(false), 2000);
+				})
+				.catch((err) => {
+					console.log('[ReportText] Clipboard API failed, trying fallback:', err);
+					// Fall back to execCommand for restricted environments
+					copyViaExecCommand(report, setCopied);
+				});
 		} else {
 			// Clipboard API not available — use legacy fallback
 			copyViaExecCommand(report, setCopied);
@@ -153,9 +156,7 @@ const ReportText: React.FC<ReportTextProps> = ({ report }) => {
 				</button>
 			</div>
 			<div style={styles.reportContainer}>
-				<pre style={styles.reportPre}>
-					{report || 'No profiling report available. Start and stop a session to generate one.'}
-				</pre>
+				<pre style={styles.reportPre}>{report || 'No profiling report available. Start and stop a session to generate one.'}</pre>
 			</div>
 		</div>
 	);

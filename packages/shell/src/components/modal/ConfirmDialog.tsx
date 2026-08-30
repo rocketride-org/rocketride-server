@@ -57,18 +57,7 @@ export interface IConfirmDialogProps {
  * @param props - {@link IConfirmDialogProps}.
  * @returns The confirm dialog element.
  */
-export function ConfirmDialog({
-	title,
-	message,
-	confirmLabel = 'Save',
-	cancelLabel = 'Cancel',
-	secondaryLabel,
-	onConfirm,
-	onCancel,
-	onSecondary,
-	destructive,
-	confirmDisabled,
-}: IConfirmDialogProps): React.ReactElement {
+export function ConfirmDialog({ title, message, confirmLabel = 'Save', cancelLabel = 'Cancel', secondaryLabel, onConfirm, onCancel, onSecondary, destructive, confirmDisabled }: IConfirmDialogProps): React.ReactElement {
 	// Auto-focus the confirm button on open, matching native dialog behavior.
 	const confirmRef = useRef<HTMLButtonElement>(null);
 	useEffect(() => {

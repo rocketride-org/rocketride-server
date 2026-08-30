@@ -29,11 +29,4 @@
 // =============================================================================
 
 export { Explorer as DocExplorer } from '../../modules/explorer';
-export type {
-	IExplorerProps as DocExplorerProps,
-	ExplorerConfig as DocExplorerConfig,
-	ExplorerEntry as DocEntry,
-	ExplorerChild as DocEntryChild,
-	ExplorerStatus as DocEntryStatus,
-	IVirtualFileSystem,
-} from '../../modules/explorer';
+export type { IExplorerProps as DocExplorerProps, ExplorerConfig as DocExplorerConfig, ExplorerEntry as DocEntry, ExplorerChild as DocEntryChild, ExplorerStatus as DocEntryStatus, IVirtualFileSystem } from '../../modules/explorer';

@@ -1,11 +1,11 @@
 /**
  * Incremental Directory Sync Utility
- * 
+ *
  * Provides smart directory synchronization that only copies changed files.
  */
 const path = require('path');
 const { exists, stat, copyFileEnsure, unlink, filesEqual } = require('./fs');
-const { setState, } = require('./state');
+const { setState } = require('./state');
 const { DIST_ROOT } = require('./paths');
 const SERVER_DIR = path.join(DIST_ROOT, 'server');
 
@@ -14,9 +14,9 @@ const SERVER_DIR = path.join(DIST_ROOT, 'server');
  * - Only copies files that are new or modified (based on size + content)
  * - Removes files in dest that don't exist in source in MIRROR mode (default)
  * - Ignores files and directories by specified patterns (default: '\*\*\/\_\_pycache\_\_\/\*\*')
- * 
+ *
  * Use this when you want dest to be an exact mirror of source.
- * 
+ *
  * @param {string} src - Source directory path
  * @param {string} dest - Destination directory path
  * @param {Object} options - Options
@@ -29,98 +29,95 @@ const SERVER_DIR = path.join(DIST_ROOT, 'server');
  * @returns {Promise<{ added: number, updated: number, deleted: number, changed: number, unchanged: number }>}
  */
 async function syncDir(src, dest, options = {}, stats = { added: 0, updated: 0, deleted: 0, changed: 0, unchanged: 0 }) {
-    const { glob } = require('glob');
-    
-    // Check source dir
-    if (!(await stat(src)).isDirectory()) {
-        throw new Error(`Source path ${src} is not a directory`);
-    }
+	const { glob } = require('glob');
 
-    // Check dest dir
-    if (await exists(dest) && !(await stat(dest)).isDirectory()) {
-        throw new Error(`Destination path ${dest} is not a directory`);
-    }
+	// Check source dir
+	if (!(await stat(src)).isDirectory()) {
+		throw new Error(`Source path ${src} is not a directory`);
+	}
 
-    // Default stats
-    stats.added = stats.added || 0;
-    stats.updated = stats.updated || 0;
-    stats.deleted = stats.deleted || 0;
-    stats.changed = stats.changed || 0;
-    stats.unchanged = stats.unchanged || 0;
+	// Check dest dir
+	if ((await exists(dest)) && !(await stat(dest)).isDirectory()) {
+		throw new Error(`Destination path ${dest} is not a directory`);
+	}
 
-    const pattern = options.pattern || '**';
-    const ignore = options.ignore || ['**/__pycache__/**'];
-    const dryRun = options.dryRun === true;
+	// Default stats
+	stats.added = stats.added || 0;
+	stats.updated = stats.updated || 0;
+	stats.deleted = stats.deleted || 0;
+	stats.changed = stats.changed || 0;
+	stats.unchanged = stats.unchanged || 0;
 
-    let changed = false;
+	const pattern = options.pattern || '**';
+	const ignore = options.ignore || ['**/__pycache__/**'];
+	const dryRun = options.dryRun === true;
 
-    // Get source files
-    const srcFiles = new Set(await glob(pattern, { cwd: src, nodir: true, ignore: ignore }));
+	let changed = false;
 
-    // Get dest files — skip glob when dest does not exist yet (clean tree / first sync).
-    // glob(..., { cwd: dest }) throws or misbehaves if cwd is missing.
-    const destFiles = (await exists(dest))
-        ? new Set(await glob(pattern, { cwd: dest, nodir: true, ignore: ignore }))
-        : new Set();
+	// Get source files
+	const srcFiles = new Set(await glob(pattern, { cwd: src, nodir: true, ignore: ignore }));
 
-    // Process source files - copy new/modified
-    for (const name of srcFiles) {
-        const srcPath = path.join(src, name);
-        const destPath = path.join(dest, name);
+	// Get dest files — skip glob when dest does not exist yet (clean tree / first sync).
+	// glob(..., { cwd: dest }) throws or misbehaves if cwd is missing.
+	const destFiles = (await exists(dest)) ? new Set(await glob(pattern, { cwd: dest, nodir: true, ignore: ignore })) : new Set();
 
-        if (destFiles.has(name)) {
-            const srcStat = await stat(srcPath);
-            const destStat = await stat(destPath);
+	// Process source files - copy new/modified
+	for (const name of srcFiles) {
+		const srcPath = path.join(src, name);
+		const destPath = path.join(dest, name);
 
-            // Skip only when the file is genuinely unchanged. Size is a cheap
-            // pre-filter; when sizes match we must compare content, because a
-            // same-length edit (e.g. a swapped bundle-hash string in index.html)
-            // does not change the size and an mtime-ordering gate misses it — a
-            // stale file then keeps referencing a deleted sibling (#1477).
-            if (srcStat.size === destStat.size && await filesEqual(srcPath, destPath)) {
-                stats.unchanged++;
-            } else {
-                if (!dryRun) {
-                    await copyFileEnsure(srcPath, destPath);
-                }
-                ++stats.updated, ++stats.changed, (changed = true);
-            }
+		if (destFiles.has(name)) {
+			const srcStat = await stat(srcPath);
+			const destStat = await stat(destPath);
 
-            destFiles.delete(name);
+			// Skip only when the file is genuinely unchanged. Size is a cheap
+			// pre-filter; when sizes match we must compare content, because a
+			// same-length edit (e.g. a swapped bundle-hash string in index.html)
+			// does not change the size and an mtime-ordering gate misses it — a
+			// stale file then keeps referencing a deleted sibling (#1477).
+			if (srcStat.size === destStat.size && (await filesEqual(srcPath, destPath))) {
+				stats.unchanged++;
+			} else {
+				if (!dryRun) {
+					await copyFileEnsure(srcPath, destPath);
+				}
+				(++stats.updated, ++stats.changed, (changed = true));
+			}
 
-        } else {
-            if (!dryRun) {
-                await copyFileEnsure(srcPath, destPath);
-            }
-            ++stats.added, ++stats.changed, (changed = true);
-        }
-    }
+			destFiles.delete(name);
+		} else {
+			if (!dryRun) {
+				await copyFileEnsure(srcPath, destPath);
+			}
+			(++stats.added, ++stats.changed, (changed = true));
+		}
+	}
 
-    // Remove dest files that don't exist in source
-    if (options.mirror === undefined || options.mirror) {
-        for (const name of destFiles) {
-            const destPath = path.join(dest, name);
-            if (!dryRun) {
-                await unlink(destPath);
-            }
-            ++stats.deleted, ++stats.changed, changed = true;
-        }
-    }
+	// Remove dest files that don't exist in source
+	if (options.mirror === undefined || options.mirror) {
+		for (const name of destFiles) {
+			const destPath = path.join(dest, name);
+			if (!dryRun) {
+				await unlink(destPath);
+			}
+			(++stats.deleted, ++stats.changed, (changed = true));
+		}
+	}
 
-    // Update list of dest files from this source for packaging
-    if (options.package && changed && !dryRun) {
-        const relPaths = Array.from(srcFiles, (name) => {
-            const destPath = path.join(dest, name);
-            const relPath = path.relative(SERVER_DIR, destPath);
-            if (relPath.startsWith('..')) {
-                throw new Error(`Destination path ${destPath} is not a subdirectory of ${SERVER_DIR}`);
-            }
-            return relPath;
-        });
-        await setState(['package', src], relPaths);
-    }
+	// Update list of dest files from this source for packaging
+	if (options.package && changed && !dryRun) {
+		const relPaths = Array.from(srcFiles, (name) => {
+			const destPath = path.join(dest, name);
+			const relPath = path.relative(SERVER_DIR, destPath);
+			if (relPath.startsWith('..')) {
+				throw new Error(`Destination path ${destPath} is not a subdirectory of ${SERVER_DIR}`);
+			}
+			return relPath;
+		});
+		await setState(['package', src], relPaths);
+	}
 
-    return stats;
+	return stats;
 }
 
 /**
@@ -132,59 +129,59 @@ async function syncDir(src, dest, options = {}, stats = { added: 0, updated: 0, 
  * @param {Object} stats - Shared stats object
  */
 async function syncFile(src, dest, options = {}, stats = { added: 0, updated: 0, deleted: 0, changed: 0, unchanged: 0 }) {
-    const dryRun = options.dryRun === true;
+	const dryRun = options.dryRun === true;
 
-    // Check source file
-    const srcStat = await stat(src);
-    if (!srcStat.isFile()) {
-        throw new Error(`Source path ${src} is not a file`);
-    }
+	// Check source file
+	const srcStat = await stat(src);
+	if (!srcStat.isFile()) {
+		throw new Error(`Source path ${src} is not a file`);
+	}
 
-    // Check destination file
-    const destStat = await exists(dest) ? await stat(dest) : null;
-    if (destStat && !destStat.isFile()) {
-        throw new Error(`Destination path ${dest} is not a file`);
-    }
+	// Check destination file
+	const destStat = (await exists(dest)) ? await stat(dest) : null;
+	if (destStat && !destStat.isFile()) {
+		throw new Error(`Destination path ${dest} is not a file`);
+	}
 
-    // Default stats
-    stats.added = stats.added || 0;
-    stats.updated = stats.updated || 0;
-    stats.deleted = stats.deleted || 0;
-    stats.changed = stats.changed || 0;
-    stats.unchanged = stats.unchanged || 0;
+	// Default stats
+	stats.added = stats.added || 0;
+	stats.updated = stats.updated || 0;
+	stats.deleted = stats.deleted || 0;
+	stats.changed = stats.changed || 0;
+	stats.unchanged = stats.unchanged || 0;
 
-    let changed = false;
+	let changed = false;
 
-    // Process source file - copy new/modified
-    if (destStat) {
-        // Same content-comparison rule as syncDir: size pre-filter, then a
-        // byte compare on same-size files so same-length edits are not
-        // skipped by an mtime-ordering heuristic (#1477).
-        if (srcStat.size === destStat.size && await filesEqual(src, dest)) {
-            stats.unchanged++;
-        } else {
-            if (!dryRun) {
-                await copyFileEnsure(src, dest);
-            }
-            ++stats.updated, ++stats.changed, (changed = true);
-        }
-    } else {
-        if (!dryRun) {
-            await copyFileEnsure(src, dest);
-        }
-        ++stats.added, ++stats.changed, (changed = true);
-    }
+	// Process source file - copy new/modified
+	if (destStat) {
+		// Same content-comparison rule as syncDir: size pre-filter, then a
+		// byte compare on same-size files so same-length edits are not
+		// skipped by an mtime-ordering heuristic (#1477).
+		if (srcStat.size === destStat.size && (await filesEqual(src, dest))) {
+			stats.unchanged++;
+		} else {
+			if (!dryRun) {
+				await copyFileEnsure(src, dest);
+			}
+			(++stats.updated, ++stats.changed, (changed = true));
+		}
+	} else {
+		if (!dryRun) {
+			await copyFileEnsure(src, dest);
+		}
+		(++stats.added, ++stats.changed, (changed = true));
+	}
 
-    // Update list of dest files from this source for packaging
-    if (options.package && changed && !dryRun) {
-        const relPath = path.relative(SERVER_DIR, dest);
-        if (relPath.startsWith('..')) {
-            throw new Error(`Destination path ${dest} is not a subdirectory of ${SERVER_DIR}`);
-        }
-        await setState(['package', src], [ relPath ]);
-    }
+	// Update list of dest files from this source for packaging
+	if (options.package && changed && !dryRun) {
+		const relPath = path.relative(SERVER_DIR, dest);
+		if (relPath.startsWith('..')) {
+			throw new Error(`Destination path ${dest} is not a subdirectory of ${SERVER_DIR}`);
+		}
+		await setState(['package', src], [relPath]);
+	}
 
-    return stats;
+	return stats;
 }
 
 /**
@@ -194,21 +191,21 @@ async function syncFile(src, dest, options = {}, stats = { added: 0, updated: 0,
  * @returns {string}
  */
 function formatSyncStats(stats, options = {}) {
-    const prefix = options.dryRun ? '(dry run) ' : '';
-    if (stats.changed === 0) {
-        return `${prefix}No changes (${stats.unchanged || 0} files up to date)`;
-    }
+	const prefix = options.dryRun ? '(dry run) ' : '';
+	if (stats.changed === 0) {
+		return `${prefix}No changes (${stats.unchanged || 0} files up to date)`;
+	}
 
-    const parts = [];
-    if (stats.added > 0) parts.push(`+${stats.added} added`);
-    if (stats.updated > 0) parts.push(`~${stats.updated} updated`);
-    if (stats.deleted > 0) parts.push(`-${stats.deleted} deleted`);
-    if (stats.unchanged > 0) parts.push(`${stats.unchanged} unchanged`);
-    return prefix + parts.join(', ');
+	const parts = [];
+	if (stats.added > 0) parts.push(`+${stats.added} added`);
+	if (stats.updated > 0) parts.push(`~${stats.updated} updated`);
+	if (stats.deleted > 0) parts.push(`-${stats.deleted} deleted`);
+	if (stats.unchanged > 0) parts.push(`${stats.unchanged} unchanged`);
+	return prefix + parts.join(', ');
 }
 
 module.exports = {
-    syncDir,
-    syncFile,
-    formatSyncStats
+	syncDir,
+	syncFile,
+	formatSyncStats,
 };

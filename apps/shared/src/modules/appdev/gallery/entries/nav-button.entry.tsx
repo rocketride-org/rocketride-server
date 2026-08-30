@@ -33,23 +33,14 @@ import type { IGalleryDemoProps, IGalleryEntry, KnobValues } from '../galleryTyp
 /** Live demo: one NavButton in a sidebar-width column. */
 const NavButtonDemo: React.FC<IGalleryDemoProps> = ({ knobs }) => (
 	<div style={{ width: knobs.collapsed ? 56 : 220 }}>
-		<NavButton
-			icon={BxRocket}
-			label={String(knobs.label)}
-			isActive={Boolean(knobs.isActive)}
-			collapsed={Boolean(knobs.collapsed)}
-			onClick={() => undefined}
-		/>
+		<NavButton icon={BxRocket} label={String(knobs.label)} isActive={Boolean(knobs.isActive)} collapsed={Boolean(knobs.collapsed)} onClick={() => undefined} />
 	</div>
 );
 
 /** Snippet builder mirroring the current knob state. */
 const buildCode = (knobs: KnobValues): string => {
 	// Only non-default props appear, so the copied code stays minimal
-	const attrs = [
-		knobs.isActive ? ' isActive' : '',
-		knobs.collapsed ? ' collapsed' : ' collapsed={collapsed}',
-	].join('');
+	const attrs = [knobs.isActive ? ' isActive' : '', knobs.collapsed ? ' collapsed' : ' collapsed={collapsed}'].join('');
 	return `import { NavButton, BxRocket } from 'shell';
 
 <NavButton icon={BxRocket} label={${JSON.stringify(String(knobs.label))}}${attrs} onClick={openView} />`;
@@ -73,7 +64,7 @@ export const navButtonEntry: IGalleryEntry = {
 		{ name: 'icon', type: 'IconComponent', dir: 'in', required: true, note: 'Icon component to render (any Bx* icon).' },
 		{ name: 'label', type: 'string', dir: 'in', required: true, note: 'Text label shown when expanded; also the tooltip fallback.' },
 		{ name: 'isActive', type: 'boolean', dir: 'in', note: 'Marks this row as the currently active item.' },
-		{ name: 'collapsed', type: 'boolean', dir: 'in', required: true, note: 'Icon-rail rendering - pass the frame\'s collapsed state.' },
+		{ name: 'collapsed', type: 'boolean', dir: 'in', required: true, note: "Icon-rail rendering - pass the frame's collapsed state." },
 		{ name: 'iconColor', type: 'string', dir: 'in', note: 'Override for the icon colour.' },
 		{ name: 'title', type: 'string', dir: 'in', note: 'Tooltip override; falls back to label.' },
 		{ name: 'onClick', type: '() => void', dir: 'out', note: 'Row activation handler.' },

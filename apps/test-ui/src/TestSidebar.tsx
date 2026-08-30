@@ -183,29 +183,19 @@ const TestSidebar: React.FC = () => {
 			<div style={styles.connectionsSection}>
 				{!collapsed && <div style={styles.sectionLabel}>Connections</div>}
 
-				{connections.map((conn) => (
+				{connections.map((conn) =>
 					collapsed ? (
-						<button
-							key={conn.id}
-							style={styles.connItemCollapsed}
-							onClick={() => handleOpenConnection(conn)}
-							title={`${conn.name} (${conn.url})`}
-						>
+						<button key={conn.id} style={styles.connItemCollapsed} onClick={() => handleOpenConnection(conn)} title={`${conn.name} (${conn.url})`}>
 							<BxDesktop size={18} />
 						</button>
 					) : (
-						<button
-							key={conn.id}
-							style={styles.connItem}
-							onClick={() => handleOpenConnection(conn)}
-							title={conn.url}
-						>
+						<button key={conn.id} style={styles.connItem} onClick={() => handleOpenConnection(conn)} title={conn.url}>
 							<BxDesktop size={16} color="var(--rr-text-secondary)" />
 							<span style={styles.connName}>{conn.name}</span>
 							<span style={styles.connPort}>{conn.url}</span>
 						</button>
 					)
-				))}
+				)}
 			</div>
 
 			{/* Sub-navigation (only when a tab is active) */}
@@ -213,41 +203,11 @@ const TestSidebar: React.FC = () => {
 				<div style={styles.navSection}>
 					{!collapsed && <div style={styles.sectionLabel}>Views</div>}
 
-					<NavButton
-						icon={BxGridAlt}
-						label="Dashboard"
-						collapsed={collapsed}
-						isActive={currentView === 'dashboard'}
-						onClick={() => requestView('dashboard')}
-					/>
-					<NavButton
-						icon={BxCog}
-						label="Settings"
-						collapsed={collapsed}
-						isActive={currentView === 'settings'}
-						onClick={() => requestView('settings')}
-					/>
-					<NavButton
-						icon={BxListUl}
-						label="Events"
-						collapsed={collapsed}
-						isActive={currentView === 'events'}
-						onClick={() => requestView('events')}
-					/>
-					<NavButton
-						icon={BxStop}
-						label="Errors"
-						collapsed={collapsed}
-						isActive={currentView === 'errors'}
-						onClick={() => requestView('errors')}
-					/>
-					<NavButton
-						icon={BxPlay}
-						label="Scenarios"
-						collapsed={collapsed}
-						isActive={currentView === 'scenarios'}
-						onClick={() => requestView('scenarios')}
-					/>
+					<NavButton icon={BxGridAlt} label="Dashboard" collapsed={collapsed} isActive={currentView === 'dashboard'} onClick={() => requestView('dashboard')} />
+					<NavButton icon={BxCog} label="Settings" collapsed={collapsed} isActive={currentView === 'settings'} onClick={() => requestView('settings')} />
+					<NavButton icon={BxListUl} label="Events" collapsed={collapsed} isActive={currentView === 'events'} onClick={() => requestView('events')} />
+					<NavButton icon={BxStop} label="Errors" collapsed={collapsed} isActive={currentView === 'errors'} onClick={() => requestView('errors')} />
+					<NavButton icon={BxPlay} label="Scenarios" collapsed={collapsed} isActive={currentView === 'scenarios'} onClick={() => requestView('scenarios')} />
 				</div>
 			)}
 		</div>

@@ -317,10 +317,7 @@ export const getComponentFromNode = (node: ISerializableNode, edges?: Edge[]): I
 	// Persist the node's measured dimensions; fall back to the default node
 	// size when ReactFlow has not (fully) measured the node yet — ReactFlow
 	// reports per-axis optional values before layout completes.
-	const measured: IDimensions =
-		node.measured?.width != null && node.measured?.height != null
-			? { width: node.measured.width, height: node.measured.height }
-			: { width: 150, height: 36 };
+	const measured: IDimensions = node.measured?.width != null && node.measured?.height != null ? { width: node.measured.width, height: node.measured.height } : { width: 150, height: 36 };
 
 	// Build the base component with UI metadata
 	const component: IProjectComponent = {

@@ -41,7 +41,10 @@ const SidebarFooterDemo: React.FC<IGalleryDemoProps> = ({ knobs }) => (
 			menuItems={[
 				{ id: 'settings', label: 'Settings', icon: BxCog, onClick: () => undefined },
 				{
-					id: 'theme', label: 'Theme', icon: BxBookOpen, submenu: [
+					id: 'theme',
+					label: 'Theme',
+					icon: BxBookOpen,
+					submenu: [
 						{ id: 'dark', label: 'Dark', checked: true, onClick: () => undefined },
 						{ id: 'light', label: 'Light', onClick: () => undefined },
 					],

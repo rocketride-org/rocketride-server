@@ -111,7 +111,9 @@ export class AppScreenProvider implements vscode.CustomReadonlyEditorProvider {
 			const raw = await vscode.workspace.fs.readFile(uri);
 			const parsed = JSON.parse(Buffer.from(raw).toString('utf8')) as { id?: string };
 			if (parsed?.id) return parsed.id;
-		} catch { /* malformed/empty marker — fall through to the binding */ }
+		} catch {
+			/* malformed/empty marker — fall through to the binding */
+		}
 		// Fallback: the appManifest binding of the containing folder
 		const folder = uri.with({ path: uri.path.slice(0, uri.path.lastIndexOf('/')) }).fsPath;
 		const apps = await scanWorkspaceApps();
@@ -167,7 +169,9 @@ export class AppScreenProvider implements vscode.CustomReadonlyEditorProvider {
 						try {
 							const token = await this.connectionManager.resolveAuthCredential();
 							if (token) await panel.webview.postMessage({ type: 'appdev:auth', token });
-						} catch { /* signed out — the preview shows its sign-in prompt */ }
+						} catch {
+							/* signed out — the preview shows its sign-in prompt */
+						}
 						// The resolve-time watch start can lose a race with the
 						// workspace scan — retry here (idempotent when running)
 						if (app && !getWatchManager()?.isRunning(appId)) void ensureWatch(app);
@@ -210,7 +214,9 @@ export class AppScreenProvider implements vscode.CustomReadonlyEditorProvider {
 						try {
 							const token = await this.connectionManager.resolveAuthCredential();
 							if (token) await panel.webview.postMessage({ type: 'appdev:auth', token });
-						} catch { /* sign-in abandoned — preview keeps its prompt */ }
+						} catch {
+							/* sign-in abandoned — preview keeps its prompt */
+						}
 						break;
 					}
 

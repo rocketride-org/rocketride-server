@@ -111,7 +111,10 @@ const ExplorerSidebar: React.FC = () => {
 	// --- Refresh file list (recursive) ----------------------------------------
 
 	const refresh = useCallback(async () => {
-		if (!client || !isConnected) { setEntries([]); return; }
+		if (!client || !isConnected) {
+			setEntries([]);
+			return;
+		}
 		try {
 			const allEntries = await listRecursive(client, '@');
 			setEntries(allEntries);
@@ -121,162 +124,175 @@ const ExplorerSidebar: React.FC = () => {
 	}, [client, isConnected]);
 
 	// Refresh on mount and when connection changes
-	useEffect(() => { refresh(); }, [refresh]);
+	useEffect(() => {
+		refresh();
+	}, [refresh]);
 
 	// --- Open a file ----------------------------------------------------------
 
-	const handleOpenFile = useCallback((path: string) => {
-		const entry = entries.find((e) => e.path === path);
-		// Don't try to open directories as documents
-		if (entry?.type === 'dir') return;
-		getDocs()?.openDocument(path);
-	}, [entries]);
+	const handleOpenFile = useCallback(
+		(path: string) => {
+			const entry = entries.find((e) => e.path === path);
+			// Don't try to open directories as documents
+			if (entry?.type === 'dir') return;
+			getDocs()?.openDocument(path);
+		},
+		[entries]
+	);
 
 	// --- File management (rename, delete, createFile, createFolder) -----------
 
-	const handleFileManage = useCallback(async (
-		action: 'rename' | 'delete' | 'createFolder' | 'createFile',
-		path: string,
-		newName?: string,
-	) => {
-		if (!client) return;
-		try {
-			switch (action) {
-				case 'rename': {
-					if (!newName) break;
-					const dir = path.includes('/') ? path.substring(0, path.lastIndexOf('/')) : '';
-					const newPath = dir ? `${dir}/${newName}` : newName;
-					if (newPath === path) break;
-					await client.fsRename(path, newPath);
-					// Update open editor tabs
-					const docs = getDocs();
-					if (docs) {
-						const s = docs.getState();
-						const editorIds = Object.entries(s.editors)
-							.filter(([, ed]) => ed.documentUri === path)
-							.map(([id]) => id);
-						for (const eid of editorIds) docs.closeEditor(eid);
-						if (editorIds.length > 0) await docs.openDocument(newPath);
+	const handleFileManage = useCallback(
+		async (action: 'rename' | 'delete' | 'createFolder' | 'createFile', path: string, newName?: string) => {
+			if (!client) return;
+			try {
+				switch (action) {
+					case 'rename': {
+						if (!newName) break;
+						const dir = path.includes('/') ? path.substring(0, path.lastIndexOf('/')) : '';
+						const newPath = dir ? `${dir}/${newName}` : newName;
+						if (newPath === path) break;
+						await client.fsRename(path, newPath);
+						// Update open editor tabs
+						const docs = getDocs();
+						if (docs) {
+							const s = docs.getState();
+							const editorIds = Object.entries(s.editors)
+								.filter(([, ed]) => ed.documentUri === path)
+								.map(([id]) => id);
+							for (const eid of editorIds) docs.closeEditor(eid);
+							if (editorIds.length > 0) await docs.openDocument(newPath);
+						}
+						break;
 					}
-					break;
-				}
-				case 'delete': {
-					const stat = await client.fsStat(path);
-					if (stat.type === 'dir') {
-						await client.fsRmdir(path, true);
-					} else {
-						await client.fsDelete(path);
+					case 'delete': {
+						const stat = await client.fsStat(path);
+						if (stat.type === 'dir') {
+							await client.fsRmdir(path, true);
+						} else {
+							await client.fsDelete(path);
+						}
+						getDocs()?.discardDocument(path);
+						break;
 					}
-					getDocs()?.discardDocument(path);
-					break;
+					case 'createFile': {
+						await client.fsWriteString(path, '');
+						getDocs()?.openDocument(path);
+						break;
+					}
+					case 'createFolder': {
+						await client.fsMkdir(path);
+						break;
+					}
 				}
-				case 'createFile': {
-					await client.fsWriteString(path, '');
-					getDocs()?.openDocument(path);
-					break;
-				}
-				case 'createFolder': {
-					await client.fsMkdir(path);
-					break;
-				}
+				await refresh();
+			} catch (err) {
+				console.error(`[ExplorerSidebar] ${action} failed:`, err);
 			}
-			await refresh();
-		} catch (err) {
-			console.error(`[ExplorerSidebar] ${action} failed:`, err);
-		}
-	}, [client, refresh]);
+		},
+		[client, refresh]
+	);
 
 	// --- Move (drag within tree) ----------------------------------------------
 
-	const handleMove = useCallback(async (sourcePath: string, targetDir: string) => {
-		if (!client) return;
-		try {
-			const name = sourcePath.includes('/') ? sourcePath.substring(sourcePath.lastIndexOf('/') + 1) : sourcePath;
-			// The tree is rooted at the '@' mount (listRecursive above), so an
-			// empty targetDir IS that root — carry '@' through instead of
-			// letting a bare name silently target the plain user store.
-			const newPath = `${targetDir || '@'}/${name}`;
-			if (newPath === sourcePath) return;
-			await client.fsRename(sourcePath, newPath);
-			// Keep open editor tabs in sync with the move.  A moved file must
-			// re-point its tab at the new path; a moved directory must re-point
-			// every open tab whose path lives under the old directory prefix.
-			const docs = getDocs();
-			if (docs) {
-				const s = docs.getState();
-				const dirPrefix = `${sourcePath}/`;
-				const affected = Object.entries(s.editors)
-					.map(([id, ed]) => ({ id, uri: ed.documentUri }))
-					.filter(({ uri }) => uri === sourcePath || uri.startsWith(dirPrefix));
-				// Compute each affected tab's new path, close the stale editors,
-				// then reopen at the relocated paths.
-				const reopenPaths: string[] = [];
-				for (const { id, uri } of affected) {
-					const movedUri = uri === sourcePath ? newPath : `${newPath}/${uri.slice(dirPrefix.length)}`;
-					reopenPaths.push(movedUri);
-					docs.closeEditor(id);
+	const handleMove = useCallback(
+		async (sourcePath: string, targetDir: string) => {
+			if (!client) return;
+			try {
+				const name = sourcePath.includes('/') ? sourcePath.substring(sourcePath.lastIndexOf('/') + 1) : sourcePath;
+				// The tree is rooted at the '@' mount (listRecursive above), so an
+				// empty targetDir IS that root — carry '@' through instead of
+				// letting a bare name silently target the plain user store.
+				const newPath = `${targetDir || '@'}/${name}`;
+				if (newPath === sourcePath) return;
+				await client.fsRename(sourcePath, newPath);
+				// Keep open editor tabs in sync with the move.  A moved file must
+				// re-point its tab at the new path; a moved directory must re-point
+				// every open tab whose path lives under the old directory prefix.
+				const docs = getDocs();
+				if (docs) {
+					const s = docs.getState();
+					const dirPrefix = `${sourcePath}/`;
+					const affected = Object.entries(s.editors)
+						.map(([id, ed]) => ({ id, uri: ed.documentUri }))
+						.filter(({ uri }) => uri === sourcePath || uri.startsWith(dirPrefix));
+					// Compute each affected tab's new path, close the stale editors,
+					// then reopen at the relocated paths.
+					const reopenPaths: string[] = [];
+					for (const { id, uri } of affected) {
+						const movedUri = uri === sourcePath ? newPath : `${newPath}/${uri.slice(dirPrefix.length)}`;
+						reopenPaths.push(movedUri);
+						docs.closeEditor(id);
+					}
+					for (const movedUri of reopenPaths) await docs.openDocument(movedUri);
 				}
-				for (const movedUri of reopenPaths) await docs.openDocument(movedUri);
+				await refresh();
+			} catch (err) {
+				console.error('[ExplorerSidebar] move failed:', err);
 			}
-			await refresh();
-		} catch (err) {
-			console.error('[ExplorerSidebar] move failed:', err);
-		}
-	}, [client, refresh]);
+		},
+		[client, refresh]
+	);
 
 	// --- Upload (drop from OS) ------------------------------------------------
 
-	const handleUpload = useCallback(async (files: File[], targetDir: string) => {
-		if (!client) return;
-		try {
-			for (const file of files) {
-				// Same root rule as handleMove: '' targetDir is the '@' mount.
-				const path = `${targetDir || '@'}/${file.name}`;
-				const { handle } = await client.fsOpen(path, 'w');
-				const chunkSize = 4 * 1024 * 1024; // 4 MB
-				try {
-					// Stream the file in chunks via File.slice so we never
-					// buffer the entire file in memory at once.
-					let offset = 0;
-					while (offset < file.size) {
-						const chunk = new Uint8Array(await file.slice(offset, offset + chunkSize).arrayBuffer());
-						await client.fsWrite(handle, chunk);
-						offset += chunkSize;
+	const handleUpload = useCallback(
+		async (files: File[], targetDir: string) => {
+			if (!client) return;
+			try {
+				for (const file of files) {
+					// Same root rule as handleMove: '' targetDir is the '@' mount.
+					const path = `${targetDir || '@'}/${file.name}`;
+					const { handle } = await client.fsOpen(path, 'w');
+					const chunkSize = 4 * 1024 * 1024; // 4 MB
+					try {
+						// Stream the file in chunks via File.slice so we never
+						// buffer the entire file in memory at once.
+						let offset = 0;
+						while (offset < file.size) {
+							const chunk = new Uint8Array(await file.slice(offset, offset + chunkSize).arrayBuffer());
+							await client.fsWrite(handle, chunk);
+							offset += chunkSize;
+						}
+					} finally {
+						// Always close the handle, even if a write throws mid-stream.
+						await client.fsClose(handle, 'w');
 					}
-				} finally {
-					// Always close the handle, even if a write throws mid-stream.
-					await client.fsClose(handle, 'w');
 				}
+				await refresh();
+			} catch (err) {
+				console.error('[ExplorerSidebar] upload failed:', err);
 			}
-			await refresh();
-		} catch (err) {
-			console.error('[ExplorerSidebar] upload failed:', err);
-		}
-	}, [client, refresh]);
+		},
+		[client, refresh]
+	);
 
 	// --- Download (kebab menu action) -----------------------------------------
 
-	const handleDownload = useCallback(async (path: string) => {
-		if (!client) return;
-		try {
-			const name = path.includes('/') ? path.substring(path.lastIndexOf('/') + 1) : path;
-			// Pass downloadName so the server bakes `Content-Disposition:
-			// attachment; filename="<name>"` into the URL (presigned/SAS for
-			// cloud, /task/fetch header for local). This makes the download
-			// filename work even for cross-origin cloud URLs, where the
-			// `<a download>` attribute is otherwise ignored.
-			const url = await client.fsGetUrl(path, undefined, name);
-			if (!url) return;
-			const a = document.createElement('a');
-			a.href = url;
-			a.download = name; // same-origin belt-and-suspenders
-			document.body.appendChild(a);
-			a.click();
-			a.remove();
-		} catch (err) {
-			console.error('[ExplorerSidebar] download failed:', err);
-		}
-	}, [client]);
+	const handleDownload = useCallback(
+		async (path: string) => {
+			if (!client) return;
+			try {
+				const name = path.includes('/') ? path.substring(path.lastIndexOf('/') + 1) : path;
+				// Pass downloadName so the server bakes `Content-Disposition:
+				// attachment; filename="<name>"` into the URL (presigned/SAS for
+				// cloud, /task/fetch header for local). This makes the download
+				// filename work even for cross-origin cloud URLs, where the
+				// `<a download>` attribute is otherwise ignored.
+				const url = await client.fsGetUrl(path, undefined, name);
+				if (!url) return;
+				const a = document.createElement('a');
+				a.href = url;
+				a.download = name; // same-origin belt-and-suspenders
+				document.body.appendChild(a);
+				a.click();
+				a.remove();
+			} catch (err) {
+				console.error('[ExplorerSidebar] download failed:', err);
+			}
+		},
+		[client]
+	);
 
 	// --- Open with... handler ----------------------------------------------------
 
@@ -290,7 +306,7 @@ const ExplorerSidebar: React.FC = () => {
 			const group = s.groups[s.activeGroupId];
 			if (!group) return;
 			// Find the editor for this URI in the active group
-			const editorId = group.editorIds.find(eid => s.editors[eid]?.documentUri === path);
+			const editorId = group.editorIds.find((eid) => s.editors[eid]?.documentUri === path);
 			if (!editorId) return;
 			docs.updateEditorViewState(editorId, { ...s.editors[editorId]?.viewState, viewerId });
 		});
@@ -298,24 +314,30 @@ const ExplorerSidebar: React.FC = () => {
 
 	// --- File actions (kebab menu) -------------------------------------------
 
-	const buildOpenWithChildren = useCallback((path: string): ExplorerFileAction[] => {
-		const { category } = getMediaInfo(path);
-		return getCompatibleViewers(category).map(vid => ({
-			id: `open-with-${vid}`,
-			label: VIEWER_LABELS[vid],
-			onSelect: (p: string) => handleOpenWith(p, vid),
-		}));
-	}, [handleOpenWith]);
-
-	const fileActions: ExplorerFileAction[] = useMemo(() => [
-		{
-			id: 'open-with',
-			label: 'Open with\u2026',
-			icon: <BxDockLeft size={16} />,
-			children: buildOpenWithChildren,
+	const buildOpenWithChildren = useCallback(
+		(path: string): ExplorerFileAction[] => {
+			const { category } = getMediaInfo(path);
+			return getCompatibleViewers(category).map((vid) => ({
+				id: `open-with-${vid}`,
+				label: VIEWER_LABELS[vid],
+				onSelect: (p: string) => handleOpenWith(p, vid),
+			}));
 		},
-		{ id: 'download', label: 'Download', icon: <BxDownload size={16} />, onSelect: handleDownload },
-	], [buildOpenWithChildren, handleDownload]);
+		[handleOpenWith]
+	);
+
+	const fileActions: ExplorerFileAction[] = useMemo(
+		() => [
+			{
+				id: 'open-with',
+				label: 'Open with\u2026',
+				icon: <BxDockLeft size={16} />,
+				children: buildOpenWithChildren,
+			},
+			{ id: 'download', label: 'Download', icon: <BxDownload size={16} />, onSelect: handleDownload },
+		],
+		[buildOpenWithChildren, handleDownload]
+	);
 
 	// --- Register sidebar content ---------------------------------------------
 
@@ -324,19 +346,7 @@ const ExplorerSidebar: React.FC = () => {
 	// content while collapsed, so no collapsed icon rail is drawn here.
 	const content = (
 		<div style={styles.sidebar}>
-			<Explorer
-				vfs={NOOP_VFS}
-				config={EXPLORER_CONFIG}
-				entries={entries}
-				isConnected={isConnected}
-				activeFilePath={activeFile}
-				onOpenFile={handleOpenFile}
-				onFileManage={handleFileManage}
-				onRefresh={refresh}
-				onMove={handleMove}
-				onUpload={handleUpload}
-				fileActions={fileActions}
-			/>
+			<Explorer vfs={NOOP_VFS} config={EXPLORER_CONFIG} entries={entries} isConnected={isConnected} activeFilePath={activeFile} onOpenFile={handleOpenFile} onFileManage={handleFileManage} onRefresh={refresh} onMove={handleMove} onUpload={handleUpload} fileActions={fileActions} />
 		</div>
 	);
 
@@ -354,10 +364,7 @@ const ExplorerSidebar: React.FC = () => {
  * building a flat ExplorerEntry[] array that the Explorer component
  * can derive its tree hierarchy from.
  */
-async function listRecursive(
-	client: any,
-	dir: string,
-): Promise<ExplorerEntry[]> {
+async function listRecursive(client: any, dir: string): Promise<ExplorerEntry[]> {
 	const result = await client.fsListDir(dir);
 	const entries: ExplorerEntry[] = [];
 

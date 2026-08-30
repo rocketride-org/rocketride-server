@@ -39,23 +39,26 @@ export const ChatContainer: React.FC<{ authToken: string | null }> = ({ authToke
 	const { messages, isTyping, sendMessage, clearMessages, addSystemMessage } = useChatMessages();
 
 	// Handle connection established
-	const handleConnected = useCallback(async (_client: RocketRideClient) => {
-		connectionAttemptsRef.current = 0; // Reset on success
-		setStatusMessage(null);
-		setConnectionErrorMessage(null);
+	const handleConnected = useCallback(
+		async (_client: RocketRideClient) => {
+			connectionAttemptsRef.current = 0; // Reset on success
+			setStatusMessage(null);
+			setConnectionErrorMessage(null);
 
-		// Show welcome message only once
-		if (!hasWelcomedRef.current) {
-			addSystemMessage("Hello! I'm your RocketRide assistant. How can I help you today?");
-			hasWelcomedRef.current = true;
-		}
-	}, [addSystemMessage]);
+			// Show welcome message only once
+			if (!hasWelcomedRef.current) {
+				addSystemMessage("Hello! I'm your RocketRide assistant. How can I help you today?");
+				hasWelcomedRef.current = true;
+			}
+		},
+		[addSystemMessage]
+	);
 
 	// Handle disconnection (reason is the error message from connect failure or server)
 	const handleDisconnected = useCallback(async (reason: string, hasError: boolean) => {
 		connectionAttemptsRef.current++;
 		// Store the last error from connect so we show the most recent failure; clear on successful connect
-		setConnectionErrorMessage((prev) => (hasError ? (reason || null) : prev));
+		setConnectionErrorMessage((prev) => (hasError ? reason || null : prev));
 		if (connectionAttemptsRef.current < 5) {
 			setStatusMessage(null); // No banner for first 4 attempts
 		} else {
@@ -64,20 +67,19 @@ export const ChatContainer: React.FC<{ authToken: string | null }> = ({ authToke
 	}, []);
 
 	// Initialize connection
-	const { isConnected, client } = useRocketRideClient(
-		handleConnected,
-		handleDisconnected,
-		setStatusMessage
-	);
+	const { isConnected, client } = useRocketRideClient(handleConnected, handleDisconnected, setStatusMessage);
 
 	// Send message handler - uses authToken instead of pipelineToken
-	const handleSendMessage = useCallback(async (text: string) => {
-		if (!client || !authToken) {
-			addSystemMessage('Not connected. Please wait...');
-			return;
-		}
-		await sendMessage(text, client, authToken);
-	}, [client, authToken, sendMessage, addSystemMessage]);
+	const handleSendMessage = useCallback(
+		async (text: string) => {
+			if (!client || !authToken) {
+				addSystemMessage('Not connected. Please wait...');
+				return;
+			}
+			await sendMessage(text, client, authToken);
+		},
+		[client, authToken, sendMessage, addSystemMessage]
+	);
 
 	// Show error panel when disconnected and we have an error (after 5 attempts) or a specific error message (e.g. auth failed)
 	if (!isConnected && (statusMessage === 'CONNECTION_FAILED' || connectionErrorMessage)) {
@@ -89,9 +91,7 @@ export const ChatContainer: React.FC<{ authToken: string | null }> = ({ authToke
 						<div className="connection-error-panel">
 							<div className="connection-error-icon">⚠️</div>
 							<h2 className="connection-error-title">Having Trouble Connecting</h2>
-							{connectionErrorMessage && (
-								<p className="connection-error-message">{connectionErrorMessage}</p>
-							)}
+							{connectionErrorMessage && <p className="connection-error-message">{connectionErrorMessage}</p>}
 							<p className="connection-error-subtitle">We can't reach your pipeline. Here's what to check:</p>
 							<div className="connection-error-checklist">
 								<div className="connection-error-item">

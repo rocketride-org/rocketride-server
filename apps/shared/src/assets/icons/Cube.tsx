@@ -31,12 +31,7 @@ import { IIconProps } from './types';
  *
  * @param props - Standard icon props for controlling size, style, and opacity.
  */
-const CubeIcon: FunctionComponent<IIconProps> = ({
-	height = 50,
-	style,
-	width = 50,
-	opacity = 1,
-}) => {
+const CubeIcon: FunctionComponent<IIconProps> = ({ height = 50, style, width = 50, opacity = 1 }) => {
 	return (
 		<svg
 			style={style}
@@ -52,20 +47,10 @@ const CubeIcon: FunctionComponent<IIconProps> = ({
 		>
 			<rect width={102} height={102} fill="url(#pattern0_602_541)" />
 			<defs>
-				<pattern
-					id="pattern0_602_541"
-					patternContentUnits="objectBoundingBox"
-					width="1"
-					height="1"
-				>
+				<pattern id="pattern0_602_541" patternContentUnits="objectBoundingBox" width="1" height="1">
 					<use xlinkHref="#image0_602_541" transform="scale(0.0104167)" />
 				</pattern>
-				<image
-					id="image0_602_541"
-					width="102"
-					height="102"
-					xlinkHref="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAGAAAABgCAYAAADimHc4AAAACXBIWXMAAAsTAAALEwEAmpwYAAABtElEQVR4nO3cQU7DQBBE0ToIW3wANuHKSOFoQJILNLLkNRKynaqe+U+afc98PBGyEgkAAAAAAAD42yLpU9JDUjVfj20v655aWAf9Dji4Onj9SLqogWvAYdVJ69Yhwj3goGrmCO4DqidFeFco9+HU7BHcB1OzR3AfSs0eYYhNSHqT9NVx/mH+ktQ0wlCPsxpGGO5OVbMIQ36wqVGEIwLYN9E5wlEBigj+AEUEf4AaYD31OnJvtoLfJzzlpY57oxW81nclBJAvwPquhADyPgUEEAHsd3HxBPgPoriCQu/Qnezzt/8Q28k+PwFEACeeADMCmBHAjABmBDAjgBkBzAhgRgAzApgRwIwAZgQwI4AZAcwIYEYAMwKYEcCMAGYEMCOAGQHMCDB7gLN/Jy6dff71B+4IIF+AZftCGk+AfE/wf75RzhXULEK6qPnPiJAubv6jI6SLnP/ICOli5z8qQrro+Y+IkC5+/r0R0rWYf0+EdG3mP/OftQpeUWaMEGe2CJFmihDrsv22Wg28bgo3eoSrGric/D6hTGu9Yl/VxLL9tdwDDm7vWvfwIenFfagAAAAAAABQtF+xGHXxQ5F0hQAAAABJRU5ErkJggg=="
-				/>
+				<image id="image0_602_541" width="102" height="102" xlinkHref="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAGAAAABgCAYAAADimHc4AAAACXBIWXMAAAsTAAALEwEAmpwYAAABtElEQVR4nO3cQU7DQBBE0ToIW3wANuHKSOFoQJILNLLkNRKynaqe+U+afc98PBGyEgkAAAAAAAD42yLpU9JDUjVfj20v655aWAf9Dji4Onj9SLqogWvAYdVJ69Yhwj3goGrmCO4DqidFeFco9+HU7BHcB1OzR3AfSs0eYYhNSHqT9NVx/mH+ktQ0wlCPsxpGGO5OVbMIQ36wqVGEIwLYN9E5wlEBigj+AEUEf4AaYD31OnJvtoLfJzzlpY57oxW81nclBJAvwPquhADyPgUEEAHsd3HxBPgPoriCQu/Qnezzt/8Q28k+PwFEACeeADMCmBHAjABmBDAjgBkBzAhgRgAzApgRwIwAZgQwI4AZAcwIYEYAMwKYEcCMAGYEMCOAGQHMCDB7gLN/Jy6dff71B+4IIF+AZftCGk+AfE/wf75RzhXULEK6qPnPiJAubv6jI6SLnP/ICOli5z8qQrro+Y+IkC5+/r0R0rWYf0+EdG3mP/OftQpeUWaMEGe2CJFmihDrsv22Wg28bgo3eoSrGric/D6hTGu9Yl/VxLL9tdwDDm7vWvfwIenFfagAAAAAAABQtF+xGHXxQ5F0hQAAAABJRU5ErkJggg==" />
 			</defs>
 		</svg>
 	);

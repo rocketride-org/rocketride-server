@@ -126,10 +126,7 @@ const generateLabels = (range: TimeRange, points: StatusDataPoint[]): string[] =
 		if (fromEnd % step !== 0) return '';
 		if (fromEnd === 0 && Math.abs(Date.now() - point.timestamp) < 2500) return 'Now';
 		const d = new Date(point.timestamp);
-		return d.toLocaleTimeString(
-			[],
-			step < 60 ? { hour: '2-digit', minute: '2-digit', second: '2-digit' } : { hour: '2-digit', minute: '2-digit' },
-		);
+		return d.toLocaleTimeString([], step < 60 ? { hour: '2-digit', minute: '2-digit', second: '2-digit' } : { hour: '2-digit', minute: '2-digit' });
 	});
 };
 

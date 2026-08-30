@@ -137,17 +137,9 @@ export class AppErrorBoundary extends Component<AppErrorBoundaryProps, AppErrorB
 		if (this.state.hasError) {
 			return (
 				<div style={styles.errorContainer}>
-					<div style={styles.errorTitle}>
-						{this.props.appName} encountered an error
-					</div>
-					<div style={styles.errorMessage}>
-						{this.state.error?.message ?? 'An unexpected error occurred.'}
-					</div>
-					{this.state.errorInfo && (
-						<div style={styles.errorDetails}>
-							{this.state.error?.stack ?? this.state.errorInfo}
-						</div>
-					)}
+					<div style={styles.errorTitle}>{this.props.appName} encountered an error</div>
+					<div style={styles.errorMessage}>{this.state.error?.message ?? 'An unexpected error occurred.'}</div>
+					{this.state.errorInfo && <div style={styles.errorDetails}>{this.state.error?.stack ?? this.state.errorInfo}</div>}
 					<button style={styles.errorButton} onClick={this.handleReload}>
 						Reload App
 					</button>

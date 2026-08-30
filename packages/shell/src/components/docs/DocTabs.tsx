@@ -64,9 +64,7 @@ const styles = {
 		fontFamily: 'var(--rr-font-family)',
 		fontWeight: isActive ? 600 : 400,
 		color: isActive ? 'var(--rr-text-primary)' : 'var(--rr-text-secondary)',
-		backgroundColor: isActive
-			? 'var(--rr-bg-default)'
-			: isHovered ? 'var(--rr-bg-surface-alt)' : 'transparent',
+		backgroundColor: isActive ? 'var(--rr-bg-default)' : isHovered ? 'var(--rr-bg-surface-alt)' : 'transparent',
 		borderRight: '1px solid var(--rr-border)',
 		borderBottom: isActive && isActiveGroup ? '2px solid var(--rr-brand)' : '2px solid transparent',
 		whiteSpace: 'nowrap',
@@ -206,10 +204,13 @@ const DocTabs: React.FC<DocTabsProps> = ({ docs, groupId, isActive = false, canC
 	 *
 	 * @param index - The index of the editor in the group's editorIds array.
 	 */
-	const handleTabClick = useCallback((index: number) => {
-		docs.setActiveEditor(groupId, index);
-		docs.setActiveGroup(groupId);
-	}, [docs, groupId]);
+	const handleTabClick = useCallback(
+		(index: number) => {
+			docs.setActiveEditor(groupId, index);
+			docs.setActiveGroup(groupId);
+		},
+		[docs, groupId]
+	);
 
 	// --- Tab close handler ----------------------------------------------------
 
@@ -221,18 +222,21 @@ const DocTabs: React.FC<DocTabsProps> = ({ docs, groupId, isActive = false, canC
 	 * @param e        - Mouse event (stopped to prevent tab activation).
 	 * @param editorId - The editor to close.
 	 */
-	const handleClose = useCallback((e: React.MouseEvent, editorId: string) => {
-		e.stopPropagation();
-		const editor = state.editors[editorId];
-		if (!editor) return;
-		const doc = state.documents[editor.documentUri];
-		// If dirty and callback provided, delegate for confirmation
-		if (doc?.dirty && onDirtyClose) {
-			onDirtyClose(editorId, editor.documentUri);
-			return;
-		}
-		docs.closeEditor(editorId);
-	}, [docs, state, onDirtyClose]);
+	const handleClose = useCallback(
+		(e: React.MouseEvent, editorId: string) => {
+			e.stopPropagation();
+			const editor = state.editors[editorId];
+			if (!editor) return;
+			const doc = state.documents[editor.documentUri];
+			// If dirty and callback provided, delegate for confirmation
+			if (doc?.dirty && onDirtyClose) {
+				onDirtyClose(editorId, editor.documentUri);
+				return;
+			}
+			docs.closeEditor(editorId);
+		},
+		[docs, state, onDirtyClose]
+	);
 
 	// --- Split handler --------------------------------------------------------
 
@@ -241,10 +245,13 @@ const DocTabs: React.FC<DocTabsProps> = ({ docs, groupId, isActive = false, canC
 	 *
 	 * @param orientation - The split direction to apply.
 	 */
-	const handleSplit = useCallback((orientation: SplitOrientation) => {
-		setSplitMenuOpen(false);
-		onSplit?.(groupId, orientation);
-	}, [onSplit, groupId]);
+	const handleSplit = useCallback(
+		(orientation: SplitOrientation) => {
+			setSplitMenuOpen(false);
+			onSplit?.(groupId, orientation);
+		},
+		[onSplit, groupId]
+	);
 
 	// --- Drag-and-drop handlers -----------------------------------------------
 
@@ -254,11 +261,14 @@ const DocTabs: React.FC<DocTabsProps> = ({ docs, groupId, isActive = false, canC
 	 * @param e        - The drag event.
 	 * @param editorId - The editor being dragged.
 	 */
-	const handleDragStart = useCallback((e: React.DragEvent, editorId: string) => {
-		e.dataTransfer.setData(DND_MIME, JSON.stringify({ editorId, sourceGroupId: groupId }));
-		e.dataTransfer.effectAllowed = 'move';
-		setDraggingId(editorId);
-	}, [groupId]);
+	const handleDragStart = useCallback(
+		(e: React.DragEvent, editorId: string) => {
+			e.dataTransfer.setData(DND_MIME, JSON.stringify({ editorId, sourceGroupId: groupId }));
+			e.dataTransfer.effectAllowed = 'move';
+			setDraggingId(editorId);
+		},
+		[groupId]
+	);
 
 	/**
 	 * Clears the dragging visual state when drag ends.
@@ -292,17 +302,22 @@ const DocTabs: React.FC<DocTabsProps> = ({ docs, groupId, isActive = false, canC
 	 *
 	 * @param e - The drop event.
 	 */
-	const handleDrop = useCallback((e: React.DragEvent) => {
-		e.preventDefault();
-		setIsDragOver(false);
-		try {
-			const data = JSON.parse(e.dataTransfer.getData(DND_MIME));
-			if (data.editorId && data.sourceGroupId !== groupId) {
-				docs.moveEditor(data.editorId, groupId);
-				docs.setActiveGroup(groupId);
+	const handleDrop = useCallback(
+		(e: React.DragEvent) => {
+			e.preventDefault();
+			setIsDragOver(false);
+			try {
+				const data = JSON.parse(e.dataTransfer.getData(DND_MIME));
+				if (data.editorId && data.sourceGroupId !== groupId) {
+					docs.moveEditor(data.editorId, groupId);
+					docs.setActiveGroup(groupId);
+				}
+			} catch {
+				/* ignore malformed data */
 			}
-		} catch { /* ignore malformed data */ }
-	}, [docs, groupId]);
+		},
+		[docs, groupId]
+	);
 
 	// --- Toolbar buttons (right edge) ----------------------------------------
 
@@ -313,23 +328,9 @@ const DocTabs: React.FC<DocTabsProps> = ({ docs, groupId, isActive = false, canC
 	const renderToolbar = () => (
 		<>
 			<div style={styles.spacer} />
-			{onSplit && (
-				<SplitButton
-					btnRef={splitBtnRef}
-					open={splitMenuOpen}
-					onToggle={() => setSplitMenuOpen((v) => !v)}
-					onClose={() => setSplitMenuOpen(false)}
-					onSplit={handleSplit}
-					hoveredItem={hoveredMenuItem}
-					onHoverItem={setHoveredMenuItem}
-				/>
-			)}
+			{onSplit && <SplitButton btnRef={splitBtnRef} open={splitMenuOpen} onToggle={() => setSplitMenuOpen((v) => !v)} onClose={() => setSplitMenuOpen(false)} onSplit={handleSplit} hoveredItem={hoveredMenuItem} onHoverItem={setHoveredMenuItem} />}
 			{canClose && onCloseGroup && (
-				<button
-					style={styles.toolbarBtn}
-					onClick={() => onCloseGroup(groupId)}
-					title="Close group"
-				>
+				<button style={styles.toolbarBtn} onClick={() => onCloseGroup(groupId)} title="Close group">
 					×
 				</button>
 			)}
@@ -342,12 +343,7 @@ const DocTabs: React.FC<DocTabsProps> = ({ docs, groupId, isActive = false, canC
 
 	if (group.editorIds.length === 0) {
 		return (
-			<div
-				style={styles.bar(isActive, isDragOver)}
-				onDragOver={handleDragOver}
-				onDragLeave={handleDragLeave}
-				onDrop={handleDrop}
-			>
+			<div style={styles.bar(isActive, isDragOver)} onDragOver={handleDragOver} onDragLeave={handleDragLeave} onDrop={handleDrop}>
 				<div style={styles.empty}>No open editors</div>
 				{renderToolbar()}
 			</div>
@@ -355,12 +351,7 @@ const DocTabs: React.FC<DocTabsProps> = ({ docs, groupId, isActive = false, canC
 	}
 
 	return (
-		<div
-			style={styles.bar(isActive, isDragOver)}
-			onDragOver={handleDragOver}
-			onDragLeave={handleDragLeave}
-			onDrop={handleDrop}
-		>
+		<div style={styles.bar(isActive, isDragOver)} onDragOver={handleDragOver} onDragLeave={handleDragLeave} onDrop={handleDrop}>
 			{group.editorIds.map((editorId, index) => {
 				const editor = state.editors[editorId];
 				if (!editor) return null;
@@ -369,22 +360,10 @@ const DocTabs: React.FC<DocTabsProps> = ({ docs, groupId, isActive = false, canC
 				const isHovered = hoveredTab === editorId;
 
 				return (
-					<div
-						key={editorId}
-						draggable
-						style={styles.tab(isActiveTab, isActive, isHovered, draggingId === editorId)}
-						onClick={() => handleTabClick(index)}
-						onMouseEnter={() => setHoveredTab(editorId)}
-						onMouseLeave={() => setHoveredTab(null)}
-						onDragStart={(e) => handleDragStart(e, editorId)}
-						onDragEnd={handleDragEnd}
-					>
+					<div key={editorId} draggable style={styles.tab(isActiveTab, isActive, isHovered, draggingId === editorId)} onClick={() => handleTabClick(index)} onMouseEnter={() => setHoveredTab(editorId)} onMouseLeave={() => setHoveredTab(null)} onDragStart={(e) => handleDragStart(e, editorId)} onDragEnd={handleDragEnd}>
 						{doc?.dirty && <div style={styles.dirtyDot} />}
 						<span>{editor.label}</span>
-						<button
-							style={styles.closeBtn(isActiveTab || isHovered)}
-							onClick={(e) => handleClose(e, editorId)}
-						>
+						<button style={styles.closeBtn(isActiveTab || isHovered)} onClick={(e) => handleClose(e, editorId)}>
 							×
 						</button>
 					</div>
@@ -438,36 +417,38 @@ const SplitButton: React.FC<SplitButtonProps> = ({ btnRef, open, onToggle, onClo
 	const rect = open && btnRef.current ? btnRef.current.getBoundingClientRect() : null;
 
 	return (
-		<button
-			ref={btnRef}
-			style={styles.toolbarBtn}
-			onClick={onToggle}
-			onBlur={handleBlur}
-			title="Split editor"
-		>
+		<button ref={btnRef} style={styles.toolbarBtn} onClick={onToggle} onBlur={handleBlur} title="Split editor">
 			{/* Simple split icon using Unicode box drawing */}
 			&#x2503;
-			{open && rect && createPortal(
-				<div style={styles.contextMenu(rect.bottom, rect.right - 140)}>
-					<div
-						style={styles.menuItem(hoveredItem === 'h')}
-						onMouseEnter={() => onHoverItem('h')}
-						onMouseLeave={() => onHoverItem(null)}
-						onMouseDown={(e) => { e.preventDefault(); onSplit('horizontal'); }}
-					>
-						&#x25EB; Split Right
-					</div>
-					<div
-						style={styles.menuItem(hoveredItem === 'v')}
-						onMouseEnter={() => onHoverItem('v')}
-						onMouseLeave={() => onHoverItem(null)}
-						onMouseDown={(e) => { e.preventDefault(); onSplit('vertical'); }}
-					>
-						&#x2B12; Split Down
-					</div>
-				</div>,
-				document.body,
-			)}
+			{open &&
+				rect &&
+				createPortal(
+					<div style={styles.contextMenu(rect.bottom, rect.right - 140)}>
+						<div
+							style={styles.menuItem(hoveredItem === 'h')}
+							onMouseEnter={() => onHoverItem('h')}
+							onMouseLeave={() => onHoverItem(null)}
+							onMouseDown={(e) => {
+								e.preventDefault();
+								onSplit('horizontal');
+							}}
+						>
+							&#x25EB; Split Right
+						</div>
+						<div
+							style={styles.menuItem(hoveredItem === 'v')}
+							onMouseEnter={() => onHoverItem('v')}
+							onMouseLeave={() => onHoverItem(null)}
+							onMouseDown={(e) => {
+								e.preventDefault();
+								onSplit('vertical');
+							}}
+						>
+							&#x2B12; Split Down
+						</div>
+					</div>,
+					document.body
+				)}
 		</button>
 	);
 };

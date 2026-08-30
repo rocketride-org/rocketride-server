@@ -114,7 +114,7 @@ test('foldTaskEvent: the bulk running snapshot resets a completed entry it repor
 	assert.deepEqual(result.activeTasks.get('proj-1.src-1'), { running: true, errors: [], warnings: [] });
 });
 
-test('foldTaskEvent: end keeps a KNOWN task\'s last-run diagnostics until the next begin', () => {
+test("foldTaskEvent: end keeps a KNOWN task's last-run diagnostics until the next begin", () => {
 	// Pinned: chips = the LAST run's diagnostics (dots = liveness). end flips
 	// running off but retains errors/warnings; the next begin resets them.
 	const active = new Map([['proj-1.src-1', { running: true, errors: ['boom'], warnings: ['careful'] }]]);

@@ -108,19 +108,23 @@ let localAppsListener: (() => void) | null = null;
 // ownership, every boot after the first skips the manifest registration
 // entirely and the dev entry is the container's ONLY registration.
 const DEV_OWNED_KEY = 'rr:devOwnedModules';
-const devRemoteModules = new Set<string>(((): string[] => {
-	try {
-		return JSON.parse(sessionStorage.getItem(DEV_OWNED_KEY) ?? '[]') as string[];
-	} catch {
-		return [];
-	}
-})());
+const devRemoteModules = new Set<string>(
+	((): string[] => {
+		try {
+			return JSON.parse(sessionStorage.getItem(DEV_OWNED_KEY) ?? '[]') as string[];
+		} catch {
+			return [];
+		}
+	})()
+);
 
 /** Persists the current dev-owned module set for this tab. */
 function persistDevOwned(): void {
 	try {
 		sessionStorage.setItem(DEV_OWNED_KEY, JSON.stringify([...devRemoteModules]));
-	} catch { /* storage unavailable — ownership lasts this page only */ }
+	} catch {
+		/* storage unavailable — ownership lasts this page only */
+	}
 }
 
 /**
@@ -270,17 +274,18 @@ export function registerDevRemote(appId: string, moduleId: string, name: string,
 	registeredEntries.set(moduleId, entry);
 	registerLocalApp(
 		appId,
-		() => (loadRemote(`${moduleId}/AppDescriptor`) as Promise<{ default: AppDescriptor }>)
-			.then((m) => m.default)
-			.catch((err) => {
-				// Full failure forensics: the error itself (message + stack, not
-				// the {} an Error JSON-stringifies to) plus the share scope the
-				// container negotiated against — key, version, loaded state.
-				console.error(`[appLoader] dev remote "${moduleId}" failed to load from ${entry}: ${err instanceof Error ? (err.stack || err.message) : String(err)}`);
-				dumpShareScope();
-				throw err;
-			}),
-		{ name, moduleId },
+		() =>
+			(loadRemote(`${moduleId}/AppDescriptor`) as Promise<{ default: AppDescriptor }>)
+				.then((m) => m.default)
+				.catch((err) => {
+					// Full failure forensics: the error itself (message + stack, not
+					// the {} an Error JSON-stringifies to) plus the share scope the
+					// container negotiated against — key, version, loaded state.
+					console.error(`[appLoader] dev remote "${moduleId}" failed to load from ${entry}: ${err instanceof Error ? err.stack || err.message : String(err)}`);
+					dumpShareScope();
+					throw err;
+				}),
+		{ name, moduleId }
 	);
 	// Release any descriptor loads holding for this registration (embedded
 	// previews pause the locked app's first load until the dev remote exists).
@@ -454,7 +459,7 @@ export function registerAndMapApps(serverApps: ServerAppEntry[]): AppManifestEnt
 	const registrable = validApps.filter((a) => !devRemoteModules.has(a.moduleId));
 	registerRemotes(
 		registrable.map((a) => ({ name: a.moduleId, entry: a.entry })),
-		{ force: true },
+		{ force: true }
 	);
 
 	// Record the registered URLs so resetRemote() can rebuild a container.
@@ -462,26 +467,25 @@ export function registerAndMapApps(serverApps: ServerAppEntry[]): AppManifestEnt
 
 	// Map server entries to runtime AppManifestEntry objects with lazy loaders
 	return validApps.map((a) => ({
-		id:            a.id,
-		moduleId:      a.moduleId,
-		name:          a.name,
-		description:   a.description,
-		icon:          a.icon,
-		categories:    a.categories,
+		id: a.id,
+		moduleId: a.moduleId,
+		name: a.name,
+		description: a.description,
+		icon: a.icon,
+		categories: a.categories,
 		// Settings contribution — validated structurally by the registry builder,
 		// so legacy array-shaped `settings` rows from an un-reseeded server are
 		// simply ignored rather than crashing the shell.
 		configuration: a.configuration as AppConfiguration | undefined,
 		authenticated: a.authenticated,
-		public:        a.public,
+		public: a.public,
 		load: () => {
 			// Local override wins over the MF remote — checked per CALL so a
 			// dev registration made after mapping still takes effect (and its
 			// removal restores the remote) without re-mapping the manifest.
 			const local = localOverrides.get(a.id);
 			if (local) return local();
-			return (loadRemote(`${a.moduleId}/AppDescriptor`) as Promise<{ default: AppDescriptor }>)
-				.then((m) => m.default);
+			return (loadRemote(`${a.moduleId}/AppDescriptor`) as Promise<{ default: AppDescriptor }>).then((m) => m.default);
 		},
 	}));
 }

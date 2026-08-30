@@ -39,16 +39,7 @@
  */
 
 import type { RocketRideClient } from './client.js';
-import type {
-	LogChaptersResult,
-	LogEvent,
-	LogPlayCallback,
-	LogPosition,
-	LogStreamRef,
-	LogTraceDetail,
-	LogTraceSummary,
-	LogTracesResult,
-} from './types/log.js';
+import type { LogChaptersResult, LogEvent, LogPlayCallback, LogPosition, LogStreamRef, LogTraceDetail, LogTraceSummary, LogTracesResult } from './types/log.js';
 import { SegmentDecoder, parseSegmentChunk, type SegmentKeyframe } from './log-codec.js';
 
 // =============================================================================
@@ -155,7 +146,7 @@ export class LogEventStream {
 	/** @param client - Owning client. @param stream - Identity tuple. */
 	constructor(
 		private client: RocketRideClient,
-		private stream: LogStreamRef,
+		private stream: LogStreamRef
 	) {
 		// The session owns its monitor registration: streaming needs
 		// essentially every event class, and consumers should not have to
@@ -171,7 +162,7 @@ export class LogEventStream {
 					source: stream.source,
 					...(stream.teamId ? { teamId: stream.teamId } : {}),
 				},
-				['all'],
+				['all']
 			)
 			.catch(() => undefined);
 	}
@@ -363,14 +354,7 @@ export class LogEventStream {
 	 * slot's matching `end` (an in-flight trace has no end yet; return
 	 * what exists).
 	 */
-	private async collectTrace(
-		traceId: number,
-		beginEvent: LogEvent,
-		beginBody: Record<string, unknown>,
-		beginList: LogEvent[],
-		beginIdx: number,
-		laterSegIds: number[],
-	): Promise<LogTraceDetail> {
+	private async collectTrace(traceId: number, beginEvent: LogEvent, beginBody: Record<string, unknown>, beginList: LogEvent[], beginIdx: number, laterSegIds: number[]): Promise<LogTraceDetail> {
 		const slot = beginBody.id;
 		const events: LogEvent[] = [];
 		let ended = false;
@@ -407,7 +391,7 @@ export class LogEventStream {
 
 		const summary: LogTraceSummary = {
 			id: traceId,
-			doc: (beginBody.component as string | undefined) ?? ((beginBody.pipes as string[] | undefined)?.[0] ?? undefined),
+			doc: (beginBody.component as string | undefined) ?? (beginBody.pipes as string[] | undefined)?.[0] ?? undefined,
 			beginTime: beginEvent.body.eventTime,
 			...(endTime !== undefined ? { elapsed: Math.max(0, endTime - beginEvent.body.eventTime) } : {}),
 			calls,
@@ -497,7 +481,7 @@ export class LogEventStream {
 					source: this.stream.source,
 					...(this.stream.teamId ? { teamId: this.stream.teamId } : {}),
 				},
-				['all'],
+				['all']
 			)
 			.catch(() => undefined);
 		this.playing = false;
@@ -745,10 +729,7 @@ export class LogEventStream {
 	}
 
 	/** Fold open/closed trace state from the keyframe + interior ≤ pos. */
-	private foldTraces(
-		seg: CachedSegment | null,
-		pos: number,
-	): { open: Map<number | string, LogTraceSummary>; closed: LogTraceSummary[] } {
+	private foldTraces(seg: CachedSegment | null, pos: number): { open: Map<number | string, LogTraceSummary>; closed: LogTraceSummary[] } {
 		const open = new Map<number | string, LogTraceSummary>();
 		const closed: LogTraceSummary[] = [];
 

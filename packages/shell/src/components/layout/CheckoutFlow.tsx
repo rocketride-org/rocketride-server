@@ -66,20 +66,20 @@ export const CheckoutFlow: React.FC<CheckoutFlowProps> = ({ stripeKey, orgId }) 
 
 	// Cancel the pending status-message clear if we unmount first (e.g. logout
 	// or navigation) so it doesn't emit after the component is gone.
-	useEffect(() => () => {
-		if (statusClearTimer.current) clearTimeout(statusClearTimer.current);
-	}, []);
+	useEffect(
+		() => () => {
+			if (statusClearTimer.current) clearTimeout(statusClearTimer.current);
+		},
+		[]
+	);
 
 	// --- Listen for subscribe events -----------------------------------------
 	useEffect(() => {
-		return ConnectionManager.getInstance().on(
-			'shell:subscribe',
-			({ app, plan, promo }: { app: unknown; plan?: CheckoutPlan; promo?: PromoValidation | null }) => {
-				setCheckoutApp(app as AppManifestEntry);
-				setPresetPlan(plan ?? null);
-				setPresetPromo(promo ?? null);
-			},
-		);
+		return ConnectionManager.getInstance().on('shell:subscribe', ({ app, plan, promo }: { app: unknown; plan?: CheckoutPlan; promo?: PromoValidation | null }) => {
+			setCheckoutApp(app as AppManifestEntry);
+			setPresetPlan(plan ?? null);
+			setPresetPromo(promo ?? null);
+		});
 	}, []);
 
 	// --- Listen for unsubscribe events ---------------------------------------
@@ -87,7 +87,8 @@ export const CheckoutFlow: React.FC<CheckoutFlowProps> = ({ stripeKey, orgId }) 
 		return ConnectionManager.getInstance().on('shell:unsubscribe', ({ appId }: { appId: string }) => {
 			const client = ConnectionManager.getInstance().getClient();
 			if (client && orgId) {
-				client.billing.cancelSubscription(orgId, appId)
+				client.billing
+					.cancelSubscription(orgId, appId)
 					.then(() => console.log('[unsubscribe] canceled', appId))
 					.catch((err) => console.error('[unsubscribe] error', err));
 			}
@@ -153,7 +154,11 @@ export const CheckoutFlow: React.FC<CheckoutFlowProps> = ({ stripeKey, orgId }) 
 				if (statusClearTimer.current) clearTimeout(statusClearTimer.current);
 				statusClearTimer.current = setTimeout(() => cm.emit('shell:statusMessage', { message: null }), 5000);
 			}}
-			onClose={() => { setCheckoutApp(null); setPresetPlan(null); setPresetPromo(null); }}
+			onClose={() => {
+				setCheckoutApp(null);
+				setPresetPlan(null);
+				setPresetPromo(null);
+			}}
 		/>
 	);
 };

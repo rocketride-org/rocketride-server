@@ -56,7 +56,6 @@ export enum ConnectionState {
 
 	/** Authentication was rejected by the server (bad/expired/revoked key). */
 	AUTH_FAILED = 'auth-failed',
-
 }
 
 // =============================================================================

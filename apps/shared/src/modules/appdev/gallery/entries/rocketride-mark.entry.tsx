@@ -31,9 +31,7 @@ import { RocketRideMark } from 'shell';
 import type { IGalleryDemoProps, IGalleryEntry, KnobValues } from '../galleryTypes';
 
 /** Live demo: the mark at the knob-driven size. */
-const RocketRideMarkDemo: React.FC<IGalleryDemoProps> = ({ knobs }) => (
-	<RocketRideMark size={Number(knobs.size)} />
-);
+const RocketRideMarkDemo: React.FC<IGalleryDemoProps> = ({ knobs }) => <RocketRideMark size={Number(knobs.size)} />;
 
 /** Snippet builder mirroring the current knob state. */
 const buildCode = (knobs: KnobValues): string => `import { RocketRideMark } from 'shell';
@@ -47,9 +45,7 @@ export const rocketRideMarkEntry: IGalleryEntry = {
 	group: 'content',
 	blurb: 'The RocketRide rocket brand mark (icon only, no logotype): body fill follows the text colour, exhaust swoosh stays the fixed RocketRide red.',
 	doc: `Use it wherever the product identifies itself — empty states, about panes, anonymous user cards. The body inherits \`currentColor\` (override with \`color\` / \`bodyColor\`); the swoosh is always brand red, so the mark reads correctly on any theme.`,
-	knobs: [
-		{ id: 'size', label: 'Size', kind: 'number', defaultValue: 48 },
-	],
+	knobs: [{ id: 'size', label: 'Size', kind: 'number', defaultValue: 48 }],
 	demo: RocketRideMarkDemo,
 	code: buildCode,
 	props: [

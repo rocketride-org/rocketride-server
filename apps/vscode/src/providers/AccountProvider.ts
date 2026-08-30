@@ -303,13 +303,7 @@ export class AccountProvider {
 		let keys: any[] = [];
 
 		if (client && isConnected) {
-			const results = await Promise.all([
-				client.account.getProfile().catch(() => null),
-				orgId ? client.account.getOrg(orgId).catch(() => null) : null,
-				orgId ? client.account.listMembers(orgId).catch(() => []) : [],
-				orgId ? client.account.listTeams(orgId).catch(() => []) : [],
-				client.account.listKeys().catch(() => []),
-			]);
+			const results = await Promise.all([client.account.getProfile().catch(() => null), orgId ? client.account.getOrg(orgId).catch(() => null) : null, orgId ? client.account.listMembers(orgId).catch(() => []) : [], orgId ? client.account.listTeams(orgId).catch(() => []) : [], client.account.listKeys().catch(() => [])]);
 			if (results[0]) profile = results[0];
 			org = results[1];
 			members = results[2] as any[];
@@ -913,14 +907,7 @@ export class AccountProvider {
 
 		try {
 			// Fetch all billing data in parallel — all from local DB, no Stripe calls
-			const [subscriptions, creditBalance, allPlans, transactions, usageByUser, usageByTeam] = await Promise.all([
-				client.billing.getDetails(orgId),
-				client.billing.getCreditBalance(orgId),
-				client.billing.getProductPrices(PIPE_BUILDER_APP_ID).catch(() => []),
-				client.billing.getTransactions(orgId, { page: 1, pageSize: 20 }).catch(() => null),
-				client.billing.getUsageByUser(orgId).catch(() => []),
-				client.billing.getUsageByTeam(orgId).catch(() => []),
-			]);
+			const [subscriptions, creditBalance, allPlans, transactions, usageByUser, usageByTeam] = await Promise.all([client.billing.getDetails(orgId), client.billing.getCreditBalance(orgId), client.billing.getProductPrices(PIPE_BUILDER_APP_ID).catch(() => []), client.billing.getTransactions(orgId, { page: 1, pageSize: 20 }).catch(() => null), client.billing.getUsageByUser(orgId).catch(() => []), client.billing.getUsageByTeam(orgId).catch(() => [])]);
 
 			// Split plans into topups for the billing dashboard
 			const topupPlans = (allPlans as any[]).filter((p: any) => p.metadata?.kind === 'topup');
@@ -1002,12 +989,7 @@ export class AccountProvider {
 			if (!orgId) throw new Error('No organisation found');
 			// clientSecret is null for a $0 first invoice (100%-off promo code) —
 			// the webview must treat that as "no payment step", not an error.
-			const result = await client.billing.createCheckoutSession(
-				orgId,
-				PIPE_BUILDER_APP_ID,
-				message.priceId as string,
-				message.promotionCode as string | undefined,
-			);
+			const result = await client.billing.createCheckoutSession(orgId, PIPE_BUILDER_APP_ID, message.priceId as string, message.promotionCode as string | undefined);
 			await panel.webview.postMessage({ type: 'checkout:sessionResult', ...result, error: null });
 		} catch (err: unknown) {
 			const msg = err instanceof Error ? err.message : String(err);
@@ -1166,13 +1148,9 @@ export class AccountProvider {
 		const deployInfo = deployClient?.getAccountInfo();
 
 		// Prefer whichever connection is cloud-connected (dev first).
-		const accountInfo =
-			(config.development.connectionMode === 'cloud' ? devInfo : null) ??
-			(config.deployment.connectionMode === 'cloud' ? deployInfo : null);
+		const accountInfo = (config.development.connectionMode === 'cloud' ? devInfo : null) ?? (config.deployment.connectionMode === 'cloud' ? deployInfo : null);
 
-		const client =
-			(config.development.connectionMode === 'cloud' && devClient ? devClient : null) ??
-			(config.deployment.connectionMode === 'cloud' && deployClient ? deployClient : null);
+		const client = (config.development.connectionMode === 'cloud' && devClient ? devClient : null) ?? (config.deployment.connectionMode === 'cloud' && deployClient ? deployClient : null);
 
 		const orgId = accountInfo?.organization?.id;
 		return { client: client ?? undefined, accountInfo: accountInfo ?? undefined, orgId };

@@ -42,20 +42,12 @@ const CATEGORY_DESCRIPTIONS = {
 	Guardrails: 'Validate and constrain inputs and outputs for safety and policy.',
 	Outputs: 'Send results out of the pipeline: responses, files, and external systems.',
 	Infrastructure: 'Plumbing that supports execution rather than transforming data.',
-	Other: 'Nodes that do not fall into a single category above.'
+	Other: 'Nodes that do not fall into a single category above.',
 };
 
 // Authored prose that frames the generated catalog. The node list itself is
 // generated from the manifest so it never drifts from the shipped nodes.
-const OVERVIEW_INTRO = [
-	'Nodes are the building blocks of a RocketRide pipeline. A [pipeline](/concepts/pipelines)',
-	'is a directed graph, and each node is one component that does one job: call a model,',
-	'embed text, query a vector store, parse a document, or run a tool. You wire nodes',
-	'together and the [engine](/concepts/runtime-engine) runs them.',
-	'',
-	'This page explains how a node is structured on disk and how the runtime loads and',
-	'executes it, then catalogs every node that ships with the toolchain, grouped by type.'
-].join('\n');
+const OVERVIEW_INTRO = ['Nodes are the building blocks of a RocketRide pipeline. A [pipeline](/concepts/pipelines)', 'is a directed graph, and each node is one component that does one job: call a model,', 'embed text, query a vector store, parse a document, or run a tool. You wire nodes', 'together and the [engine](/concepts/runtime-engine) runs them.', '', 'This page explains how a node is structured on disk and how the runtime loads and', 'executes it, then catalogs every node that ships with the toolchain, grouped by type.'].join('\n');
 
 const ANATOMY_PROSE = [
 	'## Anatomy of a node',
@@ -71,7 +63,7 @@ const ANATOMY_PROSE = [
 	'  *_client.py       # provider/client implementation detail',
 	'  requirements.txt  # Python dependencies, installed on demand',
 	'  <name>.svg        # canvas icon',
-	'  README.md         # co-located documentation (rendered as this node\'s page)',
+	"  README.md         # co-located documentation (rendered as this node's page)",
 	'```',
 	'',
 	'The **`services.json`** manifest is the contract the engine reads. Its key fields:',
@@ -79,7 +71,7 @@ const ANATOMY_PROSE = [
 	'| Field | Purpose |',
 	'| --- | --- |',
 	'| `title` | Display name on the canvas and in this catalog. |',
-	'| `protocol` | The node\'s URL scheme, e.g. `llm_openai://`. |',
+	"| `protocol` | The node's URL scheme, e.g. `llm_openai://`. |",
 	'| `classType` | The kind of work the node does (`llm`, `store`, `tool`, …). Governs how it wires into the graph. |',
 	'| `capabilities` | Flags that change engine behaviour, e.g. `invoke`. |',
 	'| `register` | How the engine registers the node: `filter` (transforms data in the graph) or `endpoint` (an edge connector). |',
@@ -88,9 +80,9 @@ const ANATOMY_PROSE = [
 	'| `description` | Prose shown in the editor. |',
 	'| `config` | The configuration schema: the fields a pipeline author fills in. |',
 	'',
-	'A node\'s public contract is its `classType`, config schema, and the input/output',
+	"A node's public contract is its `classType`, config schema, and the input/output",
 	'lanes it supports. The [pipeline JSON reference](/pipeline-reference) documents how a',
-	'node is referenced from a `.pipe` file (`id`, `provider`, `config`, `input`).'
+	'node is referenced from a `.pipe` file (`id`, `provider`, `config`, `input`).',
 ].join('\n');
 
 const RUNTIME_PROSE = [
@@ -107,11 +99,11 @@ const RUNTIME_PROSE = [
 	'   data through **lanes**; `agent`, `tool`, `llm`, and `memory` nodes participate in',
 	'   **control** connections (see [Agents & tools](/concepts/agents-tools-skills)).',
 	'4. **Execution.** The engine drives the graph from sources to targets, passing each',
-	'   node\'s output along its lanes. `capabilities` flags toggle engine features such as',
+	"   node's output along its lanes. `capabilities` flags toggle engine features such as",
 	'   `invoke`. See the [execution model](/concepts/execution-model) for how data flows.',
 	'',
 	'Because behaviour lives in `provider` + `config`, swapping which model or store a',
-	'pipeline uses is a config edit, not a code change.'
+	'pipeline uses is a config edit, not a code change.',
 ].join('\n');
 
 /**

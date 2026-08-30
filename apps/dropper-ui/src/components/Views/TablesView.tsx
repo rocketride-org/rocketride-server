@@ -23,18 +23,18 @@ interface TablesViewProps {
 
 /**
  * TablesView Component
- * 
+ *
  * Displays table content extracted from processed files with markdown rendering.
  * Tables are rendered as markdown tables, supporting both normal stacked layout
  * and comparison mode for side-by-side viewing of multiple tables from the same file.
- * 
+ *
  * Features:
  * - Markdown table rendering with proper formatting
  * - Comparison mode for side-by-side table viewing
  * - Field name labels when multiple tables exist
  * - Empty state when no tables are available
  * - Ref management for scroll-to-file functionality
- * 
+ *
  * @param props - Component props
  * @returns React component displaying table content
  */
@@ -69,9 +69,7 @@ export const TablesView: React.FC<TablesViewProps> = ({ tables, compareMode, set
 							<div className="compare-grid">
 								{group.contents.map((block: any, contentIndex: number) => (
 									<div key={contentIndex} className="compare-column">
-										{block.fieldName && (
-											<div className="content-field-label">{block.fieldName}</div>
-										)}
+										{block.fieldName && <div className="content-field-label">{block.fieldName}</div>}
 										<div className="content-item">
 											<div className="markdown-content">
 												<MarkdownRenderer content={block.content} />
@@ -85,9 +83,7 @@ export const TablesView: React.FC<TablesViewProps> = ({ tables, compareMode, set
 							group.contents.map((block: any, contentIndex: number) => (
 								<div key={contentIndex} className="content-item-wrapper">
 									{/* Show field name only when multiple tables exist */}
-									{group.contents.length > 1 && block.fieldName && (
-										<div className="content-field-label">{block.fieldName}</div>
-									)}
+									{group.contents.length > 1 && block.fieldName && <div className="content-field-label">{block.fieldName}</div>}
 									<div className="content-item">
 										<div className="markdown-content">
 											<MarkdownRenderer content={block.content} />

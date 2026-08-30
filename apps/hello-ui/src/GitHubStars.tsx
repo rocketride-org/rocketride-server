@@ -39,19 +39,28 @@ const GitHubStars: React.FC = () => {
 
 	useEffect(() => {
 		mounted.current = true;
-		return () => { mounted.current = false; };
+		return () => {
+			mounted.current = false;
+		};
 	}, []);
 
 	// Fetch star count (once per session)
 	useEffect(() => {
-		if (_starsCache !== null) { setStars(_starsCache); return; }
+		if (_starsCache !== null) {
+			setStars(_starsCache);
+			return;
+		}
 		if (!_starsFetch) {
 			_starsFetch = fetch('https://api.github.com/repos/rocketride-org/rocketride-server')
 				.then((r) => r.json())
-				.then((d) => { if (typeof d.stargazers_count === 'number') _starsCache = d.stargazers_count; })
+				.then((d) => {
+					if (typeof d.stargazers_count === 'number') _starsCache = d.stargazers_count;
+				})
 				.catch(() => {});
 		}
-		_starsFetch.then(() => { if (mounted.current && _starsCache !== null) setStars(_starsCache); });
+		_starsFetch.then(() => {
+			if (mounted.current && _starsCache !== null) setStars(_starsCache);
+		});
 	}, []);
 
 	const label = stars === null ? '—' : stars >= 1000 ? `${(stars / 1000).toFixed(1)}k` : String(stars);
@@ -62,11 +71,17 @@ const GitHubStars: React.FC = () => {
 			target="_blank"
 			rel="noopener noreferrer"
 			style={{
-				display: 'flex', alignItems: 'center', gap: 6,
-				padding: '7px 16px', borderRadius: 6,
+				display: 'flex',
+				alignItems: 'center',
+				gap: 6,
+				padding: '7px 16px',
+				borderRadius: 6,
 				border: '1px solid var(--rr-border)',
-				backgroundColor: 'transparent', color: 'var(--rr-text-secondary)',
-				fontSize: 13, fontWeight: 500, textDecoration: 'none',
+				backgroundColor: 'transparent',
+				color: 'var(--rr-text-secondary)',
+				fontSize: 13,
+				fontWeight: 500,
+				textDecoration: 'none',
 				cursor: 'pointer',
 			}}
 		>

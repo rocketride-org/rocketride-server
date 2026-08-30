@@ -34,7 +34,7 @@ export const uuid = () => {
 	// Replace each 'x' and 'y' placeholder in the UUID v4 template with a hex digit
 	return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
 		// Combine timestamp bits with a random value, then extract the low nibble
-		const random = (d + Math.random() * 16) % 16 | 0;
+		const random = ((d + Math.random() * 16) % 16) | 0;
 		// Consume timestamp bits progressively so each position gets different entropy
 		d = Math.floor(d / 16);
 		// For 'y' positions, force the top two bits to '10' per UUID v4 variant spec

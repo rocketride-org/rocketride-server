@@ -110,5 +110,4 @@ export abstract class EngineBackend {
 
 	/** Releases all resources held by this backend (processes, watchers, temp files). */
 	abstract dispose(): Promise<void>;
-
 }

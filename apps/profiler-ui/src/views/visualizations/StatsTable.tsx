@@ -249,9 +249,7 @@ function flattenTree(tree: ProfileTreeNode): FlatRow[] {
  * Path prefixes that identify project code.
  * Used to filter rows when showSystemCalls is false.
  */
-const PROJECT_PREFIXES = [
-	'./nodes/', './ai/', './lib/', './libs/', './rocketlib/', 'engLib:',
-];
+const PROJECT_PREFIXES = ['./nodes/', './ai/', './lib/', './libs/', './rocketlib/', 'engLib:'];
 
 /** Check whether a file path belongs to project code. */
 function isProjectCode(file: string): boolean {
@@ -310,7 +308,9 @@ const StatsTable: React.FC<{
 	}, [filteredRows, sortCol, sortDir]);
 
 	// Reset visible count when data changes
-	useEffect(() => { setVisibleCount(CHUNK_SIZE); }, [sortedRows]);
+	useEffect(() => {
+		setVisibleCount(CHUNK_SIZE);
+	}, [sortedRows]);
 
 	// =========================================================================
 	// SCROLL-BASED WINDOWED RENDERING
@@ -330,38 +330,50 @@ const StatsTable: React.FC<{
 	// =========================================================================
 
 	/** Toggle sort column/direction. */
-	const handleSort = useCallback((col: SortColumn) => {
-		// Plain branches, no nesting: a setSortDir inside the setSortCol updater
-		// is an impure updater and double-toggles under StrictMode.
-		if (sortCol === col) {
-			setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
-		} else {
-			setSortCol(col);
-			// Default to desc for numeric columns, asc for text
-			setSortDir(col === 'location' ? 'asc' : 'desc');
-		}
-	}, [sortCol]);
+	const handleSort = useCallback(
+		(col: SortColumn) => {
+			// Plain branches, no nesting: a setSortDir inside the setSortCol updater
+			// is an impure updater and double-toggles under StrictMode.
+			if (sortCol === col) {
+				setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
+			} else {
+				setSortCol(col);
+				// Default to desc for numeric columns, asc for text
+				setSortDir(col === 'location' ? 'asc' : 'desc');
+			}
+		},
+		[sortCol]
+	);
 
 	/** Row click — re-root the visualisation (snakeviz behaviour). */
-	const handleRowClick = useCallback((row: FlatRow) => {
-		onRootChange(row.refNode);
-	}, [onRootChange]);
+	const handleRowClick = useCallback(
+		(row: FlatRow) => {
+			onRootChange(row.refNode);
+		},
+		[onRootChange]
+	);
 
 	/** Handle keyboard activation on a sortable column header. */
-	const handleThKeyDown = useCallback((e: React.KeyboardEvent, col: SortColumn) => {
-		if (e.key === 'Enter' || e.key === ' ') {
-			e.preventDefault();
-			handleSort(col);
-		}
-	}, [handleSort]);
+	const handleThKeyDown = useCallback(
+		(e: React.KeyboardEvent, col: SortColumn) => {
+			if (e.key === 'Enter' || e.key === ' ') {
+				e.preventDefault();
+				handleSort(col);
+			}
+		},
+		[handleSort]
+	);
 
 	/** Handle keyboard activation on a selectable row. */
-	const handleRowKeyDown = useCallback((e: React.KeyboardEvent, row: FlatRow) => {
-		if (e.key === 'Enter' || e.key === ' ') {
-			e.preventDefault();
-			handleRowClick(row);
-		}
-	}, [handleRowClick]);
+	const handleRowKeyDown = useCallback(
+		(e: React.KeyboardEvent, row: FlatRow) => {
+			if (e.key === 'Enter' || e.key === ' ') {
+				e.preventDefault();
+				handleRowClick(row);
+			}
+		},
+		[handleRowClick]
+	);
 
 	// =========================================================================
 	// HELPERS
@@ -394,13 +406,7 @@ const StatsTable: React.FC<{
 		<div style={styles.container}>
 			{/* Toolbar */}
 			<div style={styles.toolbar}>
-				<input
-					type="text"
-					placeholder="Search functions..."
-					value={search}
-					onChange={(e) => setSearch(e.target.value)}
-					style={styles.searchInput}
-				/>
+				<input type="text" placeholder="Search functions..." value={search} onChange={(e) => setSearch(e.target.value)} style={styles.searchInput} />
 				<span style={styles.count}>
 					{filteredRows.length} function{filteredRows.length !== 1 ? 's' : ''}
 					{search && ` (${allRows.length} total)`}
@@ -426,7 +432,8 @@ const StatsTable: React.FC<{
 									onClick={() => handleSort(col.key)}
 									onKeyDown={(e) => handleThKeyDown(e, col.key)}
 								>
-									{col.label}{sortArrow(col.key)}
+									{col.label}
+									{sortArrow(col.key)}
 								</th>
 							))}
 						</tr>
@@ -434,10 +441,7 @@ const StatsTable: React.FC<{
 					<tbody>
 						{visibleRows.map((row, i) => {
 							// Highlight the row that matches the current viz root
-							const isSelected = vizRoot
-								&& row.name === vizRoot.name
-								&& row.file === vizRoot.file
-								&& row.line === vizRoot.line;
+							const isSelected = vizRoot && row.name === vizRoot.name && row.file === vizRoot.file && row.line === vizRoot.line;
 
 							return (
 								<tr

@@ -221,9 +221,7 @@ const DebugPanel: React.FC<{ onClose: () => void }> = ({ onClose }) => {
 
 	// --- Filter entries ------------------------------------------------------
 
-	const displayed = filter
-		? entries.filter((e) => e.event.toLowerCase().includes(filter.toLowerCase()))
-		: entries;
+	const displayed = filter ? entries.filter((e) => e.event.toLowerCase().includes(filter.toLowerCase())) : entries;
 
 	// --- Render --------------------------------------------------------------
 
@@ -232,42 +230,43 @@ const DebugPanel: React.FC<{ onClose: () => void }> = ({ onClose }) => {
 			<div style={styles.header}>
 				<span>Debug</span>
 				<div style={styles.headerActions}>
-					<input
-						style={styles.filterInput}
-						placeholder="Filter..."
-						value={filter}
-						onChange={(e) => setFilter(e.target.value)}
-					/>
-					<button style={styles.btn} onClick={handleClear}>Clear</button>
-					<button style={styles.btn} onClick={onClose}>×</button>
+					<input style={styles.filterInput} placeholder="Filter..." value={filter} onChange={(e) => setFilter(e.target.value)} />
+					<button style={styles.btn} onClick={handleClear}>
+						Clear
+					</button>
+					<button style={styles.btn} onClick={onClose}>
+						×
+					</button>
 				</div>
 			</div>
 
 			<div ref={listRef} style={styles.list} onScroll={handleScroll}>
 				{displayed.length === 0 ? (
 					<div style={styles.empty}>No events captured</div>
-				) : displayed.map((entry, i) => {
-					// Format timestamp as HH:MM:SS.mmm for compact display
-					const time = entry.timestamp.slice(11, 23);
-					// Compact payload preview
-					let payloadStr: string;
-					try {
-						payloadStr = JSON.stringify(entry.payload);
-						if (payloadStr && payloadStr.length > 120) {
-							payloadStr = payloadStr.slice(0, 120) + '…';
+				) : (
+					displayed.map((entry, i) => {
+						// Format timestamp as HH:MM:SS.mmm for compact display
+						const time = entry.timestamp.slice(11, 23);
+						// Compact payload preview
+						let payloadStr: string;
+						try {
+							payloadStr = JSON.stringify(entry.payload);
+							if (payloadStr && payloadStr.length > 120) {
+								payloadStr = payloadStr.slice(0, 120) + '…';
+							}
+						} catch {
+							payloadStr = '[unserializable]';
 						}
-					} catch {
-						payloadStr = '[unserializable]';
-					}
 
-					return (
-						<div key={i} style={styles.entry}>
-							<span style={styles.timestamp}>{time}</span>
-							<span style={styles.eventName}>{entry.event}</span>
-							<span style={styles.payload}>{payloadStr}</span>
-						</div>
-					);
-				})}
+						return (
+							<div key={i} style={styles.entry}>
+								<span style={styles.timestamp}>{time}</span>
+								<span style={styles.eventName}>{entry.event}</span>
+								<span style={styles.payload}>{payloadStr}</span>
+							</div>
+						);
+					})
+				)}
 			</div>
 		</div>
 	);

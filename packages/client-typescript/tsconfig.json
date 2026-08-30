@@ -1,11 +1,7 @@
 {
 	"compilerOptions": {
 		"target": "ES2020",
-		"lib": [
-			"ES2020",
-			"DOM",
-			"DOM.Iterable"
-		],
+		"lib": ["ES2020", "DOM", "DOM.Iterable"],
 		"module": "ESNext",
 		"moduleResolution": "node",
 		"strict": true,
@@ -21,13 +17,6 @@
 		"strictNullChecks": true,
 		"strictPropertyInitialization": true
 	},
-	"include": [
-		"./src/client/**/*"
-	],
-	"exclude": [
-		"node_modules",
-		"dist",
-		"**/*.test.ts",
-		"**/*.spec.ts"
-	]
+	"include": ["./src/client/**/*"],
+	"exclude": ["node_modules", "dist", "**/*.test.ts", "**/*.spec.ts"]
 }

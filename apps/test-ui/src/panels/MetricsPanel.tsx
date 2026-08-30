@@ -98,10 +98,7 @@ interface Props {
 	onClear: () => void;
 }
 
-const MetricsPanel: React.FC<Props> = ({
-	metrics, worstPing, worstPingSnapshot,
-	engineState, onStart, onAbort, onPause, onResume, onClear,
-}) => {
+const MetricsPanel: React.FC<Props> = ({ metrics, worstPing, worstPingSnapshot, engineState, onStart, onAbort, onPause, onResume, onClear }) => {
 	const pct = metrics.targetOps > 0 ? Math.round((metrics.totalOps / metrics.targetOps) * 100) : 0;
 	const isRunning = engineState === 'running' || engineState === 'paused';
 	// Launch/Clear gate on ANY non-idle state: engine.start (and clear) are
@@ -111,49 +108,34 @@ const MetricsPanel: React.FC<Props> = ({
 	const isPaused = engineState === 'paused';
 
 	// Ping heartbeat stats — worst ping and what was running at that moment
-	const pingColor = worstPing === 0 ? 'var(--rr-text-disabled)'
-		: worstPing < 50 ? 'var(--rr-color-success)'
-		: worstPing < 200 ? 'var(--rr-color-warning)'
-		: 'var(--rr-color-error)';
+	const pingColor = worstPing === 0 ? 'var(--rr-text-disabled)' : worstPing < 50 ? 'var(--rr-color-success)' : worstPing < 200 ? 'var(--rr-color-warning)' : 'var(--rr-color-error)';
 
 	return (
 		<div style={{ ...styles.card, ...styles.cardFullWidth }}>
 			<div style={styles.cardHeader}>
 				<span>Live Metrics</span>
-				<span style={{ fontSize: 11, color: 'var(--rr-text-disabled)', fontFamily: 'var(--rr-font-mono, monospace)' }}>
-					Elapsed: {formatTime(metrics.elapsed)}
-				</span>
+				<span style={{ fontSize: 11, color: 'var(--rr-text-disabled)', fontFamily: 'var(--rr-font-mono, monospace)' }}>Elapsed: {formatTime(metrics.elapsed)}</span>
 			</div>
 			<div style={styles.cardBody}>
 				<div style={styles.metricsRow}>
 					<div style={styles.metric}>
-						<div style={{ ...styles.metricValue, color: 'var(--rr-color-success)' }}>
-							{formatNumber(metrics.passed)}
-						</div>
+						<div style={{ ...styles.metricValue, color: 'var(--rr-color-success)' }}>{formatNumber(metrics.passed)}</div>
 						<div style={styles.metricLabel}>Passed</div>
 					</div>
 					<div style={styles.metric}>
-						<div style={{ ...styles.metricValue, color: 'var(--rr-color-error)' }}>
-							{formatNumber(metrics.failed)}
-						</div>
+						<div style={{ ...styles.metricValue, color: 'var(--rr-color-error)' }}>{formatNumber(metrics.failed)}</div>
 						<div style={styles.metricLabel}>Failed</div>
 					</div>
 					<div style={styles.metric}>
-						<div style={{ ...styles.metricValue, color: 'var(--rr-color-warning)' }}>
-							{formatNumber(metrics.activePipelines)}
-						</div>
+						<div style={{ ...styles.metricValue, color: 'var(--rr-color-warning)' }}>{formatNumber(metrics.activePipelines)}</div>
 						<div style={styles.metricLabel}>Active Pipelines</div>
 					</div>
 					<div style={styles.metric}>
-						<div style={{ ...styles.metricValue, color: 'var(--rr-color-info)' }}>
-							{formatNumber(metrics.opsPerSec)}
-						</div>
+						<div style={{ ...styles.metricValue, color: 'var(--rr-color-info)' }}>{formatNumber(metrics.opsPerSec)}</div>
 						<div style={styles.metricLabel}>Ops/sec</div>
 					</div>
 					<div style={styles.metric} title={worstPing > 0 ? `Worst: ${formatMs(worstPing)}\nIn-flight: ${worstPingSnapshot}` : 'Ping heartbeat not started'}>
-						<div style={{ ...styles.metricValue, color: pingColor }}>
-							{worstPing > 0 ? formatMs(worstPing) : '-'}
-						</div>
+						<div style={{ ...styles.metricValue, color: pingColor }}>{worstPing > 0 ? formatMs(worstPing) : '-'}</div>
 						<div style={styles.metricLabel}>Ping Max</div>
 					</div>
 				</div>
@@ -165,7 +147,9 @@ const MetricsPanel: React.FC<Props> = ({
 						</div>
 						<div style={styles.progressText}>
 							<span>{pct}% complete</span>
-							<span>{formatNumber(metrics.totalOps)} / {formatNumber(metrics.targetOps)} operations</span>
+							<span>
+								{formatNumber(metrics.totalOps)} / {formatNumber(metrics.targetOps)} operations
+							</span>
 						</div>
 					</>
 				)}
@@ -173,20 +157,28 @@ const MetricsPanel: React.FC<Props> = ({
 				{/* ── Action Buttons ─────────────────────────────────── */}
 				<div style={actionStyles.row}>
 					{!isBusy ? (
-						<button style={actionStyles.launchBtn} onClick={onStart}>Launch Tests</button>
+						<button style={actionStyles.launchBtn} onClick={onStart}>
+							Launch Tests
+						</button>
 					) : (
-						<button style={actionStyles.runningBtn} disabled>Running...</button>
+						<button style={actionStyles.runningBtn} disabled>
+							Running...
+						</button>
 					)}
 					{isRunning && (
 						<>
-							<button style={actionStyles.abortBtn} onClick={onAbort}>Abort</button>
+							<button style={actionStyles.abortBtn} onClick={onAbort}>
+								Abort
+							</button>
 							<button style={actionStyles.actionBtn} onClick={isPaused ? onResume : onPause}>
 								{isPaused ? 'Resume' : 'Pause'}
 							</button>
 						</>
 					)}
 					{!isBusy && (
-						<button style={actionStyles.actionBtn} onClick={onClear}>Clear</button>
+						<button style={actionStyles.actionBtn} onClick={onClear}>
+							Clear
+						</button>
 					)}
 				</div>
 			</div>

@@ -101,7 +101,5 @@ export function fireAction(action: 'start' | 'abort' | 'pause' | 'resume' | 'cle
 
 /** React hook — subscribe to the ACTIVE tab's engine state. */
 export function useEngineState(): EngineState {
-	return _store.useValue(
-		() => (_activeEditorId ? _states.get(_activeEditorId) : undefined) ?? 'idle',
-	);
+	return _store.useValue(() => (_activeEditorId ? _states.get(_activeEditorId) : undefined) ?? 'idle');
 }

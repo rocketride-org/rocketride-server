@@ -59,7 +59,9 @@ function persistActiveApp(appId: string): void {
 		} else {
 			sessionStorage.setItem('rr:appId', appId);
 		}
-	} catch { /* storage unavailable */ }
+	} catch {
+		/* storage unavailable */
+	}
 }
 
 /**
@@ -83,7 +85,9 @@ function pushAppHistory(appId: string): void {
 		// state object wholesale drops `rrHome` and desyncs the URL from the page
 		// the remote renders on back/forward.
 		window.history.pushState({ ...(window.history.state ?? {}), appId }, '', window.location.pathname + window.location.search);
-	} catch { /* sandboxed iframe or similar */ }
+	} catch {
+		/* sandboxed iframe or similar */
+	}
 }
 
 // =============================================================================
@@ -233,10 +237,7 @@ export const WorkspaceProvider: React.FC<IWorkspaceProviderProps> = ({ apps, wor
 	const defaultAppId = defaultAppIdProp || 'rocketride.hello';
 
 	// Destructure all state and mutation helpers from the persistence hook
-	const {
-		loaded, seeded, activeAppId, prefs, appState, settings: settingsOverrides,
-		switchApp, updatePrefs, updateAppState, updateSetting: writeSettingOverride,
-	} = useWorkspaceState(client, isConnected, defaultAppId, workspaceDir, startupAppId);
+	const { loaded, seeded, activeAppId, prefs, appState, settings: settingsOverrides, switchApp, updatePrefs, updateAppState, updateSetting: writeSettingOverride } = useWorkspaceState(client, isConnected, defaultAppId, workspaceDir, startupAppId);
 
 	// ── Settings registry + effective values ───────────────────────────────
 	// The registry flattens every desktop app's configuration (VSCode
@@ -247,10 +248,7 @@ export const WorkspaceProvider: React.FC<IWorkspaceProviderProps> = ({ apps, wor
 	// Effective values keep their declared JSON type (string | number | boolean).
 	// The settings page reads settingsOverrides + registry defaults for its
 	// controls; every other app reads this merged effective map.
-	const settings = useMemo(
-		() => effectiveSettings(settingsRegistry, settingsOverrides),
-		[settingsRegistry, settingsOverrides],
-	);
+	const settings = useMemo(() => effectiveSettings(settingsRegistry, settingsOverrides), [settingsRegistry, settingsOverrides]);
 
 	/**
 	 * Persists a setting change with deltas-only semantics: a value equal to
@@ -260,11 +258,14 @@ export const WorkspaceProvider: React.FC<IWorkspaceProviderProps> = ({ apps, wor
 	 * @param key   - The dotted setting key.
 	 * @param value - The new value, or undefined to reset to default.
 	 */
-	const updateSetting = useCallback((key: string, value: SettingValue | undefined) => {
-		const def = settingsRegistry.defaults[key];
-		// Equal to the declared default → remove the override entirely
-		writeSettingOverride(key, value !== undefined && value === def ? undefined : value);
-	}, [settingsRegistry, writeSettingOverride]);
+	const updateSetting = useCallback(
+		(key: string, value: SettingValue | undefined) => {
+			const def = settingsRegistry.defaults[key];
+			// Equal to the declared default → remove the override entirely
+			writeSettingOverride(key, value !== undefined && value === def ? undefined : value);
+		},
+		[settingsRegistry, writeSettingOverride]
+	);
 
 	// ── Grid config channel bridge (web host) ──────────────────────────────
 	// Answers shared DataGrid persistence over the document CustomEvent
@@ -335,7 +336,9 @@ export const WorkspaceProvider: React.FC<IWorkspaceProviderProps> = ({ apps, wor
 	const dismissLoadFailure = useCallback(() => setLoadFailure(null), []);
 
 	// Keep the ref mirror up to date
-	useEffect(() => { loadedAppsRef.current = loadedApps; }, [loadedApps]);
+	useEffect(() => {
+		loadedAppsRef.current = loadedApps;
+	}, [loadedApps]);
 
 	/**
 	 * Dynamically imports the AppDescriptor for the given appId.
@@ -347,94 +350,98 @@ export const WorkspaceProvider: React.FC<IWorkspaceProviderProps> = ({ apps, wor
 	 * @returns True when the descriptor is (or already was) loaded or in
 	 *          flight; false when the app is unavailable (failed / unknown).
 	 */
-	const loadDescriptor = useCallback(async (appId: string): Promise<boolean> => {
-		// Skip if already loaded
-		if (loadedAppsRef.current[appId]) { return true; }
-		// A load is already in flight: await ITS outcome rather than reporting
-		// ready — otherwise shell:switchApp switches before the descriptor lands.
-		const inFlight = loadingMapRef.current.get(appId);
-		if (inFlight) { return inFlight; }
-		// Skip if this app already failed — only retryApp re-attempts it (it clears
-		// failedSetRef first), so the auto-load effect can't silently re-arm the load.
-		if (failedSetRef.current.has(appId)) { return false; }
-		// Find the manifest entry
-		const entry = apps.find((a) => a.id === appId);
-		if (!entry) return false;
-
-		// Forward-compat gate: an app stamped with a NEWER shell-api version
-		// than this shell provides would load, then hit undefined API members
-		// at runtime. Fail fast with a clear message instead. (shellApiVersion
-		// is stamped into apps.json by the app registration step; absent on
-		// older manifests, which pass the gate.)
-		if (typeof entry.shellApiVersion === 'number' && entry.shellApiVersion > SHELL_API_VERSION) {
-			failedSetRef.current.add(appId);
-			setAppLoadErrors((prev) => ({ ...prev, [appId]: `${entry.name} requires shell API v${entry.shellApiVersion}, but this platform provides v${SHELL_API_VERSION}. Update the platform to run this app.` }));
-			return false;
-		}
-
-		// Mark as in-flight and raise loading flag
-		setAppLoading(true);
-		// A fresh (re)attempt clears any stale error recorded for this app
-		setAppLoadErrors((prev) => { if (!prev[appId]) return prev; const next = { ...prev }; delete next[appId]; return next; });
-		// The load body runs as its own promise so concurrent callers can await
-		// it via the map. The leading microtask yield guarantees the map entry
-		// below is registered before any of the body (or its finally) executes.
-		const load = (async (): Promise<boolean> => {
-		await Promise.resolve();
-		try {
-			// Embedded dev preview: the locked app's remote is registered by the
-			// embedder AFTER boot (its dev server may still be installing —
-			// seconds of pnpm + rsbuild startup against a millisecond shell
-			// boot). Hold this load until the registration arrives; attempting
-			// earlier can only fail with RUNTIME-004 noise. BOUNDED, and inside
-			// the try, so a never-registering dev server fails into the normal
-			// error path (which clears loadingMapRef) instead of holding the
-			// loading flag forever.
-			if (isDevPreviewPage() && previewLockedAppId() === appId) {
-				console.log(`[WorkspaceContext] holding "${appId}" until its dev remote registers`);
-				const DEV_REMOTE_TIMEOUT = 300000;
-				await Promise.race([
-					waitForDevRemote(appId),
-					new Promise<never>((_, reject) =>
-						setTimeout(() => reject(new Error(`Dev remote for "${appId}" did not register within ${DEV_REMOTE_TIMEOUT / 1000}s — is the app's dev server running?`)), DEV_REMOTE_TIMEOUT),
-					),
-				]);
+	const loadDescriptor = useCallback(
+		async (appId: string): Promise<boolean> => {
+			// Skip if already loaded
+			if (loadedAppsRef.current[appId]) {
+				return true;
 			}
-			// Load with timeout to avoid indefinite hangs on unreachable remotes
-			const APP_LOAD_TIMEOUT = 15000;
-			const descriptor = await Promise.race([
-				entry.load(),
-				new Promise<never>((_, reject) =>
-					setTimeout(() => reject(new Error(`App "${appId}" failed to load within ${APP_LOAD_TIMEOUT / 1000}s`)), APP_LOAD_TIMEOUT),
-				),
-			]);
+			// A load is already in flight: await ITS outcome rather than reporting
+			// ready — otherwise shell:switchApp switches before the descriptor lands.
+			const inFlight = loadingMapRef.current.get(appId);
+			if (inFlight) {
+				return inFlight;
+			}
+			// Skip if this app already failed — only retryApp re-attempts it (it clears
+			// failedSetRef first), so the auto-load effect can't silently re-arm the load.
+			if (failedSetRef.current.has(appId)) {
+				return false;
+			}
+			// Find the manifest entry
+			const entry = apps.find((a) => a.id === appId);
+			if (!entry) return false;
 
-			// Validate the descriptor has the minimum required shape: the ONE
-			// `app` mount point.
-			if (!descriptor || !descriptor.app) {
-				console.error(`[WorkspaceContext] Invalid AppDescriptor for "${appId}": missing app`);
+			// Forward-compat gate: an app stamped with a NEWER shell-api version
+			// than this shell provides would load, then hit undefined API members
+			// at runtime. Fail fast with a clear message instead. (shellApiVersion
+			// is stamped into apps.json by the app registration step; absent on
+			// older manifests, which pass the gate.)
+			if (typeof entry.shellApiVersion === 'number' && entry.shellApiVersion > SHELL_API_VERSION) {
 				failedSetRef.current.add(appId);
-				setAppLoadErrors((prev) => ({ ...prev, [appId]: `App "${appId}" loaded but is missing its UI (app entry point) — the bundle may be stale or only partially deployed.` }));
+				setAppLoadErrors((prev) => ({ ...prev, [appId]: `${entry.name} requires shell API v${entry.shellApiVersion}, but this platform provides v${SHELL_API_VERSION}. Update the platform to run this app.` }));
 				return false;
 			}
 
-			setLoadedApps((prev) => ({ ...prev, [appId]: descriptor }));
-			return true;
-		} catch (e) {
-			// message + stack explicitly: Error objects JSON-stringify to {}
-			// through console forwarding, hiding the actual failure.
-			console.error(`[WorkspaceContext] Failed to load AppDescriptor for "${appId}": ${e instanceof Error ? (e.stack || e.message) : String(e)}`);
-			failedSetRef.current.add(appId);
-			setAppLoadErrors((prev) => ({ ...prev, [appId]: (e instanceof Error ? e.message : String(e)) || `App "${appId}" failed to load.` }));
-			return false;
-		} finally {
-			loadingMapRef.current.delete(appId);
-			if (loadingMapRef.current.size === 0) setAppLoading(false);
-		}
-		})();
-		loadingMapRef.current.set(appId, load);
-		return load;
-	}, [apps]);
+			// Mark as in-flight and raise loading flag
+			setAppLoading(true);
+			// A fresh (re)attempt clears any stale error recorded for this app
+			setAppLoadErrors((prev) => {
+				if (!prev[appId]) return prev;
+				const next = { ...prev };
+				delete next[appId];
+				return next;
+			});
+			// The load body runs as its own promise so concurrent callers can await
+			// it via the map. The leading microtask yield guarantees the map entry
+			// below is registered before any of the body (or its finally) executes.
+			const load = (async (): Promise<boolean> => {
+				await Promise.resolve();
+				try {
+					// Embedded dev preview: the locked app's remote is registered by the
+					// embedder AFTER boot (its dev server may still be installing —
+					// seconds of pnpm + rsbuild startup against a millisecond shell
+					// boot). Hold this load until the registration arrives; attempting
+					// earlier can only fail with RUNTIME-004 noise. BOUNDED, and inside
+					// the try, so a never-registering dev server fails into the normal
+					// error path (which clears loadingMapRef) instead of holding the
+					// loading flag forever.
+					if (isDevPreviewPage() && previewLockedAppId() === appId) {
+						console.log(`[WorkspaceContext] holding "${appId}" until its dev remote registers`);
+						const DEV_REMOTE_TIMEOUT = 300000;
+						await Promise.race([waitForDevRemote(appId), new Promise<never>((_, reject) => setTimeout(() => reject(new Error(`Dev remote for "${appId}" did not register within ${DEV_REMOTE_TIMEOUT / 1000}s — is the app's dev server running?`)), DEV_REMOTE_TIMEOUT))]);
+					}
+					// Load with timeout to avoid indefinite hangs on unreachable remotes
+					const APP_LOAD_TIMEOUT = 15000;
+					const descriptor = await Promise.race([entry.load(), new Promise<never>((_, reject) => setTimeout(() => reject(new Error(`App "${appId}" failed to load within ${APP_LOAD_TIMEOUT / 1000}s`)), APP_LOAD_TIMEOUT))]);
+
+					// Validate the descriptor has the minimum required shape: the ONE
+					// `app` mount point.
+					if (!descriptor || !descriptor.app) {
+						console.error(`[WorkspaceContext] Invalid AppDescriptor for "${appId}": missing app`);
+						failedSetRef.current.add(appId);
+						setAppLoadErrors((prev) => ({ ...prev, [appId]: `App "${appId}" loaded but is missing its UI (app entry point) — the bundle may be stale or only partially deployed.` }));
+						return false;
+					}
+
+					setLoadedApps((prev) => ({ ...prev, [appId]: descriptor }));
+					return true;
+				} catch (e) {
+					// message + stack explicitly: Error objects JSON-stringify to {}
+					// through console forwarding, hiding the actual failure.
+					console.error(`[WorkspaceContext] Failed to load AppDescriptor for "${appId}": ${e instanceof Error ? e.stack || e.message : String(e)}`);
+					failedSetRef.current.add(appId);
+					setAppLoadErrors((prev) => ({ ...prev, [appId]: (e instanceof Error ? e.message : String(e)) || `App "${appId}" failed to load.` }));
+					return false;
+				} finally {
+					loadingMapRef.current.delete(appId);
+					if (loadingMapRef.current.size === 0) setAppLoading(false);
+				}
+			})();
+			loadingMapRef.current.set(appId, load);
+			return load;
+		},
+		[apps]
+	);
 
 	/**
 	 * Re-attempts an app's descriptor load after a failure. Clears the failure
@@ -442,15 +449,18 @@ export const WorkspaceProvider: React.FC<IWorkspaceProviderProps> = ({ apps, wor
 	 * silently re-trying a down app, so an explicit retry must clear it first);
 	 * loadDescriptor itself clears the displayed error when the attempt starts.
 	 */
-	const retryApp = useCallback((appId: string): Promise<boolean> => {
-		failedSetRef.current.delete(appId);
-		// Tear down the half-initialized MF container first so the retry does a
-		// REAL fresh fetch — re-loading the cached failed container only throws
-		// TDZ errors ("Cannot access 'x' before initialization").
-		const entry = apps.find((a) => a.id === appId);
-		if (entry?.moduleId) resetRemote(entry.moduleId);
-		return loadDescriptor(appId);
-	}, [apps, loadDescriptor]);
+	const retryApp = useCallback(
+		(appId: string): Promise<boolean> => {
+			failedSetRef.current.delete(appId);
+			// Tear down the half-initialized MF container first so the retry does a
+			// REAL fresh fetch — re-loading the cached failed container only throws
+			// TDZ errors ("Cannot access 'x' before initialization").
+			const entry = apps.find((a) => a.id === appId);
+			if (entry?.moduleId) resetRemote(entry.moduleId);
+			return loadDescriptor(appId);
+		},
+		[apps, loadDescriptor]
+	);
 
 	/**
 	 * Evicts an app's cached descriptor (and all failure bookkeeping) so the
@@ -460,16 +470,29 @@ export const WorkspaceProvider: React.FC<IWorkspaceProviderProps> = ({ apps, wor
 	 * preservation). The ref mirror is cleared synchronously so a
 	 * loadDescriptor racing this call cannot early-return on stale cache.
 	 */
-	const invalidateDescriptor = useCallback((appId: string): void => {
-		// Synchronous eviction from the ref mirror + failure bookkeeping
-		delete loadedAppsRef.current[appId];
-		failedSetRef.current.delete(appId);
-		// State eviction (descriptor + surfaced error)
-		setLoadedApps((prev) => { if (!(appId in prev)) return prev; const next = { ...prev }; delete next[appId]; return next; });
-		setAppLoadErrors((prev) => { if (!prev[appId]) return prev; const next = { ...prev }; delete next[appId]; return next; });
-		// Active app: reload now so the screen swaps to the fresh descriptor
-		if (appId === activeAppId) void loadDescriptor(appId);
-	}, [activeAppId, loadDescriptor]);
+	const invalidateDescriptor = useCallback(
+		(appId: string): void => {
+			// Synchronous eviction from the ref mirror + failure bookkeeping
+			delete loadedAppsRef.current[appId];
+			failedSetRef.current.delete(appId);
+			// State eviction (descriptor + surfaced error)
+			setLoadedApps((prev) => {
+				if (!(appId in prev)) return prev;
+				const next = { ...prev };
+				delete next[appId];
+				return next;
+			});
+			setAppLoadErrors((prev) => {
+				if (!prev[appId]) return prev;
+				const next = { ...prev };
+				delete next[appId];
+				return next;
+			});
+			// Active app: reload now so the screen swaps to the fresh descriptor
+			if (appId === activeAppId) void loadDescriptor(appId);
+		},
+		[activeAppId, loadDescriptor]
+	);
 
 	// Publish the invalidator on the appLoader bridge so non-React code
 	// (Shell's entry-change reconciliation, window.__rrShellDev) can evict
@@ -548,7 +571,9 @@ export const WorkspaceProvider: React.FC<IWorkspaceProviderProps> = ({ apps, wor
 			// effect re-runs after boot (its deps are unstable), so overwriting
 			// here would wipe `rrHome` off an entry the remote already owns.
 			window.history.replaceState({ ...(window.history.state ?? {}), appId: activeAppId }, '', window.location.pathname + window.location.search);
-		} catch { /* ignore */ }
+		} catch {
+			/* ignore */
+		}
 
 		/** Handle browser back/forward by switching to the app stored in state. */
 		const onPopState = (e: PopStateEvent) => {
@@ -581,46 +606,70 @@ export const WorkspaceProvider: React.FC<IWorkspaceProviderProps> = ({ apps, wor
 	 * Subscribes to a typed shell event by delegating to the connectionManager singleton.
 	 * Returns an unsubscribe function.  Stable reference.
 	 */
-	const on = useCallback(<K extends keyof ShellConnectionEventMap>(event: K, handler: (payload: ShellConnectionEventMap[K]) => void): () => void => {
+	const on = useCallback(<K extends keyof ShellConnectionEventMap>(event: K, handler: (payload: ShellConnectionEventMap[K]) => void): (() => void) => {
 		return ConnectionManager.getInstance().on(event, handler);
 	}, []);
 
 	// --- Dispatch (deprecated shim) ---------------------------------------------
 
 	/** @deprecated Routes prefs to updatePrefs, switchApp to connectionManager. */
-	const dispatch = useCallback((action: { type: string; [key: string]: unknown }) => {
-		if (action.type === 'prefs' && action.patch) {
-			updatePrefs(action.patch as Partial<WorkspacePrefs>);
-		} else if (action.type === 'switchApp' && action.appId) {
-			ConnectionManager.getInstance().emit('shell:switchApp', { appId: action.appId as string });
-		}
-	}, [updatePrefs]);
+	const dispatch = useCallback(
+		(action: { type: string; [key: string]: unknown }) => {
+			if (action.type === 'prefs' && action.patch) {
+				updatePrefs(action.patch as Partial<WorkspacePrefs>);
+			} else if (action.type === 'switchApp' && action.appId) {
+				ConnectionManager.getInstance().emit('shell:switchApp', { appId: action.appId as string });
+			}
+		},
+		[updatePrefs]
+	);
 
 	// --- Theme ---------------------------------------------------------------
 
 	const themeOptions = themeOptionsProp ?? [];
 
 	/** Switch theme — updates prefs, applies CSS, and persists to localStorage for unauthenticated sessions. */
-	const setTheme = useCallback((themeId: string) => {
-		updatePrefs({ theme: themeId });
-		onThemeChange?.(themeId);
-		try { localStorage.setItem('rr:theme', themeId); } catch {}
-	}, [updatePrefs, onThemeChange]);
+	const setTheme = useCallback(
+		(themeId: string) => {
+			updatePrefs({ theme: themeId });
+			onThemeChange?.(themeId);
+			try {
+				localStorage.setItem('rr:theme', themeId);
+			} catch {}
+		},
+		[updatePrefs, onThemeChange]
+	);
 
 	return (
-		<WorkspaceContext.Provider value={{
-			loaded, seeded, appLoading,
-			prefs,
-			appState, updateAppState,
-			activeAppId,
-			appManifest: apps,
-			loadedApps,
-			loadApp: loadDescriptor,
-			appLoadErrors, retryApp, invalidateApp: invalidateDescriptor,
-			loadFailure, dismissLoadFailure,
-			settings, settingsOverrides, settingsRegistry, updateSetting,
-			updatePrefs, themeOptions, setTheme, dispatch, emit, on,
-		}}>
+		<WorkspaceContext.Provider
+			value={{
+				loaded,
+				seeded,
+				appLoading,
+				prefs,
+				appState,
+				updateAppState,
+				activeAppId,
+				appManifest: apps,
+				loadedApps,
+				loadApp: loadDescriptor,
+				appLoadErrors,
+				retryApp,
+				invalidateApp: invalidateDescriptor,
+				loadFailure,
+				dismissLoadFailure,
+				settings,
+				settingsOverrides,
+				settingsRegistry,
+				updateSetting,
+				updatePrefs,
+				themeOptions,
+				setTheme,
+				dispatch,
+				emit,
+				on,
+			}}
+		>
 			{children}
 		</WorkspaceContext.Provider>
 	);

@@ -53,32 +53,12 @@
 
 		/* Additional Options for React */
 		"allowJs": true,
-		"checkJs": false,
-
+		"checkJs": false
 	},
 
-	"include": [
-		"src/**/*",
-		"src/**/*.ts",
-		"src/**/*.tsx",
-		"src/**/*.js",
-		"src/**/*.jsx",
-		"src/types/global.d.ts",
-		"public/**/*",
-		"*.ts",
-		"*.tsx"
-	],
+	"include": ["src/**/*", "src/**/*.ts", "src/**/*.tsx", "src/**/*.js", "src/**/*.jsx", "src/types/global.d.ts", "public/**/*", "*.ts", "*.tsx"],
 
-	"exclude": [
-		"node_modules",
-		"dist",
-		"build",
-		"coverage",
-		"**/*.test.ts",
-		"**/*.test.tsx",
-		"**/*.spec.ts",
-		"**/*.spec.tsx"
-	],
+	"exclude": ["node_modules", "dist", "build", "coverage", "**/*.test.ts", "**/*.test.tsx", "**/*.spec.ts", "**/*.spec.tsx"],
 
 	"ts-node": {
 		"esm": true,

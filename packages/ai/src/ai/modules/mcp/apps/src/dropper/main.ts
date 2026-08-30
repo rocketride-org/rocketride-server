@@ -46,17 +46,13 @@ function parseInfo(result: unknown): DropperInfo | null {
 	if (!text) return null;
 	try {
 		const payload = JSON.parse(text) as Partial<DropperInfo> & { ok?: boolean };
-		return payload.ok && payload.upload_url
-			? (payload as DropperInfo)
-			: null;
+		return payload.ok && payload.upload_url ? (payload as DropperInfo) : null;
 	} catch {
 		return null;
 	}
 }
 
-function el<K extends keyof HTMLElementTagNameMap>(
-	tag: K, cls?: string, text?: string,
-): HTMLElementTagNameMap[K] {
+function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, text?: string): HTMLElementTagNameMap[K] {
 	const node = document.createElement(tag);
 	if (cls) node.className = cls;
 	if (text !== undefined) node.textContent = text;
@@ -71,13 +67,20 @@ type Tab = (typeof TABS)[number] | 'JSON';
 
 const TYPE_TO_TAB: Record<string, Tab> = {
 	text: 'Text',
-	table: 'Tables', tables: 'Tables',
-	image: 'Images', images: 'Images',
-	audio: 'Audio', audios: 'Audio',
-	video: 'Video', videos: 'Video',
-	document: 'Documents', documents: 'Documents',
-	question: 'Questions', questions: 'Questions',
-	answer: 'Answers', answers: 'Answers',
+	table: 'Tables',
+	tables: 'Tables',
+	image: 'Images',
+	images: 'Images',
+	audio: 'Audio',
+	audios: 'Audio',
+	video: 'Video',
+	videos: 'Video',
+	document: 'Documents',
+	documents: 'Documents',
+	question: 'Questions',
+	questions: 'Questions',
+	answer: 'Answers',
+	answers: 'Answers',
 };
 
 const MEDIA_LANE: Partial<Record<Tab, string>> = { Images: 'image', Audio: 'audio', Video: 'video' };
@@ -109,9 +112,7 @@ function mediaUrls(value: unknown, lane: string): string[] {
 		// external URLs, and a remote src would leak the render to a third party.
 		return typeof item === 'string' && item.startsWith('data:') ? item : null;
 	};
-	return (Array.isArray(value) ? value : [value])
-		.map(fromEntry)
-		.filter((url): url is string => url !== null);
+	return (Array.isArray(value) ? value : [value]).map(fromEntry).filter((url): url is string => url !== null);
 }
 
 function renderBlock(block: Block): HTMLElement {
@@ -135,8 +136,7 @@ function renderBlock(block: Block): HTMLElement {
 	}
 	const values = Array.isArray(block.value) ? block.value : [block.value];
 	for (const value of values) {
-		card.appendChild(el('pre', undefined,
-			typeof value === 'string' ? value : JSON.stringify(value, null, 2)));
+		card.appendChild(el('pre', undefined, typeof value === 'string' ? value : JSON.stringify(value, null, 2)));
 	}
 	return card;
 }
@@ -157,9 +157,7 @@ function collectBlocks(data: DataResult): Block[] {
 function renderResults(data: DataResult): void {
 	const blocks = collectBlocks(data);
 	const wrap = el('div');
-	wrap.appendChild(
-		el('p', undefined, `${data.objectsCompleted}/${data.objectsRequested} objects processed`),
-	);
+	wrap.appendChild(el('p', undefined, `${data.objectsCompleted}/${data.objectsRequested} objects processed`));
 
 	// Failed objects carry a formatted exception instead of a pipe result.
 	for (const [objectKey, objectValue] of Object.entries(data.objects ?? {})) {
@@ -239,25 +237,17 @@ function upload(files: FileList | File[]): void {
 			renderResults(envelope.data);
 			return;
 		}
-		const message = envelope?.status === 'Error'
-			? `Pipeline error: ${JSON.stringify(envelope.error ?? {})}`
-			: `Unexpected response (HTTP ${xhr.status})`;
+		const message = envelope?.status === 'Error' ? `Pipeline error: ${JSON.stringify(envelope.error ?? {})}` : `Unexpected response (HTTP ${xhr.status})`;
 		root.replaceChildren(el('p', 'empty', message), buildDropzone('Try again'));
 	};
 	xhr.onerror = () => {
-		root.replaceChildren(
-			el('p', 'empty', 'Upload failed — network/CSP error. Check the engine is reachable.'),
-			buildDropzone('Try again'),
-		);
+		root.replaceChildren(el('p', 'empty', 'Upload failed — network/CSP error. Check the engine is reachable.'), buildDropzone('Try again'));
 	};
 	// A stalled connection fires neither onerror nor onload — without a
 	// timeout the widget would sit on "Processing…" forever with no dropzone.
 	xhr.timeout = 30 * 60 * 1000;
 	xhr.ontimeout = () => {
-		root.replaceChildren(
-			el('p', 'empty', 'Upload timed out. The pipeline may still be running.'),
-			buildDropzone('Try again'),
-		);
+		root.replaceChildren(el('p', 'empty', 'Upload timed out. The pipeline may still be running.'), buildDropzone('Try again'));
 	};
 	xhr.send(form);
 }
@@ -285,7 +275,10 @@ function buildDropzone(prompt: string): HTMLElement {
 			picker.click();
 		}
 	};
-	zone.ondragover = (e) => { e.preventDefault(); zone.classList.add('drag'); };
+	zone.ondragover = (e) => {
+		e.preventDefault();
+		zone.classList.add('drag');
+	};
 	zone.ondragleave = (e) => {
 		// dragleave bubbles from children; only clear when leaving the zone.
 		if (!(e.relatedTarget instanceof Node) || !zone.contains(e.relatedTarget)) {

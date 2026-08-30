@@ -557,40 +557,46 @@ export const Explorer: React.FC<IExplorerProps> = ({ config, entries, statuses =
 		e.dataTransfer.setData('text/plain', path);
 	}, []);
 
-	const handleDragOver = useCallback((e: React.DragEvent, dirPath: string) => {
-		e.preventDefault();
-		e.stopPropagation();
-		e.dataTransfer.dropEffect = dragPath ? 'move' : 'copy';
-		// Don't allow dropping onto self or own descendant
-		if (dragPath && (dragPath === dirPath || dirPath.startsWith(dragPath + '/'))) return;
-		setDropTarget(dirPath);
-	}, [dragPath]);
+	const handleDragOver = useCallback(
+		(e: React.DragEvent, dirPath: string) => {
+			e.preventDefault();
+			e.stopPropagation();
+			e.dataTransfer.dropEffect = dragPath ? 'move' : 'copy';
+			// Don't allow dropping onto self or own descendant
+			if (dragPath && (dragPath === dirPath || dirPath.startsWith(dragPath + '/'))) return;
+			setDropTarget(dirPath);
+		},
+		[dragPath]
+	);
 
 	const handleDragLeave = useCallback((e: React.DragEvent) => {
 		e.stopPropagation();
 		setDropTarget(null);
 	}, []);
 
-	const handleDrop = useCallback((e: React.DragEvent, dirPath: string) => {
-		e.preventDefault();
-		e.stopPropagation();
-		setDropTarget(null);
-		setDragPath(null);
+	const handleDrop = useCallback(
+		(e: React.DragEvent, dirPath: string) => {
+			e.preventDefault();
+			e.stopPropagation();
+			setDropTarget(null);
+			setDragPath(null);
 
-		// OS file drop
-		if (e.dataTransfer.files.length > 0 && onUpload) {
-			onUpload(Array.from(e.dataTransfer.files), dirPath);
-			return;
-		}
+			// OS file drop
+			if (e.dataTransfer.files.length > 0 && onUpload) {
+				onUpload(Array.from(e.dataTransfer.files), dirPath);
+				return;
+			}
 
-		// Internal move
-		const sourcePath = e.dataTransfer.getData('text/plain');
-		if (sourcePath && onMove && sourcePath !== dirPath) {
-			// Prevent moving a directory into itself or its own descendant
-			if (dirPath === sourcePath || dirPath.startsWith(sourcePath + '/')) return;
-			onMove(sourcePath, dirPath);
-		}
-	}, [onMove, onUpload]);
+			// Internal move
+			const sourcePath = e.dataTransfer.getData('text/plain');
+			if (sourcePath && onMove && sourcePath !== dirPath) {
+				// Prevent moving a directory into itself or its own descendant
+				if (dirPath === sourcePath || dirPath.startsWith(sourcePath + '/')) return;
+				onMove(sourcePath, dirPath);
+			}
+		},
+		[onMove, onUpload]
+	);
 
 	const handleDragEnd = useCallback(() => {
 		setDragPath(null);
@@ -759,7 +765,8 @@ export const Explorer: React.FC<IExplorerProps> = ({ config, entries, statuses =
 									style={{ ...S.menuBtn, ...(isFileSelected ? { color: 'var(--rr-fg-list-active)' } : {}) }}
 									onClick={(e) => {
 										e.stopPropagation();
-										setMenuPath(menuPath === file.path ? null : file.path); setSubmenuId(null);
+										setMenuPath(menuPath === file.path ? null : file.path);
+										setSubmenuId(null);
 									}}
 								>
 									<BxDotsHorizontal size={16} />
@@ -875,7 +882,7 @@ export const Explorer: React.FC<IExplorerProps> = ({ config, entries, statuses =
 									{/* Liveness dot only while running — idle is the default
 								    state and gets no marker; the fixed-width slot keeps
 								    the name column aligned either way. */}
-								{chRunning ? <div style={S.dot('var(--rr-color-success)')} /> : <span style={{ width: 8, flexShrink: 0 }} />}
+									{chRunning ? <div style={S.dot('var(--rr-color-success)')} /> : <span style={{ width: 8, flexShrink: 0 }} />}
 									<span style={S.rowName}>{ch.name}</span>
 									{errCount > 0 && <span style={S.badge('var(--rr-color-error)')}>&#10006; {errCount}</span>}
 									{warnCount > 0 && <span style={S.badge('var(--rr-color-warning)')}>&#9888; {warnCount}</span>}
@@ -959,15 +966,8 @@ export const Explorer: React.FC<IExplorerProps> = ({ config, entries, statuses =
 			{/* When the tree is empty we still need to render the inline create
 			    input if the user just clicked +File / +Folder at the root, since
 			    that input lives inside renderChildren(). */}
-			<div
-				style={{ ...S.treeList, ...(dropTarget === '' ? { outline: '2px solid var(--rr-brand)', outlineOffset: -2 } : {}) }}
-				onDragOver={canDrop ? (e) => handleDragOver(e, '') : undefined}
-				onDragLeave={canDrop ? handleDragLeave : undefined}
-				onDrop={canDrop ? (e) => handleDrop(e, '') : undefined}
-			>
-				{entries.length === 0 && !(createState && createState.parentDir === '') && (
-					<div style={S.emptyState}>{config.emptyMessage ?? 'No files'}</div>
-				)}
+			<div style={{ ...S.treeList, ...(dropTarget === '' ? { outline: '2px solid var(--rr-brand)', outlineOffset: -2 } : {}) }} onDragOver={canDrop ? (e) => handleDragOver(e, '') : undefined} onDragLeave={canDrop ? handleDragLeave : undefined} onDrop={canDrop ? (e) => handleDrop(e, '') : undefined}>
+				{entries.length === 0 && !(createState && createState.parentDir === '') && <div style={S.emptyState}>{config.emptyMessage ?? 'No files'}</div>}
 				{(entries.length > 0 || (createState && createState.parentDir === '')) && renderChildren()}
 			</div>
 		</div>

@@ -34,7 +34,7 @@ export const AUTH_REJECTED_MESSAGE = 'Authentication failed: unknown user or inv
 export class ConnectionFailure extends Error {
 	constructor(
 		message: string,
-		public readonly kind: 'auth' | 'network' | 'server',
+		public readonly kind: 'auth' | 'network' | 'server'
 	) {
 		super(message);
 		this.name = 'ConnectionFailure';
@@ -52,12 +52,7 @@ export class ConnectionFailure extends Error {
  * @param cleanup - Awaited before rejection so client-side state is cancelled first.
  * @returns The operation's value when it settles before the timeout.
  */
-export function withTimeout<T>(
-	operation: Promise<T>,
-	timeoutMs: number,
-	timeoutError: Error,
-	cleanup: () => Promise<unknown>,
-): Promise<T> {
+export function withTimeout<T>(operation: Promise<T>, timeoutMs: number, timeoutError: Error, cleanup: () => Promise<unknown>): Promise<T> {
 	return new Promise<T>((resolve, reject) => {
 		// One-shot latches: whichever of settlement / timeout fires first wins.
 		let settled = false;
@@ -95,7 +90,7 @@ export function withTimeout<T>(
 				settled = true;
 				clearTimer();
 				reject(error);
-			},
+			}
 		);
 	});
 }

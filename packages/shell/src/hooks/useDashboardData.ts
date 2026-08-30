@@ -91,7 +91,7 @@ let _snapshot: DashboardSnapshot = { data: _data, events: _events, error: _error
 /** Notify all subscribed React components that data changed. */
 function _emit(): void {
 	_snapshot = { data: _data, events: _events, error: _error };
-	_listeners.forEach(fn => fn());
+	_listeners.forEach((fn) => fn());
 }
 
 /** The one in-flight dashboard request, shared by poll / initial / refresh. */
@@ -131,8 +131,7 @@ function _fetchDashboard(): Promise<void> {
 			// case this branch exists for: a real denial would keep rendering the
 			// previous session's numbers under an "access denied" banner. Read the
 			// structured status first and fall back to the text.
-			const dapResult =
-				(err as { dapResult?: Record<string, unknown> } | undefined)?.dapResult;
+			const dapResult = (err as { dapResult?: Record<string, unknown> } | undefined)?.dapResult;
 			const status = Number(dapResult?.status ?? dapResult?.statusCode ?? dapResult?.code);
 			// `code` is not always numeric — the server may send a symbolic
 			// 'UNAUTHORIZED' / 'FORBIDDEN', which Number() turns into NaN. Testing
@@ -141,18 +140,14 @@ function _fetchDashboard(): Promise<void> {
 			// this branch exists to prevent: the previous session's figures would
 			// stay on screen under a vague error. Match the code as text too.
 			const code = String(dapResult?.code ?? '');
-			const DENIAL =
-				/denied|permission|forbidden|unauthori[sz]ed|not\s*authori[sz]ed|\b40[13]\b/i;
-			const denied =
-				status === 401 || status === 403 || DENIAL.test(code) || DENIAL.test(message);
+			const DENIAL = /denied|permission|forbidden|unauthori[sz]ed|not\s*authori[sz]ed|\b40[13]\b/i;
+			const denied = status === 401 || status === 403 || DENIAL.test(code) || DENIAL.test(message);
 			// The raw message already says "permission denied" in the case we most
 			// want to explain, so prefixing it produced "You do not have permission
 			// to view the dashboard. Permission denied". Replace it instead of
 			// appending — the verbatim text stays in the console line above for
 			// anyone debugging.
-			_error = denied
-				? 'You do not have permission to view the dashboard.'
-				: message;
+			_error = denied ? 'You do not have permission to view the dashboard.' : message;
 			// Deliberate: `_data` is NOT cleared on a transient failure. A poll that
 			// blips should leave the last good numbers on screen with an error
 			// alongside them, not blank the dashboard every time the network hiccups
@@ -258,8 +253,11 @@ export function useDashboardData(): DashboardData {
 	// The snapshot function returns a stable reference (_snapshot) that is
 	// only replaced inside _emit(), preventing infinite re-render loops.
 	const snapshot = useSyncExternalStore(
-		(cb) => { _listeners.add(cb); return () => _listeners.delete(cb); },
-		() => _snapshot,
+		(cb) => {
+			_listeners.add(cb);
+			return () => _listeners.delete(cb);
+		},
+		() => _snapshot
 	);
 
 	// Ref-count consumers; reconcile on every mount/unmount so the singleton

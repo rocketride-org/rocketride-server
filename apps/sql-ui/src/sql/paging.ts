@@ -135,23 +135,14 @@ export interface IPageStatements {
  * @param req - The grid's page request.
  * @returns The page statements.
  */
-export function buildPageStatements(
-	dialect: SqlDialect,
-	tableName: string,
-	table: ISqlSchemaTable,
-	req: IDataGridPageRequest,
-): IPageStatements {
+export function buildPageStatements(dialect: SqlDialect, tableName: string, table: ISqlSchemaTable, req: IDataGridPageRequest): IPageStatements {
 	const target = quoteIdent(dialect, tableName);
 	const where = buildWhere(dialect, table, req);
 
 	// ORDER BY from the grid's sorters; fall back to the primary key so
 	// paging is deterministic even without a user sort.
-	const sorters = req.sort.length > 0
-		? req.sort
-		: (table.primary_key ?? []).map((c) => ({ field: c, dir: 'asc' as const }));
-	const orderBy = sorters.length > 0
-		? ` ORDER BY ${sorters.map((s) => `${quoteIdent(dialect, s.field)} ${s.dir.toUpperCase()}`).join(', ')}`
-		: '';
+	const sorters = req.sort.length > 0 ? req.sort : (table.primary_key ?? []).map((c) => ({ field: c, dir: 'asc' as const }));
+	const orderBy = sorters.length > 0 ? ` ORDER BY ${sorters.map((s) => `${quoteIdent(dialect, s.field)} ${s.dir.toUpperCase()}`).join(', ')}` : '';
 
 	const offset = (req.page - 1) * req.size;
 	return {

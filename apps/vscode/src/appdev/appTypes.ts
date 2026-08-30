@@ -36,13 +36,13 @@ import { ConnectionManager } from '../connection/connection';
  */
 export type ShellVendorResult =
 	| {
-		ok: true;
-		/** Absolute path of the vendored shell tarball. */
-		tgzPath: string;
-		/** True when THIS pass rewrote the app's dependency spec — callers
-		 * must invalidate any memoised install so the new spec links. */
-		rewired?: boolean;
-	}
+			ok: true;
+			/** Absolute path of the vendored shell tarball. */
+			tgzPath: string;
+			/** True when THIS pass rewrote the app's dependency spec — callers
+			 * must invalidate any memoised install so the new spec links. */
+			rewired?: boolean;
+	  }
 	| { ok: false; reason: string };
 
 // Single-flight memo for the workspace's ONE shell package: the first
@@ -162,12 +162,7 @@ function ensureWorkspaceFile(workspaceRoot: string): void {
 
 	if (!fs.existsSync(yamlPath)) {
 		// step: no workspace file — write the canonical minimal one
-		fs.writeFileSync(yamlPath, [
-			'# RocketRide app workspace — one root install links every app under apps/.',
-			'packages:',
-			"  - 'apps/*'",
-			'',
-		].join('\n'));
+		fs.writeFileSync(yamlPath, ['# RocketRide app workspace — one root install links every app under apps/.', 'packages:', "  - 'apps/*'", ''].join('\n'));
 		logger.output(`[appdev] wrote ${yamlPath} (pnpm workspace claiming apps/*)`);
 	} else {
 		// step: amend the existing file only when the claim is missing
@@ -265,8 +260,12 @@ function runRootInstall(workspaceRoot: string): Promise<void> {
 		});
 		// step: collect output so a failure can NAME its cause
 		let output = '';
-		proc.stdout?.on('data', (chunk: Buffer) => { output += chunk.toString(); });
-		proc.stderr?.on('data', (chunk: Buffer) => { output += chunk.toString(); });
+		proc.stdout?.on('data', (chunk: Buffer) => {
+			output += chunk.toString();
+		});
+		proc.stderr?.on('data', (chunk: Buffer) => {
+			output += chunk.toString();
+		});
 		// step: settle EXACTLY once — an unsettled promise here wedges the
 		// single-flight ensureShell memo for the whole session, and 'error'
 		// followed by 'close' (or a timeout racing either) fires both paths
@@ -283,14 +282,17 @@ function runRootInstall(workspaceRoot: string): Promise<void> {
 		// pnpm in cmd.exe on Windows, so SIGKILL fells only the wrapper while
 		// pnpm keeps running (and holding locks) — taskkill /T fells the whole
 		// tree, same approach as watchManager.stop().
-		const timer = setTimeout(() => {
-			if (process.platform === 'win32' && proc.pid) {
-				spawn('taskkill', ['/PID', String(proc.pid), '/T', '/F']);
-			} else {
-				proc.kill('SIGKILL');
-			}
-			finish(new Error('pnpm install timed out after 10 minutes'));
-		}, 10 * 60 * 1000);
+		const timer = setTimeout(
+			() => {
+				if (process.platform === 'win32' && proc.pid) {
+					spawn('taskkill', ['/PID', String(proc.pid), '/T', '/F']);
+				} else {
+					proc.kill('SIGKILL');
+				}
+				finish(new Error('pnpm install timed out after 10 minutes'));
+			},
+			10 * 60 * 1000
+		);
 		proc.on('error', (err) => finish(err));
 		proc.on('close', (code) => {
 			if (code === 0) finish();
@@ -309,7 +311,10 @@ function runRootInstall(workspaceRoot: string): Promise<void> {
  * @returns One human-readable cause line.
  */
 export function extractInstallCause(output: string, code: number | null): string {
-	const lines = output.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+	const lines = output
+		.split(/\r?\n/)
+		.map((l) => l.trim())
+		.filter(Boolean);
 	// step: tiered markers, most specific first — a generic "error" line must
 	// not outrank pnpm's own ERR_PNPM_* code; newest match within a tier wins
 	const tiers = [/ERR_PNPM\w*/, /\b(ENOENT|EACCES|EPERM)\b/, /ERR!/, /\berror\b/i];

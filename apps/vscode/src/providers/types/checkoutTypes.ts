@@ -23,7 +23,4 @@ export type CheckoutResultHostToWebview =
 	| { type: 'checkout:confirmResult'; error: string | null };
 
 /** Checkout requests from the webview. */
-export type CheckoutRequestWebviewToHost =
-	| { type: 'checkout:fetchPlans' }
-	| { type: 'checkout:createSession'; priceId: string; promotionCode?: string }
-	| { type: 'checkout:confirmPending'; subscriptionId: string; priceId: string };
+export type CheckoutRequestWebviewToHost = { type: 'checkout:fetchPlans' } | { type: 'checkout:createSession'; priceId: string; promotionCode?: string } | { type: 'checkout:confirmPending'; subscriptionId: string; priceId: string };

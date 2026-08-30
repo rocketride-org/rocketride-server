@@ -34,7 +34,7 @@ import type { PIPELINE_RESULT } from 'rocketride';
  *
  * @param result - Pipeline result from RocketRide API
  * @returns Array of text strings ready for display
- * 
+ *
  * @example
  * // If result has: { result_types: { "answers": "answers" }, answers: ["Hello", "World"] }
  * // Returns: ["Hello", "World"]
@@ -49,7 +49,7 @@ export const extractTextFromResult = (result: PIPELINE_RESULT): TextResult[] => 
 
 	// If we didn't get any result types, make sure they were returned
 	if (!result.result_types) {
-		textResponses.push({ text: '### I don\'t see any answers in there...\nAre you sure you returned them in your pipeline?', key: '' });
+		textResponses.push({ text: "### I don't see any answers in there...\nAre you sure you returned them in your pipeline?", key: '' });
 		return textResponses;
 	}
 
@@ -59,8 +59,7 @@ export const extractTextFromResult = (result: PIPELINE_RESULT): TextResult[] => 
 			const fieldData = result[fieldName];
 
 			if (Array.isArray(fieldData)) {
-				fieldData.filter(item => typeof item === 'string' && item.trim())
-					.forEach(item => textResponses.push({ text: item, key: fieldName }));
+				fieldData.filter((item) => typeof item === 'string' && item.trim()).forEach((item) => textResponses.push({ text: item, key: fieldName }));
 			} else if (typeof fieldData === 'string' && fieldData.trim()) {
 				textResponses.push({ text: fieldData, key: fieldName });
 			} else if (typeof fieldData === 'object' && fieldData !== null && typeof (fieldData as Record<string, unknown>).answer === 'string') {

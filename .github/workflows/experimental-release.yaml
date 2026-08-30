@@ -215,4 +215,3 @@ jobs:
       server_version: ${{ needs.init.outputs.server_version }}
       tag_suffix: ${{ inputs.tag_suffix }}
     secrets: inherit
-

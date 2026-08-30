@@ -31,27 +31,9 @@ import { IIconProps } from './types';
  *
  * @param props - Standard icon props for controlling color, size, style, and opacity.
  */
-const WordIcon: FunctionComponent<IIconProps> = ({
-	color = '#1565C0',
-	height = '20',
-	style,
-	width = '18',
-	opacity = 1,
-}) => {
+const WordIcon: FunctionComponent<IIconProps> = ({ color = '#1565C0', height = '20', style, width = '18', opacity = 1 }) => {
 	return (
-		<svg
-			version="1.1"
-			xmlns="http://www.w3.org/2000/svg"
-			xmlnsXlink="http://www.w3.org/1999/xlink"
-			x="0px"
-			y="0px"
-			viewBox="0 0 512 512"
-			xmlSpace="preserve"
-			height={height}
-			width={width}
-			style={style}
-			opacity={opacity}
-		>
+		<svg version="1.1" xmlns="http://www.w3.org/2000/svg" xmlnsXlink="http://www.w3.org/1999/xlink" x="0px" y="0px" viewBox="0 0 512 512" xmlSpace="preserve" height={height} width={width} style={style} opacity={opacity}>
 			<g>
 				<path
 					style={{ fill: color }}

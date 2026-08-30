@@ -61,13 +61,7 @@ const HOVER_COLOR = '#ff00ff';
  * D3 category20c palette — same 20-colour ordinal scale as snakeviz.
  * Hardcoded to avoid dependency on d3-scale-chromatic type exports.
  */
-const CATEGORY20C = [
-	'#3182bd', '#6baed6', '#9ecae1', '#c6dbef',
-	'#e6550d', '#fd8d3c', '#fdae6b', '#fdd0a2',
-	'#31a354', '#74c476', '#a1d99b', '#c7e9c0',
-	'#756bb1', '#9e9ac8', '#bcbddc', '#dadaeb',
-	'#636363', '#969696', '#bdbdbd', '#d9d9d9',
-];
+const CATEGORY20C = ['#3182bd', '#6baed6', '#9ecae1', '#c6dbef', '#e6550d', '#fd8d3c', '#fdae6b', '#fdd0a2', '#31a354', '#74c476', '#a1d99b', '#c7e9c0', '#756bb1', '#9e9ac8', '#bcbddc', '#dadaeb', '#636363', '#969696', '#bdbdbd', '#d9d9d9'];
 
 // =============================================================================
 // STYLES
@@ -134,13 +128,7 @@ interface FlameGraphProps {
  * Width = cumulative time.  Same colour scheme and hover behaviour as
  * the sunburst chart.
  */
-const FlameGraph: React.FC<FlameGraphProps> = ({
-	root: vizRoot,
-	totalTime,
-	maxDepth: maxDepthProp,
-	cutoff,
-	onRootChange,
-}) => {
+const FlameGraph: React.FC<FlameGraphProps> = ({ root: vizRoot, totalTime, maxDepth: maxDepthProp, cutoff, onRootChange }) => {
 	const svgRef = useRef<SVGSVGElement>(null);
 	const containerRef = useRef<HTMLDivElement>(null);
 	const [width, setWidth] = useState(800);
@@ -175,7 +163,8 @@ const FlameGraph: React.FC<FlameGraphProps> = ({
 		const color = d3.scaleOrdinal(CATEGORY20C);
 
 		// Build d3 hierarchy — partition value = cumtime (snakeviz icicle mode)
-		const root = d3.hierarchy(processedRoot, (d) => d.children)
+		const root = d3
+			.hierarchy(processedRoot, (d) => d.children)
 			.sum((d) => {
 				if (!d.children || d.children.length === 0) return Math.max(d.cumtime, 0.000001);
 				const childCum = d.children.reduce((s, c) => s + c.cumtime, 0);
@@ -186,9 +175,7 @@ const FlameGraph: React.FC<FlameGraphProps> = ({
 		// Compute partition layout
 		const depthLimit = Math.min(root.height + 1, MAX_VISIBLE_DEPTH);
 		const height = depthLimit * ROW_HEIGHT;
-		const partition = d3.partition<ProfileTreeNode>()
-			.size([width, height])
-			.padding(1);
+		const partition = d3.partition<ProfileTreeNode>().size([width, height]).padding(1);
 		partition(root);
 
 		// Setup SVG
@@ -196,11 +183,11 @@ const FlameGraph: React.FC<FlameGraphProps> = ({
 		d3.select(svg).selectAll('*').remove();
 
 		// Flatten visible nodes
-		const nodes = (root.descendants() as HierarchyRectangularNode<ProfileTreeNode>[])
-			.filter((d) => (d.x1 - d.x0) >= MIN_RENDER_WIDTH);
+		const nodes = (root.descendants() as HierarchyRectangularNode<ProfileTreeNode>[]).filter((d) => d.x1 - d.x0 >= MIN_RENDER_WIDTH);
 
 		// Create node groups
-		const g = d3.select(svg)
+		const g = d3
+			.select(svg)
 			.selectAll<SVGGElement, HierarchyRectangularNode<ProfileTreeNode>>('g.node')
 			.data(nodes)
 			.join('g')
@@ -208,7 +195,8 @@ const FlameGraph: React.FC<FlameGraphProps> = ({
 			.attr('transform', (d) => `translate(${d.x0},${d.y0})`);
 
 		// Rectangles
-		const rects = g.append('rect')
+		const rects = g
+			.append('rect')
 			.attr('width', (d) => Math.max(0, d.x1 - d.x0))
 			.attr('height', (d) => Math.max(0, d.y1 - d.y0 - 1))
 			.attr('rx', 2)
@@ -263,17 +251,13 @@ const FlameGraph: React.FC<FlameGraphProps> = ({
 			});
 
 			// Tooltip with cumtime percentage
-			const pct = totalTime > 0 ? (d.data.cumtime / totalTime * 100).toFixed(1) : '0.0';
-			const lines = [
-				d.data.name,
-				`${d.data.cumtime.toFixed(4)}s (${pct}%)`,
-				`${d.data.file}:${d.data.line}`,
-			];
+			const pct = totalTime > 0 ? ((d.data.cumtime / totalTime) * 100).toFixed(1) : '0.0';
+			const lines = [d.data.name, `${d.data.cumtime.toFixed(4)}s (${pct}%)`, `${d.data.file}:${d.data.line}`];
 			setTooltip({ x: event.clientX + 12, y: event.clientY + 12, text: lines.join('\n') });
 		});
 
 		g.on('mousemove', (event) => {
-			setTooltip((prev) => prev ? { ...prev, x: event.clientX + 12, y: event.clientY + 12 } : null);
+			setTooltip((prev) => (prev ? { ...prev, x: event.clientX + 12, y: event.clientY + 12 } : null));
 		});
 
 		g.on('mouseleave', () => {
@@ -281,7 +265,6 @@ const FlameGraph: React.FC<FlameGraphProps> = ({
 			rects.attr('fill', (d) => color(d.data.name)).attr('opacity', 0.85);
 			setTooltip(null);
 		});
-
 	}, [vizRoot, width, maxDepthProp, cutoff, onRootChange, totalTime]);
 
 	// =========================================================================
@@ -297,9 +280,7 @@ const FlameGraph: React.FC<FlameGraphProps> = ({
 			<div ref={containerRef} style={styles.svgContainer}>
 				<svg ref={svgRef} />
 			</div>
-			{tooltip && (
-				<div style={{ ...styles.tooltip, left: tooltip.x, top: tooltip.y }}>{tooltip.text}</div>
-			)}
+			{tooltip && <div style={{ ...styles.tooltip, left: tooltip.x, top: tooltip.y }}>{tooltip.text}</div>}
 		</div>
 	);
 };

@@ -41,8 +41,7 @@ import { commonStyles } from '../../themes/styles';
 export const CLOSE_GLYPH = '✕';
 
 /** Selector matching the tabbable elements inside a dialog (for focus + trap). */
-export const FOCUSABLE_SELECTOR =
-	'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
+export const FOCUSABLE_SELECTOR = 'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 /**
  * Stack of currently-open overlay layers (identity tokens), topmost last.
@@ -235,17 +234,7 @@ const styles = {
  * @param props - {@link IModalProps}.
  * @returns The modal element.
  */
-export function Modal({
-	title,
-	onClose,
-	children,
-	footer,
-	showClose,
-	closeOnEscape = true,
-	width,
-	noBodyPadding,
-	ariaLabel,
-}: IModalProps): React.ReactElement {
+export function Modal({ title, onClose, children, footer, showClose, closeOnEscape = true, width, noBodyPadding, ariaLabel }: IModalProps): React.ReactElement {
 	// Resolve the ✕: explicit prop wins; otherwise show it only when there is no
 	// footer (a footer carries the dismiss control, making a corner ✕ redundant).
 	const resolvedShowClose = showClose ?? footer == null;

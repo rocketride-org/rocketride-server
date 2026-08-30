@@ -30,43 +30,43 @@ updates:
   # ---------------------------------------------------------------------------
   # npm (pnpm) — every workspace + per-app + per-package location
   # ---------------------------------------------------------------------------
-  - package-ecosystem: "npm"
+  - package-ecosystem: 'npm'
     directories:
-      - "/"
-      - "/packages/client-typescript"
-      - "/packages/shared-ui"
-      - "/apps/dropper-ui"
-      - "/apps/chat-ui"
+      - '/'
+      - '/packages/client-typescript'
+      - '/packages/shared-ui'
+      - '/apps/dropper-ui'
+      - '/apps/chat-ui'
     schedule:
-      interval: "monthly"
-      time: "06:00"
-      timezone: "America/Los_Angeles"
+      interval: 'monthly'
+      time: '06:00'
+      timezone: 'America/Los_Angeles'
     open-pull-requests-limit: 10
     labels:
-      - "dependencies"
-      - "area: deps"
+      - 'dependencies'
+      - 'area: deps'
     commit-message:
-      prefix: "chore(deps)"
-      prefix-development: "chore(deps-dev)"
-      include: "scope"
+      prefix: 'chore(deps)'
+      prefix-development: 'chore(deps-dev)'
+      include: 'scope'
     groups:
       # One PR per month for ALL npm bumps (prod + dev, minor + patch) across
       # every workspace directory above.
       npm-all:
         applies-to: version-updates
         update-types:
-          - "minor"
-          - "patch"
+          - 'minor'
+          - 'patch'
     ignore:
       # Block major-version PRs — handle via manual `pnpm outdated` cycles.
-      - dependency-name: "*"
-        update-types: ["version-update:semver-major"]
+      - dependency-name: '*'
+        update-types: ['version-update:semver-major']
       # rsbuild/rspack: shared-ui is on 1.x while apps/{chat,dropper}-ui
       # are pinned to 0.4.x. Bumps strand the apps at intermediate versions
       # (see #855, #860, #866). Coordinate via manual PRs across all three
       # locations together.
-      - dependency-name: "@rsbuild/*"
-      - dependency-name: "@rspack/*"
+      - dependency-name: '@rsbuild/*'
+      - dependency-name: '@rspack/*'
       # @types/vscode is constrained by apps/vscode/package.json's
       # engines.vscode field — vsce package fails the build if @types/vscode
       # exceeds engines.vscode. PR #921 hit this when the npm-development
@@ -74,28 +74,28 @@ updates:
       # ^1.99. Pinned manually in apps/vscode/ to ~1.99 instead; bumps land
       # via an explicit engines.vscode PR when the team raises the supported
       # VS Code floor.
-      - dependency-name: "@types/vscode"
+      - dependency-name: '@types/vscode'
 
   # ---------------------------------------------------------------------------
   # Python (pip) — root pyproject + published SDKs + node deps (ML runtime)
   # ---------------------------------------------------------------------------
-  - package-ecosystem: "pip"
+  - package-ecosystem: 'pip'
     directories:
-      - "/"
-      - "/packages/client-python"
-      - "/packages/client-mcp"
-      - "/nodes/src/nodes"
+      - '/'
+      - '/packages/client-python'
+      - '/packages/client-mcp'
+      - '/nodes/src/nodes'
     schedule:
-      interval: "monthly"
-      time: "06:00"
-      timezone: "America/Los_Angeles"
+      interval: 'monthly'
+      time: '06:00'
+      timezone: 'America/Los_Angeles'
     open-pull-requests-limit: 5
     labels:
-      - "dependencies"
-      - "area: deps"
+      - 'dependencies'
+      - 'area: deps'
     commit-message:
-      prefix: "chore(deps)"
-      include: "scope"
+      prefix: 'chore(deps)'
+      include: 'scope'
     groups:
       # One PR per month for ALL pip bumps (minor + patch) across every Python
       # location above — including large ML libs in nodes/src/nodes (torch,
@@ -103,12 +103,12 @@ updates:
       pip-all:
         applies-to: version-updates
         update-types:
-          - "minor"
-          - "patch"
+          - 'minor'
+          - 'patch'
     ignore:
       # Block major-version PRs.
-      - dependency-name: "*"
-        update-types: ["version-update:semver-major"]
+      - dependency-name: '*'
+        update-types: ['version-update:semver-major']
       # Pip `requirement-update` PRs (Dependabot rewriting a `>=X,<Y`
       # constraint to a higher Y) take a different classification path from
       # `version-update:*` and slipped past the semver-major rule. Pin these
@@ -134,11 +134,11 @@ updates:
       # Bring these in manually via an explicit PR per dep when the team is
       # ready to do the audit. Same #921-style fix-on-Dependabot-branch
       # pattern works if a bundled PR ever needs to ride one of these.
-      - dependency-name: "elasticsearch"
-      - dependency-name: "google-genai"
-      - dependency-name: "openai"
-      - dependency-name: "cohere"
-      - dependency-name: "redis"
+      - dependency-name: 'elasticsearch'
+      - dependency-name: 'google-genai'
+      - dependency-name: 'openai'
+      - dependency-name: 'cohere'
+      - dependency-name: 'redis'
 
   # ---------------------------------------------------------------------------
   # GitHub Actions — workflow file SHA pin updates
@@ -146,25 +146,25 @@ updates:
   # Matches the team's existing supply-chain-defense pattern of pinning
   # third-party actions to commit SHAs (see scorecard.yml, _build.yaml).
   # Dependabot opens PRs to bump those SHAs when upstream releases.
-  - package-ecosystem: "github-actions"
-    directory: "/"
+  - package-ecosystem: 'github-actions'
+    directory: '/'
     schedule:
-      interval: "monthly"
-      time: "06:00"
-      timezone: "America/Los_Angeles"
+      interval: 'monthly'
+      time: '06:00'
+      timezone: 'America/Los_Angeles'
     open-pull-requests-limit: 5
     labels:
-      - "dependencies"
-      - "area: ci"
+      - 'dependencies'
+      - 'area: ci'
     commit-message:
-      prefix: "chore(ci)"
-      include: "scope"
+      prefix: 'chore(ci)'
+      include: 'scope'
     groups:
       gh-actions:
         applies-to: version-updates
         update-types:
-          - "minor"
-          - "patch"
+          - 'minor'
+          - 'patch'
     ignore:
-      - dependency-name: "*"
-        update-types: ["version-update:semver-major"]
+      - dependency-name: '*'
+        update-types: ['version-update:semver-major']

@@ -72,9 +72,7 @@ export const Message: React.FC<MessageProps> = ({ message }) => {
 				<div className="user-bubble-content">
 					<p>{message.text}</p>
 				</div>
-				<div className="message-timestamp">
-					{message.timestamp}
-				</div>
+				<div className="message-timestamp">{message.timestamp}</div>
 			</div>
 		</div>
 	);

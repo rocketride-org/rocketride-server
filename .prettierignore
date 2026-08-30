@@ -12,6 +12,16 @@ packages/n8n-nodes/
 *.min.js
 *.min.css
 pnpm-lock.yaml
+*.generated.ts
+apps/vscode/rocketride.js
+
+# Frozen API contract floors — immutable once minted (shell:freeze / client-typescript:freeze)
+packages/shell/contract/versions/
+packages/client-typescript/contract/versions/
+
+# Node contracts — owned by the node schema validator and the credentials/docs
+# generators (nodes:docs-generate, gen-credentials.mjs); kept byte-stable.
+nodes/src/nodes/**/*.json
 
 # Storybook
 storybook-static/

@@ -120,35 +120,18 @@ interface Props {
 }
 
 /** Phase selector — checkboxes only, no status indicators. */
-const PhaseList: React.FC<Props> = ({
-	phases,
-	selectedPhases,
-	onTogglePhase,
-	onSelectAll,
-	onDeselectAll,
-	disabled,
-}) => {
+const PhaseList: React.FC<Props> = ({ phases, selectedPhases, onTogglePhase, onSelectAll, onDeselectAll, disabled }) => {
 	const allSelected = phases.length > 0 && selectedPhases.size === phases.length;
 
 	if (phases.length === 0) {
-		return <div style={{ padding: 24, textAlign: 'center', color: 'var(--rr-text-disabled)', fontSize: 11 }}>
-			No phases defined
-		</div>;
+		return <div style={{ padding: 24, textAlign: 'center', color: 'var(--rr-text-disabled)', fontSize: 11 }}>No phases defined</div>;
 	}
 
 	return (
 		<div style={s.container}>
 			<div style={s.selectAllRow}>
-				<input
-					type="checkbox"
-					style={s.checkbox}
-					checked={allSelected}
-					onChange={allSelected ? onDeselectAll : onSelectAll}
-					disabled={disabled}
-				/>
-				<span style={{ fontWeight: 600 }}>
-					{allSelected ? 'Deselect All' : 'Select All'}
-				</span>
+				<input type="checkbox" style={s.checkbox} checked={allSelected} onChange={allSelected ? onDeselectAll : onSelectAll} disabled={disabled} />
+				<span style={{ fontWeight: 600 }}>{allSelected ? 'Deselect All' : 'Select All'}</span>
 				<span style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--rr-text-disabled)' }}>
 					{selectedPhases.size}/{phases.length} selected
 				</span>
@@ -156,17 +139,8 @@ const PhaseList: React.FC<Props> = ({
 
 			<div style={s.list}>
 				{phases.map((phase) => (
-					<div
-						key={phase.id}
-						style={{ ...s.card, opacity: !selectedPhases.has(phase.id) ? 0.5 : 1 }}
-					>
-						<input
-							type="checkbox"
-							style={s.checkbox}
-							checked={selectedPhases.has(phase.id)}
-							onChange={() => onTogglePhase(phase.id)}
-							disabled={disabled}
-						/>
+					<div key={phase.id} style={{ ...s.card, opacity: !selectedPhases.has(phase.id) ? 0.5 : 1 }}>
+						<input type="checkbox" style={s.checkbox} checked={selectedPhases.has(phase.id)} onChange={() => onTogglePhase(phase.id)} disabled={disabled} />
 						<div style={s.body}>
 							<div style={s.name}>{phase.name}</div>
 							<div style={s.desc}>{phase.description}</div>

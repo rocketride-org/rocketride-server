@@ -177,7 +177,12 @@ const RocketApp: React.FC<ShellAppProps> = (_props) => {
 	// The layout declaration: two columns (pipelines Explorer) + status bar.
 	// The sidebar only mounts once Documents is ready — SidebarProvider shares
 	// the singleton with the editor surface.
-	if (!ready) return <AppLayout showStatus><div style={styles.welcome}>Initialising...</div></AppLayout>;
+	if (!ready)
+		return (
+			<AppLayout showStatus>
+				<div style={styles.welcome}>Initialising...</div>
+			</AppLayout>
+		);
 	return (
 		<AppLayout sidebar={sidebar} showStatus>
 			<RocketAppReady docs={getDocs()!} />

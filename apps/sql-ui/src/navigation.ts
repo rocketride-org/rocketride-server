@@ -58,8 +58,11 @@ export function setActiveConnection(key: string | null): void {
  */
 export function useActiveConnection(): string | null {
 	return useSyncExternalStore(
-		(cb) => { activeListeners.add(cb); return () => activeListeners.delete(cb); },
-		() => activeConnectionKey,
+		(cb) => {
+			activeListeners.add(cb);
+			return () => activeListeners.delete(cb);
+		},
+		() => activeConnectionKey
 	);
 }
 
@@ -100,7 +103,10 @@ export function requestTableRecord(key: string, table: string): void {
  */
 export function useTableRecordRequest(): ITableRecordRequest | null {
 	return useSyncExternalStore(
-		(cb) => { tableListeners.add(cb); return () => tableListeners.delete(cb); },
-		() => tableRequest,
+		(cb) => {
+			tableListeners.add(cb);
+			return () => tableListeners.delete(cb);
+		},
+		() => tableRequest
 	);
 }

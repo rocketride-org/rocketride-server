@@ -33,7 +33,7 @@ export const docExplorerEntry: IGalleryEntry = {
 	id: 'doc-explorer',
 	name: 'DocExplorer',
 	group: 'documents',
-	blurb: 'The document system\'s name for Explorer: the identical component re-exported with Doc* type aliases for the document-flavored vocabulary.',
+	blurb: "The document system's name for Explorer: the identical component re-exported with Doc* type aliases for the document-flavored vocabulary.",
 	doc: `\`DocExplorer\` IS \`Explorer\` — a thin re-export, not a fork. Both names (and both sets of type names) refer to the same component and types, and both are frozen on the surface, so use whichever vocabulary fits the app: \`Explorer\`/\`ExplorerEntry\` standalone, \`DocExplorer\`/\`DocEntry\` when wiring the document system (its \`onOpenFile\` feeding \`docs.openDocument\`).
 
 See the **Explorer** entry (Sidebar content) for the live demo and the full prop table.`,

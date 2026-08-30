@@ -48,7 +48,9 @@ export const DocxViewer: React.FC<Props> = ({ content, loadError }) => {
 			}
 		})();
 
-		return () => { cancelled = true; };
+		return () => {
+			cancelled = true;
+		};
 	}, [content]);
 
 	// Upstream load failure wins over any local render error and over "Loading...".

@@ -48,10 +48,7 @@ export function getDocs(): Documents | null {
  * @param vfs       - Virtual file system for reading/writing files.
  * @param workspace - Optional workspace binding for tab layout persistence.
  */
-export function createDocs(
-	vfs: IVirtualFileSystem,
-	workspace?: import('shell').WorkspaceBinding,
-): Documents {
+export function createDocs(vfs: IVirtualFileSystem, workspace?: import('shell').WorkspaceBinding): Documents {
 	_docs = new Documents(vfs, workspace);
 	return _docs;
 }

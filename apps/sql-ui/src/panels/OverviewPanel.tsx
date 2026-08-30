@@ -122,7 +122,7 @@ export const OverviewPanel: React.FC<IOverviewPanelProps> = ({ endpoint, snapsho
 				primaryKey: def.primary_key?.length ? def.primary_key.join(', ') : '—',
 				foreignKeys: def.foreign_keys?.length ?? 0,
 			})),
-		[tables],
+		[tables]
 	);
 	const totalColumns = rows.reduce((sum, r) => sum + r.columns, 0);
 	const totalForeignKeys = rows.reduce((sum, r) => sum + r.foreignKeys, 0);
@@ -179,7 +179,7 @@ export const OverviewPanel: React.FC<IOverviewPanelProps> = ({ endpoint, snapsho
 					sorter: 'number',
 				},
 			] satisfies GridColumnDefinition[],
-		[],
+		[]
 	);
 
 	// ── Loading / error framing ──────────────────────────────────────────────
@@ -191,7 +191,9 @@ export const OverviewPanel: React.FC<IOverviewPanelProps> = ({ endpoint, snapsho
 				<div>
 					<Button
 						variant="primary"
-						onClick={() => { if (client) void refreshSchema(client, endpoint); }}
+						onClick={() => {
+							if (client) void refreshSchema(client, endpoint);
+						}}
 						disabled={!client}
 					>
 						Retry
@@ -203,13 +205,7 @@ export const OverviewPanel: React.FC<IOverviewPanelProps> = ({ endpoint, snapsho
 
 	if (snapshot.status !== 'ready') {
 		// First paint: framed progress state, never bare "Loading..." text.
-		return (
-			<EmptyState
-				icon={<DatabaseIcon />}
-				title="Reading schema"
-				description={`Reflecting tables, columns, and relations from ${endpoint.nodeName}...`}
-			/>
-		);
+		return <EmptyState icon={<DatabaseIcon />} title="Reading schema" description={`Reflecting tables, columns, and relations from ${endpoint.nodeName}...`} />;
 	}
 
 	// ── Ready ────────────────────────────────────────────────────────────────
@@ -262,7 +258,7 @@ export const OverviewPanel: React.FC<IOverviewPanelProps> = ({ endpoint, snapsho
 				onClose={() => setOpenTable(null)}
 				database={snapshot.schema?.database ?? ''}
 				table={openTable ?? ''}
-				def={openTable ? (tables[openTable] as ISqlSchemaTable | undefined) ?? null : null}
+				def={openTable ? ((tables[openTable] as ISqlSchemaTable | undefined) ?? null) : null}
 				onBrowseData={() => {
 					// Open (or focus) the table's data-browser document; the
 					// endpoint + table ride as the static doc's content payload.

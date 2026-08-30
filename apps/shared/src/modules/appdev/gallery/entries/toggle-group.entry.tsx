@@ -44,24 +44,9 @@ const ToggleGroupDemo: React.FC<IGalleryDemoProps> = ({ knobs }) => {
 	const [values, setValues] = useState<string[]>(['hour', 'day']);
 
 	if (knobs.multi) {
-		return (
-			<ToggleGroup
-				multi
-				options={DEMO_OPTIONS}
-				values={values}
-				onToggle={(id) => setValues((prev) => (prev.includes(id) ? prev.filter((v) => v !== id) : [...prev, id]))}
-				disabled={Boolean(knobs.disabled)}
-			/>
-		);
+		return <ToggleGroup multi options={DEMO_OPTIONS} values={values} onToggle={(id) => setValues((prev) => (prev.includes(id) ? prev.filter((v) => v !== id) : [...prev, id]))} disabled={Boolean(knobs.disabled)} />;
 	}
-	return (
-		<ToggleGroup
-			options={DEMO_OPTIONS}
-			value={value}
-			onChange={setValue}
-			disabled={Boolean(knobs.disabled)}
-		/>
-	);
+	return <ToggleGroup options={DEMO_OPTIONS} value={value} onChange={setValue} disabled={Boolean(knobs.disabled)} />;
 };
 
 /** Snippet builder mirroring the current knob state. */

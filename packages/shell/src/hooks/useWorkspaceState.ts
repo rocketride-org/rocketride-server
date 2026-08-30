@@ -58,7 +58,13 @@ const defaultPrefs: WorkspacePrefs = {
  */
 const makeDefaultAppState = (_appId: string): AppWorkspaceState => {
 	// Restore theme from localStorage if available (persists across unauthenticated sessions)
-	const savedTheme = (() => { try { return localStorage.getItem('rr:theme') || ''; } catch { return ''; } })();
+	const savedTheme = (() => {
+		try {
+			return localStorage.getItem('rr:theme') || '';
+		} catch {
+			return '';
+		}
+	})();
 	return {
 		prefs: { ...defaultPrefs, ...(savedTheme ? { theme: savedTheme } : {}) },
 		appState: {},
@@ -97,7 +103,9 @@ interface GlobalFile {
  * @param dir - The workspace directory (e.g. ".workspace").
  * @returns The full path to global.json.
  */
-function globalPath(dir: string) { return `${dir}/global.json`; }
+function globalPath(dir: string) {
+	return `${dir}/global.json`;
+}
 
 /**
  * Returns the path to a specific app's workspace state file.
@@ -106,7 +114,9 @@ function globalPath(dir: string) { return `${dir}/global.json`; }
  * @param appId - The app's stable identifier.
  * @returns The full path to the app's workspace JSON file.
  */
-function appPath(dir: string, appId: string) { return `${dir}/${appId}.workspace.json`; }
+function appPath(dir: string, appId: string) {
+	return `${dir}/${appId}.workspace.json`;
+}
 
 /**
  * Returns the path to the shared settings file within the workspace directory.
@@ -114,7 +124,9 @@ function appPath(dir: string, appId: string) { return `${dir}/${appId}.workspace
  * @param dir - The workspace directory.
  * @returns The full path to settings.json.
  */
-function settingsPath(dir: string) { return `${dir}/settings.json`; }
+function settingsPath(dir: string) {
+	return `${dir}/settings.json`;
+}
 
 // =============================================================================
 // HOOK
@@ -135,13 +147,7 @@ function settingsPath(dir: string) { return `${dir}/settings.json`; }
  * @param startupAppId  - Optional override for the active app on first load.
  * @returns State values and mutation callbacks consumed by WorkspaceContext.
  */
-export function useWorkspaceState(
-	client: RocketRideClient | null,
-	isConnected: boolean,
-	defaultAppId: string,
-	workspaceDir: string = '.workspace',
-	startupAppId?: string,
-) {
+export function useWorkspaceState(client: RocketRideClient | null, isConnected: boolean, defaultAppId: string, workspaceDir: string = '.workspace', startupAppId?: string) {
 	// `loaded` becomes true once the initial disk read (or no-op) has completed
 	const [loaded, setLoaded] = useState(false);
 	// The appId of the currently active app
@@ -169,9 +175,15 @@ export function useWorkspaceState(
 	const diskLoadedRef = useRef(false);
 
 	// Keep refs in sync with state
-	useEffect(() => { appsRef.current = apps; }, [apps]);
-	useEffect(() => { activeAppIdRef.current = activeAppId; }, [activeAppId]);
-	useEffect(() => { settingsRef.current = settings; }, [settings]);
+	useEffect(() => {
+		appsRef.current = apps;
+	}, [apps]);
+	useEffect(() => {
+		activeAppIdRef.current = activeAppId;
+	}, [activeAppId]);
+	useEffect(() => {
+		settingsRef.current = settings;
+	}, [settings]);
 
 	// --- Selectors (active app's data) ---------------------------------------
 
@@ -202,14 +214,17 @@ export function useWorkspaceState(
 	 *
 	 * @param appId - The app that should be recorded as active in global.json.
 	 */
-	const writeGlobal = useCallback((appId: string) => {
-		if (!canSave()) return;
-		// Cancel any pending timer so only the most recent call wins
-		clearTimeout(globalSaveRef.current);
-		globalSaveRef.current = setTimeout(() => {
-			client!.fsWriteJson(globalPath(workspaceDir), { version: 3, activeAppId: appId, shellPrefs: shellPrefsRef.current }).catch(() => {});
-		}, SAVE_DEBOUNCE_MS);
-	}, [canSave, client, workspaceDir]);
+	const writeGlobal = useCallback(
+		(appId: string) => {
+			if (!canSave()) return;
+			// Cancel any pending timer so only the most recent call wins
+			clearTimeout(globalSaveRef.current);
+			globalSaveRef.current = setTimeout(() => {
+				client!.fsWriteJson(globalPath(workspaceDir), { version: 3, activeAppId: appId, shellPrefs: shellPrefsRef.current }).catch(() => {});
+			}, SAVE_DEBOUNCE_MS);
+		},
+		[canSave, client, workspaceDir]
+	);
 
 	/**
 	 * Merges a partial shell preference patch into the in-memory ref and
@@ -218,12 +233,15 @@ export function useWorkspaceState(
 	 * @param patch - Partial override of theme and/or sidePanelOpen.
 	 * @param appId - The current active app ID to record alongside the prefs.
 	 */
-	const writeGlobalPrefs = useCallback((patch: { theme?: string; sidePanelOpen?: boolean }, appId: string) => {
-		// Merge the patch into the cached shell prefs
-		shellPrefsRef.current = { ...shellPrefsRef.current, ...patch };
-		// Schedule (or debounce) a global.json write
-		writeGlobal(appId);
-	}, [writeGlobal]);
+	const writeGlobalPrefs = useCallback(
+		(patch: { theme?: string; sidePanelOpen?: boolean }, appId: string) => {
+			// Merge the patch into the cached shell prefs
+			shellPrefsRef.current = { ...shellPrefsRef.current, ...patch };
+			// Schedule (or debounce) a global.json write
+			writeGlobal(appId);
+		},
+		[writeGlobal]
+	);
 
 	/**
 	 * Debounced write of a single app's workspace state to its per-app JSON file.
@@ -231,14 +249,17 @@ export function useWorkspaceState(
 	 * @param appId - The app whose state should be persisted.
 	 * @param state - The full `AppWorkspaceState` to write.
 	 */
-	const writeAppState = useCallback((appId: string, state: AppWorkspaceState) => {
-		if (!canSave()) return;
-		// Cancel any pending timer; the latest call wins
-		clearTimeout(saveRef.current);
-		saveRef.current = setTimeout(() => {
-			client!.fsWriteJson(appPath(workspaceDir, appId), state).catch(() => {});
-		}, SAVE_DEBOUNCE_MS);
-	}, [canSave, client, workspaceDir]);
+	const writeAppState = useCallback(
+		(appId: string, state: AppWorkspaceState) => {
+			if (!canSave()) return;
+			// Cancel any pending timer; the latest call wins
+			clearTimeout(saveRef.current);
+			saveRef.current = setTimeout(() => {
+				client!.fsWriteJson(appPath(workspaceDir, appId), state).catch(() => {});
+			}, SAVE_DEBOUNCE_MS);
+		},
+		[canSave, client, workspaceDir]
+	);
 
 	/**
 	 * Immediate (non-debounced) write of a single app's workspace state.
@@ -247,25 +268,31 @@ export function useWorkspaceState(
 	 * @param appId - The app whose state should be flushed immediately.
 	 * @param state - The full `AppWorkspaceState` to write.
 	 */
-	const writeAppStateNow = useCallback((appId: string, state: AppWorkspaceState) => {
-		if (!canSave()) return;
-		// Write immediately — no setTimeout wrapper
-		client!.fsWriteJson(appPath(workspaceDir, appId), state).catch(() => {});
-	}, [canSave, client, workspaceDir]);
+	const writeAppStateNow = useCallback(
+		(appId: string, state: AppWorkspaceState) => {
+			if (!canSave()) return;
+			// Write immediately — no setTimeout wrapper
+			client!.fsWriteJson(appPath(workspaceDir, appId), state).catch(() => {});
+		},
+		[canSave, client, workspaceDir]
+	);
 
 	/**
 	 * Debounced write of the settings key/value map to `settings.json`.
 	 *
 	 * @param s - The complete settings object to persist.
 	 */
-	const writeSettings = useCallback((s: Record<string, SettingValue>) => {
-		if (!canSave()) return;
-		// Cancel any pending timer so rapid successive updates are batched
-		clearTimeout(settingsSaveRef.current);
-		settingsSaveRef.current = setTimeout(() => {
-			client!.fsWriteJson(settingsPath(workspaceDir), s).catch(() => {});
-		}, SAVE_DEBOUNCE_MS);
-	}, [canSave, client, workspaceDir]);
+	const writeSettings = useCallback(
+		(s: Record<string, SettingValue>) => {
+			if (!canSave()) return;
+			// Cancel any pending timer so rapid successive updates are batched
+			clearTimeout(settingsSaveRef.current);
+			settingsSaveRef.current = setTimeout(() => {
+				client!.fsWriteJson(settingsPath(workspaceDir), s).catch(() => {});
+			}, SAVE_DEBOUNCE_MS);
+		},
+		[canSave, client, workspaceDir]
+	);
 
 	// --- Load on first connect (or seed defaults pre-auth) -------------------
 
@@ -302,10 +329,8 @@ export function useWorkspaceState(
 		}
 
 		// Load global prefs and settings in parallel
-		Promise.all([
-			client.fsReadJson<GlobalFile>(globalPath(workspaceDir)).catch(() => null),
-			client.fsReadJson<Record<string, SettingValue>>(settingsPath(workspaceDir)).catch(() => null),
-		]).then(async ([global, savedSettings]) => {
+		Promise.all([client.fsReadJson<GlobalFile>(globalPath(workspaceDir)).catch(() => null), client.fsReadJson<Record<string, SettingValue>>(settingsPath(workspaceDir)).catch(() => null)])
+			.then(async ([global, savedSettings]) => {
 				// Active app: URL deep-link or built-in default
 				const restoredAppId = startupAppId ?? defaultAppId;
 
@@ -318,19 +343,23 @@ export function useWorkspaceState(
 					const raw = await client.fsReadJson<AppWorkspaceState>(appPath(workspaceDir, restoredAppId));
 					// Accept the file if it has the minimum required shape
 					if (raw?.prefs) appStateData = raw;
-				} catch { /* no saved state */ }
+				} catch {
+					/* no saved state */
+				}
 
 				// Build the resolved state, overlaying global prefs
 				const baseState = appStateData ?? makeDefaultAppState(restoredAppId);
 				const sp = global?.shellPrefs;
-				const mergedState: AppWorkspaceState = sp ? {
-					...baseState,
-					prefs: {
-						...baseState.prefs,
-						...(sp.theme !== undefined && { theme: sp.theme }),
-						...(sp.sidePanelOpen !== undefined && { sidePanelOpen: sp.sidePanelOpen }),
-					},
-				} : baseState;
+				const mergedState: AppWorkspaceState = sp
+					? {
+							...baseState,
+							prefs: {
+								...baseState.prefs,
+								...(sp.theme !== undefined && { theme: sp.theme }),
+								...(sp.sidePanelOpen !== undefined && { sidePanelOpen: sp.sidePanelOpen }),
+							},
+						}
+					: baseState;
 
 				// Ensure appState exists (handle v2 files that don't have it)
 				if (!mergedState.appState) mergedState.appState = {};
@@ -351,7 +380,7 @@ export function useWorkspaceState(
 				setSeeded(true);
 				setLoaded(true);
 			});
-	// eslint-disable-next-line react-hooks/exhaustive-deps
+		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [client, isConnected]);
 
 	// --- Debounced save on state changes -------------------------------------
@@ -390,7 +419,7 @@ export function useWorkspaceState(
 		if (prefs.theme !== undefined) patch.theme = prefs.theme;
 		if (prefs.sidePanelOpen !== undefined) patch.sidePanelOpen = prefs.sidePanelOpen;
 		writeGlobalPrefs(patch, activeAppId);
-	// eslint-disable-next-line react-hooks/exhaustive-deps
+		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [prefs.theme, prefs.sidePanelOpen, loaded]);
 
 	// --- App switch ----------------------------------------------------------
@@ -402,58 +431,63 @@ export function useWorkspaceState(
 	 *
 	 * @param newAppId - The appId to switch to.
 	 */
-	const switchApp = useCallback(async (newAppId: string) => {
-		// No-op if already on the requested app
-		if (newAppId === activeAppIdRef.current) return;
+	const switchApp = useCallback(
+		async (newAppId: string) => {
+			// No-op if already on the requested app
+			if (newAppId === activeAppIdRef.current) return;
 
-		// 1. Immediately flush current app state (no debounce)
-		clearTimeout(saveRef.current);
-		const currentState = appsRef.current[activeAppIdRef.current];
-		if (currentState) writeAppStateNow(activeAppIdRef.current, currentState);
+			// 1. Immediately flush current app state (no debounce)
+			clearTimeout(saveRef.current);
+			const currentState = appsRef.current[activeAppIdRef.current];
+			if (currentState) writeAppStateNow(activeAppIdRef.current, currentState);
 
-		// 1b. Clear all server-side monitor subscriptions from the outgoing app
-		// so the next app starts with a clean slate, and update the connection
-		// display name so the server monitor shows which app is active
-		if (client) {
-			try {
-				await client.clearAllMonitors();
-			} catch (err) {
-				console.error('[Workspace] Failed to clear monitors on app switch:', err);
+			// 1b. Clear all server-side monitor subscriptions from the outgoing app
+			// so the next app starts with a clean slate, and update the connection
+			// display name so the server monitor shows which app is active
+			if (client) {
+				try {
+					await client.clearAllMonitors();
+				} catch (err) {
+					console.error('[Workspace] Failed to clear monitors on app switch:', err);
+				}
+				client.identify(`Cloud Shell-UI \u2014 ${newAppId}`).catch(() => {});
 			}
-			client.identify(`Cloud Shell-UI \u2014 ${newAppId}`).catch(() => {});
-		}
 
-		// 2. Load new app state if not already in memory
-		let newState = appsRef.current[newAppId];
-		if (!newState && client && isConnected && hasStoreApi(client)) {
-			try {
-				const raw = await client.fsReadJson<AppWorkspaceState>(appPath(workspaceDir, newAppId));
-				if (raw?.prefs) newState = raw;
-			} catch { /* no saved state for this app */ }
-		}
-		if (!newState) newState = makeDefaultAppState(newAppId);
+			// 2. Load new app state if not already in memory
+			let newState = appsRef.current[newAppId];
+			if (!newState && client && isConnected && hasStoreApi(client)) {
+				try {
+					const raw = await client.fsReadJson<AppWorkspaceState>(appPath(workspaceDir, newAppId));
+					if (raw?.prefs) newState = raw;
+				} catch {
+					/* no saved state for this app */
+				}
+			}
+			if (!newState) newState = makeDefaultAppState(newAppId);
 
-		// Ensure appState exists (handle v2 files)
-		if (!newState.appState) newState.appState = {};
+			// Ensure appState exists (handle v2 files)
+			if (!newState.appState) newState.appState = {};
 
-		// Overlay global prefs for consistency
-		const sp = shellPrefsRef.current;
-		newState = {
-			...newState,
-			prefs: {
-				...newState.prefs,
-				...(sp.theme !== undefined && { theme: sp.theme }),
-				...(sp.sidePanelOpen !== undefined && { sidePanelOpen: sp.sidePanelOpen }),
-			},
-		};
+			// Overlay global prefs for consistency
+			const sp = shellPrefsRef.current;
+			newState = {
+				...newState,
+				prefs: {
+					...newState.prefs,
+					...(sp.theme !== undefined && { theme: sp.theme }),
+					...(sp.sidePanelOpen !== undefined && { sidePanelOpen: sp.sidePanelOpen }),
+				},
+			};
 
-		// 3. Update state
-		setApps((prev) => ({ ...prev, [newAppId]: newState! }));
-		setActiveAppId(newAppId);
+			// 3. Update state
+			setApps((prev) => ({ ...prev, [newAppId]: newState! }));
+			setActiveAppId(newAppId);
 
-		// 4. Persist global
-		writeGlobal(newAppId);
-	}, [client, isConnected, workspaceDir, writeAppStateNow, writeGlobal]);
+			// 4. Persist global
+			writeGlobal(newAppId);
+		},
+		[client, isConnected, workspaceDir, writeAppStateNow, writeGlobal]
+	);
 
 	// --- Helper: mutate the active app's state --------------------------------
 
@@ -476,9 +510,12 @@ export function useWorkspaceState(
 	 *
 	 * @param patch - Partial `WorkspacePrefs` fields to merge.
 	 */
-	const updatePrefs = useCallback((patch: Partial<WorkspacePrefs>) => {
-		updateActiveApp((s) => ({ ...s, prefs: { ...s.prefs, ...patch } }));
-	}, [updateActiveApp]);
+	const updatePrefs = useCallback(
+		(patch: Partial<WorkspacePrefs>) => {
+			updateActiveApp((s) => ({ ...s, prefs: { ...s.prefs, ...patch } }));
+		},
+		[updateActiveApp]
+	);
 
 	// --- Opaque app state mutations ------------------------------------------
 
@@ -488,9 +525,12 @@ export function useWorkspaceState(
 	 *
 	 * @param updater - A function from the current appState to a new one.
 	 */
-	const updateAppState = useCallback((updater: (prev: Record<string, unknown>) => Record<string, unknown>) => {
-		updateActiveApp((s) => ({ ...s, appState: updater(s.appState) }));
-	}, [updateActiveApp]);
+	const updateAppState = useCallback(
+		(updater: (prev: Record<string, unknown>) => Record<string, unknown>) => {
+			updateActiveApp((s) => ({ ...s, appState: updater(s.appState) }));
+		},
+		[updateActiveApp]
+	);
 
 	// --- Settings mutations --------------------------------------------------
 
@@ -505,17 +545,20 @@ export function useWorkspaceState(
 	 * @param key   - The dotted setting key (e.g. 'rocketride.models.serverHost').
 	 * @param value - The override value, or undefined to delete the override.
 	 */
-	const updateSetting = useCallback((key: string, value: SettingValue | undefined) => {
-		setSettings((prev) => {
-			// Build the next map: set the override, or remove it on undefined
-			const next = { ...prev };
-			if (value === undefined) delete next[key];
-			else next[key] = value;
-			settingsRef.current = next;
-			writeSettings(next);
-			return next;
-		});
-	}, [writeSettings]);
+	const updateSetting = useCallback(
+		(key: string, value: SettingValue | undefined) => {
+			setSettings((prev) => {
+				// Build the next map: set the override, or remove it on undefined
+				const next = { ...prev };
+				if (value === undefined) delete next[key];
+				else next[key] = value;
+				settingsRef.current = next;
+				writeSettings(next);
+				return next;
+			});
+		},
+		[writeSettings]
+	);
 
 	return {
 		loaded,

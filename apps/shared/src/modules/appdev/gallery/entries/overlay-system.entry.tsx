@@ -42,7 +42,7 @@ export const overlaySystemEntry: IGalleryEntry = {
 	doc: `The pages inside the overlays are ordinary views (their sub-pages use the ordinary \`TabControl\`), but the dialogs themselves belong to the shell: apps never create overlays, they may only **ask** the shell to open one by emitting \`shell:openOverlay\` on the \`ConnectionManager\`. Unknown ids are ignored (guarded allowlist), and opening one overlay closes any other.
 
 For the app's OWN records — inspect, edit, create — use a \`DetailPanel\` record panel instead; app-side modals are only for confirmations (\`ConfirmDialog\`) and multi-step flows (\`Modal\`).`,
-	docNote: 'Overlay dialogs render OUTSIDE the client area\'s providers - components inside them cannot rely on app-side context.',
+	docNote: "Overlay dialogs render OUTSIDE the client area's providers - components inside them cannot rely on app-side context.",
 	demo: OverlaySystemDemo,
 	code: `// Deep-link into a shell overlay from anywhere in an app. The shell's
 // OverlayManager listens for this and opens the same dialog the sidebar
@@ -51,7 +51,5 @@ import { ConnectionManager } from 'shell';
 
 ConnectionManager.getInstance().emit('shell:openOverlay', { id: 'account' });`,
 	propsLabel: 'Events',
-	props: [
-		{ name: 'shell:openOverlay', type: "{ id: 'account' | 'settings' | 'environment' }", dir: 'in', note: 'Emit on the ConnectionManager to request an overlay; part of ShellEventMap. Opening one overlay closes any other.' },
-	],
+	props: [{ name: 'shell:openOverlay', type: "{ id: 'account' | 'settings' | 'environment' }", dir: 'in', note: 'Emit on the ConnectionManager to request an overlay; part of ShellEventMap. Opening one overlay closes any other.' }],
 };

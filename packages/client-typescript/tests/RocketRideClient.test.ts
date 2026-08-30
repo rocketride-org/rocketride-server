@@ -152,31 +152,35 @@ describe('RocketRideClient Integration Tests', () => {
 			TEST_CONFIG.timeout
 		);
 
-		it('should get pipeline status', async () => {
-			const result = await client.use({
-				pipeline: getEchoPipeline(),
-				token: PIPELINE_TOKEN,
-			});
+		it(
+			'should get pipeline status',
+			async () => {
+				const result = await client.use({
+					pipeline: getEchoPipeline(),
+					token: PIPELINE_TOKEN,
+				});
 
-			// Retry a few times in case server is busy (tests may run in parallel)
-			const maxAttempts = 10;
-			const delayMs = 1000;
-			let status: Awaited<ReturnType<typeof client.getTaskStatus>> | null = null;
-			for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-				try {
-					status = await client.getTaskStatus(result.token);
-					break;
-				} catch (e) {
-					if (attempt === maxAttempts) throw e;
-					await new Promise((r) => setTimeout(r, delayMs));
+				// Retry a few times in case server is busy (tests may run in parallel)
+				const maxAttempts = 10;
+				const delayMs = 1000;
+				let status: Awaited<ReturnType<typeof client.getTaskStatus>> | null = null;
+				for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+					try {
+						status = await client.getTaskStatus(result.token);
+						break;
+					} catch (e) {
+						if (attempt === maxAttempts) throw e;
+						await new Promise((r) => setTimeout(r, delayMs));
+					}
 				}
-			}
 
-			expect(status).toHaveProperty('state');
-			expect(Object.values(TASK_STATE)).toContain(status!.state);
+				expect(status).toHaveProperty('state');
+				expect(Object.values(TASK_STATE)).toContain(status!.state);
 
-			await client.terminate(result.token);
-		}, TEST_CONFIG.timeout);
+				await client.terminate(result.token);
+			},
+			TEST_CONFIG.timeout
+		);
 
 		it(
 			'should terminate a pipeline',
@@ -1833,12 +1837,7 @@ Line 3: random data ${Math.random().toString(36).substring(2)}`;
 
 				// Create all pipelines concurrently — each needs a unique project_id
 				// to avoid server-side contention during concurrent startup.
-				const MIXED_PROJECT_IDS = [
-					'a1b2c3d4-1111-4000-a000-000000000001',
-					'a1b2c3d4-1111-4000-a000-000000000002',
-					'a1b2c3d4-1111-4000-a000-000000000003',
-					'a1b2c3d4-1111-4000-a000-000000000004',
-				];
+				const MIXED_PROJECT_IDS = ['a1b2c3d4-1111-4000-a000-000000000001', 'a1b2c3d4-1111-4000-a000-000000000002', 'a1b2c3d4-1111-4000-a000-000000000003', 'a1b2c3d4-1111-4000-a000-000000000004'];
 				const pipelines = await Promise.all(
 					Array.from({ length: PIPELINE_COUNT }, async (_, index) => {
 						const result = await client.use({
@@ -1926,16 +1925,9 @@ Line 3: random data ${Math.random().toString(36).substring(2)}`;
 
 				// Create 4 independent subprocesses concurrently — each needs a
 				// unique project_id to avoid server-side contention during startup.
-				const CYCLE_PROJECT_IDS = [
-					'b2c3d4e5-2222-4000-b000-000000000001',
-					'b2c3d4e5-2222-4000-b000-000000000002',
-					'b2c3d4e5-2222-4000-b000-000000000003',
-					'b2c3d4e5-2222-4000-b000-000000000004',
-				];
+				const CYCLE_PROJECT_IDS = ['b2c3d4e5-2222-4000-b000-000000000001', 'b2c3d4e5-2222-4000-b000-000000000002', 'b2c3d4e5-2222-4000-b000-000000000003', 'b2c3d4e5-2222-4000-b000-000000000004'];
 				const tokens = Array.from({ length: SUBPROCESS_COUNT }, (_, i) => `${CONCURRENT_TOKEN}-s${i}`);
-				await Promise.all(tokens.map((token, i) =>
-					client.use({ pipeline: getEchoPipeline(CYCLE_PROJECT_IDS[i]), token })
-				));
+				await Promise.all(tokens.map((token, i) => client.use({ pipeline: getEchoPipeline(CYCLE_PROJECT_IDS[i]), token })));
 				pipelineTokens.push(...tokens);
 
 				// Each pipeline independently cycles send/recv — all 4 run in parallel
@@ -2353,32 +2345,24 @@ class LifecycleBrowserWebSocket {
 	}
 }
 
-type LoginOutcome =
-	| { status: 'resolved'; value: Record<string, unknown> }
-	| { status: 'rejected'; error: unknown };
+type LoginOutcome = { status: 'resolved'; value: Record<string, unknown> } | { status: 'rejected'; error: unknown };
 
 function loginOutcome(promise: Promise<unknown>): Promise<LoginOutcome> {
 	return promise.then(
 		(value) => ({ status: 'resolved' as const, value: value as Record<string, unknown> }),
-		(error) => ({ status: 'rejected' as const, error }),
+		(error) => ({ status: 'rejected' as const, error })
 	);
 }
 
 async function lifecycleSettlesSoon(promise: Promise<LoginOutcome>): Promise<LoginOutcome | { status: 'pending' }> {
-	return Promise.race([
-		promise,
-		new Promise<{ status: 'pending' }>((resolve) => setTimeout(() => resolve({ status: 'pending' }), 25)),
-	]);
+	return Promise.race([promise, new Promise<{ status: 'pending' }>((resolve) => setTimeout(() => resolve({ status: 'pending' }), 25))]);
 }
 
 async function flushLifecycleMicrotasks(turns = 8): Promise<void> {
 	for (let turn = 0; turn < turns; turn += 1) await Promise.resolve();
 }
 
-async function waitForLifecycle(
-	predicate: () => boolean,
-	description: string,
-): Promise<void> {
+async function waitForLifecycle(predicate: () => boolean, description: string): Promise<void> {
 	for (let attempt = 0; attempt < 100; attempt += 1) {
 		if (predicate()) return;
 		await new Promise<void>((resolve) => setTimeout(resolve, 1));
@@ -2387,9 +2371,7 @@ async function waitForLifecycle(
 }
 
 function lifecycleRequests(command: string, socket?: LifecycleBrowserWebSocket): LifecycleSentRequest[] {
-	return LifecycleBrowserWebSocket.requests.filter(
-		(entry) => entry.message.command === command && (!socket || entry.socket === socket),
-	);
+	return LifecycleBrowserWebSocket.requests.filter((entry) => entry.message.command === command && (!socket || entry.socket === socket));
 }
 
 function connectResult(key: string): Record<string, unknown> {
@@ -2563,20 +2545,14 @@ describe('RocketRideClient lifecycle operations', () => {
 		await waitForLifecycle(() => LifecycleBrowserWebSocket.instances.length === 2, 'replacement identity socket');
 		const replacementSocket = LifecycleBrowserWebSocket.instances[1];
 		replacementSocket.open();
-		await waitForLifecycle(
-			() => lifecycleRequests('auth', replacementSocket).length === 1,
-			'replacement identity auth',
-		);
+		await waitForLifecycle(() => lifecycleRequests('auth', replacementSocket).length === 1, 'replacement identity auth');
 
 		const returnToInitial = loginOutcome(client.login('rr_initial'));
 		await expect(replacement).resolves.toMatchObject({
 			status: 'rejected',
 			error: { name: 'LoginAttemptCancelledError', reason: 'superseded' },
 		});
-		await waitForLifecycle(
-			() => LifecycleBrowserWebSocket.instances.length === 3,
-			'credential-specific replacement socket',
-		);
+		await waitForLifecycle(() => LifecycleBrowserWebSocket.instances.length === 3, 'credential-specific replacement socket');
 		const finalSocket = LifecycleBrowserWebSocket.instances[2];
 		finalSocket.open();
 		await waitForLifecycle(() => lifecycleRequests('auth', finalSocket).length === 1, 'final identity auth');
@@ -2721,10 +2697,7 @@ describe('RocketRideClient lifecycle operations', () => {
 		const initialSocket = LifecycleBrowserWebSocket.instances[0];
 		initialSocket.open();
 		await flushLifecycleMicrotasks();
-		initialSocket.respond(
-			lifecycleRequests('auth', initialSocket)[0].message,
-			connectResult('accepted-background'),
-		);
+		initialSocket.respond(lifecycleRequests('auth', initialSocket)[0].message, connectResult('accepted-background'));
 		await expect(initial).resolves.toMatchObject({ status: 'resolved' });
 
 		initialSocket.serverClose(1006, 'lost');
@@ -2734,10 +2707,7 @@ describe('RocketRideClient lifecycle operations', () => {
 		const backgroundSocket = LifecycleBrowserWebSocket.instances[1];
 		backgroundSocket.open();
 		await flushLifecycleMicrotasks();
-		backgroundSocket.respond(
-			lifecycleRequests('auth', backgroundSocket)[0].message,
-			connectResult('accepted-background-reconnected'),
-		);
+		backgroundSocket.respond(lifecycleRequests('auth', backgroundSocket)[0].message, connectResult('accepted-background-reconnected'));
 		await flushLifecycleMicrotasks(20);
 		expect(onConnected).toHaveBeenCalledTimes(2);
 
@@ -2750,10 +2720,7 @@ describe('RocketRideClient lifecycle operations', () => {
 		const foregroundSocket = LifecycleBrowserWebSocket.instances[2];
 		foregroundSocket.open();
 		await flushLifecycleMicrotasks();
-		foregroundSocket.respond(
-			lifecycleRequests('auth', foregroundSocket)[0].message,
-			connectResult('accepted-background-foreground'),
-		);
+		foregroundSocket.respond(lifecycleRequests('auth', foregroundSocket)[0].message, connectResult('accepted-background-foreground'));
 		await expect(foreground).resolves.toMatchObject({
 			status: 'resolved',
 			value: { userToken: 'rr_accepted-background-foreground' },
@@ -2768,64 +2735,58 @@ describe('RocketRideClient lifecycle operations', () => {
 		['detach', 'auth', 'detached'],
 		['logout', 'monitor restoration', 'logout'],
 		['detach', 'monitor restoration', 'detached'],
-	] as const)(
-		'%s during %s cancels all login waiters and preserves the requested terminal state',
-		async (action, phase, reason) => {
-			const onConnected = jest.fn(async () => undefined);
-			const client = makeClient({ onConnected });
-			if (phase === 'monitor restoration') {
-				await client.addMonitor({ token: 'task-phase' }, ['output']);
-			}
+	] as const)('%s during %s cancels all login waiters and preserves the requested terminal state', async (action, phase, reason) => {
+		const onConnected = jest.fn(async () => undefined);
+		const client = makeClient({ onConnected });
+		if (phase === 'monitor restoration') {
+			await client.addMonitor({ token: 'task-phase' }, ['output']);
+		}
 
-			const firstLogin = loginOutcome(client.login('phase-key'));
-			const secondLogin = loginOutcome(client.login('phase-key'));
-			await waitForLifecycle(() => LifecycleBrowserWebSocket.instances.length === 1, 'phase socket');
-			const socket = LifecycleBrowserWebSocket.instances[0];
-			if (phase !== 'attach') {
-				socket.open();
-				await waitForLifecycle(() => lifecycleRequests('auth', socket).length === 1, 'phase auth');
-			}
-			if (phase === 'monitor restoration') {
-				const auth = lifecycleRequests('auth', socket)[0];
-				socket.respond(auth.message, connectResult('phase'));
-				await waitForLifecycle(
-					() => lifecycleRequests('rrext_monitor', socket).length === 1,
-					'held monitor restore',
-				);
-			}
+		const firstLogin = loginOutcome(client.login('phase-key'));
+		const secondLogin = loginOutcome(client.login('phase-key'));
+		await waitForLifecycle(() => LifecycleBrowserWebSocket.instances.length === 1, 'phase socket');
+		const socket = LifecycleBrowserWebSocket.instances[0];
+		if (phase !== 'attach') {
+			socket.open();
+			await waitForLifecycle(() => lifecycleRequests('auth', socket).length === 1, 'phase auth');
+		}
+		if (phase === 'monitor restoration') {
+			const auth = lifecycleRequests('auth', socket)[0];
+			socket.respond(auth.message, connectResult('phase'));
+			await waitForLifecycle(() => lifecycleRequests('rrext_monitor', socket).length === 1, 'held monitor restore');
+		}
 
-			const terminal = action === 'logout' ? client.logout() : client.detach();
-			const [firstResult, secondResult] = await Promise.all([firstLogin, secondLogin]);
-			expect(firstResult).toMatchObject({
-				status: 'rejected',
-				error: { name: 'LoginAttemptCancelledError', reason },
-			});
-			expect(secondResult).toMatchObject({
-				status: 'rejected',
-				error: { name: 'LoginAttemptCancelledError', reason },
-			});
-			if (firstResult.status !== 'rejected' || secondResult.status !== 'rejected') {
-				throw new Error('Expected both coalesced login waiters to reject');
-			}
-			expect(secondResult.error).toBe(firstResult.error);
+		const terminal = action === 'logout' ? client.logout() : client.detach();
+		const [firstResult, secondResult] = await Promise.all([firstLogin, secondLogin]);
+		expect(firstResult).toMatchObject({
+			status: 'rejected',
+			error: { name: 'LoginAttemptCancelledError', reason },
+		});
+		expect(secondResult).toMatchObject({
+			status: 'rejected',
+			error: { name: 'LoginAttemptCancelledError', reason },
+		});
+		if (firstResult.status !== 'rejected' || secondResult.status !== 'rejected') {
+			throw new Error('Expected both coalesced login waiters to reject');
+		}
+		expect(secondResult.error).toBe(firstResult.error);
 
-			if (action === 'logout') {
-				await waitForLifecycle(() => LifecycleBrowserWebSocket.instances.length === 2, 'fresh anonymous socket');
-				const anonymousSocket = LifecycleBrowserWebSocket.instances[1];
-				expect(anonymousSocket).not.toBe(socket);
-				anonymousSocket.open();
-				await terminal;
-				expect(client.isAttached()).toBe(true);
-				expect(client.isAuthenticated()).toBe(false);
-				expect(lifecycleRequests('auth', anonymousSocket)).toHaveLength(0);
-			} else {
-				await terminal;
-				expect(client.isAttached()).toBe(false);
-				expect(client.isAuthenticated()).toBe(false);
-			}
-			expect(onConnected).not.toHaveBeenCalled();
-		},
-	);
+		if (action === 'logout') {
+			await waitForLifecycle(() => LifecycleBrowserWebSocket.instances.length === 2, 'fresh anonymous socket');
+			const anonymousSocket = LifecycleBrowserWebSocket.instances[1];
+			expect(anonymousSocket).not.toBe(socket);
+			anonymousSocket.open();
+			await terminal;
+			expect(client.isAttached()).toBe(true);
+			expect(client.isAuthenticated()).toBe(false);
+			expect(lifecycleRequests('auth', anonymousSocket)).toHaveLength(0);
+		} else {
+			await terminal;
+			expect(client.isAttached()).toBe(false);
+			expect(client.isAuthenticated()).toBe(false);
+		}
+		expect(onConnected).not.toHaveBeenCalled();
+	});
 
 	it('cancels a captured reconnect timer and resets backoff after foreground success', async () => {
 		jest.useFakeTimers({ doNotFake: ['queueMicrotask'] });
@@ -2858,68 +2819,62 @@ describe('RocketRideClient lifecycle operations', () => {
 		expect(lifecycleRequests('auth')).toHaveLength(authCount);
 	});
 
-	it.each(['authenticated', 'anonymous'] as const)(
-		'uses capped linear reconnect delays after successive %s failures',
-		async (mode) => {
-			jest.useFakeTimers({ doNotFake: ['queueMicrotask'] });
-			const onConnectError = jest.fn(async () => undefined);
-			const client = makeClient({ persist: true, onConnectError });
+	it.each(['authenticated', 'anonymous'] as const)('uses capped linear reconnect delays after successive %s failures', async (mode) => {
+		jest.useFakeTimers({ doNotFake: ['queueMicrotask'] });
+		const onConnectError = jest.fn(async () => undefined);
+		const client = makeClient({ persist: true, onConnectError });
 
-			let initialSocket: LifecycleBrowserWebSocket;
-			if (mode === 'authenticated') {
-				const initial = loginOutcome(client.login('linear-key'));
-				await flushLifecycleMicrotasks();
-				initialSocket = LifecycleBrowserWebSocket.instances[0];
-				initialSocket.open();
-				await flushLifecycleMicrotasks();
-				initialSocket.respond(
-					lifecycleRequests('auth', initialSocket)[0].message,
-					connectResult('linear'),
-				);
-				await expect(initial).resolves.toMatchObject({ status: 'resolved' });
-			} else {
-				const initial = client.attach();
-				await flushLifecycleMicrotasks();
-				initialSocket = LifecycleBrowserWebSocket.instances[0];
-				initialSocket.open();
-				await initial;
-			}
+		let initialSocket: LifecycleBrowserWebSocket;
+		if (mode === 'authenticated') {
+			const initial = loginOutcome(client.login('linear-key'));
+			await flushLifecycleMicrotasks();
+			initialSocket = LifecycleBrowserWebSocket.instances[0];
+			initialSocket.open();
+			await flushLifecycleMicrotasks();
+			initialSocket.respond(lifecycleRequests('auth', initialSocket)[0].message, connectResult('linear'));
+			await expect(initial).resolves.toMatchObject({ status: 'resolved' });
+		} else {
+			const initial = client.attach();
+			await flushLifecycleMicrotasks();
+			initialSocket = LifecycleBrowserWebSocket.instances[0];
+			initialSocket.open();
+			await initial;
+		}
 
-			initialSocket.serverClose(1006, 'lost');
+		initialSocket.serverClose(1006, 'lost');
+		await flushLifecycleMicrotasks(20);
+
+		const internals = client as unknown as {
+			_currentReconnectDelay: number;
+			_reconnectTimer?: ReturnType<typeof setTimeout>;
+			_lifecycleGeneration: number;
+			_scheduleReconnect(ownerGeneration?: number): void;
+		};
+		const failAfterDelay = async (delay: number, expectedNextDelay: number): Promise<void> => {
+			const attemptsBefore = LifecycleBrowserWebSocket.instances.length;
+			jest.advanceTimersByTime(delay - 1);
+			await flushLifecycleMicrotasks();
+			expect(LifecycleBrowserWebSocket.instances).toHaveLength(attemptsBefore);
+			jest.advanceTimersByTime(1);
 			await flushLifecycleMicrotasks(20);
+			expect(LifecycleBrowserWebSocket.instances).toHaveLength(attemptsBefore + 1);
+			LifecycleBrowserWebSocket.instances[attemptsBefore].error();
+			await flushLifecycleMicrotasks(30);
+			expect(internals._currentReconnectDelay).toBe(expectedNextDelay);
+		};
 
-			const internals = client as unknown as {
-				_currentReconnectDelay: number;
-				_reconnectTimer?: ReturnType<typeof setTimeout>;
-				_lifecycleGeneration: number;
-				_scheduleReconnect(ownerGeneration?: number): void;
-			};
-			const failAfterDelay = async (delay: number, expectedNextDelay: number): Promise<void> => {
-				const attemptsBefore = LifecycleBrowserWebSocket.instances.length;
-				jest.advanceTimersByTime(delay - 1);
-				await flushLifecycleMicrotasks();
-				expect(LifecycleBrowserWebSocket.instances).toHaveLength(attemptsBefore);
-				jest.advanceTimersByTime(1);
-				await flushLifecycleMicrotasks(20);
-				expect(LifecycleBrowserWebSocket.instances).toHaveLength(attemptsBefore + 1);
-				LifecycleBrowserWebSocket.instances[attemptsBefore].error();
-				await flushLifecycleMicrotasks(30);
-				expect(internals._currentReconnectDelay).toBe(expectedNextDelay);
-			};
+		await failAfterDelay(250, 500);
+		await failAfterDelay(500, 750);
+		await failAfterDelay(750, 1_000);
 
-			await failAfterDelay(250, 500);
-			await failAfterDelay(500, 750);
-			await failAfterDelay(750, 1_000);
-
-			if (internals._reconnectTimer) clearTimeout(internals._reconnectTimer);
-			internals._reconnectTimer = undefined;
-			internals._currentReconnectDelay = 14_750;
-			internals._scheduleReconnect(internals._lifecycleGeneration);
-			await failAfterDelay(14_750, 15_000);
-			await failAfterDelay(15_000, 15_000);
-			expect(onConnectError).toHaveBeenCalledTimes(5);
-		},
-	);
+		if (internals._reconnectTimer) clearTimeout(internals._reconnectTimer);
+		internals._reconnectTimer = undefined;
+		internals._currentReconnectDelay = 14_750;
+		internals._scheduleReconnect(internals._lifecycleGeneration);
+		await failAfterDelay(14_750, 15_000);
+		await failAfterDelay(15_000, 15_000);
+		expect(onConnectError).toHaveBeenCalledTimes(5);
+	});
 
 	it('awaits an authenticated reconnect error callback and cannot re-arm after foreground replacement', async () => {
 		jest.useFakeTimers({ doNotFake: ['queueMicrotask'] });
@@ -2934,10 +2889,7 @@ describe('RocketRideClient lifecycle operations', () => {
 		const initialSocket = LifecycleBrowserWebSocket.instances[0];
 		initialSocket.open();
 		await flushLifecycleMicrotasks();
-		initialSocket.respond(
-			lifecycleRequests('auth', initialSocket)[0].message,
-			connectResult('callback'),
-		);
+		initialSocket.respond(lifecycleRequests('auth', initialSocket)[0].message, connectResult('callback'));
 		await expect(initial).resolves.toMatchObject({ status: 'resolved' });
 
 		initialSocket.serverClose(1006, 'lost');
@@ -2948,8 +2900,7 @@ describe('RocketRideClient lifecycle operations', () => {
 		failedSocket.error();
 		await flushLifecycleMicrotasks(30);
 		expect(onConnectError).toHaveBeenCalledTimes(1);
-		expect((client as unknown as { _reconnectTimer?: ReturnType<typeof setTimeout> })._reconnectTimer)
-			.toBeUndefined();
+		expect((client as unknown as { _reconnectTimer?: ReturnType<typeof setTimeout> })._reconnectTimer).toBeUndefined();
 
 		const foreground = loginOutcome(client.login('foreground-after-error'));
 		await flushLifecycleMicrotasks(30);
@@ -2957,15 +2908,11 @@ describe('RocketRideClient lifecycle operations', () => {
 		const foregroundSocket = LifecycleBrowserWebSocket.instances[2];
 		releaseConnectError();
 		await flushLifecycleMicrotasks(30);
-		expect((client as unknown as { _reconnectTimer?: ReturnType<typeof setTimeout> })._reconnectTimer)
-			.toBeUndefined();
+		expect((client as unknown as { _reconnectTimer?: ReturnType<typeof setTimeout> })._reconnectTimer).toBeUndefined();
 
 		foregroundSocket.open();
 		await flushLifecycleMicrotasks();
-		foregroundSocket.respond(
-			lifecycleRequests('auth', foregroundSocket)[0].message,
-			connectResult('foreground-after-error'),
-		);
+		foregroundSocket.respond(lifecycleRequests('auth', foregroundSocket)[0].message, connectResult('foreground-after-error'));
 		await expect(foreground).resolves.toMatchObject({ status: 'resolved' });
 		jest.advanceTimersByTime(30_000);
 		await flushLifecycleMicrotasks();
@@ -2986,10 +2933,7 @@ describe('RocketRideClient lifecycle operations', () => {
 		const initialSocket = LifecycleBrowserWebSocket.instances[0];
 		initialSocket.open();
 		await flushLifecycleMicrotasks();
-		initialSocket.respond(
-			lifecycleRequests('auth', initialSocket)[0].message,
-			connectResult('established-retry'),
-		);
+		initialSocket.respond(lifecycleRequests('auth', initialSocket)[0].message, connectResult('established-retry'));
 		await expect(initial).resolves.toMatchObject({ status: 'resolved' });
 
 		initialSocket.serverClose(1006, 'initial loss');
@@ -3004,8 +2948,7 @@ describe('RocketRideClient lifecycle operations', () => {
 		reconnectSocket.serverClose(1006, 'lost during auth');
 		await flushLifecycleMicrotasks(30);
 		expect(onConnectError).toHaveBeenCalledTimes(1);
-		expect((client as unknown as { _reconnectTimer?: ReturnType<typeof setTimeout> })._reconnectTimer)
-			.toBeUndefined();
+		expect((client as unknown as { _reconnectTimer?: ReturnType<typeof setTimeout> })._reconnectTimer).toBeUndefined();
 		jest.advanceTimersByTime(30_000);
 		await flushLifecycleMicrotasks(20);
 		expect(LifecycleBrowserWebSocket.instances).toHaveLength(2);
@@ -3028,9 +2971,7 @@ describe('RocketRideClient lifecycle operations', () => {
 
 	it('exports exactly the three cancellation reasons and a non-RocketRide cancellation error', () => {
 		const exports = ClientExceptions as unknown as {
-			LoginAttemptCancelledError?: new (
-				reason: LoginAttemptCancellationReason,
-			) => Error & { reason: LoginAttemptCancellationReason };
+			LoginAttemptCancelledError?: new (reason: LoginAttemptCancellationReason) => Error & { reason: LoginAttemptCancellationReason };
 			RocketRideException: new (result: Record<string, unknown>) => Error;
 		};
 		expect(exports.LoginAttemptCancelledError).toBeDefined();
@@ -3079,11 +3020,13 @@ describe('RocketRideClient lifecycle operations', () => {
 		expect(JSON.stringify(traceMessages)).not.toContain('nested-do-not-log-this-key');
 		expect(JSON.stringify(traceMessages)).not.toContain('task-do-not-log-this-token');
 		expect(JSON.stringify(traceMessages)).not.toContain('logging-task');
-		expect(traceMessages).toContainEqual(expect.objectContaining({
-			arguments: expect.objectContaining({
-				env: expect.objectContaining({ ROCKETRIDE_APIKEY: '<redacted>' }),
-			}),
-		}));
+		expect(traceMessages).toContainEqual(
+			expect.objectContaining({
+				arguments: expect.objectContaining({
+					env: expect.objectContaining({ ROCKETRIDE_APIKEY: '<redacted>' }),
+				}),
+			})
+		);
 	});
 
 	it('traces fsRead binary data by byte count while returning the original response data', async () => {
@@ -3104,10 +3047,7 @@ describe('RocketRideClient lifecycle operations', () => {
 
 		await expect(client.fsRead('handle')).resolves.toBe(data);
 		expect(response.arguments?.data).toBe(data);
-		expect(traces).toContainEqual([
-			TraceType.Success,
-			expect.objectContaining({ arguments: { data: '<3 bytes>' } }),
-		]);
+		expect(traces).toContainEqual([TraceType.Success, expect.objectContaining({ arguments: { data: '<3 bytes>' } })]);
 	});
 
 	it('completes best-effort monitor restoration before publishing connected', async () => {
@@ -3121,10 +3061,7 @@ describe('RocketRideClient lifecycle operations', () => {
 		socket.open();
 		await waitForLifecycle(() => lifecycleRequests('auth', socket).length === 1, 'best-effort auth');
 		socket.respond(lifecycleRequests('auth', socket)[0].message, connectResult('best-effort'));
-		await waitForLifecycle(
-			() => lifecycleRequests('rrext_monitor', socket).length === 1,
-			'best-effort monitor request',
-		);
+		await waitForLifecycle(() => lifecycleRequests('rrext_monitor', socket).length === 1, 'best-effort monitor request');
 		expect(onConnected).not.toHaveBeenCalled();
 		socket.respond(lifecycleRequests('rrext_monitor', socket)[0].message, {}, false);
 
@@ -3238,10 +3175,7 @@ describe('RocketRideClient lifecycle operations', () => {
 		const disconnected = client.disconnect();
 		await waitForLifecycle(() => lifecycleRequests('deauth', oldSocket).length === 1, 'held overlap deauth');
 		const attached = client.attach('https://one.example.test');
-		await waitForLifecycle(
-			() => LifecycleBrowserWebSocket.instances.length === 2,
-			'replacement anonymous socket',
-		);
+		await waitForLifecycle(() => LifecycleBrowserWebSocket.instances.length === 2, 'replacement anonymous socket');
 		const newSocket = LifecycleBrowserWebSocket.instances[1];
 		newSocket.open();
 		await attached;
@@ -3325,10 +3259,7 @@ describe('RocketRideClient lifecycle operations', () => {
 		const replacementSocket = LifecycleBrowserWebSocket.instances[1];
 		replacementSocket.open();
 		await flushLifecycleMicrotasks();
-		replacementSocket.respond(
-			lifecycleRequests('auth', replacementSocket)[0].message,
-			connectResult('replacement'),
-		);
+		replacementSocket.respond(lifecycleRequests('auth', replacementSocket)[0].message, connectResult('replacement'));
 		await expect(replacement!).resolves.toMatchObject({ status: 'resolved' });
 
 		jest.advanceTimersByTime(15_000);
@@ -3369,8 +3300,7 @@ describe('RocketRideClient lifecycle operations', () => {
 		const firstSocket = LifecycleBrowserWebSocket.instances[0];
 		firstSocket.open();
 		await flushLifecycleMicrotasks();
-		expect(lifecycleRequests('auth', firstSocket)[0].message.arguments?.auth)
-			.toBe('pre-auth-reconnect-key');
+		expect(lifecycleRequests('auth', firstSocket)[0].message.arguments?.auth).toBe('pre-auth-reconnect-key');
 
 		firstSocket.serverClose(1006, 'lost before auth response');
 		await expect(login).resolves.toMatchObject({
@@ -3404,10 +3334,7 @@ describe('RocketRideClient lifecycle operations', () => {
 		const initialSocket = LifecycleBrowserWebSocket.instances[0];
 		initialSocket.open();
 		await flushLifecycleMicrotasks();
-		initialSocket.respond(
-			lifecycleRequests('auth', initialSocket)[0].message,
-			connectResult('background-rejection'),
-		);
+		initialSocket.respond(lifecycleRequests('auth', initialSocket)[0].message, connectResult('background-rejection'));
 		await expect(initial).resolves.toMatchObject({ status: 'resolved' });
 
 		initialSocket.serverClose(1006, 'lost before background rejection');
@@ -3432,7 +3359,9 @@ describe('RocketRideClient lifecycle operations', () => {
 		const callbacks: string[] = [];
 		let client!: RocketRideClient;
 		client = makeClient({
-			onConnected: async () => { callbacks.push('connected'); },
+			onConnected: async () => {
+				callbacks.push('connected');
+			},
 			onDisconnected: async () => {
 				callbacks.push('disconnected');
 				expect(client.isAttached()).toBe(false);
@@ -3443,21 +3372,12 @@ describe('RocketRideClient lifecycle operations', () => {
 		await waitForLifecycle(() => LifecycleBrowserWebSocket.instances.length === 1, 'authenticated socket');
 		const authenticatedSocket = LifecycleBrowserWebSocket.instances[0];
 		authenticatedSocket.open();
-		await waitForLifecycle(
-			() => lifecycleRequests('auth', authenticatedSocket).length === 1,
-			'authenticated request',
-		);
-		authenticatedSocket.respond(
-			lifecycleRequests('auth', authenticatedSocket)[0].message,
-			connectResult('attach-replacement'),
-		);
+		await waitForLifecycle(() => lifecycleRequests('auth', authenticatedSocket).length === 1, 'authenticated request');
+		authenticatedSocket.respond(lifecycleRequests('auth', authenticatedSocket)[0].message, connectResult('attach-replacement'));
 		await expect(login).resolves.toMatchObject({ status: 'resolved' });
 
 		const attach = client.attach('https://two.example.test');
-		await waitForLifecycle(
-			() => LifecycleBrowserWebSocket.instances.length === 2,
-			'anonymous replacement socket',
-		);
+		await waitForLifecycle(() => LifecycleBrowserWebSocket.instances.length === 2, 'anonymous replacement socket');
 		const replacementSocket = LifecycleBrowserWebSocket.instances[1];
 		replacementSocket.open();
 		await expect(attach).resolves.toBeUndefined();
@@ -3477,14 +3397,8 @@ describe('RocketRideClient lifecycle operations', () => {
 		await waitForLifecycle(() => LifecycleBrowserWebSocket.instances.length === 1, 'reentrant source socket');
 		const sourceSocket = LifecycleBrowserWebSocket.instances[0];
 		sourceSocket.open();
-		await waitForLifecycle(
-			() => lifecycleRequests('auth', sourceSocket).length === 1,
-			'reentrant source auth',
-		);
-		sourceSocket.respond(
-			lifecycleRequests('auth', sourceSocket)[0].message,
-			connectResult('attach-reentrant'),
-		);
+		await waitForLifecycle(() => lifecycleRequests('auth', sourceSocket).length === 1, 'reentrant source auth');
+		sourceSocket.respond(lifecycleRequests('auth', sourceSocket)[0].message, connectResult('attach-reentrant'));
 		await expect(login).resolves.toMatchObject({ status: 'resolved' });
 
 		await expect(client.attach('https://two.example.test')).resolves.toBeUndefined();
@@ -3498,7 +3412,9 @@ describe('RocketRideClient lifecycle operations', () => {
 
 	it('delivers a claimed disconnect when cancelled-login cleanup detaches during attach teardown', async () => {
 		let releaseConnected!: () => void;
-		const connectedGate = new Promise<void>((resolve) => { releaseConnected = resolve; });
+		const connectedGate = new Promise<void>((resolve) => {
+			releaseConnected = resolve;
+		});
 		const callbacks: string[] = [];
 		let client!: RocketRideClient;
 		client = makeClient({
@@ -3510,22 +3426,18 @@ describe('RocketRideClient lifecycle operations', () => {
 				callbacks.push('disconnected');
 			},
 		});
-		const login = loginOutcome(client.login('attach-claim-race-key').catch(async (error) => {
-			callbacks.push('login rejected');
-			await client.detach();
-			throw error;
-		}));
+		const login = loginOutcome(
+			client.login('attach-claim-race-key').catch(async (error) => {
+				callbacks.push('login rejected');
+				await client.detach();
+				throw error;
+			})
+		);
 		await waitForLifecycle(() => LifecycleBrowserWebSocket.instances.length === 1, 'claim-race source socket');
 		const sourceSocket = LifecycleBrowserWebSocket.instances[0];
 		sourceSocket.open();
-		await waitForLifecycle(
-			() => lifecycleRequests('auth', sourceSocket).length === 1,
-			'claim-race source auth',
-		);
-		sourceSocket.respond(
-			lifecycleRequests('auth', sourceSocket)[0].message,
-			connectResult('attach-claim-race'),
-		);
+		await waitForLifecycle(() => lifecycleRequests('auth', sourceSocket).length === 1, 'claim-race source auth');
+		sourceSocket.respond(lifecycleRequests('auth', sourceSocket)[0].message, connectResult('attach-claim-race'));
 		await waitForLifecycle(() => callbacks.includes('connected'), 'held connected callback');
 
 		const attach = client.attach('https://two.example.test');
@@ -3562,10 +3474,7 @@ describe('RocketRideClient lifecycle operations', () => {
 
 		// logout() clears that timer; it must leave the client attached anyway.
 		const logoutDone = client.logout();
-		await waitForLifecycle(
-			() => LifecycleBrowserWebSocket.instances.length === 2,
-			'post-logout anonymous socket',
-		);
+		await waitForLifecycle(() => LifecycleBrowserWebSocket.instances.length === 2, 'post-logout anonymous socket');
 		const anonymousSocket = LifecycleBrowserWebSocket.instances[1];
 		anonymousSocket.open();
 		await logoutDone;

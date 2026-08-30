@@ -24,27 +24,22 @@ interface FileListProps {
 
 /**
  * FileList Component
- * 
+ *
  * Displays a list of uploaded files with their processing status and metadata.
  * Shows status icons (pending, processing, completed, error) and allows removal
  * of files when not processing. Clicking a file scrolls to its results.
- * 
+ *
  * Features:
  * - Color-coded status icons for each file state
  * - File name and size display
  * - Error message display for failed uploads
  * - Remove button (disabled during processing)
  * - Clickable files to navigate to results
- * 
+ *
  * @param props - Component props
  * @returns React component displaying the file list
  */
-export const FileList: React.FC<FileListProps> = ({
-	files,
-	isProcessing,
-	onRemoveFile,
-	onFileClick
-}) => {
+export const FileList: React.FC<FileListProps> = ({ files, isProcessing, onRemoveFile, onFileClick }) => {
 	// Don't render if there are no files
 	if (files.length === 0) {
 		return null;
@@ -52,7 +47,7 @@ export const FileList: React.FC<FileListProps> = ({
 
 	/**
 	 * Renders the appropriate status icon based on file processing state
-	 * 
+	 *
 	 * @param status - Current status of the file
 	 * @returns Icon component with appropriate styling
 	 */
@@ -76,30 +71,19 @@ export const FileList: React.FC<FileListProps> = ({
 				{files.map((uploadedFile) => (
 					<div key={uploadedFile.id} className="file-item">
 						{/* File info section - clickable to scroll to results */}
-						<div
-							className="file-info"
-							onClick={() => onFileClick?.(uploadedFile.file.name)}
-							style={{ cursor: onFileClick ? 'pointer' : 'default' }}
-						>
+						<div className="file-info" onClick={() => onFileClick?.(uploadedFile.file.name)} style={{ cursor: onFileClick ? 'pointer' : 'default' }}>
 							{renderStatusIcon(uploadedFile.status)}
 							<div className="file-details">
 								<p className="file-name">{uploadedFile.file.name}</p>
 								<p className="file-meta">
 									{(uploadedFile.file.size / 1024).toFixed(1)} KB
-									{uploadedFile.error && (
-										<span className="file-error"> • {uploadedFile.error}</span>
-									)}
+									{uploadedFile.error && <span className="file-error"> • {uploadedFile.error}</span>}
 								</p>
 							</div>
 						</div>
 						{/* Remove button - only shown when not processing */}
 						{!isProcessing && (
-							<button
-								onClick={() => onRemoveFile(uploadedFile.id)}
-								className="remove-file-btn"
-								title="Remove file"
-								type="button"
-							>
+							<button onClick={() => onRemoveFile(uploadedFile.id)} className="remove-file-btn" title="Remove file" type="button">
 								<X className="w-3 h-3" />
 							</button>
 						)}

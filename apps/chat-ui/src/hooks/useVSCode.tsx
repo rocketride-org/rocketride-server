@@ -42,11 +42,7 @@ interface VSCodeProviderProps {
 }
 
 export const VSCodeProvider: React.FC<VSCodeProviderProps> = ({ children, value }) => {
-	return (
-		<VSCodeContext.Provider value={value}>
-			{children}
-		</VSCodeContext.Provider>
-	);
+	return <VSCodeContext.Provider value={value}>{children}</VSCodeContext.Provider>;
 };
 
 export const useVSCode = (): VSCodeContextType => {

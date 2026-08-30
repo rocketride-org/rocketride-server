@@ -64,10 +64,7 @@ async function runPytest({ engine, testsDir, extraArgs = [], execOpts = {} }) {
 	const stat = await fs.stat(testsDir);
 	if (stat.isDirectory()) {
 		// Matches pyproject.toml ``python_files = ["test_*.py", "*_test.py"]``.
-		const testFiles = [
-			...(await glob('**/test_*.py', { cwd: testsDir })),
-			...(await glob('**/*_test.py', { cwd: testsDir })),
-		];
+		const testFiles = [...(await glob('**/test_*.py', { cwd: testsDir })), ...(await glob('**/*_test.py', { cwd: testsDir }))];
 		if (testFiles.length === 0) {
 			if (execOpts.task) {
 				execOpts.task.output = `pytest: ${testsDir} has no test files, skipping`;

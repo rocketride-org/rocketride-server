@@ -62,13 +62,7 @@ const ChatViewDemo: React.FC<IGalleryDemoProps> = ({ knobs }) => {
 
 	return (
 		<div style={{ height: 380, display: 'flex', flexDirection: 'column' }}>
-			<ChatView
-				messages={messages}
-				isTyping={isTyping || Boolean(knobs.typing)}
-				isConnected={Boolean(knobs.connected)}
-				onSend={handleSend}
-				placeholder="Ask about your documents..."
-			/>
+			<ChatView messages={messages} isTyping={isTyping || Boolean(knobs.typing)} isConnected={Boolean(knobs.connected)} onSend={handleSend} placeholder="Ask about your documents..." />
 		</div>
 	);
 };

@@ -119,10 +119,7 @@ function applyLimit(sql: string, limit: string): string {
 	// Row-returning statements only: SELECT, parenthesised set expressions,
 	// and read-only WITH chains. Data-modifying CTEs (WITH ... INSERT/UPDATE/
 	// DELETE) must stay untouched — appending LIMIT there is invalid SQL.
-	const returnsRows =
-		/^select\b/i.test(trimmed) ||
-		trimmed.startsWith('(') ||
-		(/^with\b/i.test(trimmed) && !/\b(insert|update|delete)\b/i.test(trimmed));
+	const returnsRows = /^select\b/i.test(trimmed) || trimmed.startsWith('(') || (/^with\b/i.test(trimmed) && !/\b(insert|update|delete)\b/i.test(trimmed));
 	if (!returnsRows) return sql;
 	if (/\blimit\s+\d+/i.test(trimmed)) return sql;
 	return `${trimmed} LIMIT ${limit}`;
@@ -188,23 +185,22 @@ export const QueryView: React.FC<IQueryViewProps> = ({ endpoint, label }) => {
 	const columns = useMemo<GridColumnDefinition[]>(() => {
 		const first = result?.rows[0];
 		if (!first) return [];
-		return Object.keys(first).map((key) => ({
-			title: key,
-			field: key,
-			rrType: 'string',
-			rrDefault: true,
-			rrDescription: `Result column ${key}.`,
-			headerSort: true,
-			formatter: (cell: GridCellComponent) => resultCellEl(cell.getValue()),
-		} satisfies GridColumnDefinition));
+		return Object.keys(first).map(
+			(key) =>
+				({
+					title: key,
+					field: key,
+					rrType: 'string',
+					rrDefault: true,
+					rrDescription: `Result column ${key}.`,
+					headerSort: true,
+					formatter: (cell: GridCellComponent) => resultCellEl(cell.getValue()),
+				}) satisfies GridColumnDefinition
+		);
 	}, [result]);
 
 	// Result meta line: rows/affected + elapsed.
-	const meta = result
-		? result.rows.length > 0
-			? `${result.rows.length.toLocaleString()} rows - ${(result.elapsedMs / 1000).toFixed(3)} s`
-			: `${result.affectedRows.toLocaleString()} affected - ${(result.elapsedMs / 1000).toFixed(3)} s`
-		: '';
+	const meta = result ? (result.rows.length > 0 ? `${result.rows.length.toLocaleString()} rows - ${(result.elapsedMs / 1000).toFixed(3)} s` : `${result.affectedRows.toLocaleString()} affected - ${(result.elapsedMs / 1000).toFixed(3)} s`) : '';
 
 	return (
 		<div style={styles.root}>
@@ -213,14 +209,12 @@ export const QueryView: React.FC<IQueryViewProps> = ({ endpoint, label }) => {
 				subtitle={`${snapshot.schema?.database ?? endpoint.nodeName} - statements execute on ${endpoint.pipelineName} / ${endpoint.nodeId}`}
 				actions={
 					<>
-						<ToggleGroup
-							options={LIMIT_OPTIONS.map((o) => ({ id: o, label: o }))}
-							value={limit}
-							onChange={setLimit}
-						/>
+						<ToggleGroup options={LIMIT_OPTIONS.map((o) => ({ id: o, label: o }))} value={limit} onChange={setLimit} />
 						<Button
 							variant="primary"
-							onClick={() => { void run(); }}
+							onClick={() => {
+								void run();
+							}}
 							disabled={!client || !isConnected || running || !sql.trim()}
 						>
 							{running ? 'Running...' : 'Run'}
@@ -232,7 +226,14 @@ export const QueryView: React.FC<IQueryViewProps> = ({ endpoint, label }) => {
 			<div style={styles.body}>
 				{/* Editor. */}
 				<div style={styles.editorRegion}>
-					<SqlEditor value={sql} onChange={setSql} dialect={snapshot.dialect} onRun={() => { void run(); }} />
+					<SqlEditor
+						value={sql}
+						onChange={setSql}
+						dialect={snapshot.dialect}
+						onRun={() => {
+							void run();
+						}}
+					/>
 				</div>
 
 				{/* Execution failure. */}
@@ -242,28 +243,10 @@ export const QueryView: React.FC<IQueryViewProps> = ({ endpoint, label }) => {
 				<div style={styles.resultsRegion}>
 					{result && result.rows.length > 0 ? (
 						<Card noBodyPadding fill>
-							<CardDataGrid<Record<string, unknown>>
-								title="Results"
-								actions={<span style={styles.meta}>{meta}</span>}
-								columns={columns}
-								data={result.rows}
-								tableId="sql-query-results"
-								paginate={false}
-								height="100%"
-								emptyTitle="No rows"
-								emptyDescription="The statement returned no rows."
-							/>
+							<CardDataGrid<Record<string, unknown>> title="Results" actions={<span style={styles.meta}>{meta}</span>} columns={columns} data={result.rows} tableId="sql-query-results" paginate={false} height="100%" emptyTitle="No rows" emptyDescription="The statement returned no rows." />
 						</Card>
 					) : (
-						<EmptyState
-							icon={<DatabaseIcon />}
-							title={result ? 'Statement executed' : 'No results yet'}
-							description={
-								result
-									? meta
-									: 'Write a statement above and press Run (Ctrl+Enter) to execute it on the database node.'
-							}
-						/>
+						<EmptyState icon={<DatabaseIcon />} title={result ? 'Statement executed' : 'No results yet'} description={result ? meta : 'Write a statement above and press Run (Ctrl+Enter) to execute it on the database node.'} />
 					)}
 				</div>
 			</div>

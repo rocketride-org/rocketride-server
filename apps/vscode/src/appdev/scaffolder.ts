@@ -275,7 +275,7 @@ export async function scaffoldApp(params: ScaffoldParams): Promise<string> {
 			port: 3100 + (Math.abs([...appId].reduce((a, c) => a * 31 + c.charCodeAt(0), 7)) % 800),
 			previewUrl,
 		},
-		frame,
+		frame
 	);
 	for (const file of files) {
 		const uri = vscode.Uri.joinPath(target, ...file.path.split('/'));

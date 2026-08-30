@@ -50,10 +50,14 @@ const ROW_LABEL_STYLE: React.CSSProperties = {
 const PopupRowDemo: React.FC<IGalleryDemoProps> = () => (
 	<div style={MENU_STYLE}>
 		<PopupRow onClick={() => undefined}>
-			<span style={ROW_LABEL_STYLE}><BxCog size={16} /> Settings</span>
+			<span style={ROW_LABEL_STYLE}>
+				<BxCog size={16} /> Settings
+			</span>
 		</PopupRow>
 		<PopupRow onClick={() => undefined}>
-			<span style={ROW_LABEL_STYLE}><BxTrash size={16} /> Delete</span>
+			<span style={ROW_LABEL_STYLE}>
+				<BxTrash size={16} /> Delete
+			</span>
 		</PopupRow>
 	</div>
 );

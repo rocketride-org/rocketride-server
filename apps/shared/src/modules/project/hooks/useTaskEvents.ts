@@ -327,11 +327,7 @@ export function useTaskEvents(options: UseTaskEventsOptions): UseTaskEventsResul
 	const timeline = useMemo<TaskTimeline | null>(() => {
 		if (!rawTimeline) return null;
 		const raw = rawTimeline.chapters ?? [];
-		const chapters = raw.map((chapter, index) =>
-			chapter.endTime == null && index < raw.length - 1
-				? { ...chapter, endTime: raw[index + 1].beginTime, outcome: chapter.outcome ?? 'interrupted' }
-				: chapter,
-		);
+		const chapters = raw.map((chapter, index) => (chapter.endTime == null && index < raw.length - 1 ? { ...chapter, endTime: raw[index + 1].beginTime, outcome: chapter.outcome ?? 'interrupted' } : chapter));
 		return { ...rawTimeline, chapters };
 	}, [rawTimeline]);
 
@@ -437,10 +433,7 @@ export function useTaskEvents(options: UseTaskEventsOptions): UseTaskEventsResul
 			const hunt = beginHuntRef.current;
 			if (hunt && hunt.generation === generation) {
 				const time = message.body.eventTime;
-				const isBegin =
-					message.event === 'apaevt_flow' &&
-					(message.body as Record<string, unknown>).op === 'begin' &&
-					time > hunt.fromTime + STEP_BEGIN_EPSILON;
+				const isBegin = message.event === 'apaevt_flow' && (message.body as Record<string, unknown>).op === 'begin' && time > hunt.fromTime + STEP_BEGIN_EPSILON;
 				if (isBegin && time <= hunt.endCap) {
 					disarmHunt();
 					// Land just PAST the begin so its frame plays through.
@@ -462,7 +455,7 @@ export function useTaskEvents(options: UseTaskEventsOptions): UseTaskEventsResul
 				sessionRunningRef.current = false;
 			}
 		},
-		[runwayEnd, disarmHunt],
+		[runwayEnd, disarmHunt]
 	);
 
 	/**
@@ -503,7 +496,7 @@ export function useTaskEvents(options: UseTaskEventsOptions): UseTaskEventsResul
 				}
 			})();
 		},
-		[deliver],
+		[deliver]
 	);
 
 	/** Resume a runway-paused session (position advanced; more disc needed). */
@@ -515,9 +508,11 @@ export function useTaskEvents(options: UseTaskEventsOptions): UseTaskEventsResul
 		if (tail !== null && tail > runwayEnd()) return;
 		const generation = generationRef.current;
 		sessionRunningRef.current = true;
-		void target.play(undefined, 0, (item) => deliver(generation, item.event)).catch(() => {
-			sessionRunningRef.current = false;
-		});
+		void target
+			.play(undefined, 0, (item) => deliver(generation, item.event))
+			.catch(() => {
+				sessionRunningRef.current = false;
+			});
 	}, [runwayEnd, deliver]);
 
 	// Wall-clock of the last arrival-triggered resume (rate limit).
@@ -542,12 +537,14 @@ export function useTaskEvents(options: UseTaskEventsOptions): UseTaskEventsResul
 				lastNudgeRef.current = now;
 				const generation = generationRef.current;
 				sessionRunningRef.current = true;
-				void target.play(undefined, 0, (item) => deliver(generation, item.event)).catch(() => {
-					sessionRunningRef.current = false;
-				});
+				void target
+					.play(undefined, 0, (item) => deliver(generation, item.event))
+					.catch(() => {
+						sessionRunningRef.current = false;
+					});
 			}
 		},
-		[deliver],
+		[deliver]
 	);
 
 	// --- Initial seeding ------------------------------------------------------
@@ -679,7 +676,7 @@ export function useTaskEvents(options: UseTaskEventsOptions): UseTaskEventsResul
 			if (lastEnded !== null) return { chapter: lastEnded, active: false };
 			return null;
 		},
-		[timeline],
+		[timeline]
 	);
 
 	// =========================================================================
@@ -730,7 +727,7 @@ export function useTaskEvents(options: UseTaskEventsOptions): UseTaskEventsResul
 			return { chapter: resolved.chapter, active: resolved.active, events, ...truncated };
 		},
 		// eslint-disable-next-line react-hooks/exhaustive-deps
-		[resolveTrack, cursorTime, rebuildTick],
+		[resolveTrack, cursorTime, rebuildTick]
 	);
 
 	/** Events within an arbitrary [from, to] slice — the Analyze brush read. */
@@ -741,7 +738,7 @@ export function useTaskEvents(options: UseTaskEventsOptions): UseTaskEventsResul
 			return types ? slice.filter((message) => types.includes(message.event)) : slice;
 		},
 		// eslint-disable-next-line react-hooks/exhaustive-deps
-		[rebuildTick],
+		[rebuildTick]
 	);
 
 	/**
@@ -789,7 +786,7 @@ export function useTaskEvents(options: UseTaskEventsOptions): UseTaskEventsResul
 			return points;
 		},
 		// eslint-disable-next-line react-hooks/exhaustive-deps
-		[clockSecond, rebuildTick],
+		[clockSecond, rebuildTick]
 	);
 
 	/**
@@ -907,7 +904,7 @@ export function useTaskEvents(options: UseTaskEventsOptions): UseTaskEventsResul
 			if (inWindow && depthOk) return;
 			reseed(anchor);
 		},
-		[resolveTrack, reseed, disarmHunt],
+		[resolveTrack, reseed, disarmHunt]
 	);
 
 	const controller = useMemo<TaskPlayerController>(() => {
@@ -945,9 +942,7 @@ export function useTaskEvents(options: UseTaskEventsOptions): UseTaskEventsResul
 				// >>). The fold can span past both boundaries (chart depth
 				// behind, runway ahead), so both scans clamp to the chapter.
 				const cursor = cursorTime ?? timeline?.endTime ?? Date.now() / 1000;
-				const inside = chapters.find(
-					(chapter) => chapter.beginTime <= cursor && cursor <= (chapter.endTime ?? Number.POSITIVE_INFINITY),
-				);
+				const inside = chapters.find((chapter) => chapter.beginTime <= cursor && cursor <= (chapter.endTime ?? Number.POSITIVE_INFINITY));
 				const floor = inside?.beginTime ?? Number.NEGATIVE_INFINITY;
 				// An open (live) chapter has no end yet — the wall clock caps it.
 				const endCap = inside?.endTime != null ? inside.endTime - TRACK_END_EPSILON : Date.now() / 1000;
@@ -1014,9 +1009,11 @@ export function useTaskEvents(options: UseTaskEventsOptions): UseTaskEventsResul
 				if (session && !sessionRunningRef.current) {
 					const generation = generationRef.current;
 					sessionRunningRef.current = true;
-					void session.play(undefined, 0, (item) => deliver(generation, item.event)).catch(() => {
-						sessionRunningRef.current = false;
-					});
+					void session
+						.play(undefined, 0, (item) => deliver(generation, item.event))
+						.catch(() => {
+							sessionRunningRef.current = false;
+						});
 				}
 			},
 			previousTrack: () => {
@@ -1072,10 +1069,7 @@ export function useTaskEvents(options: UseTaskEventsOptions): UseTaskEventsResul
 	// RESULT
 	// =========================================================================
 
-	const player = useMemo<TaskPlayerState>(
-		() => ({ mode, playing, speed, cursorTime, buffering }),
-		[mode, playing, speed, cursorTime, buffering],
-	);
+	const player = useMemo<TaskPlayerState>(() => ({ mode, playing, speed, cursorTime, buffering }), [mode, playing, speed, cursorTime, buffering]);
 
 	return { statusAt, trackEvents, rangeEvents, chartSeries, trackStats, ingestLive, player, controller, inGap, gapNeighbors };
 }

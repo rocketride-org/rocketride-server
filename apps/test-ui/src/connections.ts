@@ -95,10 +95,7 @@ const ALL_PHASES = ['sweep', 'stress', 'flood', 'pipe', 'chaos', 'hammer'];
  * Initialise the connection store from workspace appState.
  * Seeds a default localhost connection if none exist.
  */
-export function initConnectionStore(
-	appState: Record<string, unknown>,
-	updateAppState: (updater: (prev: Record<string, unknown>) => Record<string, unknown>) => void,
-) {
+export function initConnectionStore(appState: Record<string, unknown>, updateAppState: (updater: (prev: Record<string, unknown>) => Record<string, unknown>) => void) {
 	// Bridge the workspace functional updater to key/value
 	_updateAppState = (key, value) => {
 		updateAppState((prev) => ({ ...prev, [key]: value }));
@@ -110,14 +107,16 @@ export function initConnectionStore(
 		_connections = saved as SavedConnection[];
 	} else {
 		// Seed default
-		_connections = [{
-			id: `conn_${Date.now()}_default`,
-			name: 'Local OSS Server',
-			url: 'localhost:5565',
-			apiKey: '',
-			config: { ...DEFAULT_CONFIG },
-			selectedPhases: [...ALL_PHASES],
-		}];
+		_connections = [
+			{
+				id: `conn_${Date.now()}_default`,
+				name: 'Local OSS Server',
+				url: 'localhost:5565',
+				apiKey: '',
+				config: { ...DEFAULT_CONFIG },
+				selectedPhases: [...ALL_PHASES],
+			},
+		];
 		schedulePersist();
 	}
 	emit();
@@ -152,7 +151,7 @@ export function addConnection(conn: Omit<SavedConnection, 'id'>): string {
 
 /** Update an existing connection. */
 export function updateConnection(id: string, patch: Partial<SavedConnection>) {
-	_connections = _connections.map((c) => c.id === id ? { ...c, ...patch } : c);
+	_connections = _connections.map((c) => (c.id === id ? { ...c, ...patch } : c));
 	emit();
 	schedulePersist();
 }

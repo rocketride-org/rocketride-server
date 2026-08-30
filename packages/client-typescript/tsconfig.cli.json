@@ -8,9 +8,5 @@
 		"sourceMap": true,
 		"noUnusedLocals": false
 	},
-	"include": [
-		"./src/cli/**/*",
-		"./src/client/**/*"
-	]
+	"include": ["./src/cli/**/*", "./src/client/**/*"]
 }
-

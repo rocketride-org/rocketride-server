@@ -27,7 +27,7 @@
  *
  * This is the main entry point for the RocketRide Chat application.
  * It initializes the React application and mounts it to the DOM.
- * 
+ *
  * Setup Process:
  * 1. Import React and ReactDOM
  * 2. Import root App component
@@ -35,14 +35,14 @@
  * 4. Find root DOM element
  * 5. Create React root
  * 6. Render App in StrictMode
- * 
+ *
  * React StrictMode:
  * - Enables additional development checks
  * - Highlights potential problems
  * - Activates additional warnings
  * - Does not affect production builds
  * - May cause components to render twice in development
- * 
+ *
  * Error Handling:
  * - Throws if root element not found
  * - Prevents silent failure on missing DOM node
@@ -56,17 +56,17 @@ import './styles.css';
 
 /**
  * Get root DOM element
- * 
+ *
  * The root element is defined in index.html as:
  * <div id="dropper-root"></div>
- * 
+ *
  * This element serves as the mount point for the entire React application.
  */
 const container = document.getElementById('chat-root');
 
 /**
  * Validate root element exists
- * 
+ *
  * If the root element is not found, throw a descriptive error.
  * This prevents cryptic errors later in the initialization process.
  */
@@ -76,10 +76,10 @@ if (!container) {
 
 /**
  * Create React root
- * 
+ *
  * Uses the new React 18+ createRoot API for concurrent features.
  * This replaces the legacy ReactDOM.render API.
- * 
+ *
  * Benefits of createRoot:
  * - Enables concurrent rendering
  * - Automatic batching of updates
@@ -90,14 +90,14 @@ const root = createRoot(container);
 
 /**
  * Render application
- * 
+ *
  * Wraps App in React.StrictMode for development-time checks.
  * StrictMode helps identify:
  * - Unsafe lifecycle methods
  * - Legacy string ref API usage
  * - Unexpected side effects
  * - Deprecated APIs
- * 
+ *
  * Note: StrictMode only runs in development and has no impact
  * on production builds.
  */
@@ -106,4 +106,3 @@ root.render(
 		<App />
 	</React.StrictMode>
 );
-

@@ -307,7 +307,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 						supportsMultipleEditorsPerDocument: false,
 					}),
 					appScreen,
-					{ dispose: () => watchManager.dispose() },
+					{ dispose: () => watchManager.dispose() }
 				);
 				// File-less per-team deployment tabs (teams-as-environments)
 				welcome = new WelcomeProvider(context, context.extensionUri);

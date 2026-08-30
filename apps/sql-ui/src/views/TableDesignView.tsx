@@ -199,10 +199,16 @@ function effectiveColumns(base: ISqlSchemaColumn[], pk: string[], ops: AlterOp[]
 			if (row) row.pending = 'dropped';
 		} else if (op.kind === 'renameColumn') {
 			const row = rows.find((r) => r.name === op.name);
-			if (row) { row.name = op.newName; row.pending = row.pending || 'renamed'; }
+			if (row) {
+				row.name = op.newName;
+				row.pending = row.pending || 'renamed';
+			}
 		} else if (op.kind === 'changeType') {
 			const row = rows.find((r) => r.name === op.name);
-			if (row) { row.type = op.type; row.pending = row.pending || 'retyped'; }
+			if (row) {
+				row.type = op.type;
+				row.pending = row.pending || 'retyped';
+			}
 		} else if (op.kind === 'addColumn') {
 			// Staged adds are identified by their op index (names may repeat).
 			rows.push({ id: `op:${i}`, name: op.spec.name, type: op.spec.type, primaryKey: false, pending: 'added' });
@@ -250,7 +256,7 @@ export const TableDesignView: React.FC<ITableDesignViewProps> = ({ endpoint, tab
 
 	// ── Derived data ─────────────────────────────────────────────────────────
 
-	const tableDef = !createMode ? snapshot.schema?.tables?.[table] ?? null : null;
+	const tableDef = !createMode ? (snapshot.schema?.tables?.[table] ?? null) : null;
 	const columns = useMemo<IEffectiveColumn[]>(() => {
 		if (createMode) {
 			// Drafts are positional: identity by index, not (possibly duplicated) name.
@@ -281,9 +287,15 @@ export const TableDesignView: React.FC<ITableDesignViewProps> = ({ endpoint, tab
 		setFkError(null);
 		const session = getSession(client, endpoint);
 		fetchForeignKeyNames(session, snapshot.dialect, table)
-			.then((names) => { if (!cancelled) setFkNames(names); })
-			.catch((err) => { if (!cancelled) setFkError(err instanceof Error ? err.message : String(err)); });
-		return () => { cancelled = true; };
+			.then((names) => {
+				if (!cancelled) setFkNames(names);
+			})
+			.catch((err) => {
+				if (!cancelled) setFkError(err instanceof Error ? err.message : String(err));
+			});
+		return () => {
+			cancelled = true;
+		};
 	}, [createMode, activePage, fkNames, client, snapshot.status, snapshot.dialect, endpoint, table]);
 
 	// ── Gestures ─────────────────────────────────────────────────────────────
@@ -366,10 +378,7 @@ export const TableDesignView: React.FC<ITableDesignViewProps> = ({ endpoint, tab
 	// keys the table declares AFTER Apply — fetched names (falling back to
 	// the snapshot before the first FK-page visit) minus staged drops plus
 	// staged adds.
-	const fkCount =
-		(fkNames?.length ?? tableDef?.foreign_keys?.length ?? 0) -
-		ops.filter((op) => op.kind === 'dropForeignKey').length +
-		ops.filter((op) => op.kind === 'addForeignKey').length;
+	const fkCount = (fkNames?.length ?? tableDef?.foreign_keys?.length ?? 0) - ops.filter((op) => op.kind === 'dropForeignKey').length + ops.filter((op) => op.kind === 'addForeignKey').length;
 
 	const menu: ViewMenu = {
 		entries: [
@@ -399,26 +408,23 @@ export const TableDesignView: React.FC<ITableDesignViewProps> = ({ endpoint, tab
 			<TabControl menu={menu} activeId={activePage} onSelect={setActivePage} />
 
 			<ContentHeader
-				title={createMode ? (createName.trim() || 'New table') : table}
-				subtitle={
-					pendingCount > 0
-						? `${pendingCount} pending change${pendingCount === 1 ? '' : 's'} — review on the DDL page, then Apply`
-						: 'No pending changes'
-				}
+				title={createMode ? createName.trim() || 'New table' : table}
+				subtitle={pendingCount > 0 ? `${pendingCount} pending change${pendingCount === 1 ? '' : 's'} — review on the DDL page, then Apply` : 'No pending changes'}
 				actions={
 					<>
 						<Button
 							variant="ghost"
-							onClick={() => { setOps([]); setCreateColumns([]); setSelected(null); setApplyError(null); }}
+							onClick={() => {
+								setOps([]);
+								setCreateColumns([]);
+								setSelected(null);
+								setApplyError(null);
+							}}
 							disabled={pendingCount === 0 || applying}
 						>
 							Discard
 						</Button>
-						<Button
-							variant="primary"
-							onClick={() => setConfirmOpen(true)}
-							disabled={pendingCount === 0 || applying || !client || !isConnected}
-						>
+						<Button variant="primary" onClick={() => setConfirmOpen(true)} disabled={pendingCount === 0 || applying || !client || !isConnected}>
 							{applying ? 'Applying...' : 'Apply'}
 						</Button>
 					</>
@@ -426,7 +432,11 @@ export const TableDesignView: React.FC<ITableDesignViewProps> = ({ endpoint, tab
 			/>
 
 			<div style={styles.body}>
-				{applyError && <div style={styles.cardGap}><Banner variant="error">Apply failed: {applyError}</Banner></div>}
+				{applyError && (
+					<div style={styles.cardGap}>
+						<Banner variant="error">Apply failed: {applyError}</Banner>
+					</div>
+				)}
 
 				<TabPanel
 					activeId={activePage}
@@ -462,11 +472,7 @@ export const TableDesignView: React.FC<ITableDesignViewProps> = ({ endpoint, tab
 														<td style={{ ...styles.td, ...styles.mono, textDecoration: col.pending === 'dropped' ? 'line-through' : 'none' }}>{col.name}</td>
 														<td style={{ ...styles.td, ...styles.mono }}>{col.type}</td>
 														<td style={styles.td}>{col.primaryKey ? <StatusBadge variant="info">PK</StatusBadge> : null}</td>
-														<td style={styles.td}>
-															{col.pending && (
-																<StatusBadge variant={col.pending === 'dropped' ? 'error' : 'warning'}>{col.pending}</StatusBadge>
-															)}
-														</td>
+														<td style={styles.td}>{col.pending && <StatusBadge variant={col.pending === 'dropped' ? 'error' : 'warning'}>{col.pending}</StatusBadge>}</td>
 														<td style={styles.td}>
 															<Button
 																variant="danger"
@@ -489,7 +495,11 @@ export const TableDesignView: React.FC<ITableDesignViewProps> = ({ endpoint, tab
 													</tr>
 												))}
 												{columns.length === 0 && (
-													<tr><td style={styles.td} colSpan={5}>No columns yet — add the first one on the right.</td></tr>
+													<tr>
+														<td style={styles.td} colSpan={5}>
+															No columns yet — add the first one on the right.
+														</td>
+													</tr>
 												)}
 											</tbody>
 										</table>
@@ -506,9 +516,12 @@ export const TableDesignView: React.FC<ITableDesignViewProps> = ({ endpoint, tab
 												<span style={styles.fieldLabel}>Datatype</span>
 												<InputField value={editType} onChange={(e) => setEditType(e.target.value)} />
 											</div>
-											<Button variant="primary" small onClick={applyEdit}>Stage Change</Button>
-											{' '}
-											<Button variant="ghost" small onClick={() => setSelected(null)}>Cancel</Button>
+											<Button variant="primary" small onClick={applyEdit}>
+												Stage Change
+											</Button>{' '}
+											<Button variant="ghost" small onClick={() => setSelected(null)}>
+												Cancel
+											</Button>
 										</Card>
 									) : (
 										<Card header="Add column">
@@ -550,122 +563,161 @@ export const TableDesignView: React.FC<ITableDesignViewProps> = ({ endpoint, tab
 						},
 
 						// ── FOREIGN KEYS (alter mode only) ──────────────────────
-						...(!createMode ? {
-							fks: {
-								content: (
-									<div style={styles.split}>
-										<Card noBodyPadding>
-											{fkError && <Banner variant="warning">Constraint names unavailable: {fkError}</Banner>}
-											<table style={styles.table}>
-												<thead>
-													<tr>
-														<th style={styles.th}>Key</th>
-														<th style={styles.th}>Column</th>
-														<th style={styles.th}>References</th>
-														<th style={styles.th}></th>
-													</tr>
-												</thead>
-												<tbody>
-													{(fkNames ?? []).map((fk) => {
-														const dropped = ops.some((op) => op.kind === 'dropForeignKey' && op.name === fk.name);
-														return (
-															<tr key={fk.name}>
-																<td style={{ ...styles.td, ...styles.mono, textDecoration: dropped ? 'line-through' : 'none' }}>{fk.name}</td>
-																<td style={{ ...styles.td, ...styles.mono }}>{fk.column}</td>
-																<td style={{ ...styles.td, ...styles.mono }}>{fk.referredTable}</td>
-																<td style={styles.td}>
-																	{dropped ? (
-																		<StatusBadge variant="error">dropped</StatusBadge>
-																	) : (
-																		<Button variant="danger" small onClick={() => setOps((prev) => [...prev, { kind: 'dropForeignKey', name: fk.name }])}>Drop</Button>
-																	)}
-																</td>
+						...(!createMode
+							? {
+									fks: {
+										content: (
+											<div style={styles.split}>
+												<Card noBodyPadding>
+													{fkError && <Banner variant="warning">Constraint names unavailable: {fkError}</Banner>}
+													<table style={styles.table}>
+														<thead>
+															<tr>
+																<th style={styles.th}>Key</th>
+																<th style={styles.th}>Column</th>
+																<th style={styles.th}>References</th>
+																<th style={styles.th}></th>
 															</tr>
-														);
-													})}
-													{/* Staged (not yet applied) foreign keys — keyed by op index. */}
-													{ops.map((op, i) => op.kind === 'addForeignKey' ? (
-														<tr key={`staged:${i}`}>
-															<td style={{ ...styles.td, ...styles.mono }}>{op.name}</td>
-															<td style={{ ...styles.td, ...styles.mono }}>{op.column}</td>
-															<td style={{ ...styles.td, ...styles.mono }}>{op.refTable}</td>
-															<td style={styles.td}><StatusBadge variant="warning">added</StatusBadge></td>
-														</tr>
-													) : null)}
-													{fkNames !== null && fkNames.length === 0 && (
-														<tr><td style={styles.td} colSpan={4}>This table declares no foreign keys.</td></tr>
-													)}
-													{fkNames === null && !fkError && (
-														<tr><td style={styles.td} colSpan={4}>Reading constraint names...</td></tr>
-													)}
-												</tbody>
-											</table>
-										</Card>
+														</thead>
+														<tbody>
+															{(fkNames ?? []).map((fk) => {
+																const dropped = ops.some((op) => op.kind === 'dropForeignKey' && op.name === fk.name);
+																return (
+																	<tr key={fk.name}>
+																		<td style={{ ...styles.td, ...styles.mono, textDecoration: dropped ? 'line-through' : 'none' }}>{fk.name}</td>
+																		<td style={{ ...styles.td, ...styles.mono }}>{fk.column}</td>
+																		<td style={{ ...styles.td, ...styles.mono }}>{fk.referredTable}</td>
+																		<td style={styles.td}>
+																			{dropped ? (
+																				<StatusBadge variant="error">dropped</StatusBadge>
+																			) : (
+																				<Button variant="danger" small onClick={() => setOps((prev) => [...prev, { kind: 'dropForeignKey', name: fk.name }])}>
+																					Drop
+																				</Button>
+																			)}
+																		</td>
+																	</tr>
+																);
+															})}
+															{/* Staged (not yet applied) foreign keys — keyed by op index. */}
+															{ops.map((op, i) =>
+																op.kind === 'addForeignKey' ? (
+																	<tr key={`staged:${i}`}>
+																		<td style={{ ...styles.td, ...styles.mono }}>{op.name}</td>
+																		<td style={{ ...styles.td, ...styles.mono }}>{op.column}</td>
+																		<td style={{ ...styles.td, ...styles.mono }}>{op.refTable}</td>
+																		<td style={styles.td}>
+																			<StatusBadge variant="warning">added</StatusBadge>
+																		</td>
+																	</tr>
+																) : null
+															)}
+															{fkNames !== null && fkNames.length === 0 && (
+																<tr>
+																	<td style={styles.td} colSpan={4}>
+																		This table declares no foreign keys.
+																	</td>
+																</tr>
+															)}
+															{fkNames === null && !fkError && (
+																<tr>
+																	<td style={styles.td} colSpan={4}>
+																		Reading constraint names...
+																	</td>
+																</tr>
+															)}
+														</tbody>
+													</table>
+												</Card>
 
-										<Card header="Add foreign key">
-											<div style={styles.field}>
-													<span style={styles.fieldLabel}>Name</span>
-													<InputField value={fkDraft.name} onChange={(e) => setFkDraft({ ...fkDraft, name: e.target.value })} placeholder={`fk_${table}_...`} />
-												</div>
-												<div style={styles.field}>
-													<span style={styles.fieldLabel}>Column</span>
-													<select style={styles.select} value={fkDraft.column} onChange={(e) => setFkDraft({ ...fkDraft, column: e.target.value })}>
-														<option value="">Select column...</option>
-														{columns.filter((c) => c.pending !== 'dropped').map((c) => <option key={c.name} value={c.name}>{c.name}</option>)}
-													</select>
-												</div>
-												<div style={styles.field}>
-													<span style={styles.fieldLabel}>Referenced table</span>
-													<select style={styles.select} value={fkDraft.refTable} onChange={(e) => setFkDraft({ ...fkDraft, refTable: e.target.value, refColumn: '' })}>
-														<option value="">Select table...</option>
-														{otherTables.map((t) => <option key={t} value={t}>{t}</option>)}
-													</select>
-												</div>
-												<div style={styles.field}>
-													<span style={styles.fieldLabel}>Referenced column</span>
-													<select style={styles.select} value={fkDraft.refColumn} onChange={(e) => setFkDraft({ ...fkDraft, refColumn: e.target.value })}>
-														<option value="">Select column...</option>
-														{(snapshot.schema?.tables?.[fkDraft.refTable]?.columns ?? []).map((c) => (
-															<option key={c.column} value={c.column}>{c.column}</option>
-														))}
-													</select>
-												</div>
-												<div style={styles.field}>
-													<span style={styles.fieldLabel}>On update</span>
-													<select style={styles.select} value={fkDraft.onUpdate} onChange={(e) => setFkDraft({ ...fkDraft, onUpdate: e.target.value })}>
-														{FK_ACTIONS.map((a) => <option key={a} value={a}>{a}</option>)}
-													</select>
-												</div>
-												<div style={styles.field}>
-													<span style={styles.fieldLabel}>On delete</span>
-													<select style={styles.select} value={fkDraft.onDelete} onChange={(e) => setFkDraft({ ...fkDraft, onDelete: e.target.value })}>
-														{FK_ACTIONS.map((a) => <option key={a} value={a}>{a}</option>)}
-													</select>
-												</div>
-												<Button
-													variant="primary"
-													small
-													disabled={!fkDraft.name.trim() || !fkDraft.column || !fkDraft.refTable || !fkDraft.refColumn}
-													onClick={() => {
-														setOps((prev) => [...prev, {
-															kind: 'addForeignKey',
-															name: fkDraft.name.trim(),
-															column: fkDraft.column,
-															refTable: fkDraft.refTable,
-															refColumn: fkDraft.refColumn,
-															onUpdate: fkDraft.onUpdate,
-															onDelete: fkDraft.onDelete,
-														}]);
-														setFkDraft({ name: '', column: '', refTable: '', refColumn: '', onUpdate: 'CASCADE', onDelete: 'RESTRICT' });
-													}}
-												>
-													Stage Foreign Key
-												</Button>
-										</Card>
-									</div>
-								),
-							},
-						} : {}),
+												<Card header="Add foreign key">
+													<div style={styles.field}>
+														<span style={styles.fieldLabel}>Name</span>
+														<InputField value={fkDraft.name} onChange={(e) => setFkDraft({ ...fkDraft, name: e.target.value })} placeholder={`fk_${table}_...`} />
+													</div>
+													<div style={styles.field}>
+														<span style={styles.fieldLabel}>Column</span>
+														<select style={styles.select} value={fkDraft.column} onChange={(e) => setFkDraft({ ...fkDraft, column: e.target.value })}>
+															<option value="">Select column...</option>
+															{columns
+																.filter((c) => c.pending !== 'dropped')
+																.map((c) => (
+																	<option key={c.name} value={c.name}>
+																		{c.name}
+																	</option>
+																))}
+														</select>
+													</div>
+													<div style={styles.field}>
+														<span style={styles.fieldLabel}>Referenced table</span>
+														<select style={styles.select} value={fkDraft.refTable} onChange={(e) => setFkDraft({ ...fkDraft, refTable: e.target.value, refColumn: '' })}>
+															<option value="">Select table...</option>
+															{otherTables.map((t) => (
+																<option key={t} value={t}>
+																	{t}
+																</option>
+															))}
+														</select>
+													</div>
+													<div style={styles.field}>
+														<span style={styles.fieldLabel}>Referenced column</span>
+														<select style={styles.select} value={fkDraft.refColumn} onChange={(e) => setFkDraft({ ...fkDraft, refColumn: e.target.value })}>
+															<option value="">Select column...</option>
+															{(snapshot.schema?.tables?.[fkDraft.refTable]?.columns ?? []).map((c) => (
+																<option key={c.column} value={c.column}>
+																	{c.column}
+																</option>
+															))}
+														</select>
+													</div>
+													<div style={styles.field}>
+														<span style={styles.fieldLabel}>On update</span>
+														<select style={styles.select} value={fkDraft.onUpdate} onChange={(e) => setFkDraft({ ...fkDraft, onUpdate: e.target.value })}>
+															{FK_ACTIONS.map((a) => (
+																<option key={a} value={a}>
+																	{a}
+																</option>
+															))}
+														</select>
+													</div>
+													<div style={styles.field}>
+														<span style={styles.fieldLabel}>On delete</span>
+														<select style={styles.select} value={fkDraft.onDelete} onChange={(e) => setFkDraft({ ...fkDraft, onDelete: e.target.value })}>
+															{FK_ACTIONS.map((a) => (
+																<option key={a} value={a}>
+																	{a}
+																</option>
+															))}
+														</select>
+													</div>
+													<Button
+														variant="primary"
+														small
+														disabled={!fkDraft.name.trim() || !fkDraft.column || !fkDraft.refTable || !fkDraft.refColumn}
+														onClick={() => {
+															setOps((prev) => [
+																...prev,
+																{
+																	kind: 'addForeignKey',
+																	name: fkDraft.name.trim(),
+																	column: fkDraft.column,
+																	refTable: fkDraft.refTable,
+																	refColumn: fkDraft.refColumn,
+																	onUpdate: fkDraft.onUpdate,
+																	onDelete: fkDraft.onDelete,
+																},
+															]);
+															setFkDraft({ name: '', column: '', refTable: '', refColumn: '', onUpdate: 'CASCADE', onDelete: 'RESTRICT' });
+														}}
+													>
+														Stage Foreign Key
+													</Button>
+												</Card>
+											</div>
+										),
+									},
+								}
+							: {}),
 
 						// ── DDL ─────────────────────────────────────────────────
 						ddl: {
@@ -674,22 +726,16 @@ export const TableDesignView: React.FC<ITableDesignViewProps> = ({ endpoint, tab
 									{!createMode && ops.length > 0 && (
 										<Card header="Pending changes">
 											<div style={styles.pendingList}>
-												{ops.map((op, i) => <div key={i}>{i + 1}. {describeOp(op)}</div>)}
+												{ops.map((op, i) => (
+													<div key={i}>
+														{i + 1}. {describeOp(op)}
+													</div>
+												))}
 											</div>
 										</Card>
 									)}
 									<div style={styles.cardGap} />
-									<Card header="Generated DDL">
-										{statements.length > 0 ? (
-											<pre style={styles.ddl}>{statements.map((s) => `${s};`).join('\n\n')}</pre>
-										) : (
-											<span style={commonStyles.textMuted}>
-												{createMode
-													? 'Name the table and add at least one column to generate its CREATE TABLE.'
-													: 'No pending changes — stage edits on the Columns or Foreign Keys pages.'}
-											</span>
-										)}
-									</Card>
+									<Card header="Generated DDL">{statements.length > 0 ? <pre style={styles.ddl}>{statements.map((s) => `${s};`).join('\n\n')}</pre> : <span style={commonStyles.textMuted}>{createMode ? 'Name the table and add at least one column to generate its CREATE TABLE.' : 'No pending changes — stage edits on the Columns or Foreign Keys pages.'}</span>}</Card>
 								</>
 							),
 						},
@@ -701,15 +747,13 @@ export const TableDesignView: React.FC<ITableDesignViewProps> = ({ endpoint, tab
 			{confirmOpen && (
 				<ConfirmDialog
 					title={createMode ? 'Create table?' : `Apply ${statements.length} statement${statements.length === 1 ? '' : 's'}?`}
-					message={
-						createMode
-							? `CREATE TABLE ${createName.trim()} will run on ${snapshot.schema?.database ?? endpoint.nodeName}.`
-							: `The staged DDL will run against ${snapshot.schema?.database ?? endpoint.nodeName} in order. Review the DDL page first — schema changes cannot be undone from here.`
-					}
+					message={createMode ? `CREATE TABLE ${createName.trim()} will run on ${snapshot.schema?.database ?? endpoint.nodeName}.` : `The staged DDL will run against ${snapshot.schema?.database ?? endpoint.nodeName} in order. Review the DDL page first — schema changes cannot be undone from here.`}
 					confirmLabel={applying ? 'Applying...' : 'Apply'}
 					destructive
 					confirmDisabled={applying}
-					onConfirm={() => { void apply(); }}
+					onConfirm={() => {
+						void apply();
+					}}
 					onCancel={() => setConfirmOpen(false)}
 				/>
 			)}

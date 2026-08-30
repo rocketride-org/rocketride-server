@@ -1,11 +1,7 @@
 {
 	"compilerOptions": {
 		"target": "es2022",
-		"lib": [
-			"dom",
-			"dom.iterable",
-			"esnext"
-		],
+		"lib": ["dom", "dom.iterable", "esnext"],
 		"allowJs": true,
 		"skipLibCheck": true,
 		"types": [],
@@ -18,19 +14,9 @@
 		"isolatedModules": true,
 		"jsx": "react-jsx",
 		"paths": {
-			"shared/*": [
-				"./src/*"
-			]
+			"shared/*": ["./src/*"]
 		}
 	},
-	"include": [
-		"**/*.ts",
-		"**/*.tsx",
-		"**/*.d.ts"
-	],
-	"exclude": [
-		"node_modules",
-		"**/*.test.ts",
-		"**/*.test.tsx"
-	]
+	"include": ["**/*.ts", "**/*.tsx", "**/*.d.ts"],
+	"exclude": ["node_modules", "**/*.test.ts", "**/*.test.tsx"]
 }

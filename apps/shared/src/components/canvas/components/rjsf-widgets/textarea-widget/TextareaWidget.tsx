@@ -38,7 +38,7 @@ const TextareaWidget: FC<WidgetProps> = ({ id, value, label, required, autofocus
 			setControlledValue(newValue);
 			onChange(newValue === '' ? options.emptyValue : newValue);
 		},
-		[autocomplete, controlledValue, onChange, options.emptyValue],
+		[autocomplete, controlledValue, onChange, options.emptyValue]
 	);
 
 	const handleKeyDown = useCallback(
@@ -61,7 +61,7 @@ const TextareaWidget: FC<WidgetProps> = ({ id, value, label, required, autofocus
 				autocomplete.handleDismiss();
 			}
 		},
-		[autocomplete, onEnvVarSelect],
+		[autocomplete, onEnvVarSelect]
 	);
 
 	return (
@@ -95,9 +95,7 @@ const TextareaWidget: FC<WidgetProps> = ({ id, value, label, required, autofocus
 				InputLabelProps={{ shrink: true }}
 				helperText={typeof options?.description === 'string' ? options.description : schema?.description}
 			/>
-			{envKeys.length > 0 && (
-				<EnvVarSuggestions open={autocomplete.isOpen} anchorEl={autocomplete.anchorEl} suggestions={autocomplete.suggestions} highlightedIndex={autocomplete.highlightedIndex} onSelect={onEnvVarSelect} onDismiss={autocomplete.handleDismiss} />
-			)}
+			{envKeys.length > 0 && <EnvVarSuggestions open={autocomplete.isOpen} anchorEl={autocomplete.anchorEl} suggestions={autocomplete.suggestions} highlightedIndex={autocomplete.highlightedIndex} onSelect={onEnvVarSelect} onDismiss={autocomplete.handleDismiss} />}
 		</>
 	);
 };

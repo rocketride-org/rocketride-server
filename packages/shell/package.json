@@ -9,7 +9,7 @@
 		"./src/*": "./src/*",
 		"./themes/rocketride-default.css": "./src/themes/rocketride-default.css"
 	},
-	"description": "RocketRide Shell \u2014 Module Federation host with dynamic app loading",
+	"description": "RocketRide Shell — Module Federation host with dynamic app loading",
 	"license": "MIT",
 	"scripts": {
 		"start": "pnpm rsbuild dev --env-mode development",

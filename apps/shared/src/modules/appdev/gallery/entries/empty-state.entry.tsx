@@ -32,13 +32,7 @@ import { EmptyState } from 'shell';
 import type { IGalleryDemoProps, IGalleryEntry, KnobValues } from '../galleryTypes';
 
 /** Live demo: an EmptyState driven by the knob values. */
-const EmptyStateDemo: React.FC<IGalleryDemoProps> = ({ knobs }) => (
-	<EmptyState
-		title={String(knobs.title)}
-		description={String(knobs.description) || undefined}
-		action={knobs.action ? <Button onClick={() => undefined}>New pipeline</Button> : undefined}
-	/>
-);
+const EmptyStateDemo: React.FC<IGalleryDemoProps> = ({ knobs }) => <EmptyState title={String(knobs.title)} description={String(knobs.description) || undefined} action={knobs.action ? <Button onClick={() => undefined}>New pipeline</Button> : undefined} />;
 
 /** Snippet builder mirroring the current knob state. */
 const buildCode = (knobs: KnobValues): string => {

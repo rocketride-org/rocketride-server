@@ -90,16 +90,12 @@ export const ConnectionView: React.FC<IConnectionViewProps> = ({ endpoint }) => 
 
 	// The document's pages — grows as later phases land.
 	const menu: ViewMenu = {
-		entries: [
-			{ id: 'overview', label: 'Overview' },
-		],
+		entries: [{ id: 'overview', label: 'Overview' }],
 	};
 
 	// Header subtitle: dialect + pipeline binding + snapshot freshness.
 	const dialectLabel = snapshot.dialect !== 'unknown' ? snapshot.dialect : endpoint.provider;
-	const refreshed = snapshot.refreshedAt
-		? ` — schema read ${new Date(snapshot.refreshedAt).toLocaleTimeString()}`
-		: '';
+	const refreshed = snapshot.refreshedAt ? ` — schema read ${new Date(snapshot.refreshedAt).toLocaleTimeString()}` : '';
 
 	return (
 		<div style={styles.root}>
@@ -113,15 +109,14 @@ export const ConnectionView: React.FC<IConnectionViewProps> = ({ endpoint }) => 
 					<>
 						<Button
 							variant="ghost"
-							onClick={() => { if (client) void refreshSchema(client, endpoint); }}
+							onClick={() => {
+								if (client) void refreshSchema(client, endpoint);
+							}}
 							disabled={!client || snapshot.status === 'loading'}
 						>
 							{snapshot.status === 'loading' ? 'Reading...' : 'Refresh Schema'}
 						</Button>
-						<Button
-							variant="secondary"
-							onClick={() => getDocs()?.openStaticDocument(diagramUri(endpoint.key), `${endpoint.nodeName} - diagram`, endpoint)}
-						>
+						<Button variant="secondary" onClick={() => getDocs()?.openStaticDocument(diagramUri(endpoint.key), `${endpoint.nodeName} - diagram`, endpoint)}>
 							Diagram
 						</Button>
 						<Button

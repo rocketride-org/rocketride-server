@@ -167,12 +167,7 @@ export class EngineCloud extends EngineBackend {
 						};
 					}
 
-					await cloudAuth.signIn(
-						callerTenant || process.env.RR_ZITADEL_URL || '',
-						callerTenant
-							? (callerClientId as string)
-							: (process.env.RR_ZITADEL_VSCODE_CLIENT_ID || '')
-					);
+					await cloudAuth.signIn(callerTenant || process.env.RR_ZITADEL_URL || '', callerTenant ? (callerClientId as string) : process.env.RR_ZITADEL_VSCODE_CLIENT_ID || '');
 					return { success: true };
 				}
 				case 'signout':

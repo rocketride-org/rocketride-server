@@ -94,10 +94,7 @@ export const TopUpModal: React.FC<TopUpModalProps> = ({ plans, onPurchase, onClo
 	const [error, setError] = useState<string | null>(null);
 
 	// Filter to top-up plans only
-	const topupPlans = useMemo(
-		() => plans.filter((p) => p.metadata?.kind === 'topup' && p.isActive !== false),
-		[plans],
-	);
+	const topupPlans = useMemo(() => plans.filter((p) => p.metadata?.kind === 'topup' && p.isActive !== false), [plans]);
 
 	/** Handle purchase confirmation. */
 	const handleConfirm = async () => {
@@ -141,28 +138,20 @@ export const TopUpModal: React.FC<TopUpModalProps> = ({ plans, onPurchase, onClo
 			width={600}
 			showClose={false}
 			closeOnEscape={!purchasing}
-			footer={success ? undefined : (
-				<>
-					{/* Cancel — the dialog's explicit dismiss control. */}
-					<button
-						type="button"
-						style={commonStyles.buttonSecondary}
-						onClick={onClose}
-						disabled={purchasing}
-					>
-						Cancel
-					</button>
-					{/* Confirm — label reflects selection and in-flight state. */}
-					<button
-						type="button"
-						style={confirmStyle}
-						onClick={handleConfirm}
-						disabled={!selectedPlan || purchasing}
-					>
-						{purchasing ? 'Processing...' : selectedPlan ? `Purchase ${planAmount(selectedPlan)}` : 'Select a pack'}
-					</button>
-				</>
-			)}
+			footer={
+				success ? undefined : (
+					<>
+						{/* Cancel — the dialog's explicit dismiss control. */}
+						<button type="button" style={commonStyles.buttonSecondary} onClick={onClose} disabled={purchasing}>
+							Cancel
+						</button>
+						{/* Confirm — label reflects selection and in-flight state. */}
+						<button type="button" style={confirmStyle} onClick={handleConfirm} disabled={!selectedPlan || purchasing}>
+							{purchasing ? 'Processing...' : selectedPlan ? `Purchase ${planAmount(selectedPlan)}` : 'Select a pack'}
+						</button>
+					</>
+				)
+			}
 		>
 			{success ? (
 				/* Success confirmation — shown briefly until the auto-close timer
@@ -171,11 +160,7 @@ export const TopUpModal: React.FC<TopUpModalProps> = ({ plans, onPurchase, onClo
 			) : (
 				<div style={S.body}>
 					{/* Plan picker -- reuses the same card grid */}
-					<PlanPicker
-						plans={topupPlans}
-						selectedPlan={selectedPlan}
-						onSelectPlan={setSelectedPlan}
-					/>
+					<PlanPicker plans={topupPlans} selectedPlan={selectedPlan} onSelectPlan={setSelectedPlan} />
 
 					{/* Error banner */}
 					{error && <div style={S.error}>{error}</div>}

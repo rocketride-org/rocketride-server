@@ -27,9 +27,7 @@ function extractPipelineEnvVars(pipeline: Record<string, unknown>): string[] {
  */
 async function openWithMissingKeys(missingKeys: string[]): Promise<void> {
 	await vscode.commands.executeCommand('rocketride.page.environment.open', missingKeys);
-	vscode.window.showWarningMessage(
-		`Pipeline references ${missingKeys.length} undefined variable${missingKeys.length > 1 ? 's' : ''}. Please fill in the values in the Variables page, then re-run.`
-	);
+	vscode.window.showWarningMessage(`Pipeline references ${missingKeys.length} undefined variable${missingKeys.length > 1 ? 's' : ''}. Please fill in the values in the Variables page, then re-run.`);
 }
 
 /**

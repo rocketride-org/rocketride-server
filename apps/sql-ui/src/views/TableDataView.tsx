@@ -106,31 +106,37 @@ export const TableDataView: React.FC<ITableDataViewProps> = ({ endpoint, table }
 	const columns = useMemo<GridColumnDefinition[]>(() => {
 		if (!tableDef) return [];
 		const pk = new Set(tableDef.primary_key ?? []);
-		return tableDef.columns.map((col) => ({
-			title: col.column,
-			field: col.column,
-			rrType: /int|dec|num|float|double/i.test(col.type) ? 'number' : 'string',
-			rrDefault: true,
-			rrDescription: `${col.type}${pk.has(col.column) ? ' - primary key' : ''}`,
-			headerSort: true,
-			formatter: (cell: GridCellComponent) => dataCellEl(cell.getValue()),
-		} satisfies GridColumnDefinition));
+		return tableDef.columns.map(
+			(col) =>
+				({
+					title: col.column,
+					field: col.column,
+					rrType: /int|dec|num|float|double/i.test(col.type) ? 'number' : 'string',
+					rrDefault: true,
+					rrDescription: `${col.type}${pk.has(col.column) ? ' - primary key' : ''}`,
+					headerSort: true,
+					formatter: (cell: GridCellComponent) => dataCellEl(cell.getValue()),
+				}) satisfies GridColumnDefinition
+		);
 	}, [tableDef]);
 
 	/**
 	 * REMOTE page fetcher: SELECT + COUNT per request through the session.
 	 */
-	const fetchPage = useCallback(async (req: IDataGridPageRequest): Promise<IDataGridPage<Record<string, unknown>>> => {
-		if (!client || !tableDef) return { rows: [], total: 0 };
-		const session = getSession(client, endpoint);
-		const statements = buildPageStatements(dialect, table, tableDef, req);
+	const fetchPage = useCallback(
+		async (req: IDataGridPageRequest): Promise<IDataGridPage<Record<string, unknown>>> => {
+			if (!client || !tableDef) return { rows: [], total: 0 };
+			const session = getSession(client, endpoint);
+			const statements = buildPageStatements(dialect, table, tableDef, req);
 
-		// Page rows + total over the same WHERE (drives the pager).
-		const pageResult = await session.execute(statements.select);
-		const countResult = await session.execute(statements.count);
-		const total = Number((countResult.rows[0] as { total?: unknown } | undefined)?.total ?? pageResult.rows.length);
-		return { rows: pageResult.rows, total };
-	}, [client, endpoint, table, tableDef, dialect]);
+			// Page rows + total over the same WHERE (drives the pager).
+			const pageResult = await session.execute(statements.select);
+			const countResult = await session.execute(statements.count);
+			const total = Number((countResult.rows[0] as { total?: unknown } | undefined)?.total ?? pageResult.rows.length);
+			return { rows: pageResult.rows, total };
+		},
+		[client, endpoint, table, tableDef, dialect]
+	);
 
 	// ── Framing states ───────────────────────────────────────────────────────
 
@@ -150,9 +156,7 @@ export const TableDataView: React.FC<ITableDataViewProps> = ({ endpoint, table }
 			<div style={styles.root}>
 				<ContentHeader title={table} subtitle="data" />
 				<div style={styles.body}>
-					<Banner variant="warning">
-						Table {table} is not in the current schema snapshot — refresh the schema from the connection overview.
-					</Banner>
+					<Banner variant="warning">Table {table} is not in the current schema snapshot — refresh the schema from the connection overview.</Banner>
 				</div>
 			</div>
 		);
@@ -160,22 +164,11 @@ export const TableDataView: React.FC<ITableDataViewProps> = ({ endpoint, table }
 
 	return (
 		<div style={styles.root}>
-			<ContentHeader
-				title={table}
-				subtitle={`${snapshot.schema?.database ?? ''} - browsing via ${endpoint.pipelineName} / ${endpoint.nodeId}`}
-			/>
+			<ContentHeader title={table} subtitle={`${snapshot.schema?.database ?? ''} - browsing via ${endpoint.pipelineName} / ${endpoint.nodeId}`} />
 
 			<div style={styles.body}>
 				<Card noBodyPadding fill>
-					<DataGrid<Record<string, unknown>>
-						title={table}
-						columns={columns}
-						fetchPage={isConnected ? fetchPage : undefined}
-						tableId={`sql-data-${endpoint.provider}`}
-						height="100%"
-						emptyTitle="No rows"
-						emptyDescription="The table is empty (or nothing matches the current search/filters)."
-					/>
+					<DataGrid<Record<string, unknown>> title={table} columns={columns} fetchPage={isConnected ? fetchPage : undefined} tableId={`sql-data-${endpoint.provider}`} height="100%" emptyTitle="No rows" emptyDescription="The table is empty (or nothing matches the current search/filters)." />
 				</Card>
 			</div>
 		</div>

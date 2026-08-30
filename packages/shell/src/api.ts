@@ -276,26 +276,7 @@ import { isInVSCode } from './themes/vscode';
 import { OAUTH_ROOT_URL } from './auth/oauth';
 import { ITaskState, IServiceCapabilities, DEFAULT_TOOLCHAIN_STATE } from './types/project';
 
-export {
-	Button, StatusBadge, StatusDot, EmptyState, Banner, InputField,
-	ToggleGroup, Chip, ChipAdd, DropZone, Card, MiniCard, MiniContainer,
-	Section, LabelValue, ContentHeader, RocketRideMark,
-	DetailPanel, PanelTabBody, TabControl, TabPanel, Modal, CLOSE_GLYPH,
-	SaveFileDialog,
-	SidebarMenu, SidebarCollapsedProvider, SidebarCollapsedGate,
-	useSidebarCollapsed, SidebarFooter,
-	DataGrid, CardDataGrid, FilterStrip, createActionsColumn, autoFormatter,
-	badgeEl, buttonEl, avatarEl, monoEl, mutedEl, matchesSearch,
-	createMessageGridPersistence, GRID_CONFIG_GET, GRID_CONFIG_SET,
-	GRID_CONFIG_CLEAR,
-	useDebouncedValue, useAnnouncements, formatBytes, formatDate,
-	formatDuration, formatDateValue,
-	ChatView, MessageList, MarkdownRenderer, useChatMessages,
-	ConnectionCard, ConnectionCardAdd, ConnectionManagerView,
-	commonStyles,
-	applyTheme, isInVSCode, OAUTH_ROOT_URL,
-	ITaskState, IServiceCapabilities, DEFAULT_TOOLCHAIN_STATE,
-};
+export { Button, StatusBadge, StatusDot, EmptyState, Banner, InputField, ToggleGroup, Chip, ChipAdd, DropZone, Card, MiniCard, MiniContainer, Section, LabelValue, ContentHeader, RocketRideMark, DetailPanel, PanelTabBody, TabControl, TabPanel, Modal, CLOSE_GLYPH, SaveFileDialog, SidebarMenu, SidebarCollapsedProvider, SidebarCollapsedGate, useSidebarCollapsed, SidebarFooter, DataGrid, CardDataGrid, FilterStrip, createActionsColumn, autoFormatter, badgeEl, buttonEl, avatarEl, monoEl, mutedEl, matchesSearch, createMessageGridPersistence, GRID_CONFIG_GET, GRID_CONFIG_SET, GRID_CONFIG_CLEAR, useDebouncedValue, useAnnouncements, formatBytes, formatDate, formatDuration, formatDateValue, ChatView, MessageList, MarkdownRenderer, useChatMessages, ConnectionCard, ConnectionCardAdd, ConnectionManagerView, commonStyles, applyTheme, isInVSCode, OAUTH_ROOT_URL, ITaskState, IServiceCapabilities, DEFAULT_TOOLCHAIN_STATE };
 
 // Prop/config types for the kept components, plus platform data types —
 // concrete module paths (generated from the retired barrel's map).
@@ -351,13 +332,7 @@ import { EnvironmentView } from './modules/environment';
 import { CheckoutModal, PlanPicker } from './modules/checkout';
 import { UpgradeModal } from './modules/billing';
 
-export {
-	MonitorView, parseActivityEvent,
-	ActivityPanel, ConnectionsPanel, TasksPanel, OverviewGrid, getEventDisplay,
-	formatNumber, formatTime, formatUptime, formatTimeAgo, formatDayTime,
-	AccountView, EnvironmentView,
-	CheckoutModal, PlanPicker, UpgradeModal,
-};
+export { MonitorView, parseActivityEvent, ActivityPanel, ConnectionsPanel, TasksPanel, OverviewGrid, getEventDisplay, formatNumber, formatTime, formatUptime, formatTimeAgo, formatDayTime, AccountView, EnvironmentView, CheckoutModal, PlanPicker, UpgradeModal };
 
 export type { EventTone } from './modules/server/components';
 export type { CheckoutPlan, PlanAction, PromoRedemption, PromoValidation } from './modules/checkout/types';
@@ -374,7 +349,6 @@ import * as stockIcons from './components/BoxIcon';
 
 // Theme vocabulary: the token map type.
 export type { ThemeTokens } from './themes/tokens';
-
 
 // =============================================================================
 // SHELL API SURFACE
@@ -403,113 +377,327 @@ export const shellApi = {
 	// eager read allowed here: BoxIcon is a LEAF module (react only), so
 	// it can never participate in a cycle.
 	...stockIcons,
-	get Button() { return Button; },
-	get StatusBadge() { return StatusBadge; },
-	get StatusDot() { return StatusDot; },
-	get EmptyState() { return EmptyState; },
-	get Banner() { return Banner; },
-	get InputField() { return InputField; },
-	get ToggleGroup() { return ToggleGroup; },
-	get Chip() { return Chip; },
-	get ChipAdd() { return ChipAdd; },
-	get DropZone() { return DropZone; },
-	get Card() { return Card; },
-	get MiniCard() { return MiniCard; },
-	get MiniContainer() { return MiniContainer; },
-	get Section() { return Section; },
-	get LabelValue() { return LabelValue; },
-	get ContentHeader() { return ContentHeader; },
-	get RocketRideMark() { return RocketRideMark; },
-	get DetailPanel() { return DetailPanel; },
-	get PanelTabBody() { return PanelTabBody; },
-	get TabControl() { return TabControl; },
-	get TabPanel() { return TabPanel; },
-	get Modal() { return Modal; },
-	get CLOSE_GLYPH() { return CLOSE_GLYPH; },
-	get SaveFileDialog() { return SaveFileDialog; },
-	get SidebarMenu() { return SidebarMenu; },
-	get SidebarCollapsedProvider() { return SidebarCollapsedProvider; },
-	get SidebarCollapsedGate() { return SidebarCollapsedGate; },
-	get useSidebarCollapsed() { return useSidebarCollapsed; },
-	get SidebarFooter() { return SidebarFooter; },
-	get DataGrid() { return DataGrid; },
-	get CardDataGrid() { return CardDataGrid; },
-	get FilterStrip() { return FilterStrip; },
-	get createActionsColumn() { return createActionsColumn; },
-	get autoFormatter() { return autoFormatter; },
-	get badgeEl() { return badgeEl; },
-	get buttonEl() { return buttonEl; },
-	get avatarEl() { return avatarEl; },
-	get monoEl() { return monoEl; },
-	get mutedEl() { return mutedEl; },
-	get matchesSearch() { return matchesSearch; },
-	get createMessageGridPersistence() { return createMessageGridPersistence; },
-	get GRID_CONFIG_GET() { return GRID_CONFIG_GET; },
-	get GRID_CONFIG_SET() { return GRID_CONFIG_SET; },
-	get GRID_CONFIG_CLEAR() { return GRID_CONFIG_CLEAR; },
-	get useDebouncedValue() { return useDebouncedValue; },
-	get useAnnouncements() { return useAnnouncements; },
-	get formatBytes() { return formatBytes; },
-	get formatDate() { return formatDate; },
-	get formatDuration() { return formatDuration; },
-	get commonStyles() { return commonStyles; },
-	get useShellConnection() { return useShellConnection; },
-	get useAuthUser() { return useAuthUser; },
-	get useLogout() { return useLogout; },
-	get useWorkspace() { return useWorkspace; },
-	get useClient() { return useClient; },
-	get useShellEvent() { return useShellEvent; },
-	get useIframeBridge() { return useIframeBridge; },
-	get useSubscriptions() { return useSubscriptions; },
-	get usePolling() { return usePolling; },
-	get useDashboardData() { return useDashboardData; },
-	get useConnectionStatus() { return useConnectionStatus; },
-	get useShellApiConfig() { return useShellApiConfig; },
-	get useAppComponent() { return useAppComponent; },
-	get useClickOutside() { return useClickOutside; },
-	get useFixedPopupPosition() { return useFixedPopupPosition; },
-	get usePrefs() { return usePrefs; },
-	get getClient() { return getClient; },
-	get ConnectionManager() { return ConnectionManager; },
-	get ConnectionState() { return ConnectionState; },
-	get CloudAuthProvider() { return CloudAuthProvider; },
-	get ApiKeyAuthProvider() { return ApiKeyAuthProvider; },
-	get WorkspaceProvider() { return WorkspaceProvider; },
-	get PrefsProvider() { return PrefsProvider; },
-	get Documents() { return Documents; },
-	get NOOP_VFS() { return NOOP_VFS; },
-	get Explorer() { return Explorer; },
-	get DocTabs() { return DocTabs; },
-	get DocSplitLayout() { return DocSplitLayout; },
-	get DocExplorer() { return DocExplorer; },
-	get Shell() { return Shell; },
-	get Sidebar() { return Sidebar; },
-	get BottomPanel() { return BottomPanel; },
-	get DebugPanel() { return DebugPanel; },
-	get NavButton() { return NavButton; },
-	get ConfirmDialog() { return ConfirmDialog; },
-	get PopupRow() { return PopupRow; },
-	get AccountProvider() { return AccountProvider; },
-	get SettingsProvider() { return SettingsProvider; },
-	get BxPlus() { return BxPlus; },
-	get BxEditAlt() { return BxEditAlt; },
-	get BxTrash() { return BxTrash; },
-	get BxDesktop() { return BxDesktop; },
-	get BxGridAlt() { return BxGridAlt; },
-	get BxCog() { return BxCog; },
-	get BxListUl() { return BxListUl; },
-	get BxStop() { return BxStop; },
-	get BxPlay() { return BxPlay; },
-	get BxHome() { return BxHome; },
-	get BxNote() { return BxNote; },
-	get BxComponent() { return BxComponent; },
-	get BxUser() { return BxUser; },
-	get BxRocket() { return BxRocket; },
-	get BxLockOpen() { return BxLockOpen; },
-	get BxPurchaseTag() { return BxPurchaseTag; },
-	get BxChevronRight() { return BxChevronRight; },
-	get BxFolderOpen() { return BxFolderOpen; },
-	get AppLayout() { return AppLayout; },
+	get Button() {
+		return Button;
+	},
+	get StatusBadge() {
+		return StatusBadge;
+	},
+	get StatusDot() {
+		return StatusDot;
+	},
+	get EmptyState() {
+		return EmptyState;
+	},
+	get Banner() {
+		return Banner;
+	},
+	get InputField() {
+		return InputField;
+	},
+	get ToggleGroup() {
+		return ToggleGroup;
+	},
+	get Chip() {
+		return Chip;
+	},
+	get ChipAdd() {
+		return ChipAdd;
+	},
+	get DropZone() {
+		return DropZone;
+	},
+	get Card() {
+		return Card;
+	},
+	get MiniCard() {
+		return MiniCard;
+	},
+	get MiniContainer() {
+		return MiniContainer;
+	},
+	get Section() {
+		return Section;
+	},
+	get LabelValue() {
+		return LabelValue;
+	},
+	get ContentHeader() {
+		return ContentHeader;
+	},
+	get RocketRideMark() {
+		return RocketRideMark;
+	},
+	get DetailPanel() {
+		return DetailPanel;
+	},
+	get PanelTabBody() {
+		return PanelTabBody;
+	},
+	get TabControl() {
+		return TabControl;
+	},
+	get TabPanel() {
+		return TabPanel;
+	},
+	get Modal() {
+		return Modal;
+	},
+	get CLOSE_GLYPH() {
+		return CLOSE_GLYPH;
+	},
+	get SaveFileDialog() {
+		return SaveFileDialog;
+	},
+	get SidebarMenu() {
+		return SidebarMenu;
+	},
+	get SidebarCollapsedProvider() {
+		return SidebarCollapsedProvider;
+	},
+	get SidebarCollapsedGate() {
+		return SidebarCollapsedGate;
+	},
+	get useSidebarCollapsed() {
+		return useSidebarCollapsed;
+	},
+	get SidebarFooter() {
+		return SidebarFooter;
+	},
+	get DataGrid() {
+		return DataGrid;
+	},
+	get CardDataGrid() {
+		return CardDataGrid;
+	},
+	get FilterStrip() {
+		return FilterStrip;
+	},
+	get createActionsColumn() {
+		return createActionsColumn;
+	},
+	get autoFormatter() {
+		return autoFormatter;
+	},
+	get badgeEl() {
+		return badgeEl;
+	},
+	get buttonEl() {
+		return buttonEl;
+	},
+	get avatarEl() {
+		return avatarEl;
+	},
+	get monoEl() {
+		return monoEl;
+	},
+	get mutedEl() {
+		return mutedEl;
+	},
+	get matchesSearch() {
+		return matchesSearch;
+	},
+	get createMessageGridPersistence() {
+		return createMessageGridPersistence;
+	},
+	get GRID_CONFIG_GET() {
+		return GRID_CONFIG_GET;
+	},
+	get GRID_CONFIG_SET() {
+		return GRID_CONFIG_SET;
+	},
+	get GRID_CONFIG_CLEAR() {
+		return GRID_CONFIG_CLEAR;
+	},
+	get useDebouncedValue() {
+		return useDebouncedValue;
+	},
+	get useAnnouncements() {
+		return useAnnouncements;
+	},
+	get formatBytes() {
+		return formatBytes;
+	},
+	get formatDate() {
+		return formatDate;
+	},
+	get formatDuration() {
+		return formatDuration;
+	},
+	get commonStyles() {
+		return commonStyles;
+	},
+	get useShellConnection() {
+		return useShellConnection;
+	},
+	get useAuthUser() {
+		return useAuthUser;
+	},
+	get useLogout() {
+		return useLogout;
+	},
+	get useWorkspace() {
+		return useWorkspace;
+	},
+	get useClient() {
+		return useClient;
+	},
+	get useShellEvent() {
+		return useShellEvent;
+	},
+	get useIframeBridge() {
+		return useIframeBridge;
+	},
+	get useSubscriptions() {
+		return useSubscriptions;
+	},
+	get usePolling() {
+		return usePolling;
+	},
+	get useDashboardData() {
+		return useDashboardData;
+	},
+	get useConnectionStatus() {
+		return useConnectionStatus;
+	},
+	get useShellApiConfig() {
+		return useShellApiConfig;
+	},
+	get useAppComponent() {
+		return useAppComponent;
+	},
+	get useClickOutside() {
+		return useClickOutside;
+	},
+	get useFixedPopupPosition() {
+		return useFixedPopupPosition;
+	},
+	get usePrefs() {
+		return usePrefs;
+	},
+	get getClient() {
+		return getClient;
+	},
+	get ConnectionManager() {
+		return ConnectionManager;
+	},
+	get ConnectionState() {
+		return ConnectionState;
+	},
+	get CloudAuthProvider() {
+		return CloudAuthProvider;
+	},
+	get ApiKeyAuthProvider() {
+		return ApiKeyAuthProvider;
+	},
+	get WorkspaceProvider() {
+		return WorkspaceProvider;
+	},
+	get PrefsProvider() {
+		return PrefsProvider;
+	},
+	get Documents() {
+		return Documents;
+	},
+	get NOOP_VFS() {
+		return NOOP_VFS;
+	},
+	get Explorer() {
+		return Explorer;
+	},
+	get DocTabs() {
+		return DocTabs;
+	},
+	get DocSplitLayout() {
+		return DocSplitLayout;
+	},
+	get DocExplorer() {
+		return DocExplorer;
+	},
+	get Shell() {
+		return Shell;
+	},
+	get Sidebar() {
+		return Sidebar;
+	},
+	get BottomPanel() {
+		return BottomPanel;
+	},
+	get DebugPanel() {
+		return DebugPanel;
+	},
+	get NavButton() {
+		return NavButton;
+	},
+	get ConfirmDialog() {
+		return ConfirmDialog;
+	},
+	get PopupRow() {
+		return PopupRow;
+	},
+	get AccountProvider() {
+		return AccountProvider;
+	},
+	get SettingsProvider() {
+		return SettingsProvider;
+	},
+	get BxPlus() {
+		return BxPlus;
+	},
+	get BxEditAlt() {
+		return BxEditAlt;
+	},
+	get BxTrash() {
+		return BxTrash;
+	},
+	get BxDesktop() {
+		return BxDesktop;
+	},
+	get BxGridAlt() {
+		return BxGridAlt;
+	},
+	get BxCog() {
+		return BxCog;
+	},
+	get BxListUl() {
+		return BxListUl;
+	},
+	get BxStop() {
+		return BxStop;
+	},
+	get BxPlay() {
+		return BxPlay;
+	},
+	get BxHome() {
+		return BxHome;
+	},
+	get BxNote() {
+		return BxNote;
+	},
+	get BxComponent() {
+		return BxComponent;
+	},
+	get BxUser() {
+		return BxUser;
+	},
+	get BxRocket() {
+		return BxRocket;
+	},
+	get BxLockOpen() {
+		return BxLockOpen;
+	},
+	get BxPurchaseTag() {
+		return BxPurchaseTag;
+	},
+	get BxChevronRight() {
+		return BxChevronRight;
+	},
+	get BxFolderOpen() {
+		return BxFolderOpen;
+	},
+	get AppLayout() {
+		return AppLayout;
+	},
 } as const;
 
 // =============================================================================
@@ -526,28 +714,70 @@ export const shellApi = {
 // additions are append-only, exactly like the object.
 export {
 	// Hooks
-	useShellConnection, useAuthUser, useLogout, useWorkspace, useClient,
-	useShellEvent, useIframeBridge, useSubscriptions, usePolling,
-	useDashboardData, useConnectionStatus, useShellApiConfig, useAppComponent,
-	useClickOutside, useFixedPopupPosition, usePrefs,
+	useShellConnection,
+	useAuthUser,
+	useLogout,
+	useWorkspace,
+	useClient,
+	useShellEvent,
+	useIframeBridge,
+	useSubscriptions,
+	usePolling,
+	useDashboardData,
+	useConnectionStatus,
+	useShellApiConfig,
+	useAppComponent,
+	useClickOutside,
+	useFixedPopupPosition,
+	usePrefs,
 	// Client access + connection manager + connection state
-	getClient, ConnectionManager, ConnectionState,
+	getClient,
+	ConnectionManager,
+	ConnectionState,
 	// Auth providers
-	CloudAuthProvider, ApiKeyAuthProvider,
+	CloudAuthProvider,
+	ApiKeyAuthProvider,
 	// Workspace provider + prefs provider
-	WorkspaceProvider, PrefsProvider,
+	WorkspaceProvider,
+	PrefsProvider,
 	// Document component library
-	Documents, NOOP_VFS, Explorer, DocTabs, DocSplitLayout, DocExplorer,
+	Documents,
+	NOOP_VFS,
+	Explorer,
+	DocTabs,
+	DocSplitLayout,
+	DocExplorer,
 	// Top-level shell frame + zone components
-	Shell, Sidebar, BottomPanel, DebugPanel,
+	Shell,
+	Sidebar,
+	BottomPanel,
+	DebugPanel,
 	// Layout building blocks
-	NavButton, ConfirmDialog, PopupRow,
+	NavButton,
+	ConfirmDialog,
+	PopupRow,
 	// Shell-owned overlay pages
-	AccountProvider, SettingsProvider,
+	AccountProvider,
+	SettingsProvider,
 	// Icons
-	BxPlus, BxEditAlt, BxTrash, BxDesktop, BxGridAlt, BxCog, BxListUl,
-	BxStop, BxPlay, BxHome, BxNote, BxComponent, BxUser, BxRocket,
-	BxLockOpen, BxPurchaseTag, BxChevronRight, BxFolderOpen,
+	BxPlus,
+	BxEditAlt,
+	BxTrash,
+	BxDesktop,
+	BxGridAlt,
+	BxCog,
+	BxListUl,
+	BxStop,
+	BxPlay,
+	BxHome,
+	BxNote,
+	BxComponent,
+	BxUser,
+	BxRocket,
+	BxLockOpen,
+	BxPurchaseTag,
+	BxChevronRight,
+	BxFolderOpen,
 	// The one app-root layout
 	AppLayout,
 };

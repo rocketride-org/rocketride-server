@@ -9,12 +9,12 @@
  * @returns {Promise<Object>} Platform-specific result (e.g. { vsPath, env, setupAt } on Windows).
  */
 async function runCompilerSetup(options = {}) {
-    if (process.platform === 'win32') {
-        const { runCompilerWindowsSetup } = require('./compiler-windows');
-        return runCompilerWindowsSetup(options);
-    }
-    const { runCompilerUnixSetup } = require('./compiler-unix');
-    return runCompilerUnixSetup(options);
+	if (process.platform === 'win32') {
+		const { runCompilerWindowsSetup } = require('./compiler-windows');
+		return runCompilerWindowsSetup(options);
+	}
+	const { runCompilerUnixSetup } = require('./compiler-unix');
+	return runCompilerUnixSetup(options);
 }
 
 module.exports = { runCompilerSetup };

@@ -137,11 +137,7 @@ export interface UpgradeModalProps {
  * both the picker grid and preselected plans so a hidden plan can never be
  * reached via `preselectedPriceId`.
  */
-const isVisibleSubscriptionPlan = (p: CheckoutPlan): boolean =>
-	p.metadata?.kind !== 'topup' &&
-	p.metadata?.kind !== 'promo_base' &&
-	!p.metadata?.action &&
-	p.isActive !== false;
+const isVisibleSubscriptionPlan = (p: CheckoutPlan): boolean => p.metadata?.kind !== 'topup' && p.metadata?.kind !== 'promo_base' && !p.metadata?.action && p.isActive !== false;
 
 /**
  * Modal dialog for upgrading or downgrading a subscription plan.
@@ -150,28 +146,14 @@ const isVisibleSubscriptionPlan = (p: CheckoutPlan): boolean =>
  * selects a new plan and clicks Confirm to trigger the server-side
  * Stripe subscription modification with proration.
  */
-export const UpgradeModal: React.FC<UpgradeModalProps> = ({
-	plans,
-	currentPriceId,
-	currentPlanName,
-	preselectedPriceId,
-	onUpgrade,
-	onClose,
-}) => {
-	const [selectedPlan, setSelectedPlan] = useState<CheckoutPlan | null>(
-		() => (preselectedPriceId && preselectedPriceId !== currentPriceId
-			? plans.find((p) => p.stripePriceId === preselectedPriceId && isVisibleSubscriptionPlan(p)) ?? null
-			: null),
-	);
+export const UpgradeModal: React.FC<UpgradeModalProps> = ({ plans, currentPriceId, currentPlanName, preselectedPriceId, onUpgrade, onClose }) => {
+	const [selectedPlan, setSelectedPlan] = useState<CheckoutPlan | null>(() => (preselectedPriceId && preselectedPriceId !== currentPriceId ? (plans.find((p) => p.stripePriceId === preselectedPriceId && isVisibleSubscriptionPlan(p)) ?? null) : null));
 	const [upgrading, setUpgrading] = useState(false);
 	const [success, setSuccess] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 
 	// Filter out top-up packs, hidden promo-base plans, and action-only plans
-	const subscriptionPlans = useMemo(
-		() => plans.filter(isVisibleSubscriptionPlan),
-		[plans],
-	);
+	const subscriptionPlans = useMemo(() => plans.filter(isVisibleSubscriptionPlan), [plans]);
 
 	/** Whether the selected plan differs from the current plan. */
 	const isValidSelection = selectedPlan && selectedPlan.stripePriceId !== currentPriceId;
@@ -251,37 +233,25 @@ export const UpgradeModal: React.FC<UpgradeModalProps> = ({
 			width={600}
 			showClose={false}
 			closeOnEscape={!upgrading}
-			footer={success ? undefined : (
-				<>
-					{/* Cancel — the dialog's explicit dismiss control. */}
-					<button
-						type="button"
-						style={commonStyles.buttonSecondary}
-						onClick={onClose}
-						disabled={upgrading}
-					>
-						Cancel
-					</button>
-					{/* Confirm — label reflects selection and in-flight state. */}
-					<button
-						type="button"
-						style={confirmStyle}
-						onClick={handleConfirm}
-						disabled={!isValidSelection || upgrading}
-					>
-						{buttonLabel()}
-					</button>
-				</>
-			)}
+			footer={
+				success ? undefined : (
+					<>
+						{/* Cancel — the dialog's explicit dismiss control. */}
+						<button type="button" style={commonStyles.buttonSecondary} onClick={onClose} disabled={upgrading}>
+							Cancel
+						</button>
+						{/* Confirm — label reflects selection and in-flight state. */}
+						<button type="button" style={confirmStyle} onClick={handleConfirm} disabled={!isValidSelection || upgrading}>
+							{buttonLabel()}
+						</button>
+					</>
+				)
+			}
 		>
 			{success ? (
 				/* Success confirmation — shown briefly until the auto-close timer
 				   dismisses the dialog (the footer is dropped in this state). */
-				<div style={S.success}>
-					{changeDirection === 'downgrade'
-						? 'Downgrade scheduled! Your current plan stays active until the end of this billing period.'
-						: 'Plan upgraded! Your new features and prorated token credits are available now.'}
-				</div>
+				<div style={S.success}>{changeDirection === 'downgrade' ? 'Downgrade scheduled! Your current plan stays active until the end of this billing period.' : 'Plan upgraded! Your new features and prorated token credits are available now.'}</div>
 			) : (
 				<div style={S.body}>
 					{compact && selectedPlan ? (
@@ -298,32 +268,17 @@ export const UpgradeModal: React.FC<UpgradeModalProps> = ({
 							{/* Current plan info */}
 							<div style={S.currentPlan}>
 								<span style={S.currentLabel}>Current</span>
-								<span style={S.planName}>
-									{currentPlanName ?? 'Unknown plan'}
-								</span>
+								<span style={S.planName}>{currentPlanName ?? 'Unknown plan'}</span>
 							</div>
 
 							{/* Plan picker -- reuses the same card grid */}
-							<PlanPicker
-								plans={subscriptionPlans}
-								selectedPlan={selectedPlan}
-								onSelectPlan={handleSelect}
-								currentPriceId={currentPriceId}
-							/>
+							<PlanPicker plans={subscriptionPlans} selectedPlan={selectedPlan} onSelectPlan={handleSelect} currentPriceId={currentPriceId} />
 						</>
 					)}
 
 					{/* Proration info -- explains what happens on upgrade vs downgrade */}
-					{isValidSelection && changeDirection === 'upgrade' && (
-						<div style={S.prorationNote}>
-							You will be charged the prorated difference for the remainder of your current billing period. Token credits will be adjusted accordingly.
-						</div>
-					)}
-					{isValidSelection && changeDirection === 'downgrade' && (
-						<div style={S.prorationNote}>
-							Your current plan will remain active until the end of your billing period. The new plan takes effect at your next renewal.
-						</div>
-					)}
+					{isValidSelection && changeDirection === 'upgrade' && <div style={S.prorationNote}>You will be charged the prorated difference for the remainder of your current billing period. Token credits will be adjusted accordingly.</div>}
+					{isValidSelection && changeDirection === 'downgrade' && <div style={S.prorationNote}>Your current plan will remain active until the end of your billing period. The new plan takes effect at your next renewal.</div>}
 
 					{/* Error banner */}
 					{error && <div style={S.error}>{error}</div>}

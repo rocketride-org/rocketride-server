@@ -458,7 +458,13 @@ export default function NodeConfigPanel({ node, onClose }: INodeConfigPanelProps
 				onClose={onClose}
 				title={title}
 				subtitle={isAnnotation ? undefined : node.data.provider}
-				avatar={!isAnnotation && service?.icon ? <div style={styles.avatar}><Icon name={service.icon} width={22} height={22} style={styles.avatarIcon} /></div> : undefined}
+				avatar={
+					!isAnnotation && service?.icon ? (
+						<div style={styles.avatar}>
+							<Icon name={service.icon} width={22} height={22} style={styles.avatarIcon} />
+						</div>
+					) : undefined
+				}
 				editing
 				dirty={isDirty}
 				busy={isSubmitting}

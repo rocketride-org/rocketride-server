@@ -44,16 +44,7 @@ const ConnectionCardDemo: React.FC<IGalleryDemoProps> = ({ knobs }) => {
 	return (
 		<div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', maxWidth: 560 }}>
 			<div style={{ width: 250 }}>
-				<ConnectionCard
-					name="Production"
-					address="wss://app.rocketride.io"
-					status={status}
-					statusLabel={STATUS_LABELS[status]}
-					connected={Boolean(knobs.connected)}
-					onEdit={() => undefined}
-					onDelete={() => undefined}
-					onClick={() => undefined}
-				/>
+				<ConnectionCard name="Production" address="wss://app.rocketride.io" status={status} statusLabel={STATUS_LABELS[status]} connected={Boolean(knobs.connected)} onEdit={() => undefined} onDelete={() => undefined} onClick={() => undefined} />
 			</div>
 			<div style={{ width: 250 }}>
 				<ConnectionCardAdd label="New Connection" onClick={() => undefined} />

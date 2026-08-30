@@ -49,17 +49,11 @@ function inferCategory(method: string): string {
 	if (method.startsWith('cprofile')) return 'Profiling';
 	if (method.startsWith('database.')) return 'Database';
 	if (method.startsWith('pipe.') || method === 'pipe') return 'Data';
-	if (['connect', 'attach', 'login', 'detach', 'logout', 'disconnect',
-		'ping', 'identify', 'getServerInfo', 'isConnected', 'isAttached',
-		'isAuthenticated', 'getConnectionInfo', 'getAccountInfo',
-		'getOrgId', 'getApiKey'].includes(method)) return 'Connection';
-	if (['use', 'terminate', 'restart', 'getTaskStatus', 'getTaskToken',
-		'getTaskPipeline', 'validate'].includes(method)) return 'Pipeline';
+	if (['connect', 'attach', 'login', 'detach', 'logout', 'disconnect', 'ping', 'identify', 'getServerInfo', 'isConnected', 'isAttached', 'isAuthenticated', 'getConnectionInfo', 'getAccountInfo', 'getOrgId', 'getApiKey'].includes(method)) return 'Connection';
+	if (['use', 'terminate', 'restart', 'getTaskStatus', 'getTaskToken', 'getTaskPipeline', 'validate'].includes(method)) return 'Pipeline';
 	if (['send', 'sendFiles', 'chat'].includes(method)) return 'Data';
-	if (['addMonitor', 'removeMonitor', 'clearAllMonitors',
-		'getDashboard'].includes(method)) return 'Events';
-	if (['saveTemplate', 'getTemplate', 'deleteTemplate',
-		'getAllTemplates'].includes(method)) return 'Templates';
+	if (['addMonitor', 'removeMonitor', 'clearAllMonitors', 'getDashboard'].includes(method)) return 'Events';
+	if (['saveTemplate', 'getTemplate', 'deleteTemplate', 'getAllTemplates'].includes(method)) return 'Templates';
 	if (['saveLog', 'getLog', 'deleteLog', 'listLogs'].includes(method)) return 'Logs';
 	if (['getServices', 'getService'].includes(method)) return 'Services';
 	if (method === 'tool') return 'Tool';
@@ -219,13 +213,7 @@ export class ApiMonitor {
 // =============================================================================
 
 /** Methods that are internal and should not be tracked. */
-const SKIP = new Set([
-	'constructor', 'onUpdate', 'onEvent', 'onConnected', 'onDisconnected',
-	'onConnectError', 'onReceive', 'debugMessage', 'request', 'call',
-	'buildRequest', 'buildResponse', 'buildError', 'buildEvent',
-	'getNextSeq', 'did_fail', 'didFail', 'raiseException',
-	'validateStorePath', 'validateId', 'setEvents',
-]);
+const SKIP = new Set(['constructor', 'onUpdate', 'onEvent', 'onConnected', 'onDisconnected', 'onConnectError', 'onReceive', 'debugMessage', 'request', 'call', 'buildRequest', 'buildResponse', 'buildError', 'buildEvent', 'getNextSeq', 'did_fail', 'didFail', 'raiseException', 'validateStorePath', 'validateId', 'setEvents']);
 
 /**
  * Wrap a method call with timing. Works for both sync and async methods.
@@ -238,7 +226,7 @@ function wrapMethod(
 	// eslint-disable-next-line @typescript-eslint/no-explicit-any
 	fn: (...args: any[]) => any,
 	methodName: string,
-	monitor: ApiMonitor,
+	monitor: ApiMonitor
 ) {
 	return function wrappedMethod(...args: unknown[]) {
 		const t0 = monitor.begin(methodName);
@@ -259,7 +247,7 @@ function wrapMethod(
 					(err: unknown) => {
 						monitor.end(methodName, t0);
 						throw err;
-					},
+					}
 				);
 			}
 
@@ -282,8 +270,8 @@ function proxyWithMonitor(
 	// eslint-disable-next-line @typescript-eslint/no-explicit-any
 	obj: any,
 	monitor: ApiMonitor,
-	prefix: string = '',
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+	prefix: string = ''
+	// eslint-disable-next-line @typescript-eslint/no-explicit-any
 ): any {
 	const subProxies = new Map<string, unknown>();
 
@@ -293,8 +281,7 @@ function proxyWithMonitor(
 			const val = Reflect.get(target, prop, receiver);
 
 			// Sub-namespaces: wrap once and cache
-			if (typeof val === 'object' && val !== null && !Array.isArray(val) &&
-				['account', 'billing', 'deploy', 'database'].includes(key)) {
+			if (typeof val === 'object' && val !== null && !Array.isArray(val) && ['account', 'billing', 'deploy', 'database'].includes(key)) {
 				if (!subProxies.has(key)) {
 					subProxies.set(key, proxyWithMonitor(val, monitor, `${key}.`));
 				}
@@ -342,8 +329,8 @@ export const MonitoredClient = {
 		RRClient: any,
 		monitor: ApiMonitor,
 		// eslint-disable-next-line @typescript-eslint/no-explicit-any
-		config: Record<string, any>,
-	// eslint-disable-next-line @typescript-eslint/no-explicit-any
+		config: Record<string, any>
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any
 	): any {
 		const raw = new RRClient(config);
 		return proxyWithMonitor(raw, monitor);
@@ -356,8 +343,8 @@ export const MonitoredClient = {
 	wrap(
 		// eslint-disable-next-line @typescript-eslint/no-explicit-any
 		client: any,
-		monitor: ApiMonitor,
-	// eslint-disable-next-line @typescript-eslint/no-explicit-any
+		monitor: ApiMonitor
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any
 	): any {
 		return proxyWithMonitor(client, monitor);
 	},

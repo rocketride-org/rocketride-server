@@ -79,10 +79,7 @@ describe('Tool Operations', () => {
 		}
 		await ensureCleanPipeline(client, TOOL_TOKEN);
 		if (client.isConnected()) {
-			await Promise.race([
-				client.disconnect(),
-				new Promise<void>((resolve) => setTimeout(resolve, 10000)),
-			]);
+			await Promise.race([client.disconnect(), new Promise<void>((resolve) => setTimeout(resolve, 10000))]);
 		}
 	});
 
@@ -91,48 +88,60 @@ describe('Tool Operations', () => {
 	// ------------------------------------------------------------------
 
 	describe('standalone client.tool()', () => {
-		it('executes python and returns result', async () => {
-			const result = await client.tool<{
-				exit_code: number;
-				result: { answer: number };
-			}>({
-				token: pipelineToken,
-				tool: 'execute',
-				nodeId: 'tool_python_1',
-				input: { code: 'result = {"answer": 2 + 2}' },
-			});
-
-			expect(result).toBeDefined();
-			expect(result.exit_code).toBe(0);
-			expect(result.result).toEqual({ answer: 4 });
-		}, TEST_CONFIG.timeout);
-
-		it('captures stdout from sandboxed script', async () => {
-			const result = await client.tool<{
-				exit_code: number;
-				stdout: string;
-			}>({
-				token: pipelineToken,
-				tool: 'execute',
-				nodeId: 'tool_python_1',
-				input: { code: 'print("hello")' },
-			});
-
-			expect(result).toBeDefined();
-			expect(result.exit_code).toBe(0);
-			expect(result.stdout).toContain('hello');
-		}, TEST_CONFIG.timeout);
-
-		it('invalid tool name throws', async () => {
-			await expect(
-				client.tool({
+		it(
+			'executes python and returns result',
+			async () => {
+				const result = await client.tool<{
+					exit_code: number;
+					result: { answer: number };
+				}>({
 					token: pipelineToken,
-					tool: 'nonexistent_tool',
+					tool: 'execute',
 					nodeId: 'tool_python_1',
-					input: {},
-				}),
-			).rejects.toThrow();
-		}, TEST_CONFIG.timeout);
+					input: { code: 'result = {"answer": 2 + 2}' },
+				});
+
+				expect(result).toBeDefined();
+				expect(result.exit_code).toBe(0);
+				expect(result.result).toEqual({ answer: 4 });
+			},
+			TEST_CONFIG.timeout
+		);
+
+		it(
+			'captures stdout from sandboxed script',
+			async () => {
+				const result = await client.tool<{
+					exit_code: number;
+					stdout: string;
+				}>({
+					token: pipelineToken,
+					tool: 'execute',
+					nodeId: 'tool_python_1',
+					input: { code: 'print("hello")' },
+				});
+
+				expect(result).toBeDefined();
+				expect(result.exit_code).toBe(0);
+				expect(result.stdout).toContain('hello');
+			},
+			TEST_CONFIG.timeout
+		);
+
+		it(
+			'invalid tool name throws',
+			async () => {
+				await expect(
+					client.tool({
+						token: pipelineToken,
+						tool: 'nonexistent_tool',
+						nodeId: 'tool_python_1',
+						input: {},
+					})
+				).rejects.toThrow();
+			},
+			TEST_CONFIG.timeout
+		);
 	});
 
 	// ------------------------------------------------------------------
@@ -140,30 +149,36 @@ describe('Tool Operations', () => {
 	// ------------------------------------------------------------------
 
 	describe('pipe-bound DataPipe.tool()', () => {
-		it('executes python using open pipe', async () => {
-			const pipe = await client.pipe(pipelineToken, {}, 'text/plain');
-			await pipe.open();
+		it(
+			'executes python using open pipe',
+			async () => {
+				const pipe = await client.pipe(pipelineToken, {}, 'text/plain');
+				await pipe.open();
 
-			try {
-				const result = await pipe.tool<{
-					exit_code: number;
-					result: number[];
-				}>('execute', 'tool_python_1', { code: 'result = list(range(5))' });
+				try {
+					const result = await pipe.tool<{
+						exit_code: number;
+						result: number[];
+					}>('execute', 'tool_python_1', { code: 'result = list(range(5))' });
 
-				expect(result).toBeDefined();
-				expect(result.exit_code).toBe(0);
-				expect(result.result).toEqual([0, 1, 2, 3, 4]);
-			} finally {
-				await pipe.close();
-			}
-		}, TEST_CONFIG.timeout);
+					expect(result).toBeDefined();
+					expect(result.exit_code).toBe(0);
+					expect(result.result).toEqual([0, 1, 2, 3, 4]);
+				} finally {
+					await pipe.close();
+				}
+			},
+			TEST_CONFIG.timeout
+		);
 
-		it('before open throws', async () => {
-			const pipe = await client.pipe(pipelineToken, {}, 'text/plain');
+		it(
+			'before open throws',
+			async () => {
+				const pipe = await client.pipe(pipelineToken, {}, 'text/plain');
 
-			await expect(
-				pipe.tool('execute', 'tool_python_1', { code: 'pass' }),
-			).rejects.toThrow('not open');
-		}, TEST_CONFIG.timeout);
+				await expect(pipe.tool('execute', 'tool_python_1', { code: 'pass' })).rejects.toThrow('not open');
+			},
+			TEST_CONFIG.timeout
+		);
 	});
 });

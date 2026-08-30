@@ -543,9 +543,7 @@ const FolderTree: React.FC<FolderTreeProps> = ({ nodes, depth, activeExtension, 
 						</div>
 						{/* Inline new-folder editor renders as the first child row. */}
 						{creatingIn === node.path && isExpanded && newFolderEditor}
-						{isExpanded && (
-							<FolderTree nodes={node.children} depth={depth + 1} activeExtension={activeExtension} selectedDir={selectedDir} expandedDirs={expandedDirs} creatingIn={creatingIn} newFolderEditor={newFolderEditor} onSelect={onSelect} onToggle={onToggle} />
-						)}
+						{isExpanded && <FolderTree nodes={node.children} depth={depth + 1} activeExtension={activeExtension} selectedDir={selectedDir} expandedDirs={expandedDirs} creatingIn={creatingIn} newFolderEditor={newFolderEditor} onSelect={onSelect} onToggle={onToggle} />}
 					</React.Fragment>
 				);
 			})}

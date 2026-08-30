@@ -34,7 +34,10 @@ import type { IGalleryDemoProps, IGalleryEntry } from '../galleryTypes';
 const DEMO_DEFS = [
 	{ key: 'name', label: 'Name', type: 'text' as const, placeholder: 'Search name' },
 	{
-		key: 'status', label: 'Status', type: 'select' as const, options: [
+		key: 'status',
+		label: 'Status',
+		type: 'select' as const,
+		options: [
 			{ value: '', label: 'All statuses' },
 			{ value: 'running', label: 'Running' },
 			{ value: 'stopped', label: 'Stopped' },
@@ -65,7 +68,7 @@ export const filterStripEntry: IGalleryEntry = {
 	id: 'filter-strip',
 	name: 'FilterStrip',
 	group: 'content',
-	blurb: 'The DataGrid\'s built-in filter row: one labelled control per definition - text, select, date, or async typeahead - in the platform filter-bar style.',
+	blurb: "The DataGrid's built-in filter row: one labelled control per definition - text, select, date, or async typeahead - in the platform filter-bar style.",
 	doc: `Normally you never mount it: pass \`filters\` to \`DataGrid\` and the grid renders the strip above the table, debounces edits, and feeds the values into \`fetchPage\`. Mount \`FilterStrip\` directly only for filter bars over non-grid content, holding the values yourself (there is no Apply button — every edit fires \`onChange\`).`,
 	demo: FilterStripDemo,
 	code: `import { DataGrid } from 'shell';

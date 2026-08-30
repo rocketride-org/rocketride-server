@@ -77,9 +77,7 @@ export const formattersEntry: IGalleryEntry = {
 	group: 'utils',
 	blurb: 'The stock display formatters: human byte sizes, short localized datetimes, and compact durations - the one vocabulary for numbers across every view.',
 	doc: `Use these instead of hand-rolled \`toFixed\`/\`toLocaleString\` calls so sizes, dates, and durations read identically everywhere — grids (\`autoFormatter\` uses the same treatments), tiles, detail panels, and status lines.`,
-	knobs: [
-		{ id: 'value', label: 'Value (bytes / ms)', kind: 'number', defaultValue: 1536000 },
-	],
+	knobs: [{ id: 'value', label: 'Value (bytes / ms)', kind: 'number', defaultValue: 1536000 }],
 	demo: FormattersDemo,
 	code: buildCode,
 	propsLabel: 'Functions',

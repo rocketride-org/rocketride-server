@@ -127,16 +127,7 @@ async function selfUpdate(root, branch, opts = {}) {
 		// Fetch only the scripts/ tree: depth-1 avoids history, blobless +
 		// sparse avoids downloading the rest of the working tree.
 		log(`Fetching scripts/ from ${UPSTREAM_URL} @ ${branch} ...`);
-		runGit([
-			'clone',
-			'--depth', '1',
-			'--filter=blob:none',
-			'--sparse',
-			'--branch', branch,
-			'--single-branch',
-			UPSTREAM_URL,
-			tmpDir,
-		]);
+		runGit(['clone', '--depth', '1', '--filter=blob:none', '--sparse', '--branch', branch, '--single-branch', UPSTREAM_URL, tmpDir]);
 		runGit(['sparse-checkout', 'set', 'scripts'], tmpDir);
 
 		// Sanity check before touching anything local: the fetched tree must

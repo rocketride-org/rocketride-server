@@ -1,9 +1,9 @@
 /**
  * Async File System Utilities
- * 
+ *
  * Provides async wrappers for common filesystem operations.
  * All functions use fs.promises and handle common edge cases.
- * 
+ *
  * Usage:
  *   const { exists, readFile, writeFile, mkdir } = require('../../../scripts/lib');
  */
@@ -22,12 +22,12 @@ const crypto = require('crypto');
  * @returns {Promise<boolean>}
  */
 async function exists(filePath) {
-    try {
-        await fsp.access(filePath);
-        return true;
-    } catch {
-        return false;
-    }
+	try {
+		await fsp.access(filePath);
+		return true;
+	} catch {
+		return false;
+	}
 }
 
 /**
@@ -36,12 +36,12 @@ async function exists(filePath) {
  * @returns {Promise<boolean>}
  */
 async function isFile(filePath) {
-    try {
-        const stat = await fsp.stat(filePath);
-        return stat.isFile();
-    } catch {
-        return false;
-    }
+	try {
+		const stat = await fsp.stat(filePath);
+		return stat.isFile();
+	} catch {
+		return false;
+	}
 }
 
 /**
@@ -50,12 +50,12 @@ async function isFile(filePath) {
  * @returns {Promise<boolean>}
  */
 async function isDirectory(dirPath) {
-    try {
-        const stat = await fsp.stat(dirPath);
-        return stat.isDirectory();
-    } catch {
-        return false;
-    }
+	try {
+		const stat = await fsp.stat(dirPath);
+		return stat.isDirectory();
+	} catch {
+		return false;
+	}
 }
 
 // =============================================================================
@@ -69,7 +69,7 @@ async function isDirectory(dirPath) {
  * @returns {Promise<string|Buffer>}
  */
 async function readFile(filePath, options = 'utf8') {
-    return fsp.readFile(filePath, options);
+	return fsp.readFile(filePath, options);
 }
 
 /**
@@ -78,8 +78,8 @@ async function readFile(filePath, options = 'utf8') {
  * @returns {Promise<any>}
  */
 async function readJson(filePath) {
-    const content = await fsp.readFile(filePath, 'utf8');
-    return JSON.parse(content);
+	const content = await fsp.readFile(filePath, 'utf8');
+	return JSON.parse(content);
 }
 
 /**
@@ -89,13 +89,13 @@ async function readJson(filePath) {
  * @returns {Promise<any>}
  */
 async function readJsonSafe(filePath, defaultValue = null) {
-    try {
-        const content = await fsp.readFile(filePath, 'utf8');
-        return JSON.parse(content);
-    } catch (err) {
-        if (err.code === 'ENOENT') return defaultValue;
-        throw err;
-    }
+	try {
+		const content = await fsp.readFile(filePath, 'utf8');
+		return JSON.parse(content);
+	} catch (err) {
+		if (err.code === 'ENOENT') return defaultValue;
+		throw err;
+	}
 }
 
 /**
@@ -106,7 +106,7 @@ async function readJsonSafe(filePath, defaultValue = null) {
  * @returns {Promise<string[]|fs.Dirent[]>}
  */
 async function readDir(dirPath, options = {}) {
-    return await fsp.readdir(dirPath, options);
+	return await fsp.readdir(dirPath, options);
 }
 
 /**
@@ -117,12 +117,12 @@ async function readDir(dirPath, options = {}) {
  * @returns {Promise<string[]|fs.Dirent[]>}
  */
 async function readDirSafe(dirPath, options = {}) {
-    try {
-        return await fsp.readdir(dirPath, options);
-    } catch (err) {
-        if (err.code === 'ENOENT') return [];
-        throw err;
-    }
+	try {
+		return await fsp.readdir(dirPath, options);
+	} catch (err) {
+		if (err.code === 'ENOENT') return [];
+		throw err;
+	}
 }
 
 // =============================================================================
@@ -137,7 +137,7 @@ async function readDirSafe(dirPath, options = {}) {
  * @returns {Promise<void>}
  */
 async function writeFile(filePath, content, options = 'utf8') {
-    return fsp.writeFile(filePath, content, options);
+	return fsp.writeFile(filePath, content, options);
 }
 
 /**
@@ -147,7 +147,7 @@ async function writeFile(filePath, content, options = 'utf8') {
  * @returns {fs.WriteStream}
  */
 function createWriteStream(filePath, options) {
-    return fs.createWriteStream(filePath, options);
+	return fs.createWriteStream(filePath, options);
 }
 
 /**
@@ -159,9 +159,9 @@ function createWriteStream(filePath, options) {
  * @returns {Promise<void>}
  */
 async function writeJson(filePath, data, options = {}) {
-    const { indent = 2 } = options;
-    const content = JSON.stringify(data, null, indent);
-    return fsp.writeFile(filePath, content, 'utf8');
+	const { indent = 2 } = options;
+	const content = JSON.stringify(data, null, indent);
+	return fsp.writeFile(filePath, content, 'utf8');
 }
 
 /**
@@ -172,8 +172,8 @@ async function writeJson(filePath, data, options = {}) {
  * @returns {Promise<void>}
  */
 async function writeFileEnsure(filePath, content, options = 'utf8') {
-    await fsp.mkdir(path.dirname(filePath), { recursive: true });
-    return fsp.writeFile(filePath, content, options);
+	await fsp.mkdir(path.dirname(filePath), { recursive: true });
+	return fsp.writeFile(filePath, content, options);
 }
 
 // =============================================================================
@@ -188,8 +188,8 @@ async function writeFileEnsure(filePath, content, options = 'utf8') {
  * @returns {Promise<string|undefined>} The first directory path created, or undefined
  */
 async function mkdir(dirPath, options = {}) {
-    const { recursive = true, ...rest } = options;
-    return fsp.mkdir(dirPath, { recursive, ...rest });
+	const { recursive = true, ...rest } = options;
+	return fsp.mkdir(dirPath, { recursive, ...rest });
 }
 
 /**
@@ -198,13 +198,13 @@ async function mkdir(dirPath, options = {}) {
  * @returns {Promise<boolean>} True if created, false if already existed
  */
 async function mkdirIfNotExists(dirPath) {
-    try {
-        await fsp.mkdir(dirPath, { recursive: true });
-        return true;
-    } catch (err) {
-        if (err.code === 'EEXIST') return false;
-        throw err;
-    }
+	try {
+		await fsp.mkdir(dirPath, { recursive: true });
+		return true;
+	} catch (err) {
+		if (err.code === 'EEXIST') return false;
+		throw err;
+	}
 }
 
 // =============================================================================
@@ -219,7 +219,7 @@ async function mkdirIfNotExists(dirPath) {
  * @returns {Promise<void>}
  */
 async function copyFile(src, dest, mode) {
-    return fsp.copyFile(src, dest, mode);
+	return fsp.copyFile(src, dest, mode);
 }
 
 /**
@@ -229,8 +229,8 @@ async function copyFile(src, dest, mode) {
  * @returns {Promise<void>}
  */
 async function copyFileEnsure(src, dest) {
-    await fsp.mkdir(path.dirname(dest), { recursive: true });
-    return fsp.copyFile(src, dest);
+	await fsp.mkdir(path.dirname(dest), { recursive: true });
+	return fsp.copyFile(src, dest);
 }
 
 /**
@@ -245,13 +245,13 @@ async function copyFileEnsure(src, dest) {
  * @returns {Promise<number>} Bytes read into buf (0 once EOF is reached)
  */
 async function readChunkFull(fh, buf) {
-    let offset = 0;
-    while (offset < buf.length) {
-        const { bytesRead } = await fh.read(buf, offset, buf.length - offset, null);
-        if (bytesRead === 0) break; // EOF
-        offset += bytesRead;
-    }
-    return offset;
+	let offset = 0;
+	while (offset < buf.length) {
+		const { bytesRead } = await fh.read(buf, offset, buf.length - offset, null);
+		if (bytesRead === 0) break; // EOF
+		offset += bytesRead;
+	}
+	return offset;
 }
 
 /**
@@ -273,34 +273,31 @@ async function readChunkFull(fh, buf) {
  * @returns {Promise<boolean>} True if both files have identical bytes
  */
 async function filesEqual(a, b) {
-    const CHUNK_SIZE = 64 * 1024;
-    // Open sequentially with nested try/finally. Opening both under Promise.all
-    // would leak the first handle if the second open rejected (Promise.all
-    // rejects at once, orphaning the resolved handle) — a slow FD leak that can
-    // build to EMFILE across a large sync.
-    const fhA = await fsp.open(a, 'r');
-    try {
-        const fhB = await fsp.open(b, 'r');
-        try {
-            const bufA = Buffer.allocUnsafe(CHUNK_SIZE);
-            const bufB = Buffer.allocUnsafe(CHUNK_SIZE);
-            for (;;) {
-                const [readA, readB] = await Promise.all([
-                    readChunkFull(fhA, bufA),
-                    readChunkFull(fhB, bufB),
-                ]);
-                // Divergent lengths (or one file hitting EOF first) => not equal.
-                if (readA !== readB) return false;
-                // Both reached EOF with every prior window equal => identical.
-                if (readA === 0) return true;
-                if (!bufA.subarray(0, readA).equals(bufB.subarray(0, readB))) return false;
-            }
-        } finally {
-            await fhB.close();
-        }
-    } finally {
-        await fhA.close();
-    }
+	const CHUNK_SIZE = 64 * 1024;
+	// Open sequentially with nested try/finally. Opening both under Promise.all
+	// would leak the first handle if the second open rejected (Promise.all
+	// rejects at once, orphaning the resolved handle) — a slow FD leak that can
+	// build to EMFILE across a large sync.
+	const fhA = await fsp.open(a, 'r');
+	try {
+		const fhB = await fsp.open(b, 'r');
+		try {
+			const bufA = Buffer.allocUnsafe(CHUNK_SIZE);
+			const bufB = Buffer.allocUnsafe(CHUNK_SIZE);
+			for (;;) {
+				const [readA, readB] = await Promise.all([readChunkFull(fhA, bufA), readChunkFull(fhB, bufB)]);
+				// Divergent lengths (or one file hitting EOF first) => not equal.
+				if (readA !== readB) return false;
+				// Both reached EOF with every prior window equal => identical.
+				if (readA === 0) return true;
+				if (!bufA.subarray(0, readA).equals(bufB.subarray(0, readB))) return false;
+			}
+		} finally {
+			await fhB.close();
+		}
+	} finally {
+		await fhA.close();
+	}
 }
 
 /**
@@ -312,8 +309,8 @@ async function filesEqual(a, b) {
  * @returns {Promise<void>}
  */
 async function copyDir(src, dest, options = {}) {
-    const { recursive = true, ...rest } = options;
-    return fsp.cp(src, dest, { recursive, ...rest });
+	const { recursive = true, ...rest } = options;
+	return fsp.cp(src, dest, { recursive, ...rest });
 }
 
 /**
@@ -324,8 +321,8 @@ async function copyDir(src, dest, options = {}) {
  * @returns {Promise<void>}
  */
 async function copyDirEnsure(src, dest, options = {}) {
-    await fsp.mkdir(path.dirname(dest), { recursive: true });
-    return fsp.cp(src, dest, { recursive: true, ...options });
+	await fsp.mkdir(path.dirname(dest), { recursive: true });
+	return fsp.cp(src, dest, { recursive: true, ...options });
 }
 
 // =============================================================================
@@ -338,7 +335,7 @@ async function copyDirEnsure(src, dest, options = {}) {
  * @returns {Promise<fs.Stats>}
  */
 async function stat(filePath) {
-    return fsp.stat(filePath);
+	return fsp.stat(filePath);
 }
 
 /**
@@ -347,12 +344,12 @@ async function stat(filePath) {
  * @returns {Promise<fs.Stats|null>}
  */
 async function statSafe(filePath) {
-    try {
-        return await fsp.stat(filePath);
-    } catch (err) {
-        if (err.code === 'ENOENT') return null;
-        throw err;
-    }
+	try {
+		return await fsp.stat(filePath);
+	} catch (err) {
+		if (err.code === 'ENOENT') return null;
+		throw err;
+	}
 }
 
 /**
@@ -361,7 +358,7 @@ async function statSafe(filePath) {
  * @returns {Promise<fs.Stats>}
  */
 async function lstat(filePath) {
-    return fsp.lstat(filePath);
+	return fsp.lstat(filePath);
 }
 
 // =============================================================================
@@ -376,7 +373,7 @@ async function lstat(filePath) {
  * @returns {Promise<void>}
  */
 async function symlink(target, linkPath, type) {
-    return fsp.symlink(target, linkPath, type);
+	return fsp.symlink(target, linkPath, type);
 }
 
 /**
@@ -385,7 +382,7 @@ async function symlink(target, linkPath, type) {
  * @returns {Promise<string>}
  */
 async function readlink(linkPath) {
-    return fsp.readlink(linkPath);
+	return fsp.readlink(linkPath);
 }
 
 // =============================================================================
@@ -398,13 +395,13 @@ async function readlink(linkPath) {
  * @returns {Promise<boolean>} True if removed, false if didn't exist
  */
 async function unlink(filePath) {
-    try {
-        await fsp.unlink(filePath);
-        return true;
-    } catch (err) {
-        if (err.code === 'ENOENT') return false;
-        throw err;
-    }
+	try {
+		await fsp.unlink(filePath);
+		return true;
+	} catch (err) {
+		if (err.code === 'ENOENT') return false;
+		throw err;
+	}
 }
 
 /**
@@ -416,8 +413,8 @@ async function unlink(filePath) {
  * @returns {Promise<void>}
  */
 async function rm(filePath, options = {}) {
-    const { recursive = true, force = true } = options;
-    return fsp.rm(filePath, { recursive, force });
+	const { recursive = true, force = true } = options;
+	return fsp.rm(filePath, { recursive, force });
 }
 
 /**
@@ -426,7 +423,7 @@ async function rm(filePath, options = {}) {
  * @returns {Promise<void>}
  */
 async function rmdir(dirPath) {
-    return fsp.rmdir(dirPath);
+	return fsp.rmdir(dirPath);
 }
 
 // =============================================================================
@@ -440,7 +437,7 @@ async function rmdir(dirPath) {
  * @returns {Promise<void>}
  */
 async function rename(oldPath, newPath) {
-    return fsp.rename(oldPath, newPath);
+	return fsp.rename(oldPath, newPath);
 }
 
 /**
@@ -450,8 +447,8 @@ async function rename(oldPath, newPath) {
  * @returns {Promise<void>}
  */
 async function move(oldPath, newPath) {
-    await fsp.mkdir(path.dirname(newPath), { recursive: true });
-    return fsp.rename(oldPath, newPath);
+	await fsp.mkdir(path.dirname(newPath), { recursive: true });
+	return fsp.rename(oldPath, newPath);
 }
 
 // =============================================================================
@@ -464,7 +461,7 @@ async function move(oldPath, newPath) {
  * @returns {Promise<string>}
  */
 async function realpath(filePath) {
-    return fsp.realpath(filePath);
+	return fsp.realpath(filePath);
 }
 
 /**
@@ -474,7 +471,7 @@ async function realpath(filePath) {
  * @returns {Promise<void>}
  */
 async function truncate(filePath, len = 0) {
-    return fsp.truncate(filePath, len);
+	return fsp.truncate(filePath, len);
 }
 
 /**
@@ -485,7 +482,7 @@ async function truncate(filePath, len = 0) {
  * @returns {Promise<void>}
  */
 async function utimes(filePath, atime = new Date(), mtime = new Date()) {
-    return fsp.utimes(filePath, atime, mtime);
+	return fsp.utimes(filePath, atime, mtime);
 }
 
 /**
@@ -494,16 +491,16 @@ async function utimes(filePath, atime = new Date(), mtime = new Date()) {
  * @returns {Promise<void>}
  */
 async function touch(filePath) {
-    const now = new Date();
-    try {
-        await fsp.utimes(filePath, now, now);
-    } catch (err) {
-        if (err.code === 'ENOENT') {
-            await fsp.writeFile(filePath, '');
-        } else {
-            throw err;
-        }
-    }
+	const now = new Date();
+	try {
+		await fsp.utimes(filePath, now, now);
+	} catch (err) {
+		if (err.code === 'ENOENT') {
+			await fsp.writeFile(filePath, '');
+		} else {
+			throw err;
+		}
+	}
 }
 
 // =============================================================================
@@ -513,12 +510,12 @@ async function touch(filePath) {
 /**
  * Generate a fingerprint for a directory based on file sizes and modification times.
  * This is fast (no file content reads) and catches most changes.
- * 
+ *
  * @param {string} dirPath - Directory to fingerprint
  * @param {Object} [options] - Options
  * @param {string[]} [options.exclude] - Patterns to exclude (e.g., ['node_modules', '.git'])
  * @returns {Promise<string|null>} MD5 hash of the directory's fingerprint, or null if directory doesn't exist
- * 
+ *
  * @example
  * const hash = await fingerprint('src/');
  * if (hash !== savedHash) {
@@ -526,46 +523,46 @@ async function touch(filePath) {
  * }
  */
 async function fingerprint(dirPath, options = {}) {
-    const { exclude = ['node_modules', '.git', '__pycache__', '.pyc'] } = options;
-    const entries = [];
-    
-    // Check if directory exists
-    try {
-        await fsp.access(dirPath);
-    } catch {
-        return null;  // Directory doesn't exist
-    }
-    
-    async function walk(dir, relativePath = '') {
-        const items = await fsp.readdir(dir, { withFileTypes: true });
-        
-        for (const item of items) {
-            // Skip excluded patterns
-            if (exclude.some(pattern => item.name === pattern || item.name.endsWith(pattern))) {
-                continue;
-            }
-            
-            const fullPath = path.join(dir, item.name);
-            const relPath = path.join(relativePath, item.name);
-            
-            if (item.isDirectory()) {
-                await walk(fullPath, relPath);
-            } else if (item.isFile()) {
-                const stats = await fsp.stat(fullPath);
-                // Use forward slashes for consistency across platforms
-                entries.push(`${relPath.replace(/\\/g, '/')}:${stats.size}:${stats.mtimeMs}`);
-            }
-        }
-    }
-    
-    await walk(dirPath);
-    
-    // Sort for consistent ordering
-    entries.sort();
-    
-    // Hash the combined entries
-    const content = entries.join('\n');
-    return crypto.createHash('md5').update(content).digest('hex');
+	const { exclude = ['node_modules', '.git', '__pycache__', '.pyc'] } = options;
+	const entries = [];
+
+	// Check if directory exists
+	try {
+		await fsp.access(dirPath);
+	} catch {
+		return null; // Directory doesn't exist
+	}
+
+	async function walk(dir, relativePath = '') {
+		const items = await fsp.readdir(dir, { withFileTypes: true });
+
+		for (const item of items) {
+			// Skip excluded patterns
+			if (exclude.some((pattern) => item.name === pattern || item.name.endsWith(pattern))) {
+				continue;
+			}
+
+			const fullPath = path.join(dir, item.name);
+			const relPath = path.join(relativePath, item.name);
+
+			if (item.isDirectory()) {
+				await walk(fullPath, relPath);
+			} else if (item.isFile()) {
+				const stats = await fsp.stat(fullPath);
+				// Use forward slashes for consistency across platforms
+				entries.push(`${relPath.replace(/\\/g, '/')}:${stats.size}:${stats.mtimeMs}`);
+			}
+		}
+	}
+
+	await walk(dirPath);
+
+	// Sort for consistent ordering
+	entries.sort();
+
+	// Hash the combined entries
+	const content = entries.join('\n');
+	return crypto.createHash('md5').update(content).digest('hex');
 }
 
 /**
@@ -582,57 +579,57 @@ async function fingerprint(dirPath, options = {}) {
  * @returns {Promise<string|null>} Hex hash string, or null if directory doesn't exist
  */
 async function contentHash(dirPath, options = {}) {
-    const { exclude = ['node_modules', '.git', '__pycache__', '.pyc', 'version.h'], log } = options;
-    const files = [];
+	const { exclude = ['node_modules', '.git', '__pycache__', '.pyc', 'version.h'], log } = options;
+	const files = [];
 
-    try {
-        await fsp.access(dirPath);
-    } catch {
-        return null;
-    }
+	try {
+		await fsp.access(dirPath);
+	} catch {
+		return null;
+	}
 
-    async function walk(dir, relativePath = '') {
-        const items = await fsp.readdir(dir, { withFileTypes: true });
+	async function walk(dir, relativePath = '') {
+		const items = await fsp.readdir(dir, { withFileTypes: true });
 
-        for (const item of items) {
-            if (exclude.some(pattern => item.name === pattern || item.name.endsWith(pattern))) {
-                continue;
-            }
+		for (const item of items) {
+			if (exclude.some((pattern) => item.name === pattern || item.name.endsWith(pattern))) {
+				continue;
+			}
 
-            const fullPath = path.join(dir, item.name);
-            const relPath = path.join(relativePath, item.name);
+			const fullPath = path.join(dir, item.name);
+			const relPath = path.join(relativePath, item.name);
 
-            if (item.isDirectory()) {
-                await walk(fullPath, relPath);
-            } else if (item.isFile()) {
-                files.push({ rel: relPath.replace(/\\/g, '/'), full: fullPath });
-            }
-        }
-    }
+			if (item.isDirectory()) {
+				await walk(fullPath, relPath);
+			} else if (item.isFile()) {
+				files.push({ rel: relPath.replace(/\\/g, '/'), full: fullPath });
+			}
+		}
+	}
 
-    await walk(dirPath);
-    files.sort((a, b) => (a.rel < b.rel ? -1 : a.rel > b.rel ? 1 : 0));
+	await walk(dirPath);
+	files.sort((a, b) => (a.rel < b.rel ? -1 : a.rel > b.rel ? 1 : 0));
 
-    const hash = crypto.createHash('sha256');
-    for (const f of files) {
-        const content = (await fsp.readFile(f.full, 'utf8')).replace(/\r/g, '');
-        hash.update(f.rel);
-        hash.update(content);
-    }
-    const digest = hash.digest('hex');
-    if (log) log(`contentHash: ${path.basename(dirPath)} (${files.length} files) -> ${digest}`);
-    return digest;
+	const hash = crypto.createHash('sha256');
+	for (const f of files) {
+		const content = (await fsp.readFile(f.full, 'utf8')).replace(/\r/g, '');
+		hash.update(f.rel);
+		hash.update(content);
+	}
+	const digest = hash.digest('hex');
+	if (log) log(`contentHash: ${path.basename(dirPath)} (${files.length} files) -> ${digest}`);
+	return digest;
 }
 
 /**
  * Check if source has changed since last build.
  * Returns true if rebuild is needed, false if unchanged.
- * 
+ *
  * @param {string} srcDir - Source directory to check
  * @param {string} stateKey - Key in state.json (e.g., 'client-typescript.srcHash')
  * @param {Object} [options] - Options for fingerprint
  * @returns {Promise<{changed: boolean, hash: string|null}>}
- * 
+ *
  * @example
  * const { getState, setState } = require('./state');
  * const { changed, hash } = await hasSourceChanged('src/', 'client-typescript.srcHash');
@@ -644,34 +641,34 @@ async function contentHash(dirPath, options = {}) {
  * await setState('client-typescript.srcHash', hash);
  */
 async function hasSourceChanged(srcDir, stateKey, options = {}) {
-    const { getState } = require('./state');
-    
-    const currentHash = await fingerprint(srcDir, options);
-    
-    // If directory doesn't exist, always consider it "changed" (needs build)
-    if (currentHash === null) {
-        return { changed: true, hash: null };
-    }
-    
-    const savedHash = await getState(stateKey);
-    
-    return {
-        changed: currentHash !== savedHash,
-        hash: currentHash
-    };
+	const { getState } = require('./state');
+
+	const currentHash = await fingerprint(srcDir, options);
+
+	// If directory doesn't exist, always consider it "changed" (needs build)
+	if (currentHash === null) {
+		return { changed: true, hash: null };
+	}
+
+	const savedHash = await getState(stateKey);
+
+	return {
+		changed: currentHash !== savedHash,
+		hash: currentHash,
+	};
 }
 
 /**
  * Save the source hash after a successful build.
- * 
+ *
  * @param {string} stateKey - Key in state.json
  * @param {string|null} hash - Hash to save (null is ignored)
  * @returns {Promise<void>}
  */
 async function saveSourceHash(stateKey, hash) {
-    if (hash === null) return;  // Don't save if directory didn't exist
-    const { setState } = require('./state');
-    await setState(stateKey, hash);
+	if (hash === null) return; // Don't save if directory didn't exist
+	const { setState } = require('./state');
+	await setState(stateKey, hash);
 }
 
 /**
@@ -685,32 +682,32 @@ async function saveSourceHash(stateKey, hash) {
  * @returns {Promise<string>} Combined hex digest.
  */
 async function buildInputHash(dirs, files = []) {
-    const hash = crypto.createHash('md5');
+	const hash = crypto.createHash('md5');
 
-    // Fingerprint each source directory
-    for (const dir of dirs) {
-        const fp = await fingerprint(dir);
-        hash.update(dir);
-        hash.update(fp ?? 'missing');
-    }
+	// Fingerprint each source directory
+	for (const dir of dirs) {
+		const fp = await fingerprint(dir);
+		hash.update(dir);
+		hash.update(fp ?? 'missing');
+	}
 
-    // Include individual files by size + mtime
-    for (const file of files) {
-        try {
-            const st = await fsp.stat(file);
-            hash.update(file);
-            hash.update(`${st.size}:${st.mtimeMs}`);
-        } catch (err) {
-            if (err?.code === 'ENOENT') {
-                hash.update(file);
-                hash.update('missing');
-                continue;
-            }
-            throw err;
-        }
-    }
+	// Include individual files by size + mtime
+	for (const file of files) {
+		try {
+			const st = await fsp.stat(file);
+			hash.update(file);
+			hash.update(`${st.size}:${st.mtimeMs}`);
+		} catch (err) {
+			if (err?.code === 'ENOENT') {
+				hash.update(file);
+				hash.update('missing');
+				continue;
+			}
+			throw err;
+		}
+	}
 
-    return hash.digest('hex');
+	return hash.digest('hex');
 }
 
 /**
@@ -722,73 +719,73 @@ async function buildInputHash(dirs, files = []) {
  * @returns {Promise<{changed: boolean, hash: string}>}
  */
 async function hasBuildInputChanged(stateKey, dirs, files = []) {
-    const { getState } = require('./state');
-    const currentHash = await buildInputHash(dirs, files);
-    const savedHash = await getState(stateKey);
-    return { changed: currentHash !== savedHash, hash: currentHash };
+	const { getState } = require('./state');
+	const currentHash = await buildInputHash(dirs, files);
+	const savedHash = await getState(stateKey);
+	return { changed: currentHash !== savedHash, hash: currentHash };
 }
 
 module.exports = {
-    // Existence
-    exists,
-    isFile,
-    isDirectory,
-    
-    // Reading
-    readFile,
-    readJson,
-    readJsonSafe,
-    readDir,
-    readDirSafe,
-    
-    // Writing
-    writeFile,
-    writeJson,
-    writeFileEnsure,
-    createWriteStream,
-    
-    // Directories
-    mkdir,
-    mkdirIfNotExists,
-    
-    // Copying
-    copyFile,
-    copyFileEnsure,
-    copyDir,
-    copyDirEnsure,
+	// Existence
+	exists,
+	isFile,
+	isDirectory,
 
-    // Comparing
-    filesEqual,
-    
-    // Stats
-    stat,
-    statSafe,
-    lstat,
-    
-    // Links
-    symlink,
-    readlink,
-    
-    // Deletion
-    unlink,
-    rm,
-    rmdir,
-    
-    // Rename/Move
-    rename,
-    move,
-    
-    // Utilities
-    realpath,
-    truncate,
-    utimes,
-    touch,
-    
-    // Fingerprinting
-    fingerprint,
-    contentHash,
-    hasSourceChanged,
-    saveSourceHash,
-    buildInputHash,
-    hasBuildInputChanged
+	// Reading
+	readFile,
+	readJson,
+	readJsonSafe,
+	readDir,
+	readDirSafe,
+
+	// Writing
+	writeFile,
+	writeJson,
+	writeFileEnsure,
+	createWriteStream,
+
+	// Directories
+	mkdir,
+	mkdirIfNotExists,
+
+	// Copying
+	copyFile,
+	copyFileEnsure,
+	copyDir,
+	copyDirEnsure,
+
+	// Comparing
+	filesEqual,
+
+	// Stats
+	stat,
+	statSafe,
+	lstat,
+
+	// Links
+	symlink,
+	readlink,
+
+	// Deletion
+	unlink,
+	rm,
+	rmdir,
+
+	// Rename/Move
+	rename,
+	move,
+
+	// Utilities
+	realpath,
+	truncate,
+	utimes,
+	touch,
+
+	// Fingerprinting
+	fingerprint,
+	contentHash,
+	hasSourceChanged,
+	saveSourceHash,
+	buildInputHash,
+	hasBuildInputChanged,
 };

@@ -45,10 +45,7 @@ import { ConnectionManager } from '../connection/connection';
  * });
  * ```
  */
-export function useShellEvent<K extends keyof ShellConnectionEventMap>(
-	event: K,
-	handler: (payload: ShellConnectionEventMap[K]) => void,
-): void {
+export function useShellEvent<K extends keyof ShellConnectionEventMap>(event: K, handler: (payload: ShellConnectionEventMap[K]) => void): void {
 	// Use a ref to always call the latest handler without resubscribing
 	const handlerRef = useRef(handler);
 	handlerRef.current = handler;

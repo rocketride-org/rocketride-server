@@ -31,10 +31,10 @@ interface DisplayModeInfo {
 }
 
 const DISPLAY_MODES: Record<DisplayMode, DisplayModeInfo> = {
-	byte:  { label: 'Byte',   bytesPerUnit: 1, hexWidth: 2 },
-	word:  { label: 'Word',   bytesPerUnit: 2, hexWidth: 4 },
-	dword: { label: 'DWord',  bytesPerUnit: 4, hexWidth: 8 },
-	qword: { label: 'QWord',  bytesPerUnit: 8, hexWidth: 16 },
+	byte: { label: 'Byte', bytesPerUnit: 1, hexWidth: 2 },
+	word: { label: 'Word', bytesPerUnit: 2, hexWidth: 4 },
+	dword: { label: 'DWord', bytesPerUnit: 4, hexWidth: 8 },
+	qword: { label: 'QWord', bytesPerUnit: 8, hexWidth: 16 },
 };
 
 /** Bytes per row — always 16 for consistent address alignment. */
@@ -259,10 +259,10 @@ function formatFileSize(bytes: number): string {
 class RangeDataSource {
 	private _url: string = '';
 	private _fileSize: number = 0;
-	private _chunks = new Map<number, Uint8Array>();   // chunkIndex → data (LRU: insertion order = age)
+	private _chunks = new Map<number, Uint8Array>(); // chunkIndex → data (LRU: insertion order = age)
 	private _pending = new Map<number, Promise<void>>(); // in-flight fetches
-	private _failures = new Map<number, number>();       // chunkIndex → consecutive failures
-	private _errors = new Map<number, string>();         // chunkIndex → last error message
+	private _failures = new Map<number, number>(); // chunkIndex → consecutive failures
+	private _errors = new Map<number, string>(); // chunkIndex → last error message
 	private _getUrl: () => Promise<string>;
 	private _getStat: () => Promise<number>;
 	private _onUpdate: () => void;
@@ -274,17 +274,15 @@ class RangeDataSource {
 	/** Stop refetching a chunk after this many consecutive failures. */
 	private static readonly MAX_RETRIES = 3;
 
-	constructor(
-		getUrl: () => Promise<string>,
-		getStat: () => Promise<number>,
-		onUpdate: () => void,
-	) {
+	constructor(getUrl: () => Promise<string>, getStat: () => Promise<number>, onUpdate: () => void) {
 		this._getUrl = getUrl;
 		this._getStat = getStat;
 		this._onUpdate = onUpdate;
 	}
 
-	get fileSize() { return this._fileSize; }
+	get fileSize() {
+		return this._fileSize;
+	}
 
 	async init(): Promise<void> {
 		this._fileSize = await this._getStat();
@@ -440,9 +438,7 @@ class RangeDataSource {
 	 */
 	chunkError(offset: number): string | null {
 		const ci = Math.floor(offset / CHUNK_SIZE);
-		return (this._failures.get(ci) ?? 0) >= RangeDataSource.MAX_RETRIES
-			? (this._errors.get(ci) ?? 'Failed to load')
-			: null;
+		return (this._failures.get(ci) ?? 0) >= RangeDataSource.MAX_RETRIES ? (this._errors.get(ci) ?? 'Failed to load') : null;
 	}
 
 	/** True when at least one chunk has permanently failed (drives the Retry button). */
@@ -509,7 +505,9 @@ export const HexViewer: React.FC<Props> = ({ client, uri }) => {
 				const stat = await client.fsStat(uri);
 				return stat.size ?? 0;
 			},
-			() => { if (!disposed) setTick(t => t + 1); },
+			() => {
+				if (!disposed) setTick((t) => t + 1);
+			}
 		);
 
 		dsRef.current = ds;
@@ -565,19 +563,25 @@ export const HexViewer: React.FC<Props> = ({ client, uri }) => {
 
 	// Map an authoritative row back to a scrollbar position (best-effort sync
 	// after go-to / keyboard navigation). Exact for unscaled files.
-	const rowToScrollTop = useCallback((rowIndex: number): number => {
-		const el = viewportRef.current;
-		if (!el || !isScaled) return rowIndex * ROW_HEIGHT;
-		const maxScroll = Math.max(1, spacerHeight - el.clientHeight);
-		const maxTopRow = Math.max(1, totalRows - Math.floor(el.clientHeight / ROW_HEIGHT));
-		return Math.round((rowIndex / maxTopRow) * maxScroll);
-	}, [isScaled, spacerHeight, totalRows]);
+	const rowToScrollTop = useCallback(
+		(rowIndex: number): number => {
+			const el = viewportRef.current;
+			if (!el || !isScaled) return rowIndex * ROW_HEIGHT;
+			const maxScroll = Math.max(1, spacerHeight - el.clientHeight);
+			const maxTopRow = Math.max(1, totalRows - Math.floor(el.clientHeight / ROW_HEIGHT));
+			return Math.round((rowIndex / maxTopRow) * maxScroll);
+		},
+		[isScaled, spacerHeight, totalRows]
+	);
 
 	// User-driven scroll → derive topRow. Ignore the programmatic scrolls we trigger.
 	const handleScroll = useCallback(() => {
 		const el = viewportRef.current;
 		if (!el) return;
-		if (syncingRef.current) { syncingRef.current = false; return; }
+		if (syncingRef.current) {
+			syncingRef.current = false;
+			return;
+		}
 		if (!isScaled) {
 			setTopRow(Math.floor(el.scrollTop / ROW_HEIGHT));
 			return;
@@ -588,21 +592,24 @@ export const HexViewer: React.FC<Props> = ({ client, uri }) => {
 	}, [isScaled, spacerHeight, totalRows]);
 
 	// Move to an exact row (authoritative) and best-effort sync the scrollbar.
-	const goToRow = useCallback((rowIndex: number) => {
-		const clampedRow = Math.min(Math.max(rowIndex, 0), totalRows - 1);
-		setTopRow(clampedRow);
-		const el = viewportRef.current;
-		if (el) {
-			// Only arm the guard when the scroll position actually changes — a no-op
-			// assignment fires no scroll event, which would leave the flag stuck true
-			// and swallow the user's next real scroll.
-			const nextScrollTop = rowToScrollTop(clampedRow);
-			if (nextScrollTop !== el.scrollTop) {
-				syncingRef.current = true;
-				el.scrollTop = nextScrollTop;
+	const goToRow = useCallback(
+		(rowIndex: number) => {
+			const clampedRow = Math.min(Math.max(rowIndex, 0), totalRows - 1);
+			setTopRow(clampedRow);
+			const el = viewportRef.current;
+			if (el) {
+				// Only arm the guard when the scroll position actually changes — a no-op
+				// assignment fires no scroll event, which would leave the flag stuck true
+				// and swallow the user's next real scroll.
+				const nextScrollTop = rowToScrollTop(clampedRow);
+				if (nextScrollTop !== el.scrollTop) {
+					syncingRef.current = true;
+					el.scrollTop = nextScrollTop;
+				}
 			}
-		}
-	}, [totalRows, rowToScrollTop]);
+		},
+		[totalRows, rowToScrollTop]
+	);
 
 	// --- Go-to-offset handler ------------------------------------------------
 
@@ -615,22 +622,38 @@ export const HexViewer: React.FC<Props> = ({ client, uri }) => {
 
 	// --- Keyboard navigation (essential once the scrollbar is coarse) ---------
 
-	const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLDivElement>) => {
-		const el = viewportRef.current;
-		const page = Math.max(1, Math.floor((el?.clientHeight ?? 0) / ROW_HEIGHT) - 1);
-		let next: number;
-		switch (e.key) {
-			case 'ArrowDown': next = topRow + 1; break;
-			case 'ArrowUp':   next = topRow - 1; break;
-			case 'PageDown':  next = topRow + page; break;
-			case 'PageUp':    next = topRow - page; break;
-			case 'Home':      next = 0; break;
-			case 'End':       next = totalRows - 1; break;
-			default: return;
-		}
-		e.preventDefault();
-		goToRow(next);
-	}, [topRow, totalRows, goToRow]);
+	const handleKeyDown = useCallback(
+		(e: React.KeyboardEvent<HTMLDivElement>) => {
+			const el = viewportRef.current;
+			const page = Math.max(1, Math.floor((el?.clientHeight ?? 0) / ROW_HEIGHT) - 1);
+			let next: number;
+			switch (e.key) {
+				case 'ArrowDown':
+					next = topRow + 1;
+					break;
+				case 'ArrowUp':
+					next = topRow - 1;
+					break;
+				case 'PageDown':
+					next = topRow + page;
+					break;
+				case 'PageUp':
+					next = topRow - page;
+					break;
+				case 'Home':
+					next = 0;
+					break;
+				case 'End':
+					next = totalRows - 1;
+					break;
+				default:
+					return;
+			}
+			e.preventDefault();
+			goToRow(next);
+		},
+		[topRow, totalRows, goToRow]
+	);
 
 	// --- Build visible rows --------------------------------------------------
 
@@ -717,11 +740,7 @@ export const HexViewer: React.FC<Props> = ({ client, uri }) => {
 				<div style={S.toolbarGroup}>
 					<span style={S.label}>Display:</span>
 					{(Object.entries(DISPLAY_MODES) as [DisplayMode, DisplayModeInfo][]).map(([key, info]) => (
-						<button
-							key={key}
-							style={S.modeBtn(mode === key)}
-							onClick={() => setMode(key)}
-						>
+						<button key={key} style={S.modeBtn(mode === key)} onClick={() => setMode(key)}>
 							{info.label}
 						</button>
 					))}
@@ -731,8 +750,12 @@ export const HexViewer: React.FC<Props> = ({ client, uri }) => {
 
 				<div style={S.toolbarGroup}>
 					<span style={S.label}>Endian:</span>
-					<button style={S.endianBtn(endian === 'little')} onClick={() => setEndian('little')}>LE</button>
-					<button style={S.endianBtn(endian === 'big')} onClick={() => setEndian('big')}>BE</button>
+					<button style={S.endianBtn(endian === 'little')} onClick={() => setEndian('little')}>
+						LE
+					</button>
+					<button style={S.endianBtn(endian === 'big')} onClick={() => setEndian('big')}>
+						BE
+					</button>
 				</div>
 
 				<div style={S.separator} />
@@ -744,18 +767,16 @@ export const HexViewer: React.FC<Props> = ({ client, uri }) => {
 						placeholder="hex offset"
 						value={goToValue}
 						onChange={(e) => setGoToValue(e.target.value)}
-						onKeyDown={(e) => { if (e.key === 'Enter') handleGoTo(); }}
+						onKeyDown={(e) => {
+							if (e.key === 'Enter') handleGoTo();
+						}}
 					/>
 				</div>
 
 				{hasErrors && (
 					<>
 						<div style={S.separator} />
-						<button
-							style={S.modeBtn(false)}
-							onClick={() => dsRef.current?.retryFailed()}
-							title="Retry chunks that failed to load"
-						>
+						<button style={S.modeBtn(false)} onClick={() => dsRef.current?.retryFailed()} title="Retry chunks that failed to load">
 							⚠ Retry
 						</button>
 					</>
@@ -767,13 +788,7 @@ export const HexViewer: React.FC<Props> = ({ client, uri }) => {
 			</div>
 
 			{/* Virtualized hex grid */}
-			<div
-				style={S.viewport}
-				ref={viewportRef}
-				onScroll={handleScroll}
-				onKeyDown={handleKeyDown}
-				tabIndex={0}
-			>
+			<div style={S.viewport} ref={viewportRef} onScroll={handleScroll} onKeyDown={handleKeyDown} tabIndex={0}>
 				{/* Spacer supplies the scroll range (bounded so browsers don't clamp offsets) */}
 				<div style={S.spacer(spacerHeight)}>
 					{/*
@@ -782,11 +797,7 @@ export const HexViewer: React.FC<Props> = ({ client, uri }) => {
 					  1:1 to rows, so rows ride the top of the viewport via sticky positioning,
 					  shifted up by the overscan rows above topRow.
 					*/}
-					<div
-						style={isScaled
-							? { position: 'sticky', top: 0, transform: `translateY(${-(topRow - renderStart) * ROW_HEIGHT}px)` }
-							: S.rowsContainer(renderStart * ROW_HEIGHT)}
-					>
+					<div style={isScaled ? { position: 'sticky', top: 0, transform: `translateY(${-(topRow - renderStart) * ROW_HEIGHT}px)` } : S.rowsContainer(renderStart * ROW_HEIGHT)}>
 						{rows.map((row) => {
 							if (!row.hex || !row.asciiCells) {
 								return (
@@ -797,21 +808,20 @@ export const HexViewer: React.FC<Props> = ({ client, uri }) => {
 								);
 							}
 							return (
-								<div
-									key={row.rowIndex}
-									style={hoveredRowIdx === row.rowIndex ? S.hoveredRow : S.row}
-									onMouseEnter={() => setHoveredRowIdx(row.rowIndex)}
-									onMouseLeave={() => setHoveredRowIdx(-1)}
-								>
+								<div key={row.rowIndex} style={hoveredRowIdx === row.rowIndex ? S.hoveredRow : S.row} onMouseEnter={() => setHoveredRowIdx(row.rowIndex)} onMouseLeave={() => setHoveredRowIdx(-1)}>
 									<span style={S.address}>{row.address}</span>
 									<span style={S.hexArea}>{row.hex}</span>
 									<span style={S.divider} />
 									<span style={S.ascii}>
-										{row.asciiCells.map((cell, ci) => (
-											cell.printable
-												? <span key={ci}>{cell.char}</span>
-												: <span key={ci} style={S.nonPrintable}>.</span>
-										))}
+										{row.asciiCells.map((cell, ci) =>
+											cell.printable ? (
+												<span key={ci}>{cell.char}</span>
+											) : (
+												<span key={ci} style={S.nonPrintable}>
+													.
+												</span>
+											)
+										)}
 									</span>
 								</div>
 							);

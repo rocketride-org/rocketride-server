@@ -36,7 +36,13 @@ const CardDemo: React.FC<IGalleryDemoProps> = ({ knobs }) => (
 	<div style={{ maxWidth: 420 }}>
 		<Card
 			header={String(knobs.header)}
-			headerActions={knobs.actions ? <Button variant="secondary" small onClick={() => undefined}>Refresh</Button> : undefined}
+			headerActions={
+				knobs.actions ? (
+					<Button variant="secondary" small onClick={() => undefined}>
+						Refresh
+					</Button>
+				) : undefined
+			}
 			onClick={knobs.clickable ? () => undefined : undefined}
 		>
 			Ingest finished for 1,284 documents. The next scheduled run starts at 02:00.
@@ -74,7 +80,7 @@ export const cardEntry: IGalleryEntry = {
 		{ name: 'children', type: 'ReactNode', dir: 'in', required: true, note: 'Card body content.' },
 		{ name: 'toolbar', type: 'ReactNode', dir: 'in', note: 'Optional row beneath the header and above the body (filter/search strips), with its own divider.' },
 		{ name: 'noBodyPadding', type: 'boolean', dir: 'in', note: 'Drop the body padding (for tables and media that fill the card).' },
-		{ name: 'fill', type: 'boolean', dir: 'in', note: "Fill the parent height and flex the body into the remaining space - pair with noBodyPadding to host an internally-scrolling grid." },
+		{ name: 'fill', type: 'boolean', dir: 'in', note: 'Fill the parent height and flex the body into the remaining space - pair with noBodyPadding to host an internally-scrolling grid.' },
 		{ name: 'onClick', type: '() => void', dir: 'out', note: 'Makes the whole card clickable with pointer cursor, hover border shift, and button semantics.' },
 	],
 };

@@ -55,7 +55,5 @@ function RunControls({ onRun }: { onRun: () => void }) {
 	return <Button disabled={!isConnected} onClick={onRun}>Run</Button>;
 }`,
 	propsLabel: 'Hooks',
-	props: [
-		{ name: 'useShellConnection', type: '() => { client, isConnected, statusMessage }', dir: 'out', note: 'The same global state the StatusBar renders - subscribe to react to connect/disconnect and transient status messages.' },
-	],
+	props: [{ name: 'useShellConnection', type: '() => { client, isConnected, statusMessage }', dir: 'out', note: 'The same global state the StatusBar renders - subscribe to react to connect/disconnect and transient status messages.' }],
 };

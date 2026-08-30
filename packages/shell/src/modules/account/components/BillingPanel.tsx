@@ -387,7 +387,7 @@ export const BillingPanel: React.FC<BillingPanelProps> = ({ isConnected, subscri
 	const handleAddCapacity = useCallback(() => setShowTopUpModal(true), []);
 
 	// The viewed record resolves LIVE from the subscriptions prop by appId.
-	const viewedSub = viewedAppId != null ? subscriptions.find((s) => s.appId === viewedAppId) ?? null : null;
+	const viewedSub = viewedAppId != null ? (subscriptions.find((s) => s.appId === viewedAppId) ?? null) : null;
 
 	// ── Grid rows (flattened display-value primitives) ──────────────────────
 	const rows = useMemo<SubRow[]>(
@@ -652,8 +652,7 @@ export const BillingPanel: React.FC<BillingPanelProps> = ({ isConnected, subscri
 					confirmDisabled={cancelling}
 					message={
 						<>
-							Are you sure you want to cancel <strong style={styles.confirmName}>{viewedSub.appName ?? viewedSub.appId}</strong>? Your access will continue until
-							the end of the current billing period, after which the subscription will not renew.
+							Are you sure you want to cancel <strong style={styles.confirmName}>{viewedSub.appName ?? viewedSub.appId}</strong>? Your access will continue until the end of the current billing period, after which the subscription will not renew.
 						</>
 					}
 					onConfirm={() => void handleCancel()}
@@ -662,42 +661,13 @@ export const BillingPanel: React.FC<BillingPanelProps> = ({ isConnected, subscri
 			)}
 
 			{/* Admin billing dashboard */}
-			{isOrgAdmin && isConnected && (
-				<BillingDashboard
-					balance={creditBalance}
-					transactions={transactions ?? null}
-					usageByUser={usageByUser ?? []}
-					usageByTeam={usageByTeam ?? []}
-					activeTasks={activeTasks ?? []}
-					topupPlans={topupPlans ?? []}
-					loading={dashboardLoading ?? false}
-					onTransactionPage={onTransactionPage ?? (() => {})}
-					fetchTransactions={fetchTransactions}
-					fetchTransactionDistinct={fetchTransactionDistinct}
-					onBuyTopup={onBuyTopup}
-					onAddCapacity={isSubscribed ? handleAddCapacity : undefined}
-				/>
-			)}
+			{isOrgAdmin && isConnected && <BillingDashboard balance={creditBalance} transactions={transactions ?? null} usageByUser={usageByUser ?? []} usageByTeam={usageByTeam ?? []} activeTasks={activeTasks ?? []} topupPlans={topupPlans ?? []} loading={dashboardLoading ?? false} onTransactionPage={onTransactionPage ?? (() => {})} fetchTransactions={fetchTransactions} fetchTransactionDistinct={fetchTransactionDistinct} onBuyTopup={onBuyTopup} onAddCapacity={isSubscribed ? handleAddCapacity : undefined} />}
 
 			{/* Top-up modal */}
-			{showTopUpModal && allPlans && onPurchaseTopup && (
-				<TopUpModal
-					plans={allPlans}
-					onPurchase={onPurchaseTopup}
-					onClose={() => setShowTopUpModal(false)}
-				/>
-			)}
+			{showTopUpModal && allPlans && onPurchaseTopup && <TopUpModal plans={allPlans} onPurchase={onPurchaseTopup} onClose={() => setShowTopUpModal(false)} />}
 
 			{/* Upgrade / change plan modal */}
-			{upgradeTarget && allPlans && onUpgradeSubscription && (
-				<UpgradeModal
-					plans={allPlans.filter((p) => p.appId === upgradeTarget.appId)}
-					currentPriceId={upgradeTarget.stripePriceId}
-					currentPlanName={upgradeTarget.planNickname}
-					onUpgrade={(newPriceId) => onUpgradeSubscription(upgradeTarget.appId, newPriceId)}
-					onClose={() => setUpgradeTarget(null)}
-				/>
-			)}
+			{upgradeTarget && allPlans && onUpgradeSubscription && <UpgradeModal plans={allPlans.filter((p) => p.appId === upgradeTarget.appId)} currentPriceId={upgradeTarget.stripePriceId} currentPlanName={upgradeTarget.planNickname} onUpgrade={(newPriceId) => onUpgradeSubscription(upgradeTarget.appId, newPriceId)} onClose={() => setUpgradeTarget(null)} />}
 		</section>
 	);
 };

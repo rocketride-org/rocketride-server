@@ -56,9 +56,7 @@ window.addEventListener('message', ({ data }) => {
 	if (data.type === 'shell:init') applyTheme(data.theme);   // applyTheme: the frame's own CSS applier
 });`,
 	propsLabel: 'Hooks',
-	props: [
-		{ name: 'useIframeBridge', type: '(iframeRef: RefObject<HTMLIFrameElement>) => void', dir: 'out', note: 'Attaches the full bridge: handshake, shell:init bootstrap, event forwarding, inbound request handling.' },
-	],
+	props: [{ name: 'useIframeBridge', type: '(iframeRef: RefObject<HTMLIFrameElement>) => void', dir: 'out', note: 'Attaches the full bridge: handshake, shell:init bootstrap, event forwarding, inbound request handling.' }],
 	sections: [
 		{
 			label: 'Protocol types',

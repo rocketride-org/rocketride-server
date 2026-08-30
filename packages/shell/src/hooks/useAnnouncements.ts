@@ -44,12 +44,10 @@ interface AnnouncementsPayload {
 // CONSTANTS
 // ============================================================================
 
-const FETCH_URL =
-	'https://raw.githubusercontent.com/rocketride-org/announcements/main/announcements.json';
+const FETCH_URL = 'https://raw.githubusercontent.com/rocketride-org/announcements/main/announcements.json';
 
 /** Base URL for resolving relative image/asset paths in markdown. */
-const ASSETS_BASE =
-	'https://raw.githubusercontent.com/rocketride-org/announcements/main/';
+const ASSETS_BASE = 'https://raw.githubusercontent.com/rocketride-org/announcements/main/';
 
 /** Cache TTL — 1 hour in milliseconds. */
 const CACHE_TTL = 60 * 60 * 1000;
@@ -71,10 +69,7 @@ let fetchPromise: Promise<Announcement[]> | null = null;
  * Matches `![alt](relative/path)` but skips already-absolute URLs.
  */
 function resolveImagePaths(md: string): string {
-	return md.replace(
-		/!\[([^\]]*)\]\((?!https?:\/\/)([^)]+)\)/g,
-		(_match, alt, path) => `![${alt}](${ASSETS_BASE}${path})`,
-	);
+	return md.replace(/!\[([^\]]*)\]\((?!https?:\/\/)([^)]+)\)/g, (_match, alt, path) => `![${alt}](${ASSETS_BASE}${path})`);
 }
 
 /**
@@ -142,9 +137,7 @@ async function fetchAnnouncements(): Promise<Announcement[]> {
  * Fetches on mount (if cache is stale) and re-fetches every hour.
  */
 export function useAnnouncements(): Announcement[] {
-	const [announcements, setAnnouncements] = useState<Announcement[]>(() =>
-		filterByWindow(cachedAnnouncements),
-	);
+	const [announcements, setAnnouncements] = useState<Announcement[]>(() => filterByWindow(cachedAnnouncements));
 
 	useEffect(() => {
 		let mounted = true;

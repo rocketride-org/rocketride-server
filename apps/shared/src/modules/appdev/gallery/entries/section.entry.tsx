@@ -36,8 +36,12 @@ const SectionDemo: React.FC<IGalleryDemoProps> = ({ knobs }) => (
 	<div style={{ maxWidth: 420 }}>
 		<Section label={String(knobs.label)}>
 			<LabelValue label="Name">chat.pipe</LabelValue>
-			<LabelValue label="Task id" mono={Boolean(knobs.mono)}>rod.demo.chat</LabelValue>
-			<LabelValue label="Status"><StatusBadge variant="success">Running</StatusBadge></LabelValue>
+			<LabelValue label="Task id" mono={Boolean(knobs.mono)}>
+				rod.demo.chat
+			</LabelValue>
+			<LabelValue label="Status">
+				<StatusBadge variant="success">Running</StatusBadge>
+			</LabelValue>
 		</Section>
 	</div>
 );

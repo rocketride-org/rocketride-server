@@ -39,8 +39,8 @@ export default defineConfig(() => {
 					react: { singleton: true, eager: true, requiredVersion: '^18.2.0' },
 					'react-dom': { singleton: true, eager: true, requiredVersion: '^18.2.0' },
 					// import: false — host always provides these, no fallback needed.
-					'shell':   { singleton: true, requiredVersion: false, import: false },
-					'rocketride': { singleton: true, requiredVersion: false, import: false },
+					shell: { singleton: true, requiredVersion: false, import: false },
+					rocketride: { singleton: true, requiredVersion: false, import: false },
 				},
 			}),
 		],

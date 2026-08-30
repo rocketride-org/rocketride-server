@@ -11,7 +11,7 @@
 export class ToolError extends Error {
 	constructor(
 		message: string,
-		readonly errorType?: string,
+		readonly errorType?: string
 	) {
 		super(message);
 		this.name = 'ToolError';

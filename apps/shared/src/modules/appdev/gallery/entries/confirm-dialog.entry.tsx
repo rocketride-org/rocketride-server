@@ -36,17 +36,10 @@ const ConfirmDialogDemo: React.FC<IGalleryDemoProps> = ({ knobs }) => {
 	const [open, setOpen] = useState(false);
 	return (
 		<>
-			<Button variant="secondary" onClick={() => setOpen(true)}>Delete pipeline...</Button>
-			{open && (
-				<ConfirmDialog
-					title={String(knobs.title)}
-					message="chat.pipe has unsaved changes that will be lost."
-					confirmLabel={String(knobs.confirmLabel)}
-					destructive={Boolean(knobs.destructive)}
-					onConfirm={() => setOpen(false)}
-					onCancel={() => setOpen(false)}
-				/>
-			)}
+			<Button variant="secondary" onClick={() => setOpen(true)}>
+				Delete pipeline...
+			</Button>
+			{open && <ConfirmDialog title={String(knobs.title)} message="chat.pipe has unsaved changes that will be lost." confirmLabel={String(knobs.confirmLabel)} destructive={Boolean(knobs.destructive)} onConfirm={() => setOpen(false)} onCancel={() => setOpen(false)} />}
 		</>
 	);
 };

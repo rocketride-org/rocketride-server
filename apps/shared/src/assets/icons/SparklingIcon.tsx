@@ -42,15 +42,7 @@ interface SparklingIconProps extends IIconProps {
  *
  * @param props - SparklingIcon props including standard icon props and isLabelDecorator.
  */
-const SparklingIcon: FunctionComponent<SparklingIconProps> = ({
-	height = '20',
-	style,
-	width = '20',
-	opacity = 1,
-	color,
-	className,
-	isLabelDecorator,
-}) => {
+const SparklingIcon: FunctionComponent<SparklingIconProps> = ({ height = '20', style, width = '20', opacity = 1, color, className, isLabelDecorator }) => {
 	return (
 		<svg
 			xmlns="http://www.w3.org/2000/svg"
@@ -65,18 +57,9 @@ const SparklingIcon: FunctionComponent<SparklingIconProps> = ({
 			color={color}
 			className={className}
 		>
-			<path
-				fill={color}
-				d="m24 4 5.303 9.697 9.697 5.303-9.697 5.303-5.303 9.697-5.303-9.697-9.697-5.303 9.697-5.303z"
-			/>
-			<path
-				fill={color}
-				d="m45 29 3.536 6.464 6.464 3.536-6.464 3.536-3.536 6.464-3.536-6.464-6.464-3.536 6.464-3.536z"
-			/>
-			<path
-				fill={color}
-				d="m24 50 1.768 3.232 3.232 1.768-3.232 1.768-1.768 3.232-1.768-3.232-3.232-1.768 3.232-1.768z"
-			/>
+			<path fill={color} d="m24 4 5.303 9.697 9.697 5.303-9.697 5.303-5.303 9.697-5.303-9.697-9.697-5.303 9.697-5.303z" />
+			<path fill={color} d="m45 29 3.536 6.464 6.464 3.536-6.464 3.536-3.536 6.464-3.536-6.464-6.464-3.536 6.464-3.536z" />
+			<path fill={color} d="m24 50 1.768 3.232 3.232 1.768-3.232 1.768-1.768 3.232-1.768-3.232-3.232-1.768 3.232-1.768z" />
 		</svg>
 	);
 };

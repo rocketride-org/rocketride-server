@@ -495,7 +495,18 @@ export const SchedulePanel: React.FC<ISchedulePanelProps> = ({ open, sourceId, s
 									Every
 									<input style={S.numBox} type="number" min={1} max={INTERVAL_MAX[picker.intervalUnit]} value={picker.intervalN} disabled={busy} onClick={(e) => e.stopPropagation()} onChange={(e) => setPicker((prev) => ({ ...prev, intervalN: Math.min(INTERVAL_MAX[prev.intervalUnit], Math.max(1, parseInt(e.target.value, 10) || 1)) }))} />
 									{/* Switching units re-clamps N — 45 minutes is valid, 45 hours is not. */}
-									<select style={S.unitSelect} value={picker.intervalUnit} disabled={busy} onClick={(e) => e.stopPropagation()} onChange={(e) => setPicker((prev) => { const unit = e.target.value as IntervalUnit; return { ...prev, intervalUnit: unit, intervalN: Math.min(INTERVAL_MAX[unit], prev.intervalN) }; })}>
+									<select
+										style={S.unitSelect}
+										value={picker.intervalUnit}
+										disabled={busy}
+										onClick={(e) => e.stopPropagation()}
+										onChange={(e) =>
+											setPicker((prev) => {
+												const unit = e.target.value as IntervalUnit;
+												return { ...prev, intervalUnit: unit, intervalN: Math.min(INTERVAL_MAX[unit], prev.intervalN) };
+											})
+										}
+									>
 										<option value="minutes">minutes</option>
 										<option value="hours">hours</option>
 									</select>

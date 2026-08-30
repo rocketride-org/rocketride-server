@@ -58,7 +58,6 @@ const styles = {
 	container: {
 		...commonStyles.columnFill,
 	} as CSSProperties,
-
 };
 
 // =============================================================================
@@ -89,12 +88,15 @@ const MonitorApp: React.FC<ShellAppProps> = (_props) => {
 	 * @param req - Paging / sort / filter / search arguments from the grid.
 	 * @returns The standard list envelope from the server.
 	 */
-	const listConnections = useCallback(async (req: ListPageRequest): Promise<ListPageResponse<DashboardConnection>> => {
-		// No client yet (shell still connecting): an empty page — the
-		// connection-gated poll refetches as soon as the shell comes up.
-		if (!client) return { rows: [], total: 0, page: 1, pageSize: req.page_size ?? 0 };
-		return client.listConnections(req);
-	}, [client]);
+	const listConnections = useCallback(
+		async (req: ListPageRequest): Promise<ListPageResponse<DashboardConnection>> => {
+			// No client yet (shell still connecting): an empty page — the
+			// connection-gated poll refetches as soon as the shell comes up.
+			if (!client) return { rows: [], total: 0, page: 1, pageSize: req.page_size ?? 0 };
+			return client.listConnections(req);
+		},
+		[client]
+	);
 
 	/**
 	 * Paged tasks fetcher for the shared Tasks grid (REMOTE mode).
@@ -102,11 +104,14 @@ const MonitorApp: React.FC<ShellAppProps> = (_props) => {
 	 * @param req - Paging / sort / filter / search arguments from the grid.
 	 * @returns The standard list envelope from the server.
 	 */
-	const listTasks = useCallback(async (req: ListPageRequest): Promise<ListPageResponse<DashboardTask>> => {
-		// Same shell-connecting guard as listConnections.
-		if (!client) return { rows: [], total: 0, page: 1, pageSize: req.page_size ?? 0 };
-		return client.listTasks(req);
-	}, [client]);
+	const listTasks = useCallback(
+		async (req: ListPageRequest): Promise<ListPageResponse<DashboardTask>> => {
+			// Same shell-connecting guard as listConnections.
+			if (!client) return { rows: [], total: 0, page: 1, pageSize: req.page_size ?? 0 };
+			return client.listTasks(req);
+		},
+		[client]
+	);
 
 	// Combined remote-grid refetch handed up by MonitorView; polled at the
 	// same 3s cadence as the dashboard snapshot so the current page of each
@@ -129,15 +134,7 @@ const MonitorApp: React.FC<ShellAppProps> = (_props) => {
 	return (
 		<AppLayout sidebar={SIDEBAR_FRAME_ONLY} showStatus>
 			<div style={styles.container}>
-				<MonitorView
-					data={data}
-					events={events}
-					isConnected={isConnected}
-					onRefresh={refresh}
-					listConnections={listConnections}
-					listTasks={listTasks}
-					onRefetchReady={handleRefetchReady}
-				/>
+				<MonitorView data={data} events={events} isConnected={isConnected} onRefresh={refresh} listConnections={listConnections} listTasks={listTasks} onRefetchReady={handleRefetchReady} />
 			</div>
 		</AppLayout>
 	);

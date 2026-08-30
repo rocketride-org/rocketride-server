@@ -16,7 +16,7 @@ interface DocumentsViewProps {
 
 /**
  * DocumentsView Component
- * 
+ *
  * Displays structured document objects (Doc type) from processed files.
  * Shows document content along with metadata like scores, chunks, and object IDs.
  */
@@ -67,9 +67,7 @@ export const DocumentsView: React.FC<DocumentsViewProps> = ({ documents, compare
 				{/* Document content */}
 				{doc.page_content && (
 					<div className="document-content">
-						<pre className="text-content">
-							{doc.page_content}
-						</pre>
+						<pre className="text-content">{doc.page_content}</pre>
 					</div>
 				)}
 
@@ -106,12 +104,8 @@ export const DocumentsView: React.FC<DocumentsViewProps> = ({ documents, compare
 							<div className="compare-grid">
 								{group.contents.map((block, contentIndex) => (
 									<div key={contentIndex} className="compare-column">
-										{block.fieldName && (
-											<div className="content-field-label">{block.fieldName}</div>
-										)}
-										<div className="content-item">
-											{renderDocument(block.content)}
-										</div>
+										{block.fieldName && <div className="content-field-label">{block.fieldName}</div>}
+										<div className="content-item">{renderDocument(block.content)}</div>
 									</div>
 								))}
 							</div>
@@ -120,12 +114,8 @@ export const DocumentsView: React.FC<DocumentsViewProps> = ({ documents, compare
 							group.contents.map((block, contentIndex) => (
 								<div key={contentIndex} className="content-item-wrapper">
 									{/* Show field name only when multiple content blocks exist */}
-									{group.contents.length > 1 && block.fieldName && (
-										<div className="content-field-label">{block.fieldName}</div>
-									)}
-									<div className="content-item">
-										{renderDocument(block.content)}
-									</div>
+									{group.contents.length > 1 && block.fieldName && <div className="content-field-label">{block.fieldName}</div>}
+									<div className="content-item">{renderDocument(block.content)}</div>
 								</div>
 							))
 						)}

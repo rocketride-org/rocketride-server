@@ -50,14 +50,7 @@ import { fileURLToPath } from 'node:url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, '..');
 const NODES_DIR = path.join(REPO_ROOT, 'nodes', 'src', 'nodes');
-const LEGACY_ICONS_DIR = path.join(
-	REPO_ROOT,
-	'apps',
-	'shared',
-	'src',
-	'assets',
-	'nodes',
-);
+const LEGACY_ICONS_DIR = path.join(REPO_ROOT, 'apps', 'shared', 'src', 'assets', 'nodes');
 const FALLBACK_ICON_REL = path.join('core', 'unknown.svg');
 
 const errors = [];
@@ -124,10 +117,7 @@ function collectIcons(node, into) {
 // Check 1: every service JSON's icon field resolves to a sibling SVG file
 // ---------------------------------------------------------------------------
 
-const serviceJsonFiles = await findFiles(
-	NODES_DIR,
-	(f) => /[\\/]services[^\\/]*\.json$/i.test(f),
-);
+const serviceJsonFiles = await findFiles(NODES_DIR, (f) => /[\\/]services[^\\/]*\.json$/i.test(f));
 
 /** Map<absolute icon file path, count of services referencing it> */
 const referencedIcons = new Map();
@@ -153,9 +143,7 @@ for (const jsonFile of serviceJsonFiles) {
 		// JSON (e.g. `"icon": "../../foo.svg"`) could resolve to a file
 		// outside the owning node directory and falsely pass the audit.
 		if (iconValue !== path.basename(iconValue)) {
-			warnings.push(
-				`invalid icon path: ${rel(jsonFile)} uses non-local icon "${iconValue}" (must be a basename, no separators or "..")`,
-			);
+			warnings.push(`invalid icon path: ${rel(jsonFile)} uses non-local icon "${iconValue}" (must be a basename, no separators or "..")`);
 			continue;
 		}
 
@@ -164,9 +152,7 @@ for (const jsonFile of serviceJsonFiles) {
 			// Warning, not an error: the <Icon> component falls back to
 			// the `unknown` icon at runtime when a name doesn't resolve.
 			// The build still succeeds; this just flags it for follow-up.
-			warnings.push(
-				`missing icon: ${rel(jsonFile)} references "${iconValue}" but ${rel(iconPath)} does not exist — will render the fallback icon`,
-			);
+			warnings.push(`missing icon: ${rel(jsonFile)} references "${iconValue}" but ${rel(iconPath)} does not exist — will render the fallback icon`);
 			continue;
 		}
 		referencedIcons.set(iconPath, (referencedIcons.get(iconPath) ?? 0) + 1);
@@ -190,9 +176,7 @@ for (const svg of allNodeSvgs) {
 	const relPath = path.relative(NODES_DIR, svg).split(path.sep).join('/');
 	if (relPath === FALLBACK_ICON_REL.split(path.sep).join('/')) continue;
 	if (path.dirname(svg) === CORE_DIR) continue;
-	errors.push(
-		`orphaned icon: ${rel(svg)} is not referenced by any service JSON in its directory`,
-	);
+	errors.push(`orphaned icon: ${rel(svg)} is not referenced by any service JSON in its directory`);
 }
 
 // ---------------------------------------------------------------------------
@@ -204,9 +188,7 @@ if (existsSync(LEGACY_ICONS_DIR)) {
 	// a subdirectory under the legacy location.
 	const legacy = await findFiles(LEGACY_ICONS_DIR, (f) => /\.svg$/i.test(f));
 	if (legacy.length > 0) {
-		errors.push(
-			`legacy icon dir still has ${legacy.length} SVG(s) at ${rel(LEGACY_ICONS_DIR)} — they should be moved to nodes/src/nodes/<node>/`,
-		);
+		errors.push(`legacy icon dir still has ${legacy.length} SVG(s) at ${rel(LEGACY_ICONS_DIR)} — they should be moved to nodes/src/nodes/<node>/`);
 	}
 }
 
@@ -228,9 +210,7 @@ for (const svg of allNodeSvgs) {
 for (const [base, hashMap] of byBasename) {
 	if (hashMap.size > 1) {
 		const copies = [...hashMap.values()].flat().map(rel);
-		warnings.push(
-			`divergent duplicates: "${base}" has ${hashMap.size} different versions:\n    ${copies.join('\n    ')}`,
-		);
+		warnings.push(`divergent duplicates: "${base}" has ${hashMap.size} different versions:\n    ${copies.join('\n    ')}`);
 	}
 }
 

@@ -30,8 +30,7 @@ const evt = (event: string, body: Record<string, unknown> = {}): TaskEventMessag
 	return { event, body: { eventTime: 1000 + seq, logSeq: seq, ...body } };
 };
 
-const flow = (op: string, pipe: number, extra: Record<string, unknown> = {}): TaskEventMessage =>
-	evt('apaevt_flow', { op, id: pipe, ...extra });
+const flow = (op: string, pipe: number, extra: Record<string, unknown> = {}): TaskEventMessage => evt('apaevt_flow', { op, id: pipe, ...extra });
 
 /** Collect everything a view delivers. */
 const collector = () => {
@@ -53,7 +52,7 @@ test('play delivers buffered events oldest first', async () => {
 
 	assert.deepEqual(
 		seen.map((m) => m.body.logSeq),
-		[a.body.logSeq, b.body.logSeq],
+		[a.body.logSeq, b.body.logSeq]
 	);
 });
 
@@ -122,7 +121,7 @@ test('numeric seek rewinds to the first event at or after the position', async (
 
 	assert.deepEqual(
 		seen.map((m) => m.body.logSeq),
-		[second.body.logSeq],
+		[second.body.logSeq]
 	);
 });
 
@@ -173,7 +172,7 @@ test('getTrace returns one request keyed by its begin seq', async () => {
 	const { events } = await session.getTrace(begin.body.logSeq);
 	assert.deepEqual(
 		events.map((m) => m.body.op),
-		['begin', 'enter', 'leave', 'end'],
+		['begin', 'enter', 'leave', 'end']
 	);
 });
 
@@ -187,7 +186,7 @@ test('getTrace ignores other pipe slots', async () => {
 	const { events } = await session.getTrace(begin.body.logSeq);
 	assert.deepEqual(
 		events.map((m) => m.body.id),
-		[1, 1],
+		[1, 1]
 	);
 });
 

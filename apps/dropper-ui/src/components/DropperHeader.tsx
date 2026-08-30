@@ -23,26 +23,26 @@ interface DropperHeaderProps {
 
 /**
  * DropperHeader - Header component for the RocketRide Dropper application
- * 
+ *
  * Displays the application branding, connection status, and action buttons.
  * The header remains fixed at the top of the application and provides
  * quick access to key actions.
- * 
+ *
  * Features:
  * - Application branding with upload icon avatar
  * - Real-time connection status indicator
  * - Theme selector (standalone mode only)
  * - Clear all button (trash icon) - disabled when no files present
  * - Settings button (placeholder for future functionality)
- * 
+ *
  * Visual Structure:
  * - Left side: Avatar icon + title + connection status
  * - Right side: Theme selector (if standalone) + action buttons (clear all, settings)
- * 
+ *
  * Theme Behavior:
  * - Standalone mode: Shows theme selector with available themes
  * - VSCode mode: Hides theme selector, uses VSCode's theme automatically
- * 
+ *
  * @component
  * @example
  * ```tsx
@@ -52,17 +52,13 @@ interface DropperHeaderProps {
  *   isConnected={true}
  * />
  * ```
- * 
+ *
  * @param props - Component props
  * @param props.hasFiles - Whether there are uploaded files
  * @param props.onClearAll - Callback to clear all files
  * @param props.isConnected - Whether connected to RocketRide
  */
-export const DropperHeader: React.FC<DropperHeaderProps> = ({
-	hasFiles,
-	onClearAll,
-	isConnected
-}) => {
+export const DropperHeader: React.FC<DropperHeaderProps> = ({ hasFiles, onClearAll, isConnected }) => {
 	// Get theme context for theme selection and mode detection
 	const { mode, currentTheme, setTheme, availableThemes } = useTheme();
 
@@ -79,9 +75,7 @@ export const DropperHeader: React.FC<DropperHeaderProps> = ({
 					{/* Application title and connection status */}
 					<div className="header-text">
 						<h1>RocketRide Dropper</h1>
-						<p>
-							{isConnected ? 'Connected' : 'Connecting...'}
-						</p>
+						<p>{isConnected ? 'Connected' : 'Connecting...'}</p>
 					</div>
 				</div>
 
@@ -91,14 +85,8 @@ export const DropperHeader: React.FC<DropperHeaderProps> = ({
 					{mode === 'standalone' && (
 						<div className="theme-selector">
 							<Palette className="w-4 h-4 theme-selector-icon" />
-							<select
-								value={currentTheme}
-								onChange={(e) => setTheme(e.target.value as ThemeName)}
-								className="theme-select"
-								title="Select theme"
-								aria-label="Select application theme"
-							>
-								{availableThemes.map(theme => (
+							<select value={currentTheme} onChange={(e) => setTheme(e.target.value as ThemeName)} className="theme-select" title="Select theme" aria-label="Select application theme">
+								{availableThemes.map((theme) => (
 									<option key={theme} value={theme}>
 										{theme.charAt(0).toUpperCase() + theme.slice(1)}
 									</option>
@@ -108,14 +96,7 @@ export const DropperHeader: React.FC<DropperHeaderProps> = ({
 					)}
 
 					{/* Clear all files button */}
-					<button
-						onClick={onClearAll}
-						className="header-btn"
-						title="Clear all files"
-						type="button"
-						disabled={!hasFiles}
-						aria-label="Clear all files"
-					>
+					<button onClick={onClearAll} className="header-btn" title="Clear all files" type="button" disabled={!hasFiles} aria-label="Clear all files">
 						<Trash2 className="w-5 h-5" />
 					</button>
 				</div>

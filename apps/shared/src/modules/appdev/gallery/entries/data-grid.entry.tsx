@@ -51,7 +51,7 @@ const columns: GridColumnDefinition[] = [
 <DataGrid title="Pipelines" columns={columns} remoteSort
 	fetchPage={({ page, size, sort, filters }) => client.listPipelines({ page, size, sort, filters })} />`,
 	props: [
-		{ name: 'columns', type: 'GridColumnDefinition[]', dir: 'in', required: true, note: "Tabulator column definitions plus rr extensions: rrDescription (required - header/toggle tooltip), rrType (filter control), rrDefault (default view), rrDefaultSort, rrGroup, rrNoPopup, rrOptions." },
+		{ name: 'columns', type: 'GridColumnDefinition[]', dir: 'in', required: true, note: 'Tabulator column definitions plus rr extensions: rrDescription (required - header/toggle tooltip), rrType (filter control), rrDefault (default view), rrDefaultSort, rrGroup, rrNoPopup, rrOptions.' },
 		{ name: 'data', type: 'Row[]', dir: 'in', note: 'Static mode - the full row set; the grid pages and sorts locally.' },
 		{ name: 'fetchPage', type: '(req: IDataGridPageRequest) => Promise<IDataGridPage<Row>>', dir: 'in', note: 'Server mode - called with page/size/sort/filters on every change; returns { rows, total }.' },
 		{ name: 'tableId', type: 'string', dir: 'in', note: 'Stable id keying layout persistence (required with persistence).' },

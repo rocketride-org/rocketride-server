@@ -103,39 +103,22 @@ export const KnobsPanel: React.FC<IKnobsPanelProps> = ({ knobs, values, onChange
 				// On/Off segmented control — matches the toolbar toggle idiom
 				return (
 					<ToggleGroup
-						options={[{ id: 'on', label: 'On' }, { id: 'off', label: 'Off' }]}
+						options={[
+							{ id: 'on', label: 'On' },
+							{ id: 'off', label: 'Off' },
+						]}
 						value={value ? 'on' : 'off'}
 						onChange={(id) => onChange(knob.id, id === 'on')}
 					/>
 				);
 			case 'select':
 				// One segment per option — knob selects stay small (2-5 options)
-				return (
-					<ToggleGroup
-						options={(knob.options ?? []).map((option) => ({ id: option, label: option }))}
-						value={String(value)}
-						onChange={(id) => onChange(knob.id, id)}
-					/>
-				);
+				return <ToggleGroup options={(knob.options ?? []).map((option) => ({ id: option, label: option }))} value={String(value)} onChange={(id) => onChange(knob.id, id)} />;
 			case 'number':
-				return (
-					<InputField
-						type="number"
-						style={styles.numberInput}
-						value={Number(value)}
-						onChange={(event) => onChange(knob.id, Number(event.target.value))}
-					/>
-				);
+				return <InputField type="number" style={styles.numberInput} value={Number(value)} onChange={(event) => onChange(knob.id, Number(event.target.value))} />;
 			case 'text':
 			default:
-				return (
-					<InputField
-						type="text"
-						style={styles.textInput}
-						value={String(value)}
-						onChange={(event) => onChange(knob.id, event.target.value)}
-					/>
-				);
+				return <InputField type="text" style={styles.textInput} value={String(value)} onChange={(event) => onChange(knob.id, event.target.value)} />;
 		}
 	};
 

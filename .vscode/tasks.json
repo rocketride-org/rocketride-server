@@ -5,9 +5,7 @@
 			"label": "build all",
 			"type": "shell",
 			"command": "./builder",
-			"args": [
-				"vscode:build"
-			],
+			"args": ["vscode:build"],
 			"options": {
 				"cwd": "${workspaceFolder}"
 			},

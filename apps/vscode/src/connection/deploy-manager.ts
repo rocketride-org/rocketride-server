@@ -214,7 +214,6 @@ export class DeployManager extends ConnectionManager {
 		return super.disconnect();
 	}
 
-
 	// =========================================================================
 	// INITIALIZATION — start forwarding or connect independently
 	// =========================================================================

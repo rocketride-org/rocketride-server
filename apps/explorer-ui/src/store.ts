@@ -78,12 +78,7 @@ function makeFileLoadError(err: unknown): FileLoadError {
  */
 export function isFileLoadError(value: unknown): value is FileLoadError {
 	// Narrow structurally without a cast: object -> has 'kind' -> tag matches.
-	return (
-		typeof value === 'object' &&
-		value !== null &&
-		'kind' in value &&
-		value.kind === 'file-load-error'
-	);
+	return typeof value === 'object' && value !== null && 'kind' in value && value.kind === 'file-load-error';
 }
 
 /**

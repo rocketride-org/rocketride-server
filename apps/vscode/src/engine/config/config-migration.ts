@@ -134,11 +134,19 @@ export function migrateLocalEngine(globalStorageEnginesDir: string): void {
 		const oldLock = path.join(globalStorageEnginesDir, 'install.lock');
 		const newLock = path.join(userDir, '.installing');
 		if (fs.existsSync(oldLock) && !fs.existsSync(newLock)) {
-			try { fs.renameSync(oldLock, newLock); } catch { /* cross-volume */ }
+			try {
+				fs.renameSync(oldLock, newLock);
+			} catch {
+				/* cross-volume */
+			}
 		}
 
 		// Clean up old directory
-		try { fs.rmSync(globalStorageEnginesDir, { recursive: true, force: true }); } catch { /* best effort */ }
+		try {
+			fs.rmSync(globalStorageEnginesDir, { recursive: true, force: true });
+		} catch {
+			/* best effort */
+		}
 
 		logger.output(`Local engine migration complete: ${pointer.tag}`);
 	} catch (err) {
@@ -193,7 +201,7 @@ export function migrateServiceConfig(): void {
 			if (fs.existsSync(oldEnginesDir) && !fs.existsSync(engineDir)) {
 				// Find the versioned dir (e.g., server-3.2.0--abc123)
 				const entries = fs.readdirSync(oldEnginesDir, { withFileTypes: true });
-				const versionDir = entries.find(e => e.isDirectory() && e.name.includes('--'));
+				const versionDir = entries.find((e) => e.isDirectory() && e.name.includes('--'));
 				if (versionDir) {
 					const sourceDir = path.join(oldEnginesDir, versionDir.name);
 					fs.mkdirSync(engineDir, { recursive: true });
@@ -208,7 +216,9 @@ export function migrateServiceConfig(): void {
 
 			// Keep old config.json around (don't delete) — the NSSM service
 			// still points to the old engines/ path until the user updates
-		} catch { /* corrupt, skip */ }
+		} catch {
+			/* corrupt, skip */
+		}
 	} catch (err) {
 		logger.output(`Service config migration failed (non-fatal): ${err}`);
 	}
@@ -243,7 +253,9 @@ function readLegacyPointer(enginesDir: string): LegacyPointer | null {
 					};
 				}
 			}
-		} catch { /* corrupt, skip */ }
+		} catch {
+			/* corrupt, skip */
+		}
 	}
 	return null;
 }

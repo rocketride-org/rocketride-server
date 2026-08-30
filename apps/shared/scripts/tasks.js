@@ -58,13 +58,13 @@ function makeTestAction() {
 				return;
 			}
 
-				// stub-css: no-op loader for stylesheet imports the shell barrel
-				// side-effect-pulls (Tabulator CSS) — node cannot execute CSS.
-				// stub-shell: runtime stand-in for the 'shell'/'rocketride'
-				// platform modules, which only exist inside a running shell.
-				// './' prefix required: a bare relative path in --require is
-				// resolved as a package name, not a file.
-				await execCommand('node', ['--require', './scripts/stub-css.cjs', '--require', './scripts/stub-shell.cjs', '--import', 'tsx', '--test', '--test-reporter=spec', ...testFiles], { task, cwd: APP_ROOT });
+			// stub-css: no-op loader for stylesheet imports the shell barrel
+			// side-effect-pulls (Tabulator CSS) — node cannot execute CSS.
+			// stub-shell: runtime stand-in for the 'shell'/'rocketride'
+			// platform modules, which only exist inside a running shell.
+			// './' prefix required: a bare relative path in --require is
+			// resolved as a package name, not a file.
+			await execCommand('node', ['--require', './scripts/stub-css.cjs', '--require', './scripts/stub-shell.cjs', '--import', 'tsx', '--test', '--test-reporter=spec', ...testFiles], { task, cwd: APP_ROOT });
 		},
 	};
 }

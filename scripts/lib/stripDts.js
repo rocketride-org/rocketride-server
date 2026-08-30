@@ -61,10 +61,7 @@ function stripNonPublicMembers(dtsText, ts) {
 	const isNonPublic = (member) => {
 		if (member.name && ts.isPrivateIdentifier(member.name)) return true;
 		const mods = ts.canHaveModifiers(member) ? ts.getModifiers(member) : undefined;
-		return (
-			!!mods &&
-			mods.some((m) => m.kind === ts.SyntaxKind.PrivateKeyword || m.kind === ts.SyntaxKind.ProtectedKeyword)
-		);
+		return !!mods && mods.some((m) => m.kind === ts.SyntaxKind.PrivateKeyword || m.kind === ts.SyntaxKind.ProtectedKeyword);
 	};
 
 	// Track whether anything was actually removed — only then do we reprint (a
@@ -76,14 +73,7 @@ function stripNonPublicMembers(dtsText, ts) {
 				const kept = node.members.filter((m) => !isNonPublic(m));
 				if (kept.length !== node.members.length) {
 					changed = true;
-					return ts.factory.updateClassDeclaration(
-						node,
-						node.modifiers,
-						node.name,
-						node.typeParameters,
-						node.heritageClauses,
-						kept,
-					);
+					return ts.factory.updateClassDeclaration(node, node.modifiers, node.name, node.typeParameters, node.heritageClauses, kept);
 				}
 				return node;
 			}
@@ -95,9 +85,7 @@ function stripNonPublicMembers(dtsText, ts) {
 	const result = ts.transform(sourceFile, [transformer]);
 	// Unchanged files keep their exact original bytes; changed files are
 	// reprinted (comments preserved) with the non-public members gone.
-	const out = changed
-		? ts.createPrinter({ removeComments: false, newLine: ts.NewLineKind.LineFeed }).printFile(result.transformed[0])
-		: dtsText;
+	const out = changed ? ts.createPrinter({ removeComments: false, newLine: ts.NewLineKind.LineFeed }).printFile(result.transformed[0]) : dtsText;
 	result.dispose();
 	return out;
 }

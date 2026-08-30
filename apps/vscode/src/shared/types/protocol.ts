@@ -23,11 +23,11 @@
 
 /**
  * types.ts - VS Code Debug Adapter Protocol (DAP) Type Definitions for RocketRide Extension
- * 
+ *
  * This module defines TypeScript interfaces that extend the standard VS Code Debug Adapter Protocol
  * to support RocketRide-specific debugging functionality. These types ensure type safety when communicating
  * between the VS Code client, debug adapter, and the external RocketRide debug server.
- * 
+ *
  * The Debug Adapter Protocol (DAP) is a standardized protocol for communication between development
  * tools and debuggers. This file extends the base DAP types with RocketRide-specific properties and data structures.
  */
@@ -36,7 +36,7 @@ import { DebugProtocol } from '@vscode/debugprotocol';
 
 //=====================================================================================
 // BASE GENERIC PROTOCOL TYPES
-// 
+//
 // These interfaces provide a flexible foundation for the Debug Adapter Protocol
 // communication. They define the basic structure for requests, responses, and events
 // while allowing for custom argument and body types.
@@ -48,7 +48,7 @@ import { DebugProtocol } from '@vscode/debugprotocol';
  * This serves as the foundation for more specific argument interfaces.
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any -- DAP protocol arguments are inherently open-ended
-export interface GenericArguments extends Record<string, any> { }
+export interface GenericArguments extends Record<string, any> {}
 
 /**
  * Generic body interface for protocol message responses and events.
@@ -56,7 +56,7 @@ export interface GenericArguments extends Record<string, any> { }
  * This serves as the foundation for more specific body interfaces.
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any -- DAP protocol bodies are inherently open-ended
-export interface GenericBody extends Record<string, any> { }
+export interface GenericBody extends Record<string, any> {}
 
 /**
  * Base structure for all Debug Adapter Protocol requests.
@@ -75,7 +75,7 @@ export interface GenericRequest {
 	token?: string;
 	apikey?: string;
 
-	/** 
+	/**
 	 * Sequence number for message ordering and correlation.
 	 * This is managed automatically by the Debug Adapter Protocol implementation.
 	 */
@@ -103,14 +103,13 @@ export interface GenericResponse {
 	token?: string;
 	apikey?: string;
 
-
 	/**
 	 * Sequence number for this response message.
 	 * This is managed automatically by the Debug Adapter Protocol implementation.
 	 */
 	seq?: number;
 
-	/** 
+	/**
 	 * Sequence number of the request message this response is answering.
 	 * This is managed automatically by the Debug Adapter Protocol implementation.
 	 */
@@ -134,7 +133,7 @@ export interface GenericEvent {
 	token?: string;
 	apikey?: string;
 
-	/** 
+	/**
 	 * Sequence number for this event message.
 	 * This is managed automatically by the Debug Adapter Protocol implementation.
 	 */
@@ -145,7 +144,7 @@ export type GenericMessage = GenericResponse | GenericEvent;
 
 //=====================================================================================
 // LAUNCH OPERATIONS
-// 
+//
 // Launch operations start a new debugging session by either starting a local engine
 // process or connecting to a remote debug server. These types define the configuration
 // and response data for launch requests.
@@ -153,7 +152,7 @@ export type GenericMessage = GenericResponse | GenericEvent;
 
 /**
  * Launch request arguments specific to the RocketRide debug adapter.
- * 
+ *
  * Extends the standard DAP LaunchRequestArguments with RocketRide-specific configuration
  * options for launching pipeline debugging sessions. Supports both local engine launching
  * and connection to remote debug servers.
@@ -199,12 +198,12 @@ export interface LaunchRequestArguments extends GenericArguments {
 
 /**
  * Complete launch request message for RocketRide debugging sessions.
- * 
+ *
  * Combines the standard DAP LaunchRequest structure with RocketRide-specific
  * launch arguments. Used when VS Code initiates a new debug session.
  */
 export interface LaunchRequest extends GenericRequest {
-	/** 
+	/**
 	 * Command identifier for launch requests.
 	 * This distinguishes launch requests from other types of debug adapter requests.
 	 */
@@ -219,7 +218,7 @@ export interface LaunchRequest extends GenericRequest {
 
 /**
  * Complete launch response message from the RocketRide debug server.
- * 
+ *
  * Returned by the debug server after processing a launch request,
  * containing either success information or error details.
  */
@@ -233,7 +232,7 @@ export interface LaunchResponse extends GenericResponse {
 		 * The unique task identifier assigned to the launched pipeline.
 		 * This token is used for all subsequent communication with the debug server
 		 * to identify which pipeline session the messages refer to.
-		 * 
+		 *
 		 * May be undefined if the launch failed or if connecting to an existing session
 		 * that doesn't provide a new token.
 		 */
@@ -243,7 +242,7 @@ export interface LaunchResponse extends GenericResponse {
 
 //=====================================================================================
 // ATTACH OPERATIONS
-// 
+//
 // Attach operations connect to an existing debugging session using a token.
 // This allows developers to reconnect to pipelines that are already running
 // or to share debugging sessions between multiple clients.
@@ -267,13 +266,13 @@ export interface AttachRequestArguments extends GenericArguments {
 
 /**
  * Complete attach request message for RocketRide debugging sessions.
- * 
+ *
  * Combines the standard DAP AttachRequest structure with RocketRide-specific
  * attach arguments. Used when VS Code connects to an existing debug session
  * rather than starting a new one.
  */
 export interface AttachRequest extends GenericRequest {
-	/** 
+	/**
 	 * Command identifier for attach requests.
 	 * This distinguishes attach requests from other types of debug adapter requests.
 	 */
@@ -307,12 +306,12 @@ export interface AttachResponse extends GenericResponse {
 		 * visualization and interaction.
 		 */
 		pipeline: Record<string, unknown>;
-	}
+	};
 }
 
 //=====================================================================================
 // BREAKPOINT OPERATIONS
-// 
+//
 // Breakpoint operations allow setting, removing, and managing breakpoints in
 // pipeline files. RocketRide's breakpoint model supports both component-level
 // and connection-level breakpoints with semantic naming.
@@ -320,7 +319,7 @@ export interface AttachResponse extends GenericResponse {
 
 /**
  * Extended breakpoint definition for pipeline-specific breakpoints.
- * 
+ *
  * Adds semantic naming to standard DAP source breakpoints to support
  * RocketRide's pipeline debugging model where breakpoints can be set on
  * specific components or data flow connections within the pipeline.
@@ -335,19 +334,19 @@ export interface SetBreakpointsBreakpoint extends DebugProtocol.SourceBreakpoint
 
 	/**
 	 * Semantic name for the breakpoint location within the pipeline.
-	 * 
+	 *
 	 * This name provides semantic meaning to the breakpoint location beyond just
 	 * the line number, allowing the debug server to understand the pipeline context.
-	 * 
+	 *
 	 * **Format patterns:**
 	 * - Component breakpoints: `"componentId::*::*"`
 	 * - Connection breakpoints: `"sourceComponent::lane::targetComponent"`
 	 * - Invalid/unresolved locations: `""` (empty string)
-	 * 
+	 *
 	 * **Examples:**
 	 * - `"fileSource::*::*"` - Break when the fileSource component executes
 	 * - `"transformer::output::destination"` - Break on data flowing from transformer's output lane to destination
-	 * 
+	 *
 	 * This name is used by the debug server to understand where in the
 	 * pipeline execution flow the breakpoint should trigger.
 	 */
@@ -356,7 +355,7 @@ export interface SetBreakpointsBreakpoint extends DebugProtocol.SourceBreakpoint
 
 /**
  * Arguments for setting breakpoints in RocketRide pipeline files.
- * 
+ *
  * Extends the standard DAP setBreakpoints arguments with RocketRide-specific
  * breakpoint information and pipeline context. Supports setting breakpoints
  * across multiple related pipelines.
@@ -365,7 +364,7 @@ export interface SetBreakpointsArguments extends DebugProtocol.SetBreakpointsArg
 	/**
 	 * Array of breakpoints to set, with RocketRide-specific semantic names.
 	 * Each breakpoint includes line number and semantic pipeline location information.
-	 * 
+	 *
 	 * If undefined or empty, all existing breakpoints for the specified source will be cleared.
 	 * This follows the standard DAP behavior where setBreakpoints replaces all breakpoints
 	 * for a given source file.
@@ -374,14 +373,14 @@ export interface SetBreakpointsArguments extends DebugProtocol.SetBreakpointsArg
 
 	/**
 	 * Array of pipeline names/identifiers that these breakpoints apply to.
-	 * 
+	 *
 	 * This allows setting breakpoints across multiple related pipeline files
 	 * or specifying which specific pipelines should respect these breakpoints.
 	 * Useful in scenarios where:
 	 * - A single pipeline file contains multiple pipeline definitions
 	 * - Breakpoints should only apply to specific pipeline variants
 	 * - Cross-pipeline debugging scenarios with shared components
-	 * 
+	 *
 	 * If undefined or empty, breakpoints apply to all pipelines in the source file.
 	 */
 	pipelines?: string[];
@@ -389,13 +388,13 @@ export interface SetBreakpointsArguments extends DebugProtocol.SetBreakpointsArg
 
 /**
  * Complete setBreakpoints request for RocketRide pipeline debugging.
- * 
+ *
  * Used when VS Code sends breakpoint configuration to the debug adapter,
  * typically when users add, remove, or modify breakpoints in pipeline files
  * through the VS Code editor interface.
  */
 export interface SetBreakpointsRequest extends GenericRequest {
-	/** 
+	/**
 	 * Command identifier for setBreakpoints requests.
 	 * This distinguishes breakpoint requests from other types of debug adapter requests.
 	 */
@@ -411,7 +410,7 @@ export interface SetBreakpointsRequest extends GenericRequest {
 
 //=====================================================================================
 // UNION TYPES FOR PROTOCOL MESSAGE DISCRIMINATION
-// 
+//
 // These union types provide type-safe discrimination for handling different
 // message types in the debug adapter protocol implementation.
 //=====================================================================================
@@ -419,26 +418,18 @@ export interface SetBreakpointsRequest extends GenericRequest {
 /**
  * Union type of all supported request message types.
  * Used for type-safe handling of incoming requests in the debug adapter.
- * 
+ *
  * This discriminated union allows TypeScript to provide proper type checking
  * and autocompletion when processing different types of requests.
  */
-export type Request =
-	| GenericArguments
-	| LaunchRequest
-	| AttachRequest
-	| SetBreakpointsRequest;
+export type Request = GenericArguments | LaunchRequest | AttachRequest | SetBreakpointsRequest;
 
 /**
  * Union type of all supported response message types.
  * Used for type-safe handling of outgoing responses from the debug adapter.
- * 
+ *
  * This discriminated union allows TypeScript to provide proper type checking
  * when sending responses back to VS Code. Note that some responses use
  * the standard DAP types directly when no RocketRide-specific extensions are needed.
  */
-export type Response =
-	| GenericResponse
-	| LaunchResponse
-	| AttachResponse
-	| DebugProtocol.SetBreakpointsResponse;
+export type Response = GenericResponse | LaunchResponse | AttachResponse | DebugProtocol.SetBreakpointsResponse;

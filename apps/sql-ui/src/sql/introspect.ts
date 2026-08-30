@@ -78,35 +78,24 @@ export async function fetchForeignKeyNames(session: ISqlSession, dialect: SqlDia
 	let sql: string;
 	if (dialect === 'mysql') {
 		// KEY_COLUMN_USAGE carries the referencing rows; scope to this schema.
-		sql =
-			'SELECT CONSTRAINT_NAME AS name, COLUMN_NAME AS col, REFERENCED_TABLE_NAME AS ref ' +
-			'FROM information_schema.KEY_COLUMN_USAGE ' +
-			`WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ${quoteLiteral(table)} AND REFERENCED_TABLE_NAME IS NOT NULL`;
+		sql = 'SELECT CONSTRAINT_NAME AS name, COLUMN_NAME AS col, REFERENCED_TABLE_NAME AS ref ' + 'FROM information_schema.KEY_COLUMN_USAGE ' + `WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ${quoteLiteral(table)} AND REFERENCED_TABLE_NAME IS NOT NULL`;
 	} else if (dialect === 'postgres') {
 		// Constraint names are only unique PER SCHEMA in Postgres, so every
 		// join carries constraint_schema. The referenced side pairs through
 		// referential_constraints to the unique constraint's key columns via
 		// position_in_unique_constraint = ordinal_position, so composite keys
 		// map each referencing column to ITS referenced column (no cross join).
-		sql =
-			'SELECT tc.constraint_name AS name, kcu.column_name AS col, ref_kcu.table_name AS ref ' +
-			'FROM information_schema.table_constraints tc ' +
-			'JOIN information_schema.key_column_usage kcu ' +
-			'ON kcu.constraint_schema = tc.constraint_schema AND kcu.constraint_name = tc.constraint_name ' +
-			'JOIN information_schema.referential_constraints rc ' +
-			'ON rc.constraint_schema = tc.constraint_schema AND rc.constraint_name = tc.constraint_name ' +
-			'JOIN information_schema.key_column_usage ref_kcu ' +
-			'ON ref_kcu.constraint_schema = rc.unique_constraint_schema AND ref_kcu.constraint_name = rc.unique_constraint_name ' +
-			'AND ref_kcu.ordinal_position = kcu.position_in_unique_constraint ' +
-			`WHERE tc.constraint_type = 'FOREIGN KEY' AND tc.table_name = ${quoteLiteral(table)} AND tc.table_schema = current_schema()`;
+		sql = 'SELECT tc.constraint_name AS name, kcu.column_name AS col, ref_kcu.table_name AS ref ' + 'FROM information_schema.table_constraints tc ' + 'JOIN information_schema.key_column_usage kcu ' + 'ON kcu.constraint_schema = tc.constraint_schema AND kcu.constraint_name = tc.constraint_name ' + 'JOIN information_schema.referential_constraints rc ' + 'ON rc.constraint_schema = tc.constraint_schema AND rc.constraint_name = tc.constraint_name ' + 'JOIN information_schema.key_column_usage ref_kcu ' + 'ON ref_kcu.constraint_schema = rc.unique_constraint_schema AND ref_kcu.constraint_name = rc.unique_constraint_name ' + 'AND ref_kcu.ordinal_position = kcu.position_in_unique_constraint ' + `WHERE tc.constraint_type = 'FOREIGN KEY' AND tc.table_name = ${quoteLiteral(table)} AND tc.table_schema = current_schema()`;
 	} else {
 		return [];
 	}
 
 	const result = await session.execute(sql);
-	return result.rows.map((row) => ({
-		name: String((row as { name?: unknown }).name ?? ''),
-		column: String((row as { col?: unknown }).col ?? ''),
-		referredTable: String((row as { ref?: unknown }).ref ?? ''),
-	})).filter((fk) => fk.name.length > 0);
+	return result.rows
+		.map((row) => ({
+			name: String((row as { name?: unknown }).name ?? ''),
+			column: String((row as { col?: unknown }).col ?? ''),
+			referredTable: String((row as { ref?: unknown }).ref ?? ''),
+		}))
+		.filter((fk) => fk.name.length > 0);
 }

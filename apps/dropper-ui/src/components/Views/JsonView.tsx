@@ -19,11 +19,11 @@ interface JsonViewProps {
 
 /**
  * JsonView Component
- * 
+ *
  * Displays the raw JSON results from file processing in an interactive viewer.
  * Provides syntax highlighting, collapsible sections, and clipboard copy functionality.
  * Includes a download button to save the JSON data as a file.
- * 
+ *
  * Features:
  * - Syntax-highlighted JSON display with theme-aware colors
  * - Collapsible tree structure for nested data
@@ -31,11 +31,11 @@ interface JsonViewProps {
  * - Download button to export JSON as a file
  * - Configurable inspection depth for initial render
  * - Adapts to current theme (standalone or VSCode)
- * 
+ *
  * Theme Behavior:
  * - Standalone mode: Uses dark theme for all themes except "corporate"
  * - VSCode mode: Automatically uses VSCode's current theme
- * 
+ *
  * @param props - Component props
  * @returns React component displaying JSON content
  */
@@ -78,13 +78,7 @@ export const JsonView: React.FC<JsonViewProps> = ({ rawJson }) => {
 
 				{/* Interactive JSON viewer with syntax highlighting */}
 				<div>
-					<JsonViewer
-						value={rawJson}
-						theme={isDarkTheme ? "dark" : "light"}
-						displayDataTypes={false}
-						enableClipboard={true}
-						defaultInspectDepth={2}
-					/>
+					<JsonViewer value={rawJson} theme={isDarkTheme ? 'dark' : 'light'} displayDataTypes={false} enableClipboard={true} defaultInspectDepth={2} />
 				</div>
 			</div>
 		</div>

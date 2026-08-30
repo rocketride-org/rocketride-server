@@ -52,23 +52,23 @@ const SqlSidebar: React.FC = () => {
 	// The connection document currently focused in the client area.
 	const activeKey = useActiveConnection();
 	const snapshot = useSchema(activeKey);
-	const activeEndpoint = useMemo(
-		() => endpoints.find((e) => e.key === activeKey) ?? null,
-		[endpoints, activeKey],
-	);
+	const activeEndpoint = useMemo(() => endpoints.find((e) => e.key === activeKey) ?? null, [endpoints, activeKey]);
 
 	// ── Navigation menu ──────────────────────────────────────────────────────
 	// One entry today; count reflects live discovery (hidden while 0).
-	const menu: ViewMenu = useMemo(() => ({
-		entries: [
-			{
-				id: 'connections',
-				label: 'Connections',
-				icon: <DatabaseIcon />,
-				...(endpoints.length > 0 ? { count: endpoints.length } : {}),
-			},
-		],
-	}), [endpoints.length]);
+	const menu: ViewMenu = useMemo(
+		() => ({
+			entries: [
+				{
+					id: 'connections',
+					label: 'Connections',
+					icon: <DatabaseIcon />,
+					...(endpoints.length > 0 ? { count: endpoints.length } : {}),
+				},
+			],
+		}),
+		[endpoints.length]
+	);
 
 	// ── Schema tree entries ──────────────────────────────────────────────────
 	// Tables as file entries; each table's columns as its children, with the
@@ -88,12 +88,7 @@ const SqlSidebar: React.FC = () => {
 
 	return (
 		<>
-			<SidebarMenu
-				menu={menu}
-				activeId={activeKey ? '' : 'connections'}
-				onSelect={() => getDocs()?.openStaticDocument(CONNECTIONS_URI, 'Connections')}
-				sectionLabel="SQL Explorer"
-			/>
+			<SidebarMenu menu={menu} activeId={activeKey ? '' : 'connections'} onSelect={() => getDocs()?.openStaticDocument(CONNECTIONS_URI, 'Connections')} sectionLabel="SQL Explorer" />
 
 			{/* Schema tree for the active connection document. */}
 			{activeKey && activeEndpoint && snapshot.status === 'ready' && (
@@ -108,7 +103,9 @@ const SqlSidebar: React.FC = () => {
 					entries={entries}
 					isConnected={isConnected}
 					onOpenFile={(path) => requestTableRecord(activeKey, path)}
-					onRefresh={() => { if (client) void refreshSchema(client, activeEndpoint); }}
+					onRefresh={() => {
+						if (client) void refreshSchema(client, activeEndpoint);
+					}}
 				/>
 			)}
 		</>

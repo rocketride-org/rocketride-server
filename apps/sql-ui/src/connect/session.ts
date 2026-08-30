@@ -31,14 +31,7 @@
 // =============================================================================
 
 import type { RocketRideClient } from 'shell';
-import type {
-	ISqlEndpoint,
-	ISqlExecuteResult,
-	ISqlProbeResult,
-	ISqlSchemaResponse,
-	ISqlSession,
-	SqlDialect,
-} from './types';
+import type { ISqlEndpoint, ISqlExecuteResult, ISqlProbeResult, ISqlSchemaResponse, ISqlSession, SqlDialect } from './types';
 
 // =============================================================================
 // DIALECT MAPPING

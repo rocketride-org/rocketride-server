@@ -20,10 +20,10 @@ interface MarkdownRendererProps {
 
 /**
  * MarkdownRenderer - Advanced markdown parser with syntax highlighting
- * 
+ *
  * Renders markdown content with GitHub Flavored Markdown (GFM) support and
  * custom styling. This component provides a rich text display experience with:
- * 
+ *
  * Features:
  * - GitHub Flavored Markdown (tables, strikethrough, task lists, etc.)
  * - Syntax-highlighted code blocks using Prism
@@ -32,37 +32,37 @@ interface MarkdownRendererProps {
  * - Styled blockquotes and lists
  * - Inline code highlighting
  * - Safe rendering (escapes potentially dangerous HTML)
- * 
+ *
  * Code Block Support:
  * - Detects language from code fence (```language)
  * - Applies syntax highlighting for 100+ languages
  * - Uses oneDark theme for consistent appearance
  * - Inline code uses simple background styling
- * 
+ *
  * Security:
  * - External links open in new tab with rel="noopener noreferrer"
  * - Does not render raw HTML to prevent XSS and invalid tag errors
  * - All content is escaped by default
- * 
+ *
  * Styling:
  * - Custom CSS classes applied via markdown-* prefixes
  * - Integrates with application's design system
  * - Responsive tables with horizontal scroll wrapper
- * 
+ *
  * @component
  * @example
  * ```tsx
  * <MarkdownRenderer content={`
  * # Hello World
- * 
+ *
  * Here's some **bold** text and a [link](https://example.com).
- * 
+ *
  * \`\`\`javascript
  * console.log('Syntax highlighted!');
  * \`\`\`
  * `} />
  * ```
- * 
+ *
  * @param props - Component props
  * @param props.content - Markdown string to render
  */
@@ -94,7 +94,7 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content }) =
 							customStyle={{
 								margin: 0,
 								borderRadius: '6px',
-								fontSize: 'var(--vscode-editor-font-size, 13px)'
+								fontSize: 'var(--vscode-editor-font-size, 13px)',
 							}}
 						>
 							{codeContent}
@@ -114,9 +114,7 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content }) =
 				table: (props) => {
 					return (
 						<div className="table-wrapper">
-							<table className="markdown-table">
-								{props.children}
-							</table>
+							<table className="markdown-table">{props.children}</table>
 						</div>
 					);
 				},
@@ -127,12 +125,7 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content }) =
 				 */
 				a: (props) => {
 					return (
-						<a
-							href={props.href}
-							target="_blank"
-							rel="noopener noreferrer"
-							className="markdown-link"
-						>
+						<a href={props.href} target="_blank" rel="noopener noreferrer" className="markdown-link">
 							{props.children}
 						</a>
 					);
@@ -142,11 +135,7 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content }) =
 				 * Blockquote renderer with custom styling
 				 */
 				blockquote: (props) => {
-					return (
-						<blockquote className="markdown-blockquote">
-							{props.children}
-						</blockquote>
-					);
+					return <blockquote className="markdown-blockquote">{props.children}</blockquote>;
 				},
 
 				/**
@@ -161,7 +150,7 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content }) =
 				 */
 				ol: (props) => {
 					return <ol className="markdown-list">{props.children}</ol>;
-				}
+				},
 			}}
 		>
 			{content}

@@ -16,7 +16,7 @@ interface QuestionsViewProps {
 
 /**
  * QuestionsView Component
- * 
+ *
  * Displays Question objects in a structured, compact format.
  * Long strings are truncated with tooltips showing full content.
  */
@@ -65,12 +65,8 @@ export const QuestionsView: React.FC<QuestionsViewProps> = ({ questions, compare
 						<span>Question Object</span>
 					</div>
 					<div className="question-meta-badges">
-						{questionObj.type && (
-							<span className="meta-badge">Type: {questionObj.type}</span>
-						)}
-						{questionObj.expectJson !== undefined && (
-							<span className="meta-badge">JSON: {questionObj.expectJson ? 'Yes' : 'No'}</span>
-						)}
+						{questionObj.type && <span className="meta-badge">Type: {questionObj.type}</span>}
+						{questionObj.expectJson !== undefined && <span className="meta-badge">JSON: {questionObj.expectJson ? 'Yes' : 'No'}</span>}
 					</div>
 				</div>
 
@@ -92,9 +88,7 @@ export const QuestionsView: React.FC<QuestionsViewProps> = ({ questions, compare
 								return (
 									<div key={idx} className="field-item">
 										<span className="item-number">{idx + 1}.</span>
-										<span className="item-content">
-											{renderTruncatedText(questionText)}
-										</span>
+										<span className="item-content">{renderTruncatedText(questionText)}</span>
 									</div>
 								);
 							})}
@@ -111,12 +105,8 @@ export const QuestionsView: React.FC<QuestionsViewProps> = ({ questions, compare
 								<div key={idx} className="field-item">
 									<span className="item-number">{idx + 1}.</span>
 									<div className="item-content">
-										{inst.subtitle && (
-											<div className="item-subtitle">{inst.subtitle}</div>
-										)}
-										<div className="item-text">
-											{renderTruncatedText(inst.instructions)}
-										</div>
+										{inst.subtitle && <div className="item-subtitle">{inst.subtitle}</div>}
+										<div className="item-text">{renderTruncatedText(inst.instructions)}</div>
 									</div>
 								</div>
 							))}
@@ -132,9 +122,7 @@ export const QuestionsView: React.FC<QuestionsViewProps> = ({ questions, compare
 							{questionObj.context.map((ctx: string, idx: number) => (
 								<div key={idx} className="field-item">
 									<span className="item-number">{idx + 1}.</span>
-									<span className="item-content">
-										{renderTruncatedText(ctx)}
-									</span>
+									<span className="item-content">{renderTruncatedText(ctx)}</span>
 								</div>
 							))}
 						</div>
@@ -193,9 +181,7 @@ export const QuestionsView: React.FC<QuestionsViewProps> = ({ questions, compare
 								return (
 									<div key={idx} className="field-item">
 										<span className="item-number">{idx + 1}.</span>
-										<span className="item-content">
-											{renderTruncatedText(docText)}
-										</span>
+										<span className="item-content">{renderTruncatedText(docText)}</span>
 									</div>
 								);
 							})}
@@ -208,9 +194,7 @@ export const QuestionsView: React.FC<QuestionsViewProps> = ({ questions, compare
 					<div className="question-field">
 						<div className="field-label">Filter:</div>
 						<div className="field-value">
-							<code className="filter-preview">
-								{renderTruncatedText(JSON.stringify(questionObj.filter, null, 2), 128)}
-							</code>
+							<code className="filter-preview">{renderTruncatedText(JSON.stringify(questionObj.filter, null, 2), 128)}</code>
 						</div>
 					</div>
 				)}
@@ -234,24 +218,16 @@ export const QuestionsView: React.FC<QuestionsViewProps> = ({ questions, compare
 							<div className="compare-grid">
 								{group.contents.map((block, contentIndex) => (
 									<div key={contentIndex} className="compare-column">
-										{block.fieldName && (
-											<div className="content-field-label">{block.fieldName}</div>
-										)}
-										<div className="content-item">
-											{renderQuestion(block.content)}
-										</div>
+										{block.fieldName && <div className="content-field-label">{block.fieldName}</div>}
+										<div className="content-item">{renderQuestion(block.content)}</div>
 									</div>
 								))}
 							</div>
 						) : (
 							group.contents.map((block, contentIndex) => (
 								<div key={contentIndex} className="content-item-wrapper">
-									{group.contents.length > 1 && block.fieldName && (
-										<div className="content-field-label">{block.fieldName}</div>
-									)}
-									<div className="content-item">
-										{renderQuestion(block.content)}
-									</div>
+									{group.contents.length > 1 && block.fieldName && <div className="content-field-label">{block.fieldName}</div>}
+									<div className="content-item">{renderQuestion(block.content)}</div>
 								</div>
 							))
 						)}

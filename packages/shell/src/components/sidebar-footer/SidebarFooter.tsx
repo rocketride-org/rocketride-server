@@ -43,12 +43,8 @@ import type { IconComponent } from '../BoxIcon';
 
 /** Custom component overrides for announcement markdown — compact sizing. */
 const annMarkdownComponents = {
-	img: (props: React.ImgHTMLAttributes<HTMLImageElement>) => (
-		<img {...props} style={{ maxWidth: 12, maxHeight: 12, display: 'inline-block', verticalAlign: 'middle' }} />
-	),
-	p: (props: React.HTMLAttributes<HTMLParagraphElement>) => (
-		<span {...props} style={{ display: 'block', margin: 0, fontSize: 10 }} />
-	),
+	img: (props: React.ImgHTMLAttributes<HTMLImageElement>) => <img {...props} style={{ maxWidth: 12, maxHeight: 12, display: 'inline-block', verticalAlign: 'middle' }} />,
+	p: (props: React.HTMLAttributes<HTMLParagraphElement>) => <span {...props} style={{ display: 'block', margin: 0, fontSize: 10 }} />,
 };
 
 // =============================================================================
@@ -58,8 +54,8 @@ const annMarkdownComponents = {
 /** RocketRide rocket mark (icon only, no logotype). */
 const RocketRideMark: React.FC<{ size?: number }> = ({ size = 16 }) => (
 	<svg width={size} height={size} viewBox="0 0 211 211" fill="none" xmlns="http://www.w3.org/2000/svg">
-		<path d="M159.501 180.6L153.701 186.4C151.901 188.2 148.901 188.2 147.001 186.4L126.601 166C115.601 155 115.601 137.2 126.601 126.2C138.101 114.7 138.101 96.1 126.601 84.6L125.101 83.1C113.601 71.6 95.0006 71.6 83.5006 83.1C72.5006 94.1 54.6006 94.1 43.6006 83.1L23.2006 62.7C21.4006 60.9 21.4006 57.9 23.2006 56L29.0006 50.2C37.0006 42.2 49.1006 39.7 59.6006 44.1L87.5006 55.5C97.3006 59.3 108.401 57.2 116.301 50.3L137.001 29.6C138.601 28.1 140.401 26.6 142.501 25.4C146.201 23.3 150.301 22.2 154.501 21.8L185.401 19.2C188.301 18.9 190.801 21.4 190.501 24.3L187.801 55.6C187.301 62 184.501 68 180.101 72.7L160.501 92.3C152.501 100.4 150.101 112.5 154.501 123L155.501 125.4L161.201 139.2L165.601 150.1C169.901 160.6 167.501 172.7 159.501 180.7V180.6Z" fill="currentColor"/>
-		<path d="M0.800333 209.5C-0.199667 208.5 -0.299667 206.8 0.600333 205.6L21.1003 181.2C31.1003 169.2 37.9003 156.9 41.3003 144.5C43.6003 135.8 44.6003 127.7 44.1003 120.4C44.1003 119.5 44.4003 118.6 45.1003 118C45.8003 117.4 46.8003 117.1 47.7003 117.3C65.0003 120.8 83.5003 117.5 98.5003 108.1C99.6003 107.4 101.1 107.6 102 108.5C102.9 109.4 103.1 110.9 102.4 112C93.0003 127 89.7003 145.5 93.2003 162.7C93.4003 163.5 93.2003 164.4 92.6003 165.1C92.0003 165.8 91.0003 166.4 90.1003 166.3C82.8003 165.8 74.6003 166.7 66.0003 169.1C53.6003 172.4 41.2003 179.2 29.3003 189.3L4.90033 209.8C3.80033 210.7 2.10033 210.7 1.00033 209.6H0.800333V209.5Z" fill="#F93822"/>
+		<path d="M159.501 180.6L153.701 186.4C151.901 188.2 148.901 188.2 147.001 186.4L126.601 166C115.601 155 115.601 137.2 126.601 126.2C138.101 114.7 138.101 96.1 126.601 84.6L125.101 83.1C113.601 71.6 95.0006 71.6 83.5006 83.1C72.5006 94.1 54.6006 94.1 43.6006 83.1L23.2006 62.7C21.4006 60.9 21.4006 57.9 23.2006 56L29.0006 50.2C37.0006 42.2 49.1006 39.7 59.6006 44.1L87.5006 55.5C97.3006 59.3 108.401 57.2 116.301 50.3L137.001 29.6C138.601 28.1 140.401 26.6 142.501 25.4C146.201 23.3 150.301 22.2 154.501 21.8L185.401 19.2C188.301 18.9 190.801 21.4 190.501 24.3L187.801 55.6C187.301 62 184.501 68 180.101 72.7L160.501 92.3C152.501 100.4 150.101 112.5 154.501 123L155.501 125.4L161.201 139.2L165.601 150.1C169.901 160.6 167.501 172.7 159.501 180.7V180.6Z" fill="currentColor" />
+		<path d="M0.800333 209.5C-0.199667 208.5 -0.299667 206.8 0.600333 205.6L21.1003 181.2C31.1003 169.2 37.9003 156.9 41.3003 144.5C43.6003 135.8 44.6003 127.7 44.1003 120.4C44.1003 119.5 44.4003 118.6 45.1003 118C45.8003 117.4 46.8003 117.1 47.7003 117.3C65.0003 120.8 83.5003 117.5 98.5003 108.1C99.6003 107.4 101.1 107.6 102 108.5C102.9 109.4 103.1 110.9 102.4 112C93.0003 127 89.7003 145.5 93.2003 162.7C93.4003 163.5 93.2003 164.4 92.6003 165.1C92.0003 165.8 91.0003 166.4 90.1003 166.3C82.8003 165.8 74.6003 166.7 66.0003 169.1C53.6003 172.4 41.2003 179.2 29.3003 189.3L4.90033 209.8C3.80033 210.7 2.10033 210.7 1.00033 209.6H0.800333V209.5Z" fill="#F93822" />
 	</svg>
 );
 
@@ -344,35 +340,71 @@ export const SidebarFooter: React.FC<SidebarFooterProps> = ({ collapsed, userNam
 	return (
 		<div style={S.wrapper}>
 			{/* ── Announcements ticker (popup mode) ────────────────────── */}
-			{!collapsed && announcements.length > 0 && (() => {
-				const current = announcements[tickerIndex % announcements.length];
-				return (
-					<>
-						<div style={S.fullDivider} />
-						<div style={{ padding: '10px 12px', overflow: 'hidden' }}>
-							<div style={{ opacity: tickerFade ? 1 : 0, transition: 'opacity 300ms ease' }}>
-								<div style={{ fontSize: 13, fontWeight: 600, color: 'var(--rr-text-primary)', marginBottom: 4 }}>
-									<ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeSanitize]} components={annMarkdownComponents}>{current.title}</ReactMarkdown>
-								</div>
-								<div style={{ fontSize: 12, color: 'var(--rr-text-secondary)', lineHeight: 1.4, marginBottom: 6 }}>
-									<ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeSanitize]} components={annMarkdownComponents}>{current.body}</ReactMarkdown>
-								</div>
-								<div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-									{current.link && /^https?:\/\//i.test(current.link) ? (
-										<a href={current.link} target="_blank" rel="noopener noreferrer" style={{ fontSize: 11, color: 'var(--rr-brand)', textDecoration: 'none', cursor: 'pointer' }}>Learn more &rarr;</a>
-									) : <span />}
-									{announcements.length > 1 && (
-										<div style={{ display: 'flex', gap: 2 }}>
-											<button type="button" aria-label="Previous announcement" onClick={() => { setTickerFade(false); setTimeout(() => { setTickerIndex((i) => (i - 1 + announcements.length) % announcements.length); setTickerFade(true); }, 150); }} style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', fontSize: 11, color: 'var(--rr-text-secondary)', lineHeight: 1 }}>&lsaquo;</button>
-											<button type="button" aria-label="Next announcement" onClick={() => { setTickerFade(false); setTimeout(() => { setTickerIndex((i) => (i + 1) % announcements.length); setTickerFade(true); }, 150); }} style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', fontSize: 11, color: 'var(--rr-text-secondary)', lineHeight: 1 }}>&rsaquo;</button>
-										</div>
-									)}
+			{!collapsed &&
+				announcements.length > 0 &&
+				(() => {
+					const current = announcements[tickerIndex % announcements.length];
+					return (
+						<>
+							<div style={S.fullDivider} />
+							<div style={{ padding: '10px 12px', overflow: 'hidden' }}>
+								<div style={{ opacity: tickerFade ? 1 : 0, transition: 'opacity 300ms ease' }}>
+									<div style={{ fontSize: 13, fontWeight: 600, color: 'var(--rr-text-primary)', marginBottom: 4 }}>
+										<ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeSanitize]} components={annMarkdownComponents}>
+											{current.title}
+										</ReactMarkdown>
+									</div>
+									<div style={{ fontSize: 12, color: 'var(--rr-text-secondary)', lineHeight: 1.4, marginBottom: 6 }}>
+										<ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeSanitize]} components={annMarkdownComponents}>
+											{current.body}
+										</ReactMarkdown>
+									</div>
+									<div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+										{current.link && /^https?:\/\//i.test(current.link) ? (
+											<a href={current.link} target="_blank" rel="noopener noreferrer" style={{ fontSize: 11, color: 'var(--rr-brand)', textDecoration: 'none', cursor: 'pointer' }}>
+												Learn more &rarr;
+											</a>
+										) : (
+											<span />
+										)}
+										{announcements.length > 1 && (
+											<div style={{ display: 'flex', gap: 2 }}>
+												<button
+													type="button"
+													aria-label="Previous announcement"
+													onClick={() => {
+														setTickerFade(false);
+														setTimeout(() => {
+															setTickerIndex((i) => (i - 1 + announcements.length) % announcements.length);
+															setTickerFade(true);
+														}, 150);
+													}}
+													style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', fontSize: 11, color: 'var(--rr-text-secondary)', lineHeight: 1 }}
+												>
+													&lsaquo;
+												</button>
+												<button
+													type="button"
+													aria-label="Next announcement"
+													onClick={() => {
+														setTickerFade(false);
+														setTimeout(() => {
+															setTickerIndex((i) => (i + 1) % announcements.length);
+															setTickerFade(true);
+														}, 150);
+													}}
+													style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', fontSize: 11, color: 'var(--rr-text-secondary)', lineHeight: 1 }}
+												>
+													&rsaquo;
+												</button>
+											</div>
+										)}
+									</div>
 								</div>
 							</div>
-						</div>
-					</>
-				);
-			})()}
+						</>
+					);
+				})()}
 
 			{/* ── Documentation button ──────────────────────────────────── */}
 			{onOpenDocs && (
@@ -383,7 +415,27 @@ export const SidebarFooter: React.FC<SidebarFooterProps> = ({ collapsed, userNam
 			)}
 
 			{/* ── Trigger row — avatar (signed in) or rocket branding (anonymous) */}
-			<div ref={triggerRef} role="button" tabIndex={0} aria-haspopup="menu" aria-expanded={menuOpen} style={S.avatarRow(hovered, menuOpen, collapsed)} onClick={() => { if (menuOpen) handleClose(); else setMenuOpen(true); }} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); if (menuOpen) handleClose(); else setMenuOpen(true); } }} onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)}>
+			<div
+				ref={triggerRef}
+				role="button"
+				tabIndex={0}
+				aria-haspopup="menu"
+				aria-expanded={menuOpen}
+				style={S.avatarRow(hovered, menuOpen, collapsed)}
+				onClick={() => {
+					if (menuOpen) handleClose();
+					else setMenuOpen(true);
+				}}
+				onKeyDown={(e) => {
+					if (e.key === 'Enter' || e.key === ' ') {
+						e.preventDefault();
+						if (menuOpen) handleClose();
+						else setMenuOpen(true);
+					}
+				}}
+				onMouseEnter={() => setHovered(true)}
+				onMouseLeave={() => setHovered(false)}
+			>
 				{userName ? (
 					<>
 						<div style={S.avatarCircle}>{initials}</div>
@@ -396,7 +448,9 @@ export const SidebarFooter: React.FC<SidebarFooterProps> = ({ collapsed, userNam
 					</>
 				) : (
 					<>
-						<div style={S.rocketCircle}><RocketRideMark size={18} /></div>
+						<div style={S.rocketCircle}>
+							<RocketRideMark size={18} />
+						</div>
 						{!collapsed && (
 							<div style={{ ...S.nameBlock, flex: 1 }}>
 								<div style={S.nameText}>RocketRide</div>
@@ -453,7 +507,16 @@ export const SidebarFooter: React.FC<SidebarFooterProps> = ({ collapsed, userNam
 														role={isTeamLine ? 'button' : undefined}
 														tabIndex={isTeamLine ? 0 : undefined}
 														onClick={isTeamLine ? (e) => openFlyout(item.id, item.submenu!, e.currentTarget as HTMLElement) : undefined}
-														onKeyDown={isTeamLine ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openFlyout(item.id, item.submenu!, e.currentTarget as HTMLElement); } } : undefined}
+														onKeyDown={
+															isTeamLine
+																? (e) => {
+																		if (e.key === 'Enter' || e.key === ' ') {
+																			e.preventDefault();
+																			openFlyout(item.id, item.submenu!, e.currentTarget as HTMLElement);
+																		}
+																	}
+																: undefined
+														}
 														style={{
 															paddingLeft: 10,
 															fontSize: isProgressLine ? 10 : 11,

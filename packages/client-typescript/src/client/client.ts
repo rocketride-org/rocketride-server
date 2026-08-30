@@ -34,13 +34,7 @@ import { BillingApi } from './billing.js';
 import { DatabaseApi } from './database.js';
 import { DeployApi } from './deploy.js';
 import { LogApi } from './log.js';
-import {
-	AuthenticationException,
-	ConnectionException,
-	LoginAttemptCancelledError,
-	type LoginAttemptCancellationReason,
-	PipeException,
-} from './exceptions/index.js';
+import { AuthenticationException, ConnectionException, LoginAttemptCancelledError, type LoginAttemptCancellationReason, PipeException } from './exceptions/index.js';
 
 // Global counter for generating unique client IDs
 let clientId = 0;
@@ -615,27 +609,26 @@ export class RocketRideClient extends DAPClient {
 	// INTERNAL CONNECTION HELPERS
 	// ============================================================================
 
-	private _resolveCredential(
-		credential?: string | { code: string; verifier: string; redirectUri: string },
-	): string {
+	private _resolveCredential(credential?: string | { code: string; verifier: string; redirectUri: string }): string {
 		if (credential && typeof credential === 'object') {
 			// Keep the established deterministic PKCE wire encoding.
-			return 'cd_' + btoa(JSON.stringify({
-				code: credential.code,
-				verifier: credential.verifier,
-				redirectUri: credential.redirectUri,
-			}));
+			return (
+				'cd_' +
+				btoa(
+					JSON.stringify({
+						code: credential.code,
+						verifier: credential.verifier,
+						redirectUri: credential.redirectUri,
+					})
+				)
+			);
 		}
 		const envKey = this._env['ROCKETRIDE_APIKEY'];
 		const envCredential = typeof envKey === 'string' && envKey.trim() !== '' ? envKey : undefined;
 		return credential ?? envCredential ?? this._apikey ?? '';
 	}
 
-	private _createLifecycleOperation(
-		endpoint: string,
-		credentialKey: string,
-		priority: LifecyclePriority,
-	): LoginLifecycleOperation {
+	private _createLifecycleOperation(endpoint: string, credentialKey: string, priority: LifecyclePriority): LoginLifecycleOperation {
 		let resolve!: (result: ConnectResult) => void;
 		let reject!: (error: unknown) => void;
 		const promise = new Promise<ConnectResult>((resolvePromise, rejectPromise) => {
@@ -659,8 +652,7 @@ export class RocketRideClient extends DAPClient {
 	}
 
 	private _isCurrentOperation(operation: LoginLifecycleOperation): boolean {
-		return this._lifecycleOperation === operation
-			&& this._lifecycleGeneration === operation.generation;
+		return this._lifecycleOperation === operation && this._lifecycleGeneration === operation.generation;
 	}
 
 	private _operationTerminalError(operation: LoginLifecycleOperation, fallback?: unknown): unknown {
@@ -694,20 +686,14 @@ export class RocketRideClient extends DAPClient {
 		operation.reject(error);
 	}
 
-	private _recordCancellation(
-		operation: LoginLifecycleOperation,
-		reason: LoginAttemptCancellationReason,
-	): boolean {
+	private _recordCancellation(operation: LoginLifecycleOperation, reason: LoginAttemptCancellationReason): boolean {
 		if (operation.cancellationReason || operation.unexpectedDisconnectError || operation.settled) return false;
 		operation.cancellationReason = reason;
 		this._rejectLifecycleOperation(operation, new LoginAttemptCancelledError(reason));
 		return true;
 	}
 
-	private _recordUnexpectedDisconnect(
-		operation: LoginLifecycleOperation,
-		reason?: string,
-	): ConnectionException | undefined {
+	private _recordUnexpectedDisconnect(operation: LoginLifecycleOperation, reason?: string): ConnectionException | undefined {
 		if (operation.settled || operation.cancellationReason || operation.unexpectedDisconnectError) {
 			return operation.unexpectedDisconnectError;
 		}
@@ -732,10 +718,7 @@ export class RocketRideClient extends DAPClient {
 		await transport.disconnect();
 	}
 
-	private async _prepareOperationTransport(
-		operation: LoginLifecycleOperation,
-		timeout?: number,
-	): Promise<TransportWebSocket> {
+	private async _prepareOperationTransport(operation: LoginLifecycleOperation, timeout?: number): Promise<TransportWebSocket> {
 		this._assertCurrentOperation(operation);
 		const existing = this._transport;
 		if (existing?.getConnectionInfo() === operation.endpoint) {
@@ -777,21 +760,13 @@ export class RocketRideClient extends DAPClient {
 		this._assertCurrentOperation(operation);
 	}
 
-	private async _publishDisconnected(
-		operation: LoginLifecycleOperation,
-		reason: string,
-		hasError: boolean,
-	): Promise<void> {
+	private async _publishDisconnected(operation: LoginLifecycleOperation, reason: string, hasError: boolean): Promise<void> {
 		if (!this._claimDisconnectedPublication(operation)) return;
 		await this._invokeDisconnected(reason, hasError);
 	}
 
 	private _claimDisconnectedPublication(operation: LoginLifecycleOperation): boolean {
-		if (
-			!this._isCurrentOperation(operation)
-			|| !operation.onConnectedPublished
-			|| operation.onDisconnectedPublished
-		) return false;
+		if (!this._isCurrentOperation(operation) || !operation.onConnectedPublished || operation.onDisconnectedPublished) return false;
 		operation.onDisconnectedPublished = true;
 		return true;
 	}
@@ -806,11 +781,7 @@ export class RocketRideClient extends DAPClient {
 		}
 	}
 
-	private async _runLoginOperation(
-		operation: LoginLifecycleOperation,
-		priorCleanup: Promise<void>,
-		timeout?: number,
-	): Promise<void> {
+	private async _runLoginOperation(operation: LoginLifecycleOperation, priorCleanup: Promise<void>, timeout?: number): Promise<void> {
 		try {
 			await priorCleanup;
 			this._assertCurrentOperation(operation);
@@ -822,10 +793,7 @@ export class RocketRideClient extends DAPClient {
 			if (this._clientDisplayVersion) authArguments.clientVersion = this._clientDisplayVersion;
 
 			operation.authRequestSent = true;
-			const response = await this.request(
-				{ type: 'request', command: 'auth', seq: 0, arguments: authArguments },
-				timeout,
-			);
+			const response = await this.request({ type: 'request', command: 'auth', seq: 0, arguments: authArguments }, timeout);
 			this._assertCurrentOperation(operation);
 			if (response.success !== true) {
 				throw new AuthenticationException(response as unknown as Record<string, unknown>);
@@ -858,35 +826,19 @@ export class RocketRideClient extends DAPClient {
 				}
 			}
 			this._rejectLifecycleOperation(operation, error);
-			if (
-				error instanceof AuthenticationException
-				&& operation.priority === 'background'
-				&& this._isCurrentOperation(operation)
-			) {
+			if (error instanceof AuthenticationException && operation.priority === 'background' && this._isCurrentOperation(operation)) {
 				await this.onConnectError(error);
 			}
 		}
 	}
 
-	private _startLoginOperation(
-		endpoint: string,
-		credentialKey: string,
-		priority: LifecyclePriority,
-		timeout?: number,
-	): LoginLifecycleOperation | undefined {
+	private _startLoginOperation(endpoint: string, credentialKey: string, priority: LifecyclePriority, timeout?: number): LoginLifecycleOperation | undefined {
 		const current = this._lifecycleOperation;
 		if (priority === 'foreground') this._clearReconnectTimer();
 		if (priority === 'background' && current?.priority === 'foreground' && !current.settled) {
 			return undefined;
 		}
-		if (
-			priority === 'foreground'
-			&& current?.priority === 'foreground'
-			&& !current.settled
-			&& !current.cancellationReason
-			&& current.endpoint === endpoint
-			&& current.credentialKey === credentialKey
-		) {
+		if (priority === 'foreground' && current?.priority === 'foreground' && !current.settled && !current.cancellationReason && current.endpoint === endpoint && current.credentialKey === credentialKey) {
 			return current;
 		}
 
@@ -903,18 +855,11 @@ export class RocketRideClient extends DAPClient {
 				this._authenticated = false;
 				this._connectResult = undefined;
 			}
-		} else if (
-			current?.accepted
-			&& (current.endpoint !== endpoint
-				|| (current.credentialKey !== credentialKey && this._apikey !== credentialKey))
-		) {
+		} else if (current?.accepted && (current.endpoint !== endpoint || (current.credentialKey !== credentialKey && this._apikey !== credentialKey))) {
 			// A foreground replacement is controlled ownership transfer. The
 			// previous generation must not publish a stale disconnect after the
 			// replacement has become current.
-			priorCleanup = this._discardTransport(
-				current.transport,
-				'Authenticated connection superseded',
-			);
+			priorCleanup = this._discardTransport(current.transport, 'Authenticated connection superseded');
 			this._authenticated = false;
 			this._connectResult = undefined;
 		}
@@ -923,32 +868,14 @@ export class RocketRideClient extends DAPClient {
 		return operation;
 	}
 
-	private _startForegroundLogin(
-		credential?: string | { code: string; verifier: string; redirectUri: string },
-		options?: { uri?: string; timeout?: number },
-	): Promise<ConnectResult> {
+	private _startForegroundLogin(credential?: string | { code: string; verifier: string; redirectUri: string }, options?: { uri?: string; timeout?: number }): Promise<ConnectResult> {
 		const endpoint = options?.uri ? this._getWebsocketUri(options.uri) : this._uri;
 		const credentialKey = this._resolveCredential(credential);
 		const current = this._lifecycleOperation;
-		if (
-			current?.priority === 'foreground'
-			&& !current.settled
-			&& !current.cancellationReason
-			&& current.endpoint === endpoint
-			&& (
-				current.credentialKey === credentialKey
-				|| (current.accepted && this._apikey === credentialKey)
-			)
-		) {
+		if (current?.priority === 'foreground' && !current.settled && !current.cancellationReason && current.endpoint === endpoint && (current.credentialKey === credentialKey || (current.accepted && this._apikey === credentialKey))) {
 			return current.promise;
 		}
-		if (
-			current?.accepted
-			&& current.settled
-			&& this._authenticated
-			&& current.endpoint === endpoint
-			&& (current.credentialKey === credentialKey || this._apikey === credentialKey)
-		) {
+		if (current?.accepted && current.settled && this._authenticated && current.endpoint === endpoint && (current.credentialKey === credentialKey || this._apikey === credentialKey)) {
 			return Promise.resolve(this._connectResult ?? ({} as ConnectResult));
 		}
 		const operation = this._startLoginOperation(endpoint, credentialKey, 'foreground', options?.timeout);
@@ -988,9 +915,7 @@ export class RocketRideClient extends DAPClient {
 
 			if (this._desiredState === 'authenticated') {
 				const lifecycleOperation = this._lifecycleOperation;
-				const credentialKey = lifecycleOperation && !lifecycleOperation.accepted
-					? lifecycleOperation.credentialKey
-					: this._apikey ?? lifecycleOperation?.credentialKey ?? '';
+				const credentialKey = lifecycleOperation && !lifecycleOperation.accepted ? lifecycleOperation.credentialKey : (this._apikey ?? lifecycleOperation?.credentialKey ?? '');
 				const operation = this._startLoginOperation(this._uri, credentialKey, 'background');
 				if (!operation) return;
 				void operation.promise.then(
@@ -1007,7 +932,7 @@ export class RocketRideClient extends DAPClient {
 						if (!this._isCurrentOperation(operation) || operation.cancellationReason) return;
 						this._currentReconnectDelay = Math.min(this._currentReconnectDelay + 250, 15_000);
 						this._scheduleReconnect(operation.generation);
-					},
+					}
 				);
 				return;
 			}
@@ -1018,18 +943,12 @@ export class RocketRideClient extends DAPClient {
 					if (this._lifecycleGeneration === generation) this._currentReconnectDelay = 250;
 				},
 				async (error: unknown) => {
-					if (
-						this._lifecycleGeneration !== generation
-						|| this._isDetached()
-					) return;
+					if (this._lifecycleGeneration !== generation || this._isDetached()) return;
 					await this.onConnectError(error instanceof Error ? error : new Error(String(error)));
-					if (
-						this._lifecycleGeneration !== generation
-						|| this._isDetached()
-					) return;
+					if (this._lifecycleGeneration !== generation || this._isDetached()) return;
 					this._currentReconnectDelay = Math.min(this._currentReconnectDelay + 250, 15_000);
 					this._scheduleReconnect(generation);
-				},
+				}
 			);
 		}, delay);
 	}
@@ -1053,12 +972,7 @@ export class RocketRideClient extends DAPClient {
 		const endpoint = uri ? this._getWebsocketUri(uri) : this._uri;
 		this._clearReconnectTimer();
 		const current = this._lifecycleOperation;
-		if (
-			(!current || current.settled)
-			&& this._desiredState !== 'detached'
-			&& this._transport?.getConnectionInfo() === endpoint
-			&& this._transport.isConnected()
-		) {
+		if ((!current || current.settled) && this._desiredState !== 'detached' && this._transport?.getConnectionInfo() === endpoint && this._transport.isConnected()) {
 			this._uri = endpoint;
 			return;
 		}
@@ -1070,12 +984,8 @@ export class RocketRideClient extends DAPClient {
 		this._authenticated = false;
 		this._connectResult = undefined;
 
-		const discard = current?.transport
-			? this._discardTransport(current.transport, 'Attach superseded login')
-			: Promise.resolve();
-		const notification = shouldNotify
-			? this._invokeDisconnected('Connection replaced by attach', false)
-			: Promise.resolve();
+		const discard = current?.transport ? this._discardTransport(current.transport, 'Attach superseded login') : Promise.resolve();
+		const notification = shouldNotify ? this._invokeDisconnected('Connection replaced by attach', false) : Promise.resolve();
 		await Promise.all([discard, notification]);
 		if (this._lifecycleGeneration !== generation) return;
 		if (this._transport?.getConnectionInfo() === endpoint && this._transport.isConnected()) {
@@ -1103,28 +1013,15 @@ export class RocketRideClient extends DAPClient {
 		this._connectResult = undefined;
 
 		const transport = operation?.transport ?? (this._transport as TransportWebSocket | undefined);
-		if (
-			deauthenticate
-			&& wasAuthenticated
-			&& !inFlight
-			&& transport
-			&& this._transport === transport
-			&& transport.isConnected()
-		) {
+		if (deauthenticate && wasAuthenticated && !inFlight && transport && this._transport === transport && transport.isConnected()) {
 			await this._bestEffortDeauth();
-			if (
-				this._lifecycleGeneration !== ownerGeneration
-				|| this._lifecycleOperation !== operation
-				|| this._desiredState !== 'detached'
-			) return;
+			if (this._lifecycleGeneration !== ownerGeneration || this._lifecycleOperation !== operation || this._desiredState !== 'detached') return;
 		}
 
 		const shouldNotify = Boolean(operation && this._claimDisconnectedPublication(operation));
 		++this._lifecycleGeneration;
 		this._lifecycleOperation = undefined;
-		const notification = shouldNotify
-			? this._invokeDisconnected('Disconnected by request', false)
-			: Promise.resolve();
+		const notification = shouldNotify ? this._invokeDisconnected('Disconnected by request', false) : Promise.resolve();
 		if (transport) await this._discardTransport(transport, 'Detached');
 		await notification;
 	}
@@ -1159,10 +1056,7 @@ export class RocketRideClient extends DAPClient {
 	 * resolution checks the argument, configured environment, and stored client state
 	 * (initialized by `config.auth` and updated after authentication). The transport stays attached.
 	 */
-	async login(
-		credential?: string | { code: string; verifier: string; redirectUri: string },
-		options?: { uri?: string; timeout?: number },
-	): Promise<ConnectResult> {
+	async login(credential?: string | { code: string; verifier: string; redirectUri: string }, options?: { uri?: string; timeout?: number }): Promise<ConnectResult> {
 		return this._startForegroundLogin(credential, options);
 	}
 
@@ -1587,24 +1481,15 @@ export class RocketRideClient extends DAPClient {
 	 * @param options.pipeline - The pipeline configuration to restart with.
 	 * @param options.teamId - Address the team's DEPLOY run; omit for your own dev run.
 	 */
-	async restart(options: {
-		token?: string;
-		projectId: string;
-		source: string;
-		pipeline: Record<string, unknown>;
-		teamId?: string;
-	}): Promise<void> {
+	async restart(options: { token?: string; projectId: string; source: string; pipeline: Record<string, unknown>; teamId?: string }): Promise<void> {
 		try {
-			await this.call(
-				'restart',
-				{
-					token: options.token,
-					projectId: options.projectId,
-					source: options.source,
-					pipeline: options.pipeline,
-					...(options.teamId ? { teamId: options.teamId } : {}),
-				},
-			);
+			await this.call('restart', {
+				token: options.token,
+				projectId: options.projectId,
+				source: options.source,
+				pipeline: options.pipeline,
+				...(options.teamId ? { teamId: options.teamId } : {}),
+			});
 		} catch (err) {
 			const errorMsg = err instanceof Error ? err.message : String(err);
 			this.debugMessage(`Pipeline restart failed: ${errorMsg}`);
@@ -2089,10 +1974,7 @@ export class RocketRideClient extends DAPClient {
 		}
 
 		await super.onDisconnected(reason, hasError);
-		if (
-			this._lifecycleGeneration !== ownerGeneration
-			|| (operation !== undefined && this._lifecycleOperation !== operation)
-		) return;
+		if (this._lifecycleGeneration !== ownerGeneration || (operation !== undefined && this._lifecycleOperation !== operation)) return;
 
 		if (this._desiredState === 'detached') return;
 		if (!this._persist) {
@@ -2102,11 +1984,7 @@ export class RocketRideClient extends DAPClient {
 		// A failed background login is retried by its promise handler only after
 		// onConnectError completes and the backoff advances. Scheduling here as
 		// well would race that callback and duplicate the current delay.
-		if (
-			operation?.priority === 'background'
-			&& !operation.accepted
-			&& operation.unexpectedDisconnectError
-		) return;
+		if (operation?.priority === 'background' && !operation.accepted && operation.unexpectedDisconnectError) return;
 		this._scheduleReconnect();
 	}
 
@@ -2563,9 +2441,7 @@ export class RocketRideClient extends DAPClient {
 			this._onTrace?.(TraceType.Error, redactProtocolMessage(response));
 			throw new Error(response.message ?? 'fs_read failed');
 		}
-		const traceResponse = response.arguments?.data instanceof Uint8Array
-			? { ...response, arguments: { ...response.arguments, data: `<${response.arguments.data.length} bytes>` } }
-			: response;
+		const traceResponse = response.arguments?.data instanceof Uint8Array ? { ...response, arguments: { ...response.arguments, data: `<${response.arguments.data.length} bytes>` } } : response;
 		this._onTrace?.(TraceType.Success, redactProtocolMessage(traceResponse));
 		return ((response as any).arguments?.data as Uint8Array) || new Uint8Array(0);
 	}
@@ -3073,12 +2949,7 @@ export class RocketRideClient extends DAPClient {
 	 * @param minPct   - Minimum cumtime percentage threshold (default 0.1).
 	 * @returns Object containing the tree root, total_time, and total_calls.
 	 */
-	async cprofileReportTree(
-		target?: string | null,
-		maxDepth?: number,
-		minPct?: number,
-		includeSystem?: boolean,
-	): Promise<CProfileReportTreeResponse> {
+	async cprofileReportTree(target?: string | null, maxDepth?: number, minPct?: number, includeSystem?: boolean): Promise<CProfileReportTreeResponse> {
 		const args: Record<string, unknown> = {};
 		if (target) args.target = target;
 		if (maxDepth !== undefined) args.max_depth = maxDepth;
@@ -3363,22 +3234,20 @@ export class RocketRideClient extends DAPClient {
 	 * @returns The tool's return value (typically a record/object)
 	 * @throws Error if the server signals failure or no node handles the requested tool
 	 */
-	async tool<T = any>(options: {
-		token: string;
-		tool: string;
-		nodeId?: string;
-		input?: Record<string, unknown>;
-		timeout?: number;
-	}): Promise<T> {
-		const result = await this.call<{ result: T }>('rrext_process', {
-			subcommand: 'tool',
-			tool: options.tool,
-			nodeId: options.nodeId ?? '',
-			input: options.input ?? {},
-		}, {
-			token: options.token,
-			timeout: options.timeout,
-		});
+	async tool<T = any>(options: { token: string; tool: string; nodeId?: string; input?: Record<string, unknown>; timeout?: number }): Promise<T> {
+		const result = await this.call<{ result: T }>(
+			'rrext_process',
+			{
+				subcommand: 'tool',
+				tool: options.tool,
+				nodeId: options.nodeId ?? '',
+				input: options.input ?? {},
+			},
+			{
+				token: options.token,
+				timeout: options.timeout,
+			}
+		);
 		return result.result;
 	}
 }

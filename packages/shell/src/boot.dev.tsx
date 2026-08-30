@@ -53,9 +53,15 @@ let nextRendererId = 0;
 		renderers.set(id, injected);
 		return id;
 	},
-	onScheduleFiberRoot(): void { /* refresh runtimes wrap this */ },
-	onCommitFiberRoot(): void { /* refresh runtimes wrap this to track roots */ },
-	onCommitFiberUnmount(): void { /* refresh runtimes wrap this */ },
+	onScheduleFiberRoot(): void {
+		/* refresh runtimes wrap this */
+	},
+	onCommitFiberRoot(): void {
+		/* refresh runtimes wrap this to track roots */
+	},
+	onCommitFiberUnmount(): void {
+		/* refresh runtimes wrap this */
+	},
 };
 
 // Modules compiled WITHOUT the refresh transform (this shell's own code) may

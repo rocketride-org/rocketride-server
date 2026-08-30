@@ -168,7 +168,7 @@ export const EventsGrid: React.FC<IEventsGridProps> = ({ rows, onRowClick }) => 
 					formatter: (cell) => mutedEl(String(cell.getValue() ?? '')),
 				},
 			] satisfies GridColumnDefinition[],
-		[],
+		[]
 	);
 
 	return (
@@ -177,18 +177,7 @@ export const EventsGrid: React.FC<IEventsGridProps> = ({ rows, onRowClick }) => 
 		// grid's height="100%" + paginate={false} turns it into an internally
 		// scrolling log (virtualized) rather than a paginated table.
 		<Card noBodyPadding fill>
-			<CardDataGrid<EventRow>
-				title="Event Stream"
-				actions={<span style={styles.headerCount}>{rows.length.toLocaleString()} events</span>}
-				columns={columns}
-				data={rows}
-				tableId="events-monitor"
-				paginate={false}
-				height="100%"
-				onRowClick={onRowClick}
-				emptyTitle="No events captured"
-				emptyDescription="Start monitoring to capture live DAP events from the connected engine."
-			/>
+			<CardDataGrid<EventRow> title="Event Stream" actions={<span style={styles.headerCount}>{rows.length.toLocaleString()} events</span>} columns={columns} data={rows} tableId="events-monitor" paginate={false} height="100%" onRowClick={onRowClick} emptyTitle="No events captured" emptyDescription="Start monitoring to capture live DAP events from the connected engine." />
 		</Card>
 	);
 };

@@ -48,9 +48,7 @@ import { ConnectionManager } from '../connection/connection';
  * ```
  */
 export function useConnectionStatus(): ConnectionStatus {
-	const [status, setStatus] = useState<ConnectionStatus>(
-		() => ConnectionManager.getInstance().getConnectionStatus(),
-	);
+	const [status, setStatus] = useState<ConnectionStatus>(() => ConnectionManager.getInstance().getConnectionStatus());
 
 	useEffect(() => {
 		const cm = ConnectionManager.getInstance();

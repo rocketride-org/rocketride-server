@@ -153,9 +153,14 @@ function invokingHome() {
 	const su = process.env.SUDO_USER;
 	if (su && su !== 'root') {
 		try {
-			const line = require('fs').readFileSync('/etc/passwd', 'utf8').split('\n').find((l) => l.startsWith(`${su}:`));
+			const line = require('fs')
+				.readFileSync('/etc/passwd', 'utf8')
+				.split('\n')
+				.find((l) => l.startsWith(`${su}:`));
 			if (line && line.split(':')[5]) return line.split(':')[5];
-		} catch { /* fall back to os.homedir() */ }
+		} catch {
+			/* fall back to os.homedir() */
+		}
 	}
 	return os.homedir();
 }
@@ -199,13 +204,17 @@ async function getBuildBaseEnv(task) {
 	if (hasTools) env.PATH = [toolsBin, env.PATH].filter(Boolean).join(path.delimiter);
 	// System-clang case (no tarball overlay): point vcpkg's compiler detection at
 	// clang, not the distro default cc (gcc).
-	if (isLinux() && !overlay) { env.CC = env.CC || 'clang'; env.CXX = env.CXX || 'clang++'; }
+	if (isLinux() && !overlay) {
+		env.CC = env.CC || 'clang';
+		env.CXX = env.CXX || 'clang++';
+	}
 	if (!llvmOverlayLogged && (overlay || hasTools)) {
 		const bits = [];
 		if (overlay) bits.push(`LLVM ${overlay.LLVM18}`);
 		if (hasTools) bits.push(`tools ${toolsBin}`);
 		const msg = `Using local build env (${bits.join(', ')})`;
-		if (task) task.output = msg; else console.log(msg);
+		if (task) task.output = msg;
+		else console.log(msg);
 		llvmOverlayLogged = true;
 	}
 	await warnIfNoDumpSyms(env);
@@ -954,29 +963,29 @@ function makeInstallPipAction() {
 		run: async (ctx, task) => {
 			const enginePath = path.join(DIST_DIR, 'engine');
 
-            // Bootstrap the Python toolchain only (pip + wheel/setuptools/uv). Test and runtime
-            // deps install later via server:setup-test-deps — through depends() so they respect
-            // the merged constraints; that step runs after nodes:sync/ai:sync.
-            const pipInstalled = await getState('server.pipInstalledV11');
-            if (!pipInstalled) {
-                // Add the engine's Scripts/bin dir to PATH so pip doesn't warn about it
-                const scriptsDir = path.join(DIST_DIR, process.platform === 'win32' ? 'Scripts' : 'bin');
-                const pipEnv = { ...process.env, PATH: [scriptsDir, process.env.PATH].filter(Boolean).join(path.delimiter) };
+			// Bootstrap the Python toolchain only (pip + wheel/setuptools/uv). Test and runtime
+			// deps install later via server:setup-test-deps — through depends() so they respect
+			// the merged constraints; that step runs after nodes:sync/ai:sync.
+			const pipInstalled = await getState('server.pipInstalledV11');
+			if (!pipInstalled) {
+				// Add the engine's Scripts/bin dir to PATH so pip doesn't warn about it
+				const scriptsDir = path.join(DIST_DIR, process.platform === 'win32' ? 'Scripts' : 'bin');
+				const pipEnv = { ...process.env, PATH: [scriptsDir, process.env.PATH].filter(Boolean).join(path.delimiter) };
 
-                task.output = 'Bootstrapping pip...';
-                await execCommand(enginePath, ['-m', 'ensurepip', '--default-pip'], { task, cwd: DIST_DIR, env: pipEnv });
+				task.output = 'Bootstrapping pip...';
+				await execCommand(enginePath, ['-m', 'ensurepip', '--default-pip'], { task, cwd: DIST_DIR, env: pipEnv });
 
-                task.output = 'Installing build tools...';
-                // wheel/setuptools/uv through depends.bootstrap() so their versions come from one
-                // place (depends.py _BOOTSTRAP_TOOL_VERSIONS), not hardcoded here.
-                await execCommand(enginePath, ['-c', 'import depends; depends.bootstrap()'], { task, cwd: DIST_DIR, env: pipEnv });
-                // `build` (PEP 517 frontend) is build-only; bootstrap doesn't install it.
-                await execCommand(enginePath, ['-m', 'pip', 'install', '--quiet', '--disable-pip-version-check', 'build'], { task, cwd: DIST_DIR, env: pipEnv });
+				task.output = 'Installing build tools...';
+				// wheel/setuptools/uv through depends.bootstrap() so their versions come from one
+				// place (depends.py _BOOTSTRAP_TOOL_VERSIONS), not hardcoded here.
+				await execCommand(enginePath, ['-c', 'import depends; depends.bootstrap()'], { task, cwd: DIST_DIR, env: pipEnv });
+				// `build` (PEP 517 frontend) is build-only; bootstrap doesn't install it.
+				await execCommand(enginePath, ['-m', 'pip', 'install', '--quiet', '--disable-pip-version-check', 'build'], { task, cwd: DIST_DIR, env: pipEnv });
 
-                await setState('server.pipInstalledV11', true);
-            } else {
-                task.output = 'Build tools already installed (skipped)';
-            }
+				await setState('server.pipInstalledV11', true);
+			} else {
+				task.output = 'Build tools already installed (skipped)';
+			}
 
 			const preinstall = ctx.options && ctx.options.pytestPreinstall;
 			if (preinstall) {
@@ -1227,9 +1236,7 @@ function makeRocketlibPythonTestAction(options = {}) {
 
 			const extraArgs = ['-v'];
 			if (options.pytest) {
-				const tokens = typeof options.pytest === 'string'
-					? options.pytest.split(/\s+/).filter(Boolean)
-					: options.pytest.flatMap((o) => String(o).split(/\s+/).filter(Boolean));
+				const tokens = typeof options.pytest === 'string' ? options.pytest.split(/\s+/).filter(Boolean) : options.pytest.flatMap((o) => String(o).split(/\s+/).filter(Boolean));
 				extraArgs.push(...tokens);
 			}
 
@@ -1351,10 +1358,7 @@ module.exports = {
 			name: 'server:dev',
 			action: (options = {}) => ({
 				description: 'Starting server (dev)',
-				steps: [
-					'server:build',
-					parallel(['server:run-eaas', 'shell:dev'], 'Start dev servers'),
-				],
+				steps: ['server:build', parallel(['server:run-eaas', 'shell:dev'], 'Start dev servers')],
 			}),
 		},
 		{
@@ -1369,10 +1373,7 @@ module.exports = {
 				}
 				return {
 					description: 'Running server',
-					steps: [
-						'server:build',
-						parallel(servers, 'Start servers'),
-					],
+					steps: ['server:build', parallel(servers, 'Start servers')],
 				};
 			},
 		},

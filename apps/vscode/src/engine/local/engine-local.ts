@@ -144,7 +144,7 @@ export class EngineLocal extends EngineBackend {
 		// engine process flags.
 		const executablePath = this.installer.getExecutablePath();
 		const args = [
-			'--autoterm',        // Exit when VS Code closes (stdin monitoring)
+			'--autoterm', // Exit when VS Code closes (stdin monitoring)
 			'./ai/eaas.py',
 			// Bind an explicit address, never the name 'localhost'. Where it resolves
 			// to both ::1 and 127.0.0.1, asyncio binds one socket per address family
@@ -153,7 +153,7 @@ export class EngineLocal extends EngineBackend {
 			// accepts over IPv4 and look dead while being healthy. The service
 			// launchers already pass 127.0.0.1 for this reason.
 			'--host=127.0.0.1',
-			'--port=0',          // Dynamic port assignment
+			'--port=0', // Dynamic port assignment
 		];
 
 		await this.spawnProcess(executablePath, args);
@@ -228,11 +228,19 @@ export class EngineLocal extends EngineBackend {
 					const pidStr = fs.readFileSync(path.join(engineDir, file), 'utf8').trim();
 					const pid = parseInt(pidStr, 10);
 					if (!isNaN(pid)) {
-						try { process.kill(pid, 0); running = true; break; } catch { /* not running */ }
+						try {
+							process.kill(pid, 0);
+							running = true;
+							break;
+						} catch {
+							/* not running */
+						}
 					}
 				}
 			}
-		} catch { /* can't read dir */ }
+		} catch {
+			/* can't read dir */
+		}
 
 		return {
 			state: running ? 'running' : 'stopped',
@@ -299,13 +307,15 @@ export class EngineLocal extends EngineBackend {
 			let processErrored = false;
 
 			// Write PID file — captured in local so async handlers remove their own file
-			const myPidFile = child.pid
-				? path.join(path.dirname(executablePath), `engine-${child.pid}.pid`)
-				: undefined;
+			const myPidFile = child.pid ? path.join(path.dirname(executablePath), `engine-${child.pid}.pid`) : undefined;
 
 			if (myPidFile) {
 				this.pidFilePath = myPidFile;
-				try { fs.writeFileSync(myPidFile, String(child.pid)); } catch { /* non-fatal */ }
+				try {
+					fs.writeFileSync(myPidFile, String(child.pid));
+				} catch {
+					/* non-fatal */
+				}
 			}
 
 			// --- Error handling ---
@@ -349,7 +359,7 @@ export class EngineLocal extends EngineBackend {
 					if (match) {
 						this.actualPort = parseInt(match[1], 10);
 						processReady = true;
-							this.logger.output(`${icons.success} Engine ready (port ${this.actualPort})`);
+						this.logger.output(`${icons.success} Engine ready (port ${this.actualPort})`);
 						resolve();
 					}
 				}
@@ -422,7 +432,11 @@ export class EngineLocal extends EngineBackend {
 	private removePidFile(expectedPath?: string): void {
 		if (!this.pidFilePath) return;
 		if (expectedPath && this.pidFilePath !== expectedPath) return;
-		try { fs.unlinkSync(this.pidFilePath); } catch { /* already gone */ }
+		try {
+			fs.unlinkSync(this.pidFilePath);
+		} catch {
+			/* already gone */
+		}
 		this.pidFilePath = undefined;
 	}
 

@@ -144,7 +144,9 @@ export async function refreshSchema(client: RocketRideClient, endpoint: ISqlEndp
  */
 function subscribe(cb: () => void): () => void {
 	listeners.add(cb);
-	return () => { listeners.delete(cb); };
+	return () => {
+		listeners.delete(cb);
+	};
 }
 
 /**
@@ -154,8 +156,5 @@ function subscribe(cb: () => void): () => void {
  * @returns The snapshot for that connection.
  */
 export function useSchema(key: string | null): ISchemaState {
-	return useSyncExternalStore(
-		subscribe,
-		() => (key ? snapshots[key] ?? IDLE_SCHEMA : IDLE_SCHEMA),
-	);
+	return useSyncExternalStore(subscribe, () => (key ? (snapshots[key] ?? IDLE_SCHEMA) : IDLE_SCHEMA));
 }

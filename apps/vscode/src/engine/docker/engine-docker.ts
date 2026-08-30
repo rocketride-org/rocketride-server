@@ -61,11 +61,21 @@ export class EngineDocker extends EngineBackend {
 		try {
 			const dir = path.dirname(EngineDocker.VERSION_PATH);
 			fs.mkdirSync(dir, { recursive: true });
-			fs.writeFileSync(EngineDocker.VERSION_PATH, JSON.stringify({
-				imageTag,
-				installedAt: new Date().toISOString(),
-			}, null, 2), 'utf8');
-		} catch { /* best effort */ }
+			fs.writeFileSync(
+				EngineDocker.VERSION_PATH,
+				JSON.stringify(
+					{
+						imageTag,
+						installedAt: new Date().toISOString(),
+					},
+					null,
+					2
+				),
+				'utf8'
+			);
+		} catch {
+			/* best effort */
+		}
 	}
 
 	/** Reads docker-version.json, or null if missing/corrupt. */
@@ -77,7 +87,9 @@ export class EngineDocker extends EngineBackend {
 					return { version: data.imageTag, publishedAt: data.installedAt || '' };
 				}
 			}
-		} catch { /* corrupt */ }
+		} catch {
+			/* corrupt */
+		}
 		return null;
 	}
 
@@ -87,7 +99,9 @@ export class EngineDocker extends EngineBackend {
 			if (fs.existsSync(EngineDocker.VERSION_PATH)) {
 				fs.unlinkSync(EngineDocker.VERSION_PATH);
 			}
-		} catch { /* best effort */ }
+		} catch {
+			/* best effort */
+		}
 	}
 
 	// =========================================================================
@@ -184,20 +198,23 @@ export class EngineDocker extends EngineBackend {
 
 	/** Re-emits the current status (ready with URI, or idle). */
 	emitCurrentStatus(): void {
-		this.dockerManager.getStatus().then((status) => {
-			if (status.state === 'running') {
-				this.emitStatus({
-					phase: 'ready',
-					message: 'Docker container running',
-					uri: `http://localhost:${CONTAINER_PORT}`,
-					version: status.imageTag ?? undefined,
-				});
-			} else {
-				this.emitStatus({ phase: 'idle', message: `Container ${status.state}` });
-			}
-		}).catch(() => {
-			this.emitStatus({ phase: 'idle', message: 'Docker status unknown' });
-		});
+		this.dockerManager
+			.getStatus()
+			.then((status) => {
+				if (status.state === 'running') {
+					this.emitStatus({
+						phase: 'ready',
+						message: 'Docker container running',
+						uri: `http://localhost:${CONTAINER_PORT}`,
+						version: status.imageTag ?? undefined,
+					});
+				} else {
+					this.emitStatus({ phase: 'idle', message: `Container ${status.state}` });
+				}
+			})
+			.catch(() => {
+				this.emitStatus({ phase: 'idle', message: 'Docker status unknown' });
+			});
 	}
 
 	/** Nothing to dispose — Docker daemon manages the container independently. */

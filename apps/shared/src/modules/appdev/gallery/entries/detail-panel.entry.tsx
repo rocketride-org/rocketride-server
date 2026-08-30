@@ -53,17 +53,25 @@ const DetailPanelDemo: React.FC<IGalleryDemoProps> = ({ knobs }) => {
 				subtitle="Pipeline - deployed 2 hours ago"
 				side={knobs.side as 'right' | 'bottom'}
 				contained
-				footer={knobs.footer ? (
-					<div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-						<Button variant="secondary" onClick={() => setOpen(false)}>Cancel</Button>
-						<Button onClick={() => setOpen(false)}>Save</Button>
-					</div>
-				) : undefined}
+				footer={
+					knobs.footer ? (
+						<div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+							<Button variant="secondary" onClick={() => setOpen(false)}>
+								Cancel
+							</Button>
+							<Button onClick={() => setOpen(false)}>Save</Button>
+						</div>
+					) : undefined
+				}
 			>
 				<Section label="Details">
 					<LabelValue label="Name">chat.pipe</LabelValue>
-					<LabelValue label="Task id" mono>rod.demo.chat</LabelValue>
-					<LabelValue label="Status"><StatusBadge variant="success">Running</StatusBadge></LabelValue>
+					<LabelValue label="Task id" mono>
+						rod.demo.chat
+					</LabelValue>
+					<LabelValue label="Status">
+						<StatusBadge variant="success">Running</StatusBadge>
+					</LabelValue>
 				</Section>
 			</DetailPanel>
 		</div>
@@ -121,9 +129,7 @@ export const detailPanelEntry: IGalleryEntry = {
 	sections: [
 		{
 			label: 'PanelTabBody',
-			rows: [
-				{ name: 'children', type: 'ReactNode', dir: 'in', required: true, note: 'One tab\'s content - typically a Section / LabelValue stack. The wrapper owns the tab\'s scrolling.' },
-			],
+			rows: [{ name: 'children', type: 'ReactNode', dir: 'in', required: true, note: "One tab's content - typically a Section / LabelValue stack. The wrapper owns the tab's scrolling." }],
 		},
 	],
 };

@@ -142,10 +142,7 @@ export const ConnectionDetailPanel: React.FC<IConnectionDetailPanelProps> = (pro
 	}, [open, selectedKey, endpoints]);
 
 	// Resolve the selected endpoint object from its key.
-	const selected = useMemo(
-		() => endpoints.find((e) => e.key === selectedKey) ?? null,
-		[endpoints, selectedKey],
-	);
+	const selected = useMemo(() => endpoints.find((e) => e.key === selectedKey) ?? null, [endpoints, selectedKey]);
 
 	/**
 	 * Run the live probe against the selected endpoint.
@@ -167,22 +164,32 @@ export const ConnectionDetailPanel: React.FC<IConnectionDetailPanelProps> = (pro
 		<DetailPanel
 			open={open}
 			onClose={onClose}
-			avatar={<span style={styles.avatar}><DatabaseIcon /></span>}
+			avatar={
+				<span style={styles.avatar}>
+					<DatabaseIcon />
+				</span>
+			}
 			title={selected ? selected.nodeName : 'New Connection'}
 			subtitle="Bind SQL Explorer to a database tool node in a running pipeline"
 			footer={
 				<>
-					<Button variant="ghost" onClick={onClose}>Close</Button>
+					<Button variant="ghost" onClick={onClose}>
+						Close
+					</Button>
 					<Button
 						variant="secondary"
-						onClick={() => { void runProbe(); }}
+						onClick={() => {
+							void runProbe();
+						}}
 						disabled={!client || !selected || probeStatus === 'probing'}
 					>
 						{probeStatus === 'probing' ? 'Testing...' : 'Test Connection'}
 					</Button>
 					<Button
 						variant="primary"
-						onClick={() => { if (selected) onOpen(selected); }}
+						onClick={() => {
+							if (selected) onOpen(selected);
+						}}
 						disabled={!selected}
 					>
 						Open
@@ -211,43 +218,54 @@ export const ConnectionDetailPanel: React.FC<IConnectionDetailPanelProps> = (pro
 						</option>
 					))}
 				</select>
-				<div style={styles.hint}>
-					Only database nodes inside running pipelines are listed. The pipeline
-					node owns the database credentials — nothing is entered here.
-				</div>
+				<div style={styles.hint}>Only database nodes inside running pipelines are listed. The pipeline node owns the database credentials — nothing is entered here.</div>
 			</Section>
 
 			{/* ── Endpoint ───────────────────────────────────────────────────── */}
 			{selected && (
 				<Section label="Endpoint">
-					<LabelValue label="Pipeline" mono>{selected.pipelineName}</LabelValue>
-					<LabelValue label="Node" mono>{selected.nodeId}</LabelValue>
-					<LabelValue label="Provider" mono>{selected.provider}</LabelValue>
+					<LabelValue label="Pipeline" mono>
+						{selected.pipelineName}
+					</LabelValue>
+					<LabelValue label="Node" mono>
+						{selected.nodeId}
+					</LabelValue>
+					<LabelValue label="Provider" mono>
+						{selected.provider}
+					</LabelValue>
 					<LabelValue label="State">
-						<StatusBadge variant={selected.running ? 'success' : 'muted'}>
-							{selected.running ? 'Running' : 'Stopped'}
-						</StatusBadge>
+						<StatusBadge variant={selected.running ? 'success' : 'muted'}>{selected.running ? 'Running' : 'Stopped'}</StatusBadge>
 					</LabelValue>
 				</Section>
 			)}
 
 			{/* ── Verify (probe results) ─────────────────────────────────────── */}
-			{probeStatus === 'done' && probe && (
-				probe.ok ? (
+			{probeStatus === 'done' &&
+				probe &&
+				(probe.ok ? (
 					<Section label="Verify">
 						<LabelValue label="Probe">
 							<StatusBadge variant="success">Tool reachable</StatusBadge>
 						</LabelValue>
-						<LabelValue label="Dialect" mono>{probe.dialect}</LabelValue>
-						{probe.database !== undefined && <LabelValue label="Database" mono>{probe.database}</LabelValue>}
-						{probe.tableCount !== undefined && <LabelValue label="Tables" mono>{String(probe.tableCount)}</LabelValue>}
+						<LabelValue label="Dialect" mono>
+							{probe.dialect}
+						</LabelValue>
+						{probe.database !== undefined && (
+							<LabelValue label="Database" mono>
+								{probe.database}
+							</LabelValue>
+						)}
+						{probe.tableCount !== undefined && (
+							<LabelValue label="Tables" mono>
+								{String(probe.tableCount)}
+							</LabelValue>
+						)}
 					</Section>
 				) : (
 					<div style={styles.bannerGap}>
 						<Banner variant="error">Probe failed: {probe.error ?? 'unknown error'}</Banner>
 					</div>
-				)
-			)}
+				))}
 		</DetailPanel>
 	);
 };

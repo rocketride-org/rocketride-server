@@ -174,12 +174,12 @@ const EXT_TO_LANGUAGE: Record<string, string> = {
 
 /** Well-known filenames that don't rely on extensions. */
 const NAME_TO_LANGUAGE: Record<string, string> = {
-	'dockerfile': 'dockerfile',
-	'makefile': 'makefile',
+	dockerfile: 'dockerfile',
+	makefile: 'makefile',
 	'cmakelists.txt': 'cmake',
-	'gemfile': 'ruby',
-	'rakefile': 'ruby',
-	'vagrantfile': 'ruby',
+	gemfile: 'ruby',
+	rakefile: 'ruby',
+	vagrantfile: 'ruby',
 	'.gitignore': 'ini',
 	'.dockerignore': 'ini',
 	'.editorconfig': 'ini',
@@ -244,9 +244,7 @@ function toHex(color: string): string {
 	const b = Number(match[3]);
 	const a = match[4] !== undefined ? Math.round(Number(match[4]) * 255) : 255;
 
-	const hex = '#' + [r, g, b, ...(a < 255 ? [a] : [])]
-		.map(v => v.toString(16).padStart(2, '0'))
-		.join('');
+	const hex = '#' + [r, g, b, ...(a < 255 ? [a] : [])].map((v) => v.toString(16).padStart(2, '0')).join('');
 	return hex;
 }
 
@@ -271,21 +269,21 @@ function defineRrTheme(monaco: typeof import('monaco-editor')): void {
 	const hex = (name: string, fallback: string) => toHex(cssVar(name, fallback));
 
 	// Read the app's CSS variables with sensible fallbacks
-	const bg        = hex('--rr-bg-paper',        dark ? '#252526' : '#ffffff');
-	const fg        = hex('--rr-text-primary',     dark ? '#cccccc' : '#1a1a1a');
-	const fgSec     = hex('--rr-text-secondary',   dark ? '#999999' : '#666666');
-	const border    = hex('--rr-border',            dark ? '#444444' : '#dcdcdc');
+	const bg = hex('--rr-bg-paper', dark ? '#252526' : '#ffffff');
+	const fg = hex('--rr-text-primary', dark ? '#cccccc' : '#1a1a1a');
+	const fgSec = hex('--rr-text-secondary', dark ? '#999999' : '#666666');
+	const border = hex('--rr-border', dark ? '#444444' : '#dcdcdc');
 	const selection = dark ? '#264f78' : '#add6ff';
-	const lineHl    = dark ? '#ffffff0a' : '#0000000a';
-	const inputBg   = hex('--rr-bg-input',         dark ? '#3c3c3c' : '#ffffff');
-	const widgetBg  = hex('--rr-bg-widget',         dark ? '#252526' : '#f3f3f3');
+	const lineHl = dark ? '#ffffff0a' : '#0000000a';
+	const inputBg = hex('--rr-bg-input', dark ? '#3c3c3c' : '#ffffff');
+	const widgetBg = hex('--rr-bg-widget', dark ? '#252526' : '#f3f3f3');
 	const listHover = toHex(cssVar('--rr-bg-list-hover', dark ? '#ffffff0a' : '#0000000a'));
-	const listActive = hex('--rr-bg-list-active',   dark ? '#094771' : '#0e639c');
+	const listActive = hex('--rr-bg-list-active', dark ? '#094771' : '#0e639c');
 	const listActiveFg = hex('--rr-fg-list-active', '#ffffff');
-	const accent    = hex('--rr-accent',            '#f7901f');
-	const link      = hex('--rr-text-link',         dark ? '#3794ff' : '#1976d2');
+	const accent = hex('--rr-accent', '#f7901f');
+	const link = hex('--rr-text-link', dark ? '#3794ff' : '#1976d2');
 	const scrollbar = toHex(cssVar('--rr-bg-scrollbar-thumb', '#79797966'));
-	const focusBorder = hex('--rr-border-focus',    dark ? '#007fd4' : '#0078d4');
+	const focusBorder = hex('--rr-border-focus', dark ? '#007fd4' : '#0078d4');
 
 	monaco.editor.defineTheme(THEME_NAME, {
 		base: dark ? 'vs-dark' : 'vs',
@@ -327,7 +325,7 @@ function defineRrTheme(monaco: typeof import('monaco-editor')): void {
 			'input.foreground': fg,
 			'input.border': border,
 			'inputOption.activeBorder': accent,
-			'focusBorder': focusBorder,
+			focusBorder: focusBorder,
 
 			// Lists (autocomplete, etc.)
 			'list.hoverBackground': listHover,
@@ -420,7 +418,7 @@ export const MonacoViewer: React.FC<Props> = ({ docs, uri, content, readOnly }) 
 		(value: string | undefined) => {
 			docs.updateContent(uri, value ?? '');
 		},
-		[docs, uri],
+		[docs, uri]
 	);
 
 	return (

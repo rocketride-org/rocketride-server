@@ -28,12 +28,7 @@ import React, { useEffect, useState } from 'react';
 import { useShellConnection } from 'shell';
 // App-private connection tiles (owned by this app, not the platform surface).
 import { ConnectionCard, ConnectionCardAdd } from '../components/ConnectionCard';
-import {
-	Banner,
-	Button,
-	ContentHeader,
-	EmptyState,
-} from 'shell';
+import { Banner, Button, ContentHeader, EmptyState } from 'shell';
 import type { ISqlEndpoint } from '../connect';
 import { refreshEndpoints, useSqlEndpoints } from '../connect';
 import { connectionUri, getDocs } from '../docs';
@@ -98,12 +93,16 @@ export const ConnectionsView: React.FC = () => {
 					<>
 						<Button
 							variant="ghost"
-							onClick={() => { if (client) void refreshEndpoints(client); }}
+							onClick={() => {
+								if (client) void refreshEndpoints(client);
+							}}
 							disabled={!client || status === 'loading'}
 						>
 							{status === 'loading' ? 'Refreshing...' : 'Refresh'}
 						</Button>
-						<Button variant="primary" onClick={() => openDrawer(null)}>+ New Connection</Button>
+						<Button variant="primary" onClick={() => openDrawer(null)}>
+							+ New Connection
+						</Button>
 					</>
 				}
 			/>
@@ -118,11 +117,7 @@ export const ConnectionsView: React.FC = () => {
 
 				{firstLoad ? (
 					// First paint: framed progress state, never bare "Loading..." text.
-					<EmptyState
-						icon={<DatabaseIcon />}
-						title="Discovering database nodes"
-						description="Scanning your running pipelines for database tool nodes..."
-					/>
+					<EmptyState icon={<DatabaseIcon />} title="Discovering database nodes" description="Scanning your running pipelines for database tool nodes..." />
 				) : endpoints.length === 0 ? (
 					// Nothing reachable: explain what makes a connection appear.
 					<EmptyState
@@ -130,7 +125,13 @@ export const ConnectionsView: React.FC = () => {
 						title="No database nodes found"
 						description="Start a pipeline containing a database node (MySQL, PostgreSQL, or ClickHouse), then refresh."
 						action={
-							<Button variant="primary" onClick={() => { if (client) void refreshEndpoints(client); }} disabled={!client}>
+							<Button
+								variant="primary"
+								onClick={() => {
+									if (client) void refreshEndpoints(client);
+								}}
+								disabled={!client}
+							>
 								Refresh
 							</Button>
 						}
@@ -139,17 +140,7 @@ export const ConnectionsView: React.FC = () => {
 					// The discovered endpoints as connection cards + the add tile.
 					<div style={styles.cardGrid}>
 						{endpoints.map((endpoint) => (
-							<ConnectionCard
-								key={endpoint.key}
-								icon={<DatabaseIcon />}
-								name={endpoint.nodeName}
-								address={`${endpoint.provider} - ${endpoint.pipelineName}`}
-								status={endpoint.running ? 'success' : 'muted'}
-								statusLabel={endpoint.running ? 'Running' : 'Stopped'}
-								connected={endpoint.running}
-								onClick={() => openConnection(endpoint)}
-								onEdit={() => openDrawer(endpoint)}
-							/>
+							<ConnectionCard key={endpoint.key} icon={<DatabaseIcon />} name={endpoint.nodeName} address={`${endpoint.provider} - ${endpoint.pipelineName}`} status={endpoint.running ? 'success' : 'muted'} statusLabel={endpoint.running ? 'Running' : 'Stopped'} connected={endpoint.running} onClick={() => openConnection(endpoint)} onEdit={() => openDrawer(endpoint)} />
 						))}
 						<ConnectionCardAdd label="New Connection" onClick={() => openDrawer(null)} />
 					</div>

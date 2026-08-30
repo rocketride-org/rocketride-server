@@ -49,27 +49,10 @@ interface IUnsavedIconProps {
  *
  * @param props - UnsavedIcon props for controlling color, size, style, and opacity.
  */
-const UnsavedIcon: FunctionComponent<IUnsavedIconProps> = ({
-	color = '#FF9200',
-	height = '20',
-	width = '20',
-	style,
-	opacity = 1,
-}) => {
+const UnsavedIcon: FunctionComponent<IUnsavedIconProps> = ({ color = '#FF9200', height = '20', width = '20', style, opacity = 1 }) => {
 	return (
-		<svg
-			width={width}
-			height={height}
-			viewBox="0 0 20 20"
-			fill="none"
-			xmlns="http://www.w3.org/2000/svg"
-			style={style}
-			opacity={opacity}
-		>
-			<path
-				d="M19.3827 4.85607L16.346 1.05871C15.8075 0.385594 15.0046 0 14.144 0H2.82032C1.26448 0 0 1.26448 0 2.82032V17.1797C0 18.7355 1.26448 20 2.82032 20H17.1797C18.7355 20 20 18.7355 20 17.1797V6.61669C20 5.97917 19.7808 5.35317 19.3817 4.8541L19.3827 4.85607ZM12.3084 1.53849V4.87231C12.3084 5.01367 12.1939 5.12907 12.0516 5.12907H5.89747C5.75612 5.12907 5.64072 5.01464 5.64072 4.87231V1.53849H12.3084ZM14.3594 18.4624H5.64171V13.0775C5.64171 12.3708 6.21673 11.7957 6.92349 11.7957H13.0776C13.7844 11.7957 14.3594 12.3708 14.3594 13.0775V18.4624Z"
-				fill={color}
-			/>
+		<svg width={width} height={height} viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" style={style} opacity={opacity}>
+			<path d="M19.3827 4.85607L16.346 1.05871C15.8075 0.385594 15.0046 0 14.144 0H2.82032C1.26448 0 0 1.26448 0 2.82032V17.1797C0 18.7355 1.26448 20 2.82032 20H17.1797C18.7355 20 20 18.7355 20 17.1797V6.61669C20 5.97917 19.7808 5.35317 19.3817 4.8541L19.3827 4.85607ZM12.3084 1.53849V4.87231C12.3084 5.01367 12.1939 5.12907 12.0516 5.12907H5.89747C5.75612 5.12907 5.64072 5.01464 5.64072 4.87231V1.53849H12.3084ZM14.3594 18.4624H5.64171V13.0775C5.64171 12.3708 6.21673 11.7957 6.92349 11.7957H13.0776C13.7844 11.7957 14.3594 12.3708 14.3594 13.0775V18.4624Z" fill={color} />
 		</svg>
 	);
 };

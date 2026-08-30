@@ -203,15 +203,7 @@ export function Card({ header, headerActions, children, noBodyPadding, toolbar, 
 	};
 
 	return (
-		<div
-			style={rootStyle}
-			onClick={onClick}
-			onKeyDown={interactive ? handleKeyDown : undefined}
-			onMouseEnter={interactive ? () => setHovered(true) : undefined}
-			onMouseLeave={interactive ? () => setHovered(false) : undefined}
-			role={interactive ? 'button' : undefined}
-			tabIndex={interactive ? 0 : undefined}
-		>
+		<div style={rootStyle} onClick={onClick} onKeyDown={interactive ? handleKeyDown : undefined} onMouseEnter={interactive ? () => setHovered(true) : undefined} onMouseLeave={interactive ? () => setHovered(false) : undefined} role={interactive ? 'button' : undefined} tabIndex={interactive ? 0 : undefined}>
 			{showHeader && (
 				<div style={styles.header}>
 					{header}

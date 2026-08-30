@@ -121,16 +121,7 @@ const styles = {
  * @param props - {@link ICaptureCardProps}.
  * @returns The capture controls card.
  */
-export const CaptureCard: React.FC<ICaptureCardProps> = ({
-	config,
-	canStart,
-	onToggleActive,
-	onClear,
-	onSetToken,
-	onToggleType,
-	onSelectAllTypes,
-	onClearTypes,
-}) => {
+export const CaptureCard: React.FC<ICaptureCardProps> = ({ config, canStart, onToggleActive, onClear, onSetToken, onToggleType, onSelectAllTypes, onClearTypes }) => {
 	// Stable option list for the multi-select ToggleGroup (id === label here).
 	const typeOptions = useMemo(() => EVENT_TYPE_NAMES.map((name) => ({ id: name, label: name })), []);
 	// Controls lock while a monitor subscription is live.
@@ -144,13 +135,7 @@ export const CaptureCard: React.FC<ICaptureCardProps> = ({
 					<BxStop size={16} /> Stop
 				</Button>
 			) : (
-				<Button
-					variant="primary"
-					small
-					disabled={!canStart}
-					onClick={onToggleActive}
-					title={canStart ? undefined : 'Select at least one event type'}
-				>
+				<Button variant="primary" small disabled={!canStart} onClick={onToggleActive} title={canStart ? undefined : 'Select at least one event type'}>
 					<BxPlay size={16} /> Start
 				</Button>
 			)}
@@ -166,27 +151,14 @@ export const CaptureCard: React.FC<ICaptureCardProps> = ({
 				{/* Token row: which task to monitor ('*' = all tasks). */}
 				<div style={styles.row}>
 					<span style={styles.caption}>Token</span>
-					<InputField
-						value={config.token}
-						onChange={(e) => onSetToken(e.target.value)}
-						placeholder="* (all tasks)"
-						disabled={locked}
-						style={{ width: 260 }}
-					/>
+					<InputField value={config.token} onChange={(e) => onSetToken(e.target.value)} placeholder="* (all tasks)" disabled={locked} style={{ width: 260 }} />
 				</div>
 
 				{/* Types row: the multi-select subscription categories + bulk actions. */}
 				<div style={styles.rowTop}>
 					<span style={styles.caption}>Types</span>
 					<div style={styles.typeCluster}>
-						<ToggleGroup<string>
-							multi
-							wrap
-							disabled={locked}
-							options={typeOptions}
-							values={config.types}
-							onToggle={onToggleType}
-						/>
+						<ToggleGroup<string> multi wrap disabled={locked} options={typeOptions} values={config.types} onToggle={onToggleType} />
 						<Button variant="ghost" small disabled={locked} onClick={onSelectAllTypes}>
 							All
 						</Button>

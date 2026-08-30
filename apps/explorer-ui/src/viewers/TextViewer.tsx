@@ -39,16 +39,8 @@ export const TextViewer: React.FC<Props> = ({ docs, uri, content }) => {
 		(e: React.ChangeEvent<HTMLTextAreaElement>) => {
 			docs.updateContent(uri, e.target.value);
 		},
-		[docs, uri],
+		[docs, uri]
 	);
 
-	return (
-		<textarea
-			style={styles.textarea}
-			value={content}
-			onChange={handleChange}
-			spellCheck={false}
-			wrap="off"
-		/>
-	);
+	return <textarea style={styles.textarea} value={content} onChange={handleChange} spellCheck={false} wrap="off" />;
 };

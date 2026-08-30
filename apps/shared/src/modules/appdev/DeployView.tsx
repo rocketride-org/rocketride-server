@@ -267,7 +267,10 @@ function formatWhen(unixSeconds?: number): string {
 	if (!unixSeconds) return '';
 	try {
 		return new Date(unixSeconds * 1000).toLocaleString(undefined, {
-			month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
+			month: 'short',
+			day: 'numeric',
+			hour: 'numeric',
+			minute: '2-digit',
 		});
 	} catch {
 		return '';
@@ -291,10 +294,7 @@ export const DeployView: React.FC<IDeployViewProps> = ({ host, app }) => {
 	/** Loads (or reloads) versions + pins; absent loaders resolve empty. */
 	const refresh = useCallback(async (): Promise<void> => {
 		try {
-			const [v, p] = await Promise.all([
-				host.listVersions?.() ?? Promise.resolve([]),
-				host.getWhereLive?.() ?? Promise.resolve([]),
-			]);
+			const [v, p] = await Promise.all([host.listVersions?.() ?? Promise.resolve([]), host.getWhereLive?.() ?? Promise.resolve([])]);
 			setVersions(v);
 			setPins(p);
 		} catch (e) {
@@ -304,7 +304,9 @@ export const DeployView: React.FC<IDeployViewProps> = ({ host, app }) => {
 		}
 	}, [host]);
 
-	useEffect(() => { void refresh(); }, [refresh]);
+	useEffect(() => {
+		void refresh();
+	}, [refresh]);
 
 	/** Publish flow: message prompt is host-side later; v1 uses a simple prompt. */
 	const onPublish = useCallback(async (): Promise<void> => {
@@ -318,13 +320,16 @@ export const DeployView: React.FC<IDeployViewProps> = ({ host, app }) => {
 	}, [host, refresh]);
 
 	/** Deploy flow: target prompt until the "Deploy to…" picker lands. */
-	const onDeploy = useCallback(async (version: string): Promise<void> => {
-		if (!host.deploy) return;
-		const target = window.prompt('Deploy target (@user, @team/<name>, @org):') ?? '';
-		if (!target) return;
-		await host.deploy(version, target);
-		await refresh();
-	}, [host, refresh]);
+	const onDeploy = useCallback(
+		async (version: string): Promise<void> => {
+			if (!host.deploy) return;
+			const target = window.prompt('Deploy target (@user, @team/<name>, @org):') ?? '';
+			if (!target) return;
+			await host.deploy(version, target);
+			await refresh();
+		},
+		[host, refresh]
+	);
 
 	const deployWired = Boolean(host.listVersions || host.publish);
 
@@ -333,18 +338,12 @@ export const DeployView: React.FC<IDeployViewProps> = ({ host, app }) => {
 			{/* View header — title + one-line purpose (the pipeline pattern) */}
 			<div style={styles.head}>
 				<div style={styles.h1}>{app.name}</div>
-				<div style={styles.sub}>
-					Deploy — publish immutable versions and pin them to your rungs: personal, team, org, store.
-					No review needed off the store.
-				</div>
+				<div style={styles.sub}>Deploy — publish immutable versions and pin them to your rungs: personal, team, org, store. No review needed off the store.</div>
 			</div>
 
 			{!deployWired ? (
 				<div style={styles.emptyWrap}>
-					<EmptyState
-						title="Publishing is not wired up yet"
-						description="Once the deploy pipeline lands, published versions appear here as immutable cards with rung chips, and the reverse index below shows what runs where."
-					/>
+					<EmptyState title="Publishing is not wired up yet" description="Once the deploy pipeline lands, published versions appear here as immutable cards with rung chips, and the reverse index below shows what runs where." />
 				</div>
 			) : (
 				<>
@@ -366,7 +365,8 @@ export const DeployView: React.FC<IDeployViewProps> = ({ host, app }) => {
 								<div style={styles.cardVersion}>v{v.version}</div>
 								<div style={styles.cardWho}>{v.author}</div>
 								<div style={styles.cardWhen}>
-									{formatWhen(v.publishedAt)}{v.sha ? ` · ${v.sha.slice(0, 8)}…` : ''}
+									{formatWhen(v.publishedAt)}
+									{v.sha ? ` · ${v.sha.slice(0, 8)}…` : ''}
 								</div>
 								{v.message ? <div style={styles.cardMsg}>&ldquo;{v.message}&rdquo;</div> : null}
 								<div style={styles.chips}>
@@ -378,7 +378,9 @@ export const DeployView: React.FC<IDeployViewProps> = ({ host, app }) => {
 								</div>
 								{host.deploy && (
 									<div style={styles.cardAction}>
-										<button style={styles.miniBtn} onClick={() => void onDeploy(v.version)}>Deploy to…</button>
+										<button style={styles.miniBtn} onClick={() => void onDeploy(v.version)}>
+											Deploy to…
+										</button>
 									</div>
 								)}
 							</div>
@@ -389,9 +391,7 @@ export const DeployView: React.FC<IDeployViewProps> = ({ host, app }) => {
 					<div style={styles.livePanel}>
 						<div style={styles.liveHead}>Where this app is live</div>
 						{(pins ?? []).length === 0 ? (
-							<div style={styles.liveFoot}>
-								Nothing is deployed yet — publish a version and deploy it to your personal rung to see it here.
-							</div>
+							<div style={styles.liveFoot}>Nothing is deployed yet — publish a version and deploy it to your personal rung to see it here.</div>
 						) : (
 							<>
 								{(pins ?? []).map((p) => (
@@ -401,23 +401,15 @@ export const DeployView: React.FC<IDeployViewProps> = ({ host, app }) => {
 											<span style={styles.liveHandle}>{p.handle}</span>
 										</div>
 										<span style={styles.pin}>v{p.version}</span>
-										<StatusBadge variant={p.state === 'pending' ? 'warning' : 'success'}>
-											{p.state === 'pending' ? 'in review' : p.state}
-										</StatusBadge>
+										<StatusBadge variant={p.state === 'pending' ? 'warning' : 'success'}>{p.state === 'pending' ? 'in review' : p.state}</StatusBadge>
 										<span style={styles.liveAudience}>
 											{p.audience}
 											{p.pendingVersion ? ` · v${p.pendingVersion} in review` : ''}
 										</span>
-										<span style={styles.liveWhen}>
-											{p.deployedAt ? `deployed ${formatWhen(p.deployedAt)}` : ''}
-										</span>
+										<span style={styles.liveWhen}>{p.deployedAt ? `deployed ${formatWhen(p.deployedAt)}` : ''}</span>
 									</div>
 								))}
-								<div style={styles.liveFoot}>
-									Deploy pins a rung to an immutable version — first publish, update, promote, and rollback
-									are all this one verb. Personal deploys land on your desktop automatically. Review gates
-									every version on the store rung; internal rungs never wait.
-								</div>
+								<div style={styles.liveFoot}>Deploy pins a rung to an immutable version — first publish, update, promote, and rollback are all this one verb. Personal deploys land on your desktop automatically. Review gates every version on the store rung; internal rungs never wait.</div>
 							</>
 						)}
 					</div>

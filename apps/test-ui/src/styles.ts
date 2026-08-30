@@ -527,13 +527,20 @@ export function swarmCellStyle(state: string): CSSProperties {
 		cursor: 'default',
 	};
 	switch (state) {
-		case 'idle':     return { ...base, background: 'var(--rr-bg-surface-alt)' };
-		case 'starting': return { ...base, background: 'color-mix(in srgb, var(--rr-color-info) 20%, transparent)', borderColor: 'var(--rr-color-info)' };
-		case 'running':  return { ...base, background: 'color-mix(in srgb, var(--rr-color-success) 15%, transparent)', borderColor: 'var(--rr-color-success)' };
-		case 'sending':  return { ...base, background: 'color-mix(in srgb, var(--rr-brand) 20%, transparent)', borderColor: 'var(--rr-brand)' };
-		case 'error':    return { ...base, background: 'color-mix(in srgb, var(--rr-color-error) 20%, transparent)', borderColor: 'var(--rr-color-error)' };
-		case 'stopped':  return { ...base, background: 'color-mix(in srgb, var(--rr-chart-purple, #a855f7) 15%, transparent)', borderColor: 'var(--rr-chart-purple, #a855f7)' };
-		default:         return { ...base, background: 'var(--rr-bg-surface-alt)' };
+		case 'idle':
+			return { ...base, background: 'var(--rr-bg-surface-alt)' };
+		case 'starting':
+			return { ...base, background: 'color-mix(in srgb, var(--rr-color-info) 20%, transparent)', borderColor: 'var(--rr-color-info)' };
+		case 'running':
+			return { ...base, background: 'color-mix(in srgb, var(--rr-color-success) 15%, transparent)', borderColor: 'var(--rr-color-success)' };
+		case 'sending':
+			return { ...base, background: 'color-mix(in srgb, var(--rr-brand) 20%, transparent)', borderColor: 'var(--rr-brand)' };
+		case 'error':
+			return { ...base, background: 'color-mix(in srgb, var(--rr-color-error) 20%, transparent)', borderColor: 'var(--rr-color-error)' };
+		case 'stopped':
+			return { ...base, background: 'color-mix(in srgb, var(--rr-chart-purple, #a855f7) 15%, transparent)', borderColor: 'var(--rr-chart-purple, #a855f7)' };
+		default:
+			return { ...base, background: 'var(--rr-bg-surface-alt)' };
 	}
 }
 
@@ -553,13 +560,20 @@ export function sparkBarColor(ms: number): string {
 
 export function eventTypeColor(type: string): string {
 	switch (type) {
-		case 'pass':  return 'var(--rr-color-success)';
-		case 'fail':  return 'var(--rr-color-error)';
-		case 'warn':  return 'var(--rr-color-warning)';
-		case 'chaos': return 'var(--rr-color-warning)';
-		case 'info':  return 'var(--rr-color-info)';
-		case 'data':  return 'var(--rr-chart-purple, #a855f7)';
-		default:      return 'var(--rr-text-secondary)';
+		case 'pass':
+			return 'var(--rr-color-success)';
+		case 'fail':
+			return 'var(--rr-color-error)';
+		case 'warn':
+			return 'var(--rr-color-warning)';
+		case 'chaos':
+			return 'var(--rr-color-warning)';
+		case 'info':
+			return 'var(--rr-color-info)';
+		case 'data':
+			return 'var(--rr-chart-purple, #a855f7)';
+		default:
+			return 'var(--rr-text-secondary)';
 	}
 }
 
@@ -570,10 +584,15 @@ export function eventTypeColor(type: string): string {
 export function apiDotStyle(status: string): CSSProperties {
 	const base: CSSProperties = { width: 6, height: 6, borderRadius: '50%', flexShrink: 0 };
 	switch (status) {
-		case 'passed':  return { ...base, backgroundColor: 'var(--rr-color-success)', boxShadow: '0 0 5px var(--rr-color-success)' };
-		case 'failed':  return { ...base, backgroundColor: 'var(--rr-color-error)', boxShadow: '0 0 5px var(--rr-color-error)' };
-		case 'running': return { ...base, backgroundColor: 'var(--rr-color-warning)' };
-		case 'skipped': return { ...base, backgroundColor: 'var(--rr-text-secondary)', opacity: 0.5 };
-		default:        return { ...base, backgroundColor: 'var(--rr-text-disabled)', opacity: 0.4 };
+		case 'passed':
+			return { ...base, backgroundColor: 'var(--rr-color-success)', boxShadow: '0 0 5px var(--rr-color-success)' };
+		case 'failed':
+			return { ...base, backgroundColor: 'var(--rr-color-error)', boxShadow: '0 0 5px var(--rr-color-error)' };
+		case 'running':
+			return { ...base, backgroundColor: 'var(--rr-color-warning)' };
+		case 'skipped':
+			return { ...base, backgroundColor: 'var(--rr-text-secondary)', opacity: 0.5 };
+		default:
+			return { ...base, backgroundColor: 'var(--rr-text-disabled)', opacity: 0.4 };
 	}
 }

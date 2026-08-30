@@ -146,7 +146,9 @@ const EnvironmentWebview: React.FC = () => {
 		onMessage: handleMessage,
 	});
 
-	useEffect(() => { sendMessageRef.current = sendMessage; }, [sendMessage]);
+	useEffect(() => {
+		sendMessageRef.current = sendMessage;
+	}, [sendMessage]);
 
 	// ── Callbacks for EnvironmentView ────────────────────────────────────
 
@@ -197,16 +199,7 @@ const EnvironmentWebview: React.FC = () => {
 
 	if (!ready) return null;
 
-	return (
-		<EnvironmentView
-			slots={buildSlotConfigs()}
-			envs={envs}
-			onLoadEnv={handleLoadEnv}
-			onSaveEnv={handleSaveEnv}
-			requiredKeys={requiredKeys}
-			error={error}
-		/>
-	);
+	return <EnvironmentView slots={buildSlotConfigs()} envs={envs} onLoadEnv={handleLoadEnv} onSaveEnv={handleSaveEnv} requiredKeys={requiredKeys} error={error} />;
 };
 
 export default EnvironmentWebview;

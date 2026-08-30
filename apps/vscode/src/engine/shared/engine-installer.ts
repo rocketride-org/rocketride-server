@@ -68,9 +68,7 @@ export interface ReleaseListItem {
  * - `data`: fresh data returned (HTTP 200); includes the new ETag for future requests.
  * - `notModified`: server confirmed cached version is still current (HTTP 304, free — no rate limit hit).
  */
-export type ConditionalResult<T> =
-	| { status: 'data'; data: T; etag: string | undefined }
-	| { status: 'notModified' };
+export type ConditionalResult<T> = { status: 'data'; data: T; etag: string | undefined } | { status: 'notModified' };
 
 /** Platform-specific archive naming. */
 interface PlatformInfo {
@@ -206,12 +204,7 @@ export class EngineInstaller {
 	 * @param token - Cancellation token
 	 * @param githubToken - Optional GitHub token for higher API rate limits
 	 */
-	public async install(
-		versionSpec: string = 'latest',
-		progress?: vscode.Progress<{ message?: string; increment?: number }>,
-		token?: vscode.CancellationToken,
-		githubToken?: string
-	): Promise<string> {
+	public async install(versionSpec: string = 'latest', progress?: vscode.Progress<{ message?: string; increment?: number }>, token?: vscode.CancellationToken, githubToken?: string): Promise<string> {
 		const displaySpec = versionSpec.replace(/^server-/, '');
 		this.logger.output(`${icons.info} Engine version requested: ${displaySpec}`);
 
@@ -242,7 +235,11 @@ export class EngineInstaller {
 			await this.checkLinuxRuntimeDeps(exePath);
 			return exePath;
 		} finally {
-			try { await release(); } catch { /* ignore stale lock */ }
+			try {
+				await release();
+			} catch {
+				/* ignore stale lock */
+			}
 		}
 	}
 
@@ -268,7 +265,11 @@ export class EngineInstaller {
 				this.logger.output(`${icons.info} Engine uninstalled from ${this.engineDir}`);
 			}
 		} finally {
-			try { await release(); } catch { /* ignore stale lock */ }
+			try {
+				await release();
+			} catch {
+				/* ignore stale lock */
+			}
 		}
 	}
 
@@ -285,12 +286,7 @@ export class EngineInstaller {
 	 * 4. Extract new archive into engine/
 	 * 5. Write version file
 	 */
-	private async installUnderLock(
-		versionSpec: string,
-		progress?: vscode.Progress<{ message?: string; increment?: number }>,
-		token?: vscode.CancellationToken,
-		githubToken?: string
-	): Promise<string> {
+	private async installUnderLock(versionSpec: string, progress?: vscode.Progress<{ message?: string; increment?: number }>, token?: vscode.CancellationToken, githubToken?: string): Promise<string> {
 		const displaySpec = versionSpec.replace(/^server-/, '');
 		const exePath = this.getExecutablePath();
 		const installed = this.getInstalledVersion();
@@ -328,12 +324,7 @@ export class EngineInstaller {
 	 * Downloads a release archive, clears the engine directory, extracts the
 	 * new version, writes version file, and returns the executable path.
 	 */
-	private async downloadAndInstall(
-		release: ReleaseInfo,
-		progress?: vscode.Progress<{ message?: string; increment?: number }>,
-		token?: vscode.CancellationToken,
-		githubToken?: string
-	): Promise<string> {
+	private async downloadAndInstall(release: ReleaseInfo, progress?: vscode.Progress<{ message?: string; increment?: number }>, token?: vscode.CancellationToken, githubToken?: string): Promise<string> {
 		const displayVersion = release.tag_name.replace(/^server-/, '');
 
 		// Find the correct asset for this platform
@@ -403,7 +394,9 @@ export class EngineInstaller {
 					const pidStr = fs.readFileSync(path.join(this.engineDir, entry.name), 'utf8').trim();
 					const pid = parseInt(pidStr, 10);
 					if (!isNaN(pid) && isPidAlive(pid)) continue;
-				} catch { /* stale — allow removal */ }
+				} catch {
+					/* stale — allow removal */
+				}
 			}
 
 			const fullPath = path.join(this.engineDir, entry.name);
@@ -433,11 +426,7 @@ export class EngineInstaller {
 	 * response to get a free HTTP 304 (not counted against GitHub rate limit)
 	 * when releases haven't changed.
 	 */
-	public async getReleases(
-		token?: vscode.CancellationToken,
-		githubToken?: string,
-		etag?: string
-	): Promise<ConditionalResult<ReleaseListItem[]>> {
+	public async getReleases(token?: vscode.CancellationToken, githubToken?: string, etag?: string): Promise<ConditionalResult<ReleaseListItem[]>> {
 		this.throwIfCancelled(token);
 		const octokit = await this.createOctokit(githubToken);
 
@@ -457,10 +446,10 @@ export class EngineInstaller {
 
 			// HTTP 200 — fresh data
 			const data = response.data
-				.filter(r => r.tag_name?.startsWith('server-') && !r.prerelease && r.assets && r.assets.length > 0)
-				.map(r => ({
+				.filter((r) => r.tag_name?.startsWith('server-') && !r.prerelease && r.assets && r.assets.length > 0)
+				.map((r) => ({
 					tag_name: r.tag_name,
-					prerelease: r.prerelease
+					prerelease: r.prerelease,
 				}));
 
 			return { status: 'data', data, etag: response.headers.etag };
@@ -478,7 +467,7 @@ export class EngineInstaller {
 		const { Octokit } = await import('@octokit/rest');
 		return new Octokit({
 			auth: githubToken,
-			userAgent: 'RocketRide-VSCode'
+			userAgent: 'RocketRide-VSCode',
 		});
 	}
 
@@ -488,11 +477,7 @@ export class EngineInstaller {
 	 * Duck-types the check to avoid importing @octokit/request-error.
 	 */
 	private isNotModifiedError(error: unknown): boolean {
-		return (
-			error instanceof Error &&
-			'status' in error &&
-			(error as { status: number }).status === 304
-		);
+		return error instanceof Error && 'status' in error && (error as { status: number }).status === 304;
 	}
 
 	/**
@@ -501,11 +486,7 @@ export class EngineInstaller {
 	 * - 'prerelease': newest prerelease with assets
 	 * - specific tag (e.g., 'server-3.2.0'): exact release by tag
 	 */
-	private async fetchRelease(
-		versionSpec: string,
-		token?: vscode.CancellationToken,
-		githubToken?: string
-	): Promise<ReleaseInfo> {
+	private async fetchRelease(versionSpec: string, token?: vscode.CancellationToken, githubToken?: string): Promise<ReleaseInfo> {
 		this.throwIfCancelled(token);
 		const octokit = await this.createOctokit(githubToken);
 
@@ -513,9 +494,9 @@ export class EngineInstaller {
 			const { data } = await octokit.repos.listReleases({
 				owner: EngineInstaller.GITHUB_OWNER,
 				repo: EngineInstaller.GITHUB_REPO,
-				per_page: 20
+				per_page: 20,
 			});
-			const stable = data.find(r => r.tag_name.startsWith('server-') && !r.prerelease && r.assets && r.assets.length > 0);
+			const stable = data.find((r) => r.tag_name.startsWith('server-') && !r.prerelease && r.assets && r.assets.length > 0);
 			if (!stable) throw new Error('No stable server releases found on GitHub');
 			return this.toReleaseInfo(stable);
 		}
@@ -524,9 +505,9 @@ export class EngineInstaller {
 			const { data } = await octokit.repos.listReleases({
 				owner: EngineInstaller.GITHUB_OWNER,
 				repo: EngineInstaller.GITHUB_REPO,
-				per_page: 20
+				per_page: 20,
 			});
-			const pre = data.find(r => r.tag_name.startsWith('server-') && r.prerelease && r.assets && r.assets.length > 0);
+			const pre = data.find((r) => r.tag_name.startsWith('server-') && r.prerelease && r.assets && r.assets.length > 0);
 			if (!pre) throw new Error('No prerelease server releases found on GitHub');
 			return this.toReleaseInfo(pre);
 		}
@@ -535,7 +516,7 @@ export class EngineInstaller {
 		const { data } = await octokit.repos.getReleaseByTag({
 			owner: EngineInstaller.GITHUB_OWNER,
 			repo: EngineInstaller.GITHUB_REPO,
-			tag: versionSpec
+			tag: versionSpec,
 		});
 		return this.toReleaseInfo(data);
 	}
@@ -548,12 +529,12 @@ export class EngineInstaller {
 		return {
 			tag_name: release.tag_name,
 			published_at: release.published_at ?? '',
-			assets: release.assets.map(a => ({
+			assets: release.assets.map((a) => ({
 				id: a.id,
 				name: a.name,
 				browser_download_url: a.browser_download_url,
-				size: a.size
-			}))
+				size: a.size,
+			})),
 		};
 	}
 
@@ -580,12 +561,10 @@ export class EngineInstaller {
 	private findPlatformAsset(release: ReleaseInfo): ReleaseAsset {
 		const info = this.getPlatformInfo();
 		const suffix = `-${info.name}.${info.ext}`;
-		const asset = release.assets.find(a =>
-			a.name.startsWith('rocketride-') && a.name.endsWith(suffix)
-		);
+		const asset = release.assets.find((a) => a.name.startsWith('rocketride-') && a.name.endsWith(suffix));
 
 		if (!asset) {
-			const available = release.assets.map(a => a.name).join(', ');
+			const available = release.assets.map((a) => a.name).join(', ');
 			throw new Error(`No release asset found for this platform (expected: *${suffix}). Available: ${available}`);
 		}
 
@@ -600,14 +579,7 @@ export class EngineInstaller {
 	 * Downloads a release asset with retry logic (up to 15 retries for
 	 * 503/504 errors) and progress reporting.
 	 */
-	private async downloadAsset(
-		asset: ReleaseAsset,
-		destPath: string,
-		displayVersion: string,
-		progress?: vscode.Progress<{ message?: string; increment?: number }>,
-		token?: vscode.CancellationToken,
-		githubToken?: string
-	): Promise<void> {
+	private async downloadAsset(asset: ReleaseAsset, destPath: string, displayVersion: string, progress?: vscode.Progress<{ message?: string; increment?: number }>, token?: vscode.CancellationToken, githubToken?: string): Promise<void> {
 		const MAX_RETRIES = 15;
 		const RETRY_DELAY_MS = 1000;
 
@@ -661,7 +633,10 @@ export class EngineInstaller {
 					reject(new vscode.CancellationError());
 				};
 
-				if (token?.isCancellationRequested) { onCancel(); return; }
+				if (token?.isCancellationRequested) {
+					onCancel();
+					return;
+				}
 				const cancelListener = token?.onCancellationRequested(onCancel);
 
 				response!.on('data', (chunk: Buffer) => {
@@ -678,9 +653,22 @@ export class EngineInstaller {
 				});
 
 				response!.pipe(file);
-				file.on('finish', () => { file.close(); response!.destroy(); cancelListener?.dispose(); resolve(); });
-				file.on('error', (err) => { response!.destroy(); cancelListener?.dispose(); reject(err); });
-				response!.on('error', (err) => { response!.destroy(); cancelListener?.dispose(); reject(err); });
+				file.on('finish', () => {
+					file.close();
+					response!.destroy();
+					cancelListener?.dispose();
+					resolve();
+				});
+				file.on('error', (err) => {
+					response!.destroy();
+					cancelListener?.dispose();
+					reject(err);
+				});
+				response!.on('error', (err) => {
+					response!.destroy();
+					cancelListener?.dispose();
+					reject(err);
+				});
 			});
 
 			// Verify download completeness
@@ -696,7 +684,9 @@ export class EngineInstaller {
 			try {
 				file.close();
 				if (fs.existsSync(tmpDownloadPath)) fs.unlinkSync(tmpDownloadPath);
-			} catch { /* ignore cleanup errors */ }
+			} catch {
+				/* ignore cleanup errors */
+			}
 			throw err;
 		}
 	}
@@ -710,7 +700,7 @@ export class EngineInstaller {
 			repo: EngineInstaller.GITHUB_REPO,
 			asset_id: asset.id,
 			headers: { accept: 'application/octet-stream' },
-			request: { redirect: 'manual' }
+			request: { redirect: 'manual' },
 		});
 
 		const location = (response as { headers: Record<string, string> }).headers?.location;
@@ -759,7 +749,7 @@ export class EngineInstaller {
 
 	/** Simple delay helper. */
 	private delay(ms: number): Promise<void> {
-		return new Promise(resolve => setTimeout(resolve, ms));
+		return new Promise((resolve) => setTimeout(resolve, ms));
 	}
 
 	// =========================================================================
@@ -778,43 +768,42 @@ export class EngineInstaller {
 		let lddOutput = '';
 		try {
 			lddOutput = execFileSync('ldd', [exePath], { encoding: 'utf8' });
-		} catch { return; }
+		} catch {
+			return;
+		}
 
-		const packages = [...new Set(
-			lddOutput.split('\n')
-				.filter(l => l.includes('=> not found'))
-				.map(l => l.trim().match(/^(\S+)/)?.[1])
-				.map(lib => lib ? EngineInstaller.LIB_TO_PACKAGE[lib] : undefined)
-				.filter((p): p is string => !!p),
-		)];
+		const packages = [
+			...new Set(
+				lddOutput
+					.split('\n')
+					.filter((l) => l.includes('=> not found'))
+					.map((l) => l.trim().match(/^(\S+)/)?.[1])
+					.map((lib) => (lib ? EngineInstaller.LIB_TO_PACKAGE[lib] : undefined))
+					.filter((p): p is string => !!p)
+			),
+		];
 		if (!packages.length) return;
 
 		// One-click install assumes apt; on non-Debian distros show the list and let the user handle it.
 		const hasApt = fs.existsSync('/usr/bin/apt') || fs.existsSync('/bin/apt');
 		if (!hasApt) {
-			void vscode.window.showWarningMessage(
-				`RocketRide needs these system libraries: ${packages.join(', ')}. Install them with your system package manager.`,
-				{ modal: true },
-			);
+			void vscode.window.showWarningMessage(`RocketRide needs these system libraries: ${packages.join(', ')}. Install them with your system package manager.`, { modal: true });
 			return;
 		}
 
-		const choice = await vscode.window.showWarningMessage(
-			`RocketRide needs these system libraries: ${packages.join(', ')}.`,
-			{ modal: true, detail: 'Without these libraries the engine cannot start.' },
-			'Install',
-		);
+		const choice = await vscode.window.showWarningMessage(`RocketRide needs these system libraries: ${packages.join(', ')}.`, { modal: true, detail: 'Without these libraries the engine cannot start.' }, 'Install');
 		if (choice !== 'Install') return;
 
 		try {
 			await vscode.window.withProgress(
 				{ location: vscode.ProgressLocation.Notification, title: 'Installing system libraries...', cancellable: false },
-				() => new Promise<void>((resolve, reject) => {
-					execFile('pkexec', ['apt', 'install', '-y', ...packages], { timeout: 5 * 60 * 1000 }, (err, _stdout, stderr) => {
-						if (err) reject(new Error(stderr?.trim() || err.message));
-						else resolve();
-					});
-				}),
+				() =>
+					new Promise<void>((resolve, reject) => {
+						execFile('pkexec', ['apt', 'install', '-y', ...packages], { timeout: 5 * 60 * 1000 }, (err, _stdout, stderr) => {
+							if (err) reject(new Error(stderr?.trim() || err.message));
+							else resolve();
+						});
+					})
 			);
 			void vscode.window.showInformationMessage('System libraries installed.');
 		} catch (err) {

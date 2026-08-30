@@ -23,35 +23,10 @@
  */
 
 import React, { useMemo } from 'react';
-import {
-	Chart as ChartJS,
-	CategoryScale,
-	LinearScale,
-	RadialLinearScale,
-	PointElement,
-	LineElement,
-	BarElement,
-	ArcElement,
-	Filler,
-	Tooltip,
-	Legend,
-	Title,
-} from 'chart.js';
+import { Chart as ChartJS, CategoryScale, LinearScale, RadialLinearScale, PointElement, LineElement, BarElement, ArcElement, Filler, Tooltip, Legend, Title } from 'chart.js';
 import { Bar, Line, Pie, Doughnut, Radar, PolarArea, Scatter, Bubble } from 'react-chartjs-2';
 
-ChartJS.register(
-	CategoryScale,
-	LinearScale,
-	RadialLinearScale,
-	PointElement,
-	LineElement,
-	BarElement,
-	ArcElement,
-	Filler,
-	Tooltip,
-	Legend,
-	Title,
-);
+ChartJS.register(CategoryScale, LinearScale, RadialLinearScale, PointElement, LineElement, BarElement, ArcElement, Filler, Tooltip, Legend, Title);
 
 const CHART_COMPONENTS: Record<string, React.ComponentType<any>> = {
 	bar: Bar,

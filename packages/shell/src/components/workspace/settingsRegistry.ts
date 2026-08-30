@@ -87,9 +87,7 @@ export function labelFromKey(key: string): string {
 	// Take the last dotted segment — the setting name within the app namespace
 	const seg = key.split('.').pop() ?? key;
 	// Insert spaces at lower→Upper boundaries and between acronym runs and words
-	const spaced = seg
-		.replace(/([a-z0-9])([A-Z])/g, '$1 $2')
-		.replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2');
+	const spaced = seg.replace(/([a-z0-9])([A-Z])/g, '$1 $2').replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2');
 	// Capitalize the first character
 	return spaced.charAt(0).toUpperCase() + spaced.slice(1);
 }
@@ -177,9 +175,6 @@ export function buildSettingsRegistry(appManifest: AppManifestEntry[]): Settings
  * @param overrides - The raw contents of settings.json (deltas only).
  * @returns Effective key → value map consumed by apps.
  */
-export function effectiveSettings(
-	registry: SettingsRegistry,
-	overrides: Record<string, SettingValue>,
-): Record<string, SettingValue> {
+export function effectiveSettings(registry: SettingsRegistry, overrides: Record<string, SettingValue>): Record<string, SettingValue> {
 	return { ...registry.defaults, ...overrides };
 }

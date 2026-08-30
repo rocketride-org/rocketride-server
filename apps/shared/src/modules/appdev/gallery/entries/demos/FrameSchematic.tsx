@@ -40,17 +40,7 @@ import { commonStyles } from 'shell';
 // =============================================================================
 
 /** The highlightable zones of the shell frame schematic. */
-export type FrameZone =
-	| 'sidebar'
-	| 'sidebarHeader'
-	| 'sidebarSlot'
-	| 'sidebarFooter'
-	| 'docTabs'
-	| 'content'
-	| 'bottomPanel'
-	| 'statusBar'
-	| 'debugPanel'
-	| 'overlay';
+export type FrameZone = 'sidebar' | 'sidebarHeader' | 'sidebarSlot' | 'sidebarFooter' | 'docTabs' | 'content' | 'bottomPanel' | 'statusBar' | 'debugPanel' | 'overlay';
 
 /** Props for the {@link FrameSchematic} component. */
 export interface IFrameSchematicProps {
@@ -246,23 +236,17 @@ export const FrameSchematic: React.FC<IFrameSchematicProps> = ({ highlight }) =>
 	const mapMode = highlighted.size === 0;
 
 	/** Mixes the highlight outline onto a zone's base style when selected. */
-	const zone = (name: FrameZone, base: React.CSSProperties): React.CSSProperties =>
-		highlighted.has(name) ? { ...base, ...HIGHLIGHT_STYLE, position: 'relative' } : base;
+	const zone = (name: FrameZone, base: React.CSSProperties): React.CSSProperties => (highlighted.has(name) ? { ...base, ...HIGHLIGHT_STYLE, position: 'relative' } : base);
 
 	/** Renders the floating label chip for a highlighted (or map-mode) zone. */
-	const label = (name: FrameZone, pos: React.CSSProperties): React.ReactNode =>
-		highlighted.has(name) || (mapMode && MAP_ZONES.includes(name))
-			? <span style={{ ...styles.zoneLabel, ...pos }}>{ZONE_LABEL[name]}</span>
-			: null;
+	const label = (name: FrameZone, pos: React.CSSProperties): React.ReactNode => (highlighted.has(name) || (mapMode && MAP_ZONES.includes(name)) ? <span style={{ ...styles.zoneLabel, ...pos }}>{ZONE_LABEL[name]}</span> : null);
 
 	return (
 		<div style={styles.frame}>
 			{/* Sidebar column: fixed header, scrolling app slot, fixed footer */}
 			<div style={{ ...zone('sidebar', styles.sidebar), position: 'relative' }}>
 				{label('sidebar', { top: 4, left: 4 })}
-				<div style={{ ...zone('sidebarHeader', styles.sidebarHeader), position: 'relative' }}>
-					{label('sidebarHeader', { top: 4, left: 4 })}
-				</div>
+				<div style={{ ...zone('sidebarHeader', styles.sidebarHeader), position: 'relative' }}>{label('sidebarHeader', { top: 4, left: 4 })}</div>
 				<div style={{ ...zone('sidebarSlot', styles.sidebarSlot), position: 'relative' }}>
 					{label('sidebarSlot', { top: 4, left: 4 })}
 					<span style={styles.sidebarLine} />
@@ -270,9 +254,7 @@ export const FrameSchematic: React.FC<IFrameSchematicProps> = ({ highlight }) =>
 					<span style={{ ...styles.sidebarLine, width: '85%' }} />
 					<span style={{ ...styles.sidebarLine, width: '60%' }} />
 				</div>
-				<div style={{ ...zone('sidebarFooter', styles.sidebarFooter), position: 'relative' }}>
-					{label('sidebarFooter', { bottom: 4, left: 4 })}
-				</div>
+				<div style={{ ...zone('sidebarFooter', styles.sidebarFooter), position: 'relative' }}>{label('sidebarFooter', { bottom: 4, left: 4 })}</div>
 			</div>
 
 			{/* Main column: doc tabs over the client area, then the status bar */}
@@ -283,16 +265,10 @@ export const FrameSchematic: React.FC<IFrameSchematicProps> = ({ highlight }) =>
 					<span style={styles.docTab} />
 					<span style={styles.docTab} />
 				</div>
-				<div style={{ ...zone('content', styles.content), position: 'relative' }}>
-					{label('content', { top: 6, right: 6 })}
-				</div>
+				<div style={{ ...zone('content', styles.content), position: 'relative' }}>{label('content', { top: 6, right: 6 })}</div>
 
 				{/* Bottom panel — only drawn when it is the subject */}
-				{highlighted.has('bottomPanel') && (
-					<div style={{ ...zone('bottomPanel', styles.bottomPanel), position: 'relative' }}>
-						{label('bottomPanel', { top: 4, right: 6 })}
-					</div>
-				)}
+				{highlighted.has('bottomPanel') && <div style={{ ...zone('bottomPanel', styles.bottomPanel), position: 'relative' }}>{label('bottomPanel', { top: 4, right: 6 })}</div>}
 
 				<div style={{ ...zone('statusBar', styles.statusBar), position: 'relative' }}>
 					{label('statusBar', { top: 3, right: 6 })}
@@ -302,19 +278,13 @@ export const FrameSchematic: React.FC<IFrameSchematicProps> = ({ highlight }) =>
 				{/* Overlay dialog — only drawn when the overlay zone is the subject */}
 				{highlighted.has('overlay') && (
 					<div style={styles.overlayBackdrop}>
-						<div style={{ ...styles.overlayDialog, ...HIGHLIGHT_STYLE, position: 'relative' }}>
-							{label('overlay', { top: 4, left: 4 })}
-						</div>
+						<div style={{ ...styles.overlayDialog, ...HIGHLIGHT_STYLE, position: 'relative' }}>{label('overlay', { top: 4, left: 4 })}</div>
 					</div>
 				)}
 			</div>
 
 			{/* Right-docked ALT+D debug panel — only drawn when it is the subject */}
-			{highlighted.has('debugPanel') && (
-				<div style={{ ...zone('debugPanel', styles.debugPanel), position: 'relative' }}>
-					{label('debugPanel', { top: 4, right: 4 })}
-				</div>
-			)}
+			{highlighted.has('debugPanel') && <div style={{ ...zone('debugPanel', styles.debugPanel), position: 'relative' }}>{label('debugPanel', { top: 4, right: 4 })}</div>}
 		</div>
 	);
 };

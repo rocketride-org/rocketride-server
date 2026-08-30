@@ -516,10 +516,7 @@ export const DevelopView: React.FC<IDevelopViewProps> = ({ host, previewPane, co
 	// Persisted preview preferences: read ONCE at mount from host storage
 	// (synchronous by then — VSCode delivers the bag with appdev:init) and
 	// written back whole by the persist effect below.
-	const storedPrefs = useMemo(
-		() => (host.getPref?.(PREVIEW_PREFS_KEY) ?? null) as Partial<PreviewPrefs> | null,
-		[host],
-	);
+	const storedPrefs = useMemo(() => (host.getPref?.(PREVIEW_PREFS_KEY) ?? null) as Partial<PreviewPrefs> | null, [host]);
 
 	// Inherit Auth: hand the host's session to the preview (default) or make
 	// the preview run its own OAuth cycle.
@@ -539,8 +536,7 @@ export const DevelopView: React.FC<IDevelopViewProps> = ({ host, previewPane, co
 
 	// Screen layout: which fixed-viewport frame floats on the draw canvas
 	// (see DEVICE_PRESETS) — all three behave identically.
-	const [layout, setLayout] = useState<PreviewLayout>(() =>
-		storedPrefs?.layout && DEVICE_PRESETS[storedPrefs.layout] ? storedPrefs.layout : 'desktop');
+	const [layout, setLayout] = useState<PreviewLayout>(() => (storedPrefs?.layout && DEVICE_PRESETS[storedPrefs.layout] ? storedPrefs.layout : 'desktop'));
 
 	// Selected resolution preset per layout (hover menu on the buttons).
 	const [presetIdx, setPresetIdx] = useState<Record<PreviewLayout, number>>(() => ({
@@ -564,7 +560,7 @@ export const DevelopView: React.FC<IDevelopViewProps> = ({ host, previewPane, co
 	// the geometry. Old prefs bags predate the flag: a stored manual zoom
 	// means the user was driving the zoom, so default fit OFF for them and
 	// ON for everyone else.
-	const [fitMode, setFitMode] = useState(() => storedPrefs?.fit ?? (storedPrefs?.zoom == null));
+	const [fitMode, setFitMode] = useState(() => storedPrefs?.fit ?? storedPrefs?.zoom == null);
 
 	// The gear (overflow options) dropdown.
 	const [gearOpen, setGearOpen] = useState(false);
@@ -603,31 +599,51 @@ export const DevelopView: React.FC<IDevelopViewProps> = ({ host, previewPane, co
 			return next.length > LOG_LIST_CAP ? next.slice(next.length - LOG_LIST_CAP) : next;
 		});
 	}, []);
-	useEffect(() => host.subscribeConsole?.((c: ConsoleRow) => appendRow({
-		time: c.time,
-		accent: c.level,
-		accentColor: c.level === 'error' ? 'var(--rr-color-error)' : c.level === 'warn' ? 'var(--rr-color-warning)' : 'var(--rr-color-info)',
-		detail: c.text,
-	})), [host.subscribeConsole, appendRow]);
-	useEffect(() => host.subscribeErrors?.((e: AppErrorRow) => appendRow({
-		time: e.time,
-		accent: e.source ?? 'error',
-		accentColor: 'var(--rr-color-error)',
-		detail: e.message,
-	})), [host.subscribeErrors, appendRow]);
-	useEffect(() => host.subscribeEvents?.((ev: AppEventRow) => appendRow({
-		time: ev.time,
-		accent: ev.name,
-		accentColor: 'var(--rr-color-info)',
-		detail: ev.payload,
-	})), [host.subscribeEvents, appendRow]);
+	useEffect(
+		() =>
+			host.subscribeConsole?.((c: ConsoleRow) =>
+				appendRow({
+					time: c.time,
+					accent: c.level,
+					accentColor: c.level === 'error' ? 'var(--rr-color-error)' : c.level === 'warn' ? 'var(--rr-color-warning)' : 'var(--rr-color-info)',
+					detail: c.text,
+				})
+			),
+		[host.subscribeConsole, appendRow]
+	);
+	useEffect(
+		() =>
+			host.subscribeErrors?.((e: AppErrorRow) =>
+				appendRow({
+					time: e.time,
+					accent: e.source ?? 'error',
+					accentColor: 'var(--rr-color-error)',
+					detail: e.message,
+				})
+			),
+		[host.subscribeErrors, appendRow]
+	);
+	useEffect(
+		() =>
+			host.subscribeEvents?.((ev: AppEventRow) =>
+				appendRow({
+					time: ev.time,
+					accent: ev.name,
+					accentColor: 'var(--rr-color-info)',
+					detail: ev.payload,
+				})
+			),
+		[host.subscribeEvents, appendRow]
+	);
 
 	/** Copies the whole log as plain text. */
 	const copyLog = (): void => {
 		const text = logRows.map((r) => `${r.time}  ${r.accent}  ${r.detail ?? ''}`).join('\n');
 		try {
 			void navigator.clipboard.writeText(text);
-		} catch { /* clipboard unavailable in this webview — nothing to do */ }
+		} catch {
+			/* clipboard unavailable in this webview — nothing to do */
+		}
 	};
 
 	// ── Watch/build status for the DEV badge ─────────────────────────────
@@ -677,11 +693,7 @@ export const DevelopView: React.FC<IDevelopViewProps> = ({ host, previewPane, co
 	 */
 	const computeFit = (): number | null => {
 		if (!screenSize) return null;
-		const fit = Math.min(
-			screenSize.width / (frameWidth + chrome),
-			screenSize.height / (frameHeight + chrome),
-			1,
-		);
+		const fit = Math.min(screenSize.width / (frameWidth + chrome), screenSize.height / (frameHeight + chrome), 1);
 		return Math.max(0.25, Math.floor(fit * 20) / 20);
 	};
 
@@ -700,10 +712,7 @@ export const DevelopView: React.FC<IDevelopViewProps> = ({ host, previewPane, co
 	// growing past actual size on a big pane. Null until measured.
 	const fitZoom = useMemo(() => {
 		if (!screenSize) return null;
-		const fit = Math.min(
-			(screenSize.width - FIT_MARGIN * 2) / (frameWidth + chrome),
-			(screenSize.height - FIT_MARGIN * 2) / (frameHeight + chrome),
-		);
+		const fit = Math.min((screenSize.width - FIT_MARGIN * 2) / (frameWidth + chrome), (screenSize.height - FIT_MARGIN * 2) / (frameHeight + chrome));
 		// No 25% floor here: fit PROMISES the margins, so a skinny docked
 		// pane gets a genuinely tiny frame rather than an overflowing one.
 		return Math.max(0.05, fit);
@@ -741,20 +750,29 @@ export const DevelopView: React.FC<IDevelopViewProps> = ({ host, previewPane, co
 	const needsFitRef = useRef(storedPrefs?.zoom == null);
 	const layoutMountedRef = useRef(false);
 	useEffect(() => {
-		if (!layoutMountedRef.current) { layoutMountedRef.current = true; return; }
+		if (!layoutMountedRef.current) {
+			layoutMountedRef.current = true;
+			return;
+		}
 		needsFitRef.current = true;
 		setPan({ x: 0, y: 0 });
 		setOrientation('portrait');
 	}, [layout]);
 	const orientationMountedRef = useRef(false);
 	useEffect(() => {
-		if (!orientationMountedRef.current) { orientationMountedRef.current = true; return; }
+		if (!orientationMountedRef.current) {
+			orientationMountedRef.current = true;
+			return;
+		}
 		needsFitRef.current = true;
 		setPan({ x: 0, y: 0 });
 	}, [orientation]);
 	const presetMountedRef = useRef(false);
 	useEffect(() => {
-		if (!presetMountedRef.current) { presetMountedRef.current = true; return; }
+		if (!presetMountedRef.current) {
+			presetMountedRef.current = true;
+			return;
+		}
 		needsFitRef.current = true;
 		setPan({ x: 0, y: 0 });
 	}, [presetIdx]);
@@ -771,7 +789,10 @@ export const DevelopView: React.FC<IDevelopViewProps> = ({ host, previewPane, co
 	// it would just echo the loaded values back).
 	const prefsMountedRef = useRef(false);
 	useEffect(() => {
-		if (!prefsMountedRef.current) { prefsMountedRef.current = true; return; }
+		if (!prefsMountedRef.current) {
+			prefsMountedRef.current = true;
+			return;
+		}
 		const bag: PreviewPrefs = { layout, orientation, zoom: previewZoom, presetIdx, inheritAuth, fit: fitMode };
 		host.setPref?.(PREVIEW_PREFS_KEY, bag);
 		// eslint-disable-next-line react-hooks/exhaustive-deps -- host is stable; persist on value changes only
@@ -811,7 +832,11 @@ export const DevelopView: React.FC<IDevelopViewProps> = ({ host, previewPane, co
 		const drag = panDragRef.current;
 		if (!drag || e.pointerId !== drag.pointerId) return;
 		panDragRef.current = null;
-		try { e.currentTarget.releasePointerCapture(drag.pointerId); } catch { /* already released */ }
+		try {
+			e.currentTarget.releasePointerCapture(drag.pointerId);
+		} catch {
+			/* already released */
+		}
 	};
 
 	// The scaled+panned shell and the exact-viewport glass inside it —
@@ -832,7 +857,6 @@ export const DevelopView: React.FC<IDevelopViewProps> = ({ host, previewPane, co
 			<div style={styles.pillRow}>
 				<ToggleGroup options={pillOptions} value={pane} onChange={selectPane} />
 			</div>
-
 
 			{/* PANE: PREVIEW — toolbar + host slot + DEV badge. KEPT MOUNTED
 			    while other panes are active: the preview iframe is a running
@@ -856,30 +880,25 @@ export const DevelopView: React.FC<IDevelopViewProps> = ({ host, previewPane, co
 								</>
 							)}
 						</div>
-					{/* Screen-layout presets — the iframe gets REAL device CSS
+						{/* Screen-layout presets — the iframe gets REAL device CSS
 						    dimensions (breakpoints fire); entering a layout
 						    auto-fits the zoom so the whole frame is visible.
 						    Hovering a button opens its top-5 resolution menu;
 						    the dot marks the selected one. */}
 						<div style={styles.layoutGroup}>
-							{([
-								['desktop', <Monitor key="i" size={14} />, 'Desktop'],
-								['tablet', <Tablet key="i" size={14} />, 'Tablet'],
-								['phone', <Smartphone key="i" size={14} />, 'Phone'],
-							] as Array<[PreviewLayout, React.ReactNode, string]>).map(([l, icon, label]) => {
+							{(
+								[
+									['desktop', <Monitor key="i" size={14} />, 'Desktop'],
+									['tablet', <Tablet key="i" size={14} />, 'Tablet'],
+									['phone', <Smartphone key="i" size={14} />, 'Phone'],
+								] as Array<[PreviewLayout, React.ReactNode, string]>
+							).map(([l, icon, label]) => {
 								const selected = DEVICE_PRESETS[l][presetIdx[l]] ?? DEVICE_PRESETS[l][DEFAULT_PRESET[l]];
 								return (
-									<span
-										key={l}
-										style={styles.layoutBtnWrap}
-										onMouseEnter={() => setOpenMenu(l)}
-										onMouseLeave={() => setOpenMenu((m) => (m === l ? null : m))}
-									>
-										<button
-											style={layout === l ? { ...styles.layoutBtn, ...styles.toolBtnOn } : styles.layoutBtn}
-											title={`${label} layout: ${selected.name} ${selected.width} x ${selected.height} — hover for resolutions`}
-											onClick={() => setLayout(l)}
-										>{icon}</button>
+									<span key={l} style={styles.layoutBtnWrap} onMouseEnter={() => setOpenMenu(l)} onMouseLeave={() => setOpenMenu((m) => (m === l ? null : m))}>
+										<button style={layout === l ? { ...styles.layoutBtn, ...styles.toolBtnOn } : styles.layoutBtn} title={`${label} layout: ${selected.name} ${selected.width} x ${selected.height} — hover for resolutions`} onClick={() => setLayout(l)}>
+											{icon}
+										</button>
 										{openMenu === l && (
 											<div style={styles.resMenu}>
 												{DEVICE_PRESETS[l].map((p, i) => (
@@ -901,31 +920,19 @@ export const DevelopView: React.FC<IDevelopViewProps> = ({ host, previewPane, co
 									</span>
 								);
 							})}
-							<button
-								style={styles.layoutBtn}
-								title="Rotate 90 degrees (portrait/landscape)"
-								onClick={() => setOrientation((o) => (o === 'portrait' ? 'landscape' : 'portrait'))}
-							><RotateCw size={14} /></button>
+							<button style={styles.layoutBtn} title="Rotate 90 degrees (portrait/landscape)" onClick={() => setOrientation((o) => (o === 'portrait' ? 'landscape' : 'portrait'))}>
+								<RotateCw size={14} />
+							</button>
 						</div>
 						<span style={styles.toolbarDivider} />
-						<button
-							style={fitMode ? { ...styles.toolBtn, ...styles.toolBtnOn } : styles.toolBtn}
-							title="Fit: size the preview proportionally to the pane (10px margins) and keep it centered. Zoom and the hand tool take over when off."
-							onClick={toggleFit}
-						>Fit</button>
-						<label
-							style={fitMode ? { ...styles.zoomControl, ...styles.ctlDisabled } : styles.zoomControl}
-							title={fitMode
-								? 'Zoom is driven by Fit — toggle Fit off to zoom manually.'
-								: 'Preview zoom: absolute scale, 100% = actual size. Drag the gray canvas to pan when zoomed in. Double-click the slider for 100%.'}
-						>
+						<button style={fitMode ? { ...styles.toolBtn, ...styles.toolBtnOn } : styles.toolBtn} title="Fit: size the preview proportionally to the pane (10px margins) and keep it centered. Zoom and the hand tool take over when off." onClick={toggleFit}>
+							Fit
+						</button>
+						<label style={fitMode ? { ...styles.zoomControl, ...styles.ctlDisabled } : styles.zoomControl} title={fitMode ? 'Zoom is driven by Fit — toggle Fit off to zoom manually.' : 'Preview zoom: absolute scale, 100% = actual size. Drag the gray canvas to pan when zoomed in. Double-click the slider for 100%.'}>
 							Zoom
-							<button
-								style={styles.zoomStepBtn}
-								title="Zoom in 5%"
-								disabled={fitMode}
-								onClick={() => setPreviewZoom((z) => Math.min(2, Math.round((z + 0.05) * 100) / 100))}
-							>+</button>
+							<button style={styles.zoomStepBtn} title="Zoom in 5%" disabled={fitMode} onClick={() => setPreviewZoom((z) => Math.min(2, Math.round((z + 0.05) * 100) / 100))}>
+								+
+							</button>
 							<input
 								type="range"
 								min={25}
@@ -934,15 +941,14 @@ export const DevelopView: React.FC<IDevelopViewProps> = ({ host, previewPane, co
 								value={Math.round(effectiveZoom * 100)}
 								disabled={fitMode}
 								onChange={(e) => setPreviewZoom(Number(e.target.value) / 100)}
-								onDoubleClick={() => { if (!fitMode) setPreviewZoom(1); }}
+								onDoubleClick={() => {
+									if (!fitMode) setPreviewZoom(1);
+								}}
 								style={styles.zoomSlider}
 							/>
-							<button
-								style={styles.zoomStepBtn}
-								title="Zoom out 5%"
-								disabled={fitMode}
-								onClick={() => setPreviewZoom((z) => Math.max(0.25, Math.round((z - 0.05) * 100) / 100))}
-							>-</button>
+							<button style={styles.zoomStepBtn} title="Zoom out 5%" disabled={fitMode} onClick={() => setPreviewZoom((z) => Math.max(0.25, Math.round((z - 0.05) * 100) / 100))}>
+								-
+							</button>
 							<span style={styles.zoomValue}>{Math.round(effectiveZoom * 100)}%</span>
 						</label>
 						<button
@@ -950,20 +956,18 @@ export const DevelopView: React.FC<IDevelopViewProps> = ({ host, previewPane, co
 								...(handTool ? { ...styles.layoutBtn, ...styles.toolBtnOn } : styles.layoutBtn),
 								...(fitMode ? styles.ctlDisabled : null),
 							}}
-							title={fitMode
-								? 'The hand tool is driven by Fit — toggle Fit off to pan.'
-								: 'Hand tool: drag anywhere on the preview to pan, even over the app. The app is not interactive while active.'}
+							title={fitMode ? 'The hand tool is driven by Fit — toggle Fit off to pan.' : 'Hand tool: drag anywhere on the preview to pan, even over the app. The app is not interactive while active.'}
 							disabled={fitMode}
 							onClick={() => setHandTool((h) => !h)}
-						><Hand size={14} /></button>
+						>
+							<Hand size={14} />
+						</button>
 						{/* Gear — the devtools-style overflow menu for the options
 						    that are not part of the geometry cluster. */}
 						<span style={styles.gearWrap}>
-							<button
-								style={gearOpen ? { ...styles.layoutBtn, ...styles.toolBtnOn } : styles.layoutBtn}
-								title="Preview options"
-								onClick={() => setGearOpen((o) => !o)}
-							><Settings size={14} /></button>
+							<button style={gearOpen ? { ...styles.layoutBtn, ...styles.toolBtnOn } : styles.layoutBtn} title="Preview options" onClick={() => setGearOpen((o) => !o)}>
+								<Settings size={14} />
+							</button>
 							{gearOpen && (
 								<>
 									<div style={styles.gearBackdrop} onClick={() => setGearOpen(false)} />
@@ -983,22 +987,31 @@ export const DevelopView: React.FC<IDevelopViewProps> = ({ host, previewPane, co
 											</label>
 										)}
 										{host.setPreviewTheme && (
-											<button
-												style={styles.gearMenuRow}
-												onClick={() => applyTheme(previewTheme === 'light' ? 'dark' : 'light')}
-											>Theme: {previewTheme === 'light' ? 'Light' : 'Dark'}</button>
+											<button style={styles.gearMenuRow} onClick={() => applyTheme(previewTheme === 'light' ? 'dark' : 'light')}>
+												Theme: {previewTheme === 'light' ? 'Light' : 'Dark'}
+											</button>
 										)}
 										{host.reloadPreview && (
 											<button
 												style={styles.gearMenuRow}
-												onClick={() => { host.reloadPreview?.(); setGearOpen(false); }}
-											>Reload</button>
+												onClick={() => {
+													host.reloadPreview?.();
+													setGearOpen(false);
+												}}
+											>
+												Reload
+											</button>
 										)}
 										{caps.canDebug && host.debug && (
 											<button
 												style={styles.gearMenuRow}
-												onClick={() => { host.debug?.(); setGearOpen(false); }}
-											>Debug (F5)</button>
+												onClick={() => {
+													host.debug?.();
+													setGearOpen(false);
+												}}
+											>
+												Debug (F5)
+											</button>
 										)}
 									</div>
 								</>
@@ -1021,7 +1034,9 @@ export const DevelopView: React.FC<IDevelopViewProps> = ({ host, previewPane, co
 								onPointerMove={onPanPointerMove}
 								onPointerUp={onPanPointerEnd}
 								onPointerCancel={onPanPointerEnd}
-								onDoubleClick={() => { if (!fitMode) setPan({ x: 0, y: 0 }); }}
+								onDoubleClick={() => {
+									if (!fitMode) setPan({ x: 0, y: 0 });
+								}}
 								title={fitMode ? undefined : 'Drag the gray canvas or the frame edge to pan. Double-click to recenter.'}
 							>
 								<div style={shellStyle}>
@@ -1034,17 +1049,7 @@ export const DevelopView: React.FC<IDevelopViewProps> = ({ host, previewPane, co
 							    appending/removing a trailing sibling never shifts
 							    the center's child position, so the iframe is not
 							    remounted by toggling the tool. */}
-							{handTool && (
-								<div
-									style={styles.handOverlay}
-									onPointerDown={onPanPointerDown}
-									onPointerMove={onPanPointerMove}
-									onPointerUp={onPanPointerEnd}
-									onPointerCancel={onPanPointerEnd}
-									onDoubleClick={() => setPan({ x: 0, y: 0 })}
-									title="Hand tool: drag to pan. Double-click to recenter."
-								/>
-							)}
+							{handTool && <div style={styles.handOverlay} onPointerDown={onPanPointerDown} onPointerMove={onPanPointerMove} onPointerUp={onPanPointerEnd} onPointerCancel={onPanPointerEnd} onDoubleClick={() => setPan({ x: 0, y: 0 })} title="Hand tool: drag to pan. Double-click to recenter." />}
 						</div>
 					</div>
 				</div>
@@ -1054,9 +1059,7 @@ export const DevelopView: React.FC<IDevelopViewProps> = ({ host, previewPane, co
 			    panes are active: the compiler/linker live inside it, and the
 			    preview needs the project compiled without ever visiting the
 			    Code pill (RocketApp's keep-editors-mounted pattern). */}
-			{caps.hasCodePane && (
-				<div style={{ ...styles.paneHost, display: pane === 'code' ? 'flex' : 'none' }}>{codePane}</div>
-			)}
+			{caps.hasCodePane && <div style={{ ...styles.paneHost, display: pane === 'code' ? 'flex' : 'none' }}>{codePane}</div>}
 
 			{/* PANE: COMPONENTS — the stock component gallery. Mounted on
 			    first visit, then KEPT MOUNTED (display:none) so the selected
@@ -1073,14 +1076,14 @@ export const DevelopView: React.FC<IDevelopViewProps> = ({ host, previewPane, co
 			{pane === 'console' && (
 				<div style={styles.paneHost}>
 					<div style={styles.logToolbar}>
-						<button style={styles.toolBtn} onClick={() => setLogRows([])}>Clear</button>
-						<button style={styles.toolBtn} onClick={copyLog}>Copy</button>
+						<button style={styles.toolBtn} onClick={() => setLogRows([])}>
+							Clear
+						</button>
+						<button style={styles.toolBtn} onClick={copyLog}>
+							Copy
+						</button>
 					</div>
-					<LogList
-						rows={logRows}
-						emptyTitle="No output yet"
-						emptyDescription="Everything lands here as the app runs — console.log / warn / error from the preview, runtime and build errors, and shell platform events."
-					/>
+					<LogList rows={logRows} emptyTitle="No output yet" emptyDescription="Everything lands here as the app runs — console.log / warn / error from the preview, runtime and build errors, and shell platform events." />
 				</div>
 			)}
 		</div>

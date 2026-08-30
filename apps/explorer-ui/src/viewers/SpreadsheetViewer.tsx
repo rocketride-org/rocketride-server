@@ -43,7 +43,10 @@ export const SpreadsheetViewer: React.FC<Props> = ({ content, loadError }) => {
 				if (cancelled) return;
 				const workbook = XLSX.read(data, { type: 'array' });
 				const sheet = workbook.Sheets[workbook.SheetNames[0]];
-				if (!sheet) { setError('No sheets found.'); return; }
+				if (!sheet) {
+					setError('No sheets found.');
+					return;
+				}
 				// `sanitizeLinks` strips unsafe `javascript:` URLs from workbook data (CVE-2026-44549);
 				// it is a valid runtime option but absent from the bundled xlsx type defs, hence the cast.
 				const htmlOpts = { id: 'rr-sheet', sanitizeLinks: true } as XLSX.Sheet2HTMLOpts;
@@ -54,7 +57,9 @@ export const SpreadsheetViewer: React.FC<Props> = ({ content, loadError }) => {
 			}
 		})();
 
-		return () => { cancelled = true; };
+		return () => {
+			cancelled = true;
+		};
 	}, [content]);
 
 	// Upstream load failure wins over any local render error and over "Loading...".

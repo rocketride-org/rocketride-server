@@ -35,7 +35,12 @@ function planAction(plan: CheckoutPlan): PlanAction | null {
 
 /** Extract the sort order from plan metadata, defaulting to 500. */
 function planOrder(plan: CheckoutPlan): number {
-	try { const n = parseInt(plan.metadata?.order, 10); return Number.isFinite(n) ? n : 500; } catch { return 500; }
+	try {
+		const n = parseInt(plan.metadata?.order, 10);
+		return Number.isFinite(n) ? n : 500;
+	} catch {
+		return 500;
+	}
 }
 
 /** Extract description lines from plan metadata. */
@@ -160,9 +165,7 @@ const S = {
 	// ── Plan card grid ───────────────────────────────────────────────────
 	planGrid: (count: number): CSSProperties => ({
 		display: 'grid',
-		gridTemplateColumns: count <= 2
-			? `repeat(${count}, 1fr)`
-			: `repeat(auto-fit, minmax(150px, 1fr))`,
+		gridTemplateColumns: count <= 2 ? `repeat(${count}, 1fr)` : `repeat(auto-fit, minmax(150px, 1fr))`,
 		gap: 10,
 		marginBottom: 16,
 	}),
@@ -427,24 +430,7 @@ export interface PlanPickerProps {
  * internally. Action plans (Free, Enterprise) always show; billable plans
  * are filtered by the selected interval.
  */
-export const PlanPicker: React.FC<PlanPickerProps> = ({
-	plans,
-	loading = false,
-	selectedPlan = null,
-	onSelectPlan,
-	onActionClick = defaultActionClick,
-	onPlanCta,
-	ctaLabel = 'Get started',
-	ctaConfig,
-	currentPriceId,
-	footer,
-	defaultInterval = 'month',
-	autoSelectDefault = false,
-	cardImageSrc,
-	cardImageAspect,
-	uniformCardHeight = false,
-	featureFontSize,
-}) => {
+export const PlanPicker: React.FC<PlanPickerProps> = ({ plans, loading = false, selectedPlan = null, onSelectPlan, onActionClick = defaultActionClick, onPlanCta, ctaLabel = 'Get started', ctaConfig, currentPriceId, footer, defaultInterval = 'month', autoSelectDefault = false, cardImageSrc, cardImageAspect, uniformCardHeight = false, featureFontSize }) => {
 	// ── Internal interval state ──────────────────────────────────────────
 	const [interval, setInterval] = useState<'month' | 'year'>(defaultInterval);
 
@@ -479,9 +465,7 @@ export const PlanPicker: React.FC<PlanPickerProps> = ({
 
 	// Plans visible at the current interval, sorted by order ascending.
 	const visiblePlans = useMemo(() => {
-		const filtered = showToggle
-			? plans.filter((p) => !p.interval || p.interval === 'one_time' || p.interval === interval)
-			: plans;
+		const filtered = showToggle ? plans.filter((p) => !p.interval || p.interval === 'one_time' || p.interval === interval) : plans;
 		return [...filtered].sort((a, b) => planOrder(a) - planOrder(b));
 	}, [plans, interval, showToggle]);
 
@@ -489,17 +473,11 @@ export const PlanPicker: React.FC<PlanPickerProps> = ({
 	// ``uniformCardHeight`` spacer padding so a card reserves the tallest feature
 	// list even when the current interval's own list is shorter — the height
 	// stays constant across the Monthly/Annual toggle.
-	const maxDescLines = useMemo(
-		() => (uniformCardHeight ? plans.reduce((m, p) => Math.max(m, planDescription(p)?.length ?? 0), 0) : 0),
-		[plans, uniformCardHeight],
-	);
+	const maxDescLines = useMemo(() => (uniformCardHeight ? plans.reduce((m, p) => Math.max(m, planDescription(p)?.length ?? 0), 0) : 0), [plans, uniformCardHeight]);
 
 	// The lowest-order billable plan visible at the current interval -- the
 	// "Starter" default. ``visiblePlans`` is already sorted by order ascending.
-	const defaultPlan = useMemo(
-		() => visiblePlans.find((p) => !planAction(p)) ?? null,
-		[visiblePlans]
-	);
+	const defaultPlan = useMemo(() => visiblePlans.find((p) => !planAction(p)) ?? null, [visiblePlans]);
 
 	// ── Default selection ─────────────────────────────────────────────────
 
@@ -510,8 +488,7 @@ export const PlanPicker: React.FC<PlanPickerProps> = ({
 	// indicated so the user is never charged for an unshown plan.
 	useEffect(() => {
 		if (!autoSelectDefault || !onSelectPlan) return;
-		const stillVisible =
-			selectedPlan && visiblePlans.some((p) => p.stripePriceId === selectedPlan.stripePriceId && !planAction(p));
+		const stillVisible = selectedPlan && visiblePlans.some((p) => p.stripePriceId === selectedPlan.stripePriceId && !planAction(p));
 		if (!stillVisible && defaultPlan) {
 			onSelectPlan(defaultPlan);
 		}
@@ -529,9 +506,7 @@ export const PlanPicker: React.FC<PlanPickerProps> = ({
 			// Persist the last selection across the toggle: keep the same tier
 			// (match by nickname) at the new interval when it exists.
 			if (selectedPlan && !planAction(selectedPlan)) {
-				const sameTier = plans.find(
-					(p) => p.nickname === selectedPlan.nickname && p.interval === newInterval && !planAction(p)
-				);
+				const sameTier = plans.find((p) => p.nickname === selectedPlan.nickname && p.interval === newInterval && !planAction(p));
 				if (sameTier) {
 					onSelectPlan(sameTier);
 					return;
@@ -543,9 +518,7 @@ export const PlanPicker: React.FC<PlanPickerProps> = ({
 			// caller-controlled pickers (no auto-default) leave the selection
 			// untouched so an intentional "nothing selected" state is preserved.
 			if (!autoSelectDefault) return;
-			const fallback = plans
-				.filter((p) => p.interval === newInterval && !planAction(p))
-				.sort((a, b) => planOrder(a) - planOrder(b))[0];
+			const fallback = plans.filter((p) => p.interval === newInterval && !planAction(p)).sort((a, b) => planOrder(a) - planOrder(b))[0];
 			if (fallback) onSelectPlan(fallback);
 		},
 		[plans, selectedPlan, onSelectPlan, autoSelectDefault]
@@ -581,11 +554,7 @@ export const PlanPicker: React.FC<PlanPickerProps> = ({
 
 			{/* Plan cards grid. Only a radiogroup when cards are selectable
 			    (modal); on display-only pages it's a plain container. */}
-			<div
-				style={S.planGrid(visiblePlans.length)}
-				role={onSelectPlan ? 'radiogroup' : undefined}
-				aria-label={onSelectPlan ? 'Subscription plans' : undefined}
-			>
+			<div style={S.planGrid(visiblePlans.length)} role={onSelectPlan ? 'radiogroup' : undefined} aria-label={onSelectPlan ? 'Subscription plans' : undefined}>
 				{visiblePlans.map((plan, planIdx) => {
 					const action = planAction(plan);
 					const isAction = !!action;
@@ -609,17 +578,17 @@ export const PlanPicker: React.FC<PlanPickerProps> = ({
 							// card remounts, and its <img> reloads (a visible flash). Without an
 							// image (checkout/upgrade modals) keep the original price-ID key so
 							// those consumers are unaffected.
-							key={cardImageSrc ? (plan.nickname || plan.stripePriceId || plan.id) : (plan.stripePriceId || plan.id)}
+							key={cardImageSrc ? plan.nickname || plan.stripePriceId || plan.id : plan.stripePriceId || plan.id}
 							style={S.planCard(selected, interactive)}
 							onClick={interactive ? () => onSelectPlan!(plan) : undefined}
 							onKeyDown={
 								interactive
 									? (e) => {
-										if (e.key === 'Enter' || e.key === ' ') {
-											e.preventDefault();
-											onSelectPlan!(plan);
+											if (e.key === 'Enter' || e.key === ' ') {
+												e.preventDefault();
+												onSelectPlan!(plan);
+											}
 										}
-									}
 									: undefined
 							}
 							role={interactive ? 'radio' : undefined}
@@ -634,21 +603,14 @@ export const PlanPicker: React.FC<PlanPickerProps> = ({
 								{planIntervalLabel(plan) ? (
 									<div style={S.cardInterval}>{planIntervalLabel(plan)}</div>
 								) : cardImageSrc ? (
-									<div style={S.cardInterval} aria-hidden="true">&#160;</div>
+									<div style={S.cardInterval} aria-hidden="true">
+										&#160;
+									</div>
 								) : null}
 							</div>
 
 							{/* Optional decorative image (host-supplied) */}
-							{cardImageSrc && (
-								<img
-									src={cardImageSrc}
-									alt=""
-									aria-hidden="true"
-									style={cardImageAspect
-										? S.cardImageSlice(cardImageAspect, planIdx, visiblePlans.length)
-										: S.cardImage}
-								/>
-							)}
+							{cardImageSrc && <img src={cardImageSrc} alt="" aria-hidden="true" style={cardImageAspect ? S.cardImageSlice(cardImageAspect, planIdx, visiblePlans.length) : S.cardImage} />}
 
 							{/* Feature description lines. In uniform-height mode the list is
 							    padded with invisible spacer rows up to ``maxDescLines`` so
@@ -661,12 +623,13 @@ export const PlanPicker: React.FC<PlanPickerProps> = ({
 											<span style={featureFontSize ? { whiteSpace: 'nowrap' as const } : undefined}>{line}</span>
 										</div>
 									))}
-									{uniformCardHeight && Array.from({ length: Math.max(0, maxDescLines - (desc?.length ?? 0)) }).map((_, i) => (
-										<div key={`pad-${i}`} style={{ ...S.featureLine, visibility: 'hidden', ...(featureFontSize ? { fontSize: featureFontSize } : null) }} aria-hidden="true">
-											<span style={S.featureCheck}>&#10003;</span>
-											<span>&#160;</span>
-										</div>
-									))}
+									{uniformCardHeight &&
+										Array.from({ length: Math.max(0, maxDescLines - (desc?.length ?? 0)) }).map((_, i) => (
+											<div key={`pad-${i}`} style={{ ...S.featureLine, visibility: 'hidden', ...(featureFontSize ? { fontSize: featureFontSize } : null) }} aria-hidden="true">
+												<span style={S.featureCheck}>&#10003;</span>
+												<span>&#160;</span>
+											</div>
+										))}
 								</div>
 							)}
 
@@ -676,11 +639,7 @@ export const PlanPicker: React.FC<PlanPickerProps> = ({
 									href={actionHref(action)}
 									target={action.type === 'link' ? '_blank' : undefined}
 									rel={action.type === 'link' ? 'noopener noreferrer' : undefined}
-									style={
-										isGithubAction(action)
-											? { ...S.cardAction, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }
-											: S.cardAction
-									}
+									style={isGithubAction(action) ? { ...S.cardAction, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 } : S.cardAction}
 									onClick={(e) => {
 										e.stopPropagation();
 										e.preventDefault();
@@ -699,11 +658,7 @@ export const PlanPicker: React.FC<PlanPickerProps> = ({
 								<button
 									type="button"
 									disabled={ctaDisabled}
-									style={
-										ctaDisabled
-											? { ...S.cardCta, background: 'transparent', color: 'var(--rr-text-secondary)', border: '1px solid var(--rr-border)', cursor: 'default' }
-											: S.cardCta
-									}
+									style={ctaDisabled ? { ...S.cardCta, background: 'transparent', color: 'var(--rr-text-secondary)', border: '1px solid var(--rr-border)', cursor: 'default' } : S.cardCta}
 									onClick={(e) => {
 										e.stopPropagation();
 										if (!ctaDisabled) onPlanCta(plan);

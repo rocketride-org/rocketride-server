@@ -47,7 +47,5 @@ export const bottomPanelEntry: IGalleryEntry = {
 import { BottomPanel } from 'shell';
 
 {showBottomPanel && <BottomPanel onClose={() => setShowBottomPanel(false)} />}`,
-	props: [
-		{ name: 'onClose', type: '() => void', dir: 'out', required: true, note: 'Fired by the panel close button; the host hides the panel.' },
-	],
+	props: [{ name: 'onClose', type: '() => void', dir: 'out', required: true, note: 'Fired by the panel close button; the host hides the panel.' }],
 };

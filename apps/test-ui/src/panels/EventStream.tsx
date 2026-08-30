@@ -22,9 +22,7 @@ function formatEventTime(ts: number): string {
 const EventStream: React.FC<Props> = ({ events, filter = 'all' }) => {
 	const containerRef = useRef<HTMLDivElement>(null);
 
-	const filtered = filter === 'errors'
-		? events.filter((e) => e.type === 'fail')
-		: events;
+	const filtered = filter === 'errors' ? events.filter((e) => e.type === 'fail') : events;
 
 	// Auto-scroll to top when new events arrive (they're prepended). The feed
 	// is capped, so once full its length goes constant — the newest event's id
@@ -38,19 +36,14 @@ const EventStream: React.FC<Props> = ({ events, filter = 'all' }) => {
 
 	return (
 		<div ref={containerRef} style={styles.eventStream}>
-			{filtered.length === 0 && (
-				<div style={{ padding: 24, textAlign: 'center', color: 'var(--rr-text-disabled)', fontSize: 11 }}>
-					No events yet
-				</div>
-			)}
+			{filtered.length === 0 && <div style={{ padding: 24, textAlign: 'center', color: 'var(--rr-text-disabled)', fontSize: 11 }}>No events yet</div>}
 			{filtered.slice(0, 200).map((evt) => (
 				<div key={evt.id} style={styles.eventItem}>
 					<span style={styles.eventTime}>{formatEventTime(evt.time)}</span>
-					<span style={{ ...styles.eventType, color: eventTypeColor(evt.type) }}>
-						{evt.type.toUpperCase()}
-					</span>
+					<span style={{ ...styles.eventType, color: eventTypeColor(evt.type) }}>{evt.type.toUpperCase()}</span>
 					<span style={styles.eventMsg} title={`[${evt.source}] ${evt.message}`}>
-						{evt.source !== 'engine' && evt.source !== 'sweep' ? `${evt.source} ` : ''}{evt.message}
+						{evt.source !== 'engine' && evt.source !== 'sweep' ? `${evt.source} ` : ''}
+						{evt.message}
 					</span>
 				</div>
 			))}

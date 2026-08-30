@@ -40,9 +40,7 @@ export const ROCKETRIDE_APIKEY_KEY = 'ROCKETRIDE_APIKEY';
 
 /** Quote a value only when it contains characters that would break parsing. */
 function quoteIfNeeded(value: string): string {
-	const isWrappedInMatchingQuotes =
-		(value.startsWith('"') && value.endsWith('"')) ||
-		(value.startsWith("'") && value.endsWith("'"));
+	const isWrappedInMatchingQuotes = (value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"));
 	if (!/[\s#=]/.test(value) && !isWrappedInMatchingQuotes) {
 		return value;
 	}
@@ -67,11 +65,7 @@ function quoteIfNeeded(value: string): string {
  *
  * Idempotent: `mergeEnvText(mergeEnvText(t, u), u) === mergeEnvText(t, u)`.
  */
-export function mergeEnvText(
-	existingText: string,
-	updates: Record<string, string>,
-	keysToRemove?: Set<string>,
-): string {
+export function mergeEnvText(existingText: string, updates: Record<string, string>, keysToRemove?: Set<string>): string {
 	const updateEntries = Object.entries(updates);
 
 	// New/empty file — generate from scratch in insertion order.

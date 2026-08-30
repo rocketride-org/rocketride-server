@@ -42,25 +42,10 @@
 import { RocketRideClient, Question } from 'rocketride';
 import { getClient } from 'shell';
 import { API_METHODS } from './apiMethods';
-import {
-	getEchoPipeline,
-	getChatPipeline,
-	getStressPipeline,
-} from './pipelines';
+import { getEchoPipeline, getChatPipeline, getStressPipeline } from './pipelines';
 import { generateTextChunk, generateBatchedText } from './generators';
 import { ApiMonitor, MonitoredClient } from './monitor';
-import type {
-	TestEngine,
-	EngineState,
-	TestConfig,
-	TestMetrics,
-	TestEvent,
-	PipelineSlot,
-	LatencySample,
-	ChaosScenario,
-	PipelineState,
-	PhaseResult,
-} from './types';
+import type { TestEngine, EngineState, TestConfig, TestMetrics, TestEvent, PipelineSlot, LatencySample, ChaosScenario, PipelineState, PhaseResult } from './types';
 
 // =============================================================================
 // HELPERS
@@ -88,11 +73,7 @@ function errMsg(err: unknown): string {
  * @param source - Origin label (e.g. 'sweep', 'P-03', 'chaos')
  * @param message - Human-readable description
  */
-function makeEvent(
-	type: TestEvent['type'],
-	source: string,
-	message: string,
-): TestEvent {
+function makeEvent(type: TestEvent['type'], source: string, message: string): TestEvent {
 	return { id: nextEventId++, time: Date.now(), type, source, message };
 }
 
@@ -134,10 +115,7 @@ function randomBytes(byteLength: number): Uint8Array {
  */
 let payloadCounter = 0;
 
-function generatePayload(
-	size: string,
-	type: string,
-): string | Uint8Array {
+function generatePayload(size: string, type: string): string | Uint8Array {
 	const sizes: Record<string, number> = {
 		tiny: 100,
 		medium: 10_000,
@@ -258,11 +236,7 @@ export function createTestEngine(): TestEngine {
 	}
 
 	/** Update pipeline slot state. */
-	function setPipelineState(
-		idx: number,
-		pState: PipelineState,
-		extra?: Partial<PipelineSlot>,
-	) {
+	function setPipelineState(idx: number, pState: PipelineState, extra?: Partial<PipelineSlot>) {
 		if (pipelines[idx]) {
 			pipelines[idx].state = pState;
 			if (extra) Object.assign(pipelines[idx], extra);
@@ -309,11 +283,7 @@ export function createTestEngine(): TestEngine {
 	 * Metrics.passed/failed are snapshot before and after to isolate
 	 * the phase's contribution.
 	 */
-	async function runPhase(
-		id: string,
-		fn: () => Promise<void>,
-		signal: AbortSignal,
-	): Promise<void> {
+	async function runPhase(id: string, fn: () => Promise<void>, signal: AbortSignal): Promise<void> {
 		const phase = getPhase(id);
 		if (!phase) return;
 		if (signal.aborted) {
@@ -365,9 +335,7 @@ export function createTestEngine(): TestEngine {
 	 * Pings every 100ms for the lifetime of the test run.  Latency spikes
 	 * reveal server event-loop stalls caused by other test phases.
 	 */
-	async function startPingHeartbeat(
-		signal: AbortSignal,
-	): Promise<{ stop: () => Promise<void> }> {
+	async function startPingHeartbeat(signal: AbortSignal): Promise<{ stop: () => Promise<void> }> {
 		// 5s request timeout — a stalled ping must fail fast so the 100ms
 		// heartbeat keeps sampling; matches the >5000ms classification below.
 		const client = await createClient('ping', 5000);
@@ -399,9 +367,7 @@ export function createTestEngine(): TestEngine {
 					const r = apiMonitor.get('ping');
 					r.issued++;
 					r.errors++;
-					r.lastError = latency > 5000
-						? `Ping timeout: ${latency.toFixed(0)}ms (>5000ms)`
-						: `Ping error: ${errMsg(err)}`;
+					r.lastError = latency > 5000 ? `Ping timeout: ${latency.toFixed(0)}ms (>5000ms)` : `Ping error: ${errMsg(err)}`;
 					r.status = 'failed';
 				}
 
@@ -463,20 +429,10 @@ export function createTestEngine(): TestEngine {
 	 * Create N independent clients, each with its own WebSocket.
 	 * Each phase that needs clients calls this and cleans up with destroyPool().
 	 */
-	async function createPool(
-		count: number,
-		label: string,
-		signal: AbortSignal,
-	): Promise<RocketRideClient[]> {
+	async function createPool(count: number, label: string, signal: AbortSignal): Promise<RocketRideClient[]> {
 		const { uri, apiKey } = getCredentials();
 
-		pushEvent(
-			makeEvent(
-				'info',
-				label,
-				`Creating ${count} independent WebSocket connections...`,
-			),
-		);
+		pushEvent(makeEvent('info', label, `Creating ${count} independent WebSocket connections...`));
 		notify();
 
 		const pool: RocketRideClient[] = [];
@@ -501,33 +457,19 @@ export function createTestEngine(): TestEngine {
 						// this membership, not by isConnected() at teardown.
 						countedClients.add(pool[i]);
 						pool[i].identify(`Test - ${label}`).catch(() => {});
-						pushEvent(
-							makeEvent('pass', label, `WS-${i} connected`),
-						);
+						pushEvent(makeEvent('pass', label, `WS-${i} connected`));
 						notify();
 					})
 					.catch((err) => {
-						pushEvent(
-							makeEvent(
-								'fail',
-								label,
-								`WS-${i} connect failed: ${errMsg(err)}`,
-							),
-						);
+						pushEvent(makeEvent('fail', label, `WS-${i} connect failed: ${errMsg(err)}`));
 						notify();
-					}),
+					})
 			);
 		}
 
 		await Promise.allSettled(connectPromises);
 		const connected = pool.filter((c) => c.isConnected()).length;
-		pushEvent(
-			makeEvent(
-				'info',
-				label,
-				`Pool ready: ${connected}/${count} connected`,
-			),
-		);
+		pushEvent(makeEvent('info', label, `Pool ready: ${connected}/${count} connected`));
 		notify();
 		return pool;
 	}
@@ -539,9 +481,7 @@ export function createTestEngine(): TestEngine {
 		// mid-phase (isConnected() now false) must still come back down,
 		// and members whose connect failed never went up.
 		const countedInPool = pool.filter((c) => countedClients.has(c)).length;
-		const disconnectPromises = pool.map((c) =>
-			c.disconnect().catch(() => {}),
-		);
+		const disconnectPromises = pool.map((c) => c.disconnect().catch(() => {}));
 		await Promise.allSettled(disconnectPromises);
 		metrics.wsConnections = Math.max(0, metrics.wsConnections - countedInPool);
 	}
@@ -550,12 +490,7 @@ export function createTestEngine(): TestEngine {
 	 * Run a function with a fresh client pool. Creates the pool before,
 	 * destroys it after. Makes each phase standalone.
 	 */
-	async function withPool(
-		count: number,
-		label: string,
-		signal: AbortSignal,
-		fn: () => Promise<void>,
-	): Promise<void> {
+	async function withPool(count: number, label: string, signal: AbortSignal, fn: () => Promise<void>): Promise<void> {
 		clientPool = await createPool(count, label, signal);
 		try {
 			await fn();
@@ -619,9 +554,7 @@ export function createTestEngine(): TestEngine {
 		}).length;
 		metrics.targetOps += sweepCount;
 
-		pushEvent(
-			makeEvent('info', 'sweep', `Phase 1: API coverage sweep (${isSaaS ? 'SaaS' : 'OSS'} mode, ${sweepCount} methods)...`),
-		);
+		pushEvent(makeEvent('info', 'sweep', `Phase 1: API coverage sweep (${isSaaS ? 'SaaS' : 'OSS'} mode, ${sweepCount} methods)...`));
 		notify();
 
 		// Shared context populated by methods as the sweep runs
@@ -697,13 +630,7 @@ export function createTestEngine(): TestEngine {
 		await client.disconnect().catch(() => {});
 		metrics.wsConnections = Math.max(0, metrics.wsConnections - 1);
 
-		pushEvent(
-			makeEvent(
-				'info',
-				'sweep',
-				`API sweep done: ${metrics.passed} passed, ${metrics.failed} failed`,
-			),
-		);
+		pushEvent(makeEvent('info', 'sweep', `API sweep done: ${metrics.passed} passed, ${metrics.failed} failed`));
 		notify();
 	}
 
@@ -718,12 +645,7 @@ export function createTestEngine(): TestEngine {
 	}
 
 	// eslint-disable-next-line @typescript-eslint/no-explicit-any
-	async function callApiMethod(
-		client: any,
-		method: string,
-		signal: AbortSignal,
-		ctx: SweepContext = {},
-	): Promise<void> {
+	async function callApiMethod(client: any, method: string, signal: AbortSignal, ctx: SweepContext = {}): Promise<void> {
 		if (signal.aborted) throw new Error('Aborted');
 
 		switch (method) {
@@ -736,8 +658,7 @@ export function createTestEngine(): TestEngine {
 			case 'detach':
 			case 'logout':
 			case 'disconnect':
-				if (typeof client[method] !== 'function')
-					throw new Error(`${method} not found`);
+				if (typeof client[method] !== 'function') throw new Error(`${method} not found`);
 				return;
 			case 'isConnected': {
 				const r = client.isConnected();
@@ -878,12 +799,8 @@ export function createTestEngine(): TestEngine {
 				if (chatResult?.token) {
 					const q = new Question();
 					q.addQuestion('test question from test-ui');
-					await client
-						.chat({ token: chatResult.token, question: q })
-						.catch(() => {});
-					await client
-						.terminate(chatResult.token)
-						.catch(() => {});
+					await client.chat({ token: chatResult.token, question: q }).catch(() => {});
+					await client.terminate(chatResult.token).catch(() => {});
 				}
 				return;
 			}
@@ -891,18 +808,12 @@ export function createTestEngine(): TestEngine {
 			// Events — uses the sweep pipeline token
 			case 'addMonitor': {
 				if (!ctx.pipelineToken) throw new Error('No pipeline token');
-				await client.addMonitor(
-					{ token: ctx.pipelineToken },
-					['STATUS'],
-				);
+				await client.addMonitor({ token: ctx.pipelineToken }, ['STATUS']);
 				return;
 			}
 			case 'removeMonitor': {
 				if (!ctx.pipelineToken) throw new Error('No pipeline token');
-				await client.removeMonitor(
-					{ token: ctx.pipelineToken },
-					['STATUS'],
-				);
+				await client.removeMonitor({ token: ctx.pipelineToken }, ['STATUS']);
 				return;
 			}
 			case 'clearAllMonitors':
@@ -979,10 +890,7 @@ export function createTestEngine(): TestEngine {
 				await client.fsMkdir('__test_ui__');
 				return;
 			case 'fsWriteString':
-				await client.fsWriteString(
-					'__test_ui__/test.txt',
-					'hello test-ui',
-				);
+				await client.fsWriteString('__test_ui__/test.txt', 'hello test-ui');
 				return;
 			case 'fsReadString': {
 				await client.fsReadString('__test_ui__/test.txt');
@@ -1006,10 +914,7 @@ export function createTestEngine(): TestEngine {
 				return;
 			}
 			case 'fsRename': {
-				await client.fsRename(
-					'__test_ui__/test.txt',
-					'__test_ui__/test2.txt',
-				);
+				await client.fsRename('__test_ui__/test.txt', '__test_ui__/test2.txt');
 				return;
 			}
 			case 'fsGetUrl': {
@@ -1017,27 +922,18 @@ export function createTestEngine(): TestEngine {
 				return;
 			}
 			case 'fsOpen': {
-				const { handle } = await client.fsOpen(
-					'__test_ui__/test2.txt',
-					'r',
-				);
+				const { handle } = await client.fsOpen('__test_ui__/test2.txt', 'r');
 				await client.fsClose(handle, 'r');
 				return;
 			}
 			case 'fsRead': {
-				const { handle } = await client.fsOpen(
-					'__test_ui__/test2.txt',
-					'r',
-				);
+				const { handle } = await client.fsOpen('__test_ui__/test2.txt', 'r');
 				await client.fsRead(handle);
 				await client.fsClose(handle, 'r');
 				return;
 			}
 			case 'fsWrite': {
-				const { handle } = await client.fsOpen(
-					'__test_ui__/write_test.bin',
-					'w',
-				);
+				const { handle } = await client.fsOpen('__test_ui__/write_test.bin', 'w');
 				await client.fsWrite(handle, new Uint8Array([1, 2, 3]));
 				await client.fsClose(handle, 'w');
 				return;
@@ -1212,10 +1108,7 @@ export function createTestEngine(): TestEngine {
 	 * specific WebSocket connection, distributing load across multiple sockets.
 	 * Then send data concurrently from each pipeline's owning connection.
 	 */
-	async function runMultiSocketStress(
-		cfg: TestConfig,
-		signal: AbortSignal,
-	) {
+	async function runMultiSocketStress(cfg: TestConfig, signal: AbortSignal) {
 		metrics.targetOps += cfg.pipelines * cfg.sendsPerPipeline;
 
 		// Initialize pipeline slots
@@ -1233,13 +1126,7 @@ export function createTestEngine(): TestEngine {
 		const tokens: string[] = [];
 
 		// Start pipelines distributed across the client pool
-		pushEvent(
-			makeEvent(
-				'info',
-				'stress',
-				`Phase 2: Starting ${cfg.pipelines} pipelines across ${clientPool.filter((c) => c.isConnected()).length} WebSocket connections (ramp: ${cfg.rampUp})...`,
-			),
-		);
+		pushEvent(makeEvent('info', 'stress', `Phase 2: Starting ${cfg.pipelines} pipelines across ${clientPool.filter((c) => c.isConnected()).length} WebSocket connections (ramp: ${cfg.rampUp})...`));
 		notify();
 
 		const startPromises: Promise<void>[] = [];
@@ -1251,8 +1138,7 @@ export function createTestEngine(): TestEngine {
 
 			// Ramp-up delays between pipeline starts
 			if (cfg.rampUp === 'linear') await randomDelay(1000);
-			else if (cfg.rampUp === 'exponential')
-				await randomDelay(Math.pow(2, Math.min(i, 10)));
+			else if (cfg.rampUp === 'exponential') await randomDelay(Math.pow(2, Math.min(i, 10)));
 			else if (cfg.rampUp === 'burst') {
 				if (i % 8 === 7) await randomDelay(2000);
 			}
@@ -1264,21 +1150,13 @@ export function createTestEngine(): TestEngine {
 
 		// Send data to all pipelines concurrently
 		const activeCount = tokens.filter(Boolean).length;
-		pushEvent(
-			makeEvent(
-				'info',
-				'stress',
-				`${activeCount} pipelines active. Sending ${cfg.sendsPerPipeline} payloads each...`,
-			),
-		);
+		pushEvent(makeEvent('info', 'stress', `${activeCount} pipelines active. Sending ${cfg.sendsPerPipeline} payloads each...`));
 		notify();
 
 		const sendPromises: Promise<void>[] = [];
 		for (let i = 0; i < cfg.pipelines; i++) {
 			if (!tokens[i]) continue;
-			sendPromises.push(
-				runPipelineSends(i, tokens[i], cfg, signal),
-			);
+			sendPromises.push(runPipelineSends(i, tokens[i], cfg, signal));
 		}
 		await Promise.allSettled(sendPromises);
 
@@ -1297,9 +1175,7 @@ export function createTestEngine(): TestEngine {
 				await client.terminate(tokens[i]);
 			} catch (err) {
 				// Terminate failed — unexpected, log it
-				pushEvent(
-					makeEvent('fail', label, `terminate failed: ${errMsg(err)}`),
-				);
+				pushEvent(makeEvent('fail', label, `terminate failed: ${errMsg(err)}`));
 			}
 			setPipelineState(i, 'stopped');
 		}
@@ -1310,31 +1186,19 @@ export function createTestEngine(): TestEngine {
 	 * Start a single pipeline on a client from the pool.
 	 * Each slot gets a different pipeline variant (echo, chain, fan-out, etc.).
 	 */
-	async function startPipeline(
-		idx: number,
-		_cfg: TestConfig,
-		tokens: string[],
-		signal: AbortSignal,
-	) {
+	async function startPipeline(idx: number, _cfg: TestConfig, tokens: string[], signal: AbortSignal) {
 		if (signal.aborted) return;
 		const client = getPoolClient(idx);
 		if (!client) {
 			setPipelineState(idx, 'error', {
 				lastError: 'No connected client',
 			});
-			pushEvent(
-				makeEvent(
-					'fail',
-					`P-${String(idx).padStart(2, '0')}`,
-					'No connected client in pool',
-				),
-			);
+			pushEvent(makeEvent('fail', `P-${String(idx).padStart(2, '0')}`, 'No connected client in pool'));
 			notify();
 			return;
 		}
 
-		const clientIdx =
-			clientPool.indexOf(client);
+		const clientIdx = clientPool.indexOf(client);
 		setPipelineState(idx, 'starting', { clientIdx });
 		notify();
 
@@ -1349,25 +1213,12 @@ export function createTestEngine(): TestEngine {
 			tokens[idx] = r?.token;
 			setPipelineState(idx, 'running', { token: r?.token });
 			metrics.activePipelines++;
-			pushEvent(
-				makeEvent(
-					'info',
-					label,
-					`use() -> token ${(r?.token || '').slice(0, 8)}... (WS-${clientIdx})`,
-				),
-			);
+			pushEvent(makeEvent('info', label, `use() -> token ${(r?.token || '').slice(0, 8)}... (WS-${clientIdx})`));
 		} catch (err) {
 			setPipelineState(idx, 'error', {
-				lastError:
-					errMsg(err),
+				lastError: errMsg(err),
 			});
-			pushEvent(
-				makeEvent(
-					'fail',
-					label,
-					`start failed: ${errMsg(err)}`,
-				),
-			);
+			pushEvent(makeEvent('fail', label, `start failed: ${errMsg(err)}`));
 		}
 		notify();
 	}
@@ -1376,24 +1227,12 @@ export function createTestEngine(): TestEngine {
 	 * Send payloads to a running pipeline with chaos injection.
 	 * Uses the pipeline's owning client connection.
 	 */
-	async function runPipelineSends(
-		idx: number,
-		token: string,
-		cfg: TestConfig,
-		signal: AbortSignal,
-	) {
+	async function runPipelineSends(idx: number, token: string, cfg: TestConfig, signal: AbortSignal) {
 		const label = `P-${String(idx).padStart(2, '0')}`;
 		const client = getPipelineClient(idx);
 		if (!client) return;
 
-		const corruptionPct =
-			cfg.corruptionLevel === 'off'
-				? 0
-				: cfg.corruptionLevel === 'occasional'
-					? 5
-					: cfg.corruptionLevel === 'frequent'
-						? 25
-						: 50;
+		const corruptionPct = cfg.corruptionLevel === 'off' ? 0 : cfg.corruptionLevel === 'occasional' ? 5 : cfg.corruptionLevel === 'frequent' ? 25 : 50;
 
 		for (let s = 0; s < cfg.sendsPerPipeline; s++) {
 			if (signal.aborted) break;
@@ -1403,24 +1242,12 @@ export function createTestEngine(): TestEngine {
 			if (cfg.randomDelay > 0) await randomDelay(cfg.randomDelay);
 
 			// Chaos: server-side kill — actually terminate the pipeline
-			if (
-				cfg.killProbability > 0 &&
-				Math.random() * 100 < cfg.killProbability
-			) {
-				pushEvent(
-					makeEvent(
-						'chaos',
-						label,
-						`Server-side kill (${cfg.killProbability}% roll) — terminating pipeline`,
-					),
-				);
+			if (cfg.killProbability > 0 && Math.random() * 100 < cfg.killProbability) {
+				pushEvent(makeEvent('chaos', label, `Server-side kill (${cfg.killProbability}% roll) — terminating pipeline`));
 				// Real server-side terminate
 				await client.terminate(token).catch(() => {});
 				setPipelineState(idx, 'stopped');
-				metrics.activePipelines = Math.max(
-					0,
-					metrics.activePipelines - 1,
-				);
+				metrics.activePipelines = Math.max(0, metrics.activePipelines - 1);
 				notify();
 				return;
 			}
@@ -1428,13 +1255,8 @@ export function createTestEngine(): TestEngine {
 			// Chaos: data corruption
 			let payload = generatePayload(cfg.payloadSize, cfg.payloadType);
 			if (corruptionPct > 0 && Math.random() * 100 < corruptionPct) {
-				payload =
-					'\x00\xFF\xFE' +
-					String(payload).slice(0, 100) +
-					'\x00\x00';
-				pushEvent(
-					makeEvent('chaos', label, `Corrupted payload for send #${s}`),
-				);
+				payload = '\x00\xFF\xFE' + String(payload).slice(0, 100) + '\x00\x00';
+				pushEvent(makeEvent('chaos', label, `Corrupted payload for send #${s}`));
 			}
 
 			setPipelineState(idx, 'sending');
@@ -1448,38 +1270,21 @@ export function createTestEngine(): TestEngine {
 				const latency = performance.now() - t0;
 				dataTransferred += payloadSize(payload);
 				pipelines[idx].opsCompleted++;
-				pipelines[idx].avgLatency =
-					(pipelines[idx].avgLatency *
-						(pipelines[idx].opsCompleted - 1) +
-						latency) /
-					pipelines[idx].opsCompleted;
+				pipelines[idx].avgLatency = (pipelines[idx].avgLatency * (pipelines[idx].opsCompleted - 1) + latency) / pipelines[idx].opsCompleted;
 				recordOp(true);
 				setPipelineState(idx, 'running');
 
 				// Validate response — a null/undefined result means the
 				// server silently dropped the data
 				if (result === undefined || result === null) {
-					pushEvent(
-						makeEvent(
-							'warn',
-							label,
-							`send #${s} -> no result (server may have dropped data)`,
-						),
-					);
+					pushEvent(makeEvent('warn', label, `send #${s} -> no result (server may have dropped data)`));
 				}
 			} catch (err) {
 				recordOp(false);
 				setPipelineState(idx, 'error', {
-					lastError:
-						errMsg(err),
+					lastError: errMsg(err),
 				});
-				pushEvent(
-					makeEvent(
-						'fail',
-						label,
-						`send #${s} -> ${errMsg(err)}`,
-					),
-				);
+				pushEvent(makeEvent('fail', label, `send #${s} -> ${errMsg(err)}`));
 			}
 			notify();
 		}
@@ -1500,13 +1305,7 @@ export function createTestEngine(): TestEngine {
 		const connected = clientPool.filter((c) => c.isConnected());
 		if (connected.length === 0) return;
 
-		pushEvent(
-			makeEvent(
-				'info',
-				'flood',
-				`Phase 3: Backpressure flood from ${connected.length} clients (zero delay)...`,
-			),
-		);
+		pushEvent(makeEvent('info', 'flood', `Phase 3: Backpressure flood from ${connected.length} clients (zero delay)...`));
 		notify();
 
 		// Each client gets its own echo pipeline
@@ -1550,13 +1349,7 @@ export function createTestEngine(): TestEngine {
 						recordOp(true);
 					} catch (err) {
 						recordOp(false);
-						pushEvent(
-							makeEvent(
-								'fail',
-								`flood-${cidx}`,
-								`send #${s} -> ${errMsg(err)}`,
-							),
-						);
+						pushEvent(makeEvent('fail', `flood-${cidx}`, `send #${s} -> ${errMsg(err)}`));
 						notify();
 					}
 				}
@@ -1589,13 +1382,7 @@ export function createTestEngine(): TestEngine {
 		const connected = clientPool.filter((c) => c.isConnected());
 		if (connected.length === 0) return;
 
-		pushEvent(
-			makeEvent(
-				'info',
-				'pipe',
-				`Phase 4: Pipe streaming test (${connected.length} clients)...`,
-			),
-		);
+		pushEvent(makeEvent('info', 'pipe', `Phase 4: Pipe streaming test (${connected.length} clients)...`));
 		notify();
 
 		const CHUNKS_PER_PIPE = 10;
@@ -1618,13 +1405,7 @@ export function createTestEngine(): TestEngine {
 					});
 					token = r?.token;
 				} catch (err) {
-					pushEvent(
-						makeEvent(
-							'fail',
-							`pipe-${cidx}`,
-							`use() failed: ${errMsg(err)}`,
-						),
-					);
+					pushEvent(makeEvent('fail', `pipe-${cidx}`, `use() failed: ${errMsg(err)}`));
 					notify();
 					return;
 				}
@@ -1633,11 +1414,7 @@ export function createTestEngine(): TestEngine {
 
 				try {
 					// Open a data pipe
-					const pipe = await client.pipe(
-						token,
-						{ name: `test-stream-${cidx}.bin`, size: CHUNKS_PER_PIPE * CHUNK_SIZE },
-						'application/octet-stream',
-					);
+					const pipe = await client.pipe(token, { name: `test-stream-${cidx}.bin`, size: CHUNKS_PER_PIPE * CHUNK_SIZE }, 'application/octet-stream');
 					await pipe.open();
 
 					// Write large chunks
@@ -1654,13 +1431,7 @@ export function createTestEngine(): TestEngine {
 							recordOp(true);
 						} catch (err) {
 							recordOp(false);
-							pushEvent(
-								makeEvent(
-									'fail',
-									`pipe-${cidx}`,
-									`write chunk #${c} -> ${errMsg(err)}`,
-								),
-							);
+							pushEvent(makeEvent('fail', `pipe-${cidx}`, `write chunk #${c} -> ${errMsg(err)}`));
 							notify();
 						}
 					}
@@ -1668,36 +1439,18 @@ export function createTestEngine(): TestEngine {
 					// Close and validate result
 					const result = await pipe.close();
 					if (result === undefined || result === null) {
-						pushEvent(
-							makeEvent(
-								'warn',
-								`pipe-${cidx}`,
-								'pipe.close() returned no result',
-							),
-						);
+						pushEvent(makeEvent('warn', `pipe-${cidx}`, 'pipe.close() returned no result'));
 					} else {
-						pushEvent(
-							makeEvent(
-								'pass',
-								`pipe-${cidx}`,
-								`Pipe stream complete (${CHUNKS_PER_PIPE} chunks, ${Math.round((CHUNKS_PER_PIPE * CHUNK_SIZE) / 1024)}KB)`,
-							),
-						);
+						pushEvent(makeEvent('pass', `pipe-${cidx}`, `Pipe stream complete (${CHUNKS_PER_PIPE} chunks, ${Math.round((CHUNKS_PER_PIPE * CHUNK_SIZE) / 1024)}KB)`));
 					}
 				} catch (err) {
-					pushEvent(
-						makeEvent(
-							'fail',
-							`pipe-${cidx}`,
-							`Pipe error: ${errMsg(err)}`,
-						),
-					);
+					pushEvent(makeEvent('fail', `pipe-${cidx}`, `Pipe error: ${errMsg(err)}`));
 				}
 
 				// Cleanup
 				await client.terminate(token).catch(() => {});
 				notify();
-			})(),
+			})()
 		);
 
 		await Promise.allSettled(pipePromises);
@@ -1718,9 +1471,7 @@ export function createTestEngine(): TestEngine {
 	 * - Zombie detection (use() then never terminate)
 	 */
 	async function runChaosTests(signal: AbortSignal) {
-		pushEvent(
-			makeEvent('info', 'chaos', 'Phase 5: Chaos injection tests...'),
-		);
+		pushEvent(makeEvent('info', 'chaos', 'Phase 5: Chaos injection tests...'));
 		notify();
 
 		// Chaos test 1: rapid pipeline churn (use -> terminate -> use -> ...)
@@ -1746,9 +1497,7 @@ export function createTestEngine(): TestEngine {
 		// Chaos test 5: zombie pipelines
 		await chaosZombiePipelines(signal);
 
-		pushEvent(
-			makeEvent('info', 'chaos', 'Chaos injection tests complete'),
-		);
+		pushEvent(makeEvent('info', 'chaos', 'Chaos injection tests complete'));
 		notify();
 	}
 
@@ -1762,13 +1511,7 @@ export function createTestEngine(): TestEngine {
 
 		const CYCLES = 20;
 		metrics.targetOps += CYCLES * 2; // use + terminate per cycle
-		pushEvent(
-			makeEvent(
-				'chaos',
-				'churn',
-				`Rapid pipeline churn: ${CYCLES} use/terminate cycles...`,
-			),
-		);
+		pushEvent(makeEvent('chaos', 'churn', `Rapid pipeline churn: ${CYCLES} use/terminate cycles...`));
 		notify();
 
 		for (let i = 0; i < CYCLES; i++) {
@@ -1790,20 +1533,12 @@ export function createTestEngine(): TestEngine {
 				}
 			} catch (err) {
 				recordOp(false);
-				pushEvent(
-					makeEvent(
-						'fail',
-						'churn',
-						`Cycle ${i}: ${errMsg(err)}`,
-					),
-				);
+				pushEvent(makeEvent('fail', 'churn', `Cycle ${i}: ${errMsg(err)}`));
 				notify();
 			}
 		}
 
-		pushEvent(
-			makeEvent('pass', 'churn', `${CYCLES} churn cycles complete`),
-		);
+		pushEvent(makeEvent('pass', 'churn', `${CYCLES} churn cycles complete`));
 		notify();
 	}
 
@@ -1816,13 +1551,7 @@ export function createTestEngine(): TestEngine {
 		if (!client) return;
 
 		metrics.targetOps += 5;
-		pushEvent(
-			makeEvent(
-				'chaos',
-				'zombie-send',
-				'Sending to terminated pipeline (expect rejection)...',
-			),
-		);
+		pushEvent(makeEvent('chaos', 'zombie-send', 'Sending to terminated pipeline (expect rejection)...'));
 		notify();
 
 		try {
@@ -1846,34 +1575,16 @@ export function createTestEngine(): TestEngine {
 					// If we get here, the server accepted data to a dead
 					// pipeline — that's unexpected
 					recordOp(false);
-					pushEvent(
-						makeEvent(
-							'fail',
-							'zombie-send',
-							`Send #${i} to dead pipeline was accepted (expected rejection)`,
-						),
-					);
+					pushEvent(makeEvent('fail', 'zombie-send', `Send #${i} to dead pipeline was accepted (expected rejection)`));
 				} catch {
 					// Expected — server correctly rejected
 					recordOp(true);
 				}
 				notify();
 			}
-			pushEvent(
-				makeEvent(
-					'pass',
-					'zombie-send',
-					'Dead pipeline sends correctly rejected',
-				),
-			);
+			pushEvent(makeEvent('pass', 'zombie-send', 'Dead pipeline sends correctly rejected'));
 		} catch (err) {
-			pushEvent(
-				makeEvent(
-					'fail',
-					'zombie-send',
-					`Setup failed: ${errMsg(err)}`,
-				),
-			);
+			pushEvent(makeEvent('fail', 'zombie-send', `Setup failed: ${errMsg(err)}`));
 		}
 		notify();
 	}
@@ -1887,26 +1598,14 @@ export function createTestEngine(): TestEngine {
 		const clientA = getPoolClient(0);
 		const clientB = getPoolClient(1);
 		if (!clientA || !clientB || clientA === clientB) {
-			pushEvent(
-				makeEvent(
-					'info',
-					'contention',
-					'Skipped: need 2+ independent clients',
-				),
-			);
+			pushEvent(makeEvent('info', 'contention', 'Skipped: need 2+ independent clients'));
 			notify();
 			return;
 		}
 
 		const SENDS = 20;
 		metrics.targetOps += SENDS * 2; // both clients send
-		pushEvent(
-			makeEvent(
-				'chaos',
-				'contention',
-				`Cross-client contention: 2 clients, ${SENDS} sends each...`,
-			),
-		);
+		pushEvent(makeEvent('chaos', 'contention', `Cross-client contention: 2 clients, ${SENDS} sends each...`));
 		notify();
 
 		try {
@@ -1929,55 +1628,28 @@ export function createTestEngine(): TestEngine {
 			});
 
 			// Both clients send concurrently to the same pipeline
-			const sendFromClient = async (
-				client: any,
-				label: string,
-			) => {
+			const sendFromClient = async (client: any, label: string) => {
 				for (let i = 0; i < SENDS; i++) {
 					if (signal.aborted) break;
 					await waitIfPaused(signal);
 					try {
-						await client.send(
-							token,
-							`${label} send #${i} @ ${Date.now()}`,
-						);
+						await client.send(token, `${label} send #${i} @ ${Date.now()}`);
 						recordOp(true);
 					} catch (err) {
 						recordOp(false);
-						pushEvent(
-							makeEvent(
-								'fail',
-								'contention',
-								`${label} send #${i}: ${errMsg(err)}`,
-							),
-						);
+						pushEvent(makeEvent('fail', 'contention', `${label} send #${i}: ${errMsg(err)}`));
 						notify();
 					}
 				}
 			};
 
-			await Promise.all([
-				sendFromClient(clientA, 'A'),
-				sendFromClient(clientB, 'B'),
-			]);
+			await Promise.all([sendFromClient(clientA, 'A'), sendFromClient(clientB, 'B')]);
 
 			// Cleanup
 			await clientA.terminate(token).catch(() => {});
-			pushEvent(
-				makeEvent(
-					'pass',
-					'contention',
-					'Cross-client contention test complete',
-				),
-			);
+			pushEvent(makeEvent('pass', 'contention', 'Cross-client contention test complete'));
 		} catch (err) {
-			pushEvent(
-				makeEvent(
-					'fail',
-					'contention',
-					`Failed: ${errMsg(err)}`,
-				),
-			);
+			pushEvent(makeEvent('fail', 'contention', `Failed: ${errMsg(err)}`));
 		}
 		notify();
 	}
@@ -1991,13 +1663,7 @@ export function createTestEngine(): TestEngine {
 
 		const CYCLES = 10;
 		metrics.targetOps += CYCLES * 2; // connect + disconnect per cycle
-		pushEvent(
-			makeEvent(
-				'chaos',
-				'conn-churn',
-				`Connection churn: ${CYCLES} connect/disconnect cycles...`,
-			),
-		);
+		pushEvent(makeEvent('chaos', 'conn-churn', `Connection churn: ${CYCLES} connect/disconnect cycles...`));
 		notify();
 
 		for (let i = 0; i < CYCLES; i++) {
@@ -2019,26 +1685,14 @@ export function createTestEngine(): TestEngine {
 				recordOp(true);
 			} catch (err) {
 				recordOp(false);
-				pushEvent(
-					makeEvent(
-						'fail',
-						'conn-churn',
-						`Cycle ${i}: ${errMsg(err)}`,
-					),
-				);
+				pushEvent(makeEvent('fail', 'conn-churn', `Cycle ${i}: ${errMsg(err)}`));
 				// Ensure cleanup even on failure
 				await ephemeral.disconnect().catch(() => {});
 				notify();
 			}
 		}
 
-		pushEvent(
-			makeEvent(
-				'pass',
-				'conn-churn',
-				`${CYCLES} connection churn cycles complete`,
-			),
-		);
+		pushEvent(makeEvent('pass', 'conn-churn', `${CYCLES} connection churn cycles complete`));
 		notify();
 	}
 
@@ -2053,13 +1707,7 @@ export function createTestEngine(): TestEngine {
 
 		const ZOMBIES = 5;
 		metrics.targetOps += ZOMBIES;
-		pushEvent(
-			makeEvent(
-				'chaos',
-				'zombie',
-				`Creating ${ZOMBIES} zombie pipelines (no terminate)...`,
-			),
-		);
+		pushEvent(makeEvent('chaos', 'zombie', `Creating ${ZOMBIES} zombie pipelines (no terminate)...`));
 		notify();
 
 		const zombieTokens: string[] = [];
@@ -2076,13 +1724,7 @@ export function createTestEngine(): TestEngine {
 				recordOp(true);
 			} catch (err) {
 				recordOp(false);
-				pushEvent(
-					makeEvent(
-						'fail',
-						'zombie',
-						`Zombie ${i}: ${errMsg(err)}`,
-					),
-				);
+				pushEvent(makeEvent('fail', 'zombie', `Zombie ${i}: ${errMsg(err)}`));
 				notify();
 			}
 		}
@@ -2090,34 +1732,17 @@ export function createTestEngine(): TestEngine {
 		// Check dashboard for active task count
 		try {
 			const dashboard = await client.getDashboard();
-			const taskCount =
-				typeof dashboard === 'object' && dashboard !== null
-					? Object.keys(dashboard).length
-					: 0;
-			pushEvent(
-				makeEvent(
-					'info',
-					'zombie',
-					`Dashboard shows ${taskCount} active tasks (${zombieTokens.length} are zombies)`,
-				),
-			);
+			const taskCount = typeof dashboard === 'object' && dashboard !== null ? Object.keys(dashboard).length : 0;
+			pushEvent(makeEvent('info', 'zombie', `Dashboard shows ${taskCount} active tasks (${zombieTokens.length} are zombies)`));
 		} catch {
-			pushEvent(
-				makeEvent('warn', 'zombie', 'Could not read dashboard'),
-			);
+			pushEvent(makeEvent('warn', 'zombie', 'Could not read dashboard'));
 		}
 
 		// Cleanup — terminate the zombies to be responsible
 		for (const token of zombieTokens) {
 			await client.terminate(token).catch(() => {});
 		}
-		pushEvent(
-			makeEvent(
-				'pass',
-				'zombie',
-				`${zombieTokens.length} zombie pipelines cleaned up`,
-			),
-		);
+		pushEvent(makeEvent('pass', 'zombie', `${zombieTokens.length} zombie pipelines cleaned up`));
 		notify();
 	}
 
@@ -2133,22 +1758,11 @@ export function createTestEngine(): TestEngine {
 		const connected = clientPool.filter((c) => c.isConnected());
 		if (connected.length === 0) return;
 
-		pushEvent(
-			makeEvent(
-				'info',
-				'hammer',
-				`Phase 6: Concurrent API hammer (${connected.length} clients)...`,
-			),
-		);
+		pushEvent(makeEvent('info', 'hammer', `Phase 6: Concurrent API hammer (${connected.length} clients)...`));
 		notify();
 
 		// Each client fires these concurrently
-		const hammerMethods = [
-			'getServices',
-			'getDashboard',
-			'getAllTemplates',
-			'clearAllMonitors',
-		];
+		const hammerMethods = ['getServices', 'getDashboard', 'getAllTemplates', 'clearAllMonitors'];
 		const ROUNDS = 5;
 		metrics.targetOps += connected.length * hammerMethods.length * ROUNDS;
 
@@ -2182,16 +1796,10 @@ export function createTestEngine(): TestEngine {
 								recordOp(true);
 							} catch (err) {
 								recordOp(false);
-								pushEvent(
-									makeEvent(
-										'fail',
-										'hammer',
-										`${method}: ${errMsg(err)}`,
-									),
-								);
+								pushEvent(makeEvent('fail', 'hammer', `${method}: ${errMsg(err)}`));
 								notify();
 							}
-						})(),
+						})()
 					);
 				}
 			}
@@ -2199,13 +1807,7 @@ export function createTestEngine(): TestEngine {
 			await Promise.allSettled(promises);
 		}
 
-		pushEvent(
-			makeEvent(
-				'pass',
-				'hammer',
-				`${ROUNDS} rounds of concurrent API hammer complete`,
-			),
-		);
+		pushEvent(makeEvent('pass', 'hammer', `${ROUNDS} rounds of concurrent API hammer complete`));
 		notify();
 	}
 
@@ -2275,8 +1877,7 @@ export function createTestEngine(): TestEngine {
 			const wsCount = Math.max(2, Math.min(Math.ceil(cfg.pipelines / 8), 8));
 
 			// Helper: only run if the phase is selected
-			const run = (id: string, fn: () => Promise<void>) =>
-				active.has(id) ? runPhase(id, fn, signal) : Promise.resolve();
+			const run = (id: string, fn: () => Promise<void>) => (active.has(id) ? runPhase(id, fn, signal) : Promise.resolve());
 
 			(async () => {
 				// Start a background ping heartbeat for the entire run.
@@ -2310,13 +1911,7 @@ export function createTestEngine(): TestEngine {
 
 					await run('hammer', () => withPool(wsCount, 'hammer', signal, () => runConcurrentApiHammer(signal)));
 				} catch (err) {
-					pushEvent(
-						makeEvent(
-							'fail',
-							'engine',
-							`Engine error: ${errMsg(err)}`,
-						),
-					);
+					pushEvent(makeEvent('fail', 'engine', `Engine error: ${errMsg(err)}`));
 				} finally {
 					// Stop the ping heartbeat
 					if (pingHeartbeat) {
@@ -2324,9 +1919,7 @@ export function createTestEngine(): TestEngine {
 					}
 					state = 'idle';
 					metrics.activePipelines = 0;
-					pushEvent(
-						makeEvent('info', 'engine', 'Test run complete'),
-					);
+					pushEvent(makeEvent('info', 'engine', 'Test run complete'));
 					notify();
 				}
 			})();
@@ -2407,13 +2000,7 @@ export function createTestEngine(): TestEngine {
 				payloadType: 'text',
 				...scenario.config,
 			};
-			pushEvent(
-				makeEvent(
-					'info',
-					'engine',
-					`Running scenario: ${scenario.name}`,
-				),
-			);
+			pushEvent(makeEvent('info', 'engine', `Running scenario: ${scenario.name}`));
 			notify();
 			engine.start(cfg);
 		},

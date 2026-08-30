@@ -310,11 +310,7 @@ export const StatusPane: React.FC<IStatusPaneProps> = ({ status, chapters, chapt
 				</div>
 				<EmptyState
 					title="No run at this position"
-					description={
-						onJumpToRun
-							? 'Land the needle inside a run — live or recorded — and its report card appears here.'
-							: 'This source has not run yet — start a run and its report card appears here.'
-					}
+					description={onJumpToRun ? 'Land the needle inside a run — live or recorded — and its report card appears here.' : 'This source has not run yet — start a run and its report card appears here.'}
 					action={
 						onJumpToRun && (
 							<Button small onClick={onJumpToRun}>
@@ -332,9 +328,7 @@ export const StatusPane: React.FC<IStatusPaneProps> = ({ status, chapters, chapt
 							<div style={styles.emptyHint}>Per-component timing lands here as the run executes.</div>
 						</div>
 						<div>
-							<div style={styles.sectionTitle}>
-								Slowest completions
-							</div>
+							<div style={styles.sectionTitle}>Slowest completions</div>
 							<div style={styles.emptyHint}>The run&rsquo;s slowest completions land here, each opening its trace.</div>
 						</div>
 					</div>
@@ -383,8 +377,7 @@ export const StatusPane: React.FC<IStatusPaneProps> = ({ status, chapters, chapt
 				<MiniCard
 					value={
 						<span style={styles.valueRow}>
-							{peakGpuMb >= 1024 ? (peakGpuMb / 1024).toFixed(1) : Math.round(peakGpuMb)}{' '}
-							<span style={styles.valueUnit}>{peakGpuMb >= 1024 ? 'GB' : 'MB'}</span>
+							{peakGpuMb >= 1024 ? (peakGpuMb / 1024).toFixed(1) : Math.round(peakGpuMb)} <span style={styles.valueUnit}>{peakGpuMb >= 1024 ? 'GB' : 'MB'}</span>
 						</span>
 					}
 					label="Peak GPU"
@@ -395,7 +388,8 @@ export const StatusPane: React.FC<IStatusPaneProps> = ({ status, chapters, chapt
 							{avgCompletion !== null ? formatSeconds(avgCompletion) : '—'}
 							{deviation !== null && (
 								<span style={styles.tileDeviation}>
-									{'▲'} {deviation.toFixed(1)}{'×'}
+									{'▲'} {deviation.toFixed(1)}
+									{'×'}
 								</span>
 							)}
 						</span>
@@ -428,11 +422,7 @@ export const StatusPane: React.FC<IStatusPaneProps> = ({ status, chapters, chapt
 						<div style={styles.emptyHint}>{traceOff ? 'Pipeline tracing is not enabled for this run — set the Trace level to record component stats.' : 'No component timing recorded — component stats require pipeline tracing.'}</div>
 					) : (
 						componentRows.map((row) => (
-							<div
-								key={row.component}
-								style={styles.componentRow}
-								title={`${formatSeconds(row.totalSeconds)} · ${row.calls.toLocaleString()} calls · avg ${formatSeconds(row.calls > 0 ? row.totalSeconds / row.calls : 0)} · max ${formatSeconds(row.maxSeconds)}`}
-							>
+							<div key={row.component} style={styles.componentRow} title={`${formatSeconds(row.totalSeconds)} · ${row.calls.toLocaleString()} calls · avg ${formatSeconds(row.calls > 0 ? row.totalSeconds / row.calls : 0)} · max ${formatSeconds(row.maxSeconds)}`}>
 								<span style={styles.componentName}>{componentNames?.get(row.component) ?? row.component}</span>
 								<span style={styles.componentTrack}>
 									<span style={{ ...styles.componentBar, width: `${maxComponentTotal > 0 ? Math.max(1, (row.totalSeconds / maxComponentTotal) * 100) : 1}%` }} />
@@ -443,9 +433,7 @@ export const StatusPane: React.FC<IStatusPaneProps> = ({ status, chapters, chapt
 					)}
 				</div>
 				<div>
-					<div style={styles.sectionTitle}>
-						Slowest completions
-					</div>
+					<div style={styles.sectionTitle}>Slowest completions</div>
 					{slowest.length === 0 ? (
 						<div style={styles.emptyHint}>{traceOff ? 'Pipeline tracing is not enabled for this run.' : `No completions recorded yet${componentRows.length === 0 ? ' — requires pipeline tracing' : ''}.`}</div>
 					) : (
@@ -482,7 +470,6 @@ export const StatusPane: React.FC<IStatusPaneProps> = ({ status, chapters, chapt
 					)}
 				</div>
 			</div>
-
 		</div>
 	);
 };

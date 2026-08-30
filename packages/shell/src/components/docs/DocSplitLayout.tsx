@@ -160,19 +160,22 @@ const SplitRenderer: React.FC<SplitRendererProps> = ({ node, docs, renderPane })
 	 * Skips the initial onChange that fires on mount to prevent persisting
 	 * stale/transitional sizes.  Only persists after user-initiated resizes.
 	 */
-	const handleSizeChange = useCallback((sizes: number[]) => {
-		// Skip the initial onChange fired by allotment on mount
-		if (!mountedRef.current) {
-			mountedRef.current = true;
-			return;
-		}
-		// Ignore degenerate sizes (both must be positive)
-		if (sizes[0]! <= 0 || sizes[1]! <= 0) return;
-		clearTimeout(timerRef.current);
-		timerRef.current = setTimeout(() => {
-			docs.updateSplitSizes(nodeIdRef.current, [sizes[0]!, sizes[1]!]);
-		}, SIZE_DEBOUNCE_MS);
-	}, [docs]);
+	const handleSizeChange = useCallback(
+		(sizes: number[]) => {
+			// Skip the initial onChange fired by allotment on mount
+			if (!mountedRef.current) {
+				mountedRef.current = true;
+				return;
+			}
+			// Ignore degenerate sizes (both must be positive)
+			if (sizes[0]! <= 0 || sizes[1]! <= 0) return;
+			clearTimeout(timerRef.current);
+			timerRef.current = setTimeout(() => {
+				docs.updateSplitSizes(nodeIdRef.current, [sizes[0]!, sizes[1]!]);
+			}, SIZE_DEBOUNCE_MS);
+		},
+		[docs]
+	);
 
 	return (
 		<Allotment key={node.id} vertical={node.orientation === 'vertical'} onChange={handleSizeChange}>

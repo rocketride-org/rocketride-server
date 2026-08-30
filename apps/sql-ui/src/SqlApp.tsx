@@ -164,14 +164,7 @@ const SqlAppReady: React.FC<{ docs: Documents }> = ({ docs }) => {
 					return (
 						<div style={styles.groupPane} onClick={() => docs.setActiveGroup(groupId)}>
 							{/* Tab bar for this group. */}
-							<DocTabs
-								docs={docs}
-								groupId={groupId}
-								isActive={state.activeGroupId === groupId}
-								canClose={canCloseGroups}
-								onSplit={(gid, dir) => docs.splitGroupWithDocument(gid, dir)}
-								onCloseGroup={(gid) => docs.closeGroup(gid)}
-							/>
+							<DocTabs docs={docs} groupId={groupId} isActive={state.activeGroupId === groupId} canClose={canCloseGroups} onSplit={(gid, dir) => docs.splitGroupWithDocument(gid, dir)} onCloseGroup={(gid) => docs.closeGroup(gid)} />
 
 							{/* Editor content — all editors stay mounted; visibility
 							    toggles so per-view state survives tab switches. */}

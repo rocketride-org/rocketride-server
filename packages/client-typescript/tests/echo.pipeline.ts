@@ -24,34 +24,34 @@
 
 /**
  * Get the echo pipeline configuration.
- * 
+ *
  * This pipeline receives data and returns it unchanged, making it ideal
  * for testing basic connectivity and data transmission.
- * 
+ *
  * @returns Echo pipeline configuration
  */
 export function getEchoPipeline(projectId: string = 'e612b741-748c-4b35-a8b7-186797a8ea42') {
 	return {
 		components: [
 			{
-				id: "webhook_1",
-				provider: "webhook",
-				name: "My webhook",
-				description: "A webhook to receive data",
+				id: 'webhook_1',
+				provider: 'webhook',
+				name: 'My webhook',
+				description: 'A webhook to receive data',
 				config: {
 					hideForm: true,
-					mode: "Source",
-					type: "webhook"
-				}
+					mode: 'Source',
+					type: 'webhook',
+				},
 			},
 			{
-				id: "response_1",
-				provider: "response",
+				id: 'response_1',
+				provider: 'response',
 				config: { lanes: [] },
-				input: [{ lane: "text", from: "webhook_1" }]
-			}
+				input: [{ lane: 'text', from: 'webhook_1' }],
+			},
 		],
-		source: "webhook_1",
-		project_id: projectId
+		source: 'webhook_1',
+		project_id: projectId,
 	};
 }

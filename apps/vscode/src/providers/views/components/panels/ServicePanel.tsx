@@ -124,25 +124,65 @@ export const ServicePanel: React.FC<ServicePanelProps> = ({ idPrefix, status, pr
 				{dropdownOpen && (
 					<div role="menu" style={S.splitDropdown}>
 						<div style={S.splitDropdownGroupLabel}>Recommended</div>
-						{versions.filter((v) => v.value === 'latest' || v.value === 'prerelease').map((opt) => {
-							const optKey = `${idPrefix}-service-${opt.value}`;
-							return (
-								<button type="button" key={opt.value} role="menuitem" style={optionStyle(opt.value === selectedVersion, hoveredOption === optKey)} onClick={() => { onVersionChange(opt.value); setDropdownOpen(false); }} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { onVersionChange(opt.value); setDropdownOpen(false); } if (e.key === 'Escape') setDropdownOpen(false); }} onMouseEnter={() => setHoveredOption(optKey)} onMouseLeave={() => setHoveredOption(null)}>
-									{opt.label}
-								</button>
-							);
-						})}
+						{versions
+							.filter((v) => v.value === 'latest' || v.value === 'prerelease')
+							.map((opt) => {
+								const optKey = `${idPrefix}-service-${opt.value}`;
+								return (
+									<button
+										type="button"
+										key={opt.value}
+										role="menuitem"
+										style={optionStyle(opt.value === selectedVersion, hoveredOption === optKey)}
+										onClick={() => {
+											onVersionChange(opt.value);
+											setDropdownOpen(false);
+										}}
+										onKeyDown={(e) => {
+											if (e.key === 'Enter' || e.key === ' ') {
+												onVersionChange(opt.value);
+												setDropdownOpen(false);
+											}
+											if (e.key === 'Escape') setDropdownOpen(false);
+										}}
+										onMouseEnter={() => setHoveredOption(optKey)}
+										onMouseLeave={() => setHoveredOption(null)}
+									>
+										{opt.label}
+									</button>
+								);
+							})}
 						{versions.some((v) => v.value !== 'latest' && v.value !== 'prerelease') && (
 							<>
 								<div style={S.splitDropdownGroupLabel}>All versions</div>
-								{versions.filter((v) => v.value !== 'latest' && v.value !== 'prerelease').map((opt) => {
-									const optKey = `${idPrefix}-service-${opt.value}`;
-									return (
-										<button type="button" key={opt.value} role="menuitem" style={optionStyle(opt.value === selectedVersion, hoveredOption === optKey)} onClick={() => { onVersionChange(opt.value); setDropdownOpen(false); }} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { onVersionChange(opt.value); setDropdownOpen(false); } if (e.key === 'Escape') setDropdownOpen(false); }} onMouseEnter={() => setHoveredOption(optKey)} onMouseLeave={() => setHoveredOption(null)}>
-											{opt.label}
-										</button>
-									);
-								})}
+								{versions
+									.filter((v) => v.value !== 'latest' && v.value !== 'prerelease')
+									.map((opt) => {
+										const optKey = `${idPrefix}-service-${opt.value}`;
+										return (
+											<button
+												type="button"
+												key={opt.value}
+												role="menuitem"
+												style={optionStyle(opt.value === selectedVersion, hoveredOption === optKey)}
+												onClick={() => {
+													onVersionChange(opt.value);
+													setDropdownOpen(false);
+												}}
+												onKeyDown={(e) => {
+													if (e.key === 'Enter' || e.key === ' ') {
+														onVersionChange(opt.value);
+														setDropdownOpen(false);
+													}
+													if (e.key === 'Escape') setDropdownOpen(false);
+												}}
+												onMouseEnter={() => setHoveredOption(optKey)}
+												onMouseLeave={() => setHoveredOption(null)}
+											>
+												{opt.label}
+											</button>
+										);
+									})}
 							</>
 						)}
 					</div>
@@ -243,14 +283,7 @@ export const ServicePanel: React.FC<ServicePanelProps> = ({ idPrefix, status, pr
 			{/* Test connection — visible when installed, enabled only when running */}
 			{onTestConnection && status.state !== 'not-installed' && (
 				<div style={{ marginTop: 12 }}>
-					<button
-						type="button"
-						onClick={onTestConnection}
-						disabled={status.state !== 'running' || busy}
-						style={secondaryBtnStyle(hoveredBtn === `${idPrefix}-service-test`, status.state !== 'running' || busy)}
-						onMouseEnter={() => setHoveredBtn(`${idPrefix}-service-test`)}
-						onMouseLeave={() => setHoveredBtn(null)}
-					>
+					<button type="button" onClick={onTestConnection} disabled={status.state !== 'running' || busy} style={secondaryBtnStyle(hoveredBtn === `${idPrefix}-service-test`, status.state !== 'running' || busy)} onMouseEnter={() => setHoveredBtn(`${idPrefix}-service-test`)} onMouseLeave={() => setHoveredBtn(null)}>
 						Test Connection
 					</button>
 				</div>

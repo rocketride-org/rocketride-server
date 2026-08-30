@@ -71,18 +71,10 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content }) =
 					const codeContent = String(children).replace(/\n$/, '');
 
 					if (!inline && match && match[1] === 'html') {
-						const isFullDocument = codeContent.trim().startsWith('<!DOCTYPE') ||
-							codeContent.trim().startsWith('<html');
+						const isFullDocument = codeContent.trim().startsWith('<!DOCTYPE') || codeContent.trim().startsWith('<html');
 						const htmlContent = isFullDocument ? codeContent : HTML_WRAPPER_TEMPLATE(codeContent);
 
-						return (
-							<iframe
-								srcDoc={htmlContent}
-								sandbox="allow-scripts"
-								className='html-iframe'
-								title="Rendered HTML"
-							/>
-						);
+						return <iframe srcDoc={htmlContent} sandbox="allow-scripts" className="html-iframe" title="Rendered HTML" />;
 					}
 
 					if (!inline && match && match[1] === 'chartjs') {
@@ -97,7 +89,7 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content }) =
 							customStyle={{
 								margin: 0,
 								borderRadius: '6px',
-								fontSize: 'var(--vscode-editor-font-size, 13px)'
+								fontSize: 'var(--vscode-editor-font-size, 13px)',
 							}}
 						>
 							{codeContent}
@@ -111,9 +103,7 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content }) =
 				table: (props) => {
 					return (
 						<div className="table-wrapper">
-							<table className="markdown-table">
-								{props.children}
-							</table>
+							<table className="markdown-table">{props.children}</table>
 						</div>
 					);
 				},
@@ -125,18 +115,14 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content }) =
 					);
 				},
 				blockquote: (props) => {
-					return (
-						<blockquote className="markdown-blockquote">
-							{props.children}
-						</blockquote>
-					);
+					return <blockquote className="markdown-blockquote">{props.children}</blockquote>;
 				},
 				ul: (props) => {
 					return <ul className="markdown-list">{props.children}</ul>;
 				},
 				ol: (props) => {
 					return <ol className="markdown-list">{props.children}</ol>;
-				}
+				},
 			}}
 		>
 			{content}

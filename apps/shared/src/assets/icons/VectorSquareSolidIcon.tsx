@@ -31,36 +31,13 @@ import { IIconProps } from './types';
  *
  * @param props - Standard icon props for controlling color, size, style, and opacity.
  */
-const VectorSquareSolidIcon: FunctionComponent<IIconProps> = ({
-	color,
-	height = 50,
-	style,
-	width = 50,
-	opacity = 1,
-}) => {
+const VectorSquareSolidIcon: FunctionComponent<IIconProps> = ({ color, height = 50, style, width = 50, opacity = 1 }) => {
 	return (
-		<svg
-			style={style}
-			width={width}
-			height={height}
-			viewBox="0 0 52 50"
-			fill={color}
-			opacity={opacity}
-			xmlns="http://www.w3.org/2000/svg"
-			xmlnsXlink="http://www.w3.org/1999/xlink"
-		>
+		<svg style={style} width={width} height={height} viewBox="0 0 52 50" fill={color} opacity={opacity} xmlns="http://www.w3.org/2000/svg" xmlnsXlink="http://www.w3.org/1999/xlink">
 			<rect width={width} height={height} fill="url(#pattern0_444_17557)" />
 			<defs>
-				<pattern
-					id="pattern0_444_17557"
-					patternContentUnits="objectBoundingBox"
-					width="1"
-					height="1"
-				>
-					<use
-						xlinkHref="#image0_444_17557"
-						transform="matrix(0.00195312 0 0 0.00202559 0 -0.0185513)"
-					/>
+				<pattern id="pattern0_444_17557" patternContentUnits="objectBoundingBox" width="1" height="1">
+					<use xlinkHref="#image0_444_17557" transform="matrix(0.00195312 0 0 0.00202559 0 -0.0185513)" />
 				</pattern>
 				<image
 					id="image0_444_17557"

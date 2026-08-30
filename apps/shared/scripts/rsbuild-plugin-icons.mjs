@@ -103,16 +103,10 @@ export const pluginRocketrideIcons = () => ({
 
 			const appRoot = api.context.rootPath;
 			if (!chain.resolve.alias.has('react')) {
-				chain.resolve.alias.set(
-					'react',
-					path.resolve(appRoot, 'node_modules/react'),
-				);
+				chain.resolve.alias.set('react', path.resolve(appRoot, 'node_modules/react'));
 			}
 			if (!chain.resolve.alias.has('react-dom')) {
-				chain.resolve.alias.set(
-					'react-dom',
-					path.resolve(appRoot, 'node_modules/react-dom'),
-				);
+				chain.resolve.alias.set('react-dom', path.resolve(appRoot, 'node_modules/react-dom'));
 			}
 		});
 	},

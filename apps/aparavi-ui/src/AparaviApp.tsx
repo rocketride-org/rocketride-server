@@ -142,16 +142,24 @@ const AparaviApp: React.FC<ShellAppProps> = () => {
 				try {
 					const result = await listChatDir(client, dir);
 					return (result.entries ?? []).map((e: any) => ({ name: e.name, type: e.type ?? 'file' }));
-				} catch { return []; }
+				} catch {
+					return [];
+				}
 			},
 			read: async (uri: string) => {
-				try { return await loadChat(client, uri); }
-				catch { return null; }
+				try {
+					return await loadChat(client, uri);
+				} catch {
+					return null;
+				}
 			},
 			write: async (uri: string, content: unknown) => {
 				if (!content) return;
-				try { await saveChat(client, uri, content); }
-				catch (err) { console.error('[AparaviApp] Failed to save chat:', err); }
+				try {
+					await saveChat(client, uri, content);
+				} catch (err) {
+					console.error('[AparaviApp] Failed to save chat:', err);
+				}
 			},
 			rename: async (oldPath: string, newPath: string) => {
 				await renameChat(client, oldPath, newPath);
@@ -165,7 +173,10 @@ const AparaviApp: React.FC<ShellAppProps> = () => {
 		createDocs(vfs, { appState, updateAppState });
 		setReady(true);
 
-		return () => { destroyDocs(); setReady(false); };
+		return () => {
+			destroyDocs();
+			setReady(false);
+		};
 	}, [client, loaded]);
 
 	// --- Start pipeline on connect -------------------------------------------
@@ -191,7 +202,12 @@ const AparaviApp: React.FC<ShellAppProps> = () => {
 
 	// Two-column app: the chat-file Explorer sidebar mounts once Documents is
 	// ready (it shares the singleton with the editor surface).
-	if (!ready) return <AppLayout sidebar={sidebar} showStatus><div style={styles.welcome}>Initialising...</div></AppLayout>;
+	if (!ready)
+		return (
+			<AppLayout sidebar={sidebar} showStatus>
+				<div style={styles.welcome}>Initialising...</div>
+			</AppLayout>
+		);
 	return (
 		<AppLayout sidebar={sidebar} showStatus>
 			<AparaviAppReady docs={getDocs()!} pipelineToken={pipelineToken} />
@@ -244,19 +260,9 @@ const AparaviAppReady: React.FC<{
 					if (!group) return null;
 
 					return (
-						<div
-							style={styles.groupPane}
-							onClick={() => docs.setActiveGroup(groupId)}
-						>
+						<div style={styles.groupPane} onClick={() => docs.setActiveGroup(groupId)}>
 							{/* Tab bar for this group */}
-							<DocTabs
-								docs={docs}
-								groupId={groupId}
-								isActive={state.activeGroupId === groupId}
-								canClose={canCloseGroups}
-								onSplit={(gid, dir) => docs.splitGroupWithDocument(gid, dir)}
-								onCloseGroup={(gid) => docs.closeGroup(gid)}
-							/>
+							<DocTabs docs={docs} groupId={groupId} isActive={state.activeGroupId === groupId} canClose={canCloseGroups} onSplit={(gid, dir) => docs.splitGroupWithDocument(gid, dir)} onCloseGroup={(gid) => docs.closeGroup(gid)} />
 
 							{/* Editor content — each chat tab is independently mounted
 							    so chat history is preserved across tab switches. */}
@@ -272,16 +278,8 @@ const AparaviAppReady: React.FC<{
 										if (!editor) return null;
 										const isActive = idx === group.activeEditorIndex;
 										return (
-											<div
-												key={editorId}
-												style={{ ...styles.tabPane, ...(isActive ? styles.tabPaneVisible : styles.tabPaneHidden) }}
-											>
-												<ChatTab
-													uri={editor.documentUri}
-													client={client}
-													isConnected={isConnected}
-													pipelineToken={pipelineToken}
-												/>
+											<div key={editorId} style={{ ...styles.tabPane, ...(isActive ? styles.tabPaneVisible : styles.tabPaneHidden) }}>
+												<ChatTab uri={editor.documentUri} client={client} isConnected={isConnected} pipelineToken={pipelineToken} />
 											</div>
 										);
 									})
@@ -335,9 +333,7 @@ const ChatTab: React.FC<{
 		// Debounce the disk write to avoid excessive I/O on rapid message updates
 		clearTimeout(saveTimer.current);
 		saveTimer.current = setTimeout(() => {
-			if (client) saveChat(client, uri, content).catch((err) =>
-				console.error('[AparaviApp] Failed to persist chat to disk:', err)
-			);
+			if (client) saveChat(client, uri, content).catch((err) => console.error('[AparaviApp] Failed to persist chat to disk:', err));
 		}, 500);
 	}, [messages, uri, docs, client]);
 	useEffect(() => () => clearTimeout(saveTimer.current), []);
@@ -351,15 +347,7 @@ const ChatTab: React.FC<{
 		[client, pipelineToken, sendMessage]
 	);
 
-	return (
-		<ChatView
-			messages={messages}
-			isTyping={isTyping}
-			isConnected={isConnected && !!pipelineToken}
-			onSend={handleSend}
-			placeholder="Ask about your Aparavi data..."
-		/>
-	);
+	return <ChatView messages={messages} isTyping={isTyping} isConnected={isConnected && !!pipelineToken} onSend={handleSend} placeholder="Ask about your Aparavi data..." />;
 };
 
 export default AparaviApp;

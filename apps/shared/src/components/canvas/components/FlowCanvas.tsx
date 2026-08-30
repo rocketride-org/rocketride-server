@@ -246,10 +246,7 @@ export default function Canvas(): ReactElement {
 	}, [setViewport]);
 
 	// Stable handler so ReactFlow doesn't see a new onMoveEnd reference every render.
-	const handleMoveEnd = useCallback(
-		(_event: unknown, viewport: { x: number; y: number; zoom: number }) => onViewportChange?.(viewport),
-		[onViewportChange],
-	);
+	const handleMoveEnd = useCallback((_event: unknown, viewport: { x: number; y: number; zoom: number }) => onViewportChange?.(viewport), [onViewportChange]);
 
 	// Restore viewport when the shell activates this tab (canvas:restoreViewport
 	// is dispatched by ProjectView when it receives shell:viewActivated).
@@ -300,10 +297,7 @@ export default function Canvas(): ReactElement {
 	// straight to <ReactFlow> makes StoreUpdater re-sync the store every render →
 	// "Maximum update depth exceeded". Memoizing on the actual numbers keeps the
 	// array reference stable until a value really changes.
-	const snapGrid = useMemo<[number, number]>(
-		() => (projectLayout.snapGridSize as [number, number] | undefined) ?? DEFAULT_SNAP_GRID,
-		[projectLayout.snapGridSize?.[0], projectLayout.snapGridSize?.[1]]
-	);
+	const snapGrid = useMemo<[number, number]>(() => (projectLayout.snapGridSize as [number, number] | undefined) ?? DEFAULT_SNAP_GRID, [projectLayout.snapGridSize?.[0], projectLayout.snapGridSize?.[1]]);
 
 	// --- Annotation shortcut -----------------------------------------------
 	const addAnnotation = useCallback(() => {

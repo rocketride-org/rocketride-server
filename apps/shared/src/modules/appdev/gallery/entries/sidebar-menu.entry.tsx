@@ -54,13 +54,7 @@ const SidebarMenuDemo: React.FC<IGalleryDemoProps> = ({ knobs }) => {
 
 	return (
 		<div style={{ width: knobs.collapsed ? 56 : 220, border: '1px solid var(--rr-border)', borderRadius: 6, background: 'var(--rr-bg-surface-alt)', padding: '6px 0' }}>
-			<SidebarMenu
-				menu={menu}
-				activeId={activeId}
-				onSelect={setActiveId}
-				sectionLabel={String(knobs.sectionLabel) || undefined}
-				collapsed={Boolean(knobs.collapsed)}
-			/>
+			<SidebarMenu menu={menu} activeId={activeId} onSelect={setActiveId} sectionLabel={String(knobs.sectionLabel) || undefined} collapsed={Boolean(knobs.collapsed)} />
 		</div>
 	);
 };
@@ -68,7 +62,7 @@ const SidebarMenuDemo: React.FC<IGalleryDemoProps> = ({ knobs }) => {
 /** Snippet builder mirroring the current knob state. */
 const buildCode = (knobs: KnobValues): string => {
 	const sectionAttr = knobs.sectionLabel ? `\n\tsectionLabel="${String(knobs.sectionLabel)}"` : '';
-	const countAttr = knobs.badges ? ", count: 48" : '';
+	const countAttr = knobs.badges ? ', count: 48' : '';
 	return `import { SidebarMenu } from 'shell';
 
 const menu = { entries: [

@@ -15,22 +15,7 @@
  * `Tabulator` class from THIS file, never from 'tabulator-tables' directly.
  */
 
-import {
-	Tabulator,
-	AjaxModule,
-	FilterModule,
-	FormatModule,
-	InteractionModule,
-	MenuModule,
-	MoveColumnsModule,
-	PageModule,
-	PersistenceModule,
-	PopupModule,
-	ResizeColumnsModule,
-	ResizeTableModule,
-	SortModule,
-	TooltipModule,
-} from 'tabulator-tables';
+import { Tabulator, AjaxModule, FilterModule, FormatModule, InteractionModule, MenuModule, MoveColumnsModule, PageModule, PersistenceModule, PopupModule, ResizeColumnsModule, ResizeTableModule, SortModule, TooltipModule } from 'tabulator-tables';
 import type { CellComponent, ColumnComponent } from 'tabulator-tables';
 
 // =============================================================================
@@ -48,14 +33,7 @@ declare module 'tabulator-tables' {
 		 * invoked on open (event, column, onRendered) returning the panel.
 		 * Supported by the Popup module at runtime; missing from @types.
 		 */
-		headerPopup?:
-			| string
-			| HTMLElement
-			| ((
-					e: MouseEvent | TouchEvent,
-					column: ColumnComponent,
-					onRendered: (callback: () => void) => void,
-			  ) => HTMLElement | string);
+		headerPopup?: string | HTMLElement | ((e: MouseEvent | TouchEvent, column: ColumnComponent, onRendered: (callback: () => void) => void) => HTMLElement | string);
 		/**
 		 * Icon of the header-popup button: HTML string, element, or a builder
 		 * from the column component. Supported at runtime; missing from @types.
@@ -97,21 +75,7 @@ declare module 'tabulator-tables' {
 // grid ever renders there, so registration is safely skipped; every real
 // bundle (rspack ESM) resolves Tabulator and registers as before.
 if (Tabulator) {
-	Tabulator.registerModule([
-		AjaxModule,
-		FilterModule,
-		FormatModule,
-		InteractionModule,
-		MenuModule,
-		MoveColumnsModule,
-		PageModule,
-		PersistenceModule,
-		PopupModule,
-		ResizeColumnsModule,
-		ResizeTableModule,
-		SortModule,
-		TooltipModule,
-	]);
+	Tabulator.registerModule([AjaxModule, FilterModule, FormatModule, InteractionModule, MenuModule, MoveColumnsModule, PageModule, PersistenceModule, PopupModule, ResizeColumnsModule, ResizeTableModule, SortModule, TooltipModule]);
 }
 
 export { Tabulator };

@@ -47,10 +47,7 @@ export function getDocs(): Documents | null {
  * @param vfs       - Virtual file system for file I/O.
  * @param workspace - Optional workspace binding for automatic persistence.
  */
-export function createDocs(
-	vfs: import('shell').IVirtualFileSystem,
-	workspace?: import('shell').WorkspaceBinding,
-): Documents {
+export function createDocs(vfs: import('shell').IVirtualFileSystem, workspace?: import('shell').WorkspaceBinding): Documents {
 	_docs = new Documents(vfs, workspace);
 	return _docs;
 }

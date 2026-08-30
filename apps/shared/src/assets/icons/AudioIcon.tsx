@@ -32,27 +32,9 @@ import { IIconProps } from './types';
  *
  * @param props - Standard icon props for controlling size, style, and opacity.
  */
-const AudioIcon: FunctionComponent<IIconProps> = ({
-	height = '18',
-	style,
-	width = '22',
-	opacity = 1,
-}) => {
+const AudioIcon: FunctionComponent<IIconProps> = ({ height = '18', style, width = '22', opacity = 1 }) => {
 	return (
-		<svg
-			version="1.1"
-			id="Layer_1"
-			xmlns="http://www.w3.org/2000/svg"
-			xmlnsXlink="http://www.w3.org/1999/xlink"
-			x="0px"
-			y="0px"
-			viewBox="0 0 512 512"
-			xmlSpace="preserve"
-			height={height}
-			width={width}
-			style={style}
-			opacity={opacity}
-		>
+		<svg version="1.1" id="Layer_1" xmlns="http://www.w3.org/2000/svg" xmlnsXlink="http://www.w3.org/1999/xlink" x="0px" y="0px" viewBox="0 0 512 512" xmlSpace="preserve" height={height} width={width} style={style} opacity={opacity}>
 			<g>
 				<path
 					fill="#2EE6C7"
@@ -86,19 +68,10 @@ const AudioIcon: FunctionComponent<IIconProps> = ({
 	300.336,60.344 "
 			/>
 			<g>
-				<path
-					fill="#7F838C"
-					d="M120,352H48c-26.51,0-48-21.49-48-48v-96c0-26.51,21.49-48,48-48h72V352z"
-				/>
-				<path
-					fill="#7F838C"
-					d="M288,480h-12V32h12c26.51,0,48,21.49,48,48v352C336,458.51,314.51,480,288,480z"
-				/>
+				<path fill="#7F838C" d="M120,352H48c-26.51,0-48-21.49-48-48v-96c0-26.51,21.49-48,48-48h72V352z" />
+				<path fill="#7F838C" d="M288,480h-12V32h12c26.51,0,48,21.49,48,48v352C336,458.51,314.51,480,288,480z" />
 			</g>
-			<polygon
-				fill="#53565C"
-				points="93.977,256 81.977,313.594 120,352 276,480 300.336,428.656 312.336,256 "
-			/>
+			<polygon fill="#53565C" points="93.977,256 81.977,313.594 120,352 276,480 300.336,428.656 312.336,256 " />
 			<g>
 				<path fill="#7F8184" d="M276,256v224h12c26.508,0,48-21.5,48-48V256H276z" />
 				<path fill="#7F8184" d="M0,256v48c0,26.5,21.492,48,48,48h72v-96H0z" />

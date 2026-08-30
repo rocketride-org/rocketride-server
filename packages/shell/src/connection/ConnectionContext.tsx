@@ -78,9 +78,7 @@ export interface ShellConnectionState {
 export function useShellConnection(): ShellConnectionState {
 	// Initialise state from the singleton's current values so we don't
 	// flash stale state on first render
-	const [isConnected, setIsConnected] = useState<boolean>(
-		() => ConnectionManager.getInstance().isConnected(),
-	);
+	const [isConnected, setIsConnected] = useState<boolean>(() => ConnectionManager.getInstance().isConnected());
 	const [statusMessage, setStatusMessage] = useState<string | null>(null);
 
 	// Track mount status to prevent setState on unmounted components

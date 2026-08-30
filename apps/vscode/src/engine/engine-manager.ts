@@ -86,17 +86,24 @@ export class EngineManager extends EventEmitter {
 	// =========================================================================
 
 	/** Current connection mode, or null if idle. */
-	get mode(): ConnectionMode | null { return this._mode; }
+	get mode(): ConnectionMode | null {
+		return this._mode;
+	}
 
 	/** Current lifecycle phase. */
-	get phase(): EnginePhase { return this._phase; }
+	get phase(): EnginePhase {
+		return this._phase;
+	}
 
 	/** Config checksum from when this engine was last started. */
-	get configChecksum(): number { return this._configChecksum; }
-
+	get configChecksum(): number {
+		return this._configChecksum;
+	}
 
 	/** The active backend (if any). Useful for mode-specific operations. */
-	getBackend(): EngineBackend | null { return this.backend; }
+	getBackend(): EngineBackend | null {
+		return this.backend;
+	}
 
 	/** Returns info about the installed engine, or null. */
 	getInfo(): EngineInfo | null {
@@ -127,7 +134,9 @@ export class EngineManager extends EventEmitter {
 		if (this._mode !== mode && this.backend) {
 			try {
 				await this.backend.stop();
-			} catch { /* best effort */ }
+			} catch {
+				/* best effort */
+			}
 			await this.backend.dispose();
 			this.backend = null;
 		}
@@ -178,7 +187,11 @@ export class EngineManager extends EventEmitter {
 		this.cancelCurrentOperation();
 
 		if (this.backend) {
-			try { await this.backend.stop(); } catch { /* best effort */ }
+			try {
+				await this.backend.stop();
+			} catch {
+				/* best effort */
+			}
 			await this.backend.dispose();
 			this.backend = null;
 		}

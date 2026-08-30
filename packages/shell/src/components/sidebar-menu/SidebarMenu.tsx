@@ -119,7 +119,7 @@ const styles = {
 			? {
 					background: 'var(--rr-bg-list-active)',
 					color: 'var(--rr-fg-list-active)',
-			  }
+				}
 			: null),
 		// Hover (non-active, non-disabled only): quiet list-hover fill.
 		...(!disabled && !active && hovered ? { background: 'var(--rr-bg-list-hover)' } : null),
@@ -171,7 +171,7 @@ const styles = {
 			? {
 					background: 'var(--rr-bg-list-active)',
 					color: 'var(--rr-fg-list-active)',
-			  }
+				}
 			: null),
 		...(!disabled && !active && hovered ? { background: 'var(--rr-bg-list-hover)' } : null),
 	}),
@@ -264,8 +264,7 @@ export function SidebarMenu({ menu, activeId, onSelect, sectionLabel, collapsed 
 	 * @param id - The entry id to locate.
 	 * @returns The owning section's id, or null.
 	 */
-	const sectionOf = (id: string): string | null =>
-		menu.entries.find((e) => e.children?.some((c) => c.id === id))?.id ?? null;
+	const sectionOf = (id: string): string | null => menu.entries.find((e) => e.children?.some((c) => c.id === id))?.id ?? null;
 
 	// Accordion state: the ONE open section (null = all closed). Seeded with
 	// the section containing the active entry so the current view is visible
@@ -338,7 +337,9 @@ export function SidebarMenu({ menu, activeId, onSelect, sectionLabel, collapsed 
 				aria-disabled={isDisabled || undefined}
 				tabIndex={isDisabled ? -1 : 0}
 				style={{ ...styles.item(isActive, isHovered, isDisabled), ...styles.rowIndent(grouped, indented) }}
-				onClick={() => { if (!isDisabled) onSelect(entry.id); }}
+				onClick={() => {
+					if (!isDisabled) onSelect(entry.id);
+				}}
 				onKeyDown={(e) => onItemKeyDown(e, entry.id, isDisabled)}
 				onMouseEnter={() => setHoveredId(entry.id)}
 				onMouseLeave={() => setHoveredId(null)}
@@ -373,7 +374,9 @@ export function SidebarMenu({ menu, activeId, onSelect, sectionLabel, collapsed 
 							aria-disabled={isDisabled || undefined}
 							tabIndex={isDisabled ? -1 : 0}
 							style={styles.itemCollapsed(isActive, isHovered, isDisabled)}
-							onClick={() => { if (!isDisabled) onSelect(entry.id); }}
+							onClick={() => {
+								if (!isDisabled) onSelect(entry.id);
+							}}
 							onKeyDown={(e) => onItemKeyDown(e, entry.id, isDisabled)}
 							onMouseEnter={() => setHoveredId(entry.id)}
 							onMouseLeave={() => setHoveredId(null)}
@@ -405,23 +408,12 @@ export function SidebarMenu({ menu, activeId, onSelect, sectionLabel, collapsed 
 				const isHovered = entry.id === hoveredId;
 				return (
 					<React.Fragment key={entry.id}>
-						<div
-							role="button"
-							aria-expanded={isOpen}
-							tabIndex={0}
-							style={{ ...styles.sectionRow(isHovered), ...styles.rowIndent(grouped, false) }}
-							onClick={() => toggleSection(entry.id)}
-							onKeyDown={(e) => onSectionKeyDown(e, entry.id)}
-							onMouseEnter={() => setHoveredId(entry.id)}
-							onMouseLeave={() => setHoveredId(null)}
-						>
+						<div role="button" aria-expanded={isOpen} tabIndex={0} style={{ ...styles.sectionRow(isHovered), ...styles.rowIndent(grouped, false) }} onClick={() => toggleSection(entry.id)} onKeyDown={(e) => onSectionKeyDown(e, entry.id)} onMouseEnter={() => setHoveredId(entry.id)} onMouseLeave={() => setHoveredId(null)}>
 							{/* Section icon shares the item icon slot (never active-tinted). */}
 							{entry.icon && <span style={styles.itemIcon(false, false)}>{entry.icon}</span>}
 							<span style={styles.label}>{entry.label}</span>
 							{/* Open/closed chevron at the trailing edge. */}
-							<span style={styles.sectionChevron}>
-								{isOpen ? <BxChevronDown size={15} /> : <BxChevronRight size={15} />}
-							</span>
+							<span style={styles.sectionChevron}>{isOpen ? <BxChevronDown size={15} /> : <BxChevronRight size={15} />}</span>
 						</div>
 						{isOpen && entry.children.map((child) => renderItem(child, true))}
 					</React.Fragment>

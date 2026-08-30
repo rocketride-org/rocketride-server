@@ -49,144 +49,140 @@ const ENGINE = path.join(DIST_ROOT, 'server', 'engine');
 // depends.engine_cache_dir() = <engine executable dir>/cache.
 const ENGINE_CACHE_DIR = path.join(DIST_ROOT, 'server', 'cache');
 
-
 // ============================================================================
 // Leaf actions (carry the actual run callbacks)
 // ============================================================================
 
 function makeRunChecksAction(options = {}) {
-    return {
-        // No description -> internal; reached as the final step of
-        // `check-externals:run`, or invoked directly for fast dev iteration.
-        run: async (ctx, task) => {
-            if (options.rebuildCache) {
-                const constraints = path.join(ENGINE_CACHE_DIR, 'constraints.txt');
-                const hashFile = path.join(ENGINE_CACHE_DIR, 'requirements.hash');
-                await unlink(constraints);
-                await unlink(hashFile);
-                // The satisfied-verdict cache too: a recompile that produces
-                // identical constraints leaves every verdict valid, so without
-                // this the flag cannot force a resolve — and a verdict that is
-                // wrong for an unforeseen reason would have no supported way out.
-                const verdicts = path.join(ENGINE_CACHE_DIR, 'satisfied');
-                await removeDir(verdicts);
-                // removeDir only warns when the directory is in use (EPERM/EBUSY),
-                // so confirm it is gone rather than reporting a reset that did not
-                // happen: a surviving verdict means the flag did not force the
-                // re-resolve it promises. Checked here rather than on removeDir's
-                // return value, which reports success for an absent directory too.
-                if (await exists(verdicts)) {
-                    throw new Error(`Could not clear the satisfied-verdict cache at ${verdicts}; the re-resolve would be skipped`);
-                }
-                task.output = 'Constraint and verdict caches cleared; depends() will recompile and re-resolve';
-            }
+	return {
+		// No description -> internal; reached as the final step of
+		// `check-externals:run`, or invoked directly for fast dev iteration.
+		run: async (ctx, task) => {
+			if (options.rebuildCache) {
+				const constraints = path.join(ENGINE_CACHE_DIR, 'constraints.txt');
+				const hashFile = path.join(ENGINE_CACHE_DIR, 'requirements.hash');
+				await unlink(constraints);
+				await unlink(hashFile);
+				// The satisfied-verdict cache too: a recompile that produces
+				// identical constraints leaves every verdict valid, so without
+				// this the flag cannot force a resolve — and a verdict that is
+				// wrong for an unforeseen reason would have no supported way out.
+				const verdicts = path.join(ENGINE_CACHE_DIR, 'satisfied');
+				await removeDir(verdicts);
+				// removeDir only warns when the directory is in use (EPERM/EBUSY),
+				// so confirm it is gone rather than reporting a reset that did not
+				// happen: a surviving verdict means the flag did not force the
+				// re-resolve it promises. Checked here rather than on removeDir's
+				// return value, which reports success for an absent directory too.
+				if (await exists(verdicts)) {
+					throw new Error(`Could not clear the satisfied-verdict cache at ${verdicts}; the re-resolve would be skipped`);
+				}
+				task.output = 'Constraint and verdict caches cleared; depends() will recompile and re-resolve';
+			}
 
-            // Invoke the CLI directly — no pytest. The CLI implements the
-            // verification loop itself (find_spec for skip-on-missing,
-            // verify_* for each contract entry, exit code from failure
-            // count). pytest only runs under check-externals:run-tests.
-            const cliArgs = [CLI_SCRIPT];
-            // Prefer --pattern (framework-native); fall back to --pytest-pattern
-            // for users with muscle memory from pytest-based tasks like nodes:test.
-            // options.pattern is always a list (build.js accumulates). The CLI
-            // supports `--pattern` multiple times with OR semantics, so we forward
-            // each entry as its own flag occurrence.
-            const patterns = options.pattern || (options.pytestPattern ? [options.pytestPattern] : []);
-            for (const p of patterns) {
-                cliArgs.push('--pattern', p);
-            }
+			// Invoke the CLI directly — no pytest. The CLI implements the
+			// verification loop itself (find_spec for skip-on-missing,
+			// verify_* for each contract entry, exit code from failure
+			// count). pytest only runs under check-externals:run-tests.
+			const cliArgs = [CLI_SCRIPT];
+			// Prefer --pattern (framework-native); fall back to --pytest-pattern
+			// for users with muscle memory from pytest-based tasks like nodes:test.
+			// options.pattern is always a list (build.js accumulates). The CLI
+			// supports `--pattern` multiple times with OR semantics, so we forward
+			// each entry as its own flag occurrence.
+			const patterns = options.pattern || (options.pytestPattern ? [options.pytestPattern] : []);
+			for (const p of patterns) {
+				cliArgs.push('--pattern', p);
+			}
 
-            // --install-all: forwarded as-is to the CLI. Nightly cron lane
-            // sets this so the framework installs every requirement*.txt
-            // even when carrying a `# contract-check: skip-install` marker.
-            if (options.installAll) {
-                cliArgs.push('--install-all');
-            }
+			// --install-all: forwarded as-is to the CLI. Nightly cron lane
+			// sets this so the framework installs every requirement*.txt
+			// even when carrying a `# contract-check: skip-install` marker.
+			if (options.installAll) {
+				cliArgs.push('--install-all');
+			}
 
-            await execCommand(ENGINE, cliArgs, {
-                task,
-                // NLTK 3.9.4's import guard (nltk/inisec.py) blocks any NLTK-triggered import
-                // that resolves under the CWD. Here cwd=dist/server holds the engine's frozen
-                // stdlib, so NLTK importing optparse trips it as a false positive. Its
-                // off-switch disables the guard so the stdlib import resolves normally.
-                cwd: path.join(DIST_ROOT, 'server'),
-                env: { ...process.env, NLTK_DISABLE_IMPORT_SECURITY: '1' },
-            });
-        },
-    };
+			await execCommand(ENGINE, cliArgs, {
+				task,
+				// NLTK 3.9.4's import guard (nltk/inisec.py) blocks any NLTK-triggered import
+				// that resolves under the CWD. Here cwd=dist/server holds the engine's frozen
+				// stdlib, so NLTK importing optparse trips it as a false positive. Its
+				// off-switch disables the guard so the stdlib import resolves normally.
+				cwd: path.join(DIST_ROOT, 'server'),
+				env: { ...process.env, NLTK_DISABLE_IMPORT_SECURITY: '1' },
+			});
+		},
+	};
 }
-
 
 function makeRunTestsAction(options = {}) {
-    return {
-        // No description -> internal; reached as the final step of
-        // `check-externals:test`.
-        run: async (ctx, task) => {
-            const extraArgs = ['-v', '--tb=short'];
+	return {
+		// No description -> internal; reached as the final step of
+		// `check-externals:test`.
+		run: async (ctx, task) => {
+			const extraArgs = ['-v', '--tb=short'];
 
-            // Accept both --pattern and --pytest-pattern; this lane is real
-            // pytest, so either maps to pytest's -k expression. pytest only
-            // accepts ONE -k arg, so join multiple --pattern values with
-            // ` or ` (pytest's OR operator) to preserve the OR semantics.
-            const patterns = options.pattern || (options.pytestPattern ? [options.pytestPattern] : []);
-            if (patterns.length > 0) {
-                extraArgs.push('-k', patterns.join(' or '));
-            }
+			// Accept both --pattern and --pytest-pattern; this lane is real
+			// pytest, so either maps to pytest's -k expression. pytest only
+			// accepts ONE -k arg, so join multiple --pattern values with
+			// ` or ` (pytest's OR operator) to preserve the OR semantics.
+			const patterns = options.pattern || (options.pytestPattern ? [options.pytestPattern] : []);
+			if (patterns.length > 0) {
+				extraArgs.push('-k', patterns.join(' or '));
+			}
 
-            // Target the two self-test files directly so collection doesn't
-            // also pull in any future parametrized contract tests (which
-            // would require the four trees to be built).
-            for (const fname of ['test_extractor.py', 'test_runner.py']) {
-                await runPytest({
-                    engine: ENGINE,
-                    testsDir: path.join(TEST_DIR, fname),
-                    extraArgs,
-                    execOpts: {
-                        task,
-                        cwd: path.join(DIST_ROOT, 'server'),
-                        env: { ...process.env },
-                    },
-                });
-            }
-        },
-    };
+			// Target the two self-test files directly so collection doesn't
+			// also pull in any future parametrized contract tests (which
+			// would require the four trees to be built).
+			for (const fname of ['test_extractor.py', 'test_runner.py']) {
+				await runPytest({
+					engine: ENGINE,
+					testsDir: path.join(TEST_DIR, fname),
+					extraArgs,
+					execOpts: {
+						task,
+						cwd: path.join(DIST_ROOT, 'server'),
+						env: { ...process.env },
+					},
+				});
+			}
+		},
+	};
 }
-
 
 // ============================================================================
 // Public compound actions (only `steps` — no `run`, so action-runner won't
 // silently drop anything)
 // ============================================================================
 
-
 module.exports = {
-    name: 'check-externals',
-    description: '3rd-party interface contract test framework',
+	name: 'check-externals',
+	description: '3rd-party interface contract test framework',
 
-    actions: [
-        // Internal leaf actions — these carry the real run callbacks.
-        { name: 'check-externals:run-checks', action: makeRunChecksAction },
-        { name: 'check-externals:run-tests', action: makeRunTestsAction },
+	actions: [
+		// Internal leaf actions — these carry the real run callbacks.
+		{ name: 'check-externals:run-checks', action: makeRunChecksAction },
+		{ name: 'check-externals:run-tests', action: makeRunTestsAction },
 
-        // Public compound actions — build deps + the matching leaf.
-        { name: 'check-externals:run', action: () => ({
-            description: 'Check interfaces to 3rd-party Python modules used by the engine',
-            // Build the engine + the four scanned trees so depends() can install
-            // every component's requirements.txt at session start. The leaf
-            // step at the end actually invokes the CLI.
-            steps: [
-                'server:build',
-                'nodes:build',
-                'ai:build',
-                'client-python:build',
-                'check-externals:run-checks',
-            ],
-        })},
-        { name: 'check-externals:test', action: () => ({
-            description: 'Unit tests for the check-externals framework itself',
-            // Only the engine is required; the four trees are not scanned by
-            // these tests, so we don't need to build them.
-            steps: ['server:build', 'check-externals:run-tests'],
-        })},
-    ],
+		// Public compound actions — build deps + the matching leaf.
+		{
+			name: 'check-externals:run',
+			action: () => ({
+				description: 'Check interfaces to 3rd-party Python modules used by the engine',
+				// Build the engine + the four scanned trees so depends() can install
+				// every component's requirements.txt at session start. The leaf
+				// step at the end actually invokes the CLI.
+				steps: ['server:build', 'nodes:build', 'ai:build', 'client-python:build', 'check-externals:run-checks'],
+			}),
+		},
+		{
+			name: 'check-externals:test',
+			action: () => ({
+				description: 'Unit tests for the check-externals framework itself',
+				// Only the engine is required; the four trees are not scanned by
+				// these tests, so we don't need to build them.
+				steps: ['server:build', 'check-externals:run-tests'],
+			}),
+		},
+	],
 };

@@ -43,11 +43,7 @@ function makeClientShell(): { client: RocketRideClient; calls: Array<{ args?: un
 	const calls: Array<{ args?: unknown; opts?: unknown }> = [];
 	const client = Object.create(RocketRideClient.prototype) as RocketRideClient;
 	(client as unknown as { isConnected: () => boolean }).isConnected = () => true;
-	(client as unknown as { call: (cmd: string, args?: unknown, opts?: unknown) => Promise<void> }).call = async (
-		_cmd: string,
-		args?: unknown,
-		opts?: unknown,
-	) => {
+	(client as unknown as { call: (cmd: string, args?: unknown, opts?: unknown) => Promise<void> }).call = async (_cmd: string, args?: unknown, opts?: unknown) => {
 		calls.push({ args, opts });
 	};
 	(client as unknown as { _monitorKeys: Map<string, Map<string, number>> })._monitorKeys = new Map();
@@ -135,8 +131,7 @@ describe('monitor key scope', () => {
 		const { client, calls } = makeClientShell();
 		await client.addMonitor({ projectId: 'proj-1', source: 'src-1', teamId: 'team-1' }, ['summary']);
 		calls.length = 0;
-		await (client as unknown as { _resubscribeAllMonitors: (operation: unknown) => Promise<void> })
-			._resubscribeAllMonitors(makeCurrentOperation(client));
+		await (client as unknown as { _resubscribeAllMonitors: (operation: unknown) => Promise<void> })._resubscribeAllMonitors(makeCurrentOperation(client));
 		expect(calls).toHaveLength(1);
 		expect((calls[0].args as Record<string, unknown>).teamId).toBe('team-1');
 	});

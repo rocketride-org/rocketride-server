@@ -23,14 +23,14 @@
 
 /**
  * Task State Enumeration
- * 
+ *
  * Matches the backend TASK_STATE enum for consistent state representation
  * across the frontend and backend systems. These states represent the complete
  * lifecycle of a pipeline task from initialization to completion.
- * 
+ *
  * State Transitions:
  * NONE → STARTING → INITIALIZING → RUNNING → STOPPING → COMPLETED/CANCELLED
- * 
+ *
  * Visual Status Mapping:
  * - NONE, STARTING, COMPLETED, CANCELLED → "Offline" (inactive indicator)
  * - INITIALIZING → "Initializing" (inactive indicator)
@@ -57,7 +57,7 @@ export enum TASK_STATE {
 	COMPLETED = 5,
 
 	/** Task was cancelled before completion */
-	CANCELLED = 6
+	CANCELLED = 6,
 }
 
 /**
@@ -68,7 +68,7 @@ export interface FlowData {
 	/** Total number of pipes in the pipeline flow */
 	totalPipes: number;
 
-	/** 
+	/**
 	 * Mapping of pipe numbers to their associated string data.
 	 * Key: pipe number (identifier)
 	 * Value: array of strings associated with that pipe
@@ -92,14 +92,14 @@ export interface Pipeline {
  * Endpoint configuration information for external services contained in the notes field of TaskStatus.
  */
 export interface EndpointInfo {
-	'button-text'?: string;  // e.g., "Chat now", "Open Dropper" (optional for webhook)
-	'button-link'?: string;  // URL to open (optional for webhook)
-	'url-text': string;      // e.g., "Chat interface URL", "Webhook Endpoint"
-	'url-link': string;      // The actual URL
-	'auth-text': string;     // e.g., "Public Authorization Key", "Secret Key"
-	'auth-key': string;      // The actual key
-	'token-text'?: string;   // e.g., "Private Token" (optional)
-	'token-key'?: string;    // The actual token (optional)
+	'button-text'?: string; // e.g., "Chat now", "Open Dropper" (optional for webhook)
+	'button-link'?: string; // URL to open (optional for webhook)
+	'url-text': string; // e.g., "Chat interface URL", "Webhook Endpoint"
+	'url-link': string; // The actual URL
+	'auth-text': string; // e.g., "Public Authorization Key", "Secret Key"
+	'auth-key': string; // The actual key
+	'token-text'?: string; // e.g., "Private Token" (optional)
+	'token-key'?: string; // The actual token (optional)
 }
 
 /**
@@ -117,7 +117,7 @@ export interface TaskStatus {
 	/** Whether the task has finished execution (successfully or with errors) */
 	completed: boolean;
 
-	/** 
+	/**
 	 * Numeric state code representing the current execution state.
 	 * Specific values depend on the task implementation.
 	 */
@@ -238,37 +238,37 @@ export interface TaskStatus {
 		// Current snapshot
 		/** Current CPU utilization percentage (normalized 0-100%, per-process) */
 		cpu_percent?: number;
-		
+
 		/** Current CPU memory (RAM) usage in megabytes (per-process) */
 		cpu_memory_mb?: number;
-		
+
 		/** Current GPU memory (VRAM) usage in megabytes (per-process) */
 		gpu_memory_mb?: number;
-		
+
 		// Peak values
 		/** Peak CPU utilization percentage during task execution */
 		peak_cpu_percent?: number;
-		
+
 		/** Peak CPU memory usage in megabytes during task execution */
 		peak_cpu_memory_mb?: number;
-		
+
 		/** Peak GPU memory usage in megabytes during task execution */
 		peak_gpu_memory_mb?: number;
-		
+
 		// Average values
 		/** Average CPU utilization percentage over task lifetime */
 		avg_cpu_percent?: number;
-		
+
 		/** Average CPU memory usage in megabytes over task lifetime */
 		avg_cpu_memory_mb?: number;
-		
+
 		/** Average GPU memory usage in megabytes over task lifetime */
 		avg_gpu_memory_mb?: number;
 	};
 
 	/**
 	 * Optional task token usage tracking (user-facing billing).
-	 * 
+	 *
 	 * Behavior:
 	 *   - Values are CUMULATIVE from when monitoring starts
 	 *   - Updated in real-time every 250ms as metrics are sampled
@@ -278,13 +278,13 @@ export interface TaskStatus {
 	tokens?: {
 		/** Cumulative CPU utilization tokens charged since monitoring started */
 		cpu_utilization?: number;
-		
+
 		/** Cumulative CPU memory tokens charged since monitoring started */
 		cpu_memory?: number;
-		
+
 		/** Cumulative GPU memory tokens charged since monitoring started */
 		gpu_memory?: number;
-		
+
 		/** Total cumulative tokens charged (cpu_utilization + cpu_memory + gpu_memory) since monitoring started */
 		total?: number;
 	};
@@ -292,7 +292,7 @@ export interface TaskStatus {
 	/** Optional flow data for pipeline-specific tasks */
 	pipeflow?: FlowData;
 
-	/** 
+	/**
 	 * Optional host identifier where the task is running.
 	 * This may be added by the debugger for distributed pipeline debugging.
 	 */

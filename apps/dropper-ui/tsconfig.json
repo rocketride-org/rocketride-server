@@ -2,11 +2,7 @@
 	"compilerOptions": {
 		/* Language and Environment */
 		"target": "ES2022",
-		"lib": [
-			"ES2022",
-			"DOM",
-			"DOM.Iterable"
-		],
+		"lib": ["ES2022", "DOM", "DOM.Iterable"],
 		"module": "ESNext",
 		/* Bundler mode */
 		"moduleResolution": "bundler",
@@ -26,30 +22,14 @@
 		"noUncheckedIndexedAccess": true,
 		/* Module Resolution */
 		"paths": {
-			"@/*": [
-				"./src/*"
-			],
-			"@components/*": [
-				"./src/components/*"
-			],
-			"@pages/*": [
-				"./src/pages/*"
-			],
-			"@apptypes/*": [
-				"./src/types/*"
-			],
-			"@utils/*": [
-				"./src/utils/*"
-			],
-			"@hooks/*": [
-				"./src/hooks/*"
-			],
-			"@services/*": [
-				"./src/services/*"
-			],
-			"@assets/*": [
-				"./src/assets/*"
-			]
+			"@/*": ["./src/*"],
+			"@components/*": ["./src/components/*"],
+			"@pages/*": ["./src/pages/*"],
+			"@apptypes/*": ["./src/types/*"],
+			"@utils/*": ["./src/utils/*"],
+			"@hooks/*": ["./src/hooks/*"],
+			"@services/*": ["./src/services/*"],
+			"@assets/*": ["./src/assets/*"]
 		},
 		/* Interop Constraints */
 		"esModuleInterop": true,
@@ -61,25 +41,6 @@
 		"allowJs": true,
 		"checkJs": false
 	},
-	"include": [
-		"src/**/*",
-		"src/**/*.ts",
-		"src/**/*.tsx",
-		"src/**/*.js",
-		"src/**/*.jsx",
-		"src/types/global.d.ts",
-		"public/**/*",
-		"*.ts",
-		"*.tsx"
-	],
-	"exclude": [
-		"node_modules",
-		"dist",
-		"build",
-		"coverage",
-		"**/*.test.ts",
-		"**/*.test.tsx",
-		"**/*.spec.ts",
-		"**/*.spec.tsx"
-	]
+	"include": ["src/**/*", "src/**/*.ts", "src/**/*.tsx", "src/**/*.js", "src/**/*.jsx", "src/types/global.d.ts", "public/**/*", "*.ts", "*.tsx"],
+	"exclude": ["node_modules", "dist", "build", "coverage", "**/*.test.ts", "**/*.test.tsx", "**/*.spec.ts", "**/*.spec.tsx"]
 }

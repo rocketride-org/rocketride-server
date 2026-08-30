@@ -55,9 +55,7 @@ export class ConnectionGenerationController {
 	}
 
 	isCurrentAttempt(generation: number | undefined): boolean {
-		return generation !== undefined
-			&& generation === this.generation
-			&& generation === this.activeAttempt;
+		return generation !== undefined && generation === this.generation && generation === this.activeAttempt;
 	}
 
 	isCurrentGeneration(generation: number): boolean {
@@ -75,9 +73,7 @@ export class ConnectionGenerationController {
 	}
 
 	isCurrentCallback(generation: number | undefined): boolean {
-		return generation !== undefined
-			&& generation === this.callbackOwner
-			&& this.isCurrentAttempt(generation);
+		return generation !== undefined && generation === this.callbackOwner && this.isCurrentAttempt(generation);
 	}
 
 	/**
@@ -85,10 +81,7 @@ export class ConnectionGenerationController {
 	 * publication either observes lost ownership before writing, or finishes
 	 * before the newest publication is allowed to begin.
 	 */
-	serializeAttemptPublication(
-		generation: number,
-		publication: (isCurrent: () => boolean) => Promise<void>,
-	): Promise<void> {
+	serializeAttemptPublication(generation: number, publication: (isCurrent: () => boolean) => Promise<void>): Promise<void> {
 		const operation = this.publicationQueue.then(async () => {
 			if (!this.isCurrentAttempt(generation)) return;
 			await publication(() => this.isCurrentAttempt(generation));
@@ -98,9 +91,7 @@ export class ConnectionGenerationController {
 	}
 }
 
-export type GenerationOwnedOutcome<T> =
-	| { status: 'fulfilled'; value: T }
-	| { status: 'rejected'; reason: unknown };
+export type GenerationOwnedOutcome<T> = { status: 'fulfilled'; value: T } | { status: 'rejected'; reason: unknown };
 
 /**
  * Coalesces work only within a defined generation and publishes only while
@@ -114,12 +105,7 @@ export class GenerationOwnedOperationSlot {
 		promise: Promise<void>;
 	};
 
-	run<T>(
-		generation: number | undefined,
-		isCurrent: () => boolean,
-		work: () => Promise<T>,
-		publish: (outcome: GenerationOwnedOutcome<T>) => void | Promise<void>,
-	): Promise<void> {
+	run<T>(generation: number | undefined, isCurrent: () => boolean, work: () => Promise<T>, publish: (outcome: GenerationOwnedOutcome<T>) => void | Promise<void>): Promise<void> {
 		const active = this.active;
 		if (generation !== undefined && active && active.generation === generation) return active.promise;
 
@@ -130,17 +116,19 @@ export class GenerationOwnedOperationSlot {
 			generation,
 			promise: Promise.resolve(),
 		};
-		operation.promise = Promise.resolve().then(async () => {
-			let outcome: GenerationOwnedOutcome<T>;
-			try {
-				outcome = { status: 'fulfilled', value: await work() };
-			} catch (reason) {
-				outcome = { status: 'rejected', reason };
-			}
-			if (this.active === operation && isCurrent()) await publish(outcome);
-		}).finally(() => {
-			if (this.active === operation) this.active = undefined;
-		});
+		operation.promise = Promise.resolve()
+			.then(async () => {
+				let outcome: GenerationOwnedOutcome<T>;
+				try {
+					outcome = { status: 'fulfilled', value: await work() };
+				} catch (reason) {
+					outcome = { status: 'rejected', reason };
+				}
+				if (this.active === operation && isCurrent()) await publish(outcome);
+			})
+			.finally(() => {
+				if (this.active === operation) this.active = undefined;
+			});
 		this.active = operation;
 		return operation.promise;
 	}

@@ -36,11 +36,7 @@ const DropZoneDemo: React.FC<IGalleryDemoProps> = ({ knobs }) => {
 	const [droppedCount, setDroppedCount] = useState<number | null>(null);
 	return (
 		<div style={{ maxWidth: 420 }}>
-			<DropZone
-				title={String(knobs.title)}
-				hint={String(knobs.hint) || undefined}
-				onFiles={(files) => setDroppedCount(files.length)}
-			/>
+			<DropZone title={String(knobs.title)} hint={String(knobs.hint) || undefined} onFiles={(files) => setDroppedCount(files.length)} />
 			{droppedCount !== null && (
 				<div style={{ ...commonStyles.textMuted, marginTop: 8 }}>
 					{droppedCount} file{droppedCount === 1 ? '' : 's'} dropped (demo only - nothing is uploaded).

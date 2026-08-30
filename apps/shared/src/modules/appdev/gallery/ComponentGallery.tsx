@@ -58,9 +58,7 @@ import type { IGalleryDemoProps, IGalleryEntry, IGalleryPropRow, KnobValue, Knob
 // lazily. In MF remotes the dynamic import resolves through the share
 // scope (the host's already-loaded shell instance), so this defers only
 // the gallery's own use, not a second copy of the bundle.
-const MarkdownDoc = React.lazy(() =>
-	import('shell').then((mod) => ({ default: mod.MarkdownRenderer })),
-);
+const MarkdownDoc = React.lazy(() => import('shell').then((mod) => ({ default: mod.MarkdownRenderer })));
 
 // =============================================================================
 // STYLES
@@ -239,7 +237,9 @@ const styles: Record<string, React.CSSProperties> = {
 /** Builds the default knob values for an entry (spec defaults). */
 function defaultKnobValues(entry: IGalleryEntry): KnobValues {
 	const values: KnobValues = {};
-	(entry.knobs ?? []).forEach((knob) => { values[knob.id] = knob.defaultValue; });
+	(entry.knobs ?? []).forEach((knob) => {
+		values[knob.id] = knob.defaultValue;
+	});
 	return values;
 }
 
@@ -284,9 +284,7 @@ const TokenChip: React.FC<ITokenChipProps> = ({ token }) => {
 
 	return (
 		<span style={styles.tokenChip} onClick={copyToken} title={`Copy var(${token})`}>
-			{!NON_COLOR_TOKEN.test(token) && (
-				<span style={{ ...styles.tokenSwatch, background: `var(${token})` }} />
-			)}
+			{!NON_COLOR_TOKEN.test(token) && <span style={{ ...styles.tokenSwatch, background: `var(${token})` }} />}
 			<span style={styles.tokenName}>{copied ? 'copied' : token}</span>
 		</span>
 	);
@@ -322,7 +320,11 @@ const ApiTable: React.FC<IApiTableProps> = ({ rows }) => (
 				<tr key={row.name}>
 					<td style={{ ...commonStyles.tableCell, ...styles.propName }}>
 						{row.name}
-						{row.required && <span style={styles.required} title="Required">*</span>}
+						{row.required && (
+							<span style={styles.required} title="Required">
+								*
+							</span>
+						)}
 					</td>
 					<td style={{ ...commonStyles.tableCell, ...styles.propType }}>{row.type}</td>
 					<td style={commonStyles.tableCell}>
@@ -423,9 +425,7 @@ export const ComponentGallery: React.FC = () => {
 						key={group.id}
 						sectionLabel={group.label}
 						menu={{
-							entries: GALLERY_ENTRIES
-								.filter((candidate) => candidate.group === group.id)
-								.map((candidate) => ({ id: candidate.id, label: candidate.name })),
+							entries: GALLERY_ENTRIES.filter((candidate) => candidate.group === group.id).map((candidate) => ({ id: candidate.id, label: candidate.name })),
 						}}
 						activeId={entry.id}
 						onSelect={selectEntry}
@@ -486,7 +486,9 @@ export const ComponentGallery: React.FC = () => {
 				<div style={styles.snippetWrap}>
 					<pre style={styles.snippet}>{code}</pre>
 					<div style={styles.snippetCopy}>
-						<Button variant="secondary" small onClick={copySnippet}>{copied ? 'Copied' : 'Copy'}</Button>
+						<Button variant="secondary" small onClick={copySnippet}>
+							{copied ? 'Copied' : 'Copy'}
+						</Button>
 					</div>
 				</div>
 
@@ -513,7 +515,9 @@ export const ComponentGallery: React.FC = () => {
 							<div key={styleName} style={styles.commonStyleRow}>
 								<span style={styles.commonStyleName}>commonStyles.{styleName}</span>
 								<span style={styles.tokenRow}>
-									{tokens.map((token) => <TokenChip key={token} token={token} />)}
+									{tokens.map((token) => (
+										<TokenChip key={token} token={token} />
+									))}
 								</span>
 							</div>
 						))}
@@ -526,7 +530,9 @@ export const ComponentGallery: React.FC = () => {
 					<>
 						<span style={styles.sectionLabel}>Tokens</span>
 						<div style={styles.tokenRow}>
-							{allTokens.map((token) => <TokenChip key={token} token={token} />)}
+							{allTokens.map((token) => (
+								<TokenChip key={token} token={token} />
+							))}
 						</div>
 					</>
 				)}

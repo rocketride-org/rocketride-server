@@ -38,9 +38,7 @@ import type { ProfileTreeNode } from './types';
 export function pruneTree(node: ProfileTreeNode, cutoff: number): ProfileTreeNode {
 	if (cutoff <= 0 || !node.children.length) return node;
 	const threshold = cutoff * node.cumtime;
-	const prunedChildren = node.children
-		.filter((c) => c.cumtime >= threshold)
-		.map((c) => pruneTree(c, cutoff));
+	const prunedChildren = node.children.filter((c) => c.cumtime >= threshold).map((c) => pruneTree(c, cutoff));
 	return { ...node, children: prunedChildren };
 }
 

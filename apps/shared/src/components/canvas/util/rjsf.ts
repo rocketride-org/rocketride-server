@@ -65,8 +65,7 @@ function stripEmptyStrings(data: unknown): unknown {
 	const copy: Record<string, unknown> = {};
 	for (const [key, value] of Object.entries(data as Record<string, unknown>)) {
 		if (value === '') continue;
-		copy[key] = (value && typeof value === 'object' && !Array.isArray(value))
-			? stripEmptyStrings(value) : value;
+		copy[key] = value && typeof value === 'object' && !Array.isArray(value) ? stripEmptyStrings(value) : value;
 	}
 	return copy;
 }

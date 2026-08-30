@@ -5,12 +5,8 @@
 			"name": "Run Extension (with build)",
 			"type": "extensionHost",
 			"request": "launch",
-			"args": [
-				"--extensionDevelopmentPath=${workspaceFolder}/build/vscode"
-			],
-			"outFiles": [
-				"${workspaceFolder}/build/vscode/**/*.js"
-			],
+			"args": ["--extensionDevelopmentPath=${workspaceFolder}/build/vscode"],
+			"outFiles": ["${workspaceFolder}/build/vscode/**/*.js"],
 			"sourceMapPathOverrides": {
 				"webpack:///./*": "${workspaceFolder}/apps/vscode/*",
 				"webpack:///src/*": "${workspaceFolder}/apps/vscode/src/*"
@@ -22,12 +18,8 @@
 			"name": "Run Extension (no build)",
 			"type": "extensionHost",
 			"request": "launch",
-			"args": [
-				"--extensionDevelopmentPath=${workspaceFolder}/build/vscode"
-			],
-			"outFiles": [
-				"${workspaceFolder}/build/vscode/**/*.js"
-			],
+			"args": ["--extensionDevelopmentPath=${workspaceFolder}/build/vscode"],
+			"outFiles": ["${workspaceFolder}/build/vscode/**/*.js"],
 			"sourceMapPathOverrides": {
 				"webpack:///./*": "${workspaceFolder}/apps/vscode/*",
 				"webpack:///src/*": "${workspaceFolder}/apps/vscode/src/*"

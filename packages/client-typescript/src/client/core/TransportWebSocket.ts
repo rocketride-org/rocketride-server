@@ -302,20 +302,13 @@ export class TransportWebSocket extends TransportBase {
 		if (!this._ownsSocket(epoch, socket)) return;
 
 		if (!epoch.established) {
-			await this._handlePreOpenFailure(
-				epoch,
-				new Error(epoch.isBrowser ? `Failed to connect to ${epoch.uri}` : `Failed to connect to ${epoch.uri}: ${error.message}`),
-			);
+			await this._handlePreOpenFailure(epoch, new Error(epoch.isBrowser ? `Failed to connect to ${epoch.uri}` : `Failed to connect to ${epoch.uri}: ${error.message}`));
 			return;
 		}
 
 		this._debugMessage(epoch.isBrowser ? 'WebSocket error occurred' : `WebSocket error: ${error.message}`);
 		this._invalidateEpoch(epoch);
-		await this._notifyAndCleanup(
-			epoch,
-			epoch.isBrowser ? 'WebSocket error' : `WebSocket error: ${error.message}`,
-			true,
-		);
+		await this._notifyAndCleanup(epoch, epoch.isBrowser ? 'WebSocket error' : `WebSocket error: ${error.message}`, true);
 	}
 
 	private async _handleClose(epoch: ConnectionEpoch, socket: UniversalWebSocket, code: number, reason: string): Promise<void> {
@@ -412,16 +405,8 @@ export class TransportWebSocket extends TransportBase {
 		await this._transportDisconnected(reason, hasError);
 	}
 
-	private async _notifyAndCleanup(
-		epoch: ConnectionEpoch,
-		reason: string,
-		hasError: boolean,
-		excludedMessageTasks?: ReadonlySet<Promise<void>>,
-	): Promise<void> {
-		const [notification, cleanup] = await Promise.allSettled([
-			this._notifyDisconnected(epoch, reason, hasError),
-			this._cleanupEpoch(epoch, excludedMessageTasks),
-		]);
+	private async _notifyAndCleanup(epoch: ConnectionEpoch, reason: string, hasError: boolean, excludedMessageTasks?: ReadonlySet<Promise<void>>): Promise<void> {
+		const [notification, cleanup] = await Promise.allSettled([this._notifyDisconnected(epoch, reason, hasError), this._cleanupEpoch(epoch, excludedMessageTasks)]);
 		if (notification.status === 'rejected') {
 			this._debugMessage(`Error notifying disconnected callback: ${notification.reason}`);
 		}
@@ -444,10 +429,7 @@ export class TransportWebSocket extends TransportBase {
 		}
 	}
 
-	private _cleanupEpoch(
-		epoch: ConnectionEpoch,
-		excludedMessageTasks?: ReadonlySet<Promise<void>>,
-	): Promise<void> {
+	private _cleanupEpoch(epoch: ConnectionEpoch, excludedMessageTasks?: ReadonlySet<Promise<void>>): Promise<void> {
 		if (epoch.cleanupPromise) return epoch.cleanupPromise;
 
 		const cleanup = (async () => {
@@ -456,9 +438,7 @@ export class TransportWebSocket extends TransportBase {
 			this._stopPingInterval(epoch);
 			this._removeSocketListeners(epoch);
 
-			const tasksToDrain = Array.from(epoch.messageTasks).filter(
-				(task) => !excludedMessageTasks?.has(task),
-			);
+			const tasksToDrain = Array.from(epoch.messageTasks).filter((task) => !excludedMessageTasks?.has(task));
 			if (tasksToDrain.length > 0) {
 				await Promise.allSettled(tasksToDrain);
 			}
@@ -534,7 +514,7 @@ export class TransportWebSocket extends TransportBase {
 		this._cleanupOperations.add(cleanup);
 		void cleanup.then(
 			() => this._cleanupOperations.delete(cleanup),
-			() => this._cleanupOperations.delete(cleanup),
+			() => this._cleanupOperations.delete(cleanup)
 		);
 	}
 
@@ -564,12 +544,7 @@ export class TransportWebSocket extends TransportBase {
 		const activeMessageTasks = new Set(epoch.messageTasks);
 
 		this._invalidateEpoch(epoch, new Error('Connection attempt cancelled by disconnect'));
-		const operation = this._notifyAndCleanup(
-			epoch,
-			'Disconnected by request',
-			false,
-			activeMessageTasks,
-		);
+		const operation = this._notifyAndCleanup(epoch, 'Disconnected by request', false, activeMessageTasks);
 		this._trackCleanup(operation);
 		return this._waitForCleanups();
 	}

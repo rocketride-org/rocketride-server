@@ -125,14 +125,24 @@ export const TableRecordPanel: React.FC<ITableRecordPanelProps> = (props) => {
 		<DetailPanel
 			open={open}
 			onClose={onClose}
-			avatar={<span style={styles.avatar}><TableIcon /></span>}
+			avatar={
+				<span style={styles.avatar}>
+					<TableIcon />
+				</span>
+			}
 			title={table}
 			subtitle={database}
 			footer={
 				<>
-					<Button variant="ghost" onClick={onClose}>Close</Button>
-					<Button variant="secondary" onClick={onDesign}>Design</Button>
-					<Button variant="primary" onClick={onBrowseData}>Browse Data</Button>
+					<Button variant="ghost" onClick={onClose}>
+						Close
+					</Button>
+					<Button variant="secondary" onClick={onDesign}>
+						Design
+					</Button>
+					<Button variant="primary" onClick={onBrowseData}>
+						Browse Data
+					</Button>
 				</>
 			}
 		>
@@ -163,9 +173,7 @@ export const TableRecordPanel: React.FC<ITableRecordPanelProps> = (props) => {
 						{fk.referred_table} ({fk.referred_columns.join(', ')})
 					</div>
 				))}
-				{!def?.foreign_keys?.length && (
-					<LabelValue label="None">This table declares no foreign keys.</LabelValue>
-				)}
+				{!def?.foreign_keys?.length && <LabelValue label="None">This table declares no foreign keys.</LabelValue>}
 			</Section>
 		</DetailPanel>
 	);

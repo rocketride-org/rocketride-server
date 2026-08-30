@@ -237,19 +237,7 @@ export function ApiKeyLogin({ onSubmit, onCancel, appName = 'RocketRide', initia
 				<div style={styles.form}>
 					{/* Key input with reveal toggle. */}
 					<div style={styles.inputWrap}>
-						<InputField
-							type={revealed ? 'text' : 'password'}
-							value={apiKey}
-							onChange={(e) => setApiKey(e.target.value)}
-							onKeyDown={handleKeyDown}
-							placeholder="API key"
-							aria-label="API key"
-							style={styles.input}
-							autoFocus
-							disabled={loading}
-							spellCheck={false}
-							autoComplete="off"
-						/>
+						<InputField type={revealed ? 'text' : 'password'} value={apiKey} onChange={(e) => setApiKey(e.target.value)} onKeyDown={handleKeyDown} placeholder="API key" aria-label="API key" style={styles.input} autoFocus disabled={loading} spellCheck={false} autoComplete="off" />
 						<button
 							type="button"
 							style={styles.reveal}
@@ -267,8 +255,7 @@ export function ApiKeyLogin({ onSubmit, onCancel, appName = 'RocketRide', initia
 
 					{/* The blank-key rule, spelled out next to the field it governs. */}
 					<div style={styles.hint}>
-						The key is whatever the server&apos;s <code>ROCKETRIDE_APIKEY</code> setting holds.
-						If the server does not require one, leave the field blank.
+						The key is whatever the server&apos;s <code>ROCKETRIDE_APIKEY</code> setting holds. If the server does not require one, leave the field blank.
 					</div>
 
 					{/* Failed connect — stock error banner (announced via its live region). */}

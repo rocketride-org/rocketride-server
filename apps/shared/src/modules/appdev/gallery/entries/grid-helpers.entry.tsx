@@ -39,15 +39,7 @@ const GridHelpersDemo: React.FC<IGalleryDemoProps> = () => {
 	useEffect(() => {
 		const host = hostRef.current;
 		if (!host) return;
-		host.replaceChildren(
-			badgeEl('success', 'Running'),
-			badgeEl('error', 'Failed'),
-			buttonEl('secondary', 'Open', 'open'),
-			buttonEl('danger', 'Delete', 'delete'),
-			avatarEl('RC', 'var(--rr-color-brand)'),
-			monoEl('rod.demo.chat'),
-			mutedEl('Jun 12, 4:02 PM'),
-		);
+		host.replaceChildren(badgeEl('success', 'Running'), badgeEl('error', 'Failed'), buttonEl('secondary', 'Open', 'open'), buttonEl('danger', 'Delete', 'delete'), avatarEl('RC', 'var(--rr-color-brand)'), monoEl('rod.demo.chat'), mutedEl('Jun 12, 4:02 PM'));
 	}, []);
 
 	return <div ref={hostRef} style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 10 }} />;

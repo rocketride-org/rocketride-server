@@ -31,27 +31,9 @@ import { IIconProps } from './types';
  *
  * @param props - Standard icon props for controlling color, size, style, and opacity.
  */
-const PdfIcon: FunctionComponent<IIconProps> = ({
-	color = '#CC4B4C',
-	height = '20',
-	style,
-	width = '18',
-	opacity = 1,
-}) => {
+const PdfIcon: FunctionComponent<IIconProps> = ({ color = '#CC4B4C', height = '20', style, width = '18', opacity = 1 }) => {
 	return (
-		<svg
-			version="1.1"
-			xmlns="http://www.w3.org/2000/svg"
-			xmlnsXlink="http://www.w3.org/1999/xlink"
-			x="0px"
-			y="0px"
-			viewBox="0 0 56 56"
-			xmlSpace="preserve"
-			height={height}
-			width={width}
-			style={style}
-			opacity={opacity}
-		>
+		<svg version="1.1" xmlns="http://www.w3.org/2000/svg" xmlnsXlink="http://www.w3.org/1999/xlink" x="0px" y="0px" viewBox="0 0 56 56" xmlSpace="preserve" height={height} width={width} style={style} opacity={opacity}>
 			<g>
 				<path
 					fill="#E9E9E0"
@@ -74,10 +56,7 @@ const PdfIcon: FunctionComponent<IIconProps> = ({
 				c-0.715,2.474-1.659,5.145-2.674,7.564c2.09-0.811,4.362-1.519,6.496-2.02C30.815,21.15,29.466,19.192,28.343,17.174z
 				 M27.736,8.712c-0.098,0.033-1.33,1.757,0.096,3.216C28.781,9.813,27.779,8.698,27.736,8.712z"
 				/>
-				<path
-					fill={color}
-					d="M48.037,56H7.963C7.155,56,6.5,55.345,6.5,54.537V39h43v15.537C49.5,55.345,48.845,56,48.037,56z"
-				/>
+				<path fill={color} d="M48.037,56H7.963C7.155,56,6.5,55.345,6.5,54.537V39h43v15.537C49.5,55.345,48.845,56,48.037,56z" />
 				<g>
 					<path
 						fill="#FFFFFF"
@@ -97,10 +76,7 @@ const PdfIcon: FunctionComponent<IIconProps> = ({
 					 M27.352,51.797c1.112,0,1.914-0.355,2.406-1.066s0.738-1.741,0.738-3.09c0-0.419-0.05-0.834-0.15-1.244
 					c-0.101-0.41-0.294-0.781-0.581-1.114s-0.677-0.602-1.169-0.807s-1.13-0.308-1.914-0.308h-0.957v7.629H27.352z"
 					/>
-					<path
-						fill="#FFFFFF"
-						d="M36.266,44.168v3.172h4.211v1.121h-4.211V53h-1.668V42.924H40.9v1.244H36.266z"
-					/>
+					<path fill="#FFFFFF" d="M36.266,44.168v3.172h4.211v1.121h-4.211V53h-1.668V42.924H40.9v1.244H36.266z" />
 				</g>
 			</g>
 		</svg>

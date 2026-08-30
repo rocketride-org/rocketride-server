@@ -48,9 +48,7 @@ export interface ISidebarCollapsedProviderProps {
  * @param props - {@link ISidebarCollapsedProviderProps}.
  * @returns The provider element.
  */
-export const SidebarCollapsedProvider: React.FC<ISidebarCollapsedProviderProps> = ({ value, children }) => (
-	<SidebarCollapsedContext.Provider value={value}>{children}</SidebarCollapsedContext.Provider>
-);
+export const SidebarCollapsedProvider: React.FC<ISidebarCollapsedProviderProps> = ({ value, children }) => <SidebarCollapsedContext.Provider value={value}>{children}</SidebarCollapsedContext.Provider>;
 
 // =============================================================================
 // HOOK

@@ -240,7 +240,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 			}, 500);
 		};
 		this.disposables.push(watcherPkg, watcherPkg.onDidCreate(onPkgEvent), watcherPkg.onDidDelete(onPkgEvent), watcherPkg.onDidChange(onPkgEvent), {
-			dispose: () => { if (this.rescanTimer) clearTimeout(this.rescanTimer); },
+			dispose: () => {
+				if (this.rescanTimer) clearTimeout(this.rescanTimer);
+			},
 		});
 	}
 
@@ -463,18 +465,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 		};
 		this.deployManager.on('shell:disconnected', deployDisconnectedHandler);
 
-		this.disposables.push(
-			{ dispose: () => this.connectionManager.off('shell:statusChange', connStateHandler) },
-			{ dispose: () => this.connectionManager.off('shell:connected', connectedHandler) },
-			{ dispose: () => this.connectionManager.off('shell:disconnected', disconnectedHandler) },
-			{ dispose: () => this.connectionManager.off('shell:error', errorHandler) },
-			configChange,
-			{ dispose: () => this.connectionManager.off('shell:servicesUpdated', servicesUpdatedHandler) },
-			{ dispose: () => this.deployManager.off('shell:statusChange', deployConnStateHandler) },
-			{ dispose: () => this.deployManager.off('shell:connected', deployConnectedHandler) },
-			{ dispose: () => this.deployManager.off('shell:disconnected', deployDisconnectedHandler) },
-			{ dispose: () => cloudAuth.onDidChange.removeListener('changed', cloudAuthHandler) }
-		);
+		this.disposables.push({ dispose: () => this.connectionManager.off('shell:statusChange', connStateHandler) }, { dispose: () => this.connectionManager.off('shell:connected', connectedHandler) }, { dispose: () => this.connectionManager.off('shell:disconnected', disconnectedHandler) }, { dispose: () => this.connectionManager.off('shell:error', errorHandler) }, configChange, { dispose: () => this.connectionManager.off('shell:servicesUpdated', servicesUpdatedHandler) }, { dispose: () => this.deployManager.off('shell:statusChange', deployConnStateHandler) }, { dispose: () => this.deployManager.off('shell:connected', deployConnectedHandler) }, { dispose: () => this.deployManager.off('shell:disconnected', deployDisconnectedHandler) }, { dispose: () => cloudAuth.onDidChange.removeListener('changed', cloudAuthHandler) });
 
 		// Forward server events to webview
 		this.connectionManager.on('shell:event', (event: GenericEvent) => {

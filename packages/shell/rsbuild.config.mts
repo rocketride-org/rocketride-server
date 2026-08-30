@@ -174,7 +174,7 @@ export default defineConfig(({ command }) => {
 					// (requiredVersion: false) because it is always co-deployed.
 					// MF shared resolution bypasses rsbuild aliases — explicit import
 					// paths are required so MF can find the modules at build time.
-					'shell':   { singleton: true, version: '1.0.0', requiredVersion: false, eager: true, import: path.resolve(__dirname, './src/index.ts') },
+					shell: { singleton: true, version: '1.0.0', requiredVersion: false, eager: true, import: path.resolve(__dirname, './src/index.ts') },
 					// The SDK surface — remotes import runtime values (protocol
 					// classes, enums, constants) from 'rocketride' and consume
 					// this host-provided singleton, so those classes keep ONE
@@ -183,11 +183,10 @@ export default defineConfig(({ command }) => {
 					// Client INSTANCES still only arrive via useShellConnection().
 					// The advertised version is the SDK package's own, so MF
 					// diagnostics report the version actually being served.
-					'rocketride': { singleton: true, version: sdkVersion, requiredVersion: false, eager: true, import: path.resolve(__dirname, '../../packages/client-typescript/src/client/index.ts') },
+					rocketride: { singleton: true, version: sdkVersion, requiredVersion: false, eager: true, import: path.resolve(__dirname, '../../packages/client-typescript/src/client/index.ts') },
 					// NOTE: no 'shared' share key — the shared library is STATIC
 					// (each consumer bundles its own copy via deep specs); only
 					// the shell surface and the SDK are runtime-bound.
-
 				},
 
 				// Skip TypeScript declaration file generation for MF exposed modules —
@@ -208,8 +207,8 @@ export default defineConfig(({ command }) => {
 				// local index.ts so imports work identically across host and remotes.
 				// Exact-match: bare 'shell' is the barrel; subpaths ('shell/src/
 				// stock/...', the in-tree static path form) resolve via the dir alias.
-				'shell$': path.resolve(__dirname, './src/index.ts'),
-				'shell': path.resolve(__dirname, '.'),
+				shell$: path.resolve(__dirname, './src/index.ts'),
+				shell: path.resolve(__dirname, '.'),
 			},
 		},
 		source: {
@@ -277,7 +276,6 @@ export default defineConfig(({ command }) => {
 
 			// Watch the two aliased package sources for changes so that HMR
 			// picks up edits to shared without a manual restart. The shell lives inside src/ and is watched automatically.
-
 		},
 		output: {
 			// RR_SHELL_DEBUG=1: ship UNMINIFIED bundles so runtime errors carry
@@ -304,9 +302,7 @@ export default defineConfig(({ command }) => {
 			// serves files at the root path, but assetPrefix: '/shell/' means the
 			// app requests /shell/themes/ — placing them in the build output
 			// ensures they resolve correctly under the prefix.
-			copy: [
-				{ from: path.resolve(__dirname, 'public/themes'), to: 'themes' },
-			],
+			copy: [{ from: path.resolve(__dirname, 'public/themes'), to: 'themes' }],
 		},
 	};
 });

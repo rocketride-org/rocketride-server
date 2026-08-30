@@ -56,9 +56,7 @@ export const AnswersView: React.FC<AnswersViewProps> = ({ answers, compareMode, 
 							<div className="compare-grid">
 								{group.contents.map((block, contentIndex) => (
 									<div key={contentIndex} className="compare-column">
-										{block.fieldName && (
-											<div className="content-field-label">{block.fieldName}</div>
-										)}
+										{block.fieldName && <div className="content-field-label">{block.fieldName}</div>}
 										<div className="content-item">
 											<div className="answer-content">
 												<MessageSquare className="answer-icon" />
@@ -71,9 +69,7 @@ export const AnswersView: React.FC<AnswersViewProps> = ({ answers, compareMode, 
 						) : (
 							group.contents.map((block, contentIndex) => (
 								<div key={contentIndex} className="content-item-wrapper">
-									{group.contents.length > 1 && block.fieldName && (
-										<div className="content-field-label">{block.fieldName}</div>
-									)}
+									{group.contents.length > 1 && block.fieldName && <div className="content-field-label">{block.fieldName}</div>}
 									<div className="content-item">
 										<div className="answer-content">
 											<MessageSquare className="answer-icon" />

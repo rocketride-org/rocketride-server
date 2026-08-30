@@ -109,11 +109,7 @@ function _generateId(): string {
  * @param updateAppState - Callback to persist changes to workspace.
  * @param settings       - Workspace settings (for seeding defaults).
  */
-export function initConnectionStore(
-	appState: Record<string, unknown>,
-	updateAppState: (key: string, value: unknown) => void,
-	settings: Record<string, string>,
-): void {
+export function initConnectionStore(appState: Record<string, unknown>, updateAppState: (key: string, value: unknown) => void, settings: Record<string, string>): void {
 	_updateAppState = updateAppState;
 
 	// Restore from persisted state
@@ -196,7 +192,10 @@ export function getSavedConnections(): SavedConnection[] {
  */
 export function useSavedConnections(): SavedConnection[] {
 	return useSyncExternalStore(
-		(cb) => { _listeners.add(cb); return () => _listeners.delete(cb); },
-		() => _connections,
+		(cb) => {
+			_listeners.add(cb);
+			return () => _listeners.delete(cb);
+		},
+		() => _connections
 	);
 }

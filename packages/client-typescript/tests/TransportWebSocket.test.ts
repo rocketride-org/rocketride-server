@@ -183,13 +183,9 @@ class NodeHarness implements WebSocketHarness {
 	captureHandlers(socket: TestSocket): CapturedSocketHandlers {
 		const nodeSocket = socket as FakeNodeWebSocket;
 		const open = nodeSocket.listeners('open')[0] as (() => void) | undefined;
-		const message = nodeSocket.listeners('message')[0] as
-			| ((data: Buffer, isBinary: boolean) => void)
-			| undefined;
+		const message = nodeSocket.listeners('message')[0] as ((data: Buffer, isBinary: boolean) => void) | undefined;
 		const error = nodeSocket.listeners('error')[0] as ((error: Error) => void) | undefined;
-		const close = nodeSocket.listeners('close')[0] as
-			| ((code: number, reason: Buffer) => void)
-			| undefined;
+		const close = nodeSocket.listeners('close')[0] as ((code: number, reason: Buffer) => void) | undefined;
 		if (!open || !message || !error || !close) throw new Error('Node WebSocket handlers are not wired');
 		return {
 			open: () => open.call(nodeSocket),
@@ -219,10 +215,7 @@ class NodeHarness implements WebSocketHarness {
 	}
 
 	listenerCount(socket: TestSocket): number {
-		return (socket as FakeNodeWebSocket).eventNames().reduce(
-			(total, eventName) => total + (socket as FakeNodeWebSocket).listenerCount(eventName),
-			0,
-		);
+		return (socket as FakeNodeWebSocket).eventNames().reduce((total, eventName) => total + (socket as FakeNodeWebSocket).listenerCount(eventName), 0);
 	}
 
 	async cleanup(): Promise<void> {
@@ -265,10 +258,7 @@ class BrowserHarness implements WebSocketHarness {
 			open: () => open.call(browserSocket, {} as Event),
 			message: (packet) => message.call(browserSocket, { data: JSON.stringify(packet) } as MessageEvent),
 			error: () => error.call(browserSocket, {} as Event),
-			close: (code = 1000, reason = '') => close.call(
-				browserSocket,
-				{ code, reason, wasClean: code === 1000 } as CloseEvent,
-			),
+			close: (code = 1000, reason = '') => close.call(browserSocket, { code, reason, wasClean: code === 1000 } as CloseEvent),
 		};
 	}
 
@@ -291,8 +281,7 @@ class BrowserHarness implements WebSocketHarness {
 
 	listenerCount(socket: TestSocket): number {
 		const browserSocket = socket as FakeBrowserWebSocket;
-		return [browserSocket.onopen, browserSocket.onmessage, browserSocket.onerror, browserSocket.onclose]
-			.filter(Boolean).length;
+		return [browserSocket.onopen, browserSocket.onmessage, browserSocket.onerror, browserSocket.onclose].filter(Boolean).length;
 	}
 
 	async cleanup(): Promise<void> {
@@ -303,17 +292,12 @@ class BrowserHarness implements WebSocketHarness {
 function outcome<T>(promise: Promise<T>): Promise<{ status: 'resolved'; value: T } | { status: 'rejected'; error: unknown }> {
 	return promise.then(
 		(value) => ({ status: 'resolved' as const, value }),
-		(error) => ({ status: 'rejected' as const, error }),
+		(error) => ({ status: 'rejected' as const, error })
 	);
 }
 
-async function settleSoon<T>(
-	promise: Promise<{ status: 'resolved'; value: T } | { status: 'rejected'; error: unknown }>,
-): Promise<{ status: 'resolved'; value: T } | { status: 'rejected'; error: unknown } | { status: 'pending' }> {
-	return Promise.race([
-		promise,
-		new Promise<{ status: 'pending' }>((resolve) => setTimeout(() => resolve({ status: 'pending' }), 50)),
-	]);
+async function settleSoon<T>(promise: Promise<{ status: 'resolved'; value: T } | { status: 'rejected'; error: unknown }>): Promise<{ status: 'resolved'; value: T } | { status: 'rejected'; error: unknown } | { status: 'pending' }> {
+	return Promise.race([promise, new Promise<{ status: 'pending' }>((resolve) => setTimeout(() => resolve({ status: 'pending' }), 50))]);
 }
 
 describe.each(['node ws', 'browser WebSocket'] as const)('TransportWebSocket lifecycle on %s', (runtime) => {
@@ -521,10 +505,7 @@ describe.each(['node ws', 'browser WebSocket'] as const)('TransportWebSocket lif
 		await harness.open('send-trace', socket);
 		await connected;
 
-		const redactSpy = jest.spyOn(
-			transport as unknown as { _redactProtocolMessage: (value: unknown) => unknown },
-			'_redactProtocolMessage',
-		);
+		const redactSpy = jest.spyOn(transport as unknown as { _redactProtocolMessage: (value: unknown) => unknown }, '_redactProtocolMessage');
 
 		// Untraced: neither the JSON nor the binary branch may pay for a redaction walk.
 		await transport.send({ type: 'request', seq: 1, command: 'noTrace' });
@@ -547,10 +528,7 @@ describe.each(['node ws', 'browser WebSocket'] as const)('TransportWebSocket lif
 		});
 
 		expect(redactSpy).toHaveBeenCalledTimes(2);
-		expect(traces).toEqual([
-			'SEND: {"type":"request","seq":3,"command":"traced","arguments":{"userToken":"<redacted>"}}',
-			'SEND: {"type":"request","seq":4,"command":"tracedBinary","arguments":{"data":"<3 bytes>","userToken":"<redacted>"}}',
-		]);
+		expect(traces).toEqual(['SEND: {"type":"request","seq":3,"command":"traced","arguments":{"userToken":"<redacted>"}}', 'SEND: {"type":"request","seq":4,"command":"tracedBinary","arguments":{"data":"<3 bytes>","userToken":"<redacted>"}}']);
 
 		redactSpy.mockRestore();
 		await transport.disconnect();
@@ -602,34 +580,31 @@ describe.each(['node ws', 'browser WebSocket'] as const)('TransportWebSocket lif
 		}
 	});
 
-	test.each(['error', 'close'] as const)(
-		'a pre-open %s rejects the attempt and clears socket resources without disconnected publication',
-		async (failure) => {
-			const disconnected = jest.fn(async () => undefined);
-			const transport = new TransportWebSocket(harness.uri(`pre-open-${failure}`));
-			transport.bind({ onDisconnected: disconnected });
+	test.each(['error', 'close'] as const)('a pre-open %s rejects the attempt and clears socket resources without disconnected publication', async (failure) => {
+		const disconnected = jest.fn(async () => undefined);
+		const transport = new TransportWebSocket(harness.uri(`pre-open-${failure}`));
+		transport.bind({ onDisconnected: disconnected });
 
-			const connected = outcome(transport.connect(250));
-			await harness.waitForAttempts(`pre-open-${failure}`);
-			const socket = harness.currentSocket(transport);
-			if (failure === 'error') harness.error(socket, new Error('pre-open failure'));
-			else harness.close(socket, 1006, 'pre-open close');
+		const connected = outcome(transport.connect(250));
+		await harness.waitForAttempts(`pre-open-${failure}`);
+		const socket = harness.currentSocket(transport);
+		if (failure === 'error') harness.error(socket, new Error('pre-open failure'));
+		else harness.close(socket, 1006, 'pre-open close');
 
-			await expect(connected).resolves.toMatchObject({ status: 'rejected' });
-			await transport.disconnect();
-			const internals = transport as unknown as {
-				_connectionTimeout?: ReturnType<typeof setTimeout>;
-				_pingInterval?: ReturnType<typeof setInterval>;
-				_messageTasks: Set<Promise<void>>;
-			};
-			expect(transport.isConnected()).toBe(false);
-			expect(internals._connectionTimeout).toBeUndefined();
-			expect(internals._pingInterval).toBeUndefined();
-			expect(internals._messageTasks.size).toBe(0);
-			expect(harness.listenerCount(socket)).toBe(0);
-			expect(disconnected).not.toHaveBeenCalled();
-		},
-	);
+		await expect(connected).resolves.toMatchObject({ status: 'rejected' });
+		await transport.disconnect();
+		const internals = transport as unknown as {
+			_connectionTimeout?: ReturnType<typeof setTimeout>;
+			_pingInterval?: ReturnType<typeof setInterval>;
+			_messageTasks: Set<Promise<void>>;
+		};
+		expect(transport.isConnected()).toBe(false);
+		expect(internals._connectionTimeout).toBeUndefined();
+		expect(internals._pingInterval).toBeUndefined();
+		expect(internals._messageTasks.size).toBe(0);
+		expect(harness.listenerCount(socket)).toBe(0);
+		expect(disconnected).not.toHaveBeenCalled();
+	});
 
 	test('a pre-open timeout rejects the attempt and clears socket resources', async () => {
 		const transport = new TransportWebSocket(harness.uri('pre-open-timeout'));
@@ -678,9 +653,7 @@ describe.each(['node ws', 'browser WebSocket'] as const)('TransportWebSocket lif
 		expect(internals._messageTasks.size).toBe(0);
 		expect(internals._cleanupOperations.size).toBe(0);
 		expect(harness.listenerCount(socket)).toBe(0);
-		expect(socket.readyState).toBe(
-			runtime === 'browser WebSocket' ? FakeBrowserWebSocket.CLOSED : FakeNodeWebSocket.CLOSED,
-		);
+		expect(socket.readyState).toBe(runtime === 'browser WebSocket' ? FakeBrowserWebSocket.CLOSED : FakeNodeWebSocket.CLOSED);
 	});
 
 	test('a receive callback can immediately await disconnect without deadlocking its own task', async () => {

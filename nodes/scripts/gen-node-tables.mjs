@@ -56,7 +56,10 @@ function resolveRepoSlug() {
 }
 
 function esc(v) {
-	return String(v == null ? '' : v).replace(/\|/g, '\\|').replace(/\r?\n/g, ' ').trim();
+	return String(v == null ? '' : v)
+		.replace(/\|/g, '\\|')
+		.replace(/\r?\n/g, ' ')
+		.trim();
 }
 
 /** Dependencies section parsed from requirements.txt (pins kept, comments dropped). */
@@ -79,9 +82,7 @@ function dependenciesBlock(dir) {
 // GitHub mark (Invertocat), inline so it renders the real logo in the CommonMark
 // docs (.md is not MDX here, so a JSX icon component won't work). `currentColor`
 // makes it inherit the link color and theme with light/dark.
-const GITHUB_MARK =
-	'<svg viewBox="0 0 16 16" width="15" height="15" fill="currentColor" aria-hidden="true" style="vertical-align:-0.15em;margin-right:0.35em">' +
-	'<path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>';
+const GITHUB_MARK = '<svg viewBox="0 0 16 16" width="15" height="15" fill="currentColor" aria-hidden="true" style="vertical-align:-0.15em;margin-right:0.35em">' + '<path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>';
 
 /** Source section: a GitHub-mark "View source" link to the node directory. */
 function sourceBlock(name) {
@@ -127,30 +128,32 @@ function formatDefault(field) {
 }
 
 function schemaBlock(dir) {
-	const files = readdirSync(dir).filter(f => /^services.*\.json$/.test(f)).sort();
+	const files = readdirSync(dir)
+		.filter((f) => /^services.*\.json$/.test(f))
+		.sort();
 	if (!files.length) return '';
-	
+
 	const serviceBlocks = [];
 	for (const filename of files) {
 		const filePath = path.join(dir, filename);
 		const data = readJsonSilently(filePath);
 		if (!data || !data.fields) continue;
-		
+
 		const title = data.title || '';
 		const heading = files.length > 1 ? (title ? `### ${title} (\`${filename}\`)` : `### \`${filename}\``) : '';
-		
+
 		const fieldKeys = Object.keys(data.fields).sort();
 		const rows = [];
 		for (const k of fieldKeys) {
 			const field = data.fields[k];
 			if (field && field.object !== undefined) continue; // Skip profile definitions
-			
+
 			const type = field.type || '';
 			const desc = formatDescription(field);
 			const def = formatDefault(field);
 			rows.push(`| \`${esc(k)}\` | ${type ? `\`${esc(type)}\`` : ''} | ${desc} | ${def} |`);
 		}
-		
+
 		const sectionParts = [];
 		if (heading) sectionParts.push(heading, '');
 		if (rows.length) {
@@ -160,23 +163,27 @@ function schemaBlock(dir) {
 		}
 		serviceBlocks.push(sectionParts.join('\n'));
 	}
-	
+
 	if (!serviceBlocks.length) return '';
 	return ['## Schema', '', serviceBlocks.join('\n\n')].join('\n');
 }
 
 function generateBlock(dir, name) {
 	const parts = [];
-	
+
 	const schema = schemaBlock(dir);
 	if (schema) parts.push(schema);
-	
+
 	const deps = dependenciesBlock(dir);
 	if (deps) parts.push(deps);
-	
+
 	parts.push(sourceBlock(name));
-	
-	return parts.map((p) => p.trim()).filter(Boolean).join('\n\n').trim();
+
+	return parts
+		.map((p) => p.trim())
+		.filter(Boolean)
+		.join('\n\n')
+		.trim();
 }
 
 function injectBlock(docPath, block) {

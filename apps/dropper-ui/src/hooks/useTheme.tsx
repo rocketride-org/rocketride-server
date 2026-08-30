@@ -5,7 +5,7 @@
  */
 
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import { useVSCode } from './useVSCode'
+import { useVSCode } from './useVSCode';
 
 export type ThemeName = 'ocean' | 'forest' | 'sunset' | 'midnight' | 'corporate' | 'vscode';
 
@@ -167,14 +167,10 @@ interface ThemeProviderProps {
 export const ThemeProvider: React.FC<ThemeProviderProps> = ({ children }) => {
 	const { isVSCode, theme: vscodeTheme } = useVSCode();
 
-	const [currentTheme, setCurrentTheme] = useState<ThemeName>(
-		isVSCode ? 'vscode' : 'ocean'
-	);
+	const [currentTheme, setCurrentTheme] = useState<ThemeName>(isVSCode ? 'vscode' : 'ocean');
 
 	const mode: 'standalone' | 'vscode' = isVSCode ? 'vscode' : 'standalone';
-	const availableThemes: ThemeName[] = isVSCode
-		? ['vscode']
-		: ['ocean', 'forest', 'sunset', 'midnight', 'corporate'];
+	const availableThemes: ThemeName[] = isVSCode ? ['vscode'] : ['ocean', 'forest', 'sunset', 'midnight', 'corporate'];
 
 	// Apply theme colors to CSS variables
 	useEffect(() => {
@@ -199,7 +195,6 @@ export const ThemeProvider: React.FC<ThemeProviderProps> = ({ children }) => {
 			const cssVarName = key.startsWith('--') ? key : `--${key}`;
 			root.style.setProperty(cssVarName, value);
 		});
-
 	}, [currentTheme, vscodeTheme, isVSCode]);
 
 	const setTheme = (theme: ThemeName) => {
@@ -210,13 +205,15 @@ export const ThemeProvider: React.FC<ThemeProviderProps> = ({ children }) => {
 	};
 
 	return (
-		<ThemeContext.Provider value={{
-			currentTheme: isVSCode ? 'vscode' : currentTheme,
-			setTheme,
-			isVSCode,
-			mode,
-			availableThemes
-		}}>
+		<ThemeContext.Provider
+			value={{
+				currentTheme: isVSCode ? 'vscode' : currentTheme,
+				setTheme,
+				isVSCode,
+				mode,
+				availableThemes,
+			}}
+		>
 			{children}
 		</ThemeContext.Provider>
 	);

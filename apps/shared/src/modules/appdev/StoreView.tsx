@@ -287,11 +287,7 @@ export const StoreView: React.FC<IStoreViewProps> = ({ host, app }) => {
 	/** Initial load: listing draft, pre-flight results, review history. */
 	const refresh = useCallback(async (): Promise<void> => {
 		try {
-			const [d, c, h] = await Promise.all([
-				host.loadListing?.() ?? Promise.resolve(null),
-				host.runPreflight?.() ?? Promise.resolve([]),
-				host.loadReviewHistory?.() ?? Promise.resolve([]),
-			]);
+			const [d, c, h] = await Promise.all([host.loadListing?.() ?? Promise.resolve(null), host.runPreflight?.() ?? Promise.resolve([]), host.loadReviewHistory?.() ?? Promise.resolve([])]);
 			// Seed an empty draft from the app facts when no record exists yet
 			setDraft(d ?? { appId: app.id, mode: 'free', name: app.name, description: app.description ?? '', tiers: [] });
 			setChecks(c);
@@ -301,13 +297,19 @@ export const StoreView: React.FC<IStoreViewProps> = ({ host, app }) => {
 		}
 	}, [host, app.id, app.name, app.description]);
 
-	useEffect(() => { void refresh(); }, [refresh]);
+	useEffect(() => {
+		void refresh();
+	}, [refresh]);
 
 	/** Persist the listing draft through the host. */
 	const onSave = useCallback(async (): Promise<void> => {
 		if (!draft || !host.saveListing) return;
 		setSaving(true);
-		try { await host.saveListing(draft); } finally { setSaving(false); }
+		try {
+			await host.saveListing(draft);
+		} finally {
+			setSaving(false);
+		}
 	}, [draft, host]);
 
 	/** Submit the current version for public review. */
@@ -317,7 +319,9 @@ export const StoreView: React.FC<IStoreViewProps> = ({ host, app }) => {
 		try {
 			await host.submitForReview(app.version ?? '');
 			await refresh();
-		} finally { setSubmitting(false); }
+		} finally {
+			setSubmitting(false);
+		}
 	}, [host, app.version, refresh]);
 
 	// Marketplace not wired at all: one teaching empty state, no dead forms
@@ -326,16 +330,10 @@ export const StoreView: React.FC<IStoreViewProps> = ({ host, app }) => {
 			<div style={styles.wrap}>
 				<div style={styles.head}>
 					<div style={styles.h1}>{app.name}</div>
-					<div style={styles.sub}>
-						Store — the public listing, pre-flight checks, and platform review. Only needed to
-						distribute on the App Store; personal, team, and org deploys skip all of this.
-					</div>
+					<div style={styles.sub}>Store — the public listing, pre-flight checks, and platform review. Only needed to distribute on the App Store; personal, team, and org deploys skip all of this.</div>
 				</div>
 				<div style={styles.emptyWrap}>
-					<EmptyState
-						title="Store publishing is not wired up yet"
-						description="Once the marketplace flows land, the listing form, pre-flight checks, and the per-version review timeline appear here."
-					/>
+					<EmptyState title="Store publishing is not wired up yet" description="Once the marketplace flows land, the listing form, pre-flight checks, and the per-version review timeline appear here." />
 				</div>
 			</div>
 		);
@@ -348,19 +346,12 @@ export const StoreView: React.FC<IStoreViewProps> = ({ host, app }) => {
 			{/* View header — title + one-line purpose */}
 			<div style={styles.head}>
 				<div style={styles.h1}>{app.name}</div>
-				<div style={styles.sub}>
-					Store — the public listing, pre-flight checks, and platform review. Only needed to
-					distribute on the App Store; personal, team, and org deploys skip all of this. Every
-					public version is reviewed.
-				</div>
+				<div style={styles.sub}>Store — the public listing, pre-flight checks, and platform review. Only needed to distribute on the App Store; personal, team, and org deploys skip all of this. Every public version is reviewed.</div>
 			</div>
 
 			<div style={styles.grid}>
 				{/* ── Left: the listing card ─────────────────────────────── */}
-				<Card
-					header="Store listing"
-					headerActions={<StatusBadge variant={app.status === 'live' ? 'info' : 'muted'}>{app.status}</StatusBadge>}
-				>
+				<Card header="Store listing" headerActions={<StatusBadge variant={app.status === 'live' ? 'info' : 'muted'}>{app.status}</StatusBadge>}>
 					<div style={styles.form2col}>
 						<div style={styles.formRow}>
 							<div style={styles.formLabel}>App ID</div>
@@ -368,11 +359,7 @@ export const StoreView: React.FC<IStoreViewProps> = ({ host, app }) => {
 						</div>
 						<div style={styles.formRow}>
 							<div style={styles.formLabel}>Mode</div>
-							<select
-								style={styles.formSelect}
-								value={draft?.mode ?? 'free'}
-								onChange={(e) => setDraft((d) => d ? { ...d, mode: e.target.value as ListingDraft['mode'] } : d)}
-							>
+							<select style={styles.formSelect} value={draft?.mode ?? 'free'} onChange={(e) => setDraft((d) => (d ? { ...d, mode: e.target.value as ListingDraft['mode'] } : d))}>
 								<option value="free">Free</option>
 								<option value="subscription">Subscription</option>
 								<option value="paywall">Paywall</option>
@@ -381,18 +368,11 @@ export const StoreView: React.FC<IStoreViewProps> = ({ host, app }) => {
 					</div>
 					<div style={styles.formRow}>
 						<div style={styles.formLabel}>Display name</div>
-						<InputField
-							value={draft?.name ?? ''}
-							onChange={(e) => setDraft((d) => d ? { ...d, name: e.target.value } : d)}
-						/>
+						<InputField value={draft?.name ?? ''} onChange={(e) => setDraft((d) => (d ? { ...d, name: e.target.value } : d))} />
 					</div>
 					<div style={styles.formRow}>
 						<div style={styles.formLabel}>Description</div>
-						<textarea
-							style={styles.formArea}
-							value={draft?.description ?? ''}
-							onChange={(e) => setDraft((d) => d ? { ...d, description: e.target.value } : d)}
-						/>
+						<textarea style={styles.formArea} value={draft?.description ?? ''} onChange={(e) => setDraft((d) => (d ? { ...d, description: e.target.value } : d))} />
 					</div>
 					{(draft?.mode ?? 'free') !== 'free' && (
 						<div style={styles.formRow}>
@@ -433,17 +413,12 @@ export const StoreView: React.FC<IStoreViewProps> = ({ host, app }) => {
 				<div style={styles.rightCol}>
 					<Card header="Pre-flight & submission">
 						{checks.length === 0 ? (
-							<EmptyState
-								title="No pre-flight results"
-								description="Build the app once, then the bundle, contract, listing, and Stripe checks run here."
-							/>
+							<EmptyState title="No pre-flight results" description="Build the app once, then the bundle, contract, listing, and Stripe checks run here." />
 						) : (
 							<>
 								{checks.map((c, i) => (
 									<div key={c.id} style={i === 0 ? { ...styles.checkRow, ...styles.checkRowFirst } : styles.checkRow}>
-										<div style={{ ...styles.checkMark, background: CHECK_PALETTE[c.state].bg, color: CHECK_PALETTE[c.state].fg }}>
-											{CHECK_PALETTE[c.state].glyph}
-										</div>
+										<div style={{ ...styles.checkMark, background: CHECK_PALETTE[c.state].bg, color: CHECK_PALETTE[c.state].fg }}>{CHECK_PALETTE[c.state].glyph}</div>
 										<div style={styles.checkText}>{c.label}</div>
 										{c.note ? <div style={styles.checkNote}>{c.note}</div> : null}
 									</div>
@@ -462,10 +437,7 @@ export const StoreView: React.FC<IStoreViewProps> = ({ host, app }) => {
 
 					<Card header="Review history">
 						{history.length === 0 ? (
-							<EmptyState
-								title="No reviews yet"
-								description="Submissions, approvals, and rejections land here per version, with reviewer notes."
-							/>
+							<EmptyState title="No reviews yet" description="Submissions, approvals, and rejections land here per version, with reviewer notes." />
 						) : (
 							<div style={styles.timeline}>
 								<div style={styles.timelineRail} />

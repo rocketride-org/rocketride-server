@@ -92,9 +92,7 @@ const TestSessionView: React.FC<TestSessionViewProps> = ({ connection, editorId,
 	const [config, setConfig] = useState<TestConfig>(saved.current?.config || connection.config || DEFAULT_CONFIG);
 	const [engineState, setEngineState] = useState<EngineState>('idle');
 	const [, setTick] = useState(0);
-	const [selectedPhases, setSelectedPhases] = useState<Set<string>>(
-		new Set(saved.current?.selectedPhases || connection.selectedPhases || ALL_PHASE_IDS),
-	);
+	const [selectedPhases, setSelectedPhases] = useState<Set<string>>(new Set(saved.current?.selectedPhases || connection.selectedPhases || ALL_PHASE_IDS));
 
 	// ── Persist to viewState ──
 	useEffect(() => {
@@ -127,15 +125,20 @@ const TestSessionView: React.FC<TestSessionViewProps> = ({ connection, editorId,
 	}, [viewRequest]);
 
 	// Mark ready after first render so we ignore stale requests
-	useEffect(() => { ready.current = true; }, []);
+	useEffect(() => {
+		ready.current = true;
+	}, []);
 
 	// ── Cleanup ──
-	useEffect(() => () => {
-		// Closing the tab must stop in-flight runs — live WebSockets and
-		// timers would otherwise outlive the view.
-		engine.abort();
-		cleanupEditor(editorId);
-	}, [engine, editorId]);
+	useEffect(
+		() => () => {
+			// Closing the tab must stop in-flight runs — live WebSockets and
+			// timers would otherwise outlive the view.
+			engine.abort();
+			cleanupEditor(editorId);
+		},
+		[engine, editorId]
+	);
 
 	// ── Engine subscription ──
 	useEffect(() => {
@@ -155,7 +158,10 @@ const TestSessionView: React.FC<TestSessionViewProps> = ({ connection, editorId,
 				});
 			}
 		});
-		return () => { unsub(); if (raf !== null) cancelAnimationFrame(raf); };
+		return () => {
+			unsub();
+			if (raf !== null) cancelAnimationFrame(raf);
+		};
 	}, [engine]);
 
 	// ── Action handlers ──
@@ -163,7 +169,10 @@ const TestSessionView: React.FC<TestSessionViewProps> = ({ connection, editorId,
 	const handleAbort = useCallback(() => engine.abort(), [engine]);
 	const handlePause = useCallback(() => engine.pause(), [engine]);
 	const handleResume = useCallback(() => engine.resume(), [engine]);
-	const handleClear = useCallback(() => { engine.clear(); setTick(0); }, [engine]);
+	const handleClear = useCallback(() => {
+		engine.clear();
+		setTick(0);
+	}, [engine]);
 	const handleReset = useCallback(() => {
 		engine.reset();
 		setConfig(DEFAULT_CONFIG);
@@ -174,12 +183,24 @@ const TestSessionView: React.FC<TestSessionViewProps> = ({ connection, editorId,
 	useEffect(() => {
 		setActionHandler(editorId, (action) => {
 			switch (action) {
-				case 'start': handleStart(); break;
-				case 'abort': handleAbort(); break;
-				case 'pause': handlePause(); break;
-				case 'resume': handleResume(); break;
-				case 'clear': handleClear(); break;
-				case 'reset': handleReset(); break;
+				case 'start':
+					handleStart();
+					break;
+				case 'abort':
+					handleAbort();
+					break;
+				case 'pause':
+					handlePause();
+					break;
+				case 'resume':
+					handleResume();
+					break;
+				case 'clear':
+					handleClear();
+					break;
+				case 'reset':
+					handleReset();
+					break;
 			}
 		});
 		return () => setActionHandler(editorId, null);
@@ -193,14 +214,7 @@ const TestSessionView: React.FC<TestSessionViewProps> = ({ connection, editorId,
 			{currentView === 'dashboard' && (
 				<div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' as const, overflow: 'auto' }}>
 					<div style={styles.gridArea}>
-						<MetricsPanel
-							metrics={engine.metrics}
-							worstPing={engine.worstPing} worstPingSnapshot={engine.worstPingSnapshot}
-							engineState={engineState}
-							onStart={handleStart} onAbort={handleAbort}
-							onPause={handlePause} onResume={handleResume}
-							onClear={handleClear}
-						/>
+						<MetricsPanel metrics={engine.metrics} worstPing={engine.worstPing} worstPingSnapshot={engine.worstPingSnapshot} engineState={engineState} onStart={handleStart} onAbort={handleAbort} onPause={handlePause} onResume={handleResume} onClear={handleClear} />
 						<PhaseProgress phases={engine.phases} selectedPhases={selectedPhases} />
 						<SwarmPanel pipelines={engine.pipelines} />
 						<LatencyPanel samples={engine.latencyHistory} />
@@ -219,7 +233,8 @@ const TestSessionView: React.FC<TestSessionViewProps> = ({ connection, editorId,
 					onTogglePhase={(id) => {
 						setSelectedPhases((prev) => {
 							const next = new Set(prev);
-							if (next.has(id)) next.delete(id); else next.add(id);
+							if (next.has(id)) next.delete(id);
+							else next.add(id);
 							return next;
 						});
 					}}

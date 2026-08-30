@@ -48,14 +48,12 @@
 import * as React from 'react';
 
 /** Matches absolute http(s)/ftp URLs (e.g. icons supplied by remote services). */
-const isUrl = (value: string): boolean =>
-	/^(https?|ftp):\/\/[^\s/$.?#].[^\s]*$/i.test(value);
+const isUrl = (value: string): boolean => /^(https?|ftp):\/\/[^\s/$.?#].[^\s]*$/i.test(value);
 
 // The built-in fallback glyph (generic "node" mark) — the ONE icon that must
 // exist before any server has been contacted. Monochrome by design: fill is
 // currentColor so it follows the theme like every processed icon.
-const UNKNOWN_SVG =
-	'<svg xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960" width="24px" fill="currentColor"><path d="M440-280H280q-83 0-141.5-58.5T80-480q0-83 58.5-141.5T280-680h160v80H280q-50 0-85 35t-35 85q0 50 35 85t85 35h160v80ZM320-440v-80h320v80H320Zm200 160v-80h160q50 0 85-35t35-85q0-50-35-85t-85-35H520v-80h160q83 0 141.5 58.5T880-480q0 83-58.5 141.5T680-280H520Z"/></svg>';
+const UNKNOWN_SVG = '<svg xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960" width="24px" fill="currentColor"><path d="M440-280H280q-83 0-141.5-58.5T80-480q0-83 58.5-141.5T280-680h160v80H280q-50 0-85 35t-35 85q0 50 35 85t85 35h160v80ZM320-440v-80h320v80H320Zm200 160v-80h160q50 0 85-35t35-85q0-50-35-85t-85-35H520v-80h160q83 0 141.5 58.5T880-480q0 83-58.5 141.5T680-280H520Z"/></svg>';
 
 // =============================================================================
 // SVG PROCESSING (sanitize + auto-currentColor)
@@ -268,16 +266,7 @@ export const Icon: React.FC<IconProps> = ({ name, alt = '', style, ...svgProps }
 		// both element types (width/height/style/className) so callers don't
 		// need a separate code path for the URL case.
 		const { width, height, className } = svgProps as React.SVGProps<SVGSVGElement>;
-		return (
-			<img
-				src={name}
-				alt={alt}
-				width={width as number | string | undefined}
-				height={height as number | string | undefined}
-				style={style as React.CSSProperties | undefined}
-				className={className}
-			/>
-		);
+		return <img src={name} alt={alt} width={width as number | string | undefined} height={height as number | string | undefined} style={style as React.CSSProperties | undefined} className={className} />;
 	}
 
 	// Registry lookup: exact id/name first, then without a file extension

@@ -43,6 +43,4 @@ export type ICardDataGridProps<Row extends Record<string, unknown>> = IDataGridP
  * exists purely so call sites that present a grid AS a card cannot omit the
  * title.
  */
-export const CardDataGrid = DataGrid as <Row extends Record<string, unknown>>(
-	props: ICardDataGridProps<Row> & { ref?: Ref<IDataGridHandle> },
-) => ReactElement;
+export const CardDataGrid = DataGrid as <Row extends Record<string, unknown>>(props: ICardDataGridProps<Row> & { ref?: Ref<IDataGridHandle> }) => ReactElement;

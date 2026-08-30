@@ -22,18 +22,18 @@ interface TextViewProps {
 
 /**
  * TextView Component
- * 
+ *
  * Displays text content extracted from processed files as plain text.
  * Supports both normal stacked layout and comparison mode for side-by-side viewing
  * of multiple content blocks from the same file.
- * 
+ *
  * Features:
  * - Plain text display with preserved whitespace and line breaks
  * - Comparison mode for side-by-side content viewing
  * - Field name labels when multiple content blocks exist
  * - Empty state when no text content is available
  * - Ref management for scroll-to-file functionality
- * 
+ *
  * @param props - Component props
  * @returns React component displaying text content
  */
@@ -68,13 +68,9 @@ export const TextView: React.FC<TextViewProps> = ({ textContent, compareMode, se
 							<div className="compare-grid">
 								{group.contents.map((block: any, contentIndex: number) => (
 									<div key={contentIndex} className="compare-column">
-										{block.fieldName && (
-											<div className="content-field-label">{block.fieldName}</div>
-										)}
+										{block.fieldName && <div className="content-field-label">{block.fieldName}</div>}
 										<div className="content-item">
-											<pre className="text-content">
-												{block.content}
-											</pre>
+											<pre className="text-content">{block.content}</pre>
 										</div>
 									</div>
 								))}
@@ -84,13 +80,9 @@ export const TextView: React.FC<TextViewProps> = ({ textContent, compareMode, se
 							group.contents.map((block: any, contentIndex: number) => (
 								<div key={contentIndex} className="content-item-wrapper">
 									{/* Show field name only when multiple content blocks exist */}
-									{group.contents.length > 1 && block.fieldName && (
-										<div className="content-field-label">{block.fieldName}</div>
-									)}
+									{group.contents.length > 1 && block.fieldName && <div className="content-field-label">{block.fieldName}</div>}
 									<div className="content-item">
-										<pre className="text-content">
-											{block.content}
-										</pre>
+										<pre className="text-content">{block.content}</pre>
 									</div>
 								</div>
 							))

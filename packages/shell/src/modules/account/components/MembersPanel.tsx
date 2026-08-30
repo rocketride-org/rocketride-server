@@ -385,7 +385,7 @@ export const MembersPanel: React.FC<MembersPanelProps> = ({ members, teams, prof
 
 	// The viewed record resolves LIVE from props so server refreshes (e.g. a
 	// role save flipping role -> admin) update the open panel in place.
-	const viewedMember = panel?.mode === 'view' ? members.find((m) => m.userId === panel.userId) ?? null : null;
+	const viewedMember = panel?.mode === 'view' ? (members.find((m) => m.userId === panel.userId) ?? null) : null;
 
 	// Gating derived from the viewed record: never self-edit/remove, and only
 	// org admins manage members at all (ported from the old Actions column).
@@ -408,7 +408,7 @@ export const MembersPanel: React.FC<MembersPanelProps> = ({ members, teams, prof
 		() => () => {
 			mountedRef.current = false;
 		},
-		[],
+		[]
 	);
 
 	// ── Table rows ──────────────────────────────────────────────────────────
@@ -446,7 +446,7 @@ export const MembersPanel: React.FC<MembersPanelProps> = ({ members, teams, prof
 					return memberCellEl(row.displayName, row.email, row.id === profile?.userId);
 				},
 			},
-			{ title: 'Email', field: 'email', rrType: 'string', rrDefault: true, rrDescription: 'Sign-in email address of the member\'s user account; invitations are sent here.', headerSort: true },
+			{ title: 'Email', field: 'email', rrType: 'string', rrDefault: true, rrDescription: "Sign-in email address of the member's user account; invitations are sent here.", headerSort: true },
 			{
 				title: 'Role',
 				field: 'role',

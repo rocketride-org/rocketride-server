@@ -80,15 +80,10 @@ export class RemoteManager extends BaseManager {
 		// entire operation and detach before surfacing a timeout.
 		let result: ConnectResult;
 		try {
-			result = await withTimeout(
-				client.login(config.credential as string | { code: string; verifier: string; redirectUri: string }),
-				CONNECT_TIMEOUT_MS,
-				new ConnectionFailure(`Connection timed out after ${CONNECT_TIMEOUT_MS}ms`, 'network'),
-				async () => {
-					const ownsLogin = await this.onLoginTimeout?.();
-					if (ownsLogin !== false) await client.detach();
-				},
-			);
+			result = await withTimeout(client.login(config.credential as string | { code: string; verifier: string; redirectUri: string }), CONNECT_TIMEOUT_MS, new ConnectionFailure(`Connection timed out after ${CONNECT_TIMEOUT_MS}ms`, 'network'), async () => {
+				const ownsLogin = await this.onLoginTimeout?.();
+				if (ownsLogin !== false) await client.detach();
+			});
 		} catch (error) {
 			// Classify the failure so recovery UI can offer the right action.
 			if (error instanceof LoginAttemptCancelledError) throw error;

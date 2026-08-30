@@ -146,9 +146,7 @@ export class EnvironmentProvider {
 		if (!keys?.length) return;
 		this.pendingPrefillKeys = null;
 
-		Promise.resolve(
-			panel.webview.postMessage({ type: 'env:prefill', keys })
-		).catch((err: unknown) => {
+		Promise.resolve(panel.webview.postMessage({ type: 'env:prefill', keys })).catch((err: unknown) => {
 			console.error(`[EnvironmentProvider] Failed to send prefill keys: ${err}`);
 		});
 	}
@@ -411,11 +409,7 @@ export class EnvironmentProvider {
 	 * @param context - Optional slot/scope context so the webview can clear
 	 *                  per-card loading state for the specific key that failed.
 	 */
-	private postError(
-		panel: vscode.WebviewPanel,
-		message: string,
-		context?: { slot: 'development' | 'deployment'; scope: 'org' | 'team' | 'user'; scopeId?: string },
-	): void {
+	private postError(panel: vscode.WebviewPanel, message: string, context?: { slot: 'development' | 'deployment'; scope: 'org' | 'team' | 'user'; scopeId?: string }): void {
 		panel.webview.postMessage({ type: 'env:error', error: message, ...context }).then(undefined, (err: unknown) => {
 			console.error(`[EnvironmentProvider] Failed to post error: ${err}`);
 		});

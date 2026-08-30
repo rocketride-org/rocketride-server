@@ -48,16 +48,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const {
-	execCommand,
-	syncDir,
-	formatSyncStats,
-	removeDir,
-	hasBuildInputChanged,
-	saveSourceHash,
-	setState,
-	exists,
-} = require('./index');
+const { execCommand, syncDir, formatSyncStats, removeDir, hasBuildInputChanged, saveSourceHash, setState, exists } = require('./index');
 const { BUILD_ROOT, DIST_ROOT, PROJECT_ROOT } = require('./paths');
 const { registerApp } = require('./registerApp');
 const registry = require('./registry');
@@ -68,12 +59,8 @@ const registry = require('./registry');
 // library at shared/ and the shell prebuilt in .rocketride/shell
 // (vendored via client:update). Missing dirs hash as 'missing', so
 // preferring the platform layout is safe.
-const SHELL_UI_SRC = fs.existsSync(path.join(PROJECT_ROOT, 'packages', 'shell', 'src'))
-	? path.join(PROJECT_ROOT, 'packages', 'shell', 'src')
-	: path.join(PROJECT_ROOT, '.rocketride', 'shell');
-const SHARED_UI_SRC = fs.existsSync(path.join(PROJECT_ROOT, 'apps', 'shared', 'src'))
-	? path.join(PROJECT_ROOT, 'apps', 'shared', 'src')
-	: path.join(PROJECT_ROOT, 'shared', 'src');
+const SHELL_UI_SRC = fs.existsSync(path.join(PROJECT_ROOT, 'packages', 'shell', 'src')) ? path.join(PROJECT_ROOT, 'packages', 'shell', 'src') : path.join(PROJECT_ROOT, '.rocketride', 'shell');
+const SHARED_UI_SRC = fs.existsSync(path.join(PROJECT_ROOT, 'apps', 'shared', 'src')) ? path.join(PROJECT_ROOT, 'apps', 'shared', 'src') : path.join(PROJECT_ROOT, 'shared', 'src');
 
 /**
  * Create a standard builder module for an MF remote app.
@@ -89,16 +76,16 @@ const SHARED_UI_SRC = fs.existsSync(path.join(PROJECT_ROOT, 'apps', 'shared', 's
  */
 function createAppModule({ name, description, appRoot, dev = false }) {
 	// Derived paths
-	const buildDir       = path.join(BUILD_ROOT, 'apps', name);
+	const buildDir = path.join(BUILD_ROOT, 'apps', name);
 	const serverStaticDir = path.join(DIST_ROOT, 'server', 'static', 'apps', name);
 
 	// Build input tracking
-	const srcDir       = path.join(appRoot, 'src');
-	const pkgJson      = path.join(appRoot, 'package.json');
+	const srcDir = path.join(appRoot, 'src');
+	const pkgJson = path.join(appRoot, 'package.json');
 	const buildHashKey = `${name}.buildHash`;
 
 	// Source directories that affect this app's build output
-	const inputDirs  = [srcDir, SHELL_UI_SRC, SHARED_UI_SRC];
+	const inputDirs = [srcDir, SHELL_UI_SRC, SHARED_UI_SRC];
 	const inputFiles = [pkgJson];
 
 	// =========================================================================
@@ -147,9 +134,9 @@ function createAppModule({ name, description, appRoot, dev = false }) {
 
 	const actions = [
 		// Internal actions (no description — not shown in builder --help)
-		{ name: `${name}:bundle`,   action: makeBundleAction },
+		{ name: `${name}:bundle`, action: makeBundleAction },
 		{ name: `${name}:register`, action: () => registerApp(appRoot) },
-		{ name: `${name}:copy`,     action: makeCopyAction },
+		{ name: `${name}:copy`, action: makeCopyAction },
 
 		// Full build: bundle → register → copy. Every app depends on the
 		// shell, so in repos that CARRY the shell module its build runs

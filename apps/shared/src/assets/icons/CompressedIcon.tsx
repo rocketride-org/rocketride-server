@@ -31,28 +31,11 @@ import { IIconProps } from './types';
  *
  * @param props - Standard icon props for controlling size, style, and opacity.
  */
-const CompressedIcon: FunctionComponent<IIconProps> = ({
-	height = '20',
-	style,
-	width = '22',
-	opacity = 1,
-}) => {
+const CompressedIcon: FunctionComponent<IIconProps> = ({ height = '20', style, width = '22', opacity = 1 }) => {
 	return (
-		<svg
-			id="Layer_1"
-			enableBackground="new 0 0 512 512"
-			viewBox="0 0 512 512"
-			xmlns="http://www.w3.org/2000/svg"
-			height={height}
-			width={width}
-			style={style}
-			opacity={opacity}
-		>
+		<svg id="Layer_1" enableBackground="new 0 0 512 512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg" height={height} width={width} style={style} opacity={opacity}>
 			<g>
-				<path
-					d="m321.2 2h-232.4c-16.1 0-29.1 13-29.1 29.1v449.8c0 16.1 13 29.1 29.1 29.1h334.4c16.1 0 29.1-13 29.1-29.1v-347.8z"
-					fill="#9ABCF8"
-				/>
+				<path d="m321.2 2h-232.4c-16.1 0-29.1 13-29.1 29.1v449.8c0 16.1 13 29.1 29.1 29.1h334.4c16.1 0 29.1-13 29.1-29.1v-347.8z" fill="#9ABCF8" />
 				<path d="m321.2 104c0 16.1 13 29.1 29.1 29.1h102l-131.1-131.1z" fill="#607caf" />
 				<g>
 					<path d="m190.1 2h57.7v289.8h-57.7z" fill="#445c6c" />
@@ -77,14 +60,8 @@ const CompressedIcon: FunctionComponent<IIconProps> = ({
 						<path d="m212 17.6s1.2-3.4 3.8-3.4c2.3 0 4.1 2.9 6.1 2.9 1.7 0 3.7-2.2 3.7-7.3s-1.9-7.3-3.7-7.3c-2 0-3.9 2.9-6.1 2.9-2.6 0-3.8-3.4-3.8-3.4h-14.2v15.6z" />
 					</g>
 					<g>
-						<path
-							d="m265.2 376.8-14.2-43.6v-38.8c0-4.9-4-8.9-8.9-8.9h-46.7c-4.9 0-8.9 4-8.9 8.9v38.8l-14.3 43.7c-2 6-2.9 12.5-2.4 19.3 1.8 24.2 21.6 43.7 45.8 45.1 28.5 1.7 52.1-20.8 52.1-48.9.1-5.5-.8-10.7-2.5-15.6zm-46.4 47.8c-17.8 0-32.2-14.4-32.2-32.2s14.4-32.2 32.2-32.2 32.2 14.4 32.2 32.2-14.4 32.2-32.2 32.2z"
-							fill="#fbd984"
-						/>
-						<path
-							d="m218.8 285.6c-5 0-9 4-9 9v29.1c0 5 4 9 9 9s9-4 9-9v-29.1c0-5-4.1-9-9-9z"
-							fill="#e39a61"
-						/>
+						<path d="m265.2 376.8-14.2-43.6v-38.8c0-4.9-4-8.9-8.9-8.9h-46.7c-4.9 0-8.9 4-8.9 8.9v38.8l-14.3 43.7c-2 6-2.9 12.5-2.4 19.3 1.8 24.2 21.6 43.7 45.8 45.1 28.5 1.7 52.1-20.8 52.1-48.9.1-5.5-.8-10.7-2.5-15.6zm-46.4 47.8c-17.8 0-32.2-14.4-32.2-32.2s14.4-32.2 32.2-32.2 32.2 14.4 32.2 32.2-14.4 32.2-32.2 32.2z" fill="#fbd984" />
+						<path d="m218.8 285.6c-5 0-9 4-9 9v29.1c0 5 4 9 9 9s9-4 9-9v-29.1c0-5-4.1-9-9-9z" fill="#e39a61" />
 					</g>
 				</g>
 			</g>

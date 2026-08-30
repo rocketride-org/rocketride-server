@@ -1,6 +1,6 @@
 /**
  * Shared State Management with Mutex Locking and In-Memory Cache
- * 
+ *
  * Provides thread-safe state management for the build system.
  * - State is loaded from disk once on first access
  * - Reads are served from memory cache
@@ -22,39 +22,39 @@ const STATE_FILE = path.join(BUILD_ROOT, 'state.json');
 // closes CodeQL js/prototype-pollution-utility alert #274.
 const FORBIDDEN_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
 function assertSafePath(parts) {
-    // Coerce each segment with String() before the Set check. Bracket access
-    // (obj[part]) coerces its operand to a string property key, so passing
-    // `new String('__proto__')` (a wrapper object, not a primitive) would
-    // bypass FORBIDDEN_KEYS.has() — identity equality in Set — while still
-    // resolving to '__proto__' at the actual write site. String() normalizes
-    // wrappers, numbers, etc. to the same key form the property access uses.
-    for (const rawPart of parts) {
-        const part = String(rawPart);
-        if (FORBIDDEN_KEYS.has(part)) {
-            throw new Error(`state: forbidden key segment "${part}" in path`);
-        }
-    }
+	// Coerce each segment with String() before the Set check. Bracket access
+	// (obj[part]) coerces its operand to a string property key, so passing
+	// `new String('__proto__')` (a wrapper object, not a primitive) would
+	// bypass FORBIDDEN_KEYS.has() — identity equality in Set — while still
+	// resolving to '__proto__' at the actual write site. String() normalizes
+	// wrappers, numbers, etc. to the same key form the property access uses.
+	for (const rawPart of parts) {
+		const part = String(rawPart);
+		if (FORBIDDEN_KEYS.has(part)) {
+			throw new Error(`state: forbidden key segment "${part}" in path`);
+		}
+	}
 }
 
 // ============================================================================
 // In-Memory Cache
 // ============================================================================
 
-let stateCache = null;  // null = not loaded yet
+let stateCache = null; // null = not loaded yet
 
 /**
  * Ensure state is loaded into memory cache
  * @returns {Promise<Object>}
  */
 async function ensureLoaded() {
-    if (stateCache === null) {
-        try {
-            stateCache = await readJsonSafe(STATE_FILE, {});
-        } catch {
-            stateCache = {};
-        }
-    }
-    return stateCache;
+	if (stateCache === null) {
+		try {
+			stateCache = await readJsonSafe(STATE_FILE, {});
+		} catch {
+			stateCache = {};
+		}
+	}
+	return stateCache;
 }
 
 /**
@@ -62,9 +62,9 @@ async function ensureLoaded() {
  * @param {Object} state
  */
 async function persistState(state) {
-    stateCache = state;
-    await mkdir(BUILD_ROOT);
-    await writeJson(STATE_FILE, state);
+	stateCache = state;
+	await mkdir(BUILD_ROOT);
+	await writeJson(STATE_FILE, state);
 }
 
 /**
@@ -72,48 +72,48 @@ async function persistState(state) {
  * Use this if you know external process may have modified state
  */
 function invalidateCache() {
-    stateCache = null;
+	stateCache = null;
 }
 
 // ============================================================================
 // Mutex Implementation
 // ============================================================================
 
-const locks = new Map();  // lockName -> { promise, waiters }
+const locks = new Map(); // lockName -> { promise, waiters }
 
 /**
  * Execute a function while holding a named lock.
  * Multiple calls with the same lock name will be serialized.
  * Cleans up when no more waiters to prevent memory leaks.
- * 
+ *
  * @param {string} name - Lock name (e.g., 'state', 'java-setup', 'vcpkg-setup')
  * @param {Function} fn - Async function to execute while holding the lock
  * @returns {Promise<any>} - Result of fn()
  */
 async function withLock(name, fn) {
-    // Get or create lock entry
-    if (!locks.has(name)) {
-        locks.set(name, { promise: Promise.resolve(), waiters: 0 });
-    }
+	// Get or create lock entry
+	if (!locks.has(name)) {
+		locks.set(name, { promise: Promise.resolve(), waiters: 0 });
+	}
 
-    const lock = locks.get(name);
-    lock.waiters++;
+	const lock = locks.get(name);
+	lock.waiters++;
 
-    const current = lock.promise;
-    let release;
-    lock.promise = new Promise(resolve => release = resolve);
+	const current = lock.promise;
+	let release;
+	lock.promise = new Promise((resolve) => (release = resolve));
 
-    await current;  // Wait for previous holder
-    try {
-        return await fn();
-    } finally {
-        lock.waiters--;
-        // Clean up if no more waiters
-        if (lock.waiters === 0) {
-            locks.delete(name);
-        }
-        release();  // Let next waiter proceed
-    }
+	await current; // Wait for previous holder
+	try {
+		return await fn();
+	} finally {
+		lock.waiters--;
+		// Clean up if no more waiters
+		if (lock.waiters === 0) {
+			locks.delete(name);
+		}
+		release(); // Let next waiter proceed
+	}
 }
 
 // ============================================================================
@@ -126,10 +126,10 @@ async function withLock(name, fn) {
  * @returns {Promise<Object>}
  */
 async function loadState() {
-    return withLock('state', async () => {
-        const state = await ensureLoaded();
-        return JSON.parse(JSON.stringify(state));  // Deep copy
-    });
+	return withLock('state', async () => {
+		const state = await ensureLoaded();
+		return JSON.parse(JSON.stringify(state)); // Deep copy
+	});
 }
 
 /**
@@ -137,9 +137,9 @@ async function loadState() {
  * @param {Object} state
  */
 async function saveState(state) {
-    return withLock('state', async () => {
-        await persistState(state);
-    });
+	return withLock('state', async () => {
+		await persistState(state);
+	});
 }
 
 /**
@@ -149,20 +149,20 @@ async function saveState(state) {
  * @returns {Promise<any>}
  */
 async function getState(key) {
-    return withLock('state', async () => {
-        const state = await ensureLoaded();
-        const parts = Array.isArray(key) ? key : key.split('.');
-        let value = state;
-        for (const part of parts) {
-            if (value === undefined || value === null) return undefined;
-            value = value[part];
-        }
-        // Return a copy of objects/arrays to prevent mutation
-        if (value !== null && typeof value === 'object') {
-            return JSON.parse(JSON.stringify(value));
-        }
-        return value;
-    });
+	return withLock('state', async () => {
+		const state = await ensureLoaded();
+		const parts = Array.isArray(key) ? key : key.split('.');
+		let value = state;
+		for (const part of parts) {
+			if (value === undefined || value === null) return undefined;
+			value = value[part];
+		}
+		// Return a copy of objects/arrays to prevent mutation
+		if (value !== null && typeof value === 'object') {
+			return JSON.parse(JSON.stringify(value));
+		}
+		return value;
+	});
 }
 
 /**
@@ -171,23 +171,23 @@ async function getState(key) {
  * @param {string[]} parts - Key path parts
  */
 function deleteKeyAndPrune(state, parts) {
-    let obj = state;
-    for (let i = 0; i < parts.length - 1; i++) {
-        obj = obj[parts[i]];
-        if (obj == null) return;
-    }
-    delete obj[parts[parts.length - 1]];
-    // Prune empty parents from the leaf up
-    for (let depth = parts.length - 2; depth >= 0; depth--) {
-        let parent = state;
-        for (let i = 0; i < depth; i++) parent = parent[parts[i]];
-        const branch = parent[parts[depth]];
-        if (branch != null && typeof branch === 'object' && !Array.isArray(branch) && Object.keys(branch).length === 0) {
-            delete parent[parts[depth]];
-        } else {
-            break;
-        }
-    }
+	let obj = state;
+	for (let i = 0; i < parts.length - 1; i++) {
+		obj = obj[parts[i]];
+		if (obj == null) return;
+	}
+	delete obj[parts[parts.length - 1]];
+	// Prune empty parents from the leaf up
+	for (let depth = parts.length - 2; depth >= 0; depth--) {
+		let parent = state;
+		for (let i = 0; i < depth; i++) parent = parent[parts[i]];
+		const branch = parent[parts[depth]];
+		if (branch != null && typeof branch === 'object' && !Array.isArray(branch) && Object.keys(branch).length === 0) {
+			delete parent[parts[depth]];
+		} else {
+			break;
+		}
+	}
 }
 
 /**
@@ -198,25 +198,25 @@ function deleteKeyAndPrune(state, parts) {
  * @param {any} value
  */
 async function setState(key, value) {
-    return withLock('state', async () => {
-        const state = await ensureLoaded();
-        const parts = Array.isArray(key) ? key : key.split('.');
-        assertSafePath(parts);
-        if (value === null) {
-            deleteKeyAndPrune(state, parts);
-        } else {
-            let obj = state;
-            for (let i = 0; i < parts.length - 1; i++) {
-                const part = parts[i];
-                if (obj[part] === undefined || obj[part] === null) {
-                    obj[part] = {};
-                }
-                obj = obj[part];
-            }
-            obj[parts[parts.length - 1]] = value;
-        }
-        await persistState(state);
-    });
+	return withLock('state', async () => {
+		const state = await ensureLoaded();
+		const parts = Array.isArray(key) ? key : key.split('.');
+		assertSafePath(parts);
+		if (value === null) {
+			deleteKeyAndPrune(state, parts);
+		} else {
+			let obj = state;
+			for (let i = 0; i < parts.length - 1; i++) {
+				const part = parts[i];
+				if (obj[part] === undefined || obj[part] === null) {
+					obj[part] = {};
+				}
+				obj = obj[part];
+			}
+			obj[parts[parts.length - 1]] = value;
+		}
+		await persistState(state);
+	});
 }
 
 /**
@@ -226,38 +226,38 @@ async function setState(key, value) {
  * @param {Object} updates - Object with dot-notation keys and values
  */
 async function updateState(updates) {
-    return withLock('state', async () => {
-        const state = await ensureLoaded();
+	return withLock('state', async () => {
+		const state = await ensureLoaded();
 
-        for (const [key, value] of Object.entries(updates)) {
-            const parts = key.split('.');
-            assertSafePath(parts);
-            if (value === null) {
-                deleteKeyAndPrune(state, parts);
-            } else {
-                let obj = state;
-                for (let i = 0; i < parts.length - 1; i++) {
-                    const part = parts[i];
-                    if (obj[part] === undefined || obj[part] === null) {
-                        obj[part] = {};
-                    }
-                    obj = obj[part];
-                }
-                obj[parts[parts.length - 1]] = value;
-            }
-        }
+		for (const [key, value] of Object.entries(updates)) {
+			const parts = key.split('.');
+			assertSafePath(parts);
+			if (value === null) {
+				deleteKeyAndPrune(state, parts);
+			} else {
+				let obj = state;
+				for (let i = 0; i < parts.length - 1; i++) {
+					const part = parts[i];
+					if (obj[part] === undefined || obj[part] === null) {
+						obj[part] = {};
+					}
+					obj = obj[part];
+				}
+				obj[parts[parts.length - 1]] = value;
+			}
+		}
 
-        await persistState(state);
-    });
+		await persistState(state);
+	});
 }
 
 /**
  * Clear all state (mutex-protected)
  */
 async function clearState() {
-    return withLock('state', async () => {
-        await persistState({});
-    });
+	return withLock('state', async () => {
+		await persistState({});
+	});
 }
 
 // ============================================================================
@@ -265,21 +265,21 @@ async function clearState() {
 // ============================================================================
 
 module.exports = {
-    // Mutex
-    withLock,
+	// Mutex
+	withLock,
 
-    // Async state operations (mutex-protected, cached)
-    loadState,
-    saveState,
-    getState,
-    setState,
-    updateState,
-    clearState,
+	// Async state operations (mutex-protected, cached)
+	loadState,
+	saveState,
+	getState,
+	setState,
+	updateState,
+	clearState,
 
-    // Cache control
-    invalidateCache,
+	// Cache control
+	invalidateCache,
 
-    // Paths (for reference)
-    STATE_FILE,
-    BUILD_ROOT
+	// Paths (for reference)
+	STATE_FILE,
+	BUILD_ROOT,
 };

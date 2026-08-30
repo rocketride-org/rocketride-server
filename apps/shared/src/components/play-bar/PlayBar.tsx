@@ -38,12 +38,7 @@
 import React, { CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from 'shell';
 import { useClickOutside } from 'shell';
-import type {
-	TaskChapter,
-	TaskPlayerController,
-	TaskPlayerState,
-	TaskTimeline,
-} from '../../modules/project/hooks/useTaskEvents';
+import type { TaskChapter, TaskPlayerController, TaskPlayerState, TaskTimeline } from '../../modules/project/hooks/useTaskEvents';
 
 // =============================================================================
 // TYPES
@@ -335,8 +330,7 @@ const PauseGlyph: React.FC = () => (
 const isSameDay = (a: Date, b: Date): boolean => a.toDateString() === b.toDateString();
 
 /** Clock time, optionally with seconds. */
-const fmtClock = (d: Date, withSeconds: boolean): string =>
-	d.toLocaleTimeString([], withSeconds ? { hour: '2-digit', minute: '2-digit', second: '2-digit' } : { hour: '2-digit', minute: '2-digit' });
+const fmtClock = (d: Date, withSeconds: boolean): string => d.toLocaleTimeString([], withSeconds ? { hour: '2-digit', minute: '2-digit', second: '2-digit' } : { hour: '2-digit', minute: '2-digit' });
 
 /** Short date: "Mon, Jul 21". */
 const fmtDate = (d: Date): string => d.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
@@ -531,7 +525,7 @@ export const PlayBar: React.FC<IPlayBarProps> = ({ timeline, player, controller,
 			window.addEventListener('mousemove', move);
 			window.addEventListener('mouseup', up);
 		},
-		[timeAt, position, secPerPx, controller, onSelectionChange],
+		[timeAt, position, secPerPx, controller, onSelectionChange]
 	);
 
 	// ±30 s on arrow keys; Esc clears the selection. Bound to the BAR, not
@@ -567,7 +561,7 @@ export const PlayBar: React.FC<IPlayBarProps> = ({ timeline, player, controller,
 			setSecPerPx(Math.min(MAX_SEC_PER_PX, Math.max(MIN_SEC_PER_PX, durationSec / (needleX * 0.55))));
 			controller.seekToTime(chapter.beginTime);
 		},
-		[needleX, controller],
+		[needleX, controller]
 	);
 
 	// --- Derived render pieces ------------------------------------------------
@@ -605,11 +599,7 @@ export const PlayBar: React.FC<IPlayBarProps> = ({ timeline, player, controller,
 	// also self-heals these at the next open; this covers stale caches.)
 	const chapters = useMemo(() => {
 		const raw = timeline?.chapters ?? [];
-		return raw.map((chapter, index) =>
-			chapter.endTime == null && index < raw.length - 1
-				? { ...chapter, endTime: raw[index + 1].beginTime, outcome: chapter.outcome ?? 'interrupted' }
-				: chapter,
-		);
+		return raw.map((chapter, index) => (chapter.endTime == null && index < raw.length - 1 ? { ...chapter, endTime: raw[index + 1].beginTime, outcome: chapter.outcome ?? 'interrupted' } : chapter));
 	}, [timeline]);
 
 	const menuGroups = useMemo(() => {
@@ -638,8 +628,7 @@ export const PlayBar: React.FC<IPlayBarProps> = ({ timeline, player, controller,
 	// earlier run). >|: an end ahead in this run, or a later run's begin.
 	const canPrevTrack = chapters.length > 0 && position > chapters[0].beginTime + 0.5;
 	const insideChapter = chapters.find((c) => c.beginTime <= position && position <= (c.endTime ?? Number.POSITIVE_INFINITY));
-	const canNextTrack =
-		(insideChapter?.endTime != null && position < insideChapter.endTime - 1) || chapters.some((c) => c.beginTime > position + 1);
+	const canNextTrack = (insideChapter?.endTime != null && position < insideChapter.endTime - 1) || chapters.some((c) => c.beginTime > position + 1);
 
 	// --- Render ---------------------------------------------------------------
 	return (
@@ -650,56 +639,51 @@ export const PlayBar: React.FC<IPlayBarProps> = ({ timeline, player, controller,
 			<div style={styles.chrome}>
 				{/* Live means playing by definition — the button is simply Pause
 				    (pressing it freezes the position and drops out of live). */}
-				<Button
-					variant="primary"
-					small
-					onClick={isLive || player.playing ? controller.pause : controller.play}
-					title={isLive ? 'Pause (drop out of live)' : player.playing ? 'Pause' : 'Play'}
-				>
+				<Button variant="primary" small onClick={isLive || player.playing ? controller.pause : controller.play} title={isLive ? 'Pause (drop out of live)' : player.playing ? 'Pause' : 'Play'}>
 					{isLive || player.playing ? <PauseGlyph /> : <PlayGlyph />}
 				</Button>
 				{/* The chrome row is ALWAYS visible, but live keeps it minimal:
 				    pause + the time/run dropdown (+ zoom scale). Speed and
 				    window stepping appear in replay, where they mean something. */}
 				{!isLive && (
-				<div ref={speedRef} style={{ position: 'relative', display: 'inline-flex' }}>
-					<Button variant="ghost" small onClick={() => setSpeedOpen((open) => !open)} title="Playback speed">
-						<span style={styles.timeButton}>
-							{player.speed}×<span style={styles.timeCaret}>▼</span>
-						</span>
-					</Button>
-					{speedOpen && speedPos && (
-						<div role="menu" style={{ ...styles.speedMenu, top: speedPos.top, left: speedPos.left, transform: speedPos.up ? 'translateY(-100%)' : undefined }}>
-							{SPEEDS.map((value) => {
-								const select = () => {
-									controller.setSpeed(value);
-									setSpeedOpen(false);
-								};
-								return (
-									<div
-										key={value}
-										role="menuitemradio"
-										aria-checked={player.speed === value}
-										tabIndex={0}
-										style={styles.speedItem}
-										onMouseEnter={(e) => ((e.currentTarget as HTMLDivElement).style.background = 'var(--rr-bg-widget)')}
-										onMouseLeave={(e) => ((e.currentTarget as HTMLDivElement).style.background = 'transparent')}
-										onClick={select}
-										onKeyDown={(e) => {
-											if (e.key === 'Enter' || e.key === ' ') {
-												e.preventDefault();
-												select();
-											}
-										}}
-									>
-										<span style={styles.speedDot}>{player.speed === value ? '●' : ''}</span>
-										{value}×
-									</div>
-								);
-							})}
-						</div>
-					)}
-				</div>
+					<div ref={speedRef} style={{ position: 'relative', display: 'inline-flex' }}>
+						<Button variant="ghost" small onClick={() => setSpeedOpen((open) => !open)} title="Playback speed">
+							<span style={styles.timeButton}>
+								{player.speed}×<span style={styles.timeCaret}>▼</span>
+							</span>
+						</Button>
+						{speedOpen && speedPos && (
+							<div role="menu" style={{ ...styles.speedMenu, top: speedPos.top, left: speedPos.left, transform: speedPos.up ? 'translateY(-100%)' : undefined }}>
+								{SPEEDS.map((value) => {
+									const select = () => {
+										controller.setSpeed(value);
+										setSpeedOpen(false);
+									};
+									return (
+										<div
+											key={value}
+											role="menuitemradio"
+											aria-checked={player.speed === value}
+											tabIndex={0}
+											style={styles.speedItem}
+											onMouseEnter={(e) => ((e.currentTarget as HTMLDivElement).style.background = 'var(--rr-bg-widget)')}
+											onMouseLeave={(e) => ((e.currentTarget as HTMLDivElement).style.background = 'transparent')}
+											onClick={select}
+											onKeyDown={(e) => {
+												if (e.key === 'Enter' || e.key === ' ') {
+													e.preventDefault();
+													select();
+												}
+											}}
+										>
+											<span style={styles.speedDot}>{player.speed === value ? '●' : ''}</span>
+											{value}×
+										</div>
+									);
+								})}
+							</div>
+						)}
+					</div>
 				)}
 				{/* Window stepping (replay only): |< / << / >> / >| step by
 				    the JUMP AMOUNT selected in the dropdown between them (a
@@ -707,82 +691,61 @@ export const PlayBar: React.FC<IPlayBarProps> = ({ timeline, player, controller,
 				    independent of the zoom factor. Buttons disable when there
 				    is nowhere to go in their direction. */}
 				{!isLive && (
-				<>
-				<span style={styles.separator} />
-				<Button variant="ghost" small disabled={!canPrevTrack} onClick={controller.previousTrack} title="Beginning of the previous run">
-					{'|<'}
-				</Button>
-				<Button
-					variant="ghost"
-					small
-					disabled={!canStepBack}
-					onClick={() => (jumpStep === 'request' ? controller.stepBegin(-1) : controller.skip(-jumpStep))}
-					title={jumpStep === 'request' ? 'Previous request begin' : `Back ${jumpLabel}`}
-				>
-					{'<<'}
-				</Button>
-				<div ref={jumpRef} style={{ position: 'relative', display: 'inline-flex' }}>
-					<Button
-						variant="ghost"
-						small
-						onClick={() => setJumpOpen((open) => !open)}
-						title="Jump amount for << and >>"
-						ariaExpanded={jumpOpen}
-					>
-						<span style={styles.timeButton}>
-							{jumpLabel}
-							<span style={styles.timeCaret}>▼</span>
-						</span>
-					</Button>
-					{jumpOpen && jumpPos && (
-						<div
-							role="menu"
-							style={{ ...styles.speedMenu, top: jumpPos.top, left: jumpPos.left, transform: jumpPos.up ? 'translateY(-100%)' : undefined }}
-						>
-							{JUMP_STEPS.map((step) => {
-								const select = () => {
-									setJumpStep(step.key);
-									setJumpOpen(false);
-								};
-								return (
-									<div
-										key={step.key}
-										role="menuitemradio"
-										aria-checked={jumpStep === step.key}
-										tabIndex={0}
-										style={styles.speedItem}
-										onMouseEnter={(e) => ((e.currentTarget as HTMLDivElement).style.background = 'var(--rr-bg-widget)')}
-										onMouseLeave={(e) => ((e.currentTarget as HTMLDivElement).style.background = 'transparent')}
-										onClick={select}
-										onKeyDown={(e) => {
-											if (e.key === 'Enter' || e.key === ' ') {
-												e.preventDefault();
-												select();
-											}
-										}}
-									>
-										<span style={styles.speedDot}>{jumpStep === step.key ? '●' : ''}</span>
-										{step.label}
-									</div>
-								);
-							})}
+					<>
+						<span style={styles.separator} />
+						<Button variant="ghost" small disabled={!canPrevTrack} onClick={controller.previousTrack} title="Beginning of the previous run">
+							{'|<'}
+						</Button>
+						<Button variant="ghost" small disabled={!canStepBack} onClick={() => (jumpStep === 'request' ? controller.stepBegin(-1) : controller.skip(-jumpStep))} title={jumpStep === 'request' ? 'Previous request begin' : `Back ${jumpLabel}`}>
+							{'<<'}
+						</Button>
+						<div ref={jumpRef} style={{ position: 'relative', display: 'inline-flex' }}>
+							<Button variant="ghost" small onClick={() => setJumpOpen((open) => !open)} title="Jump amount for << and >>" ariaExpanded={jumpOpen}>
+								<span style={styles.timeButton}>
+									{jumpLabel}
+									<span style={styles.timeCaret}>▼</span>
+								</span>
+							</Button>
+							{jumpOpen && jumpPos && (
+								<div role="menu" style={{ ...styles.speedMenu, top: jumpPos.top, left: jumpPos.left, transform: jumpPos.up ? 'translateY(-100%)' : undefined }}>
+									{JUMP_STEPS.map((step) => {
+										const select = () => {
+											setJumpStep(step.key);
+											setJumpOpen(false);
+										};
+										return (
+											<div
+												key={step.key}
+												role="menuitemradio"
+												aria-checked={jumpStep === step.key}
+												tabIndex={0}
+												style={styles.speedItem}
+												onMouseEnter={(e) => ((e.currentTarget as HTMLDivElement).style.background = 'var(--rr-bg-widget)')}
+												onMouseLeave={(e) => ((e.currentTarget as HTMLDivElement).style.background = 'transparent')}
+												onClick={select}
+												onKeyDown={(e) => {
+													if (e.key === 'Enter' || e.key === ' ') {
+														e.preventDefault();
+														select();
+													}
+												}}
+											>
+												<span style={styles.speedDot}>{jumpStep === step.key ? '●' : ''}</span>
+												{step.label}
+											</div>
+										);
+									})}
+								</div>
+							)}
 						</div>
-					)}
-				</div>
-				<Button
-					variant="ghost"
-					small
-					disabled={!canStepForward}
-					onClick={() => (jumpStep === 'request' ? controller.stepBegin(1) : controller.skip(jumpStep))}
-					title={jumpStep === 'request' ? 'Next request begin' : `Forward ${jumpLabel}`}
-				>
-					{'>>'}
-				</Button>
-				<Button variant="ghost" small disabled={!canNextTrack} onClick={controller.nextTrack} title="Beginning of the next run">
-					{'>|'}
-				</Button>
-				<span style={styles.separator} />
-				</>
+						<Button variant="ghost" small disabled={!canStepForward} onClick={() => (jumpStep === 'request' ? controller.stepBegin(1) : controller.skip(jumpStep))} title={jumpStep === 'request' ? 'Next request begin' : `Forward ${jumpLabel}`}>
+							{'>>'}
+						</Button>
+						<Button variant="ghost" small disabled={!canNextTrack} onClick={controller.nextTrack} title="Beginning of the next run">
+							{'>|'}
+						</Button>
+						<span style={styles.separator} />
+					</>
 				)}
 				<div ref={menuRef} style={{ position: 'relative', display: 'inline-flex' }}>
 					<Button variant="ghost" small onClick={() => setMenuOpen((open) => !open)} title="Jump to a run">
@@ -792,50 +755,48 @@ export const PlayBar: React.FC<IPlayBarProps> = ({ timeline, player, controller,
 						</span>
 					</Button>
 					{menuOpen && menuPos && (
-					<div role="menu" style={{ ...styles.menu, top: menuPos.top, left: menuPos.left, transform: menuPos.up ? 'translateY(-100%)' : undefined }}>
-						{menuGroups.length === 0 && <div style={styles.menuEmpty}>No recorded runs yet</div>}
-						{menuGroups.map((group) => (
-							<React.Fragment key={group.day}>
-								<div style={styles.menuDay}>{group.day}</div>
-								{group.items.map((chapter) => {
-									const liveChapter = chapter.endTime == null && (runActive ?? timeline?.completed === false);
-									const dotColor = liveChapter ? 'var(--rr-color-success)' : chapter.outcome === 'error' ? 'var(--rr-color-error)' : 'var(--rr-brand)';
-									const durationSec = (chapter.endTime ?? Date.now() / 1000) - chapter.beginTime;
-									// A live row returns to the live edge; a recorded
-									// row jumps the needle and frames the run.
-									const activate = () => {
-										if (liveChapter) {
-											setMenuOpen(false);
-											controller.goLive();
-										} else jumpToChapter(chapter);
-									};
-									return (
-										<div
-											key={chapter.beginSeq}
-											role="menuitem"
-											tabIndex={0}
-											style={styles.menuItem}
-											onMouseEnter={(e) => ((e.currentTarget as HTMLDivElement).style.background = 'var(--rr-bg-widget)')}
-											onMouseLeave={(e) => ((e.currentTarget as HTMLDivElement).style.background = 'transparent')}
-											onClick={activate}
-											onKeyDown={(e) => {
-												if (e.key === 'Enter' || e.key === ' ') {
-													e.preventDefault();
-													activate();
-												}
-											}}
-										>
-											<span style={{ ...styles.menuDot, background: dotColor }} />
-											<span style={styles.menuTime}>{fmtClock(new Date(chapter.beginTime * 1000), true)}</span>
-											<span style={styles.menuDetail}>
-												{liveChapter ? 'LIVE' : fmtDuration(durationSec) + (chapter.outcome === 'error' ? ' · failed' : '')}
-											</span>
-										</div>
-									);
-								})}
-							</React.Fragment>
-						))}
-					</div>
+						<div role="menu" style={{ ...styles.menu, top: menuPos.top, left: menuPos.left, transform: menuPos.up ? 'translateY(-100%)' : undefined }}>
+							{menuGroups.length === 0 && <div style={styles.menuEmpty}>No recorded runs yet</div>}
+							{menuGroups.map((group) => (
+								<React.Fragment key={group.day}>
+									<div style={styles.menuDay}>{group.day}</div>
+									{group.items.map((chapter) => {
+										const liveChapter = chapter.endTime == null && (runActive ?? timeline?.completed === false);
+										const dotColor = liveChapter ? 'var(--rr-color-success)' : chapter.outcome === 'error' ? 'var(--rr-color-error)' : 'var(--rr-brand)';
+										const durationSec = (chapter.endTime ?? Date.now() / 1000) - chapter.beginTime;
+										// A live row returns to the live edge; a recorded
+										// row jumps the needle and frames the run.
+										const activate = () => {
+											if (liveChapter) {
+												setMenuOpen(false);
+												controller.goLive();
+											} else jumpToChapter(chapter);
+										};
+										return (
+											<div
+												key={chapter.beginSeq}
+												role="menuitem"
+												tabIndex={0}
+												style={styles.menuItem}
+												onMouseEnter={(e) => ((e.currentTarget as HTMLDivElement).style.background = 'var(--rr-bg-widget)')}
+												onMouseLeave={(e) => ((e.currentTarget as HTMLDivElement).style.background = 'transparent')}
+												onClick={activate}
+												onKeyDown={(e) => {
+													if (e.key === 'Enter' || e.key === ' ') {
+														e.preventDefault();
+														activate();
+													}
+												}}
+											>
+												<span style={{ ...styles.menuDot, background: dotColor }} />
+												<span style={styles.menuTime}>{fmtClock(new Date(chapter.beginTime * 1000), true)}</span>
+												<span style={styles.menuDetail}>{liveChapter ? 'LIVE' : fmtDuration(durationSec) + (chapter.outcome === 'error' ? ' · failed' : '')}</span>
+											</div>
+										);
+									})}
+								</React.Fragment>
+							))}
+						</div>
 					)}
 				</div>
 				{/* GO LIVE sits in the transport after the run selector — and
@@ -845,17 +806,11 @@ export const PlayBar: React.FC<IPlayBarProps> = ({ timeline, player, controller,
 						GO LIVE
 					</Button>
 				)}
-				<span style={styles.zoomReadout}>
-					{secPerPx < 60 ? `1px = ${secPerPx.toFixed(1)}s` : `1px = ${(secPerPx / 60).toFixed(1)}m`}
-				</span>
+				<span style={styles.zoomReadout}>{secPerPx < 60 ? `1px = ${secPerPx.toFixed(1)}s` : `1px = ${(secPerPx / 60).toFixed(1)}m`}</span>
 			</div>
 
 			{/* The strip — the full lane, always. */}
-			<div
-				ref={stripRef}
-				style={{ ...styles.strip, height: STRIP_EXPANDED, cursor: dragging ? 'grabbing' : 'grab' }}
-				onMouseDown={handleStripMouseDown}
-			>
+			<div ref={stripRef} style={{ ...styles.strip, height: STRIP_EXPANDED, cursor: dragging ? 'grabbing' : 'grab' }} onMouseDown={handleStripMouseDown}>
 				{/* Run blocks (double-click = play that track). */}
 				{chapters.map((chapter) => {
 					const liveChapter = chapter.endTime == null && (runActive ?? timeline?.completed === false);
@@ -864,9 +819,7 @@ export const PlayBar: React.FC<IPlayBarProps> = ({ timeline, player, controller,
 					if (x2 < 0 || x1 > stripWidth) return null;
 					const background = liveChapter ? 'var(--rr-color-success)' : chapter.outcome === 'error' ? 'var(--rr-color-error)' : 'var(--rr-brand)';
 					const begin = new Date(chapter.beginTime * 1000);
-					const title = `${fmtDate(begin)} ${fmtClock(begin, true)} · ${
-						liveChapter ? 'live' : fmtDuration((chapter.endTime ?? nowSec) - chapter.beginTime)
-					}${chapter.outcome ? ` · ${chapter.outcome}` : ''} — double-click to play this track`;
+					const title = `${fmtDate(begin)} ${fmtClock(begin, true)} · ${liveChapter ? 'live' : fmtDuration((chapter.endTime ?? nowSec) - chapter.beginTime)}${chapter.outcome ? ` · ${chapter.outcome}` : ''} — double-click to play this track`;
 					return (
 						<div
 							key={chapter.beginSeq}

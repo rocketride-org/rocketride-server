@@ -35,10 +35,7 @@ import { createDocs, destroyDocs, getDocs } from './docs';
 // Both references are runtime-only (render / click handler), so the cycle
 // never resolves during module initialisation.
 import TestSidebar from './TestSidebar';
-import {
-	initConnectionStore, destroyConnectionStore,
-	type SavedConnection, type TestConnectionContent,
-} from './connections';
+import { initConnectionStore, destroyConnectionStore, type SavedConnection, type TestConnectionContent } from './connections';
 import TestSessionView from './TestSessionView';
 import ConnectionManagerView from './views/ConnectionManagerView';
 import { setHasActiveTab } from './navigation';
@@ -76,7 +73,6 @@ const s = {
 		color: 'var(--rr-text-secondary)',
 		fontSize: 14,
 	} as CSSProperties,
-
 };
 
 // =============================================================================
@@ -126,7 +122,12 @@ const TestApp: React.FC<ShellAppProps> = (_props) => {
 
 	// Two-column app: the connections/views sidebar mounts once Documents is
 	// ready (it reads the same singletons as the editor surface).
-	if (!ready) return <AppLayout showStatus><div style={s.center}>Initialising...</div></AppLayout>;
+	if (!ready)
+		return (
+			<AppLayout showStatus>
+				<div style={s.center}>Initialising...</div>
+			</AppLayout>
+		);
 	return (
 		<AppLayout sidebar={sidebar} showStatus>
 			<TestAppReady docs={getDocs()!} />
@@ -145,9 +146,7 @@ const TestAppReady: React.FC<{ docs: Documents }> = ({ docs }) => {
 
 	// The ONE globally active editor across all groups
 	const activeGroup = state.groups[state.activeGroupId];
-	const globalActiveEditorId = activeGroup
-		? activeGroup.editorIds[activeGroup.activeEditorIndex] ?? null
-		: null;
+	const globalActiveEditorId = activeGroup ? (activeGroup.editorIds[activeGroup.activeEditorIndex] ?? null) : null;
 
 	// Tell sidebar whether any tabs are open
 	useEffect(() => {
@@ -180,19 +179,9 @@ const TestAppReady: React.FC<{ docs: Documents }> = ({ docs }) => {
 					const activeDoc = activeDocUri ? state.documents[activeDocUri] : undefined;
 
 					return (
-						<div
-							style={s.groupPane}
-							onClick={() => docs.setActiveGroup(groupId)}
-						>
+						<div style={s.groupPane} onClick={() => docs.setActiveGroup(groupId)}>
 							{/* Tab bar */}
-							<DocTabs
-								docs={docs}
-								groupId={groupId}
-								isActive={state.activeGroupId === groupId}
-								canClose={canCloseGroups}
-								onSplit={(gid, dir) => docs.splitGroupWithDocument(gid, dir)}
-								onCloseGroup={(gid) => docs.closeGroup(gid)}
-							/>
+							<DocTabs docs={docs} groupId={groupId} isActive={state.activeGroupId === groupId} canClose={canCloseGroups} onSplit={(gid, dir) => docs.splitGroupWithDocument(gid, dir)} onCloseGroup={(gid) => docs.closeGroup(gid)} />
 
 							{/* Session content — all editors rendered, active shown, others hidden */}
 							<div style={s.content}>
@@ -213,11 +202,7 @@ const TestAppReady: React.FC<{ docs: Documents }> = ({ docs }) => {
 												flexDirection: 'column' as const,
 											}}
 										>
-											<TestSessionView
-												connection={doc.content as TestConnectionContent}
-												editorId={eid}
-												isActive={eid === globalActiveEditorId}
-											/>
+											<TestSessionView connection={doc.content as TestConnectionContent} editorId={eid} isActive={eid === globalActiveEditorId} />
 										</div>
 									);
 								})}

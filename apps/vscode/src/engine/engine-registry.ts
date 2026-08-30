@@ -146,10 +146,7 @@ export class EngineRegistry extends EventEmitter {
 			const checksum = ConfigManager.getInstance().getGroupChecksum(group);
 			const engine = this.engines.get(mode)!;
 
-			const needsRestart = engine.mode !== mode
-				|| engine.phase === 'idle'
-				|| engine.phase === 'error'
-				|| engine.configChecksum !== checksum;
+			const needsRestart = engine.mode !== mode || engine.phase === 'idle' || engine.phase === 'error' || engine.configChecksum !== checksum;
 
 			if (needsRestart) {
 				if (engine.mode === mode && engine.phase !== 'idle') {
@@ -184,12 +181,18 @@ export class EngineRegistry extends EventEmitter {
 			this.emit('progress', { mode, command, message });
 		};
 		switch (mode) {
-			case 'local': return EngineLocal.ioControl(mode, command, params, onProgress);
-			case 'service': return EngineService.ioControl(mode, command, params, onProgress);
-			case 'docker': return EngineDocker.ioControl(mode, command, params, onProgress);
-			case 'cloud': return EngineCloud.ioControl(mode, command, params, onProgress);
-			case 'onprem': return EngineOnprem.ioControl(mode, command, params, onProgress);
-			default: return { success: false, error: `Unknown mode: ${mode}` };
+			case 'local':
+				return EngineLocal.ioControl(mode, command, params, onProgress);
+			case 'service':
+				return EngineService.ioControl(mode, command, params, onProgress);
+			case 'docker':
+				return EngineDocker.ioControl(mode, command, params, onProgress);
+			case 'cloud':
+				return EngineCloud.ioControl(mode, command, params, onProgress);
+			case 'onprem':
+				return EngineOnprem.ioControl(mode, command, params, onProgress);
+			default:
+				return { success: false, error: `Unknown mode: ${mode}` };
 		}
 	}
 

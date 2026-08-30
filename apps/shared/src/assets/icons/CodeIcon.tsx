@@ -31,28 +31,9 @@ import { IIconProps } from './types';
  *
  * @param props - Standard icon props for controlling color, size, style, and opacity.
  */
-const CodeIcon: FunctionComponent<IIconProps> = ({
-	color = '#000',
-	height = '18',
-	style,
-	width = '22',
-	opacity = 1,
-}) => {
+const CodeIcon: FunctionComponent<IIconProps> = ({ color = '#000', height = '18', style, width = '22', opacity = 1 }) => {
 	return (
-		<svg
-			version="1.1"
-			id="Capa_1"
-			xmlns="http://www.w3.org/2000/svg"
-			xmlnsXlink="http://www.w3.org/1999/xlink"
-			x="0px"
-			y="0px"
-			viewBox="0 0 511.997 411.997"
-			xmlSpace="preserve"
-			height={height}
-			width={width}
-			style={style}
-			opacity={opacity}
-		>
+		<svg version="1.1" id="Capa_1" xmlns="http://www.w3.org/2000/svg" xmlnsXlink="http://www.w3.org/1999/xlink" x="0px" y="0px" viewBox="0 0 511.997 411.997" xmlSpace="preserve" height={height} width={width} style={style} opacity={opacity}>
 			<g>
 				<g>
 					<path

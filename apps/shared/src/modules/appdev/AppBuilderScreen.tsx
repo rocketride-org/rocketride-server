@@ -102,20 +102,21 @@ const styles: Record<string, React.CSSProperties> = {
  *
  * @param props - See {@link IAppBuilderScreenProps}.
  */
-export const AppBuilderScreen: React.FC<IAppBuilderScreenProps> = ({
-	host, app, previewPane, codePane, initialStage, onStageChange,
-}) => {
+export const AppBuilderScreen: React.FC<IAppBuilderScreenProps> = ({ host, app, previewPane, codePane, initialStage, onStageChange }) => {
 	// ── Stage — the active activity view ─────────────────────────────────
 	const [stage, setStage] = useState<AppBuilderStage>(initialStage ?? 'develop');
 
 	// The three activity views, per the settled UI model
-	const viewMenu: ViewMenu = useMemo(() => ({
-		entries: [
-			{ id: 'develop', label: 'Develop' },
-			{ id: 'deploy', label: 'Deploy' },
-			{ id: 'store', label: 'Store' },
-		],
-	}), []);
+	const viewMenu: ViewMenu = useMemo(
+		() => ({
+			entries: [
+				{ id: 'develop', label: 'Develop' },
+				{ id: 'deploy', label: 'Deploy' },
+				{ id: 'store', label: 'Store' },
+			],
+		}),
+		[]
+	);
 
 	/** Switch views and let the host persist the selection. */
 	const selectStage = (id: string): void => {
@@ -133,16 +134,15 @@ export const AppBuilderScreen: React.FC<IAppBuilderScreenProps> = ({
 				onSelect={selectStage}
 				trailing={
 					<span style={styles.trailing}>
-						{app.id}{app.version ? ` · v${app.version}` : ''}
+						{app.id}
+						{app.version ? ` · v${app.version}` : ''}
 					</span>
 				}
 			/>
 
 			{/* Active view body */}
 			<div style={styles.body}>
-				{stage === 'develop' && (
-					<DevelopView host={host} previewPane={previewPane} codePane={codePane} />
-				)}
+				{stage === 'develop' && <DevelopView host={host} previewPane={previewPane} codePane={codePane} />}
 				{stage === 'deploy' && <DeployView host={host} app={app} />}
 				{stage === 'store' && <StoreView host={host} app={app} />}
 			</div>

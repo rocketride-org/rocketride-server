@@ -195,7 +195,11 @@ export class BillingApi {
 	 * @param newPriceId - Stripe price_* identifier for the target plan.
 	 * @returns Object with status, new plan details, and subscription ID.
 	 */
-	async upgradeSubscription(orgId: string, appId: string, newPriceId: string): Promise<{
+	async upgradeSubscription(
+		orgId: string,
+		appId: string,
+		newPriceId: string
+	): Promise<{
 		status: string;
 		subscriptionId: string;
 		newPriceId: string;
@@ -295,7 +299,7 @@ export class BillingApi {
 			sort?: { field: string; dir: 'asc' | 'desc' }[];
 			filters?: Record<string, string | string[]>;
 			search?: string;
-		} = {},
+		} = {}
 	): Promise<TransactionsResult> {
 		return this.client.call<TransactionsResult>('rrext_account_billing', {
 			subcommand: 'transactions',

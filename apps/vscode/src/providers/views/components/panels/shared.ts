@@ -195,11 +195,7 @@ export const secondaryBtnStyle = (hovered: boolean, disabled?: boolean): CSSProp
 /** Dropdown menu option style with selection/hover highlighting. */
 export const optionStyle = (isSelected: boolean, isHovered: boolean): CSSProperties => ({
 	appearance: 'none' as const,
-	background: isSelected
-		? 'var(--vscode-list-activeSelectionBackground)'
-		: isHovered
-			? 'var(--vscode-list-hoverBackground)'
-			: 'none',
+	background: isSelected ? 'var(--vscode-list-activeSelectionBackground)' : isHovered ? 'var(--vscode-list-hoverBackground)' : 'none',
 	border: 'none',
 	width: '100%',
 	textAlign: 'left',
@@ -208,7 +204,5 @@ export const optionStyle = (isSelected: boolean, isHovered: boolean): CSSPropert
 	fontSize: 13,
 	lineHeight: '22px',
 	cursor: 'pointer',
-	color: isSelected
-		? 'var(--vscode-list-activeSelectionForeground)'
-		: 'var(--vscode-foreground)',
+	color: isSelected ? 'var(--vscode-list-activeSelectionForeground)' : 'var(--vscode-foreground)',
 });

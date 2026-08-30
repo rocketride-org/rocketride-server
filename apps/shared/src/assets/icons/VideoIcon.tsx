@@ -31,30 +31,12 @@ import { IIconProps } from './types';
  *
  * @param props - Standard icon props for controlling size, style, and opacity.
  */
-const VideoIcon: FunctionComponent<IIconProps> = ({
-	height = '18',
-	style,
-	width = '18',
-	opacity = 1,
-}) => {
+const VideoIcon: FunctionComponent<IIconProps> = ({ height = '18', style, width = '18', opacity = 1 }) => {
 	return (
-		<svg
-			viewBox="0 0 512 512"
-			xmlns="http://www.w3.org/2000/svg"
-			height={height}
-			width={width}
-			style={style}
-			opacity={opacity}
-		>
+		<svg viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg" height={height} width={width} style={style} opacity={opacity}>
 			<g>
-				<path
-					d="m285 31c-38.39 0-71.686 20.94-90 51.78-18.314-30.84-51.61-51.78-90-51.78-57.891 0-105 47.109-105 105s47.109 105 105 105c38.39 0 71.686-20.94 90-51.78 18.314 30.84 51.61 51.78 90 51.78 57.891 0 105-47.109 105-105s-47.109-105-105-105z"
-					fill="#3a4d4d"
-				/>
-				<path
-					d="m285 241c57.891 0 105-47.109 105-105s-47.109-105-105-105c-38.39 0-71.686 20.94-90 51.78v106.44c18.314 30.84 51.61 51.78 90 51.78z"
-					fill="#3a4d4d"
-				/>
+				<path d="m285 31c-38.39 0-71.686 20.94-90 51.78-18.314-30.84-51.61-51.78-90-51.78-57.891 0-105 47.109-105 105s47.109 105 105 105c38.39 0 71.686-20.94 90-51.78 18.314 30.84 51.61 51.78 90 51.78 57.891 0 105-47.109 105-105s-47.109-105-105-105z" fill="#3a4d4d" />
+				<path d="m285 241c57.891 0 105-47.109 105-105s-47.109-105-105-105c-38.39 0-71.686 20.94-90 51.78v106.44c18.314 30.84 51.61 51.78 90 51.78z" fill="#3a4d4d" />
 				<g>
 					<g>
 						<g>
@@ -75,16 +57,10 @@ const VideoIcon: FunctionComponent<IIconProps> = ({
 				</g>
 				<g id="Video_2_">
 					<g>
-						<path
-							d="m105 181c-24.814 0-45-20.186-45-45s20.186-45 45-45 45 20.186 45 45-20.186 45-45 45z"
-							fill="#f3f5f9"
-						/>
+						<path d="m105 181c-24.814 0-45-20.186-45-45s20.186-45 45-45 45 20.186 45 45-20.186 45-45 45z" fill="#f3f5f9" />
 					</g>
 					<g>
-						<path
-							d="m285 181c-24.814 0-45-20.186-45-45s20.186-45 45-45 45 20.186 45 45-20.186 45-45 45z"
-							fill="#e1e6f0"
-						/>
+						<path d="m285 181c-24.814 0-45-20.186-45-45s20.186-45 45-45 45 20.186 45 45-20.186 45-45 45z" fill="#e1e6f0" />
 					</g>
 				</g>
 				<path d="m195 211h195v270h-195z" fill="#3a4d4d" />

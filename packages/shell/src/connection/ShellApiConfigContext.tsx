@@ -14,11 +14,7 @@ const ShellApiConfigContext = createContext<ShellApiConfig>({});
 export const ShellApiConfigProvider: React.FC<{
 	config: ShellApiConfig;
 	children: React.ReactNode;
-}> = ({ config, children }) => (
-	<ShellApiConfigContext.Provider value={config}>
-		{children}
-	</ShellApiConfigContext.Provider>
-);
+}> = ({ config, children }) => <ShellApiConfigContext.Provider value={config}>{children}</ShellApiConfigContext.Provider>;
 
 /** Access host-provided API config from any component under Shell. */
 export function useShellApiConfig(): ShellApiConfig {

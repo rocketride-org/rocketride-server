@@ -14,11 +14,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { execFile, spawn } from 'child_process';
 import { promisify } from 'util';
-import {
-	ServiceManager,
-	ServiceStatus,
-	SERVICE_PORT
-} from './service-manager';
+import { ServiceManager, ServiceStatus, SERVICE_PORT } from './service-manager';
 import { icons } from '../../shared/util/icons';
 
 const execFileAsync = promisify(execFile);
@@ -46,7 +42,6 @@ const PLIST_PATH = `/Library/LaunchDaemons/${PLIST_LABEL}.plist`;
  * All privileged operations pipe the sudo password via stdin (`sudo -S`).
  */
 export class MacServiceManager extends ServiceManager {
-
 	/** Sudo password provided by the UI, piped to `sudo -S` via stdin. */
 	private sudoPassword: string | undefined;
 
@@ -112,12 +107,28 @@ export class MacServiceManager extends ServiceManager {
 
 	/** Unloads the daemon, removes the plist, and deletes the install root and config dir. */
 	public async remove(): Promise<void> {
-		try { await this.runSudo('launchctl', ['unload', PLIST_PATH]); } catch { /* ignore */ }
-		try { await this.runSudo('rm', ['-f', PLIST_PATH]); } catch { /* ignore */ }
+		try {
+			await this.runSudo('launchctl', ['unload', PLIST_PATH]);
+		} catch {
+			/* ignore */
+		}
+		try {
+			await this.runSudo('rm', ['-f', PLIST_PATH]);
+		} catch {
+			/* ignore */
+		}
 
 		// Remove the entire install root and config dir
-		try { await this.runSudo('rm', ['-rf', INSTALL_ROOT]); } catch { /* ignore */ }
-		try { await this.runSudo('rm', ['-rf', CONFIG_DIR]); } catch { /* ignore */ }
+		try {
+			await this.runSudo('rm', ['-rf', INSTALL_ROOT]);
+		} catch {
+			/* ignore */
+		}
+		try {
+			await this.runSudo('rm', ['-rf', CONFIG_DIR]);
+		} catch {
+			/* ignore */
+		}
 
 		this.logger.output(`${icons.success} Service removed`);
 	}
@@ -173,7 +184,9 @@ export class MacServiceManager extends ServiceManager {
 			// succeeding means the service is loaded
 			await execFileAsync('launchctl', ['print', `system/${PLIST_LABEL}`]);
 			serviceLoaded = true;
-		} catch { /* not loaded */ }
+		} catch {
+			/* not loaded */
+		}
 
 		let state: 'stopped' | 'starting' | 'running' = 'stopped';
 		if (serviceLoaded) {
@@ -186,12 +199,7 @@ export class MacServiceManager extends ServiceManager {
 
 	/** Escapes a string for safe embedding in XML/plist values. */
 	private static escapeXml(s: string): string {
-		return s
-			.replace(/&/g, '&amp;')
-			.replace(/</g, '&lt;')
-			.replace(/>/g, '&gt;')
-			.replace(/"/g, '&quot;')
-			.replace(/'/g, '&apos;');
+		return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&apos;');
 	}
 
 	/**
@@ -243,7 +251,7 @@ export class MacServiceManager extends ServiceManager {
 	private runSudo(command: string, args: string[]): Promise<void> {
 		return new Promise((resolve, reject) => {
 			const child = spawn('sudo', ['-S', command, ...args], {
-				stdio: ['pipe', 'pipe', 'pipe']
+				stdio: ['pipe', 'pipe', 'pipe'],
 			});
 
 			if (this.sudoPassword !== undefined) {
@@ -251,9 +259,13 @@ export class MacServiceManager extends ServiceManager {
 			}
 			child.stdin!.end();
 
-			child.stdout!.on('data', () => { /* drain stdout to prevent pipe buffer from blocking */ });
+			child.stdout!.on('data', () => {
+				/* drain stdout to prevent pipe buffer from blocking */
+			});
 			let stderr = '';
-			child.stderr!.on('data', (d: Buffer) => { stderr += d.toString(); });
+			child.stderr!.on('data', (d: Buffer) => {
+				stderr += d.toString();
+			});
 			child.on('close', (code: number | null) => {
 				if (code === 0) {
 					resolve();

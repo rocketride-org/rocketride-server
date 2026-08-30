@@ -52,13 +52,7 @@ const HOVER_COLOR = '#ff00ff';
  * D3 category20c palette — the same 20-colour ordinal scale that snakeviz uses.
  * Hardcoded to avoid dependency on d3-scale-chromatic type exports.
  */
-const CATEGORY20C = [
-	'#3182bd', '#6baed6', '#9ecae1', '#c6dbef',
-	'#e6550d', '#fd8d3c', '#fdae6b', '#fdd0a2',
-	'#31a354', '#74c476', '#a1d99b', '#c7e9c0',
-	'#756bb1', '#9e9ac8', '#bcbddc', '#dadaeb',
-	'#636363', '#969696', '#bdbdbd', '#d9d9d9',
-];
+const CATEGORY20C = ['#3182bd', '#6baed6', '#9ecae1', '#c6dbef', '#e6550d', '#fd8d3c', '#fdae6b', '#fdd0a2', '#31a354', '#74c476', '#a1d99b', '#c7e9c0', '#756bb1', '#9e9ac8', '#bcbddc', '#dadaeb', '#636363', '#969696', '#bdbdbd', '#d9d9d9'];
 
 // =============================================================================
 // STYLES
@@ -137,13 +131,7 @@ interface SunburstChartProps {
 const SVG_SIZE = 600;
 const SVG_RADIUS = SVG_SIZE / 2;
 
-const SunburstChart: React.FC<SunburstChartProps> = ({
-	root: vizRoot,
-	totalTime,
-	maxDepth,
-	cutoff,
-	onRootChange,
-}) => {
+const SunburstChart: React.FC<SunburstChartProps> = ({ root: vizRoot, totalTime, maxDepth, cutoff, onRootChange }) => {
 	const svgRef = useRef<SVGSVGElement>(null);
 	const [tooltip, setTooltip] = useState<{ x: number; y: number; text: string } | null>(null);
 
@@ -168,7 +156,8 @@ const SunburstChart: React.FC<SunburstChartProps> = ({
 		const color = d3.scaleOrdinal(CATEGORY20C);
 
 		// Build hierarchy — partition value = cumtime (snakeviz behaviour)
-		const root = d3.hierarchy(processedRoot, (d) => d.children)
+		const root = d3
+			.hierarchy(processedRoot, (d) => d.children)
 			.sum((d) => {
 				// Use cumtime for partition sizing (snakeviz style)
 				if (!d.children || d.children.length === 0) return Math.max(d.cumtime, 0.000001);
@@ -183,16 +172,12 @@ const SunburstChart: React.FC<SunburstChartProps> = ({
 		partition(root);
 
 		// Setup SVG — fixed viewBox, scales to fill container via CSS
-		const svgSel = d3.select(svg)
-			.attr('viewBox', `${-SVG_RADIUS} ${-SVG_RADIUS} ${SVG_SIZE} ${SVG_SIZE}`)
-			.style('width', '100%')
-			.style('height', '100%')
-			.style('max-width', `${SVG_SIZE}px`)
-			.style('max-height', `${SVG_SIZE}px`);
+		const svgSel = d3.select(svg).attr('viewBox', `${-SVG_RADIUS} ${-SVG_RADIUS} ${SVG_SIZE} ${SVG_SIZE}`).style('width', '100%').style('height', '100%').style('max-width', `${SVG_SIZE}px`).style('max-height', `${SVG_SIZE}px`);
 		svgSel.selectAll('*').remove();
 
 		// Arc generator
-		const arc = d3.arc<HierarchyRectangularNode<ProfileTreeNode>>()
+		const arc = d3
+			.arc<HierarchyRectangularNode<ProfileTreeNode>>()
 			.startAngle((d) => d.x0)
 			.endAngle((d) => d.x1)
 			.innerRadius((d) => d.y0)
@@ -201,11 +186,11 @@ const SunburstChart: React.FC<SunburstChartProps> = ({
 			.padRadius(SVG_RADIUS / 2);
 
 		// Filter visible nodes (depth > 0, min arc angle)
-		const nodes = root.descendants()
-			.filter((d) => d.depth > 0 && (d.x1 - d.x0) > MIN_ARC_ANGLE) as HierarchyRectangularNode<ProfileTreeNode>[];
+		const nodes = root.descendants().filter((d) => d.depth > 0 && d.x1 - d.x0 > MIN_ARC_ANGLE) as HierarchyRectangularNode<ProfileTreeNode>[];
 
 		// Draw arcs
-		const paths = svgSel.selectAll<SVGPathElement, HierarchyRectangularNode<ProfileTreeNode>>('path.arc')
+		const paths = svgSel
+			.selectAll<SVGPathElement, HierarchyRectangularNode<ProfileTreeNode>>('path.arc')
 			.data(nodes)
 			.join('path')
 			.attr('class', 'arc')
@@ -217,7 +202,8 @@ const SunburstChart: React.FC<SunburstChartProps> = ({
 			.style('cursor', 'pointer');
 
 		// Center label — current root name
-		svgSel.append('text')
+		svgSel
+			.append('text')
 			.attr('text-anchor', 'middle')
 			.attr('dy', '-0.3em')
 			.attr('fill', textPrimary)
@@ -226,7 +212,8 @@ const SunburstChart: React.FC<SunburstChartProps> = ({
 			.text(vizRoot.name === '<root>' ? 'All' : vizRoot.name);
 
 		// Center subtitle — cumtime
-		svgSel.append('text')
+		svgSel
+			.append('text')
 			.attr('text-anchor', 'middle')
 			.attr('dy', '1.2em')
 			.attr('fill', textSecondary)
@@ -258,17 +245,13 @@ const SunburstChart: React.FC<SunburstChartProps> = ({
 			});
 
 			// Tooltip with cumtime percentage
-			const pct = totalTime > 0 ? (d.data.cumtime / totalTime * 100).toFixed(1) : '0.0';
-			const lines = [
-				d.data.name,
-				`${d.data.cumtime.toFixed(4)}s (${pct}%)`,
-				`${d.data.file}:${d.data.line}`,
-			];
+			const pct = totalTime > 0 ? ((d.data.cumtime / totalTime) * 100).toFixed(1) : '0.0';
+			const lines = [d.data.name, `${d.data.cumtime.toFixed(4)}s (${pct}%)`, `${d.data.file}:${d.data.line}`];
 			setTooltip({ x: event.clientX + 12, y: event.clientY + 12, text: lines.join('\n') });
 		});
 
 		paths.on('mousemove', (event) => {
-			setTooltip((prev) => prev ? { ...prev, x: event.clientX + 12, y: event.clientY + 12 } : null);
+			setTooltip((prev) => (prev ? { ...prev, x: event.clientX + 12, y: event.clientY + 12 } : null));
 		});
 
 		paths.on('mouseleave', () => {
@@ -276,7 +259,6 @@ const SunburstChart: React.FC<SunburstChartProps> = ({
 			paths.attr('fill', (d) => color(d.data.name)).attr('opacity', 0.85);
 			setTooltip(null);
 		});
-
 	}, [vizRoot, maxDepth, cutoff, onRootChange, totalTime]);
 
 	// =========================================================================
@@ -292,9 +274,7 @@ const SunburstChart: React.FC<SunburstChartProps> = ({
 			<div style={styles.svgWrapper}>
 				<svg ref={svgRef} />
 			</div>
-			{tooltip && (
-				<div style={{ ...styles.tooltip, left: tooltip.x, top: tooltip.y }}>{tooltip.text}</div>
-			)}
+			{tooltip && <div style={{ ...styles.tooltip, left: tooltip.x, top: tooltip.y }}>{tooltip.text}</div>}
 		</div>
 	);
 };

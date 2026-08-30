@@ -154,7 +154,7 @@ const AccountWebview: React.FC = () => {
 				setBillingLoading((message as any).billingLoading ?? false);
 				setBillingError((message as any).billingError ?? null);
 				setCreditBalance((message as any).creditBalance ?? null);
-					setTransactions((message as any).transactions ?? null);
+				setTransactions((message as any).transactions ?? null);
 				setUsageByUser((message as any).usageByUser ?? []);
 				setUsageByTeam((message as any).usageByTeam ?? []);
 				setTopupPlans((message as any).topupPlans ?? []);
@@ -200,11 +200,12 @@ const AccountWebview: React.FC = () => {
 				if (r) {
 					checkoutResolvers.current.session = undefined;
 					if ((message as any).error) r.reject(new Error((message as any).error));
-					else r.resolve({
-						clientSecret: (message as any).clientSecret,
-						subscriptionId: (message as any).subscriptionId,
-						status: (message as any).status,
-					});
+					else
+						r.resolve({
+							clientSecret: (message as any).clientSecret,
+							subscriptionId: (message as any).subscriptionId,
+							status: (message as any).status,
+						});
 				}
 				break;
 			}
@@ -366,7 +367,6 @@ const AccountWebview: React.FC = () => {
 		sendMessageRef.current({ type: 'billing:portal' } as any);
 	}, []);
 
-
 	/** Opens the inline checkout modal for Pipe Builder subscription. */
 	const handleSubscribe = useCallback((): void => {
 		setShowCheckout(true);
@@ -503,20 +503,7 @@ const AccountWebview: React.FC = () => {
 				onRemoveTeamMember={handleRemoveTeamMember}
 				onLoadTeamDetail={handleLoadTeamDetail}
 			/>
-			{showCheckout && stripeKey && (
-				<CheckoutModal
-					appName="Pipe Builder"
-					appDescription="Visual AI pipeline editor -- run and deploy pipelines on RocketRide Cloud."
-					stripePublishableKey={stripeKey}
-					onFetchPlans={handleFetchPlans}
-					onCreateCheckout={handleCreateCheckout}
-					onConfirmPending={handleConfirmPending}
-					onValidatePromoCode={handleValidatePromo}
-					onRedeemPromoCode={handleRedeemPromo}
-					onSuccess={handleCheckoutSuccess}
-					onClose={() => setShowCheckout(false)}
-				/>
-			)}
+			{showCheckout && stripeKey && <CheckoutModal appName="Pipe Builder" appDescription="Visual AI pipeline editor -- run and deploy pipelines on RocketRide Cloud." stripePublishableKey={stripeKey} onFetchPlans={handleFetchPlans} onCreateCheckout={handleCreateCheckout} onConfirmPending={handleConfirmPending} onValidatePromoCode={handleValidatePromo} onRedeemPromoCode={handleRedeemPromo} onSuccess={handleCheckoutSuccess} onClose={() => setShowCheckout(false)} />}
 		</>
 	);
 };

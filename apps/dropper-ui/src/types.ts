@@ -7,7 +7,7 @@
 /**
  * TypeScript interface declarations corresponding to Python Pydantic models
  * for the RocketRide AI dropper system.
- * 
+ *
  * These interfaces provide type safety when working with question data
  * structures in the frontend application.
  */
@@ -18,7 +18,7 @@
 
 /**
  * Represents an answer to a question, which can be either plain text or JSON format.
- * 
+ *
  * @interface Answer
  * @property {string | object | any[] | null} answer - The answer content (null during creation)
  * @property {boolean} expectJson - Flag indicating if JSON format is expected
@@ -37,7 +37,7 @@ export interface Answer {
 
 /**
  * Represents a single entry in the conversation history.
- * 
+ *
  * @interface QuestionHistory
  * @property {string} role - The role: 'user', 'system', or 'assistant'
  * @property {string} content - The content of the message/response
@@ -56,7 +56,7 @@ export interface QuestionHistory {
 
 /**
  * Represents instructions for how to handle the question.
- * 
+ *
  * @interface QuestionInstruction
  * @property {string} subtitle - A brief subtitle describing the instruction
  * @property {string} instructions - Detailed instructions for handling the question
@@ -72,7 +72,7 @@ export interface QuestionInstruction {
 /**
  * Represents an example question and its expected result.
  * Used to provide context and expected format for answers.
- * 
+ *
  * @interface QuestionExample
  * @property {string} given - The example question provided
  * @property {string} result - The expected result or answer (as string, even if originally JSON)
@@ -91,7 +91,7 @@ export interface QuestionExample {
 
 /**
  * Represents a question with optional embedding data for semantic search.
- * 
+ *
  * @interface QuestionText
  * @property {string} text - The question text
  * @property {string | null} embedding_model - The name of the embedding model used (if any)
@@ -114,7 +114,7 @@ export interface QuestionText {
 
 /**
  * Enum representing different types of questions and how they should be processed.
- * 
+ *
  * @enum {string} QuestionType
  */
 export enum QuestionType {
@@ -131,7 +131,7 @@ export enum QuestionType {
 	QUESTION = 'question',
 
 	/** Question that serves as a prompt for further interaction */
-	PROMPT = 'prompt'
+	PROMPT = 'prompt',
 }
 
 // =============================================================================
@@ -141,7 +141,7 @@ export enum QuestionType {
 /**
  * Document filter criteria for selecting relevant documents.
  * Note: This interface should be updated to match your actual DocFilter model
- * 
+ *
  * @interface DocFilter
  */
 export interface DocFilter {
@@ -152,7 +152,7 @@ export interface DocFilter {
 /**
  * Document representation with content and metadata.
  * Note: This interface should be updated to match your actual Doc model
- * 
+ *
  * @interface Doc
  */
 export interface Doc {
@@ -175,10 +175,10 @@ export interface Doc {
 
 /**
  * Main Question model representing a complete question with all associated data.
- * 
+ *
  * This serves as a container for the entire structure of a question,
  * including its instructions, examples, context, documents, and sub-questions.
- * 
+ *
  * @interface Question
  */
 export interface Question {

@@ -58,37 +58,27 @@ const SwarmPanel: React.FC<Props> = ({ pipelines }) => {
 				<div style={styles.swarmGrid}>
 					{Array.from({ length: TOTAL_SLOTS }, (_, i) => {
 						const slot = pipelines[i] || { id: i, state: 'idle', opsCompleted: 0, avgLatency: 0 };
-						return (
-							<div
-								key={i}
-								style={swarmCellStyle(slot.state)}
-								onMouseEnter={() => setHoveredIdx(i)}
-								onMouseLeave={() => setHoveredIdx(null)}
-								title={
-									slot.state === 'idle'
-										? ''
-										: `P-${String(i).padStart(2, '0')}: ${slot.state} · ${slot.opsCompleted} ops · ${Math.round(slot.avgLatency)}ms avg${slot.lastError ? ` · ${slot.lastError}` : ''}`
-								}
-							/>
-						);
+						return <div key={i} style={swarmCellStyle(slot.state)} onMouseEnter={() => setHoveredIdx(i)} onMouseLeave={() => setHoveredIdx(null)} title={slot.state === 'idle' ? '' : `P-${String(i).padStart(2, '0')}: ${slot.state} · ${slot.opsCompleted} ops · ${Math.round(slot.avgLatency)}ms avg${slot.lastError ? ` · ${slot.lastError}` : ''}`} />;
 					})}
 				</div>
 				{hoveredIdx !== null && pipelines[hoveredIdx] && pipelines[hoveredIdx].state !== 'idle' && (
-					<div style={{
-						marginTop: 8,
-						fontSize: 10,
-						fontFamily: 'var(--rr-font-mono, monospace)',
-						color: 'var(--rr-text-secondary)',
-						padding: '6px 8px',
-						background: 'var(--rr-bg-surface-alt)',
-						borderRadius: 4,
-					}}>
+					<div
+						style={{
+							marginTop: 8,
+							fontSize: 10,
+							fontFamily: 'var(--rr-font-mono, monospace)',
+							color: 'var(--rr-text-secondary)',
+							padding: '6px 8px',
+							background: 'var(--rr-bg-surface-alt)',
+							borderRadius: 4,
+						}}
+					>
 						P-{String(hoveredIdx).padStart(2, '0')}: {pipelines[hoveredIdx].state}
-						{' · '}{pipelines[hoveredIdx].opsCompleted} ops
-						{' · '}{Math.round(pipelines[hoveredIdx].avgLatency)}ms avg
-						{pipelines[hoveredIdx].lastError && (
-							<span style={{ color: 'var(--rr-color-error)' }}> · {pipelines[hoveredIdx].lastError}</span>
-						)}
+						{' · '}
+						{pipelines[hoveredIdx].opsCompleted} ops
+						{' · '}
+						{Math.round(pipelines[hoveredIdx].avgLatency)}ms avg
+						{pipelines[hoveredIdx].lastError && <span style={{ color: 'var(--rr-color-error)' }}> · {pipelines[hoveredIdx].lastError}</span>}
 					</div>
 				)}
 			</div>

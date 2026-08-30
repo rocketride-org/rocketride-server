@@ -10,22 +10,19 @@
  * React-based file dropper/uploader interface application.
  */
 const path = require('path');
-const {
-	execCommand, syncDir, formatSyncStats, removeDir, BUILD_ROOT, DIST_ROOT,
-	hasBuildInputChanged, saveSourceHash, setState, exists,
-} = require('../../../scripts/lib');
+const { execCommand, syncDir, formatSyncStats, removeDir, BUILD_ROOT, DIST_ROOT, hasBuildInputChanged, saveSourceHash, setState, exists } = require('../../../scripts/lib');
 const { PROJECT_ROOT } = require('../../../scripts/lib/paths');
 
 // Paths
-const APP_ROOT          = path.join(__dirname, '..');
-const BUILD_DIR         = path.join(BUILD_ROOT, 'dropper-ui');
+const APP_ROOT = path.join(__dirname, '..');
+const BUILD_DIR = path.join(BUILD_ROOT, 'dropper-ui');
 const SERVER_STATIC_DIR = path.join(DIST_ROOT, 'server', 'static', 'dropper');
 
 // Build inputs: own src + MF host + shared package + package.json
-const SRC_DIR       = path.join(APP_ROOT, 'src');
-const SHELL_UI_SRC  = path.join(PROJECT_ROOT, 'apps', 'shell', 'src');
+const SRC_DIR = path.join(APP_ROOT, 'src');
+const SHELL_UI_SRC = path.join(PROJECT_ROOT, 'apps', 'shell', 'src');
 const SHARED_UI_SRC = path.join(PROJECT_ROOT, 'packages', 'shared', 'src');
-const PKG_JSON      = path.join(APP_ROOT, 'package.json');
+const PKG_JSON = path.join(APP_ROOT, 'package.json');
 const BUILD_HASH_KEY = 'dropper-ui.buildHash';
 
 // =============================================================================
@@ -39,8 +36,7 @@ function makeBundleAction() {
 	return {
 		run: async (ctx, task) => {
 			// Fingerprint inputs before building so concurrent edits are detected on the next run.
-			const { changed, hash } = await hasBuildInputChanged(
-				BUILD_HASH_KEY, [SRC_DIR, SHELL_UI_SRC, SHARED_UI_SRC], [PKG_JSON]);
+			const { changed, hash } = await hasBuildInputChanged(BUILD_HASH_KEY, [SRC_DIR, SHELL_UI_SRC, SHARED_UI_SRC], [PKG_JSON]);
 			if (!ctx.options.force && !changed && (await exists(BUILD_DIR))) {
 				task.output = 'No changes detected';
 				return;
@@ -76,8 +72,8 @@ module.exports = {
 	description: 'File Dropper Application',
 
 	actions: [
-		{ name: 'dropper-ui:bundle',   action: makeBundleAction },
-		{ name: 'dropper-ui:copy',     action: makeCopyAction },
+		{ name: 'dropper-ui:bundle', action: makeBundleAction },
+		{ name: 'dropper-ui:copy', action: makeCopyAction },
 		// No-op: dropper-ui is a standalone page, not a shell MF remote — no apps.json registration needed.
 		{ name: 'dropper-ui:register', action: () => ({ run: async () => {} }) },
 
@@ -85,11 +81,7 @@ module.exports = {
 			name: 'dropper-ui:build',
 			action: () => ({
 				description: 'Build dropper-ui',
-				steps: [
-					'client-typescript:build',
-					'dropper-ui:bundle',
-					'dropper-ui:copy',
-				],
+				steps: ['client-typescript:build', 'dropper-ui:bundle', 'dropper-ui:copy'],
 			}),
 		},
 		{

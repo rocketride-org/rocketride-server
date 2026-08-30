@@ -124,8 +124,7 @@ export const LogList: React.FC<ILogListProps> = ({ rows, emptyTitle, emptyDescri
 		const capped = rows.length > LOG_LIST_CAP ? rows.slice(rows.length - LOG_LIST_CAP) : rows;
 		const needle = filter.trim().toLowerCase();
 		if (!needle) return capped;
-		return capped.filter((r) =>
-			r.accent.toLowerCase().includes(needle) || (r.detail ?? '').toLowerCase().includes(needle));
+		return capped.filter((r) => r.accent.toLowerCase().includes(needle) || (r.detail ?? '').toLowerCase().includes(needle));
 	}, [rows, filter]);
 
 	// No rows at all: the teaching empty state (no filter box — nothing to filter)
@@ -140,11 +139,7 @@ export const LogList: React.FC<ILogListProps> = ({ rows, emptyTitle, emptyDescri
 	return (
 		<div style={styles.wrap}>
 			<div style={styles.filterRow}>
-				<InputField
-					placeholder="Filter…"
-					value={filter}
-					onChange={(e) => setFilter(e.target.value)}
-				/>
+				<InputField placeholder="Filter…" value={filter} onChange={(e) => setFilter(e.target.value)} />
 			</div>
 			<div style={styles.list}>
 				{visible.map((r, i) => (

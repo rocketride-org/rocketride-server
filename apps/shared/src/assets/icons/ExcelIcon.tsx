@@ -42,28 +42,9 @@ interface IExcelIconProps extends IIconProps {
  *
  * @param props - Excel icon props including color, secondaryColor, size, style, and opacity.
  */
-const ExcelIcon: FunctionComponent<IExcelIconProps> = ({
-	color = '#388E3C',
-	secondaryColor = '#2E7D32',
-	height = '20',
-	style,
-	width = '18',
-	opacity = 1,
-}) => {
+const ExcelIcon: FunctionComponent<IExcelIconProps> = ({ color = '#388E3C', secondaryColor = '#2E7D32', height = '20', style, width = '18', opacity = 1 }) => {
 	return (
-		<svg
-			version="1.1"
-			xmlns="http://www.w3.org/2000/svg"
-			xmlnsXlink="http://www.w3.org/1999/xlink"
-			x="0px"
-			y="0px"
-			viewBox="0 0 512 512"
-			xmlSpace="preserve"
-			height={height}
-			width={width}
-			style={style}
-			opacity={opacity}
-		>
+		<svg version="1.1" xmlns="http://www.w3.org/2000/svg" xmlnsXlink="http://www.w3.org/1999/xlink" x="0px" y="0px" viewBox="0 0 512 512" xmlSpace="preserve" height={height} width={width} style={style} opacity={opacity}>
 			<path
 				fill="#ECEFF1"
 				d="M496,432.011H272c-8.832,0-16-7.168-16-16s0-311.168,0-320s7.168-16,16-16h224

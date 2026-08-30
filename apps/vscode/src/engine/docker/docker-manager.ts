@@ -42,10 +42,7 @@ export type ProgressCallback = (message: string) => void;
 
 // Windows named pipes — Docker Desktop uses 'dockerDesktopLinuxEngine',
 // older/standalone installs use 'docker_engine'.
-const WINDOWS_PIPES = [
-	'//./pipe/dockerDesktopLinuxEngine',
-	'//./pipe/docker_engine',
-];
+const WINDOWS_PIPES = ['//./pipe/dockerDesktopLinuxEngine', '//./pipe/docker_engine'];
 
 /**
  * Manages the RocketRide engine Docker container lifecycle.
@@ -60,8 +57,7 @@ export class DockerManager {
 	private readonly logger = getLogger();
 
 	/** ARM Macs need explicit `linux/amd64` platform since GHCR may lack arm64 builds. */
-	private readonly needsPlatformOverride =
-		process.platform === 'darwin' && process.arch === 'arm64';
+	private readonly needsPlatformOverride = process.platform === 'darwin' && process.arch === 'arm64';
 
 	constructor() {
 		this.docker = this.createClient();
@@ -150,10 +146,10 @@ export class DockerManager {
 			ExposedPorts: { [`${CONTAINER_PORT}/tcp`]: {} },
 			HostConfig: {
 				PortBindings: {
-					[`${CONTAINER_PORT}/tcp`]: [{ HostPort: String(CONTAINER_PORT), HostIp: '127.0.0.1' }]
+					[`${CONTAINER_PORT}/tcp`]: [{ HostPort: String(CONTAINER_PORT), HostIp: '127.0.0.1' }],
 				},
-				RestartPolicy: { Name: 'unless-stopped' }
-			}
+				RestartPolicy: { Name: 'unless-stopped' },
+			},
 		});
 
 		// Start container
@@ -200,7 +196,9 @@ export class DockerManager {
 			try {
 				const info = await container.inspect();
 				imageName = info.Config.Image;
-			} catch { /* container may not exist */ }
+			} catch {
+				/* container may not exist */
+			}
 		}
 
 		// Force-remove the container (stops it if running)
@@ -249,10 +247,10 @@ export class DockerManager {
 			ExposedPorts: { [`${CONTAINER_PORT}/tcp`]: {} },
 			HostConfig: {
 				PortBindings: {
-					[`${CONTAINER_PORT}/tcp`]: [{ HostPort: String(CONTAINER_PORT), HostIp: '127.0.0.1' }]
+					[`${CONTAINER_PORT}/tcp`]: [{ HostPort: String(CONTAINER_PORT), HostIp: '127.0.0.1' }],
 				},
-				RestartPolicy: { Name: 'unless-stopped' }
-			}
+				RestartPolicy: { Name: 'unless-stopped' },
+			},
 		});
 
 		onProgress?.('Starting container...');
@@ -272,7 +270,7 @@ export class DockerManager {
 	async getStatus(): Promise<DockerStatus> {
 		const empty: DockerStatus = { state: 'not-installed', version: null, publishedAt: null, imageTag: null };
 
-		if (!await this.isDockerAvailable()) {
+		if (!(await this.isDockerAvailable())) {
 			return { ...empty, state: 'no-docker' };
 		}
 
@@ -286,7 +284,7 @@ export class DockerManager {
 			switch (dockerState) {
 				case 'running':
 					// Verify the port is actually responding
-					state = await this.isPortOpen() ? 'running' : 'starting';
+					state = (await this.isPortOpen()) ? 'running' : 'starting';
 					break;
 				case 'restarting':
 					state = 'starting';
@@ -337,9 +335,7 @@ export class DockerManager {
 					},
 					(event: { status?: string; progress?: string }) => {
 						if (onProgress && event.status) {
-							const msg = event.progress
-								? `${event.status}: ${event.progress}`
-								: event.status;
+							const msg = event.progress ? `${event.status}: ${event.progress}` : event.status;
 							onProgress(msg);
 						}
 					}
@@ -364,9 +360,18 @@ export class DockerManager {
 		return new Promise((resolve) => {
 			const socket = new net.Socket();
 			socket.setTimeout(1000);
-			socket.on('connect', () => { socket.destroy(); resolve(true); });
-			socket.on('timeout', () => { socket.destroy(); resolve(false); });
-			socket.on('error', () => { socket.destroy(); resolve(false); });
+			socket.on('connect', () => {
+				socket.destroy();
+				resolve(true);
+			});
+			socket.on('timeout', () => {
+				socket.destroy();
+				resolve(false);
+			});
+			socket.on('error', () => {
+				socket.destroy();
+				resolve(false);
+			});
 			socket.connect(port, 'localhost');
 		});
 	}
@@ -400,5 +405,4 @@ export class DockerManager {
 		}
 		return err;
 	}
-
 }

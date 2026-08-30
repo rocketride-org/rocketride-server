@@ -6,7 +6,10 @@
 	"main": "./index.js",
 	"types": "./shell.d.ts",
 	"exports": {
-		".": { "types": "./shell.d.ts", "default": "./index.js" },
+		".": {
+			"types": "./shell.d.ts",
+			"default": "./index.js"
+		},
 		"./themes/rocketride-default.css": "./themes/rocketride-default.css",
 		"./tokens.css": "./tokens.css",
 		"./package.json": "./package.json"

@@ -60,7 +60,7 @@ interface PendingFrame {
 
 export function useTraceState(
 	traceEvents: TraceEvent[],
-	resetKey?: string | number,
+	resetKey?: string | number
 ): {
 	rows: TraceRow[];
 	clearTrace: () => void;

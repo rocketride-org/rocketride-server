@@ -239,9 +239,7 @@ export interface ShellLayoutProps {
  * Wraps content in OverlayManager so shell-owned overlays (Account, Settings)
  * can render over the client area.
  */
-export const ShellLayout: React.FC<ShellLayoutProps> = ({
-	config, isConnected, statusMessage, hideAppSwitcher, defaultAppId,
-}) => {
+export const ShellLayout: React.FC<ShellLayoutProps> = ({ config, isConnected, statusMessage, hideAppSwitcher, defaultAppId }) => {
 	const { loaded, seeded, appLoading, prefs, updatePrefs, activeAppId, loadedApps, settings, appManifest, appLoadErrors, retryApp, loadFailure, dismissLoadFailure } = useWorkspace();
 
 	// The ONE workspace-prefs accessor (getPref/setPref) handed to every app and
@@ -252,18 +250,22 @@ export const ShellLayout: React.FC<ShellLayoutProps> = ({
 			getPref: (key: string): unknown => prefs[key],
 			setPref: (key: string, value: unknown): void => updatePrefs({ [key]: value }),
 		}),
-		[prefs, updatePrefs],
+		[prefs, updatePrefs]
 	);
 
 	// Technical-details panel on the app-load error view; collapses whenever
 	// the active app changes so a stale trace never shows for a new app.
 	const [showErrorDetails, setShowErrorDetails] = useState(false);
-	useEffect(() => { setShowErrorDetails(false); }, [activeAppId]);
+	useEffect(() => {
+		setShowErrorDetails(false);
+	}, [activeAppId]);
 
 	// Load-failure modal's own details toggle (the page view and the modal can
 	// coexist), reset whenever a new failure arrives.
 	const [showModalDetails, setShowModalDetails] = useState(false);
-	useEffect(() => { setShowModalDetails(false); }, [loadFailure]);
+	useEffect(() => {
+		setShowModalDetails(false);
+	}, [loadFailure]);
 
 	/**
 	 * Retry from the load-failure modal: re-attempts the load (retryApp tears
@@ -289,11 +291,9 @@ export const ShellLayout: React.FC<ShellLayoutProps> = ({
 	const mergedApiConfig = useMemo(
 		() => ({
 			...config.apiConfig,
-			...Object.fromEntries(
-				Object.entries(settings).map(([key, value]) => [key, String(value)]),
-			),
+			...Object.fromEntries(Object.entries(settings).map(([key, value]) => [key, String(value)])),
 		}),
-		[config.apiConfig, settings],
+		[config.apiConfig, settings]
 	);
 
 	// --- Active app descriptor (undefined while loading) ---------------------
@@ -337,7 +337,7 @@ export const ShellLayout: React.FC<ShellLayoutProps> = ({
 	useEffect(() => {
 		if (!loaded) return;
 		config.themeConfig.onThemeChange?.(prefs.theme);
-	// eslint-disable-next-line react-hooks/exhaustive-deps
+		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [loaded, prefs.theme]);
 
 	// --- Ctrl+S forwarding ---------------------------------------------------
@@ -394,10 +394,7 @@ export const ShellLayout: React.FC<ShellLayoutProps> = ({
 
 	// --- Subscription gate: auto-trigger checkout for subscription apps ------
 	const subGateTriggeredRef = useRef<string | null>(null);
-	const subGateActive = identity
-		&& activeManifest
-		&& activeAppId !== defaultAppId
-		&& activeManifest.appStatus === 'unsubscribed';
+	const subGateActive = identity && activeManifest && activeAppId !== defaultAppId && activeManifest.appStatus === 'unsubscribed';
 
 	useEffect(() => {
 		// When a logged-in user navigates to an app they haven't subscribed to,
@@ -425,10 +422,7 @@ export const ShellLayout: React.FC<ShellLayoutProps> = ({
 	// preview counts as still-loading: its registration self-corrects when
 	// the embedder's injection lands (see the client-area branch below).
 	const devPending = isDevPreviewPending(activeAppId);
-	const hasFirstContent =
-		hasAppUi ||
-		(!devPending && !!appLoadErrors[activeAppId]) ||
-		(!devPending && appManifest.length > 0 && !activeManifest);
+	const hasFirstContent = hasAppUi || (!devPending && !!appLoadErrors[activeAppId]) || (!devPending && appManifest.length > 0 && !activeManifest);
 	if (hasFirstContent) firstContentRef.current = true;
 	if (!firstContentRef.current) {
 		// A latched failure (server unreachable, session expired) can strand the
@@ -459,146 +453,122 @@ export const ShellLayout: React.FC<ShellLayoutProps> = ({
 	// --- Render --------------------------------------------------------------
 	return (
 		<PrefsProvider value={prefsApi}>
-		<ShellApiConfigProvider config={mergedApiConfig}>
-		<HostChromeProvider>
-		<OverlayManager>
-		<div style={styles.shell}>
-			<ConnectionErrorBanner />
-			{/* Main row: Sidebar | Client Area | Debug Panel */}
-			<div style={styles.main}>
-				{/* Sidebar zone — always mounted; self-hides when it has no content. */}
-				<SidebarWithOverlay
-					themeConfig={config.themeConfig}
-					account={config.account}
-					hideAppSwitcher={hideAppSwitcher}
-					isSaas={(config.capabilities ?? []).includes('saas')}
-				/>
+			<ShellApiConfigProvider config={mergedApiConfig}>
+				<HostChromeProvider>
+					<OverlayManager>
+						<div style={styles.shell}>
+							<ConnectionErrorBanner />
+							{/* Main row: Sidebar | Client Area | Debug Panel */}
+							<div style={styles.main}>
+								{/* Sidebar zone — always mounted; self-hides when it has no content. */}
+								<SidebarWithOverlay themeConfig={config.themeConfig} account={config.account} hideAppSwitcher={hideAppSwitcher} isSaas={(config.capabilities ?? []).includes('saas')} />
 
-				{/* Client area */}
-				<div style={styles.overlayContainer}>
-					<div style={styles.clientArea}>
-						{hasAppUi && activeApp ? (
-							// The framing control mounts the descriptor's `app`
-							// component raw; the app declares its layout inside.
-							<AppErrorBoundary key={activeAppId} appName={appName}>
-								<AppFrame
-									app={activeApp}
-									isConnected={isConnected}
-									identity={identity}
-								/>
-							</AppErrorBoundary>
-					) : isDevPreviewPending(activeAppId) ? (
-							// DEV PREVIEW, registration not yet injected: the dev
-							// server may still be starting — showing an error here
-							// is a lie that flashes and self-corrects (the injection
-							// invalidates + retries the load when it lands). Hold
-							// the loading animation instead.
-							<LoadingScreen />
-						) : appLoadErrors[activeAppId] ? (
-							<div style={styles.appLoadError}>
-								<div style={styles.appLoadErrorTitle}>Could not load {activeManifest?.name ?? activeAppId}</div>
-								{/* Plain-language explanation; raw error lives behind Show Details */}
-								<div style={styles.appLoadErrorMessage} role="alert">
-									{friendlyLoadError(appLoadErrors[activeAppId], activeManifest?.name ?? activeAppId)}
+								{/* Client area */}
+								<div style={styles.overlayContainer}>
+									<div style={styles.clientArea}>
+										{hasAppUi && activeApp ? (
+											// The framing control mounts the descriptor's `app`
+											// component raw; the app declares its layout inside.
+											<AppErrorBoundary key={activeAppId} appName={appName}>
+												<AppFrame app={activeApp} isConnected={isConnected} identity={identity} />
+											</AppErrorBoundary>
+										) : isDevPreviewPending(activeAppId) ? (
+											// DEV PREVIEW, registration not yet injected: the dev
+											// server may still be starting — showing an error here
+											// is a lie that flashes and self-corrects (the injection
+											// invalidates + retries the load when it lands). Hold
+											// the loading animation instead.
+											<LoadingScreen />
+										) : appLoadErrors[activeAppId] ? (
+											<div style={styles.appLoadError}>
+												<div style={styles.appLoadErrorTitle}>Could not load {activeManifest?.name ?? activeAppId}</div>
+												{/* Plain-language explanation; raw error lives behind Show Details */}
+												<div style={styles.appLoadErrorMessage} role="alert">
+													{friendlyLoadError(appLoadErrors[activeAppId], activeManifest?.name ?? activeAppId)}
+												</div>
+												<div style={styles.appLoadErrorActions}>
+													{/* Home is the guaranteed exit — $HOME resolves to the platform default */}
+													<button type="button" style={styles.appLoadErrorButton} onClick={() => ConnectionManager.getInstance().emit('shell:switchApp', { appId: '$HOME' })}>
+														Go to Home
+													</button>
+													<button type="button" style={styles.appLoadErrorButtonSecondary} onClick={() => retryApp(activeAppId)}>
+														Try Again
+													</button>
+													<button type="button" style={styles.appLoadErrorButtonSecondary} onClick={() => setShowErrorDetails((v) => !v)}>
+														{showErrorDetails ? 'Hide Details' : 'Show Details'}
+													</button>
+												</div>
+												{/* Raw loader error, verbatim — for debugging (user-requested) */}
+												{showErrorDetails && <pre style={styles.appLoadErrorDetails}>{appLoadErrors[activeAppId]}</pre>}
+											</div>
+										) : (loaded || seeded) && appManifest.length > 0 && !activeManifest ? (
+											// The active app id is not in this server's manifest — e.g. a
+											// stale per-tab session id left by a different shell flavour on
+											// the same origin, or an app that was renamed/removed. Say so
+											// explicitly with an exit; never strand the user on the splash
+											// (loadDescriptor returns false silently for unknown ids).
+											<div style={styles.appLoadError}>
+												<div style={styles.appLoadErrorTitle}>App not found</div>
+												<div style={styles.appLoadErrorMessage} role="alert">
+													This server has no app with the id &quot;{activeAppId}&quot;. It may have been renamed, removed, or belong to a different RocketRide deployment.
+												</div>
+												<div style={styles.appLoadErrorActions}>
+													{/* Home is the guaranteed exit — $HOME resolves to the platform default */}
+													<button type="button" style={styles.appLoadErrorButton} onClick={() => ConnectionManager.getInstance().emit('shell:switchApp', { appId: '$HOME' })}>
+														Go to Home
+													</button>
+												</div>
+											</div>
+										) : appLoading || !activeApp ? (
+											// Same bobbing rocket as the boot LoadingScreen and home-ui's
+											// AuthTransitionPage (all phase-anchored) so the post-login
+											// boot → app-load → transition handoff is one continuous animation
+											// with no "Loading…" text frame flashing between them.
+											<LoadingScreen />
+										) : null}
+									</div>
 								</div>
-								<div style={styles.appLoadErrorActions}>
-									{/* Home is the guaranteed exit — $HOME resolves to the platform default */}
-									<button type="button" style={styles.appLoadErrorButton} onClick={() => ConnectionManager.getInstance().emit('shell:switchApp', { appId: '$HOME' })}>
-										Go to Home
-									</button>
-									<button type="button" style={styles.appLoadErrorButtonSecondary} onClick={() => retryApp(activeAppId)}>
-										Try Again
-									</button>
-									<button type="button" style={styles.appLoadErrorButtonSecondary} onClick={() => setShowErrorDetails((v) => !v)}>
-										{showErrorDetails ? 'Hide Details' : 'Show Details'}
-									</button>
-								</div>
-								{/* Raw loader error, verbatim — for debugging (user-requested) */}
-								{showErrorDetails && (
-									<pre style={styles.appLoadErrorDetails}>{appLoadErrors[activeAppId]}</pre>
-								)}
-							</div>
-						) : (loaded || seeded) && appManifest.length > 0 && !activeManifest ? (
-							// The active app id is not in this server's manifest — e.g. a
-							// stale per-tab session id left by a different shell flavour on
-							// the same origin, or an app that was renamed/removed. Say so
-							// explicitly with an exit; never strand the user on the splash
-							// (loadDescriptor returns false silently for unknown ids).
-							<div style={styles.appLoadError}>
-								<div style={styles.appLoadErrorTitle}>App not found</div>
-								<div style={styles.appLoadErrorMessage} role="alert">
-									This server has no app with the id &quot;{activeAppId}&quot;. It may have been
-									renamed, removed, or belong to a different RocketRide deployment.
-								</div>
-								<div style={styles.appLoadErrorActions}>
-									{/* Home is the guaranteed exit — $HOME resolves to the platform default */}
-									<button type="button" style={styles.appLoadErrorButton} onClick={() => ConnectionManager.getInstance().emit('shell:switchApp', { appId: '$HOME' })}>
-										Go to Home
-									</button>
-								</div>
-							</div>
-						) : appLoading || !activeApp ? (
-							// Same bobbing rocket as the boot LoadingScreen and home-ui's
-							// AuthTransitionPage (all phase-anchored) so the post-login
-							// boot → app-load → transition handoff is one continuous animation
-							// with no "Loading…" text frame flashing between them.
-							<LoadingScreen />
-						) : null}
-					</div>
-				</div>
 
-				{/* Load-failure modal — a switch-to-app failed while the current app
+								{/* Load-failure modal — a switch-to-app failed while the current app
 				    stayed on screen; shown over it instead of a page takeover. */}
-				{loadFailure && (
-					/* Backdrop is inert like every shell dialog (OverlayManager is the
+								{loadFailure && (
+									/* Backdrop is inert like every shell dialog (OverlayManager is the
 					   source of truth for the no-backdrop-dismiss rule); the footer
 					   Close button is the dismiss control. */
-					<div style={styles.loadFailureBackdrop}>
-						<div style={styles.loadFailureDialog} role="dialog" aria-modal="true">
-							<div style={styles.appLoadErrorTitle}>Could not load {loadFailure.name}</div>
-							{/* Plain-language explanation; raw error behind Show Details */}
-							<div style={styles.appLoadErrorMessage} role="alert">
-								{friendlyLoadError(appLoadErrors[loadFailure.appId] ?? '', loadFailure.name)}
+									<div style={styles.loadFailureBackdrop}>
+										<div style={styles.loadFailureDialog} role="dialog" aria-modal="true">
+											<div style={styles.appLoadErrorTitle}>Could not load {loadFailure.name}</div>
+											{/* Plain-language explanation; raw error behind Show Details */}
+											<div style={styles.appLoadErrorMessage} role="alert">
+												{friendlyLoadError(appLoadErrors[loadFailure.appId] ?? '', loadFailure.name)}
+											</div>
+											<div style={styles.appLoadErrorActions}>
+												<button type="button" style={styles.appLoadErrorButton} onClick={dismissLoadFailure}>
+													Close
+												</button>
+												<button type="button" style={styles.appLoadErrorButtonSecondary} onClick={handleModalRetry}>
+													Try Again
+												</button>
+												<button type="button" style={styles.appLoadErrorButtonSecondary} onClick={() => setShowModalDetails((v) => !v)}>
+													{showModalDetails ? 'Hide Details' : 'Show Details'}
+												</button>
+											</div>
+											{/* Raw loader error, verbatim — for debugging */}
+											{showModalDetails && <pre style={styles.appLoadErrorDetails}>{appLoadErrors[loadFailure.appId]}</pre>}
+										</div>
+									</div>
+								)}
+
+								{/* Debug panel (ALT+D) */}
+								{debugOpen && <DebugPanel onClose={() => setDebugOpen(false)} />}
 							</div>
-							<div style={styles.appLoadErrorActions}>
-								<button type="button" style={styles.appLoadErrorButton} onClick={dismissLoadFailure}>
-									Close
-								</button>
-								<button type="button" style={styles.appLoadErrorButtonSecondary} onClick={handleModalRetry}>
-									Try Again
-								</button>
-								<button type="button" style={styles.appLoadErrorButtonSecondary} onClick={() => setShowModalDetails((v) => !v)}>
-									{showModalDetails ? 'Hide Details' : 'Show Details'}
-								</button>
-							</div>
-							{/* Raw loader error, verbatim — for debugging */}
-							{showModalDetails && (
-								<pre style={styles.appLoadErrorDetails}>{appLoadErrors[loadFailure.appId]}</pre>
-							)}
+
+							{/* Status bar — presence is the app's AppLayout declaration */}
+							{considerStatusBar && <StatusBarWithChrome appName={appName} isConnected={isConnected} isAuthenticated={identity !== null} statusMessage={statusMessage} onToggleBottomPanel={() => {}} />}
 						</div>
-					</div>
-				)}
-
-				{/* Debug panel (ALT+D) */}
-				{debugOpen && (
-					<DebugPanel onClose={() => setDebugOpen(false)} />
-				)}
-			</div>
-
-			{/* Status bar — presence is the app's AppLayout declaration */}
-			{considerStatusBar && (
-				<StatusBarWithChrome
-					appName={appName}
-					isConnected={isConnected}
-					isAuthenticated={identity !== null}
-					statusMessage={statusMessage}
-					onToggleBottomPanel={() => {}}
-				/>
-			)}
-		</div>
-		</OverlayManager>
-		</HostChromeProvider>
-		</ShellApiConfigProvider>
+					</OverlayManager>
+				</HostChromeProvider>
+			</ShellApiConfigProvider>
 		</PrefsProvider>
 	);
 };
@@ -619,15 +589,7 @@ const SidebarWithOverlay: React.FC<{
 	isSaas?: boolean;
 }> = ({ themeConfig, account, hideAppSwitcher, isSaas }) => {
 	const onOverlay = useOverlay();
-	return (
-		<Sidebar
-			themeConfig={themeConfig}
-			account={account}
-			hideAppSwitcher={hideAppSwitcher}
-			isSaas={isSaas}
-			onOverlay={onOverlay}
-		/>
-	);
+	return <Sidebar themeConfig={themeConfig} account={account} hideAppSwitcher={hideAppSwitcher} isSaas={isSaas} onOverlay={onOverlay} />;
 };
 
 // =============================================================================

@@ -50,7 +50,11 @@ const cloneTokens = (tokens: ThemeTokens): ThemeTokens => JSON.parse(JSON.string
 export async function fetchAndApplyTheme(themeId: string, basePath = '/themes'): Promise<ThemeTokens> {
 	const cacheKey = `${basePath}/${themeId}`;
 	const cached = _themeFetchCache.get(cacheKey);
-	if (cached) { const copy = cloneTokens(cached); applyTheme(copy); return copy; }
+	if (cached) {
+		const copy = cloneTokens(cached);
+		applyTheme(copy);
+		return copy;
+	}
 	const response = await fetch(`${basePath}/${themeId}.json`);
 	if (!response.ok) throw new Error(`Theme '${themeId}' not found`);
 	const tokens: ThemeTokens = await response.json();

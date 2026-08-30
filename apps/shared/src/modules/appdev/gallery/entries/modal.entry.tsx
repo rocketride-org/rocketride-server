@@ -36,18 +36,26 @@ const ModalDemo: React.FC<IGalleryDemoProps> = ({ knobs }) => {
 	const [open, setOpen] = useState(false);
 	return (
 		<>
-			<Button variant="secondary" onClick={() => setOpen(true)}>Open modal</Button>
+			<Button variant="secondary" onClick={() => setOpen(true)}>
+				Open modal
+			</Button>
 			{open && (
 				<Modal
 					title={String(knobs.title)}
 					width={Number(knobs.width)}
 					onClose={() => setOpen(false)}
-					footer={knobs.footer ? (
-						<>
-							<Button variant="secondary" small onClick={() => setOpen(false)}>Cancel</Button>
-							<Button small onClick={() => setOpen(false)}>Save</Button>
-						</>
-					) : undefined}
+					footer={
+						knobs.footer ? (
+							<>
+								<Button variant="secondary" small onClick={() => setOpen(false)}>
+									Cancel
+								</Button>
+								<Button small onClick={() => setOpen(false)}>
+									Save
+								</Button>
+							</>
+						) : undefined
+					}
 				>
 					<div>Multi-step flows and pickers live here. Escape closes; the backdrop is inert.</div>
 				</Modal>
@@ -60,11 +68,15 @@ const ModalDemo: React.FC<IGalleryDemoProps> = ({ knobs }) => {
 const buildCode = (knobs: KnobValues): string => `import { Modal, Button } from 'shell';
 
 {open && (
-	<Modal title={${JSON.stringify(String(knobs.title))}}${Number(knobs.width) !== 440 ? ` width={${Number(knobs.width)}}` : ''} onClose={() => setOpen(false)}${knobs.footer ? `
+	<Modal title={${JSON.stringify(String(knobs.title))}}${Number(knobs.width) !== 440 ? ` width={${Number(knobs.width)}}` : ''} onClose={() => setOpen(false)}${
+		knobs.footer
+			? `
 		footer={<>
 			<Button variant="secondary" small onClick={() => setOpen(false)}>Cancel</Button>
 			<Button small onClick={onSave}>Save</Button>
-		</>}` : ''}>
+		</>}`
+			: ''
+	}>
 		{/* body */}
 	</Modal>
 )}`;
@@ -99,9 +111,7 @@ Behavior that comes for free: page-scroll lock, Tab focus trap, prior-focus rest
 	sections: [
 		{
 			label: 'Helpers',
-			rows: [
-				{ name: 'CLOSE_GLYPH', type: 'string', dir: 'in', note: 'The one canonical close glyph (U+2715) - use it for any custom close affordance.' },
-			],
+			rows: [{ name: 'CLOSE_GLYPH', type: 'string', dir: 'in', note: 'The one canonical close glyph (U+2715) - use it for any custom close affordance.' }],
 		},
 	],
 };

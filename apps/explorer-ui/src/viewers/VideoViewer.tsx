@@ -29,10 +29,17 @@ export const VideoViewer: React.FC<Props> = ({ client, uri }) => {
 		setUrl(null);
 		setError(null);
 		let cancelled = false;
-		client.fsGetUrl(uri)
-			.then((u) => { if (!cancelled) setUrl(u); })
-			.catch((err) => { if (!cancelled) setError(err instanceof Error ? err.message : String(err)); });
-		return () => { cancelled = true; };
+		client
+			.fsGetUrl(uri)
+			.then((u) => {
+				if (!cancelled) setUrl(u);
+			})
+			.catch((err) => {
+				if (!cancelled) setError(err instanceof Error ? err.message : String(err));
+			});
+		return () => {
+			cancelled = true;
+		};
 	}, [client, uri]);
 
 	if (error) return <div style={viewerStyles.message}>{error}</div>;

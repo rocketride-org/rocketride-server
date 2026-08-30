@@ -37,7 +37,7 @@ on:
   merge_group:
     types: [checks_requested]
   schedule:
-    - cron: '0 3 * * *'   # 03:00 UTC daily
+    - cron: '0 3 * * *' # 03:00 UTC daily
   workflow_dispatch:
     inputs:
       install_all:

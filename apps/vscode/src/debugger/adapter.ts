@@ -61,9 +61,7 @@ import { icons } from '../shared/util/icons';
  * Simplified Debug Adapter Factory that uses persistent connection
  */
 export class RocketRideDebugAdapterDescriptorFactory implements vscode.DebugAdapterDescriptorFactory {
-	async createDebugAdapterDescriptor(
-		session: vscode.DebugSession
-	): Promise<vscode.DebugAdapterDescriptor> {
+	async createDebugAdapterDescriptor(session: vscode.DebugSession): Promise<vscode.DebugAdapterDescriptor> {
 		const logger = getLogger();
 
 		logger.output(`${icons.begin} Creating debug adapter (persistent connection mode)...`);
@@ -109,43 +107,42 @@ export function registerDebugger(context: vscode.ExtensionContext) {
 					type: 'rocketride',
 					request: 'launch',
 					name: 'RocketRide: Launch Pipeline',
-					file: '${file}'
+					file: '${file}',
 				},
 				{
 					type: 'rocketride',
 					request: 'attach',
 					name: 'RocketRide: Attach to Pipeline',
-					token: '${input:token}'
-				}
+					token: '${input:token}',
+				},
 			];
-		}
+		},
 	});
 
-	const initialConfigProvider = vscode.debug.registerDebugConfigurationProvider('rocketride', {
-		provideDebugConfigurations(_folder: vscode.WorkspaceFolder | undefined): vscode.DebugConfiguration[] {
-			return [
-				{
-					name: 'Launch RocketRide Pipeline',
-					type: 'rocketride',
-					request: 'launch',
-					file: '${file}'
-				}
-			];
-		}
-	}, vscode.DebugConfigurationProviderTriggerKind.Dynamic);
+	const initialConfigProvider = vscode.debug.registerDebugConfigurationProvider(
+		'rocketride',
+		{
+			provideDebugConfigurations(_folder: vscode.WorkspaceFolder | undefined): vscode.DebugConfiguration[] {
+				return [
+					{
+						name: 'Launch RocketRide Pipeline',
+						type: 'rocketride',
+						request: 'launch',
+						file: '${file}',
+					},
+				];
+			},
+		},
+		vscode.DebugConfigurationProviderTriggerKind.Dynamic
+	);
 
 	// Breakpoint change monitoring (same as before)
-	const onDidChangeBreakpoints = vscode.debug.onDidChangeBreakpoints(_e => {
+	const onDidChangeBreakpoints = vscode.debug.onDidChangeBreakpoints((_e) => {
 		// Handle breakpoint changes - implementation stays the same
 		// This could also notify the connection manager about breakpoint changes
 	});
 
-	context.subscriptions.push(
-		disposable,
-		configProvider,
-		initialConfigProvider,
-		onDidChangeBreakpoints
-	);
+	context.subscriptions.push(disposable, configProvider, initialConfigProvider, onDidChangeBreakpoints);
 
 	logger.output(`${icons.success} Debug adapter registered`);
 }

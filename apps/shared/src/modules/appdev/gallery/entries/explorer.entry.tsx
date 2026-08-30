@@ -60,7 +60,7 @@ export const explorerEntry: IGalleryEntry = {
 		{ name: 'fileActions', type: 'ExplorerFileAction[]', dir: 'in', note: 'Host-injected kebab-menu actions (e.g. Export/Download in saas hosts).' },
 		{ name: 'onOpenFile', type: '(path: string) => void', dir: 'out', required: true, note: 'Fired when the user clicks a file entry to open it.' },
 		{ name: 'onRefresh', type: '() => void', dir: 'out', required: true, note: 'Fired when the user clicks the refresh button.' },
-		{ name: 'onFileManage', type: "(action, path, newName?) => void", dir: 'out', note: 'Rename/delete/create operations; when absent, the file-management UI is hidden (display-only).' },
-		{ name: 'onChildAction', type: "(action, filePath, childId, documentId?) => void", dir: 'out', note: 'Run/stop buttons on child items; when absent, no action buttons are shown.' },
+		{ name: 'onFileManage', type: '(action, path, newName?) => void', dir: 'out', note: 'Rename/delete/create operations; when absent, the file-management UI is hidden (display-only).' },
+		{ name: 'onChildAction', type: '(action, filePath, childId, documentId?) => void', dir: 'out', note: 'Run/stop buttons on child items; when absent, no action buttons are shown.' },
 	],
 };

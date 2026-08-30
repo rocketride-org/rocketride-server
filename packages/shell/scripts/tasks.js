@@ -37,19 +37,7 @@
  */
 const path = require('path');
 const { readdir } = require('node:fs/promises');
-const {
-	execCommand,
-	syncDir,
-	formatSyncStats,
-	removeDir,
-	BUILD_ROOT,
-	DIST_ROOT,
-	isWindows,
-	hasBuildInputChanged,
-	saveSourceHash,
-	setState,
-	exists,
-} = require('../../../scripts/lib');
+const { execCommand, syncDir, formatSyncStats, removeDir, BUILD_ROOT, DIST_ROOT, isWindows, hasBuildInputChanged, saveSourceHash, setState, exists } = require('../../../scripts/lib');
 
 // Paths
 const APP_ROOT = path.join(__dirname, '..');
@@ -63,8 +51,8 @@ const SERVER_STATIC_DIR = path.join(DIST_ROOT, 'server', 'static', 'shell');
 const SERVER_CLIENTS_DIR = path.join(DIST_ROOT, 'server', 'static', 'clients', 'shell');
 
 // Source directories and files that affect the shell build output.
-const SRC_DIR       = path.join(APP_ROOT, 'src');
-const PKG_JSON      = path.join(APP_ROOT, 'package.json');
+const SRC_DIR = path.join(APP_ROOT, 'src');
+const PKG_JSON = path.join(APP_ROOT, 'package.json');
 const BUILD_HASH_KEY = 'shell.buildHash';
 
 // =============================================================================
@@ -92,7 +80,9 @@ async function killPort(port) {
 			let m;
 			while ((m = pattern.exec(out)) !== null) pids.add(m[1]);
 			for (const pid of pids) {
-				try { execSync(`taskkill /PID ${pid} /F`, { stdio: 'ignore' }); } catch {}
+				try {
+					execSync(`taskkill /PID ${pid} /F`, { stdio: 'ignore' });
+				} catch {}
 			}
 		} else {
 			// lsof -ti :<port> prints one PID per line; xargs kills them all.
@@ -116,8 +106,7 @@ function makeBundleAction() {
 	return {
 		run: async (ctx, task) => {
 			// Fingerprint inputs before building so concurrent edits are detected on the next run.
-			const { changed, hash } = await hasBuildInputChanged(
-				BUILD_HASH_KEY, [SRC_DIR], [PKG_JSON]);
+			const { changed, hash } = await hasBuildInputChanged(BUILD_HASH_KEY, [SRC_DIR], [PKG_JSON]);
 			// The cache skip must also verify the CANONICAL artifact: on a
 			// fresh clone the invoking root's .rocketride/shell/shell.tgz is
 			// the pre-install stub (marked by the shell.tgz.stub file the
@@ -153,7 +142,11 @@ function makeBundleAction() {
 			// already carries the env (ROCKETRIDE_*_ROOT) it reads.
 			task.output = 'Packing shell.tgz...';
 			const { packShell } = require(path.join(APP_ROOT, 'scripts', 'pack-shell.js'));
-			await packShell({ log: (msg) => { task.output = msg; } });
+			await packShell({
+				log: (msg) => {
+					task.output = msg;
+				},
+			});
 
 			await saveSourceHash(BUILD_HASH_KEY, hash);
 		},
@@ -194,9 +187,7 @@ function makeTestRunAction() {
 		description: 'Testing the shell',
 		run: async (ctx, task) => {
 			// Discover co-located tests anywhere under src/.
-			const testFiles = (await readdir(SRC_DIR, { recursive: true }))
-				.filter((file) => file.endsWith('.test.ts') || file.endsWith('.test.tsx'))
-				.map((file) => path.join('src', file));
+			const testFiles = (await readdir(SRC_DIR, { recursive: true })).filter((file) => file.endsWith('.test.ts') || file.endsWith('.test.tsx')).map((file) => path.join('src', file));
 
 			if (testFiles.length === 0) {
 				task.output = 'No shell test files found';
@@ -240,12 +231,7 @@ const shellModule = {
 			name: 'shell:build',
 			action: () => ({
 				description: 'Build the shell',
-				steps: [
-					'client-typescript:build',
-					'shell:test-run',
-					'shell:bundle',
-					'shell:copy',
-				],
+				steps: ['client-typescript:build', 'shell:test-run', 'shell:bundle', 'shell:copy'],
 			}),
 		},
 		{
@@ -284,94 +270,94 @@ const shellModule = {
 // =============================================================================
 
 const contractActions = [
-		// Internal leaf actions (no description — not shown in builder --help).
-		// Both public composites below chain `client-typescript:build` ahead of
-		// these: the freeze script's tsc pre-check type-checks apps/shared,
-		// whose SDK-adjacent imports resolve to the SDK's dist/types — a build
-		// artifact that fresh clones and CI runners do not have yet.
-		{
-			name: 'shell:freeze-run',
-			action: () => ({
-				run: async (ctx, task) => {
-					const script = path.join(APP_ROOT, 'scripts', 'freeze-shell-api.js');
-					const args = [script];
-					// Back-compat: `shell:freeze --check` still runs CI mode.
-					if (ctx.options.check) args.push('--check');
-					await execCommand('node', args, { task, cwd: APP_ROOT });
-				},
-			}),
-		},
-		{
-			name: 'shell:check-run',
-			action: () => ({
-				run: async (ctx, task) => {
-					const script = path.join(APP_ROOT, 'scripts', 'freeze-shell-api.js');
-					await execCommand('node', [script, '--check'], { task, cwd: APP_ROOT });
-				},
-			}),
-		},
-		{
-			name: 'shell:regen-run',
-			action: () => ({
-				run: async (ctx, task) => {
-					const script = path.join(APP_ROOT, 'scripts', 'freeze-shell-api.js');
-					await execCommand('node', [script, '--regen'], { task, cwd: APP_ROOT });
-				},
-			}),
-		},
-		{
-			name: 'shell:regen-derived-run',
-			action: () => ({
-				run: async (ctx, task) => {
-					const script = path.join(APP_ROOT, 'scripts', 'freeze-shell-api.js');
-					await execCommand('node', [script, '--regen-derived'], { task, cwd: APP_ROOT });
-				},
-			}),
-		},
-		{
-			// Freeze the shell-api contract: bundle src/api.ts into the next
-			// packages/shell/contract/versions/vN and regenerate the conformance file.
-			name: 'shell:freeze',
-			action: () => ({
-				description: 'Freeze the shell-api contract',
-				steps: ['client-typescript:build', 'shell:freeze-run'],
-			}),
-		},
-		{
-			// CI mode: verify the live surface has not drifted from the newest
-			// frozen version, without writing anything. Nonzero exit on drift.
-			// The preferred spelling — replaces `shell:freeze --check`.
-			name: 'shell:check',
-			action: () => ({
-				description: 'Check the shell-api contract is current (no write)',
-				steps: ['client-typescript:build', 'shell:check-run'],
-			}),
-		},
-		{
-			// RESET to a fresh v0: drops every frozen version and re-mints v0
-			// from the CURRENT live surface (pre-1.0 policy — intentional
-			// breaking changes collapse the contract history). A deliberate,
-			// local-only action; CI's tamper guard runs shell:regen-derived,
-			// which never drops a frozen version.
-			name: 'shell:regen',
-			action: () => ({
-				description: 'Recreate the v0 shell-api freeze from the live surface (contract reset)',
-				steps: ['client-typescript:build', 'shell:regen-run'],
-			}),
-		},
-		{
-			// Rebuild the derived files (contract barrels, conformance floors,
-			// apiver) from the immutable versions/*.d.ts. On a clean tree this
-			// is a byte-level no-op, so CI pairs it with `git diff --exit-code`
-			// to prove the committed derived files were not hand-edited. No
-			// `client-typescript:build` prerequisite: derived regeneration only
-			// parses the frozen snapshots — no tsc, nothing from the live surface.
-			name: 'shell:regen-derived',
-			action: () => ({
-				description: 'Rebuild derived contract files from the frozen versions (no reset)',
-				steps: ['shell:regen-derived-run'],
-			}),
-		},
+	// Internal leaf actions (no description — not shown in builder --help).
+	// Both public composites below chain `client-typescript:build` ahead of
+	// these: the freeze script's tsc pre-check type-checks apps/shared,
+	// whose SDK-adjacent imports resolve to the SDK's dist/types — a build
+	// artifact that fresh clones and CI runners do not have yet.
+	{
+		name: 'shell:freeze-run',
+		action: () => ({
+			run: async (ctx, task) => {
+				const script = path.join(APP_ROOT, 'scripts', 'freeze-shell-api.js');
+				const args = [script];
+				// Back-compat: `shell:freeze --check` still runs CI mode.
+				if (ctx.options.check) args.push('--check');
+				await execCommand('node', args, { task, cwd: APP_ROOT });
+			},
+		}),
+	},
+	{
+		name: 'shell:check-run',
+		action: () => ({
+			run: async (ctx, task) => {
+				const script = path.join(APP_ROOT, 'scripts', 'freeze-shell-api.js');
+				await execCommand('node', [script, '--check'], { task, cwd: APP_ROOT });
+			},
+		}),
+	},
+	{
+		name: 'shell:regen-run',
+		action: () => ({
+			run: async (ctx, task) => {
+				const script = path.join(APP_ROOT, 'scripts', 'freeze-shell-api.js');
+				await execCommand('node', [script, '--regen'], { task, cwd: APP_ROOT });
+			},
+		}),
+	},
+	{
+		name: 'shell:regen-derived-run',
+		action: () => ({
+			run: async (ctx, task) => {
+				const script = path.join(APP_ROOT, 'scripts', 'freeze-shell-api.js');
+				await execCommand('node', [script, '--regen-derived'], { task, cwd: APP_ROOT });
+			},
+		}),
+	},
+	{
+		// Freeze the shell-api contract: bundle src/api.ts into the next
+		// packages/shell/contract/versions/vN and regenerate the conformance file.
+		name: 'shell:freeze',
+		action: () => ({
+			description: 'Freeze the shell-api contract',
+			steps: ['client-typescript:build', 'shell:freeze-run'],
+		}),
+	},
+	{
+		// CI mode: verify the live surface has not drifted from the newest
+		// frozen version, without writing anything. Nonzero exit on drift.
+		// The preferred spelling — replaces `shell:freeze --check`.
+		name: 'shell:check',
+		action: () => ({
+			description: 'Check the shell-api contract is current (no write)',
+			steps: ['client-typescript:build', 'shell:check-run'],
+		}),
+	},
+	{
+		// RESET to a fresh v0: drops every frozen version and re-mints v0
+		// from the CURRENT live surface (pre-1.0 policy — intentional
+		// breaking changes collapse the contract history). A deliberate,
+		// local-only action; CI's tamper guard runs shell:regen-derived,
+		// which never drops a frozen version.
+		name: 'shell:regen',
+		action: () => ({
+			description: 'Recreate the v0 shell-api freeze from the live surface (contract reset)',
+			steps: ['client-typescript:build', 'shell:regen-run'],
+		}),
+	},
+	{
+		// Rebuild the derived files (contract barrels, conformance floors,
+		// apiver) from the immutable versions/*.d.ts. On a clean tree this
+		// is a byte-level no-op, so CI pairs it with `git diff --exit-code`
+		// to prove the committed derived files were not hand-edited. No
+		// `client-typescript:build` prerequisite: derived regeneration only
+		// parses the frozen snapshots — no tsc, nothing from the live surface.
+		name: 'shell:regen-derived',
+		action: () => ({
+			description: 'Rebuild derived contract files from the frozen versions (no reset)',
+			steps: ['shell:regen-derived-run'],
+		}),
+	},
 ];
 
 // Merge the contract actions into the one shell module (see note above).

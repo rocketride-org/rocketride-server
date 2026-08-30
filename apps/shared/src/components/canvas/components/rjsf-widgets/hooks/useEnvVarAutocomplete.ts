@@ -83,32 +83,29 @@ export function useEnvVarAutocomplete(envKeys: string[]): UseEnvVarAutocompleteR
 
 			setIsOpen(false);
 		},
-		[envKeys],
+		[envKeys]
 	);
 
-	const handleSelect = useCallback(
-		(key: string, currentValue: string, inputEl: HTMLInputElement | HTMLTextAreaElement | null): string => {
-			const triggerStart = triggerStartRef.current;
-			const cursorPos = inputEl?.selectionStart ?? currentValue.length;
+	const handleSelect = useCallback((key: string, currentValue: string, inputEl: HTMLInputElement | HTMLTextAreaElement | null): string => {
+		const triggerStart = triggerStartRef.current;
+		const cursorPos = inputEl?.selectionStart ?? currentValue.length;
 
-			// Replace from the `${` trigger to the cursor with the full variable reference
-			const before = currentValue.substring(0, triggerStart);
-			const after = currentValue.substring(cursorPos);
-			const newValue = `${before}\${${key}}${after}`;
+		// Replace from the `${` trigger to the cursor with the full variable reference
+		const before = currentValue.substring(0, triggerStart);
+		const after = currentValue.substring(cursorPos);
+		const newValue = `${before}\${${key}}${after}`;
 
-			setIsOpen(false);
+		setIsOpen(false);
 
-			// Restore cursor position after the inserted reference
-			const newCursorPos = triggerStart + key.length + 3; // 3 = ${ + }
-			setTimeout(() => {
-				inputEl?.setSelectionRange(newCursorPos, newCursorPos);
-				inputEl?.focus();
-			}, 0);
+		// Restore cursor position after the inserted reference
+		const newCursorPos = triggerStart + key.length + 3; // 3 = ${ + }
+		setTimeout(() => {
+			inputEl?.setSelectionRange(newCursorPos, newCursorPos);
+			inputEl?.focus();
+		}, 0);
 
-			return newValue;
-		},
-		[],
-	);
+		return newValue;
+	}, []);
 
 	const handleDismiss = useCallback(() => {
 		setIsOpen(false);
@@ -121,7 +118,7 @@ export function useEnvVarAutocomplete(envKeys: string[]): UseEnvVarAutocompleteR
 				return prev >= suggestions.length - 1 ? 0 : prev + 1;
 			});
 		},
-		[suggestions.length],
+		[suggestions.length]
 	);
 
 	return { isOpen, suggestions, anchorEl, handleInputChange, handleSelect, handleDismiss, highlightedIndex, moveHighlight };

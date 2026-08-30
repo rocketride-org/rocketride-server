@@ -21,13 +21,7 @@ import * as http from 'http';
 import * as crypto from 'crypto';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
-import {
-	ServiceManager,
-	ServiceStatus,
-	SERVICE_NAME,
-	SERVICE_DISPLAY_NAME,
-	SERVICE_PORT
-} from './service-manager';
+import { ServiceManager, ServiceStatus, SERVICE_NAME, SERVICE_DISPLAY_NAME, SERVICE_PORT } from './service-manager';
 import { icons } from '../../shared/util/icons';
 
 const execFileAsync = promisify(execFile);
@@ -57,7 +51,7 @@ function psEscape(s: string): string {
 
 /** Build a PowerShell line: & 'exe' 'arg1' 'arg2' ... */
 function psCmd(...args: string[]): string {
-	return `& ${args.map(a => `'${psEscape(a)}'`).join(' ')}`;
+	return `& ${args.map((a) => `'${psEscape(a)}'`).join(' ')}`;
 }
 
 /**
@@ -68,7 +62,6 @@ function psCmd(...args: string[]): string {
  * are written to disk so users can also run them manually.
  */
 export class WindowsServiceManager extends ServiceManager {
-
 	/** @returns The ProgramData install root (C:\ProgramData\RocketRide). */
 	public getInstallPath(): string {
 		return INSTALL_ROOT;
@@ -103,18 +96,7 @@ export class WindowsServiceManager extends ServiceManager {
 
 		// Register and configure the service (single UAC prompt).
 		// Directories and NSSM are already in place (created above as current user).
-		await this.runElevatedScript('install.ps1', [
-			psCmd(NSSM_PATH, 'install', SERVICE_NAME, executablePath, './ai/eaas.py', '--host=127.0.0.1', `--port=${SERVICE_PORT}`),
-			psCmd(NSSM_PATH, 'set', SERVICE_NAME, 'AppDirectory', engineDir),
-			psCmd(NSSM_PATH, 'set', SERVICE_NAME, 'DisplayName', SERVICE_DISPLAY_NAME),
-			psCmd(NSSM_PATH, 'set', SERVICE_NAME, 'Description', 'RocketRide pipeline execution engine'),
-			psCmd(NSSM_PATH, 'set', SERVICE_NAME, 'AppStdout', path.join(LOGS_DIR, 'stdout.log')),
-			psCmd(NSSM_PATH, 'set', SERVICE_NAME, 'AppStderr', path.join(LOGS_DIR, 'stderr.log')),
-			psCmd(NSSM_PATH, 'set', SERVICE_NAME, 'AppStdoutCreationDisposition', '4'),
-			psCmd(NSSM_PATH, 'set', SERVICE_NAME, 'AppStderrCreationDisposition', '4'),
-			psCmd(NSSM_PATH, 'set', SERVICE_NAME, 'AppRestartDelay', '5000'),
-			psCmd(NSSM_PATH, 'start', SERVICE_NAME),
-		].join('\n'));
+		await this.runElevatedScript('install.ps1', [psCmd(NSSM_PATH, 'install', SERVICE_NAME, executablePath, './ai/eaas.py', '--host=127.0.0.1', `--port=${SERVICE_PORT}`), psCmd(NSSM_PATH, 'set', SERVICE_NAME, 'AppDirectory', engineDir), psCmd(NSSM_PATH, 'set', SERVICE_NAME, 'DisplayName', SERVICE_DISPLAY_NAME), psCmd(NSSM_PATH, 'set', SERVICE_NAME, 'Description', 'RocketRide pipeline execution engine'), psCmd(NSSM_PATH, 'set', SERVICE_NAME, 'AppStdout', path.join(LOGS_DIR, 'stdout.log')), psCmd(NSSM_PATH, 'set', SERVICE_NAME, 'AppStderr', path.join(LOGS_DIR, 'stderr.log')), psCmd(NSSM_PATH, 'set', SERVICE_NAME, 'AppStdoutCreationDisposition', '4'), psCmd(NSSM_PATH, 'set', SERVICE_NAME, 'AppStderrCreationDisposition', '4'), psCmd(NSSM_PATH, 'set', SERVICE_NAME, 'AppRestartDelay', '5000'), psCmd(NSSM_PATH, 'start', SERVICE_NAME)].join('\n'));
 
 		// Now that INSTALL_ROOT is user-writable, write the control scripts
 		// from Node.js (simple file writes, no PowerShell escaping gymnastics).
@@ -141,29 +123,13 @@ export class WindowsServiceManager extends ServiceManager {
 		// directory (engines, logs, tools, scripts). The entire cleanup runs
 		// elevated so it can remove SYSTEM-owned files.
 		const installRoot = INSTALL_ROOT.replace(/'/g, "''");
-		const script = [
-			`& '${nssm}' 'stop' '${svcName}'`,
-			`# Wait for service to fully stop (up to 30s)`,
-			`$timeout = 30; $elapsed = 0`,
-			`while ($elapsed -lt $timeout) {`,
-			`    $result = & sc.exe query '${svcName}' 2>&1`,
-			`    if ($result -match 'STOPPED' -or $LASTEXITCODE -ne 0) { break }`,
-			`    Start-Sleep -Seconds 1; $elapsed++`,
-			`}`,
-			`& '${nssm}' 'remove' '${svcName}' 'confirm'`,
-			`Start-Sleep -Seconds 2`,
-			`# Remove the entire install directory (engines, logs, tools, scripts)`,
-			`Remove-Item -Recurse -Force '${installRoot}' -ErrorAction SilentlyContinue`,
-		].join('\n');
+		const script = [`& '${nssm}' 'stop' '${svcName}'`, `# Wait for service to fully stop (up to 30s)`, `$timeout = 30; $elapsed = 0`, `while ($elapsed -lt $timeout) {`, `    $result = & sc.exe query '${svcName}' 2>&1`, `    if ($result -match 'STOPPED' -or $LASTEXITCODE -ne 0) { break }`, `    Start-Sleep -Seconds 1; $elapsed++`, `}`, `& '${nssm}' 'remove' '${svcName}' 'confirm'`, `Start-Sleep -Seconds 2`, `# Remove the entire install directory (engines, logs, tools, scripts)`, `Remove-Item -Recurse -Force '${installRoot}' -ErrorAction SilentlyContinue`].join('\n');
 
 		try {
 			await this.runElevatedScript('remove.ps1', script);
 		} catch (err) {
 			const msg = err instanceof Error ? err.message : String(err);
-			if (
-				!/not installed|service does not exist|does not exist as an installed|1060/i.test(msg) &&
-				!/cancell?ed by the user|1223|0x4c7/i.test(msg)
-			) {
+			if (!/not installed|service does not exist|does not exist as an installed|1060/i.test(msg) && !/cancell?ed by the user|1223|0x4c7/i.test(msg)) {
 				throw err;
 			}
 			// Service missing or elevation cancelled — proceed with best-effort local cleanup
@@ -216,65 +182,13 @@ export class WindowsServiceManager extends ServiceManager {
 		const logsDir = psEscape(LOGS_DIR);
 
 		const scripts: Record<string, string> = {
-			'start.ps1': [
-				`# RocketRide Engine — Start Service`,
-				`# Run as Administrator: right-click → "Run with PowerShell"`,
-				``,
-				`Write-Host "Starting RocketRide service..."`,
-				`& '${nssm}' 'start' '${svcName}'`,
-				`Write-Host "Done."`,
-			].join('\n'),
+			'start.ps1': [`# RocketRide Engine — Start Service`, `# Run as Administrator: right-click → "Run with PowerShell"`, ``, `Write-Host "Starting RocketRide service..."`, `& '${nssm}' 'start' '${svcName}'`, `Write-Host "Done."`].join('\n'),
 
-			'stop.ps1': [
-				`# RocketRide Engine — Stop Service`,
-				`# Run as Administrator: right-click → "Run with PowerShell"`,
-				``,
-				`Write-Host "Stopping RocketRide service..."`,
-				`& '${nssm}' 'stop' '${svcName}'`,
-				`Write-Host "Done."`,
-			].join('\n'),
+			'stop.ps1': [`# RocketRide Engine — Stop Service`, `# Run as Administrator: right-click → "Run with PowerShell"`, ``, `Write-Host "Stopping RocketRide service..."`, `& '${nssm}' 'stop' '${svcName}'`, `Write-Host "Done."`].join('\n'),
 
-			'update.ps1': [
-				`# RocketRide Engine — Update Service`,
-				`# Run as Administrator: right-click → "Run with PowerShell"`,
-				``,
-				`Write-Host "Stopping RocketRide service..."`,
-				psCmd(NSSM_PATH, 'stop', SERVICE_NAME),
-				`Write-Host "Updating service configuration..."`,
-				psCmd(NSSM_PATH, 'set', SERVICE_NAME, 'Application', executablePath),
-				psCmd(NSSM_PATH, 'set', SERVICE_NAME, 'AppParameters', `./ai/eaas.py --host=127.0.0.1 --port=${SERVICE_PORT}`),
-				psCmd(NSSM_PATH, 'set', SERVICE_NAME, 'AppDirectory', engineDir),
-				`Write-Host "Starting RocketRide service..."`,
-				psCmd(NSSM_PATH, 'start', SERVICE_NAME),
-				`Write-Host "Done."`,
-			].join('\n'),
+			'update.ps1': [`# RocketRide Engine — Update Service`, `# Run as Administrator: right-click → "Run with PowerShell"`, ``, `Write-Host "Stopping RocketRide service..."`, psCmd(NSSM_PATH, 'stop', SERVICE_NAME), `Write-Host "Updating service configuration..."`, psCmd(NSSM_PATH, 'set', SERVICE_NAME, 'Application', executablePath), psCmd(NSSM_PATH, 'set', SERVICE_NAME, 'AppParameters', `./ai/eaas.py --host=127.0.0.1 --port=${SERVICE_PORT}`), psCmd(NSSM_PATH, 'set', SERVICE_NAME, 'AppDirectory', engineDir), `Write-Host "Starting RocketRide service..."`, psCmd(NSSM_PATH, 'start', SERVICE_NAME), `Write-Host "Done."`].join('\n'),
 
-			'uninstall.ps1': [
-				`# RocketRide Engine — Uninstall Script`,
-				`# Run as Administrator: right-click → "Run with PowerShell"`,
-				``,
-				`Write-Host "Stopping RocketRide service..."`,
-				`& '${nssm}' 'stop' '${svcName}'`,
-				``,
-				`# Wait for the service to fully stop (up to 30 seconds)`,
-				`$timeout = 30; $elapsed = 0`,
-				`while ($elapsed -lt $timeout) {`,
-				`    $result = & sc.exe query '${svcName}' 2>&1`,
-				`    if ($result -match 'STOPPED' -or $LASTEXITCODE -ne 0) { break }`,
-				`    Start-Sleep -Seconds 1; $elapsed++`,
-				`}`,
-				``,
-				`Write-Host "Removing RocketRide service..."`,
-				`& '${nssm}' 'remove' '${svcName}' 'confirm'`,
-				`Start-Sleep -Seconds 2`,
-				``,
-				`Write-Host "Cleaning up install directory..."`,
-				`Remove-Item -Recurse -Force '${psEscape(INSTALL_ROOT)}' -ErrorAction SilentlyContinue`,
-				``,
-				`Write-Host "RocketRide service uninstalled successfully."`,
-				`Write-Host "Press any key to close..."`,
-				`$null = $Host.UI.RawUI.ReadKey('NoEcho,IncludeKeyDown')`,
-			].join('\n'),
+			'uninstall.ps1': [`# RocketRide Engine — Uninstall Script`, `# Run as Administrator: right-click → "Run with PowerShell"`, ``, `Write-Host "Stopping RocketRide service..."`, `& '${nssm}' 'stop' '${svcName}'`, ``, `# Wait for the service to fully stop (up to 30 seconds)`, `$timeout = 30; $elapsed = 0`, `while ($elapsed -lt $timeout) {`, `    $result = & sc.exe query '${svcName}' 2>&1`, `    if ($result -match 'STOPPED' -or $LASTEXITCODE -ne 0) { break }`, `    Start-Sleep -Seconds 1; $elapsed++`, `}`, ``, `Write-Host "Removing RocketRide service..."`, `& '${nssm}' 'remove' '${svcName}' 'confirm'`, `Start-Sleep -Seconds 2`, ``, `Write-Host "Cleaning up install directory..."`, `Remove-Item -Recurse -Force '${psEscape(INSTALL_ROOT)}' -ErrorAction SilentlyContinue`, ``, `Write-Host "RocketRide service uninstalled successfully."`, `Write-Host "Press any key to close..."`, `$null = $Host.UI.RawUI.ReadKey('NoEcho,IncludeKeyDown')`].join('\n'),
 		};
 
 		for (const [name, content] of Object.entries(scripts)) {
@@ -290,17 +204,7 @@ export class WindowsServiceManager extends ServiceManager {
 		// then executes the corresponding .ps1 script.
 		for (const name of Object.keys(scripts)) {
 			const cmdName = name.replace(/\.ps1$/, '.cmd');
-			const cmdContent = [
-				`@echo off`,
-				`:: RocketRide Engine — ${name.replace('.ps1', '')} (double-click to run as Administrator)`,
-				`net session >nul 2>&1`,
-				`if %errorlevel% neq 0 (`,
-				`    powershell -NoProfile -Command "Start-Process cmd.exe -ArgumentList '/c \"%~f0\"' -Verb RunAs"`,
-				`    exit /b`,
-				`)`,
-				`powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0${name}"`,
-				`pause`,
-			].join('\r\n');
+			const cmdContent = [`@echo off`, `:: RocketRide Engine — ${name.replace('.ps1', '')} (double-click to run as Administrator)`, `net session >nul 2>&1`, `if %errorlevel% neq 0 (`, `    powershell -NoProfile -Command "Start-Process cmd.exe -ArgumentList '/c \"%~f0\"' -Verb RunAs"`, `    exit /b`, `)`, `powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0${name}"`, `pause`].join('\r\n');
 			try {
 				fs.writeFileSync(path.join(INSTALL_ROOT, cmdName), cmdContent, 'utf8');
 			} catch {
@@ -320,13 +224,7 @@ export class WindowsServiceManager extends ServiceManager {
 	 * @param engineDir - Working directory for the engine process
 	 */
 	public async update(executablePath: string, engineDir: string): Promise<void> {
-		await this.runElevatedScript('update.ps1', [
-			psCmd(NSSM_PATH, 'stop', SERVICE_NAME),
-			psCmd(NSSM_PATH, 'set', SERVICE_NAME, 'Application', executablePath),
-			psCmd(NSSM_PATH, 'set', SERVICE_NAME, 'AppParameters', `./ai/eaas.py --host=127.0.0.1 --port=${SERVICE_PORT}`),
-			psCmd(NSSM_PATH, 'set', SERVICE_NAME, 'AppDirectory', engineDir),
-			psCmd(NSSM_PATH, 'start', SERVICE_NAME),
-		].join('\n'));
+		await this.runElevatedScript('update.ps1', [psCmd(NSSM_PATH, 'stop', SERVICE_NAME), psCmd(NSSM_PATH, 'set', SERVICE_NAME, 'Application', executablePath), psCmd(NSSM_PATH, 'set', SERVICE_NAME, 'AppParameters', `./ai/eaas.py --host=127.0.0.1 --port=${SERVICE_PORT}`), psCmd(NSSM_PATH, 'set', SERVICE_NAME, 'AppDirectory', engineDir), psCmd(NSSM_PATH, 'start', SERVICE_NAME)].join('\n'));
 
 		this.logger.output(`${icons.success} Service updated and restarted`);
 	}
@@ -379,7 +277,7 @@ export class WindowsServiceManager extends ServiceManager {
 			state,
 			version: null,
 			publishedAt: null,
-			installPath: state === 'not-installed' ? null : INSTALL_ROOT
+			installPath: state === 'not-installed' ? null : INSTALL_ROOT,
 		};
 	}
 
@@ -423,7 +321,7 @@ export class WindowsServiceManager extends ServiceManager {
 				if (attempt === MAX_RETRIES) {
 					throw new Error(`NSSM download failed after ${MAX_RETRIES} attempts: ${msg}`);
 				}
-				await new Promise(r => setTimeout(r, RETRY_DELAY_MS));
+				await new Promise((r) => setTimeout(r, RETRY_DELAY_MS));
 			}
 		}
 
@@ -440,9 +338,7 @@ export class WindowsServiceManager extends ServiceManager {
 			const zip = new AdmZip(zipPath);
 			const entries = zip.getEntries();
 
-			const nssmEntry = entries.find((e: { entryName: string }) =>
-				e.entryName.includes('win64/nssm.exe') || e.entryName.includes('win64\\nssm.exe')
-			);
+			const nssmEntry = entries.find((e: { entryName: string }) => e.entryName.includes('win64/nssm.exe') || e.entryName.includes('win64\\nssm.exe'));
 
 			if (!nssmEntry) {
 				throw new Error('Could not find nssm.exe in downloaded archive');
@@ -459,9 +355,17 @@ export class WindowsServiceManager extends ServiceManager {
 			fs.renameSync(tempPath, NSSM_PATH);
 		} finally {
 			if (tempDir) {
-				try { fs.rmSync(tempDir, { recursive: true, force: true }); } catch { /* ignore */ }
+				try {
+					fs.rmSync(tempDir, { recursive: true, force: true });
+				} catch {
+					/* ignore */
+				}
 			}
-			try { fs.unlinkSync(zipPath); } catch { /* ignore */ }
+			try {
+				fs.unlinkSync(zipPath);
+			} catch {
+				/* ignore */
+			}
 		}
 
 		if (!fs.existsSync(NSSM_PATH)) {
@@ -500,8 +404,14 @@ export class WindowsServiceManager extends ServiceManager {
 
 				const file = fs.createWriteStream(destPath);
 				response.pipe(file);
-				file.on('finish', () => { file.close(); resolve(); });
-				file.on('error', (err) => { file.close(); reject(err); });
+				file.on('finish', () => {
+					file.close();
+					resolve();
+				});
+				file.on('error', (err) => {
+					file.close();
+					reject(err);
+				});
 			});
 			req.on('error', reject);
 		});
@@ -527,7 +437,6 @@ export class WindowsServiceManager extends ServiceManager {
 			const psCommand = `$p = Start-Process powershell.exe -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-File','${psEscape(scriptPath)}' -Verb RunAs -Wait -PassThru -WindowStyle Hidden; exit $p.ExitCode`;
 
 			execFile('powershell.exe', ['-NoProfile', '-Command', psCommand], (error, _stdout, stderr) => {
-
 				if (error) {
 					const msg = stderr?.trim() || error.message;
 					this.logger.output(`${icons.error} Elevated command failed: ${msg}`);

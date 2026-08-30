@@ -40,8 +40,8 @@
  * is its SHA-256 hash (base64url-encoded) sent to the authorization server.
  */
 export interface PkceChallenge {
-    verifier: string;
-    challenge: string;
+	verifier: string;
+	challenge: string;
 }
 
 // =============================================================================
@@ -71,16 +71,16 @@ const PKCE_VERIFIER_KEY = 'rr:pkce_verifier';
  * @returns Base64url-encoded string.
  */
 function base64UrlEncode(buffer: ArrayBuffer): string {
-    // Convert the ArrayBuffer into a plain byte array for character-level access.
-    const bytes = new Uint8Array(buffer);
+	// Convert the ArrayBuffer into a plain byte array for character-level access.
+	const bytes = new Uint8Array(buffer);
 
-    // Build a binary string by mapping each byte to its corresponding character.
-    let str = '';
-    for (const b of bytes) str += String.fromCharCode(b);
+	// Build a binary string by mapping each byte to its corresponding character.
+	let str = '';
+	for (const b of bytes) str += String.fromCharCode(b);
 
-    // Use btoa() for standard base64, then replace characters that are not
-    // URL-safe and strip the `=` padding characters.
-    return btoa(str).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+	// Use btoa() for standard base64, then replace characters that are not
+	// URL-safe and strip the `=` padding characters.
+	return btoa(str).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
 }
 
 /**
@@ -94,29 +94,29 @@ function base64UrlEncode(buffer: ArrayBuffer): string {
  * @returns A promise that resolves to a PkceChallenge with both values.
  */
 export async function generatePkce(): Promise<PkceChallenge> {
-    // Allocate a 64-byte typed array and fill it with cryptographically
-    // secure random values using the Web Crypto API.
-    const array = new Uint8Array(64);
-    crypto.getRandomValues(array);
+	// Allocate a 64-byte typed array and fill it with cryptographically
+	// secure random values using the Web Crypto API.
+	const array = new Uint8Array(64);
+	crypto.getRandomValues(array);
 
-    // Encode the random bytes as a base64url string to form the verifier.
-    const verifier = base64UrlEncode(array.buffer);
+	// Encode the random bytes as a base64url string to form the verifier.
+	const verifier = base64UrlEncode(array.buffer);
 
-    // Encode the verifier string as UTF-8 bytes so it can be hashed.
-    const encoded = new TextEncoder().encode(verifier);
+	// Encode the verifier string as UTF-8 bytes so it can be hashed.
+	const encoded = new TextEncoder().encode(verifier);
 
-    // Compute SHA-256 of the encoded verifier. crypto.subtle.digest returns
-    // an ArrayBuffer containing the 32-byte hash.
-    const digest = await crypto.subtle.digest('SHA-256', encoded);
+	// Compute SHA-256 of the encoded verifier. crypto.subtle.digest returns
+	// an ArrayBuffer containing the 32-byte hash.
+	const digest = await crypto.subtle.digest('SHA-256', encoded);
 
-    // Encode the raw hash bytes as base64url to form the code_challenge.
-    const challenge = base64UrlEncode(digest);
+	// Encode the raw hash bytes as base64url to form the code_challenge.
+	const challenge = base64UrlEncode(digest);
 
-    // Persist the verifier in sessionStorage so it survives the browser
-    // redirect to the Zitadel authorization endpoint and back.
-    sessionStorage.setItem(PKCE_VERIFIER_KEY, verifier);
+	// Persist the verifier in sessionStorage so it survives the browser
+	// redirect to the Zitadel authorization endpoint and back.
+	sessionStorage.setItem(PKCE_VERIFIER_KEY, verifier);
 
-    return { verifier, challenge };
+	return { verifier, challenge };
 }
 
 /**
@@ -129,10 +129,10 @@ export async function generatePkce(): Promise<PkceChallenge> {
  * @returns The verifier string, or null if it was never stored or has been cleared.
  */
 export function getStoredVerifier(): string | null {
-    // Read the previously stored verifier from sessionStorage.
-    // Returns null if the key does not exist (e.g., the tab was closed
-    // between the initial navigation and the redirect callback).
-    return sessionStorage.getItem(PKCE_VERIFIER_KEY);
+	// Read the previously stored verifier from sessionStorage.
+	// Returns null if the key does not exist (e.g., the tab was closed
+	// between the initial navigation and the redirect callback).
+	return sessionStorage.getItem(PKCE_VERIFIER_KEY);
 }
 
 /**
@@ -142,8 +142,8 @@ export function getStoredVerifier(): string | null {
  * connectClient() to prevent replay attacks and keep sessionStorage tidy.
  */
 export function clearStoredVerifier(): void {
-    // Remove the verifier entry from sessionStorage so it cannot be reused.
-    sessionStorage.removeItem(PKCE_VERIFIER_KEY);
+	// Remove the verifier entry from sessionStorage so it cannot be reused.
+	sessionStorage.removeItem(PKCE_VERIFIER_KEY);
 }
 
 // =============================================================================
@@ -165,35 +165,29 @@ export function clearStoredVerifier(): void {
  *                        the login page (with its Register link), see below
  * @returns The fully formed authorization URL string ready for browser navigation.
  */
-export function buildAuthUrl(
-    zitadelUrl: string,
-    clientId: string,
-    redirectUri: string,
-    challenge: string,
-    _register = false,
-): string {
-    // Assemble the standard OAuth 2.0 authorization request parameters.
-    // The scope includes openid and profile for basic identity, email and phone
-    // for contact info, offline_access for refresh tokens, and the Zitadel-specific
-    // audience scope so the resulting token is accepted by the RocketRide API.
-    const params = new URLSearchParams({
-        client_id: clientId,
-        redirect_uri: redirectUri,
-        response_type: 'code',
-        scope: 'openid profile email phone offline_access urn:zitadel:iam:org:project:id:zitadel:aud',
-        code_challenge: challenge,
-        code_challenge_method: 'S256',
-    });
+export function buildAuthUrl(zitadelUrl: string, clientId: string, redirectUri: string, challenge: string, _register = false): string {
+	// Assemble the standard OAuth 2.0 authorization request parameters.
+	// The scope includes openid and profile for basic identity, email and phone
+	// for contact info, offline_access for refresh tokens, and the Zitadel-specific
+	// audience scope so the resulting token is accepted by the RocketRide API.
+	const params = new URLSearchParams({
+		client_id: clientId,
+		redirect_uri: redirectUri,
+		response_type: 'code',
+		scope: 'openid profile email phone offline_access urn:zitadel:iam:org:project:id:zitadel:aud',
+		code_challenge: challenge,
+		code_challenge_method: 'S256',
+	});
 
-    // Always land on Zitadel's login page (prompt=login): it forces the login UI
-    // so Zitadel never silently reuses its SSO session (account switching stays
-    // possible), and its built-in "Register" link covers new users. prompt=create
-    // dead-ends returning users on the sign-up form with no path to log in
-    // ("could not sign up at this time"), so the register flag no longer maps
-    // to it. The parameter is kept so callers' intent stays visible at call sites.
-    params.set('prompt', 'login');
+	// Always land on Zitadel's login page (prompt=login): it forces the login UI
+	// so Zitadel never silently reuses its SSO session (account switching stays
+	// possible), and its built-in "Register" link covers new users. prompt=create
+	// dead-ends returning users on the sign-up form with no path to log in
+	// ("could not sign up at this time"), so the register flag no longer maps
+	// to it. The parameter is kept so callers' intent stays visible at call sites.
+	params.set('prompt', 'login');
 
-    // Strip any trailing slash from the base URL before appending the path
-    // to avoid a double-slash in the resulting URL.
-    return `${zitadelUrl.replace(/\/$/, '')}/oauth/v2/authorize?${params}`;
+	// Strip any trailing slash from the base URL before appending the path
+	// to avoid a double-slash in the resulting URL.
+	return `${zitadelUrl.replace(/\/$/, '')}/oauth/v2/authorize?${params}`;
 }

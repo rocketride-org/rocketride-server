@@ -201,16 +201,26 @@ function evalEnumInitializer(expr, memberValues) {
 		const r = evalEnumInitializer(expr.right, memberValues);
 		if (typeof l !== 'number' || typeof r !== 'number') return null;
 		switch (expr.operatorToken.kind) {
-			case ts.SyntaxKind.LessThanLessThanToken: return l << r;
-			case ts.SyntaxKind.GreaterThanGreaterThanToken: return l >> r;
-			case ts.SyntaxKind.GreaterThanGreaterThanGreaterThanToken: return l >>> r;
-			case ts.SyntaxKind.BarToken: return l | r;
-			case ts.SyntaxKind.AmpersandToken: return l & r;
-			case ts.SyntaxKind.CaretToken: return l ^ r;
-			case ts.SyntaxKind.PlusToken: return l + r;
-			case ts.SyntaxKind.MinusToken: return l - r;
-			case ts.SyntaxKind.AsteriskToken: return l * r;
-			default: return null;
+			case ts.SyntaxKind.LessThanLessThanToken:
+				return l << r;
+			case ts.SyntaxKind.GreaterThanGreaterThanToken:
+				return l >> r;
+			case ts.SyntaxKind.GreaterThanGreaterThanGreaterThanToken:
+				return l >>> r;
+			case ts.SyntaxKind.BarToken:
+				return l | r;
+			case ts.SyntaxKind.AmpersandToken:
+				return l & r;
+			case ts.SyntaxKind.CaretToken:
+				return l ^ r;
+			case ts.SyntaxKind.PlusToken:
+				return l + r;
+			case ts.SyntaxKind.MinusToken:
+				return l - r;
+			case ts.SyntaxKind.AsteriskToken:
+				return l * r;
+			default:
+				return null;
 		}
 	}
 	return null;
@@ -236,12 +246,18 @@ function rewriteEnumsStructural(dtsText) {
 		let prevNumeric = -1;
 		let folded = true;
 		for (const m of st.members) {
-			if (!ts.isIdentifier(m.name) && !ts.isStringLiteral(m.name)) { folded = false; break; }
+			if (!ts.isIdentifier(m.name) && !ts.isStringLiteral(m.name)) {
+				folded = false;
+				break;
+			}
 			const name = m.name.text;
 			let value;
 			if (m.initializer) {
 				value = evalEnumInitializer(m.initializer, memberValues);
-				if (value === null) { folded = false; break; }
+				if (value === null) {
+					folded = false;
+					break;
+				}
 			} else {
 				value = prevNumeric + 1;
 			}
@@ -674,23 +690,7 @@ function extractBundleBody(fileContent) {
  * @returns {string} The header text.
  */
 function versionHeader(key) {
-	return [
-		MIT_HEADER,
-		'',
-		'// =============================================================================',
-		`// FROZEN rocketride SDK contract — floor v${key} — never edit by hand`,
-		'// =============================================================================',
-		`// Floor key:     ${key} (MAJOR.MINOR of packages/client-typescript/package.json)`,
-		`// Source commit: ${gitCommit()}`,
-		`// Generator:     dts-bundle-generator@${resolveBin('dts-bundle-generator', 'dts-bundle-generator').version}`,
-		'// Produced by:   ./builder client-typescript:freeze',
-		'//',
-		`// Mutable ONLY while ${key} is the in-progress package version: re-running`,
-		'// client-typescript:freeze REPLACES this floor. Once the package version',
-		'// moves past it, this file is immutable — the append-only contract floor',
-		'// for every release of this minor.',
-		'// =============================================================================',
-	].join('\n');
+	return [MIT_HEADER, '', '// =============================================================================', `// FROZEN rocketride SDK contract — floor v${key} — never edit by hand`, '// =============================================================================', `// Floor key:     ${key} (MAJOR.MINOR of packages/client-typescript/package.json)`, `// Source commit: ${gitCommit()}`, `// Generator:     dts-bundle-generator@${resolveBin('dts-bundle-generator', 'dts-bundle-generator').version}`, '// Produced by:   ./builder client-typescript:freeze', '//', `// Mutable ONLY while ${key} is the in-progress package version: re-running`, '// client-typescript:freeze REPLACES this floor. Once the package version', '// moves past it, this file is immutable — the append-only contract floor', '// for every release of this minor.', '// ============================================================================='].join('\n');
 }
 
 /**
@@ -737,7 +737,7 @@ function regenerateBarrels(keys) {
 		' * The newest frozen SDK floor — a convenience alias for consumers.',
 		' *',
 		' * Accumulation is NOT an intersection of versions: the "nothing ever frozen',
-		" * can be removed\" guarantee is the per-version floors in the package's",
+		' * can be removed" guarantee is the per-version floors in the package\'s',
 		' * src/contract-check.generated.ts, which assert the live surface still',
 		' * satisfies EACH frozen floor separately.',
 		' */',

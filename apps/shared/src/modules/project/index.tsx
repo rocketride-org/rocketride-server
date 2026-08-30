@@ -16,18 +16,7 @@ export type { ParsedServerEvent } from './utils';
 // Run-log continuum delivery + projections (the source-section building
 // blocks: session-consumer hook, text log projection, efficiency analysis).
 export { useTaskEvents } from './hooks/useTaskEvents';
-export type {
-	PlayerMode,
-	TaskChapter,
-	TaskEventMessage,
-	TaskEventSession,
-	TaskPlayerController,
-	TaskPlayerState,
-	TaskTimeline,
-	TrackWindow,
-	UseTaskEventsOptions,
-	UseTaskEventsResult,
-} from './hooks/useTaskEvents';
+export type { PlayerMode, TaskChapter, TaskEventMessage, TaskEventSession, TaskPlayerController, TaskPlayerState, TaskTimeline, TrackWindow, UseTaskEventsOptions, UseTaskEventsResult } from './hooks/useTaskEvents';
 export { LogPane } from './components/LogPane';
 export type { ILogPaneProps } from './components/LogPane';
 export { StatusPane } from './components/StatusPane';

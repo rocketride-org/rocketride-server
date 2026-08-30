@@ -1,6 +1,6 @@
 /**
  * Shared Path Constants
- * 
+ *
  * Common directory paths used throughout the build system.
  */
 const path = require('path');
@@ -15,8 +15,7 @@ const BUILD_ROOT = process.env.ROCKETRIDE_BUILD_ROOT || path.join(PROJECT_ROOT, 
 const DIST_ROOT = process.env.ROCKETRIDE_DIST_ROOT || path.join(PROJECT_ROOT, 'dist');
 
 module.exports = {
-    PROJECT_ROOT,
-    BUILD_ROOT,
-    DIST_ROOT
+	PROJECT_ROOT,
+	BUILD_ROOT,
+	DIST_ROOT,
 };
-

@@ -27,7 +27,7 @@ on:
         required: false
         default: '3.12'
   schedule:
-    - cron: '0 6 * * 1'          # weekly, Monday 06:00 UTC — catch upstream drift
+    - cron: '0 6 * * 1' # weekly, Monday 06:00 UTC — catch upstream drift
   push:
     branches: [develop]
     paths:
@@ -92,7 +92,7 @@ jobs:
       - name: Install uv (pinned for reproducible compiles)
         uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5.4.1
         with:
-          version: "0.5.29"
+          version: '0.5.29'
 
       - name: Compile the universal lockfile from all node requirements
         id: compile

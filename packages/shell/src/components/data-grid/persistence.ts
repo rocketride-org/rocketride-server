@@ -89,10 +89,7 @@ const PREFS_KEY = 'tableLayouts';
  * @param updatePrefs - The workspace `updatePrefs` patch function.
  * @returns A persistence adapter to pass to one or more DataGrids in a view.
  */
-export function createWorkspaceGridPersistence(
-	getPrefs: () => Record<string, unknown>,
-	updatePrefs: (patch: Record<string, unknown>) => void,
-): IDataGridPersistence {
+export function createWorkspaceGridPersistence(getPrefs: () => Record<string, unknown>, updatePrefs: (patch: Record<string, unknown>) => void): IDataGridPersistence {
 	// Seed the cache from whatever the store has hydrated; clone one level so
 	// grid writes never mutate the store's own object graph in place.
 	const stored = getPrefs()[PREFS_KEY];

@@ -47,9 +47,7 @@ function makeBundleAction() {
 			// Check every expected bundle, not just the dist dir: a deleted or
 			// never-emitted widget HTML would otherwise ride a matching hash and
 			// silently vanish from the served UI surface.
-			const outputsPresent = (
-				await Promise.all(WIDGETS.map((widget) => exists(path.join(DIST_DIR, `${widget}.html`))))
-			).every(Boolean);
+			const outputsPresent = (await Promise.all(WIDGETS.map((widget) => exists(path.join(DIST_DIR, `${widget}.html`))))).every(Boolean);
 			if (!ctx.options.force && !changed && outputsPresent) {
 				task.output = 'No changes detected';
 				return;

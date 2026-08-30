@@ -37,10 +37,7 @@
 import React from 'react';
 import { ConnectionManagerView } from 'shell';
 import type { IConnectionFormField } from 'shell';
-import {
-	useSavedConnections, addConnection, updateConnection, deleteConnection,
-	type SavedConnection,
-} from '../connections';
+import { useSavedConnections, addConnection, updateConnection, deleteConnection, type SavedConnection } from '../connections';
 import { getDocs } from '../docs';
 import { openConnection } from '../TestApp';
 import { DEFAULT_CONFIG } from '../session';

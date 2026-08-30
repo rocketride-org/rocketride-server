@@ -130,12 +130,13 @@ const AparaviSidebar: React.FC = () => {
 	// --- Refresh file list ----------------------------------------------------
 
 	const refresh = useCallback(async () => {
-		if (!client || !isConnected) { setEntries([]); return; }
+		if (!client || !isConnected) {
+			setEntries([]);
+			return;
+		}
 		try {
 			const result = await listChatDir(client, '');
-			const chatFiles: ExplorerEntry[] = (result.entries ?? [])
-				.filter((e: any) => e.name?.endsWith('.chat'))
-				.map((e: any) => ({ path: e.name, type: 'file' as const }));
+			const chatFiles: ExplorerEntry[] = (result.entries ?? []).filter((e: any) => e.name?.endsWith('.chat')).map((e: any) => ({ path: e.name, type: 'file' as const }));
 			setEntries(chatFiles);
 		} catch {
 			setEntries([]);
@@ -143,7 +144,9 @@ const AparaviSidebar: React.FC = () => {
 	}, [client, isConnected]);
 
 	// Refresh on mount and when connection changes
-	useEffect(() => { refresh(); }, [refresh]);
+	useEffect(() => {
+		refresh();
+	}, [refresh]);
 
 	// --- Create new chat ------------------------------------------------------
 
@@ -174,52 +177,49 @@ const AparaviSidebar: React.FC = () => {
 
 	// --- File management (rename, delete, createFile) -------------------------
 
-	const handleFileManage = useCallback(async (
-		action: 'rename' | 'delete' | 'createFolder' | 'createFile',
-		path: string,
-		newName?: string,
-	) => {
-		if (!client) return;
-		try {
-			switch (action) {
-				case 'rename': {
-					if (!newName) break;
-					const dir = path.includes('/') ? path.substring(0, path.lastIndexOf('/')) : '';
-					const newPath = dir
-						? `${dir}/${newName}.chat`
-						: `${newName}.chat`;
-					if (newPath === path) break;
-					await renameChat(client, path, newPath);
-					// Update open editor tabs: close old, reopen at new path
-					const docs = getDocs();
-					if (docs) {
-						const s = docs.getState();
-						const editorIds = Object.entries(s.editors)
-							.filter(([, ed]) => ed.documentUri === path)
-							.map(([id]) => id);
-						for (const eid of editorIds) docs.closeEditor(eid);
-						if (editorIds.length > 0) await docs.openDocument(newPath);
+	const handleFileManage = useCallback(
+		async (action: 'rename' | 'delete' | 'createFolder' | 'createFile', path: string, newName?: string) => {
+			if (!client) return;
+			try {
+				switch (action) {
+					case 'rename': {
+						if (!newName) break;
+						const dir = path.includes('/') ? path.substring(0, path.lastIndexOf('/')) : '';
+						const newPath = dir ? `${dir}/${newName}.chat` : `${newName}.chat`;
+						if (newPath === path) break;
+						await renameChat(client, path, newPath);
+						// Update open editor tabs: close old, reopen at new path
+						const docs = getDocs();
+						if (docs) {
+							const s = docs.getState();
+							const editorIds = Object.entries(s.editors)
+								.filter(([, ed]) => ed.documentUri === path)
+								.map(([id]) => id);
+							for (const eid of editorIds) docs.closeEditor(eid);
+							if (editorIds.length > 0) await docs.openDocument(newPath);
+						}
+						break;
 					}
-					break;
+					case 'delete': {
+						await deleteChat(client, path);
+						// Force-remove the document and all editors regardless of dirty state
+						// so stale content doesn't linger if a new chat reuses the same name
+						getDocs()?.discardDocument(path);
+						break;
+					}
+					case 'createFile': {
+						await saveChat(client, path, { messages: [] });
+						getDocs()?.openDocument(path);
+						break;
+					}
 				}
-				case 'delete': {
-					await deleteChat(client, path);
-					// Force-remove the document and all editors regardless of dirty state
-					// so stale content doesn't linger if a new chat reuses the same name
-					getDocs()?.discardDocument(path);
-					break;
-				}
-				case 'createFile': {
-					await saveChat(client, path, { messages: [] });
-					getDocs()?.openDocument(path);
-					break;
-				}
+				await refresh();
+			} catch (err) {
+				console.error(`[AparaviSidebar] ${action} failed:`, err);
 			}
-			await refresh();
-		} catch (err) {
-			console.error(`[AparaviSidebar] ${action} failed:`, err);
-		}
-	}, [client, refresh]);
+		},
+		[client, refresh]
+	);
 
 	// --- Register sidebar content ---------------------------------------------
 
@@ -232,20 +232,17 @@ const AparaviSidebar: React.FC = () => {
 			{/* New Chat action (stock SidebarMenu, single entry). activeId='' —
 			    no persistent selection; the id guard keeps the handler typed. */}
 			<div style={styles.newChatRow}>
-				<SidebarMenu menu={NEW_CHAT_MENU} activeId="" onSelect={(id) => { if (id === 'new') handleNewChat(); }} />
+				<SidebarMenu
+					menu={NEW_CHAT_MENU}
+					activeId=""
+					onSelect={(id) => {
+						if (id === 'new') handleNewChat();
+					}}
+				/>
 			</div>
 
 			{/* Chat file tree (shared Explorer component) */}
-			<Explorer
-				vfs={NOOP_VFS}
-				config={CHAT_CONFIG}
-				entries={entries}
-				isConnected={isConnected}
-				activeFilePath={activeFile}
-				onOpenFile={handleOpenFile}
-				onFileManage={handleFileManage}
-				onRefresh={refresh}
-			/>
+			<Explorer vfs={NOOP_VFS} config={CHAT_CONFIG} entries={entries} isConnected={isConnected} activeFilePath={activeFile} onOpenFile={handleOpenFile} onFileManage={handleFileManage} onRefresh={refresh} />
 		</div>
 	);
 

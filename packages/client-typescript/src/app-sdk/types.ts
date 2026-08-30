@@ -339,7 +339,6 @@ export interface IWorkspaceContext {
 	on: (event: string, handler: (payload: any) => void) => () => void;
 }
 
-
 // =============================================================================
 // VIRTUAL FILE SYSTEM
 // =============================================================================

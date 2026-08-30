@@ -54,15 +54,7 @@ const ExplorerDemo: React.FC<IGalleryDemoProps> = () => {
 	const [activeFilePath, setActiveFilePath] = useState('chat.pipe');
 	return (
 		<div style={{ width: 250, border: '1px solid var(--rr-border)', borderRadius: 6, background: 'var(--rr-bg-surface-alt)', padding: '6px 0' }}>
-			<Explorer
-				vfs={NOOP_VFS}
-				config={{ title: 'Pipelines', extensions: ['.pipe'], emptyMessage: 'No pipelines' }}
-				entries={DEMO_ENTRIES}
-				isConnected
-				activeFilePath={activeFilePath}
-				onOpenFile={setActiveFilePath}
-				onRefresh={() => undefined}
-			/>
+			<Explorer vfs={NOOP_VFS} config={{ title: 'Pipelines', extensions: ['.pipe'], emptyMessage: 'No pipelines' }} entries={DEMO_ENTRIES} isConnected activeFilePath={activeFilePath} onOpenFile={setActiveFilePath} onRefresh={() => undefined} />
 		</div>
 	);
 };

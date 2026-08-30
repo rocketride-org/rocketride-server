@@ -88,14 +88,7 @@ export const EventDetailPanel: React.FC<IEventDetailPanelProps> = ({ event, onCl
 	}
 
 	return (
-		<DetailPanel
-			persistKey="panelDetailEventWidth"
-			open
-			onClose={onClose}
-			avatar={<span style={styles.dot(eventColor(event.eventName))} />}
-			title={event.eventName}
-			subtitle={`#${event.id} · ${formatTime(event.time)}`}
-		>
+		<DetailPanel persistKey="panelDetailEventWidth" open onClose={onClose} avatar={<span style={styles.dot(eventColor(event.eventName))} />} title={event.eventName} subtitle={`#${event.id} · ${formatTime(event.time)}`}>
 			{/* Metadata: the scalar fields, monospace where they are identifiers. */}
 			<Section label="Event">
 				<LabelValue label="Name" mono>

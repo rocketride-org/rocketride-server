@@ -23,10 +23,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {
-	ConnectionGenerationController,
-	GenerationOwnedOperationSlot,
-} from '../connection/connection-generation';
+import { ConnectionGenerationController, GenerationOwnedOperationSlot } from '../connection/connection-generation';
 
 function deferred(): { promise: Promise<void>; resolve(): void } {
 	let resolve!: () => void;
@@ -116,10 +113,7 @@ test('SDK event publication stays with the callback-owning connection attempt', 
 	controller.activateAttemptCallbacks(newGeneration);
 	publishEvent('new-after-callback-activation');
 
-	assert.deepEqual(published, [
-		'old-before-replacement',
-		'new-after-callback-activation',
-	]);
+	assert.deepEqual(published, ['old-before-replacement', 'new-after-callback-activation']);
 });
 
 test('intentional teardown suppresses stale SDK callbacks and only its current completion publishes disconnect', async () => {
@@ -162,7 +156,7 @@ test('callback-owned async publication from an old attempt cannot overwrite the 
 		},
 		(outcome) => {
 			if (outcome.status === 'fulfilled') published.push(outcome.value);
-		},
+		}
 	);
 
 	const newGeneration = controller.beginAttempt();
@@ -176,7 +170,7 @@ test('callback-owned async publication from an old attempt cannot overwrite the 
 		},
 		(outcome) => {
 			if (outcome.status === 'fulfilled') published.push(outcome.value);
-		},
+		}
 	);
 	await newPublication;
 	oldCompletion.resolve();
@@ -203,7 +197,7 @@ test('clearing a callback-owned slot suppresses old work when the same outer gen
 		},
 		(outcome) => {
 			if (outcome.status === 'fulfilled') published.push(outcome.value);
-		},
+		}
 	);
 
 	slot.clear();
@@ -213,7 +207,7 @@ test('clearing a callback-owned slot suppresses old work when the same outer gen
 		async () => 'reconnected',
 		(outcome) => {
 			if (outcome.status === 'fulfilled') published.push(outcome.value);
-		},
+		}
 	);
 	await reconnectedPublication;
 	oldCompletion.resolve();
@@ -230,8 +224,12 @@ test('a synchronous callback-owned work failure publishes to the active generati
 	await slot.run(
 		1,
 		() => true,
-		() => { throw failure; },
-		(outcome) => { published.push(outcome); },
+		() => {
+			throw failure;
+		},
+		(outcome) => {
+			published.push(outcome);
+		}
 	);
 
 	assert.deepEqual(published, [{ status: 'rejected', reason: failure }]);
@@ -253,7 +251,7 @@ test('an ownerless operation never coalesces with another ownerless operation', 
 		},
 		(outcome) => {
 			if (outcome.status === 'fulfilled') published.push(outcome.value);
-		},
+		}
 	);
 	const second = slot.run(
 		undefined,
@@ -264,7 +262,7 @@ test('an ownerless operation never coalesces with another ownerless operation', 
 		},
 		(outcome) => {
 			if (outcome.status === 'fulfilled') published.push(outcome.value);
-		},
+		}
 	);
 
 	await second;

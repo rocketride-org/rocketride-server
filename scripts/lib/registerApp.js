@@ -41,13 +41,13 @@
 
 'use strict';
 
-const fs   = require('node:fs');
+const fs = require('node:fs');
 const path = require('node:path');
 const { BUILD_ROOT, DIST_ROOT, setState } = require('./index');
 
 const BUILD_APPS_JSON = path.join(BUILD_ROOT, 'apps.json');
-const DIST_APPS_JSON  = path.join(DIST_ROOT, 'server', 'static', 'apps.json');
-const APPS_BASE       = process.env.APPS_BASE_URL ?? 'apps';
+const DIST_APPS_JSON = path.join(DIST_ROOT, 'server', 'static', 'apps.json');
+const APPS_BASE = process.env.APPS_BASE_URL ?? 'apps';
 
 // Single source of truth for the shell contract version (freeze auto-writes it).
 const APIVER_TS = path.join(__dirname, '..', '..', 'packages', 'shell', 'src', 'apiver.ts');
@@ -120,10 +120,7 @@ function writeManifest(filePath, manifest) {
  */
 function upsert(manifest, entry) {
 	return {
-		apps: [
-			...manifest.apps.filter(a => a.id !== entry.id),
-			entry,
-		],
+		apps: [...manifest.apps.filter((a) => a.id !== entry.id), entry],
 	};
 }
 
@@ -167,7 +164,7 @@ function registerApp(appRoot) {
 				return;
 			}
 
-			const dirName  = path.basename(appRoot);
+			const dirName = path.basename(appRoot);
 			const buildDir = path.join(BUILD_ROOT, APPS_BASE, dirName);
 
 			// Derive moduleId from appId
@@ -177,18 +174,14 @@ function registerApp(appRoot) {
 			const shellApiVersion = readShellApiVersion();
 
 			// Resolve app mode — default based on stripeProductId presence
-			const mode = appManifest.mode
-				?? (appManifest.stripeProductId ? 'subscription' : 'free');
+			const mode = appManifest.mode ?? (appManifest.stripeProductId ? 'subscription' : 'free');
 
 			// Note: subscription/paywall apps get their stripeProductId at runtime
 			// via seed_apps → ensure_stripe_billing, not at build time.
 
 			// Validate mode value
 			if (!['free', 'subscription', 'paywall'].includes(mode)) {
-				throw new Error(
-					`App "${appManifest.id}" has invalid mode="${mode}". `
-					+ 'Must be "free", "subscription", or "paywall".'
-				);
+				throw new Error(`App "${appManifest.id}" has invalid mode="${mode}". ` + 'Must be "free", "subscription", or "paywall".');
 			}
 
 			// Validate the app's settings contribution — the VSCode
@@ -197,26 +190,16 @@ function registerApp(appRoot) {
 			// unique, and every schema needs a valid JSON type.
 			const configuration = appManifest.contributes?.configuration ?? null;
 			if (configuration) {
-				if (typeof configuration !== 'object' || Array.isArray(configuration)
-					|| typeof configuration.properties !== 'object' || Array.isArray(configuration.properties)) {
-					throw new Error(
-						`App "${appManifest.id}" has an invalid contributes.configuration. `
-						+ 'Expected { title?, properties: { "<appId>.<setting>": { type, ... } } }.'
-					);
+				if (typeof configuration !== 'object' || Array.isArray(configuration) || typeof configuration.properties !== 'object' || Array.isArray(configuration.properties)) {
+					throw new Error(`App "${appManifest.id}" has an invalid contributes.configuration. ` + 'Expected { title?, properties: { "<appId>.<setting>": { type, ... } } }.');
 				}
 				const validTypes = ['string', 'number', 'integer', 'boolean'];
 				for (const [key, schema] of Object.entries(configuration.properties)) {
 					if (!key.startsWith(`${appManifest.id}.`)) {
-						throw new Error(
-							`App "${appManifest.id}" setting "${key}" must be prefixed with the app id `
-							+ `("${appManifest.id}.<settingName>") so setting keys are globally unique.`
-						);
+						throw new Error(`App "${appManifest.id}" setting "${key}" must be prefixed with the app id ` + `("${appManifest.id}.<settingName>") so setting keys are globally unique.`);
 					}
 					if (!schema || !validTypes.includes(schema.type)) {
-						throw new Error(
-							`App "${appManifest.id}" setting "${key}" has invalid type `
-							+ `"${schema && schema.type}". Must be one of: ${validTypes.join(', ')}.`
-						);
+						throw new Error(`App "${appManifest.id}" setting "${key}" has invalid type ` + `"${schema && schema.type}". Must be one of: ${validTypes.join(', ')}.`);
 					}
 				}
 			}
@@ -232,10 +215,7 @@ function registerApp(appRoot) {
 				const valid = ['saas', 'oss', 'vscode'];
 				for (const s of shells) {
 					if (!valid.includes(s)) {
-						throw new Error(
-							`App "${appManifest.id}" has invalid shell="${s}". `
-							+ `Must be one of: ${valid.join(', ')}.`
-						);
+						throw new Error(`App "${appManifest.id}" has invalid shell="${s}". ` + `Must be one of: ${valid.join(', ')}.`);
 					}
 				}
 			}
@@ -281,17 +261,17 @@ function registerApp(appRoot) {
 
 			// Build the apps.json entry
 			const appEntry = {
-				id:            appManifest.id,
+				id: appManifest.id,
 				moduleId,
-				publisher:     appManifest.publisher ?? '',
-				name:          appManifest.name,
-				description:   appManifest.description ?? '',
+				publisher: appManifest.publisher ?? '',
+				name: appManifest.name,
+				description: appManifest.description ?? '',
 				readme,
 				icon,
-				categories:    appManifest.categories ?? [],
+				categories: appManifest.categories ?? [],
 				// Settings contribution (VSCode contributes.configuration shape)
 				...(configuration ? { configuration } : {}),
-				entry:         `/${APPS_BASE}/${dirName}/remoteEntry.js`,
+				entry: `/${APPS_BASE}/${dirName}/remoteEntry.js`,
 				// Shell contract version this app was built against (for prune analysis).
 				...(shellApiVersion !== null ? { shellApiVersion } : {}),
 				// App monetization mode
@@ -311,11 +291,7 @@ function registerApp(appRoot) {
 				// Include billing section (plans array) for seed_apps to provision Stripe products
 				...(appManifest.billing ? { billing: appManifest.billing } : {}),
 				// Permission-gated apps — user must hold ALL listed sysPermissions to see the app
-				...(Array.isArray(appManifest.requiredPermissions)
-					&& appManifest.requiredPermissions.length
-					&& appManifest.requiredPermissions.every((p) => typeof p === 'string' && p.length > 0)
-					? { requiredPermissions: appManifest.requiredPermissions }
-					: {}),
+				...(Array.isArray(appManifest.requiredPermissions) && appManifest.requiredPermissions.length && appManifest.requiredPermissions.every((p) => typeof p === 'string' && p.length > 0) ? { requiredPermissions: appManifest.requiredPermissions } : {}),
 			};
 
 			// Upsert into build/apps.json (dev server publicDir)

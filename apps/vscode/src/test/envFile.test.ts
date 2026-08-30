@@ -41,10 +41,7 @@ function parseClientPythonEnv(text: string): Record<string, string> {
 		const separator = trimmedLine.indexOf('=');
 		const key = trimmedLine.slice(0, separator).trim();
 		let value = trimmedLine.slice(separator + 1).trim();
-		if (
-			(value.startsWith('"') && value.endsWith('"')) ||
-			(value.startsWith("'") && value.endsWith("'"))
-		) {
+		if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
 			value = value.slice(1, -1);
 		}
 		env[key] = value;
@@ -55,10 +52,7 @@ function parseClientPythonEnv(text: string): Record<string, string> {
 // --- mergeEnvText ------------------------------------------------------------
 
 test('creates a new file from scratch when none exists', () => {
-	assert.equal(
-		mergeEnvText('', updates),
-		`ROCKETRIDE_URI=${URI}\nROCKETRIDE_APIKEY=${KEY}\n`,
-	);
+	assert.equal(mergeEnvText('', updates), `ROCKETRIDE_URI=${URI}\nROCKETRIDE_APIKEY=${KEY}\n`);
 });
 
 test('returns text unchanged when there is nothing to write', () => {
@@ -68,10 +62,7 @@ test('returns text unchanged when there is nothing to write', () => {
 
 test('updates an existing key in place, keeping its position', () => {
 	const existing = 'ROCKETRIDE_URI=http://localhost:5565\nFOO=bar';
-	assert.equal(
-		mergeEnvText(existing, { ROCKETRIDE_URI: URI }),
-		`ROCKETRIDE_URI=${URI}\nFOO=bar`,
-	);
+	assert.equal(mergeEnvText(existing, { ROCKETRIDE_URI: URI }), `ROCKETRIDE_URI=${URI}\nFOO=bar`);
 });
 
 test('preserves comments, blank lines, and unrelated user variables', () => {
@@ -86,10 +77,7 @@ test('preserves comments, blank lines, and unrelated user variables', () => {
 
 test('appends new keys after a blank separator when file has content', () => {
 	const existing = 'FOO=bar';
-	assert.equal(
-		mergeEnvText(existing, updates),
-		`FOO=bar\n\nROCKETRIDE_URI=${URI}\nROCKETRIDE_APIKEY=${KEY}`,
-	);
+	assert.equal(mergeEnvText(existing, updates), `FOO=bar\n\nROCKETRIDE_URI=${URI}\nROCKETRIDE_APIKEY=${KEY}`);
 });
 
 test('quotes values containing whitespace, # or =', () => {
@@ -107,17 +95,11 @@ test('is idempotent — merging the same updates twice is a no-op', () => {
 
 test('removes keys listed in keysToRemove', () => {
 	const existing = 'FOO=bar\nOLD=gone\nROCKETRIDE_URI=old';
-	assert.equal(
-		mergeEnvText(existing, { ROCKETRIDE_URI: URI }, new Set(['OLD'])),
-		`FOO=bar\nROCKETRIDE_URI=${URI}`,
-	);
+	assert.equal(mergeEnvText(existing, { ROCKETRIDE_URI: URI }, new Set(['OLD'])), `FOO=bar\nROCKETRIDE_URI=${URI}`);
 });
 
 test('writes raw internal quotes and backslashes when a value needs quoting', () => {
-	assert.equal(
-		mergeEnvText('', { ROCKETRIDE_APIKEY: 'has "quote" and \\slash' }),
-		'ROCKETRIDE_APIKEY="has "quote" and \\slash"\n',
-	);
+	assert.equal(mergeEnvText('', { ROCKETRIDE_APIKEY: 'has "quote" and \\slash' }), 'ROCKETRIDE_APIKEY="has "quote" and \\slash"\n');
 });
 
 test('round-trips values through the client.py parser', () => {
@@ -129,75 +111,45 @@ test('round-trips values through the client.py parser', () => {
 test('does not treat inherited property names as sync updates', () => {
 	const existing = 'toString=x\n__proto__=y\nFOO=bar';
 	assert.doesNotThrow(() => mergeEnvText(existing, { ROCKETRIDE_URI: URI }));
-	assert.equal(
-		mergeEnvText(existing, { ROCKETRIDE_URI: URI }),
-		`toString=x\n__proto__=y\nFOO=bar\n\nROCKETRIDE_URI=${URI}`,
-	);
+	assert.equal(mergeEnvText(existing, { ROCKETRIDE_URI: URI }), `toString=x\n__proto__=y\nFOO=bar\n\nROCKETRIDE_URI=${URI}`);
 });
 
 test('preserves CRLF line endings without mixing in LF-only lines', () => {
 	const existing = '# my env\r\nFOO=bar\r\nROCKETRIDE_URI=http://localhost:5565\r\n';
 	const result = mergeEnvText(existing, updates);
-	assert.equal(
-		result,
-		`# my env\r\nFOO=bar\r\nROCKETRIDE_URI=${URI}\r\n\r\nROCKETRIDE_APIKEY=${KEY}`,
-	);
+	assert.equal(result, `# my env\r\nFOO=bar\r\nROCKETRIDE_URI=${URI}\r\n\r\nROCKETRIDE_APIKEY=${KEY}`);
 	assert.ok(!/[^\r]\n/.test(result), 'no bare LF line endings');
 });
 
 test('uses CRLF when generating from a whitespace-only CRLF file', () => {
-	assert.equal(
-		mergeEnvText(' \r\n\t\r\n', { ROCKETRIDE_URI: URI }),
-		`ROCKETRIDE_URI=${URI}\r\n`,
-	);
+	assert.equal(mergeEnvText(' \r\n\t\r\n', { ROCKETRIDE_URI: URI }), `ROCKETRIDE_URI=${URI}\r\n`);
 });
 
 // --- resolveConnectionEnv ----------------------------------------------------
 
 for (const mode of ['local', 'docker', 'service', 'onprem'] as const) {
 	test(`writes both vars for self-hosted mode: ${mode}`, () => {
-		assert.deepEqual(
-			resolveConnectionEnv({ group: 'development', mode, httpUrl: URI, apiKey: KEY }),
-			{ ROCKETRIDE_URI: URI, ROCKETRIDE_APIKEY: KEY },
-		);
+		assert.deepEqual(resolveConnectionEnv({ group: 'development', mode, httpUrl: URI, apiKey: KEY }), { ROCKETRIDE_URI: URI, ROCKETRIDE_APIKEY: KEY });
 	});
 }
 
 test('skips cloud mode (OAuth token is not an SDK key)', () => {
-	assert.equal(
-		resolveConnectionEnv({ group: 'development', mode: 'cloud', httpUrl: 'https://api.rocketride.ai', apiKey: 'oauth-token' }),
-		null,
-	);
+	assert.equal(resolveConnectionEnv({ group: 'development', mode: 'cloud', httpUrl: 'https://api.rocketride.ai', apiKey: 'oauth-token' }), null);
 });
 
 test('skips the deployment group so it never fights over .env', () => {
-	assert.equal(
-		resolveConnectionEnv({ group: 'deployment', mode: 'local', httpUrl: URI, apiKey: KEY }),
-		null,
-	);
+	assert.equal(resolveConnectionEnv({ group: 'deployment', mode: 'local', httpUrl: URI, apiKey: KEY }), null);
 });
 
 test('returns null when there is no resolvable URI', () => {
-	assert.equal(
-		resolveConnectionEnv({ group: 'development', mode: 'local', httpUrl: '', apiKey: KEY }),
-		null,
-	);
+	assert.equal(resolveConnectionEnv({ group: 'development', mode: 'local', httpUrl: '', apiKey: KEY }), null);
 });
 
 test('returns null when URI or API key contains a newline', () => {
-	assert.equal(
-		resolveConnectionEnv({ group: 'development', mode: 'local', httpUrl: `${URI}\nnext`, apiKey: KEY }),
-		null,
-	);
-	assert.equal(
-		resolveConnectionEnv({ group: 'development', mode: 'local', httpUrl: URI, apiKey: `${KEY}\rnext` }),
-		null,
-	);
+	assert.equal(resolveConnectionEnv({ group: 'development', mode: 'local', httpUrl: `${URI}\nnext`, apiKey: KEY }), null);
+	assert.equal(resolveConnectionEnv({ group: 'development', mode: 'local', httpUrl: URI, apiKey: `${KEY}\rnext` }), null);
 });
 
 test('writes only the URI when no API key is available', () => {
-	assert.deepEqual(
-		resolveConnectionEnv({ group: 'development', mode: 'local', httpUrl: URI, apiKey: '' }),
-		{ ROCKETRIDE_URI: URI },
-	);
+	assert.deepEqual(resolveConnectionEnv({ group: 'development', mode: 'local', httpUrl: URI, apiKey: '' }), { ROCKETRIDE_URI: URI });
 });

@@ -417,10 +417,7 @@ const SpendingVelocity: React.FC<{
 			{/* Low-capacity warning + top-up CTA — only shown when running low (<7 days) */}
 			{isUrgent && (
 				<div style={styles.urgentRow}>
-					<div style={styles.urgentText}>
-						Based on your current usage velocity, you will be running out of capacity soon. We suggest you upgrade your current plan or purchase more capacity to ensure
-						uninterrupted service.
-					</div>
+					<div style={styles.urgentText}>Based on your current usage velocity, you will be running out of capacity soon. We suggest you upgrade your current plan or purchase more capacity to ensure uninterrupted service.</div>
 					<Button variant="primary" small onClick={() => onAddCapacity?.()}>
 						Add more capacity...
 					</Button>
@@ -447,10 +444,7 @@ interface LeaderRow extends Record<string, unknown> {
 }
 
 /** Usage leaderboard -- top consumers by user or team. */
-const UsageLeaderboard: React.FC<{ usageByUser: UsageRollup[]; usageByTeam: UsageRollup[] }> = ({
-	usageByUser,
-	usageByTeam,
-}) => {
+const UsageLeaderboard: React.FC<{ usageByUser: UsageRollup[]; usageByTeam: UsageRollup[] }> = ({ usageByUser, usageByTeam }) => {
 	const [mode, setMode] = useState<'user' | 'team'>('user');
 	const data = mode === 'user' ? usageByUser : usageByTeam;
 
@@ -460,7 +454,7 @@ const UsageLeaderboard: React.FC<{ usageByUser: UsageRollup[]; usageByTeam: Usag
 		() =>
 			data.map((row) => ({
 				id: row.id,
-				name: row.id === '__none__' ? '(unassigned)' : row.name ?? '--',
+				name: row.id === '__none__' ? '(unassigned)' : (row.name ?? '--'),
 				total: Object.values(row.credits).reduce((s, v) => s + v, 0),
 				resources: Object.keys(row.credits).length,
 			})),
@@ -826,14 +820,7 @@ const TransactionLog: React.FC<{
 			    pure inspect, so NO footer (interaction standard: footer
 			    presence signals editability; header X / Escape close). ─────── */}
 			{viewedTx != null && (
-				<DetailPanel
-					persistKey="panelDetailTransactionWidth"
-					contained
-					open
-					onClose={() => setViewedTx(null)}
-					title={`Transaction #${viewedTx.id}`}
-					subtitle={viewedTx.type}
-				>
+				<DetailPanel persistKey="panelDetailTransactionWidth" contained open onClose={() => setViewedTx(null)} title={`Transaction #${viewedTx.id}`} subtitle={viewedTx.type}>
 					<Section label="Transaction">
 						{/* formatDateValue applies the wire contract (zone-less ISO IS
 						    UTC) and renders exactly like the Date column. */}
@@ -955,15 +942,7 @@ const ActiveTasksView: React.FC<{ activeTasks: ActiveTask[] }> = ({ activeTasks 
 	// both set the grid contributes no buttons, while `actions` still renders.
 	return (
 		<Card noBodyPadding>
-			<CardDataGrid<TaskRow>
-				title="Active Tasks"
-				actions={<span style={styles.runningCount}>{activeTasks.length} running</span>}
-				columns={columns}
-				data={rows}
-				noSearch
-				noExport
-				emptyTitle="No active tasks"
-			/>
+			<CardDataGrid<TaskRow> title="Active Tasks" actions={<span style={styles.runningCount}>{activeTasks.length} running</span>} columns={columns} data={rows} noSearch noExport emptyTitle="No active tasks" />
 		</Card>
 	);
 };
@@ -973,18 +952,7 @@ const ActiveTasksView: React.FC<{ activeTasks: ActiveTask[] }> = ({ activeTasks 
 // =============================================================================
 
 /** Billing dashboard with admin insight sections. */
-export const BillingDashboard: React.FC<BillingDashboardProps> = ({
-	balance,
-	transactions,
-	usageByUser,
-	usageByTeam,
-	activeTasks,
-	loading,
-	onTransactionPage,
-	fetchTransactions,
-	fetchTransactionDistinct,
-	onAddCapacity,
-}) => {
+export const BillingDashboard: React.FC<BillingDashboardProps> = ({ balance, transactions, usageByUser, usageByTeam, activeTasks, loading, onTransactionPage, fetchTransactions, fetchTransactionDistinct, onAddCapacity }) => {
 	if (loading) {
 		return <div style={styles.loading}>Loading billing data...</div>;
 	}

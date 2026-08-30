@@ -94,17 +94,7 @@ export interface MonitorConfig {
 }
 
 /** Event subscription category names available for monitoring. */
-export const EVENT_TYPE_NAMES = [
-	'DEBUGGER',
-	'DETAIL',
-	'SUMMARY',
-	'OUTPUT',
-	'FLOW',
-	'TASK',
-	'SSE',
-	'DASHBOARD',
-	'BILLING',
-] as const;
+export const EVENT_TYPE_NAMES = ['DEBUGGER', 'DETAIL', 'SUMMARY', 'OUTPUT', 'FLOW', 'TASK', 'SSE', 'DASHBOARD', 'BILLING'] as const;
 
 /** One subscription category name. */
 export type EventTypeName = (typeof EVENT_TYPE_NAMES)[number];

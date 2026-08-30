@@ -36,7 +36,7 @@ permissions:
 # mind if iterating.
 on:
   workflow_run:
-    workflows: ["CI"]
+    workflows: ['CI']
     branches: [develop]
     types: [completed]
   workflow_dispatch:

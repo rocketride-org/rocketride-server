@@ -45,13 +45,7 @@
 
 import * as vscode from 'vscode';
 import { EventEmitter } from 'events';
-import {
-	RocketRideClient,
-	DAPMessage,
-	TraceType,
-	AuthenticationException,
-	LoginAttemptCancelledError,
-} from 'rocketride';
+import { RocketRideClient, DAPMessage, TraceType, AuthenticationException, LoginAttemptCancelledError } from 'rocketride';
 import { ConfigManager, type ConnectionMode, type ConnectionGroup, type ConnectionGroupConfig } from '../config';
 import { EngineRegistry, EngineManager, type EngineStatusEvent } from '../engine';
 import { getUserConfigDir, getSystemInstallDir } from '../engine/config/config-migration';
@@ -62,10 +56,7 @@ import { connectionModeRequiresApiKey, connectionModeUsesOAuth } from '../shared
 import { mergeEnvText, resolveConnectionEnv } from '../shared/util/envFile';
 import { getIdeName } from '../shared/util/ide';
 import { CloudAuthProvider } from '../auth/CloudAuthProvider';
-import {
-	ConnectionGenerationController,
-	GenerationOwnedOperationSlot,
-} from './connection-generation';
+import { ConnectionGenerationController, GenerationOwnedOperationSlot } from './connection-generation';
 
 export class ConnectionManager extends EventEmitter {
 	private static instance: ConnectionManager;
@@ -135,7 +126,6 @@ export class ConnectionManager extends EventEmitter {
 		this.engineRegistry.on('status', this.engineStatusHandler);
 	}
 
-
 	/**
 	 * Tears down and disconnects. Called on extension deactivation.
 	 */
@@ -170,9 +160,7 @@ export class ConnectionManager extends EventEmitter {
 			case 'working': {
 				// Show engine progress (downloading, extracting, starting) in connection status.
 				// Only for events targeting this CM's configured mode.
-				const targetMode = this.getGroupConfig().connectionMode
-					?? this.configManager.getConfig().development.connectionMode
-					?? 'local';
+				const targetMode = this.getGroupConfig().connectionMode ?? this.configManager.getConfig().development.connectionMode ?? 'local';
 				if (event.mode === targetMode) {
 					this.updateConnectionStatus({
 						state: ConnectionState.CONNECTING,
@@ -195,7 +183,9 @@ export class ConnectionManager extends EventEmitter {
 					const generation = this.invalidateConnectionAttempts();
 					this.connectedMode = undefined;
 					this.engineUri = undefined;
-					this.client?.disconnect().catch(() => { /* best effort */ });
+					this.client?.disconnect().catch(() => {
+						/* best effort */
+					});
 					if (event.phase === 'error') {
 						this.updateConnectionStatus({
 							state: ConnectionState.DISCONNECTED,
@@ -219,9 +209,7 @@ export class ConnectionManager extends EventEmitter {
 				// configured to use. The registry may manage multiple engines but
 				// each CM only cares about its own group's active mode.
 				const rawMode = this.getGroupConfig().connectionMode;
-				const effectiveMode = rawMode
-					?? this.configManager.getConfig().development.connectionMode
-					?? 'local';
+				const effectiveMode = rawMode ?? this.configManager.getConfig().development.connectionMode ?? 'local';
 
 				if (event.mode !== effectiveMode) return;
 				if (!event.uri) return;
@@ -293,8 +281,7 @@ export class ConnectionManager extends EventEmitter {
 
 	/** True while `generation` is still the active connection attempt. */
 	private isCurrentConnectionAttempt(generation: number | undefined): boolean {
-		return this.connectionGeneration.isCurrentAttempt(generation)
-			&& !this.isDisposing;
+		return this.connectionGeneration.isCurrentAttempt(generation) && !this.isDisposing;
 	}
 
 	/** True while `generation` is the newest lifecycle generation of any kind. */
@@ -341,11 +328,7 @@ export class ConnectionManager extends EventEmitter {
 	 * is open. Skips the write when the file already matches, so reconnects
 	 * don't churn `.env`.
 	 */
-	private async syncEnvFile(
-		mode: ConnectionMode,
-		apiKey: string,
-		generation: number,
-	): Promise<void> {
+	private async syncEnvFile(mode: ConnectionMode, apiKey: string, generation: number): Promise<void> {
 		// Serialized per generation: an older sync either observes lost
 		// ownership before writing, or finishes before a newer one begins —
 		// so two reconnects can never interleave .env reads and writes.
@@ -427,7 +410,7 @@ export class ConnectionManager extends EventEmitter {
 		if (!this.isCurrentConnectionGeneration(generation)) return;
 
 		// Full cycle: disconnect old manager → validate config → reconcile
-		if (!await this.disconnectForGeneration(generation)) return;
+		if (!(await this.disconnectForGeneration(generation))) return;
 		await this.initializeForGeneration(generation);
 		if (!this.isCurrentConnectionGeneration(generation)) return;
 
@@ -589,11 +572,7 @@ export class ConnectionManager extends EventEmitter {
 			},
 			onConnectError: async (error: Error) => {
 				const generation = this.connectionGeneration.callbackGeneration;
-				if (
-					!this.connectionGeneration.isCurrentCallback(generation)
-					|| this.isDisposing
-					|| error instanceof LoginAttemptCancelledError
-				) return;
+				if (!this.connectionGeneration.isCurrentCallback(generation) || this.isDisposing || error instanceof LoginAttemptCancelledError) return;
 				// Auth rejection: stop retrying, clear stale credentials, and
 				// open the auth page so the user can fix them.
 				if (error instanceof AuthenticationException) {
@@ -604,7 +583,9 @@ export class ConnectionManager extends EventEmitter {
 					// retrying with stale credentials. The reconcile path will
 					// call connectToEngine() with fresh credentials after the
 					// user fixes them in Settings and saves.
-					this.client.disconnect().catch(() => { /* best effort */ });
+					this.client.disconnect().catch(() => {
+						/* best effort */
+					});
 
 					// Only clear the cloud token — on-prem/docker/service keys
 					// live in config, not SecretStorage.
@@ -708,10 +689,14 @@ export class ConnectionManager extends EventEmitter {
 	 * @param hostUrl - Host URL for cloud/onprem probe (optional).
 	 */
 	static async getEngineStatus(mode: ConnectionMode, hostUrl?: string): Promise<import('../engine/engine-backend').EngineBackendStatus> {
-		return EngineManager.getEngineStatus(mode, {
-			localParentDir: getUserConfigDir(),
-			serviceInstallDir: getSystemInstallDir(),
-		}, hostUrl);
+		return EngineManager.getEngineStatus(
+			mode,
+			{
+				localParentDir: getUserConfigDir(),
+				serviceInstallDir: getSystemInstallDir(),
+			},
+			hostUrl
+		);
 	}
 
 	// Engine lifecycle operations (install, start, stop, remove) are managed
@@ -816,13 +801,10 @@ export class ConnectionManager extends EventEmitter {
 		return { services: this.cachedServices ?? {}, icons: this.cachedIcons ?? {} };
 	}
 
-	public async refreshServices(
-		generation = this.connectionGeneration.callbackGeneration,
-	): Promise<void> {
+	public async refreshServices(generation = this.connectionGeneration.callbackGeneration): Promise<void> {
 		// Ownership: publish only while `generation` still owns callbacks and
 		// the connection is live — a stale refresh never touches the cache.
-		const ownsGeneration = () => this.connectionGeneration.isCurrentCallback(generation)
-			&& !this.isDisposing;
+		const ownsGeneration = () => this.connectionGeneration.isCurrentCallback(generation) && !this.isDisposing;
 		const isCurrent = () => ownsGeneration() && this.isConnected();
 		if (!ownsGeneration()) return;
 		if (!this.isConnected() || !this.client) {
@@ -845,14 +827,12 @@ export class ConnectionManager extends EventEmitter {
 					this.emit('shell:servicesUpdated', { services, icons, servicesError: undefined });
 					return;
 				}
-				const msg = outcome.reason instanceof Error
-					? outcome.reason.message
-					: String(outcome.reason);
+				const msg = outcome.reason instanceof Error ? outcome.reason.message : String(outcome.reason);
 				this.cachedServices = null;
 				this.cachedIcons = null;
 				this.cachedServicesError = msg;
 				this.emit('shell:servicesUpdated', { services: {}, icons: {}, servicesError: msg });
-			},
+			}
 		);
 	}
 

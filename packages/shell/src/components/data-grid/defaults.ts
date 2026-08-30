@@ -368,12 +368,7 @@ function parseCellDateMs(value: unknown): number | null {
  * @param rrType - The base field's declared column type, if any.
  * @returns True when the cell passes this entry.
  */
-function matchesFilterEntry(
-	cellValue: unknown,
-	value: string | string[],
-	suffix: RangeSuffix,
-	rrType: GridColumnRRType | undefined,
-): boolean {
+function matchesFilterEntry(cellValue: unknown, value: string | string[], suffix: RangeSuffix, rrType: GridColumnRRType | undefined): boolean {
 	// ── Array value: set membership (server-side IN / contains-ANY) ─────────
 	if (Array.isArray(value)) {
 		// Arrays are invalid on range keys — the entry is inert.
@@ -457,11 +452,7 @@ function matchesFilterEntry(
  * @param columns - The grid's declared columns (rrType lookup by base field).
  * @returns True when the row passes every committed entry.
  */
-export function rowMatchesFilters(
-	row: Record<string, unknown>,
-	filters: Record<string, string | string[]>,
-	columns: GridColumnDefinition[],
-): boolean {
+export function rowMatchesFilters(row: Record<string, unknown>, filters: Record<string, string | string[]>, columns: GridColumnDefinition[]): boolean {
 	for (const [key, rawValue] of Object.entries(filters)) {
 		// Step 1: normalize — empty string / emptied array means "filter off".
 		let value: string | string[];
@@ -621,7 +612,7 @@ export function createActionsColumn<Row>(config: IActionsColumnConfig<Row>): Gri
 			wrap.className = 'rr-cell-actions';
 			for (const action of actions) {
 				const label = typeof action.label === 'function' ? action.label(row) : action.label;
-				const kind = typeof action.kind === 'function' ? action.kind(row) : action.kind ?? 'ghost';
+				const kind = typeof action.kind === 'function' ? action.kind(row) : (action.kind ?? 'ghost');
 				wrap.appendChild(buttonEl(kind, label, action.key));
 			}
 			return wrap;
@@ -763,7 +754,7 @@ export function formatDateValue(value: unknown, fmt: IColumnFormat): string | nu
 				hours: date.getUTCHours(),
 				minutes: date.getUTCMinutes(),
 				seconds: date.getUTCSeconds(),
-		  }
+			}
 		: {
 				year: date.getFullYear(),
 				month: date.getMonth() + 1,
@@ -771,7 +762,7 @@ export function formatDateValue(value: unknown, fmt: IColumnFormat): string | nu
 				hours: date.getHours(),
 				minutes: date.getMinutes(),
 				seconds: date.getSeconds(),
-		  };
+			};
 	const out: string[] = [];
 	// Step 1: the date part (exclusive pair).
 	if (dateFormat === 'MM/YY') {
@@ -805,8 +796,7 @@ export function formatDateValue(value: unknown, fmt: IColumnFormat): string | nu
  */
 export function formatNumberValue(value: unknown, fmt: IColumnFormat): string | null {
 	if (fmt.decimals === undefined && !fmt.thousands && !fmt.currency) return null;
-	const num =
-		typeof value === 'number' ? value : typeof value === 'string' && value.trim() !== '' ? Number(value) : Number.NaN;
+	const num = typeof value === 'number' ? value : typeof value === 'string' && value.trim() !== '' ? Number(value) : Number.NaN;
 	if (Number.isNaN(num)) return null;
 	// Format the magnitude, then re-apply sign and prefix around it.
 	let text = fmt.decimals !== undefined ? Math.abs(num).toFixed(fmt.decimals) : String(Math.abs(num));
@@ -846,8 +836,7 @@ function wrapFormatter(field: string, base: ColumnFormatterFn | undefined): Colu
 			if (fmt.align) {
 				const el = cell.getElement();
 				el.style.textAlign = fmt.align;
-				el.style.justifyContent =
-					fmt.align === 'left' ? 'flex-start' : fmt.align === 'center' ? 'center' : 'flex-end';
+				el.style.justifyContent = fmt.align === 'left' ? 'flex-start' : fmt.align === 'center' ? 'center' : 'flex-end';
 			}
 			const dateText = formatDateValue(cell.getValue(), fmt);
 			if (dateText !== null) return mutedEl(dateText);
@@ -885,11 +874,7 @@ interface IPersistedColumn {
  * @returns Column definitions for the undeclared keys (visible: false unless
  *          the persisted layout says otherwise).
  */
-export function buildAutoColumns(
-	sampleRow: Record<string, unknown>,
-	knownFields: Set<string>,
-	persisted?: IPersistedColumn[],
-): ColumnDefinition[] {
+export function buildAutoColumns(sampleRow: Record<string, unknown>, knownFields: Set<string>, persisted?: IPersistedColumn[]): ColumnDefinition[] {
 	const persistedByField = new Map<string, IPersistedColumn>();
 	for (const entry of persisted ?? []) {
 		if (entry.field) persistedByField.set(entry.field, entry);
@@ -1090,10 +1075,7 @@ export function applyDefaultLayout(columns: GridColumnDefinition[]): GridColumnD
 	// every other column (array order, hidden).
 	const defaulted = columns.filter((c) => c.rrDefault === true);
 	const rest = columns.filter((c) => c.rrDefault !== true);
-	return [
-		...defaulted.map((c) => ({ ...c, visible: true })),
-		...rest.map((c) => ({ ...c, visible: false })),
-	];
+	return [...defaulted.map((c) => ({ ...c, visible: true })), ...rest.map((c) => ({ ...c, visible: false }))];
 }
 
 /**
@@ -1106,9 +1088,7 @@ export function applyDefaultLayout(columns: GridColumnDefinition[]): GridColumnD
  *     grid declares no default sort.
  */
 export function defaultSorters(columns: GridColumnDefinition[]): { column: string; dir: 'asc' | 'desc' }[] {
-	return columns
-		.filter((c) => c.rrDefaultSort != null && typeof c.field === 'string')
-		.map((c) => ({ column: c.field as string, dir: c.rrDefaultSort as 'asc' | 'desc' }));
+	return columns.filter((c) => c.rrDefaultSort != null && typeof c.field === 'string').map((c) => ({ column: c.field as string, dir: c.rrDefaultSort as 'asc' | 'desc' }));
 }
 
 /**
@@ -1120,9 +1100,7 @@ export function defaultSorters(columns: GridColumnDefinition[]): { column: strin
  * @returns Group-by field names; [] when the grid declares no grouping.
  */
 export function defaultGroupFields(columns: GridColumnDefinition[]): string[] {
-	return columns
-		.filter((c) => c.rrGroup === true && typeof c.field === 'string')
-		.map((c) => c.field as string);
+	return columns.filter((c) => c.rrGroup === true && typeof c.field === 'string').map((c) => c.field as string);
 }
 
 /**
@@ -1143,9 +1121,7 @@ export function defaultGroupFields(columns: GridColumnDefinition[]): string[] {
  *     {@link applyDefaultLayout} first so contract-mode order/visibility land).
  * @returns Tabulator-ready definitions without DataGrid-private markers.
  */
-export function normalizeColumns(
-	columns: (ColumnDefinition & Partial<Pick<GridColumnDefinition, 'rrNoPopup' | 'rrType' | 'rrDefault' | 'rrDefaultSort' | 'rrGroup' | 'rrDescription' | 'rrOptions'>>)[],
-): ColumnDefinition[] {
+export function normalizeColumns(columns: (ColumnDefinition & Partial<Pick<GridColumnDefinition, 'rrNoPopup' | 'rrType' | 'rrDefault' | 'rrDefaultSort' | 'rrGroup' | 'rrDescription' | 'rrOptions'>>)[]): ColumnDefinition[] {
 	return columns.map((def) => {
 		// Step 1: strip the markers by destructuring so Tabulator never sees
 		// unknown options (the DataGrid retains the PRE-normalized defs for
@@ -1276,12 +1252,7 @@ interface IPendingFilterControls {
  * @param onRendered - Popup render hook (used to focus the input on open).
  * @returns The pending-state verbs for the section footer.
  */
-function buildTextFilterControls(
-	section: HTMLElement,
-	bridge: IHeaderFilterBridge,
-	field: string,
-	onRendered: (callback: () => void) => void,
-): IPendingFilterControls {
+function buildTextFilterControls(section: HTMLElement, bridge: IHeaderFilterBridge, field: string, onRendered: (callback: () => void) => void): IPendingFilterControls {
 	// Step 1: input prefilled from current state (arrays never appear in
 	// 'text' mode, but coerce defensively in case the mode was switched).
 	const input = document.createElement('input');
@@ -1339,12 +1310,7 @@ const BOOLEAN_ENTRIES: IChecklistEntry[] = [
  * @param loadEntries - Async provider of the checklist rows (value + label).
  * @returns The pending-state verbs for the section footer.
  */
-function buildChecklistFilterControls(
-	section: HTMLElement,
-	bridge: IHeaderFilterBridge,
-	field: string,
-	loadEntries: () => Promise<IChecklistEntry[]>,
-): IPendingFilterControls {
+function buildChecklistFilterControls(section: HTMLElement, bridge: IHeaderFilterBridge, field: string, loadEntries: () => Promise<IChecklistEntry[]>): IPendingFilterControls {
 	// ── Pending checklist state ─────────────────────────────────────────────
 	// Wire values are strings; entry values arrive pre-stringified.
 	const current = bridge.getValue(field);
@@ -1386,9 +1352,7 @@ function buildChecklistFilterControls(
 			loaded = true;
 			// Step 2: initial check-set — filter OFF means everything admitted
 			// (all checked); an active array checks its (still-known) members.
-			checked = activeArray
-				? new Set(activeArray.filter((value) => seen.has(value)))
-				: new Set(allValues);
+			checked = activeArray ? new Set(activeArray.filter((value) => seen.has(value))) : new Set(allValues);
 			// Step 3: render one toggle row per value.
 			list.textContent = '';
 			if (allValues.length === 0) {
@@ -1507,11 +1471,7 @@ function normalizeTimeText(text: string): string | null {
  *                the bridge's range API).
  * @returns The pending-state verbs for the section footer.
  */
-function buildDateFilterControls(
-	section: HTMLElement,
-	bridge: IHeaderFilterBridge,
-	field: string,
-): IPendingFilterControls {
+function buildDateFilterControls(section: HTMLElement, bridge: IHeaderFilterBridge, field: string): IPendingFilterControls {
 	// Start / End input pairs prefilled from the committed range.
 	const current = bridge.getRange(field);
 
@@ -1612,11 +1572,7 @@ function buildDateFilterControls(
  *                the bridge's range API).
  * @returns The pending-state verbs for the section footer.
  */
-function buildNumberFilterControls(
-	section: HTMLElement,
-	bridge: IHeaderFilterBridge,
-	field: string,
-): IPendingFilterControls {
+function buildNumberFilterControls(section: HTMLElement, bridge: IHeaderFilterBridge, field: string): IPendingFilterControls {
 	// Min / Max inputs prefilled from the committed bounds (numeric bounds
 	// ride the same suffixed keys as date bounds, so getRange serves both).
 	const current = bridge.getRange(field);
@@ -1674,12 +1630,7 @@ function buildNumberFilterControls(
  * @param onRendered - Popup render hook (focuses the 'text' input on open).
  * @returns The section element.
  */
-function buildFilterSection(
-	bridge: IHeaderFilterBridge,
-	field: string,
-	mode: Exclude<HeaderFilterMode, 'none'>,
-	onRendered: (callback: () => void) => void,
-): HTMLElement {
+function buildFilterSection(bridge: IHeaderFilterBridge, field: string, mode: Exclude<HeaderFilterMode, 'none'>, onRendered: (callback: () => void) => void): HTMLElement {
 	const section = document.createElement('div');
 	section.className = 'rr-grid-hp-section';
 	section.appendChild(popupLabelEl('Filter'));
@@ -1707,8 +1658,8 @@ function buildFilterSection(
 							.map((value) => ({ value, label: value }));
 						return [...declared, ...extras];
 					},
-					() => declared,
-				),
+					() => declared
+				)
 			);
 			break;
 		}
@@ -1779,7 +1730,12 @@ function alignIcon(dir: 'left' | 'center' | 'right'): SVGElement {
 	svg.setAttribute('aria-hidden', 'true');
 	// Bars alternate full / narrow; the narrow ones sit flush per direction.
 	const narrowX = dir === 'left' ? 0 : dir === 'center' ? 2 : 4;
-	const bars: [number, number][] = [[0, 12], [narrowX, 8], [0, 12], [narrowX, 8]];
+	const bars: [number, number][] = [
+		[0, 12],
+		[narrowX, 8],
+		[0, 12],
+		[narrowX, 8],
+	];
 	bars.forEach(([x, width], i) => {
 		const rect = document.createElementNS(NS, 'rect');
 		rect.setAttribute('x', String(x));
@@ -1832,12 +1788,7 @@ function buildFormatSection(bridge: IHeaderFormatBridge, field: string, mode: He
 	 * @param onClick - Applies the pick's patch through the bridge.
 	 * @returns The button element.
 	 */
-	const optionBtn = (
-		content: string | SVGElement,
-		title: string,
-		isOn: () => boolean,
-		onClick: () => void,
-	): HTMLElement => {
+	const optionBtn = (content: string | SVGElement, title: string, isOn: () => boolean, onClick: () => void): HTMLElement => {
 		const btn = document.createElement('button');
 		btn.type = 'button';
 		btn.className = 'rr-grid-hp-fmt-btn';
@@ -1858,9 +1809,12 @@ function buildFormatSection(bridge: IHeaderFormatBridge, field: string, mode: He
 	alignRow.className = 'rr-grid-hp-fmt-row';
 	for (const dir of ['left', 'center', 'right'] as const) {
 		alignRow.appendChild(
-			optionBtn(alignIcon(dir), `Align ${dir}`, () => current().align === dir, () =>
-				bridge.set(field, { align: current().align === dir ? undefined : dir }),
-			),
+			optionBtn(
+				alignIcon(dir),
+				`Align ${dir}`,
+				() => current().align === dir,
+				() => bridge.set(field, { align: current().align === dir ? undefined : dir })
+			)
 		);
 	}
 	section.appendChild(alignRow);
@@ -1874,9 +1828,12 @@ function buildFormatSection(bridge: IHeaderFormatBridge, field: string, mode: He
 		dateRow.className = 'rr-grid-hp-fmt-row';
 		for (const dateFormat of ['MM/YY', 'MM/DD/YY'] as const) {
 			dateRow.appendChild(
-				optionBtn(dateFormat, `Date as ${dateFormat}`, () => current().dateFormat === dateFormat, () =>
-					bridge.set(field, { dateFormat: current().dateFormat === dateFormat ? undefined : dateFormat }),
-				),
+				optionBtn(
+					dateFormat,
+					`Date as ${dateFormat}`,
+					() => current().dateFormat === dateFormat,
+					() => bridge.set(field, { dateFormat: current().dateFormat === dateFormat ? undefined : dateFormat })
+				)
 			);
 		}
 		section.appendChild(dateRow);
@@ -1885,20 +1842,29 @@ function buildFormatSection(bridge: IHeaderFormatBridge, field: string, mode: He
 		timeRow.className = 'rr-grid-hp-fmt-row';
 		for (const timeFormat of ['HH:MM', 'HH:MM:SS'] as const) {
 			timeRow.appendChild(
-				optionBtn(timeFormat, `Time as ${timeFormat}`, () => current().timeFormat === timeFormat, () =>
-					bridge.set(field, { timeFormat: current().timeFormat === timeFormat ? undefined : timeFormat }),
-				),
+				optionBtn(
+					timeFormat,
+					`Time as ${timeFormat}`,
+					() => current().timeFormat === timeFormat,
+					() => bridge.set(field, { timeFormat: current().timeFormat === timeFormat ? undefined : timeFormat })
+				)
 			);
 		}
 		timeRow.appendChild(
-			optionBtn('24HR', '24-hour clock', () => current().clock24 === true, () =>
-				bridge.set(field, { clock24: current().clock24 ? undefined : true }),
-			),
+			optionBtn(
+				'24HR',
+				'24-hour clock',
+				() => current().clock24 === true,
+				() => bridge.set(field, { clock24: current().clock24 ? undefined : true })
+			)
 		);
 		timeRow.appendChild(
-			optionBtn('UTC', 'Show in UTC (default: your local time)', () => current().utc === true, () =>
-				bridge.set(field, { utc: current().utc ? undefined : true }),
-			),
+			optionBtn(
+				'UTC',
+				'Show in UTC (default: your local time)',
+				() => current().utc === true,
+				() => bridge.set(field, { utc: current().utc ? undefined : true })
+			)
 		);
 		section.appendChild(timeRow);
 	}
@@ -1908,22 +1874,36 @@ function buildFormatSection(bridge: IHeaderFormatBridge, field: string, mode: He
 	if (mode === 'number') {
 		const row = document.createElement('div');
 		row.className = 'rr-grid-hp-fmt-row';
-		for (const [label, places] of [['.', 0], ['.0', 1], ['.00', 2], ['.000', 3]] as const) {
+		for (const [label, places] of [
+			['.', 0],
+			['.0', 1],
+			['.00', 2],
+			['.000', 3],
+		] as const) {
 			row.appendChild(
-				optionBtn(label, `${places} decimal place${places === 1 ? '' : 's'}`, () => current().decimals === places, () =>
-					bridge.set(field, { decimals: current().decimals === places ? undefined : places }),
-				),
+				optionBtn(
+					label,
+					`${places} decimal place${places === 1 ? '' : 's'}`,
+					() => current().decimals === places,
+					() => bridge.set(field, { decimals: current().decimals === places ? undefined : places })
+				)
 			);
 		}
 		row.appendChild(
-			optionBtn(',', 'Thousands separators', () => current().thousands === true, () =>
-				bridge.set(field, { thousands: current().thousands ? undefined : true }),
-			),
+			optionBtn(
+				',',
+				'Thousands separators',
+				() => current().thousands === true,
+				() => bridge.set(field, { thousands: current().thousands ? undefined : true })
+			)
 		);
 		row.appendChild(
-			optionBtn('$', 'Currency prefix', () => current().currency === true, () =>
-				bridge.set(field, { currency: current().currency ? undefined : true }),
-			),
+			optionBtn(
+				'$',
+				'Currency prefix',
+				() => current().currency === true,
+				() => bridge.set(field, { currency: current().currency ? undefined : true })
+			)
 		);
 		section.appendChild(row);
 	}
@@ -1955,12 +1935,7 @@ function buildFormatSection(bridge: IHeaderFormatBridge, field: string, mode: He
  * @param onRendered - Registers a callback run once the popup is in the DOM.
  * @returns The popup panel element.
  */
-export function buildHeaderPopup(
-	this: unknown,
-	_e: MouseEvent | TouchEvent,
-	column: ColumnComponent,
-	onRendered: (callback: () => void) => void,
-): HTMLElement {
+export function buildHeaderPopup(this: unknown, _e: MouseEvent | TouchEvent, column: ColumnComponent, onRendered: (callback: () => void) => void): HTMLElement {
 	// DataGrid-private state stashed on the instance at build time.
 	const state = column.getTable() as IGridInstanceState;
 	const panel = document.createElement('div');
@@ -2028,9 +2003,7 @@ export function buildHeaderPopup(
 	// Alphabetical by title (user feedback 2026-07-16): the list is a lookup
 	// ("is X available?"), so dictionary order beats display order — which
 	// drifts per user as columns get dragged around and persisted.
-	titled.sort((a, b) =>
-		String(a.getDefinition().title).localeCompare(String(b.getDefinition().title), undefined, { numeric: true }),
-	);
+	titled.sort((a, b) => String(a.getDefinition().title).localeCompare(String(b.getDefinition().title), undefined, { numeric: true }));
 	for (const col of titled) {
 		// The declared rrDescription lands on headerTooltip (normalizeColumns),
 		// so the toggle row inherits it as its native title tooltip.

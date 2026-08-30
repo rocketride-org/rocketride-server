@@ -78,9 +78,7 @@ const BottomPanel: React.FC<BottomPanelProps> = ({ onClose }) => {
 					<X size={16} />
 				</button>
 			</div>
-			<div style={styles.content}>
-				Ready. Select a project to see output here.
-			</div>
+			<div style={styles.content}>Ready. Select a project to see output here.</div>
 		</div>
 	);
 };

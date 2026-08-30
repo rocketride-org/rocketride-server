@@ -327,7 +327,6 @@ export interface OrgInfo {
  * field is used for subsequent reconnects in persist mode.
  */
 
-
 export interface ConnectResult {
 	/**
 	 * Short-lived RocketRide session token (`rr_…`) that can be replayed on

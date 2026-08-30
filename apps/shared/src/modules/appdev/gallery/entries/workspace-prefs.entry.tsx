@@ -80,9 +80,7 @@ const { settings, updateSetting, appState, updateAppState, activeAppId } = useWo
 		},
 		{
 			label: 'Types',
-			rows: [
-				{ name: 'IPrefsApi', type: '{ getPref(key) => unknown, setPref(key, value) => void }', dir: 'in', note: 'The minimal prefs contract; writes shallow-merge into the bag.' },
-			],
+			rows: [{ name: 'IPrefsApi', type: '{ getPref(key) => unknown, setPref(key, value) => void }', dir: 'in', note: 'The minimal prefs contract; writes shallow-merge into the bag.' }],
 		},
 	],
 };

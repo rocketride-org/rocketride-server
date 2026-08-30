@@ -76,17 +76,7 @@ function runBadge(connected: boolean, active: boolean): IRunBadge {
  * with a row click opening the record detail panel.
  */
 const EventsApp: React.FC<ShellAppProps> = (_props) => {
-	const {
-		config,
-		snapshot,
-		connected,
-		toggleActive,
-		clear,
-		setToken,
-		toggleType,
-		selectAllTypes,
-		clearTypes,
-	} = useEventCapture();
+	const { config, snapshot, connected, toggleActive, clear, setToken, toggleType, selectAllTypes, clearTypes } = useEventCapture();
 
 	// The event whose body is open in the detail drawer (null = closed).
 	const [selected, setSelected] = useState<EventRow | null>(null);
@@ -97,52 +87,48 @@ const EventsApp: React.FC<ShellAppProps> = (_props) => {
 
 	return (
 		<AppLayout sidebar={SIDEBAR_FRAME_ONLY} showStatus>
-		<div style={styles.root}>
-			<ContentHeader
-				title="Event Monitor"
-				subtitle="Capture and inspect live DAP events from the connected engine."
-				actions={<StatusBadge variant={badge.variant}>{badge.label}</StatusBadge>}
-			/>
+			<div style={styles.root}>
+				<ContentHeader title="Event Monitor" subtitle="Capture and inspect live DAP events from the connected engine." actions={<StatusBadge variant={badge.variant}>{badge.label}</StatusBadge>} />
 
-			<div style={styles.content}>
-				{/* Capture metrics (natural height). */}
-				<div style={styles.staticRow}>
-					<MiniContainer columns={3}>
-						<MiniCard value={snapshot.total.toLocaleString()} label="Captured" />
-						<MiniCard value={snapshot.inMemory.toLocaleString()} label="In memory" />
-						<MiniCard value={`${snapshot.rate}/s`} label="Event rate" />
-					</MiniContainer>
-				</div>
+				<div style={styles.content}>
+					{/* Capture metrics (natural height). */}
+					<div style={styles.staticRow}>
+						<MiniContainer columns={3}>
+							<MiniCard value={snapshot.total.toLocaleString()} label="Captured" />
+							<MiniCard value={snapshot.inMemory.toLocaleString()} label="In memory" />
+							<MiniCard value={`${snapshot.rate}/s`} label="Event rate" />
+						</MiniContainer>
+					</div>
 
-				{/* Capture controls + subscription (natural height); Start/Stop/Clear
+					{/* Capture controls + subscription (natural height); Start/Stop/Clear
 				    live in this card's header. */}
-				<div style={styles.staticRow}>
-					<CaptureCard
-						config={config}
-						canStart={canStart}
-						onToggleActive={toggleActive}
-						onClear={() => {
-							// Clearing the buffer must also dismiss the detail drawer:
-							// the selected row no longer exists in the (now-empty) capture.
-							clear();
-							setSelected(null);
-						}}
-						onSetToken={setToken}
-						onToggleType={toggleType}
-						onSelectAllTypes={selectAllTypes}
-						onClearTypes={clearTypes}
-					/>
+					<div style={styles.staticRow}>
+						<CaptureCard
+							config={config}
+							canStart={canStart}
+							onToggleActive={toggleActive}
+							onClear={() => {
+								// Clearing the buffer must also dismiss the detail drawer:
+								// the selected row no longer exists in the (now-empty) capture.
+								clear();
+								setSelected(null);
+							}}
+							onSetToken={setToken}
+							onToggleType={toggleType}
+							onSelectAllTypes={selectAllTypes}
+							onClearTypes={clearTypes}
+						/>
+					</div>
+
+					{/* The live event stream fills the remaining height and scrolls. */}
+					<div style={styles.gridFill}>
+						<EventsGrid rows={snapshot.rows} onRowClick={setSelected} />
+					</div>
 				</div>
 
-				{/* The live event stream fills the remaining height and scrolls. */}
-				<div style={styles.gridFill}>
-					<EventsGrid rows={snapshot.rows} onRowClick={setSelected} />
-				</div>
+				{/* Record slide-over for the selected event's body. */}
+				<EventDetailPanel event={selected} onClose={() => setSelected(null)} />
 			</div>
-
-			{/* Record slide-over for the selected event's body. */}
-			<EventDetailPanel event={selected} onClose={() => setSelected(null)} />
-		</div>
 		</AppLayout>
 	);
 };

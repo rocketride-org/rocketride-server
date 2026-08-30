@@ -128,16 +128,21 @@ const ProfilerApp: React.FC<ShellAppProps> = (_props) => {
 			destroyDocs();
 			setReady(false);
 		};
-	// One-time init gated on `seeded`: re-running on appState/settings churn
-	// would tear down and rebuild the Documents + connection stores.
-	// eslint-disable-next-line react-hooks/exhaustive-deps
+		// One-time init gated on `seeded`: re-running on appState/settings churn
+		// would tear down and rebuild the Documents + connection stores.
+		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [seeded]);
 
 	// =========================================================================
 	// RENDER
 	// =========================================================================
 
-	if (!ready) return <AppLayout sidebar={SIDEBAR_FRAME_ONLY} showStatus><div style={styles.center}>Initialising...</div></AppLayout>;
+	if (!ready)
+		return (
+			<AppLayout sidebar={SIDEBAR_FRAME_ONLY} showStatus>
+				<div style={styles.center}>Initialising...</div>
+			</AppLayout>
+		);
 	return (
 		<AppLayout sidebar={SIDEBAR_FRAME_ONLY} showStatus>
 			<ProfilerAppReady docs={getDocs()!} />
@@ -192,32 +197,12 @@ const ProfilerAppReady: React.FC<{ docs: Documents }> = ({ docs }) => {
 					const activeDoc = activeDocUri ? state.documents[activeDocUri] : undefined;
 
 					return (
-						<div
-							style={styles.groupPane}
-							onClick={() => docs.setActiveGroup(groupId)}
-						>
+						<div style={styles.groupPane} onClick={() => docs.setActiveGroup(groupId)}>
 							{/* Tab bar */}
-							<DocTabs
-								docs={docs}
-								groupId={groupId}
-								isActive={state.activeGroupId === groupId}
-								canClose={canCloseGroups}
-								onSplit={(gid, dir) => docs.splitGroupWithDocument(gid, dir)}
-								onCloseGroup={(gid) => docs.closeGroup(gid)}
-							/>
+							<DocTabs docs={docs} groupId={groupId} isActive={state.activeGroupId === groupId} canClose={canCloseGroups} onSplit={(gid, dir) => docs.splitGroupWithDocument(gid, dir)} onCloseGroup={(gid) => docs.closeGroup(gid)} />
 
 							{/* Profiler content */}
-							<div style={styles.content}>
-								{activeDoc && activeEditorId && activeDocUri?.startsWith('conn:') ? (
-									<ProfilerView
-										host={(activeDoc.content as ConnectionContent).host}
-										port={(activeDoc.content as ConnectionContent).port}
-										name={activeEditor!.label}
-									/>
-								) : (
-									<ConnectionManagerView />
-								)}
-							</div>
+							<div style={styles.content}>{activeDoc && activeEditorId && activeDocUri?.startsWith('conn:') ? <ProfilerView host={(activeDoc.content as ConnectionContent).host} port={(activeDoc.content as ConnectionContent).port} name={activeEditor!.label} /> : <ConnectionManagerView />}</div>
 						</div>
 					);
 				}}

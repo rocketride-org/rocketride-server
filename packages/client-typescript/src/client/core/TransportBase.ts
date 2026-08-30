@@ -24,21 +24,7 @@
 
 import { DAPMessage, TransportCallbacks } from '../types';
 
-const SENSITIVE_PROTOCOL_KEYS = new Set([
-	'apikey',
-	'rocketrideapikey',
-	'auth',
-	'authorization',
-	'accesstoken',
-	'refreshtoken',
-	'usertoken',
-	'credential',
-	'credentials',
-	'password',
-	'secret',
-	'clientsecret',
-	'verifier',
-]);
+const SENSITIVE_PROTOCOL_KEYS = new Set(['apikey', 'rocketrideapikey', 'auth', 'authorization', 'accesstoken', 'refreshtoken', 'usertoken', 'credential', 'credentials', 'password', 'secret', 'clientsecret', 'verifier']);
 
 /**
  * Produce a logging-only copy with credential-bearing fields removed.
@@ -49,15 +35,15 @@ export function redactProtocolMessage<T>(value: T): T {
 		if (!item || typeof item !== 'object' || item instanceof Uint8Array) return item;
 		if (ancestors.has(item)) return '<circular>';
 		ancestors.add(item);
-		const redacted = Array.isArray(item) ? item.map(redact) : Object.fromEntries(
-			Object.entries(item as Record<string, unknown>).map(([key, child]) => {
-				const normalizedKey = key.replace(/[^a-z0-9]/gi, '').toLowerCase();
-				const isSensitive = SENSITIVE_PROTOCOL_KEYS.has(normalizedKey)
-					|| normalizedKey === 'token'
-					|| normalizedKey.endsWith('token');
-				return [key, isSensitive ? '<redacted>' : redact(child)];
-			}),
-		);
+		const redacted = Array.isArray(item)
+			? item.map(redact)
+			: Object.fromEntries(
+					Object.entries(item as Record<string, unknown>).map(([key, child]) => {
+						const normalizedKey = key.replace(/[^a-z0-9]/gi, '').toLowerCase();
+						const isSensitive = SENSITIVE_PROTOCOL_KEYS.has(normalizedKey) || normalizedKey === 'token' || normalizedKey.endsWith('token');
+						return [key, isSensitive ? '<redacted>' : redact(child)];
+					})
+				);
 		ancestors.delete(item);
 		return redacted;
 	};

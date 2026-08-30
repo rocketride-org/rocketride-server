@@ -93,7 +93,9 @@ const StatusBar: React.FC<StatusBarProps> = ({ appName, isConnected, isAuthentic
 	return (
 		<div style={styles.bar}>
 			<div style={styles.left}>
-				<span style={{ cursor: 'pointer' }} onClick={onToggleBottomPanel}>{appName}</span>
+				<span style={{ cursor: 'pointer' }} onClick={onToggleBottomPanel}>
+					{appName}
+				</span>
 				{isAuthenticated && (
 					<>
 						<span style={styles.dot(isConnected)} />
@@ -107,9 +109,7 @@ const StatusBar: React.FC<StatusBarProps> = ({ appName, isConnected, isAuthentic
 				{isAuthenticated && (
 					<>
 						{statusMessage && <span>{statusMessage}</span>}
-						<span style={styles.readyLabel(isConnected)}>
-							{isConnected ? 'Ready' : 'Offline'}
-						</span>
+						<span style={styles.readyLabel(isConnected)}>{isConnected ? 'Ready' : 'Offline'}</span>
 					</>
 				)}
 			</div>

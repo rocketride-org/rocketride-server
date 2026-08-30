@@ -32,9 +32,7 @@ import type { BannerVariant } from 'shell';
 import type { IGalleryDemoProps, IGalleryEntry, KnobValues } from '../galleryTypes';
 
 /** Live demo: one Banner driven by the knob values. */
-const BannerDemo: React.FC<IGalleryDemoProps> = ({ knobs }) => (
-	<Banner variant={knobs.variant as BannerVariant}>{String(knobs.text)}</Banner>
-);
+const BannerDemo: React.FC<IGalleryDemoProps> = ({ knobs }) => <Banner variant={knobs.variant as BannerVariant}>{String(knobs.text)}</Banner>;
 
 /** Snippet builder mirroring the current knob state. */
 const buildCode = (knobs: KnobValues): string => `import { Banner } from 'shell';

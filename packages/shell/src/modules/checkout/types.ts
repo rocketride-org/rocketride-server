@@ -164,22 +164,22 @@ export interface PromoRedemption {
  */
 export type CheckoutModalPromoProps =
 	| {
-		/**
-		 * Resolves a promo code without side effects. Providing the pair
-		 * renders a Promo Code box under the plan cards.
-		 */
-		onValidatePromoCode: (code: string, priceId?: string) => Promise<PromoValidation>;
+			/**
+			 * Resolves a promo code without side effects. Providing the pair
+			 * renders a Promo Code box under the plan cards.
+			 */
+			onValidatePromoCode: (code: string, priceId?: string) => Promise<PromoValidation>;
 
-		/**
-		 * Redeems a credit-grant (hackathon) code — $0 subscription plus
-		 * immediate credits, no plan selection or payment step.
-		 */
-		onRedeemPromoCode: (code: string) => Promise<PromoRedemption>;
-	}
+			/**
+			 * Redeems a credit-grant (hackathon) code — $0 subscription plus
+			 * immediate credits, no plan selection or payment step.
+			 */
+			onRedeemPromoCode: (code: string) => Promise<PromoRedemption>;
+	  }
 	| {
-		onValidatePromoCode?: undefined;
-		onRedeemPromoCode?: undefined;
-	};
+			onValidatePromoCode?: undefined;
+			onRedeemPromoCode?: undefined;
+	  };
 
 /**
  * Props for the host-agnostic CheckoutModal component.

@@ -67,9 +67,7 @@ useEffect(() => { void grid.current?.refetch({ search: term }); }, [term]);`,
 	sections: [
 		{
 			label: 'Types',
-			rows: [
-				{ name: 'Announcement', type: '{ id, title, body, priority, valid_from?, valid_until?, link?, dismissable? }', dir: 'in', note: "One announcement; title/body are markdown, priority is 'info' | 'warning' | 'urgent'." },
-			],
+			rows: [{ name: 'Announcement', type: '{ id, title, body, priority, valid_from?, valid_until?, link?, dismissable? }', dir: 'in', note: "One announcement; title/body are markdown, priority is 'info' | 'warning' | 'urgent'." }],
 		},
 	],
 };

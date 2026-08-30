@@ -54,9 +54,7 @@ const { useWorkspace, ConnectionManager } = getShellApi();
 const DISCORD_URL = 'https://discord.gg/PMXrtenMsY';
 
 /** Honor the OS "reduce motion" setting for card hover transitions. */
-const REDUCE_MOTION =
-	typeof window !== 'undefined' &&
-	window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+const REDUCE_MOTION = typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 /** Category ids whose display label is not a simple capitalisation. */
 const CATEGORY_LABELS: Record<string, string> = {
@@ -70,8 +68,7 @@ const CATEGORY_LABELS: Record<string, string> = {
  * @param cat - Raw category id from the app manifest (e.g. "tools").
  * @returns Display label (e.g. "Tools").
  */
-const formatCategory = (cat: string): string =>
-	CATEGORY_LABELS[cat.toLowerCase()] ?? cat.charAt(0).toUpperCase() + cat.slice(1);
+const formatCategory = (cat: string): string => CATEGORY_LABELS[cat.toLowerCase()] ?? cat.charAt(0).toUpperCase() + cat.slice(1);
 
 // =============================================================================
 // MOVIE QUOTES — rotating tagline on the signed-in desktop
@@ -79,28 +76,28 @@ const formatCategory = (cat: string): string =>
 
 /** Classic movie quotes cycled in the desktop tagline. */
 const QUOTES: { text: string; source: string }[] = [
-	{ text: 'Frankly, my dear, I don\'t give a damn.', source: 'Gone with the Wind (1939)' },
-	{ text: 'I\'m gonna make him an offer he can\'t refuse.', source: 'The Godfather (1972)' },
+	{ text: "Frankly, my dear, I don't give a damn.", source: 'Gone with the Wind (1939)' },
+	{ text: "I'm gonna make him an offer he can't refuse.", source: 'The Godfather (1972)' },
 	{ text: 'May the Force be with you.', source: 'Star Wars (1977)' },
-	{ text: 'Here\'s looking at you, kid.', source: 'Casablanca (1942)' },
-	{ text: 'I\'ll be back.', source: 'The Terminator (1984)' },
-	{ text: 'Toto, I\'ve a feeling we\'re not in Kansas anymore.', source: 'The Wizard of Oz (1939)' },
+	{ text: "Here's looking at you, kid.", source: 'Casablanca (1942)' },
+	{ text: "I'll be back.", source: 'The Terminator (1984)' },
+	{ text: "Toto, I've a feeling we're not in Kansas anymore.", source: 'The Wizard of Oz (1939)' },
 	{ text: 'You talking to me?', source: 'Taxi Driver (1976)' },
 	{ text: 'E.T. phone home.', source: 'E.T. the Extra-Terrestrial (1982)' },
 	{ text: 'Go ahead, make my day.', source: 'Sudden Impact (1983)' },
 	{ text: 'Houston, we have a problem.', source: 'Apollo 13 (1995)' },
 	{ text: 'Show me the money!', source: 'Jerry Maguire (1996)' },
-	{ text: 'You can\'t handle the truth!', source: 'A Few Good Men (1992)' },
+	{ text: "You can't handle the truth!", source: 'A Few Good Men (1992)' },
 	{ text: 'I see dead people.', source: 'The Sixth Sense (1999)' },
-	{ text: 'Here\'s Johnny!', source: 'The Shining (1980)' },
+	{ text: "Here's Johnny!", source: 'The Shining (1980)' },
 	{ text: 'My precious.', source: 'The Lord of the Rings: The Two Towers (2002)' },
-	{ text: 'Life is like a box of chocolates. You never know what you\'re gonna get.', source: 'Forrest Gump (1994)' },
+	{ text: "Life is like a box of chocolates. You never know what you're gonna get.", source: 'Forrest Gump (1994)' },
 	{ text: 'I feel the need — the need for speed!', source: 'Top Gun (1986)' },
 	{ text: 'Nobody puts Baby in a corner.', source: 'Dirty Dancing (1987)' },
-	{ text: 'You\'re gonna need a bigger boat.', source: 'Jaws (1975)' },
+	{ text: "You're gonna need a bigger boat.", source: 'Jaws (1975)' },
 	{ text: 'Say hello to my little friend!', source: 'Scarface (1983)' },
 	{ text: 'Bond. James Bond.', source: 'Dr. No (1962)' },
-	{ text: 'There\'s no place like home.', source: 'The Wizard of Oz (1939)' },
+	{ text: "There's no place like home.", source: 'The Wizard of Oz (1939)' },
 	{ text: 'I am your father.', source: 'The Empire Strikes Back (1980)' },
 	{ text: 'Why so serious?', source: 'The Dark Knight (2008)' },
 	{ text: 'To infinity and beyond!', source: 'Toy Story (1995)' },
@@ -108,7 +105,7 @@ const QUOTES: { text: string; source: string }[] = [
 	{ text: 'First rule in government spending: why build one when you can have two at twice the price?', source: 'Contact (1997)' },
 	{ text: 'You shall not pass!', source: 'The Lord of the Rings: The Fellowship of the Ring (2001)' },
 	{ text: 'Hasta la vista, baby.', source: 'Terminator 2: Judgment Day (1991)' },
-	{ text: 'I\'m the king of the world!', source: 'Titanic (1997)' },
+	{ text: "I'm the king of the world!", source: 'Titanic (1997)' },
 ];
 
 /** Seconds each quote stays on screen before the rotation advances. */
@@ -121,8 +118,7 @@ const QUOTE_INTERVAL_S = 30;
  *
  * @returns Index into {@link QUOTES}.
  */
-const currentQuoteIndex = (): number =>
-	Math.floor(Date.now() / (QUOTE_INTERVAL_S * 1000)) % QUOTES.length;
+const currentQuoteIndex = (): number => Math.floor(Date.now() / (QUOTE_INTERVAL_S * 1000)) % QUOTES.length;
 
 // =============================================================================
 // GREETING — time-aware welcome, mirrored from home-ui's utils/greeting.ts
@@ -143,36 +139,11 @@ const getTimeBucket = (hour: number): TimeBucket => {
 // always-available `any` pool before a random pick, so a fraction of
 // greetings are time-neutral (and launch-flavored) at any hour.
 const GREETINGS: Record<TimeBucket | 'any', readonly string[]> = {
-	morning: [
-		'Good morning.',
-		'Morning — fresh start.',
-		'Rise and shine.',
-		'A perfect morning for a launch.',
-	],
-	afternoon: [
-		'Good afternoon.',
-		"Hope the day's treating you well.",
-		'Cruising through the afternoon.',
-	],
-	evening: [
-		'Good evening.',
-		'Winding down?',
-		'Quiet evening for a flight?',
-	],
-	night: [
-		'Burning the midnight oil?',
-		'Still up?',
-		'Late one tonight?',
-	],
-	any: [
-		'Welcome back.',
-		'Good to see you.',
-		'Ready when you are.',
-		"Let's get to it.",
-		'Wanna take a ride?',
-		'All systems go.',
-		'Ready for liftoff?',
-	],
+	morning: ['Good morning.', 'Morning — fresh start.', 'Rise and shine.', 'A perfect morning for a launch.'],
+	afternoon: ['Good afternoon.', "Hope the day's treating you well.", 'Cruising through the afternoon.'],
+	evening: ['Good evening.', 'Winding down?', 'Quiet evening for a flight?'],
+	night: ['Burning the midnight oil?', 'Still up?', 'Late one tonight?'],
+	any: ['Welcome back.', 'Good to see you.', 'Ready when you are.', "Let's get to it.", 'Wanna take a ride?', 'All systems go.', 'Ready for liftoff?'],
 };
 
 /**
@@ -322,9 +293,7 @@ const styles = {
 		// reliably diff a shorthand (border) against its longhand (borderColor)
 		// across renders, which left stale border-color on unhovered cards.
 		transform: 'none',
-		transition: REDUCE_MOTION
-			? 'none'
-			: 'transform 0.12s ease, background-color 0.12s ease, border-color 0.12s ease',
+		transition: REDUCE_MOTION ? 'none' : 'transform 0.12s ease, background-color 0.12s ease, border-color 0.12s ease',
 	} as CSSProperties,
 
 	/** Card hover effect — bg/border shift + slight lift (unless reduced motion).
@@ -499,18 +468,15 @@ const ThemeToggle: React.FC<{ theme: string; onSetTheme: (id: string) => void }>
 	const toggle = () => {
 		const mode = isDark ? 'light' : 'dark';
 		onSetTheme(mode === 'dark' ? 'rocketride' : 'rocketride-light');
-		try { localStorage.setItem('rr:home:theme', mode); } catch { /* storage unavailable */ }
+		try {
+			localStorage.setItem('rr:home:theme', mode);
+		} catch {
+			/* storage unavailable */
+		}
 	};
 
 	return (
-		<button
-			type="button"
-			role="switch"
-			aria-checked={!isDark}
-			aria-label={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
-			onClick={toggle}
-			style={styles.themeToggle}
-		>
+		<button type="button" role="switch" aria-checked={!isDark} aria-label={isDark ? 'Switch to light mode' : 'Switch to dark mode'} onClick={toggle} style={styles.themeToggle}>
 			{/* Knob slides right in light mode (same geometry as home-ui: 24px travel) */}
 			<span style={{ ...styles.themeKnob, transform: `translateX(${isDark ? 0 : 24}px)` }}>
 				{isDark ? (
@@ -555,17 +521,18 @@ const AppCard: React.FC<{ app: AppManifestEntry; onLaunch: (app: AppManifestEntr
 			tabIndex={0}
 			style={{ ...styles.card, ...(hover ? styles.cardHover : {}) }}
 			onClick={() => onLaunch(app)}
-			onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onLaunch(app); } }}
+			onKeyDown={(e) => {
+				if (e.key === 'Enter' || e.key === ' ') {
+					e.preventDefault();
+					onLaunch(app);
+				}
+			}}
 			onMouseEnter={() => setHover(true)}
 			onMouseLeave={() => setHover(false)}
 		>
 			{/* Top row — icon chip + name/category */}
 			<div style={styles.cardHeader}>
-				<div style={styles.iconChip}>
-					{app.icon
-						? <img src={app.icon} alt="" loading="lazy" decoding="async" style={styles.iconImg} />
-						: app.name[0]}
-				</div>
+				<div style={styles.iconChip}>{app.icon ? <img src={app.icon} alt="" loading="lazy" decoding="async" style={styles.iconImg} /> : app.name[0]}</div>
 				<div style={styles.nameWrap}>
 					<h2 style={styles.appName}>{app.name}</h2>
 					{category && <div style={styles.appCategory}>{category}</div>}
@@ -573,9 +540,7 @@ const AppCard: React.FC<{ app: AppManifestEntry; onLaunch: (app: AppManifestEntr
 			</div>
 
 			{/* Description — full width below the header row */}
-			<p style={styles.appDesc}>
-				{app.description || 'No description'}
-			</p>
+			<p style={styles.appDesc}>{app.description || 'No description'}</p>
 		</div>
 	);
 };
@@ -603,18 +568,17 @@ const HomeApp: React.FC<ShellAppProps> = ({ identity }) => {
 	React.useEffect(() => {
 		if (identity) return;
 		let mode: string | null = null;
-		try { mode = localStorage.getItem('rr:home:theme'); } catch { /* storage unavailable */ }
+		try {
+			mode = localStorage.getItem('rr:home:theme');
+		} catch {
+			/* storage unavailable */
+		}
 		const target = mode === 'dark' ? 'rocketride' : 'rocketride-light';
 		if (prefs.theme !== target) setTheme(target);
 	}, [identity, prefs.theme, setTheme]);
 
 	// Filter out this app from the list — don't show ourselves
-	const apps = useMemo(
-		() => appManifest
-			.filter((a) => a.id !== 'rocketride.hello')
-			.sort((a, b) => a.name.localeCompare(b.name)),
-		[appManifest],
-	);
+	const apps = useMemo(() => appManifest.filter((a) => a.id !== 'rocketride.hello').sort((a, b) => a.name.localeCompare(b.name)), [appManifest]);
 
 	/** Launch an app by switching to it in the workspace. */
 	const handleLaunch = (app: AppManifestEntry) => {
@@ -640,83 +604,79 @@ const HomeApp: React.FC<ShellAppProps> = ({ identity }) => {
 	return (
 		// One-column app (no sidebar) with the status bar on.
 		<AppLayout showStatus>
-		<div style={styles.container}>
-			{/* Top bar */}
-			<div style={styles.topBar}>
-				{/* Brand logo */}
-				<div style={styles.brand}>
-					<svg width="36" height="36" viewBox="0 0 191 192" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ display: 'block', flexShrink: 0 }}>
-						<path d="M159.5 161.424L153.7 167.224C151.9 169.024 148.9 169.024 147 167.224L126.6 146.824C115.6 135.824 115.6 118.024 126.6 107.024C138.1 95.5245 138.1 76.9245 126.6 65.4245L125.1 63.9245C113.6 52.4245 95 52.4245 83.5 63.9245C72.5 74.9245 54.6 74.9245 43.6 63.9245L23.2 43.5245C21.4 41.7245 21.4 38.7245 23.2 36.8245L29 31.0245C37 23.0245 49.1 20.5245 59.6 24.9245L87.5 36.3245C97.3 40.1245 108.4 38.0245 116.3 31.1245L137 10.4245C138.6 8.92449 140.4 7.42449 142.5 6.22449C146.2 4.12449 150.3 3.02449 154.5 2.62449L185.4 0.0244895C188.3 -0.275511 190.8 2.22449 190.5 5.12449L187.8 36.4245C187.3 42.8245 184.5 48.8245 180.1 53.5245L160.5 73.1245C152.5 81.2245 150.1 93.3245 154.5 103.824L155.5 106.224L161.2 120.024L165.6 130.924C169.9 141.424 167.5 153.524 159.5 161.524V161.424Z" fill="currentColor" fillOpacity={0.85} />
-						<path d="M0.799997 190.325C-0.200003 189.325 -0.300003 187.625 0.599997 186.425L21.1 162.024C31.1 150.024 37.9 137.725 41.3 125.325C43.6 116.625 44.6 108.525 44.1 101.225C44.1 100.325 44.4 99.4245 45.1 98.8245C45.8 98.2245 46.8 97.9245 47.7 98.1245C65 101.625 83.5 98.3245 98.5 88.9245C99.6 88.2245 101.1 88.4245 102 89.3245C102.9 90.2245 103.1 91.7245 102.4 92.8245C93 107.825 89.7 126.325 93.2 143.525C93.4 144.325 93.2 145.225 92.6 145.925C92 146.625 91 147.225 90.1 147.125C82.8 146.625 74.6 147.525 66 149.925C53.6 153.225 41.2 160.025 29.3 170.125L4.9 190.625C3.8 191.525 2.1 191.525 0.999997 190.425H0.799997V190.325Z" fill="#F93822" />
-					</svg>
-					<span style={styles.brandName}>RocketRide</span>
+			<div style={styles.container}>
+				{/* Top bar */}
+				<div style={styles.topBar}>
+					{/* Brand logo */}
+					<div style={styles.brand}>
+						<svg width="36" height="36" viewBox="0 0 191 192" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ display: 'block', flexShrink: 0 }}>
+							<path d="M159.5 161.424L153.7 167.224C151.9 169.024 148.9 169.024 147 167.224L126.6 146.824C115.6 135.824 115.6 118.024 126.6 107.024C138.1 95.5245 138.1 76.9245 126.6 65.4245L125.1 63.9245C113.6 52.4245 95 52.4245 83.5 63.9245C72.5 74.9245 54.6 74.9245 43.6 63.9245L23.2 43.5245C21.4 41.7245 21.4 38.7245 23.2 36.8245L29 31.0245C37 23.0245 49.1 20.5245 59.6 24.9245L87.5 36.3245C97.3 40.1245 108.4 38.0245 116.3 31.1245L137 10.4245C138.6 8.92449 140.4 7.42449 142.5 6.22449C146.2 4.12449 150.3 3.02449 154.5 2.62449L185.4 0.0244895C188.3 -0.275511 190.8 2.22449 190.5 5.12449L187.8 36.4245C187.3 42.8245 184.5 48.8245 180.1 53.5245L160.5 73.1245C152.5 81.2245 150.1 93.3245 154.5 103.824L155.5 106.224L161.2 120.024L165.6 130.924C169.9 141.424 167.5 153.524 159.5 161.524V161.424Z" fill="currentColor" fillOpacity={0.85} />
+							<path d="M0.799997 190.325C-0.200003 189.325 -0.300003 187.625 0.599997 186.425L21.1 162.024C31.1 150.024 37.9 137.725 41.3 125.325C43.6 116.625 44.6 108.525 44.1 101.225C44.1 100.325 44.4 99.4245 45.1 98.8245C45.8 98.2245 46.8 97.9245 47.7 98.1245C65 101.625 83.5 98.3245 98.5 88.9245C99.6 88.2245 101.1 88.4245 102 89.3245C102.9 90.2245 103.1 91.7245 102.4 92.8245C93 107.825 89.7 126.325 93.2 143.525C93.4 144.325 93.2 145.225 92.6 145.925C92 146.625 91 147.225 90.1 147.125C82.8 146.625 74.6 147.525 66 149.925C53.6 153.225 41.2 160.025 29.3 170.125L4.9 190.625C3.8 191.525 2.1 191.525 0.999997 190.425H0.799997V190.325Z" fill="#F93822" />
+						</svg>
+						<span style={styles.brandName}>RocketRide</span>
+					</div>
+
+					{/* GitHub stars */}
+					<GitHubStars />
+
+					{/* Discord */}
+					<a href={DISCORD_URL} target="_blank" rel="noopener noreferrer" style={styles.linkBtn}>
+						<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+							<path d="M20.317 4.37a19.791 19.791 0 0 0-4.885-1.515.074.074 0 0 0-.079.037c-.21.375-.444.864-.608 1.25a18.27 18.27 0 0 0-5.487 0 12.64 12.64 0 0 0-.617-1.25.077.077 0 0 0-.079-.037A19.736 19.736 0 0 0 3.677 4.37a.07.07 0 0 0-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 0 0 .031.057 19.9 19.9 0 0 0 5.993 3.03.078.078 0 0 0 .084-.028c.462-.63.874-1.295 1.226-1.994a.076.076 0 0 0-.041-.106 13.107 13.107 0 0 1-1.872-.892.077.077 0 0 1-.008-.128 10.2 10.2 0 0 0 .372-.292.074.074 0 0 1 .077-.01c3.928 1.793 8.18 1.793 12.062 0a.074.074 0 0 1 .078.01c.12.098.246.198.373.292a.077.077 0 0 1-.006.127 12.299 12.299 0 0 1-1.873.892.077.077 0 0 0-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 0 0 .084.028 19.839 19.839 0 0 0 6.002-3.03.077.077 0 0 0 .032-.054c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 0 0-.031-.03zM8.02 15.33c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.956-2.419 2.157-2.419 1.21 0 2.176 1.095 2.157 2.42 0 1.333-.956 2.418-2.157 2.418zm7.975 0c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.955-2.419 2.157-2.419 1.21 0 2.176 1.095 2.157 2.42 0 1.333-.946 2.418-2.157 2.418z" />
+						</svg>
+						Discord
+					</a>
+
+					{/* Theme toggle — sliding sun/moon pill, same control as home-ui */}
+					<ThemeToggle theme={prefs.theme} onSetTheme={setTheme} />
+
+					{/* Auth button */}
+					{identity ? (
+						<button style={styles.signOutBtn} onClick={() => cm.emit('shell:logoutRequest', {})}>
+							Sign Out
+						</button>
+					) : (
+						<button style={styles.authBtn} onClick={() => cm.emit('shell:loginRequest', {})}>
+							Sign In
+						</button>
+					)}
 				</div>
 
-				{/* GitHub stars */}
-				<GitHubStars />
-
-				{/* Discord */}
-				<a href={DISCORD_URL} target="_blank" rel="noopener noreferrer" style={styles.linkBtn}>
-					<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
-						<path d="M20.317 4.37a19.791 19.791 0 0 0-4.885-1.515.074.074 0 0 0-.079.037c-.21.375-.444.864-.608 1.25a18.27 18.27 0 0 0-5.487 0 12.64 12.64 0 0 0-.617-1.25.077.077 0 0 0-.079-.037A19.736 19.736 0 0 0 3.677 4.37a.07.07 0 0 0-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 0 0 .031.057 19.9 19.9 0 0 0 5.993 3.03.078.078 0 0 0 .084-.028c.462-.63.874-1.295 1.226-1.994a.076.076 0 0 0-.041-.106 13.107 13.107 0 0 1-1.872-.892.077.077 0 0 1-.008-.128 10.2 10.2 0 0 0 .372-.292.074.074 0 0 1 .077-.01c3.928 1.793 8.18 1.793 12.062 0a.074.074 0 0 1 .078.01c.12.098.246.198.373.292a.077.077 0 0 1-.006.127 12.299 12.299 0 0 1-1.873.892.077.077 0 0 0-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 0 0 .084.028 19.839 19.839 0 0 0 6.002-3.03.077.077 0 0 0 .032-.054c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 0 0-.031-.03zM8.02 15.33c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.956-2.419 2.157-2.419 1.21 0 2.176 1.095 2.157 2.42 0 1.333-.956 2.418-2.157 2.418zm7.975 0c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.955-2.419 2.157-2.419 1.21 0 2.176 1.095 2.157 2.42 0 1.333-.946 2.418-2.157 2.418z" />
-					</svg>
-					Discord
-				</a>
-
-				{/* Theme toggle — sliding sun/moon pill, same control as home-ui */}
-				<ThemeToggle theme={prefs.theme} onSetTheme={setTheme} />
-
-				{/* Auth button */}
-				{identity ? (
-					<button
-						style={styles.signOutBtn}
-						onClick={() => cm.emit('shell:logoutRequest', {})}
-					>
-						Sign Out
-					</button>
-				) : (
-					<button
-						style={styles.authBtn}
-						onClick={() => cm.emit('shell:loginRequest', {})}
-					>
-						Sign In
-					</button>
-				)}
-			</div>
-
-			{/* Content */}
-			<div style={styles.centre}>
-				{/* Header row — greeting (40%) / blank spacer (20%) / movie quote (40%) */}
-				<div style={styles.headerRow}>
-					<div style={styles.headerLeft}>
-						<h1 style={styles.greetingTitle}>{identity ? greeting : 'Welcome to RocketRide'}</h1>
-						<p style={styles.greetingSub}>Select an application to launch.</p>
+				{/* Content */}
+				<div style={styles.centre}>
+					{/* Header row — greeting (40%) / blank spacer (20%) / movie quote (40%) */}
+					<div style={styles.headerRow}>
+						<div style={styles.headerLeft}>
+							<h1 style={styles.greetingTitle}>{identity ? greeting : 'Welcome to RocketRide'}</h1>
+							<p style={styles.greetingSub}>Select an application to launch.</p>
+						</div>
+						<div style={styles.headerSpacer} />
+						<div style={styles.headerRight}>
+							{quote && (
+								<>
+									{/* Quote slightly bolder; attribution italic underneath */}
+									<p style={styles.quoteText}>
+										{'“'}
+										{quote.text}
+										{'”'}
+									</p>
+									<p style={styles.quoteSource}>— {quote.source}</p>
+								</>
+							)}
+						</div>
 					</div>
-					<div style={styles.headerSpacer} />
-					<div style={styles.headerRight}>
-						{quote && (
-							<>
-								{/* Quote slightly bolder; attribution italic underneath */}
-								<p style={styles.quoteText}>{'“'}{quote.text}{'”'}</p>
-								<p style={styles.quoteSource}>— {quote.source}</p>
-							</>
-						)}
-					</div>
+
+					{apps.length > 0 ? (
+						<div style={styles.grid}>
+							{apps.map((app) => (
+								<AppCard key={app.id} app={app} onLaunch={handleLaunch} />
+							))}
+						</div>
+					) : (
+						<p style={styles.greetingSub}>No apps installed. Build and deploy an app to see it here.</p>
+					)}
 				</div>
-
-				{apps.length > 0 ? (
-					<div style={styles.grid}>
-						{apps.map((app) => (
-							<AppCard key={app.id} app={app} onLaunch={handleLaunch} />
-						))}
-					</div>
-				) : (
-					<p style={styles.greetingSub}>
-						No apps installed. Build and deploy an app to see it here.
-					</p>
-				)}
 			</div>
-		</div>
 		</AppLayout>
 	);
 };

@@ -1,12 +1,7 @@
 {
 	"compilerOptions": {
 		"target": "ES2020",
-		"lib": [
-			"ES2020",
-			"DOM",
-			"DOM.Iterable",
-			"ESNext.Disposable"
-		],
+		"lib": ["ES2020", "DOM", "DOM.Iterable", "ESNext.Disposable"],
 		"module": "ESNext",
 		"moduleResolution": "bundler",
 		"allowImportingTsExtensions": true,
@@ -28,19 +23,9 @@
 		"allowJs": true,
 		"checkJs": false,
 		"paths": {
-			"shell": [
-				"./src/index.ts"
-			]
+			"shell": ["./src/index.ts"]
 		}
 	},
-	"include": [
-		"src/**/*",
-		"*.ts",
-		"*.tsx"
-	],
-	"exclude": [
-		"node_modules",
-		"dist",
-		"build"
-	]
+	"include": ["src/**/*", "*.ts", "*.tsx"],
+	"exclude": ["node_modules", "dist", "build"]
 }

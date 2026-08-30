@@ -43,11 +43,7 @@ import type { Documents } from 'shell';
 import { createDocs, destroyDocs, getDocs } from './docs';
 import { createStoreVfs, isFileLoadError } from './store';
 import { getMediaInfo } from './mediaTypes';
-import {
-	AudioViewer, BinaryViewer, DocxViewer, HexViewer, ImageViewer,
-	JsonViewer, MarkdownViewer, MonacoViewer, PdfViewer, SpreadsheetViewer,
-	TextViewer, VideoViewer,
-} from './viewers';
+import { AudioViewer, BinaryViewer, DocxViewer, HexViewer, ImageViewer, JsonViewer, MarkdownViewer, MonacoViewer, PdfViewer, SpreadsheetViewer, TextViewer, VideoViewer } from './viewers';
 import type { ViewerId } from './viewerRegistry';
 import ExplorerSidebar from './ExplorerSidebar';
 
@@ -144,7 +140,10 @@ const ExplorerApp: React.FC<ShellAppProps> = () => {
 		createDocs(vfs, { appState, updateAppState });
 		setReady(true);
 
-		return () => { destroyDocs(); setReady(false); };
+		return () => {
+			destroyDocs();
+			setReady(false);
+		};
 	}, [client, loaded]);
 
 	// Sidebar node memoized once: ExplorerSidebar takes no props and reads all
@@ -153,7 +152,12 @@ const ExplorerApp: React.FC<ShellAppProps> = () => {
 
 	// Two-column app: the file-tree Explorer sidebar mounts once Documents is
 	// ready (it shares the singleton with the editor surface).
-	if (!ready) return <AppLayout showStatus><div style={styles.welcome}>Initialising...</div></AppLayout>;
+	if (!ready)
+		return (
+			<AppLayout showStatus>
+				<div style={styles.welcome}>Initialising...</div>
+			</AppLayout>
+		);
 	return (
 		<AppLayout sidebar={sidebar} showStatus>
 			<ExplorerAppReady docs={getDocs()!} />
@@ -195,18 +199,8 @@ const ExplorerAppReady: React.FC<{ docs: Documents }> = ({ docs }) => {
 					if (!group) return null;
 
 					return (
-						<div
-							style={styles.groupPane}
-							onClick={() => docs.setActiveGroup(groupId)}
-						>
-							<DocTabs
-								docs={docs}
-								groupId={groupId}
-								isActive={state.activeGroupId === groupId}
-								canClose={canCloseGroups}
-								onSplit={(gid, dir) => docs.splitGroupWithDocument(gid, dir)}
-								onCloseGroup={(gid) => docs.closeGroup(gid)}
-							/>
+						<div style={styles.groupPane} onClick={() => docs.setActiveGroup(groupId)}>
+							<DocTabs docs={docs} groupId={groupId} isActive={state.activeGroupId === groupId} canClose={canCloseGroups} onSplit={(gid, dir) => docs.splitGroupWithDocument(gid, dir)} onCloseGroup={(gid) => docs.closeGroup(gid)} />
 
 							<div style={styles.content}>
 								{group.editorIds.length === 0 ? (
@@ -220,15 +214,8 @@ const ExplorerAppReady: React.FC<{ docs: Documents }> = ({ docs }) => {
 										if (!editor) return null;
 										const isActive = idx === group.activeEditorIndex;
 										return (
-											<div
-												key={editorId}
-												style={{ ...styles.tabPane, ...(isActive ? styles.tabPaneVisible : styles.tabPaneHidden) }}
-											>
-												<FilePane
-													docs={docs}
-													uri={editor.documentUri}
-													editorId={editorId}
-												/>
+											<div key={editorId} style={{ ...styles.tabPane, ...(isActive ? styles.tabPaneVisible : styles.tabPaneHidden) }}>
+												<FilePane docs={docs} uri={editor.documentUri} editorId={editorId} />
 											</div>
 										);
 									})
@@ -265,9 +252,7 @@ const FilePane: React.FC<{ docs: Documents; uri: string; editorId: string }> = (
 	// Ref-count blob URLs so we only revoke when no pane references them.
 	const prevBlobRef = useRef<string | null>(null);
 	useEffect(() => {
-		const url = (contentMode === 'blob' && doc?.content && typeof doc.content === 'string' && doc.content.startsWith('blob:'))
-			? doc.content
-			: null;
+		const url = contentMode === 'blob' && doc?.content && typeof doc.content === 'string' && doc.content.startsWith('blob:') ? doc.content : null;
 
 		// Release previous blob URL if it changed
 		if (prevBlobRef.current && prevBlobRef.current !== url) {
@@ -301,18 +286,30 @@ const FilePane: React.FC<{ docs: Documents; uri: string; editorId: string }> = (
 
 	if (viewerOverride) {
 		switch (viewerOverride) {
-			case 'monaco':      return <MonacoViewer docs={docs} uri={uri} content={content} />;
-			case 'text':        return <TextViewer docs={docs} uri={uri} content={content} />;
-			case 'json':        return <JsonViewer content={content} />;
-			case 'markdown':    return <MarkdownViewer content={content} />;
-			case 'hex':         return client ? <HexViewer client={client} uri={uri} /> : null;
-			case 'image':       return <ImageViewer content={content} uri={uri} error={loadError} />;
-			case 'pdf':         return <PdfViewer content={content} uri={uri} error={loadError} />;
-			case 'docx':        return <DocxViewer content={content} loadError={loadError} />;
-			case 'spreadsheet': return <SpreadsheetViewer content={content} loadError={loadError} />;
-			case 'video':       return client ? <VideoViewer client={client} uri={uri} /> : null;
-			case 'audio':       return client ? <AudioViewer client={client} uri={uri} /> : null;
-			case 'binary':      return <BinaryViewer />;
+			case 'monaco':
+				return <MonacoViewer docs={docs} uri={uri} content={content} />;
+			case 'text':
+				return <TextViewer docs={docs} uri={uri} content={content} />;
+			case 'json':
+				return <JsonViewer content={content} />;
+			case 'markdown':
+				return <MarkdownViewer content={content} />;
+			case 'hex':
+				return client ? <HexViewer client={client} uri={uri} /> : null;
+			case 'image':
+				return <ImageViewer content={content} uri={uri} error={loadError} />;
+			case 'pdf':
+				return <PdfViewer content={content} uri={uri} error={loadError} />;
+			case 'docx':
+				return <DocxViewer content={content} loadError={loadError} />;
+			case 'spreadsheet':
+				return <SpreadsheetViewer content={content} loadError={loadError} />;
+			case 'video':
+				return client ? <VideoViewer client={client} uri={uri} /> : null;
+			case 'audio':
+				return client ? <AudioViewer client={client} uri={uri} /> : null;
+			case 'binary':
+				return <BinaryViewer />;
 		}
 	}
 

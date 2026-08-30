@@ -13,11 +13,7 @@
 
 /** @type {import('tailwindcss').Config} */
 module.exports = {
-	content: [
-		'./index.html',
-		'./src/**/*.{js,ts,jsx,tsx}',
-		'./public/**/*.html',
-	],
+	content: ['./index.html', './src/**/*.{js,ts,jsx,tsx}', './public/**/*.html'],
 
 	theme: {
 		extend: {
@@ -80,45 +76,27 @@ module.exports = {
 
 			// Custom fonts
 			fontFamily: {
-				sans: [
-					'Inter',
-					'-apple-system',
-					'BlinkMacSystemFont',
-					'"Segoe UI"',
-					'Roboto',
-					'"Helvetica Neue"',
-					'Arial',
-					'sans-serif',
-				],
-				mono: [
-					'"SF Mono"',
-					'Monaco',
-					'Inconsolata',
-					'"Roboto Mono"',
-					'Consolas',
-					'"Liberation Mono"',
-					'"Courier New"',
-					'monospace',
-				],
+				sans: ['Inter', '-apple-system', 'BlinkMacSystemFont', '"Segoe UI"', 'Roboto', '"Helvetica Neue"', 'Arial', 'sans-serif'],
+				mono: ['"SF Mono"', 'Monaco', 'Inconsolata', '"Roboto Mono"', 'Consolas', '"Liberation Mono"', '"Courier New"', 'monospace'],
 			},
 
 			// Custom spacing
 			spacing: {
-				'18': '4.5rem',
-				'88': '22rem',
-				'128': '32rem',
+				18: '4.5rem',
+				88: '22rem',
+				128: '32rem',
 			},
 
 			// Custom border radius
 			borderRadius: {
-				'xl': '1rem',
+				xl: '1rem',
 				'2xl': '1.5rem',
 				'3xl': '2rem',
 			},
 
 			// Custom shadows with brand colors
 			boxShadow: {
-				'rocketride': '0 4px 6px -1px rgba(59, 130, 246, 0.1), 0 2px 4px -1px rgba(59, 130, 246, 0.06)',
+				rocketride: '0 4px 6px -1px rgba(59, 130, 246, 0.1), 0 2px 4px -1px rgba(59, 130, 246, 0.06)',
 				'rocketride-lg': '0 10px 15px -3px rgba(59, 130, 246, 0.1), 0 4px 6px -2px rgba(59, 130, 246, 0.05)',
 			},
 
@@ -145,13 +123,13 @@ module.exports = {
 
 			// Custom transitions
 			transitionDuration: {
-				'400': '400ms',
-				'600': '600ms',
+				400: '400ms',
+				600: '600ms',
 			},
 
 			// Custom aspect ratios for charts
 			aspectRatio: {
-				'chart': '16 / 9',
+				chart: '16 / 9',
 				'square-chart': '1 / 1',
 				'wide-chart': '21 / 9',
 			},
@@ -164,11 +142,11 @@ module.exports = {
 
 			// Custom z-index scale
 			zIndex: {
-				'60': '60',
-				'70': '70',
-				'80': '80',
-				'90': '90',
-				'100': '100',
+				60: '60',
+				70: '70',
+				80: '80',
+				90: '90',
+				100: '100',
 			},
 
 			// Custom backdrop blur
@@ -178,15 +156,15 @@ module.exports = {
 
 			// Custom grid template columns for dashboard layouts
 			gridTemplateColumns: {
-				'dashboard': 'repeat(auto-fit, minmax(300px, 1fr))',
-				'metrics': 'repeat(auto-fit, minmax(250px, 1fr))',
-				'sidebar': '250px 1fr',
+				dashboard: 'repeat(auto-fit, minmax(300px, 1fr))',
+				metrics: 'repeat(auto-fit, minmax(250px, 1fr))',
+				sidebar: '250px 1fr',
 				'sidebar-collapsed': '60px 1fr',
 			},
 
 			// Custom grid template rows
 			gridTemplateRows: {
-				'layout': 'auto 1fr auto',
+				layout: 'auto 1fr auto',
 			},
 		},
 	},
@@ -248,17 +226,31 @@ module.exports = {
 	// Safelist for dynamic classes (classes that might be generated dynamically)
 	safelist: [
 		// Status colors that might be applied dynamically
-		'bg-green-100', 'text-green-800', 'border-green-200',
-		'bg-red-100', 'text-red-800', 'border-red-200',
-		'bg-yellow-100', 'text-yellow-800', 'border-yellow-200',
-		'bg-blue-100', 'text-blue-800', 'border-blue-200',
-		'bg-gray-100', 'text-gray-800', 'border-gray-200',
+		'bg-green-100',
+		'text-green-800',
+		'border-green-200',
+		'bg-red-100',
+		'text-red-800',
+		'border-red-200',
+		'bg-yellow-100',
+		'text-yellow-800',
+		'border-yellow-200',
+		'bg-blue-100',
+		'text-blue-800',
+		'border-blue-200',
+		'bg-gray-100',
+		'text-gray-800',
+		'border-gray-200',
 
 		// Progress bar widths
 		...Array.from({ length: 101 }, (_, i) => `w-[${i}%]`),
 
 		// Grid column spans for responsive layouts
-		'col-span-1', 'col-span-2', 'col-span-3', 'col-span-4',
-		'col-span-6', 'col-span-12',
+		'col-span-1',
+		'col-span-2',
+		'col-span-3',
+		'col-span-4',
+		'col-span-6',
+		'col-span-12',
 	],
 };

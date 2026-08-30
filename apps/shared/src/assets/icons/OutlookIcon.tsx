@@ -31,25 +31,9 @@ import { IIconProps } from './types';
  *
  * @param props - Standard icon props for controlling size, style, and opacity.
  */
-const OutlookIcon: FunctionComponent<IIconProps> = ({
-	height = '20',
-	style,
-	width = '18',
-	opacity = 1,
-}) => {
+const OutlookIcon: FunctionComponent<IIconProps> = ({ height = '20', style, width = '18', opacity = 1 }) => {
 	return (
-		<svg
-			xmlns="http://www.w3.org/2000/svg"
-			xmlnsXlink="http://www.w3.org/1999/xlink"
-			x="0px"
-			y="0px"
-			viewBox="0 0 512 512"
-			xmlSpace="preserve"
-			height={height}
-			width={width}
-			style={style}
-			opacity={opacity}
-		>
+		<svg xmlns="http://www.w3.org/2000/svg" xmlnsXlink="http://www.w3.org/1999/xlink" x="0px" y="0px" viewBox="0 0 512 512" xmlSpace="preserve" height={height} width={width} style={style} opacity={opacity}>
 			<path
 				fill="#1976D2"
 				d="M496,112.011H272c-8.832,0-16,7.168-16,16s7.168,16,16,16h177.376l-98.304,76.448l-70.496-44.832

@@ -108,39 +108,18 @@ interface Props {
 }
 
 /** Settings view — config controls, phase selector, and reset button. */
-const SettingsPanel: React.FC<Props> = ({
-	config,
-	onConfigChange,
-	engineState,
-	phases,
-	selectedPhases,
-	onTogglePhase,
-	onSelectAll,
-	onDeselectAll,
-	onReset,
-}) => {
+const SettingsPanel: React.FC<Props> = ({ config, onConfigChange, engineState, phases, selectedPhases, onTogglePhase, onSelectAll, onDeselectAll, onReset }) => {
 	const isActive = engineState === 'running' || engineState === 'paused';
 
 	return (
 		<div style={s.container}>
 			{/* Config controls (concurrency, chaos, payload) */}
-			<ControlPanel
-				config={config}
-				onChange={onConfigChange}
-				engineState={engineState}
-			/>
+			<ControlPanel config={config} onChange={onConfigChange} engineState={engineState} />
 
 			{/* Phase selector */}
 			<div style={s.phaseSection}>
 				<div style={s.sectionLabel}>Test Phases</div>
-				<PhaseList
-					phases={phases}
-					selectedPhases={selectedPhases}
-					onTogglePhase={onTogglePhase}
-					onSelectAll={onSelectAll}
-					onDeselectAll={onDeselectAll}
-					disabled={isActive}
-				/>
+				<PhaseList phases={phases} selectedPhases={selectedPhases} onTogglePhase={onTogglePhase} onSelectAll={onSelectAll} onDeselectAll={onDeselectAll} disabled={isActive} />
 			</div>
 
 			{/* Reset button — only enabled when idle */}

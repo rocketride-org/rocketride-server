@@ -280,9 +280,7 @@ export const Welcome: React.FC = () => {
 
 					// Test results show inline via testMessage
 					if (command === 'test') {
-						const data: MessageData = success
-							? { level: 'success', message: 'Connection successful!' }
-							: { level: 'error', message: error || 'Connection failed' };
+						const data: MessageData = success ? { level: 'success', message: 'Connection successful!' } : { level: 'error', message: error || 'Connection failed' };
 						setTestMessage(data);
 						if (success) setTimeout(() => setTestMessage(null), 5000);
 						break;

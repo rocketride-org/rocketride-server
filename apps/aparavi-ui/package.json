@@ -1,68 +1,68 @@
 {
-  "name": "@rocketride/aparavi-ui",
-  "version": "1.0.0",
-  "private": true,
-  "description": "Aparavi AQL Chat — natural-language query interface for Aparavi data",
-  "license": "MIT",
-  "appManifest": {
-    "id": "rocketride.aparavi",
-    "publisher": "Aparavi Software AG",
-    "name": "Aparavi AQL",
-    "description": "Chat with your Aparavi data using natural language",
-    "readme": "./src/README.md",
-    "icon": "./src/icon.svg",
-    "categories": [
-      "tools"
-    ],
-    "mode": "free",
-    "authenticated": true,
-    "showStatusBar": true,
-    "contributes": {
-      "configuration": {
-        "title": "Aparavi AQL",
-        "properties": {
-          "rocketride.aparavi.url": {
-            "type": "string",
-            "required": true,
-            "placeholder": "https://app.aparavi.com",
-            "description": "Base URL of the Aparavi platform API (e.g. https://app.aparavi.com)."
-          },
-          "rocketride.aparavi.user": {
-            "type": "string",
-            "required": true,
-            "description": "User ID for authenticating with the Aparavi API."
-          },
-          "rocketride.aparavi.password": {
-            "type": "string",
-            "format": "rocketride.envkey",
-            "required": true,
-            "description": "Variable holding the Aparavi password. The value is the name of a Variable; the secret itself is stored encrypted on the server."
-          }
-        }
-      }
-    }
-  },
-  "scripts": {
-    "build": "rsbuild build"
-  },
-  "browserslist": [
-    "chrome >= 81",
-    "edge >= 83",
-    "firefox >= 76",
-    "safari >= 13"
-  ],
-  "dependencies": {
-    "@module-federation/rsbuild-plugin": "^2.5.1",
-    "react": "^18.2.0",
-    "react-dom": "^18.2.0",
-    "rocketride": "workspace:*",
-    "shell": "file:../../.rocketride/shell/shell.tgz"
-  },
-  "devDependencies": {
-    "@rsbuild/core": "~2.0.11",
-    "@rsbuild/plugin-react": "~2.0.1",
-    "typescript": "^5.3.0",
-    "@types/react": "~18.3.31",
-    "@types/react-dom": "~18.3.7"
-  }
+	"name": "@rocketride/aparavi-ui",
+	"version": "1.0.0",
+	"private": true,
+	"description": "Aparavi AQL Chat — natural-language query interface for Aparavi data",
+	"license": "MIT",
+	"appManifest": {
+		"id": "rocketride.aparavi",
+		"publisher": "Aparavi Software AG",
+		"name": "Aparavi AQL",
+		"description": "Chat with your Aparavi data using natural language",
+		"readme": "./src/README.md",
+		"icon": "./src/icon.svg",
+		"categories": [
+			"tools"
+		],
+		"mode": "free",
+		"authenticated": true,
+		"showStatusBar": true,
+		"contributes": {
+			"configuration": {
+				"title": "Aparavi AQL",
+				"properties": {
+					"rocketride.aparavi.url": {
+						"type": "string",
+						"required": true,
+						"placeholder": "https://app.aparavi.com",
+						"description": "Base URL of the Aparavi platform API (e.g. https://app.aparavi.com)."
+					},
+					"rocketride.aparavi.user": {
+						"type": "string",
+						"required": true,
+						"description": "User ID for authenticating with the Aparavi API."
+					},
+					"rocketride.aparavi.password": {
+						"type": "string",
+						"format": "rocketride.envkey",
+						"required": true,
+						"description": "Variable holding the Aparavi password. The value is the name of a Variable; the secret itself is stored encrypted on the server."
+					}
+				}
+			}
+		}
+	},
+	"scripts": {
+		"build": "rsbuild build"
+	},
+	"browserslist": [
+		"chrome >= 81",
+		"edge >= 83",
+		"firefox >= 76",
+		"safari >= 13"
+	],
+	"dependencies": {
+		"@module-federation/rsbuild-plugin": "^2.5.1",
+		"react": "^18.2.0",
+		"react-dom": "^18.2.0",
+		"rocketride": "workspace:*",
+		"shell": "file:../../.rocketride/shell/shell.tgz"
+	},
+	"devDependencies": {
+		"@rsbuild/core": "~2.0.11",
+		"@rsbuild/plugin-react": "~2.0.1",
+		"typescript": "^5.3.0",
+		"@types/react": "~18.3.31",
+		"@types/react-dom": "~18.3.7"
+	}
 }

@@ -76,7 +76,7 @@ async function main() {
 	ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(
 		<React.StrictMode>
 			<Shell config={config} />
-		</React.StrictMode>,
+		</React.StrictMode>
 	);
 }
 

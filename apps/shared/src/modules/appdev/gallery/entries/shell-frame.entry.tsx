@@ -57,7 +57,5 @@ Ownership is one-way: the shell mounts the frame and the app fills the client ar
 import { Shell } from 'shell';
 
 <Shell config={shellConfig} />`,
-	props: [
-		{ name: 'config', type: 'ShellConfig', dir: 'in', required: true, note: 'Full shell configuration assembled by the host bootstrap: branding, theme, account, auth, and app registration.' },
-	],
+	props: [{ name: 'config', type: 'ShellConfig', dir: 'in', required: true, note: 'Full shell configuration assembled by the host bootstrap: branding, theme, account, auth, and app registration.' }],
 };

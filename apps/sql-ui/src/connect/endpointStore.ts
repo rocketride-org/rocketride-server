@@ -106,7 +106,10 @@ export async function refreshEndpoints(client: RocketRideClient): Promise<void> 
  */
 export function useSqlEndpoints(): IEndpointState {
 	return useSyncExternalStore(
-		(cb) => { listeners.add(cb); return () => listeners.delete(cb); },
-		() => state,
+		(cb) => {
+			listeners.add(cb);
+			return () => listeners.delete(cb);
+		},
+		() => state
 	);
 }

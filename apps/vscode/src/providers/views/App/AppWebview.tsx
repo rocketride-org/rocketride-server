@@ -33,15 +33,7 @@ import { useMessaging } from '../hooks/useMessaging';
 // TYPES — messages between extension host and webview
 // =============================================================================
 
-type OutgoingMessage =
-	| { type: 'view:ready' }
-	| { type: 'appdev:debug' }
-	| { type: 'appdev:login' }
-	| { type: 'appdev:restart' }
-	| { type: 'appdev:reveal' }
-	| { type: 'appdev:stage'; stage: AppBuilderStage }
-	| { type: 'appdev:pref'; key: string; value: unknown }
-	| { type: 'appdev:call'; id: number; method: string; args?: unknown[] };
+type OutgoingMessage = { type: 'view:ready' } | { type: 'appdev:debug' } | { type: 'appdev:login' } | { type: 'appdev:restart' } | { type: 'appdev:reveal' } | { type: 'appdev:stage'; stage: AppBuilderStage } | { type: 'appdev:pref'; key: string; value: unknown } | { type: 'appdev:call'; id: number; method: string; args?: unknown[] };
 
 type IncomingMessage =
 	| {
@@ -62,8 +54,23 @@ type IncomingMessage =
 	| { type: 'appdev:result'; id: number; ok: boolean; value?: unknown; error?: string };
 
 // Wire shapes for the publish-ladder RPC (mirrors the SDK's return rows)
-interface WireRailEntry { registryVersion: number; appVersion: string; sha256: string; publishedAt: number; author: string; message: string; rungs?: string[] }
-interface WirePin { rung: string; handle: string; version: number; appVersion: string; state: string; deployedAt?: number }
+interface WireRailEntry {
+	registryVersion: number;
+	appVersion: string;
+	sha256: string;
+	publishedAt: number;
+	author: string;
+	message: string;
+	rungs?: string[];
+}
+interface WirePin {
+	rung: string;
+	handle: string;
+	version: number;
+	appVersion: string;
+	state: string;
+	deployedAt?: number;
+}
 
 // Bridge RPC bound — generous because publish builds are the slowest
 // legitimate call; a host that never answers must not pend forever.
@@ -163,13 +170,7 @@ const PreviewInitializing: React.FC<{ status: WatchStatus }> = ({ status }) => (
 		<div style={styles.loading}>
 			<div style={{ textAlign: 'center', maxWidth: 460, padding: '0 24px' }}>
 				<div style={styles.initTitle}>{status.state === 'error' ? 'Dev session failed' : 'Initializing Services'}</div>
-				<div style={styles.initDetail}>
-					{status.state === 'error'
-						? (status.reason ?? 'See the Console pane for the error output.')
-						: status.state === 'building'
-							? 'Starting the dev server\u2026'
-							: 'Installing dependencies\u2026'}
-				</div>
+				<div style={styles.initDetail}>{status.state === 'error' ? (status.reason ?? 'See the Console pane for the error output.') : status.state === 'building' ? 'Starting the dev server\u2026' : 'Installing dependencies\u2026'}</div>
 			</div>
 		</div>
 	</div>
@@ -209,7 +210,13 @@ const PreviewFrame: React.FC<{ url: string; reloadSeq: number; app: AppSummary |
 	const iframeRef = useRef<HTMLIFrameElement | null>(null);
 	// Every credential-bearing post targets the shell origin explicitly so a
 	// navigated-away frame can never receive the token.
-	const shellOrigin = ((): string => { try { return new URL(url).origin; } catch { return url; } })();
+	const shellOrigin = ((): string => {
+		try {
+			return new URL(url).origin;
+		} catch {
+			return url;
+		}
+	})();
 	const ready = phase === 'ready';
 
 	// Latest registration facts, readable from the message listener without
@@ -241,13 +248,16 @@ const PreviewFrame: React.FC<{ url: string; reloadSeq: number; app: AppSummary |
 		const { app: a, devEntry: entry } = registrationRef.current;
 		if (!a || !entry) return;
 		injectedRef.current = true;
-		iframeRef.current?.contentWindow?.postMessage({
-			type: 'rrdev:registerRemote',
-			appId: a.id,
-			moduleId: a.moduleId,
-			name: a.name,
-			entry,
-		}, shellOrigin);
+		iframeRef.current?.contentWindow?.postMessage(
+			{
+				type: 'rrdev:registerRemote',
+				appId: a.id,
+				moduleId: a.moduleId,
+				name: a.name,
+				entry,
+			},
+			shellOrigin
+		);
 	}, [shellOrigin]);
 
 	// Inherit Auth toggled live: re-answer with the resulting state — the
@@ -334,7 +344,6 @@ const PreviewFrame: React.FC<{ url: string; reloadSeq: number; app: AppSummary |
 		if (ready && devEntry && app && !injectedRef.current) inject();
 	}, [ready, devEntry, app, inject]);
 
-
 	// Fresh cache-buster per attempt: the _ts from the init payload is fixed
 	// for the panel's lifetime, so retries mint their own.
 	const attemptUrl = attemptSeq === 0 ? url : `${url.replace(/([?&])_ts=\d+/, '$1_ts=' + Date.now())}`;
@@ -346,23 +355,19 @@ const PreviewFrame: React.FC<{ url: string; reloadSeq: number; app: AppSummary |
 				<div style={styles.loading}>
 					<div style={{ textAlign: 'center', maxWidth: 460, padding: '0 24px' }}>
 						<div style={styles.initTitle}>Preview shell not responding</div>
-						<div style={styles.initDetail}>
-							The shell at {shellOrigin} did not load — is the server running? Retrying automatically; the preview appears as soon as it answers.
-						</div>
+						<div style={styles.initDetail}>The shell at {shellOrigin} did not load — is the server running? Retrying automatically; the preview appears as soon as it answers.</div>
 						<div style={{ marginTop: 12, display: 'flex', gap: 8, justifyContent: 'center' }}>
-							<button type="button" style={styles.overlayButton} onClick={() => setAttemptSeq((n) => n + 1)}>Retry now</button>
-							<button type="button" style={styles.overlayButtonGhost} onClick={() => setPhase('ready')}>Show anyway</button>
+							<button type="button" style={styles.overlayButton} onClick={() => setAttemptSeq((n) => n + 1)}>
+								Retry now
+							</button>
+							<button type="button" style={styles.overlayButtonGhost} onClick={() => setPhase('ready')}>
+								Show anyway
+							</button>
 						</div>
 					</div>
 				</div>
 			)}
-			<iframe
-				key={`${reloadSeq}:${attemptSeq}`}
-				ref={iframeRef}
-				src={attemptUrl}
-				style={{ ...styles.iframe, visibility: ready ? 'visible' : 'hidden' }}
-				allow="clipboard-read; clipboard-write"
-			/>
+			<iframe key={`${reloadSeq}:${attemptSeq}`} ref={iframeRef} src={attemptUrl} style={{ ...styles.iframe, visibility: ready ? 'visible' : 'hidden' }} allow="clipboard-read; clipboard-write" />
 		</div>
 	);
 };
@@ -507,7 +512,13 @@ const AppWebview: React.FC = () => {
 	React.useEffect(() => {
 		// Only the preview shell's frame may drive the sign-in flow or write
 		// diagnostic rows.
-		const shellOrigin = ((): string => { try { return new URL(previewUrl).origin; } catch { return ''; } })();
+		const shellOrigin = ((): string => {
+			try {
+				return new URL(previewUrl).origin;
+			} catch {
+				return '';
+			}
+		})();
 		const stamp = (): string => new Date().toLocaleTimeString(undefined, { hour12: false });
 		const onWindowMessage = (e: MessageEvent): void => {
 			if (!shellOrigin || e.origin !== shellOrigin) return;
@@ -534,85 +545,111 @@ const AppWebview: React.FC = () => {
 	}, [sendMessage, previewUrl]);
 
 	/** One RPC round trip to the extension host over the bridge. */
-	const rpc = useCallback(<T,>(method: string, args?: unknown[]): Promise<T> => {
-		return new Promise<T>((resolve, reject) => {
-			const id = nextCallId.current++;
-			const timer = setTimeout(() => {
-				pendingCalls.current.delete(id);
-				reject(new Error(`appdev call "${method}" timed out`));
-			}, RPC_TIMEOUT_MS);
-			// Both settle paths clear the timer so a late answer cannot
-			// double-settle after a timeout (the entry is gone by then).
-			pendingCalls.current.set(id, {
-				resolve: (v: unknown) => { clearTimeout(timer); (resolve as (v: unknown) => void)(v); },
-				reject: (e: Error) => { clearTimeout(timer); reject(e); },
+	const rpc = useCallback(
+		<T,>(method: string, args?: unknown[]): Promise<T> => {
+			return new Promise<T>((resolve, reject) => {
+				const id = nextCallId.current++;
+				const timer = setTimeout(() => {
+					pendingCalls.current.delete(id);
+					reject(new Error(`appdev call "${method}" timed out`));
+				}, RPC_TIMEOUT_MS);
+				// Both settle paths clear the timer so a late answer cannot
+				// double-settle after a timeout (the entry is gone by then).
+				pendingCalls.current.set(id, {
+					resolve: (v: unknown) => {
+						clearTimeout(timer);
+						(resolve as (v: unknown) => void)(v);
+					},
+					reject: (e: Error) => {
+						clearTimeout(timer);
+						reject(e);
+					},
+				});
+				sendMessage({ type: 'appdev:call', id, method, args });
 			});
-			sendMessage({ type: 'appdev:call', id, method, args });
-		});
-	}, [sendMessage]);
+		},
+		[sendMessage]
+	);
 
 	// ── The BRIDGE adapter (IAppBuilderHost over useMessaging) ──────────
-	const host: IAppBuilderHost = useMemo(() => ({
-		capabilities,
-		// Feeds: registry-backed subscriptions (stable identities)
-		subscribeEvents: (fn) => { eventListeners.current.add(fn); return () => eventListeners.current.delete(fn); },
-		subscribeConsole: (fn) => { consoleListeners.current.add(fn); return () => consoleListeners.current.delete(fn); },
-		subscribeErrors: (fn) => { errorListeners.current.add(fn); return () => errorListeners.current.delete(fn); },
-		subscribeWatch: (fn) => { watchListeners.current.add(fn); return () => watchListeners.current.delete(fn); },
-		// Preview chrome
-		getPreviewUrl: () => previewUrl,
-		// Reload = full inner-loop reset in the extension host (kill dev
-		// server → pnpm install → fresh rsbuild). The iframe is NOT bumped
-		// here: remounting now would load against a dead dev server — the
-		// restart's first successful build sends appdev:reload, which does.
-		reloadPreview: () => sendMessage({ type: 'appdev:restart' }),
-		// Inherit Auth toggle — PreviewFrame reacts to the prop change (pushes
-		// the session down, or tells the shell to drop it).
-		setInheritAuth: (inherit: boolean) => setInheritAuthState(inherit),
-		// Per-workspace UI preferences: reads from the init-delivered bag,
-		// writes echo to the extension host (workspaceState).
-		getPref: (key: string) => prefsRef.current[key],
-		setPref: (key: string, value: unknown) => {
-			prefsRef.current[key] = value;
-			sendMessage({ type: 'appdev:pref', key, value });
-		},
-		// Host actions — ride the bridge to the extension host
-		debug: capabilities.canDebug ? () => sendMessage({ type: 'appdev:debug' }) : undefined,
-		revealFiles: capabilities.hasNativeFiles ? () => sendMessage({ type: 'appdev:reveal' }) : undefined,
+	const host: IAppBuilderHost = useMemo(
+		() => ({
+			capabilities,
+			// Feeds: registry-backed subscriptions (stable identities)
+			subscribeEvents: (fn) => {
+				eventListeners.current.add(fn);
+				return () => eventListeners.current.delete(fn);
+			},
+			subscribeConsole: (fn) => {
+				consoleListeners.current.add(fn);
+				return () => consoleListeners.current.delete(fn);
+			},
+			subscribeErrors: (fn) => {
+				errorListeners.current.add(fn);
+				return () => errorListeners.current.delete(fn);
+			},
+			subscribeWatch: (fn) => {
+				watchListeners.current.add(fn);
+				return () => watchListeners.current.delete(fn);
+			},
+			// Preview chrome
+			getPreviewUrl: () => previewUrl,
+			// Reload = full inner-loop reset in the extension host (kill dev
+			// server → pnpm install → fresh rsbuild). The iframe is NOT bumped
+			// here: remounting now would load against a dead dev server — the
+			// restart's first successful build sends appdev:reload, which does.
+			reloadPreview: () => sendMessage({ type: 'appdev:restart' }),
+			// Inherit Auth toggle — PreviewFrame reacts to the prop change (pushes
+			// the session down, or tells the shell to drop it).
+			setInheritAuth: (inherit: boolean) => setInheritAuthState(inherit),
+			// Per-workspace UI preferences: reads from the init-delivered bag,
+			// writes echo to the extension host (workspaceState).
+			getPref: (key: string) => prefsRef.current[key],
+			setPref: (key: string, value: unknown) => {
+				prefsRef.current[key] = value;
+				sendMessage({ type: 'appdev:pref', key, value });
+			},
+			// Host actions — ride the bridge to the extension host
+			debug: capabilities.canDebug ? () => sendMessage({ type: 'appdev:debug' }) : undefined,
+			revealFiles: capabilities.hasNativeFiles ? () => sendMessage({ type: 'appdev:reveal' }) : undefined,
 
-		// ── Deploy (the publish ladder) — all data over the RPC lane ────
-		listVersions: async () => {
-			const rail = await rpc<WireRailEntry[]>('listVersions');
-			registryByLabel.current = new Map(rail.map((v) => [v.appVersion || `r${v.registryVersion}`, v.registryVersion]));
-			return rail.map((v) => ({
-				version: v.appVersion || `r${v.registryVersion}`,
-				author: v.author,
-				publishedAt: v.publishedAt,
-				sha: v.sha256,
-				message: v.message,
-				rungs: (v.rungs ?? []).filter((r): r is 'personal' | 'team' | 'org' => r === 'personal' || r === 'team' || r === 'org'),
-			}));
-		},
-		publish: async (message) => { await rpc('publish', [message]); },
-		deploy: async (version, target) => {
-			const registryVersion = registryByLabel.current.get(version);
-			if (registryVersion === undefined) throw new Error(`Unknown version: ${version}`);
-			await rpc('deploy', [registryVersion, target]);
-		},
-		getWhereLive: async () => {
-			const pins = await rpc<WirePin[]>('where');
-			return pins.map((p) => ({
-				rung: (p.rung === 'personal' || p.rung === 'team' || p.rung === 'org' ? p.rung : 'org') as 'personal' | 'team' | 'org',
-				label: p.rung.charAt(0).toUpperCase() + p.rung.slice(1),
-				handle: p.handle,
-				version: p.appVersion || `r${p.version}`,
-				state: (p.state === 'enabled' ? 'enabled' : 'pending') as 'enabled' | 'pending',
-				audience: p.rung === 'personal' ? 'on your desktop' : p.rung === 'org' ? 'everyone in the org' : 'team members',
-				deployedAt: p.deployedAt,
-			}));
-		},
-		// Store loaders arrive in M5 — absent = teaching empty states
-	}), [capabilities, previewUrl, sendMessage, rpc]);
+			// ── Deploy (the publish ladder) — all data over the RPC lane ────
+			listVersions: async () => {
+				const rail = await rpc<WireRailEntry[]>('listVersions');
+				registryByLabel.current = new Map(rail.map((v) => [v.appVersion || `r${v.registryVersion}`, v.registryVersion]));
+				return rail.map((v) => ({
+					version: v.appVersion || `r${v.registryVersion}`,
+					author: v.author,
+					publishedAt: v.publishedAt,
+					sha: v.sha256,
+					message: v.message,
+					rungs: (v.rungs ?? []).filter((r): r is 'personal' | 'team' | 'org' => r === 'personal' || r === 'team' || r === 'org'),
+				}));
+			},
+			publish: async (message) => {
+				await rpc('publish', [message]);
+			},
+			deploy: async (version, target) => {
+				const registryVersion = registryByLabel.current.get(version);
+				if (registryVersion === undefined) throw new Error(`Unknown version: ${version}`);
+				await rpc('deploy', [registryVersion, target]);
+			},
+			getWhereLive: async () => {
+				const pins = await rpc<WirePin[]>('where');
+				return pins.map((p) => ({
+					rung: (p.rung === 'personal' || p.rung === 'team' || p.rung === 'org' ? p.rung : 'org') as 'personal' | 'team' | 'org',
+					label: p.rung.charAt(0).toUpperCase() + p.rung.slice(1),
+					handle: p.handle,
+					version: p.appVersion || `r${p.version}`,
+					state: (p.state === 'enabled' ? 'enabled' : 'pending') as 'enabled' | 'pending',
+					audience: p.rung === 'personal' ? 'on your desktop' : p.rung === 'org' ? 'everyone in the org' : 'team members',
+					deployedAt: p.deployedAt,
+				}));
+			},
+			// Store loaders arrive in M5 — absent = teaching empty states
+		}),
+		[capabilities, previewUrl, sendMessage, rpc]
+	);
 
 	// ── Render ──────────────────────────────────────────────────────────
 	if (!app) {
@@ -621,13 +658,7 @@ const AppWebview: React.FC = () => {
 
 	return (
 		<div style={styles.root}>
-			<AppBuilderScreen
-				host={host}
-				app={app}
-				previewPane={previewUrl && previewLive ? <PreviewFrame url={previewUrl} reloadSeq={reloadSeq} app={app} devEntry={devEntry} authToken={authToken} inheritAuth={inheritAuth} explicitAuthSeq={explicitAuthSeq} /> : <PreviewInitializing status={watchStatus} />}
-				initialStage={initialStage}
-				onStageChange={(stage) => sendMessage({ type: 'appdev:stage', stage })}
-			/>
+			<AppBuilderScreen host={host} app={app} previewPane={previewUrl && previewLive ? <PreviewFrame url={previewUrl} reloadSeq={reloadSeq} app={app} devEntry={devEntry} authToken={authToken} inheritAuth={inheritAuth} explicitAuthSeq={explicitAuthSeq} /> : <PreviewInitializing status={watchStatus} />} initialStage={initialStage} onStageChange={(stage) => sendMessage({ type: 'appdev:stage', stage })} />
 		</div>
 	);
 };

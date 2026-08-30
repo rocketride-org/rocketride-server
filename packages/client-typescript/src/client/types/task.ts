@@ -352,7 +352,6 @@ export interface TASK_STATUS {
 
 	/** Epoch when the longest unused stretch began (0 while none is recorded). */
 	idleLongestAt?: number;
-
 }
 
 /**

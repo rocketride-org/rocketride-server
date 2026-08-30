@@ -43,11 +43,7 @@ import type { ISqlEndpoint } from './types';
  * (execute / get_schema / dialect, inherited from DatabaseInstanceBase).
  * Extend this set when new relational nodes ship.
  */
-export const DATABASE_PROVIDERS: ReadonlySet<string> = new Set([
-	'db_mysql',
-	'db_postgres',
-	'db_clickhouse',
-]);
+export const DATABASE_PROVIDERS: ReadonlySet<string> = new Set(['db_mysql', 'db_postgres', 'db_clickhouse']);
 
 // =============================================================================
 // PIPELINE SHAPES (minimal, local to discovery)

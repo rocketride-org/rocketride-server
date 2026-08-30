@@ -334,10 +334,7 @@ export interface IConnectionManager {
 	 * @param handler - Callback invoked when the event fires.
 	 * @returns An unsubscribe function — call it to remove the handler.
 	 */
-	on<K extends keyof ShellConnectionEventMap>(
-		event: K,
-		handler: (payload: ShellConnectionEventMap[K]) => void,
-	): () => void;
+	on<K extends keyof ShellConnectionEventMap>(event: K, handler: (payload: ShellConnectionEventMap[K]) => void): () => void;
 
 	/**
 	 * Emits a typed shell event, dispatching to all registered handlers.
@@ -348,8 +345,5 @@ export interface IConnectionManager {
 	 * @param event   - The event name from `ShellConnectionEventMap`.
 	 * @param payload - The payload matching the event's type.
 	 */
-	emit<K extends keyof ShellConnectionEventMap>(
-		event: K,
-		payload: ShellConnectionEventMap[K],
-	): void;
+	emit<K extends keyof ShellConnectionEventMap>(event: K, payload: ShellConnectionEventMap[K]): void;
 }

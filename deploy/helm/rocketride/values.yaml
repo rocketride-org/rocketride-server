@@ -115,8 +115,7 @@ engine:
 
   # -- Secret values (only used when existingSecret is empty)
   # These will be base64-encoded and stored in a Kubernetes Secret
-  secrets:
-    {}
+  secrets: {}
     # OPENAI_API_KEY: ""
     # ANTHROPIC_API_KEY: ""
     # HUGGINGFACE_TOKEN: ""
@@ -186,8 +185,7 @@ ingress:
   # -- Ingress class name (e.g. nginx, traefik)
   className: ''
   # -- Ingress annotations
-  annotations:
-    {}
+  annotations: {}
     # kubernetes.io/tls-acme: "true"
     # cert-manager.io/cluster-issuer: letsencrypt-prod
   # -- Ingress host rules

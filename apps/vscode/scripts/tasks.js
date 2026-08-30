@@ -131,10 +131,7 @@ function makeBundleExtensionAction() {
 			// build-webview saving theirs doesn't cause this step to skip). esbuild
 			// inlines shared (the appdev templates) into rocketride.js, so a
 			// shared-only change must rebuild the host bundle too.
-			const [vsrc, sharedUi] = await Promise.all([
-				hasSourceChanged(SRC_DIR, BUNDLE_HASH_KEY),
-				hasSourceChanged(SHARED_UI_SRC, BUNDLE_SHARED_UI_HASH_KEY),
-			]);
+			const [vsrc, sharedUi] = await Promise.all([hasSourceChanged(SRC_DIR, BUNDLE_HASH_KEY), hasSourceChanged(SHARED_UI_SRC, BUNDLE_SHARED_UI_HASH_KEY)]);
 			const outputExists = await exists(path.join(BUILD_DIR, 'rocketride.js'));
 
 			if (!vsrc.changed && !sharedUi.changed && outputExists) {

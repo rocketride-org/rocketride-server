@@ -28,17 +28,7 @@
 // See types.ts for the isolation rationale.
 // =============================================================================
 
-export type {
-	SqlDialect,
-	ISqlEndpoint,
-	ISqlExecuteResult,
-	ISqlSchemaColumn,
-	ISqlSchemaForeignKey,
-	ISqlSchemaTable,
-	ISqlSchemaResponse,
-	ISqlSession,
-	ISqlProbeResult,
-} from './types';
+export type { SqlDialect, ISqlEndpoint, ISqlExecuteResult, ISqlSchemaColumn, ISqlSchemaForeignKey, ISqlSchemaTable, ISqlSchemaResponse, ISqlSession, ISqlProbeResult } from './types';
 export { DATABASE_PROVIDERS, discoverSqlEndpoints } from './discovery';
 export { createSqlSession, probeSqlEndpoint } from './session';
 export { refreshEndpoints, useSqlEndpoints } from './endpointStore';

@@ -29,22 +29,18 @@ module.exports = {
 	testEnvironment: 'node', // Use node environment for Node.js WebSocket testing
 	testRunner: 'jest-jasmine2', // Required for jestreport.js
 	roots: ['<rootDir>/tests'],
-	testMatch: [
-		'**/__tests__/**/*.+(ts|tsx|js)',
-		'**/*.(test|spec).+(ts|tsx|js)'
-	],
+	testMatch: ['**/__tests__/**/*.+(ts|tsx|js)', '**/*.(test|spec).+(ts|tsx|js)'],
 	transform: {
-		'^.+\\.(ts|tsx)$': ['ts-jest', {
-			useESM: true,
-			tsconfig: 'tsconfig.json'
-		}],
+		'^.+\\.(ts|tsx)$': [
+			'ts-jest',
+			{
+				useESM: true,
+				tsconfig: 'tsconfig.json',
+			},
+		],
 	},
 	setupFilesAfterEnv: ['../../scripts/lib/jestreport.js'],
-	collectCoverageFrom: [
-		'src/**/*.{ts,tsx}',
-		'!src/**/*.d.ts',
-		'!src/**/*.test.{ts,tsx}',
-	],
+	collectCoverageFrom: ['src/**/*.{ts,tsx}', '!src/**/*.d.ts', '!src/**/*.test.{ts,tsx}'],
 	coverageDirectory: 'coverage',
 	coverageReporters: ['text', 'lcov', 'html'],
 	testTimeout: 120000, // 120 seconds for integration tests (CI runners can be slow)
@@ -60,5 +56,5 @@ module.exports = {
 	moduleNameMapper: {
 		'^(\\.\\.?/.*)\\.js$': '$1',
 		'^@/(.*)$': '<rootDir>/src/$1',
-	}
+	},
 };

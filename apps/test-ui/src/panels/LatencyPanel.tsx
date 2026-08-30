@@ -63,11 +63,7 @@ const LatencyPanel: React.FC<Props> = ({ samples }) => {
 			</div>
 			<div style={styles.cardBody}>
 				<div style={styles.sparklineContainer}>
-					{visible.length === 0 && (
-						<div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--rr-text-disabled)', fontSize: 11 }}>
-							No data yet
-						</div>
-					)}
+					{visible.length === 0 && <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--rr-text-disabled)', fontSize: 11 }}>No data yet</div>}
 					{visible.map((s, i) => (
 						<div
 							key={i}

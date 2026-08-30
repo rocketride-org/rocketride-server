@@ -140,20 +140,16 @@ export const TableNode: React.FC<NodeProps<ErNode>> = ({ data, selected }) => {
 	return (
 		<div style={styles.node(!!selected)}>
 			<div style={styles.header}>
-				<span style={styles.headerIcon}><TableIcon /></span>
+				<span style={styles.headerIcon}>
+					<TableIcon />
+				</span>
 				{data.table}
 			</div>
 			{data.columns.map((col) => (
 				<div key={col.name} style={styles.row}>
 					{/* FK destination anchor (left) and origin anchor (right). */}
 					<Handle type="target" position={Position.Left} id={targetHandle(col.name)} style={styles.handle} isConnectable={false} />
-					{col.pk ? (
-						<span style={styles.keyDot('var(--rr-chart-yellow)')} />
-					) : col.fk ? (
-						<span style={styles.keyDot('var(--rr-chart-red)')} />
-					) : (
-						<span style={styles.keySpacer} />
-					)}
+					{col.pk ? <span style={styles.keyDot('var(--rr-chart-yellow)')} /> : col.fk ? <span style={styles.keyDot('var(--rr-chart-red)')} /> : <span style={styles.keySpacer} />}
 					<span style={styles.name(col.pk)}>{col.name}</span>
 					<span style={styles.type}>{col.type}</span>
 					<Handle type="source" position={Position.Right} id={sourceHandle(col.name)} style={styles.handle} isConnectable={false} />

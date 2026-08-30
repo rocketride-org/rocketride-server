@@ -9,34 +9,22 @@ import type { FileCategory } from './mediaTypes';
  * and stored in the editor's `viewState.viewerId` when the user picks
  * a non-default viewer.
  */
-export type ViewerId =
-	| 'monaco'
-	| 'text'
-	| 'json'
-	| 'markdown'
-	| 'hex'
-	| 'image'
-	| 'pdf'
-	| 'docx'
-	| 'spreadsheet'
-	| 'video'
-	| 'audio'
-	| 'binary';
+export type ViewerId = 'monaco' | 'text' | 'json' | 'markdown' | 'hex' | 'image' | 'pdf' | 'docx' | 'spreadsheet' | 'video' | 'audio' | 'binary';
 
 /** Display label for each viewer shown in the "Open with…" menu. */
 export const VIEWER_LABELS: Record<ViewerId, string> = {
-	monaco:      'Code Editor',
-	text:        'Plain Text',
-	json:        'JSON Viewer',
-	markdown:    'Markdown Preview',
-	hex:         'Hex Viewer',
-	image:       'Image Viewer',
-	pdf:         'PDF Viewer',
-	docx:        'Document Viewer',
+	monaco: 'Code Editor',
+	text: 'Plain Text',
+	json: 'JSON Viewer',
+	markdown: 'Markdown Preview',
+	hex: 'Hex Viewer',
+	image: 'Image Viewer',
+	pdf: 'PDF Viewer',
+	docx: 'Document Viewer',
 	spreadsheet: 'Spreadsheet Viewer',
-	video:       'Video Player',
-	audio:       'Audio Player',
-	binary:      'Binary (unsupported)',
+	video: 'Video Player',
+	audio: 'Audio Player',
+	binary: 'Binary (unsupported)',
 };
 
 /**
@@ -44,17 +32,17 @@ export const VIEWER_LABELS: Record<ViewerId, string> = {
  * The first entry is the default viewer.
  */
 const CATEGORY_VIEWERS: Record<FileCategory, ViewerId[]> = {
-	text:        ['monaco', 'text', 'hex'],
-	code:        ['monaco', 'text', 'hex'],
-	json:        ['monaco', 'json', 'text', 'hex'],
-	markdown:    ['markdown', 'monaco', 'text', 'hex'],
-	image:       ['image', 'hex'],
-	video:       ['video', 'hex'],
-	audio:       ['audio', 'hex'],
-	pdf:         ['pdf', 'hex'],
-	docx:        ['docx', 'hex'],
+	text: ['monaco', 'text', 'hex'],
+	code: ['monaco', 'text', 'hex'],
+	json: ['monaco', 'json', 'text', 'hex'],
+	markdown: ['markdown', 'monaco', 'text', 'hex'],
+	image: ['image', 'hex'],
+	video: ['video', 'hex'],
+	audio: ['audio', 'hex'],
+	pdf: ['pdf', 'hex'],
+	docx: ['docx', 'hex'],
 	spreadsheet: ['spreadsheet', 'hex'],
-	binary:      ['hex', 'binary'],
+	binary: ['hex', 'binary'],
 };
 
 /**

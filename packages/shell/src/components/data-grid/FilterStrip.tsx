@@ -174,33 +174,41 @@ const TypeaheadControl: React.FC<{
 	const wrapRef = useRef<HTMLDivElement>(null);
 
 	// External label changes (e.g. a reset) resync the input text.
-	useEffect(() => { setText(label); }, [label]);
+	useEffect(() => {
+		setText(label);
+	}, [label]);
 
 	/** Debounced suggestion lookup; empty input clears the filter at once. */
-	const handleInput = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-		const value = e.target.value;
-		setText(value);
-		if (!value.trim()) {
-			onChange('', '');
-			setResults([]);
-			setOpen(false);
-			return;
-		}
-		if (timerRef.current) clearTimeout(timerRef.current);
-		timerRef.current = setTimeout(async () => {
-			const items = await def.search?.(value.trim()) ?? [];
-			setResults(items);
-			setOpen(items.length > 0);
-			setHoveredIdx(-1);
-		}, 250);
-	}, [def, onChange]);
+	const handleInput = useCallback(
+		(e: React.ChangeEvent<HTMLInputElement>) => {
+			const value = e.target.value;
+			setText(value);
+			if (!value.trim()) {
+				onChange('', '');
+				setResults([]);
+				setOpen(false);
+				return;
+			}
+			if (timerRef.current) clearTimeout(timerRef.current);
+			timerRef.current = setTimeout(async () => {
+				const items = (await def.search?.(value.trim())) ?? [];
+				setResults(items);
+				setOpen(items.length > 0);
+				setHoveredIdx(-1);
+			}, 250);
+		},
+		[def, onChange]
+	);
 
 	/** Commit a picked suggestion. */
-	const handlePick = useCallback((item: IGridFilterOption) => {
-		setText(item.label);
-		onChange(item.value, item.label);
-		setOpen(false);
-	}, [onChange]);
+	const handlePick = useCallback(
+		(item: IGridFilterOption) => {
+			setText(item.label);
+			onChange(item.value, item.label);
+			setOpen(false);
+		},
+		[onChange]
+	);
 
 	// Outside click dismisses the popup.
 	useEffect(() => {
@@ -218,18 +226,14 @@ const TypeaheadControl: React.FC<{
 				placeholder={def.placeholder}
 				value={text}
 				onChange={handleInput}
-				onFocus={() => { if (results.length > 0 && text) setOpen(true); }}
+				onFocus={() => {
+					if (results.length > 0 && text) setOpen(true);
+				}}
 			/>
 			{open && (
 				<div style={styles.dropdown}>
 					{results.map((item, i) => (
-						<div
-							key={item.value}
-							style={styles.item(hoveredIdx === i)}
-							onMouseEnter={() => setHoveredIdx(i)}
-							onMouseLeave={() => setHoveredIdx(-1)}
-							onClick={() => handlePick(item)}
-						>
+						<div key={item.value} style={styles.item(hoveredIdx === i)} onMouseEnter={() => setHoveredIdx(i)} onMouseLeave={() => setHoveredIdx(-1)} onClick={() => handlePick(item)}>
 							{item.label}
 						</div>
 					))}
@@ -250,8 +254,7 @@ const TypeaheadControl: React.FC<{
  * @param value - Raw value from the shared filter record.
  * @returns The string form ('' for arrays / missing keys).
  */
-const asString = (value: string | string[] | undefined): string =>
-	typeof value === 'string' ? value : '';
+const asString = (value: string | string[] | undefined): string => (typeof value === 'string' ? value : '');
 
 /**
  * Render the labelled filter controls row. See the module doc for behavior.
@@ -266,46 +269,24 @@ export const FilterStrip: React.FC<IFilterStripProps> = ({ defs, values, labels,
 				<span style={styles.label}>{def.label}</span>
 
 				{/* Free-text filter. */}
-				{def.type === 'text' && (
-					<input
-						style={{ ...commonStyles.inputField, height: 30, width: def.width ?? 180 }}
-						placeholder={def.placeholder}
-						value={asString(values[def.key])}
-						onChange={(e) => onChange(def.key, e.target.value)}
-					/>
-				)}
+				{def.type === 'text' && <input style={{ ...commonStyles.inputField, height: 30, width: def.width ?? 180 }} placeholder={def.placeholder} value={asString(values[def.key])} onChange={(e) => onChange(def.key, e.target.value)} />}
 
 				{/* Select filter — options carry their own "All ..." entry. */}
 				{def.type === 'select' && (
-					<select
-						style={{ ...styles.select, ...(def.width ? { width: def.width } : {}) }}
-						value={asString(values[def.key])}
-						onChange={(e) => onChange(def.key, e.target.value)}
-					>
+					<select style={{ ...styles.select, ...(def.width ? { width: def.width } : {}) }} value={asString(values[def.key])} onChange={(e) => onChange(def.key, e.target.value)}>
 						{(def.options ?? []).map((opt) => (
-							<option key={opt.value} value={opt.value}>{opt.label}</option>
+							<option key={opt.value} value={opt.value}>
+								{opt.label}
+							</option>
 						))}
 					</select>
 				)}
 
 				{/* Date filter (native picker). */}
-				{def.type === 'date' && (
-					<input
-						type="date"
-						style={{ ...styles.date, ...(def.width ? { width: def.width } : {}) }}
-						value={asString(values[def.key])}
-						onChange={(e) => onChange(def.key, e.target.value)}
-					/>
-				)}
+				{def.type === 'date' && <input type="date" style={{ ...styles.date, ...(def.width ? { width: def.width } : {}) }} value={asString(values[def.key])} onChange={(e) => onChange(def.key, e.target.value)} />}
 
 				{/* Async typeahead filter. */}
-				{def.type === 'typeahead' && (
-					<TypeaheadControl
-						def={def}
-						label={labels[def.key] ?? ''}
-						onChange={(value, label) => onChange(def.key, value, label)}
-					/>
-				)}
+				{def.type === 'typeahead' && <TypeaheadControl def={def} label={labels[def.key] ?? ''} onChange={(value, label) => onChange(def.key, value, label)} />}
 			</div>
 		))}
 	</div>

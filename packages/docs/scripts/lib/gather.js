@@ -107,7 +107,11 @@ function extractDescription(text) {
 	const m = /"description"\s*:\s*\[([^\]]*)\]/.exec(text);
 	if (!m) return '';
 	const parts = m[1].match(/"((?:[^"\\]|\\.)*)"/g) || [];
-	const full = parts.map((s) => s.slice(1, -1)).join(' ').replace(/\s+/g, ' ').trim();
+	const full = parts
+		.map((s) => s.slice(1, -1))
+		.join(' ')
+		.replace(/\s+/g, ' ')
+		.trim();
 	const dot = full.indexOf('. ');
 	return dot >= 0 ? full.slice(0, dot + 1) : full;
 }
@@ -243,7 +247,10 @@ function pageDescription(content) {
 				// YAML block scalar (`description: >`, `|`, `>-`, …). The text is the
 				// indented run that follows; the indicator itself is not the value.
 				const block = [];
-				for (const line of fm[1].slice(d.index + d[0].length).split(/\r?\n/).slice(1)) {
+				for (const line of fm[1]
+					.slice(d.index + d[0].length)
+					.split(/\r?\n/)
+					.slice(1)) {
 					if (!/^[ \t]+\S/.test(line)) break;
 					block.push(line.trim());
 				}
@@ -275,7 +282,11 @@ function pageDescription(content) {
 		}
 		para.push(t);
 	}
-	const prose = para.join(' ').replace(/\[([^\]]+)\]\([^)]*\)/g, '$1').replace(/[*`_]/g, '').trim();
+	const prose = para
+		.join(' ')
+		.replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+		.replace(/[*`_]/g, '')
+		.trim();
 	const m = /^(.+?[.!?])(\s|$)/.exec(prose);
 	return (m ? m[1] : prose).slice(0, 200).trim();
 }
@@ -359,9 +370,12 @@ function gitLastUpdate(srcAbs) {
 	if (_gitDateCache.has(srcAbs)) return _gitDateCache.get(srcAbs);
 	let date = null;
 	try {
-		date = execFileSync('git', ['log', '-1', '--format=%cs', '--', srcAbs], {
-			cwd: path.dirname(srcAbs), encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'],
-		}).trim() || null;
+		date =
+			execFileSync('git', ['log', '-1', '--format=%cs', '--', srcAbs], {
+				cwd: path.dirname(srcAbs),
+				encoding: 'utf8',
+				stdio: ['ignore', 'pipe', 'ignore'],
+			}).trim() || null;
 	} catch {
 		/* not a git checkout — leave null; the page simply carries no date */
 	}

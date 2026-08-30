@@ -23,17 +23,11 @@
 
 /**
  * Java Build Module
- * 
+ *
  * Handles downloading JDK, JRE, and Maven.
  */
 const path = require('path');
-const {
-    withLock, getState, setState,
-    downloadFile, extractArchive,
-    removeDir, getPlatform, PROJECT_ROOT, BUILD_ROOT,
-    exists, readJson, mkdir,
-    parallel
-} = require('../../../scripts/lib');
+const { withLock, getState, setState, downloadFile, extractArchive, removeDir, getPlatform, PROJECT_ROOT, BUILD_ROOT, exists, readJson, mkdir, parallel } = require('../../../scripts/lib');
 
 // Paths
 const BUILD_DIR = path.join(BUILD_ROOT, 'java');
@@ -47,13 +41,13 @@ let JDK_VERSION = '17';
 let packageJsonLoaded = false;
 
 async function loadPackageJson() {
-    if (!packageJsonLoaded) {
-        const packageJson = await readJson(path.join(PROJECT_ROOT, 'package.json'));
-        MAVEN_VERSION = packageJson.java?.mavenVersion || '3.9.6';
-        JDK_VERSION = packageJson.java?.jdkVersion || '17';
-        packageJsonLoaded = true;
-    }
-    return { mavenVersion: MAVEN_VERSION, jdkVersion: JDK_VERSION };
+	if (!packageJsonLoaded) {
+		const packageJson = await readJson(path.join(PROJECT_ROOT, 'package.json'));
+		MAVEN_VERSION = packageJson.java?.mavenVersion || '3.9.6';
+		JDK_VERSION = packageJson.java?.jdkVersion || '17';
+		packageJsonLoaded = true;
+	}
+	return { mavenVersion: MAVEN_VERSION, jdkVersion: JDK_VERSION };
 }
 
 // =============================================================================
@@ -61,17 +55,17 @@ async function loadPackageJson() {
 // =============================================================================
 
 function getMavenUrl() {
-    return `https://archive.apache.org/dist/maven/maven-3/${MAVEN_VERSION}/binaries/apache-maven-${MAVEN_VERSION}-bin.tar.gz`;
+	return `https://archive.apache.org/dist/maven/maven-3/${MAVEN_VERSION}/binaries/apache-maven-${MAVEN_VERSION}-bin.tar.gz`;
 }
 
 function getJdkUrl() {
-    const { os: osName, arch } = getPlatform();
-    return `https://api.adoptium.net/v3/binary/latest/${JDK_VERSION}/ga/${osName}/${arch}/jdk/hotspot/normal/eclipse`;
+	const { os: osName, arch } = getPlatform();
+	return `https://api.adoptium.net/v3/binary/latest/${JDK_VERSION}/ga/${osName}/${arch}/jdk/hotspot/normal/eclipse`;
 }
 
 function getJreUrl() {
-    const { os: osName, arch } = getPlatform();
-    return `https://api.adoptium.net/v3/binary/latest/${JDK_VERSION}/ga/${osName}/${arch}/jre/hotspot/normal/eclipse`;
+	const { os: osName, arch } = getPlatform();
+	return `https://api.adoptium.net/v3/binary/latest/${JDK_VERSION}/ga/${osName}/${arch}/jre/hotspot/normal/eclipse`;
 }
 
 // =============================================================================
@@ -79,89 +73,89 @@ function getJreUrl() {
 // =============================================================================
 
 function makeSetupJdkAction(options = {}) {
-    return {
-        locks: ['java-jdk'],
-        outputLines: 1,
-        run: async (ctx, task) => {
-            const { jdkVersion } = await loadPackageJson();
+	return {
+		locks: ['java-jdk'],
+		outputLines: 1,
+		run: async (ctx, task) => {
+			const { jdkVersion } = await loadPackageJson();
 
-            // Skip if already installed
-            if (!options.force && await getState('java.jdk') === 'installed' && await exists(JDK_DIR)) {
-                task.output = `JDK ${jdkVersion} already installed`;
-                return;
-            }
+			// Skip if already installed
+			if (!options.force && (await getState('java.jdk')) === 'installed' && (await exists(JDK_DIR))) {
+				task.output = `JDK ${jdkVersion} already installed`;
+				return;
+			}
 
-            const { ext, os } = getPlatform();
-            task.output = `Downloading JDK ${jdkVersion}...`;
-            await mkdir(BUILD_DIR);
+			const { ext, os } = getPlatform();
+			task.output = `Downloading JDK ${jdkVersion}...`;
+			await mkdir(BUILD_DIR);
 
-            await withLock('java-jdk', async () => {
-                const archivePath = await downloadFile(getJdkUrl(), `jdk-${jdkVersion}.${ext}`, task);
-                const stripLevels = os === "mac" ? 3 : 1;
-                task.output = 'Extracting...';
-                await extractArchive(archivePath, JDK_DIR, { stripLevels: stripLevels });
-                await setState('java.jdk', 'installed');
-            });
+			await withLock('java-jdk', async () => {
+				const archivePath = await downloadFile(getJdkUrl(), `jdk-${jdkVersion}.${ext}`, task);
+				const stripLevels = os === 'mac' ? 3 : 1;
+				task.output = 'Extracting...';
+				await extractArchive(archivePath, JDK_DIR, { stripLevels: stripLevels });
+				await setState('java.jdk', 'installed');
+			});
 
-            task.output = `JDK ${jdkVersion} installed`;
-        }
-    };
+			task.output = `JDK ${jdkVersion} installed`;
+		},
+	};
 }
 
 function makeSetupMavenAction(options = {}) {
-    return {
-        locks: ['java-maven'],
-        outputLines: 1,
-        run: async (ctx, task) => {
-            const { mavenVersion } = await loadPackageJson();
+	return {
+		locks: ['java-maven'],
+		outputLines: 1,
+		run: async (ctx, task) => {
+			const { mavenVersion } = await loadPackageJson();
 
-            // Skip if already installed
-            if (!options.force && await getState('java.maven') === 'installed' && await exists(MAVEN_DIR)) {
-                task.output = `Maven ${mavenVersion} already installed`;
-                return;
-            }
+			// Skip if already installed
+			if (!options.force && (await getState('java.maven')) === 'installed' && (await exists(MAVEN_DIR))) {
+				task.output = `Maven ${mavenVersion} already installed`;
+				return;
+			}
 
-            task.output = `Downloading Maven ${mavenVersion}...`;
+			task.output = `Downloading Maven ${mavenVersion}...`;
 
-            await withLock('java-maven', async () => {
-                const archivePath = await downloadFile(getMavenUrl(), `maven-${mavenVersion}.tar.gz`, task);
-                task.output = 'Extracting...';
-                await extractArchive(archivePath, MAVEN_DIR, { stripLevels: 1 });
-                await setState('java.maven', 'installed');
-            });
+			await withLock('java-maven', async () => {
+				const archivePath = await downloadFile(getMavenUrl(), `maven-${mavenVersion}.tar.gz`, task);
+				task.output = 'Extracting...';
+				await extractArchive(archivePath, MAVEN_DIR, { stripLevels: 1 });
+				await setState('java.maven', 'installed');
+			});
 
-            task.output = `Maven ${mavenVersion} installed`;
-        }
-    };
+			task.output = `Maven ${mavenVersion} installed`;
+		},
+	};
 }
 
 function makeSetupJreAction(options = {}) {
-    return {
-        locks: ['java-jre'],
-        outputLines: 1,
-        run: async (ctx, task) => {
-            const { jdkVersion } = await loadPackageJson();
+	return {
+		locks: ['java-jre'],
+		outputLines: 1,
+		run: async (ctx, task) => {
+			const { jdkVersion } = await loadPackageJson();
 
-            // Skip if already installed
-            if (!options.force && await getState('java.jre') === 'installed' && await exists(JRE_DIR)) {
-                task.output = `JRE ${jdkVersion} already installed`;
-                return;
-            }
+			// Skip if already installed
+			if (!options.force && (await getState('java.jre')) === 'installed' && (await exists(JRE_DIR))) {
+				task.output = `JRE ${jdkVersion} already installed`;
+				return;
+			}
 
-            const { ext, os } = getPlatform();
-            task.output = `Downloading JRE ${jdkVersion}...`;
+			const { ext, os } = getPlatform();
+			task.output = `Downloading JRE ${jdkVersion}...`;
 
-            await withLock('java-jre', async () => {
-                const archivePath = await downloadFile(getJreUrl(), `jre-${jdkVersion}.${ext}`, task);
-                const stripLevels = os === "mac" ? 3 : 1;
-                task.output = 'Extracting...';
-                await extractArchive(archivePath, JRE_DIR, { stripLevels: stripLevels });
-                await setState('java.jre', 'installed');
-            });
+			await withLock('java-jre', async () => {
+				const archivePath = await downloadFile(getJreUrl(), `jre-${jdkVersion}.${ext}`, task);
+				const stripLevels = os === 'mac' ? 3 : 1;
+				task.output = 'Extracting...';
+				await extractArchive(archivePath, JRE_DIR, { stripLevels: stripLevels });
+				await setState('java.jre', 'installed');
+			});
 
-            task.output = `JRE ${jdkVersion} installed`;
-        }
-    };
+			task.output = `JRE ${jdkVersion} installed`;
+		},
+	};
 }
 
 // =============================================================================
@@ -169,37 +163,37 @@ function makeSetupJreAction(options = {}) {
 // =============================================================================
 
 module.exports = {
-    name: 'java',
-    description: 'Java Development Kit & Maven',
+	name: 'java',
+	description: 'Java Development Kit & Maven',
 
-    actions: [
-        // Internal actions
-        { name: 'java:setup-jdk', action: makeSetupJdkAction },
-        { name: 'java:setup-maven', action: makeSetupMavenAction },
-        { name: 'java:setup-jre', action: makeSetupJreAction },
+	actions: [
+		// Internal actions
+		{ name: 'java:setup-jdk', action: makeSetupJdkAction },
+		{ name: 'java:setup-maven', action: makeSetupMavenAction },
+		{ name: 'java:setup-jre', action: makeSetupJreAction },
 
-        // Submodule actions (called by server:build-core / server:clean-all)
-        { name: 'java:submodule-build', action: () => ({
-            steps: [
-                parallel([
-                    'java:setup-jdk',
-                    'java:setup-maven',
-                    'java:setup-jre'
-                ], 'Setup Java tools')
-            ]
-        })},
-        { name: 'java:submodule-clean', action: () => ({
-            run: async (ctx, task) => {
-                await withLock('java-setup', async () => {
-                    await removeDir(BUILD_DIR);
-                    await setState('java.jdk', null);
-                    await setState('java.maven', null);
-                    await setState('java.jre', null);
-                });
-                task.output = 'Cleaned Java';
-            }
-        })}
-    ]
+		// Submodule actions (called by server:build-core / server:clean-all)
+		{
+			name: 'java:submodule-build',
+			action: () => ({
+				steps: [parallel(['java:setup-jdk', 'java:setup-maven', 'java:setup-jre'], 'Setup Java tools')],
+			}),
+		},
+		{
+			name: 'java:submodule-clean',
+			action: () => ({
+				run: async (ctx, task) => {
+					await withLock('java-setup', async () => {
+						await removeDir(BUILD_DIR);
+						await setState('java.jdk', null);
+						await setState('java.maven', null);
+						await setState('java.jre', null);
+					});
+					task.output = 'Cleaned Java';
+				},
+			}),
+		},
+	],
 };
 
 // Export for direct use

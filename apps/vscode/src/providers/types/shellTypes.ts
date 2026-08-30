@@ -18,14 +18,7 @@
  * Shell pushes from the host. `isSubscribed`/`serverHost` ride the
  * connection push only where the host knows them.
  */
-export type ShellHostToWebview =
-	| { type: 'shell:init'; theme: Record<string, string>; isConnected: boolean }
-	| { type: 'shell:themeChange'; tokens: Record<string, string> }
-	| { type: 'shell:connectionChange'; isConnected: boolean; isSubscribed?: boolean; serverHost?: string }
-	| { type: 'shell:viewActivated'; viewId: string }
-	| { type: 'shell:event'; event: unknown };
+export type ShellHostToWebview = { type: 'shell:init'; theme: Record<string, string>; isConnected: boolean } | { type: 'shell:themeChange'; tokens: Record<string, string> } | { type: 'shell:connectionChange'; isConnected: boolean; isSubscribed?: boolean; serverHost?: string } | { type: 'shell:viewActivated'; viewId: string } | { type: 'shell:event'; event: unknown };
 
 /** Shell lifecycle requests every webview can send to its host. */
-export type ShellWebviewToHost =
-	| { type: 'view:ready' }
-	| { type: 'view:initialized' };
+export type ShellWebviewToHost = { type: 'view:ready' } | { type: 'view:initialized' };

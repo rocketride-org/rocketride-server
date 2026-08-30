@@ -47,7 +47,9 @@ const ScenarioList: React.FC<Props> = ({ engine, engineState }) => {
 					<div style={styles.scenarioDesc}>{scenario.description}</div>
 					<div style={styles.scenarioTags}>
 						{scenario.tags.map((tag) => (
-							<span key={tag.label} style={styles.scenarioTag(tag.color)}>{tag.label}</span>
+							<span key={tag.label} style={styles.scenarioTag(tag.color)}>
+								{tag.label}
+							</span>
 						))}
 					</div>
 				</div>

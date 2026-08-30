@@ -50,9 +50,7 @@ declare module '*.svg' {
 	import type * as React from 'react';
 	// SVGR is configured with `ref: true` (see the icons plugin), so the
 	// generated components forward a ref to the underlying <svg>.
-	const Component: React.ForwardRefExoticComponent<
-		React.SVGProps<SVGSVGElement> & React.RefAttributes<SVGSVGElement>
-	>;
+	const Component: React.ForwardRefExoticComponent<React.SVGProps<SVGSVGElement> & React.RefAttributes<SVGSVGElement>>;
 	export default Component;
 }
 
@@ -123,6 +121,6 @@ interface ImportMeta {
 			mode?: 'sync' | 'eager' | 'weak' | 'lazy' | 'lazy-once';
 			exclude?: RegExp;
 			include?: RegExp;
-		},
+		}
 	): WebpackContext;
 }

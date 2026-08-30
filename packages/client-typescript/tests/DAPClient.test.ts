@@ -90,22 +90,17 @@ class ObservableDAPClient extends DAPClient {
 	}
 }
 
-type RequestOutcome =
-	| { status: 'resolved'; value: DAPMessage }
-	| { status: 'rejected'; error: unknown };
+type RequestOutcome = { status: 'resolved'; value: DAPMessage } | { status: 'rejected'; error: unknown };
 
 function requestOutcome(promise: Promise<DAPMessage>): Promise<RequestOutcome> {
 	return promise.then(
 		(value) => ({ status: 'resolved' as const, value }),
-		(error) => ({ status: 'rejected' as const, error }),
+		(error) => ({ status: 'rejected' as const, error })
 	);
 }
 
 async function settleSoon(promise: Promise<RequestOutcome>): Promise<RequestOutcome | { status: 'pending' }> {
-	return Promise.race([
-		promise,
-		new Promise<{ status: 'pending' }>((resolve) => setTimeout(() => resolve({ status: 'pending' }), 25)),
-	]);
+	return Promise.race([promise, new Promise<{ status: 'pending' }>((resolve) => setTimeout(() => resolve({ status: 'pending' }), 25))]);
 }
 
 function responseFor(request: DAPMessage, body: Record<string, unknown>): DAPMessage {
@@ -211,7 +206,9 @@ describe('DAPClient transport epochs', () => {
 		circular.self = circular;
 		let deliveredWithoutTrace: DAPMessage | undefined;
 		noTraceTransport.bind({
-			onReceive: async (message) => { deliveredWithoutTrace = message; },
+			onReceive: async (message) => {
+				deliveredWithoutTrace = message;
+			},
 		});
 		const noTraceMessage: DAPMessage = {
 			type: 'event',
@@ -227,7 +224,9 @@ describe('DAPClient transport epochs', () => {
 		let deliveredWithTrace: DAPMessage | undefined;
 		traceTransport.bind({
 			onDebugProtocol: (message) => traces.push(message),
-			onReceive: async (message) => { deliveredWithTrace = message; },
+			onReceive: async (message) => {
+				deliveredWithTrace = message;
+			},
 		});
 		const binary = new Uint8Array([1, 2, 3]);
 		const tracedCircular = {} as Record<string, unknown>;

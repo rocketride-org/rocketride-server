@@ -251,7 +251,7 @@ function keyBadgeEl(variant: 'active' | 'expired' | 'member' | 'pending', label:
  * @returns The display string ('' for session keys).
  */
 function teamScope(k: ApiKeyRecord): string {
-	return k.isSession ? '' : k.teamId == null ? 'All Teams' : k.teamName ?? 'Unknown team';
+	return k.isSession ? '' : k.teamId == null ? 'All Teams' : (k.teamName ?? 'Unknown team');
 }
 
 // =============================================================================
@@ -285,7 +285,7 @@ export const ApiKeysPanel: React.FC<ApiKeysPanelProps> = ({ keys, teams, onCreat
 
 	// The viewed record resolves LIVE from props so server refreshes (e.g. a
 	// revoke flipping active -> false) update the open panel in place.
-	const viewedKey = panel?.mode === 'view' ? keys.find((k) => k.id === panel.keyId) ?? null : null;
+	const viewedKey = panel?.mode === 'view' ? (keys.find((k) => k.id === panel.keyId) ?? null) : null;
 
 	// Create-form dirty flag: any field differs from its seeded default. It
 	// drives the materializing [Create Key] and arms the discard guard; the
@@ -640,9 +640,7 @@ export const ApiKeysPanel: React.FC<ApiKeysPanelProps> = ({ keys, teams, onCreat
 					message={
 						<>
 							<div style={{ fontSize: 13, fontWeight: 700, color: 'var(--rr-text-primary)', marginBottom: 2 }}>{viewedKey.name}</div>
-							<div style={{ fontSize: 11, color: 'var(--rr-text-secondary)', marginBottom: 12 }}>
-								{viewedKey.lastUsedAt ? `Last used ${relativeTime(viewedKey.lastUsedAt)}` : 'Never used'}
-							</div>
+							<div style={{ fontSize: 11, color: 'var(--rr-text-secondary)', marginBottom: 12 }}>{viewedKey.lastUsedAt ? `Last used ${relativeTime(viewedKey.lastUsedAt)}` : 'Never used'}</div>
 							<strong>This cannot be undone.</strong> Any service using this key will immediately lose access.
 						</>
 					}

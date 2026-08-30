@@ -296,7 +296,7 @@ const NewAppWebview: React.FC = () => {
 			setAppName(value);
 			if (!displayTouched) setDisplayName(deriveDisplayName(value));
 		},
-		[displayTouched],
+		[displayTouched]
 	);
 
 	/** Sends the create request and locks the form until the host answers. */
@@ -316,11 +316,7 @@ const NewAppWebview: React.FC = () => {
 	if (!identity) return null;
 
 	// step: pick the footer note for the current state
-	const note = !workspaceOpen
-		? 'Open a workspace folder first — the app is scaffolded into it.'
-		: identity.source === 'default'
-			? 'No organization developer id — using the "local" default.'
-			: 'Developer ID is read from the organization account profile.';
+	const note = !workspaceOpen ? 'Open a workspace folder first — the app is scaffolded into it.' : identity.source === 'default' ? 'No organization developer id — using the "local" default.' : 'Developer ID is read from the organization account profile.';
 
 	return (
 		<div style={styles.page}>
@@ -351,15 +347,7 @@ const NewAppWebview: React.FC = () => {
 							<label htmlFor="appName" style={styles.fieldLabel}>
 								App name
 							</label>
-							<input
-								id="appName"
-								type="text"
-								spellCheck={false}
-								placeholder="lowercase letters, digits, hyphens"
-								value={appName}
-								onChange={(e) => onAppNameChange(e.target.value.trim())}
-								style={{ ...styles.input, ...(appName !== '' && !nameValid ? styles.inputInvalid : {}) }}
-							/>
+							<input id="appName" type="text" spellCheck={false} placeholder="lowercase letters, digits, hyphens" value={appName} onChange={(e) => onAppNameChange(e.target.value.trim())} style={{ ...styles.input, ...(appName !== '' && !nameValid ? styles.inputInvalid : {}) }} />
 							{appName !== '' && !nameValid && <div style={styles.fieldError}>Must start with a letter; lowercase letters, digits, and hyphens only.</div>}
 							{collision && <div style={styles.fieldError}>Folder "apps/{folderName}" already exists in the workspace.</div>}
 						</div>

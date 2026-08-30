@@ -70,12 +70,7 @@ export function parseListPayload(payload: Record<string, unknown>): ListPayload 
 	}
 	const closed = (Array.isArray(payload.traces) ? payload.traces : []) as LogTraceSummary[];
 	const open = (Array.isArray(payload.open) ? payload.open : []) as LogTraceSummary[];
-	const combined: Array<{ summary: LogTraceSummary; inFlight: boolean }> = [
-		...closed.map((summary) => ({ summary, inFlight: false })),
-		...open.map((summary) => ({ summary, inFlight: true })),
-	];
-	const summaries = combined
-		.map((row, index) => toRequestSummary(row.summary, row.inFlight, index))
-		.sort((a, b) => (a.beginSeq ?? 0) - (b.beginSeq ?? 0));
+	const combined: Array<{ summary: LogTraceSummary; inFlight: boolean }> = [...closed.map((summary) => ({ summary, inFlight: false })), ...open.map((summary) => ({ summary, inFlight: true }))];
+	const summaries = combined.map((row, index) => toRequestSummary(row.summary, row.inFlight, index)).sort((a, b) => (a.beginSeq ?? 0) - (b.beginSeq ?? 0));
 	return { context, summaries, note: typeof payload.note === 'string' ? payload.note : undefined };
 }

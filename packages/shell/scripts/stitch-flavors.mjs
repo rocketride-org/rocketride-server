@@ -75,9 +75,7 @@ function extractAssets(html) {
  * @returns {string} Html without entry asset tags.
  */
 function stripAssetTags(html) {
-	return html
-		.replace(/<script\b[^>]*\bsrc="[^"]+"[^>]*>\s*<\/script>/g, '')
-		.replace(/<link\b[^>]*>/g, (tag) => (/\brel="stylesheet"/.test(tag) ? '' : tag));
+	return html.replace(/<script\b[^>]*\bsrc="[^"]+"[^>]*>\s*<\/script>/g, '').replace(/<link\b[^>]*>/g, (tag) => (/\brel="stylesheet"/.test(tag) ? '' : tag));
 }
 
 /**

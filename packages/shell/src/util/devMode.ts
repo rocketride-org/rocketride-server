@@ -97,7 +97,9 @@ export function isDevHooksEnabled(): boolean {
 			// choice per tab ('rr:dev'), and the gate honors the same flag so
 			// the flavor and the hooks can never disagree.
 			if (!urlFlag) urlFlag = sessionStorage.getItem('rr:dev') === '1';
-		} catch { /* no window/location (tests) — build-mode gate only */ }
+		} catch {
+			/* no window/location (tests) — build-mode gate only */
+		}
 		gateResult = process.env.NODE_ENV !== 'production' || urlFlag;
 	}
 	return gateResult;
@@ -198,7 +200,9 @@ export async function installDevHooks(): Promise<void> {
 	// waitForEmbeddedSession() as soon as React mounts, and the promise must
 	// exist by then (see the handshake section above).
 	if (!bootAnswerPromise) {
-		bootAnswerPromise = new Promise((resolve) => { bootAnswerResolve = resolve; });
+		bootAnswerPromise = new Promise((resolve) => {
+			bootAnswerResolve = resolve;
+		});
 	}
 
 	// Resolve the SAME live module the MF share scope hands to real apps:
@@ -210,9 +214,9 @@ export async function installDevHooks(): Promise<void> {
 
 	// Anchor the share scope on globalThis (see DEV_SHARE_SCOPE_KEY note).
 	const scope: Record<string, unknown> = {
-		'react': React,
+		react: React,
 		'react-dom': ReactDom,
-		'shell': shellUi,
+		shell: shellUi,
 	};
 	Reflect.set(globalThis, DEV_SHARE_SCOPE_KEY, scope);
 
@@ -254,7 +258,8 @@ export async function installDevHooks(): Promise<void> {
 				settleBootAnswer(data.token || null);
 				return;
 			}
-			if (data.token) cm.saveToken(data.token); else cm.clearToken();
+			if (data.token) cm.saveToken(data.token);
+			else cm.clearToken();
 			if (settleBootAnswer(data.token || null)) {
 				// Boot-window answer: bootstrap is still holding behind the
 				// loading screen and proceeds straight into the new state —
@@ -273,7 +278,9 @@ export async function installDevHooks(): Promise<void> {
 	// Tell a parent embedder the hooks are ready so it doesn't have to poll.
 	try {
 		window.parent?.postMessage({ type: 'shell:devReady' }, '*');
-	} catch { /* sandboxed/parentless — console users just call the API */ }
+	} catch {
+		/* sandboxed/parentless — console users just call the API */
+	}
 
 	console.log('[devMode] Dev hooks installed (window.__rrShellDev)');
 
@@ -322,7 +329,9 @@ function installConsoleForwarding(): void {
 	const forward = (type: string, payload: Record<string, unknown>): void => {
 		try {
 			window.parent.postMessage({ type, ...payload }, '*');
-		} catch { /* embedder gone — drop the row */ }
+		} catch {
+			/* embedder gone — drop the row */
+		}
 	};
 
 	// Wrap the three mirrored levels; every other console method stays native

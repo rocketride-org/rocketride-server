@@ -175,22 +175,7 @@ const styles = {
  * @param props - {@link IConnectionManagerViewProps}.
  * @returns The connections landing element.
  */
-export function ConnectionManagerView<T extends { id: string }>({
-	title,
-	subtitle,
-	emptyTitle = 'No connections yet',
-	emptyDescription,
-	connections,
-	card,
-	fields,
-	newValues,
-	editValues,
-	onCreate,
-	onUpdate,
-	onOpen,
-	onDelete,
-	icon,
-}: IConnectionManagerViewProps<T>): React.ReactElement {
+export function ConnectionManagerView<T extends { id: string }>({ title, subtitle, emptyTitle = 'No connections yet', emptyDescription, connections, card, fields, newValues, editValues, onCreate, onUpdate, onOpen, onDelete, icon }: IConnectionManagerViewProps<T>): React.ReactElement {
 	// Add/edit dialog state and per-field reveal state (secret inputs).
 	const [form, setForm] = useState<IFormState<T> | null>(null);
 	const [revealed, setRevealed] = useState<Record<string, boolean>>({});
@@ -249,7 +234,11 @@ export function ConnectionManagerView<T extends { id: string }>({
 			<ContentHeader
 				title={title}
 				subtitle={subtitle}
-				actions={<Button variant="secondary" onClick={openAdd}>+ New Connection</Button>}
+				actions={
+					<Button variant="secondary" onClick={openAdd}>
+						+ New Connection
+					</Button>
+				}
 			/>
 
 			<div style={styles.content}>
@@ -259,27 +248,18 @@ export function ConnectionManagerView<T extends { id: string }>({
 						icon={renderIcon(40)}
 						title={emptyTitle}
 						description={emptyDescription}
-						action={<Button variant="secondary" onClick={openAdd}>+ New Connection</Button>}
+						action={
+							<Button variant="secondary" onClick={openAdd}>
+								+ New Connection
+							</Button>
+						}
 					/>
 				) : (
 					<div style={styles.grid}>
 						{connections.map((conn) => {
 							// Per-connection card display props from the app's mapper.
 							const display = card(conn);
-							return (
-								<ConnectionCard
-									key={conn.id}
-									icon={renderIcon(30)}
-									name={display.name}
-									address={display.address}
-									status={display.status}
-									statusLabel={display.statusLabel}
-									connected={display.connected}
-									onEdit={() => openEdit(conn)}
-									onDelete={() => onDelete(conn)}
-									onClick={() => onOpen(conn)}
-								/>
-							);
+							return <ConnectionCard key={conn.id} icon={renderIcon(30)} name={display.name} address={display.address} status={display.status} statusLabel={display.statusLabel} connected={display.connected} onEdit={() => openEdit(conn)} onDelete={() => onDelete(conn)} onClick={() => onOpen(conn)} />;
 						})}
 						{/* Dashed "add a connection" tile terminates the grid. */}
 						<ConnectionCardAdd label="New Connection" onClick={openAdd} />
@@ -294,7 +274,9 @@ export function ConnectionManagerView<T extends { id: string }>({
 					onClose={closeForm}
 					footer={
 						<>
-							<Button variant="ghost" onClick={closeForm}>Cancel</Button>
+							<Button variant="ghost" onClick={closeForm}>
+								Cancel
+							</Button>
 							<Button variant="primary" onClick={save}>
 								{form.conn == null ? 'Connect' : 'Save'}
 							</Button>
@@ -307,27 +289,13 @@ export function ConnectionManagerView<T extends { id: string }>({
 							{f.secret ? (
 								// Secret field: masked input with a Show/Hide reveal toggle.
 								<div style={styles.secretRow}>
-									<InputField
-										style={styles.secretInput}
-										type={revealed[f.key] ? 'text' : 'password'}
-										value={form.values[f.key] ?? ''}
-										onChange={(e) => setFieldValue(f.key, e.target.value)}
-										onKeyDown={handleFieldKeyDown}
-										placeholder={f.placeholder}
-										autoFocus={f.autoFocus}
-									/>
+									<InputField style={styles.secretInput} type={revealed[f.key] ? 'text' : 'password'} value={form.values[f.key] ?? ''} onChange={(e) => setFieldValue(f.key, e.target.value)} onKeyDown={handleFieldKeyDown} placeholder={f.placeholder} autoFocus={f.autoFocus} />
 									<Button variant="ghost" onClick={() => setRevealed({ ...revealed, [f.key]: !revealed[f.key] })}>
 										{revealed[f.key] ? 'Hide' : 'Show'}
 									</Button>
 								</div>
 							) : (
-								<InputField
-									value={form.values[f.key] ?? ''}
-									onChange={(e) => setFieldValue(f.key, e.target.value)}
-									onKeyDown={handleFieldKeyDown}
-									placeholder={f.placeholder}
-									autoFocus={f.autoFocus}
-								/>
+								<InputField value={form.values[f.key] ?? ''} onChange={(e) => setFieldValue(f.key, e.target.value)} onKeyDown={handleFieldKeyDown} placeholder={f.placeholder} autoFocus={f.autoFocus} />
 							)}
 						</div>
 					))}

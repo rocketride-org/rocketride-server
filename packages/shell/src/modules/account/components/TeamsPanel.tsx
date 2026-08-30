@@ -310,7 +310,7 @@ export const TeamsPanel: React.FC<TeamsPanelProps> = ({ teams, teamDetail, activ
 
 	// The viewed record resolves LIVE from props so server refreshes (member
 	// added / removed, permissions changed) update the open panel in place.
-	const viewedTeam = panel?.mode === 'view' ? teams.find((t) => t.id === panel.teamId) ?? null : null;
+	const viewedTeam = panel?.mode === 'view' ? (teams.find((t) => t.id === panel.teamId) ?? null) : null;
 
 	// CREATE-mode dirty flag: the name field differs from its seeded default.
 	// Drives the materializing [Create Team] and arms the discard guard.
@@ -529,7 +529,7 @@ export const TeamsPanel: React.FC<TeamsPanelProps> = ({ teams, teamDetail, activ
 
 	// ── Derived view-mode values ────────────────────────────────────────────
 	// Live member count: the loaded detail wins over the list's cached count.
-	const memberCount = viewedDetail != null ? viewedDetail.members.length : viewedTeam?.memberCount ?? 0;
+	const memberCount = viewedDetail != null ? viewedDetail.members.length : (viewedTeam?.memberCount ?? 0);
 	// Count team admins so the last admin cannot remove themselves.
 	const adminCount = useMemo(() => (viewedDetail == null ? 0 : viewedDetail.members.filter((m) => m.permissions.includes('team.admin')).length), [viewedDetail]);
 	// Org members not already in the team — the add-member eligibility pool.

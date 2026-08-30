@@ -1,18 +1,18 @@
 /**
  * MIT License
- * 
+ *
  * Copyright (c) 2026 Aparavi Software AG
- * 
+ *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
  * in the Software without restriction, including without limitation the rights
  * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
  * copies of the Software, and to permit persons to whom the Software is
  * furnished to do so, subject to the following conditions:
- * 
+ *
  * The above copyright notice and this permission notice shall be included in all
  * copies or substantial portions of the Software.
- * 
+ *
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
  * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
  * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -26,7 +26,7 @@ import { Doc, DocHelper } from './Doc.js';
 
 /**
  * Groups related document chunks that come from the same source file.
- * 
+ *
  * When you search RocketRide and multiple chunks are found from the same document,
  * they can be organized into DocGroups for easier processing. This helps you
  * understand which content comes from which files and work with complete documents
@@ -87,9 +87,7 @@ export class DocGroupHelper {
 	 * Get the total content from all documents in the group.
 	 */
 	static getFullContent(group: DocGroup): string {
-		return group.documents
-			.map(doc => doc.page_content || '')
-			.join('\n');
+		return group.documents.map((doc) => doc.page_content || '').join('\n');
 	}
 
 	/**
@@ -133,7 +131,7 @@ export class DocGroupHelper {
 	 * Filter documents in the group by score threshold.
 	 */
 	static filterByScore(group: DocGroup, minScore: number): DocGroup {
-		const filteredDocuments = group.documents.filter(doc => (doc.score || 0) >= minScore);
+		const filteredDocuments = group.documents.filter((doc) => (doc.score || 0) >= minScore);
 
 		return {
 			...group,
@@ -171,21 +169,21 @@ export class DocGroupHelper {
 	 * Check if group contains table data.
 	 */
 	static hasTableData(group: DocGroup): boolean {
-		return group.documents.some(doc => doc.metadata?.isTable === true);
+		return group.documents.some((doc) => doc.metadata?.isTable === true);
 	}
 
 	/**
 	 * Get only table documents from the group.
 	 */
 	static getTableDocuments(group: DocGroup): Doc[] {
-		return group.documents.filter(doc => doc.metadata?.isTable === true);
+		return group.documents.filter((doc) => doc.metadata?.isTable === true);
 	}
 
 	/**
 	 * Get only text documents from the group.
 	 */
 	static getTextDocuments(group: DocGroup): Doc[] {
-		return group.documents.filter(doc => doc.metadata?.isTable !== true);
+		return group.documents.filter((doc) => doc.metadata?.isTable !== true);
 	}
 
 	/**
@@ -196,7 +194,7 @@ export class DocGroupHelper {
 			score: group.score,
 			objectId: group.objectId,
 			parent: group.parent,
-			documents: group.documents.map(doc => DocHelper.toDict(doc)),
+			documents: group.documents.map((doc) => DocHelper.toDict(doc)),
 		};
 	}
 
@@ -232,17 +230,17 @@ export class DocGroupHelper {
 
 		// Ensure all groups are from the same document
 		const firstGroup = groups[0];
-		const sameSource = groups.every(group => group.objectId === firstGroup.objectId);
+		const sameSource = groups.every((group) => group.objectId === firstGroup.objectId);
 
 		if (!sameSource) {
 			throw new Error('Cannot merge DocGroups from different source documents');
 		}
 
 		// Merge all documents
-		const allDocuments = groups.flatMap(group => group.documents);
+		const allDocuments = groups.flatMap((group) => group.documents);
 
 		// Use the highest score
-		const maxScore = Math.max(...groups.map(group => group.score));
+		const maxScore = Math.max(...groups.map((group) => group.score));
 
 		return {
 			score: maxScore,
@@ -265,7 +263,7 @@ export class DocGroupHelper {
 
 		for (let i = 0; i < sortedGroup.documents.length; i += chunkSize) {
 			const chunkDocuments = sortedGroup.documents.slice(i, i + chunkSize);
-			const chunkScore = Math.max(...chunkDocuments.map(doc => doc.score || 0));
+			const chunkScore = Math.max(...chunkDocuments.map((doc) => doc.score || 0));
 
 			result.push({
 				score: chunkScore,

@@ -1071,9 +1071,7 @@ export const TraceDetail: React.FC<ITraceDetailProps> = ({ traceId, projectId, f
 		let run: typeof group.nodes = [];
 		const flushRun = () => {
 			if (run.length === 0) return;
-			interleaved.push(
-				<TraceCallChildren key={`run-${run[0]?.row.id}`} nodes={run} componentNames={componentNames} expandedNodes={expandedNodes} moreRevealed={moreRevealed} onToggleExpand={toggleNode} onExpandAll={expandAllForNode} onCollapseAll={collapseAllForNode} onRevealMore={revealMore} />,
-			);
+			interleaved.push(<TraceCallChildren key={`run-${run[0]?.row.id}`} nodes={run} componentNames={componentNames} expandedNodes={expandedNodes} moreRevealed={moreRevealed} onToggleExpand={toggleNode} onExpandAll={expandAllForNode} onCollapseAll={collapseAllForNode} onRevealMore={revealMore} />);
 			run = [];
 		};
 		while (nodeIdx < group.nodes.length || sseIdx < sseEvents.length) {
@@ -1089,7 +1087,7 @@ export const TraceDetail: React.FC<ITraceDetailProps> = ({ traceId, projectId, f
 					<div key={`sse-${sse.body.logSeq}`} style={S.sseRow}>
 						<span style={S.sseTime}>{new Date(sseMs).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</span>
 						{text}
-					</div>,
+					</div>
 				);
 				sseIdx += 1;
 			} else {

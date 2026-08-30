@@ -74,7 +74,8 @@ const esbuild = require('esbuild');
  * @returns {{ file: string, version: number }} Snapshot path + version.
  */
 function newestFrozenContract() {
-	const versions = fs.readdirSync(VERSIONS_DIR)
+	const versions = fs
+		.readdirSync(VERSIONS_DIR)
 		.map((name) => /^v(\d+)\.d\.ts$/.exec(name))
 		.filter(Boolean)
 		.map((m) => Number(m[1]))

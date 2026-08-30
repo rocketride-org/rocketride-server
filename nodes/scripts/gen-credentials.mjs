@@ -67,10 +67,7 @@ const DEFAULT_CATALOG = path.join(HERE, '..', '..', 'packages', 'ai', 'src', 'ai
 // Same token list as packages/ai/src/ai/modules/mcp/credentials.py:_GENERIC_TOKENS.
 // JS can't import the Python constant, so this is a deliberate duplicate —
 // keep the two lists in sync by hand.
-const GENERIC_TOKENS = new Set([
-	'store', 'tool', 'db', 'graph', 'llm', 'embedding', 'memory', 'search',
-	'rerank', 'vision', 'cloud', 'api', 'agent', 'eval',
-]);
+const GENERIC_TOKENS = new Set(['store', 'tool', 'db', 'graph', 'llm', 'embedding', 'memory', 'search', 'rerank', 'vision', 'cloud', 'api', 'agent', 'eval']);
 
 // A key is credential-shaped iff it looks like a secret AND is not one of
 // the token-count fields that happen to contain the substring "token".
@@ -364,10 +361,7 @@ function main() {
 	}
 
 	writeFileSync(args.catalog, JSON.stringify(next, null, 2) + '\n');
-	console.log(
-		`nodes:credentials-generate wrote ${Object.keys(next).length} node(s): ` +
-		`${added.length} new field(s) appended, ${stale.length} stale entr${stale.length === 1 ? 'y' : 'ies'} kept (not removed).`,
-	);
+	console.log(`nodes:credentials-generate wrote ${Object.keys(next).length} node(s): ` + `${added.length} new field(s) appended, ${stale.length} stale entr${stale.length === 1 ? 'y' : 'ies'} kept (not removed).`);
 }
 
 main();

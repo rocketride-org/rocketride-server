@@ -42,15 +42,15 @@ import { ConnectionManager } from './connection/connection';
  */
 const API_CONFIG: ShellApiConfig = {
 	// Base URI for the RocketRide WebSocket server
-	ROCKETRIDE_URI:             process.env.ROCKETRIDE_URI,
+	ROCKETRIDE_URI: process.env.ROCKETRIDE_URI,
 	// Hard-coded API key for service accounts / dev; bypasses OAuth2 when present
-	RR_APIKEY:                 process.env.RR_APIKEY,
+	RR_APIKEY: process.env.RR_APIKEY,
 	// Stripe publishable key — passed to loadStripe() in CheckoutModal
 	RR_STRIPE_PUBLISHABLE_KEY: process.env.RR_STRIPE_PUBLISHABLE_KEY,
 	// Zitadel OIDC issuer URL — required for the OAuth2 PKCE sign-in flow
-	RR_ZITADEL_URL:            process.env.RR_ZITADEL_URL,
+	RR_ZITADEL_URL: process.env.RR_ZITADEL_URL,
 	// OAuth2 client ID registered with Zitadel for this SPA
-	RR_ZITADEL_CLIENT_ID:      process.env.RR_ZITADEL_CLIENT_ID,
+	RR_ZITADEL_CLIENT_ID: process.env.RR_ZITADEL_CLIENT_ID,
 };
 
 // =============================================================================
@@ -113,11 +113,21 @@ export function buildShellConfig(apps: AppManifestEntry[], capabilities: string[
 		// background matches their preference instead of always showing light.
 		// Falls back to rocketride-light if nothing is saved yet.
 		onInit: () => {
-			const homeTheme = (() => { try { return localStorage.getItem('rr:home:theme'); } catch { return null; } })();
+			const homeTheme = (() => {
+				try {
+					return localStorage.getItem('rr:home:theme');
+				} catch {
+					return null;
+				}
+			})();
 			const saved = (() => {
 				if (homeTheme === 'dark') return 'rocketride';
 				if (homeTheme === 'light') return 'rocketride-light';
-				try { return localStorage.getItem('rr:theme') || 'rocketride-light'; } catch { return 'rocketride-light'; }
+				try {
+					return localStorage.getItem('rr:theme') || 'rocketride-light';
+				} catch {
+					return 'rocketride-light';
+				}
 			})();
 			return fetchAndApplyTheme(saved, '/shell/themes').catch(console.error);
 		},

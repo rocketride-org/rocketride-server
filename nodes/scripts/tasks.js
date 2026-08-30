@@ -23,7 +23,7 @@
 
 /**
  * Build tasks for @rocketride/nodes
- * 
+ *
  * Commands:
  *   build - Sync nodes to dist
  *   test  - Run node integration tests (starts test server automatically)
@@ -31,20 +31,7 @@
  */
 const path = require('path');
 const os = require('os');
-const {
-    exists,
-    syncDir,
-    formatSyncStats,
-    removeDir,
-    PROJECT_ROOT, DIST_ROOT,
-    startServer,
-    stopServer,
-    execCommand,
-    runPytest,
-    parallel,
-    bracket,
-    parseServerAddress
-} = require('../../scripts/lib');
+const { exists, syncDir, formatSyncStats, removeDir, PROJECT_ROOT, DIST_ROOT, startServer, stopServer, execCommand, runPytest, parallel, bracket, parseServerAddress } = require('../../scripts/lib');
 
 const PACKAGE_DIR = path.join(__dirname, '..');
 const SRC_DIR = path.join(PACKAGE_DIR, 'src', 'nodes');
@@ -59,236 +46,226 @@ const ENGINE = path.join(DIST_ROOT, 'server', 'engine');
 // ============================================================================
 
 function makeSyncNodesAction(options = {}) {
-    return {
-        run: async (ctx, task) => {
-            task.output = 'Scanning for changes...';
+	return {
+		run: async (ctx, task) => {
+			task.output = 'Scanning for changes...';
 
-            const stats = {};
-            await syncDir(SRC_DIR, DIST_DIR, { mirror: false, package: true }, stats);
+			const stats = {};
+			await syncDir(SRC_DIR, DIST_DIR, { mirror: false, package: true }, stats);
 
-            if (options.overlayRoot) {
-                const overlaySrcDir = path.join(options.overlayRoot, 'nodes', 'src', 'nodes');
-                if (await exists(overlaySrcDir)) {
-                    await syncDir(overlaySrcDir, DIST_DIR, { mirror: false, package: true }, stats);
-                }
-            }
+			if (options.overlayRoot) {
+				const overlaySrcDir = path.join(options.overlayRoot, 'nodes', 'src', 'nodes');
+				if (await exists(overlaySrcDir)) {
+					await syncDir(overlaySrcDir, DIST_DIR, { mirror: false, package: true }, stats);
+				}
+			}
 
-            task.output = formatSyncStats(stats);
-        }
-    };
+			task.output = formatSyncStats(stats);
+		},
+	};
 }
 
 function makeStartTestServerAction(options = {}) {
-    return {
-        run: async (ctx, task) => {
-            const taskserver = options.taskserver || ctx.options?.taskserver;
-            if (taskserver) {
-                const parsed = parseServerAddress(taskserver);
-                ctx.port = parsed.port;
-                task.output = `Using existing server at ${parsed.uri}`;
-                return { port: parsed.port, server: null, serverUri: parsed.uri };
-            }
+	return {
+		run: async (ctx, task) => {
+			const taskserver = options.taskserver || ctx.options?.taskserver;
+			if (taskserver) {
+				const parsed = parseServerAddress(taskserver);
+				ctx.port = parsed.port;
+				task.output = `Using existing server at ${parsed.uri}`;
+				return { port: parsed.port, server: null, serverUri: parsed.uri };
+			}
 
-            task.output = 'Starting server...';
-            let taskComplete = false;
+			task.output = 'Starting server...';
+			let taskComplete = false;
 
-            // Set ROCKETRIDE_MOCK to enable mock modules for testing
-            const mocksPath = path.join(PACKAGE_DIR, 'test', 'mocks');
+			// Set ROCKETRIDE_MOCK to enable mock modules for testing
+			const mocksPath = path.join(PACKAGE_DIR, 'test', 'mocks');
 
-            const result = await startServer({
-                script: 'ai/eaas.py',
-                trace: options.trace,
-                basePort: 40000,  // Use 40000 range for node tests
-                env: {
-                    ROCKETRIDE_MOCK: mocksPath
-                },
-                onOutput: (text) => {
-                    if (taskComplete) return;
-                    const lines = text.trim().split('\n');
-                    if (lines.length > 0) {
-                        task.output = lines[lines.length - 1];
-                    }
-                }
-            });
+			const result = await startServer({
+				script: 'ai/eaas.py',
+				trace: options.trace,
+				basePort: 40000, // Use 40000 range for node tests
+				env: {
+					ROCKETRIDE_MOCK: mocksPath,
+				},
+				onOutput: (text) => {
+					if (taskComplete) return;
+					const lines = text.trim().split('\n');
+					if (lines.length > 0) {
+						task.output = lines[lines.length - 1];
+					}
+				},
+			});
 
-            ctx.port = result.port;
-            task.output = `Server ready on port ${ctx.port} (mocks enabled)`;
-            taskComplete = true;
-            return { port: result.port, server: result.server };
-        }
-    };
+			ctx.port = result.port;
+			task.output = `Server ready on port ${ctx.port} (mocks enabled)`;
+			taskComplete = true;
+			return { port: result.port, server: result.server };
+		},
+	};
 }
 
 function makeStopTestServerAction() {
-    return {
-        run: async (ctx, task) => {
-            const bracket = ctx.brackets?.['node-test-server'];
-            if (bracket?.server) {
-                task.output = 'Stopping server...';
-                await stopServer({ server: bracket.server });
-                task.output = 'Server stopped';
-            } else {
-                task.output = 'No server to stop';
-            }
-        }
-    };
+	return {
+		run: async (ctx, task) => {
+			const bracket = ctx.brackets?.['node-test-server'];
+			if (bracket?.server) {
+				task.output = 'Stopping server...';
+				await stopServer({ server: bracket.server });
+				task.output = 'Server stopped';
+			} else {
+				task.output = 'No server to stop';
+			}
+		},
+	};
 }
 
 function makeRunPytestAction(options = {}) {
-    return {
-        run: async (ctx, task) => {
-            // Load .env for test configuration
-            require('dotenv').config({ path: path.join(PROJECT_ROOT, '.env') });
+	return {
+		run: async (ctx, task) => {
+			// Load .env for test configuration
+			require('dotenv').config({ path: path.join(PROJECT_ROOT, '.env') });
 
-            const bracket = ctx.brackets?.['node-test-server'];
-            if (!bracket?.port) throw new Error('node-test-server bracket missing — server did not start');
-            const serverUri = bracket.serverUri || `http://localhost:${bracket.port}`;
+			const bracket = ctx.brackets?.['node-test-server'];
+			if (!bracket?.port) throw new Error('node-test-server bracket missing — server did not start');
+			const serverUri = bracket.serverUri || `http://localhost:${bracket.port}`;
 
-            const testEnv = {
-                ...process.env,
-                ROCKETRIDE_URI: serverUri,
-                ROCKETRIDE_MOCK: path.join(PACKAGE_DIR, 'test', 'mocks')
-            };
+			const testEnv = {
+				...process.env,
+				ROCKETRIDE_URI: serverUri,
+				ROCKETRIDE_MOCK: path.join(PACKAGE_DIR, 'test', 'mocks'),
+			};
 
-            // Use absolute paths since cwd is dist/server
-            const extraArgs = ['-v', '--rootdir', PACKAGE_DIR];
+			// Use absolute paths since cwd is dist/server
+			const extraArgs = ['-v', '--rootdir', PACKAGE_DIR];
 
-            if (!options.test_full) {
-                extraArgs.push(
-                    '--ignore-glob', '**/test_*_full.py',
-                    '--ignore-glob', '**/test_*_full/**');
-            }
+			if (!options.test_full) {
+				extraArgs.push('--ignore-glob', '**/test_*_full.py', '--ignore-glob', '**/test_*_full/**');
+			}
 
-            // Exclude skip_node tests by default (same as skip_nodes in pytest_generate_tests for dynamic tests)
-            const pytestOpts = options.pytest;
-            const markersOpt = options.markers;
-            const hasExplicitMarkers = (() => {
-                if (markersOpt) return true;
-                if (!pytestOpts) return false;
-                const tokens = typeof pytestOpts === 'string'
-                    ? pytestOpts.split(/\s+/).filter(Boolean)
-                    : pytestOpts.flatMap(o => String(o).split(/\s+/).filter(Boolean));
-                return tokens.some(t => t === '-m' || (t.startsWith('-m') && !t.startsWith('--')));
-            })();
-            if (!hasExplicitMarkers) {
-                extraArgs.push('-m', 'not skip_node');
-            }
+			// Exclude skip_node tests by default (same as skip_nodes in pytest_generate_tests for dynamic tests)
+			const pytestOpts = options.pytest;
+			const markersOpt = options.markers;
+			const hasExplicitMarkers = (() => {
+				if (markersOpt) return true;
+				if (!pytestOpts) return false;
+				const tokens = typeof pytestOpts === 'string' ? pytestOpts.split(/\s+/).filter(Boolean) : pytestOpts.flatMap((o) => String(o).split(/\s+/).filter(Boolean));
+				return tokens.some((t) => t === '-m' || (t.startsWith('-m') && !t.startsWith('--')));
+			})();
+			if (!hasExplicitMarkers) {
+				extraArgs.push('-m', 'not skip_node');
+			}
 
-            // Add any additional pytest options (from CLI or direct options)
-            // options comes from CLI args like --pytest="-s -v"
-            if (pytestOpts) {
-                // Handle both string and array formats
-                // CLI passes array like ["-v -s"], so split each element by spaces
-                if (typeof pytestOpts === 'string') {
-                    extraArgs.push(...pytestOpts.split(/\s+/).filter(x => x));
-                } else if (Array.isArray(pytestOpts)) {
-                    for (const opt of pytestOpts) {
-                        extraArgs.push(...opt.split(/\s+/).filter(x => x));
-                    }
-                }
-            }
+			// Add any additional pytest options (from CLI or direct options)
+			// options comes from CLI args like --pytest="-s -v"
+			if (pytestOpts) {
+				// Handle both string and array formats
+				// CLI passes array like ["-v -s"], so split each element by spaces
+				if (typeof pytestOpts === 'string') {
+					extraArgs.push(...pytestOpts.split(/\s+/).filter((x) => x));
+				} else if (Array.isArray(pytestOpts)) {
+					for (const opt of pytestOpts) {
+						extraArgs.push(...opt.split(/\s+/).filter((x) => x));
+					}
+				}
+			}
 
-            // Allow filtering tests by marker or pattern
-            const markers = options.markers;
-            const pattern = options.pytestPattern;
-            if (markers) {
-                extraArgs.push('-m', markers);
-            }
-            if (pattern) {
-                extraArgs.push('-k', pattern);
-            }
+			// Allow filtering tests by marker or pattern
+			const markers = options.markers;
+			const pattern = options.pytestPattern;
+			if (markers) {
+				extraArgs.push('-m', markers);
+			}
+			if (pattern) {
+				extraArgs.push('-k', pattern);
+			}
 
-            // Parallel execution via pytest-xdist. Defaults to min(cpus, 8) when the
-            // flag is not set: empirically, cloud-LLM rate limits + node-subprocess
-            // fan-out make >8 workers counterproductive on this test shape. Explicit
-            // values (numeric or 'auto') pass through; 'off'/'0' disables xdist.
-            const parallelRaw = options.pytestParallel ?? String(Math.min(os.cpus().length, 8));
-            const parallelVal = String(parallelRaw).trim().toLowerCase();
-            if (parallelVal && parallelVal !== 'off' && parallelVal !== '0') {
-                extraArgs.push('-n', parallelVal);
-                // Honor @pytest.mark.xdist_group (set in conftest._build_parametrize_list):
-                // same-group tests run on one worker, so heavy GPU/model node tests serialize
-                // and don't OOM-crash workers. The marker is ignored under the default
-                // --dist load. Skip if the caller already chose a distribution mode via
-                // --pytest, in either `--dist <mode>` or `--dist=<mode>` form.
-                const hasDistOverride = extraArgs.some((a) => a === '--dist' || a.startsWith('--dist='));
-                if (!hasDistOverride) {
-                    extraArgs.push('--dist', 'loadgroup');
-                }
-            }
+			// Parallel execution via pytest-xdist. Defaults to min(cpus, 8) when the
+			// flag is not set: empirically, cloud-LLM rate limits + node-subprocess
+			// fan-out make >8 workers counterproductive on this test shape. Explicit
+			// values (numeric or 'auto') pass through; 'off'/'0' disables xdist.
+			const parallelRaw = options.pytestParallel ?? String(Math.min(os.cpus().length, 8));
+			const parallelVal = String(parallelRaw).trim().toLowerCase();
+			if (parallelVal && parallelVal !== 'off' && parallelVal !== '0') {
+				extraArgs.push('-n', parallelVal);
+				// Honor @pytest.mark.xdist_group (set in conftest._build_parametrize_list):
+				// same-group tests run on one worker, so heavy GPU/model node tests serialize
+				// and don't OOM-crash workers. The marker is ignored under the default
+				// --dist load. Skip if the caller already chose a distribution mode via
+				// --pytest, in either `--dist <mode>` or `--dist=<mode>` form.
+				const hasDistOverride = extraArgs.some((a) => a === '--dist' || a.startsWith('--dist='));
+				if (!hasDistOverride) {
+					extraArgs.push('--dist', 'loadgroup');
+				}
+			}
 
-            await runPytest({
-                engine: ENGINE,
-                testsDir: TEST_DIR,
-                extraArgs,
-                execOpts: { task, cwd: PACKAGE_DIR, env: testEnv },
-            });
-        }
-    };
+			await runPytest({
+				engine: ENGINE,
+				testsDir: TEST_DIR,
+				extraArgs,
+				execOpts: { task, cwd: PACKAGE_DIR, env: testEnv },
+			});
+		},
+	};
 }
 
 function makeDocsGenerateAction() {
-    return {
-        run: async (ctx, task) => {
-            await execCommand('node', [path.join(__dirname, 'gen-node-tables.mjs')], { task, cwd: PACKAGE_DIR });
-        }
-    };
+	return {
+		run: async (ctx, task) => {
+			await execCommand('node', [path.join(__dirname, 'gen-node-tables.mjs')], { task, cwd: PACKAGE_DIR });
+		},
+	};
 }
 
 function makeCredentialsGenerateAction() {
-    return {
-        run: async (ctx, task) => {
-            await execCommand('node', [path.join(__dirname, 'gen-credentials.mjs')], { task, cwd: PACKAGE_DIR });
-        }
-    };
+	return {
+		run: async (ctx, task) => {
+			await execCommand('node', [path.join(__dirname, 'gen-credentials.mjs')], { task, cwd: PACKAGE_DIR });
+		},
+	};
 }
 
 function makeCredentialsCheckAction() {
-    return {
-        run: async (ctx, task) => {
-            await execCommand('node', [path.join(__dirname, 'gen-credentials.mjs'), '--check'], { task, cwd: PACKAGE_DIR });
-        }
-    };
+	return {
+		run: async (ctx, task) => {
+			await execCommand('node', [path.join(__dirname, 'gen-credentials.mjs'), '--check'], { task, cwd: PACKAGE_DIR });
+		},
+	};
 }
 
 function makeRunContractTestsAction() {
-    return {
-        run: async (ctx, task) => {
-            await runPytest({
-                engine: ENGINE,
-                testsDir: path.join(TEST_DIR, 'test_contracts.py'),
-                extraArgs: ['-v', '--rootdir', PACKAGE_DIR],
-                execOpts: { task, cwd: PACKAGE_DIR },
-            });
-        }
-    };
+	return {
+		run: async (ctx, task) => {
+			await runPytest({
+				engine: ENGINE,
+				testsDir: path.join(TEST_DIR, 'test_contracts.py'),
+				extraArgs: ['-v', '--rootdir', PACKAGE_DIR],
+				execOpts: { task, cwd: PACKAGE_DIR },
+			});
+		},
+	};
 }
 
 function makeTestAction(options = {}) {
-    return {
-        description: 'Testing nodes',
-        steps: [
-            'server:build',
-            parallel([
-                'nodes:build',
-                'ai:build',
-                'client-python:build'
-            ], 'Build dependencies'),
-            bracket({
-                name: 'node-test-server',
-                setup: makeStartTestServerAction(options),
-                teardown: makeStopTestServerAction(options),
-                steps: [
-                    {
-                        name: options.test_full 
-                            ? 'nodes:run-pytest-full'
-                            : 'nodes:run-pytest',
-                        action: makeRunPytestAction(options)
-                    }
-                ]
-            })
-        ]
-    }
+	return {
+		description: 'Testing nodes',
+		steps: [
+			'server:build',
+			parallel(['nodes:build', 'ai:build', 'client-python:build'], 'Build dependencies'),
+			bracket({
+				name: 'node-test-server',
+				setup: makeStartTestServerAction(options),
+				teardown: makeStopTestServerAction(options),
+				steps: [
+					{
+						name: options.test_full ? 'nodes:run-pytest-full' : 'nodes:run-pytest',
+						action: makeRunPytestAction(options),
+					},
+				],
+			}),
+		],
+	};
 }
 
 // ============================================================================
@@ -296,38 +273,47 @@ function makeTestAction(options = {}) {
 // ============================================================================
 
 module.exports = {
-    name: 'nodes',
-    description: 'Pipeline Nodes',
+	name: 'nodes',
+	description: 'Pipeline Nodes',
 
-    actions: [
-        // Internal actions
-        { name: 'nodes:sync', action: makeSyncNodesAction },
-        { name: 'nodes:start-server', action: makeStartTestServerAction },
-        { name: 'nodes:stop-server', action: makeStopTestServerAction },
-        { name: 'nodes:run-contracts', action: makeRunContractTestsAction },
-        { name: 'nodes:docs-generate', action: makeDocsGenerateAction },
-        { name: 'nodes:credentials-generate', action: makeCredentialsGenerateAction },
-        { name: 'nodes:credentials-check', action: makeCredentialsCheckAction },
+	actions: [
+		// Internal actions
+		{ name: 'nodes:sync', action: makeSyncNodesAction },
+		{ name: 'nodes:start-server', action: makeStartTestServerAction },
+		{ name: 'nodes:stop-server', action: makeStopTestServerAction },
+		{ name: 'nodes:run-contracts', action: makeRunContractTestsAction },
+		{ name: 'nodes:docs-generate', action: makeDocsGenerateAction },
+		{ name: 'nodes:credentials-generate', action: makeCredentialsGenerateAction },
+		{ name: 'nodes:credentials-check', action: makeCredentialsCheckAction },
 
-        // Public actions (have descriptions)
-        { name: 'nodes:build', action: () => ({
-            description: 'Build nodes',
-            steps: ['server:build', 'nodes:sync', 'nodes:docs-generate', 'nodes:credentials-generate']
-        })},
-        { name: 'nodes:test', action: (options) => makeTestAction({ ...options, test_full: false }) },
-        { name: 'nodes:test-full', action: (options) => makeTestAction({ ...options, test_full: true }) },
-        { name: 'nodes:test-contracts', action: () => ({
-            description: 'Testing nodes (contracts)',
-            steps: ['server:build', 'nodes:run-contracts']
-        })},
-        { name: 'nodes:clean', action: () => ({
-            description: 'Cleaning nodes',
-            run: async (ctx, task) => {
-                await removeDir(DIST_DIR);
-                task.output = 'Cleaned nodes';
-            }
-        })}
-    ]
+		// Public actions (have descriptions)
+		{
+			name: 'nodes:build',
+			action: () => ({
+				description: 'Build nodes',
+				steps: ['server:build', 'nodes:sync', 'nodes:docs-generate', 'nodes:credentials-generate'],
+			}),
+		},
+		{ name: 'nodes:test', action: (options) => makeTestAction({ ...options, test_full: false }) },
+		{ name: 'nodes:test-full', action: (options) => makeTestAction({ ...options, test_full: true }) },
+		{
+			name: 'nodes:test-contracts',
+			action: () => ({
+				description: 'Testing nodes (contracts)',
+				steps: ['server:build', 'nodes:run-contracts'],
+			}),
+		},
+		{
+			name: 'nodes:clean',
+			action: () => ({
+				description: 'Cleaning nodes',
+				run: async (ctx, task) => {
+					await removeDir(DIST_DIR);
+					task.output = 'Cleaned nodes';
+				},
+			}),
+		},
+	],
 };
 
 // Export paths for external use

@@ -55,12 +55,7 @@ const TabControlDemo: React.FC<IGalleryDemoProps> = ({ knobs }) => {
 
 	return (
 		<div style={{ maxWidth: 560 }}>
-			<TabControl
-				menu={menu}
-				activeId={activeId}
-				onSelect={setActiveId}
-				trailing={knobs.trailing ? <span style={{ ...commonStyles.fontMono, fontSize: 11, color: 'var(--rr-text-disabled)', alignSelf: 'center' }}>chat.pipe</span> : undefined}
-			/>
+			<TabControl menu={menu} activeId={activeId} onSelect={setActiveId} trailing={knobs.trailing ? <span style={{ ...commonStyles.fontMono, fontSize: 11, color: 'var(--rr-text-disabled)', alignSelf: 'center' }}>chat.pipe</span> : undefined} />
 			<TabPanel
 				activeId={activeId}
 				panels={{

@@ -150,17 +150,7 @@ const styles = {
  * @param props - {@link IConnectionCardProps}.
  * @returns The card element.
  */
-export function ConnectionCard({
-	icon,
-	name,
-	address,
-	status,
-	statusLabel,
-	connected = false,
-	onEdit,
-	onDelete,
-	onClick,
-}: IConnectionCardProps): React.ReactElement {
+export function ConnectionCard({ icon, name, address, status, statusLabel, connected = false, onEdit, onDelete, onClick }: IConnectionCardProps): React.ReactElement {
 	// Hover state drives the visibility of the edit / delete actions.
 	const [hovered, setHovered] = useState(false);
 
@@ -193,7 +183,7 @@ export function ConnectionCard({
 								e.preventDefault();
 								onClick();
 							}
-					  }
+						}
 					: undefined
 			}
 			onMouseEnter={() => setHovered(true)}
@@ -212,26 +202,12 @@ export function ConnectionCard({
 			{(onEdit || onDelete) && (
 				<div style={styles.actions(hovered)}>
 					{onEdit && (
-						<span
-							role="button"
-							aria-label="Edit"
-							tabIndex={0}
-							style={styles.actionButton}
-							onClick={(e) => runAction(e, onEdit)}
-							onKeyDown={(e) => runActionKey(e, onEdit)}
-						>
+						<span role="button" aria-label="Edit" tabIndex={0} style={styles.actionButton} onClick={(e) => runAction(e, onEdit)} onKeyDown={(e) => runActionKey(e, onEdit)}>
 							<BxEditAlt size={15} />
 						</span>
 					)}
 					{onDelete && (
-						<span
-							role="button"
-							aria-label="Delete"
-							tabIndex={0}
-							style={styles.actionButton}
-							onClick={(e) => runAction(e, onDelete)}
-							onKeyDown={(e) => runActionKey(e, onDelete)}
-						>
+						<span role="button" aria-label="Delete" tabIndex={0} style={styles.actionButton} onClick={(e) => runAction(e, onDelete)} onKeyDown={(e) => runActionKey(e, onDelete)}>
 							<BxTrash size={15} />
 						</span>
 					)}

@@ -44,32 +44,5 @@ export type { ILogListProps, LogListRow } from './LogList';
 export { renderTemplate, TEMPLATE_NAMES } from './templates';
 export type { FrameOptions, TemplateFile, TemplateName, TemplateVars } from './templates';
 export { ComponentGallery, KnobsPanel, GALLERY_ENTRIES, GALLERY_GROUPS } from './gallery';
-export type {
-	GalleryGroup,
-	IGalleryDemoProps,
-	IGalleryEntry,
-	IGalleryKnob,
-	IGalleryPropRow,
-	IKnobsPanelProps,
-	KnobValue,
-	KnobValues,
-} from './gallery';
-export type {
-	AppBuilderCapabilities,
-	AppBuilderStage,
-	AppErrorRow,
-	AppEventRow,
-	AppStatus,
-	AppSummary,
-	AppVersionInfo,
-	ConsoleRow,
-	DevelopPane,
-	IAppBuilderHost,
-	ListingDraft,
-	PreflightCheck,
-	PricingTier,
-	ReviewTimelineItem,
-	RungKind,
-	RungPin,
-	WatchStatus,
-} from './types';
+export type { GalleryGroup, IGalleryDemoProps, IGalleryEntry, IGalleryKnob, IGalleryPropRow, IKnobsPanelProps, KnobValue, KnobValues } from './gallery';
+export type { AppBuilderCapabilities, AppBuilderStage, AppErrorRow, AppEventRow, AppStatus, AppSummary, AppVersionInfo, ConsoleRow, DevelopPane, IAppBuilderHost, ListingDraft, PreflightCheck, PricingTier, ReviewTimelineItem, RungKind, RungPin, WatchStatus } from './types';

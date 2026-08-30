@@ -35,12 +35,4 @@ export { ComponentGallery } from './ComponentGallery';
 export { KnobsPanel } from './KnobsPanel';
 export type { IKnobsPanelProps } from './KnobsPanel';
 export { GALLERY_ENTRIES, GALLERY_GROUPS } from './registry';
-export type {
-	GalleryGroup,
-	IGalleryDemoProps,
-	IGalleryEntry,
-	IGalleryKnob,
-	IGalleryPropRow,
-	KnobValue,
-	KnobValues,
-} from './galleryTypes';
+export type { GalleryGroup, IGalleryDemoProps, IGalleryEntry, IGalleryKnob, IGalleryPropRow, KnobValue, KnobValues } from './galleryTypes';

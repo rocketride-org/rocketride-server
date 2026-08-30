@@ -72,7 +72,7 @@ const IS_PLATFORM_REPO = fs.existsSync(path.join(PROJECT_ROOT, 'packages', 'shel
  * overlay apps are visible in the registry.
  */
 function getRemoteUiModules() {
-	return registry.names().filter(n => n.endsWith('-ui'));
+	return registry.names().filter((n) => n.endsWith('-ui'));
 }
 
 // =============================================================================
@@ -91,8 +91,8 @@ const uiModule = {
 				description: 'Cleaning ui (all)',
 				steps: [
 					parallel(
-						getRemoteUiModules().map(n => `${n}:clean`),
-						'Clean UI apps',
+						getRemoteUiModules().map((n) => `${n}:clean`),
+						'Clean UI apps'
 					),
 				],
 			}),
@@ -105,8 +105,8 @@ const uiModule = {
 				description: 'Register all UI apps into apps.json',
 				steps: [
 					parallel(
-						getRemoteUiModules().map(n => `${n}:register`),
-						'Register UI apps',
+						getRemoteUiModules().map((n) => `${n}:register`),
+						'Register UI apps'
 					),
 				],
 			}),
@@ -120,8 +120,8 @@ const uiModule = {
 				description: 'Build ui (all)',
 				steps: [
 					parallel(
-						getRemoteUiModules().map(n => `${n}:build`),
-						'Build remote apps',
+						getRemoteUiModules().map((n) => `${n}:build`),
+						'Build remote apps'
 					),
 				],
 			}),
@@ -156,7 +156,9 @@ const clientVendorModule = {
 					// the task display; skip the lib's own install...
 					const tgzPath = await vendorShell(PROJECT_ROOT, ctx.options.shell, {
 						install: false,
-						log: (msg) => { task.output = msg; },
+						log: (msg) => {
+							task.output = msg;
+						},
 					});
 					// step: ...and relink through execCommand instead, so
 					// pnpm's output stays inside the task UI
@@ -190,7 +192,11 @@ const builderModule = {
 				run: async (ctx, task) => {
 					if (!ctx.options.path) throw new Error('builder:inject requires --path=<repo root> (the repository to receive the scripts/ tree)');
 					const { copyScripts } = require('./lib/copy-scripts');
-					await copyScripts(path.resolve(ctx.options.path), { log: (msg) => { task.output = msg; } });
+					await copyScripts(path.resolve(ctx.options.path), {
+						log: (msg) => {
+							task.output = msg;
+						},
+					});
 					task.output = `scripts/ copied to ${path.resolve(ctx.options.path)}`;
 				},
 			}),
@@ -216,14 +222,22 @@ const builderModule = {
 					// check. A missing target cannot resolve — leave it to
 					// selfUpdate, which fails naming the real cause.
 					let targetReal = target;
-					try { targetReal = fs.realpathSync(target); } catch { /* missing target — selfUpdate reports it */ }
+					try {
+						targetReal = fs.realpathSync(target);
+					} catch {
+						/* missing target — selfUpdate reports it */
+					}
 					if (targetReal === fs.realpathSync(PROJECT_ROOT)) {
 						const others = process.argv.slice(2).filter((arg) => !arg.startsWith('-') && arg !== 'builder:update');
 						if (others.length) {
 							throw new Error(`builder:update targets this repository — run it as the invocation's only action (also requested: ${others.join(', ')})`);
 						}
 					}
-					await selfUpdate(target, ctx.options.branch, { log: (msg) => { task.output = msg; } });
+					await selfUpdate(target, ctx.options.branch, {
+						log: (msg) => {
+							task.output = msg;
+						},
+					});
 					task.output = `${target} scripts/ updated from upstream`;
 				},
 			}),

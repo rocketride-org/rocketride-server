@@ -204,11 +204,7 @@ export const SidebarView: React.FC<ISidebarViewProps> = ({ connection, isSubscri
 	// when the host wires the app-builder sidebar content; Nodes (the
 	// node-builder placeholder) rides along whenever the tabs render.
 	const modeMenu: ViewMenu = {
-		entries: [
-			{ id: 'pipelines', label: 'Pipelines' },
-			...(hasAppBuilder ? [{ id: 'apps', label: 'Apps' }] : []),
-			{ id: 'nodes', label: 'Nodes' },
-		],
+		entries: [{ id: 'pipelines', label: 'Pipelines' }, ...(hasAppBuilder ? [{ id: 'apps', label: 'Apps' }] : []), { id: 'nodes', label: 'Nodes' }],
 	};
 
 	// --- Map pipeline entries → Explorer entries -----------------------------
@@ -324,33 +320,18 @@ export const SidebarView: React.FC<ISidebarViewProps> = ({ connection, isSubscri
 			</div>
 			<div style={S.appsLabel}>My Apps</div>
 			<div style={S.appsList}>
-				{appBuilder.apps.length === 0 && (
-					<div style={{ padding: '4px 10px', fontSize: 12, color: 'var(--rr-text-secondary)' }}>
-						No apps yet — create one with New app.
-					</div>
-				)}
+				{appBuilder.apps.length === 0 && <div style={{ padding: '4px 10px', fontSize: 12, color: 'var(--rr-text-secondary)' }}>No apps yet — create one with New app.</div>}
 				{appBuilder.apps.map((app) => {
 					const rowKey = `app:${app.id}`;
 					const active = app.id === appBuilder.activeAppId;
 					const badge = APP_BADGE[app.status] ?? APP_BADGE.local;
 					return (
-						<div
-							key={app.id}
-							style={{ ...S.row, ...(active ? { background: HOVER_BG } : hoverBg(rowKey)) }}
-							onMouseEnter={() => setHoveredRow(rowKey)}
-							onMouseLeave={() => setHoveredRow(null)}
-							onClick={() => appBuilder.onOpenApp(app.id)}
-							title={app.folder ? `${app.id}\n${app.folder}` : app.id}
-						>
+						<div key={app.id} style={{ ...S.row, ...(active ? { background: HOVER_BG } : hoverBg(rowKey)) }} onMouseEnter={() => setHoveredRow(rowKey)} onMouseLeave={() => setHoveredRow(null)} onClick={() => appBuilder.onOpenApp(app.id)} title={app.folder ? `${app.id}\n${app.folder}` : app.id}>
 							{/* Mirror the Explorer file-row anatomy — 14px chevron slot
 							    (apps don't expand) + 16px leading icon — so app icons and
 							    names align column-for-column with the pipeline rows. */}
 							<span style={{ width: 14, flexShrink: 0 }} />
-							{app.iconUrl ? (
-								<img src={app.iconUrl} alt="" style={S.appIcon} />
-							) : (
-								<BxGridAlt size={16} color="var(--rr-text-secondary)" />
-							)}
+							{app.iconUrl ? <img src={app.iconUrl} alt="" style={S.appIcon} /> : <BxGridAlt size={16} color="var(--rr-text-secondary)" />}
 							<span style={S.rowName}>{app.name}</span>
 							<span style={S.spacer} />
 							<StatusBadge variant={badge.variant}>{badge.label}</StatusBadge>

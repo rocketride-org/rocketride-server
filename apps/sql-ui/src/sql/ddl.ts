@@ -51,13 +51,7 @@ export interface IColumnSpec {
 }
 
 /** One staged designer operation. */
-export type AlterOp =
-	| { kind: 'addColumn'; spec: IColumnSpec }
-	| { kind: 'dropColumn'; name: string }
-	| { kind: 'renameColumn'; name: string; newName: string }
-	| { kind: 'changeType'; name: string; type: string }
-	| { kind: 'addForeignKey'; name: string; column: string; refTable: string; refColumn: string; onUpdate: string; onDelete: string }
-	| { kind: 'dropForeignKey'; name: string };
+export type AlterOp = { kind: 'addColumn'; spec: IColumnSpec } | { kind: 'dropColumn'; name: string } | { kind: 'renameColumn'; name: string; newName: string } | { kind: 'changeType'; name: string; type: string } | { kind: 'addForeignKey'; name: string; column: string; refTable: string; refColumn: string; onUpdate: string; onDelete: string } | { kind: 'dropForeignKey'; name: string };
 
 /** Referential action options offered by the FK editor. */
 export const FK_ACTIONS = ['RESTRICT', 'CASCADE', 'SET NULL', 'NO ACTION'] as const;
@@ -132,12 +126,7 @@ export function generateAlterStatements(dialect: SqlDialect, tableName: string, 
 				return `ALTER TABLE ${target} MODIFY COLUMN ${quoteIdent(dialect, op.name)} ${op.type}`;
 
 			case 'addForeignKey':
-				return (
-					`ALTER TABLE ${target} ADD CONSTRAINT ${quoteIdent(dialect, op.name)} ` +
-					`FOREIGN KEY (${quoteIdent(dialect, op.column)}) ` +
-					`REFERENCES ${quoteIdent(dialect, op.refTable)} (${quoteIdent(dialect, op.refColumn)}) ` +
-					`ON UPDATE ${op.onUpdate} ON DELETE ${op.onDelete}`
-				);
+				return `ALTER TABLE ${target} ADD CONSTRAINT ${quoteIdent(dialect, op.name)} ` + `FOREIGN KEY (${quoteIdent(dialect, op.column)}) ` + `REFERENCES ${quoteIdent(dialect, op.refTable)} (${quoteIdent(dialect, op.refColumn)}) ` + `ON UPDATE ${op.onUpdate} ON DELETE ${op.onDelete}`;
 
 			case 'dropForeignKey':
 				// MySQL names the gesture; everyone else drops the constraint.
@@ -157,11 +146,17 @@ export function generateAlterStatements(dialect: SqlDialect, tableName: string, 
  */
 export function describeOp(op: AlterOp): string {
 	switch (op.kind) {
-		case 'addColumn': return `Add column ${op.spec.name} ${op.spec.type}`;
-		case 'dropColumn': return `Drop column ${op.name}`;
-		case 'renameColumn': return `Rename column ${op.name} to ${op.newName}`;
-		case 'changeType': return `Change ${op.name} type to ${op.type}`;
-		case 'addForeignKey': return `Add foreign key ${op.name} (${op.column} -> ${op.refTable}.${op.refColumn})`;
-		case 'dropForeignKey': return `Drop foreign key ${op.name}`;
+		case 'addColumn':
+			return `Add column ${op.spec.name} ${op.spec.type}`;
+		case 'dropColumn':
+			return `Drop column ${op.name}`;
+		case 'renameColumn':
+			return `Rename column ${op.name} to ${op.newName}`;
+		case 'changeType':
+			return `Change ${op.name} type to ${op.type}`;
+		case 'addForeignKey':
+			return `Add foreign key ${op.name} (${op.column} -> ${op.refTable}.${op.refColumn})`;
+		case 'dropForeignKey':
+			return `Drop foreign key ${op.name}`;
 	}
 }

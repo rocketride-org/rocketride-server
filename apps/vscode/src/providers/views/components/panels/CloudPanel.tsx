@@ -121,33 +121,15 @@ export const CloudPanel: React.FC<CloudPanelProps> = ({ cloudSignedIn, cloudUser
 			{/* Subscribe prompt — shown when signed in but not subscribed */}
 			{isSaas && cloudSignedIn && isSubscribed === false && onFetchPlans && (
 				<div style={{ display: 'flex', alignItems: 'center', gap: 16, padding: '14px 16px', borderRadius: 8, border: '1px solid var(--vscode-input-border, #444)', background: 'var(--vscode-editor-background)' }}>
-					<div style={{ flex: 1, fontSize: 13, lineHeight: 1.5, color: 'var(--rr-text-secondary)' }}>
-						You are currently not subscribed to the RocketRide Cloud. You will be able to run all your pipelines locally, but to run them in the cloud, or deploy pipelines to the cloud, requires a subscription.
-					</div>
-					<button
-						type="button"
-						onClick={() => setShowCheckout(true)}
-						style={{ whiteSpace: 'nowrap', padding: '10px 24px', fontWeight: 600, flexShrink: 0 }}
-					>
+					<div style={{ flex: 1, fontSize: 13, lineHeight: 1.5, color: 'var(--rr-text-secondary)' }}>You are currently not subscribed to the RocketRide Cloud. You will be able to run all your pipelines locally, but to run them in the cloud, or deploy pipelines to the cloud, requires a subscription.</div>
+					<button type="button" onClick={() => setShowCheckout(true)} style={{ whiteSpace: 'nowrap', padding: '10px 24px', fontWeight: 600, flexShrink: 0 }}>
 						Subscribe to Pipe Builder
 					</button>
 				</div>
 			)}
 
 			{/* Checkout modal overlay */}
-			{showCheckout && stripeKey && onFetchPlans && onCreateCheckout && onConfirmPending && (
-				<CheckoutModal
-					appName="Pipe Builder"
-					appDescription="Visual AI pipeline editor -- run and deploy pipelines on RocketRide Cloud."
-					stripePublishableKey={stripeKey}
-					onFetchPlans={onFetchPlans}
-					onCreateCheckout={onCreateCheckout}
-					onConfirmPending={onConfirmPending}
-					onSuccess={handleCheckoutSuccess}
-					onClose={() => setShowCheckout(false)}
-				/>
-			)}
-
+			{showCheckout && stripeKey && onFetchPlans && onCreateCheckout && onConfirmPending && <CheckoutModal appName="Pipe Builder" appDescription="Visual AI pipeline editor -- run and deploy pipelines on RocketRide Cloud." stripePublishableKey={stripeKey} onFetchPlans={onFetchPlans} onCreateCheckout={onCreateCheckout} onConfirmPending={onConfirmPending} onSuccess={handleCheckoutSuccess} onClose={() => setShowCheckout(false)} />}
 		</>
 	);
 };
