@@ -10,9 +10,10 @@ not a file in the tree.
 
 ## Preconditions (do not skip)
 
-1. This branch is merged, so `ci-ok` treats `cancelled` as neutral. Before
-   that change, `cancel-in-progress: true` cancelled 33 of the last 100 PR
-   runs and each of those would have shown as a red required check.
+1. This branch is merged, so `ci-ok` runs with `if: ${{ !cancelled() }}`: a
+   run superseded by a newer push (`cancel-in-progress: true` cancelled 33 of
+   the last 100 PR runs) leaves `CI OK` *skipped* on the old SHA instead of
+   red, while a single job that hits its `timeout-minutes` still fails it.
 2. `CI OK` has been green on **10 consecutive `develop` pushes** with the new
    `test-fast` and `ci-lint` jobs included. Check with:
 
