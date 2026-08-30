@@ -271,7 +271,18 @@ const lintModule = {
 	actions: [
 		{ name: 'lint:eslint', action: () => makeEslintAction(false) },
 		{ name: 'lint:prettier', action: () => makePrettierAction(false) },
-		{ name: 'lint:tsc', action: makeTscAction },
+		{ name: 'lint:tsc-run', action: makeTscAction },
+		{
+			// The shell, apps and extension import types from the `rocketride`
+			// workspace package, which only exist after client-typescript:build
+			// (tsc, engine-free). Without it a clean checkout fails with
+			// "Cannot find module 'rocketride'".
+			name: 'lint:tsc',
+			action: () => ({
+				description: 'tsc --noEmit for every workspace in TSC_PROJECTS',
+				steps: ['client-typescript:build', 'lint:tsc-run'],
+			}),
+		},
 		{ name: 'lint:ruff', action: () => makeRuffAction(false) },
 		{ name: 'lint:pyright', action: makePyrightAction },
 		{ name: 'lint:eslint-fix', action: () => makeEslintAction(true) },
