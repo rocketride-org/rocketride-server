@@ -408,6 +408,10 @@ Returned by `await client.pipe(...)`. One streaming upload: **open** -> **write*
 | `__aenter__` | `async def __aenter__(self)`                           | `self`            | Enters context; calls `open()`.                    |
 | `__aexit__`  | `async def __aexit__(self, exc_type, exc_val, exc_tb)` | -                 | Exits context; calls `close()`.                    |
 
+`open()` retries automatically (a few short attempts) if it hits a transient
+connection error while the pipeline's data listener is still starting up; a
+`PipeException` from `open()` means the pipe genuinely could not be opened.
+
 ---
 
 ## Question

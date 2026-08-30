@@ -60,6 +60,19 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 from ..core import DAPClient, PipeException
 from ..types import PIPELINE_RESULT, UPLOAD_RESULT
 
+# A just-registered pipeline's per-pipe data listener can occasionally still be
+# binding when `open()` reaches it - observed under heavy concurrent load (e.g. many
+# pipelines opened at once in CI) as a transient "Connect call failed"/"Connection
+# refused" on the freshly assigned port. That's indistinguishable from a real
+# "pipeline isn't running" failure to the caller, so give it a couple of short
+# retries before surfacing it as an error.
+_PIPE_OPEN_RETRY_ATTEMPTS = 3
+_PIPE_OPEN_RETRY_BACKOFF_SECONDS = 0.25
+
+
+def _is_transient_pipe_open_error(message: str) -> bool:
+    return 'Connect call failed' in message or 'Connection refused' in message
+
 
 class DataMixin(DAPClient):
     """
@@ -169,21 +182,30 @@ class DataMixin(DAPClient):
             if self._opened:
                 raise RuntimeError('Pipe already opened')
 
-            request = self._client.build_request(
-                'rrext_process',
-                arguments={
-                    'subcommand': 'open',
-                    'object': self._objinfo,
-                    'mimeType': self._mime_type,
-                    'provider': self._provider,
-                },
-                token=self._token,
-            )
+            response = None
+            for attempt in range(1, _PIPE_OPEN_RETRY_ATTEMPTS + 1):
+                request = self._client.build_request(
+                    'rrext_process',
+                    arguments={
+                        'subcommand': 'open',
+                        'object': self._objinfo,
+                        'mimeType': self._mime_type,
+                        'provider': self._provider,
+                    },
+                    token=self._token,
+                )
 
-            response = await self._client.request(request)
+                response = await self._client.request(request)
 
-            if self._client.did_fail(response):
-                msg = response.get('message') or 'Failed to open a data pipe.'
+                if not self._client.did_fail(response):
+                    break
+
+                message = response.get('message') or ''
+                if attempt < _PIPE_OPEN_RETRY_ATTEMPTS and _is_transient_pipe_open_error(message):
+                    await asyncio.sleep(_PIPE_OPEN_RETRY_BACKOFF_SECONDS * attempt)
+                    continue
+
+                msg = message or 'Failed to open a data pipe.'
                 msg = (
                     f'{msg}\n\n'
                     'Common causes:\n'
