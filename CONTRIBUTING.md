@@ -150,7 +150,12 @@ We follow [Conventional Commits](https://www.conventionalcommits.org/):
 ### Running Tests
 
 ```bash
-# All tests
+# Fast tier — no engine, no server, runs in CI on every PR (see AGENTS.md)
+./builder test:fast          # contract tests, shell/shared unit tests, repo invariants
+./builder lint:check         # eslint, prettier, tsc, ruff, pyright ratchet
+./builder surfaces:check     # regenerate derived files; fails on drift
+
+# All tests (needs the engine; 20+ minutes)
 ./builder test
 
 # C++ engine tests only
@@ -168,9 +173,25 @@ We follow [Conventional Commits](https://www.conventionalcommits.org/):
 ### Writing Tests
 
 - Write unit tests for new functionality
+- A bug fix includes a test that fails without the fix
 - Ensure edge cases are covered
 - Use descriptive test names
-- Mock external dependencies appropriately
+- Mock external dependencies appropriately; never wait on `sleep` for a condition
+
+## AI-assisted contributions
+
+Contributions written with coding agents are welcome under the same bar as
+any other change. Please:
+
+- Read `AGENTS.md` (or point your agent at it) — it lists the checks that
+  must pass and the files that must not be edited.
+- Fill in the **Agent context** section of the PR template: model and
+  harness, how closely the work was supervised, and what could not be
+  verified locally (for example engine-dependent suites).
+- Only claim test runs you actually performed. CI runs the fast tier on
+  every PR; say "not run" for anything else.
+- You are responsible for the change: review bot findings and reviewer
+  questions need a human answer, not a pasted transcript.
 
 ## Documentation
 

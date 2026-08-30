@@ -31,6 +31,25 @@ reviews:
       instructions: |
         Python pipeline nodes: use single quotes, ruff for linting/formatting,
         PEP 257 docstrings, target Python 3.10+.
+    - path: 'nodes/src/nodes/**/services*.json'
+      instructions: |
+        Node contract. Changing inputs, outputs, config or credential-shaped
+        fields must regenerate the node README's ROCKETRIDE:GENERATED:PARAMS
+        block and the credentials catalog (`./builder surfaces:check`).
+        Flag PRs that edit the generated README block by hand, or that change
+        a lane/field without a matching README prose update.
+    - path: 'packages/{shell,client-typescript}/contract/**'
+      instructions: |
+        Frozen API contract floors. versions/*.d.ts are immutable once minted;
+        index.ts / latest.ts / *.generated.ts are derived by shell:regen-derived
+        and client-typescript:regen. Flag any hand edit here — a floor line
+        removed or narrowed lets a breaking API change past the tsc gates.
+    - path: '{AGENTS.md,CLAUDE.md,.cursorrules,.cursor/rules/**}'
+      instructions: |
+        AGENTS.md is the single source of truth for contributor rules; the
+        other files must stay pointers. Flag duplicated or contradicting
+        guidance, commands that are not registered builder actions, and any
+        claim about timing or behaviour that is not verified.
     - path: 'packages/server/**/*.{cpp,h,hpp}'
       instructions: |
         C++ code: C++17 standard. This is the core engine — review for

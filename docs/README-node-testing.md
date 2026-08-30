@@ -26,8 +26,11 @@ Add a `test` property to your node's `services.json`:
 
 Run tests:
 ```bash
-# Contract tests (no server needed)
-builder nodes:test
+# Contract tests — plain Python, no engine, no server (~2 s)
+builder nodes:test-contracts-local
+
+# Contract tests under the engine's interpreter (downloads/builds the engine first)
+builder nodes:test-contracts
 
 # Full integration tests (starts a server, runs test cases)
 builder nodes:test-full
@@ -406,13 +409,13 @@ Content matchers and `property` can be used together -- content matchers check t
 Contract tests validate `services*.json` structure (required fields, lane names, module existence) without running a server:
 
 ```bash
-# Run contract tests
-builder nodes:test
+# Plain Python (no engine, no server) — the fast tier; also part of `builder test:fast`
+builder nodes:test-contracts-local
 
-# Or explicitly
+# Under the engine's bundled interpreter (downloads or builds the engine first)
 builder nodes:test-contracts
 
-# Or directly with pytest
+# Or directly with pytest from any interpreter with requirements-test.txt installed
 pytest nodes/test/test_contracts.py -v
 
 # Filter by node name

@@ -6,7 +6,7 @@ This guide walks you through setting up a local development environment for the 
 
 | Tool              | Version       | Notes                                                          |
 | ----------------- | ------------- | -------------------------------------------------------------- |
-| **Node.js**       | 18+           | Runtime for the build system and TypeScript clients            |
+| **Node.js**       | 20+           | Runtime for the build system and TypeScript clients            |
 | **pnpm**          | 8+            | Package manager (`npm install -g pnpm`)                        |
 | **Python**        | 3.10+         | Required for pipeline nodes, AI modules, and the Python SDK    |
 | **C++ toolchain** | C++17-capable | Required only when building the engine from source (see below) |
