@@ -97,11 +97,18 @@ function resetActionTracking() {
 // failure. With ROCKETRIDE_SANDBOX=1 the builder refuses up front and names
 // the engine-free alternative. Every engine-dependent action chains through
 // one of these, so guarding the roots is enough.
-const SANDBOX_BLOCKED = /^server:(build|build-all|build-core|download|compile|compile-engine|configure|configure-cmake|setup-.*|test|package)$/;
+const SANDBOX_BLOCKED = /^server:(build|build-all|build-core|download|compile|compile-engine|compile-tests|configure|configure-cmake|setup-.*|run-.*|copy-test-data|test|package)$/;
 
 function isSandbox() {
 	const v = (process.env.ROCKETRIDE_SANDBOX || '').toLowerCase();
 	return v === '1' || v === 'true' || v === 'yes';
+}
+
+/** Throws the sandbox refusal for an engine-requiring action name, else no-op. */
+function assertNotSandboxBlocked(name) {
+	if (isSandbox() && SANDBOX_BLOCKED.test(name)) {
+		throw new Error(`${name} needs the engine binary (download or native build), which is unavailable when ROCKETRIDE_SANDBOX=1.\n` + `  Engine-free alternatives: ./builder test:fast   ./builder lint:check   ./builder surfaces:check\n` + `  Unset ROCKETRIDE_SANDBOX on a machine with network access to run the full ${name}.`);
+	}
 }
 
 function resolveAction(step, options) {
@@ -110,9 +117,7 @@ function resolveAction(step, options) {
 		if (!found) {
 			throw new Error(`Action not found in registry: ${step}`);
 		}
-		if (isSandbox() && SANDBOX_BLOCKED.test(step)) {
-			throw new Error(`${step} needs the engine binary (download or native build), which is unavailable when ROCKETRIDE_SANDBOX=1.\n` + `  Engine-free alternatives: ./builder test:fast   ./builder lint:check   ./builder surfaces:check\n` + `  Unset ROCKETRIDE_SANDBOX on a machine with network access to run the full ${step}.`);
-		}
+		assertNotSandboxBlocked(step);
 		const actionObj = typeof found.action === 'function' ? found.action(options) : found.action;
 		return { name: step, actionObj };
 	}
@@ -692,7 +697,7 @@ module.exports = {
 	buildTaskTree,
 	buildTask,
 	resolveAction,
-
+	assertNotSandboxBlocked,
 	// Phase 2
 	runTaskCommand,
 	stepsToListr,

@@ -10,7 +10,7 @@ pre-commit:
     # Markdown/CSS/HTML are not yet formatted.
     eslint:
       glob: '*.{js,ts,jsx,tsx,mjs,cjs,mts,cts}'
-      run: npx --no-install eslint --max-warnings 521 {staged_files}
+      run: npx --no-install eslint --quiet {staged_files} # errors only; the warning ceiling is enforced by lint:check
     prettier:
       glob: '*.{js,ts,jsx,tsx,mjs,cjs,mts,cts,json,yaml,yml}'
       run: npx --no-install prettier --check {staged_files}

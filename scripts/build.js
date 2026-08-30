@@ -439,7 +439,18 @@ async function main() {
 		process.exit(0);
 	}
 
-	// Validate all requested actions exist
+	// Validate all requested actions exist (and, under ROCKETRIDE_SANDBOX=1,
+	// refuse engine-requiring roots up front — composite actions are caught at
+	// their first step, leaf roots like server:download would otherwise run).
+	const { assertNotSandboxBlocked } = require('./lib/action-runner');
+	for (const { command } of requests) {
+		try {
+			assertNotSandboxBlocked(command);
+		} catch (err) {
+			console.error(`Error: ${err.message}`);
+			process.exit(1);
+		}
+	}
 	for (const { module, command } of requests) {
 		if (!registry.has(module)) {
 			console.error(`Error: Unknown module '${module}'`);

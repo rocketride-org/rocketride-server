@@ -57,7 +57,8 @@ const { execCommand, resolvePython, PROJECT_ROOT } = require('../../../scripts/l
 
 // ESLint warning ceiling — a ratchet. 600 warnings on develop @ c04ebaf when
 // this gate was introduced, 521 after the first cleanup. Lower it as warnings
-// are fixed; never raise it. lefthook.yml carries the same number.
+// are fixed; never raise it. (lefthook's per-file hook gates on errors only —
+// a repo-wide ceiling is meaningless for a staged subset.)
 const ESLINT_MAX_WARNINGS = 521;
 
 // Prettier: CODE files only. Markdown/MDX/HTML/CSS are deliberately excluded
@@ -186,8 +187,9 @@ function makePyrightAction() {
 					/* pyright exits 1 when it reports errors; the JSON below is the verdict */
 				});
 				const start = json.indexOf('{');
-				if (start < 0) throw new Error(`lint:pyright — no JSON output for ${project}; is pyright installed in the test venv (requirements-test.txt)?`);
-				const summary = JSON.parse(json.slice(start)).summary;
+				const end = json.lastIndexOf('}');
+				if (start < 0 || end < start) throw new Error(`lint:pyright — no JSON output for ${project}; is pyright installed in the test venv (requirements-test.txt)? Output:\n${json.slice(-500)}`);
+				const summary = JSON.parse(json.slice(start, end + 1)).summary;
 				const actual = summary.errorCount;
 				if (actual > expected) {
 					throw new Error(`lint:pyright — ${project}: ${actual} errors, baseline is ${expected}. Fix the new errors (run: cd ${project} && python -m pyright --level error src).`);

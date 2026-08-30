@@ -235,3 +235,6 @@ packages/ai/src/ai/modules/mcp/apps/dist/
 # no secrets); they must be tracked despite the global credentials/ ignore above.
 !packages/n8n-nodes/credentials/
 !packages/n8n-nodes/credentials/**
+
+# Scratch dir of an interrupted shell:freeze
+packages/shell/contract/.freeze-tmp/
