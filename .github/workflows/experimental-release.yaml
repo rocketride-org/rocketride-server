@@ -69,6 +69,7 @@ jobs:
     name: Resolve product matrix
     needs: init
     runs-on: ubuntu-latest
+    timeout-minutes: 120
     outputs:
       include: ${{ steps.build.outputs.include }}
     steps:
@@ -114,6 +115,7 @@ jobs:
     name: Release ${{ matrix.name }}
     needs: [init, build, resolve-matrix]
     runs-on: ubuntu-latest
+    timeout-minutes: 120
     # Tag push + GitHub Release creation need write to contents.
     permissions:
       contents: write

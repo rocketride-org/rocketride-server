@@ -36,6 +36,7 @@ jobs:
   docker:
     name: ${{ inputs.prerelease && 'Publish Docker prerelease image' || 'Publish Docker image' }}
     runs-on: ubuntu-latest
+    timeout-minutes: 120
     permissions:
       contents: read
       packages: write

@@ -13,6 +13,7 @@ jobs:
   stale:
     name: Close stale issues and PRs
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - name: Mark stale
         uses: actions/stale@5bef64f19d7facfb25b37b414482c7164d639639 # v9

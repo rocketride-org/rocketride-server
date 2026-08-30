@@ -17,6 +17,7 @@ concurrency:
 jobs:
   notify:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_DISCUSSIONS_FORUM_WEBHOOK_URL }}

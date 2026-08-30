@@ -45,6 +45,7 @@ jobs:
   release:
     name: ${{ matrix.name }}
     runs-on: ubuntu-latest
+    timeout-minutes: 120
     environment: ${{ inputs.environment }}
     permissions:
       contents: write
