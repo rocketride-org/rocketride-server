@@ -38,3 +38,10 @@
 packages/ai/src/ai/common/graph/age/_cypher/gen/** linguist-generated=true
 packages/ai/src/ai/common/graph/age/_agtype/gen/** linguist-generated=true
 packages/ai/src/ai/common/graph/age/_agtype/** linguist-vendored=true
+
+# Frozen API contract floors (minted by shell:freeze / client-typescript:freeze)
+# and the bundled VS Code extension entry — generated, immutable, ~11k lines.
+# Collapsed in diffs; excluded from lint in eslint.config.mjs.
+packages/shell/contract/versions/*.d.ts linguist-generated=true
+packages/client-typescript/contract/versions/*.d.ts linguist-generated=true
+apps/vscode/rocketride.js linguist-generated=true

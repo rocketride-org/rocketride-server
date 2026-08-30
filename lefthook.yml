@@ -5,14 +5,15 @@ pre-commit:
     gitleaks:
       tags: security
       run: gitleaks protect --verbose --redact --staged --config .gitleaks.toml
-    # Note: ESLint and Prettier are temporarily disabled in lefthook in order
-    #       to enable them later in both lefthook and CI workflow.
-    # eslint:
-    #   glob: '*.{js,ts,jsx,tsx,mjs,cjs}'
-    #   run: npx eslint {staged_files}
-    # prettier:
-    #   glob: '*.{js,ts,jsx,tsx,mjs,cjs,json,css,scss,html,md,yaml,yml}'
-    #   run: npx prettier --check {staged_files}
+    # Mirrors CI `ci-lint` (./builder lint:check). Prettier covers CODE files
+    # only — see PRETTIER_GLOBS in tools/checks/scripts/tasks.js for why
+    # Markdown/CSS/HTML are not yet formatted.
+    eslint:
+      glob: '*.{js,ts,jsx,tsx,mjs,cjs,mts,cts}'
+      run: npx --no-install eslint --max-warnings 521 {staged_files}
+    prettier:
+      glob: '*.{js,ts,jsx,tsx,mjs,cjs,mts,cts,json,yaml,yml}'
+      run: npx --no-install prettier --check {staged_files}
     ruff-check:
       glob: '*.py'
       run: ruff check {staged_files}
