@@ -5,7 +5,7 @@ sidebar_position: 2
 
 # Tools
 
-The server exposes **27 tools**. This page is the full reference; the
+The server exposes **29 tools**. This page is the full reference; the
 [overview](/connect/mcp/http/) has the one-table summary.
 
 ## How every tool behaves
@@ -56,6 +56,20 @@ integration.
   `ok: true` and, for integrations, `credentials: {status, missing, candidates,
   wiring | setup}`.
 
+### resolve_config
+
+Show what a component config resolves to at load — the engine applies profile
+and default merging, so the `.pipe` rarely says what the node actually
+receives.
+
+- **Parameters:** `provider` (string, required) — a provider from
+  `list_components`; `config` (object, optional) — the component's config
+  block, omitted for pure defaults.
+- **Returns:** the resolved config the node would receive, plus `ok: true`.
+- **Notable:** keys the resolver discarded (for example a key written beside
+  `profile` instead of inside it) are reported with a `hint` explaining where
+  to move them — a silent drop a schema cannot express.
+
 ### list_integrations
 
 Report credential setup status for integrations — the discovery counterpart to
@@ -81,7 +95,9 @@ node on the connected engine are listed.
 ### validate_pipeline
 
 Validate an inline pipeline with the engine's own validator — the same rules
-`use()` applies, so there is no client-side drift.
+`use()` applies, so there is no client-side drift — plus one check the engine's
+pipeline path does not cover: every component must name a provider the engine
+has a service for.
 
 - **Parameters:** `pipeline` (object, required).
 - **Returns:** `{ok, errors: [], warnings: []}` — `ok` is true only when there
@@ -98,6 +114,22 @@ best-effort engine lookup per provider (title, category).
 - **Notable:** lookups share one 30-second budget; providers the engine cannot
   resolve fall back to the pipeline's own metadata instead of failing the
   parse.
+
+### scaffold_node
+
+Emit a local node skeleton that loads on the first try, with the manifest keys
+and file layout the engine requires. It returns files to write — it writes
+nothing itself.
+
+- **Parameters:** `name` (string, required) — a lowercase Python identifier;
+  `lane_in` (string, optional, default `text`); `lane_out` (string, optional,
+  defaults to `lane_in`); `class_type` (string, optional, defaults to
+  `lane_in`).
+- **Returns:** `{ok, name, provider, files, next_steps}` — `files` maps
+  `local_nodes/<name>/...` paths to file contents.
+- **Notable:** lanes and `class_type` are validated against the connected
+  engine's live catalog, so the allowed sets never drift from what is actually
+  in service.
 
 ### save_template
 

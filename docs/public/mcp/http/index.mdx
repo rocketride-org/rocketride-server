@@ -35,13 +35,13 @@ for each client are on [Connect a client](/connect/mcp/http/connect).
 
 ## What you can do
 
-The server exposes 27 tools, organized by capability — the full parameter-level
+The server exposes 29 tools, organized by capability — the full parameter-level
 reference is on [Tools](/connect/mcp/http/tools):
 
 | Capability | Tools |
 | --- | --- |
-| [Discover components](/connect/mcp/http/tools#discover-components) | `list_components`, `describe_component`, `list_integrations` |
-| [Author pipelines](/connect/mcp/http/tools#author-pipelines) | `validate_pipeline`, `describe_pipeline`, `save_template`, `load_template` |
+| [Discover components](/connect/mcp/http/tools#discover-components) | `list_components`, `describe_component`, `resolve_config`, `list_integrations` |
+| [Author pipelines](/connect/mcp/http/tools#author-pipelines) | `validate_pipeline`, `describe_pipeline`, `scaffold_node`, `save_template`, `load_template` |
 | [Run pipelines](/connect/mcp/http/tools#run-pipelines) | `run_pipeline`, `run_dropper_pipe`, `send_data`, `send_files`, `terminate` |
 | [Watch what's running](/connect/mcp/http/tools#watch-whats-running) | `monitor`, `list_running_pipelines` |
 | [Read the file store](/connect/mcp/http/tools#read-the-file-store) | `store_read`, `store_list`, `store_stat`, `store_get_url` |
@@ -94,7 +94,7 @@ Two things to know when working with the tools:
 
 <a className="rr-side-card" href="/connect/mcp/http/tools">
   <span className="rr-side-card__head"><LuWrench className="rr-card-icon" /><span className="rr-side-card__title">Tools</span></span>
-  <span className="rr-side-card__body">All 27 tools with parameters, return shapes, and the error contract.</span>
+  <span className="rr-side-card__body">All 29 tools with parameters, return shapes, and the error contract.</span>
 </a>
 
 <a className="rr-side-card" href="/connect/mcp/http/resources-and-widgets">

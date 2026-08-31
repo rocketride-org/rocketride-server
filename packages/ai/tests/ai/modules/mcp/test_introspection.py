@@ -530,3 +530,147 @@ async def test_validate_pipeline_timeout_returns_timeout_envelope(fake_engine, m
 
     assert result['ok'] is False
     assert result['error_type'] == 'Timeout'
+
+
+# ---------------------------------------------------------------------------
+# resolve_config
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_resolve_config_passes_provider_and_config_through(fake_engine):
+    """The tool is a thin pass-through: resolution has to happen engine-side."""
+    fake_engine._resolve_config_result = {
+        'provider': 'llm_openai',
+        'profile': 'default',
+        'resolved': {'model': 'gpt-4o'},
+        'dropped': [],
+    }
+    registry = ToolRegistry()
+    introspection.register(registry)
+
+    result = await registry.handler('resolve_config')(
+        fake_engine, None, {'provider': 'llm_openai', 'config': {'model': 'gpt-4o'}}
+    )
+
+    assert result['ok'] is True
+    assert result['resolved'] == {'model': 'gpt-4o'}
+    assert fake_engine.resolve_config_calls == [{'provider': 'llm_openai', 'config': {'model': 'gpt-4o'}}]
+
+
+@pytest.mark.asyncio
+async def test_resolve_config_explains_keys_dropped_by_a_profile(fake_engine):
+    """
+    The day-losing case from #1989: a key beside 'profile' never reaches the node.
+
+    An absence is not self-explanatory, so the tool names the discarded keys and
+    says where to put them instead.
+    """
+    fake_engine._resolve_config_result = {
+        'provider': 'store_pinecone',
+        'profile': 'serverless-dense',
+        'resolved': {'collection': 'ROCKETRIDE'},
+        'dropped': ['apikey', 'pipeline_path'],
+    }
+    registry = ToolRegistry()
+    introspection.register(registry)
+
+    result = await registry.handler('resolve_config')(
+        fake_engine,
+        None,
+        {'provider': 'store_pinecone', 'config': {'profile': 'serverless-dense', 'apikey': 'x'}},
+    )
+
+    assert result['dropped'] == ['apikey', 'pipeline_path']
+    assert 'apikey' in result['hint'] and 'pipeline_path' in result['hint']
+    assert 'serverless-dense' in result['hint'], 'the hint must say which object to move them into'
+
+
+@pytest.mark.asyncio
+async def test_resolve_config_stays_quiet_when_nothing_was_dropped(fake_engine):
+    """No hint when there is nothing to correct, so the hint stays meaningful."""
+    fake_engine._resolve_config_result = {'provider': 'ocr', 'profile': 'default', 'resolved': {}, 'dropped': []}
+    registry = ToolRegistry()
+    introspection.register(registry)
+
+    result = await registry.handler('resolve_config')(fake_engine, None, {'provider': 'ocr'})
+
+    assert 'hint' not in result
+
+
+@pytest.mark.asyncio
+async def test_resolve_config_rejects_a_missing_provider(fake_engine):
+    registry = ToolRegistry()
+    introspection.register(registry)
+
+    result = await registry.handler('resolve_config')(fake_engine, None, {})
+
+    assert result['ok'] is False
+    assert result['error_type'] == 'BadRequest'
+    assert fake_engine.resolve_config_calls == [], 'a bad request must not reach the engine'
+
+
+@pytest.mark.asyncio
+async def test_resolve_config_rejects_a_non_object_config(fake_engine):
+    registry = ToolRegistry()
+    introspection.register(registry)
+
+    result = await registry.handler('resolve_config')(fake_engine, None, {'provider': 'ocr', 'config': 'nope'})
+
+    assert result['ok'] is False
+    assert fake_engine.resolve_config_calls == []
+
+
+@pytest.mark.asyncio
+async def test_validate_pipeline_reports_a_provider_the_engine_does_not_have(fake_engine):
+    """The engine validates a pipeline structurally and never checks its providers.
+
+    A typed provider name passes validation and fails later at run time, which is
+    the gap this tool exists to close.
+    """
+    registry = ToolRegistry()
+    introspection.register(registry)
+    fake_engine._services = {'services': {'parse': {}, 'llm_openai': {}}}
+    pipeline = {
+        'components': [
+            {'id': 'a', 'provider': 'parse', 'config': {}},
+            {'id': 'b', 'provider': 'no_such_provider', 'config': {}},
+        ]
+    }
+
+    result = await registry.handler('validate_pipeline')(fake_engine, None, {'pipeline': pipeline})
+
+    assert result['ok'] is False
+    assert [e['component'] for e in result['errors']] == ['b']
+    assert 'no_such_provider' in result['errors'][0]['message']
+
+
+@pytest.mark.asyncio
+async def test_validate_pipeline_accepts_providers_in_the_catalog(fake_engine):
+    """Every provider present means the added check contributes no errors."""
+    registry = ToolRegistry()
+    introspection.register(registry)
+    fake_engine._services = {'services': {'parse': {}, 'llm_openai': {}}}
+    pipeline = {'components': [{'id': 'a', 'provider': 'parse', 'config': {}}]}
+
+    result = await registry.handler('validate_pipeline')(fake_engine, None, {'pipeline': pipeline})
+
+    assert result['ok'] is True
+    assert result['errors'] == []
+
+
+@pytest.mark.asyncio
+async def test_validate_pipeline_keeps_engine_errors_alongside_provider_errors(fake_engine):
+    """The engine's own findings must survive, not be replaced by the added check."""
+    registry = ToolRegistry()
+    introspection.register(registry)
+    fake_engine._services = {'services': {'parse': {}}}
+    fake_engine._validate_result = {'errors': [{'ccode': 40, 'message': 'structural'}], 'warnings': ['w']}
+    pipeline = {'components': [{'id': 'b', 'provider': 'no_such_provider', 'config': {}}]}
+
+    result = await registry.handler('validate_pipeline')(fake_engine, None, {'pipeline': pipeline})
+
+    messages = [e.get('message') for e in result['errors']]
+    assert 'structural' in messages
+    assert any('no_such_provider' in m for m in messages)
+    assert result['warnings'] == ['w']

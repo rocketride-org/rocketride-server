@@ -59,7 +59,28 @@ DAPException                    # Base DAP protocol error (has dap_result dict)
 ```
 
 All exceptions in the hierarchy expose a `dap_result` dict with detailed server
-error context. `PipeException` also subclasses `RuntimeError`, so a broad
+error context, plus `code` and `hint`:
+
+- `code` is the server's machine-readable classification, or `None`. Task
+  failures carry one: `TASK_NOT_REGISTERED` (the token names no live task —
+  never started, terminated, replaced, or the engine restarted),
+  `TASK_AMBIGUOUS`, `TASK_COMPLETED`, `TASK_STOPPED`. **Classify on `code`, not
+  on the message text**, which is written for people and may be reworded.
+- `hint` is troubleshooting text the SDK attached for a developer, or `None`.
+  It is kept out of `str(e)` so an application can show the message to an end
+  user without the developer checklist.
+
+```python
+except PipeException as e:
+    if e.code == 'TASK_NOT_REGISTERED':
+        await restart_pipeline()      # the task is gone; start a new one
+    else:
+        print(e)                      # safe to show
+        if e.hint:
+            log.debug(e.hint)         # developer detail
+```
+
+`PipeException` also subclasses `RuntimeError`, so a broad
 `except RuntimeError` catches pipe failures too.
 
 `ConnectionException`, `ExecutionException`, and `ValidationException` exist in

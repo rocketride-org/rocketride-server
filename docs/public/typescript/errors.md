@@ -68,7 +68,29 @@ LoginAttemptCancelledError      # extends Error directly (by design)
 ```
 
 Exceptions in the hierarchy expose a `dapResult` record with the server's error
-context (mirroring Python's `dap_result`). In practice most failures outside the connection/pipe paths surface as plain
+context (mirroring Python's `dap_result`), plus two optional fields:
+
+- `code` — the server's machine-readable classification, absent when the failure
+  has none. Task failures carry one: `TASK_NOT_REGISTERED` (the token names no
+  live task — never started, terminated, replaced, or the engine restarted),
+  `TASK_AMBIGUOUS`, `TASK_COMPLETED`, `TASK_STOPPED`. **Classify on `code`, not
+  on `message`**, which is written for people and may be reworded.
+- `hint` — troubleshooting text the SDK attached for a developer, absent when
+  there is none. Kept out of `message` so an application can show the message
+  to an end user without the developer checklist.
+
+```typescript
+try {
+	await pipe.open();
+} catch (err) {
+	if (err instanceof PipeException) {
+		if (err.code === 'TASK_NOT_REGISTERED') await restartPipeline();
+		else console.error(err.message, err.hint);
+	}
+}
+```
+
+In practice most failures outside the connection/pipe paths surface as plain
 `Error` with a descriptive message — write handlers that catch the specific
 classes above first and fall back to `Error`. `ExecutionException` and
 `ValidationException` exist and are exported but the SDK does not currently throw

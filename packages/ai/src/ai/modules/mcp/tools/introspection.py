@@ -100,6 +100,41 @@ async def _describe_component(client, tasks, args: Dict[str, Any]) -> dict:
     return result
 
 
+async def _unknown_provider_errors(client, pipeline: Dict[str, Any]):
+    """Report components naming a provider the engine has no service for.
+
+    The engine validates a whole pipeline structurally. Its provider lookup lives
+    in the single-component path (`validate_pipeline.cpp`), which the pipeline path
+    never reaches, so a typed provider name validates clean and fails at run time.
+    The names come from the engine's own catalog, so this adds no client-side rule.
+
+    Args:
+        client: The engine client.
+        pipeline: The pipeline body, already unwrapped from its envelope.
+
+    Returns:
+        A ``(errors, engine_error)`` pair; ``engine_error`` is set only when the
+        catalog could not be read.
+    """
+    components = [c for c in (pipeline.get('components') or []) if isinstance(c, dict)]
+    if not components:
+        return [], None
+
+    services, err = await engine_call(client.get_services(), 'validate_pipeline')
+    if err:
+        return [], err
+
+    catalog = (services or {}).get('services') or {}
+    if not catalog:
+        return [], None
+
+    return [
+        {'component': c.get('id'), 'message': f'unknown provider {c.get("provider")!r}'}
+        for c in components
+        if c.get('provider') and c['provider'] not in catalog
+    ], None
+
+
 async def _validate_pipeline(client, tasks, args: Dict[str, Any]) -> dict:
     pipeline = load_pipeline(args)  # raises ValueError -> normalized by the dispatch layer
     # The engine requires the {'pipeline': {...}} envelope and treats a missing
@@ -113,9 +148,43 @@ async def _validate_pipeline(client, tasks, args: Dict[str, Any]) -> dict:
     if err:
         return err
     result = validated or {}
-    errors = result.get('errors') or []
+    errors = list(result.get('errors') or [])
     warnings = result.get('warnings') or []
+
+    unknown, err = await _unknown_provider_errors(client, payload['pipeline'])
+    if err:
+        return err
+    errors.extend(unknown)
     return {'ok': not errors, 'errors': errors, 'warnings': warnings}
+
+
+async def _resolve_config(client, tasks, args: Dict[str, Any]) -> dict:
+    provider = args.get('provider')
+    if not provider:
+        return _bad('provider is required', 'pick a provider from list_components')
+
+    # Default only an absent config: `or {}` would coerce [] and skip this check.
+    config = args.get('config')
+    if config is None:
+        config = {}
+    if not isinstance(config, dict):
+        return _bad('config must be an object', "pass the component's config block, or omit it for defaults")
+
+    resolved, err = await engine_call(client.resolve_config(provider, config), 'resolve_config')
+    if err:
+        return err
+
+    result = resolved or {}
+    # Surface the discard rather than leaving it to be inferred from an absence:
+    # a key written beside 'profile' instead of inside it never reaches the node.
+    dropped = result.get('dropped') or []
+    out = {'ok': True, **result}
+    if dropped:
+        out['hint'] = (
+            f'{len(dropped)} config key(s) were discarded because a profile is set: {", ".join(dropped)}. '
+            f'Move them inside the "{result.get("profile")}" object to take effect.'
+        )
+    return out
 
 
 async def _describe_pipeline(client, tasks, args: Dict[str, Any]) -> dict:
@@ -161,7 +230,7 @@ async def _describe_pipeline(client, tasks, args: Dict[str, Any]) -> dict:
 
 
 def register(registry: ToolRegistry) -> None:
-    """Register the 4 authoring/introspection tools against ``registry``."""
+    """Register the authoring/introspection tools against ``registry``."""
     registry.register(
         'list_components',
         'List RocketRide components ready to use now (zero-config plus integrations you have configured). '
@@ -180,6 +249,20 @@ def register(registry: ToolRegistry) -> None:
             'required': ['name'],
         },
     )(_describe_component)
+
+    registry.register(
+        'resolve_config',
+        'Show what a component config resolves to at load: the engine applies profile and default '
+        'merging, so the .pipe rarely says what the node receives. Reports discarded keys.',
+        {
+            'type': 'object',
+            'properties': {
+                'provider': {'type': 'string', 'description': 'Component provider, e.g. llm_openai'},
+                'config': {'type': 'object', 'description': "The component's config block; omit for defaults"},
+            },
+            'required': ['provider'],
+        },
+    )(_resolve_config)
 
     registry.register(
         'validate_pipeline',
