@@ -16,7 +16,13 @@ from unittest.mock import MagicMock
 import pytest
 
 # tools/sync_models/src is added to sys.path by conftest.py
-from core.merger import merge, _make_profile_key, _derive_title, find_swapped_output_profiles
+from core.merger import (
+    merge,
+    _make_profile_key,
+    _derive_title,
+    find_swapped_output_profiles,
+    _source_is_authoritative,
+)
 from core.smoke import run
 from core.patcher import load as patcher_load, patch as patcher_patch, get_profiles
 from core.reporter import SyncReport, ProviderReport, format_console, format_pr_body
@@ -169,6 +175,9 @@ class TestMerge:
                 'model': 'test-model-a',
                 'modelTotalTokens': 16384,
                 'deprecated': True,
+                # Marked by the sync, so the sync may lift it again. Without this the
+                # mark is a human's and stays — see TestDeprecationIsNotUndoneByTheSync.
+                'deprecatedBy': 'provider',
                 'apikey': '',
             }
         }
@@ -681,3 +690,102 @@ class TestSwappedOutputTokens:
         assert not errors, 'Profiles sending the context window as max_tokens:\n' + '\n'.join(
             f'{p}: {k} ({v:,})' for p, k, v in errors
         )
+
+
+# ---------------------------------------------------------------------------
+# Deprecation authority
+# ---------------------------------------------------------------------------
+
+
+class TestSourceAuthority:
+    def test_display_labels_are_recognised(self):
+        # The deprecation path passes '<Display> API', not the internal 'provider API'.
+        assert _source_is_authoritative('Anthropic API', 'provider') is True
+        assert _source_is_authoritative('OpenAI API', 'manual') is True
+        assert _source_is_authoritative('xAI API', 'provider') is True
+
+    def test_internal_keys_are_recognised(self):
+        # The enrichment path passes lowercase internal keys.
+        assert _source_is_authoritative('provider API', 'provider') is True
+        assert _source_is_authoritative('openrouter', 'openrouter') is True
+        assert _source_is_authoritative('litellm', 'litellm') is True
+        assert _source_is_authoritative('OpenRouter', 'openrouter') is True
+
+    def test_a_source_has_no_authority_over_another_source_profile(self):
+        assert _source_is_authoritative('Anthropic API', 'openrouter') is False
+        assert _source_is_authoritative('openrouter', 'provider') is False
+        assert _source_is_authoritative('litellm', 'openrouter') is False
+
+    def test_unknown_source_has_no_authority(self):
+        assert _source_is_authoritative('something else', 'provider') is False
+
+
+class TestDeprecationIsNotUndoneByTheSync:
+    def _profile(self, **extra):
+        base = {
+            'title': 'Test Model A',
+            'model': 'test-model-a',
+            'modelSource': 'provider',
+            'modelTotalTokens': 16384,
+            'modelOutputTokens': 4096,
+            'deprecated': True,
+            'migration': "Please use 'test-model-b' instead",
+            'apikey': '',
+        }
+        base.update(extra)
+        return {'test-model-a': base}
+
+    def test_hand_marked_profile_survives_the_model_reappearing(self, title_mappings):
+        # No deprecatedBy — a human marked this. The provider listing still returning
+        # the model is exactly the case that made someone mark it by hand.
+        updated, _ = merge(
+            current_profiles=self._profile(),
+            api_models=[{'id': 'test-model-a'}],
+            title_mappings=title_mappings,
+            token_overrides={},
+            output_token_overrides={},
+            default_output_tokens=4096,
+        )
+        assert updated['test-model-a'].get('deprecated') is True
+        assert updated['test-model-a'].get('migration') == "Please use 'test-model-b' instead"
+
+    def test_sync_marked_profile_is_lifted_when_the_model_returns(self, title_mappings):
+        updated, result = merge(
+            current_profiles=self._profile(deprecatedBy='provider'),
+            api_models=[{'id': 'test-model-a'}],
+            title_mappings=title_mappings,
+            token_overrides={},
+            output_token_overrides={},
+            default_output_tokens=4096,
+        )
+        profile = updated['test-model-a']
+        assert profile.get('deprecated') is None
+        assert profile.get('deprecatedBy') is None
+        assert profile.get('migration') is None
+        assert any(r[0] == 'test-model-a' and r[1] == 'deprecated' for r in result.updated)
+
+    def test_another_source_cannot_lift_a_mark_it_did_not_make(self, title_mappings):
+        # Marked by OpenRouter; the provider API must not lift it.
+        updated, _ = merge(
+            current_profiles=self._profile(deprecatedBy='openrouter'),
+            api_models=[{'id': 'test-model-a'}],
+            title_mappings=title_mappings,
+            token_overrides={},
+            output_token_overrides={},
+            default_output_tokens=4096,
+        )
+        assert updated['test-model-a'].get('deprecated') is True
+
+    def test_deprecating_records_the_source(self, current_profiles, title_mappings):
+        # test-model-b absent from the API, discovered by the native provider.
+        updated, result = merge(
+            current_profiles=current_profiles,
+            api_models=[{'id': 'test-model-a'}],
+            title_mappings=title_mappings,
+            token_overrides={},
+            output_token_overrides={},
+            default_output_tokens=4096,
+            deprecation_source='Anthropic API',
+        )
+        assert 'test-model-b' in result.deprecated
+        assert updated['test-model-b']['deprecatedBy'] == 'provider'
