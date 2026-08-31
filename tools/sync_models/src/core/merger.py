@@ -115,6 +115,31 @@ def _is_reasoning_model(bare_id: str) -> bool:
     return any(fam in low for fam in _REASONING_FAMILIES)
 
 
+def _normalize_source(source: Optional[str]) -> str:
+    """
+    Reduce a source label to one of 'provider', 'openrouter', 'litellm', or ''.
+
+    Callers name the same three sources in two vocabularies: the deprecation path
+    passes display labels ('Anthropic API', 'OpenRouter'), the enrichment path
+    passes internal keys ('provider API', 'openrouter'). Normalising here lets
+    both reach the same answer.
+
+    Args:
+        source: A source label in either vocabulary, or None.
+
+    Returns:
+        The canonical key, or '' when unrecognised.
+    """
+    if not source:
+        return ''
+    lowered = source.strip().lower()
+    if lowered.endswith(' api'):  # '<Display> API' and the internal 'provider API'
+        return 'provider'
+    if lowered in ('provider', 'openrouter', 'litellm'):
+        return lowered
+    return ''
+
+
 def _source_is_authoritative(source: str, model_source: str) -> bool:
     """
     Return True if the given sync source has authority to deprecate or
@@ -128,11 +153,12 @@ def _source_is_authoritative(source: str, model_source: str) -> bool:
     Absence from a different source is meaningless — e.g. an OpenRouter alias
     not appearing in the native provider API is expected, not a deprecation signal.
     """
-    if source == 'provider API':
+    normalized = _normalize_source(source)
+    if normalized == 'provider':
         return model_source in ('provider', 'manual')
-    if source == 'OpenRouter':
+    if normalized == 'openrouter':
         return model_source == 'openrouter'
-    if source == 'LiteLLM':
+    if normalized == 'litellm':
         return model_source == 'litellm'
     return False
 
@@ -700,6 +726,8 @@ def merge(
             _exp = api_entry.get('expiration_date') if _api_entry_source == 'openrouter' else None
             if _exp and not existing.get('deprecated'):
                 updated_profiles[profile_key]['deprecated'] = True
+                # Record who marked it, so only this source can lift it later.
+                updated_profiles[profile_key]['deprecatedBy'] = 'openrouter'
                 if not existing.get('migration'):
                     updated_profiles[profile_key]['migration'] = (
                         f'Model deprecated by OpenRouter (expiration date: {_exp}). Please select a current model.'
@@ -707,12 +735,21 @@ def merge(
                 deprecated.append(profile_key)
                 changed = True
             elif not _exp:
-                # Un-deprecate if the current source is authoritative for this profile
-                # and the model just appeared in the source's response.
-                if existing.get('deprecated') and _source_is_authoritative(
-                    _api_entry_source, existing.get('modelSource', 'manual')
+                # Un-deprecate only what this sync marked, and only when the current
+                # source is authoritative for the profile. A profile deprecated by hand
+                # carries no 'deprecatedBy', and is left alone: a human acted on
+                # something the listing does not show — a retired model that the API
+                # still lists, say — so its reappearance here is not evidence to the
+                # contrary, and reverting would silently undo the correction.
+                deprecated_by = existing.get('deprecatedBy')
+                if (
+                    existing.get('deprecated')
+                    and _normalize_source(deprecated_by) == _normalize_source(_api_entry_source)
+                    and _normalize_source(deprecated_by) != ''
+                    and _source_is_authoritative(_api_entry_source, existing.get('modelSource', 'manual'))
                 ):
                     updated_profiles[profile_key].pop('deprecated', None)
+                    updated_profiles[profile_key].pop('deprecatedBy', None)
                     updated_profiles[profile_key].pop('deprecatedSince', None)
                     updated_profiles[profile_key].pop('migration', None)
                     updated_fields.append((profile_key, 'deprecated', True, None))
@@ -761,6 +798,8 @@ def merge(
 
             if not profile.get('deprecated'):
                 updated_profiles[profile_key]['deprecated'] = True
+                # Record who marked it, so only this source can lift it later.
+                updated_profiles[profile_key]['deprecatedBy'] = _normalize_source(deprecation_source)
                 # Only set migration if not already present (don't overwrite manual msgs).
                 if not profile.get('migration'):
                     updated_profiles[profile_key]['migration'] = (
