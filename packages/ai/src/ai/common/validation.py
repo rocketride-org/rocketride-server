@@ -12,7 +12,7 @@ it is sent to LLM provider APIs. It guards against:
 """
 
 import re
-from typing import Optional
+from typing import Any, Dict, Optional
 
 from rocketlib import debug
 
@@ -122,6 +122,64 @@ def validate_model_name(model: Optional[str]) -> Optional[str]:
         )
 
     return model
+
+
+def check_output_token_config(
+    model: str,
+    output_tokens: int,
+    total_tokens: int,
+    profiles: Optional[Dict[str, Any]] = None,
+) -> Optional[str]:
+    """Report a max_tokens value the provider is likely to reject.
+
+    A hand-written profile carries whatever the author typed, and nothing checks
+    it before the request goes out. Providers that cap completions below their
+    context window answer with a 400 naming a limit the author never saw.
+
+    Two checks, in order of usefulness:
+
+    1. If the model name matches a catalogue profile that states a completion
+       limit, anything above that limit is reported with both numbers. Catalogue
+       entries whose own output equals their window are skipped — that value is
+       the window, not a limit, and cannot be compared against.
+    2. Otherwise, an output limit equal to the context window is reported: it
+       sends the whole window as max_tokens. Legitimate where the provider has
+       no separate completion limit, hence a warning rather than an error.
+
+    Args:
+        model: Configured model name.
+        output_tokens: Resolved max output tokens.
+        total_tokens: Resolved context window.
+        profiles: The node's "preconfig.profiles" mapping, used to look the
+            model up. Any mapping of profile-key to a ``.get``-able profile.
+
+    Returns:
+        The message to warn with, or None when nothing looks wrong.
+    """
+    catalogue_limit: Optional[int] = None
+    for profile in (profiles or {}).values():
+        if not hasattr(profile, 'get') or profile.get('model') != model:
+            continue
+        limit = profile.get('modelOutputTokens')
+        if isinstance(limit, int) and not isinstance(limit, bool) and limit != profile.get('modelTotalTokens'):
+            catalogue_limit = limit
+            break
+
+    if catalogue_limit is not None:
+        if output_tokens > catalogue_limit:
+            return (
+                f'modelOutputTokens ({output_tokens:,}) exceeds the {catalogue_limit:,} that {model} accepts. '
+                'The provider will reject the request.'
+            )
+        return None
+
+    if output_tokens == total_tokens:
+        return (
+            f'modelOutputTokens ({output_tokens:,}) equals modelTotalTokens, so the whole context window is sent '
+            f'as max_tokens. Set the real completion limit for {model} unless this provider accepts max_tokens '
+            'up to its context window.'
+        )
+    return None
 
 
 def validate_max_tokens(output_tokens: int, total_tokens: int) -> int:

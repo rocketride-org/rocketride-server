@@ -68,6 +68,19 @@ class Config:
         return Config._config
 
     @staticmethod
+    def getNodeProfiles(logicalType: str) -> Dict:
+        """
+        Get the preconfig.profiles mapping for a node, or {} if it has none.
+
+        Lets callers look a model name up in the catalogue without going through
+        profile resolution.
+        """
+        service = getServiceDefinition(logicalType)
+        if service is None or 'preconfig' not in service:
+            return {}
+        return service['preconfig'].get('profiles') or {}
+
+    @staticmethod
     def getNodeConfig(logicalType: str, connConfig: Dict):
         """
         Get the configuration for a connector.

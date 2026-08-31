@@ -18,7 +18,12 @@ from rocketlib import debug, warning
 from ai.common.schema import Answer, Question
 from ai.common.config import Config
 from ai.common.util import parseJson
-from ai.common.validation import validate_model_name, validate_max_tokens, validate_prompt
+from ai.common.validation import (
+    validate_model_name,
+    validate_max_tokens,
+    validate_prompt,
+    check_output_token_config,
+)
 from ai.common.llm_native_stream import STOP_SEQUENCES_VAR, dispatch_native_chat_stream
 from ai.common.llm_adapter import LangChainAdapter, NativeOpenAIResponsesAdapter, drive_adapter
 
@@ -101,6 +106,20 @@ class ChatBase:
 
         # Validate and clamp output tokens against known safe maximums
         self._modelOutputTokens = validate_max_tokens(self._modelOutputTokens, self._modelTotalTokens)
+
+        # A custom profile carries whatever the author typed and the model sync never sees
+        # it, so check the resolved limits here. Most custom profiles name a model that is
+        # also in the catalogue ("gpt-4.1-mini"), which gives a real completion limit to
+        # compare against; without one, fall back to spotting the whole window being sent.
+        if connConfig.get('profile') == 'custom':
+            problem = check_output_token_config(
+                self._model,
+                self._modelOutputTokens,
+                self._modelTotalTokens,
+                Config.getNodeProfiles(provider),
+            )
+            if problem:
+                warning(f'{provider}: {problem}')
 
         # We really can't work with a model that has a very small output window
         if self._modelOutputTokens < 1024:
