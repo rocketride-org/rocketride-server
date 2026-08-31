@@ -43,7 +43,9 @@ python3 -m venv .venv && .venv/bin/pip install -r requirements-test.txt -e packa
 
 ## Commands — run the narrowest one first
 
-Engine-free (seconds to ~1.5 min; CI runs these three on every PR):
+Engine-free (seconds to ~1.5 min on Linux/macOS; on Windows the invariants
+suite shells out to the builder repeatedly and `test:fast` takes ~2 min —
+that is normal, nothing is wrong):
 
 | You changed… | Run |
 |---|---|

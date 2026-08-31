@@ -61,3 +61,11 @@ Every invariant mutation (bogus builder action, un-pinned `uses:`, removed
 contract file and a deleted derived file both fail `surfaces:check` naming
 the file. `test:fast` runs green under `ROCKETRIDE_SANDBOX=1`; no step
 chains to an engine root. Ignored files pass the prettier hook.
+
+## Human review (joshuadarron, PR review 2026-08-30)
+
+| # | Finding | Disposition |
+|---|---|---|
+| H1-1 | **Blocking:** `subprocess.run(text=True)` without `encoding=` in `tests/test_repo_invariants.py` crashes on Windows (cp1252 decode kills the reader thread, `proc.stdout` is `None`, membership test raises `TypeError`) — the two builder-backed invariants error instead of checking, invisibly to Ubuntu-only CI. | **Fixed**: `encoding='utf-8', errors='replace'` on all three `subprocess.run` calls (incl. the `git ls-files` one for consistency), matching `rocketlib-python/lib/depends.py:580`. |
+| H1-2 | `registered_actions()` used `check=True`, so a broken builder raises `CalledProcessError` instead of a readable failure. | **Fixed**: explicit returncode check raising `RuntimeError` with the command name and stderr. |
+| H1-3 | `test:fast` is ~123 s on Windows vs ~30 s on Linux/macOS; worth a note so contributors don't assume breakage. | **Fixed**: timing note added to AGENTS.md. |

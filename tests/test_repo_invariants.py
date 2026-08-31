@@ -208,14 +208,23 @@ def pinned_version(text: str, tool: str) -> str:
 
 @lru_cache(maxsize=1)
 def registered_actions() -> Set[str]:
-    out = subprocess.run(
+    # encoding/errors are explicit: on Windows, text=True alone decodes with the
+    # ANSI code page, which can kill the reader thread and leave stdout=None.
+    proc = subprocess.run(
         ['node', str(REPO / 'scripts' / 'build.js'), '--list-actions'],
         cwd=REPO,
         capture_output=True,
         text=True,
+        encoding='utf-8',
+        errors='replace',
         timeout=120,
-        check=True,
-    ).stdout
+    )
+    if proc.returncode != 0:
+        raise RuntimeError(
+            f'`node scripts/build.js --list-actions` exited {proc.returncode}; '
+            f'the invariants suite needs a working builder.\nstderr:\n{proc.stderr}'
+        )
+    out = proc.stdout
     return {line.strip().split(' ')[0] for line in out.splitlines() if re.match(r'^\s+[a-z0-9-]+:[a-z0-9-]+', line)}
 
 
@@ -225,6 +234,8 @@ def list_deps(action: str) -> subprocess.CompletedProcess:
         cwd=REPO,
         capture_output=True,
         text=True,
+        encoding='utf-8',
+        errors='replace',
         timeout=120,
     )
 
@@ -295,7 +306,13 @@ def test_ruff_pinned_identically():
 
 def test_instruction_files_only_where_allowed():
     tracked = subprocess.run(
-        ['git', 'ls-files', '--', '*AGENTS.md', '*CLAUDE.md'], cwd=REPO, capture_output=True, text=True, check=True
+        ['git', 'ls-files', '--', '*AGENTS.md', '*CLAUDE.md'],
+        cwd=REPO,
+        capture_output=True,
+        text=True,
+        encoding='utf-8',
+        errors='replace',
+        check=True,
     ).stdout.split()
     stray = sorted(p for p in tracked if p not in INSTRUCTION_FILE_ALLOWLIST)
     assert not stray, f'AGENTS.md/CLAUDE.md outside the allow-list (harnesses auto-load these): {stray}'
