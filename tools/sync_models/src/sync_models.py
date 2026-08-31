@@ -38,7 +38,12 @@ _TOOLS_SRC = Path(__file__).parent
 if str(_TOOLS_SRC) not in sys.path:
     sys.path.insert(0, str(_TOOLS_SRC))
 
-from core.merger import _LITELLM_AVAILABLE, get_openrouter_cache, is_openrouter_available
+from core.merger import (
+    _LITELLM_AVAILABLE,
+    find_swapped_output_profiles,
+    get_openrouter_cache,
+    is_openrouter_available,
+)
 from core.patcher import get_profiles
 from core.reporter import SyncReport, format_console, format_pr_body
 from providers.base import _active_protected_profiles
@@ -240,6 +245,34 @@ def sync_provider(
     )
 
 
+def check_swapped_outputs(repo_root: Path, provider_names: List[str]) -> List[tuple]:
+    """
+    Find catalogue profiles that send their whole context window as ``max_tokens``.
+
+    A profile whose ``modelOutputTokens`` equals its ``modelTotalTokens`` is the
+    signature of an upstream source swapping the two fields. The provider rejects
+    such a call with a 400, so this is checked against what is on disk.
+
+    Args:
+        repo_root: Repository root.
+        provider_names: Providers whose services.json should be checked.
+
+    Returns:
+        List of (provider_name, profile_key, shared_token_value).
+    """
+    offenders: List[tuple] = []
+    for provider_name in provider_names:
+        rel_path = _SERVICES_JSON_PATHS.get(provider_name)
+        if not rel_path:
+            continue
+        services_path = repo_root / rel_path
+        if not services_path.exists():
+            continue
+        for profile_key, value in find_swapped_output_profiles(get_profiles(str(services_path))):
+            offenders.append((provider_name, profile_key, value))
+    return offenders
+
+
 def main() -> int:
     """
     CLI entry point.
@@ -404,6 +437,22 @@ def main() -> int:
     # Exit 1 if any provider had an error
     if any(p.error for p in report.providers):
         return 1
+
+    # Catalogue gate — a profile sending its context window as max_tokens is
+    # rejected by the provider at run time, so fail the sync rather than ship it.
+    offenders = check_swapped_outputs(repo_root, providers_to_sync)
+    if offenders:
+        print(
+            f'\nERROR: {len(offenders)} profile(s) have modelOutputTokens equal to modelTotalTokens.\n'
+            '       These send the whole context window as max_tokens and the provider rejects\n'
+            "       the call. Set the model's real completion limit in sync_models.config.json\n"
+            '       under model_output_tokens.overrides.',
+            file=sys.stderr,
+        )
+        for provider_name, profile_key, value in offenders:
+            print(f'       {provider_name}: {profile_key} ({value:,} / {value:,})', file=sys.stderr)
+        return 1
+
     return 0
 
 

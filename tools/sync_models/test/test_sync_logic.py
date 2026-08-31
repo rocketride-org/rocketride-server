@@ -16,7 +16,7 @@ from unittest.mock import MagicMock
 import pytest
 
 # tools/sync_models/src is added to sys.path by conftest.py
-from core.merger import merge, _make_profile_key, _derive_title
+from core.merger import merge, _make_profile_key, _derive_title, find_swapped_output_profiles
 from core.smoke import run
 from core.patcher import load as patcher_load, patch as patcher_patch, get_profiles
 from core.reporter import SyncReport, ProviderReport, format_console, format_pr_body
@@ -527,3 +527,103 @@ class TestCliValidation:
         )
         assert rc != 0
         assert 'must not be repeated' in stderr.lower() or 'duplicate' in stderr.lower() or '--model-source' in stderr
+
+
+# ---------------------------------------------------------------------------
+# Swapped output tokens (context window reported as the completion limit)
+# ---------------------------------------------------------------------------
+
+
+class TestSwappedOutputTokens:
+    def test_swapped_candidate_is_not_used_for_new_profile(self, current_profiles, title_mappings):
+        # Source reports the same number for both fields — the swap signature.
+        api_models = [
+            {'id': 'test-model-a'},
+            {'id': 'test-model-b'},
+            {'id': 'test-model-c', 'context_window': 128000, 'max_output_tokens': 128000},
+        ]
+        updated, result = merge(
+            current_profiles=current_profiles,
+            api_models=api_models,
+            title_mappings=title_mappings,
+            token_overrides={},
+            output_token_overrides={},
+            default_output_tokens=4096,
+        )
+        profile = updated['test-model-c']
+        assert profile['modelTotalTokens'] == 128000
+        assert profile['modelOutputTokens'] == 4096
+
+    def test_genuine_output_limit_is_kept(self, current_profiles, title_mappings):
+        api_models = [
+            {'id': 'test-model-a'},
+            {'id': 'test-model-b'},
+            {'id': 'test-model-c', 'context_window': 128000, 'max_output_tokens': 32768},
+        ]
+        updated, _ = merge(
+            current_profiles=current_profiles,
+            api_models=api_models,
+            title_mappings=title_mappings,
+            token_overrides={},
+            output_token_overrides={},
+            default_output_tokens=4096,
+        )
+        assert updated['test-model-c']['modelOutputTokens'] == 32768
+
+    def test_override_still_wins_over_source(self, current_profiles, title_mappings):
+        api_models = [
+            {'id': 'test-model-a'},
+            {'id': 'test-model-b'},
+            {'id': 'test-model-c', 'context_window': 128000, 'max_output_tokens': 128000},
+        ]
+        updated, _ = merge(
+            current_profiles=current_profiles,
+            api_models=api_models,
+            title_mappings=title_mappings,
+            token_overrides={},
+            output_token_overrides={'test-model-c': 16384},
+            default_output_tokens=4096,
+        )
+        assert updated['test-model-c']['modelOutputTokens'] == 16384
+
+    def test_fallback_default_does_not_overwrite_existing_value(self, title_mappings):
+        # A profile that already carries a real limit must survive a source that
+        # only offers a swapped value — the 4096 default is for new profiles.
+        profiles = {
+            'test-model-a': {
+                'title': 'Test Model A',
+                'model': 'test-model-a',
+                'modelSource': 'provider',
+                'modelTotalTokens': 128000,
+                'modelOutputTokens': 32768,
+                'apikey': '',
+            },
+        }
+        api_models = [{'id': 'test-model-a', 'context_window': 128000, 'max_output_tokens': 128000}]
+        updated, _ = merge(
+            current_profiles=profiles,
+            api_models=api_models,
+            title_mappings=title_mappings,
+            token_overrides={},
+            output_token_overrides={},
+            default_output_tokens=4096,
+        )
+        assert updated['test-model-a']['modelOutputTokens'] == 32768
+
+    def test_find_swapped_output_profiles(self):
+        profiles = {
+            'bad': {'model': 'm1', 'modelTotalTokens': 131072, 'modelOutputTokens': 131072},
+            'good': {'model': 'm2', 'modelTotalTokens': 131072, 'modelOutputTokens': 32768},
+            'no-output-key': {'model': 'm3', 'modelTotalTokens': 131072},
+            'custom': {'model': ''},
+        }
+        assert find_swapped_output_profiles(profiles) == [('bad', 131072)]
+
+    def test_catalogue_has_no_swapped_profiles(self):
+        # Guards every llm_* node, including the ones sync_models does not cover.
+        repo_root = Path(__file__).resolve().parents[3]
+        offenders = []
+        for services_path in sorted(repo_root.glob('nodes/src/nodes/llm_*/services.json')):
+            for key, value in find_swapped_output_profiles(get_profiles(str(services_path))):
+                offenders.append(f'{services_path.parent.name}: {key} ({value:,})')
+        assert not offenders, 'Profiles sending the context window as max_tokens:\n' + '\n'.join(offenders)

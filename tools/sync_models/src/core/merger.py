@@ -115,6 +115,50 @@ def _is_reasoning_model(bare_id: str) -> bool:
     return any(fam in low for fam in _REASONING_FAMILIES)
 
 
+def _is_swapped_output(out: Optional[int], ctx: Optional[int]) -> bool:
+    """
+    True when a source reports its max output tokens as the context window.
+
+    Both LiteLLM and OpenRouter do this for some models: the two fields come
+    back identical, which is never a real completion limit — modern models cap
+    output well below their window. Sending that value as ``max_tokens`` gets
+    the call rejected by the provider, so the candidate must be discarded and
+    the next source tried.
+
+    Args:
+        out: Candidate max output tokens from a source.
+        ctx: Context window reported by that same source.
+
+    Returns:
+        True if the pair carries the swap signature.
+    """
+    return out is not None and ctx is not None and out == ctx
+
+
+def find_swapped_output_profiles(profiles: Dict[str, Any]) -> List[Tuple[str, int]]:
+    """
+    Return profiles whose ``modelOutputTokens`` equals their ``modelTotalTokens``.
+
+    Used as a catalogue gate: such a profile sends the whole context window as
+    ``max_tokens`` and the provider rejects the call with a 400.
+
+    Args:
+        profiles: The "preconfig.profiles" mapping from a services.json.
+
+    Returns:
+        List of (profile_key, shared_token_value), sorted by key.
+    """
+    found: List[Tuple[str, int]] = []
+    for key, profile in profiles.items():
+        if not isinstance(profile, dict):
+            continue
+        total = profile.get('modelTotalTokens')
+        output = profile.get('modelOutputTokens')
+        if isinstance(total, int) and total == output:
+            found.append((key, total))
+    return sorted(found)
+
+
 def _source_is_authoritative(source: str, model_source: str) -> bool:
     """
     Return True if the given sync source has authority to deprecate or
@@ -591,26 +635,32 @@ def merge(
         else:
             api_output_tokens = -1  # sentinel — replaced below
             output_tokens_src = 'default'
+            # A candidate whose value equals its own source's context window is the
+            # swap signature (_is_swapped_output) — skip it and try the next source
+            # rather than break, so a good value further down the list still wins.
             for _src in model_sources:
                 if _src == 'provider' and _api_entry_source == 'provider API' and _api_entry_out is not None:
-                    api_output_tokens = _api_entry_out
-                    output_tokens_src = 'provider API'
-                    break
+                    if not _is_swapped_output(_api_entry_out, _api_ctx):
+                        api_output_tokens = _api_entry_out
+                        output_tokens_src = 'provider API'
+                        break
                 if _src == 'openrouter':
                     if _api_entry_source == 'openrouter' and _api_entry_out is not None:
-                        api_output_tokens = _api_entry_out
-                        output_tokens_src = 'openrouter'
-                        break
-                    if _or_out is not None:
+                        if not _is_swapped_output(_api_entry_out, _api_ctx):
+                            api_output_tokens = _api_entry_out
+                            output_tokens_src = 'openrouter'
+                            break
+                    if _or_out is not None and not _is_swapped_output(_or_out, _or_ctx):
                         api_output_tokens = _or_out
                         output_tokens_src = 'openrouter'
                         break
                 if _src == 'litellm':
                     if _api_entry_source == 'litellm' and _api_entry_out is not None:
-                        api_output_tokens = _api_entry_out
-                        output_tokens_src = 'litellm'
-                        break
-                    if _litellm_out is not None:
+                        if not _is_swapped_output(_api_entry_out, _api_ctx):
+                            api_output_tokens = _api_entry_out
+                            output_tokens_src = 'litellm'
+                            break
+                    if _litellm_out is not None and not _is_swapped_output(_litellm_out, _litellm_ctx):
                         api_output_tokens = _litellm_out
                         output_tokens_src = 'litellm'
                         break
@@ -682,7 +732,12 @@ def merge(
                 # any patcher rewrite, even when the value itself hasn't changed.
                 updated_profiles[profile_key]['_src_modelTotalTokens'] = total_tokens_src
 
-            if api_output_tokens > 0:
+            # 'default' means no source produced a usable value (none had one, or the
+            # only candidates carried the swap signature). That is a fallback for new
+            # profiles, not evidence about this model — never let it overwrite a value
+            # already in the catalogue.
+            _output_is_fallback = output_tokens_src == 'default' and existing.get('modelOutputTokens') is not None
+            if api_output_tokens > 0 and not _output_is_fallback:
                 if existing.get('modelOutputTokens') != api_output_tokens:
                     old_val = existing.get('modelOutputTokens')
                     updated_profiles[profile_key]['modelOutputTokens'] = api_output_tokens

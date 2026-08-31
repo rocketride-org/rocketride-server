@@ -121,6 +121,8 @@ Pick primary source  →  fetch model list  →  discovery gate  →  smoke test
 
 The same priority applies to output tokens: `model_output_tokens.overrides` → first source in `--model-source` order with data → `model_output_tokens.defaults.chat` (or `defaults.embedding` for embedding providers).
 
+**Swapped-value guard**: LiteLLM and OpenRouter report max output tokens as the context window for some models. A candidate whose value equals its own source's context window is discarded and the next source is tried; if none has a usable value, the default applies to new profiles only and never overwrites a limit already in `services.json`. After the run, the sync fails with exit code 1 if any profile still has `modelOutputTokens == modelTotalTokens` — such a profile sends the whole window as `max_tokens` and the provider rejects the call. Fix those with `model_output_tokens.overrides`.
+
 ### Discovery vs enrichment
 
 The sync has two distinct modes:
