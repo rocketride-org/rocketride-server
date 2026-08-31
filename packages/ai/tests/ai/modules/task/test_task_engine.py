@@ -1175,3 +1175,89 @@ def test_cap_trace_payload_leaves_unserializable_payloads_alone():
     """Unserializable payloads pass through — the transport owns that error."""
     payload = {'bad': object()}
     assert cap_trace_payload(payload) is payload
+
+
+# ---------------------------------------------------------------------------
+# on_event: idle-timer reset
+# ---------------------------------------------------------------------------
+
+
+def _event_task(run_kind='dev'):
+    """A Task wired far enough to run on_event, with the handlers stubbed."""
+    from unittest.mock import AsyncMock
+
+    t = _task()
+    t._run_kind = run_kind
+    t._idle_time = 600
+    t._status_trace = []
+    # The trace branch walks the per-pipe execution stack before anything else.
+    t._status.pipeflow = SimpleNamespace(byPipe={})
+    t._update_status = MagicMock()
+    t._forward_task_event = AsyncMock()
+    t._send_status_update = AsyncMock()
+    return t
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    'event_type',
+    [
+        'apaevt_status_counts',
+        'apaevt_status_object',
+        'apaevt_status_message',
+        'apaevt_status_metrics',
+        'apaevt_sse',
+        'apaevt_trace',
+    ],
+)
+async def test_on_event_engine_event_resets_idle_timer_for_a_dev_task(event_type):
+    """Pipeline work is activity: a dev task mid-turn is not idle.
+
+    The timer moved only on inbound data before, so a model call or tool loop aged
+    the task toward its TTL while it was busy.
+    """
+    t = _event_task()
+
+    await Task.on_event(t, {'event': event_type, 'body': {}})
+
+    assert t._idle_time == 0
+
+
+@pytest.mark.asyncio
+async def test_on_event_stdout_does_not_reset_idle_timer():
+    """`output` carries any line a node printed, including from a background thread.
+
+    Letting it count would hold a finished task alive, which is what the timer
+    exists to prevent.
+    """
+    t = _event_task()
+
+    await Task.on_event(t, {'event': 'output', 'body': {'output': 'still here'}})
+
+    assert t._idle_time == 600
+
+
+@pytest.mark.asyncio
+async def test_on_event_debugger_passthrough_does_not_reset_idle_timer():
+    """Debugger traffic is not pipeline work and its cadence is not ours to reason about."""
+    t = _event_task()
+
+    await Task.on_event(t, {'event': 'stopped', 'body': {}})
+
+    assert t._idle_time == 600
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('event_type', ['apaevt_status_counts', 'apaevt_sse', 'apaevt_trace'])
+async def test_on_event_never_resets_idle_timer_for_a_deploy_run(event_type):
+    """A deploy run's ttl is a wall-clock window, not an idle timeout.
+
+    task_server_facade sends one for every scheduled run and the schedule UI sells
+    it as "run for up to N". A source-driven run never calls _send_data, so the
+    timer never resetting is exactly what caps the window.
+    """
+    t = _event_task(run_kind='deploy')
+
+    await Task.on_event(t, {'event': event_type, 'body': {}})
+
+    assert t._idle_time == 600
