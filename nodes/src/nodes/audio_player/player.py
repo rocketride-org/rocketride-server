@@ -25,7 +25,14 @@ import threading
 import queue
 import time
 import numpy as np
-import sounddevice as sd
+
+try:
+    import sounddevice as sd
+except (ImportError, OSError) as e:
+    raise RuntimeError(
+        "The 'sounddevice' library requires PortAudio to be installed on your system. Cannot load audio_player node."
+    ) from e
+from rocketlib import warning
 from ai.common.avi.audio import AudioReader
 from .IGlobal import IGlobal
 
@@ -40,6 +47,7 @@ class Player(AudioReader):
     CHANNELS = 2  # Stereo audio
     MAX_CHUNK_SIZE = 16 * 1024  # 16 KB per chunk
     MAX_QUEUE_SIZE = 32  # Max chunks in queue
+    STOP_TIMEOUT = 10.0  # Max seconds to wait for stop
 
     IGlobal: IGlobal  # Shared global context (optional external application state)
 
@@ -156,10 +164,24 @@ class Player(AudioReader):
         """
         Start the audio playback stream and the data extractor.
         """
-        # Initialize internal buffers
+        # Initialize internal buffers. Recreate the queue so a stale stop()
+        # sentinel from a timed-out previous cycle cannot mute this stream.
+        self._play_queue = queue.Queue(maxsize=self.MAX_QUEUE_SIZE)
         self._chunk_accumulator = bytearray()
         self._play_callback_buffer = bytearray()
         self._playback_finished = False
+
+        # Check for valid output audio hardware
+        try:
+            devices = sd.query_devices()
+        except Exception as e:
+            raise RuntimeError(
+                "The 'sounddevice' library encountered an error checking for audio hardware. "
+                'Cannot start audio playback.'
+            ) from e
+
+        if not any(d.get('max_output_channels', 0) > 0 for d in devices):
+            raise RuntimeError('No audio output hardware detected on this system. Cannot start audio playback.')
 
         # Create and start the audio output stream
         self._stream = sd.OutputStream(
@@ -183,12 +205,31 @@ class Player(AudioReader):
         # Stop parent processing
         super().stop()
 
-        # Wait until the queue is drained and all buffered audio is played
-        while not self._play_queue.empty() or len(self._play_callback_buffer) > 0 or not self._playback_finished:
+        # `_playback_finished` flips only after the callback consumes the
+        # trailing sentinel, which also drains everything queued ahead of it.
+        # Do not also wait on `_play_queue.empty()`: a leftover sentinel from
+        # stop() is never consumed once the callback has finished, and that
+        # check would stall until STOP_TIMEOUT on every normal EOF.
+        start_wait_time = time.monotonic()
+        sentinel_sent = False
+        while len(self._play_callback_buffer) > 0 or not self._playback_finished:
+            if not sentinel_sent:
+                try:
+                    self._play_queue.put_nowait(None)
+                    sentinel_sent = True
+                except queue.Full:
+                    pass
+
+            if time.monotonic() - start_wait_time > self.STOP_TIMEOUT:
+                warning('audio_player: stop timed out, forcing stream stop')
+                break
             time.sleep(0.1)  # Wait 100ms
 
         # Stop the audio stream if it exists
         if self._stream:
-            self._stream.stop()
+            if time.monotonic() - start_wait_time > self.STOP_TIMEOUT:
+                self._stream.abort()
+            else:
+                self._stream.stop()
             self._stream.close()
             self._stream = None
