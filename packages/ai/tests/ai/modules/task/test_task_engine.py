@@ -1261,3 +1261,42 @@ async def test_on_event_never_resets_idle_timer_for_a_deploy_run(event_type):
     await Task.on_event(t, {'event': event_type, 'body': {}})
 
     assert t._idle_time == 600
+
+
+@pytest.mark.asyncio
+async def test_on_event_exit_reads_the_key_the_emitters_write():
+    """A clean exit must record code 0, not the fallback.
+
+    Every emitter in dap/transport_stdio.py writes 'exitCode'. Reading 'exit_code'
+    always missed, so a clean exit took the default 1 and _update_completion_status
+    recorded the run as cancelled instead of completed, and the dashboard was told
+    the task errored.
+    """
+    t = _event_task()
+    t._status.exitCode = None
+    t._status.exitMessage = ''
+    t._status.state = 0
+    t._is_restarting = False
+    t._update_completion_status = MagicMock()
+    t._close_run_log = MagicMock()
+
+    await Task.on_event(t, {'event': 'apaevt_exit', 'body': {'exitCode': 0, 'message': 'COMPLETED'}})
+
+    assert t._status.exitCode == 0
+    assert t._status.exitMessage == 'COMPLETED'
+
+
+@pytest.mark.asyncio
+async def test_on_event_exit_still_defaults_when_no_code_is_sent():
+    """A malformed exit with no code keeps the pessimistic default."""
+    t = _event_task()
+    t._status.exitCode = None
+    t._status.exitMessage = ''
+    t._status.state = 0
+    t._is_restarting = False
+    t._update_completion_status = MagicMock()
+    t._close_run_log = MagicMock()
+
+    await Task.on_event(t, {'event': 'apaevt_exit', 'body': {'message': 'Malformed exit message'}})
+
+    assert t._status.exitCode == 1

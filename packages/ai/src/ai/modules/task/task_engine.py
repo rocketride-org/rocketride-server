@@ -1526,8 +1526,8 @@ class Task(DAPBase):
             )
 
         elif event_type == 'apaevt_exit':
-            # Get the exit info
-            exit_code = body.get('exit_code', 1)
+            # exitCode is the spelling every emitter in dap/transport_stdio.py writes.
+            exit_code = body.get('exitCode', 1)
             exit_message = body.get('message', 'Task exited unexpectedly')
 
             # Save it
