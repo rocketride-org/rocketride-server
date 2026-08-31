@@ -204,7 +204,7 @@
 				"model": "minimax-01",
 				"modelSource": "openrouter",
 				"modelTotalTokens": 1000192, // openrouter
-				"modelOutputTokens": 1000192, // openrouter
+				"modelOutputTokens": 900172, // openrouter
 				"apikey": ""
 			},
 			"minimax-m1": {
@@ -224,6 +224,39 @@
 				"modelSource": "openrouter",
 				"modelTotalTokens": 65536, // openrouter
 				"modelOutputTokens": 2048, // openrouter
+				"apikey": ""
+			},
+			"minimax-m2-7-free": {
+				"title": "MiniMax: MiniMax M2.7 (free)",
+				"model": "minimax-m2.7:free",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 196608, // openrouter
+				"modelOutputTokens": 176947, // openrouter
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"minimax-m3-batch": {
+				"title": "MiniMax: MiniMax M3 (batch)",
+				"model": "minimax-m3:batch",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 524288, // openrouter
+				"modelOutputTokens": 471859, // openrouter
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"minimax-m3-free": {
+				"title": "MiniMax: MiniMax M3 (free)",
+				"model": "minimax-m3:free",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 1048576, // openrouter
+				"modelOutputTokens": 943718, // openrouter
+				"capabilities": {
+					"reasoning": true
+				},
 				"apikey": ""
 			}
 		}
@@ -426,6 +459,24 @@
 					"properties": [
 						"minimax.minimax-m2-her"
 					]
+				},
+				{
+					"value": "minimax-m2-7-free",
+					"properties": [
+						"minimax.minimax-m2-7-free"
+					]
+				},
+				{
+					"value": "minimax-m3-batch",
+					"properties": [
+						"minimax.minimax-m3-batch"
+					]
+				},
+				{
+					"value": "minimax-m3-free",
+					"properties": [
+						"minimax.minimax-m3-free"
+					]
 				}
 			]
 		},
@@ -452,6 +503,27 @@
 		},
 		"minimax.minimax-m2-her": {
 			"object": "minimax-m2-her",
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
+		},
+		"minimax.minimax-m2-7-free": {
+			"object": "minimax-m2-7-free",
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
+		},
+		"minimax.minimax-m3-batch": {
+			"object": "minimax-m3-batch",
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
+		},
+		"minimax.minimax-m3-free": {
+			"object": "minimax-m3-free",
 			"properties": [
 				"llm.cloud.apikey",
 				"llm.cloud.modelSource"
