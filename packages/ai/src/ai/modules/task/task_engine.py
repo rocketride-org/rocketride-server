@@ -1489,6 +1489,22 @@ class Task(DAPBase):
         event_type = message.get('event', '')
         body = message.get('body', {})
 
+        # A structured engine event means the pipeline did something, so a dev task
+        # working through a long turn is not idle. Without this the timer only moved
+        # on inbound data, and a model call or tool loop aged the task toward its TTL
+        # while it was busy.
+        #
+        # A deploy run is excluded because its ttl is a wall-clock run window, not an
+        # idle timeout: task_server_facade sends one for every scheduled run and the
+        # schedule UI sells it as "run for up to N". Resetting it there would turn
+        # every fixed window into an idle timeout.
+        #
+        # The 'output' branch below is excluded too. It carries any line a node
+        # printed, so a chatty background thread would hold a finished task alive,
+        # which is what the timer exists to prevent.
+        if self._run_kind == 'dev' and event_type.startswith('apaevt_'):
+            self.reset_idle_timer()
+
         # Handle service state changes
         if event_type == 'apaevt_status_state':
             service_up = body.get('service', False)
