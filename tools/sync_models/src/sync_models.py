@@ -245,22 +245,30 @@ def sync_provider(
     )
 
 
-def check_swapped_outputs(repo_root: Path, provider_names: List[str]) -> List[tuple]:
+def check_swapped_outputs(
+    repo_root: Path, provider_names: List[str], config: Dict[str, Any]
+) -> tuple[List[tuple], List[tuple]]:
     """
-    Find catalogue profiles that send their whole context window as ``max_tokens``.
+    Find catalogue profiles whose ``modelOutputTokens`` equals ``modelTotalTokens``.
 
-    A profile whose ``modelOutputTokens`` equals its ``modelTotalTokens`` is the
-    signature of an upstream source swapping the two fields. The provider rejects
-    such a call with a 400, so this is checked against what is on disk.
+    Equality only proves a broken value on a provider that caps completions below
+    its context window (``output_limit_below_context``), and only for profiles that
+    came from that provider's own API — an OpenRouter or LiteLLM alias is served
+    elsewhere. Everything else is reported but does not fail the run: on providers
+    with no separate completion limit the two values are legitimately equal.
 
     Args:
         repo_root: Repository root.
         provider_names: Providers whose services.json should be checked.
+        config: Parsed sync_models.config.json.
 
     Returns:
-        List of (provider_name, profile_key, shared_token_value).
+        (errors, warnings), each a list of (provider_name, profile_key, value).
     """
-    offenders: List[tuple] = []
+    providers_config = config.get('providers', {})
+    confirmed = set((config.get('model_output_tokens', {}) or {}).get('overrides', {}) or {})
+    errors: List[tuple] = []
+    warnings: List[tuple] = []
     for provider_name in provider_names:
         rel_path = _SERVICES_JSON_PATHS.get(provider_name)
         if not rel_path:
@@ -268,9 +276,15 @@ def check_swapped_outputs(repo_root: Path, provider_names: List[str]) -> List[tu
         services_path = repo_root / rel_path
         if not services_path.exists():
             continue
-        for profile_key, value in find_swapped_output_profiles(get_profiles(str(services_path))):
-            offenders.append((provider_name, profile_key, value))
-    return offenders
+        profiles = get_profiles(str(services_path))
+        capped = bool(providers_config.get(provider_name, {}).get('output_limit_below_context', False))
+        failing = (
+            {key for key, _ in find_swapped_output_profiles(profiles, confirmed, native_only=True)} if capped else set()
+        )
+        for profile_key, value in find_swapped_output_profiles(profiles, confirmed):
+            target = errors if profile_key in failing else warnings
+            target.append((provider_name, profile_key, value))
+    return errors, warnings
 
 
 def main() -> int:
@@ -438,18 +452,25 @@ def main() -> int:
     if any(p.error for p in report.providers):
         return 1
 
-    # Catalogue gate — a profile sending its context window as max_tokens is
-    # rejected by the provider at run time, so fail the sync rather than ship it.
-    offenders = check_swapped_outputs(repo_root, providers_to_sync)
-    if offenders:
+    # Catalogue gate — on a provider that caps completions, a native profile sending
+    # its whole context window as max_tokens is rejected at run time. Fail on those;
+    # report the rest, where the equality may well be legitimate.
+    errors, warnings = check_swapped_outputs(repo_root, providers_to_sync, config)
+    if warnings:
+        print(f'\nNote: {len(warnings)} profile(s) have modelOutputTokens equal to modelTotalTokens.')
+        print('      Legitimate where the provider has no separate completion limit; confirm a')
+        print('      value by adding it to model_output_tokens.overrides to silence this.')
+        for provider_name, profile_key, value in warnings:
+            print(f'      {provider_name}: {profile_key} ({value:,})')
+    if errors:
         print(
-            f'\nERROR: {len(offenders)} profile(s) have modelOutputTokens equal to modelTotalTokens.\n'
-            '       These send the whole context window as max_tokens and the provider rejects\n'
-            "       the call. Set the model's real completion limit in sync_models.config.json\n"
-            '       under model_output_tokens.overrides.',
+            f'\nERROR: {len(errors)} profile(s) send the whole context window as max_tokens.\n'
+            '       Their provider caps completions below the window and rejects the call.\n'
+            "       Set the model's real completion limit in sync_models.config.json under\n"
+            '       model_output_tokens.overrides.',
             file=sys.stderr,
         )
-        for provider_name, profile_key, value in offenders:
+        for provider_name, profile_key, value in errors:
             print(f'       {provider_name}: {profile_key} ({value:,} / {value:,})', file=sys.stderr)
         return 1
 

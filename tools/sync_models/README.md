@@ -121,7 +121,11 @@ Pick primary source  →  fetch model list  →  discovery gate  →  smoke test
 
 The same priority applies to output tokens: `model_output_tokens.overrides` → first source in `--model-source` order with data → `model_output_tokens.defaults.chat` (or `defaults.embedding` for embedding providers).
 
-**Swapped-value guard**: LiteLLM and OpenRouter report max output tokens as the context window for some models. A candidate whose value equals its own source's context window is discarded and the next source is tried; if none has a usable value, the default applies to new profiles only and never overwrites a limit already in `services.json`. After the run, the sync fails with exit code 1 if any profile still has `modelOutputTokens == modelTotalTokens` — such a profile sends the whole window as `max_tokens` and the provider rejects the call. Fix those with `model_output_tokens.overrides`.
+**Swapped-value guard** (providers with `output_limit_below_context` only): LiteLLM and OpenRouter report max output tokens as the context window for some models. On a provider that caps completions below its window, a candidate equal to its own source's context window is discarded and the next source is tried. If no source has a usable value, the default applies to new profiles only — it never overwrites a limit already in `services.json`.
+
+The equality is only a defect where the provider enforces a separate completion limit. OpenAI rejects an oversized `max_tokens` with _"This model supports at most N completion tokens"_, and litellm swaps the fields for Anthropic; both set `output_limit_below_context`. Mistral and xAI accept `max_tokens` up to the context window and publish no separate limit, so **every** source reports the two values as equal there and it is correct data — do not set the flag for them.
+
+After the run the sync reports every profile with `modelOutputTokens == modelTotalTokens`, and exits 1 for those that are also (a) on a provider with `output_limit_below_context`, (b) `modelSource: provider` — a routed OpenRouter or LiteLLM alias is served elsewhere and is not bound by this provider's limit — and (c) not `deprecated`. Fix a failing profile with `model_output_tokens.overrides`; adding a model there also marks the value as confirmed and silences the warning.
 
 ### Discovery vs enrichment
 
@@ -180,6 +184,7 @@ The sync has two distinct modes:
     "default_context_window": 128000,  // fallback for new models when API + litellm have no data
     "protected_profiles": ["custom"],  // these keys are never deprecated (merged with default_protected_profiles)
     "exclude_dated_snapshots": true,   // drop -2024-04-09 and -0613 date suffixes
+    "output_limit_below_context": true, // provider caps completions below its window (see above)
     "model_filter": {
         "include_prefixes": ["gpt-", "o1"],  // only these prefixes; empty = allow all
         "exclude_prefixes": [],

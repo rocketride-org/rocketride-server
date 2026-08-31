@@ -601,6 +601,7 @@ class CloudProvider(ABC):
             normalize_profile_model_id=self.normalize_profile_model_id,
             deprecation_source=deprecation_source,
             derive_title_fn=self.derive_title,
+            output_limit_below_context=bool(self._config.get('output_limit_below_context', False)),
         )
 
         report.added = merge_result.added
