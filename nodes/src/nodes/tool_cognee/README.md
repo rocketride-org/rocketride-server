@@ -62,6 +62,12 @@ For an access-controlled Cognee server, provide **API Key** or set `COGNEE_API_K
 
 `remember` and `recall` use one POST attempt. Dataset listing and status checks use the shared retrying GET helper. For background storage, call `memory_status` and wait for `completed` before relying on a recall result.
 
+### Shared memory across agents
+
+A RocketRide component may carry multiple tool/control entries, so one `tool_cognee` node can serve several agents at once. Prefer that to duplicating the node per agent: one component keeps the server, credentials, dataset, and retrieval settings from drifting apart. Shared recall requires every participant to use the same Cognee server, an authenticated identity with permission to the shared memory, and the same dataset — keep **Allow dataset override** disabled so no agent can select a different dataset. Memory never moves implicitly: an agent must call `cognee.remember` to store, and another must call `cognee.recall` to retrieve; each agent still needs its own run-scoped working memory.
+
+Simultaneous writes may overlap. The node provides no transaction, serialization, or ordering guarantee across tool calls, and recall is eventually consistent with processing. Prefer a sequential handoff: let the storing agent finish, wait for `cognee.memory_status` to report `completed`, and only then have the receiving agent recall. See the copyable [`cognee-shared-memory-agents.pipe`](https://github.com/rocketride-org/rocketride-server/blob/develop/examples/cognee-shared-memory-agents.pipe) example.
+
 ## Upstream docs
 
 - [Cognee documentation](https://docs.cognee.ai)
