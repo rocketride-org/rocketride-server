@@ -16,11 +16,17 @@ from abc import ABC, abstractmethod
 from datetime import date as _date
 from typing import Any, Dict, List, Optional
 
-from core.merger import _derive_title, _LITELLM_AVAILABLE, get_openrouter_cache, is_openrouter_available, merge
+from core.merger import (
+    CALL_VERIFIED,
+    _derive_title,
+    _LITELLM_AVAILABLE,
+    get_openrouter_cache,
+    is_openrouter_available,
+    merge,
+)
 from core.patcher import patch, _find_fields_block, _repair_field_objects
 from core.reporter import ProviderReport
 from core.smoke import run as smoke_run, SmokeResult
-from core.util import is_model_missing_error
 
 try:
     import json5 as _json5
@@ -435,9 +441,11 @@ class CloudProvider(ABC):
         # correctly and was retired six months later is never called again. A listing
         # endpoint is no help: providers keep returning models they have retired, and
         # the call is the only thing that answers the question. Only a message naming
-        # the model as gone counts (is_model_missing_error) — a busy service or a
-        # permission problem must never deprecate a profile.
+        # provider states the model is retired counts; a bare 404 is reported instead,
+        # since OpenAI and Anthropic answer one for a gated model too, and a busy
+        # service or a permission problem never reaches this at all.
         retired_models: Dict[str, str] = {}
+        revived_models: set = set()
         if verify_existing and primary_source == 'provider' and client is not None:
             protected_keys = _active_protected_profiles(self._config.get('protected_profiles', []))
             if global_protected_profiles:
@@ -446,12 +454,25 @@ class CloudProvider(ABC):
                 if not isinstance(profile, dict) or profile_key in protected_keys:
                     continue
                 model_id = profile.get('model')
-                if not model_id or profile.get('deprecated'):
+                if not model_id:
+                    continue
+                # Profiles this pass marked before are called again: a mark made by a
+                # call can only be lifted by a call that passes, never by the model
+                # turning up in a listing (it never left one).
+                already_marked = profile.get('deprecated')
+                if already_marked and profile.get('deprecatedBy') != CALL_VERIFIED:
                     continue
                 result = smoke_run(self.smoke_type, client, model_id)
-                if not result.passed() and is_model_missing_error(result.reason):
-                    retired_models[model_id] = result.reason
-                    report.retired.append((profile_key, result.reason))
+                if result.retired():
+                    if not already_marked:
+                        retired_models[model_id] = result.reason
+                        report.retired.append((profile_key, result.reason))
+                elif result.passed() and already_marked:
+                    revived_models.add(model_id)
+                elif result.outcome == 'missing' and not already_marked:
+                    # A bare 404: retired, or a model this key cannot reach. Not
+                    # evidence enough to deprecate, so hand it to a human instead.
+                    report.unverified.append((profile_key, result.reason))
 
         # --- Warning messages for partial-result modes ---
         if primary_source != 'provider' and api_key is None:
@@ -477,6 +498,7 @@ class CloudProvider(ABC):
             deprecation_source=deprecation_source,
             deprecation_source_key=deprecation_source_key,
             retired_models=retired_models,
+            revived_models=revived_models,
         )
 
     def _fetch_litellm_models(self) -> List[Dict[str, Any]]:
@@ -588,6 +610,7 @@ class CloudProvider(ABC):
         deprecation_source: str = 'provider API',
         deprecation_source_key: str = 'provider',
         retired_models: Dict[str, str] | None = None,
+        revived_models: set | None = None,
     ) -> ProviderReport:
         """
         Run the smart merge and optionally write results to disk.
@@ -636,6 +659,7 @@ class CloudProvider(ABC):
             derive_title_fn=self.derive_title,
             output_limit_below_context=bool(self._config.get('output_limit_below_context', False)),
             retired_models=retired_models or {},
+            revived_models=revived_models or set(),
         )
 
         report.added = merge_result.added

@@ -50,6 +50,7 @@ class ProviderReport:
     estimated_tokens: List[str] = field(default_factory=list)
     reappeared_deprecated: List[str] = field(default_factory=list)
     retired: List[tuple] = field(default_factory=list)
+    unverified: List[tuple] = field(default_factory=list)
     unchanged_count: int = 0
     warning: Optional[str] = None
     error: Optional[str] = None
@@ -66,7 +67,7 @@ class ProviderReport:
         provider whose only finding is one of them must not be rendered as a
         pure skip — the early return above would drop the finding entirely.
         """
-        return bool(self.added or self.updated or self.deprecated or self.reappeared_deprecated)
+        return bool(self.added or self.updated or self.deprecated or self.reappeared_deprecated or self.unverified)
 
 
 @dataclass
@@ -161,6 +162,9 @@ def format_console(report: SyncReport) -> str:
 
         for profile_key, _reason in pr.retired:
             lines.append(_c(f'  - {profile_key:<30} retired upstream (verified by call)', '90'))
+
+        for profile_key, _reason in pr.unverified:
+            lines.append(_c(f'  ? {profile_key:<30} 404 on call — retired, or no access with this key', '33'))
 
         for key in pr.reappeared_deprecated:
             lines.append(_c(f'  ? {key:<30} listed again but still deprecated — confirm or clear', '33'))
@@ -270,6 +274,13 @@ def format_pr_body(report: SyncReport) -> str:
             lines.append('**Retired upstream** (a direct call reports the model as gone):')
             lines.append('')
             for profile_key, reason in pr.retired:
+                lines.append(f'- `{profile_key}` — {reason[:200]}')
+            lines.append('')
+
+        if pr.unverified:
+            lines.append('**Could not be called** (404 — either retired, or not reachable with the key used):')
+            lines.append('')
+            for profile_key, reason in pr.unverified:
                 lines.append(f'- `{profile_key}` — {reason[:200]}')
             lines.append('')
 

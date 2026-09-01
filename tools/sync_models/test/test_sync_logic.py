@@ -23,8 +23,23 @@ from core.merger import (
     find_swapped_output_profiles,
     _source_is_authoritative,
     _migration_from_provider,
+    CALL_VERIFIED,
 )
-from core.util import is_model_missing_error
+from core.smoke import classify_failure
+
+
+class _NotFound(Exception):
+    """Stands in for openai/anthropic NotFoundError and google-genai ClientError."""
+
+    def __init__(self, message):
+        super().__init__(message)
+        self.status_code = 404
+
+
+def _not_found(message):
+    return _NotFound(message)
+
+
 from core.smoke import run
 from core.patcher import load as patcher_load, patch as patcher_patch, get_profiles
 from core.reporter import SyncReport, ProviderReport, format_console, format_pr_body
@@ -840,21 +855,6 @@ class TestReappearedDeprecatedIsReported:
 # ---------------------------------------------------------------------------
 
 
-class TestModelMissingDetection:
-    def test_recognises_a_retired_model(self):
-        assert is_model_missing_error('404 NOT_FOUND: This model is no longer available to new users')
-        assert is_model_missing_error('Error code: 404 - model_not_found')
-        assert is_model_missing_error('not_found_error: model does not exist')
-
-    def test_a_busy_or_broken_service_is_not_a_retired_model(self):
-        for message in ('rate limit exceeded', '503 service unavailable', 'timeout', 'overloaded'):
-            assert not is_model_missing_error(Exception(message)), message
-
-    def test_a_permission_problem_is_not_a_retired_model(self):
-        assert not is_model_missing_error('401 unauthorized')
-        assert not is_model_missing_error('permission denied for this model')
-
-
 class TestRetiredModelsDeprecation:
     def _profiles(self, model_source='openrouter'):
         return {
@@ -881,7 +881,8 @@ class TestRetiredModelsDeprecation:
             retired_models={'test-model-a': '404 NOT_FOUND: no longer available'},
         )
         assert updated['test-model-a']['deprecated'] is True
-        assert updated['test-model-a']['deprecatedBy'] == 'provider'
+        # Marked as call-verified, not as the source: the listing path must not lift it.
+        assert updated['test-model-a']['deprecatedBy'] == CALL_VERIFIED
         assert 'test-model-a' in result.deprecated
 
     def test_the_providers_suggested_replacement_becomes_the_migration_note(self, title_mappings):
@@ -940,3 +941,103 @@ class TestMigrationFromProvider:
     def test_ignores_prose_that_is_not_a_model_id(self):
         note = _migration_from_provider('You must use a valid key to continue', 'Gemini API')
         assert 'Please select a current model' in note
+
+
+class TestCallVerifiedMarksSurviveTheListing:
+    """
+    The premise of a call-verified retirement is that the provider still lists
+    the model. So the listing path must not be able to lift one, or the next
+    scheduled run — which never passes --verify-existing — resurrects it and
+    deletes the provider's replacement note.
+    """
+
+    def _marked(self, deprecated_by):
+        return {
+            'test-model-a': {
+                'title': 'Test Model A',
+                'model': 'test-model-a',
+                'modelSource': 'provider',
+                'modelTotalTokens': 16384,
+                'modelOutputTokens': 4096,
+                'deprecated': True,
+                'deprecatedBy': deprecated_by,
+                'migration': "Model retired by the provider. Please use 'test-model-b' instead.",
+                'apikey': '',
+            }
+        }
+
+    def test_a_listing_run_does_not_resurrect_a_call_made_mark(self, title_mappings):
+        updated, _ = merge(
+            current_profiles=self._marked(CALL_VERIFIED),
+            api_models=[{'id': 'test-model-a'}],  # still listed, as expected
+            title_mappings=title_mappings,
+            token_overrides={},
+            output_token_overrides={},
+            default_output_tokens=4096,
+        )
+        assert updated['test-model-a']['deprecated'] is True
+        assert 'test-model-b' in updated['test-model-a']['migration']
+
+    def test_a_listing_run_still_lifts_a_listing_made_mark(self, title_mappings):
+        updated, _ = merge(
+            current_profiles=self._marked('provider'),
+            api_models=[{'id': 'test-model-a'}],
+            title_mappings=title_mappings,
+            token_overrides={},
+            output_token_overrides={},
+            default_output_tokens=4096,
+        )
+        assert updated['test-model-a'].get('deprecated') is None
+
+    def test_a_passing_call_lifts_a_call_made_mark(self, title_mappings):
+        updated, result = merge(
+            current_profiles=self._marked(CALL_VERIFIED),
+            api_models=[{'id': 'test-model-a'}],
+            title_mappings=title_mappings,
+            token_overrides={},
+            output_token_overrides={},
+            default_output_tokens=4096,
+            revived_models={'test-model-a'},
+        )
+        assert updated['test-model-a'].get('deprecated') is None
+        assert updated['test-model-a'].get('deprecatedBy') is None
+        assert any(r[0] == 'test-model-a' and r[1] == 'deprecated' for r in result.updated)
+
+    def test_a_call_that_did_not_pass_leaves_it_marked(self, title_mappings):
+        updated, _ = merge(
+            current_profiles=self._marked(CALL_VERIFIED),
+            api_models=[{'id': 'test-model-a'}],
+            title_mappings=title_mappings,
+            token_overrides={},
+            output_token_overrides={},
+            default_output_tokens=4096,
+            revived_models=set(),
+        )
+        assert updated['test-model-a']['deprecated'] is True
+
+
+class TestFailureClassification:
+    def test_an_explicit_retirement_is_the_only_thing_that_deprecates(self):
+        error = _not_found('This model is no longer available to new users. Please use model-y')
+        assert classify_failure(error).outcome == 'retired'
+
+    def test_a_bare_404_is_reported_not_acted_on(self):
+        # OpenAI answers this for a retired model and for one the key cannot reach.
+        error = _not_found('The model `gpt-x` does not exist or you do not have access to it.')
+        assert classify_failure(error).outcome == 'missing'
+
+    def test_a_method_mismatch_is_not_a_retirement(self):
+        error = _not_found('models/x is not found for API version v1beta, or is not supported for generateContent')
+        assert classify_failure(error).outcome == 'missing'
+
+    def test_a_transient_failure_never_looks_like_a_retirement(self):
+        for message in ('429 rate limit exceeded', '503 service unavailable', 'connection timeout', 'overloaded'):
+            assert classify_failure(Exception(message)).outcome == 'error', message
+
+    def test_a_404_in_the_text_of_an_untyped_error_is_not_a_404(self):
+        # The old string match turned any message mentioning 404 into a retirement.
+        assert classify_failure(Exception('failed to fetch the 404 page')).outcome != 'retired'
+
+    def test_an_auth_failure_is_not_a_retirement(self):
+        assert classify_failure(Exception('401 unauthorized')).outcome == 'skip'
+        assert classify_failure(Exception('permission denied for this model')).outcome == 'skip'

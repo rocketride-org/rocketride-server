@@ -185,7 +185,7 @@ def test_gemini_profiles_can_actually_be_called():
     """
     from google import genai  # type: ignore[import]
 
-    from core.util import is_model_missing_error
+    from core.smoke import classify_failure
 
     client = genai.Client(api_key=os.environ['ROCKETRIDE_GEMINI_KEY'])
     retired = []
@@ -195,10 +195,10 @@ def test_gemini_profiles_can_actually_be_called():
             continue
         try:
             client.models.generate_content(model=model_id, contents='Reply with the word OK only.')
-        except Exception as exc:  # noqa: BLE001 — any failure naming the model as gone counts
-            if is_model_missing_error(exc):
+        except Exception as exc:  # noqa: BLE001 — the classifier decides what the failure means
+            if classify_failure(exc).retired():
                 retired.append(f'{profile_key} ({model_id}): {str(exc)[:160]}')
-    assert not retired, 'llm_gemini profiles the API refuses to run:\n' + '\n'.join(retired)
+    assert not retired, 'llm_gemini profiles the API says are retired:\n' + '\n'.join(retired)
 
 
 # ---------------------------------------------------------------------------

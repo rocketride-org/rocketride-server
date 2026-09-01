@@ -184,6 +184,13 @@ def find_swapped_output_profiles(
 # labels ('provider API') both reduce to one of these before any authority check.
 SOURCE_KEYS = ('provider', 'openrouter', 'litellm')
 
+# Marks a deprecation made because a call to the model failed, not because the
+# model dropped out of a listing. Deliberately outside SOURCE_KEYS: the listing
+# path only lifts marks whose deprecatedBy names a source, and the whole premise
+# of a call-verified retirement is that the provider still lists the model. Left
+# liftable by listing, the next run would resurrect it.
+CALL_VERIFIED = 'provider-call'
+
 
 # A retirement message usually names the replacement: "Please update your code to
 # use models/gemini-3.6-flash". Requiring a digit or hyphen keeps ordinary prose
@@ -485,6 +492,7 @@ def merge(
     deprecation_source: str = 'provider API',
     deprecation_source_key: str = 'provider',
     retired_models: Dict[str, str] | None = None,
+    revived_models: Optional[set] = None,
     derive_title_fn=None,
     output_limit_below_context: bool = False,
 ) -> tuple[Dict[str, Any], MergeResult]:
@@ -524,6 +532,9 @@ def merge(
             reported as gone. Unlike absence from a listing, that answer is
             evidence regardless of which source discovered the profile, so it
             deprecates without an authority check.
+        revived_models: model IDs whose call passed while the profile still
+            carried a call-made mark. Only this lifts one — the listing path
+            cannot, since the model was never missing from a listing.
 
     Returns:
         Tuple of (updated_profiles dict, MergeResult describing what changed)
@@ -925,13 +936,21 @@ def merge(
     # it routes to has retired the model, and OpenRouter will happily keep listing
     # it. Marked as the sync's own so a later run can lift it if the model returns.
     for profile_key, profile in updated_profiles.items():
-        if not isinstance(profile, dict) or not (retired_models or {}):
+        if not isinstance(profile, dict):
+            continue
+        # A call that passes clears a mark a call made. Nothing else does.
+        if profile.get('deprecated') and profile.get('deprecatedBy') == CALL_VERIFIED:
+            if profile.get('model', '') in (revived_models or set()):
+                updated_profiles[profile_key].pop('deprecated', None)
+                updated_profiles[profile_key].pop('deprecatedBy', None)
+                updated_profiles[profile_key].pop('migration', None)
+                updated_fields.append((profile_key, 'deprecated', True, None))
             continue
         reason = (retired_models or {}).get(profile.get('model', ''))
         if not reason or profile.get('deprecated'):
             continue
         updated_profiles[profile_key]['deprecated'] = True
-        updated_profiles[profile_key]['deprecatedBy'] = deprecation_source_key
+        updated_profiles[profile_key]['deprecatedBy'] = CALL_VERIFIED
         if not profile.get('migration'):
             updated_profiles[profile_key]['migration'] = _migration_from_provider(reason, deprecation_source)
         if profile_key not in deprecated:

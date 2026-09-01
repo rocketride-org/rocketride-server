@@ -108,7 +108,19 @@ Pick primary source  →  fetch model list  →  discovery gate  →  smoke test
 3. **Discovery gate**: if `--enable-discovery` is off, drop new models from the list (only existing profiles get enriched). If discovery is on but no source qualifies for discovery (because the provider key is missing and `--allow-fallback-discovery` is off), drop new models too and flag the provider as `discovery_skipped` in the report.
 4. **Smoke test**: only when (a) discovery is on, (b) the discovery source is `provider`, (c) the API key is set. New models are smoke-tested via the native API. Discovery from `openrouter` or `litellm` skips smoke testing, there is no client to invoke.
 
-   With `--verify-existing`, profiles already in the catalogue are called too. The smoke gate otherwise validates **additions only**, so a model that entered correctly and was retired months later is never called again and stays in the catalogue indefinitely. A listing endpoint does not answer this: providers keep returning models they have retired, and only the call itself does. A profile is deprecated on this evidence regardless of its `modelSource` — a refusal to run the model is stronger than absence from a listing, and an OpenRouter-discovered profile is just as unusable once the underlying provider has retired it. Only a message naming the model as gone counts; a busy service or a permission error never deprecates anything.
+   With `--verify-existing`, profiles already in the catalogue are called too. The smoke gate otherwise validates **additions only**, so a model that entered correctly and was retired months later is never called again and stays in the catalogue indefinitely. A listing endpoint does not answer this: providers keep returning models they have retired, and only the call itself does. A profile is deprecated on this evidence regardless of its `modelSource` — a refusal to run the model is stronger than absence from a listing, and an OpenRouter-discovered profile is just as unusable once the underlying provider has retired it.
+
+   A failed call is classified from the typed SDK exception, into three answers rather than two, because a 404 does not settle the question on its own:
+
+   | outcome | what it means | effect |
+   | --- | --- | --- |
+   | `retired` | the provider said the model is gone — *"no longer available"*, *"has been retired"* | deprecated, with the replacement it named |
+   | `missing` | a bare 404. Could be retired, could be a model this key cannot reach: OpenAI answers *"does not exist or you do not have access to it"* for both, and Anthropic returns `not_found_error` for org-restricted models | reported for a human, never acted on |
+   | `error` / `skip` | transient, or an auth/permission failure | ignored |
+
+   So a CI key without a tier cannot deprecate a live-but-gated model: it gets `missing`.
+
+   **A mark made by a call records `deprecatedBy: "provider-call"`, and only a call that passes can lift it.** The listing path must not: the premise of a call-verified retirement is that the provider *still lists the model*, so a scheduled run — which does not pass `--verify-existing` — would otherwise see it listed and resurrect it, deleting the provider's replacement note along the way.
 5. **Merge**: smart merge into `preconfig.profiles`:
    - New model, smoke passed → add profile
    - Existing model → update token limits if authoritative data differs; preserve title and other manual fields
