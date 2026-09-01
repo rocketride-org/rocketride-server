@@ -1,7 +1,7 @@
 <div align="center">
 
 <a href="https://rocketride.org">
-  <img src="images/poster.png" alt="RocketRide: Open Source AI Pipeline Tool" width="100%">
+  <img src="docs/public/assets/poster.png" alt="RocketRide: Open Source AI Pipeline Tool" width="100%">
 </a>
 
 <p>
@@ -10,9 +10,9 @@
 </p>
 
 <p>
-<img src="https://raw.githubusercontent.com/rocketride-org/rocketride-server/develop/images/icon-cpp.png" alt="C++" />&nbsp;&nbsp;
-<img src="https://raw.githubusercontent.com/rocketride-org/rocketride-server/develop/images/icon-python.png" alt="Python" />&nbsp;&nbsp;
-<img src="https://raw.githubusercontent.com/rocketride-org/rocketride-server/develop/images/icon-typescript.png" alt="TypeScript" />
+<img src="docs/public/assets/icon-cpp.png" alt="C++" />&nbsp;&nbsp;
+<img src="docs/public/assets/icon-python.png" alt="Python" />&nbsp;&nbsp;
+<img src="docs/public/assets/icon-typescript.png" alt="TypeScript" />
 </p>
 
 <p>
@@ -38,11 +38,11 @@
   <a href="https://github.com/rocketride-org/rocketride-server/blob/develop/LICENSE"><img src="https://img.shields.io/badge/License-MIT-41b6e6" alt="MIT License"></a>
 </p>
 
-<img src="images/pipeline-example.png" alt="Build and run AI pipelines inside your IDE" width="100%">
+<img src="docs/public/assets/pipeline-example.png" alt="Build and run AI pipelines inside your IDE" width="100%">
 
 _Design, test, and ship complex AI workflows from a visual canvas, right where you write code._
 
-<img src="images/sdk-example.png" alt="Integrate real AI solutions using a simple SDK" width="100%">
+<img src="docs/public/assets/sdk-example.png" alt="Integrate real AI solutions using a simple SDK" width="100%">
 
 _Drop pipelines into any Python or TypeScript app with a few lines of code, no infrastructure glue required._
 
@@ -103,7 +103,7 @@ ROCKETRIDE_AUTH=your-api-token
 ```
 
 <p align="center">
-  <a href="https://cloud.rocketride.ai/"><strong>Get Started</strong></a> &nbsp;&nbsp;·&nbsp;&nbsp; <a href="https://docs.rocketride.org/cloud">Read the Cloud docs</a>
+  <a href="https://cloud.rocketride.ai/"><strong>Get Started</strong></a> &nbsp;&nbsp;·&nbsp;&nbsp; <a href="https://docs.rocketride.org/operate/cloud">Read the Cloud docs</a>
 </p>
 
 ## On-Prem &nbsp;<code>FREE &amp; MIT</code>
@@ -139,7 +139,7 @@ ROCKETRIDE_URI=ws://localhost:5565
 ```
 
 <p align="center">
-  <a href="#quick-start"><strong>Quick Start</strong></a> &nbsp;&nbsp;·&nbsp;&nbsp; <a href="https://docs.rocketride.org/self-hosting">Read the On-Prem docs</a>
+  <a href="#quick-start"><strong>Quick Start</strong></a> &nbsp;&nbsp;·&nbsp;&nbsp; <a href="https://docs.rocketride.org/operate/self-hosting">Read the On-Prem docs</a>
 </p>
 
 ## Features
@@ -160,7 +160,7 @@ ROCKETRIDE_URI=ws://localhost:5565
 1. Install the extension for your IDE. Search for RocketRide in the extension marketplace:
 
    <p align="center">
-     <img src="images/install-extension.png" alt="Install RocketRide extension">
+     <img src="docs/public/assets/install-extension.png" alt="Install RocketRide extension">
    </p>
 
    <sub>[Not seeing your IDE? Open an issue](https://github.com/rocketride-org/rocketride-server/issues/new) · [Download directly](https://open-vsx.org/extension/RocketRide/rocketride)</sub>
@@ -181,7 +181,7 @@ ROCKETRIDE_URI=ws://localhost:5565
 3. Connect input lanes and output lanes by type to properly wire your pipeline. Some nodes like agents or LLMs can be invoked as tools for use by a parent node as shown below:
 
    <p align="center">
-     <img src="https://raw.githubusercontent.com/rocketride-org/rocketride-server/develop/images/first_pipe.gif" alt="Pipeline canvas example" width="100%">
+     <img src="docs/public/assets/first_pipe.gif" alt="Pipeline canvas example" width="100%">
    </p>
 
 4. You can run a pipeline from the canvas by pressing the ▶ button on the source node or from the `Connection Manager` directly.
@@ -206,7 +206,7 @@ ROCKETRIDE_URI=ws://localhost:5565
 Selecting running pipelines allows for in-depth analytics. Trace call trees, token usage, memory consumption, and more to optimize your pipelines before scaling and deploying. Find the models, agents, and tools best fit for your task.
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/rocketride-org/rocketride-server/develop/images/tracing.gif" alt="Pipeline observability and tracing">
+  <img src="docs/public/assets/tracing.gif" alt="Pipeline observability and tracing">
 </p>
 
 ## Contributors

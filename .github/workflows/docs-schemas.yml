@@ -1,0 +1,163 @@
+# ---------------------------------------------------------------------------
+#  Documentation schema checks — the PR gate for doc contracts.
+#
+#  Graduated from the fix/docs rollout branch: these jobs guard pull requests
+#  into develop (and direct pushes to it). ci.yml deliberately does not carry
+#  them — the paths filter below keeps doc-only machinery from spending the
+#  shared pipeline's minutes, and non-doc changes from spending these.
+# ---------------------------------------------------------------------------
+name: Doc schemas
+
+on:
+  pull_request:
+    branches: [develop]
+    # GitHub Actions YAML has no anchors — keep this list identical to push's.
+    paths:
+      - 'docs/**'
+      - 'packages/docs/**'
+      - 'nodes/src/nodes/**/README.md'
+      - 'nodes/src/nodes/**/services*.json'
+      - 'scripts/validate-node-readme.py'
+      - 'scripts/validate-client-docs.py'
+      - 'tests/test_validate_node_readme.py'
+      - 'pnpm-lock.yaml'
+      - '.github/workflows/docs-schemas.yml'
+  push:
+    branches: [develop]
+    paths:
+      - 'docs/**'
+      - 'packages/docs/**'
+      - 'nodes/src/nodes/**/README.md'
+      - 'nodes/src/nodes/**/services*.json'
+      - 'scripts/validate-node-readme.py'
+      - 'scripts/validate-client-docs.py'
+      - 'tests/test_validate_node_readme.py'
+      - 'pnpm-lock.yaml'
+      - '.github/workflows/docs-schemas.yml'
+
+concurrency:
+  group: docs-schemas-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # -------------------------------------------------------------------------
+  #  Schema validators — scoped to what the change actually touches, BLOCKING.
+  #
+  #  Deliberately not `--all` as a gate. Scoping to the diff keeps the check
+  #  green by default, so red means this PR broke something — and it lets the
+  #  gate be hard immediately instead of waiting for the last corpus stragglers
+  #  to be cleaned up. The backlog drains on its own: touching a node obliges
+  #  you to bring its README along, and it can never grow, because a new or
+  #  edited node is validated the moment it lands.
+  #
+  #  services*.json counts as a trigger, not just README.md: the metadata is
+  #  what decides which sections are required or forbidden, so a metadata-only
+  #  change can invalidate a README that nobody edited.
+  #
+  #  The corpus-wide count lives in the informational sweep step at the end;
+  #  once it reaches zero, flip `--all` into the gate and drop the sweep.
+  # -------------------------------------------------------------------------
+  schemas:
+    name: Schema validators
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+      # paths-filter picks the right base per event: the PR's changed-file list
+      # on pull_request (immune to a stale base.sha), and the pre-push commit
+      # on push (so multi-commit pushes are diffed whole, not just the tip).
+      - name: Detect changed node docs
+        uses: dorny/paths-filter@d1c1ffe0248fe513906c8e24db8ea791d46f8590 # v3
+        id: nodedocs
+        with:
+          list-files: shell
+          filters: |
+            nodedocs:
+              - 'nodes/src/nodes/*/README.md'
+              - 'nodes/src/nodes/*/services*.json'
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.12'
+      - name: Install validator test dependencies
+        run: python -m pip install --disable-pip-version-check pytest==8.4.1 pytest-asyncio==1.1.0 pytest-timeout==2.4.0
+      - name: Test the node README validator
+        run: python -m pytest tests/test_validate_node_readme.py -q
+      - name: Validate the node READMEs this change touches
+        if: steps.nodedocs.outputs.nodedocs == 'true'
+        env:
+          CHANGED_FILES: ${{ steps.nodedocs.outputs.nodedocs_files }}
+        run: |
+          set -euo pipefail
+          # Node dirs whose README or service metadata changed. Deleted nodes
+          # drop out via the -d test; `if` swallows its status under pipefail.
+          DIRS="$(for f in $CHANGED_FILES; do d="${f%/*}"; if [ -d "$d" ]; then echo "$d"; fi; done | sort -u)"
+          if [ -z "$DIRS" ]; then
+            echo 'Only deleted node docs in the diff — nothing to validate.'
+            exit 0
+          fi
+          echo "Validating $(echo "$DIRS" | wc -l | tr -d ' ') node(s):"
+          echo "$DIRS" | sed 's/^/  /'
+          # shellcheck disable=SC2086
+          python3 scripts/validate-node-readme.py $DIRS
+      # !cancelled(): still report parity when the README gate failed, but not
+      # after a checkout/setup failure's cascade or a superseded (cancelled) run.
+      - name: Validate client doc parity
+        if: ${{ !cancelled() }}
+        run: python3 scripts/validate-client-docs.py
+      # -----------------------------------------------------------------------
+      #  Corpus-wide sweep. A count, not a gate — `--all` is information when
+      #  it is a trend line and noise when it is a merge blocker. 6 of 124
+      #  nodes still fail as of 2026-08-28; retire this step (and gate --all
+      #  above) once the count reaches zero. continue-on-error keeps it
+      #  informational: a red sweep never blocks the job.
+      # -----------------------------------------------------------------------
+      - name: Node README schema — whole corpus (informational)
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        run: |
+          python3 scripts/validate-node-readme.py --all nodes/src/nodes | tee "$RUNNER_TEMP/sweep.txt" || true
+          # `grep -c` already prints 0 when it matches nothing; it just exits 1
+          # as well. `|| true` swallows the status — `|| echo 0` would print a
+          # second zero and render as "0 0".
+          {
+            echo '### Node README schema — corpus'
+            echo
+            echo "- passing: $(grep -c '^ok' "$RUNNER_TEMP/sweep.txt" || true)"
+            echo "- failing: $(grep -cE '^x ' "$RUNNER_TEMP/sweep.txt" || true)"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # -------------------------------------------------------------------------
+  #  Stage and compile the docs site. Catches what only a full build can:
+  #  broken internal links, files under docs/ not covered by a mount, and
+  #  spine entries with no backing page. docs:test guards the gather/export
+  #  logic itself; docs:check is the export drift gate. Blocking — every
+  #  failure mode here is deterministic. (docs.yml's deploy build re-runs the
+  #  same commands on develop with the full-history checkout its sitemap
+  #  <lastmod> stamping needs; a shallow clone is fine for a PR gate.)
+  # -------------------------------------------------------------------------
+  build:
+    name: Docs site build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Docs unit tests
+        run: node scripts/build.js docs:test
+      - name: Build docs site
+        run: node scripts/build.js docs:build
+      - name: Check docs export drift
+        run: node scripts/build.js docs:check

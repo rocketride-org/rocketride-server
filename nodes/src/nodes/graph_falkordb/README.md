@@ -1,152 +1,81 @@
 # graph_falkordb
 
-A RocketRide graph database node for [FalkorDB](https://www.falkordb.com).
+A RocketRide graph node that translates questions or agent calls into Cypher for FalkorDB; choose it when a FalkorDB graph is the data source rather than an ArangoDB database.
+
+## About FalkorDB
+
+FalkorDB is a graph database that uses Cypher queries and the Redis protocol. A server can host multiple named graphs, which this node can list and select.
 
 ## What it does
 
-Queries a FalkorDB graph in two ways, and you can use either or both:
+The node uses the required LLM connection to translate natural-language questions to Cypher, validates the result with `EXPLAIN`, and returns graph data through a pipeline or tools. It also provides a direct Cypher tool for callers that already have a query. Choose it over `graph_arango` for FalkorDB and Cypher; normal queries use the server’s read-only operation until writes are explicitly enabled.
 
-- **Wired into a pipeline** — connect it to a `questions` lane like any other database. A
-  natural-language question is translated to Cypher by the LLM, validated against the live graph
-  with `EXPLAIN` (and repaired if the server rejects it), executed, and the result is emitted on
-  the `text`, `table` and `answers` lanes.
-- **Bound to an agent as a tool** — the agent gets `get_data` (ask in plain language),
-  `query` (run Cypher it wrote itself), `get_schema`, `get_query`, `list_graphs` and `dialect`.
+## Connections
 
-It derives from `ai.common.graph.GraphInstanceBase`, the base class shared by every graph
-database node: the lane handling, the natural-language-to-Cypher loop and the common tools live
-there, so this node only implements what is specific to FalkorDB — the Redis-protocol client,
-multi-graph selection, and server-side read-only execution. (`graph_neo4j` derives from the same
-base.)
+| Connection | Required | Description |
+|---|---|---|
+| `llm` | yes | LLM used to craft Cypher from a question. |
 
-Queries are **read-only by default**: they run through `GRAPH.RO_QUERY`, so the FalkorDB server
-itself rejects any write clause (`CREATE`/`MERGE`/`SET`/`DELETE`) — the restriction is enforced
-server-side, not by client-side parsing. Turn on **Allow Writes** to let the agent mutate the
-graph.
+## Lanes
 
-Values always travel as Cypher parameters (`$name`), which FalkorDB treats strictly as data and
-never as query text. Node, edge, and path results are serialized to plain JSON-safe objects, and
-result sets are capped at **Max Rows** with a `truncated` flag so a broad query cannot flood the
-agent's context.
+| Lane in | Lane out | Description |
+|---|---|---|
+| `questions` | `table` | Emits a table result. |
+| `questions` | `text` | Emits a text result. |
+| `questions` | `answers` | Emits the answer result. |
 
----
+## As a tool
+
+The server-name prefix defaults to `falkordb`. It registers its FalkorDB-specific tools plus the inherited graph-tool surface.
+
+| Function | Description |
+|---|---|
+| `falkordb.get_data` | Requires a non-empty `question`; optional `limit` is clamped to the graph row cap. Returns sanitized rows, generated query, applied limit, and truncation state; generation/execution failure returns `error`, `valid: false`, and no rows. |
+| `falkordb.get_schema` | Takes no meaningful arguments and returns reflected `labels`, node properties, and relationships. |
+| `falkordb.get_query` | Requires a non-empty `question`, with optional `limit`; returns validated read-only Cypher and `valid: true`, or an `error`/off-topic `answer` with `valid: false`. |
+| `falkordb.execute` | Requires raw `query` and runs it without LLM translation; it raises an error unless `allow_execute` is enabled, and fails when the result exceeds the execute row cap. |
+| `falkordb.dialect` | Takes no meaningful arguments and returns `{dialect: "falkordb"}`. |
+| `falkordb.query` | Requires non-empty `cypher`; accepts optional object `params` and optional `graph`. Returns columns, serialized rows, count, and truncation state; Redis failures return `error` with empty rows. |
+| `falkordb.list_graphs` | Takes no arguments and returns graph names, or `error` with an empty graph list on a Redis failure. |
+
+## Profiles
+
+Default: **Manual configuration (host and port)** (`default`).
+
+| Profile | Model | Context |
+|---|---|---|
+| `default` *(default)* | Manual configuration | Uses host and port fields. |
+| `url` | FalkorDB URL | Uses the supplied connection string. |
 
 ## Configuration
 
-The node connects in one of two ways, picked with the **Connection** selector — the same choice
-the FalkorDB Browser offers between *Manual Configuration* and *FalkorDB URL*:
+Select Manual configuration for host and port fields, or the URL profile for a connection string. Both profiles include graph, LLM context, query safety, result caps, and timeout settings; begin with the defaults and adjust only for the actual graph and workload.
 
-- **Manual configuration (host and port)** — profile `default`. Fill in `host`, `port`,
-  `username`, `password` and `tls` yourself.
-- **FalkorDB URL (connection string)** — profile `url`. Paste the connection string from the
-  FalkorDB Cloud console, e.g.
-  `falkor://falkordb@r-6jissuruar.instance-ytljliglb.us-east-1.aws.cloud:53939`. Schemes
-  accepted: `falkor://`, `falkors://` (TLS), `redis://`, `rediss://`, `unix://`. The password may
-  be embedded (`falkor://user:password@host:port`) or left out of the URL and typed into
-  `password`, which keeps the secret in the node's encrypted field instead of in the URL. When
-  `password` is filled in it is the one used: any password the URL embeds is stripped before the
-  connection is opened, so the two can never silently disagree.
+### Connection and credentials
 
-Every other setting below is available in both profiles. Pipelines saved before the URL profile
-existed keep working unchanged: they already use the `default` profile.
+The manual profile passes host, port, optional username/password, and TLS to the FalkorDB client. The URL profile requires a `falkor://`, `falkors://`, `redis://`, `rediss://`, or `unix://` URL. If a Password field is set with a URL, the node removes an embedded password and uses the field value, so the two cannot silently disagree.
 
-### Connection fields
+### Graph description and retries
 
-| Field | Profile | Type | Description |
-|---|---|---|---|
-| `host` | manual | string | Default `localhost`. FalkorDB host, e.g. `localhost` or `your-instance.falkordb.cloud`. |
-| `port` | manual | integer | Default 6379 (1–65535). FalkorDB port (Redis protocol). |
-| `username` | manual | string | Default empty. Username, e.g. `default` for FalkorDB Cloud. Leave empty for no auth. |
-| `tls` | manual | boolean | Default false. Connect with TLS (for FalkorDB Cloud TLS endpoints). |
-| `url` | url | string | Connection string, e.g. `falkor://user@host:6379`. Required in this profile. |
-| `password` | both | string | Default empty. Stored encrypted. When set it replaces any password embedded in the URL. Leave empty for no auth, or to use the one the URL carries. |
+`graph` selects the named graph when a tool caller does not supply one. `db_description` is supplied to the LLM when it writes Cypher; add labels, relationships, and domain language when generation targets the wrong shape. `max_attempts` defaults to five and controls how often a rejected `EXPLAIN` result is repaired.
 
-### Shared fields
+### Write access, row caps, and timeout
 
-| Field | Type | Description |
-|---|---|---|
-| `graph` | string | Default `agent`. Graph queried when the agent does not pass one explicitly. |
-| `db_description` | string | Default empty. What this graph holds, in your own words. Given to the LLM so it writes better Cypher. |
-| `allow_writes` | boolean | Default false. Permit `CREATE`/`MERGE`/`SET`/`DELETE` in `query`. When off, queries run via `GRAPH.RO_QUERY` and the server rejects write clauses. |
-| `allow_execute` | boolean | Default false. Enable the `execute` tool, which runs raw Cypher with no LLM translation and no read-only gate. |
-| `max_attempts` | integer | Default 5 (1–10). How many times a generated query is repaired and re-validated with `EXPLAIN` before giving up. |
-| `max_rows` | integer | Default 250 (1–25000). Upper cap on rows returned to the agent per query. |
-| `max_execute_rows` | integer | Default 25000 (1–25000). Upper cap on rows returned by the `execute` tool. |
-| `query_timeout_ms` | integer | Default 30000 (100–600000). Server-side timeout for a single query. |
+`allow_writes` defaults to false, using `GRAPH.RO_QUERY` so the server rejects write clauses. Enable it only for a trusted workload; direct `query` then uses `GRAPH.QUERY` and can return write statistics. `max_rows` truncates ordinary results and marks them truncated; `max_execute_rows` makes oversized direct-execute results fail. `query_timeout_ms` bounds a single server query.
 
----
+## Authentication
 
-## Available tools
+Manual connections can omit credentials or provide the configured username and password. URL connections may carry credentials, but the separate Password field takes precedence when present. The node probes the connection at startup, so malformed connection settings or an unavailable server fail before a tool call.
 
-| Tool | Description |
-|---|---|
-| `get_data` | Describe the data you want in plain language; the node writes the Cypher, runs it, and returns rows. |
-| `query` | Run a Cypher query you wrote yourself against a graph. |
-| `get_query` | Translate a question into Cypher **without** executing it. |
-| `get_schema` | Return the graph's node labels with their properties, and the relationship types connecting them. |
-| `list_graphs` | List the graph names that exist on this FalkorDB instance. |
-| `execute` | Run raw Cypher with writes allowed. Disabled unless `allow_execute` is on. |
-| `dialect` | Return `falkordb`, so an SDK caller can tell it is talking to a graph database. |
+## Notes
 
-`get_data`, `get_query`, `get_schema`, `execute` and `dialect` come from the shared graph base
-class, so every graph node exposes them identically. `query` and `list_graphs` are specific to
-FalkorDB, which hosts many graphs on one server.
+### Result representation
 
-### query
+The direct query tool serializes graph nodes, relationships, paths, maps, lists, and temporal values into JSON-safe values. It returns no more than the configured row cap, allowing agents to recognize broad results through the `truncated` flag.
 
-| Parameter | Required | Description |
-|---|---|---|
-| `cypher` | yes | Cypher query. Reference values as `$name` placeholders, never inline data into the query string. |
-| `params` | no | Object of values for the `$name` placeholders (injection-safe). |
-| `graph` | no | Graph to query. Defaults to the graph configured on the node. |
+## Upstream docs
 
-Returns `columns`, `rows` (nodes/edges serialized to objects, capped at `max_rows`),
-`row_count`, and `truncated`. When writes are enabled and a query mutates the graph, non-zero
-write counters are returned under `stats`. On failure it returns `error` with empty
-`rows`/`columns`, `row_count: 0`, and `truncated: false`.
-
-### list_graphs
-
-No parameters. Returns `graphs` (or `error` on failure).
-
-### get_schema
-
-No parameters. Returns `labels`, `nodes` (each label with its property names and types) and
-`relationships` (each type with its start and end labels), reflected from the graph when the
-pipeline starts. Useful when a query returns unexpected results or the agent needs to discover
-the data model.
-
----
-
-## Read-only by default
-
-With `allow_writes` off (the default), `query` runs every statement through `GRAPH.RO_QUERY`.
-FalkorDB rejects write clauses at the server, so the agent cannot create, merge, set, or delete
-no matter what Cypher it sends. Set `allow_writes: true` to switch `query` to the read/write
-`GRAPH.QUERY` path; write counters then surface under `stats`. `get_schema` always uses the
-read-only path.
-
----
-
-## Local quickstart
-
-```bash
-docker run -p 6379:6379 -it --rm falkordb/falkordb:latest
-```
-
-Point the node at `localhost:6379` (manual profile) or at `falkor://localhost:6379` (URL
-profile) and ask the agent to `MATCH` away, or to `CREATE` with **Allow Writes** turned on.
-
----
-
-## Running the tests
-
-```bash
-# Unit tests (mocked FalkorDB client — no server or network needed)
-pytest nodes/test/test_graph_falkordb.py -v
-```
-
----
+- [FalkorDB documentation](https://docs.falkordb.com/)
 
 <!-- ROCKETRIDE:GENERATED:PARAMS START -->
 <!-- Generated by nodes:docs-generate. Do not edit by hand. -->

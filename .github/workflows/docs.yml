@@ -8,10 +8,15 @@ on:
   push:
     branches: [develop]
     paths:
+      - 'docs/**'
       - 'packages/docs/**'
       - 'nodes/src/nodes/**/README.md'
       - 'packages/*/docs/**'
       - 'apps/*/docs/**'
+      - 'packages/client-typescript/README.md'
+      - 'packages/client-python/README.md'
+      - 'packages/client-mcp/README.md'
+      - 'packages/n8n-nodes/README.md'
       - '.github/workflows/docs.yml'
   workflow_dispatch: {}
 
@@ -44,6 +49,8 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: Build docs
         run: node scripts/build.js docs:build
+      - name: Check docs export drift
+        run: node scripts/build.js docs:check
       - uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa # v3.0.1
         with:
           path: dist/docs

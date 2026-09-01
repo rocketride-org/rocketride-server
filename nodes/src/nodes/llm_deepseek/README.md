@@ -18,93 +18,77 @@ At save time, the node validates cloud configurations (`deepseek-reasoner` and
 `https://api.deepseek.com/v1`. Local/Ollama profiles are intentionally **not**
 validated at save time: a misconfigured local server only surfaces at runtime.
 
----
-
-## Configuration
-
-### Lanes
+## Lanes
 
 | Lane in     | Lane out  | Description                                          |
 |-------------|-----------|------------------------------------------------------|
 | `questions` | `answers` | Send a question directly, receive a generated answer |
 
-### Fields
-
-| Field        | Type / Default                 | Description                                                                     |
-|--------------|--------------------------------|---------------------------------------------------------------------------------|
-| `profile`    | enum, default `cloud-reasoner` | Which DeepSeek model profile to use (see below). Shown as **Model** in the UI. |
-| `apikey`     | string                         | API key. Cloud and OpenRouter profiles only; local profiles have no key field.  |
-| `serverbase` | string                         | OpenAI-compatible endpoint URL. Local profiles only; default `http://localhost:11434/v1` (Ollama). |
-
-Each profile pre-configures `model`, `modelSource`, `modelTotalTokens`,
-`modelOutputTokens`, and (for cloud/local) `serverbase`. Only the fields listed
-above are user-editable; the rest come from the selected profile.
-
-### API key handling
-
-- For the cloud endpoint (`serverbase` containing `api.deepseek`), the key must start
-  with `sk-`; anything else raises `Invalid DeepSeek API key format` at startup.
-- For local profiles no key is needed; the node substitutes a dummy key
-  (`sk-local-dummy-key`) internally because the OpenAI client requires a non-empty value.
-- `serverbase` is required: an empty value raises `DeepSeek serverbase is required.`
-
----
-
 ## Profiles
 
-The default profile is **Cloud Reasoner** (`cloud-reasoner`).
+Default: **Cloud Reasoner** (`cloud-reasoner`).
 
-### Cloud (DeepSeek API)
+| Profile | Model | Context tokens | Output tokens |
+| ------- | ----- | -------------- | ------------- |
+| Cloud Reasoner **(default)** | `deepseek-reasoner` | 128,000 | 4,096 |
+| DeepSeek: DeepSeek V4 Pro | `deepseek-v4-pro` | 1,048,576 | 384,000 |
+| DeepSeek: DeepSeek V4 Flash | `deepseek-v4-flash` | 1,048,576 | 393,216 |
+| DeepSeek: DeepSeek V3.2 | `deepseek-v3.2` | 163,840 | 65,536 |
+| DeepSeek: DeepSeek V3.2 Exp | `deepseek-v3.2-exp` | 163,840 | 65,536 |
 
-Served from `https://api.deepseek.com/v1`; requires a DeepSeek API key.
+<details>
+<summary><strong>View 19 more models</strong></summary>
 
-| Profile                    | Model               | Context / output tokens |
-|----------------------------|---------------------|-------------------------|
-| Cloud Reasoner *(default)* | `deepseek-reasoner` | 128,000 / 4,096         |
-| Cloud Chat                 | `deepseek-chat`     | 163,840 / 16,384        |
+| Profile | Model | Context tokens | Output tokens |
+| ------- | ----- | -------------- | ------------- |
+| Cloud Chat | `deepseek-chat` | 163,840 | 16,000 |
+| DeepSeek R1 1.5B (`deepseek-r1-1_5b`) | `deepseek-r1:1.5b` | 128,000 | 4,096 |
+| DeepSeek R1 7B (`deepseek-r1-7b`) | `deepseek-r1:7b` | 128,000 | 4,096 |
+| DeepSeek R1 8B (`deepseek-r1-8b`) | `deepseek-r1:8b` | 128,000 | 4,096 |
+| DeepSeek R1 14B (`deepseek-r1-14b`) | `deepseek-r1:14b` | 128,000 | 4,096 |
+| DeepSeek R1 32B (`deepseek-r1-32b`) | `deepseek-r1:32b` | 128,000 | 4,096 |
+| DeepSeek R1 70B (`deepseek-r1-70b`) | `deepseek-r1:70b` | 128,000 | 4,096 |
+| DeepSeek R1 671B (`deepseek-r1-671b`) | `deepseek-r1:671b` | 128,000 | 4,096 |
+| DeepSeek V3 (`deepseek-v3`) | `deepseek-v3` | 128,000 | 4,096 |
+| DeepSeek: DeepSeek V3 0324 | `deepseek-chat-v3-0324` | 163,840 | 65,536 |
+| DeepSeek: DeepSeek V3.1 | `deepseek-chat-v3.1` | 163,840 | 32,768 |
+| DeepSeek: R1 | `deepseek-r1` | 163,840 | 16,000 |
+| DeepSeek: R1 0528 | `deepseek-r1-0528` | 163,840 | 32,768 |
+| DeepSeek: R1 Distill Llama 70B | `deepseek-r1-distill-llama-70b` | 8,192 | 8,192 |
+| DeepSeek: R1 Distill Qwen 32B | `deepseek-r1-distill-qwen-32b` | 32,768 | 32,768 |
+| TNG: DeepSeek R1T2 Chimera | `deepseek-r1t2-chimera` | 163,840 | 163,840 |
+| Nex AGI: DeepSeek V3.1 Nex N1 | `deepseek-v3.1-nex-n1` | 131,072 | 163,840 |
+| DeepSeek: DeepSeek V3.1 Terminus | `deepseek-v3.1-terminus` | 163,840 | 32,768 |
+| DeepSeek: DeepSeek V3.2 Speciale | `deepseek-v3.2-speciale` | 163,840 | 163,840 |
 
-### Local via Ollama
+</details>
 
-Served from `serverbase` (default `http://localhost:11434/v1`); no API key required.
-All local profiles are configured with 128,000 context / 4,096 output tokens. The
-model must already be pulled into Ollama before the pipeline runs.
+Cloud profiles use the DeepSeek API, local profiles use an Ollama-compatible
+endpoint, and OpenRouter profiles use OpenRouter credentials.
 
-| Profile          | Model              |
-|------------------|--------------------|
-| DeepSeek R1 1.5B | `deepseek-r1:1.5b` |
-| DeepSeek R1 7B   | `deepseek-r1:7b`   |
-| DeepSeek R1 8B   | `deepseek-r1:8b`   |
-| DeepSeek R1 14B  | `deepseek-r1:14b`  |
-| DeepSeek R1 32B  | `deepseek-r1:32b`  |
-| DeepSeek R1 70B  | `deepseek-r1:70b`  |
-| DeepSeek R1 671B | `deepseek-r1:671b` |
-| DeepSeek V3      | `deepseek-v3`      |
+## Configuration
 
-### Via OpenRouter
+Choose a profile for the provider and deployment you intend to use. Each profile
+sets the model, model source, context and output limits, and—where applicable—the
+endpoint; most users only need to provide the corresponding API key.
 
-These profiles have `modelSource: openrouter` and require an OpenRouter API key. They
-are not probed at save time.
+### Endpoint
 
-| Profile                          | Model                           | Context / output tokens |
-|----------------------------------|---------------------------------|-------------------------|
-| DeepSeek: DeepSeek V3 0324       | `deepseek-chat-v3-0324`         | 163,840 / 16,384        |
-| DeepSeek: DeepSeek V3.1          | `deepseek-chat-v3.1`            | 32,768 / 7,168          |
-| DeepSeek: R1                     | `deepseek-r1`                   | 64,000 / 16,000         |
-| DeepSeek: R1 0528                | `deepseek-r1-0528`              | 163,840 / 32,768        |
-| DeepSeek: R1 Distill Llama 70B   | `deepseek-r1-distill-llama-70b` | 131,072 / 16,384        |
-| DeepSeek: R1 Distill Qwen 32B    | `deepseek-r1-distill-qwen-32b`  | 32,768 / 32,768         |
-| TNG: DeepSeek R1T2 Chimera       | `deepseek-r1t2-chimera`         | 163,840 / 163,840       |
-| Nex AGI: DeepSeek V3.1 Nex N1   | `deepseek-v3.1-nex-n1`          | 131,072 / 163,840       |
-| DeepSeek: DeepSeek V3.1 Terminus | `deepseek-v3.1-terminus`        | 163,840 / 32,768        |
-| DeepSeek: DeepSeek V3.2          | `deepseek-v3.2`                 | 131,072 / 65,536        |
-| DeepSeek: DeepSeek V3.2 Exp      | `deepseek-v3.2-exp`             | 163,840 / 65,536        |
-| DeepSeek: DeepSeek V3.2 Speciale | `deepseek-v3.2-speciale`        | 163,840 / 163,840       |
-| DeepSeek: DeepSeek V4 Flash      | `deepseek-v4-flash`             | 1,048,576 / 384,000     |
-| DeepSeek: DeepSeek V4 Pro        | `deepseek-v4-pro`               | 1,048,576 / 384,000     |
+Local profiles use the OpenAI-compatible `serverbase`, which defaults to
+`http://localhost:11434/v1` for Ollama. The selected model must already be pulled
+into Ollama. An empty endpoint raises `DeepSeek serverbase is required.` Cloud and
+OpenRouter profiles supply their own endpoints.
 
----
+## Authentication
 
-## Config validation
+DeepSeek cloud profiles require a key beginning with `sk-`; another format raises
+`Invalid DeepSeek API key format` at startup. OpenRouter profiles require an
+OpenRouter API key. Local profiles need no credential, so the node supplies the
+placeholder `sk-local-dummy-key` required by the OpenAI client.
+
+## Notes
+
+### Save-time validation
 
 When a pipeline is saved, `validateConfig` runs a 1-token probe (`"Hi"`) against the
 DeepSeek cloud API using the official `openai` SDK, but only when the configured model
@@ -113,8 +97,6 @@ with the HTTP status, error type, and message preserved (e.g.
 `Error 401: authentication_error - ...`); they do not block the save. All other
 profiles (local and OpenRouter) are skipped at save time and will only fail at runtime
 if misconfigured.
-
----
 
 ## Upstream docs
 

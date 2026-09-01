@@ -2,6 +2,12 @@
 
 A RocketRide tool node that exposes GitHub repository operations to an AI agent.
 
+## About GitHub
+
+GitHub is the world's largest code-hosting platform, built on git. Teams use it
+for source control, code review, issue tracking, releases, and CI/CD automation
+via GitHub Actions.
+
 ## What it does
 
 Gives an agent full access to the GitHub REST API: files, issues, pull requests,
@@ -18,76 +24,53 @@ A personal access token is **required**: the pipeline fails to start without one
 operations are **allowed by default**; enable **read-only mode** to block every mutating
 tool when the agent should only inspect.
 
----
+## Example pipelines
 
-## Configuration
+**GitHub assistant**
 
+`chat → agent_rocketride → response_answers`
 
-| Field | Type | Description |
-|---|---|---|
-| `token` | string | Default empty. GitHub PAT with repo, issues, pull_requests, and workflows scopes. Use a fine-grained token scoped to only the repos you need. |
-| `defaultRepo` | string | Default empty. Default repo in owner/repo format (e.g. acme/myapp). Tool calls that omit the repo parameter will use this value. |
-| `readOnly` | boolean | Default false. When enabled, all write operations (file create/edit/delete, issue create, PR create, etc.) are blocked. Safe for agents that should only read. |
+<div align="center">
 
+![The GitHub node on the canvas connected to an agent as a tool](example.png)
 
-### Repository resolution
+[![Download example.pipe](https://img.shields.io/badge/example.pipe-Download-41b6e6?style=for-the-badge)](example.pipe)
+
+</div>
+
+`llm_anthropic` is wired to `llm` and `tool_github` to `tool`. Chat questions
+reach the agent, which can inspect or update the configured repository before
+returning an answer.
+
+**Read-only codebase analyst**
+
+An agent with this node as a tool and read-only mode **on**: it can search
+code, read files, and summarize pull requests, with every mutating call
+blocked at dispatch — safe to point at production repositories.
+
+**Release automation**
+
+`webhook → agent_deepagent → response`, with this node plus `tool_python` as
+tools. The agent drafts release notes from `commit_list`, creates the release
+with `release_create`, and dispatches the publish workflow with
+`workflow_dispatch`.
+
+## As a tool
+
+List tools accept `per_page` (1–100, default 30) and `page` (default 1) for pagination.
 
 Most tools accept an optional `repo` parameter (`owner/repo`). If omitted, the configured
 `defaultRepo` is used; if neither is set, the call fails with an error asking for a repo.
 
-> **Note:** `search_code` and `search_issues` also fall back to `defaultRepo`, when a
-> default repo is configured, searches are scoped to it unless the call passes its own
-> `repo`. To search across all accessible repositories, leave `defaultRepo` blank.
-
----
-
-## Available tools
-
-List tools accept `per_page` (1–100, default 30) and `page` (default 1) for pagination.
-
 ### Files
 
-
 | Tool | Description |
-|---|---|---|
-| `file_get` | Get the decoded content and metadata of a single file from a GitHub repository. |
-| `file_list` | List files and directories at a path in a GitHub repository. |
-| `file_create` | Create a new file in a GitHub repository. |
-| `file_edit` | Update an existing file in a GitHub repository. Requires the current file SHA (get it from file_get first). |
-| `file_delete` | Delete a file from a GitHub repository. Requires the current file SHA (get it from file_get first). |
-| `issue_get` | Get a single GitHub issue by number. |
-| `issue_list` | List issues in a repository. Excludes pull requests. |
-| `issue_create` | Create a new issue in a GitHub repository. |
-| `issue_comment` | Post a comment on a GitHub issue. |
-| `issue_edit` | Edit an existing GitHub issue (title, body, state, labels, assignees). |
-| `issue_lock` | Lock a GitHub issue to prevent further comments. |
-| `pr_get` | Get a single pull request by number. |
-| `pr_list` | List pull requests in a repository. |
-| `pr_create` | Create a new pull request. |
-| `review_create` | Submit a review on a pull request (approve, request changes, or comment). |
-| `review_list` | List all reviews on a pull request. |
-| `review_get` | Get a single review on a pull request. |
-| `review_update` | Update the body of a pending review on a pull request. |
-| `repo_get` | Get metadata for a GitHub repository (stars, forks, language, default branch, etc.). |
-| `release_list` | List releases for a repository. |
-| `release_get` | Get a single release by ID. |
-| `release_create` | Create a new release in a repository. |
-| `release_update` | Update an existing release. |
-| `release_delete` | Delete a release from a repository. |
-| `workflow_list` | List all workflows in a repository. |
-| `workflow_get` | Get a single workflow by ID or filename. |
-| `workflow_dispatch` | Trigger a workflow_dispatch event to manually run a workflow. |
-| `workflow_enable` | Enable a previously disabled workflow. |
-| `workflow_disable` | Disable a workflow so it will not run. |
-| `workflow_get_usage` | Get billable minutes and run counts for a workflow. |
-| `org_list_repos` | List repositories belonging to a GitHub organization. |
-| `user_get_repos` | List repositories for a user. Omit username to list the authenticated user's repos. |
-| `user_invite` | Invite a user to a GitHub organization by email. |
-| `search_code` | Search code across GitHub repositories. Returns matching file paths, repo, and a snippet. |
-| `search_issues` | Search issues and pull requests across GitHub. Useful for finding bug reports and edge cases related to a node. |
-| `commit_list` | List commits in a repository, optionally filtered to a specific file path. Useful for understanding what changed recently. |
-| `commit_get` | Get a single commit including its diff stats and changed files. |
-
+|---|---|
+| `file_get` | Get the decoded content and metadata of a single file |
+| `file_list` | List files and directories at a path |
+| `file_create` | Create a new file |
+| `file_edit` | Update an existing file. Requires the current file SHA (get it from `file_get` first) |
+| `file_delete` | Delete a file. Requires the current file SHA (get it from `file_get` first) |
 
 `file_get` raises an error when the path is a directory (use `file_list`), and
 `file_list` raises when the path is a file (use `file_get`). Reads accept an optional
@@ -169,9 +152,20 @@ GitHub's issues endpoint includes pull requests; `issue_list` filters them out, 
 | `commit_list`   | List commits, optionally filtered to a file path or starting ref     |
 | `commit_get`    | Get a single commit with diff stats and per-file patches             |
 
----
+## Configuration
 
-## Read-only mode
+Three fields: the token (see Authentication), a default repository, and a
+read-only switch. The two behavioral ones are detailed below.
+
+### Default Repository
+
+Fallback repo in `owner/repo` format used when a tool call omits its `repo`
+parameter. Note that `search_code` and `search_issues` also fall back to it:
+when a default repo is configured, searches are scoped to that repository
+unless the call passes its own `repo`. To search across all accessible
+repositories, leave this field blank.
+
+### Read-only mode
 
 When `readOnly` is `true`, every mutating tool is blocked at dispatch and returns an
 error. This is the recommended setting when the agent only needs to inspect repositories.
@@ -189,8 +183,6 @@ Always allowed: `file_get`, `file_list`, `issue_get`, `issue_list`, `pr_get`, `p
 Note the default is `false`, a freshly added node can write. Turn read-only mode on
 explicitly for inspect-only agents.
 
----
-
 ## Authentication
 
 Set `token` to a GitHub Personal Access Token. Classic tokens need the `repo`, `issues`,
@@ -201,11 +193,9 @@ repositories the agent needs is the safer choice. The token is sent as a
 API errors are surfaced to the agent as readable messages including the HTTP status and
 GitHub's error details.
 
-Upstream reference: [GitHub REST API documentation](https://docs.github.com/en/rest).
+## Notes
 
----
-
-## Running the tests
+### Running the tests
 
 ```bash
 # Integration tests against a real repository (skipped unless both vars are set)
@@ -213,6 +203,10 @@ export GITHUB_TOKEN=<your token>
 export GITHUB_TEST_REPO=owner/repo
 pytest nodes/test/tool_github/test_tools.py -v
 ```
+
+## Upstream docs
+
+- [GitHub REST API documentation](https://docs.github.com/en/rest)
 
 ---
 

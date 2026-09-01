@@ -35,6 +35,24 @@ reviews:
       instructions: |
         C++ code: C++17 standard. This is the core engine — review for
         memory safety, thread safety, and performance.
+    - path: 'nodes/src/nodes/**/README.md'
+      instructions: |
+        Node READMEs follow docs/development/nodes/readme-schema.md (structure is
+        machine-checked by scripts/validate-node-readme.py; focus review on
+        accuracy). Verify the prose matches the node's code and services*.json:
+        the "As a tool" table must list exactly the functions the node exposes
+        to agents, and lane and connection descriptions must match declared
+        behavior. Never accept hand edits inside the ROCKETRIDE:GENERATED:PARAMS
+        region. If a PR changes node behavior, config fields, or tools without
+        updating the README, flag it.
+    - path: 'docs/public/**/*.md'
+      instructions: |
+        Client docs follow docs/development/clients/readme-schema.md. The Python
+        and TypeScript readmes must stay in parity: an API method, type, or
+        exception documented in one must be documented in the other or be
+        explicitly marked language-specific. Package READMEs are generated
+        from these sources via `builder docs:export` — never review edits to
+        packages/client-*/README.md as hand-written files.
   tools:
     eslint:
       enabled: true

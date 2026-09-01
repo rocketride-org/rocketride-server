@@ -1,0 +1,111 @@
+---
+title: Introduction
+sidebar_label: Overview
+sidebar_position: 1
+---
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/rocketride-org/rocketride-server/main/docs/public/vscode/assets/banner-vscode.png" alt="RocketRide for VS Code" width="900" />
+</p>
+
+<p align="center">
+  Build, debug, and deploy AI pipelines - without leaving your IDE.
+</p>
+
+> **Works in every VS Code-based editor.** The same build supports VS Code and
+> forks such as **Cursor**, **Windsurf**, and **VSCodium** — the visual canvas,
+> runtime management, and pipeline tooling behave identically everywhere. The
+> extension also auto-detects your coding agent — GitHub Copilot, Claude Code,
+> Cursor, or Windsurf — and writes **RocketRide agent rules** into your
+> workspace so the editor's AI understands how to build RocketRide pipelines.
+
+<p align="center">
+  <a href="https://marketplace.visualstudio.com/items?itemName=RocketRide.rocketride"><img src="https://img.shields.io/visual-studio-marketplace/v/RocketRide.rocketride?color=222223&label=Marketplace" alt="VS Code Marketplace" /></a>
+  <a href="https://github.com/rocketride-org/rocketride-server"><img src="https://img.shields.io/github/stars/rocketride-org/rocketride-server?style=flat&color=238636&label=GitHub&logo=github&logoColor=white" alt="GitHub" /></a>
+  <a href="https://discord.gg/PMXrtenMsY"><img src="https://img.shields.io/badge/Discord-Join-370b7a?logo=discord&logoColor=white" alt="Discord" /></a>
+  <a href="https://github.com/rocketride-org/rocketride-server/blob/develop/LICENSE"><img src="https://img.shields.io/badge/License-MIT-41b6e6" alt="MIT License" /></a>
+</p>
+
+## Quick Start
+
+1. Install the **RocketRide** extension from the VS Code Marketplace
+2. Click the **RocketRide** icon in the Activity Bar
+3. Create a `.pipe` file - it opens automatically in the visual canvas builder
+4. Wire up nodes by connecting input and output lanes, then hit **Play** to run
+
+## What is RocketRide?
+
+[RocketRide](https://rocketride.org) is an open-source, developer-native AI pipeline platform.
+It lets you build, debug, and deploy production AI workflows without leaving your IDE -
+using a visual drag-and-drop canvas or code-first with TypeScript and Python SDKs.
+
+You build your `.pipe` - and you run it against the fastest AI runtime available.
+
+- **140+ ready-to-use nodes** - 15+ LLM providers, 10+ vector stores, OCR, NER, PII anonymization, and more
+- **High-performance C++ engine** - production-grade speed and reliability
+- **Deploy anywhere** - locally, on-premises, or self-hosted with Docker
+- **MIT licensed** - fully open-source, OSI-compliant
+
+## Features
+
+- **Visual canvas builder** - Drag, drop, and wire up AI workflows directly in VS Code. Create `.pipe` files to get started.
+- **Debugging & live traces** - Monitor running pipelines in real time with execution traces, token usage, and memory stats, see exactly what your agents are doing at every step.
+
+- **App Builder** - Scaffold, live-preview, publish, and deploy [Shell Apps](/guides/apps) from a template, without leaving VS Code.
+- **Connection manager** - Connect to a local engine (one click, no setup) or your own on-premises server.
+- **SDKs for TypeScript, Python & MCP** - Embed pipelines in your apps or expose them as tools for AI assistants.
+
+Need inspiration? Check out [awesome-rocketride](https://github.com/rocketride-org/awesome-rocketride#demos--examples), a collection of example projects built on RocketRide.
+
+## Extension Settings
+
+| Setting                              | Type       | Default                          | Description                                                                                                                               |
+| ------------------------------------ | ---------- | -------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `rocketride.development.connectionMode` | `string` | `"local"`                        | Connection mode: `"local"` (your machine), `"docker"`, `"service"`, `"onprem"` (your own hosted server), or `"cloud"`                     |
+| `rocketride.development.hostUrl`     | `string`   | `""`                             | Host URL for on-prem or direct connections. Host and port will be parsed from this URL.                                                   |
+| `rocketride.deployment.connectionMode` | `string \| null` | `null`                   | Deployment connection mode (`null` = same as development)                                                                                 |
+| `rocketride.deployment.hostUrl`      | `string`   | `""`                             | Host URL for the deployment connection                                                                                                    |
+| `rocketride.defaultPipelinePath`     | `string`   | `"${workspaceFolder}/pipelines"` | Default directory path for creating new pipeline files                                                                                    |
+| `rocketride.development.local.engineVersion` | `string` | `"latest"`                 | Engine version to download. `"latest"` for newest stable, `"prerelease"` for newest prerelease, or a specific tag like `"server-v3.1.1"`. |
+| `rocketride.deployment.local.engineVersion` | `string` | `"latest"`                  | Engine version for the local deployment target                                                                                            |
+| `rocketride.taskArguments`           | `string`   | `""`                             | Additional command-line arguments passed to each pipeline task                                                                            |
+| `rocketride.pipelineDebugOutput`     | `boolean`  | `false`                          | Enable full debug output for pipeline tasks (`--trace=debugOut`)                                                                          |
+| `rocketride.pipelineRestartBehavior` | `string`   | `"prompt"`                       | Behavior when a `.pipe` file changes while the pipeline is running: `"auto"`, `"manual"`, or `"prompt"`                                   |
+| `rocketride.pipelineTTL`             | `integer`  | `900`                            | Default idle timeout (seconds) before a running pipeline is shut down; `0` = run forever                                                  |
+| `rocketride.pipelineTraceLevel`      | `string`   | `"full"`                         | Tracing verbosity for pipeline execution: `"full"`, `"summary"`, `"metadata"`, or `"none"`                                                |
+| `rocketride.welcomeDismissed`        | `boolean`  | `false`                          | Set to `true` to skip the welcome page on startup                                                                                         |
+| `rocketride.integrations.autoAgentIntegration` | `boolean` | `true`                  | Auto-detect and install RocketRide documentation for coding agents (Copilot, Claude Code, Cursor, Windsurf) on startup                    |
+| `rocketride.integrations.copilot`    | `boolean`  | `false`                          | Enable RocketRide integration with GitHub Copilot                                                                                         |
+| `rocketride.integrations.claudeCode` | `boolean`  | `false`                          | Enable RocketRide integration with Claude Code                                                                                            |
+| `rocketride.integrations.cursor`     | `boolean`  | `false`                          | Enable RocketRide integration with Cursor                                                                                                 |
+| `rocketride.integrations.windsurf`   | `boolean`  | `false`                          | Enable RocketRide integration with Windsurf                                                                                               |
+| `rocketride.integrations.claudeMd`   | `boolean`  | `false`                          | Install RocketRide instructions to `CLAUDE.md` at the repo root                                                                           |
+| `rocketride.integrations.agentsMd`   | `boolean`  | `false`                          | Install RocketRide instructions to `AGENTS.md` at the repo root                                                                           |
+| `rocketride.appdev.shellUrl`         | `string`   | `""`                             | App Builder: override the preview shell base URL (empty = the Development Mode engine)                                                    |
+| `rocketride.appdev.autoWatch`        | `boolean`  | `true`                           | App Builder: start the app watch/rebuild session automatically when an App Builder screen opens                                           |
+
+## Commands
+
+| Command                                    | Description                      |
+| ------------------------------------------ | -------------------------------- |
+| `RocketRide: Settings`                     | Open extension settings          |
+| `RocketRide: Server Monitor`               | View server and pipeline status  |
+| `RocketRide Pipeline: Create New Pipeline` | Create a new `.pipe` file        |
+| `RocketRide Pipeline: Run`                 | Run the selected pipeline        |
+| `RocketRide Pipeline: Stop Pipeline`       | Stop a running pipeline          |
+| `RocketRide: Open as Text`                 | Open a `.pipe` file as raw JSON  |
+| `RocketRide: Welcome`                      | Open the welcome page            |
+
+Connect, disconnect, and reconnect are buttons in the sidebar connection panel, not command-palette commands.
+
+## Links
+
+- [Documentation](https://docs.rocketride.org/)
+- [Discord](https://discord.gg/PMXrtenMsY)
+- [GitHub](https://github.com/rocketride-org/rocketride-server)
+- [Contributing](https://github.com/rocketride-org/rocketride-server/blob/develop/CONTRIBUTING.md)
+- [Security](https://github.com/rocketride-org/rocketride-server/blob/develop/SECURITY.md)
+
+## License
+
+MIT - see [LICENSE](https://github.com/rocketride-org/rocketride-server/blob/develop/LICENSE).

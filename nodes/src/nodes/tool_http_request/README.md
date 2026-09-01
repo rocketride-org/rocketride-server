@@ -1,8 +1,90 @@
 # tool_http_request
 
-A RocketRide tool node that lets an AI agent make HTTP requests to any API endpoint, like curl for agents.
+A RocketRide tool node that lets an AI agent make guarded HTTP requests to API endpoints.
+
++## About HTTP
+
+HTTP is the request-and-response protocol used by web APIs. An HTTP request names a URL,
+method, headers, credentials, and optional body, while a response carries status, headers,
+and content.
 
 ## What it does
+
+This node provides one controlled HTTP client for an agent and has no pipeline lanes. Pick
+it when the agent must call an API endpoint directly; use a product-specific tool when that
+service already has a dedicated node and richer operations. Method switches, URL patterns,
+and rate limits are enforced before every request.
+
+## As a tool
+
+The hidden server-name setting defaults to `http`, so the registered function is
+`http.http_request` by default.
+
+| Function | Description |
+| --- | --- |
+| `http.http_request` | Makes one guarded HTTP request and returns its completed response. |
+
+`url` and `method` are required. The method must be one of GET, POST, PUT, PATCH,
+DELETE, HEAD, or OPTIONS and must be enabled in configuration. Optional inputs include
+headers, query parameters, path parameters, timeout, advanced authentication and body
+objects, plus `body_json`, `bearer_token`, and `basic_auth` shortcuts. A completed
+response—including a non-2xx HTTP response—returns `status_code`, `status_text`,
+`headers`, `body`, `json`, `elapsed_ms`, and `content_type`.
+
+Invalid input, disabled methods, whitelist rejection, rate-limit rejection, and transport
+errors raise tool errors. A parsed JSON field is null when the response type is not JSON-like
+or cannot be parsed; the raw text remains in `body`.
+
+## Configuration
+
+Use the default method set for a broad but controlled API agent, then limit endpoints and
+throughput for the services it is allowed to reach. The server name changes the function
+namespace and should be stable once an agent prompt refers to it.
+
+### Allowed methods
+
+GET, POST, PUT, PATCH, and DELETE are enabled by default; HEAD and OPTIONS are disabled.
+Enable only methods that the intended API flow needs, especially before giving an agent
+access to a URL where mutation is possible.
+
+### URL Whitelist
+
+An empty whitelist allows every URL. Non-empty patterns use `re.search`, so anchor them
+when the endpoint scope must be exact—for example, `^https://api.example.com/`. Invalid
+patterns are skipped with a warning; a lone invalid pattern therefore leaves no effective
+restriction. The whitelist is checked before path parameters are expanded, and replacements
+are percent-encoded to remain a single URL path segment.
+
+### Rate limits
+
+The defaults are 10 requests per second, 100 per minute, and five concurrent requests.
+The token buckets and concurrency limit reject immediately rather than queue, so an agent
+must retry later after a limit error. Set all three values explicitly to zero to disable
+limiting; otherwise each configured value is clamped to at least one.
+
+## Authentication
+
+This node has no stored service credential: provide credentials per request. The simple
+shortcuts set bearer or Basic authentication when the equivalent advanced object is absent.
+Advanced authentication supports `none`, `basic`, `bearer`, and an API key placed in a
+header or query parameter.
+
+## Notes
+
+### Request bodies and timeout
+
+`body_json` serializes objects and arrays as JSON; a string is used verbatim. The advanced
+body supports raw content, multipart form data, and URL-encoded form data. Timeout defaults
+to 30 seconds, caps positive values at 300 seconds, and treats zero or negative values as
+the default.
+
+## Upstream docs
+
+- [HTTP documentation at MDN](https://developer.mozilla.org/docs/Web/HTTP)
+
+<!-- Legacy pre-schema prose retained below only while the generated documentation is preserved. -->
+
+### What it does
 
 Exposes a single agent-callable tool, `http_request`, registered as
 `<serverName>.http_request` (default: `http.http_request`). The agent provides the full
@@ -23,7 +105,7 @@ Three security guardrails are enforced before every request, all configured on t
 
 ---
 
-## Configuration
+### Configuration
 
 
 | Field | Type | Description |
@@ -51,7 +133,7 @@ restriction, check the logs after editing the whitelist.
 
 ---
 
-## Available tools
+### Available tools
 
 
 | Tool | Description |
@@ -108,7 +190,7 @@ is only applied when the corresponding advanced field is not also set.
 
 ---
 
-## Authentication
+### Authentication
 
 The `auth` object supports `type`: `none`, `basic`, `bearer`, or `api_key`.
 
@@ -123,7 +205,7 @@ expand to the same thing.
 
 ---
 
-## Request bodies
+### Request bodies
 
 The `body` object supports `type`: `none`, `raw`, `form_data`, or `x_www_form_urlencoded`.
 
@@ -138,7 +220,7 @@ serialized and wrapped as raw `application/json` automatically.
 
 ---
 
-## Rate limiting
+### Rate limiting
 
 Three independent limits are enforced per node (shared across all calls):
 
@@ -155,6 +237,8 @@ To disable rate limiting entirely, set **all three** values to `0`. Otherwise ea
 non-zero value is clamped to a minimum of `1`.
 
 ---
+
+-->
 
 <!-- ROCKETRIDE:GENERATED:PARAMS START -->
 <!-- Generated by nodes:docs-generate. Do not edit by hand. -->

@@ -1,67 +1,67 @@
 # audio_tts
 
-A RocketRide pipe node that converts incoming text into spoken audio using the Kokoro-82M text-to-speech engine.
+A RocketRide audio node that turns incoming text, documents, questions, or
+answers into a WAV audio stream through Kokoro.
+
+## About Kokoro
+
+Kokoro is the text-to-speech backend used by this node. The node can construct
+its pipeline locally or ask a configured model server to load the Kokoro
+backend.
 
 ## What it does
 
-Takes text arriving on any of its input lanes, synthesizes it with Kokoro-82M (`hexgrad/Kokoro-82M`), and emits the result on the **audio** lane as WAV bytes (MIME `audio/wav`) via the `writeAudio` BEGIN / WRITE / END sequence. Locally generated audio is mono, 16-bit, 24 kHz; synthesis speed is fixed at 1.
+The node synthesizes non-empty text and streams a `audio/wav` file on its
+`audio` lane. Choose it when a pipeline needs to make text audible rather than
+play already-produced media or turn speech into text. It extracts text from
+the four supported input lanes, so it can speak data already moving through a
+pipeline without an agent-tool interface.
 
-The node runs in one of two modes, chosen automatically at startup:
+## Lanes
 
-- **Local**: when no model server is configured, the node installs its own requirements (`numpy`, `kokoro`, `soundfile`) at runtime and constructs a `kokoro.KPipeline` in-process. The spaCy `en_core_web_sm` model (needed by Kokoro's misaki G2P) is downloaded and installed automatically, matched to the installed spaCy version.
-- **Model server (`--modelserver`)**: when a model server address is available, the node connects a `ModelClient` and loads the `kokoro` loader on the server instead. The heavy local dependencies are skipped entirely; audio comes back base64-encoded over the inference command.
-
-Audio is written to a temporary WAV file during synthesis and deleted as soon as the bytes have been streamed, including on error, so no orphan files are left on disk. Empty or whitespace-only input is silently skipped and produces no output. Startup fails with `Kokoro: choose a voice from the list` if no voice is configured.
-
----
+| Lane in | Lane out | Description |
+| --- | --- | --- |
+| `text` | `audio` | Synthesize the supplied text. |
+| `documents` | `audio` | Join eligible document `page_content` values with newlines, then synthesize it. |
+| `questions` | `audio` | Join question text with spaces, then synthesize it. |
+| `answers` | `audio` | Synthesize the answer text. |
 
 ## Configuration
 
-### Lanes
+Choose the single `kokoro` profile and its voice. Most users only need to
+choose a voice appropriate for their text; the profile selector does not offer
+an alternative backend.
 
-All four input lanes produce output on the **audio** lane.
+### Voice
 
-| Input lane  | What gets synthesized                                                                                                   |
-|-------------|-------------------------------------------------------------------------------------------------------------------------|
-| `text`      | The raw text, as-is.                                                                                                    |
-| `documents` | The `page_content` of each document, joined with newlines. Documents of type `Image`, `Audio`, or `Video` are skipped. |
-| `questions` | The text of every question, joined with spaces.                                                                         |
-| `answers`   | The answer text (via `getText()`).                                                                                      |
+The voice is required at startup; a blank value raises `Kokoro: choose a voice
+from the list`. Its first character is passed to the local or remote Kokoro
+pipeline as the language code, so select a voice with the appropriate prefix
+for the language you need. The default `af_heart` starts with `a`; change it
+when the desired voice or its language-code prefix differs.
 
-### Fields
+## Notes
 
-The node has a single profile, **`kokoro`** (the default), selected by the `profile` field.
+### Local and model-server execution
 
-| Field | Type | Description |
-|---|---|---|
-| `kokoro_voice` | string | Default "af_heart". Kokoro voice. The language is derived automatically from the voice prefix (af_/am_ → American, bf_/bm_ → British, ef_/em_ → Spanish, etc.). |
-| `profile` | string | Default "kokoro".  |
+When a model-server address is configured, the node connects a `ModelClient`,
+loads the `kokoro` loader there, and writes the returned base64 WAV data to a
+temporary file. Without one, it installs the local requirements, ensures the
+`en_core_web_sm` spaCy model is present when spaCy is importable, and creates a
+local `KPipeline`. Both paths synthesize at speed 1; the local path writes
+mono, 16-bit, 24 kHz WAV output.
 
-### Voices and language
+### Input and cleanup behavior
 
-The language is derived automatically from the **first character** of the voice id (`af_*` / `am_*` is American English, `bf_*` / `bm_*` is British English, `ef_*` / `em_*` is Spanish, and so on). Available voice families:
+Whitespace-only input produces no audio. Document input excludes documents of
+type `Image`, `Audio`, and `Video`; the remaining page content is joined with
+newlines. A temporary WAV file is removed after streaming and is also removed
+if synthesis raises an exception.
 
-| Prefix        | Language         | Examples                                    |
-|---------------|------------------|---------------------------------------------|
-| `af_` / `am_` | American English | `af_heart` (default), `af_bella`, `am_adam` |
-| `bf_` / `bm_` | British English  | `bf_emma`, `bm_george`, `bm_fable`          |
-| `jf_` / `jm_` | Japanese         | `jf_alpha`, `jm_kumo`                       |
-| `zf_` / `zm_` | Mandarin         | `zf_xiaoxiao`, `zm_yunxi`                   |
-| `ef_` / `em_` | Spanish          | `ef_dora`, `em_alex`                        |
-| `ff_`         | French           | `ff_siwis`                                  |
-| `hf_` / `hm_` | Hindi            | `hf_alpha`, `hm_omega`                      |
-| `if_` / `im_` | Italian          | `if_sara`, `im_nicola`                      |
-| `pf_` / `pm_` | Portuguese       | `pf_dora`, `pm_alex`                        |
+## Upstream docs
 
-The full list of voice ids is defined in `services.json`.
+- [Kokoro repository](https://github.com/hexgrad/kokoro)
 
----
-
-## Troubleshooting (`Exception: 1` / wasabi)
-
-If misaki/spaCy initialization fails (for example `Exception: 1` or a missing `wasabi` dependency), ensure the spaCy English model is installed: this node downloads `en_core_web_sm` automatically from the official spaCy GitHub release wheel, matched to the installed spaCy version. Verify that `numpy`, `kokoro`, and `soundfile` from `requirements.txt` are installed, and that the model download was not blocked by network restrictions.
-
----
 
 <!-- ROCKETRIDE:GENERATED:PARAMS START -->
 <!-- Generated by nodes:docs-generate. Do not edit by hand. -->

@@ -21,11 +21,12 @@ When the RocketRide VS Code extension is installed, it populates a `.rocketride/
 
 **IMPORTANT:** Always read `.rocketride/services-catalog.json` for the current list of available components. The catalog is the single source of truth: it is generated from the connected server and may contain components not listed in this document.
 
-> **See also:** [`docs/README-nodes.md`](../README-nodes.md) is the node catalog
-> grouped by category, with each node's lanes and the wire-vs-bind rule.
-> [`docs/README-node-schema.md`](../README-node-schema.md) explains the
-> `services.json` model (`lanes`, `preconfig`/`profiles`, `fields`, `shape`)
-> behind this reference and the canvas UI.
+> **See also:** `ROCKETRIDE_PIPELINE_RULES.md`, exported next to this file, covers how
+> components connect — lane types, lane flow rules, and control (invoke) connections.
+> Online: <https://docs.rocketride.org/concepts/pipelines> contrasts data lanes with
+> invoke connections, <https://docs.rocketride.org/concepts/nodes> describes a node's
+> `provider`/`config`/`input` shape and its class types, and per-node reference lives
+> at <https://docs.rocketride.org/nodes>.
 
 ### Reading the Catalog
 
@@ -50,7 +51,7 @@ Each entry in `services-catalog.json` has this structure:
 **Key fields:**
 
 - `name`: the `provider` value you use in pipeline files
-- `classType`: component category: source, data, text, image, audio, video, embedding, llm, store, database, tool, agent, memory, infrastructure, target, preprocessor
+- `classType`: component category: source, data, text, image, audio, video, embedding, llm, store, database, graph, guard, rerank, search, tool, agent, memory, infrastructure, target, preprocessor
 - `lanes`: the definitive reference for data flow. Each key is an input lane; its value array lists the output lanes produced. An empty array `[]` means the component consumes data with no lane output (e.g., storage, response). Source components use `_source` as the input lane key
 - `invoke`: (optional) defines what control-plane connections the component requires or accepts. Each key is a `classType` (e.g., `llm`, `tool`, `memory`) with `min`/`max` constraints and a description. Components with `invoke` need corresponding entries in the `control` array of the pipeline definition
 
@@ -312,8 +313,10 @@ This applies to agents, but also to non-agent components like `summarization`, `
 | `agent_rocketride` | Required (exactly 1) | **Required (exactly 1)** | Optional |
 | `agent_crewai`     | Required (min 1)     | Not supported            | Optional |
 | `agent_langchain`  | Required (min 1)     | Not supported            | Optional |
+| `agent_llamaindex` | Required (min 1)     | Not supported            | Optional |
+| `agent_deepagent`  | Required (min 1)     | Not supported            | Optional (plus an optional `deepagent` sub-agent port) |
 
-Only `agent_rocketride` supports a `memory_internal` control connection. `agent_crewai` and `agent_langchain` do not have a memory port, do not wire memory to them.
+Only `agent_rocketride` supports a `memory_internal` control connection. The other agents do not have a memory port, do not wire memory to them.
 
 ### Multi-Agent Pipelines
 
@@ -337,7 +340,7 @@ Agent_2 has no `input` lanes: it is invoked as a tool by Agent_1. LLM_2 and Memo
 
 ### Tool Components
 
-Tool components (classType `tool`) have empty `lanes` (`{}`). They are not connected via data lanes: they are invoked by agents at runtime. The tool declares which agent controls it via the `control` array with `"classType": "tool"`.
+Most pure-tool components (classType `tool`) have empty `lanes` (`{}`) and are not connected via data lanes: they are invoked by agents at runtime. Exceptions exist: `tool_pipe` exposes sub-pipeline output lanes, and dual-class `data`+`tool` nodes (e.g. `tool_guild`, `tool_n8n`) carry data lanes. The tool declares which agent controls it via the `control` array with `"classType": "tool"`.
 
 ---
 

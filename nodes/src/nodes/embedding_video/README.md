@@ -1,64 +1,66 @@
 # embedding_video
 
-A pipeline filter node that extracts frames from a video stream and encodes each frame as a vector embedding using a Hugging Face vision model.
+A RocketRide embedding node that samples a video stream into embedded image documents; choose it when video needs frame-level retrieval rather than embedding a standalone image.
+
+## About Hugging Face
+
+Hugging Face provides open-source model tooling and model repositories. This node uses its vision-model interfaces to produce an embedding for each selected frame.
 
 ## What it does
 
-Receives a video stream on its `video` input lane, buffers the full video in memory, then decodes it with **OpenCV** (`cv2.VideoCapture`) via a temporary file. Frames are sampled at a configurable interval and each is passed through a vision embedding model (CLIP by default, loaded via PyTorch and `transformers`) to produce a fixed-length numeric vector. One document is emitted per frame; all documents for a video are flushed as a single batch when processing completes.
+The node buffers a video stream, extracts frames with OpenCV, and emits one Image document with an embedding per selected frame. Choose it over `embedding_image` when RocketRide must perform the frame extraction, and over text embedders for visual media. It is marked experimental and serializes shared model access with a lock.
 
-The embedding engine is shared with the `embedding_image` node and a thread lock serializes GPU access, so concurrent video streams do not race for the model. The node is flagged **experimental** and declares a **gpu** capability.
+## Lanes
 
-Three safety limits apply out of the box:
-
-- Videos larger than `maxVideoSizeMB` (default 500 MB) are rejected with a warning and produce no output.
-- Frame extraction is capped at `max_frames` (default 50) per video; set to `0` for unlimited.
-- If the container does not report a frame rate, a fallback of 30 fps is used when computing timestamps.
-
-Supported containers: MP4 (`video/mp4`), AVI (`video/x-msvideo`), QuickTime (`video/quicktime`), WebM (`video/webm`). An unrecognized MIME type is still processed, treated as MP4.
-
----
-
-## Configuration
-
-### Lanes
-
-| Lane in | Lane out    | Description                                         |
-| ------- | ----------- | --------------------------------------------------- |
-| `video` | `documents` | One document per extracted frame, with an embedding |
-
-Each output document contains:
-
-- `type`: `Image`, with `page_content` holding the frame as a base64-encoded PNG
-- `embedding`: the frame's embedding vector (list of floats), plus `embedding_model` (the model identifier string)
-- metadata: `time_stamp` (seconds from the start of the video), `frame_number` (frame index in the source), and `chunkId`, which counts the object's frames — an object carrying several videos is numbered straight through, and the count starts again with each object
-- provenance: `metadata.source` (the source video's media detail — `source_mime`, `duration`, `fps`, `width`, `height`, …) and `metadata.name` = `<video-stem>.frame<N>` (N = the same count as `chunkId`, so the name and the chunk id label the same frame); both omitted when the source carried no stream descriptor
-
-### Fields
-
-| Field | Type | Description |
+| Lane in | Lane out | Description |
 |---|---|---|
-| `model` | string | Hugging Face model to use for frame embedding |
-| `profile` | string | Default "openai-patch16". Embedding model for video frames |
-| `interval` | number | Default 5. Time in seconds between extracted frames |
-| `max_frames` | number | Default 50. Limit the total number of frames extracted from the video. Set to 0 for unlimited. |
-| `start_time` | number | Default 0.  |
-| `duration` | number | Default 0.  |
-| `maxVideoSizeMB` | number | Default 500. Maximum allowed video file size in megabytes. Videos exceeding this limit will be rejected. |
-
-The extraction window runs from `start_time` to `start_time + duration`, clamped to the actual video length.
-
----
+| `video` | `documents` | Emits embedded Image documents for sampled frames. |
 
 ## Profiles
 
-| Profile ID                 | Model                          | Notes                                  |
-| -------------------------- | ------------------------------ | -------------------------------------- |
-| `openai-patch16` (default) | `openai/clip-vit-base-patch16` | Good performance, lower memory         |
-| `openai-patch32`           | `openai/clip-vit-base-patch32` | Lower performance, better recognition  |
-| `google16x224`             | `google/vit-base-patch16-224`  | Fast, accurate, general-purpose        |
-| `custom`                   | user-specified via `model`     | Any Hugging Face vision model          |
+Default: **OpenAI CLIP - 16x16 - good performance, lower memory** (`openai-patch16`).
 
----
+| Profile | Model | Context |
+|---|---|---|
+| `openai-patch16` *(default)* | `openai/clip-vit-base-patch16` | Default frame model. |
+| `openai-patch32` | `openai/clip-vit-base-patch32` | Alternative CLIP profile. |
+| `google16x224` | `google/vit-base-patch16-224` | ViT profile. |
+| `custom` | User-provided | Enter a compatible Hugging Face model identifier. |
+
+## Configuration
+
+Use the default model and sampling limits first. Frame count directly determines how many documents and model calls the node produces, so tune extraction for the retrieval granularity you actually need.
+
+### Model
+
+The default is `openai/clip-vit-base-patch16`; Custom accepts a model name. Choose a model compatible with the target vector index, because every emitted frame carries that model’s vector and model name.
+
+### Frame extraction
+
+Frames are sampled at `interval` seconds, starting at `start_time`. `duration` of zero continues to the end; otherwise the extraction window ends at `start_time + duration` and is clamped to the video length. Increase the interval or shorten the window for a coarse overview; decrease it for short visual events, accepting more documents and embedding work.
+
+### Frame and file limits
+
+`max_frames` defaults to 50 and zero removes that cap. `maxVideoSizeMB` defaults to 500; an oversized video is rejected with a warning and produces no output. Raise either limit only after sizing the worker memory and the downstream index for the added frames.
+
+## Requirements
+
+The node declares GPU capability and uses a vision model plus OpenCV. The source does not define a CPU-only fallback, so run it where the compatible model runtime is available.
+
+## Notes
+
+### Frame documents
+
+Each output contains a base64 PNG Image, `embedding`, `embedding_model`, a frame number, and a timestamp. If the input provides stream details, source metadata and a `<video-stem>.frame<N>` name are retained. A missing reported frame rate falls back to 30 fps for timestamp calculation.
+
+### Supported containers
+
+MP4 (`video/mp4`), AVI (`video/x-msvideo`), QuickTime (`video/quicktime`), and WebM (`video/webm`). An unrecognized MIME type is still processed, treated as MP4.
+
+## Upstream docs
+
+- [Hugging Face Transformers documentation](https://huggingface.co/docs/transformers)
+- [OpenCV documentation](https://docs.opencv.org/)
 
 <!-- ROCKETRIDE:GENERATED:PARAMS START -->
 <!-- Generated by nodes:docs-generate. Do not edit by hand. -->

@@ -1313,9 +1313,6 @@ module.exports = {
 	name: 'server',
 	description: 'C++ Engine Server',
 
-	// Co-located docs gathered by docs:gather.
-	docs: [{ source: 'docs', mount: 'protocols/websocket' }],
-
 	actions: [
 		// Internal actions (no description in help)
 		{ name: 'server:download', action: makeDownloadAction },

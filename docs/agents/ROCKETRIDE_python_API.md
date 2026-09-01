@@ -61,8 +61,9 @@ ROCKETRIDE_URI=https://api.rocketride.ai
 The client will automatically parse the `.env` file if it exists and use the values as defaults. The priority order is:
 
 1. **Constructor parameters** (highest priority)
-2. **`.env` file values**
-3. **Default values** (lowest priority)
+2. **Process environment variables**
+3. **`.env` file values** (applied only where the process environment does not already set them)
+4. **Default values** (lowest priority)
 
 The client automatically reads configuration from the `.env` file, so you typically don't need to pass any parameters:
 
@@ -80,7 +81,7 @@ client = RocketRideClient(uri='https://api.rocketride.ai', auth='your-api-key')
 
 ### Environment Variable Substitution in Pipelines
 
-The SDK automatically performs template variable substitution in pipeline configurations. Any string containing `${ROCKETRIDE_*}` will be replaced with the corresponding value from your `.env` file.
+The SDK sends its `ROCKETRIDE_*` environment map with the execute request, and the server performs template variable substitution in pipeline configurations. Any string containing `${ROCKETRIDE_*}` will be replaced server-side with the corresponding value from your `.env` file.
 
 **Example `.env` file:**
 
@@ -100,13 +101,18 @@ ROCKETRIDE_OUTPUT_PATH=/data/output
 	"components": [
 		{
 			"id": "data-processor",
-			"provider": "transform",
+			"provider": "webhook",
 			"config": {
-				"inputPath": "${ROCKETRIDE_INPUT_PATH}",
-				"outputPath": "${ROCKETRIDE_OUTPUT_PATH}",
-				"apiKey": "${ROCKETRIDE_APIKEY}",
-				"staticValue": "this stays the same",
-				"unknownVar": "${ROCKETRIDE_UNKNOWN}"
+				"hideForm": true,
+				"mode": "Source",
+				"type": "webhook",
+				"parameters": {
+					"inputPath": "${ROCKETRIDE_INPUT_PATH}",
+					"outputPath": "${ROCKETRIDE_OUTPUT_PATH}",
+					"apiKey": "${ROCKETRIDE_APIKEY}",
+					"staticValue": "this stays the same",
+					"unknownVar": "${ROCKETRIDE_UNKNOWN}"
+				}
 			}
 		}
 	]
@@ -118,7 +124,9 @@ ROCKETRIDE_OUTPUT_PATH=/data/output
 ```python
 # Variables are automatically substituted when the pipeline starts
 result = await client.use(filepath='pipeline.pipe')
-# The server receives the pipeline with all ${ROCKETRIDE_*} variables replaced
+# The server receives the unresolved pipeline plus the ROCKETRIDE_* env map and
+# resolves the ${ROCKETRIDE_*} placeholders at execution (stored pipelines keep
+# the placeholders, so no secrets are included)
 ```
 
 **Key features:**
@@ -156,7 +164,7 @@ rocketride start my-pipeline.pipe --apikey YOUR_KEY
 **Upload files:**
 
 ```bash
-rocketride upload files/*.csv --pipeline ./pipeline.pipe --apikey YOUR_KEY
+rocketride upload files/*.csv --pipeline_path ./pipeline.pipe --apikey YOUR_KEY
 # or with existing task token
 rocketride upload files/*.csv --token TASK_TOKEN --apikey YOUR_KEY
 # with custom thread count (default is 4)
@@ -208,7 +216,7 @@ await client.connect()
 pipeline = {
     'components': [
         {'id': 'input', 'provider': 'webhook', 'config': {}},
-        {'id': 'process', 'provider': 'transform', 'config': {}, 'input': [{'lane': 'text', 'from': 'input'}]},
+        {'id': 'process', 'provider': 'anonymize_text', 'config': {}, 'input': [{'lane': 'text', 'from': 'input'}]},
         {'id': 'output', 'provider': 'response_text', 'config': {}, 'input': [{'lane': 'text', 'from': 'process'}]},
     ],
     'source': 'input',
@@ -267,8 +275,7 @@ async def on_connect_error(error: str) -> None:
 client = RocketRideClient(
     uri='https://api.rocketride.ai',
     auth='your-api-key',
-    persist=True,  # Enable automatic reconnection (exponential backoff)
-    max_retry_time=60000,  # Stop retrying after 60 seconds (None = retry forever)
+    persist=True,  # Enable automatic reconnection (linear backoff)
     on_connected=on_connected,
     on_disconnected=on_disconnected,
     on_connect_error=on_connect_error,
@@ -278,7 +285,7 @@ client = RocketRideClient(
 await client.connect()
 
 # If connection is lost, the client will automatically attempt to reconnect
-# Reconnection uses exponential backoff (0.25s initial, doubling up to 2.5s max)
+# Reconnection uses linear backoff (0.25s increments, capped at 15s)
 # To stop auto-reconnection, call disconnect()
 await client.disconnect()
 ```
@@ -368,10 +375,14 @@ RocketRideClient(uri: str = '', auth: str = '', **kwargs)
 - `on_event` (EventCallback, optional): Event handler for server events
 - `on_connected` (ConnectCallback, optional): Connection established callback
 - `on_disconnected` (DisconnectCallback, optional): Connection lost callback
-- `persist` (bool, optional): Enable automatic reconnection with exponential backoff (default: False)
-- `max_retry_time` (float, optional): Maximum total time in milliseconds to keep retrying connections (default: None, retry indefinitely)
+- `persist` (bool, optional): Enable automatic reconnection with linear backoff (default: False)
+- `max_retry_time` (float, optional): Deprecated — accepted but ignored; reconnection retries indefinitely
 - `module` (str, optional): Module name for client identification
 - `on_connect_error` (ConnectErrorCallback, optional): Called on each failed connection attempt in persist mode
+- `env` (dict, optional): Override environment map; if omitted, `.env` is loaded
+- `request_timeout` (float, optional): Default timeout in ms for requests
+- `on_protocol_message` (callable, optional): Called with raw DAP messages, for protocol debugging
+- `on_debug_message` (callable, optional): Called with debug output
 
 #### Connection Methods
 
@@ -389,7 +400,7 @@ Close the connection to the RocketRide server and stop automatic reconnection. I
 
 ###### `async attach(uri: Optional[str] = None, *, timeout: Optional[float] = None) -> None`
 
-Open the WebSocket transport without authenticating. If `uri` is provided and differs from the current URI, detaches first; attaching to the same URI is a no-op. `timeout` (seconds) bounds the connect.
+Open the WebSocket transport without authenticating. If `uri` is provided and differs from the current URI, detaches first; attaching to the same URI is a no-op. `timeout` (ms) bounds the connect.
 
 ###### `async detach() -> None`
 
@@ -439,7 +450,7 @@ await client.detach()
 
 ##### `async use(**kwargs) -> Dict[str, Any]`
 
-Start a RocketRide pipeline for processing data. Automatically performs environment variable substitution on the pipeline configuration.
+Start a RocketRide pipeline for processing data. `${ROCKETRIDE_*}` placeholders in the pipeline configuration are substituted server-side at execution (the client sends its `ROCKETRIDE_*` environment map with the request).
 
 > All `use()` parameters are **keyword-only**: pass them by name (e.g. `use(pipeline=...)`), not positionally.
 
@@ -454,6 +465,8 @@ Start a RocketRide pipeline for processing data. Automatically performs environm
 - `args` (List[str], optional): Command line arguments to pass to pipeline
 - `ttl` (int, optional): Time-to-live in seconds for idle pipelines (server default if not provided; use 0 for no timeout)
 - `pipelineTraceLevel` (str, optional): Trace level: 'none', 'metadata', 'summary', or 'full'. When set, captures every lane write and invoke call in the response under `_trace`.
+- `name` (str, optional): Display name for the task; derived from `filepath` when omitted
+- `env` (Dict[str, str], optional): Extra `ROCKETRIDE_*` overrides sent with the request for server-side substitution
 
 **Returns:** Dictionary containing the task token and other metadata
 
@@ -475,7 +488,7 @@ Get the current status of a running pipeline.
 
 **Returns:** Dictionary containing status information
 
-##### `async restart(*, project_id: str, source: str, pipeline: PipelineConfig, token: Optional[str] = None) -> None`
+##### `async restart(*, project_id: str, source: str, pipeline: PipelineConfig, token: Optional[str] = None, team_id: str = '') -> None`
 
 Restart a running pipeline with a new configuration. Looks up the existing task by project/source, terminates it, and starts a new execution in one server round-trip. All arguments are keyword-only.
 
@@ -485,6 +498,7 @@ Restart a running pipeline with a new configuration. Looks up the existing task 
 - `source` (str): The source component identifier
 - `pipeline` (PipelineConfig): The pipeline configuration to restart with
 - `token` (str, optional): Existing task token; resolved server-side if omitted
+- `team_id` (str, optional): Addresses a team's deploy run
 
 **Raises:** `RuntimeError` if the restart fails.
 
@@ -498,7 +512,7 @@ await client.restart(
 )
 ```
 
-##### `async get_task_token(project_id: str, source: str) -> str | None`
+##### `async get_task_token(project_id: str, source: str, *, team_id: str = '') -> str | None`
 
 Resolve a running task's token from its project ID and source component. The token is required for operations like `terminate()` and `restart()`. Returns `None` if no task is currently running for the given project/source.
 
@@ -506,6 +520,7 @@ Resolve a running task's token from its project ID and source component. The tok
 
 - `project_id` (str): The project identifier
 - `source` (str): The source component identifier
+- `team_id` (str, optional): Addresses a team's deploy run
 
 **Returns:** The task token string, or `None` if no running task was found.
 
@@ -614,14 +629,23 @@ response = await client.chat(token='chat-token', question=question)
 
 #### Event Methods
 
-##### `async set_events(token: str, event_types: List[str]) -> None`
+##### `async set_events(token: str, event_types: List[str], pipe_id: int = None) -> None`
 
-Subscribe to specific types of events from the server.
+**Deprecated** — use `add_monitor` / `remove_monitor` instead. Subscribe to specific types of events from the server.
 
 **Parameters:**
 
 - `token` (str): Task token of the pipeline
 - `event_types` (list): List of event type names
+- `pipe_id` (int, optional): Restrict the subscription to one pipe
+
+##### `async add_monitor(key: Dict[str, Any], types: List[str]) -> None`
+
+Add a monitor subscription. Types for an existing key are merged via reference counting.
+
+##### `async remove_monitor(key: Dict[str, Any], types: List[str]) -> None`
+
+Remove a monitor subscription. A type is unsubscribed from the server only when its reference count reaches 0.
 
 **Example:**
 
@@ -664,12 +688,20 @@ Question builder for AI chat operations.
 #### Constructor
 
 ```python
-Question(expectJson: bool = False)
+Question(
+    type: QuestionType = QuestionType.QUESTION,
+    filter: DocFilter = None,
+    expectJson: bool = False,
+    role: str = '',
+)
 ```
 
 **Parameters:**
 
+- `type` (QuestionType, optional): `QUESTION`, `SEMANTIC`, `KEYWORD`, `GET`, or `PROMPT` (default: `QUESTION`)
+- `filter` (DocFilter, optional): Document filter to scope retrieval
 - `expectJson` (bool, optional): Whether to expect JSON response (default: False)
+- `role` (str, optional): Role text for the AI (default: `''`)
 
 #### Methods
 
@@ -755,7 +787,8 @@ pipeline = {
 ```python
 {
     'name': str,  # Result identifier (UUID)
-    'location': str,  # Storage location (optional)
+    'path': str,  # Storage path
+    'objectId': str,  # Object identifier
     'result_types': dict,  # Result type mapping (optional)
     # Additional dynamic fields based on result_types
 }
@@ -765,9 +798,12 @@ pipeline = {
 
 ```python
 {
-    'state': str,  # 'running', 'completed', 'failed', 'terminated'
-    'progress': float,  # Progress percentage 0-100 (optional)
-    'message': str,  # Status message (optional)
+    'state': int,  # TASK_STATE value (NONE=0 ... RUNNING=3 ... COMPLETED=5, CANCELLED=6)
+    'completed': bool,  # True when the task has finished
+    'completedCount': int,  # Items completed
+    'totalCount': int,  # Items total
+    'exitCode': int,  # Exit code
+    'status': str,  # Status message
     # Additional status fields
 }
 ```
@@ -994,12 +1030,12 @@ import asyncio
 
 # Request status
 status = await client.get_task_status(token)
-state = status.get('state')  # 'running', 'completed', 'failed', etc.
+state = status.get('state')  # TASK_STATE int (NONE=0 ... RUNNING=3 ... COMPLETED=5, CANCELLED=6)
 
 # Poll for progress
 while True:
     status = await client.get_task_status(token)
-    if status['state'] in ['completed', 'failed']:
+    if status.get('completed'):
         break
     await asyncio.sleep(1)
 ```
@@ -1078,8 +1114,8 @@ DAPException                      (base; wraps DAP error responses)
 
 Which methods raise what:
 
-- `connect()` / `attach()` / `login()`: `ConnectionException`, or `AuthenticationException` on bad credentials
-- `use()`: `ValidationException` for a bad config, `ExecutionException` if the pipeline fails to start
+- `connect()` / `attach()` / `login()`: built-in `ConnectionError` on transport failure, or `AuthenticationException` on bad credentials (`ConnectionException` is declared but not raised today)
+- `use()`: `ValueError` for a bad config, `FileNotFoundError` for a missing file, `RuntimeError` if the pipeline fails to start (`ValidationException`/`ExecutionException` are declared but not raised today)
 - `send()` / `send_files()` / `pipe()` writes: `PipeException` on transfer failure (also catchable as `RuntimeError`)
 - `terminate()` / `restart()`: raise `RuntimeError` on failure
 

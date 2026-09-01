@@ -1,106 +1,147 @@
 # audio_transcribe
 
-A RocketRide audio filter node that transcribes spoken audio or video to text using OpenAI Whisper.
+A RocketRide audio node that transcribes incoming audio or video streams into
+text with the configured Whisper backend.
+
+## About Whisper
+
+Whisper is the transcription backend constructed by this node. The node uses
+it to turn buffered PCM audio into timestamped text segments.
 
 ## What it does
 
-Receives an audio or video stream, extracts the audio track as 16 kHz mono PCM, buffers it in 60-second chunks (configurable — see `chunk_duration`), and runs Whisper with built-in voice activity detection (VAD). Segments are merged until they end in terminal punctuation (`.`, `?`, `!`), so output arrives as whole sentences, each carrying the timestamp of its first segment.
+The node accepts `audio` or `video`, extracts the audio track as 16 kHz mono
+PCM, buffers it in chunks of `chunk_duration` seconds (default 60), and
+transcribes each chunk with Whisper using built-in Silero voice-activity
+detection. Consecutive segments are merged until one ends in terminal
+punctuation (`.`, `?`, `!`), so the `text` lane carries whole sentences, each
+stamped with the timestamp of its first segment. Pick it when a pipeline
+needs spoken content as text, rather than local playback or speech synthesis.
+Transcription runs through `ai.common.models.Whisper`: it routes to the model
+server when the engine is started with `--modelserver`, otherwise it runs
+locally via `faster-whisper`; no API key is required either way. When a
+`documents` listener is attached, it also writes one document per merged
+sentence; the declared lanes remain the `text` outputs below.
 
-Uses `ai.common.models.Whisper`: transcription routes to the model server when the engine is started with `--modelserver`, otherwise it runs locally via `faster-whisper`. No API key is required either way. Decoding and VAD are configurable per request — see `beam_size` and the `vad_*` fields below; the defaults reproduce the behaviour this node had before they were exposed. Transcription calls are serialized through a global lock so a single loaded model is shared safely across instances.
+## Lanes
 
-Models are downloaded from HuggingFace on first use. GPU is used automatically when available; `compute_type` picks the precision of the loaded weights and defaults to `float16`, which CTranslate2 downgrades to `int8` on CPU.
-
----
-
-## Configuration
-
-### Lanes
-
-| Input lane | Output lane | Behaviour |
-|------------|-------------|-----------|
-| `audio`    | `text`      | Transcribed sentences, one per segment |
-| `video`    | `text`      | Audio track is extracted from the video and transcribed |
-
-When a `documents` listener is attached, the node also emits one document per merged sentence with `chunkId` (sequential per stream, reset on each new stream) and `time_stamp` (seconds from stream start) in the document metadata, plus `metadata.source` (the source audio's media detail — `source_mime`, `duration`, `sample_rate`, …) and `metadata.name` = `<audio-stem>.segment<N>.txt` when the input carried a stream descriptor.
-
-### Fields
-
-| Field | Type | Description |
-|---|---|---|
-| `profile` | string | Default "default". The model preset this node runs. Every other field below is stored per profile |
-| `model` | string | Defaults to the selected profile's model. Overrides it when set |
-| `language` | string | Default "en". ISO 639-1 code of the spoken language |
-| `compute_type` | string | Default "float16". CTranslate2 weight precision: `float16`, `int8`, `int8_float16` or `float32`. `float16` needs a GPU and falls back to `int8` on CPU |
-| `chunk_duration` | number | Default 60. Seconds of audio to buffer before sending a chunk to Whisper |
-| `beam_size` | number | Default 5. Beam size for decoding. 1 is greedy (fastest); higher is slower and usually more accurate |
-| `vad_filter` | boolean | Default true. Use Whisper's built-in Silero VAD to drop non-speech before transcribing |
-| `vad_threshold` | number | Default 0.5. Silero speech probability above which audio counts as speech (0-1) |
-| `vad_min_silence_duration_ms` | number | Default 500. Silence this long ends a speech chunk |
-| `vad_speech_pad_ms` | number | Default 400. Padding added to each side of a detected speech chunk |
-| `vad_max_speech_duration_s` | number | Default 0. Split speech chunks longer than this. 0 means no limit |
-
-The five `vad_*` fields map onto faster-whisper's `VadOptions`. They are merged over the
-node's defaults rather than replacing them, so setting one leaves the others alone. Note
-`vad_threshold` and `vad_speech_pad_ms` accept `0` as a real value; only
-`vad_max_speech_duration_s` treats `0` specially, as "no limit".
-
-### Removed fields
-
-`silence_threshold`, `min_seconds`, `max_seconds` and `vad_level` were declared but read
-by nothing, and are gone as of #1809. They predate the move to faster-whisper's built-in
-Silero VAD:
-
-| Removed | Replacement |
-|---|---|
-| `vad_level` (webrtcvad 0-3 aggressiveness) | `vad_threshold` (Silero 0-1 speech probability) |
-| `silence_threshold` (seconds) | `vad_min_silence_duration_ms` |
-| `min_seconds` / `max_seconds` | `chunk_duration`, which is actually wired up. There is no second, higher threshold: it would only mean something with a silence test between the two, and pause handling belongs to Whisper's VAD |
-
-Configs that still carry them keep working: nothing validates node config keys, so the
-unknown values are ignored. There is no automatic translation to the replacements, since
-that would change transcripts for anyone who had set them.
-
----
-
-## Models
-
-| Model      | Notes |
-|------------|-------|
-| `tiny`     | Fastest, least accurate |
-| `base`     | Fast, low accuracy (default) |
-| `small`    | Medium speed and accuracy |
-| `medium`   | Slower, high accuracy |
-| `large-v3` | Slowest, highest accuracy |
-
----
+| Lane in | Lane out | Description |
+| --- | --- | --- |
+| `audio` | `text` | Transcribe the audio stream into merged text sentences. |
+| `video` | `text` | Transcribe audio decoded from the video stream into merged text sentences. |
 
 ## Profiles
 
-The node ships one profile per model size (`tiny`, `base`, `small`, `medium`, `large-v3`) plus `default`, which is an alias for `base`. Only the model and `language: en` differ; everything else comes from the field defaults.
+Default: **Default (Base)** (`default`), an alias for the `base` model.
 
-Pick one with the **Model Profile** selector. Each profile owns a full copy of the fields above, stored under its own key, so editing `beam_size` on `medium` leaves `tiny`'s settings untouched:
+| Profile | Model | Context |
+| --- | --- | --- |
+| `default` **(default)** | `base` | Alias for the base model. |
+| `tiny` | `tiny` | Fastest, least accurate. |
+| `base` | `base` | Fast, low accuracy. |
+| `small` | `small` | Medium speed and accuracy. |
+| `medium` | `medium` | Slower, high accuracy. |
+| `large-v3` | `large-v3` | Slowest, highest accuracy. |
 
-```json
-{
-  "profile": "medium",
-  "medium": { "beam_size": 1, "language": "de" }
-}
-```
+Each profile owns a full copy of the configuration fields below, stored under
+its own key, so editing `beam_size` on `medium` leaves `tiny`'s settings
+untouched. A config with no `profile` key keeps working: it resolves against
+`default`, whether its values sit at the top level or inside a
+`"default": { … }` object.
 
-A config with no `profile` key keeps working: it resolves against `default`, whether its values sit at the top level or inside a `"default": { … }` object.
+## Configuration
 
-Two bugs are worth knowing about because their shape explains the current design:
+Pick a profile with the **Model Profile** selector; only the model and
+`language: en` differ between profiles, and everything else comes from the
+field defaults, which reproduce the behavior this node had before the
+decoding and VAD fields were exposed. Most users only need the profile and
+`language`. Models are downloaded from HuggingFace on first use, and the GPU
+is used automatically when available.
 
-- Before #1809 the profiles set `mode`, but the node reads `model` — so every profile silently loaded `base`, whichever one you picked.
-- Before #2067 the selector was hidden and listed only `default`, so five of the six profiles were unreachable from the UI. The `model` field is declared once **per profile**, each defaulted to that profile's own model. A single shared field defaulted to `base` would be written into the selected profile's object on the first save and win the merge — silently downgrading `medium` to `base` with nothing logged.
+### Model
 
----
+Declared once per profile and defaulted to that profile's own model;
+setting it overrides the profile's choice. It is deliberately not a single
+shared field: a shared field defaulted to `base` would be written into the
+selected profile's object on the first save and win the merge — silently
+downgrading `medium` to `base` with nothing logged.
 
-## Language
+### Language
 
-Defaults to English (`en`). Change the `language` config value to transcribe other languages. Any language supported by Whisper is accepted.
+ISO 639-1 code of the spoken language (default `en`). It must match the
+audio; a mismatch produces garbled, half-translated text.
 
----
+### Compute Type
+
+CTranslate2 weight precision for the loaded model: `float16` (default),
+`int8`, `int8_float16`, or `float32`. `float16` needs a GPU; CTranslate2
+downgrades it to `int8` on CPU.
+
+### Chunk Duration
+
+Seconds of audio to buffer before sending a chunk to Whisper (default 60).
+Longer chunks give Whisper more context per call; shorter chunks reduce
+latency to the first transcript.
+
+### Beam Size
+
+Beam size for decoding (default 5). `1` is greedy and fastest; higher values
+are slower and usually more accurate.
+
+### VAD fields
+
+`vad_filter` (default true) uses Whisper's built-in Silero VAD to drop
+non-speech before transcribing. The other four map onto faster-whisper's
+`VadOptions`: `vad_threshold` (default 0.5, Silero speech probability above
+which audio counts as speech), `vad_min_silence_duration_ms` (default 500,
+silence this long ends a speech chunk), `vad_speech_pad_ms` (default 400,
+padding added to each side of a detected speech chunk), and
+`vad_max_speech_duration_s` (default 0, split speech chunks longer than
+this). They are merged over the node's defaults rather than replacing them,
+so setting one leaves the others alone. `vad_threshold` and
+`vad_speech_pad_ms` accept `0` as a real value; only
+`vad_max_speech_duration_s` treats `0` specially, as "no limit".
+
+## Notes
+
+### Segmentation and documents
+
+Transcription calls are serialized through a global lock so a single loaded
+model is shared safely across instances. The transcriber combines
+consecutive segments until one ends in `.`, `?`, or `!`, then writes that
+text with the timestamp of its first segment. For document output, each
+document carries `chunkId` (sequential per stream, reset on each new stream)
+and `time_stamp` (seconds from stream start) in its metadata, plus
+`metadata.source` (the source audio's media detail — `source_mime`,
+`duration`, `sample_rate`, …) and `metadata.name` =
+`<audio-stem>.segment<N>.txt` when the input carried a stream descriptor.
+
+### Removed fields
+
+`silence_threshold`, `min_seconds`, `max_seconds` and `vad_level` were
+declared but read by nothing, and are gone as of #1809. They predate the
+move to faster-whisper's built-in Silero VAD: `vad_level` (webrtcvad 0-3
+aggressiveness) is replaced by `vad_threshold` (Silero 0-1 speech
+probability), `silence_threshold` (seconds) by
+`vad_min_silence_duration_ms`, and `min_seconds`/`max_seconds` by
+`chunk_duration`, which is actually wired up. Configs that still carry the
+old keys keep working: nothing validates node config keys, so the unknown
+values are ignored. There is no automatic translation to the replacements,
+since that would change transcripts for anyone who had set them.
+
+### Profile history
+
+Two fixed bugs explain the current design. Before #1809 the profiles set
+`mode`, but the node reads `model` — so every profile silently loaded
+`base`, whichever one you picked. Before #2067 the profile selector was
+hidden and listed only `default`, so five of the six profiles were
+unreachable from the UI.
+
+## Upstream docs
+
+- [Whisper repository](https://github.com/openai/whisper)
+- [faster-whisper repository](https://github.com/SYSTRAN/faster-whisper)
+
 
 <!-- ROCKETRIDE:GENERATED:PARAMS START -->
 <!-- Generated by nodes:docs-generate. Do not edit by hand. -->

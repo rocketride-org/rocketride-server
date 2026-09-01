@@ -1,63 +1,68 @@
 # thumbnail
 
-A RocketRide filter node that generates a 128×128 PNG thumbnail from an input image.
+A RocketRide image filter that turns an existing image or Image document into a
+compact 128×128 PNG thumbnail. Choose it when downstream preview, storage, or
+vision work needs a fixed-size image rather than the source resolution.
+
+## About Pillow
+
+Pillow is a Python imaging library. This node uses the shared Pillow-based image
+helper to decode input images, resize them, crop a thumbnail, and encode PNG
+output.
 
 ## What it does
 
-Resizes incoming images into compact, fixed-size thumbnails. It accepts either a raw
-image stream or Image documents, and outputs the resized result downstream. Useful for
-creating lightweight image previews before passing them to a vision LLM, reducing token
-usage and processing time compared to full-resolution images.
+The node accepts raw images on the `image` lane and Image documents on the
+`documents` lane, then produces thumbnail versions for the lanes declared by the
+pipeline. It is a pure transform with no configuration or agent-tool surface.
+Use it after an image is already available and you need a compact, consistently
+sized derivative; it does not select frames or acquire images from another
+source.
 
-Uses **Pillow** (via the shared `ai.common.image.ImageProcessor` helper, the node itself
-declares no extra requirements). Thumbnails are produced by stepwise downscaling (halving
-until the larger side is ≤ 256 px, which avoids aliasing), an aspect-ratio-preserving
-resize, and a final **center crop to exactly 128×128 pixels**. Output is always encoded
-as PNG, preserving transparency.
+## Lanes
 
-The node is registered as a `filter` with class type `image` and has no configurable
-fields.
-
----
+| Lane in | Lane out | Description |
+| --- | --- | --- |
+| `image` | `documents` | Emit the thumbnail as an Image document. |
+| `image` | `image` | Emit the thumbnail as a raw PNG image stream. |
+| `documents` | `documents` | Replace each supported Image document with its thumbnail. |
 
 ## Configuration
 
-### Lanes
+This node has no configuration fields. Its output size is fixed by the
+implementation, so connect the input and only attach the output lane or lanes
+your pipeline needs.
 
-| Lane in     | Lane out    | Description                           |
-| ----------- | ----------- | ------------------------------------- |
-| `image`     | `image`     | Resize raw image to thumbnail         |
-| `image`     | `documents` | Resize raw image and emit as document |
-| `documents` | `documents` | Resize image documents to thumbnail   |
+## Notes
 
-### `image` lane in
+### Thumbnail output
 
-Raw image data arrives as a chunked stream (`BEGIN` / `WRITE` / `END`). The node buffers
-all chunks, loads the complete image once the stream ends, and generates the thumbnail.
-It then emits on whichever output lanes have listeners attached:
+The shared image helper works on a copy, progressively reduces very large
+images, preserves aspect ratio during its resize step, then center-crops the
+result to exactly 128×128 pixels. Both raw-image and document paths encode the
+result as PNG; the raw-image output therefore announces `image/png` even if the
+input used a different MIME type.
 
-- **`documents` listener**: the thumbnail is base64-encoded (PNG) and emitted as a
-  single `Doc` of type `Image` with fresh metadata (`chunkId`, `isTable: false`,
-  `tableId: 0`, `isDeleted: false`), where `chunkId` counts the object's thumbnails — an
-  object arriving as several image streams gets one per stream, numbered from zero again
-  with each object — plus a `metadata.source` provenance chain (the input
-  image's media detail, nesting the input's own `source` underneath, so the chain grows one
-  hop per transform) and `metadata.name` (inherited from the input, else `<image-stem>.png`)
-  when the input carried a stream descriptor.
-- **`image` listener**: the thumbnail is emitted as raw PNG bytes in a new
-  `BEGIN` / `WRITE` / `END` stream as `image/png` (the encoded format, regardless of the input
-  mime); the `BEGIN` carries the same `source` provenance chain and `name` as an enrichment
-  descriptor, so both lanes stay consistent.
+### Raw image streams
 
-### `documents` lane in
+The `image` lane buffers the input from `BEGIN` through `WRITE` and processes
+it at `END`. If `documents` is connected, it emits one base64-encoded `Image`
+document with new thumbnail metadata and preserved source provenance. If
+`image` is connected, it emits an enriched PNG stream with the thumbnail width
+and height. When both lanes have listeners, it emits both forms.
 
-Each incoming `Doc` of type `Image` has its base64 content decoded, thumbnailed, and
-re-emitted as a new `Image` document with the **original metadata preserved**. Documents
-are skipped with a warning (not an error) when they are not of type `Image`, have empty
-content, or fail to decode/process, the remaining documents in the batch are still
-processed.
+### Image documents
 
-None. The node's shape defines no properties; the thumbnail size (128×128) is fixed.
+Only documents whose `type` is `Image` and whose `page_content` is non-empty
+are processed. Unsupported documents, empty content, and document-level decode
+or processing errors produce a warning and are skipped, while the node
+continues processing the remaining documents in the batch. The emitted document
+keeps a copy of the original metadata and adds an image-source layer for the
+new thumbnail.
+
+## Upstream docs
+
+- [Pillow documentation](https://pillow.readthedocs.io/)
 
 ---
 

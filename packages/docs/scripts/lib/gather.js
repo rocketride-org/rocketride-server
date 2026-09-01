@@ -23,6 +23,18 @@ const { allDocIds, docTitles, isValidMount, mountSlots, NODES_DIR } = require('.
 const NODES_GLOB = 'nodes/src/nodes/*/README.md';
 const GENERATED_START = '<!-- ROCKETRIDE:GENERATED:PARAMS START -->';
 const DOCS_GLOB = '{nodes,packages,apps}/**/docs/**/*.{md,mdx}';
+// Top-level docs/ tree mounts (docs consolidation): source dir -> spine slot.
+// A README.md inside these roots is a package-README export source
+// (docs:export) and is normally not a site page — except when the mount root
+// has no index.md/mdx, in which case its README.md doubles as the mount's page
+// (GitHub-standard naming; see the sweep below).
+const DOCS_ROOT_MOUNTS = [
+	{ source: 'docs/public/typescript', mount: 'clients/typescript' },
+	{ source: 'docs/public/python', mount: 'clients/python' },
+	{ source: 'docs/public/vscode', mount: 'clients/vscode' },
+	{ source: 'docs/public/mcp/stdio', mount: 'connect/mcp/stdio' },
+	{ source: 'docs/public/mcp/http', mount: 'connect/mcp/http' },
+];
 // Node sources and node tests are excluded from the package-mount pass: node
 // markdown is the nodes contributor's domain (staged when the node's top-level
 // README carries the generated markers, and not otherwise), and a node
@@ -32,6 +44,29 @@ const DOCS_GLOB = '{nodes,packages,apps}/**/docs/**/*.{md,mdx}';
 const IGNORE = ['**/node_modules/**', '**/build/**', '**/dist/**', 'packages/docs/**', 'nodes/src/nodes/**', 'nodes/test/**'];
 
 const PLACEHOLDER_NOTE = '> **Placeholder.** Generated stub for the documentation spine. Real content lands in a later phase.';
+
+// Doc ids allowed to publish as a placeholder ("coming soon") page.
+//
+// A doc id is also the public URL, so a placeholder is almost never intentional:
+// ensurePlaceholders() writes one for any spine slot with no backing file, which
+// is exactly what a page moved without its spine.js id (or the reverse) looks
+// like. The gate below turns that silent publish into a build failure.
+//
+// Seeded EMPTY on 2026-08-14: `docs:gather` staged 180 pages, none of them a
+// placeholder. Add an id here only when a stub page is genuinely wanted, with a
+// comment naming who fills it in — do not add ids to quiet a failing build.
+const EXPECTED_PLACEHOLDERS = [
+	// Placeholder at gather time only: docs:release-notes overwrites it with a
+	// page generated from GitHub releases, unless the API is unreachable.
+	'support/release-notes',
+];
+
+// Structural, never a spine/path desync: ensurePlaceholders() emits
+// `nodes/example` only when the node corpus produced no pages at all (docs-only
+// checkout, or nodes:docs-generate never ran). That condition is already visible
+// in the task's "Staged N pages, N nodes" line, so it must not be reported as a
+// broken spine id.
+const STRUCTURAL_PLACEHOLDERS = [`${NODES_DIR}/example`];
 
 // Node category grouping for the "Nodes" sidebar — mirrors the
 // editor canvas palette. Each node's primary `classType` (from its
@@ -107,7 +142,11 @@ function extractDescription(text) {
 	const m = /"description"\s*:\s*\[([^\]]*)\]/.exec(text);
 	if (!m) return '';
 	const parts = m[1].match(/"((?:[^"\\]|\\.)*)"/g) || [];
-	const full = parts.map((s) => s.slice(1, -1)).join(' ').replace(/\s+/g, ' ').trim();
+	const full = parts
+		.map((s) => s.slice(1, -1))
+		.join(' ')
+		.replace(/\s+/g, ' ')
+		.trim();
 	const dot = full.indexOf('. ');
 	return dot >= 0 ? full.slice(0, dot + 1) : full;
 }
@@ -178,7 +217,24 @@ function yamlStr(v) {
  * swizzle) instead of a content section. Everything else in README.md renders
  * verbatim, so the page, README.md, and the LLM .md surface carry the same content.
  */
-function stageNodeMarkdown(content, { slug, title }) {
+// Node READMEs reference their shipped example by bare relative name
+// (example.png / example.pipe, per docs/development/node-readme-schema.md) so
+// node folders stay self-contained and GitHub renders them natively. Staged
+// site pages have no adjacent assets, so rewrite those two refs to
+// repository URLs — same develop-pinned pattern as the generated Source link.
+const REPO_RAW = 'https://raw.githubusercontent.com/rocketride-org/rocketride-server/develop';
+const REPO_BLOB = 'https://github.com/rocketride-org/rocketride-server/blob/develop';
+
+function rewriteExampleRefs(body, nodeRel) {
+	if (!nodeRel) return body;
+	// Matches both the markdown target form — ](example.png) — and the HTML
+	// attribute form used for centred/sized embeds: src="example.png",
+	// href="example.pipe". The closing delimiter is kept via lookahead.
+	const rewrite = (name, base) => (s) => s.replace(new RegExp(String.raw`(\]\(|src=["']|href=["'])(?:\./)?${name}(?=[)"'])`, 'g'), (_, prefix) => `${prefix}${base}/${nodeRel}/${name}`);
+	return [rewrite('example.png', REPO_RAW), rewrite('example.pipe', REPO_BLOB)].reduce((s, f) => f(s), body);
+}
+
+function stageNodeMarkdown(content, { slug, title, nodeRel }) {
 	let fmLines = [];
 	let body = content;
 	const fm = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/.exec(content);
@@ -204,7 +260,7 @@ function stageNodeMarkdown(content, { slug, title }) {
 	if (title != null && !has('title')) inject.push(`title: ${yamlStr(title)}`);
 	if (sourceUrl && !has('source_url')) inject.push(`source_url: ${yamlStr(sourceUrl)}`);
 	const merged = [...inject, ...fmLines].filter((l) => l.trim() !== '');
-	return `---\n${merged.join('\n')}\n---\n\n${body}`;
+	return `---\n${merged.join('\n')}\n---\n\n${rewriteExampleRefs(body, nodeRel)}`;
 }
 
 /**
@@ -243,7 +299,10 @@ function pageDescription(content) {
 				// YAML block scalar (`description: >`, `|`, `>-`, …). The text is the
 				// indented run that follows; the indicator itself is not the value.
 				const block = [];
-				for (const line of fm[1].slice(d.index + d[0].length).split(/\r?\n/).slice(1)) {
+				for (const line of fm[1]
+					.slice(d.index + d[0].length)
+					.split(/\r?\n/)
+					.slice(1)) {
 					if (!/^[ \t]+\S/.test(line)) break;
 					block.push(line.trim());
 				}
@@ -275,7 +334,11 @@ function pageDescription(content) {
 		}
 		para.push(t);
 	}
-	const prose = para.join(' ').replace(/\[([^\]]+)\]\([^)]*\)/g, '$1').replace(/[*`_]/g, '').trim();
+	const prose = para
+		.join(' ')
+		.replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+		.replace(/[*`_]/g, '')
+		.trim();
 	const m = /^(.+?[.!?])(\s|$)/.exec(prose);
 	return (m ? m[1] : prose).slice(0, 200).trim();
 }
@@ -293,7 +356,7 @@ function headingTitle(content) {
 function docIdFor(mount, rel) {
 	let relNoExt = rel.replace(/\.(md|mdx)$/i, '');
 	const base = path.posix.basename(relNoExt);
-	if (base === 'index') {
+	if (base === 'index' || base === 'README') {
 		const dir = path.posix.dirname(relNoExt);
 		relNoExt = dir === '.' ? '' : dir;
 	}
@@ -359,9 +422,12 @@ function gitLastUpdate(srcAbs) {
 	if (_gitDateCache.has(srcAbs)) return _gitDateCache.get(srcAbs);
 	let date = null;
 	try {
-		date = execFileSync('git', ['log', '-1', '--format=%cs', '--', srcAbs], {
-			cwd: path.dirname(srcAbs), encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'],
-		}).trim() || null;
+		date =
+			execFileSync('git', ['log', '-1', '--format=%cs', '--', srcAbs], {
+				cwd: path.dirname(srcAbs),
+				encoding: 'utf8',
+				stdio: ['ignore', 'pipe', 'ignore'],
+			}).trim() || null;
 	} catch {
 		/* not a git checkout — leave null; the page simply carries no date */
 	}
@@ -515,7 +581,7 @@ async function gather({ projectRoot, contentStaticDir, contentDir, staticDir, mo
 			// index so the parent label is clickable.
 			const folderRel = toPosix(path.join(NODES_DIR, cat.slug, name));
 			await writeFileEnsure(path.join(contentDir, folderRel, '_category_.json'), JSON.stringify({ label, collapsed: true, link: { type: 'doc', id: `${folderRel}/index` } }, null, 2));
-			await writeFileEnsure(path.join(contentDir, folderRel, 'index.md'), stampLastUpdate(stageNodeMarkdown(content, { slug: `/${route}`, title: existingTitle ? null : label }), gitLastUpdate(srcAbs)));
+			await writeFileEnsure(path.join(contentDir, folderRel, 'index.md'), stampLastUpdate(stageNodeMarkdown(content, { slug: `/${route}`, title: existingTitle ? null : label, nodeRel: toPosix(path.relative(projectRoot, nodeDir)) }), gitLastUpdate(srcAbs)));
 			await writeFileEnsure(path.join(staticDir, `${route}.md`), content);
 			manifest.push({ id: route, route: `/${route}`, title: label, mdSibling: `/${route}.md`, source: srcAbs, node: name, category: cat.label, categoryOrder: cat.position, description });
 			const serviceDescriptions = await readServiceDescriptions(nodeDir);
@@ -528,7 +594,7 @@ async function gather({ projectRoot, contentStaticDir, contentDir, staticDir, mo
 				const vExistingTitle = frontMatterTitle(vcontent);
 				const vlabel = vExistingTitle || nodeLabel(variant, '');
 				const vdescription = variantDescription(variant, serviceDescriptions);
-				await writeFileEnsure(path.join(contentDir, folderRel, `${variant}.md`), stampLastUpdate(stageNodeMarkdown(vcontent, { slug: `/${vroute}`, title: vExistingTitle ? null : vlabel }), gitLastUpdate(vsrcAbs)));
+				await writeFileEnsure(path.join(contentDir, folderRel, `${variant}.md`), stampLastUpdate(stageNodeMarkdown(vcontent, { slug: `/${vroute}`, title: vExistingTitle ? null : vlabel, nodeRel: toPosix(path.relative(projectRoot, path.dirname(vsrcAbs))) }), gitLastUpdate(vsrcAbs)));
 				await writeFileEnsure(path.join(staticDir, `${vroute}.md`), vcontent);
 				manifest.push({ id: vroute, route: `/${vroute}`, title: vlabel, mdSibling: `/${vroute}.md`, source: vsrcAbs, node: name, variant, category: cat.label, categoryOrder: cat.position, description: vdescription });
 			}
@@ -538,14 +604,36 @@ async function gather({ projectRoot, contentStaticDir, contentDir, staticDir, mo
 		// fills in when missing, and the body H1 is dropped to avoid a duplicate
 		// heading. Always a real write — a symlink can't carry the edits.
 		const destAbs = path.join(contentDir, NODES_DIR, cat.slug, `${name}.md`);
-		await writeFileEnsure(destAbs, stampLastUpdate(stageNodeMarkdown(content, { slug: `/${route}`, title: existingTitle ? null : label }), gitLastUpdate(srcAbs)));
+		await writeFileEnsure(destAbs, stampLastUpdate(stageNodeMarkdown(content, { slug: `/${route}`, title: existingTitle ? null : label, nodeRel: toPosix(path.relative(projectRoot, nodeDir)) }), gitLastUpdate(srcAbs)));
 		await writeFileEnsure(path.join(staticDir, `${route}.md`), content);
 		manifest.push({ id: route, route: `/${route}`, title: label, mdSibling: `/${route}.md`, source: srcAbs, node: name, category: cat.label, categoryOrder: cat.position, description });
 	}
 
-	// 3. Declared per-package mounts.
-	const contributors = discoverContributors();
-	const allDocsFiles = await glob(DOCS_GLOB, { cwd: projectRoot, nodir: true, ignore: IGNORE });
+	// 3. Declared per-package mounts, plus the central top-level docs/ tree mounts
+	//    (DOCS_ROOT_MOUNTS). README.md files under a root mount are skipped — they
+	//    are package-README export sources (docs:export) — with one exception: a
+	//    README.md at a mount root that has no index.md/mdx sibling IS the
+	//    mount's page (it may simultaneously be an export source; docs:export
+	//    just copies the file).
+	//    The sweep covers all of docs/public/, so any new .md there without a
+	//    covering mount aborts the build. docs/development/ is never swept — it
+	//    is unpublished contributor documentation, with no exceptions. Exclusions:
+	//    docs/public/product/ is the shell-authored spine (staged in pass 1, not a
+	//    mount), and docs/public/n8n/ holds only the exported README. Non-markdown
+	//    files (per-client assets/, docs/public/assets/) are never swept — the
+	//    globs match .md/.mdx only, so images need no mount coverage.
+	const contributors = discoverContributors().concat(DOCS_ROOT_MOUNTS.map((m) => ({ sourceDir: path.join(projectRoot, m.source), mount: m.mount, module: 'docs' })));
+	const packageDocsFiles = await glob(DOCS_GLOB, { cwd: projectRoot, nodir: true, ignore: IGNORE });
+	const rootDocsFiles = await glob(['docs/public/**/*.{md,mdx}'], { cwd: projectRoot, nodir: true, ignore: ['**/README.md', 'docs/public/product/**'] });
+	// The mount-root README exception described above: gather <source>/README.md
+	// as the mount's page when the mount root carries no index.md/mdx.
+	for (const m of DOCS_ROOT_MOUNTS) {
+		const readmeRel = `${m.source}/README.md`;
+		if ((await exists(path.join(projectRoot, readmeRel))) && !(await exists(path.join(projectRoot, m.source, 'index.md'))) && !(await exists(path.join(projectRoot, m.source, 'index.mdx')))) {
+			rootDocsFiles.push(readmeRel);
+		}
+	}
+	const allDocsFiles = [...packageDocsFiles, ...rootDocsFiles];
 	for (const rel of allDocsFiles) {
 		const abs = path.join(projectRoot, rel);
 		const owner = contributors.find((c) => `${abs}${path.sep}`.startsWith(`${c.sourceDir}${path.sep}`));
@@ -624,4 +712,21 @@ async function ensurePlaceholders({ contentDir, staticDir, routes, manifest }) {
 	}
 }
 
-module.exports = { gather, docIdFor, pageDescription, stampLastUpdate };
+/**
+ * Fail the build when the staged manifest carries a placeholder page nobody
+ * asked for. Called by the docs:gather action (packages/docs/scripts/tasks.js)
+ * rather than by gather() itself, so gather stays callable against a partial
+ * tree (tests, tooling) while every real build is gated.
+ * @param {Array<object>} manifest - manifest entries produced by gather().
+ * @param {string[]} [allowed] - doc ids permitted to be placeholders.
+ * @return {void}
+ * @throws {Error} listing the offending ids and the likely cause.
+ */
+function assertNoUnexpectedPlaceholders(manifest, allowed = EXPECTED_PLACEHOLDERS) {
+	const permitted = new Set([...allowed, ...STRUCTURAL_PLACEHOLDERS]);
+	const offenders = (manifest || []).filter((e) => e && e.placeholder && !permitted.has(e.id)).map((e) => e.id);
+	if (!offenders.length) return;
+	throw new Error([`docs:gather: ${offenders.length} page(s) would publish as an empty "coming soon" placeholder:`, ...offenders.map((id) => `  /${id}`), 'A doc id IS the public URL, so this almost always means a spine id and a file path are out of sync:', 'a page was moved or renamed without updating its id in packages/docs/scripts/lib/spine.js, or a spine', 'id was changed without moving the file under docs/. Fix whichever is wrong so the two match.', 'If a stub page really is intended, add its id to EXPECTED_PLACEHOLDERS in packages/docs/scripts/lib/gather.js.'].join('\n'));
+}
+
+module.exports = { gather, docIdFor, pageDescription, stampLastUpdate, assertNoUnexpectedPlaceholders, EXPECTED_PLACEHOLDERS };

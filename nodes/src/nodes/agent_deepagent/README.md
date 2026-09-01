@@ -2,6 +2,13 @@
 
 A planning-capable RocketRide agent built on the Deep Agents library, with optional managed sub-agents for hierarchical delegation.
 
+## About Deep Agents
+
+Deep Agents is an open-source agent framework built on LangChain and
+LangGraph. It layers the machinery long-running tasks need — upfront
+planning, state that persists across steps, and long-context management — on
+top of the standard tools-plus-LLM agent loop.
+
 ## What it does
 
 Runs an agent loop via `deepagents.create_deep_agent` (built on LangChain/LangGraph), which layers strategic planning, persistent state, and long-context management on top of the standard LangChain tool-calling loop. The package ships two node variants:
@@ -11,15 +18,43 @@ Runs an agent loop via `deepagents.create_deep_agent` (built on LangChain/LangGr
 
 Sub-agents are optional: with none connected, the Deep Agent behaves as a standard single-agent node. Inference is routed through the host LLM channel using a JSON envelope protocol, so any LLM that can follow JSON instructions works; native function-calling support is not required. Agent lifecycle progress (tool calls, LLM calls, agent steps) is streamed as SSE `thinking` events.
 
----
+## Example pipelines
 
-## Configuration
+**Research assistant with an HTTP tool**
 
-### Lanes
+`chat → agent_deepagent → response_answers`
 
-**Lanes (Deep Agent only):** `questions` -> `answers`. The Subagent declares no lanes; it is driven by an orchestrator, not by direct questions.
+<div align="center">
 
-### Deep Agent invoke channels
+![The Deep Agent node on the canvas with an LLM and an HTTP Request tool connected](example.png)
+
+[![Download example.pipe](https://img.shields.io/badge/example.pipe-Download-41b6e6?style=for-the-badge)](example.pipe)
+
+</div>
+
+`llm_anthropic` is wired to `llm` and `tool_http_request` to `tool`. Chat
+questions reach the agent, which can call the HTTP tool before returning an
+answer.
+
+**Hierarchical team with specialists**
+
+`webhook → agent_deepagent → response`, plus two Deep Agent Subagents on the
+`deepagent` channel: a researcher (tools: `tool_exa_search`) and a coder
+(tools: `tool_python`, `tool_github`), each with its own `llm`. The
+orchestrator breaks the task apart and delegates each piece to the sub-agent
+whose Description matches, and the plural `tool_calls` envelope lets it
+delegate to several sub-agents in parallel in a single turn.
+
+**Agent-callable research service**
+
+A parent agent (e.g. `agent_rocketride`) with this Deep Agent connected as a
+tool. With a filled-in Agent description, the parent invokes
+`<nodeId>.run_agent` when it hits a question needing deep multi-step
+research rather than attempting it in its own loop.
+
+## Connections
+
+### Deep Agent
 
 | Channel     | Required    | Description                                                  |
 |-------------|-------------|--------------------------------------------------------------|
@@ -27,7 +62,7 @@ Sub-agents are optional: with none connected, the Deep Agent behaves as a standa
 | `tool`      | no          | Tools available to the agent (via control-plane invoke)      |
 | `deepagent` | no          | Deep Agent Subagent nodes for hierarchical delegation        |
 
-### Deep Agent Subagent invoke channels
+### Deep Agent Subagent
 
 | Channel | Required    | Description                                    |
 |---------|-------------|------------------------------------------------|
@@ -36,32 +71,71 @@ Sub-agents are optional: with none connected, the Deep Agent behaves as a standa
 
 The sub-agent's LLM and tool channels are independent of the orchestrator's. When the orchestrator delegates, the sub-agent's LLM and tool calls are routed back through this node's own channels.
 
-Both variants use an **Advanced Mode** toggle (default `Off`): when Off, the node is edited through the Instructions list; when On, the prompt fields are exposed directly.
+## Lanes
 
-### Deep Agent
+| Lane in     | Lane out  | Description                                     |
+| ----------- | --------- | ----------------------------------------------- |
+| `questions` | `answers` | Send the agent a task, receive its final answer |
 
-| Field | Type | Description |
-|---|---|---|
-| `description` | string | Default empty. The orchestrator reads this description to decide when to delegate to this sub-agent. Keep it specific and action-oriented, this is the only signal the orchestrator uses to pick a sub-agent. |
-| `system_prompt` | string | Default empty. Instructions that define this sub-agent's role and behaviour. Leave blank to use the default. |
-| `instructions` | array | Additional instructions to guide this sub-agent. Each line is appended to the system prompt. |
-| `advanced_mode` | boolean | Default false. When enabled, replace the Instructions list with a direct System Prompt field for full control. |
-| `agent_description` | string | Default empty. What does this agent do? Describe its purpose and capabilities, this helps parent agents select and invoke it correctly. |
+Deep Agent only. The Subagent declares no lanes; it is driven by an
+orchestrator, not by direct questions.
 
-### Deep Agent Subagent
+## As a tool
 
-| Field           | Type / Default   | Description                                                                                                      |
-|-----------------|------------------|------------------------------------------------------------------------------------------------------------------|
-| `description`   | string, `""`     | Always visible. The orchestrator reads this to decide when to delegate; it is the only signal used to pick a sub-agent. Keep it specific and action-oriented. |
-| `advanced_mode` | boolean, `false` | Off shows `instructions`; On shows `system_prompt` for full control.                                             |
-| `instructions`  | array, `[]`      | Additional instructions; each line is appended to the system prompt. (Advanced Mode Off)                         |
-| `system_prompt` | string, `""`     | Instructions that define this sub-agent's role and behaviour. Blank uses the built-in default. (Advanced Mode On) |
+The Deep Agent (not the Subagent) exposes itself as an invokable tool, `<nodeId>.run_agent`, so parent agents can delegate to it in nested pipelines.
 
-The final system prompt is composed as the base `system_prompt` (or the built-in fallback when blank) with each non-empty instruction appended on its own line.
+- **Input:** `{query: string, context?: object}`. `query` must be a non-empty string; `context`, when provided, is attached to the question as a `RocketRide.agent.tool_context.v1` JSON payload.
+- **Output:** `{content, meta, stack}`.
 
----
+When `agent_description` is non-empty it is included in the tool's description so parent agents can select this agent correctly.
 
-## Tool calling
+## Configuration
+
+Both variants are steered the same way: by default you add **Instructions**,
+and turning on **Advanced Mode** swaps them for direct prompt fields. The
+field-level details:
+
+### Description (Subagent)
+
+The most important field on a sub-agent. The orchestrating Deep Agent reads
+**only this text** when deciding which sub-agent gets a task — it cannot see
+the sub-agent's prompt, tools, or LLM. Keep it specific and action-oriented:
+"Searches the web and summarizes findings with sources" gets routed work;
+"helper agent" never gets picked. If a sub-agent sits idle while the
+orchestrator does everything itself, fix this field first.
+
+### Agent description (Deep Agent)
+
+The same idea one level up: when the Deep Agent is used as a tool by a parent
+agent, this text is folded into the `run_agent` tool description so the
+caller can decide when to invoke it. Leave it blank if nothing calls this
+agent as a tool.
+
+### Instructions, System prompt & Advanced Mode
+
+With Advanced Mode **off** (the default), you steer the agent by adding
+Instructions — each non-empty line is appended, on its own line, to the
+built-in system prompt that already handles planning and state. With Advanced
+Mode **on**, the Instructions list is replaced by the raw prompt fields
+(`system_prompt`, and `agent_description` on the orchestrator) for full
+control; a blank `system_prompt` falls back to the built-in default. Stay in
+default mode unless the built-in prompt is actively in your way — replacing
+it discards the planning behavior that makes Deep Agents worth choosing.
+
+### Require tool call
+
+Smaller or weaker planning models occasionally **narrate** a multi-step tool
+chain in prose instead of actually calling the tools, producing a
+plausible-looking but ungrounded answer. When this toggle is on, any run that
+produces an answer without invoking at least one tool fails with a
+`RocketRide.agent.guard.v1` error instead of delivering the ungrounded text.
+Off by default; enable it for determinism-critical pipelines. The guard
+counts real tool invocations only — internal/local reads (for example the
+wave agent's `memory.peek`) do not satisfy it.
+
+## Notes
+
+### Tool calling protocol
 
 The host LLM is opaque to the driver, so tool calling uses a JSON envelope protocol: each LLM call is prefixed with a system preamble instructing the model to output exactly one JSON object in one of three shapes:
 
@@ -75,9 +149,7 @@ Up to 3 attempts are made when the LLM produces malformed JSON, and a tolerant p
 
 Host tool descriptors are converted to LangChain `BaseTool` instances with typed Pydantic input schemas built from each tool's JSON-Schema `inputSchema`; tool execution and LLM calls are bridged off the event loop via `asyncio.to_thread` so concurrent calls do not serialize.
 
----
-
-## Hierarchical delegation
+### Hierarchical delegation
 
 Connect one or more Deep Agent Subagent nodes to the `deepagent` invoke channel to turn the Deep Agent into an orchestrator. On each run:
 
@@ -88,34 +160,14 @@ Connect one or more Deep Agent Subagent nodes to the `deepagent` invoke channel 
 
 Give each sub-agent its own LLM, tools, and a clear `description`: the description is the only signal the orchestrator uses to choose a delegate. A Subagent can be connected to multiple orchestrators simultaneously; each orchestrator independently includes it in its own hierarchical run. A `describe` failure on one node is logged and skipped, not fatal to the run.
 
----
-
-## Using as a tool
-
-The Deep Agent (not the Subagent) exposes itself as an invokable tool, `<nodeId>.run_agent`, so parent agents can delegate to it in nested pipelines.
-
-- **Input:** `{query: string, context?: object}`. `query` must be a non-empty string; `context`, when provided, is attached to the question as a `RocketRide.agent.tool_context.v1` JSON payload.
-- **Output:** `{content, meta, stack}`.
-
-When `agent_description` is non-empty it is included in the tool's description so parent agents can select this agent correctly.
-
----
-
-## Observability
+### Observability
 
 The driver emits SSE `thinking` events throughout a run: host-tool discovery count, sub-agent collection count, agent start, per-tool start/completion/error (with tool name and input length), LLM call start/completion/error, and agent thinking/done transitions.
 
----
+## Upstream docs
 
-## Fabrication guard
-
-Smaller or weaker planning models occasionally **narrate** a multi-step tool chain in
-prose instead of actually calling the tools, producing a plausible-looking but ungrounded
-answer. The optional **Require tool call** (`require_tool_call`) config field guards against
-this: when enabled, any run that produces an answer without invoking at least one tool fails
-with a `RocketRide.agent.guard.v1` error instead of delivering the ungrounded text. It is off by
-default; enable it for determinism-critical pipelines. The guard counts real tool invocations
-only — internal/local reads (for example the wave agent’s `memory.peek`) do not satisfy it.
+- [Deep Agents documentation](https://docs.langchain.com/oss/python/deepagents/overview)
+- [LangChain documentation](https://python.langchain.com/docs/)
 
 ---
 

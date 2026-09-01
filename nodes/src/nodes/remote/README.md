@@ -26,7 +26,7 @@ deployments only, not on RocketRide Cloud.
 
 ---
 
-## How it works
+### How it works
 
 `preparePipeline` (in `client/prepare_pipeline.py`) rewrites the user's simplified
 pipeline before execution, based on the selected profile:
@@ -56,9 +56,19 @@ All HTTP and WebSocket requests carry an `Authorization: Bearer <apikey>` header
 
 ---
 
+## Profiles
+
+Default: `local`, which inlines the sub-pipeline without opening a network
+connection.
+
+| Profile | Description |
+|---------|-------------|
+| `local` **(default)** | Inlines the sub-pipeline locally; no network connection is created. |
+| `remote` | Uses the preset `localhost:5565` and `xxx` API key as placeholders; replace them with the remote server details. |
+
 ## Configuration
 
-### Lanes
+### Pipeline and lane forwarding
 
 `services.client.json` declares no static lanes (`"lanes": {}`); lane wiring is derived
 from the sub-pipeline by `preparePipeline`. At runtime the client forwards these calls
@@ -76,7 +86,7 @@ pipeline tracks the local object lifecycle. Responses from the remote pipeline
 (`writeText`, `writeDocuments`, etc.) are dispatched back into the local pipeline as
 they arrive.
 
-### Fields
+### Remote endpoint and sub-pipeline
 
 Settings live under the node's `remote` configuration block; the sub-pipeline lives
 under `pipeline`.
@@ -96,7 +106,7 @@ or the job's task ID is missing.
 
 ---
 
-## Profiles
+### Profile presets
 
 | Profile | Description |
 |---------|-------------|
@@ -105,7 +115,11 @@ or the job's task ID is missing.
 
 ---
 
-## Error handling and limits
+## Limitations
+
+Remote Processing and its internal Remote Server counterpart are marked `nosaas`. They run only on self-hosted RocketRide deployments, because remote execution creates HTTP and WebSocket connections to another RocketRide server and transfers the configured sub-pipeline and its data across that boundary.
+
+### Error handling and limits
 
 - Every forwarded call is acknowledged: after processing, each side sends an `error`
   lane message containing an `APERR` result. A non-success code is re-raised on the

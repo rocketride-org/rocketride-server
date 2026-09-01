@@ -1,0 +1,89 @@
+---
+slug: /
+title: RocketRide Documentation
+sidebar_label: Home
+sidebar_position: 0
+hide_table_of_contents: true
+hide_title: true
+pagination_next: null
+pagination_prev: null
+---
+
+import { LuZap, LuCode, LuRocket, LuCloud, LuPlug, LuBlocks, LuBookOpen } from 'react-icons/lu';
+import { SiPython, SiTypescript, SiDiscord, SiGithub } from 'react-icons/si';
+import { VscVscode } from 'react-icons/vsc';
+
+<div className="rr-hero">
+
+# RocketRide <span className="rr-accent">Documentation</span>
+
+RocketRide is an open-source runtime for AI pipelines. Pipelines are portable JSON: version-controlled, shareable, and executed by a multithreaded C++ core that runs the same way on your laptop, your servers, or RocketRide Cloud.
+
+<div className="rr-hero-actions">
+  <a className="rr-btn rr-btn--primary" href="/quickstart">Get Started</a>
+  <a className="rr-btn rr-btn--secondary" href="/concepts/pipelines">Core Concepts</a>
+</div>
+
+</div>
+
+<span className="rr-kicker">01 · Build</span>
+## Build your first pipeline
+
+New to RocketRide? Start here: run a working pipeline and pick up the core concepts along the way.
+
+<CardGrid>
+  <Card href="/quickstart/ide-walkthrough" title="Build in your IDE" icon={<LuZap />}>
+    Install the VS Code extension, deploy a local runtime, and assemble a pipeline visually in minutes.
+  </Card>
+  <Card href="/quickstart/sdk-integration" title="Integrate with an SDK" icon={<LuCode />}>
+    Drop pipelines into your TypeScript or Python application with a few lines of code.
+  </Card>
+</CardGrid>
+
+<span className="rr-kicker">02 · Run</span>
+## Choose how you run RocketRide
+
+<CardGrid>
+  <Card href="/operate/cloud" title="RocketRide Cloud" icon={<LuCloud />}>
+    Start building right away on the managed platform. Same pipeline JSON, zero infrastructure to manage.
+  </Card>
+  <Card href="/operate/self-hosting" title="Self-host" icon={<LuRocket />}>
+    Run the runtime on your own infrastructure — Docker, on-prem, or anywhere the engine builds.
+  </Card>
+</CardGrid>
+
+<span className="rr-kicker">03 · Explore</span>
+## Explore more
+
+<CardGrid columns={3}>
+  <Card href="/clients/typescript" title="TypeScript SDK" icon={<SiTypescript />}>
+    Deploy, run, and observe pipelines from your TypeScript app.
+  </Card>
+  <Card href="/clients/python" title="Python SDK" icon={<SiPython />}>
+    The same client surface, native to Python.
+  </Card>
+  <Card href="/nodes" title="Nodes" icon={<LuBlocks />}>
+    The full catalog: LLMs, vector stores, parsers, tools, and more.
+  </Card>
+  <Card href="/connect/mcp" title="MCP" icon={<LuPlug />}>
+    Expose any pipeline as an MCP tool for AI assistants.
+  </Card>
+  <Card href="/clients/vscode" title="VS Code Extension" icon={<VscVscode />}>
+    Build, run, and debug pipelines visually in your editor.
+  </Card>
+  <Card href="/reference/pipeline-reference" title="Pipeline Reference" icon={<LuBookOpen />}>
+    Every field of the portable pipeline JSON format.
+  </Card>
+</CardGrid>
+
+<span className="rr-kicker">04 · Community</span>
+## Community
+
+<CardGrid>
+  <Card href="https://discord.gg/PMXrtenMsY" title="Discord" icon={<SiDiscord />}>
+    Share what you're building, swap ideas, and get help from the community.
+  </Card>
+  <Card href="https://github.com/rocketride-org" title="GitHub" icon={<SiGithub />}>
+    RocketRide is open source. Report bugs, discuss in issues, and contribute code.
+  </Card>
+</CardGrid>

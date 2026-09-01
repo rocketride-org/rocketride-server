@@ -2,6 +2,10 @@
 
 A RocketRide rerank node that reorders retrieved documents by relevance to the query using Cohere's Rerank API.
 
+## About Cohere
+
+Cohere provides the Rerank API used by this node to score a query against a list of document strings. The node sends the configured model, query, document list, and requested result count to that API, then uses the returned relevance scores to construct RocketRide documents.
+
 ## What it does
 
 Takes questions that already carry retrieved documents and reorders those documents by how well they match the query. Cohere scores each document, results are sorted by relevance, cut to the top N, and anything below the minimum score threshold is dropped. Put it downstream of a retrieval or vector-store node so it can rerank the documents attached to each question.
@@ -19,9 +23,7 @@ Key behavior to know:
 
 ---
 
-## Configuration
-
-### Lanes
+## Lanes
 
 | Lane in     | Lane out    | Description                                   |
 |-------------|-------------|-----------------------------------------------|
@@ -30,28 +32,33 @@ Key behavior to know:
 
 The `documents` lane is written only when at least one document survives the `min_score` filter. The `answers` lane is **always** written, so downstream nodes receive a result even when every document was filtered out: the answer text is the surviving documents' content joined by blank lines (empty string if none survived).
 
-### Fields
+## Profiles
 
-| Field | Type | Description |
-|---|---|---|
-| `model` | string | Default "rerank-english-v3.0". Cohere rerank model name |
-| `top_n` | number | Number of top results to return |
-| `min_score` | number | Minimum relevance score threshold (0.0-1.0) |
-| `profile` | string | Default "rerank-english-v3.0". Rerank model |
-
-`top_n` must be a whole number >= 1 (whole-number floats like `5.0` are accepted; booleans and fractional values are rejected). `min_score` must be a number between 0.0 and 1.0.
-
-### Profiles
-
-The **Model** dropdown selects a preconfigured profile:
+Default: **Rerank v3.0** (`rerank-english-v3.0`). The **Model** dropdown
+selects a preconfigured profile:
 
 | Profile               | Title       | Model                           |
 |-----------------------|-------------|---------------------------------|
-| `rerank-english-v3.0` | Rerank v3.0 | `rerank-english-v3.0` (default) |
+| `rerank-english-v3.0` **(default)** | Rerank v3.0 | `rerank-english-v3.0` |
 | `rerank-v3.5`         | Rerank v3.5 | `rerank-v3.5`                   |
-| `custom`              | Custom      | free-form `model` field         |
+| `custom`              | Custom      | _(free-form model name)_        |
 
-All profiles expose `top_n`, `min_score`, and the API key. The Custom profile additionally exposes the `model` field.
+All preset profiles expose `top_n`, `min_score`, and the API key; `custom`
+additionally takes a free-form model name.
+
+## Configuration
+
+Select a preset for the supplied model name, or use Custom to enter a model name. Most tuning is the trade-off between how many candidates Cohere considers worth returning and how selective the local score filter should be.
+
+### Model
+
+The named profiles provide their declared model values. Use Custom only when the API key is authorized for the name entered; the node rejects an empty or whitespace-only model before it can make a request.
+
+### Top N and Min Score
+
+`top_n` determines how many results are requested from Cohere before local filtering. It must be an integer of at least 1; whole-number numeric values are accepted, while booleans and fractional values are rejected. Keep the default of 5 for a small candidate set, increase it when later pipeline stages need more alternatives, and lower it to limit the resulting context.
+
+`min_score` is then applied to those returned results and must be between 0.0 and 1.0. The default 0.0 preserves all returned results. Raise it to remove weak matches, but expect fewer than `top_n` documents because the threshold is applied after Cohere's top-N result set has been returned.
 
 ---
 
@@ -63,7 +70,9 @@ The built-in pipeline test cases require the `ROCKETRIDE_RERANK_COHERE_KEY` envi
 
 ---
 
-## Error handling
+## Notes
+
+### API failures
 
 Cohere API errors are mapped to a custom exception hierarchy whose class names let retry/circuit-breaker heuristics classify them correctly:
 
@@ -74,6 +83,10 @@ Cohere API errors are mapped to a custom exception hierarchy whose class names l
 | `TooManyRequestsError` | `RerankRateLimitError`      | Yes       |
 | `InternalServerError`  | `RerankServerError`         | Yes       |
 | Any other exception    | `RerankServerError`         | Yes       |
+
+## Upstream docs
+
+- [Cohere Rerank API reference](https://docs.cohere.com/reference/rerank)
 
 ---
 

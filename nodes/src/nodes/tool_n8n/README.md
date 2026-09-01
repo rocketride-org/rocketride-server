@@ -1,12 +1,15 @@
----
-title: n8n
-date: 2026-06-10
-sidebar_position: 1
----
+# tool_n8n
 
-<head>
-  <title>n8n - RocketRide Documentation</title>
-</head>
+A RocketRide node that invokes an n8n webhook from pipeline lanes or gives an
+agent controlled access to an n8n instance. Pick it when an existing n8n
+workflow is the right automation boundary rather than rebuilding that flow on
+the RocketRide canvas.
+
+## About n8n
+
+n8n is a workflow-automation product that connects services and custom logic
+through executable workflows. It can expose a workflow through webhooks and a
+public API; this node uses those interfaces from RocketRide.
 
 ## What it does
 
@@ -17,20 +20,33 @@ Connects a RocketRide pipeline to [n8n](https://n8n.io) workflow automation. It'
 
 n8n is self-hosted, so you configure your instance's **Base URL** and (for listing/polling) a **public API key**.
 
-## Connections
-
-This node has no required `invoke` connections. As a tool it binds to an agent's tool channel; as a pipeline step it wires by lanes.
-
-## As a pipeline node
+## Lanes
 
 **Lanes:**
 
 | Lane in     | Lane out            | Description                                                        |
 | ----------- | ------------------- | ------------------------------------------------------------------ |
-| `text`      | `text`, `answers`, `table`   | Sends the text to the configured workflow; emits the result   |
-| `questions` | `answers`, `text`, `table`   | Sends the question text to the workflow; emits the result     |
-| `documents` | `documents`, `text`, `table` | Sends the documents to the workflow; emits the result         |
-| `image` / `audio` / `video` | `image` / `audio` / `video`, `text` | Uploads the binary to the workflow as multipart; emits binary returned by n8n back onto the matching lane |
+| `text` | `text` | Sends text to the configured workflow and emits its result |
+| `text` | `answers` | Sends text to the configured workflow and emits its result |
+| `text` | `table` | Sends text to the configured workflow and emits its result |
+| `questions` | `answers` | Sends question text to the workflow and emits its result |
+| `questions` | `text` | Sends question text to the workflow and emits its result |
+| `questions` | `table` | Sends question text to the workflow and emits its result |
+| `documents` | `documents` | Sends documents to the configured workflow and emits its result |
+| `documents` | `text` | Sends documents to the configured workflow and emits its result |
+| `documents` | `table` | Sends documents to the configured workflow and emits its result |
+| `image` | `image` | Sends binary input as multipart and emits returned image data |
+| `image` | `text` | Sends binary input as multipart and emits a text result |
+| `image` | `answers` | Sends binary input as multipart and emits an answer result |
+| `image` | `table` | Sends binary input as multipart and emits a structured result |
+| `audio` | `audio` | Sends binary input as multipart and emits returned audio data |
+| `audio` | `text` | Sends binary input as multipart and emits a text result |
+| `audio` | `answers` | Sends binary input as multipart and emits an answer result |
+| `audio` | `table` | Sends binary input as multipart and emits a structured result |
+| `video` | `video` | Sends binary input as multipart and emits returned video data |
+| `video` | `text` | Sends binary input as multipart and emits a text result |
+| `video` | `answers` | Sends binary input as multipart and emits an answer result |
+| `video` | `table` | Sends binary input as multipart and emits a structured result |
 
 Structured (`payloadMode: structured`) and binary requests preserve document boundaries/metadata and file bytes; a `table` listener receives structured (dict/list) results.
 
@@ -50,35 +66,52 @@ Exposes these functions to an agent (namespaced under `n8n`):
 | `n8n.activate_workflow` | Activate a workflow (blocked in read-only mode) — needs API key          |
 | `n8n.deactivate_workflow` | Deactivate a workflow (blocked in read-only mode) — needs API key      |
 
-The agent never chooses the host — every request targets the configured Base URL — and `workflow` arguments are sanitised to a plain webhook path.
+The agent never chooses the host — every request targets the configured Base URL — and `workflow` arguments are sanitized to a plain webhook path.
+
+Tool calls return a `success` flag and an `error` message on validation or API
+failure. `trigger_workflow` uses its optional `workflow` argument or the
+configured workflow, and `get_workflow`, `get_execution`,
+`activate_workflow`, and `deactivate_workflow` each require an `id`.
 
 ## Configuration
 
-| Field                | Default                 | Description                                                                        |
-| -------------------- | ----------------------- | ---------------------------------------------------------------------------------- |
-| n8n Base URL         | `http://localhost:5678` | Your n8n instance URL. In Docker, use `http://host.docker.internal:5678` (see below). |
-| API Key              | —                       | n8n public API key (`X-N8N-API-KEY`). Only for listing/inspecting/polling.         |
-| Workflow             | —                       | Webhook path the target workflow listens on (the pipeline step triggers this).     |
-| Payload shape        | `simple`                | Pipeline step body: `simple` → `{"data": text}`; `structured` → `{text, documents:[{content, metadata}]}` (preserves document boundaries/metadata). |
-| Result mode          | `sync`                  | `sync` waits for the webhook response; `async` triggers then polls the execution via the public API (API key required). |
-| Sync timeout         | `30`                    | Max seconds to wait for the webhook response in sync mode (1–3600).                |
-| Async timeout        | `120`                   | Max seconds to wait for an async execution before raising an error (5–3600).      |
-| Webhook auth         | `none`                  | Auth on the workflow's Webhook node (`none` / `header` / `basic` / `bearer` / `jwt`) — separate from API key. |
-| Verify TLS certificate | `Yes`                 | Leave ON; disable only for a self-signed local n8n over HTTPS.                     |
-| Read-only mode       | `Yes`                   | When ON, blocks write operations (activate/deactivate).                            |
+Configure the Base URL and the webhook path first. The default synchronous,
+simple-payload setup suits a workflow that returns one response; most other
+fields can remain at their defaults.
 
-## Setup notes
+### Payload shape and result mode
 
-- **Triggering is webhook-only.** The target workflow needs a **Webhook** trigger node. Manual/cron/event-triggered workflows can't be triggered over HTTP directly — wrap them with a webhook **dispatcher** (Execute Sub-Workflow); see the [n8n integration guide](../../../../docs/README-n8n.md).
+Use **structured** payloads when the workflow needs separate document content
+and metadata; the default **simple** mode flattens input into one `data`
+string for compatibility. **Sync** waits for the webhook response and should
+be paired with a response-producing workflow. Choose **async** for a long run:
+it polls the public API and therefore requires the API key. Raise the matching
+timeout only when the workflow genuinely needs longer than the 30-second sync
+or 120-second async defaults.
+
+### Authentication and write access
+
+Webhook authentication is independent of the public API key. Match it to the
+target Webhook node, supplying the relevant header, basic credentials, or
+bearer/JWT token only for its selected mode. Keep TLS verification enabled
+unless a self-signed local HTTPS instance requires otherwise. Read-only mode
+is on by default; disable it only when the agent is explicitly allowed to
+activate or deactivate workflows.
+
+## Notes
+
+### Setup
+
+- **Triggering is webhook-only.** The target workflow needs a **Webhook** trigger node. Manual/cron/event-triggered workflows can't be triggered over HTTP directly — wrap them with a webhook **dispatcher** (Execute Sub-Workflow); see the [n8n integration guide](../../../../docs/public/product/integrations/n8n.md).
 - **Activate the workflow.** A production webhook (`/webhook/...`) only exists once the workflow is **activated/published** in n8n — otherwise the call 404s and the node tells you to activate it. While editing, set `test_mode` to use the editor's one-shot `/webhook-test/...` route.
 - **Return a result.** For `sync` mode, the workflow must end in a **"Respond to Webhook"** node (or set the Webhook node to respond when the last node finishes); otherwise n8n only returns a "workflow started" ack and the node warns you.
 - **Docker reachability.** If RocketRide runs in a container, `localhost` points at the container, not your machine. Use `http://host.docker.internal:5678` (Docker Desktop, or add `extra_hosts: ["host.docker.internal:host-gateway"]` on Linux), or run n8n on the same Docker network and use `http://n8n:5678`. The node detects this and suggests the fix.
 
-## Round-trips (n8n → RocketRide)
+### Round-trips (n8n → RocketRide)
 
-The reverse direction needs no special node: any RocketRide pipeline with a `webhook`/`chat`/`dropper` source is HTTP-callable from n8n's **HTTP Request** node, enabling RR→n8n→RR round-trips. See the [n8n integration guide](../../../../docs/README-n8n.md) and the templates [`examples/n8n-roundtrip.pipe`](../../../../examples/n8n-roundtrip.pipe) + [`examples/n8n-call-rocketride.workflow.json`](../../../../examples/n8n-call-rocketride.workflow.json).
+The reverse direction needs no special node: any RocketRide pipeline with a `webhook`/`chat`/`dropper` source is HTTP-callable from n8n's **HTTP Request** node, enabling RR→n8n→RR round-trips. See the [n8n integration guide](../../../../docs/public/product/integrations/n8n.md) and the templates [`examples/n8n-roundtrip.pipe`](../../../../examples/n8n-roundtrip.pipe) + [`examples/n8n-call-rocketride.workflow.json`](../../../../examples/n8n-call-rocketride.workflow.json).
 
-## Environment variables
+### Environment variables
 
 Either set fields in the node config or use env vars:
 
@@ -86,3 +119,7 @@ Either set fields in the node config or use env vars:
 ROCKETRIDE_N8N_URL=http://localhost:5678
 ROCKETRIDE_N8N_KEY=...   # n8n public API key
 ```
+
+## Upstream docs
+
+- [n8n documentation](https://docs.n8n.io)

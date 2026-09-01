@@ -1,150 +1,97 @@
 # llamaparse
 
-A RocketRide data node that parses documents with the LlamaParse cloud service and emits the extracted text and tables into the pipeline.
+A RocketRide data node that sends documents to LlamaParse and writes flattened Markdown text and extracted tables into the pipeline; use it for readable content, not audit-grade source provenance.
 
-> **⚠️ Provenance limitation — not for audit-grade extraction.** This node flattens documents to Markdown: it drops page boundaries, bbox/polygon coordinates, and the table-HTML cell grid, so cell-level provenance and coordinate-based review cannot be reconstructed from its output. Do not use it where every value must trace back to its exact source cell (e.g. financial-table / regulatory extraction). For structure-preserving parsing that retains table HTML plus page and coordinate data, use the **`datalab_parse`** node instead.
+## About LlamaParse
+
+LlamaParse is a document-parsing service used to turn files into text and
+structured document content. This node uses its Python client to parse the
+document bytes supplied by a RocketRide pipeline and to return the resulting
+text and table data.
 
 ## What it does
 
-Sends incoming documents to the LlamaIndex / LlamaParse cloud API (via the `llama-parse` Python library) and emits the results. Handles PDFs, images, Word documents, Excel spreadsheets, and other formats, with table extraction, layout preservation, and Markdown output. Processing happens in the cloud: a LlamaIndex API key is required, and the run aborts at startup if none is configured.
+The node processes incoming document data on `tags` and emits parsed Markdown
+on `text` plus tables on `table`. It isolates each LlamaParse request in a
+separate thread and event loop, which is useful where the surrounding runtime
+already has event-loop state. Choose it when flattened Markdown is the desired
+downstream format; use a structure-preserving parser when later review needs
+page boundaries, coordinates, or the original table-cell grid.
 
-Tables are extracted two ways: Markdown table patterns (`|`-delimited rows) are detected in the parsed text, and structured items of type `table` returned by the API are converted to Markdown. Both are written to the `table` lane.
+## Lanes
 
-A single shared parser instance is guarded by a lock, so documents are parsed one at a time per node. If parsing returns no text, a fallback Markdown notice (file type, size, and a hint that the document may be empty or OCR failed) is written to the `text` lane; on a parsing error, a Markdown error report is written instead, so downstream nodes always receive something.
-
----
+| Lane in | Lane out | Description |
+| --- | --- | --- |
+| `tags` | `text` | Parsed document text, flattened to Markdown. |
+| `tags` | `table` | Table content detected in the parsed result. |
 
 ## Configuration
 
-### Lanes
+Start with an API key and the default simple configuration. Simple mode builds
+the LlamaParse constructor arguments from the visible controls; advanced mode
+instead parses the supplied JSON and merges its entries into those arguments.
 
-| Lane in | Lane out    | Description                                                       |
-| ------- | ----------- | ----------------------------------------------------------------- |
-| `data`  | `text`      | Parse document, emit extracted text                               |
-| `data`  | `table`     | Parse document, emit extracted tables (Markdown)                  |
-| `data`  | `documents` | Parse document, emit full document objects (when listener exists) |
+### Advanced Configuration
 
-Incoming document objects of type `Document`, `PDF`, or `Image` (base64 `page_content`) are also accepted on the documents lane; the node parses them, re-emits them as `Document` objects containing the parsed text, and suppresses the default pass-through of the original files.
+Enable **Advanced Configuration** only when the simple controls cannot express
+the parsing options you need. Its value must be valid JSON and must not set
+`api_key`, which the node ignores when merging the advanced object. Save-time
+validation only warns about unknown keys or invalid JSON, but startup aborts
+when advanced mode has no configuration or when JSON cannot be parsed. A good
+value is an object containing only the constructor options you intend to
+override, such as `{"parse_mode": "parse_page_with_llm"}`.
 
-When no file name accompanies the raw bytes, the file type is detected from magic numbers (PDF, DOCX/XLSX, DOC/XLS, JPEG, PNG, GIF, WebP, HTML, XML) and defaults to PDF if unrecognized.
+### Parse Mode and LVM Model
 
-### Fields
+The default **Parse Mode**, `parse_page_with_lvm`, passes that mode to the
+client, optionally passes **LVM Model** as `vendor_multimodal_model_name`, and
+sets a page-error tolerance of `0.05`. The `agentic` and `agentic_plus` choices
+both select `parse_page_with_agent` and can use the same LVM model setting.
 
-| Field | Type | Description |
-|---|---|---|
-| `use_advanced_config` | boolean | Default false. Check to use advanced JSON configuration instead of simple options. |
-| `api_key` | string | Your LlamaIndex API key for LlamaParse service |
-| `parse_mode` | string | Default "parse_page_with_lvm". The parse mode to use for chosing complexity of the parse |
-| `lvm_model` | string | Default "anthropic-sonnet-4.0". The LVM model to use for parsing when LVM or agentic modes are selected. |
-| `use_system_prompt_append` | boolean | Default false. Check to add custom instructions to the system prompt for LlamaParse. |
-| `system_prompt_append` | string | Additional instructions to append to the system prompt for LlamaParse. |
-| `spreadsheet_extract_sub_tables` | boolean | Default false. Extract sub-tables from spreadsheets for better table parsing. |
-| `advanced_config` | string | Default "{
-  "parse_mode": "parse_page_with_llm",
-  "spreadsheet_extract_sub_tables": false,
-  "system_prompt_append": "",
-  "lvm_model": "anthropic-sonnet-4.0"
-}". Enter configuration options in JSON format. For more information, see: <a href='https://docs.cloud.llamaindex.ai/llamaparse/presets_and_modes/advance_parsing_modes' target='_blank'>LlamaParse Documentation</a> |
+The displayed `cost_effective (LLM)` value does not match the code path that
+checks for `cost_effective`; as written, choosing it supplies no parse-mode
+argument. Keep the default or use an agentic choice when a specific mode must
+be sent. The LVM model is not used by the cost-effective path.
 
-  "parse_mode": "parse_page_with_llm",
-  "spreadsheet_extract_sub_tables": false,
-  "system_prompt_append": "",
-  "lvm_model": "anthropic-sonnet-4.0"
-}". Enter configuration options in JSON format. For more information, see: <a href='https://docs.cloud.llamaindex.ai/llamaparse/presets_and_modes/advance_parsing_modes' target='_blank'>LlamaParse Documentation</a> |
+### Additional Instructions and spreadsheet tables
 
-**Simple mode options** (shown when `use_advanced_config` is off):
-
-| Field                            | Type / default                         | Description                                                |
-| -------------------------------- | -------------------------------------- | ---------------------------------------------------------- |
-| `parse_mode`                     | string, default `parse_page_with_lvm`  | Parse mode, see parse modes below                          |
-| `lvm_model`                      | string, default `anthropic-sonnet-4.0` | Vision model used for LVM and agentic modes                |
-| `use_system_prompt_append`       | boolean, default `false`               | Append custom instructions to the parsing system prompt    |
-| `system_prompt_append`           | string (textarea)                      | The additional instructions (shown when the toggle is on)  |
-| `spreadsheet_extract_sub_tables` | boolean, default `false`               | Extract sub-tables from spreadsheets                       |
-
-**Advanced mode option** (shown when `use_advanced_config` is on):
-
-| Field             | Type / default | Description                                              |
-| ----------------- | -------------- | -------------------------------------------------------- |
-| `advanced_config` | string (JSON)  | Raw JSON passed to the LlamaParse constructor, see below |
-
-Configuration is validated at save time: invalid JSON in the advanced config, unknown advanced parameters, and a missing API key all produce warnings. At pipeline start, a missing API key, invalid advanced JSON, or an enabled-but-empty advanced config aborts the run with an error before any documents are sent.
-
----
-
-## Parse modes
-
-| Mode                      | Credits/page | Best for                              |
-| ------------------------- | ------------ | ------------------------------------- |
-| Cost-effective            | 3            | Text-heavy documents without diagrams |
-| Agentic                   | 10           | Documents with diagrams and images    |
-| Agentic Plus              | 90           | Complex layouts and multi-page tables |
-| Parse with LVM (legacy)   | n/a          | Legacy LVM-based parsing              |
-
-Simple-mode selections map onto LlamaParse API modes:
-
-- **Cost-effective**: `parse_page_with_llm`
-- **Agentic** and **Agentic Plus**: `parse_page_with_agent`, with the selected LVM model as `vendor_multimodal_model_name`
-- **Parse with LVM (legacy)**: `parse_page_with_lvm`, with the selected LVM model, any additional instructions (`system_prompt_append`, only applied in this mode when **Use Additional Instructions** is on), and `page_error_tolerance` fixed at `0.05`
-
----
-
-## LVM models
-
-Available when using LVM legacy, Agentic, or Agentic Plus modes:
-
-| Model                            | Value                  |
-| -------------------------------- | ---------------------- |
-| Anthropic Sonnet 4.0 (default)   | `anthropic-sonnet-4.0` |
-| Anthropic Sonnet 3.5             | `anthropic-sonnet-3.5` |
-| GPT-4o                           | `gpt-4o`               |
-| GPT-4o Mini                      | `gpt-4o-mini`          |
-
----
-
-## Advanced configuration (JSON mode)
-
-When **Advanced Configuration** is enabled, supply a raw JSON object instead of the simple options. The keys are merged directly into the LlamaParse constructor arguments (any `api_key` key in the JSON is ignored; the API key field always wins). Recognized parameters:
-
-| Key                              | Type    | Description |
-| -------------------------------- | ------- | ----------- |
-| `parse_mode`                     | string  | API-level parse mode passed directly to LlamaIndex. Accepted values: `parse_page_with_llm` (cost-effective text parsing), `parse_page_with_agent` (agentic/diagram-aware parsing), `parse_page_with_lvm` (legacy LVM-based parsing). Note: simple-mode aliases (`agentic`, `agentic_plus`, `cost_effective`) are not valid here; they are only mapped in simple mode. |
-| `system_prompt_append`           | string  | Text appended to the parsing system prompt. In advanced mode, this is honored directly from the JSON payload regardless of simple-mode toggles. In simple mode, only applied in LVM legacy mode (`parse_page_with_lvm`) when **Use Additional Instructions** is on. |
-| `spreadsheet_extract_sub_tables` | boolean | Extract sub-tables embedded within spreadsheet cells. Corresponds to the **Extract Sub Tables** toggle in simple mode. |
-| `vendor_multimodal_model_name`   | string  | Vision model used for LVM and agentic modes (e.g. `anthropic-sonnet-4.0`). |
-| `page_error_tolerance`           | number  | Fraction of pages allowed to fail before the job is aborted (default `0.05` in LVM legacy mode). |
-| `verbose`                        | boolean | LlamaParse client verbosity (the node sets `false` by default). |
-
-> Advanced mode bypasses all simple-mode settings. Unknown keys produce a warning at save time but do not abort execution.
-
----
-
-## Timeouts and large files
-
-The cloud call runs in an isolated thread with its own event loop (LlamaParse uses asyncio internally and can otherwise raise "Event loop is closed" errors). The per-document timeout scales with file size:
-
-| File size    | Timeout    |
-| ------------ | ---------- |
-| up to 100 MB | 5 minutes  |
-| 100-500 MB   | 10 minutes |
-| over 500 MB  | 15 minutes |
-
-For files over 50 MB, the LlamaParse job timeout is also raised to at least 10 minutes. If the call times out, the node returns an empty result with the timeout recorded in the parsing metadata and the pipeline continues; it does not hang the run.
-
----
+**Additional Instructions** are passed only for the legacy
+`parse_page_with_lvm` path, when non-blank; use them for parser guidance that
+belongs with that mode. **Extract Sub Tables** defaults to off and, when on,
+passes `spreadsheet_extract_sub_tables=True` to LlamaParse. Enable it only for
+spreadsheets whose nested tables need separate parsing; it has no special
+handling in the node beyond forwarding that setting.
 
 ## Authentication
 
-Obtain a LlamaIndex API key from [cloud.llamaindex.ai](https://cloud.llamaindex.ai) and paste it into the **API Key** field. The field is stored securely (marked `secure: true` in the node config). The key is required; the node aborts at startup if it is absent.
+Set **API Key** to the LlamaParse service key. Missing keys generate a
+save-time warning and cause startup to raise before a parser is created.
 
----
+## Requirements
+
+The service metadata declares the `gpu` capability. The node itself creates a
+LlamaParse client and sends document bytes to it; it does not download or run a
+local model. A working network connection to the service and its Python
+dependency are therefore required by this implementation.
+
+## Notes
+
+### Flattened output and failures
+
+The node concatenates the returned document text and reads tables from either
+`structured_data` or `items` metadata. It does not retain page boundaries,
+bounding boxes, or a table HTML cell grid. Parsing errors, absent input, and
+import errors return empty text and structured data rather than an exception.
+
+For files over 50 MiB the isolated call raises the parser timeout settings to
+at least 600 seconds. The worker waits up to 300 seconds for smaller files,
+600 seconds above 100 MiB, and 900 seconds above 500 MiB; a timed-out worker
+returns an empty result with error metadata while its daemon thread is left to
+finish.
 
 ## Upstream docs
 
-- [LlamaParse documentation](https://docs.cloud.llamaindex.ai/llamaparse/getting_started)
-- [Advanced parsing modes](https://docs.cloud.llamaindex.ai/llamaparse/presets_and_modes/advance_parsing_modes)
-
----
+- [LlamaParse documentation](https://developers.llamaindex.ai/llamaparse/parse/)
 
 <!-- ROCKETRIDE:GENERATED:PARAMS START -->
 <!-- Generated by nodes:docs-generate. Do not edit by hand. -->
@@ -153,7 +100,7 @@ Obtain a LlamaIndex API key from [cloud.llamaindex.ai](https://cloud.llamaindex.
 
 | Field | Type | Description | Default |
 |---|---|---|---|
-| `llamaparse.advanced_config` | `string` | **Advanced Configuration (JSON)**<br/>Enter configuration options in JSON format. For more information, see: <a href='https://docs.cloud.llamaindex.ai/llamaparse/presets_and_modes/advance_parsing_modes' target='_blank'>LlamaParse Documentation</a> | `"{\n  \"parse_mode\": \"parse_page_with_llm\",\n  \"spreadsheet_extract_sub_tables\": false,\n  \"system_prompt_append\": \"\",\n  \"lvm_model\": \"anthropic-sonnet-4.0\"\n}"` |
+| `llamaparse.advanced_config` | `string` | **Advanced Configuration (JSON)**<br/>Enter configuration options in JSON format. For more information, see: <a href='https://developers.llamaindex.ai/llamaparse/parse/v1/presets_and_modes/advance_parsing_modes/' target='_blank'>LlamaParse Documentation</a> | `"{\n  \"parse_mode\": \"parse_page_with_llm\",\n  \"spreadsheet_extract_sub_tables\": false,\n  \"system_prompt_append\": \"\",\n  \"lvm_model\": \"anthropic-sonnet-4.0\"\n}"` |
 | `llamaparse.api_key` | `string` | **API Key**<br/>Your LlamaIndex API key for LlamaParse service |  |
 | `llamaparse.lvm_model` | `string` | **LVM Model**<br/>The LVM model to use for parsing when LVM or agentic modes are selected. | `"anthropic-sonnet-4.0"` |
 | `llamaparse.parse_mode` | `string` | **Parse Mode**<br/>The parse mode to use for chosing complexity of the parse | `"parse_page_with_lvm"` |

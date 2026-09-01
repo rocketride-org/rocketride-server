@@ -1,119 +1,77 @@
-# Development Environment Setup
+# docs/
 
-This guide walks you through setting up a local development environment for the RocketRide Engine.
+The three folders split by **audience**: `public/` is for people outside the repo,
+`development/` is for contributors, `agents/` is for AI assistants.
 
-## Prerequisites
+## `public/` — humans outside the repo
 
-| Tool              | Version       | Notes                                                          |
-| ----------------- | ------------- | -------------------------------------------------------------- |
-| **Node.js**       | 18+           | Runtime for the build system and TypeScript clients            |
-| **pnpm**          | 8+            | Package manager (`npm install -g pnpm`)                        |
-| **Python**        | 3.10+         | Required for pipeline nodes, AI modules, and the Python SDK    |
-| **C++ toolchain** | C++17-capable | Required only when building the engine from source (see below) |
-| **Git**           | 2.x           | Source control                                                 |
+- **`product/`** — the site spine, and the only folder here whose paths are public
+  URLs verbatim: `quickstart/`, `evaluate/`, `concepts/`, `examples/`,
+  `integrations/`, `develop/`, `operate/`, `reference/`, `ide-extensions/`, plus
+  `protocols/websocket/` (the WebSocket (5565) engine wire protocol, for people
+  building their own client).
+- **`typescript/`, `python/`, `vscode/`, `mcp/`** — the per-surface guides, each
+  mounted into the docs site. Each folder also holds a `README.md` (the package
+  distribution readme — see Rules) and an `assets/` folder for its own images;
+  `mcp/` is the exception — it splits into `http/` and `stdio/`, and its readme
+  source lives at `mcp/stdio/README.md`.
+- **`n8n/`** — `README.md` only; the export source for `packages/n8n-nodes/`.
+  Nothing here is published to the site.
+- **`assets/`** — images shared by more than one section.
 
-### C++ toolchain details (engine builds only)
+## `development/` — contributors
 
-- **macOS** -- Xcode Command Line Tools (`xcode-select --install`)
-- **Linux** -- GCC 10+ or Clang 13+ (`sudo apt install build-essential cmake`)
-- **Windows** -- Visual Studio 2019+ with the "Desktop development with C++" workload
+`index.md` is the setup guide; the rest is grouped by **subsystem**, so a new
+contributor page has exactly one correct home:
 
-> Most contributors do **not** need the C++ toolchain. The builder downloads a pre-built engine binary by default.
+- **`builder/`** — `reference.md` (run builds: commands, modules, output, CLI flags,
+  compiler toolchain), `authoring.md` (write a package's `scripts/tasks.js`),
+  `pre-commit-hooks.md`.
+- **`engine/`** — C++ engine internals (`index.md`), `crash-reporting.md`, and
+  `mcp-module.md`.
+- **`nodes/`** — `index.md` (how nodes connect, adding one, local prototyping),
+  `services-schema.md` (the `services*.json` contract), `readme-schema.md`
+  (the node README contract), `testing.md`.
+- **`clients/`** — `readme-schema.md`, the client-docs contract.
+- **`apps/`** — building first-party shell apps inside the monorepo.
+- `docs-pipeline.md` — how this docs system is assembled, and how to add a page.
+- `ci-gates.md` — what gates a PR, and how to reproduce each check locally.
 
-## Clone and Install
+The two documentation contracts (`nodes/readme-schema.md`,
+`clients/readme-schema.md`) are enforced by `scripts/validate-node-readme.py` and
+`scripts/validate-client-docs.py`; move or rename either and update both scripts,
+which name the schema paths in their output.
 
-```bash
-git clone https://github.com/rocketride-org/rocketride-server.git
-cd rocketride-server
-pnpm install
-```
+**Nothing here is published, with no exceptions.** `docs:gather` only sweeps
+`public/`, so a page whose audience is outside the repo belongs in `public/` —
+move it there rather than mounting out of `development/`.
 
-## Environment Configuration
+## `agents/` — AI assistants
 
-If the repository contains a `.env.template` or `.env.example` file, copy it:
+- The eight `ROCKETRIDE_*` assistant-facing integration docs, exported to
+  `.rocketride/docs/` (a local, gitignored artifact) by `./builder docs:export`.
+- **`stubs/`** — assistant-stub templates (`AGENTS.md`, `CLAUDE.md`,
+  Cursor/Windsurf rules files, etc.), packaged into the VS Code extension.
+- **`skills/`** — reserved for agent skills; empty until the first one ships.
 
-```bash
-cp .env.template .env   # or .env.example
-```
+The export copies top-level `.md` files only, so `stubs/` and `skills/` are
+deliberately excluded from it.
 
-Edit `.env` and fill in the values relevant to your setup (API keys, model endpoints, etc.). If no template exists, you can skip this step -- most functionality works with defaults.
+## Rules
 
-## Building
+- Hand-written only. Nothing generated is committed under `docs/`.
+- Node docs stay with their nodes: `nodes/src/nodes/<name>/README.md` (generated
+  params between markers via `nodes:docs-generate`), following
+  `development/nodes/readme-schema.md` — check with
+  `python3 scripts/validate-node-readme.py <node-dir>`.
+- A `README.md` in a `public/` section is that package's README export source —
+  after editing it, run `./builder docs:export` to regenerate the committed
+  package `README.md`. Never hand-edit the package `README.md` directly. This
+  covers `typescript`, `python`, `mcp`, and `n8n`; `public/vscode/README.md` is
+  the marketplace readme, copied into the VSIX at package time rather than
+  exported.
+- `README.md` files are never site pages — the site mounts skip them.
+- CI runs `./builder docs:check` to catch export drift.
 
-The project uses a unified build system. See [README-builder.md](../README-builder.md) for full details.
-
-```bash
-# Show all available commands
-./builder --help
-
-# Full project build (downloads pre-built engine + all modules)
-./builder build
-
-# Build only the C++ engine
-./builder server:build
-
-# Build specific modules
-./builder nodes:build
-./builder vscode:build
-./builder client-typescript:build client-python:build
-```
-
-### Build output
-
-| Directory       | Contents                      |
-| --------------- | ----------------------------- |
-| `build/`        | Temporary build artifacts     |
-| `dist/`         | Final distributable outputs   |
-| `dist/server/`  | Engine executable and runtime |
-| `dist/clients/` | Client library packages       |
-| `dist/vscode/`  | VS Code extension (`.vsix`)   |
-
-## Running
-
-### Start the server
-
-After building, the engine executable is located in `dist/server/`. Run it directly:
-
-```bash
-./dist/server/engine ai/eaas.py
-```
-
-### Connect the VS Code extension
-
-1. Build the extension: `./builder vscode:build`
-2. Install the generated `.vsix` from `dist/vscode/` in VS Code
-3. Click the RocketRide icon in the sidebar and connect to your running server
-
-For VS Code extension development details, see [README-vscode.md](../README-vscode.md).
-
-## Testing
-
-```bash
-# Run all tests
-./builder test
-
-# C++ engine tests only
-./builder server:test
-
-# Python tests only (nodes, AI, clients)
-./builder nodes:test
-./builder ai:test
-./builder client-python:test
-
-# TypeScript tests only
-./builder client-typescript:test
-
-# Other module tests
-./builder client-mcp:test
-```
-
-For information on writing and running node-level tests, see [README-node-testing.md](../README-node-testing.md).
-
-## Further Reading
-
-- [Build System](../README-builder.md) -- declarative build system reference
-- [Engine Reference](../README-engine.md) -- C++ engine architecture, CLI options, task types
-- [Pipeline Nodes](../README-nodes.md) -- writing and extending pipeline nodes
-- [VS Code Extension](../README-vscode.md) -- extension development
-- [Pre-commit Hooks](../README-pre-commit-hooks.md) -- code quality automation
-- [Contributing Guide](../../CONTRIBUTING.md) -- contribution workflow and code style
+Root GitHub files (`README.md`, `CONTRIBUTING.md`, `AGENTS.md`, `.cursorrules`, ...)
+never move into `docs/`; they stay at the repo root.

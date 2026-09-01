@@ -8,42 +8,47 @@ Accumulates all text (and table content) of each object flowing through the pipe
 
 Chunking uses LangChain's `RecursiveCharacterTextSplitter`, sized to the connected LLM's context length and measured with the LLM's own token counter. The token budget of the instruction prompt itself is accounted for, so each chunk plus the prompt always fits the model's context window.
 
-Only the first `numberOfSummaries` chunks (default 2) are summarized; the rest of the document is ignored. Each of the three extraction sections can be disabled individually by setting its config field to `0`.
+Only the first `numberOfSummaries` chunks (default 2) are summarized; the rest of the document is ignored. Each of the three extraction sections can be disabled individually by setting its config field to `0`. Choose this node when one LLM pass should produce all three outputs; use a simpler text transformation when no LLM-generated summary is needed.
 
 Output is emitted only on lanes that actually have a downstream listener: plain formatted text on the `text` lane, and/or one structured document per section on the `documents` lane.
 
----
+## Connections
 
-## Configuration
+| Connection | Required | Description |
+|---|---|---|
+| `llm` | yes | LLM used for extraction and for its context length and token counter. |
 
-### Lanes
+## Lanes
 
 | Lane in | Lane out | Description |
 |---------|----------|-------------|
 | `text` | `text` | Summarized output as plain text: a summary block, a `Key Points:` bullet list, and an `Entities:` bullet list. Sections that are disabled or empty are omitted. |
 | `text` | `documents` | Summarized output as structured documents: each summary, key-point list, and entity list becomes its own `Doc` with an incrementing `chunkId` in its metadata. |
 
-Both table and plain-text input are accepted; table content is appended to the same accumulator as text and summarized together with it.
+The declared input lane is `text`; the node accumulates that text for the
+current object before it invokes the LLM at close.
 
-### Fields
+## Configuration
 
-| Field | Type | Description |
-|---|---|---|
-| `numberOfSummaries` | number |  |
-| `numberOfSummaryWords` | number |  |
-| `numberOfKeyPointWords` | number |  |
-| `numberOfEntities` | number |  |
-| `profile` | string | Default "default".  |
+The default configuration summarizes two chunks, targets 1,500 words per
+summary, 250 words per key point, and extracts 25 entities. Tune the limits to
+the length and density of the source material; the splitter uses the connected
+LLM's token counter and context length, not a fixed character limit.
 
-The node ships a single `default` profile (selected via the hidden `summarization.profile` field) that exposes the four fields above.
+### Number of chunks to summarize
 
----
+`numberOfSummaries` limits how many chunks are sent to the LLM after splitting.
+Keep the default when the opening chunks are representative. Raise it to cover
+longer documents, accepting more LLM calls; set it to `0` when no chunks should
+be processed.
 
-## Connections
+### Summary, key-point, and entity limits
 
-| Channel | Required | Description |
-|---------|----------|-------------|
-| `llm` | yes (min 1) | LLM used to generate summaries, key points, and entities. Also provides the context length and token counter used for chunking. |
+`numberOfSummaryWords`, `numberOfKeyPointWords`, and `numberOfEntities` control
+the instructions passed to the LLM. Set a value to `0` to omit that section.
+Use smaller limits for compact indexing output and larger limits when downstream
+readers need more detail. These limits do not change how many source chunks are
+selected; that is controlled by `numberOfSummaries`.
 
 ---
 

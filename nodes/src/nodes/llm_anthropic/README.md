@@ -2,6 +2,12 @@
 
 A RocketRide LLM node that connects Anthropic's Claude models to your pipeline.
 
+## About Anthropic
+
+Anthropic is an AI safety company and the maker of the Claude family of large
+language models. Claude models are widely used for reasoning, long-context
+analysis, conversational AI, and code generation.
+
 ## What it does
 
 Connects Anthropic's Claude models to your pipeline. Used primarily as an `llm`
@@ -14,64 +20,116 @@ directly for save-time validation. The configured `modelOutputTokens` is passed 
 the model as `max_tokens`. Token counts for budgeting are estimated at roughly
 4 characters per token.
 
-Extended thinking is opt-in per node via the `extendedThinking` field and is off by
-default. When it is enabled on a reasoning-capable model, the node streams the model's
-reasoning over the `thinking` SSE lane on the interactive streaming path only — the
-agent / `expectJson` path never requests it; see "Extended thinking" below.
+## Example pipelines
 
----
+**Direct question answering**
 
-## Configuration
+`chat → llm_anthropic → response_answers`
 
-### Lanes
+<div align="center">
+
+![The Anthropic node on the canvas between a chat source and an answers response](example.png)
+
+[![Download example.pipe](https://img.shields.io/badge/example.pipe-Download-41b6e6?style=for-the-badge)](example.pipe)
+
+</div>
+
+Questions arrive from chat and Claude's answers stream to the answers
+response.
+
+**LLM for an agent**
+
+`webhook → agent_rocketride → response`, with this node connected to the
+agent's `llm` channel. The agent uses Claude for its reasoning and tool
+calling; swap profiles to trade cost against capability without touching the
+pipeline.
+
+**SQL generation for a database node**
+
+`webhook → db_postgres → response`, with this node on the database node's
+`llm` channel. Claude translates natural-language questions into SQL that the
+database node validates and executes.
+
+## Lanes
 
 | Lane in     | Lane out  | Description                                           |
 | ----------- | --------- | ----------------------------------------------------- |
 | `questions` | `answers` | Send a question directly, receive a generated answer  |
 
-### Fields
-
-| Field              | Type / Default               | Description                                                                                          |
-| ------------------ | ---------------------------- | ---------------------------------------------------------------------------------------------------- |
-| `profile`          | enum, `claude-sonnet-4-6`    | Which Claude model to use (see Profiles below)                                                       |
-| `apikey`           | string                       | Anthropic API key. Must start with `sk-ant` (e.g. `sk-ant-...` or `sk-ant-api03-...`)               |
-| `modelSource`      | string                       | Where the model definition comes from (`manual` or `openrouter`)                                     |
-| `model`            | string (custom profile only) | Anthropic model ID, used only when `profile` is `custom`                                             |
-| `modelTotalTokens` | number (custom profile only) | Total context tokens for the custom profile; must be greater than 0                                  |
-| `extendedThinking` | boolean, `false`             | Request extended thinking for this node. Ignored unless the model is reasoning-capable               |
-
-The model ID and token limits for named profiles are fixed by the profile. Only the
-`custom` profile exposes `model` and `modelTotalTokens` directly.
-
----
-
 ## Profiles
 
-Default profile: **Claude Sonnet 4.6**.
+Default: **Claude Sonnet 4.6** (`claude-sonnet-4-6`).
 
-| Profile                        | Model ID            | Context tokens     | Output tokens |
-| ------------------------------ | ------------------- | ------------------ | ------------- |
-| Claude Sonnet 4.6 _(default)_  | `claude-sonnet-4-6` | 1,000,000          | 128,000       |
-| Claude Opus 4.7                | `claude-opus-4-7`   | 1,000,000          | 128,000       |
-| Claude Opus 4.6                | `claude-opus-4-6`   | 1,000,000          | 128,000       |
-| Claude Sonnet 4.5              | `claude-sonnet-4-5` | 1,000,000          | 64,000        |
-| Claude Opus 4.5                | `claude-opus-4-5`   | 200,000            | 64,000        |
-| Claude Haiku 4.5               | `claude-haiku-4-5`  | 200,000            | 64,000        |
-| Custom                         | _(user-specified)_  | 200,000 (editable) | _(none set)_  |
+| Profile | Model ID | Context tokens | Output tokens |
+| ------- | -------- | -------------- | ------------- |
+| Claude Sonnet 4.6 **(default)** | `claude-sonnet-4-6` | 1,000,000 | 128,000 |
+| Anthropic: Claude Fable 5 | `claude-fable-5` | 1,000,000 | 128,000 |
+| Anthropic: Claude Sonnet 5 | `claude-sonnet-5` | 1,000,000 | 128,000 |
+| Claude Opus 5 | `claude-opus-5` | 1,000,000 | 128,000 |
+| Claude Opus 5 (Fast) | `claude-opus-5-fast` | 1,000,000 | 128,000 |
+| Anthropic: Claude Opus 4.8 | `claude-opus-4-8` | 1,000,000 | 128,000 |
 
----
+<details>
+<summary><strong>View 16 more models</strong></summary>
 
-## Extended thinking
+| Profile | Model ID | Context tokens | Output tokens |
+| ------- | -------- | -------------- | ------------- |
+| `custom` | _(user-specified)_ | 200,000 (editable) | — |
+| Claude Opus 4.6 | `claude-opus-4-6` | 1,000,000 | 128,000 |
+| Claude Haiku 4.5 | `claude-haiku-4-5` | 200,000 | 64,000 |
+| Claude Sonnet 4.5 | `claude-sonnet-4-5` | 1,000,000 | 64,000 |
+| Claude Opus 4.5 | `claude-opus-4-5` | 200,000 | 64,000 |
+| Anthropic: Claude Opus 4.7 | `claude-opus-4-7` | 1,000,000 | 128,000 |
+| Anthropic: Claude 3 Haiku | `claude-3-haiku` | 200,000 | 4,096 |
+| Anthropic: Claude Fable Latest | `claude-fable-latest` | 1,000,000 | 128,000 |
+| Anthropic Claude Haiku Latest | `claude-haiku-latest` | 200,000 | 64,000 |
+| Anthropic: Claude Opus 4 | `claude-opus-4` | 200,000 | 32,000 |
+| Anthropic: Claude Opus 4.1 | `claude-opus-4-1` | 200,000 | 32,000 |
+| Anthropic: Claude Opus 4.7 (Fast) | `claude-opus-4-7-fast` | 1,000,000 | 128,000 |
+| Anthropic: Claude Opus 4.8 (Fast) | `claude-opus-4-8-fast` | 1,000,000 | 128,000 |
+| Anthropic: Claude Opus Latest | `claude-opus-latest` | 1,000,000 | 128,000 |
+| Anthropic: Claude Sonnet 4 | `claude-sonnet-4` | 1,000,000 | 64,000 |
+| Anthropic Claude Sonnet Latest | `claude-sonnet-latest` | 1,000,000 | 128,000 |
 
-Whether thinking is requested is driven by two things: the model's
-`capabilities.reasoning` flag in the node configuration (stamped from OpenRouter
-model sync) **and** the node's own `extendedThinking` toggle, which is off by
-default. Both must be on. When they are, the node builds provider-correct
-thinking parameters based on the model name.
+</details>
+
+The `*-latest` profiles track Anthropic's current model aliases and update as
+Anthropic promotes new versions; pin a specific profile when reproducibility
+matters.
+
+## Configuration
+
+Pick a profile and provide an API key — that is the whole configuration for
+most pipelines. The model ID and token limits for named profiles are fixed by
+the profile; only the `custom` profile exposes `model` and `modelTotalTokens`
+directly. `modelSource` records where a custom model definition comes from
+(`manual` or `openrouter`).
+
+### Extended thinking
+
+The `extendedThinking` toggle (off by default) requests the model's reasoning
+stream. Two switches must both be on for thinking to activate: the model's
+`capabilities.reasoning` flag (stamped from OpenRouter model sync) and this
+node's toggle. It affects the interactive streaming path only — the agent /
+`expectJson` path never requests thinking. Provider-correct parameters are
+chosen by model; see Notes for the exact per-model behavior.
+
+## Authentication
+
+Provide an Anthropic API key in the `apikey` field. The key is validated at
+startup: it must be non-empty and start with `sk-ant` (covers both standard
+`sk-ant-...` and newer `sk-ant-api03-...` formats). If the key fails this check,
+the node raises `Invalid Anthropic API key format, please check your API key.`
+The key is read at construction time and not stored by the node.
+
+## Notes
+
+### Extended thinking parameters by model
+
 Routing prefixes such as `openrouter/anthropic/` are stripped before matching.
 
 | Model                                  | Thinking parameters sent                                                                                                                                                                                                                      |
-| -------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| -------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Legacy Claude 3 / 3.5 Haiku            | None. Those models have no extended thinking; sending parameters would return a 400. Haiku 4.5 and newer are not excluded and follow the row below.                                                                                            |
 | `claude-opus-4-7` / `claude-opus-4-8` | `thinking: {type: "adaptive", display: "summarized"}` (adaptive thinking)                                                                                                                                                                    |
 | Other Claude models                    | `thinking: {type: "enabled", budget_tokens: N}` plus the `interleaved-thinking-2025-05-14` beta header, where `N` is half the output-token limit (minimum 2,048, always below `max_tokens`). Skipped entirely if the output window is too small for a valid budget. |
@@ -82,19 +140,7 @@ Anthropic Messages API handler (`ai.common.llm_native_stream`, provider
 forwarded on the `thinking` SSE lane. Non-reasoning models stay on the default
 LangChain streaming path.
 
----
-
-## Authentication
-
-Provide an Anthropic API key in the `apikey` field. The key is validated at
-startup: it must be non-empty and start with `sk-ant` (covers both standard
-`sk-ant-...` and newer `sk-ant-api03-...` formats). If the key fails this check,
-the node raises `Invalid Anthropic API key format, please check your API key.`
-The key is read at construction time and not stored by the node.
-
----
-
-## Save-time validation
+### Save-time validation
 
 When the node configuration is saved, a lightweight validation pass runs before
 the first pipeline execution:
@@ -108,6 +154,10 @@ concise single-line warning in the form `Error <status>: <type> - <message>`,
 extracted from the API's structured error payload when available. Network or SDK
 errors that carry no structured payload fall back to the raw exception message,
 collapsed to a single line.
+
+## Upstream docs
+
+- [Anthropic API documentation](https://docs.anthropic.com/en/api)
 
 ---
 

@@ -8,44 +8,42 @@ Routes questions through Perplexity AI's Sonar family of models, each of which g
 
 Uses `langchain-openai` (`ChatOpenAI`) against Perplexity's OpenAI-compatible endpoint at `https://api.perplexity.ai`. Temperature is fixed at `0`. The SDK's built-in retries are disabled; the node manages its own retry loop with per-model timeouts and exponential backoff (see "Timeouts and retries" below). Prompt length is checked against the model's token limit before each request, using a word-based estimate (approximately 0.75 words per token).
 
----
-
-## Configuration
-
-| Field               | Type / Default         | Description                                              |
-|---------------------|------------------------|----------------------------------------------------------|
-| `profile`           | enum, default `sonar`  | Which Sonar model profile to activate (see Profiles)     |
-| `apikey`            | string                 | Perplexity AI API key for the selected profile           |
-| `model`             | string (per profile)   | Perplexity model identifier, set automatically by profile|
-| `modelTotalTokens`  | number (per profile)   | Total context window in tokens                           |
-| `modelOutputTokens` | number (per profile)   | Maximum output tokens per response                       |
-
-The `model`, `modelTotalTokens`, and `modelOutputTokens` values are preset by the chosen profile; only `apikey` needs to be supplied per profile.
-
-### Lanes
+## Lanes
 
 | Lane in     | Lane out  | Description                                          |
-|-------------|-----------|------------------------------------------------------|
+| ----------- | --------- | ---------------------------------------------------- |
 | `questions` | `answers` | Send a question directly, receive a generated answer |
-
----
 
 ## Profiles
 
-| Profile                       | Model                 | Context (tokens) | Max output | Model source |
-|-------------------------------|-----------------------|------------------|------------|--------------|
-| Sonar (default)               | `sonar`               | 127,072          | 4,096      | manual       |
-| Sonar Pro                     | `sonar-pro`           | 200,000          | 8,000      | manual       |
-| Sonar Reasoning               | `sonar-reasoning`     | 128,000          | 4,096      | manual       |
-| Sonar Reasoning Pro           | `sonar-reasoning-pro` | 128,000          | 4,096      | manual       |
-| Sonar Deep Research           | `sonar-deep-research` | 128,000          | 4,096      | manual       |
-| Perplexity: Sonar Pro Search  | `sonar-pro-search`    | 200,000          | 8,000      | OpenRouter   |
+Default: **Sonar** (`sonar`).
+
+| Profile | Model | Context tokens | Output tokens | Model source |
+| ------- | ----- | -------------- | ------------- | ------------ |
+| `sonar` **(default)** | `sonar` | 127,072 | 4,096 | manual |
+| `sonar-pro` | `sonar-pro` | 200,000 | 8,000 | manual |
+| `sonar-reasoning-pro` | `sonar-reasoning-pro` | 128,000 | 4,096 | manual |
+| `sonar-reasoning` | `sonar-reasoning` | 128,000 | 4,096 | manual |
+| `sonar-deep-research` | `sonar-deep-research` | 128,000 | 4,096 | manual |
+| `sonar-pro-search` | `sonar-pro-search` | 200,000 | 8,000 | OpenRouter |
 
 All profiles except `sonar-pro-search` use manually configured model metadata. The `sonar-pro-search` profile pulls token limits from OpenRouter.
 
----
+## Configuration
 
-## Timeouts and retries
+Choose a Sonar profile for the search and reasoning depth the pipeline needs. The
+profile supplies the model ID, context window, and output budget; only the Perplexity
+API key normally needs to be supplied.
+
+## Authentication
+
+Set `apikey` to a valid Perplexity AI API key in the selected profile's config panel. The key is validated at save time by sending a minimal 10-token probe request (`"Hi"`) to `https://api.perplexity.ai`. If the probe fails, a concise warning is surfaced rather than a raw error dump. For HTTP 401 responses that return an HTML page (a known Perplexity behavior), the node extracts the page title or `<h1>` text and formats it into a readable message.
+
+To obtain an API key, visit [https://www.perplexity.ai/settings/api](https://www.perplexity.ai/settings/api).
+
+## Notes
+
+### Timeouts and retries
 
 Request timeout and retry behavior scale with model complexity:
 
@@ -58,16 +56,6 @@ Request timeout and retry behavior scale with model complexity:
 Retries use exponential backoff (`base_delay x 2^attempt`) and only fire on transient failures: timeouts, connection/network errors, and HTTP 500/502/503/504 responses. Authentication errors, quota/billing errors, and input validation errors fail immediately without retrying.
 
 After all retries are exhausted, raw API errors are translated into concise user-facing messages covering: bad API key, rate limiting, quota/billing issues, invalid input, model unavailability, content policy violations, timeouts, and network errors.
-
----
-
-## Authentication
-
-Set `apikey` to a valid Perplexity AI API key in the selected profile's config panel. The key is validated at save time by sending a minimal 10-token probe request (`"Hi"`) to `https://api.perplexity.ai`. If the probe fails, a concise warning is surfaced rather than a raw error dump. For HTTP 401 responses that return an HTML page (a known Perplexity behavior), the node extracts the page title or `<h1>` text and formats it into a readable message.
-
-To obtain an API key, visit [https://www.perplexity.ai/settings/api](https://www.perplexity.ai/settings/api).
-
----
 
 ## Upstream docs
 

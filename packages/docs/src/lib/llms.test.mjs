@@ -41,15 +41,15 @@ describe('buildIndex', () => {
 	it('writes llms.txt grouping pages under their spine sections', async () => {
 		const index = await readFile(path.join(staticDir, 'llms.txt'), 'utf8');
 		assert.match(index, /^# RocketRide Documentation/m);
-		assert.match(index, /## Quickstart/);
+		assert.match(index, /## Get Started/);
 		assert.match(index, /## Concepts/);
 		// Links are absolute (the llms.txt format specifies URLs) and carry the
 		// manifest description when the page has one.
 		assert.match(index, /\[Pipelines\]\(https:\/\/docs\.rocketride\.org\/concepts\/pipelines\.md\): A pipeline is a directed graph of nodes\./);
 		// An entry without a description degrades to a bare link, no trailing colon.
 		assert.match(index, /\[Quickstart\]\(https:\/\/docs\.rocketride\.org\/quickstart\.md\)\n/);
-		// Quickstart section precedes Concepts (spine order)
-		assert.ok(index.indexOf('## Quickstart') < index.indexOf('## Concepts'));
+		// Get Started section precedes Concepts (spine order)
+		assert.ok(index.indexOf('## Get Started') < index.indexOf('## Concepts'));
 	});
 
 	it('writes llms-full.txt with the generated node catalog inlined', async () => {

@@ -1,0 +1,118 @@
+---
+title: Python SDK
+sidebar_position: 0
+sidebar_label: Overview
+---
+
+import { LuSettings, LuPlug, LuPlay, LuRocket, LuSend, LuFolderOpen, LuMessageSquare, LuActivity, LuShieldAlert, LuBookOpen, LuFlaskConical, LuChartLine } from 'react-icons/lu';
+
+# Python SDK
+
+Build, run, and manage AI pipelines from Python. The `rocketride` package is
+async-first — built on `asyncio` and `websockets` — and speaks the engine's native
+[WebSocket protocol](/connect/websocket): you author a `.pipe`
+([visually](/clients/vscode) or [by hand](/reference/pipeline-reference)) and run it
+against the engine from your own application.
+
+## Install
+
+```bash
+pip install rocketride
+```
+
+Python 3.10+. The [`rocketride` CLI](/connect/cli) is installed with the package.
+
+## Quickstart
+
+```python
+import asyncio
+from rocketride import RocketRideClient
+
+
+async def main():
+    async with RocketRideClient(uri='https://api.rocketride.ai', auth='my-key') as client:
+        result = await client.use(filepath='pipeline.pipe')
+        token = result['token']
+        out = await client.send(token, 'Hello, pipeline!', objinfo={'name': 'input.txt'}, mimetype='text/plain')
+        print(out)
+        await client.terminate(token)
+
+
+asyncio.run(main())
+```
+
+`send()` / `send_files()` target pipelines whose **source** is `webhook` or
+`dropper`; if your pipeline source is `chat`, use
+[`client.chat()`](/clients/python/chat). No pipeline yet? The
+[IDE walkthrough](/quickstart/ide-walkthrough) builds one in minutes.
+
+## Explore the SDK
+
+<div className="rr-card-grid">
+
+<a className="rr-side-card" href="/clients/python/configuration">
+  <span className="rr-side-card__head"><LuSettings className="rr-card-icon" /><span className="rr-side-card__title">Configuration</span></span>
+  <span className="rr-side-card__body">Constructor options, environment variables, timeouts, and reconnection.</span>
+</a>
+
+<a className="rr-side-card" href="/clients/python/connection">
+  <span className="rr-side-card__head"><LuPlug className="rr-card-icon" /><span className="rr-side-card__title">Connection</span></span>
+  <span className="rr-side-card__body">The attach/login layers, context manager, persist mode, and lifecycle callbacks.</span>
+</a>
+
+<a className="rr-side-card" href="/clients/python/pipelines">
+  <span className="rr-side-card__head"><LuPlay className="rr-card-icon" /><span className="rr-side-card__title">Running Pipelines</span></span>
+  <span className="rr-side-card__body">Start with <code>use()</code>, watch progress, validate, and terminate.</span>
+</a>
+
+<a className="rr-side-card" href="/clients/python/deploy">
+  <span className="rr-side-card__head"><LuRocket className="rr-card-icon" /><span className="rr-side-card__title">Deployments</span></span>
+  <span className="rr-side-card__body">Publish immutable versions, point team environments at them, and schedule runs.</span>
+</a>
+
+<a className="rr-side-card" href="/clients/python/data">
+  <span className="rr-side-card__head"><LuSend className="rr-card-icon" /><span className="rr-side-card__title">Sending Data</span></span>
+  <span className="rr-side-card__body">One-shot sends, concurrent file uploads with progress, and chunked streaming.</span>
+</a>
+
+<a className="rr-side-card" href="/clients/python/storage">
+  <span className="rr-side-card__head"><LuFolderOpen className="rr-card-icon" /><span className="rr-side-card__title">File Storage</span></span>
+  <span className="rr-side-card__body">Read, write, and manage your server-side store; signed URLs for direct access.</span>
+</a>
+
+<a className="rr-side-card" href="/clients/python/chat">
+  <span className="rr-side-card__head"><LuMessageSquare className="rr-card-icon" /><span className="rr-side-card__title">Chat</span></span>
+  <span className="rr-side-card__body">Build a <code>Question</code>, stream the response, parse it with <code>Answer</code>.</span>
+</a>
+
+<a className="rr-side-card" href="/clients/python/logs">
+  <span className="rr-side-card__head"><LuActivity className="rr-card-icon" /><span className="rr-side-card__title">Run Logs</span></span>
+  <span className="rr-side-card__body">The log continuum and the DVR session: live monitoring and replay with one API.</span>
+</a>
+
+<a className="rr-side-card" href="/clients/python/errors">
+  <span className="rr-side-card__head"><LuShieldAlert className="rr-card-icon" /><span className="rr-side-card__title">Error Handling</span></span>
+  <span className="rr-side-card__body">What the SDK raises, when, and how to catch it.</span>
+</a>
+
+<a className="rr-side-card" href="/clients/python/reference">
+  <span className="rr-side-card__head"><LuBookOpen className="rr-card-icon" /><span className="rr-side-card__title">API Reference</span></span>
+  <span className="rr-side-card__body">Every public class and method, in one place.</span>
+</a>
+
+<a className="rr-side-card" href="/clients/python/examples">
+  <span className="rr-side-card__head"><LuFlaskConical className="rr-card-icon" /><span className="rr-side-card__title">Examples</span></span>
+  <span className="rr-side-card__body">Seven complete programs, from hello-pipeline to custom DAP requests.</span>
+</a>
+
+<a className="rr-side-card" href="/clients/python/analytics">
+  <span className="rr-side-card__head"><LuChartLine className="rr-card-icon" /><span className="rr-side-card__title">Analytics</span></span>
+  <span className="rr-side-card__body">Report client-side analytics events through the SDK.</span>
+</a>
+
+</div>
+
+## Links
+
+- [GitHub](https://github.com/rocketride-org/rocketride-server) · [PyPI](https://pypi.org/project/rocketride/) · [Discord](https://discord.gg/PMXrtenMsY)
+- [Release notes](/support/release-notes) · [Get help](/support/get-help)

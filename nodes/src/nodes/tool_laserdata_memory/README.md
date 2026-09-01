@@ -1,10 +1,16 @@
-# LaserData Memory node
+# tool_laserdata_memory
 
 Adds durable, shared memory to agents through four tools: `laserdata.remember`,
 `laserdata.recall`, `laserdata.improve`, and `laserdata.forget`.
 
 This is a `tool` node (`classType: ["tool"]`, invoke capability, no data lanes). Multiple agents
 can connect to the same LaserData Memory node and share its namespace-scoped durable memory.
+
+## About LaserData
+
+LaserData provides data infrastructure and an SDK for working with durable
+streams, memory, context, and state on Apache Iggy. This node uses its Laser
+SDK memory primitive as a shared, durable store for agents.
 
 ## What it does
 
@@ -20,7 +26,7 @@ namespace per call, falling back to the one configured on the node; turn
 `allow_namespace_override` off to lock all calls to the configured namespace. A `conversation` id
 can additionally scope items to one session.
 
-## Tools
+## As a tool
 
 - **`laserdata.remember`** stores a statement verbatim and returns its `memory_id` (a
   time-ordered ULID).
@@ -34,7 +40,16 @@ can additionally scope items to one session.
 Bad input raises `ValueError`; backend and timeout failures raise `RuntimeError`. There is no
 destructive clear/reset tool.
 
-## SDK contract provenance
+## Profiles
+
+Default: **Your own Apache Iggy server** (`local`).
+
+| Profile | Deployment | Context |
+|---|---|---|
+| `local` **(default)** | Your own Apache Iggy server | Uses the local connection-string field |
+| `cloud` | LaserData Cloud | Uses the cloud connection-string field |
+
+### SDK contract provenance
 
 Built against **`laser-sdk==0.0.1rc21`** (PyPI, pinned in `requirements.txt`). rc20+ speaks only
 Apache Iggy's VSR cluster protocol (the upcoming clustering wire format), so the server must be a
@@ -50,7 +65,7 @@ futures must be created on a running event loop, so the node keeps one persisten
 a daemon thread (`IGlobal`) and submits each synchronously-dispatched tool call to it. The
 connection opens lazily on the first tool call and closes on pipe teardown.
 
-## Setup
+## Configuration
 
 The **LaserData deployment** dropdown selects a connection mode (a preconfig profile, same
 pattern as the Qdrant node) and switches the visible fields and defaults:
@@ -90,6 +105,14 @@ Shared by both modes:
 - `op_timeout` (advanced): per-operation timeout (including first connect), 5–600 seconds.
   Defaults to 30.
 
+## Notes
+
+### Deferred scope
+
+`context(id)` assembly, `kv` get/set/delete, and `fork(id)` copy-on-write
+state are not exposed. The node is deliberately a request-driven memory/state
+provider rather than an event-stream source.
+
 ## Upstream docs
 
 - LaserData: https://laserdata.com
@@ -98,10 +121,3 @@ Shared by both modes:
 
 <!-- ROCKETRIDE:GENERATED:PARAMS START -->
 <!-- ROCKETRIDE:GENERATED:PARAMS END -->
-
-## Scope
-
-Deferred (see issue #1733): `context(id)` assembly, `kv` get/set/delete, `fork(id)` copy-on-write
-state. Out of scope by architect decision: the streaming-transport surface (`log`/`topic`,
-`views`, `graph`, `watch`, `fabric`) — RocketRide's engine is request-driven, and LaserData is
-integrated here as a memory/state provider, not an event source.

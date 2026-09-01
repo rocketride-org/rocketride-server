@@ -35,7 +35,7 @@
  */
 const path = require('path');
 const { glob } = require('glob');
-const { execCommand, removeDirs, removeDirAndParents, PROJECT_ROOT, BUILD_ROOT, DIST_ROOT, exists, mkdir, syncDir, formatSyncStats, writeFile, copyFile, startServer, stopServer, bracket, parallel, hasSourceChanged, saveSourceHash, setState, parseServerAddress } = require('../../../scripts/lib');
+const { execCommand, removeDirs, removeDirAndParents, PROJECT_ROOT, BUILD_ROOT, DIST_ROOT, exists, mkdir, syncDir, formatSyncStats, writeFile, startServer, stopServer, bracket, parallel, hasSourceChanged, saveSourceHash, setState, parseServerAddress } = require('../../../scripts/lib');
 const { stripDtsDir } = require('../../../scripts/lib/stripDts');
 
 const PACKAGE_DIR = path.join(__dirname, '..');
@@ -70,12 +70,6 @@ async function saveCompileHash() {
 	}
 }
 
-// Canonical README lives in docs/; npm pack runs against the package root,
-// so we must copy the README here (npm doesn't support files outside the package).
-const DOCS_DIR = path.join(PROJECT_ROOT, 'docs');
-const README_SRC = path.join(DOCS_DIR, 'README-typescript-client.md');
-const README_DEST = path.join(PACKAGE_DIR, 'README.md');
-
 // ============================================================================
 // Action Factories
 // ============================================================================
@@ -101,15 +95,6 @@ function makeSyncVersionAction() {
 			} else {
 				task.output = `SDK_VERSION already ${version}`;
 			}
-		},
-	};
-}
-
-function makeCopyReadmeAction() {
-	return {
-		run: async (ctx, task) => {
-			await copyFile(README_SRC, README_DEST);
-			task.output = 'Copied README from docs/';
 		},
 	};
 }
@@ -355,14 +340,12 @@ module.exports = {
 
 	// Co-located docs mounts gathered by docs:gather.
 	docs: [
-		{ source: 'docs/guide', mount: 'develop/typescript' },
-		{ source: 'docs/reference/pipeline', mount: 'pipeline-reference' }
+		{ source: 'docs/reference/pipeline', mount: 'reference/pipeline-reference' }
 	],
 
 	actions: [
 		// Internal actions
 		{ name: 'client-typescript:sync-version', action: makeSyncVersionAction },
-		{ name: 'client-typescript:copy-readme', action: makeCopyReadmeAction },
 		{ name: 'client-typescript:compile-cjs', action: makeCompileCjsAction },
 		{ name: 'client-typescript:compile-esm', action: makeCompileEsmAction },
 		{ name: 'client-typescript:generate-types', action: makeGenerateTypesAction },
@@ -382,7 +365,7 @@ module.exports = {
 			name: 'client-typescript:build',
 			action: () => ({
 				description: 'Build client-typescript',
-				steps: ['client-typescript:sync-version', 'client-typescript:copy-readme', parallel(['client-typescript:compile-cjs', 'client-typescript:compile-esm', 'client-typescript:generate-types'], 'Compile sources'), 'client-typescript:compile-cli', 'client-typescript:post-build', 'client-typescript:create-package', 'client-typescript:sync', 'client-typescript:docs-generate'],
+				steps: ['client-typescript:sync-version', parallel(['client-typescript:compile-cjs', 'client-typescript:compile-esm', 'client-typescript:generate-types'], 'Compile sources'), 'client-typescript:compile-cli', 'client-typescript:post-build', 'client-typescript:create-package', 'client-typescript:sync', 'client-typescript:docs-generate'],
 			}),
 		},
 		{

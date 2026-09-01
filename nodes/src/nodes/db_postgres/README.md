@@ -8,11 +8,41 @@ Plays two roles in a pipeline. As a pipeline node, it receives natural-language 
 
 Uses SQLAlchemy with the psycopg2 driver (`psycopg2-binary`). The connection string is built as `postgresql+psycopg2://user:password@host/database`; user, password, and database are URL-encoded so reserved characters (`@`, `/`, `#`, `:`) are safe, and the host may carry an explicit port (e.g. `localhost:5433`).
 
-Safety defaults: only `SELECT` statements are permitted for queries (whitelist check, see SQL safety below), generated SQL is validated with `EXPLAIN` against the live database before execution, and raw SQL execution (`QuestionType.EXECUTE`) is disabled by default via `allow_execute`.
+Safety defaults: only `SELECT` statements are permitted for queries (whitelist check, see Notes), generated SQL is validated with `EXPLAIN` against the live database before execution, and raw SQL execution (`QuestionType.EXECUTE`) is disabled by default via `allow_execute`.
 
 The same implementation also ships as a Supabase preset (`services.supabase.json`, protocol `db_supabase://`): Supabase is managed Postgres, so it is a branded configuration, not separate code.
 
----
+## Example pipelines
+
+**Chat with your database**
+
+`chat → db_postgres → response_answers + response_table`
+
+<div align="center">
+
+![The PostgreSQL node on the canvas answering questions from chat, with an LLM connected](example.png)
+
+[![Download example.pipe](https://img.shields.io/badge/example.pipe-Download-41b6e6?style=for-the-badge)](example.pipe)
+
+</div>
+
+`llm_anthropic` is wired to `llm`. Natural-language questions arrive from
+chat; PostgreSQL returns conversational answers and tabular results on the
+two response lanes.
+
+**Structured extraction into a table**
+
+`webhook → ocr → extract_data → db_postgres`
+
+Scanned documents are OCR'd, `extract_data` structures the fields, and the
+rows arrive on this node's `answers` lane — the table is auto-created on
+first insert.
+
+**Agent with database access**
+
+An agent (e.g. `agent_deepagent`) with this node connected as a tool. The
+agent calls `get_schema` to learn the shape of the data, then `get_data` to
+answer questions — with the SELECT-only whitelist keeping it read-safe.
 
 ## Connections
 
@@ -20,18 +50,14 @@ The same implementation also ships as a Supabase preset (`services.supabase.json
 | ---------- | -------- | ---------------------------------------------- |
 | `llm`      | yes      | LLM used to generate SQL from natural language |
 
----
-
-## Configuration
-
-### Lanes
+## Lanes
 
 | Lane in     | Lane out | Description                                                    |
 | ----------- | -------- | -------------------------------------------------------------- |
 | `questions` | `table`  | Translate question to SQL, execute, return as a markdown table |
 | `questions` | `text`   | Translate question to SQL, execute, return as text             |
 | `questions` | `answers`| Translate question to SQL, execute, return as answers          |
-| `answers`   | (none)   | Parse structured rows and insert into the table                |
+| `answers`   | —        | Parse structured rows and insert into the table                |
 
 If the LLM decides a question is not a database query, its text response is emitted instead of query results.
 
@@ -40,25 +66,7 @@ Two special question types are handled on the `questions` lane:
 - **`QuestionType.DIALECT`**: emits `{"dialect": "postgres"}` on the `answers` lane so SDK callers can branch on the underlying engine.
 - **`QuestionType.EXECUTE`**: runs the question text as raw SQL (read or write, no LLM, no safety check). Gated by `allow_execute`; when disabled the request is logged and dropped. `SELECT` results are capped at 25,000 rows; write statements report `affected_rows`.
 
-### Fields
-
-| Field | Type | Description |
-|---|---|---|
-| `host` | string | Default "localhost". Host name or IP address of the PostgreSQL server, optionally including a port (e.g. localhost:5433) |
-| `user` | string | Default "postgres". User to connect to the PostgreSQL server |
-| `password` | string | Password to connect to the PostgreSQL server |
-| `database` | string | Default "postgres". Name of database |
-| `table` | string | Default "table". Name of table |
-| `db_description` | string | Default empty. What is this database used for? Describe its content and purpose, this helps the LLM generate more accurate queries. |
-| `max_attempts` | integer | Default 5. Maximum number of times to re-ask the LLM if EXPLAIN rejects the generated SQL |
-| `allow_execute` | boolean | Default false. Permit QuestionType.EXECUTE callers to run raw SQL without LLM translation or safety checks. Leave OFF unless a trusted application explicitly needs to issue SQL directly. |
-| `profile` | string | Default "default".  |
-
-The single `default` profile presets `database` to `postgres`.
-
----
-
-## Available tools
+## As a tool
 
 When connected to an agent, the node exposes three functions (named under the configured server prefix, default `postgres`):
 
@@ -70,9 +78,7 @@ When connected to an agent, the node exposes three functions (named under the co
 
 `get_data` and `get_sql` return `valid: false` with an `error` (unsafe SQL) or an `answer` (the question was not a database query) when no executable query is produced.
 
----
-
-## Transaction tool functions
+### Transactions
 
 Three additional tool functions support explicit database transactions. All three require `allow_execute=true` on the node (the same gate as `QuestionType.EXECUTE`); requests are silently dropped when the gate is off.
 
@@ -90,9 +96,44 @@ The Python SDK exposes these as `client.database.begin_transaction()`, `client.d
 
 To run a statement **inside** an open session from the SDK, pass the `session_id` (and any positional `$1..$n` `params`) to the database query method — Python `client.database.query(token=..., sql=..., session_id=..., params=[...])`, TypeScript `client.database.query({ token, sql, sessionId, params })`. Parameters are bound server-side. A `query(...)` call without a `session_id` runs on a fresh auto-commit connection and is not part of any transaction.
 
----
+## Configuration
 
-## SQL safety & validation
+Connection settings (host, user, password, database, table) plus three fields
+that shape query behavior, detailed below. The single `default` profile presets
+`database` to `postgres`.
+
+### Database description
+
+Free-text description of what the database contains and what it is used for,
+included in the prompt when the LLM generates SQL. This is the highest-leverage
+field on the node: a specific description ("orders and customers for the EU
+webshop; `orders.status` is an enum of pending/shipped/returned") measurably
+improves query accuracy, while a blank one leaves the LLM guessing from column
+names alone. Update it when the schema's meaning changes, not just its shape.
+
+### Max validation attempts
+
+How many times the node re-asks the LLM after `EXPLAIN` rejects the generated
+SQL (default 5). Raise it for complex schemas where first attempts often fail;
+lower it to fail fast in latency-sensitive pipelines. Each retry feeds the
+database error back to the LLM, so attempts are not blind retries.
+
+### Allow direct query execution
+
+Gates raw SQL execution (`QuestionType.EXECUTE` and the transaction tools).
+Off by default — leave it off unless a trusted application explicitly needs to
+issue SQL directly, because enabled callers bypass both the LLM translation
+and the SELECT-only safety check.
+
+## Limitations
+
+Declared `noremote`: this node runs on the local engine host only and is not
+available for remote execution. It needs a direct network path to the
+PostgreSQL server it queries.
+
+## Notes
+
+### SQL safety & validation
 
 Generated SQL passes two gates before execution:
 
@@ -101,9 +142,7 @@ Generated SQL passes two gates before execution:
 
 Insert operations never go through SQL generation; they use the `answers` lane.
 
----
-
-## Data insertion
+### Data insertion
 
 Rows arriving on the `answers` lane are inserted into the configured `table`:
 
@@ -112,9 +151,7 @@ Rows arriving on the `answers` lane are inserted into the configured `table`:
 - Lists and dicts are serialised as JSON strings; booleans are stored as `0`/`1`.
 - Each batch is inserted in a single transaction: on failure it is rolled back and the error re-raised.
 
----
-
-## Supabase preset
+### Supabase preset
 
 `services.supabase.json` registers the same node as Supabase (`db_supabase://`, prefix `supabase`). The connection is encrypted over TLS. Operational notes:
 

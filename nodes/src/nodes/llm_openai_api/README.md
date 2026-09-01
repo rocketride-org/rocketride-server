@@ -20,30 +20,62 @@ completion request to the configured endpoint (10-second timeout) and surfaces a
 error (bad key, unknown model, unreachable URL) as a warning with the provider's status code
 and message, truncated to 500 characters.
 
----
+## Lanes
+
+| Lane in     | Lane out  | Description                                          |
+| ----------- | --------- | ---------------------------------------------------- |
+| `questions` | `answers` | Send a question directly, receive a generated answer |
+
+## Profiles
+
+Generic endpoint default: **Custom OpenAI-compatible endpoint** (`custom`).
+Nebius preset default: **Llama 3.3 70B Instruct** (`llama-3-3-70b`).
+
+The directory documents the generic endpoint and the Nebius branded preset in one
+combined profile table.
+
+| Profile | Model | Context tokens | Source |
+| ------- | ----- | -------------- | ------ |
+| Generic `custom` **(default)** | _(user-specified)_ | 32,768 | Any OpenAI-compatible API |
+| `llama-3-3-70b` **(default)** | `meta-llama/Llama-3.3-70B-Instruct` | 131,072 | Nebius Token Factory |
+| `qwen3-235b` | `Qwen/Qwen3-235B-A22B` | 131,072 | Nebius Token Factory |
+| `deepseek-v3` | `deepseek-ai/DeepSeek-V3` | 131,072 | Nebius Token Factory |
 
 ## Configuration
 
-### Lanes
+Choose `custom` for a generic provider and set its model ID, base URL, context limit,
+and API key. Choose one of the named Nebius profiles when using Token Factory; those
+profiles pin the model ID, endpoint, and context limit.
 
-| Lane in     | Lane out  | Description                                          |
-|-------------|-----------|------------------------------------------------------|
-| `questions` | `answers` | Send a question directly, receive a generated answer |
+### Generic OpenAI-compatible endpoints
 
-### Fields
+Set `base_url` to the provider's OpenAI-compatible API root and `model` to its exact
+model identifier. When `base_url` is empty, the OpenAI SDK uses its default endpoint.
+Use a positive `modelTotalTokens` value that matches the selected model.
 
-| Field | Type | Description |
-|---|---|---|
-| `model` | string | Nebius Token Factory model id (e.g. meta-llama/Llama-3.3-70B-Instruct). Full list: https://tokenfactory.nebius.com/models |
-| `base_url` | string | OpenAI-compatible base URL. Defaults to Nebius Token Factory. |
-| `modelTotalTokens` | number | Total Tokens |
-| `profile` | string | Default "llama-3-3-70b". Nebius Token Factory model |
+### Nebius preset
 
-The generic node has a single `custom` profile: all four fields are specified directly.
+`services.nebius.json` registers **Nebius** (`llm_nebius://`) as a branded preset of
+this node. It uses the same Python implementation and pins the base URL to
+`https://api.tokenfactory.nebius.com/v1/`. The three named Nebius profiles in the
+combined table require no model or endpoint edits.
 
----
+Nebius profiles default the API key to the `${ROCKETRIDE_NEBIUS_KEY}` environment
+substitution, so no per-node key entry is needed when that variable is set. The Nebius
+service also exposes its own `custom` option for another Token Factory model, retaining
+the pinned endpoint, environment-backed key, and 131,072-token context limit. The
+combined table represents the duplicate `custom` key once, using the generic service's
+merged 32,768-token default.
 
-## Error handling & retries
+## Authentication
+
+For `custom`, provide the API key expected by the configured endpoint. Nebius named
+profiles use `${ROCKETRIDE_NEBIUS_KEY}` by default; replace it only when the credential
+must be supplied directly in the node configuration.
+
+## Notes
+
+### Error handling and retries
 
 Provider errors are mapped to friendly messages and classified for retry:
 
@@ -56,27 +88,7 @@ Provider errors are mapped to friendly messages and classified for retry:
 
 Anything else falls through to the shared LLM base's default retry and mapping logic.
 
----
-
-## Nebius preset
-
-`services.nebius.json` registers **Nebius** (`llm_nebius://`) as a branded preset of this
-node: it reuses the same Python implementation (`nodes.llm_openai_api`) with the base URL
-pinned to Nebius Token Factory (`https://api.tokenfactory.nebius.com/v1/`).
-
-| Profile                      | Model                               | Total tokens |
-|------------------------------|-------------------------------------|--------------|
-| `llama-3-3-70b` (default)    | `meta-llama/Llama-3.3-70B-Instruct` | 131072       |
-| `qwen3-235b`                 | `Qwen/Qwen3-235B-A22B`              | 131072       |
-| `deepseek-v3`                | `deepseek-ai/DeepSeek-V3`           | 131072       |
-| `custom`                     | any Nebius Token Factory model id   | 131072       |
-
-All Nebius profiles default the API key to the `${ROCKETRIDE_NEBIUS_KEY}` environment
-substitution, so no per-node key entry is needed when that variable is set.
-
----
-
-## Testing
+### Testing
 
 `services.json` includes a `test` block that runs the `custom` profile against a local
 test server with a mocked `langchain_openai`, so no real API key is required.

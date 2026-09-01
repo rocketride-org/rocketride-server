@@ -16,7 +16,7 @@ The `hash/` and `parser/` subdirectories carry the per-service documentation pag
 
 ---
 
-## Services
+### Protocol-bearing services
 
 | Service | File | Protocol | Class type | Lanes |
 |---------|------|----------|------------|-------|
@@ -72,7 +72,21 @@ An internal no-op endpoint registered as both a source shape and a target shape 
 
 ---
 
-## Shared field libraries
+## Lanes
+
+| Lane in | Lane out | Description |
+|---------|----------|-------------|
+| `_source` | `tags` | Local File System emits source tags for downstream processing. |
+| `tags` | `tags` | The Fingerprinter preserves the tags lane while adding its deterministic content fingerprint. |
+| `source` | `tags` | The internal null endpoint forwards a source lane into tags without an external system. |
+
+The parser also accepts `tags` and emits `text`, `table`, `image`, `video`, and `audio`; its protocol-specific documentation is in the `parser/` subdirectory.
+
+## Configuration
+
+This directory supplies several built-in services as well as shared field definitions used by other nodes. Configure the protocol-bearing service selected in a pipeline; the generated schema below is the field reference. The shared field files do not register a selectable service themselves.
+
+### Shared field libraries
 
 These files define common fields that are merged into a service definition as required. Field names below are exact.
 
@@ -150,7 +164,7 @@ Combines services into single selectable types for pipelines that pick one provi
 
 ---
 
-## Google access helper (`google_access.py`)
+### Google access helper (`google_access.py`)
 
 A single reader that turns a Google tool node's `access` enum and capability toggles into one resolved object: the OAuth scopes to request, plus the write/destructive gates the node's tool functions check at invoke time.
 
@@ -176,11 +190,19 @@ Bundled specs:
 
 ---
 
-## Running the tests
+### Running the tests
 
 ```bash
 pytest nodes/test/core/test_google_access.py -v
 ```
+
+## Limitations
+
+The Local File System service reads local paths and is marked for filesystem access, security-sensitive use, non-remote execution, and non-SaaS deployment. Run pipelines that use it where the intended files are locally accessible; it is not available in hosted RocketRide deployments and cannot be moved to a remote execution host.
+
+## Notes
+
+The internal Word indexer, ZIP Creation, and null endpoint are protocol-bearing engine services but are not normal user-selectable nodes. The `core` directory also contains reusable JSON field fragments; those fragments are included in the generated schema but do not themselves register pipeline protocols.
 
 ---
 

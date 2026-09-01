@@ -17,7 +17,8 @@ const { execCommand, exists, mkdir, rm, setState, parallel, PROJECT_ROOT, BUILD_
 const DOC_GENERATORS = ['nodes:docs-generate', 'client-typescript:docs-generate'];
 
 const DOCS_DIR = path.join(__dirname, '..');
-const CONTENT_STATIC_DIR = path.join(DOCS_DIR, 'content-static');
+// Spine pages now live in the top-level docs/ tree (docs consolidation).
+const CONTENT_STATIC_DIR = path.join(PROJECT_ROOT, 'docs', 'public', 'product');
 const STATIC_DIR = path.join(DOCS_DIR, 'static');
 
 // Assembled content tree Docusaurus reads (gather populates it).
@@ -35,16 +36,29 @@ function docsEnv(options = {}) {
 		DOCS_VERSION: options.buildVersion || '',
 		DOCS_HASH: options.buildHash || '',
 		DOCS_STAMP: options.buildStamp || '',
-		DOCS_SAAS: options.saas ? '1' : ''
+		DOCS_SAAS: options.saas ? '1' : '',
 	};
 }
 
 function makeGatherAction(mode = 'copy') {
 	return {
 		run: async (ctx, task) => {
-			const { gather } = require('./lib/gather');
-			await gather({ projectRoot: PROJECT_ROOT, contentStaticDir: CONTENT_STATIC_DIR, contentDir: CONTENT_DIR, staticDir: STATIC_DIR, mode, task });
-		}
+			const { gather, assertNoUnexpectedPlaceholders } = require('./lib/gather');
+			const manifest = await gather({ projectRoot: PROJECT_ROOT, contentStaticDir: CONTENT_STATIC_DIR, contentDir: CONTENT_DIR, staticDir: STATIC_DIR, mode, task });
+			// Guardrail: an unexpected placeholder means a spine id and a file path
+			// drifted apart, which otherwise publishes a live "coming soon" URL in
+			// silence. Fails docs:build (and so CI) instead.
+			assertNoUnexpectedPlaceholders(manifest);
+		},
+	};
+}
+
+function makeReleaseNotesAction() {
+	return {
+		run: async (ctx, task) => {
+			const { buildReleaseNotes } = require('./lib/release-notes');
+			await buildReleaseNotes({ contentDir: CONTENT_DIR, staticDir: STATIC_DIR, task });
+		},
 	};
 }
 
@@ -53,7 +67,7 @@ function makeIndexAction() {
 		run: async (ctx, task) => {
 			const { buildIndex } = require('./lib/llms');
 			await buildIndex({ contentDir: CONTENT_DIR, staticDir: STATIC_DIR, task });
-		}
+		},
 	};
 }
 
@@ -63,7 +77,7 @@ function makeCompileAction(options = {}) {
 			await mkdir(SITE_OUT);
 			await execCommand('pnpm', ['exec', 'docusaurus', 'build', '--out-dir', SITE_OUT], { task, cwd: DOCS_DIR, env: docsEnv(options) });
 			task.output = `Built docs site at ${SITE_OUT}`;
-		}
+		},
 	};
 }
 
@@ -71,7 +85,7 @@ function makeDevStartAction(options = {}) {
 	return {
 		run: async (ctx, task) => {
 			await execCommand('pnpm', ['exec', 'docusaurus', 'start'], { task, cwd: DOCS_DIR, env: docsEnv(options), stdio: 'inherit' });
-		}
+		},
 	};
 }
 
@@ -92,7 +106,7 @@ function makeServeAction() {
 				throw new Error(`No built docs at ${SITE_OUT}. Run 'builder docs:build' first.`);
 			}
 			await execCommand('pnpm', ['exec', 'docusaurus', 'serve', '--dir', SITE_OUT, '--port', '3000'], { task, cwd: DOCS_DIR, stdio: 'inherit' });
-		}
+		},
 	};
 }
 
@@ -123,7 +137,32 @@ function makeTestAction() {
 				return;
 			}
 			await execCommand('node', ['--test', '--test-reporter=spec', ...testFiles], { task, cwd: DOCS_DIR });
-		}
+		},
+	};
+}
+
+function makeExportAction() {
+	return {
+		description: 'Export docs-owned files to their package destinations',
+		run: async (ctx, task) => {
+			const { exportDocs } = require('./lib/export');
+			const { written } = await exportDocs({ projectRoot: PROJECT_ROOT, task });
+			task.output = `Exported ${written.length} files`;
+		},
+	};
+}
+
+function makeCheckAction() {
+	return {
+		description: 'Verify exported docs copies are in sync',
+		run: async (ctx, task) => {
+			const { exportDocs } = require('./lib/export');
+			const { drifted } = await exportDocs({ projectRoot: PROJECT_ROOT, check: true, task });
+			if (drifted.length) {
+				throw new Error(`docs:check: exported copies are out of sync:\n${drifted.map((d) => `  ${d}`).join('\n')}\nRun './builder docs:export' to refresh them.`);
+			}
+			task.output = 'Docs exports in sync';
+		},
 	};
 }
 
@@ -137,7 +176,7 @@ function makeCleanAction() {
 			await rm(path.join(DOCS_DIR, 'build'));
 			await setState(GATHER_HASH_KEY, null);
 			task.output = 'Cleaned docs';
-		}
+		},
 	};
 }
 
@@ -149,7 +188,15 @@ module.exports = {
 	actions: [
 		// Internal actions
 		{ name: 'docs:gather', action: () => makeGatherAction('copy') },
-		{ name: 'docs:gather-dev', action: () => makeGatherAction('symlink') },
+		// Dev must copy too, not symlink: Docusaurus hardcodes webpack
+		// `resolve.symlinks: true`, so symlinked MDX compiles under its real
+		// source path outside the docs plugin's content dir. The plugin's
+		// mdx-loader rule then never attaches the doc metadata export and every
+		// page crashes at runtime with "Cannot read properties of undefined
+		// (reading 'id')" in DocItem. Source edits need a re-run of docs:dev
+		// (or docs:gather) to show up.
+		{ name: 'docs:gather-dev', action: () => makeGatherAction('copy') },
+		{ name: 'docs:release-notes', action: makeReleaseNotesAction },
 		{ name: 'docs:index', action: makeIndexAction },
 		{ name: 'docs:compile', action: makeCompileAction },
 		{ name: 'docs:dev-start', action: makeDevStartAction },
@@ -166,8 +213,8 @@ module.exports = {
 		{
 			name: 'docs:build',
 			action: () => ({
-				steps: [parallel(DOC_GENERATORS, 'Generate reference docs'), 'docs:gather', 'docs:index', 'docs:compile']
-			})
+				steps: [parallel(DOC_GENERATORS, 'Generate reference docs'), 'docs:gather', 'docs:release-notes', 'docs:index', 'docs:compile'],
+			}),
 		},
 
 		// Public actions (have descriptions)
@@ -175,20 +222,28 @@ module.exports = {
 			name: 'docs:dev',
 			action: () => ({
 				description: 'Start docs dev server',
-				steps: ['docs:gather-dev', 'docs:dev-start']
-			})
+				steps: ['docs:gather-dev', 'docs:dev-start'],
+			}),
 		},
 		{
 			name: 'docs:serve',
-			action: makeServeAction
+			action: makeServeAction,
 		},
 		{
 			name: 'docs:test',
-			action: makeTestAction
+			action: makeTestAction,
+		},
+		{
+			name: 'docs:export',
+			action: makeExportAction,
+		},
+		{
+			name: 'docs:check',
+			action: makeCheckAction,
 		},
 		{
 			name: 'docs:clean',
-			action: makeCleanAction
-		}
-	]
+			action: makeCleanAction,
+		},
+	],
 };

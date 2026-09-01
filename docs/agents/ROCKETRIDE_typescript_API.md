@@ -71,20 +71,20 @@ ROCKETRIDE_APIKEY=your-api-key-here
 ROCKETRIDE_URI=https://api.rocketride.ai
 ```
 
-The client will automatically parse the `.env` file if it exists (Node.js only) and use the values as defaults. The priority order is:
+The client does not load `.env` files itself; it reads string values from `process.env` (Node.js only) and uses them as defaults. Load your `.env` into the process environment first, e.g. `node --env-file=.env`. The priority order is:
 
 1. **Constructor parameters** (highest priority)
-2. **`.env` file values**
+2. **`process.env` values** (e.g. loaded from `.env` via `--env-file`)
 3. **Default values** (lowest priority)
 
-The client automatically reads configuration from the `.env` file, so you typically don't need to pass any parameters:
+The client automatically reads configuration from `process.env`, so you typically don't need to pass any parameters:
 
 ```typescript
-// Reads ROCKETRIDE_URI and ROCKETRIDE_APIKEY from .env
+// Reads ROCKETRIDE_URI and ROCKETRIDE_APIKEY from process.env
 const client = new RocketRideClient();
 ```
 
-You can override `.env` settings by passing configuration directly to the constructor if needed:
+You can override environment settings by passing configuration directly to the constructor if needed:
 
 ```typescript
 // Override for testing or special cases
@@ -96,7 +96,7 @@ const client = new RocketRideClient({
 
 ### Environment Variable Substitution in Pipelines
 
-The SDK automatically performs template variable substitution in pipeline configurations. Any string containing `${ROCKETRIDE_*}` will be replaced with the corresponding value from your `.env` file.
+Pipeline configurations support template variable substitution: any string containing `${ROCKETRIDE_*}` is replaced with the corresponding environment value. The client sends its `ROCKETRIDE_*` environment values (from `process.env` or `config.env`, plus any per-use `env` overrides) with the execute request, and the server performs the substitution.
 
 **Example `.env` file:**
 
@@ -116,29 +116,34 @@ const pipeline = {
 	components: [
 		{
 			id: 'data-processor',
-			provider: 'transform',
+			provider: 'webhook',
 			config: {
-				inputPath: '${ROCKETRIDE_INPUT_PATH}', // Replaced with: /data/input
-				outputPath: '${ROCKETRIDE_OUTPUT_PATH}', // Replaced with: /data/output
-				apiKey: '${ROCKETRIDE_APIKEY}', // Replaced with: your-api-key
-				staticValue: 'this stays the same', // Not changed
-				unknownVar: '${ROCKETRIDE_UNKNOWN}', // Left as-is (not in .env)
+				hideForm: true,
+				mode: 'Source',
+				type: 'webhook',
+				parameters: {
+					inputPath: '${ROCKETRIDE_INPUT_PATH}', // Replaced with: /data/input
+					outputPath: '${ROCKETRIDE_OUTPUT_PATH}', // Replaced with: /data/output
+					apiKey: '${ROCKETRIDE_APIKEY}', // Replaced with: your-api-key
+					staticValue: 'this stays the same', // Not changed
+					unknownVar: '${ROCKETRIDE_UNKNOWN}', // Left as-is (not set in the environment)
+				},
 			},
 		},
 	],
 };
 
-// Variables are automatically substituted when you call use()
+// Variables are substituted server-side when you call use()
 const result = await client.use({ pipeline });
 ```
 
 **Key features:**
 
 - Works with deeply nested objects and arrays
-- Only replaces variables that exist in `.env` file
+- Only replaces variables that exist in the client's environment map
 - Unknown variables are left unchanged
 - Only matches `${ROCKETRIDE_*}` pattern (other variables ignored)
-- Performs substitution before sending to server
+- The client sends the values with the request; substitution happens server-side
 
 ## CLI Tool
 
@@ -172,11 +177,11 @@ rocketride start --pipeline ./my-pipeline.pipe --apikey YOUR_KEY
 rocketride upload files/*.csv --pipeline ./pipeline.pipe --apikey YOUR_KEY
 # or with existing task token
 rocketride upload files/*.csv --token TASK_TOKEN --apikey YOUR_KEY
-# with custom concurrency (default is 64)
+# with custom concurrency (default is 5)
 rocketride upload files/*.csv --token TASK_TOKEN --max-concurrent 10 --apikey YOUR_KEY
 ```
 
-Upload command supports parallel file uploads with configurable concurrency (default: 64). Use `--max-concurrent` to control how many files are uploaded simultaneously.
+Upload command supports parallel file uploads with configurable concurrency (default: 5). Use `--max-concurrent` to control how many files are uploaded simultaneously.
 
 **Monitor pipeline status:**
 
@@ -211,7 +216,7 @@ await client.connect();
 const pipeline = {
 	components: [
 		{ id: 'input', provider: 'webhook', config: {} },
-		{ id: 'process', provider: 'transform', config: {}, input: [{ lane: 'text', from: 'input' }] },
+		{ id: 'process', provider: 'anonymize_text', config: {}, input: [{ lane: 'text', from: 'input' }] },
 		{ id: 'output', provider: 'response_text', config: {}, input: [{ lane: 'text', from: 'process' }] },
 	],
 	source: 'input',
@@ -238,8 +243,9 @@ await using client = new RocketRideClient({
 	auth: 'your-api-key',
 	uri: 'https://api.rocketride.ai',
 });
+await client.connect();
 
-// Client is automatically connected and will be disconnected when leaving scope
+// Client is automatically disconnected when leaving scope
 const result = await client.use({ pipeline });
 // Client automatically disconnects here
 ```
@@ -250,9 +256,9 @@ const result = await client.use({ pipeline });
 import { RocketRideClient } from 'rocketride';
 
 // Python-style async with pattern
-// Configuration from .env file
+// Configuration from environment variables
 const result = await RocketRideClient.withConnection(
-	{}, // Empty config uses .env settings
+	{}, // Empty config uses process.env settings
 	async (client) => {
 		// Client is already connected
 		const pipelineResult = await client.use({ pipeline });
@@ -273,8 +279,8 @@ import { RocketRideClient } from 'rocketride';
 const client = new RocketRideClient({
 	auth: 'your-api-key',
 	uri: 'https://api.rocketride.ai',
-	persist: true, // Enable automatic reconnection (exponential backoff)
-	maxRetryTime: 60000, // Stop retrying after 60 seconds (omit to retry forever)
+	persist: true, // Enable automatic reconnection (capped linear backoff: 250ms steps, 15s cap)
+	maxRetryTime: 60000, // Accepted for backward compatibility but ignored; reconnection never gives up
 	onConnected: async (info) => {
 		console.log(`Connected: ${info}`);
 	},
@@ -344,7 +350,7 @@ const client = new RocketRideClient({
 
 await client.connect();
 
-// Upload files in parallel (all files uploaded concurrently)
+// Upload files in parallel (up to maxConcurrent — default 5 — files at a time)
 const results = await client.sendFiles([{ file: fileObject1 }, { file: fileObject2, mimetype: 'application/json' }, { file: fileObject3, objinfo: { custom: 'metadata' } }], 'task-token');
 
 console.log('Upload results:', results);
@@ -363,14 +369,23 @@ new RocketRideClient(config?: RocketRideClientConfig)
 
 **Configuration Options:**
 
-- `auth?: string` - API key for authentication (can also use `ROCKETRIDE_APIKEY` in `.env`)
-- `uri?: string` - Server URI (default: `https://api.rocketride.ai`, can also use `ROCKETRIDE_URI` in `.env`)
+- `auth?: string` - API key for authentication (can also use `ROCKETRIDE_APIKEY` from the environment)
+- `uri?: string` - Server URI (default: `https://api.rocketride.ai`, can also use `ROCKETRIDE_URI` from the environment)
+- `env?: Record<string, string>` - Environment override used for `${ROCKETRIDE_*}` substitution and credential/URI defaults; if omitted in Node, string values are copied from `process.env`
 - `onEvent?: (event: DAPMessage) => void` - Event handler for server events
 - `onConnected?: (connectionInfo?: string) => Promise<void>` - Connection established callback
 - `onDisconnected?: (reason?: string, hasError?: boolean) => Promise<void>` - Connection lost callback
-- `persist?: boolean` - Enable automatic reconnection with exponential backoff (default: false)
-- `maxRetryTime?: number` - Maximum total time in milliseconds to keep retrying connections (default: undefined, retry indefinitely)
+- `persist?: boolean` - Enable automatic reconnection with capped linear backoff (250ms steps, 15s cap; default: false)
+- `maxRetryTime?: number` - Accepted for backward compatibility but ignored; persistent reconnection has no time limit
 - `onConnectError?: (error: ConnectionException) => void | Promise<void>` - Called on each failed connection attempt in persist mode (the argument is a `ConnectionException`)
+- `requestTimeout?: number` - Default timeout in ms for individual requests (default: no timeout)
+- `onProtocolMessage?: (message: string) => void` - Receives credential-redacted DAP messages for protocol debugging
+- `onDebugMessage?: (message: string) => void` - Receives debug output
+- `onTrace?: (type: TraceType, message: DAPMessage) => void` - Called around high-level SDK requests with a credential-redacted message copy
+- `public?: boolean` - Open a public (unauthenticated) connection; only `rrext_public_*` commands may be sent
+- `wsPath?: string` - Custom WebSocket path override (default: `/task/service`)
+- `clientName?: string` - Friendly client name sent during auth (e.g. "VS Code")
+- `clientVersion?: string` - Client version sent during auth (e.g. "0.9.4")
 - `module?: string` - Module name for client identification
 
 #### Connection Methods
@@ -436,14 +451,16 @@ Start a RocketRide pipeline for processing data. Automatically performs environm
 - `args?: string[]` - Command line arguments to pass to pipeline
 - `ttl?: number` - Time-to-live in seconds for idle pipelines (optional, server default if not provided; use 0 for no timeout)
 - `pipelineTraceLevel?: 'none' | 'metadata' | 'summary' | 'full'` - When set, captures every lane write and invoke call in the response under `_trace`
+- `name?: string` - Display name for the pipeline (derived from `filepath` if omitted)
+- `env?: Record<string, string>` - Per-use environment overrides merged over the client's `ROCKETRIDE_*` environment map
 
 ##### `terminate(token: string): Promise<void>`
 
 Terminate a running pipeline.
 
-##### `getTaskStatus(token: string): Promise<TASK_STATUS>`
+##### `getTaskStatus(token: string, options?: { timeout?: number | false }): Promise<TASK_STATUS>`
 
-Get the current status of a running pipeline.
+Get the current status of a running pipeline. `options.timeout` overrides the per-call bound in ms (default 15000; pass `false` to disable it).
 
 ##### `validate(options: { pipeline: PipelineConfig | Record<string, unknown>; source?: string }): Promise<ValidationResult>`
 
@@ -458,7 +475,7 @@ if (result.errors.length > 0) {
 }
 ```
 
-##### `restart(options: { token?: string; projectId: string; source: string; pipeline: Record<string, unknown> }): Promise<void>`
+##### `restart(options: { token?: string; teamId?: string; projectId: string; source: string; pipeline: Record<string, unknown> }): Promise<void>`
 
 Restart a running pipeline with a new configuration. Looks up the existing task by project/source, terminates it, and starts a new execution in one server round-trip. `token` is optional and resolved server-side if omitted.
 
@@ -466,7 +483,7 @@ Restart a running pipeline with a new configuration. Looks up the existing task 
 await client.restart({ projectId: 'proj-123', source: 'input', pipeline });
 ```
 
-##### `getTaskToken(options: { projectId: string; source: string }): Promise<string | undefined>`
+##### `getTaskToken(options: { projectId: string; source: string; teamId?: string }): Promise<string | undefined>`
 
 Resolve a running task's token from its project ID and source component. The token is required for operations like `terminate()` and `restart()`. Returns `undefined` if no task is currently running for that project/source.
 
@@ -572,7 +589,7 @@ await client.setEvents('task-token', ['apaevt_status_upload', 'apaevt_status_pro
 
 ##### `addMonitor(key: MonitorKey, types: string[]): Promise<void>`
 
-Add a reference-counted monitor subscription. If the key already exists, the new `types` are merged with the existing set and the merged set is sent to the server. `MonitorKey` is either `{ token: string }` for a running task or `{ projectId: string; source: string; pipeId?: number }` for a project/source.
+Add a reference-counted monitor subscription. If the key already exists, the new `types` are merged with the existing set and the merged set is sent to the server. `MonitorKey` is either `{ token: string }` for a running task or `{ teamId?: string; projectId: string; source: string; pipeId?: number }` for a project/source.
 
 ```typescript
 await client.addMonitor({ token }, ['summary', 'flow']);
@@ -702,7 +719,8 @@ interface UPLOAD_RESULT {
 ```typescript
 interface PIPELINE_RESULT {
 	name: string; // Result identifier (UUID)
-	location?: string; // Storage location
+	path: string; // Storage path
+	objectId: string; // Object identifier
 	result_types?: Record<string, string>; // Result type mapping
 	[key: string]: any; // Dynamic fields based on result_types
 }
@@ -714,25 +732,21 @@ interface PIPELINE_RESULT {
 interface TASK_STATUS {
 	state: number; // TASK_STATE enum: 0 NONE, 1 STARTING, 2 INITIALIZING, 3 RUNNING, 4 STOPPING, 5 COMPLETED, 6 CANCELLED
 	completed: boolean; // true once the task has finished (prefer this over comparing `state`)
-	progress?: number; // Progress percentage (0-100)
-	message?: string; // Status message
+	status: string; // Current status message
+	completedCount: number; // Items processed successfully (derive progress from completedCount/totalCount)
+	totalCount: number; // Total items to process
 	[key: string]: any; // Additional status fields
 }
 ```
 
 ## MIME Types
 
-The SDK supports automatic MIME type detection for common file extensions:
+The SDK does not detect MIME types from file extensions. The type is resolved from what you provide:
 
-- `.json` → `application/json`
-- `.csv` → `text/csv`
-- `.txt` → `text/plain`
-- `.pdf` → `application/pdf`
-- `.jpg/.jpeg` → `image/jpeg`
-- `.png` → `image/png`
-- `.mp4` → `video/mp4`
-- `.mp3` → `audio/mpeg`
-- Default → `application/octet-stream`
+- `sendFiles()`: the entry's explicit `mimetype` → the browser `File.type` → `application/octet-stream`
+- `send()` / `pipe()`: the `mimetype` parameter → `application/octet-stream`
+
+Pass an explicit `mimetype` whenever the lane routing below matters.
 
 For data pipes, MIME types determine processing lanes:
 
@@ -755,7 +769,7 @@ When using a chat system, starting the pipeline should be done as a global part 
 import { RocketRideClient, Question } from 'rocketride';
 
 // Start your chat pipeline once at the beginning
-const client = new RocketRideClient(); // Configuration from .env
+const client = new RocketRideClient(); // Configuration from process.env
 await client.connect();
 
 const result = await client.use({ filepath: 'chat_pipeline.pipe' });
@@ -843,7 +857,7 @@ const response = await client.chat({ token: 'chat-token', question });
 import { RocketRideClient } from 'rocketride';
 
 async function processDocuments() {
-	const client = new RocketRideClient(); // Configuration from .env
+	const client = new RocketRideClient(); // Configuration from process.env
 
 	try {
 		await client.connect();
@@ -873,7 +887,7 @@ async function processDocuments() {
 import { RocketRideClient } from 'rocketride';
 
 async function streamSensorData(dataGenerator: AsyncIterable<SensorReading>) {
-	const client = new RocketRideClient(); // Configuration from .env
+	const client = new RocketRideClient(); // Configuration from process.env
 
 	try {
 		await client.connect();
@@ -1006,7 +1020,7 @@ The SDK provides comprehensive error handling:
 import { RocketRideClient } from 'rocketride';
 
 try {
-	const client = new RocketRideClient(); // Configuration from .env
+	const client = new RocketRideClient(); // Configuration from process.env
 	await client.connect();
 
 	const result = await client.use({ filepath: 'pipeline.pipe' });
@@ -1081,7 +1095,7 @@ try {
 
 ## Performance Considerations
 
-- File uploads are parallelized (all files uploaded concurrently)
+- File uploads are parallelized (up to `maxConcurrent` — default 5 — files at a time)
 - The server handles queuing and rate limiting automatically
 - Use pipes for streaming large datasets to avoid memory issues
 - Event system provides real-time feedback without polling overhead

@@ -1,68 +1,73 @@
 # ner
 
-A RocketRide text-processing node that identifies and extracts named entities from text and documents using HuggingFace transformer models.
+A RocketRide text-processing node that identifies named entities with a configured Hugging Face model. Choose it when documents need entity metadata for downstream filtering or analysis, rather than LLM-generated structured records.
+
+## About Hugging Face
+
+Hugging Face provides tools and models for machine-learning workflows. This node uses its model identifiers with RocketRide's Transformers pipeline to perform named-entity recognition.
 
 ## What it does
 
-Runs a HuggingFace token-classification (NER) pipeline over everything flowing through the node and attaches the recognized entities to document metadata for downstream filtering, search, and analysis.
+The node runs named-entity recognition on incoming text and documents, filtering the model's results by the configured confidence threshold. Text continues unchanged on the `text` lane. Documents are copied and, by default, enriched with entity lists and a total count in their metadata. Use it instead of `dictionary` when you need model-recognized entity spans and categories, not LLM-authored definitions of internal terminology.
 
-Uses the transformers pipeline via the RocketRide model server (`ai.common.models.transformers`): the pipeline automatically uses the model server when available and falls back to local execution otherwise, so the node has no local Python dependencies of its own. The node is GPU-capable and registers as a `filter` with class type `text`.
+## Lanes
 
-The model is loaded once per pipeline run (in the global context) and shared across all instances. Entities below the configured confidence threshold (default `0.9`) are discarded. If entity extraction fails on a piece of text, the error is logged and an empty entity list is returned; the pipeline keeps running and the original content still passes through.
-
-Each extracted entity carries: `entity_group` (type such as PER, ORG, LOC), `word` (the entity text), `score` (confidence), and `start` / `end` (character offsets).
-
----
-
-## Configuration
-
-### Lanes
-
-| Lane in     | Lane out    | Description                                                                |
-|-------------|-------------|----------------------------------------------------------------------------|
-| `text`      | `text`      | Extract entities, pass the original text through unchanged                 |
-| `documents` | `documents` | Extract entities from each document's content and enrich document metadata |
-
-On the `documents` lane, when **Store in metadata** is on (the default), each document copy gains:
-
-- `entities_<type>`: one key per entity type, lowercased (e.g. `entities_per`, `entities_org`, `entities_loc`), holding a deduplicated, sorted list of entity texts
-- `entities_count`: total number of entities found in the document
-
-The original documents are never mutated; enriched copies are written downstream.
-
-### Fields
-
-The node is configured by picking a model **profile** (see below). The `custom` profile additionally exposes the model name field.
-
-| Field | Type | Description |
-|---|---|---|
-| `model` | string | HuggingFace model to use for NER |
-| `aggregation_strategy` | string | Default "simple". How to combine word pieces into entities |
-| `min_confidence` | number | Default 0.9. Minimum confidence score (0.0-1.0) for entity detection |
-| `store_in_metadata` | boolean | Default true. Add extracted entities to document metadata fields |
-| `profile` | string | Default "bertLarge". NER model configuration |
-
-If no model is configured, the recognizer falls back to `dbmdz/bert-large-cased-finetuned-conll03-english`.
-
----
+| Lane in | Lane out | Description |
+| --- | --- | --- |
+| `text` | `text` | Runs recognition and passes the original text through unchanged. |
+| `documents` | `documents` | Runs recognition on each document and writes an enriched copy downstream. |
 
 ## Profiles
 
-The default profile is **bertLarge**.
+Default: **BERT Large (English) - High accuracy for English text** (`bertLarge`).
 
-| Profile key  | Title                                                  | Model                                               | Notes                               |
-|--------------|--------------------------------------------------------|-----------------------------------------------------|-------------------------------------|
-| `bertLarge`  | BERT Large (English) - high accuracy for English text  | `dbmdz/bert-large-cased-finetuned-conll03-english`  | Default                             |
-| `bertBase`   | BERT Base (English) - balanced performance             | `dslim/bert-base-NER`                               |                                     |
-| `distilbert` | DistilBERT (English) - fast and lightweight            | `Davlan/distilbert-base-multilingual-cased-ner-hrl` | Multilingual model despite the title |
-| `xlmRoberta` | XLM-RoBERTa (Multilingual) - supports 100+ languages  | `Davlan/xlm-roberta-base-ner-hrl`                   |                                     |
-| `deberta`    | DeBERTa v3 (English) - state-of-the-art accuracy      | `dslim/distilbert-NER`                              | Currently maps to DistilBERT NER    |
-| `biomedical` | BioBERT (Biomedical) - medical/scientific entities     | `dmis-lab/biobert-base-cased-v1.1`                  | `min_confidence` defaults to `0.85` |
-| `custom`     | Custom model                                           | (user-specified)                                    | Any compatible HuggingFace NER model |
+| Profile | Model | Context |
+| --- | --- | --- |
+| `bertLarge` **(default)** | `dbmdz/bert-large-cased-finetuned-conll03-english` | English profile; `min_confidence` defaults to `0.9`. |
+| `bertBase` | `dslim/bert-base-NER` | English profile; `min_confidence` defaults to `0.9`. |
+| `distilbert` | `Davlan/distilbert-base-multilingual-cased-ner-hrl` | Multilingual profile; `min_confidence` defaults to `0.9`. |
+| `xlmRoberta` | `Davlan/xlm-roberta-base-ner-hrl` | Multilingual profile; `min_confidence` defaults to `0.9`. |
+| `deberta` | `dslim/distilbert-NER` | English profile; `min_confidence` defaults to `0.9`. |
+| `biomedical` | `dmis-lab/biobert-base-cased-v1.1` | Biomedical profile; `min_confidence` defaults to `0.85`. |
+| `custom` | _(your own token-classification model)_ | `min_confidence` defaults to `0.9`. |
 
-All profiles use `aggregation_strategy: simple` and `min_confidence: 0.9` unless noted above; both can be overridden in the node config.
+## Configuration
 
----
+Start with the profile that matches the language or domain of the input, then adjust confidence and output handling only when the default behavior does not fit the pipeline. Select `custom` when a compatible model identifier is required; the other profiles preconfigure their model value.
+
+### Model
+
+The profile selector defaults to `bertLarge`. Its preset supplies the model identifier, aggregation strategy, and confidence threshold. Use a named profile when it matches the input domain, or select `custom` to enter a model name yourself; the recognizer otherwise falls back to `dbmdz/bert-large-cased-finetuned-conll03-english` when no model value reaches it. A custom model must work with the NER pipeline and the selected aggregation strategy.
+
+### Entity aggregation strategy
+
+This controls how the underlying pipeline combines word pieces into entities. The default is `simple`; the available strategies are `none`, `simple`, `first`, `average`, and `max`. Change it when your model's subword output produces entity boundaries or scores that are not useful to downstream consumers. Because confidence filtering happens after recognition, a different aggregation strategy can also change which combined entities meet the threshold.
+
+### Minimum confidence threshold
+
+The threshold is a number from `0.0` to `1.0` and defaults to `0.9` for most presets (`0.85` for `biomedical`). Raise it when metadata should contain only more confident entities; lower it when the model is missing useful candidates and the pipeline can tolerate more noise. The recognizer discards results below this value before it formats the entity dictionaries or stores them in document metadata.
+
+### Store entities in document metadata
+
+This is on by default and affects the `documents` lane. When enabled, the node copies each document and stores deduplicated, sorted entity words under `entities_<type>` keys plus `entities_count`. Turn it off when the lane should preserve document metadata unchanged; recognition still runs, but the extracted entity list is not written to that document's metadata.
+
+## Requirements
+
+This node declares GPU capability. It initializes its recognizer once at pipeline start and uses RocketRide's Transformers pipeline, which uses the model server when it is available and otherwise falls back to local execution. The model is not loaded while the node is opened in configuration mode.
+
+## Notes
+
+### Result handling
+
+Each recognized item is formatted with `entity_group`, `word`, `score`, `start`, and `end`. Empty or whitespace-only text yields no entities. If recognition raises an exception, the node reports the error and returns an empty list, while text and documents continue through their normal lane handling.
+
+### Text and document behavior
+
+On the `text` lane, the node collects recognized entities in instance state but writes only the original text downstream. On the `documents` lane, it processes each document's `page_content` separately and uses `model_copy()` before changing metadata, so the original document object is not mutated.
+
+## Upstream docs
+
+- [Hugging Face Transformers documentation](https://huggingface.co/docs/transformers/)
 
 <!-- ROCKETRIDE:GENERATED:PARAMS START -->
 <!-- Generated by nodes:docs-generate. Do not edit by hand. -->
