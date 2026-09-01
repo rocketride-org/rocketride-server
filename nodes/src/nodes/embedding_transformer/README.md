@@ -83,3 +83,67 @@ The node also exposes an `embedding.preprocessor` combo field (default `preproce
 
 [<svg viewBox="0 0 16 16" width="15" height="15" fill="currentColor" aria-hidden="true" style="vertical-align:-0.15em;margin-right:0.35em"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg> View source](https://github.com/rocketride-org/rocketride-server/tree/develop/nodes/src/nodes/embedding_transformer)
 <!-- ROCKETRIDE:GENERATED:PARAMS END -->
+
+---
+
+## Benchmarking
+
+Measured through the engine as part of [#2053](https://github.com/rocketride-org/rocketride-server/issues/2053).
+
+**This node runs inference on the GPU whenever torch sees one.** Neither the node nor `SentenceTransformer` is passed an explicit `device`, so sentence-transformers auto-selects CUDA when available and CPU otherwise. `packages/ai/src/ai/common/torch/requirements.txt` pins the `+cu128` build so a GPU is used where present. The device decides not only throughput but the sign and size of every tuning knob below, so always record which one was used.
+
+### Test environment parameters
+
+| Parameter | Value |
+|---|---|
+| Model | `sentence-transformers/multi-qa-MiniLM-L6-cos-v1` (512-token limit) |
+| CPU | 20 cores, Windows |
+| GPU | NVIDIA RTX 4000 Ada Generation Laptop GPU (12 GiB) |
+| Pipeline | `webhook -> embedding_transformer -> response` (discard sink) |
+| Default corpus | 120 documents x 16 chunks x 512 tokens |
+| Node encode flush | 64 buffered documents (`IInstance.maxDocuments`) |
+| Reps | 3 per row, first discarded, median reported |
+| CPU-only runs | GPU hidden with `CUDA_VISIBLE_DEVICES=-1` |
+| GPU utilisation | Per-process SM utilisation via NVML, engine processes only |
+
+Rows are compared on chunks/s, since the 64-chunks/document row uses documents four times larger. Each table was collected in one pass against a single engine, so every row is a diff against the default measured minutes earlier. The BLAS-pinned rows need different engine environment variables and so come from their own pass.
+
+### GPU (`cuda:0`, auto-selected)
+
+| # | Configuration | docs/s | chunks/s | vs default | CPU cores | GPU util |
+|---|---|---|---|---|---|---|
+| 0 | default - `threads=8`, 1 task, 16 chunks/doc, 512 tokens | 13.86 | 222 | - | 1.49 | 34% |
+| 1 | `threads=1` | 10.25 | 164 | -26% | 0.88 | 17% |
+| 2 | `threads=32` | 14.04 | 225 | +1% | 1.61 | 37% |
+| 3 | `threads=64` | 13.18 | 211 | -5% | 1.59 | 30% |
+| 4 | 124-token chunks | 21.05 | 337 | +52% | 1.20 | 12% |
+| 5 | 244-token chunks | 17.12 | 274 | +23% | 1.61 | 21% |
+| 6 | 64 chunks/document | 3.22 | 206 | -7% | 1.45 | 39% |
+| 7 | 2 tasks | 12.18 | 195 | -12% | 2.83 | 39% |
+| 8 | 4 tasks | 12.50 | 200 | -10% | 3.63 | 41% |
+| 9 | BLAS/OMP pinned to 4 (own pass) | 14.09 | 225 | -6% | 1.44 | - |
+
+### CPU only (`CUDA_VISIBLE_DEVICES=-1`)
+
+| # | Configuration | docs/s | chunks/s | vs default | CPU cores | GPU util |
+|---|---|---|---|---|---|---|
+| 0 | default - `threads=8`, 1 task, 16 chunks/doc, 512 tokens | 2.33 | 37 | - | 15.61 | 0% |
+| 1 | `threads=1` | 1.56 | 25 | -33% | 13.25 | 0% |
+| 2 | `threads=32` | 2.17 | 35 | -7% | 15.61 | 0% |
+| 3 | `threads=64` | 2.29 | 37 | -1% | 15.77 | 0% |
+| 4 | 124-token chunks | 8.36 | 134 | +259% | 13.37 | 0% |
+| 5 | 244-token chunks | 5.13 | 82 | +120% | 14.74 | 0% |
+| 6 | 64 chunks/document | 0.62 | 39 | +6% | 15.90 | 0% |
+| 7 | 2 tasks | 2.31 | 37 | -1% | 16.05 | 0% |
+| 8 | 4 tasks | 2.43 | 39 | +5% | 15.91 | 0% |
+| 9 | BLAS/OMP pinned to 4 (own pass) | 2.55 | 41 | +11% | 15.80 | 0% |
+| 10 | BLAS/OMP pinned to 4, 4 tasks (own pass) | 2.71 | 43 | +16% | 16.26 | 0% |
+
+### Key findings
+
+- **GPU is the default where one exists, and is about 6x faster** on the default configuration: 222 vs 37 chunks/s. The gap widens with chunk size, so expect the larger figure for realistic chunking that fills the 512-token window.
+- **Chunk size is the dominant lever, and far more so on CPU.** Dropping from 512 to 124 tokens per chunk is worth +52% on GPU but +259% on CPU. Sizing chunks below the model's limit is the single most effective change available.
+- **`threads` matters mainly at the low end.** Going from 1 to 8 gains 26% on GPU and 33% on CPU; beyond 8 it is flat to slightly negative on both. There is no reason to raise it above the default.
+- **Extra tasks help only on CPU, and only a little.** On GPU they cost 10-12% while doubling CPU use, because they contend for the one device. On CPU they gain 5%, rising to 16% when combined with BLAS pinning - worthwhile, but far from linear, since a single task already occupies ~15.6 of 20 cores through torch's own parallelism.
+- **BLAS/OMP pinning is CPU-only.** It gains 11% on CPU and loses 6% on GPU.
+- **The GPU is never saturated** (12-41% SM utilisation). On GPU hardware this node is limited by CPU-side tokenisation and marshalling, not by the device.
