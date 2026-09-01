@@ -22,7 +22,9 @@ from core.merger import (
     _derive_title,
     find_swapped_output_profiles,
     _source_is_authoritative,
+    _migration_from_provider,
 )
+from core.util import is_model_missing_error
 from core.smoke import run
 from core.patcher import load as patcher_load, patch as patcher_patch, get_profiles
 from core.reporter import SyncReport, ProviderReport, format_console, format_pr_body
@@ -831,3 +833,110 @@ class TestReappearedDeprecatedIsReported:
         pr = ProviderReport(provider='llm_gemini')
         pr.reappeared_deprecated = ['gemini-3-pro-image']
         assert 'gemini-3-pro-image' in format_pr_body(SyncReport(providers=[pr]))
+
+
+# ---------------------------------------------------------------------------
+# Re-verifying models already in the catalogue
+# ---------------------------------------------------------------------------
+
+
+class TestModelMissingDetection:
+    def test_recognises_a_retired_model(self):
+        assert is_model_missing_error('404 NOT_FOUND: This model is no longer available to new users')
+        assert is_model_missing_error('Error code: 404 - model_not_found')
+        assert is_model_missing_error('not_found_error: model does not exist')
+
+    def test_a_busy_or_broken_service_is_not_a_retired_model(self):
+        for message in ('rate limit exceeded', '503 service unavailable', 'timeout', 'overloaded'):
+            assert not is_model_missing_error(Exception(message)), message
+
+    def test_a_permission_problem_is_not_a_retired_model(self):
+        assert not is_model_missing_error('401 unauthorized')
+        assert not is_model_missing_error('permission denied for this model')
+
+
+class TestRetiredModelsDeprecation:
+    def _profiles(self, model_source='openrouter'):
+        return {
+            'test-model-a': {
+                'title': 'Test Model A',
+                'model': 'test-model-a',
+                'modelSource': model_source,
+                'modelTotalTokens': 16384,
+                'modelOutputTokens': 4096,
+                'apikey': '',
+            }
+        }
+
+    def test_a_direct_refusal_deprecates_regardless_of_who_discovered_it(self, title_mappings):
+        # The provider API has no authority over an 'openrouter' profile when the
+        # signal is absence from a listing. A refusal to run it is different.
+        updated, result = merge(
+            current_profiles=self._profiles(model_source='openrouter'),
+            api_models=[{'id': 'test-model-a'}],
+            title_mappings=title_mappings,
+            token_overrides={},
+            output_token_overrides={},
+            default_output_tokens=4096,
+            retired_models={'test-model-a': '404 NOT_FOUND: no longer available'},
+        )
+        assert updated['test-model-a']['deprecated'] is True
+        assert updated['test-model-a']['deprecatedBy'] == 'provider'
+        assert 'test-model-a' in result.deprecated
+
+    def test_the_providers_suggested_replacement_becomes_the_migration_note(self, title_mappings):
+        updated, _ = merge(
+            current_profiles=self._profiles(),
+            api_models=[{'id': 'test-model-a'}],
+            title_mappings=title_mappings,
+            token_overrides={},
+            output_token_overrides={},
+            default_output_tokens=4096,
+            retired_models={
+                'test-model-a': (
+                    'This model models/gemini-2.5-flash is no longer available to new users. '
+                    'Please update your code to use models/gemini-3.6-flash instead.'
+                )
+            },
+        )
+        assert 'models/gemini-3.6-flash' in updated['test-model-a']['migration']
+
+    def test_a_hand_written_migration_note_is_kept(self, title_mappings):
+        profiles = self._profiles()
+        profiles['test-model-a']['migration'] = "Please use 'test-model-b' instead"
+        updated, _ = merge(
+            current_profiles=profiles,
+            api_models=[{'id': 'test-model-a'}],
+            title_mappings=title_mappings,
+            token_overrides={},
+            output_token_overrides={},
+            default_output_tokens=4096,
+            retired_models={'test-model-a': '404 not found'},
+        )
+        assert updated['test-model-a']['migration'] == "Please use 'test-model-b' instead"
+
+    def test_nothing_changes_without_verification(self, title_mappings):
+        updated, result = merge(
+            current_profiles=self._profiles(),
+            api_models=[{'id': 'test-model-a'}],
+            title_mappings=title_mappings,
+            token_overrides={},
+            output_token_overrides={},
+            default_output_tokens=4096,
+        )
+        assert updated['test-model-a'].get('deprecated') is None
+        assert result.deprecated == []
+
+
+class TestMigrationFromProvider:
+    def test_extracts_the_named_replacement(self):
+        note = _migration_from_provider('Please update your code to use models/gemini-3.6-flash.', 'Gemini API')
+        assert "'models/gemini-3.6-flash'" in note
+
+    def test_falls_back_when_no_replacement_is_named(self):
+        note = _migration_from_provider('404 not found', 'Gemini API')
+        assert 'Gemini API' in note
+
+    def test_ignores_prose_that_is_not_a_model_id(self):
+        note = _migration_from_provider('You must use a valid key to continue', 'Gemini API')
+        assert 'Please select a current model' in note

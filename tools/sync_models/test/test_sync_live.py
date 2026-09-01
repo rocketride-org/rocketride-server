@@ -171,6 +171,36 @@ def test_gemini_profiles_exist_in_api():
     _check_missing_models(profiles, live_ids, 'llm_gemini')
 
 
+@requires_gemini
+def test_gemini_profiles_can_actually_be_called():
+    """
+    Every non-deprecated llm_gemini profile must answer a real generateContent call.
+
+    The listing check above cannot fail for a retired model: Google keeps returning
+    those from models.list(), with generateContent among their supportedGenerationMethods,
+    and only refuses when the model is actually called. Being listed and being usable
+    are different questions, and this asks the second one.
+
+    One minimal call per profile, so it is slower than the listing check by design.
+    """
+    from google import genai  # type: ignore[import]
+
+    from core.util import is_model_missing_error
+
+    client = genai.Client(api_key=os.environ['ROCKETRIDE_GEMINI_KEY'])
+    retired = []
+    for profile_key, profile in _load_profiles('llm_gemini').items():
+        model_id = profile.get('model')
+        if not model_id or profile.get('deprecated'):
+            continue
+        try:
+            client.models.generate_content(model=model_id, contents='Reply with the word OK only.')
+        except Exception as exc:  # noqa: BLE001 — any failure naming the model as gone counts
+            if is_model_missing_error(exc):
+                retired.append(f'{profile_key} ({model_id}): {str(exc)[:160]}')
+    assert not retired, 'llm_gemini profiles the API refuses to run:\n' + '\n'.join(retired)
+
+
 # ---------------------------------------------------------------------------
 # Mistral
 # ---------------------------------------------------------------------------

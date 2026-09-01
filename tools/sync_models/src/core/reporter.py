@@ -29,6 +29,8 @@ class ProviderReport:
         deprecated: list of profile_key strings
         skipped: list of (model_id, reason) tuples (smoke test failures)
         unchanged_count: number of profiles with no changes
+        retired: list of (profile_key, provider_message) for profiles a direct call
+                          reported as gone, under --verify-existing
         reappeared_deprecated: list of profile_key strings the source listed again while the
                           profile stays deprecated — a hand-applied mark, or no authority to
                           lift it; needs a human to confirm or clear
@@ -47,6 +49,7 @@ class ProviderReport:
     skipped: List[tuple] = field(default_factory=list)
     estimated_tokens: List[str] = field(default_factory=list)
     reappeared_deprecated: List[str] = field(default_factory=list)
+    retired: List[tuple] = field(default_factory=list)
     unchanged_count: int = 0
     warning: Optional[str] = None
     error: Optional[str] = None
@@ -156,6 +159,9 @@ def format_console(report: SyncReport) -> str:
         for key in pr.estimated_tokens:
             lines.append(_c(f'  ? {key:<30} token limit is estimated — verify manually', '33'))
 
+        for profile_key, _reason in pr.retired:
+            lines.append(_c(f'  - {profile_key:<30} retired upstream (verified by call)', '90'))
+
         for key in pr.reappeared_deprecated:
             lines.append(_c(f'  ? {key:<30} listed again but still deprecated — confirm or clear', '33'))
 
@@ -258,6 +264,13 @@ def format_pr_body(report: SyncReport) -> str:
             lines.append('')
             for key in pr.estimated_tokens:
                 lines.append(f'- `{key}`')
+            lines.append('')
+
+        if pr.retired:
+            lines.append('**Retired upstream** (a direct call reports the model as gone):')
+            lines.append('')
+            for profile_key, reason in pr.retired:
+                lines.append(f'- `{profile_key}` — {reason[:200]}')
             lines.append('')
 
         if pr.reappeared_deprecated:

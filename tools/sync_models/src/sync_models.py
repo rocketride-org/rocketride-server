@@ -159,6 +159,7 @@ def sync_provider(
     enable_discovery: bool = False,
     allow_fallback_discovery: bool = False,
     use_config_overrides: bool = True,
+    verify_existing: bool = False,
 ) -> 'ProviderReport':  # noqa: F821
     """
     Sync a single provider.
@@ -242,6 +243,7 @@ def sync_provider(
         allow_fallback_discovery=allow_fallback_discovery,
         use_config_overrides=use_config_overrides,
         global_protected_profiles=global_protected,
+        verify_existing=verify_existing,
     )
 
 
@@ -368,6 +370,14 @@ def main() -> int:
         help='Write changes to disk. Without this flag the script runs in dry-run mode.',
     )
     parser.add_argument(
+        '--verify-existing',
+        action='store_true',
+        help=(
+            'Call every model already in the catalogue, not just new ones, and deprecate the ones the provider '
+            'reports as gone. Requires the provider API key. Slower: one request per profile.'
+        ),
+    )
+    parser.add_argument(
         '--pr-body',
         action='store_true',
         default=False,
@@ -479,6 +489,7 @@ def main() -> int:
             enable_discovery=args.enable_discovery,
             allow_fallback_discovery=args.allow_fallback_discovery,
             use_config_overrides=not args.no_config_overrides,
+            verify_existing=args.verify_existing,
         )
         report.add(pr)
 
