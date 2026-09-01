@@ -5,7 +5,7 @@
 
 """Unit: the custom-profile check for a max_tokens the provider would reject."""
 
-from ai.common.validation import check_output_token_config
+from ai.common.validation import check_output_token_config, hand_supplied_token_fields
 
 
 PROFILES = {
@@ -57,3 +57,36 @@ def test_no_profiles_available():
     assert check_output_token_config('gpt-4.1-mini', 8192, 128000, None) is None
     problem = check_output_token_config('gpt-4.1-mini', 128000, 128000, {})
     assert problem is not None
+
+
+def test_flags_output_above_the_configured_window():
+    # Would be clamped down to 32,768 with nothing said.
+    problem = check_output_token_config('some-local-model', 131072, 32768, PROFILES)
+    assert problem is not None
+    assert 'capped at the smaller value' in problem
+
+
+def test_catalogue_breach_outranks_the_clamp_notice():
+    problem = check_output_token_config('gpt-4.1-mini', 128000, 64000, PROFILES)
+    assert 'exceeds the 32,768' in problem
+
+
+class TestHandSuppliedTokenFields:
+    def test_top_level_fields(self):
+        assert hand_supplied_token_fields({'model': 'x', 'modelTotalTokens': 128000}) is True
+
+    def test_nested_under_a_named_profile(self):
+        assert hand_supplied_token_fields({'profile': 'custom', 'custom': {'modelOutputTokens': 32768}}) is True
+
+    def test_nested_under_the_default_profile_name(self):
+        # llm_openai_api's default profile is 'custom', so 'profile' is often omitted.
+        assert hand_supplied_token_fields({'custom': {'modelTotalTokens': 128000}}) is True
+
+    def test_no_token_fields(self):
+        assert hand_supplied_token_fields({'profile': 'gpt-4-1-mini', 'gpt-4-1-mini': {'apikey': ''}}) is False
+
+    def test_none_values_do_not_count(self):
+        assert hand_supplied_token_fields({'modelTotalTokens': None}) is False
+
+    def test_non_mapping(self):
+        assert hand_supplied_token_fields(None) is False

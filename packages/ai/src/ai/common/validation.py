@@ -124,6 +124,36 @@ def validate_model_name(model: Optional[str]) -> Optional[str]:
     return model
 
 
+_TOKEN_FIELDS = ('modelTotalTokens', 'modelOutputTokens')
+
+
+def hand_supplied_token_fields(connConfig: Optional[Dict[str, Any]]) -> bool:
+    """True if the pipeline author wrote a token limit into this node's config.
+
+    A node's config arrives in several shapes — keyed under a named profile, nested
+    under the default profile's name, or as direct top-level fields — and a profile
+    named "custom" is only one of them (``llm_openai_api`` has "custom" as its
+    default, so an omitted key resolves there too). Rather than matching on the
+    profile string, look for the token fields themselves at either level: their
+    presence is what makes a value the author's rather than the catalogue's.
+
+    Args:
+        connConfig: The node's raw connection config, before profile resolution.
+
+    Returns:
+        True when a token field appears at the top level or in a nested block.
+    """
+    if not hasattr(connConfig, 'get'):
+        return False
+
+    def _has(block: Any) -> bool:
+        return hasattr(block, 'get') and any(block.get(field) is not None for field in _TOKEN_FIELDS)
+
+    if _has(connConfig):
+        return True
+    return any(_has(value) for value in connConfig.values())
+
+
 def check_output_token_config(
     model: str,
     output_tokens: int,
@@ -165,12 +195,21 @@ def check_output_token_config(
             catalogue_limit = limit
             break
 
+    if catalogue_limit is not None and output_tokens > catalogue_limit:
+        return (
+            f'modelOutputTokens ({output_tokens:,}) exceeds the {catalogue_limit:,} that {model} accepts. '
+            'The provider will reject the request.'
+        )
+
+    if output_tokens > total_tokens:
+        # About to be clamped down to the window. Silent otherwise, and it reads at
+        # run time as the model simply refusing to write more.
+        return (
+            f'modelOutputTokens ({output_tokens:,}) is above modelTotalTokens ({total_tokens:,}) '
+            f'and will be capped at the smaller value.'
+        )
+
     if catalogue_limit is not None:
-        if output_tokens > catalogue_limit:
-            return (
-                f'modelOutputTokens ({output_tokens:,}) exceeds the {catalogue_limit:,} that {model} accepts. '
-                'The provider will reject the request.'
-            )
         return None
 
     if output_tokens == total_tokens:

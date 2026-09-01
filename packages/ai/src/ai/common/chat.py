@@ -23,6 +23,7 @@ from ai.common.validation import (
     validate_max_tokens,
     validate_prompt,
     check_output_token_config,
+    hand_supplied_token_fields,
 )
 from ai.common.llm_native_stream import STOP_SEQUENCES_VAR, dispatch_native_chat_stream
 from ai.common.llm_adapter import LangChainAdapter, NativeOpenAIResponsesAdapter, drive_adapter
@@ -104,14 +105,12 @@ class ChatBase:
         self._modelTotalTokens = config.get('modelTotalTokens', 16384)  # Default to 16K if not specified
         self._modelOutputTokens = config.get('modelOutputTokens', 4096)  # Default to 4K if not specified
 
-        # Validate and clamp output tokens against known safe maximums
-        self._modelOutputTokens = validate_max_tokens(self._modelOutputTokens, self._modelTotalTokens)
-
-        # A custom profile carries whatever the author typed and the model sync never sees
-        # it, so check the resolved limits here. Most custom profiles name a model that is
-        # also in the catalogue ("gpt-4.1-mini"), which gives a real completion limit to
-        # compare against; without one, fall back to spotting the whole window being sent.
-        if connConfig.get('profile') == 'custom':
+        # Check what the author wrote, before the clamp below rewrites it — a value the
+        # provider would reject can be clamped into a plausible-looking one, and then
+        # there is nothing left to report. Only when a token field was hand-supplied:
+        # catalogue profiles are checked by the model sync, and warning about those on
+        # every run would be noise. Hand-written config is what the sync never sees.
+        if hand_supplied_token_fields(connConfig):
             problem = check_output_token_config(
                 self._model,
                 self._modelOutputTokens,
@@ -120,6 +119,9 @@ class ChatBase:
             )
             if problem:
                 warning(f'{provider}: {problem}')
+
+        # Validate and clamp output tokens against known safe maximums
+        self._modelOutputTokens = validate_max_tokens(self._modelOutputTokens, self._modelTotalTokens)
 
         # We really can't work with a model that has a very small output window
         if self._modelOutputTokens < 1024:

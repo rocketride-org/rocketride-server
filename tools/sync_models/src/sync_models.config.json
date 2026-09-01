@@ -54,6 +54,14 @@
 			// Override token limits when the provider API and litellm are unreliable.
 			// Comment out to let litellm drive — restore when litellm has wrong values.
 			"token_limit_overrides": {
+				// The chat-latest family had its window hand-filled with its output limit
+				// (16384 in both fields). 16384 is the correct output; the window is
+				// 128000 per models.dev and litellm. Pinned so a source that reports no
+				// context window for these cannot let the wrong value back in.
+				"gpt-5-chat-latest": 128000,
+				"gpt-5.1-chat-latest": 128000,
+				"gpt-5.2-chat-latest": 128000,
+				"gpt-5.3-chat-latest": 128000,
 				// "gpt-3.5-turbo": 16385,
 				// "gpt-3.5-turbo-16k": 16385,
 				// "gpt-3.5-turbo-1106": 16385,
