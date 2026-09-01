@@ -84,7 +84,7 @@ Build your pipeline once, in the same portable <code>.pipe</code> format, and we
 
 <table>
 <tr>
-<td width="50%" valign="top" align="left"><strong>A fraction of the cost</strong><br/><br/>Our patent-pending model server runs your AI workloads far more efficiently, so you pay a fraction of what standard hosting costs.</td>
+<td width="50%" valign="top" align="left"><strong>A fraction of the cost</strong><br/><br/>Our model server runs your AI workloads far more efficiently, so you pay a fraction of what standard hosting costs.</td>
 <td width="50%" valign="top" align="left"><strong>Collaborate as a team</strong><br/><br/>Work together on shared pipelines. Your whole team builds, runs, and iterates in one place.</td>
 </tr>
 <tr>
