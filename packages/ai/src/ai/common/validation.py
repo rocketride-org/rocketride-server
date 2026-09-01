@@ -195,18 +195,24 @@ def check_output_token_config(
             catalogue_limit = limit
             break
 
-    if catalogue_limit is not None and output_tokens > catalogue_limit:
+    # What validate_max_tokens will actually send. The rejection warning has to be
+    # decided on this, not on the configured value: a 128,000 output under a 16,384
+    # window goes out as 16,384, which the provider accepts, so claiming it will be
+    # rejected would be wrong. The cap itself is still worth reporting, below.
+    effective_tokens = min(output_tokens, total_tokens, MAX_OUTPUT_TOKENS)
+
+    if catalogue_limit is not None and effective_tokens > catalogue_limit:
         return (
-            f'modelOutputTokens ({output_tokens:,}) exceeds the {catalogue_limit:,} that {model} accepts. '
+            f'modelOutputTokens ({effective_tokens:,}) exceeds the {catalogue_limit:,} that {model} accepts. '
             'The provider will reject the request.'
         )
 
-    if output_tokens > total_tokens:
-        # About to be clamped down to the window. Silent otherwise, and it reads at
-        # run time as the model simply refusing to write more.
+    if effective_tokens < output_tokens:
+        # Capped before the request. Silent otherwise, and it reads at run time as
+        # the model simply refusing to write more.
         return (
-            f'modelOutputTokens ({output_tokens:,}) is above modelTotalTokens ({total_tokens:,}) '
-            f'and will be capped at the smaller value.'
+            f'modelOutputTokens ({output_tokens:,}) is above the {effective_tokens:,} that can be sent '
+            f'and will be capped at that value.'
         )
 
     if catalogue_limit is not None:

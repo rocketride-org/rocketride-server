@@ -60,14 +60,22 @@ def test_no_profiles_available():
 
 
 def test_flags_output_above_the_configured_window():
-    # Would be clamped down to 32,768 with nothing said.
+    # Would be capped down to 32,768 with nothing said.
     problem = check_output_token_config('some-local-model', 131072, 32768, PROFILES)
     assert problem is not None
-    assert 'capped at the smaller value' in problem
+    assert 'capped at that value' in problem
 
 
-def test_catalogue_breach_outranks_the_clamp_notice():
-    problem = check_output_token_config('gpt-4.1-mini', 128000, 64000, PROFILES)
+def test_a_capped_value_the_model_accepts_is_not_called_a_rejection():
+    # 128,000 configured under a 16,384 window goes out as 16,384, which
+    # gpt-4.1-mini accepts. Reporting a rejection here would be wrong.
+    problem = check_output_token_config('gpt-4.1-mini', 128000, 16384, PROFILES)
+    assert 'reject' not in problem
+    assert 'capped at that value' in problem
+
+
+def test_catalogue_breach_is_reported_when_the_value_really_goes_out():
+    problem = check_output_token_config('gpt-4.1-mini', 128000, 128000, PROFILES)
     assert 'exceeds the 32,768' in problem
 
 
