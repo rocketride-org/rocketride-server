@@ -387,7 +387,9 @@ class CloudProvider(ABC):
             report.error = f'Failed to fetch models from {primary_source}: {e}'
             return report
 
-        # Set deprecation_source label based on the actual primary source.
+        # Set deprecation_source label based on the actual primary source. The label
+        # is prose for the migration message; primary_source is the canonical key that
+        # decides authority, and is passed through unchanged.
         if primary_source == 'provider':
             provider_label = self.display_name or self.provider_name
             deprecation_source = f'{provider_label} API'
@@ -395,6 +397,7 @@ class CloudProvider(ABC):
             deprecation_source = 'OpenRouter'
         else:
             deprecation_source = 'LiteLLM'
+        deprecation_source_key = primary_source
 
         # --- Discovery gate ---
         # If discovery is off, OR no source qualifies for discovery, drop new models
@@ -447,6 +450,7 @@ class CloudProvider(ABC):
             use_config_overrides=use_config_overrides,
             global_protected_profiles=global_protected_profiles,
             deprecation_source=deprecation_source,
+            deprecation_source_key=deprecation_source_key,
         )
 
     def _fetch_litellm_models(self) -> List[Dict[str, Any]]:
@@ -556,6 +560,7 @@ class CloudProvider(ABC):
         use_config_overrides: bool = True,
         global_protected_profiles: List[str] | None = None,
         deprecation_source: str = 'provider API',
+        deprecation_source_key: str = 'provider',
     ) -> ProviderReport:
         """
         Run the smart merge and optionally write results to disk.
@@ -600,6 +605,7 @@ class CloudProvider(ABC):
             model_sources=model_sources,
             normalize_profile_model_id=self.normalize_profile_model_id,
             deprecation_source=deprecation_source,
+            deprecation_source_key=deprecation_source_key,
             derive_title_fn=self.derive_title,
         )
 
@@ -608,6 +614,7 @@ class CloudProvider(ABC):
         report.deprecated = merge_result.deprecated
         report.unchanged_count = len(merge_result.unchanged)
         report.estimated_tokens = merge_result.estimated_tokens
+        report.reappeared_deprecated = merge_result.reappeared_deprecated
 
         if apply:
             # Check if field repairs are needed even when no profiles changed
