@@ -2,5 +2,5 @@
 # Shared base for all vision-family loaders (CLIP/ViT, depth, detection, ...).
 # Per-model extras live in requirements_<x>.txt (installed after this base).
 # torch via ai.common.torch; numpy is a base engine dep (not declared).
-transformers==4.53.3
+transformers==5.10.1
 Pillow
