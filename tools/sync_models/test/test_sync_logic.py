@@ -652,3 +652,22 @@ class TestDeprecationIsNotUndoneByTheSync:
         )
         assert 'test-model-b' in result.deprecated
         assert updated['test-model-b']['deprecatedBy'] == 'provider'
+
+
+class TestReappearedDeprecatedIsReported:
+    def test_a_provider_whose_only_finding_is_a_standing_mark_is_not_a_pure_skip(self):
+        pr = ProviderReport(provider='llm_gemini')
+        pr.reappeared_deprecated = ['gemini-3-pro-image']
+        assert pr.has_changes() is True
+
+    def test_it_survives_the_skip_path_in_the_console_output(self):
+        pr = ProviderReport(provider='llm_gemini')
+        pr.warning = 'ran without a key'
+        pr.reappeared_deprecated = ['gemini-3-pro-image']
+        report = SyncReport(providers=[pr])
+        assert 'gemini-3-pro-image' in format_console(report)
+
+    def test_it_survives_into_the_pr_body(self):
+        pr = ProviderReport(provider='llm_gemini')
+        pr.reappeared_deprecated = ['gemini-3-pro-image']
+        assert 'gemini-3-pro-image' in format_pr_body(SyncReport(providers=[pr]))
