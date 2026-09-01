@@ -5,5 +5,5 @@ gliner
 # ours to choose, but all these files must agree. 1.20.1 was withdrawn from PyPI for the -gpu
 # build (the CPU build of it survives), which is why this moved; 1.20.2 is the mirror trap --
 # it exists only for -gpu, so pinning it would break macOS.
-onnxruntime-gpu==1.22.0; platform_system != 'Darwin'
-onnxruntime==1.22.0; platform_system == 'Darwin'
+onnxruntime-gpu==1.29.0; platform_system != 'Darwin'
+onnxruntime==1.29.0; platform_system == 'Darwin'

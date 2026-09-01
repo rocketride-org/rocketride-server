@@ -1,5 +1,5 @@
 # Preprocessor: SpaCy
-spacy==3.8.14
+spacy==3.8.16
 spacy-transformers==1.4.0
 spacy-curated-transformers==0.3.1
 
