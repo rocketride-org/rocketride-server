@@ -20,6 +20,7 @@ from core.merger import _derive_title, _LITELLM_AVAILABLE, get_openrouter_cache,
 from core.patcher import patch, _find_fields_block, _repair_field_objects
 from core.reporter import ProviderReport
 from core.smoke import run as smoke_run, SmokeResult
+from core.util import is_model_missing_error
 
 try:
     import json5 as _json5
@@ -272,6 +273,7 @@ class CloudProvider(ABC):
         allow_fallback_discovery: bool = False,
         use_config_overrides: bool = True,
         global_protected_profiles: List[str] | None = None,
+        verify_existing: bool = False,
     ) -> ProviderReport:
         """
         Full sync pipeline: pick source → fetch → discovery gate → smoke (if applicable) → merge.
@@ -428,6 +430,29 @@ class CloudProvider(ABC):
                         report.skipped.append((model_id, result.reason))
             api_models = verified_models
 
+        # --- Re-verify what is already in the catalogue ---
+        # The smoke gate above validates additions only, so a model that entered
+        # correctly and was retired six months later is never called again. A listing
+        # endpoint is no help: providers keep returning models they have retired, and
+        # the call is the only thing that answers the question. Only a message naming
+        # the model as gone counts (is_model_missing_error) — a busy service or a
+        # permission problem must never deprecate a profile.
+        retired_models: Dict[str, str] = {}
+        if verify_existing and primary_source == 'provider' and client is not None:
+            protected_keys = _active_protected_profiles(self._config.get('protected_profiles', []))
+            if global_protected_profiles:
+                protected_keys.update(_active_protected_profiles(global_protected_profiles))
+            for profile_key, profile in current_profiles.items():
+                if not isinstance(profile, dict) or profile_key in protected_keys:
+                    continue
+                model_id = profile.get('model')
+                if not model_id or profile.get('deprecated'):
+                    continue
+                result = smoke_run(self.smoke_type, client, model_id)
+                if not result.passed() and is_model_missing_error(result.reason):
+                    retired_models[model_id] = result.reason
+                    report.retired.append((profile_key, result.reason))
+
         # --- Warning messages for partial-result modes ---
         if primary_source != 'provider' and api_key is None:
             report.warning = (
@@ -451,6 +476,7 @@ class CloudProvider(ABC):
             global_protected_profiles=global_protected_profiles,
             deprecation_source=deprecation_source,
             deprecation_source_key=deprecation_source_key,
+            retired_models=retired_models,
         )
 
     def _fetch_litellm_models(self) -> List[Dict[str, Any]]:
@@ -561,6 +587,7 @@ class CloudProvider(ABC):
         global_protected_profiles: List[str] | None = None,
         deprecation_source: str = 'provider API',
         deprecation_source_key: str = 'provider',
+        retired_models: Dict[str, str] | None = None,
     ) -> ProviderReport:
         """
         Run the smart merge and optionally write results to disk.
@@ -607,6 +634,7 @@ class CloudProvider(ABC):
             deprecation_source=deprecation_source,
             deprecation_source_key=deprecation_source_key,
             derive_title_fn=self.derive_title,
+            retired_models=retired_models or {},
         )
 
         report.added = merge_result.added

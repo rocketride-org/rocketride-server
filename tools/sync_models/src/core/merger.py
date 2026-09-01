@@ -120,6 +120,29 @@ def _is_reasoning_model(bare_id: str) -> bool:
 SOURCE_KEYS = ('provider', 'openrouter', 'litellm')
 
 
+# A retirement message usually names the replacement: "Please update your code to
+# use models/gemini-3.6-flash". Requiring a digit or hyphen keeps ordinary prose
+# out of the migration note.
+_REPLACEMENT_RE = re.compile(r"""use\s+(?:the\s+)?['"`]?((?:models/)?[A-Za-z][\w.:/-]*[\d-][\w.:/-]*)""", re.IGNORECASE)
+
+
+def _migration_from_provider(reason: str, source_label: str) -> str:
+    """
+    Turn a provider's retirement message into a migration note.
+
+    Args:
+        reason: The message the failed call came back with.
+        source_label: Human-readable source, for the fallback wording.
+
+    Returns:
+        A sentence naming the replacement when the provider named one.
+    """
+    match = _REPLACEMENT_RE.search(reason or '')
+    if match:
+        return f"Model retired by the provider. Please use '{match.group(1).rstrip('.,')}' instead."
+    return f'Model no longer available from {source_label}. Please select a current model.'
+
+
 def _source_is_authoritative(source_key: str, model_source: str) -> bool:
     """
     Return True if the given sync source has authority to deprecate or
@@ -396,6 +419,7 @@ def merge(
     normalize_profile_model_id=None,
     deprecation_source: str = 'provider API',
     deprecation_source_key: str = 'provider',
+    retired_models: Dict[str, str] | None = None,
     derive_title_fn=None,
 ) -> tuple[Dict[str, Any], MergeResult]:
     """
@@ -430,6 +454,10 @@ def merge(
             never used to decide authority, since the label varies per provider.
         deprecation_source_key: The same source as a canonical SOURCE_KEYS value.
             This is what authority and the "deprecatedBy" stamp are decided on.
+        retired_models: model_id → provider message, for models a direct call
+            reported as gone. Unlike absence from a listing, that answer is
+            evidence regardless of which source discovered the profile, so it
+            deprecates without an authority check.
 
     Returns:
         Tuple of (updated_profiles dict, MergeResult describing what changed)
@@ -807,6 +835,29 @@ def merge(
                 deprecated.append(profile_key)
             else:
                 unchanged.append(profile_key)
+
+    # --- Retired models ---
+    # A direct call answered "this model is gone". That is a stronger signal than
+    # absence from a listing — which is why it bypasses _source_is_authoritative:
+    # a profile discovered through OpenRouter is still unusable once the provider
+    # it routes to has retired the model, and OpenRouter will happily keep listing
+    # it. Marked as the sync's own so a later run can lift it if the model returns.
+    for profile_key, profile in updated_profiles.items():
+        if not isinstance(profile, dict) or not (retired_models or {}):
+            continue
+        reason = (retired_models or {}).get(profile.get('model', ''))
+        if not reason or profile.get('deprecated'):
+            continue
+        updated_profiles[profile_key]['deprecated'] = True
+        updated_profiles[profile_key]['deprecatedBy'] = deprecation_source_key
+        if not profile.get('migration'):
+            updated_profiles[profile_key]['migration'] = _migration_from_provider(reason, deprecation_source)
+        if profile_key not in deprecated:
+            deprecated.append(profile_key)
+        if profile_key in unchanged:
+            unchanged.remove(profile_key)
+        if profile_key in reappeared_deprecated:
+            reappeared_deprecated.remove(profile_key)
 
     # --- Pass 3: backfill missing fields ---
     # Profiles that were not processed in Pass 1 (e.g. model not listed by the
