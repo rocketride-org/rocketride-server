@@ -1173,7 +1173,7 @@ class TaskServer(DAPBase):
                 of the task controls its life cycle
         """
 
-        def _return_results(control: TASK_CONTROL) -> str:
+        def _return_results(control: TASK_CONTROL, reused: bool = False) -> str:
             """
             Return task token for the task.
 
@@ -1181,6 +1181,11 @@ class TaskServer(DAPBase):
 
             Args:
                 control (TASK_CONTROL): The existing task control structure
+                reused (bool): True when this is a live instance returned under
+                    useExisting rather than a task launched from the submitted
+                    pipeline. Without it the two are indistinguishable to the
+                    caller, and a run against stale configuration reads as a
+                    successful run of the configuration just sent.
             """
             return {
                 'id': control.id,
@@ -1189,6 +1194,7 @@ class TaskServer(DAPBase):
                 'projectId': control.project_id,
                 'source': control.source,
                 'provider': control.provider,
+                'reused': reused,
             }
 
         # Initialize task control structure for new task
@@ -1332,9 +1338,18 @@ class TaskServer(DAPBase):
                 # make sure the user actually specified the task to use. If so,
                 # then all is ok, just use the existing task
                 if use_existing_task:
+                    # The submitted pipeline is not applied to a running instance.
+                    # Say so when it differs from what is actually running, otherwise
+                    # an edit-and-rerun loop silently measures the old configuration.
+                    if control.pipeline != existing_control.pipeline:
+                        self.debug_message(
+                            f'Task "{existing_control.id}" is already running: reusing it and ignoring the '
+                            'submitted pipeline, which differs from the running one. Restart the task to '
+                            'apply it.'
+                        )
                     if wait_for_running:
                         await existing_control.task.wait_for_running()
-                    return _return_results(existing_control)
+                    return _return_results(existing_control, reused=True)
 
                 # We are absolutely supposed to create a task or the user did
                 # not specify the token (which means a random collision)
