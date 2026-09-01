@@ -1,6 +1,7 @@
 import json5
 import sys
 import os
+import difflib
 from typing import Dict, Any
 from rocketlib import getServiceDefinition, IJson, warning
 
@@ -79,6 +80,71 @@ class Config:
         if service is None or 'preconfig' not in service:
             return {}
         return service['preconfig'].get('profiles') or {}
+
+    @staticmethod
+    def _knownConfigKeys(service: Dict) -> set:
+        """
+        Collect every config key this node legitimately accepts.
+
+        Two sources, unioned: the keys declared across all of the node's profiles
+        (so a key present on any profile counts, e.g. modelOutputTokens, which the
+        "custom" placeholder omits), and the names in the node's "fields" block,
+        with any "<prefix>." stripped.
+        """
+        keys: set = set()
+        preconfig = service.get('preconfig') or {}
+        for profile in (preconfig.get('profiles') or {}).values():
+            if isinstance(profile, (dict, IJson)):
+                keys.update(profile.keys())
+        for field in service.get('fields') or {}:
+            keys.add(field.split('.')[-1] if '.' in field else field)
+        return keys
+
+    @staticmethod
+    def _suggestKey(unknown: str, knownKeys: set) -> str | None:
+        """
+        Return the key ``unknown`` was probably meant to be, or None.
+
+        Deliberately narrow. A near-miss is reported only when it is nearly
+        certain, because an unrecognised key is not proof of a mistake: several
+        nodes read config keys their services.json never declares, and warning
+        about those on every run would train people to ignore the message.
+
+        Two signals qualify:
+          - a known key that ENDS with the unknown one ("outputTokens" ->
+            "modelOutputTokens"), the dropped-prefix mistake this exists for.
+            Not the reverse, which fires on unrelated names sharing a suffix.
+          - a very close spelling (difflib at 0.9), for a plain typo.
+        """
+        lowered = unknown.lower()
+        if any(key.lower() == lowered for key in knownKeys):
+            return None
+        for key in sorted(knownKeys):
+            candidate = key.lower()
+            if len(candidate) > len(lowered) and candidate.endswith(lowered):
+                return key
+        matches = difflib.get_close_matches(unknown, [k for k in knownKeys if k.lower() != lowered], n=1, cutoff=0.9)
+        return matches[0] if matches else None
+
+    @staticmethod
+    def _warnMisnamedKeys(logicalType: str, service: Dict, userConfig: Dict) -> None:
+        """
+        Warn about a config key that is almost, but not quite, a real one.
+
+        Such a key is copied into the merged config and then never read, so the
+        node runs with a default the author believes they overrode. Nothing else
+        reports it: the pipeline publishes, runs, and produces output.
+        """
+        knownKeys = Config._knownConfigKeys(service)
+        if not knownKeys:
+            return
+        for key in userConfig:
+            suggestion = Config._suggestKey(key, knownKeys)
+            if suggestion:
+                warning(
+                    f'{logicalType}: unknown config key "{key}" - did you mean "{suggestion}"? '
+                    f'"{key}" is ignored, so the node runs with the default.'
+                )
 
     @staticmethod
     def getNodeConfig(logicalType: str, connConfig: Dict):
@@ -186,6 +252,8 @@ class Config:
                         combined[key] = value
                 userConfig = combined
 
+            Config._warnMisnamedKeys(logicalType, service, userConfig)
+
             # Merge it
             config = merge(userConfig, defaultConfig)
 
@@ -211,6 +279,8 @@ class Config:
             # If it is none, then set to empty
             if not userConfig:
                 userConfig = {}
+
+            Config._warnMisnamedKeys(logicalType, service, userConfig)
 
             # Merge defaultConfig into userConfig
             config = merge(userConfig, defaultConfig)
