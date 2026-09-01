@@ -698,25 +698,22 @@ class TestSwappedOutputTokens:
 
 
 class TestSourceAuthority:
-    def test_display_labels_are_recognised(self):
-        # The deprecation path passes '<Display> API', not the internal 'provider API'.
-        assert _source_is_authoritative('Anthropic API', 'provider') is True
-        assert _source_is_authoritative('OpenAI API', 'manual') is True
-        assert _source_is_authoritative('xAI API', 'provider') is True
-
-    def test_internal_keys_are_recognised(self):
-        # The enrichment path passes lowercase internal keys.
-        assert _source_is_authoritative('provider API', 'provider') is True
+    def test_a_source_owns_the_profiles_it_discovered(self):
+        assert _source_is_authoritative('provider', 'provider') is True
+        assert _source_is_authoritative('provider', 'manual') is True
         assert _source_is_authoritative('openrouter', 'openrouter') is True
         assert _source_is_authoritative('litellm', 'litellm') is True
-        assert _source_is_authoritative('OpenRouter', 'openrouter') is True
 
     def test_a_source_has_no_authority_over_another_source_profile(self):
-        assert _source_is_authoritative('Anthropic API', 'openrouter') is False
+        assert _source_is_authoritative('provider', 'openrouter') is False
         assert _source_is_authoritative('openrouter', 'provider') is False
+        assert _source_is_authoritative('openrouter', 'manual') is False
         assert _source_is_authoritative('litellm', 'openrouter') is False
 
-    def test_unknown_source_has_no_authority(self):
+    def test_display_labels_are_not_accepted_as_keys(self):
+        # Authority is decided on canonical keys only; a label must never reach here.
+        assert _source_is_authoritative('Anthropic API', 'provider') is False
+        assert _source_is_authoritative('OpenRouter', 'openrouter') is False
         assert _source_is_authoritative('something else', 'provider') is False
 
 
@@ -764,8 +761,10 @@ class TestDeprecationIsNotUndoneByTheSync:
         assert profile.get('migration') is None
         assert any(r[0] == 'test-model-a' and r[1] == 'deprecated' for r in result.updated)
 
-    def test_another_source_cannot_lift_a_mark_it_did_not_make(self, title_mappings):
-        # Marked by OpenRouter; the provider API must not lift it.
+    def test_an_authoritative_source_lifts_a_mark_another_source_applied(self, title_mappings):
+        # A keyless run can stamp deprecatedBy='openrouter' on a 'provider' profile via
+        # the expiration branch. Requiring the stamp to match would strand it deprecated
+        # with no source able to clear it, so authority over the profile is what counts.
         updated, _ = merge(
             current_profiles=self._profile(deprecatedBy='openrouter'),
             api_models=[{'id': 'test-model-a'}],
@@ -774,7 +773,30 @@ class TestDeprecationIsNotUndoneByTheSync:
             output_token_overrides={},
             default_output_tokens=4096,
         )
+        assert updated['test-model-a'].get('deprecated') is None
+
+    def test_a_source_without_authority_cannot_lift(self, title_mappings):
+        updated, _ = merge(
+            current_profiles=self._profile(modelSource='openrouter', deprecatedBy='openrouter'),
+            api_models=[{'id': 'test-model-a'}],
+            title_mappings=title_mappings,
+            token_overrides={},
+            output_token_overrides={},
+            default_output_tokens=4096,
+            deprecation_source_key='provider',
+        )
         assert updated['test-model-a'].get('deprecated') is True
+
+    def test_a_standing_mark_is_reported_not_silent(self, title_mappings):
+        _, result = merge(
+            current_profiles=self._profile(),
+            api_models=[{'id': 'test-model-a'}],
+            title_mappings=title_mappings,
+            token_overrides={},
+            output_token_overrides={},
+            default_output_tokens=4096,
+        )
+        assert result.reappeared_deprecated == ['test-model-a']
 
     def test_deprecating_records_the_source(self, current_profiles, title_mappings):
         # test-model-b absent from the API, discovered by the native provider.
@@ -786,6 +808,7 @@ class TestDeprecationIsNotUndoneByTheSync:
             output_token_overrides={},
             default_output_tokens=4096,
             deprecation_source='Anthropic API',
+            deprecation_source_key='provider',
         )
         assert 'test-model-b' in result.deprecated
         assert updated['test-model-b']['deprecatedBy'] == 'provider'

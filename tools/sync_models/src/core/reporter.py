@@ -29,6 +29,9 @@ class ProviderReport:
         deprecated: list of profile_key strings
         skipped: list of (model_id, reason) tuples (smoke test failures)
         unchanged_count: number of profiles with no changes
+        reappeared_deprecated: list of profile_key strings the source listed again while the
+                          profile stays deprecated — a hand-applied mark, or no authority to
+                          lift it; needs a human to confirm or clear
         estimated_tokens: list of profile_key strings added with a best-guess token limit
                           (no authoritative source); flagged for manual review
         warning: set when the provider was intentionally skipped (e.g. no API key);
@@ -43,6 +46,7 @@ class ProviderReport:
     deprecated: List[str] = field(default_factory=list)
     skipped: List[tuple] = field(default_factory=list)
     estimated_tokens: List[str] = field(default_factory=list)
+    reappeared_deprecated: List[str] = field(default_factory=list)
     unchanged_count: int = 0
     warning: Optional[str] = None
     error: Optional[str] = None
@@ -146,6 +150,9 @@ def format_console(report: SyncReport) -> str:
         for key in pr.estimated_tokens:
             lines.append(_c(f'  ? {key:<30} token limit is estimated — verify manually', '33'))
 
+        for key in pr.reappeared_deprecated:
+            lines.append(_c(f'  ? {key:<30} listed again but still deprecated — confirm or clear', '33'))
+
         if not pr.has_changes() and not pr.skipped:
             lines.append(_c(f'  (no changes — {pr.unchanged_count} profiles unchanged)', '90'))
 
@@ -244,6 +251,13 @@ def format_pr_body(report: SyncReport) -> str:
             lines.append('**Estimated token limits** (no authoritative source — verify manually):')
             lines.append('')
             for key in pr.estimated_tokens:
+                lines.append(f'- `{key}`')
+            lines.append('')
+
+        if pr.reappeared_deprecated:
+            lines.append('**Listed again but still deprecated** (marked by hand, or this source cannot lift it):')
+            lines.append('')
+            for key in pr.reappeared_deprecated:
                 lines.append(f'- `{key}`')
             lines.append('')
 
