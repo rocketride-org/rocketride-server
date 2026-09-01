@@ -62,8 +62,10 @@ class TestSuggestKey:
         for key in ('model', 'modelTotalTokens', 'modelOutputTokens', 'apikey'):
             assert Config._suggestKey(key, keys) is None
 
-    def test_case_differences_are_not_a_mistake(self):
-        assert Config._suggestKey('MODELOUTPUTTOKENS', Config._knownConfigKeys(SERVICE)) is None
+    def test_a_casing_difference_is_a_mistake(self):
+        # merge() keys off the exact spelling, so this overrides nothing.
+        assert Config._suggestKey('MODELOUTPUTTOKENS', Config._knownConfigKeys(SERVICE)) == 'modelOutputTokens'
+        assert Config._suggestKey('modeloutputtokens', Config._knownConfigKeys(SERVICE)) == 'modelOutputTokens'
 
     def test_an_unrelated_key_is_left_alone(self):
         keys = Config._knownConfigKeys(SERVICE)
@@ -116,20 +118,22 @@ class TestAgainstTheRealCatalogue:
 
         repo_root = Path(__file__).resolve().parents[5]
         for path in sorted(glob.glob(str(repo_root / 'nodes/src/nodes/*/services.json'))):
-            try:
-                with open(path, encoding='utf-8') as fh:
-                    yield Path(path).parent.name, json5.load(fh)
-            except Exception:
-                continue
+            # Never swallowed: a service that fails to load would silently drop out
+            # of the sweep below and leave it passing on nothing.
+            with open(path, encoding='utf-8') as fh:
+                yield Path(path).parent.name, json5.load(fh)
 
     def test_no_declared_key_is_reported_as_a_mistake(self):
         offenders = []
+        checked = 0
         for node, service in self._services():
+            checked += 1
             keys = Config._knownConfigKeys(service)
             for key in keys:
                 suggestion = Config._suggestKey(key, keys)
                 if suggestion:
                     offenders.append(f'{node}: {key} -> {suggestion}')
+        assert checked > 50, f'only {checked} services.json files found — the sweep is not running'
         assert not offenders, 'Valid keys flagged as mistakes:\n' + '\n'.join(offenders)
 
     def test_the_motivating_typo_is_still_caught(self):

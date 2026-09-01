@@ -110,15 +110,20 @@ class Config:
         nodes read config keys their services.json never declares, and warning
         about those on every run would train people to ignore the message.
 
-        Two signals qualify:
+        Three signals qualify:
+          - a key that matches except for casing. merge() keys off the exact
+            spelling, so "MODELOUTPUTTOKENS" overrides nothing at all.
           - a known key that ENDS with the unknown one ("outputTokens" ->
             "modelOutputTokens"), the dropped-prefix mistake this exists for.
             Not the reverse, which fires on unrelated names sharing a suffix.
           - a very close spelling (difflib at 0.9), for a plain typo.
         """
         lowered = unknown.lower()
-        if any(key.lower() == lowered for key in knownKeys):
+        if unknown in knownKeys:
             return None
+        for key in sorted(knownKeys):
+            if key.lower() == lowered:
+                return key
         for key in sorted(knownKeys):
             candidate = key.lower()
             if len(candidate) > len(lowered) and candidate.endswith(lowered):
