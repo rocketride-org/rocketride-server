@@ -56,8 +56,14 @@ class ProviderReport:
     discovery_skipped: bool = False
 
     def has_changes(self) -> bool:
-        """Return True if any adds, updates, or deprecations occurred."""
-        return bool(self.added or self.updated or self.deprecated)
+        """
+        Return True if there is anything to show for this provider.
+
+        Includes reappeared_deprecated: those need a human decision, and a
+        provider whose only finding is one of them must not be rendered as a
+        pure skip — the early return above would drop the finding entirely.
+        """
+        return bool(self.added or self.updated or self.deprecated or self.reappeared_deprecated)
 
 
 @dataclass
