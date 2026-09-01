@@ -1539,6 +1539,11 @@ class TaskServer(DAPBase):
                 provider=control.provider,
             )
 
+            # The control now describes the pipeline that is running. Without this the
+            # record still holds whatever was launched originally, so a later
+            # useExisting compares against a configuration that was replaced here.
+            control.pipeline = pipeline
+
             # Wait for running state if requested
             if wait_for_running:
                 await control.task.wait_for_running()

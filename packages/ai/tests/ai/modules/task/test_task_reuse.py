@@ -13,7 +13,7 @@ and reads as a successful measurement of the wrong thing.
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -102,3 +102,34 @@ async def test_an_identical_pipeline_is_reused_without_the_notice():
     said = ' '.join(str(call) for call in ts.debug_message.call_args_list)
     assert 'ignoring the submitted pipeline' not in said
     assert result['reused'] is True
+
+
+@pytest.mark.asyncio
+async def test_the_restarted_pipeline_is_what_a_later_reuse_compares_against():
+    """
+    restart(P2) then use(P2, useExisting) must not report a difference.
+
+    That is the documented way to apply new configuration to a live token, so
+    the control has to describe what is running. Left stale, the flow warns
+    about the pipeline that is actually loaded and stays silent about the one
+    that is not — exactly backwards.
+    """
+    ts = _make_server()
+    control = _running(_pipeline(model='gpt-4.1-mini'))
+    control.teamId = ''
+    ts._task_control['tk_test'] = control
+    ts.get_task_control = lambda token: control
+    control.task.restart_task = AsyncMock()
+    control.task.has_attached_debugger.return_value = False
+
+    restarted = _pipeline(model='claude-opus-5')
+    conn = MagicMock()
+    conn._account_info = None
+    await ts.restart_task({'arguments': {'token': 'tk_test', 'pipeline': restarted}}, conn=conn)
+
+    assert control.pipeline == restarted
+
+    ts.debug_message.reset_mock()
+    await ts.start_task(_request(restarted), conn=MagicMock())
+    said = ' '.join(str(call) for call in ts.debug_message.call_args_list)
+    assert 'ignoring the submitted pipeline' not in said
