@@ -63,6 +63,68 @@ class NodeDevCommands(DAPConn):
             return {'nodes': await list_installed_in_store(self._node_store())}
         raise ValueError(f'unknown rrext_node_dev subcommand {subcommand!r}')
 
+    async def on_rrext_node_catalog(self, request: Dict[str, Any]) -> Dict[str, Any]:
+        """Route ``rrext_node_catalog`` by ``arguments.subcommand``.
+
+        The catalog is public: list, get and fetch are readable by any connected
+        caller, exactly as a shop window is. Publishing and unpublishing carry the
+        caller's identity into the record.
+        """
+        args = request.get('arguments') or {}
+        subcommand = args.get('subcommand')
+        if not subcommand:
+            raise ValueError('Subcommand is required')
+        from ai.account import account
+
+        if subcommand == 'list':
+            return {'nodes': await account.catalog_list(str(args.get('search') or ''))}
+        if subcommand == 'get':
+            entry = await account.catalog_get(args.get('name'))
+            if entry is None:
+                raise ValueError(f'node {args.get("name")!r} is not published')
+            return entry
+        if subcommand == 'fetch':
+            return await account.catalog_fetch(args.get('name'), args.get('version'))
+        if subcommand == 'publish':
+            return await self._catalog_publish(args, account)
+        if subcommand == 'unpublish':
+            return await account.catalog_unpublish(args.get('name'), self._catalog_actor())
+        raise ValueError(f'unknown rrext_node_catalog subcommand {subcommand!r}')
+
+    async def _catalog_publish(self, args: Dict[str, Any], account) -> Dict[str, Any]:
+        """Publish a capsule, taking the bytes from the request or the store.
+
+        A publisher normally has the node installed already, so ``name`` alone
+        publishes what is installed: packing it again client-side would be a
+        second chance for the two to differ.
+        """
+        name = args.get('name')
+        capsule = args.get('capsule')
+        if capsule:
+            blob = base64.b64decode(capsule)
+        else:
+            from ai.account.node_install import pack_installed_node
+
+            blob = await pack_installed_node(self._node_store(), name, str(args.get('version') or '0.0.0'))
+        return await account.catalog_publish(
+            name,
+            blob,
+            self._catalog_actor(),
+            title=str(args.get('title') or ''),
+            description=str(args.get('description') or ''),
+            price_cents=int(args.get('priceCents') or 0),
+            version_label=str(args.get('version') or ''),
+        )
+
+    def _catalog_actor(self) -> Dict[str, str]:
+        """The identity recorded against a publish, denormalized for audit."""
+        info = getattr(self, '_account_info', None)
+        return {
+            'id': getattr(info, 'userId', '') or '',
+            'name': getattr(info, 'displayName', '') or '',
+            'email': getattr(info, 'email', '') or '',
+        }
+
     def _node_scaffold(self, args: Dict[str, Any]) -> Dict[str, Any]:
         """Render a node folder from the request args and return the file map."""
         name = args.get('name')

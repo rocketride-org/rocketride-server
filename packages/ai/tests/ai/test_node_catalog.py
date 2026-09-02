@@ -242,3 +242,116 @@ async def test_a_capsule_without_metadata_still_publishes(catalog):
     assert entry['title'] == 'bare_node'
     assert entry['categories'] == []
     assert entry['icon'] == ''
+
+
+# ---------------------------------------------------------------------------
+# The engine verb: what a UI actually calls
+# ---------------------------------------------------------------------------
+
+
+class _FakeAccount:
+    """Stands in for the account facade, recording what the verb asked for."""
+
+    def __init__(self, backend):
+        self._backend = backend
+        self.calls = []
+
+    async def catalog_list(self, search='', include_removed=False):
+        self.calls.append(('list', search))
+        return await self._backend.list(search, include_removed)
+
+    async def catalog_get(self, name):
+        self.calls.append(('get', name))
+        return await self._backend.get(name)
+
+    async def catalog_fetch(self, name, version=None):
+        self.calls.append(('fetch', name, version))
+        return await self._backend.fetch(name, version)
+
+    async def catalog_publish(self, name, capsule, actor, title='', description='', price_cents=0, version_label=''):
+        self.calls.append(('publish', name, actor))
+        return await self._backend.publish(name, capsule, actor, title, description, price_cents, version_label)
+
+    async def catalog_unpublish(self, name, actor):
+        self.calls.append(('unpublish', name, actor))
+        return await self._backend.unpublish(name, actor)
+
+
+class _Caller:
+    """The verb, with an identity and an account behind it."""
+
+    from ai.modules.task.commands.cmd_node_dev import NodeDevCommands
+
+    on_rrext_node_catalog = NodeDevCommands.on_rrext_node_catalog
+    _catalog_publish = NodeDevCommands._catalog_publish
+    _catalog_actor = NodeDevCommands._catalog_actor
+
+    def __init__(self, account):
+        self._fake_account = account
+        self._account_info = type('Info', (), {'userId': 'u1', 'displayName': 'Ariel', 'email': 'a@example.com'})()
+
+
+async def _call(caller, monkeypatch, **args):
+    """Invoke the verb with the account facade patched out."""
+    import ai.account
+
+    monkeypatch.setattr(ai.account, 'account', caller._fake_account, raising=False)
+    return await caller.on_rrext_node_catalog({'arguments': args})
+
+
+@pytest.fixture
+def verb(catalog):
+    return _Caller(_FakeAccount(catalog)), catalog
+
+
+async def test_the_verb_lists_the_catalog(verb, monkeypatch):
+    caller, catalog = verb
+    await catalog.publish('demo_node', b'CAPSULE', ACTOR)
+
+    result = await _call(caller, monkeypatch, subcommand='list')
+    assert [n['name'] for n in result['nodes']] == ['demo_node']
+
+
+async def test_the_verb_carries_the_callers_identity_into_the_record(verb, monkeypatch):
+    caller, catalog = verb
+    entry = await _call(caller, monkeypatch, subcommand='publish', name='demo_node', capsule='Q0FQU1VMRQ==')
+
+    # The author is whoever was connected, not something the client claimed.
+    assert entry['author']['name'] == 'Ariel'
+    assert entry['author']['id'] == 'u1'
+
+
+async def test_the_verb_records_the_asking_price(verb, monkeypatch):
+    caller, _ = verb
+    entry = await _call(
+        caller, monkeypatch, subcommand='publish', name='paid_node', capsule='Q0FQU1VMRQ==', priceCents=1900
+    )
+    assert entry['priceCents'] == 1900
+
+
+async def test_fetch_returns_the_capsule_a_client_can_install(verb, monkeypatch):
+    caller, catalog = verb
+    await catalog.publish('demo_node', b'CAPSULE', ACTOR)
+
+    result = await _call(caller, monkeypatch, subcommand='fetch', name='demo_node')
+    import base64
+
+    assert base64.b64decode(result['capsule']) == b'CAPSULE'
+
+
+async def test_get_on_an_unpublished_node_is_an_error_not_an_empty_card(verb, monkeypatch):
+    caller, _ = verb
+    with pytest.raises(ValueError):
+        await _call(caller, monkeypatch, subcommand='get', name='demo_node')
+
+
+async def test_an_unknown_subcommand_is_refused(verb, monkeypatch):
+    caller, _ = verb
+    with pytest.raises(ValueError):
+        await _call(caller, monkeypatch, subcommand='drop_everything')
+
+
+async def test_a_missing_subcommand_is_refused(verb, monkeypatch):
+    caller, _ = verb
+    with pytest.raises(ValueError):
+        await _call(caller, monkeypatch)

@@ -482,6 +482,63 @@ class AccountBase(ABC):
             self._deployments_backend = FileDeploymentBackend(Store.instance().raw_store())
         return self._deployments_backend
 
+    # =========================================================================
+    # NODE CATALOG — the public shelf of user-published nodes.
+    #
+    # PUBLISH copies a capsule in as an immutable version; anyone can list and
+    # fetch. Unlike deployments this is not org-scoped: a catalog nobody else
+    # can see is not a catalog.
+    #
+    # Same shape as the deployments interface above and for the same reason:
+    # ONE backend hook, file-backed in OSS, swapped for DB-backed metadata in
+    # SaaS over the identical artifact files — callers never branch on edition.
+    #
+    # Price is carried, never enforced. Whether a caller may pay is the billing
+    # layer's question; in OSS there is no billing at all.
+    # =========================================================================
+
+    _node_catalog = None
+
+    def _node_catalog_backend(self):
+        """The lazily-created file backend used by the OSS defaults."""
+        if self._node_catalog is None:
+            from .node_catalog_backend import FileNodeCatalogBackend
+            from .store import Store
+
+            self._node_catalog = FileNodeCatalogBackend(Store.instance().raw_store())
+        return self._node_catalog
+
+    async def catalog_publish(
+        self,
+        name: str,
+        capsule: bytes,
+        actor: dict,
+        title: str = '',
+        description: str = '',
+        price_cents: int = 0,
+        version_label: str = '',
+    ) -> dict:
+        """Publish a capsule as the node's next immutable catalog version."""
+        return await self._node_catalog_backend().publish(
+            name, capsule, actor, title, description, price_cents, version_label
+        )
+
+    async def catalog_unpublish(self, name: str, actor: dict) -> dict:
+        """Hide a node from the catalog; artifacts and history survive."""
+        return await self._node_catalog_backend().unpublish(name, actor)
+
+    async def catalog_list(self, search: str = '', include_removed: bool = False) -> list:
+        """Every published node, newest first."""
+        return await self._node_catalog_backend().list(search, include_removed)
+
+    async def catalog_get(self, name: str):
+        """One catalog entry with its versions, or None."""
+        return await self._node_catalog_backend().get(name)
+
+    async def catalog_fetch(self, name: str, version=None) -> dict:
+        """One version's capsule, base64-encoded, digest re-verified."""
+        return await self._node_catalog_backend().fetch(name, version)
+
     async def deployments_publish(
         self, org_id: str, project_id: str, pipeline: dict, actor: dict, comment: str = ''
     ) -> dict:

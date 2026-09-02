@@ -234,3 +234,46 @@ async def installed_node_definition(fs, name: str):
     definition['source'] = 'capsule'
     definition.pop('icon', None)
     return definition
+
+
+async def pack_installed_node(fs, name: str, version: str = '0.0.0') -> bytes:
+    """Re-pack a node already installed in the caller's store as a ``.rrc``.
+
+    Publishing normally means "publish what I have installed". Packing it again
+    on the client would be a second chance for the two to differ, so the bytes
+    come from the store the engine actually loads.
+
+    Args:
+        fs: The caller's FileStore.
+        name: Installed node name.
+        version: Version label recorded in the capsule manifest.
+
+    Returns:
+        The ``.rrc`` bytes.
+
+    Raises:
+        NodeInstallError: The node is not installed, or carries no files.
+    """
+    from ai.account.capsule import pack_capsule
+
+    name = _safe_name(name)
+    root = f'{_STORE_ROOT}/{name}'
+    try:
+        listing = await fs.list_dir(root)
+    except Exception as e:
+        raise NodeInstallError(f'node {name!r} is not installed: {e}')
+
+    files: Dict[str, str] = {}
+    for entry in listing.get('entries', []):
+        if entry.get('type') != 'file':
+            continue
+        filename = entry['name']
+        try:
+            files[filename] = (await fs.read(f'{root}/{filename}')).decode('utf-8')
+        except UnicodeDecodeError:
+            # An icon or other binary member: pack_capsule takes text, so skip
+            # what cannot be represented rather than corrupting it.
+            continue
+    if not files:
+        raise NodeInstallError(f'node {name!r} has no files to publish')
+    return pack_capsule(name, files, version=version)
