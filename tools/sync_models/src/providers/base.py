@@ -38,6 +38,31 @@ except ImportError:
 #   -0613        (MMDD, e.g. gpt-4-0613, gpt-3.5-turbo-1106)
 _DATED_SNAPSHOT_RE = re.compile(r'(-20\d{2}-\d{2}-\d{2}|-\d{4})$')
 
+# Above this share of a provider's verified models coming back "retired", the
+# result is treated as an API-level failure rather than N retirements.
+_RETIREMENT_ANOMALY_RATIO = 0.5
+
+
+def is_retirement_anomaly(retired_count: int, verified_count: int) -> bool:
+    """True when "retired" came back for too much of a provider to be believable.
+
+    A retirement message is per-model evidence, but a break one level up produces
+    the same message for every model at once: retire an API version and every call
+    answers with the same 404 and the same wording. Providers do not retire most of
+    a catalogue in one go, so a majority verdict says more about the API than about
+    the models.
+
+    Args:
+        retired_count: Models whose call reported them retired.
+        verified_count: Models actually called this run.
+
+    Returns:
+        True if the run should be treated as an API-level failure instead.
+    """
+    if not retired_count or not verified_count:
+        return False
+    return retired_count > verified_count * _RETIREMENT_ANOMALY_RATIO
+
 
 def _active_protected_profiles(entries: List, today=None) -> set:
     """
@@ -446,6 +471,7 @@ class CloudProvider(ABC):
         # service or a permission problem never reaches this at all.
         retired_models: Dict[str, str] = {}
         revived_models: set = set()
+        verified_count = 0
         if verify_existing and primary_source == 'provider' and client is not None:
             protected_keys = _active_protected_profiles(self._config.get('protected_profiles', []))
             if global_protected_profiles:
@@ -463,6 +489,7 @@ class CloudProvider(ABC):
                 if already_marked and profile.get('deprecatedBy') != CALL_VERIFIED:
                     continue
                 result = smoke_run(self.smoke_type, client, model_id)
+                verified_count += 1
                 if result.retired():
                     if not already_marked:
                         retired_models[model_id] = result.reason
@@ -473,6 +500,22 @@ class CloudProvider(ABC):
                     # A bare 404: retired, or a model this key cannot reach. Not
                     # evidence enough to deprecate, so hand it to a human instead.
                     report.unverified.append((profile_key, result.reason))
+
+            # A retirement message is per-model evidence, but a break one level up
+            # produces the same message for every model at once: retire an API
+            # version and each call comes back with the same 404 and the same
+            # wording. Providers do not retire most of a catalogue in one go, so a
+            # majority verdict says more about the API than about the models.
+            # Deprecating nothing and asking for a human is the safe reading; a real
+            # mass retirement is then applied deliberately rather than swept in.
+            if is_retirement_anomaly(len(retired_models), verified_count):
+                report.warning = (
+                    f'{len(retired_models)} of {verified_count} models reported as retired — that is an API-level '
+                    'failure more often than a real mass retirement. Nothing was deprecated; verify by hand.'
+                )
+                report.unverified.extend(report.retired)
+                report.retired = []
+                retired_models = {}
 
         # --- Warning messages for partial-result modes ---
         if primary_source != 'provider' and api_key is None:

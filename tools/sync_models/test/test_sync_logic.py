@@ -26,6 +26,7 @@ from core.merger import (
     CALL_VERIFIED,
 )
 from core.smoke import classify_failure
+from providers.base import is_retirement_anomaly
 
 
 class _NotFound(Exception):
@@ -1100,3 +1101,31 @@ class TestOpenRouterExpirationRespectsOwnership:
             default_output_tokens=4096,
         )
         assert updated['test-model-a'].get('deprecated') is None
+
+
+class TestRetirementAnomaly:
+    """
+    A per-model verdict that arrives for the whole provider at once is not N
+    retirements; it is one failure a level up. Retire an API version and every
+    call answers with the same 404 and the same wording, which is exactly what
+    the retirement phrases match.
+    """
+
+    def test_a_majority_verdict_is_treated_as_an_api_failure(self):
+        assert is_retirement_anomaly(6, 10) is True
+        assert is_retirement_anomaly(26, 26) is True
+
+    def test_a_normal_handful_is_believed(self):
+        # The real gemini case: five of twenty-six.
+        assert is_retirement_anomaly(5, 26) is False
+        assert is_retirement_anomaly(1, 3) is False
+
+    def test_exactly_half_is_not_a_majority(self):
+        assert is_retirement_anomaly(5, 10) is False
+
+    def test_nothing_retired_is_never_an_anomaly(self):
+        assert is_retirement_anomaly(0, 26) is False
+
+    def test_nothing_verified_cannot_be_judged(self):
+        # No calls were made, so there is no ratio to reason about.
+        assert is_retirement_anomaly(3, 0) is False

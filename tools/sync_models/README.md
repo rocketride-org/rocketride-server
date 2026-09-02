@@ -120,6 +120,8 @@ Pick primary source  →  fetch model list  →  discovery gate  →  smoke test
 
    So a CI key without a tier cannot deprecate a live-but-gated model: it gets `missing`.
 
+   One more guard sits above all of it: if **more than half** of a provider's verified models come back `retired`, the run deprecates nothing and warns instead. A retirement message is per-model evidence, but a break one level up — a retired API version, say — produces that same message for every model at once. Providers do not retire most of a catalogue in one go, so a majority verdict says more about the API than about the models, and a real mass retirement is then applied deliberately rather than swept in.
+
    **A mark made by a call records `deprecatedBy: "provider-call"`, and only a call that passes can lift it.** The listing path must not: the premise of a call-verified retirement is that the provider *still lists the model*, so a scheduled run — which does not pass `--verify-existing` — would otherwise see it listed and resurrect it, deleting the provider's replacement note along the way.
 5. **Merge**: smart merge into `preconfig.profiles`:
    - New model, smoke passed → add profile
