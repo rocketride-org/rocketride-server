@@ -206,3 +206,33 @@ async def test_an_invalid_pipeline_is_refused_before_the_task_is_stopped():
 
     control.task.restart_task.assert_not_awaited()
     assert control.pipeline is original, 'the record still describes what is running'
+
+
+@pytest.mark.asyncio
+async def test_a_restart_cannot_change_the_source():
+    """
+    The source is part of the task's identity, as restart_task documents.
+
+    _apply_source_defaults stamps the control's source onto the pipeline, so a
+    request naming a different one would be silently overwritten — the caller
+    would believe it had switched source and be told nothing.
+    """
+    ts = _make_server()
+    control = _running(_pipeline())
+    control.teamId = ''
+    ts._task_control['tk_test'] = control
+    ts.get_task_control = lambda token: control
+    control.task.restart_task = AsyncMock()
+    control.task.has_attached_debugger.return_value = False
+
+    other_source = {
+        'project_id': 'project-1',
+        'source': 'llm',  # a real component, but not the one this task runs
+        'components': [{'id': 'src', 'provider': 'webhook'}, {'id': 'llm', 'provider': 'llm_openai'}],
+    }
+    conn = MagicMock()
+    conn._account_info = None
+    with pytest.raises(ValueError, match='source'):
+        await ts.restart_task({'arguments': {'token': 'tk_test', 'pipeline': other_source}}, conn=conn)
+
+    control.task.restart_task.assert_not_awaited()

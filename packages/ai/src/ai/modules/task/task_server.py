@@ -1548,6 +1548,17 @@ class TaskServer(DAPBase):
             if type(components) is not list:
                 raise ValueError('Invalid components in pipeline')
 
+            # The source is part of the task's identity and a restart cannot change
+            # it. _apply_source_defaults stamps control.source onto the pipeline, so
+            # a different explicit source would be overwritten without a word —
+            # refuse it instead, which is what the docstring above promises.
+            requested_source = pipeline.get('source')
+            if requested_source and requested_source != control.source:
+                raise ValueError(
+                    f'Cannot change the source on restart: task "{control.id}" runs '
+                    f'"{control.source}", the request asks for "{requested_source}"'
+                )
+
             # Normalise BEFORE anything is stopped. This is also the validation: it
             # raises when the source component is missing, and doing that after the
             # restart would leave the task stopped, the new pipeline already stored
