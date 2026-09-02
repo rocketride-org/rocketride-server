@@ -451,7 +451,7 @@ export const Welcome: React.FC = () => {
 					</div>
 
 					<ul style={{ listStyle: 'none', width: '100%', margin: '0 0 30px', padding: 0 }}>
-						{['Visual pipeline editor', 'High-performance C++ engine', '50+ pipeline nodes with AI/ML', 'Multi-agent workflows', 'Tool and model agnostic', 'TypeScript, Python & MCP SDKs'].map((feat) => (
+						{['Visual pipeline editor', 'High-performance C++ engine', '100+ pipeline nodes with AI/ML', 'Multi-agent workflows', 'Tool and model agnostic', 'TypeScript, Python & MCP SDKs'].map((feat) => (
 							<li key={feat} style={styles.featureItem}>
 								<span style={styles.featureIcon}>&#9670;</span> {feat}
 							</li>
