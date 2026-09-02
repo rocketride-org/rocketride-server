@@ -1041,3 +1041,62 @@ class TestFailureClassification:
     def test_an_auth_failure_is_not_a_retirement(self):
         assert classify_failure(Exception('401 unauthorized')).outcome == 'skip'
         assert classify_failure(Exception('permission denied for this model')).outcome == 'skip'
+
+
+class TestOpenRouterExpirationRespectsOwnership:
+    """
+    An expiry OpenRouter publishes is evidence about the models it serves, not
+    about one the native provider still supports. Acting on it regardless of
+    ownership lets a keyless run hide a working model.
+    """
+
+    def _profile(self, model_source):
+        return {
+            'test-model-a': {
+                'title': 'Test Model A',
+                'model': 'test-model-a',
+                'modelSource': model_source,
+                'modelTotalTokens': 16384,
+                'modelOutputTokens': 4096,
+                'apikey': '',
+            }
+        }
+
+    def _expired_entry(self):
+        return [{'id': 'test-model-a', '_source': 'openrouter', 'expiration_date': '2026-01-01'}]
+
+    def test_it_deprecates_a_profile_openrouter_owns(self, title_mappings):
+        updated, result = merge(
+            current_profiles=self._profile('openrouter'),
+            api_models=self._expired_entry(),
+            title_mappings=title_mappings,
+            token_overrides={},
+            output_token_overrides={},
+            default_output_tokens=4096,
+        )
+        assert updated['test-model-a']['deprecated'] is True
+        assert updated['test-model-a']['deprecatedBy'] == 'openrouter'
+        assert 'test-model-a' in result.deprecated
+
+    def test_it_leaves_a_native_profile_alone(self, title_mappings):
+        updated, result = merge(
+            current_profiles=self._profile('provider'),
+            api_models=self._expired_entry(),
+            title_mappings=title_mappings,
+            token_overrides={},
+            output_token_overrides={},
+            default_output_tokens=4096,
+        )
+        assert updated['test-model-a'].get('deprecated') is None
+        assert 'test-model-a' not in result.deprecated
+
+    def test_it_leaves_a_hand_added_profile_alone(self, title_mappings):
+        updated, _ = merge(
+            current_profiles=self._profile('manual'),
+            api_models=self._expired_entry(),
+            title_mappings=title_mappings,
+            token_overrides={},
+            output_token_overrides={},
+            default_output_tokens=4096,
+        )
+        assert updated['test-model-a'].get('deprecated') is None

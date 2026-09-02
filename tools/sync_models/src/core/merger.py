@@ -834,11 +834,16 @@ def merge(
             # live provider API is the source, _or_exp is a supplemental token
             # lookup and must NOT drive deprecation: the model just passed the
             # provider's own API check, so it is clearly still available.
+            # The expiration is also only OpenRouter's to act on: it owns the profiles
+            # it discovered, and an expiry it publishes says nothing about a model the
+            # native provider still serves. Without this an OpenRouter entry could
+            # deprecate a 'provider' profile that works.
             _exp = api_entry.get('expiration_date') if _api_entry_source == 'openrouter' else None
+            if _exp and not _source_is_authoritative(_model_source, existing.get('modelSource', 'manual')):
+                _exp = None
             if _exp and not existing.get('deprecated'):
                 updated_profiles[profile_key]['deprecated'] = True
-                # Mark it as the sync's own so a later run may lift it; this branch only
-                # runs for an OpenRouter entry, so _model_source is 'openrouter' here.
+                # Mark it as the sync's own so a later run may lift it.
                 updated_profiles[profile_key]['deprecatedBy'] = _model_source
                 if not existing.get('migration'):
                     updated_profiles[profile_key]['migration'] = (

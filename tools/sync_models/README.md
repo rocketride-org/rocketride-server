@@ -124,7 +124,7 @@ Pick primary source  →  fetch model list  →  discovery gate  →  smoke test
 5. **Merge**: smart merge into `preconfig.profiles`:
    - New model, smoke passed → add profile
    - Existing model → update token limits if authoritative data differs; preserve title and other manual fields
-   - Model no longer in API → mark `"deprecated": true` (only by sources authoritative for the profile's `modelSource`) and record `"deprecatedBy"` with the source that marked it
+   - Model no longer in API → mark `"deprecated": true` (only by sources authoritative for the profile's `modelSource`) and record `"deprecatedBy"` with the source that marked it. The same ownership applies to an OpenRouter `expiration_date`: it is evidence about the models OpenRouter serves, not about one the native provider still supports
    - Model back in the API → lift the mark, **but only a mark this sync made**: a profile deprecated by hand carries no `deprecatedBy` and is left alone. A provider that keeps listing a model it has retired is exactly why someone marks one by hand, so its reappearance is not evidence to the contrary. Any source with authority over the profile may lift it, not only the one that applied it — the OpenRouter expiration path can stamp a `provider` profile, and requiring a match would strand it. A mark left standing is reported as "listed again but still deprecated" rather than passing silently
    - Model in `protected_profiles` → never deprecated (e.g. `"custom"`)
 
