@@ -35,7 +35,7 @@
 > [HTTP MCP Server documentation](https://docs.rocketride.org/connect/mcp/http)
 > for Claude, Cursor, and ChatGPT setup.
 >
-> `rocketride-mcp` 1.3.0 is the final release. It continues to work against
+> `rocketride-mcp` 1.5.0 is the final release. It continues to work against
 > existing engines, but receives no new features or fixes.
 
 ## Quick Start

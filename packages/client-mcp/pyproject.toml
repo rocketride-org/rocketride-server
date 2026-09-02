@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "rocketride-mcp"
-version = "1.3.0"
+version = "1.5.0"
 description = "[DEPRECATED] RocketRide MCP stdio server — use the engine's built-in HTTP MCP server instead"
 classifiers = [
   "Development Status :: 7 - Inactive",
