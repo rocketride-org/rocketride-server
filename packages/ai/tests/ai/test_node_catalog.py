@@ -200,3 +200,45 @@ async def test_fetching_a_version_that_does_not_exist(catalog):
 
 async def test_an_empty_catalog_lists_nothing(catalog):
     assert await catalog.list() == []
+
+
+# ---------------------------------------------------------------------------
+# Card metadata: what the store card needs, taken from the node itself
+# ---------------------------------------------------------------------------
+
+
+def _real_capsule(**over):
+    """A capsule built from a scaffolded node, so services.json is the real shape."""
+    from ai.account.capsule import pack_capsule
+    from ai.account.node_scaffold import scaffold_node
+
+    files = scaffold_node(
+        name=over.get('name', 'ticket_feed'),
+        title=over.get('title', 'Ticket Feed'),
+        kind='filter',
+        description=over.get('description', 'Reads a support queue'),
+    )
+    return pack_capsule(over.get('name', 'ticket_feed'), files)
+
+
+async def test_the_card_fields_come_from_the_node_itself(catalog):
+    # The author publishes without retyping any of it.
+    entry = await catalog.publish('ticket_feed', _real_capsule(), ACTOR)
+
+    assert entry['title'] == 'Ticket Feed'
+    assert entry['description'] == 'Reads a support queue'
+    assert entry['categories'], 'classType becomes the store category'
+    assert entry['icon'].startswith('<svg'), 'the node ships its own icon'
+
+
+async def test_an_explicit_title_overrides_the_declared_one(catalog):
+    entry = await catalog.publish('ticket_feed', _real_capsule(), ACTOR, title='Support Queue Reader')
+    assert entry['title'] == 'Support Queue Reader'
+
+
+async def test_a_capsule_without_metadata_still_publishes(catalog):
+    # Not every capsule is scaffolded; the card falls back to the name.
+    entry = await catalog.publish('bare_node', b'not-a-zip', ACTOR)
+    assert entry['title'] == 'bare_node'
+    assert entry['categories'] == []
+    assert entry['icon'] == ''

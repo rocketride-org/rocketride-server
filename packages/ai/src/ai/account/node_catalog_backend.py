@@ -45,6 +45,7 @@ import re
 import time
 from typing import Any, Dict, List, Optional
 
+from .capsule import read_capsule
 from .store import IStore, StorageError, VersionMismatchError
 
 # How many CAS retries a meta.json read-modify-write attempts before failing.
@@ -95,6 +96,61 @@ def artifact_sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
+def card_metadata(capsule: bytes) -> Dict[str, Any]:
+    """Read the card fields out of the capsule's own services.json.
+
+    The catalog card wants a title, a description, categories and an icon —
+    all of which the node already declares. Asking the author to type them
+    again at publish time is how the two drift apart, so they are derived here
+    and only overridden when the publisher explicitly passes something.
+
+    Args:
+        capsule: The ``.rrc`` bytes.
+
+    Returns:
+        ``{'title', 'description', 'categories', 'icon'}``; any field the node
+        does not declare comes back empty.
+    """
+    try:
+        _manifest, payload = read_capsule(capsule)
+    except Exception:
+        return {'title': '', 'description': '', 'categories': [], 'icon': ''}
+
+    from .capsule import load_relaxed_json
+
+    definition: Dict[str, Any] = {}
+    raw = payload.get('services.json')
+    if raw:
+        try:
+            definition = load_relaxed_json(raw.decode('utf-8')) or {}
+        except Exception:
+            definition = {}
+
+    description = definition.get('description')
+    if isinstance(description, list):
+        description = ''.join(description)
+
+    icon_name = definition.get('icon')
+    icon_svg = ''
+    if isinstance(icon_name, str) and icon_name.lower().endswith('.svg'):
+        blob = payload.get(icon_name)
+        if blob:
+            try:
+                icon_svg = blob.decode('utf-8')
+            except UnicodeDecodeError:
+                icon_svg = ''
+
+    class_type = definition.get('classType')
+    categories = [c for c in (class_type if isinstance(class_type, list) else []) if isinstance(c, str)]
+
+    return {
+        'title': definition.get('title') or '',
+        'description': description or '',
+        'categories': categories,
+        'icon': icon_svg,
+    }
+
+
 class FileNodeCatalogBackend:
     """The OSS catalog: capsules on the store, metadata in meta.json.
 
@@ -142,6 +198,8 @@ class FileNodeCatalogBackend:
             raise ValueError('price_cents cannot be negative')
 
         digest = artifact_sha256(capsule)
+        # Derived from the node's own services.json; explicit arguments win.
+        card = card_metadata(capsule)
 
         async def mutate(meta: Dict[str, Any]) -> Dict[str, Any]:
             version = len(meta['versions']) + 1
@@ -158,8 +216,11 @@ class FileNodeCatalogBackend:
             }
             meta['versions'].append(record)
             meta['name'] = name
-            meta['title'] = title or meta.get('title') or name
-            meta['description'] = description or meta.get('description') or ''
+            meta['title'] = title or card['title'] or meta.get('title') or name
+            meta['description'] = description or card['description'] or meta.get('description') or ''
+            meta['categories'] = card['categories'] or meta.get('categories') or []
+            if card['icon']:
+                meta['icon'] = card['icon']
             meta['priceCents'] = int(price_cents)
             meta['state'] = 'published'
             meta['author'] = meta.get('author') or _actor_record(actor)
@@ -275,6 +336,9 @@ class FileNodeCatalogBackend:
             'name': meta.get('name'),
             'title': meta.get('title') or meta.get('name'),
             'description': meta.get('description') or '',
+            # The app store card reads these; a node declares them already.
+            'categories': meta.get('categories') or [],
+            'icon': meta.get('icon') or '',
             'author': meta.get('author') or {},
             'priceCents': int(meta.get('priceCents') or 0),
             'state': meta.get('state') or 'published',
