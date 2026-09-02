@@ -1548,6 +1548,12 @@ class TaskServer(DAPBase):
             if type(components) is not list:
                 raise ValueError('Invalid components in pipeline')
 
+            # Normalise BEFORE anything is stopped. This is also the validation: it
+            # raises when the source component is missing, and doing that after the
+            # restart would leave the task stopped, the new pipeline already stored
+            # by Task.restart_task, and control.pipeline still naming the old one.
+            pipeline = _apply_source_defaults(pipeline, control.source)
+
             # Call the Task's restart method to restart the engine process
             # This preserves all statistics and monitoring while restarting the subprocess
             await control.task.restart_task(
@@ -1557,12 +1563,10 @@ class TaskServer(DAPBase):
                 provider=control.provider,
             )
 
-            # The control now describes the pipeline that is running. Without this the
+            # The control now describes the pipeline that is running: without this the
             # record still holds whatever was launched originally, so a later
             # useExisting compares against a configuration that was replaced here.
-            # Normalised the same way a launch does, or the comparison reads the
-            # difference a launch itself introduced.
-            control.pipeline = _apply_source_defaults(pipeline, control.source)
+            control.pipeline = pipeline
 
             # Wait for running state if requested
             if wait_for_running:

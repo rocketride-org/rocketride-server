@@ -177,3 +177,32 @@ async def test_a_restart_stores_the_pipeline_in_the_shape_a_launch_would():
     )
     said = ' '.join(str(call) for call in ts.debug_message.call_args_list)
     assert 'ignoring the submitted pipeline' not in said
+
+
+@pytest.mark.asyncio
+async def test_an_invalid_pipeline_is_refused_before_the_task_is_stopped():
+    """
+    Normalisation doubles as validation, so it has to happen first.
+
+    Rejecting after the restart would leave the task stopped, Task.restart_task
+    holding the new pipeline, and control.pipeline still naming the old one —
+    three views of the world, none of them running.
+    """
+    ts = _make_server()
+    original = _pipeline()
+    control = _running(original)
+    control.teamId = ''
+    ts._task_control['tk_test'] = control
+    ts.get_task_control = lambda token: control
+    control.task.restart_task = AsyncMock()
+    control.task.has_attached_debugger.return_value = False
+
+    # The source component the control names is not in this pipeline.
+    broken = {'project_id': 'project-1', 'components': [{'id': 'other', 'provider': 'webhook'}]}
+    conn = MagicMock()
+    conn._account_info = None
+    with pytest.raises(ValueError):
+        await ts.restart_task({'arguments': {'token': 'tk_test', 'pipeline': broken}}, conn=conn)
+
+    control.task.restart_task.assert_not_awaited()
+    assert control.pipeline is original, 'the record still describes what is running'
