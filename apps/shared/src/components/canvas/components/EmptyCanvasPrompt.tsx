@@ -150,7 +150,6 @@ const styles = {
 		fontWeight: 500,
 		color: 'var(--rr-text-secondary)',
 		cursor: 'pointer',
-		outline: 'none',
 		userSelect: 'none' as const,
 		padding: '4px 0',
 	},
@@ -172,6 +171,13 @@ interface IEmptyCanvasPromptProps {
 	onNodeAdded: (nodeId: string, formDataValid: boolean) => void;
 }
 
+/**
+ * EmptyCanvasPrompt renders the starting point overlay when the pipeline canvas has no nodes.
+ * Prioritizes curated starter templates and nests raw source components in an advanced collapsible section.
+ *
+ * @param props - Component properties including template instantiation and node addition callbacks.
+ * @returns The rendered empty canvas prompt overlay or null if no sources/templates are available.
+ */
 export default function EmptyCanvasPrompt({ instantiateTemplate, onNodeAdded }: IEmptyCanvasPromptProps): ReactElement | null {
 	const { servicesJson } = useFlowProject();
 	const { addNode } = useFlowGraph();
