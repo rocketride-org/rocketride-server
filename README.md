@@ -28,7 +28,9 @@
   <a href="https://docs.rocketride.org/">Documentation</a> |
   <a href="https://pypi.org/project/rocketride/">Python SDK</a> |
   <a href="https://www.npmjs.com/package/rocketride">TypeScript SDK</a> |
-  <a href="https://pypi.org/project/rocketride-mcp/">MCP Server</a>
+  <a href="https://pypi.org/project/rocketride-mcp/">MCP Server</a> |
+  <a href="https://marketplace.visualstudio.com/items?itemName=RocketRide.rocketride">VS Code Marketplace</a> |
+  <a href="https://open-vsx.org/extension/RocketRide/rocketride">Open VSX Registry</a>
 </p>
 
 <p>
