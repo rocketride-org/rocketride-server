@@ -1093,6 +1093,34 @@ export class ConnectionManager implements IConnectionManager {
 				errorKind: isAuthFailure ? 'session' : undefined,
 			},
 		});
+		// A CORS-blocked or proxy-dropped request and a dead server both surface
+		// as the same opaque network TypeError, but only one means the server is
+		// down. Disambiguate with a same-origin probe, which every topology
+		// serves: single-host deployments answer /version on the page origin and
+		// CDN-split ones proxy it through the edge. When the probe answers, the
+		// server is reachable and the stored token simply couldn't be validated,
+		// so recovery is sign-in, not retry; re-latch as a session failure so the
+		// signed-out landing gets the sign-in banner instead of a false outage.
+		if (isNetworkFailure) {
+			const generation = this.connectionGeneration;
+			void fetch('/version', { cache: 'no-store' }).then((res) => {
+				if (!res.ok) return;
+				if (this.connectionGeneration !== generation) return;
+				// Only downgrade the failure this call latched; a newer failure
+				// or a successful reconnect must not be overwritten.
+				if (this.connectionStatus.lastFailure?.kind !== 'network') return;
+				const message = 'Your session has expired — please sign in again.';
+				this.updateConnectionStatus({
+					state: ConnectionState.AUTH_FAILED,
+					lastError: message,
+					progressMessage: undefined,
+					errorKind: 'session',
+					lastFailure: { kind: 'auth', lastError: message, errorKind: 'session' },
+				});
+			}).catch(() => {
+				// Probe failed too: genuinely unreachable, keep the network banner.
+			});
+		}
 		return isAuthFailure;
 	}
 

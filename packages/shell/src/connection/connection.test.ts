@@ -216,6 +216,66 @@ test('handleStoredTokenFailure preserves credentials for retryable server failur
 	});
 });
 
+test('handleStoredTokenFailure downgrades a network latch to session expiry when a same-origin probe answers', async () => {
+	const originalFetch = Object.getOwnPropertyDescriptor(globalThis, 'fetch');
+	let probed: string | undefined;
+	Object.defineProperty(globalThis, 'fetch', {
+		configurable: true,
+		value: async (input: unknown) => {
+			probed = String(input);
+			return { ok: true };
+		},
+	});
+
+	try {
+		const { manager } = createTestManager();
+
+		const shouldClearToken = manager.handleStoredTokenFailure(new ConnectionFailure('Failed to fetch', 'network'));
+
+		// The network failure latches synchronously so recovery UI can render it.
+		assert.equal(shouldClearToken, false);
+		assert.equal(manager.connectionStatus.lastFailure?.kind, 'network');
+
+		// The same-origin probe answering proves the server is reachable, so the
+		// latched failure downgrades to session expiry instead of a false outage.
+		await new Promise((resolve) => setImmediate(resolve));
+		assert.equal(probed, '/version');
+		assert.equal(manager.connectionStatus.state, ConnectionState.AUTH_FAILED);
+		assert.deepEqual(manager.connectionStatus.lastFailure, {
+			kind: 'auth',
+			lastError: 'Your session has expired — please sign in again.',
+			errorKind: 'session',
+		});
+	} finally {
+		if (originalFetch) Object.defineProperty(globalThis, 'fetch', originalFetch);
+		else delete (globalThis as { fetch?: typeof fetch }).fetch;
+	}
+});
+
+test('handleStoredTokenFailure keeps the network latch when the same-origin probe fails too', async () => {
+	const originalFetch = Object.getOwnPropertyDescriptor(globalThis, 'fetch');
+	Object.defineProperty(globalThis, 'fetch', {
+		configurable: true,
+		value: async () => {
+			throw new TypeError('Failed to fetch');
+		},
+	});
+
+	try {
+		const { manager } = createTestManager();
+
+		manager.handleStoredTokenFailure(new ConnectionFailure('Failed to fetch', 'network'));
+		await new Promise((resolve) => setImmediate(resolve));
+
+		// Both requests dead: genuinely unreachable, the network banner stands.
+		assert.equal(manager.connectionStatus.state, ConnectionState.FAILED);
+		assert.equal(manager.connectionStatus.lastFailure?.kind, 'network');
+	} finally {
+		if (originalFetch) Object.defineProperty(globalThis, 'fetch', originalFetch);
+		else delete (globalThis as { fetch?: typeof fetch }).fetch;
+	}
+});
+
 test('clearToken removes current and legacy stored tokens', () => {
 	const removedLocalKeys: string[] = [];
 	const removedSessionKeys: string[] = [];
