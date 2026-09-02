@@ -133,3 +133,47 @@ async def test_the_restarted_pipeline_is_what_a_later_reuse_compares_against():
     await ts.start_task(_request(restarted), conn=MagicMock())
     said = ' '.join(str(call) for call in ts.debug_message.call_args_list)
     assert 'ignoring the submitted pipeline' not in said
+
+
+@pytest.mark.asyncio
+async def test_a_restart_stores_the_pipeline_in_the_shape_a_launch_would():
+    """
+    A launch stamps `source` and gives the source component a config. A restart
+    that stores the raw request would differ from the same pipeline after a
+    launch normalises it, so the comparison would report a difference that the
+    launch itself introduced.
+    """
+    ts = _make_server()
+    control = _running(_pipeline())
+    control.teamId = ''
+    ts._task_control['tk_test'] = control
+    ts.get_task_control = lambda token: control
+    control.task.restart_task = AsyncMock()
+    control.task.has_attached_debugger.return_value = False
+
+    # As a caller would write it: no config on the source node.
+    raw = {
+        'project_id': 'project-1',
+        'source': 'src',
+        'components': [{'id': 'src', 'provider': 'webhook'}, {'id': 'llm', 'provider': 'llm_openai'}],
+    }
+    conn = MagicMock()
+    conn._account_info = None
+    await ts.restart_task({'arguments': {'token': 'tk_test', 'pipeline': raw}}, conn=conn)
+
+    assert control.pipeline['source'] == 'src'
+    assert control.pipeline['components'][0]['config'] == {}
+
+    # The same pipeline submitted again must not read as different.
+    ts.debug_message.reset_mock()
+    resubmitted = {
+        'project_id': 'project-1',
+        'source': 'src',
+        'components': [{'id': 'src', 'provider': 'webhook'}, {'id': 'llm', 'provider': 'llm_openai'}],
+    }
+    await ts.start_task(
+        {'command': 'launch', 'arguments': {'token': 'tk_test', 'pipeline': resubmitted, 'useExisting': True}},
+        conn=MagicMock(),
+    )
+    said = ' '.join(str(call) for call in ts.debug_message.call_args_list)
+    assert 'ignoring the submitted pipeline' not in said

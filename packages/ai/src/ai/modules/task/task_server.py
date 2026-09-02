@@ -159,6 +159,34 @@ class TASK_CONTROL:
         return self.teamId if self.run_kind == 'deploy' else self.userId
 
 
+def _apply_source_defaults(pipeline: Dict[str, Any], source: str) -> Dict[str, Any]:
+    """
+    Fill in the fields a launch stamps on a pipeline, so two copies compare equal.
+
+    ``start_task`` writes the resolved source onto the pipeline and gives the
+    source component an empty config when it has none. A pipeline stored without
+    those looks different from the same pipeline after a launch, which turns a
+    useExisting comparison into a false "differs".
+
+    Args:
+        pipeline: The pipeline to normalise, mutated in place.
+        source: The resolved source component id.
+
+    Returns:
+        The same pipeline.
+
+    Raises:
+        ValueError: If the source component is not in the components list.
+    """
+    pipeline['source'] = source
+    for component in pipeline.get('components', []):
+        if component.get('id') == source:
+            if 'config' not in component:
+                component['config'] = {}
+            return pipeline
+    raise ValueError(f'Pipeline source component "{source}" not found in components list')
+
+
 class TaskServer(DAPBase):
     """
     Central task management server orchestrating computational task lifecycles.
@@ -1231,20 +1259,10 @@ class TaskServer(DAPBase):
                 raise ValueError('Pipeline does not have a source component defined')
 
         # Find the actual source component
-        source_component = None
-        for component in control.pipeline.get('components', []):
-            if component.get('id') == control.source:
-                source_component = component
-                break
-
-        # Update the source on the pipeline
-        control.pipeline['source'] = control.source
-
-        if source_component is None:
-            raise ValueError(f'Pipeline source component "{control.source}" not found in components list')
-
-        if 'config' not in source_component:
-            source_component['config'] = {}
+        # Stamp the resolved source and give the source component a config if it has
+        # none. Shared with restart_task so a restarted pipeline is stored in the same
+        # shape a launched one is, and the two compare equal.
+        _apply_source_defaults(control.pipeline, control.source)
 
         # Project identity is project_id on the flat project.
         control.project_id = control.pipeline.get('project_id', None)
@@ -1542,7 +1560,9 @@ class TaskServer(DAPBase):
             # The control now describes the pipeline that is running. Without this the
             # record still holds whatever was launched originally, so a later
             # useExisting compares against a configuration that was replaced here.
-            control.pipeline = pipeline
+            # Normalised the same way a launch does, or the comparison reads the
+            # difference a launch itself introduced.
+            control.pipeline = _apply_source_defaults(pipeline, control.source)
 
             # Wait for running state if requested
             if wait_for_running:
