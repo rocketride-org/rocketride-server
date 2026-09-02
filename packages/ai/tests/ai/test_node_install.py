@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 
 from ai.account.capsule import pack_capsule
+from ai.account.capsule import CapsuleError
 from ai.account.node_install import (
     NodeInstallError,
     install_capsule,
@@ -73,7 +74,8 @@ def test_install_rejects_bad_name(tmp_path):
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, 'w') as zf:
         zf.writestr('capsule.json', json.dumps({'name': 'bad name'}))
-    with pytest.raises(NodeInstallError):
+    # Refused where the name is first read, so the installer never sees it.
+    with pytest.raises((NodeInstallError, CapsuleError)):
         install_capsule(buf.getvalue(), node_path=str(tmp_path))
 
 

@@ -20,17 +20,26 @@ Kept deliberately self-contained so it is trivial to split into its own PR later
 import hashlib
 import io
 import json
+import ntpath
 import posixpath
 import zipfile
 from typing import Dict, List, Optional, Tuple
 
 import json5
 
+from ai.account.node_scaffold import _NAME_RE
+
 MANIFEST_NAME = 'capsule.json'
 NODES_ROOT = 'local_nodes'
 
 # A payload larger than this is refused before extraction (zip-bomb / runaway).
 MAX_CAPSULE_BYTES = 25 * 1024 * 1024
+
+# The compressed cap says nothing about what the archive expands to: a few hundred
+# KiB of zeros decompresses to hundreds of MiB, all of it read into memory here.
+# Bound the declared uncompressed total and the member count as well.
+MAX_UNCOMPRESSED_BYTES = 100 * 1024 * 1024
+MAX_CAPSULE_MEMBERS = 2000
 
 # Build/runtime cruft that never belongs in a capsule.
 _SKIP_DIRS = frozenset({'__pycache__', '.git', '.mypy_cache', '.ruff_cache'})
@@ -107,6 +116,53 @@ def pack_capsule(
     return buf.getvalue()
 
 
+def _validate_payload_key(key: str) -> None:
+    """Reject a payload key that would escape the node directory it is joined onto.
+
+    The archive name is not the thing that gets written — the remainder after the
+    ``local_nodes/<name>/`` prefix is, and a member can traverse within an accepted
+    prefix so that only the remainder escapes. Checked on the key itself, and on
+    both separators: a backslash is a path separator on Windows and passes a POSIX
+    normalisation untouched.
+
+    Args:
+        key: Path relative to the node directory.
+
+    Raises:
+        CapsuleError: The key is absolute, empty, or contains a ``..`` segment.
+    """
+    if not key or key.startswith('/') or key.startswith('\\') or posixpath.isabs(key):
+        raise CapsuleError(f'unsafe path in capsule: {key!r}')
+    if ntpath.isabs(key) or (len(key) > 1 and key[1] == ':'):
+        raise CapsuleError(f'unsafe path in capsule: {key!r}')
+    for segment in key.replace('\\', '/').split('/'):
+        if segment in ('..', ''):
+            raise CapsuleError(f'unsafe path in capsule: {key!r}')
+
+
+def _verify_digest(manifest: dict, payload: Dict[str, bytes]) -> None:
+    """Check the payload against the manifest's sha256, when it carries one.
+
+    pack_capsule records the digest so a read can confirm the bytes are intact;
+    a digest nobody checks is a claim, not a guarantee.
+
+    Args:
+        manifest: The parsed capsule manifest.
+        payload: Contents keyed relative to the node directory.
+
+    Raises:
+        CapsuleError: The recorded digest does not match the payload.
+    """
+    recorded = manifest.get('sha256')
+    if not recorded:
+        return
+    name = manifest.get('name')
+    prefixed = {f'{NODES_ROOT}/{name}/{key}': value for key, value in payload.items()}
+    actual = _payload_sha256(prefixed)
+    if actual != recorded:
+        raise CapsuleError('capsule contents do not match the recorded sha256')
+
+
 def read_capsule(zip_bytes: bytes) -> Tuple[dict, Dict[str, bytes]]:
     """Read a capsule back to ``(manifest, payload)`` for installation.
 
@@ -132,6 +188,13 @@ def read_capsule(zip_bytes: bytes) -> Tuple[dict, Dict[str, bytes]]:
     except zipfile.BadZipFile as e:
         raise CapsuleError(f'not a valid zip archive: {e}')
 
+    infos = zf.infolist()
+    if len(infos) > MAX_CAPSULE_MEMBERS:
+        raise CapsuleError(f'capsule holds more than {MAX_CAPSULE_MEMBERS} entries')
+    declared = sum(info.file_size for info in infos)
+    if declared > MAX_UNCOMPRESSED_BYTES:
+        raise CapsuleError(f'capsule expands to more than {MAX_UNCOMPRESSED_BYTES} bytes')
+
     names = zf.namelist()
     for name in names:
         norm = posixpath.normpath(name)
@@ -144,17 +207,37 @@ def read_capsule(zip_bytes: bytes) -> Tuple[dict, Dict[str, bytes]]:
         manifest = json.loads(zf.read(MANIFEST_NAME).decode('utf-8'))
     except Exception as e:
         raise CapsuleError(f'{MANIFEST_NAME} is not valid JSON: {e}')
+    if not isinstance(manifest, dict):
+        raise CapsuleError(f'{MANIFEST_NAME} is not an object')
 
     node_name = manifest.get('name')
     if not node_name:
         raise CapsuleError(f'{MANIFEST_NAME} missing "name"')
+    # Validated where the name is first read, so every consumer gets the same
+    # answer rather than relying on the installer to check it later.
+    if not _NAME_RE.match(str(node_name)):
+        raise CapsuleError(f'invalid node name in {MANIFEST_NAME}: {node_name!r}')
     node_dir = f'{NODES_ROOT}/{node_name}/'
 
     payload: Dict[str, bytes] = {}
+    read_bytes = 0
     for arc in names:
         if arc == MANIFEST_NAME or arc.endswith('/'):
             continue
         if not arc.startswith(node_dir):
             raise CapsuleError(f'{arc!r} is outside the node folder {node_dir!r}')
-        payload[arc[len(node_dir) :]] = zf.read(arc)
+        key = arc[len(node_dir) :]
+        # The key is what the caller joins onto its own node directory, so it is the
+        # thing that has to be safe — not the archive name it came from. A member
+        # traversing *inside* an accepted prefix ('local_nodes/x/sub/../../evil.py')
+        # normalises to something with no leading '..' and passes every check above,
+        # while the key still escapes when joined.
+        _validate_payload_key(key)
+        data = zf.read(arc)
+        read_bytes += len(data)
+        if read_bytes > MAX_UNCOMPRESSED_BYTES:
+            raise CapsuleError(f'capsule expands to more than {MAX_UNCOMPRESSED_BYTES} bytes')
+        payload[key] = data
+
+    _verify_digest(manifest, payload)
     return manifest, payload
