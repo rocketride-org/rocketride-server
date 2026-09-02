@@ -6,6 +6,11 @@ from typing import Dict, Any
 from rocketlib import getServiceDefinition, IJson, warning
 
 
+# Fields the catalogue keeps about a profile, which a pipeline never sets. Kept out
+# of the known-key set so a near-miss cannot be answered with one of them.
+_CATALOGUE_METADATA = frozenset({'title', 'modelSource', 'deprecated', 'deprecatedBy', 'deprecatedSince', 'migration'})
+
+
 class Config:
     """
     Loads and parses the aiconfig.json file (deprecated).
@@ -95,7 +100,7 @@ class Config:
         preconfig = service.get('preconfig') or {}
         for profile in (preconfig.get('profiles') or {}).values():
             if isinstance(profile, (dict, IJson)):
-                keys.update(profile.keys())
+                keys.update(key for key in profile.keys() if key not in _CATALOGUE_METADATA)
         for field in service.get('fields') or {}:
             keys.add(field.split('.')[-1] if '.' in field else field)
         return keys

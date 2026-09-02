@@ -50,6 +50,14 @@ class TestKnownConfigKeys:
     def test_empty_service(self):
         assert Config._knownConfigKeys({}) == set()
 
+    def test_catalogue_metadata_is_not_a_configuration_key(self):
+        # A pipeline never sets these, so they must not be offered as a suggestion.
+        keys = Config._knownConfigKeys(
+            {'preconfig': {'profiles': {'p': {'title': 'X', 'deprecated': True, 'migration': 'use y', 'model': 'm'}}}}
+        )
+        assert keys == {'model'}
+        assert Config._suggestKey('deprecatd', keys) is None
+
 
 class TestSuggestKey:
     def test_dropped_prefix_is_the_case_this_exists_for(self):
