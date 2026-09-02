@@ -21,6 +21,23 @@
   <a href="https://github.com/rocketride-org/rocketride-server/blob/develop/LICENSE"><img src="https://img.shields.io/badge/License-MIT-41b6e6" alt="MIT License" /></a>
 </p>
 
+> [!WARNING]
+> **This package is deprecated.** The RocketRide engine now ships a built-in
+> **HTTP MCP server** with a far larger tool surface — create, validate, run,
+> and trace pipelines directly from your AI assistant. Use it instead:
+>
+> ```bash
+> claude mcp add --transport http rocketride https://api.rocketride.ai/mcp
+> ```
+>
+> Self-hosted engines serve the same endpoint automatically at
+> `http://<host>:5565/mcp` — nothing extra to install. See the
+> [HTTP MCP Server documentation](https://docs.rocketride.org/connect/mcp/http)
+> for Claude, Cursor, and ChatGPT setup.
+>
+> `rocketride-mcp` 1.5.0 is the final release. It continues to work against
+> existing engines, but receives no new features or fixes.
+
 ## Quick Start
 
 ```bash
