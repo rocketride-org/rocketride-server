@@ -22,12 +22,12 @@ node path (the same ``local_nodes`` the capsule installer and ``--node_path`` sh
 """
 
 import base64
-from typing import TYPE_CHECKING, Dict, Any
+from typing import TYPE_CHECKING, Any, Dict, List
 
 from ai.common.dap import DAPConn
 from ai.account import Store
 from ai.account.node_scaffold import scaffold_node, validate_node
-from ai.account.capsule import pack_capsule
+from ai.account.capsule import pack_capsule, read_capsule
 from ai.account.node_install import (
     install_capsule_to_store,
     uninstall_node_from_store,
@@ -53,6 +53,8 @@ class NodeDevCommands(DAPConn):
             return self._node_validate(args)
         if subcommand == 'pack':
             return self._node_pack(args)
+        if subcommand == 'inspect':
+            return self._node_inspect(args)
         if subcommand == 'install':
             return await self._node_install(args)
         if subcommand == 'uninstall':
@@ -86,6 +88,58 @@ class NodeDevCommands(DAPConn):
         files = args.get('files') or {}
         blob = pack_capsule(name, files, version=args.get('version', '0.0.0'), declares=args.get('declares'))
         return {'name': name, 'capsule': base64.b64encode(blob).decode('ascii')}
+
+    def _node_inspect(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Report what a .rrc capsule contains and whether it would load — without writing it.
+
+        Installing a capsule puts Python on disk that the task subprocess imports, so
+        the contents are worth seeing before that happens rather than after. Nothing
+        here touches the store: reading the archive already verifies the manifest, the
+        recorded digest and every payload path, and validate_node then answers whether
+        the engine could register the node at all.
+
+        Args:
+            args: ``{'capsule': base64 .rrc}``.
+
+        Returns:
+            ``{name, protocol, version, declares, sizeBytes, files: [{path, bytes}],
+            totalBytes, ok, errors, warnings, replaces}`` — ``replaces`` names the
+            installed node this would overwrite, when there is one.
+        """
+        capsule = args.get('capsule')
+        if not capsule:
+            raise ValueError('capsule (base64 .rrc) is required')
+        blob = base64.b64decode(capsule)
+        manifest, payload = read_capsule(blob)
+        name = manifest.get('name')
+
+        # validate_node reads text; a capsule may legitimately carry binary (an icon),
+        # so anything undecodable is reported by name instead of failing the read.
+        text_files: Dict[str, str] = {}
+        binary_files: List[str] = []
+        for path, body in payload.items():
+            try:
+                text_files[path] = body.decode('utf-8')
+            except UnicodeDecodeError:
+                binary_files.append(path)
+
+        verdict = validate_node(name, text_files)
+        return {
+            'name': name,
+            'protocol': manifest.get('protocol') or f'{name}://',
+            'version': manifest.get('version'),
+            'declares': manifest.get('declares') or [],
+            'sizeBytes': len(blob),
+            'totalBytes': sum(len(body) for body in payload.values()),
+            'files': sorted(
+                ({'path': path, 'bytes': len(body)} for path, body in payload.items()),
+                key=lambda entry: entry['path'],
+            ),
+            'binaryFiles': sorted(binary_files),
+            'ok': verdict.get('ok'),
+            'errors': verdict.get('errors') or [],
+            'warnings': verdict.get('warnings') or [],
+        }
 
     def _node_store(self):
         """The caller's FileStore — installs persist here and materialize per-run."""

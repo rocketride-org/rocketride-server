@@ -258,3 +258,63 @@ async def test_handler_pack_returns_base64_capsule():
 
     manifest, _ = read_capsule(base64.b64decode(result['capsule']))
     assert manifest['name'] == 'packv'
+
+
+# ---------------------------------------------------------------------------
+# inspect: what a capsule contains, before anything is written
+# ---------------------------------------------------------------------------
+
+
+class _InspectHost:
+    """The handler's inspect path, without a connection or a store behind it."""
+
+    from ai.modules.task.commands.cmd_node_dev import NodeDevCommands
+
+    _node_inspect = NodeDevCommands._node_inspect
+
+
+def _inspect(blob):
+    import base64
+
+    return _InspectHost()._node_inspect({'capsule': base64.b64encode(blob).decode('ascii')})
+
+
+def test_inspect_reports_the_contents_without_installing(tmp_path):
+    files = scaffold_node(name='demo_node', kind='filter')
+    report = _inspect(pack_capsule('demo_node', files))
+
+    assert report['name'] == 'demo_node'
+    assert report['protocol'] == 'demo_node://'
+    assert report['ok'] is True
+    assert report['errors'] == []
+    # Every file is named with its size, so the reviewer sees what lands on disk.
+    listed = {entry['path'] for entry in report['files']}
+    assert 'services.json' in listed and 'IGlobal.py' in listed
+    # __init__.py is legitimately empty; everything else carries content.
+    assert all(entry['bytes'] >= 0 for entry in report['files'])
+    assert next(e['bytes'] for e in report['files'] if e['path'] == 'services.json') > 0
+    assert report['totalBytes'] == sum(entry['bytes'] for entry in report['files'])
+    # Nothing was written anywhere.
+    assert not list(tmp_path.iterdir())
+
+
+def test_inspect_reports_a_node_that_would_not_load():
+    files = scaffold_node(name='demo_node', kind='filter')
+    files['services.json'] = '{ "title": "broken" }'  # no protocol, no register
+    report = _inspect(pack_capsule('demo_node', files))
+
+    assert report['ok'] is False
+    assert report['errors']
+
+
+def test_inspect_refuses_a_capsule_that_read_rejects():
+    import io
+    import json
+    import zipfile
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, 'w') as zf:
+        zf.writestr('capsule.json', json.dumps({'name': 'demo'}))
+        zf.writestr('local_nodes/demo/sub/../../evil.py', b'x')
+    with pytest.raises(CapsuleError):
+        _inspect(buf.getvalue())
