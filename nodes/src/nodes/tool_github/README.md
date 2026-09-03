@@ -64,6 +64,7 @@ List tools accept `per_page` (1–100, default 30) and `page` (default 1) for pa
 | `pr_get` | Get a single pull request by number. |
 | `pr_list` | List pull requests in a repository. |
 | `pr_create` | Create a new pull request. |
+| `pr_review_context` | One-shot PR review context: metadata, changed files, unified diff, and related open PRs/issues. |
 | `review_create` | Submit a review on a pull request (approve, request changes, or comment). |
 | `review_list` | List all reviews on a pull request. |
 | `review_get` | Get a single review on a pull request. |
@@ -110,11 +111,12 @@ GitHub's issues endpoint includes pull requests; `issue_list` filters them out, 
 
 ### Pull requests
 
-| Tool        | Description                                                  |
-|-------------|--------------------------------------------------------------|
-| `pr_get`    | Get a single pull request by number                          |
-| `pr_list`   | List pull requests (filter by state, base branch)            |
-| `pr_create` | Create a pull request (title, head, base, body, draft flag)  |
+| Tool                 | Description                                                  |
+|----------------------|--------------------------------------------------------------|
+| `pr_get`             | Get a single pull request by number                          |
+| `pr_list`            | List pull requests (filter by state, base branch)            |
+| `pr_create`          | Create a pull request (title, head, base, body, draft flag)  |
+| `pr_review_context`  | One-shot review seed: PR metadata (`clean_pr`), changed files, unified diff (truncated at 100k chars), and related open PRs/issues matched by ticket IDs (`#N`, Fixes/Closes/Refs `#N`) or overlapping changed-file basenames |
 
 ### Reviews
 
@@ -182,9 +184,9 @@ Blocked tools: `file_create`, `file_edit`, `file_delete`, `issue_create`,
 `workflow_dispatch`, `workflow_enable`, `workflow_disable`, `user_invite`.
 
 Always allowed: `file_get`, `file_list`, `issue_get`, `issue_list`, `pr_get`, `pr_list`,
-`review_list`, `review_get`, `repo_get`, `release_list`, `release_get`, `workflow_list`,
-`workflow_get`, `workflow_get_usage`, `org_list_repos`, `user_get_repos`, `search_code`,
-`search_issues`, `commit_list`, `commit_get`.
+`pr_review_context`, `review_list`, `review_get`, `repo_get`, `release_list`, `release_get`,
+`workflow_list`, `workflow_get`, `workflow_get_usage`, `org_list_repos`, `user_get_repos`,
+`search_code`, `search_issues`, `commit_list`, `commit_get`.
 
 Note the default is `false`, a freshly added node can write. Turn read-only mode on
 explicitly for inspect-only agents.

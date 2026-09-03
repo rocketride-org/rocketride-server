@@ -127,6 +127,47 @@ _SEARCH_STOPWORDS = frozenset(
 # quotes does not split them: -label:"good first issue" | repo:acme/app | "exact phrase" | word
 _QUERY_TOKEN_RE = re.compile(r'-?\w+:"[^"]*"|-?\w+:\S+|"[^"]*"|\S+')
 
+# Ticket refs in PR/issue text: bare ``#123`` and keyword forms (Fixes/Closes/Refs #123).
+_TICKET_ID_RE = re.compile(
+    r'(?:(?:fix(?:es)?|close[sd]?|resolve[sd]?|ref(?:erence)?s?)\s+)?#(\d+)\b',
+    re.IGNORECASE,
+)
+
+# Unified diffs can be huge; keep agent context bounded.
+_MAX_DIFF_CHARS = 100_000
+
+
+def _extract_ticket_ids(*texts: str | None) -> list[int]:
+    """Return unique ticket numbers referenced in the given texts, in first-seen order."""
+    seen: set[int] = set()
+    ids: list[int] = []
+    for text in texts:
+        if not text:
+            continue
+        for m in _TICKET_ID_RE.finditer(text):
+            n = int(m.group(1))
+            if n not in seen:
+                seen.add(n)
+                ids.append(n)
+    return ids
+
+
+def _basename(path: str) -> str:
+    return path.rsplit('/', 1)[-1]
+
+
+def _match_reasons(text: str, ticket_ids: list[int], basenames: set[str]) -> list[str]:
+    """Cheap overlap reasons: ticket mentions and changed-file basenames in title/body."""
+    reasons: list[str] = []
+    lower = text.lower()
+    for tid in ticket_ids:
+        if re.search(rf'(?<!\d)#{tid}(?!\d)', text):
+            reasons.append(f'ticket:#{tid}')
+    for name in sorted(basenames):
+        if name and name.lower() in lower:
+            reasons.append(f'file:{name}')
+    return reasons
+
 
 def _relax_query(q: str, *, max_terms: int = 5) -> str | None:
     """Build an OR-relaxed variant of a free-text-heavy query.
@@ -604,6 +645,133 @@ class IInstance(IInstanceBase):
             body['draft'] = bool(args['draft'])
         data = call(self._token(), 'POST', f'/repos/{repo}/pulls', body=body)
         return clean_pr(data)
+
+    @tool_function(
+        input_schema={
+            'type': 'object',
+            'required': ['pr_number'],
+            'properties': {
+                'repo': {'type': 'string', 'description': _REPO_DESC},
+                'pr_number': {'type': 'integer', 'description': 'Pull request number to assemble review context for'},
+            },
+        },
+        description=(
+            'One-shot PR review context: PR metadata, changed files, unified diff, and related '
+            'open PRs/issues matched by ticket IDs (#N / Fixes|Closes|Refs #N) or overlapping '
+            'changed-file basenames. Diffs larger than 100_000 characters are truncated.'
+        ),
+    )
+    def pr_review_context(self, args):
+        args = normalize_tool_input(args, tool_name='tool_github')
+        repo = self._repo(args)
+        num = require_int(args, 'pr_number', tool_name='pr_review_context')
+        token = self._token()
+
+        pr_raw = call(token, 'GET', f'/repos/{repo}/pulls/{num}')
+        pr = clean_pr(pr_raw)
+
+        files_raw = call(
+            token,
+            'GET',
+            f'/repos/{repo}/pulls/{num}/files',
+            params={'per_page': 100},
+        )
+        files = [
+            {
+                'filename': f.get('filename'),
+                'status': f.get('status'),
+                'additions': f.get('additions'),
+                'deletions': f.get('deletions'),
+                'changes': f.get('changes'),
+            }
+            for f in (files_raw or [])
+        ]
+
+        diff = call(
+            token,
+            'GET',
+            f'/repos/{repo}/pulls/{num}',
+            accept='application/vnd.github.v3.diff',
+            raw=True,
+        )
+        if not isinstance(diff, str):
+            diff = '' if diff is None else str(diff)
+        diff_truncated = False
+        if len(diff) > _MAX_DIFF_CHARS:
+            diff = (
+                diff[:_MAX_DIFF_CHARS]
+                + f'\n\n...[diff truncated at {_MAX_DIFF_CHARS} characters]...'
+            )
+            diff_truncated = True
+
+        ticket_ids = _extract_ticket_ids(pr.get('title'), pr.get('body'))
+        basenames = {_basename(f['filename']) for f in files if f.get('filename')}
+
+        open_prs = call(
+            token,
+            'GET',
+            f'/repos/{repo}/pulls',
+            params={'state': 'open', 'per_page': 100},
+        )
+        related_prs: list[dict] = []
+        for other in open_prs or []:
+            other_num = other.get('number')
+            if other_num == num:
+                continue
+            haystack = f'{other.get("title") or ""}\n{other.get("body") or ""}'
+            reasons = _match_reasons(haystack, ticket_ids, basenames)
+            if reasons:
+                related_prs.append(
+                    {
+                        'number': other_num,
+                        'title': other.get('title'),
+                        'html_url': other.get('html_url'),
+                        'state': other.get('state'),
+                        'reasons': reasons,
+                    }
+                )
+
+        open_issues = call(
+            token,
+            'GET',
+            f'/repos/{repo}/issues',
+            params={'state': 'open', 'per_page': 100},
+        )
+        related_issues: list[dict] = []
+        for issue in open_issues or []:
+            # Issues endpoint includes PRs; skip those (and the current PR number).
+            if issue.get('pull_request') is not None:
+                continue
+            issue_num = issue.get('number')
+            if issue_num == num:
+                continue
+            haystack = f'{issue.get("title") or ""}\n{issue.get("body") or ""}'
+            reasons = _match_reasons(haystack, ticket_ids, basenames)
+            # Also treat an open issue whose number is a referenced ticket as related.
+            if issue_num in ticket_ids and f'ticket:#{issue_num}' not in reasons:
+                reasons = [f'ticket:#{issue_num}', *reasons]
+            if reasons:
+                related_issues.append(
+                    {
+                        'number': issue_num,
+                        'title': issue.get('title'),
+                        'html_url': issue.get('html_url'),
+                        'state': issue.get('state'),
+                        'reasons': reasons,
+                    }
+                )
+
+        return {
+            'pr': pr,
+            'files': files,
+            'diff': diff,
+            'diff_truncated': diff_truncated,
+            'ticket_ids': ticket_ids,
+            'related': {
+                'prs': related_prs,
+                'issues': related_issues,
+            },
+        }
 
     # =======================================================================
     # REVIEWS
