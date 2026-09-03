@@ -41,4 +41,26 @@ TEST_CASE("store::Services") {
         REQUIRE(schema.isMember("services"));
         REQUIRE(schema["services"].isObject());
     }
+
+    // react-jsonschema-form reads a scalar array's option labels off the array's
+    // own ui schema, so the metadata processField builds for the items subfield
+    // has to be lifted onto the array. Without that the config panel renders the
+    // raw enum values instead of the labels the service authored.
+    SECTION("scalar array enums keep their option metadata") {
+        // tool_pipedrive is the only service with a scalar array enum, so it is
+        // what this exercises; if it ever goes away, move the check rather than
+        // letting it pass on an absent service.
+        const auto &services = schema["services"];
+        REQUIRE(services.isMember("tool_pipedrive"));
+
+        const auto &ui = services["tool_pipedrive"]["Pipe"]["ui"]["toolGroups"];
+
+        REQUIRE(ui.isMember("ui:enumNames"));
+        REQUIRE(ui["ui:enumNames"][0].asString() == "Deals (27)");
+
+        // The optional third element of an enum tuple rides along the same path
+        REQUIRE(ui.isMember("ui:enumDescriptions"));
+        REQUIRE(ui["ui:enumDescriptions"].size() == ui["ui:enumNames"].size());
+        REQUIRE(!ui["ui:enumDescriptions"][0].asString().empty());
+    }
 }

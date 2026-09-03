@@ -47,6 +47,17 @@ test('opted-in inputs render one focusable info trigger outside the hidden notch
 	assert.doesNotMatch(fieldset, /role="button"/);
 });
 
+// Descriptions now go through sanitizeAndParseHtmlToReact so a service that
+// writes <b> gets bold text rather than literal tags. Only the plain-text path
+// is asserted here: the markup path calls DOMPurify, which needs a DOM this
+// runner does not provide. Rendered markup is checked by hand in the panel.
+test('a description without markup reaches the tooltip untouched', () => {
+	const label = FieldLabelWithInfo({ label: 'Read-only mode', description: 'Prevents write operations.', fieldTitle: 'Read-only mode' }) as ReactElement<Record<string, unknown>>;
+	const tooltip = Children.toArray(label.props.children)[1] as ReactElement<Record<string, unknown>>;
+
+	assert.equal(tooltip.props.title, 'Prevents write operations.');
+});
+
 test('info trigger blocks Enter and Space from activating a parent label', () => {
 	const label = FieldLabelWithInfo({ label: 'Read-only mode', description: 'Prevents write operations.', fieldTitle: 'Read-only mode' }) as ReactElement<Record<string, unknown>>;
 	const tooltip = Children.toArray(label.props.children)[1] as ReactElement<Record<string, unknown>>;

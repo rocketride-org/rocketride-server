@@ -28,16 +28,16 @@ mutating tool.
 | Field | Type | Description |
 |---|---|---|
 | `apiToken` | string | Default empty. Pipedrive API token (Settings -> Personal preferences -> API), or an OAuth access token. Stored encrypted. |
-| `companyDomain` | string | Default empty. The "acme" in `https://acme.pipedrive.com`. When set, requests go to `https://{domain}.pipedrive.com/api/v1`; otherwise `https://api.pipedrive.com/api/v1`. |
+| `companyDomain` | string | Default empty. Just the subdomain — the "acme" in `https://acme.pipedrive.com`, not the whole URL. When set, requests go to `https://{domain}.pipedrive.com/api/v1`; otherwise `https://api.pipedrive.com/api/v1`. A token belongs to one company, so a domain from another account fails as a 401 or 404 rather than as an obvious configuration error. |
 | `readOnly` | boolean | Default false. When enabled, every create, update and delete tool is blocked and `request` only accepts GET. |
-| `toolGroups` | array | Default `["deals", "persons", "organizations", "activities", "pipelines", "stages", "notes", "search"]`. Which groups of tools to publish, shown as a multi-select dropdown with per-group tool counts. Select **All groups** for everything. |
+| `toolGroups` | array | Default `["deals", "persons", "organizations", "activities", "pipelines", "stages", "notes", "search"]`. Which groups of tools to publish, shown as a multi-select dropdown with per-group tool counts and a hover tooltip describing what each group covers. Select **All groups** for everything. |
 | `allowRawRequest` | boolean | Default true. Publishes the generic `request` tool. |
 
 ### Tool groups
 
 Full v1 coverage is 255 tools. That is more than an LLM can choose between reliably,
 and more than some providers accept in one request, so the node only publishes the
-groups listed in **Tool groups**. The default eight groups publish 108 tools — the
+groups listed in **Tool groups**. The default eight groups publish 106 tools — the
 everyday CRM surface. Add group names to reach further, or use `all`.
 
 Available groups, with the number of tools each publishes:
@@ -51,7 +51,9 @@ Available groups, with the number of tools each publishes:
 
 The config panel renders these as a multi-select dropdown. RJSF picks that widget for
 an array carrying `uniqueItems: true` and an `items.enum`; **All groups** is the last
-option.
+option. Each option carries a third element in that `items.enum` tuple, which the
+engine forwards as `ui:enumDescriptions` and the panel shows as a hover tooltip
+describing what the group covers.
 
 A tool in a group that is not published is invisible to the agent and refused if
 invoked anyway.

@@ -27,6 +27,7 @@ import TextField, { TextFieldProps } from '@mui/material/TextField';
 import { ariaDescribedByIds, enumOptionsIndexForValue, enumOptionsValueForIndex, labelValue, FormContextType, RJSFSchema, StrictRJSFSchema, WidgetProps } from '@rjsf/utils';
 
 import FieldLabelWithInfo from '../field-label-with-info/FieldLabelWithInfo';
+import OptionInfoIcon from '../option-info-icon/OptionInfoIcon';
 
 // =============================================================================
 // Component
@@ -102,8 +103,25 @@ export default function SelectWidget<
 	const selectedIndexes = enumOptionsIndexForValue<S>(value, enumOptions, multiple);
 	const { InputLabelProps, SelectProps, autocomplete, ...textFieldRemainingProps } = textFieldProps;
 
+	// Per-option help text, index-aligned with enumOptions. The engine emits it as
+	// `ui:enumDescriptions` when a service gives an enum option a third tuple element.
+	const rawEnumDescriptions = (options as { enumDescriptions?: unknown }).enumDescriptions;
+	const enumDescriptions = Array.isArray(rawEnumDescriptions) ? rawEnumDescriptions : undefined;
+
+	// Join the selected options' plain labels. MUI otherwise composes the collapsed
+	// display out of each selected MenuItem's own children, which would stamp an
+	// info icon into the closed field once per selection.
+	const renderSelectedLabels = (selected: unknown): string =>
+		(Array.isArray(selected) ? selected : [selected])
+			// An unset single-select is '', and Number('') is 0 - without this the
+			// empty field would display the first option.
+			.filter((index) => index !== '' && index !== null && typeof index !== 'undefined')
+			.map((index) => enumOptions?.[Number(index)]?.label)
+			.filter((optionLabel): optionLabel is string => typeof optionLabel === 'string')
+			.join(', ');
+
 	// Resolve the label of the selected option to use as a tooltip on the input (for overflow cases)
-	const selectedOptionLabel = !isEmpty && Array.isArray(enumOptions) && typeof selectedIndexes !== 'undefined' ? enumOptions[Number(selectedIndexes)]?.label : undefined;
+	const selectedOptionLabel = isEmpty ? undefined : renderSelectedLabels(selectedIndexes) || undefined;
 
 	return (
 		<TextField
@@ -155,15 +173,23 @@ export default function SelectWidget<
 			SelectProps={{
 				...SelectProps,
 				multiple,
+				renderValue: SelectProps?.renderValue ?? renderSelectedLabels,
 			}}
 			aria-describedby={ariaDescribedByIds<T>(id)}
 		>
 			{Array.isArray(enumOptions) &&
 				enumOptions.map(({ value, label }, i: number) => {
-					const disabled: boolean = Array.isArray(enumDisabled) && enumDisabled.indexOf(value) !== -1;
+					const optionDisabled: boolean = Array.isArray(enumDisabled) && enumDisabled.indexOf(value) !== -1;
+					const rawDescription = enumDescriptions?.[i];
+					const optionDescription = typeof rawDescription === 'string' && rawDescription.trim() ? rawDescription : undefined;
+					const descriptionId = optionDescription ? `${id}__option_${i}__description` : undefined;
 					return (
-						<MenuItem key={i} value={String(i)} disabled={disabled}>
-							{label}
+						// aria-label pins the accessible name to the label so the hidden description
+						// node inside the option cannot leak into it; the help text is announced
+						// through aria-describedby instead.
+						<MenuItem key={i} value={String(i)} disabled={optionDisabled} aria-label={typeof label === 'string' ? label : undefined} aria-describedby={descriptionId}>
+							<span>{label}</span>
+							{optionDescription && descriptionId && <OptionInfoIcon description={optionDescription} descriptionId={descriptionId} />}
 						</MenuItem>
 					);
 				})}

@@ -26,6 +26,8 @@ import Box from '@mui/material/Box';
 import InfoIcon from '@mui/icons-material/Info';
 import Tooltip from '@mui/material/Tooltip';
 
+import { sanitizeAndParseHtmlToReact } from '../../../util/helpers';
+
 // =============================================================================
 // Types
 // =============================================================================
@@ -66,6 +68,11 @@ export default function FieldLabelWithInfo({ label, description, fieldTitle, id 
 
 	const accessibleName = fieldTitle ? `More information about ${fieldTitle}` : 'More information';
 
+	// Service descriptions may carry simple markup. Tooltip renders a string
+	// verbatim, so parse it the way DescriptionField does rather than showing the
+	// user a literal <b>.
+	const richDescription = typeof description === 'string' ? sanitizeAndParseHtmlToReact(description) : description;
+
 	// Keep the icon pointer-interactive even when nested inside a MUI InputLabel or
 	// FormControlLabel: activating the icon must not toggle a checkbox or steal focus.
 	// Suppressing mouse and keyboard activation cancels the label's default behavior
@@ -79,7 +86,7 @@ export default function FieldLabelWithInfo({ label, description, fieldTitle, id 
 	return (
 		<Box component="span" id={id} sx={{ display: 'inline-flex', alignItems: 'center' }}>
 			{label}
-			<Tooltip title={description} placement="right" describeChild>
+			<Tooltip title={richDescription} placement="right" describeChild>
 				<span role="button" tabIndex={0} aria-label={accessibleName} onMouseDown={suppressLabelActivation} onClick={suppressLabelActivation} onKeyDown={suppressLabelActivation} style={{ display: 'inline-flex', alignItems: 'center', cursor: 'default', pointerEvents: 'auto' }}>
 					<InfoIcon sx={{ ml: 0.5, color: 'text.secondary', fontSize: 16 }} />
 				</span>
