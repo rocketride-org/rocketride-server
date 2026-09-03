@@ -25,6 +25,11 @@
  * VSCode Extension Build Module
  *
  * RocketRide extension for Visual Studio Code.
+ *
+ * vscode:test runs the co-located node:test files in src/test against the
+ * compiled output, and chains vscode:compile-typescript so it is safe to invoke
+ * on its own. Like shared:test it belongs to test targets, never to build steps:
+ * a normal build must not stream unit-test output.
  */
 const path = require('path');
 const { glob } = require('glob');
@@ -131,10 +136,7 @@ function makeBundleExtensionAction() {
 			// build-webview saving theirs doesn't cause this step to skip). esbuild
 			// inlines shared (the appdev templates) into rocketride.js, so a
 			// shared-only change must rebuild the host bundle too.
-			const [vsrc, sharedUi] = await Promise.all([
-				hasSourceChanged(SRC_DIR, BUNDLE_HASH_KEY),
-				hasSourceChanged(SHARED_UI_SRC, BUNDLE_SHARED_UI_HASH_KEY),
-			]);
+			const [vsrc, sharedUi] = await Promise.all([hasSourceChanged(SRC_DIR, BUNDLE_HASH_KEY), hasSourceChanged(SHARED_UI_SRC, BUNDLE_SHARED_UI_HASH_KEY)]);
 			const outputExists = await exists(path.join(BUILD_DIR, 'rocketride.js'));
 
 			if (!vsrc.changed && !sharedUi.changed && outputExists) {
@@ -293,6 +295,35 @@ function makeCleanStagingAction() {
 // Module Definition
 // =============================================================================
 
+function makeRunTestsAction() {
+	return {
+		description: 'Testing vscode',
+		run: async (ctx, task) => {
+			// Runs the output of vscode:compile-typescript rather than the sources,
+			// so the extension needs no TS test runner of its own and the tests are
+			// proven to compile under tsconfig.json. `vscode:test` chains the
+			// compile so this cannot see a missing or stale out/ directory.
+			const outDir = path.join(BUILD_DIR, 'out');
+			if (!(await exists(outDir))) {
+				throw new Error('No compiled output found — vscode:compile-typescript must run first');
+			}
+
+			// Globbed rather than joined from a fixed path: tsconfig's rootDir
+			// decides how deep the emitted tree is (src-relative vs repo-relative),
+			// and a hard-coded out/test silently finds nothing when that changes.
+			// extension.test.js requires the `vscode` module, which only resolves
+			// inside an Extension Development Host, so plain node cannot run it.
+			const testFiles = (await glob('**/test/*.test.js', { cwd: outDir })).filter((f) => path.basename(f) !== 'extension.test.js').sort();
+
+			if (testFiles.length === 0) {
+				throw new Error(`No compiled test files found under ${outDir} — check tsconfig rootDir/include`);
+			}
+
+			await execCommand('node', ['--test', '--test-reporter=spec', ...testFiles], { task, cwd: outDir });
+		},
+	};
+}
+
 module.exports = {
 	name: 'vscode',
 	description: 'RocketRide VSCode Extension',
@@ -309,8 +340,19 @@ module.exports = {
 		{ name: 'vscode:stage-files', action: makeStageFilesAction },
 		{ name: 'vscode:package-vsix', action: makePackageVsixAction },
 		{ name: 'vscode:clean-staging', action: makeCleanStagingAction },
+		{ name: 'vscode:run-tests', action: makeRunTestsAction },
 
 		// Public actions (have descriptions)
+		{
+			name: 'vscode:test',
+			action: () => ({
+				description: 'Test vscode',
+				// Chains the compile so the tests can never run against a missing
+				// or stale out/ — the compile is hash-cached, so it is a no-op
+				// when a build already produced the current output.
+				steps: ['vscode:compile-typescript', 'vscode:run-tests'],
+			}),
+		},
 		{
 			name: 'vscode:compile',
 			action: () => ({
@@ -328,8 +370,8 @@ module.exports = {
 				// install relinks the workspace). Cache-skipped when the shell
 				// is unchanged and the real artifact is in place.
 				// Builds gate on drift CHECKS only (silent unless they fail);
-				// unit tests (shared:test) run under test targets, never as
-				// build steps — a normal build must not stream test output.
+				// unit tests (shared:test, vscode:test) run under test targets,
+				// never as build steps — a normal build must not stream test output.
 				steps: ['shell:build', 'shared:check-gallery-tokens', 'vscode:copy-readme', 'vscode:build-webview', 'vscode:compile-typescript', 'vscode:bundle-extension', 'vscode:stage-files', 'vscode:package-vsix'],
 			}),
 		},
