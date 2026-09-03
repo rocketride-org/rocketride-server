@@ -346,22 +346,25 @@ class CrewManager(CrewBase):
             context, crew.akickoff(inputs={'user_request': prompt} if prompt else {})
         )
 
-        # Result extraction: prefer the last completed task's output (clean result)
-        # over result.raw, which in hierarchical mode contains the full manager
-        # ReAct trace (all delegations + observations concatenated).
+        # Result extraction: `tasks_output` holds one raw entry per delegate
+        # Task and nothing in CrewAI combines them, so the manager's own
+        # synthesis step has to happen here, explicitly, through its own LLM
+        # channel -- otherwise "the manager's answer" is just whichever single
+        # delegate's output happens to be picked, which defeats the entire
+        # point of a manager (see the goal/backstory above).
         tasks_out = getattr(result, 'tasks_output', None) or []
-        final_text = ''
-        for task_out in reversed(tasks_out):
-            candidate = safe_str(getattr(task_out, 'raw', None))
-            if not candidate:
-                continue
-            stripped = _strip_react_preamble(candidate)
-            if stripped:
-                final_text = stripped
-                break
+        final_text = self._synthesize_delegate_findings(
+            context=context,
+            tasks_out=tasks_out,
+            sub_tasks=sub_tasks,
+            manager_backstory=manager_backstory,
+            manager_goal=ig.goal or _MGR_GOAL,
+        )
 
         if not final_text:
-            # Fall back to result.raw with the same ReAct stripping.
+            # No delegate produced usable output (or the synthesis call itself
+            # came back empty) -- fall back to result.raw, ReAct-stripped, same
+            # as before this method existed.
             raw = (
                 safe_str(getattr(result, 'raw', None))
                 or safe_str(getattr(getattr(result, 'result', None), 'raw', None))
@@ -370,3 +373,46 @@ class CrewManager(CrewBase):
             final_text = _strip_react_preamble(raw)
 
         return final_text, result
+
+    def _synthesize_delegate_findings(
+        self,
+        *,
+        context: AgentContext,
+        tasks_out: List[Any],
+        sub_tasks: List[Any],
+        manager_backstory: str,
+        manager_goal: str,
+    ) -> str:
+        """Combine every delegate's clean task output into the manager's own answer.
+
+        `tasks_out` and `sub_tasks` are positional (`crew.tasks` executes in
+        the order it was given `sub_tasks`, and `tasks_output` is appended in
+        execution order), so zipping them pairs each raw output with the
+        delegate that produced it -- used only to label findings by role.
+
+        Returns ``''`` when no delegate produced usable output, so the caller
+        falls back to `result.raw`.
+        """
+        findings = []
+        for sub_task, task_out in zip(sub_tasks, tasks_out):
+            candidate = safe_str(getattr(task_out, 'raw', None))
+            if not candidate:
+                continue
+            stripped = _strip_react_preamble(candidate)
+            if not stripped:
+                continue
+            role = getattr(getattr(sub_task, 'agent', None), 'role', None) or 'Sub-agent'
+            findings.append(f'### {role}\n{stripped}')
+
+        if not findings:
+            return ''
+
+        synthesis_prompt = (
+            f'{manager_backstory}\n\n'
+            f'Your goal: {manager_goal}\n\n'
+            "Your team has finished. Below is each sub-agent's finding for this "
+            'request. Write your own final answer that satisfies your goal by '
+            'synthesizing these findings together -- never return one finding '
+            'verbatim as the final answer.\n\n' + '\n\n'.join(findings)
+        )
+        return safe_str(self.call_llm(context, synthesis_prompt, role=_MGR_ROLE)).strip()
