@@ -1,6 +1,6 @@
 import os
 import sys
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -41,9 +41,17 @@ def setup_mocks():
             self.instance = MagicMock()
     sys.modules["rocketlib"].IInstanceBase = MockIInstanceBase
 
+_CORE_STUBS = ("rocketlib", "engLib", "depends")
+_saved_core = {_name: sys.modules.get(_name) for _name in _CORE_STUBS}
 setup_mocks()
-
-from nodes.ner.IInstance import IInstance
+try:
+    from nodes.ner.IInstance import IInstance
+finally:
+    for _name, _mod in _saved_core.items():
+        if _mod is None:
+            sys.modules.pop(_name, None)
+        else:
+            sys.modules[_name] = _mod
 from ai.common.schema import Doc, DocMetadata
 
 class TestNerWriteDocuments:
@@ -73,7 +81,9 @@ class TestNerWriteDocuments:
         doc = Doc(page_content="Alice and Bob work at OpenAI.", metadata=metadata)
 
         # Call the production method
-        instance.writeDocuments([doc])
+        with patch.object(doc, "model_copy", wraps=doc.model_copy) as model_copy:
+            instance.writeDocuments([doc])
+        model_copy.assert_called_once_with(deep=True)
 
         # Verify the enriched document passed to the next instance
         call_args = instance.instance.writeDocuments.call_args
