@@ -83,11 +83,8 @@ class IInstance(IInstanceBase):
             if self.IGlobal.recognizer.store_in_metadata:
                 if enriched_doc.metadata is None:
                     # Initialize with default metadata if missing
-                    from rocketride.schema.doc_metadata import DocMetadata
-                    enriched_doc.metadata = DocMetadata(
-                        objectId=getattr(doc.metadata, 'objectId', 'unknown'),
-                        chunkId=getattr(doc.metadata, 'chunkId', 0)
-                    )
+                    from ai.common.schema import DocMetadata
+                    enriched_doc.metadata = DocMetadata(objectId='unknown', chunkId=0)
 
                 # Group entities by type
                 entities_by_type = {}
