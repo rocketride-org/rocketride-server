@@ -28,6 +28,7 @@ import type { LoginAttemptCancellationReason } from '../src/client/exceptions';
 import { describe, it, expect, beforeEach, afterEach, beforeAll, jest } from '@jest/globals';
 import { getEchoPipeline } from './echo.pipeline';
 import { getChatPipeline } from './chat.pipeline';
+import { withTimeoutGuard } from './timeoutGuard';
 // Skip chat tests when no LLM API key is available (must match env vars used by chat.pipeline.ts)
 const hasLLMKey = !!(process.env.ROCKETRIDE_OPENAI_KEY || process.env.ROCKETRIDE_ANTHROPIC_KEY || process.env.ROCKETRIDE_GEMINI_KEY || process.env.ROCKETRIDE_OLLAMA_HOST);
 const describeIfLLM = hasLLMKey ? describe : describe.skip;
@@ -73,7 +74,7 @@ describe('RocketRideClient Integration Tests', () => {
 	afterEach(async () => {
 		if (client.isConnected()) {
 			// Use a bounded timeout so teardown never hangs the suite
-			await Promise.race([client.disconnect(), new Promise<void>((resolve) => setTimeout(resolve, 10000))]);
+			await withTimeoutGuard(client.disconnect(), 10000, 'disconnect');
 		}
 	});
 
@@ -1661,7 +1662,7 @@ Line 3: random data ${Math.random().toString(36).substring(2)}`;
 
 		afterEach(async () => {
 			// Clean up all pipelines with a bounded timeout so teardown never hangs
-			await Promise.race([
+			await withTimeoutGuard(
 				Promise.all(
 					pipelineTokens.map(async (token) => {
 						try {
@@ -1671,8 +1672,9 @@ Line 3: random data ${Math.random().toString(36).substring(2)}`;
 						}
 					})
 				),
-				new Promise<void>((resolve) => setTimeout(resolve, 15000)),
-			]);
+				15000,
+				'pipeline cleanup'
+			);
 			pipelineTokens = [];
 		});
 
@@ -2060,7 +2062,7 @@ Line 3: random data ${Math.random().toString(36).substring(2)}`;
 					expect(uniqueTexts.size).toBe(SENDS_PER_CLIENT * 2);
 				} finally {
 					if (clientB.isConnected()) {
-						await Promise.race([clientB.disconnect(), new Promise<void>((resolve) => setTimeout(resolve, 10000))]);
+						await withTimeoutGuard(clientB.disconnect(), 10000, 'disconnect');
 					}
 				}
 			},

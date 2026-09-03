@@ -24,6 +24,7 @@
 
 import { RocketRideClient } from '../src/client';
 import { describe, it, expect, beforeEach, afterEach } from '@jest/globals';
+import { withTimeoutGuard } from './timeoutGuard';
 
 const TEST_CONFIG = {
 	uri: process.env.ROCKETRIDE_URI || 'http://localhost:5565',
@@ -85,7 +86,7 @@ describe('Deploy API Integration Tests', () => {
 
 	afterEach(async () => {
 		if (client.isConnected()) {
-			await Promise.race([client.disconnect(), new Promise<void>((resolve) => setTimeout(resolve, 10000))]);
+			await withTimeoutGuard(client.disconnect(), 10000, 'disconnect');
 		}
 	});
 
