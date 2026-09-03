@@ -289,10 +289,24 @@ def test_inference_serializes_via_model_obj_unwrap(fake_torch):
 def test_encode_local_serializes_shared_model(monkeypatch, fake_torch):
     """encode() serializes the shared model through the loader's lock."""
     recorder = _ForwardRecorder()
-    shared_model = _make_model(recorder)
+    model = _local_encoder(monkeypatch, recorder)
 
-    def fake_get_model_server_address():
-        return None
+    def run_encode(worker_idx):
+        sentences = [f'search_document: worker-{worker_idx}-item-{i}' for i in range(4)]
+        return model.encode(sentences, batch_size=2)
+
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        results = list(executor.map(run_encode, range(8)))
+
+    assert recorder.max_active == 1
+    for result in results:
+        assert isinstance(result, np.ndarray)
+        assert result.shape == (4, recorder.hidden_size)
+
+
+def _local_encoder(monkeypatch, recorder, batches=None):
+    """A SentenceTransformer on the local path, backed by `recorder`."""
+    shared_model = _make_model(recorder)
 
     def fake_load(model_name, device=None, allocate_gpu=None, exclude_gpus=None, **kwargs):
         metadata = {
@@ -306,29 +320,38 @@ def test_encode_local_serializes_shared_model(monkeypatch, fake_torch):
         return shared_model, metadata, -1
 
     def fake_preprocess(model, inputs, metadata=None):
+        if batches is not None:
+            batches.append(list(inputs))
         return _make_preprocessed(batch=len(inputs))
 
     def fake_postprocess(model, raw_output, batch_size, output_fields, **kwargs):
+        if batches is not None:
+            return [{'$embeddings': _embedding_of(text)} for text in batches[-1]]
         return [{'$embeddings': raw_output[i].array.tolist()} for i in range(batch_size)]
 
-    monkeypatch.setattr(sentence_transformers_module, 'get_model_server_address', fake_get_model_server_address)
+    monkeypatch.setattr(sentence_transformers_module, 'get_model_server_address', lambda: None)
     monkeypatch.setattr(SentenceTransformerLoader, 'load', staticmethod(fake_load))
     monkeypatch.setattr(SentenceTransformerLoader, 'preprocess', staticmethod(fake_preprocess))
     monkeypatch.setattr(SentenceTransformerLoader, 'postprocess', staticmethod(fake_postprocess))
+    return sentence_transformers_module.SentenceTransformer('nomic-ai/nomic-embed-text-v1.5', device='cpu')
 
-    model = sentence_transformers_module.SentenceTransformer('nomic-ai/nomic-embed-text-v1.5', device='cpu')
 
-    def run_encode(worker_idx):
-        sentences = [f'search_document: worker-{worker_idx}-item-{i}' for i in range(4)]
-        return model.encode(sentences, batch_size=2)
+def _embedding_of(text):
+    """An embedding that identifies the sentence it came from."""
+    return [float(len(text)), float(ord(text[0])), 1.0]
 
-    with ThreadPoolExecutor(max_workers=4) as executor:
-        results = list(executor.map(run_encode, range(8)))
 
-    assert recorder.max_active == 1
-    for result in results:
-        assert isinstance(result, np.ndarray)
-        assert result.shape == (4, recorder.hidden_size)
+def test_encode_local_sorts_by_length_and_restores_order(monkeypatch, fake_torch):
+    """Batches are built shortest-first, and every row comes back on its own sentence."""
+    batches = []
+    model = _local_encoder(monkeypatch, _ForwardRecorder(delay=0.0), batches)
+    sentences = ['w' * 40, 'x' * 5, 'y' * 120, 'z' * 20]
+
+    result = model.encode(sentences, batch_size=2)
+
+    assert [len(text) for batch in batches for text in batch] == [5, 20, 40, 120]
+    for index, sentence in enumerate(sentences):
+        assert list(result[index]) == _embedding_of(sentence), f'row {index} does not belong to its sentence'
 
 
 def test_inference_reports_lock_wait_as_queue_time(fake_torch):
