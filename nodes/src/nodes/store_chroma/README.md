@@ -38,7 +38,7 @@ Documents must pass through an embedding node before reaching this node; chunks 
 | Profile | Description                                                                                            |
 | ------- | ------------------------------------------------------------------------------------------------------ |
 | `local` | Your own ChromaDB server. Connects with plain `HttpClient(host, port)`, no authentication.             |
-| `cloud` | ChromaDB Cloud. Requires `host` and `apikey`; authenticates using ChromaDB's `TokenAuthClientProvider`. |
+| `cloud` | ChromaDB Cloud or any TLS-protected remote server. Connects over TLS and sends the `apikey` in the `x-chroma-token` header; ChromaDB Cloud additionally requires `tenant` and `database`. |
 
 ---
 
@@ -82,7 +82,13 @@ No authentication is required. The node connects with `chromadb.HttpClient(host,
 
 ### Cloud profile
 
-Set `profile` to `cloud`, provide the ChromaDB Cloud `host` and your `apikey`. The node authenticates using `chromadb.auth.token_authn.TokenAuthClientProvider` configured via ChromaDB's `Settings` object.
+Set the profile to `cloud` and provide:
+
+- `host`: the server hostname (`api.trychroma.com` for ChromaDB Cloud)
+- `apikey`: sent with every request in the `x-chroma-token` header
+- `tenant` and `database`: required by ChromaDB Cloud accounts, optional for self-hosted multi-tenant servers
+
+The connection always uses TLS; ChromaDB Cloud only serves HTTPS, and a plain HTTP request against the TLS port hangs or is rejected with "illegal request line". Every HTTP session the chromadb client creates is given a 30s connect / 120s request timeout, so an unresponsive connection surfaces as an error instead of hanging the pipeline (the client library itself defaults to no timeout).
 
 ---
 
