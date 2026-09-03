@@ -73,8 +73,5 @@
 	},
 	"peerDependencies": {
 		"n8n-workflow": "*"
-	},
-	"overrides": {
-		"nanoid": "^3.3.12"
 	}
 }
