@@ -235,7 +235,7 @@ Composer:   one run over shared evidence, after every room is gone
   roughly one time in four
 - Telemetry is queried live at the end: cross-session, cross-agent, concurrency and failure patterns
 
-**Required env vars:** `ROCKETRIDE_OPENAI_KEY`, `ROCKETRIDE_DB_HOTDATA_KEY`, `ROCKETRIDE_DB_HOTDATA_WORKSPACE_ID`. The runners rewrite every LLM node to OpenAI by default, so that is all you need; `ROCKETRIDE_GEMINI_KEY` is required only if you open the `.pipe` files directly on the canvas, which reference Gemini, or pass `--model gemini`.
+**Required env vars:** `ROCKETRIDE_OPENAI_KEY`, `ROCKETRIDE_DB_HOTDATA_KEY`, `ROCKETRIDE_DB_HOTDATA_WORKSPACE_ID`. The runners rewrite every LLM node to OpenAI by default, so that is all you need. Other providers are needed only when you select them: `ROCKETRIDE_GEMINI_KEY` for `--model gemini` or for opening the `.pipe` files directly on the canvas, which reference Gemini, and `ROCKETRIDE_ANTHROPIC_KEY` for `--model anthropic` (or `--composer-model anthropic`).
 
 See [`symphony-test/RESULTS.md`](symphony-test/RESULTS.md). Try
 `python test_symphony_waves.py --wiring-only` first: no keys, no network.

@@ -165,9 +165,13 @@ class Telemetry:
             )
             if not _locked(status, body):
                 break
-            if time.monotonic() >= deadline:
+            # Cap the sleep to what is left of the budget, and stop when nothing is:
+            # sleeping an uncapped backoff first would overshoot the deadline and then
+            # still fire one more request, which is the stall the budget exists to stop.
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
                 break
-            time.sleep(0.5 * attempt + random.uniform(0, 0.5))
+            time.sleep(min(0.5 * attempt + random.uniform(0, 0.5), remaining))
         if status >= 400:
             raise TelemetryError(f'load {table}: {status} {body}')
 

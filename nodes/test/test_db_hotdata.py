@@ -1570,7 +1570,9 @@ def test_widening_gives_up_after_a_bounded_number_of_attempts():
     inst = _instance(g)
     with pytest.raises(RuntimeError, match='missing column'):
         inst.load_data({'table': 't', 'rows': [{'a': 1}]})
-    assert len(uploads) <= iinstance_mod._WIDEN_ATTEMPTS + 1
+    # Exactly: one original upload plus one per widening attempt. `<=` would let a
+    # regression that stopped retrying after the first attempt pass unnoticed.
+    assert len(uploads) == iinstance_mod._WIDEN_ATTEMPTS + 1
 
 
 def test_load_does_not_widen_when_nothing_would_change():

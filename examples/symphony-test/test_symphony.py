@@ -223,11 +223,13 @@ async def run() -> int:
 
 def main() -> int:
     _load_env()
-    # swap_llm injects the OpenAI key by default, and _hotdata indexes its two
-    # variables directly - report them by name rather than dying on a KeyError.
+    # _hotdata indexes its two variables directly - report them by name rather
+    # than dying on a KeyError. The model key follows the actual choice: asking
+    # for the OpenAI key under --gemini would reject a correctly configured run.
+    model_key = 'ROCKETRIDE_OPENAI_KEY' if USE_OPENAI else 'ROCKETRIDE_GEMINI_KEY'
     missing = [
         k
-        for k in ('ROCKETRIDE_DB_HOTDATA_KEY', 'ROCKETRIDE_DB_HOTDATA_WORKSPACE_ID', 'ROCKETRIDE_OPENAI_KEY')
+        for k in ('ROCKETRIDE_DB_HOTDATA_KEY', 'ROCKETRIDE_DB_HOTDATA_WORKSPACE_ID', model_key)
         if not os.environ.get(k)
     ]
     if missing:
