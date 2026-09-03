@@ -628,7 +628,9 @@ export class ConnectionManager implements IConnectionManager {
 
 		if (errorDescription) {
 			if (this.connectionGeneration !== bootstrapGeneration) return null;
-			window.history.replaceState({}, '', window.location.pathname);
+			// Strip the query string but keep any existing history state (e.g. the
+			// rrHome snapshot / appId) so an OAuth failure does not lose navigation.
+			window.history.replaceState({ ...(window.history.state ?? {}) }, '', window.location.pathname);
 			this.updateConnectionStatus({
 				state: ConnectionState.AUTH_FAILED,
 				lastError: errorDescription,
@@ -646,8 +648,11 @@ export class ConnectionManager implements IConnectionManager {
 		if (code) {
 			const verifier = getStoredVerifier();
 			clearStoredVerifier();
-			// Strip the ?code= from the URL so refreshes don't re-exchange
-			window.history.replaceState({}, '', window.location.pathname);
+			// Strip the ?code= from the URL so refreshes don't re-exchange.
+			// Carry the existing `history.state` across — it is shared with the
+			// home-ui remote (which keeps its snapshot under `rrHome`), so it must
+			// be merged, never replaced; only the query string is being dropped.
+			window.history.replaceState({ ...(window.history.state ?? {}) }, '', window.location.pathname);
 
 			if (!verifier) {
 				// Missing verifier — can't exchange this code. This is the

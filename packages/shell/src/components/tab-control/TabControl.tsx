@@ -47,24 +47,29 @@ const styles = {
 	// filled with the CARD-HEADER background sourced from Card's exported
 	// chrome (single source, never re-declared) so it reads as header chrome.
 	// NO margins: the fill runs flush to the host's edge, and the vertical
-	// padding provides the breathing room INSIDE the band.
+	// padding provides the breathing room INSIDE the band. Most of the band's
+	// vertical room lives on the tabs themselves (see `tab`), so the strip only
+	// carries the residual gap above/below the tab row.
 	strip: {
 		flex: 'none',
 		display: 'flex',
 		alignItems: 'stretch',
 		gap: 2,
-		padding: '15px 10px',
+		padding: '12px 10px',
 		borderBottom: '1px solid var(--rr-border)',
 		background: cardHeaderChrome.header.background,
 	} as CSSProperties,
 
 	// A single strip tab; the active treatment is layered on top. The active
 	// underline indicator sits on the entry's bottom edge (the strip's bottom).
+	// The tab carries its OWN vertical padding — the underline lives on this
+	// element, so the inset keeps the centred content (label + count badge)
+	// clear of it instead of resting flush against the 2px line.
 	tab: (active: boolean): CSSProperties => ({
 		display: 'flex',
 		alignItems: 'center',
 		gap: 7,
-		padding: '0 13px',
+		padding: '5px 13px',
 		fontSize: 11.5,
 		fontWeight: 600,
 		textTransform: 'uppercase',

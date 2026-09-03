@@ -280,17 +280,32 @@ jobs:
         # contract check. Nonzero exit fails the PR.
         run: node scripts/build.js shell:check
       - name: shell contract floors are un-tampered — regen must be a no-op
-        # Regenerate the barrels + per-version floors from the immutable frozen
-        # versions, then fail on any diff. A nonzero diff means the committed
-        # contract-check.generated.ts (or a contract barrel) was hand-edited —
-        # e.g. a `_floor_vN` line dropped so a removed export slips past tsc. The
-        # SDK/tsc prereqs are already warm from the step above.
+        # Regenerate the barrels + per-version floors + apiver from the immutable
+        # frozen versions, then fail on any diff. A nonzero diff means a committed
+        # derived file was hand-edited — e.g. a `_floor_vN` line dropped so a
+        # removed export slips past tsc. shell:regen-derived reads ONLY the frozen
+        # versions/*.d.ts (never the live surface, never a reset), so legitimate
+        # freezes of new versions pass here untouched.
         run: |
-          node scripts/build.js shell:regen
+          node scripts/build.js shell:regen-derived
           git diff --exit-code -- \
             packages/shell/src/contract-check.generated.ts \
             packages/shell/contract/index.ts \
-            packages/shell/contract/latest.ts
+            packages/shell/contract/latest.ts \
+            packages/shell/src/apiver.ts
+          # `git diff` sees tracked changes only: a derived file DELETED from
+          # the commit is recreated by the regen as untracked and would sail
+          # through the diff above.
+          untracked=$(git ls-files --others --exclude-standard -- \
+            packages/shell/src/contract-check.generated.ts \
+            packages/shell/contract/index.ts \
+            packages/shell/contract/latest.ts \
+            packages/shell/src/apiver.ts)
+          if [ -n "$untracked" ]; then
+            echo "Derived contract file(s) missing from the commit (recreated by regen):"
+            echo "$untracked"
+            exit 1
+          fi
       - name: client SDK contract floors are un-tampered — regen must be a no-op
         # Same guarantee for the rocketride TypeScript SDK: regenerate its
         # contract barrels + conformance file from the immutable frozen floors
@@ -308,6 +323,11 @@ jobs:
             packages/client-typescript/src/contract-check.generated.ts \
             packages/client-typescript/contract/index.ts \
             packages/client-typescript/contract/latest.ts
+      - name: credentials catalog is current — no unmapped or stale entries
+        # Equivalent to `./builder nodes:credentials-check`. Fails if a node's
+        # services*.json has a credential-shaped field with no catalog entry,
+        # or an existing catalog entry has gone stale. Never writes.
+        run: node nodes/scripts/gen-credentials.mjs --check
 
   # ---------------------------------------------------------------------------
   #  Gatekeeper — the ONLY job to mark as "Required" in branch protection.

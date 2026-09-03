@@ -2,7 +2,15 @@ import re
 import queue
 from typing import Dict, Any
 from typing import Callable
+
+from rocketlib import warning
+
 from .reader import AVIReader
+
+# How long a complete PNG waits for its showinfo entry before the frame is left buffered.
+# The entry is written by ffmpeg alongside the frame, so this is generous; its job is to
+# bound the wait rather than to time real work.
+_FRAME_INFO_TIMEOUT = 5.0
 
 
 class VideoFrameExtractor(AVIReader):
@@ -172,8 +180,15 @@ class VideoFrameExtractor(AVIReader):
             # Get the data and the offes
             png_data, end_offset = result
 
-            # Get frame info
-            frame_number, start_time = self._frame_info_queue.get()
+            # Frame info arrives on the stderr thread while the bytes arrive here, so a
+            # brief wait is normal. Bounded rather than open-ended: with no entry coming
+            # at all this used to block the data thread for good, and stop() would then
+            # hang on its join(). Leaving the PNG buffered lets a later chunk retry it.
+            try:
+                frame_number, start_time = self._frame_info_queue.get(timeout=_FRAME_INFO_TIMEOUT)
+            except queue.Empty:
+                warning(f'[{self._name}]: no showinfo entry for a complete frame after {_FRAME_INFO_TIMEOUT}s')
+                return
 
             # Callback with complete PNG frame
             self._frame_callback(png_data, frame_number, start_time + self._start_time)
@@ -226,6 +241,16 @@ class VideoFrameExtractor(AVIReader):
         # Reset these
         self._done = False
         self._buffer = bytearray()
+
+        # Drop whatever the previous stream left queued. showinfo entries are pushed from
+        # the stderr thread independently of PNG extraction, so a stream that ended with
+        # entries still unread would hand its frame numbers and timestamps to the next one
+        # — one object can carry several video streams, and this reader serves them in turn.
+        while True:
+            try:
+                self._frame_info_queue.get_nowait()
+            except queue.Empty:
+                break
 
         # Start extractor process and feed video data to it via stdin
         super().start()

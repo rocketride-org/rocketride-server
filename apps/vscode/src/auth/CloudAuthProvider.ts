@@ -92,15 +92,18 @@ export class CloudAuthProvider implements vscode.UriHandler, vscode.Disposable {
 		await vscode.env.openExternal(vscode.Uri.parse(authUrl));
 	}
 
-	// --- Google node OAuth ---------------------------------------------------
+	// --- Node OAuth (Google, Microsoft) ---------------------------------------
 
 	/**
-	 * Registers a one-shot callback to receive Google node-OAuth tokens once the
-	 * broker's deep link (`/auth/google`) returns. Waiters are keyed by the
-	 * node id that started the login (the broker echoes it inside `state`), so
-	 * concurrent logins from different editors cannot overwrite or misroute
-	 * each other. Google's consent screen can't render in a webview iframe,
-	 * so the login runs in the system browser and returns via this deep link.
+	 * Registers a one-shot callback to receive node-OAuth tokens once the
+	 * broker's deep link (`/auth/google` or `/auth/microsoft`) returns.
+	 * Waiters are keyed by the node id that started the login (the broker
+	 * echoes it inside `state`), so concurrent logins from different editors
+	 * cannot overwrite or misroute each other. Both providers' consent
+	 * screens can't render in a webview iframe, so the login runs in the
+	 * system browser and returns via this deep link. The registry is shared
+	 * across providers — ProjectProvider arms every node-OAuth login through
+	 * this same call regardless of which provider it targets.
 	 *
 	 * @param nodeId   The pipeline node that initiated the login.
 	 * @param callback Invoked with the raw `tokens` and `state` query strings.
@@ -113,7 +116,8 @@ export class CloudAuthProvider implements vscode.UriHandler, vscode.Disposable {
 		};
 	}
 
-	private handleGoogleOAuth(uri: vscode.Uri): void {
+	private handleProviderOAuth(uri: vscode.Uri, provider: 'google' | 'microsoft'): void {
+		const label = provider === 'google' ? 'Google' : 'Microsoft';
 		const params = new URLSearchParams(uri.query);
 		const error = params.get('oauth_error') || params.get('error');
 		const tokens = params.get('tokens');
@@ -138,15 +142,15 @@ export class CloudAuthProvider implements vscode.UriHandler, vscode.Disposable {
 		}
 
 		if (error) {
-			vscode.window.showErrorMessage(`Google sign-in failed: ${params.get('error_description') || error}`);
+			vscode.window.showErrorMessage(`${label} sign-in failed: ${params.get('error_description') || error}`);
 			return;
 		}
 		if (!tokens) {
-			vscode.window.showErrorMessage('Google sign-in failed: no tokens received.');
+			vscode.window.showErrorMessage(`${label} sign-in failed: no tokens received.`);
 			return;
 		}
 		if (!callback) {
-			vscode.window.showWarningMessage('Google sign-in completed, but no pipeline editor was waiting for it.');
+			vscode.window.showWarningMessage(`${label} sign-in completed, but no pipeline editor was waiting for it.`);
 			return;
 		}
 		callback(tokens, state);
@@ -156,7 +160,11 @@ export class CloudAuthProvider implements vscode.UriHandler, vscode.Disposable {
 
 	async handleUri(uri: vscode.Uri): Promise<void> {
 		if (uri.path === '/auth/google') {
-			this.handleGoogleOAuth(uri);
+			this.handleProviderOAuth(uri, 'google');
+			return;
+		}
+		if (uri.path === '/auth/microsoft') {
+			this.handleProviderOAuth(uri, 'microsoft');
 			return;
 		}
 		if (uri.path !== '/auth/callback') return;

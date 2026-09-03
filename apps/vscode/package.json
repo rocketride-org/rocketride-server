@@ -407,6 +407,16 @@
 				"category": "RocketRide Pipeline"
 			},
 			{
+				"command": "rocketride.pipeline.new",
+				"title": "RocketRide Pipeline",
+				"category": "RocketRide Pipeline"
+			},
+			{
+				"command": "rocketride.pipeline.save",
+				"title": "Save Pipeline",
+				"category": "RocketRide Pipeline"
+			},
+			{
 				"command": "rocketride.sidebar.files.runPipeline",
 				"title": "Run",
 				"icon": "$(play)",
@@ -458,7 +468,21 @@
 				"category": "RocketRide"
 			}
 		],
+		"keybindings": [
+			{
+				"command": "rocketride.pipeline.save",
+				"key": "ctrl+s",
+				"mac": "cmd+s",
+				"when": "activeCustomEditorId == 'rocketride.PageProject'"
+			}
+		],
 		"menus": {
+			"file/newFile": [
+				{
+					"command": "rocketride.pipeline.new",
+					"group": "file"
+				}
+			],
 			"commandPalette": [
 				{
 					"command": "rocketride.sidebar.files.openStatus",
@@ -514,6 +538,14 @@
 				},
 				{
 					"command": "rocketride.sidebar.files.createFile",
+					"when": "false"
+				},
+				{
+					"command": "rocketride.pipeline.new",
+					"when": "false"
+				},
+				{
+					"command": "rocketride.pipeline.save",
 					"when": "false"
 				},
 				{
@@ -604,12 +636,12 @@
 	},
 	"dependencies": {
 		"@octokit/rest": "^22.0.1",
-		"adm-zip": "^0.5.17",
+		"adm-zip": "^0.6.0",
 		"chart.js": "^4.4.0",
 		"dockerode": "^4.0.12",
 		"proper-lockfile": "^4.1.2",
 		"shared": "file:../shared",
-		"tar": "^7.5.15",
+		"tar": "^7.5.21",
 		"rocketride": "workspace:*",
 		"shell": "file:../../.rocketride/shell/shell.tgz"
 	},

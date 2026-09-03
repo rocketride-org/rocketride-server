@@ -11,7 +11,7 @@ import { renderText, isText } from './render_text';
 import { renderAudio, isAudio } from './render_audio';
 import { renderVideo, isVideo } from './render_video';
 import { renderTable, isTable } from './render_table';
-import { JsonTree } from '../JsonTree';
+import { JsonTree } from '../../json-tree';
 
 // =============================================================================
 // STYLES

@@ -51,11 +51,14 @@ test('foldTaskEvent: begin tracks the task and lists unknown pipelines', () => {
 	assert.equal(result.unknownTasks[0].displayName, 'Mystery');
 });
 
-test('foldTaskEvent: restart preserves accumulated errors and warnings', () => {
+test('foldTaskEvent: restart starts a NEW run — previous diagnostics reset', () => {
+	// Pinned: a begin/restart resets stale diagnostics so a lingering chip
+	// always describes the run the user is looking at (dots = liveness,
+	// chips = the LAST run's diagnostics).
 	const event: TaskLifecycleEvent = { action: 'restart', projectId: 'proj-1', source: 'src-1' };
 	const result = foldTaskEvent(event, tracked(), NO_UNKNOWN, isKnown);
 	assert.ok(result);
-	assert.deepEqual(result.activeTasks.get('proj-1.src-1'), { running: true, errors: ['boom'], warnings: ['careful'] });
+	assert.deepEqual(result.activeTasks.get('proj-1.src-1'), { running: true, errors: [], warnings: [] });
 });
 
 test('foldTaskEvent: the bulk running snapshot preserves indicators of still-running tasks', () => {
@@ -81,7 +84,7 @@ test('foldTaskEvent: the bulk running snapshot drops tasks the server no longer 
 	assert.equal(result.activeTasks.size, 0);
 });
 
-test('foldTaskEvent: end removes the task and its unknown entry', () => {
+test('foldTaskEvent: end removes an UNKNOWN task and its unknown entry', () => {
 	const unknown: UnknownTask[] = [{ projectId: 'proj-2', sourceId: 'src-9', displayName: 'Mystery', projectLabel: 'proj-2' }];
 	const active = new Map([['proj-2.src-9', { running: true, errors: [], warnings: [] }]]);
 	const event: TaskLifecycleEvent = { action: 'end', projectId: 'proj-2', source: 'src-9' };
@@ -89,6 +92,41 @@ test('foldTaskEvent: end removes the task and its unknown entry', () => {
 	assert.ok(result);
 	assert.equal(result.activeTasks.size, 0);
 	assert.equal(result.unknownTasks.length, 0);
+});
+
+test('foldTaskEvent: the bulk running snapshot retains completed entries it does not mention', () => {
+	// Pinned: the snapshot enumerates what is RUNNING — it says nothing about
+	// history, so a completed entry's last-run chips survive it.
+	const active = new Map([['proj-1.src-1', { running: false, errors: ['boom'], warnings: [] }]]);
+	const event: TaskLifecycleEvent = { action: 'running', tasks: [] };
+	const result = foldTaskEvent(event, active, NO_UNKNOWN, isKnown);
+	assert.ok(result);
+	assert.deepEqual(result.activeTasks.get('proj-1.src-1'), { running: false, errors: ['boom'], warnings: [] });
+});
+
+test('foldTaskEvent: the bulk running snapshot resets a completed entry it reports running again', () => {
+	// Pinned: completed -> running via snapshot is a NEW run — diagnostics
+	// reset, same rule as begin/restart.
+	const active = new Map([['proj-1.src-1', { running: false, errors: ['boom'], warnings: ['careful'] }]]);
+	const event: TaskLifecycleEvent = { action: 'running', tasks: [{ projectId: 'proj-1', source: 'src-1' }] };
+	const result = foldTaskEvent(event, active, NO_UNKNOWN, isKnown);
+	assert.ok(result);
+	assert.deepEqual(result.activeTasks.get('proj-1.src-1'), { running: true, errors: [], warnings: [] });
+});
+
+test('foldTaskEvent: end keeps a KNOWN task\'s last-run diagnostics until the next begin', () => {
+	// Pinned: chips = the LAST run's diagnostics (dots = liveness). end flips
+	// running off but retains errors/warnings; the next begin resets them.
+	const active = new Map([['proj-1.src-1', { running: true, errors: ['boom'], warnings: ['careful'] }]]);
+	const end: TaskLifecycleEvent = { action: 'end', projectId: 'proj-1', source: 'src-1' };
+	const afterEnd = foldTaskEvent(end, active, NO_UNKNOWN, isKnown);
+	assert.ok(afterEnd);
+	assert.deepEqual(afterEnd.activeTasks.get('proj-1.src-1'), { running: false, errors: ['boom'], warnings: ['careful'] });
+
+	const begin: TaskLifecycleEvent = { action: 'begin', projectId: 'proj-1', source: 'src-1' };
+	const afterBegin = foldTaskEvent(begin, afterEnd.activeTasks, afterEnd.unknownTasks, isKnown);
+	assert.ok(afterBegin);
+	assert.deepEqual(afterBegin.activeTasks.get('proj-1.src-1'), { running: true, errors: [], warnings: [] });
 });
 
 test('foldTaskEvent: unrelated actions change nothing', () => {

@@ -35,6 +35,7 @@ from __future__ import annotations
 import hashlib
 import os
 import platform
+import re
 import subprocess
 import sys
 import threading
@@ -59,6 +60,16 @@ REQUIREMENTS_GLOBS = [
     'requirement*.txt',
     'nodes/**/requirement*.txt',
     'ai/**/requirement*.txt',
+]
+
+# Override files: unlike constraints, uv overrides REPLACE what packages
+# declare. Discovered like requirement files; see packages/ai/src/ai/overrides.txt
+# for the policy comment. Named 'overrides.txt' so REQUIREMENTS_GLOBS
+# ('requirement*.txt') never sweeps them into the combined requirements.
+OVERRIDES_GLOBS = [
+    'overrides.txt',
+    'nodes/**/overrides.txt',
+    'ai/**/overrides.txt',
 ]
 
 # Bootstrap tools install outside any constraint, so pin them or they float to 'latest' and a
@@ -328,6 +339,22 @@ def _constraints_args(constraints_path: str, exe_dir: str) -> list[str]:
     """
     if os.path.exists(constraints_path) and os.path.getsize(constraints_path) > 0:
         return ['-c', os.path.relpath(constraints_path, exe_dir)]
+    return []
+
+
+def _get_overrides_path() -> str:
+    """Path of the combined overrides file in the engine cache."""
+    return os.path.join(engine_cache_dir(), 'overrides-combined.txt')
+
+
+def _override_args(exe_dir: str) -> list[str]:
+    """Return uv ``--override`` args if the combined overrides file is non-empty, else ``[]``.
+
+    Relative to exe_dir (the subprocess cwd) — uv splits the value on whitespace.
+    """
+    overrides_path = _get_overrides_path()
+    if os.path.exists(overrides_path) and os.path.getsize(overrides_path) > 0:
+        return ['--override', os.path.relpath(overrides_path, exe_dir)]
     return []
 
 
@@ -649,6 +676,19 @@ def _find_requirement_files() -> list[str]:
     return found
 
 
+def _find_override_files() -> list[str]:
+    """Find all override files matching OVERRIDES_GLOBS."""
+    executable_dir = _get_executable_dir()
+    found = []
+    for pattern in OVERRIDES_GLOBS:
+        full_pattern = os.path.join(executable_dir, pattern)
+        for path in glob(full_pattern, recursive=True):
+            abs_path = os.path.abspath(path)
+            if os.path.isfile(abs_path) and abs_path not in found:
+                found.append(abs_path)
+    return found
+
+
 def _compute_hash(file_paths: list[str]) -> str:
     """Compute a fast hash from file metadata (mtime + size)."""
     hasher = hashlib.md5()
@@ -716,6 +756,7 @@ def _compile_constraints(constraints_path: str):
         '--no-build-isolation',  # Don't create temp venvs (engine.exe can't create venvs)
         '--emit-index-url',  # Preserve --extra-index-url etc. so install/dry-run can find packages (e.g. torch+cu128)
     ]
+    args.extend(_override_args(exe_dir))
     debug(f'Compile: {args}')
     result = subprocess.run(
         args,
@@ -750,16 +791,27 @@ def ensure_constraints() -> str:
 
     # Find all requirement files
     req_files = _find_requirement_files()
+    override_files = _find_override_files()
     if not req_files:
         debug('No requirement files found')
         return constraints_path
 
     # Compute current hash
-    current_hash = _compute_hash(req_files)
+    current_hash = _compute_hash(req_files + override_files)
     stored_hash = _load_stored_hash(hash_file)
 
-    # Check if rebuild is needed
-    if current_hash == stored_hash and os.path.exists(constraints_path):
+    # Check if rebuild is needed. The derived overrides cache is part of the
+    # predicate: install-time _override_args() reads that file, so a missing
+    # one (partially cleared cache) while override files exist — or a stale
+    # non-empty one after overrides were removed — must trigger a rebuild,
+    # not be silently reused.
+    overrides_path = _get_overrides_path()
+    overrides_cache_nonempty = os.path.exists(overrides_path) and os.path.getsize(overrides_path) > 0
+    if (
+        current_hash == stored_hash
+        and os.path.exists(constraints_path)
+        and bool(override_files) == overrides_cache_nonempty
+    ):
         debug('Constraints are up to date')
         return constraints_path
 
@@ -768,6 +820,9 @@ def ensure_constraints() -> str:
 
     # Combine all requirements
     _combine_requirements(req_files, combined_path)
+
+    # Combine all overrides (empty file list yields a zero-byte file, treated as absent)
+    _combine_requirements(override_files, _get_overrides_path())
 
     # Compile with uv
     _compile_constraints(constraints_path)
@@ -783,20 +838,191 @@ def ensure_constraints() -> str:
 # ---------------------------------------------------------------------------
 
 
-def _write_excludes_file() -> str:
-    """Write uv's resolution-excludes file (rewritten each call) and return its path.
+def _excludes_content() -> str:
+    """Content of uv's resolution-excludes file for this platform.
 
     Excludes `uv` (bootstrapped by depends.py; pip-installing it crashes on Windows)
     and, on non-Darwin, plain `onnxruntime` (it clobbers onnxruntime-gpu in the same
     folder; the gpu build provides `import onnxruntime`).
     """
-    excludes_path = os.path.join(engine_cache_dir(), 'excludes.txt')
     excludes = 'uv\n'
     if platform.system() != 'Darwin':
         excludes += 'onnxruntime\n'
+    return excludes
+
+
+def _write_excludes_file() -> str:
+    """Write uv's resolution-excludes file (rewritten each call) and return its path."""
+    excludes_path = os.path.join(engine_cache_dir(), 'excludes.txt')
     with open(excludes_path, 'w', encoding='utf-8') as f:
-        f.write(excludes)
+        f.write(_excludes_content())
     return excludes_path
+
+
+# ---------------------------------------------------------------------------
+# Satisfied-verdict cache
+# ---------------------------------------------------------------------------
+#
+# ``_processed`` spans one process, so every cold engine re-ran the 20-40s uv
+# resolve only to conclude that nothing was missing (#2089). Persist that
+# verdict instead, keyed by everything a resolve consults.
+#
+# Two consequences worth knowing. The fingerprint is the whole installed set,
+# so installing anything invalidates every file's verdict: on a host where
+# nodes install lazily, each install costs one extra resolve per requirements
+# file before things settle again. And the key cannot see the resolve's own
+# arguments, so _VERDICT_SCHEMA below is bumped whenever those change.
+#
+# The check and the write both run under the engine-global ``install.lock``
+# via depends(), which is what makes the non-atomic _save_hash write safe.
+# Per-node locks (#2089 ask 2) would remove that guarantee.
+
+# Bump when the resolve's inputs or semantics change (uv arguments, what the
+# key covers), so verdicts recorded under the old behaviour are not reused.
+_VERDICT_SCHEMA = '1'
+
+
+def _verdict_path(requirements_path: str) -> str:
+    """Path of the cached verdict for a requirements file."""
+    digest = hashlib.md5(os.path.abspath(requirements_path).encode('utf-8')).hexdigest()
+    return os.path.join(engine_cache_dir(), 'satisfied', f'{digest}.hash')
+
+
+def _file_digest(path: str) -> str:
+    """Content digest of a file, or empty string when it does not exist."""
+    try:
+        with open(path, 'rb') as f:
+            return hashlib.md5(f.read()).hexdigest()
+    except OSError:
+        return ''
+
+
+# A requirements line that pulls in another file: ``-r``/``--requirement`` and
+# ``-c``/``--constraint``, with the path after whitespace or ``=``.
+_INCLUDE_DIRECTIVE = re.compile(r'^\s*(?:-r|--requirement|-c|--constraint)(?:\s+|=)(?:"([^"]+)"|\'([^\']+)\'|(\S+))')
+
+
+def _requirements_closure(requirements_path: str) -> list[str]:
+    """``requirements_path`` plus every file it pulls in through ``-r`` / ``-c``, recursively.
+
+    Included paths resolve relative to the including file, as pip and uv resolve
+    them. Each file is visited once, so an include cycle terminates.
+    """
+    closure: list[str] = []
+    pending = [os.path.abspath(requirements_path)]
+    while pending:
+        path = pending.pop(0)
+        if path in closure:
+            continue
+        closure.append(path)
+        try:
+            # errors='replace' because this decode only feeds directive
+            # scanning: the digest is taken from the bytes in _file_digest, so a
+            # non-UTF-8 requirements file must not fail the node it belongs to.
+            with open(path, 'r', encoding='utf-8', errors='replace') as f:
+                # A trailing backslash continues the line, as in pip and uv.
+                lines = f.read().replace('\\\n', '').splitlines()
+        except OSError:
+            continue
+        for line in lines:
+            match = _INCLUDE_DIRECTIVE.match(line)
+            if match:
+                target = match.group(1) or match.group(2) or match.group(3)
+                pending.append(os.path.normpath(os.path.join(os.path.dirname(path), target)))
+    return closure
+
+
+def _installed_fingerprint() -> Optional[str]:
+    """Digest of the *.dist-info / *.egg-info names in site-packages, or ``None``.
+
+    The names carry versions, so an install, upgrade or uninstall changes it.
+
+    ``None`` when the directory cannot be listed. Hashing an empty list instead
+    would return the same digest every time, so the key would stop noticing
+    installs and every verdict would stay satisfied for ever — a silent stale
+    hit. Refusing the key resolves every time instead, which is the safe
+    direction. ``bootstrap()`` creates this directory before any key is
+    computed, so on the real path it always exists.
+    """
+    try:
+        entries = [e for e in os.listdir(_get_site_packages()) if e.endswith(('.dist-info', '.egg-info'))]
+    except OSError:
+        return None
+    return hashlib.md5('\n'.join(sorted(entries)).encode('utf-8')).hexdigest()
+
+
+def _verdict_key(requirements_path: str, constraints_path: str) -> Optional[str]:
+    """Key under which a "satisfied" verdict for ``requirements_path`` is valid.
+
+    Everything that can change what a resolve concludes is part of it,
+    including every file the requirements file includes through ``-r`` / ``-c``.
+
+    Returns ``None`` when the key cannot be computed honestly — a directive
+    names something that is not a readable file, or site-packages cannot be
+    listed. In
+    both cases something the resolve depends on is invisible here, so the key
+    would be stable over changing inputs. Refusing it degrades to resolving
+    every time, which is the safe direction — a stable key over an unseen
+    input keeps reporting "satisfied" after that input gains a dependency.
+    """
+    closure = _requirements_closure(requirements_path)
+    if not all(os.path.isfile(path) for path in closure):
+        return None
+
+    installed = _installed_fingerprint()
+    if installed is None:
+        return None
+
+    parts = [_VERDICT_SCHEMA, sys.executable, sys.version]
+    parts.extend(_file_digest(path) for path in closure)
+    parts.extend(
+        [
+            _file_digest(constraints_path),
+            _file_digest(_get_overrides_path()),
+            _excludes_content(),
+            installed,
+        ]
+    )
+    # NUL-separated: none of the parts can contain it, so field boundaries
+    # stay unambiguous even though two of them are multi-line text.
+    return hashlib.md5('\0'.join(parts).encode('utf-8')).hexdigest()
+
+
+def _verdict_cached(requirements_path: str, constraints_path: str) -> bool:
+    """True when a previous resolve recorded this requirements file as satisfied under the current key.
+
+    An unreadable cache, or a key the closure refuses to produce, is a miss —
+    never an error. The cache is an optimisation: anything it cannot answer
+    must fall back to resolving, not fail the node that asked.
+    """
+    try:
+        stored = _load_stored_hash(_verdict_path(requirements_path))
+        if stored is None:
+            return False
+        key = _verdict_key(requirements_path, constraints_path)
+        return key is not None and stored == key
+    except Exception as e:  # noqa: BLE001 - a cache read must never fail an install
+        debug(f'  Could not read the satisfied verdict ({e}); resolving instead')
+        return False
+
+
+def _save_verdict(requirements_path: str, constraints_path: str):
+    """Record that ``requirements_path`` is satisfied under the current key.
+
+    Best effort, like the progress sidecar: the verdict only saves the next
+    process a resolve, so a cache that cannot be written must not fail an
+    install that succeeded.
+    """
+    try:
+        key = _verdict_key(requirements_path, constraints_path)
+        if key is None:
+            debug(f'  Not recording a verdict: an include of {requirements_path} does not resolve')
+            return
+        verdict_file = _verdict_path(requirements_path)
+        os.makedirs(os.path.dirname(verdict_file), exist_ok=True)
+        _save_hash(verdict_file, key)
+    except Exception as e:  # noqa: BLE001 - a cache write must never fail an install
+        debug(f'  Could not record the satisfied verdict ({e}); the next process will resolve again')
 
 
 def _install_dry_run(requirements_path: str, constraints_path: str) -> list[str]:
@@ -831,6 +1057,7 @@ def _install_dry_run(requirements_path: str, constraints_path: str) -> list[str]
     args.extend(['--excludes', os.path.relpath(_write_excludes_file(), exe_dir)])
 
     args.extend(_constraints_args(constraints_path, exe_dir))
+    args.extend(_override_args(exe_dir))
 
     debug(f'Dry-run: {args}')
     result = subprocess.run(
@@ -883,6 +1110,12 @@ def _install_requirements(requirements_path: str, constraints_path: str):
         debug(f'  Empty requirements file, skipping: {requirements_path}')
         return
 
+    # A previous process already resolved this file against this environment
+    # and found it satisfied: nothing to install, and nothing to resolve.
+    if _verdict_cached(requirements_path, constraints_path):
+        debug(f'  Satisfied verdict cached, skipping resolve: {requirements_path}')
+        return
+
     # Start heartbeat early — the dry-run can block on uv's internal lock
     # for minutes, and we need monitorStatus events to keep the task startup
     # timeout alive during that time.
@@ -904,6 +1137,7 @@ def _install_requirements_inner(requirements_path: str, constraints_path: str):
     # If dry-run returned empty list, all packages are satisfied
     if len(packages) == 0:
         debug(f'All requirements satisfied: {requirements_path}')
+        _save_verdict(requirements_path, constraints_path)
         return
 
     # Format status message: show up to 5 packages, or 4 + "..." if more than 5
@@ -932,6 +1166,7 @@ def _install_requirements_inner(requirements_path: str, constraints_path: str):
     uv_args.extend(['--excludes', os.path.relpath(_write_excludes_file(), exe_dir)])
 
     uv_args.extend(_constraints_args(constraints_path, exe_dir))
+    uv_args.extend(_override_args(exe_dir))
 
     # Run uv and stream output (heartbeat is already running from the caller)
     debug(f'Install: {uv_args}')
@@ -965,6 +1200,9 @@ def _install_requirements_inner(requirements_path: str, constraints_path: str):
 
     # Clear path importer cache for site-packages to force re-scan
     sys.path_importer_cache.pop(_get_site_packages(), None)
+
+    # The install changed the installed set: record the verdict against it.
+    _save_verdict(requirements_path, constraints_path)
 
     debug(f'Installed: {requirements_path}')
 

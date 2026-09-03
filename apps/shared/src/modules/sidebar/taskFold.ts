@@ -83,9 +83,11 @@ export function foldTaskEvent(
 	switch (action) {
 		case 'begin':
 		case 'restart': {
-			// Preserve accumulated errors/warnings across a restart.
-			const existing = nextActive.get(key);
-			nextActive.set(key, { running: true, errors: existing?.errors ?? [], warnings: existing?.warnings ?? [] });
+			// A begin/restart is a NEW run: stale diagnostics from the previous
+			// run reset here, so a lingering warning chip always describes the
+			// run the user is looking at (indicator-semantics decision: dots =
+			// liveness, chips = the LAST run's diagnostics).
+			nextActive.set(key, { running: true, errors: [], warnings: [] });
 			if (projectId && sourceId && !isKnownTask(projectId, sourceId)) {
 				if (!unknownTasks.some((ut) => ut.projectId === projectId && ut.sourceId === sourceId)) {
 					nextUnknown = [
@@ -98,17 +100,25 @@ export function foldTaskEvent(
 		}
 
 		case 'running': {
-			// Bulk snapshot: rebuild both collections from the server state.
+			// Bulk snapshot: rebuild the RUNNING set from the server state.
 			// Each ROW carries its own runKind — the snapshot event itself has
 			// none, so the per-row filter is what keeps deploy runs out.
 			const rows = (event.tasks ?? []).filter((t) => t.runKind !== 'deploy');
 			nextActive.clear();
 			for (const t of rows) {
-				// Preserve accumulated errors/warnings for a task that was
-				// already tracked — the snapshot confirms it is still running,
-				// it does not reset its indicators (same rule as begin/restart).
+				// A task that was already RUNNING keeps its indicators — the
+				// snapshot confirms liveness, it does not reset them. A retained
+				// COMPLETED entry the snapshot reports running again is a NEW
+				// run: its diagnostics reset, same rule as begin/restart.
 				const prev = activeTasks.get(`${t.projectId}.${t.source}`);
-				nextActive.set(`${t.projectId}.${t.source}`, { running: true, errors: prev?.errors ?? [], warnings: prev?.warnings ?? [] });
+				const carry = prev?.running ? prev : undefined;
+				nextActive.set(`${t.projectId}.${t.source}`, { running: true, errors: carry?.errors ?? [], warnings: carry?.warnings ?? [] });
+			}
+			// Completed entries absent from the snapshot keep their last-run
+			// chips — the snapshot enumerates what is RUNNING; it says nothing
+			// about history (the next begin/restart still resets them).
+			for (const [k, v] of activeTasks) {
+				if (!v.running && !nextActive.has(k)) nextActive.set(k, v);
 			}
 			nextUnknown = rows
 				.filter((t) => !isKnownTask(t.projectId, t.source))
@@ -119,10 +129,21 @@ export function foldTaskEvent(
 			break;
 		}
 
-		case 'end':
-			nextActive.delete(key);
+		case 'end': {
+			// Liveness ends; the LAST run's diagnostics stay on the entry
+			// (running: false) so chips keep describing the finished run until
+			// the next begin/restart resets them — the tooltip's "Last run"
+			// contract. Unknown tasks leave the view with their row, so their
+			// entry is dropped rather than retained.
+			const existing = nextActive.get(key);
+			if (existing && projectId && sourceId && isKnownTask(projectId, sourceId)) {
+				nextActive.set(key, { running: false, errors: existing.errors, warnings: existing.warnings });
+			} else {
+				nextActive.delete(key);
+			}
 			nextUnknown = unknownTasks.filter((ut) => !(ut.projectId === projectId && ut.sourceId === sourceId));
 			break;
+		}
 
 		default:
 			return null;

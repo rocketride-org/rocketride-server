@@ -13,7 +13,7 @@ authors = [
 ]
 license = "MIT"
 dependencies = [
-  "mcp>=1.2.0",
+  "mcp>=2.0.0,<3",
   "rocketride>=1.0.4",
 ]
 

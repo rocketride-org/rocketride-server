@@ -658,6 +658,15 @@ def main() -> None:
         - Other exceptions: Error message and non-zero exit code
         - Normal completion: Exit with command's return code
     """
+    # Tolerate Unicode output on non-Unicode consoles, which would otherwise
+    # abort the command with UnicodeEncodeError.
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(errors='replace')
+        except (AttributeError, ValueError, OSError):
+            # Stream is not a reconfigurable text wrapper; nothing to relax
+            pass
+
     try:
         # Create CLI instance and run with asyncio
         cli = RocketRideCLI()

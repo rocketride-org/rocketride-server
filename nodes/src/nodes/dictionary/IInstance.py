@@ -142,6 +142,11 @@ to be delinquent on their repayment schedule by 60 days or more.
     def writeAnswers(self, answer: Answer):
         # Iterate over the extracted JSON objects
         definitions = answer.getJson()
+        if not isinstance(definitions, list):
+            raise ValueError(
+                f'Dictionary expected the LLM response to be a JSON array of definitions, '
+                f'got {type(definitions).__name__}.'
+            )
 
         # Create a list of documents
         documents: List[Doc] = []

@@ -36,6 +36,7 @@ import { icons } from './shared/util/icons';
 import { ConnectionManager } from './connection/connection';
 import { DeployManager } from './connection/deploy-manager';
 import { ConfigManager } from './config';
+import { savePipelineDocument } from './shared/util/pipelineSave';
 import { EngineRegistry } from './engine';
 import { getUserConfigDir, getSystemInstallDir, migrateLocalEngine, migrateServiceConfig } from './engine/config/config-migration';
 
@@ -428,6 +429,34 @@ function sleep(ms: number): Promise<void> {
 }
 
 /**
+ * Creates a brand-new, NAMELESS untitled pipeline document and opens it in the
+ * pipeline grid editor — the standard VS Code new-file lifecycle, shared by the
+ * sidebar "New pipeline" action and the File ▸ New File… picker.
+ *
+ * The document is deliberately path-less. A path-bearing untitled URI is
+ * treated by VS Code as already destined for that file, so it silent-saves with
+ * no dialog (and errors "file already exists" when the file is present). A
+ * nameless untitled defers everything to first save, which is handled by the
+ * scoped Ctrl+S keybinding / webview Save button → {@link savePipelineDocument}.
+ */
+async function createUntitledPipeline(): Promise<void> {
+	// step: require an open workspace — pipelines are rooted in it.
+	if (!vscode.workspace.workspaceFolders?.length) {
+		vscode.window.showErrorMessage('No workspace folder open');
+		return;
+	}
+
+	try {
+		// step: open a NAMELESS untitled document seeded with the empty-pipeline
+		// template (born dirty), then show it in the pipeline grid editor.
+		const doc = await vscode.workspace.openTextDocument({ language: 'json', content: JSON.stringify({ components: [] }, null, 2) });
+		await vscode.commands.executeCommand('vscode.openWith', doc.uri, 'rocketride.PageProject');
+	} catch (error) {
+		vscode.window.showErrorMessage(`Failed to create pipeline: ${error}`);
+	}
+}
+
+/**
  * Registers utility commands that coordinate between providers
  */
 function registerUtilityCommands(context: vscode.ExtensionContext): void {
@@ -489,31 +518,31 @@ function registerUtilityCommands(context: vscode.ExtensionContext): void {
 		}),
 
 		// ── Pipeline file commands (previously in SidebarFilesProvider) ──────────
+		// Both entry points — the sidebar "New pipeline" action and the
+		// File ▸ New File… picker — mint a new untitled .pipe through the
+		// standard VS Code document lifecycle (see createUntitledPipeline).
 		vscode.commands.registerCommand('rocketride.sidebar.files.createFile', async () => {
-			if (!vscode.workspace.workspaceFolders) {
-				vscode.window.showErrorMessage('No workspace folder open');
-				return;
-			}
-			const workspaceFolder = vscode.workspace.workspaceFolders[0];
-			const config = ConfigManager.getInstance().getConfig();
-			const rawPath = config?.defaultPipelinePath || 'pipelines';
-			const relativePath = rawPath.replace(/^\$\{workspaceFolder\}[/\\]?/, '');
-			const defaultDir = vscode.Uri.joinPath(workspaceFolder.uri, relativePath);
+			await createUntitledPipeline();
+		}),
 
-			const fileUri = await vscode.window.showSaveDialog({
-				defaultUri: vscode.Uri.joinPath(defaultDir, 'new-pipeline'),
-				filters: { 'RocketRide Pipeline': ['pipe'] },
-				title: 'Create New Pipeline',
-			});
-			if (!fileUri) return;
+		vscode.commands.registerCommand('rocketride.pipeline.new', async () => {
+			await createUntitledPipeline();
+		}),
 
-			await vscode.workspace.fs.createDirectory(vscode.Uri.joinPath(fileUri, '..'));
-			const template = { components: [] };
+		// Ctrl+S inside the grid editor (contributes.keybindings, scoped to
+		// activeCustomEditorId): resolve the active custom-editor tab to its
+		// backing document and run the shared save flow — in place for titled
+		// files, the native OS Save dialog (defaulted into the pipelines
+		// directory) for untitled ones.
+		vscode.commands.registerCommand('rocketride.pipeline.save', async () => {
+			const input = vscode.window.tabGroups.activeTabGroup.activeTab?.input;
+			if (!(input instanceof vscode.TabInputCustom) || input.viewType !== 'rocketride.PageProject') return;
+			const document = vscode.workspace.textDocuments.find((d) => d.uri.toString() === input.uri.toString());
+			if (!document) return;
 			try {
-				await vscode.workspace.fs.writeFile(fileUri, Buffer.from(JSON.stringify(template, null, 2), 'utf8'));
-				await vscode.commands.executeCommand('vscode.openWith', fileUri, 'rocketride.PageProject');
+				await savePipelineDocument(document);
 			} catch (error) {
-				vscode.window.showErrorMessage(`Failed to create pipeline: ${error}`);
+				vscode.window.showErrorMessage(`Failed to save pipeline: ${error}`);
 			}
 		}),
 

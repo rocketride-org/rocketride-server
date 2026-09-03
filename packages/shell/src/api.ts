@@ -247,6 +247,7 @@ import { PanelTabBody } from './components/detail-panel/PanelTabBody';
 import { TabControl } from './components/tab-control/TabControl';
 import { TabPanel } from './components/tab-panel/TabPanel';
 import { Modal, CLOSE_GLYPH } from './components/modal/Modal';
+import { SaveFileDialog } from './components/save-file-dialog/SaveFileDialog';
 import { SidebarMenu } from './components/sidebar-menu/SidebarMenu';
 import { SidebarCollapsedProvider, SidebarCollapsedGate, useSidebarCollapsed } from './components/sidebar-menu/SidebarCollapsedContext';
 import { SidebarFooter } from './components/sidebar-footer/SidebarFooter';
@@ -280,6 +281,7 @@ export {
 	ToggleGroup, Chip, ChipAdd, DropZone, Card, MiniCard, MiniContainer,
 	Section, LabelValue, ContentHeader, RocketRideMark,
 	DetailPanel, PanelTabBody, TabControl, TabPanel, Modal, CLOSE_GLYPH,
+	SaveFileDialog,
 	SidebarMenu, SidebarCollapsedProvider, SidebarCollapsedGate,
 	useSidebarCollapsed, SidebarFooter,
 	DataGrid, CardDataGrid, FilterStrip, createActionsColumn, autoFormatter,
@@ -319,6 +321,7 @@ export type { ITabControlProps } from './components/tab-control/TabControl';
 export type { ITabPanelProps, ITabPanelPanel } from './components/tab-panel/TabPanel';
 export type { IModalProps } from './components/modal/Modal';
 export type { IConfirmDialogProps } from './components/modal/ConfirmDialog';
+export type { ISaveFileDialogProps, ISaveFileType } from './components/save-file-dialog/SaveFileDialog';
 export type { ISidebarMenuProps } from './components/sidebar-menu/SidebarMenu';
 export type { ISidebarCollapsedProviderProps, ISidebarCollapsedGateProps } from './components/sidebar-menu/SidebarCollapsedContext';
 export type { SidebarFooterProps, SidebarFooterMenuItem } from './components/sidebar-footer/SidebarFooter';
@@ -423,6 +426,7 @@ export const shellApi = {
 	get TabPanel() { return TabPanel; },
 	get Modal() { return Modal; },
 	get CLOSE_GLYPH() { return CLOSE_GLYPH; },
+	get SaveFileDialog() { return SaveFileDialog; },
 	get SidebarMenu() { return SidebarMenu; },
 	get SidebarCollapsedProvider() { return SidebarCollapsedProvider; },
 	get SidebarCollapsedGate() { return SidebarCollapsedGate; },

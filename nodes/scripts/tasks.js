@@ -235,6 +235,22 @@ function makeDocsGenerateAction() {
     };
 }
 
+function makeCredentialsGenerateAction() {
+    return {
+        run: async (ctx, task) => {
+            await execCommand('node', [path.join(__dirname, 'gen-credentials.mjs')], { task, cwd: PACKAGE_DIR });
+        }
+    };
+}
+
+function makeCredentialsCheckAction() {
+    return {
+        run: async (ctx, task) => {
+            await execCommand('node', [path.join(__dirname, 'gen-credentials.mjs'), '--check'], { task, cwd: PACKAGE_DIR });
+        }
+    };
+}
+
 function makeRunContractTestsAction() {
     return {
         run: async (ctx, task) => {
@@ -290,11 +306,13 @@ module.exports = {
         { name: 'nodes:stop-server', action: makeStopTestServerAction },
         { name: 'nodes:run-contracts', action: makeRunContractTestsAction },
         { name: 'nodes:docs-generate', action: makeDocsGenerateAction },
+        { name: 'nodes:credentials-generate', action: makeCredentialsGenerateAction },
+        { name: 'nodes:credentials-check', action: makeCredentialsCheckAction },
 
         // Public actions (have descriptions)
         { name: 'nodes:build', action: () => ({
             description: 'Build nodes',
-            steps: ['server:build', 'nodes:sync', 'nodes:docs-generate']
+            steps: ['server:build', 'nodes:sync', 'nodes:docs-generate', 'nodes:credentials-generate']
         })},
         { name: 'nodes:test', action: (options) => makeTestAction({ ...options, test_full: false }) },
         { name: 'nodes:test-full', action: (options) => makeTestAction({ ...options, test_full: true }) },

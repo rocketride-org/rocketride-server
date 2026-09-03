@@ -213,6 +213,8 @@
 				"capabilities": {
 					"reasoning": true
 				},
+				"deprecated": true,
+				"migration": "Please use 'claude-opus-5' instead",
 				"apikey": ""
 			},
 			"claude-opus-4-7-fast": {

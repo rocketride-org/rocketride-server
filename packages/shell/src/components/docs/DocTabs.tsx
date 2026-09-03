@@ -74,11 +74,15 @@ const styles = {
 		userSelect: 'none',
 		opacity: isDragging ? 0.4 : 1,
 	}),
+	// Neutral on purpose: "unsaved" must never share a color with the
+	// warning-diagnostics chips (indicator-semantics decision 2026-08-07 —
+	// VS Code's own dirty marker is the plain tab foreground for the same
+	// reason).
 	dirtyDot: {
 		width: 6,
 		height: 6,
 		borderRadius: '50%',
-		backgroundColor: 'var(--rr-color-warning, #f59e0b)',
+		backgroundColor: 'var(--rr-text-primary)',
 		flexShrink: 0,
 	} as CSSProperties,
 	closeBtn: (visible: boolean): CSSProperties => ({

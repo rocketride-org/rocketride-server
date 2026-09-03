@@ -433,7 +433,11 @@ async def task_Data(
     request: Request,
     token: Optional[str] = Query(None, description='Token returned from task execute'),
     teamId: Optional[str] = Query(None, description="Address the team's DEPLOY run of the path's project/source"),
-    authorization: str = Header(..., description='Bearer API key in the Authorization header'),
+    authorization: Optional[str] = Header(
+        None,
+        description='Credential via Authorization header. Optional: may instead be supplied as the '
+        '?auth= query param, which AuthMiddleware also accepts.',
+    ),
 ) -> Response:
     r"""
     Process data uploads through RocketRide pipelines.
@@ -445,7 +449,12 @@ async def task_Data(
     Args:
         request (Request): The FastAPI request object
         token (str): Task token from pipeline execution
-        authorization (str): Bearer token in Authorization header
+        authorization (str): Bearer token in the Authorization header. May
+            instead be supplied as the ``?auth=`` query param (accepted by
+            AuthMiddleware) — used by out-of-band uploaders like the dropper
+            widget's self-contained upload URL, where no header can be set.
+            Prefer the header where possible: query strings can end up in
+            access logs and browser history.
 
     Example Usage:
         # Multipart form upload
@@ -453,6 +462,10 @@ async def task_Data(
              -H "Authorization: Bearer your-api-key" \
              -F "file=@document.pdf" \
              -F "question=What is this about?"
+
+        # Query-param auth (no header available, e.g. dropper upload URL)
+        curl -X POST "http://localhost:8000/task/data?token=task-123&auth=your-public-key" \
+             -F "file=@document.pdf"
 
         # Raw stream upload (PUT or POST)
         curl -X PUT "http://localhost:8000/task/data?token=task-123" \
@@ -541,7 +554,11 @@ async def task_Process(
     request: Request,
     token: Optional[str] = Query(None, description='Token returned from task execute'),
     teamId: Optional[str] = Query(None, description="Address the team's DEPLOY run of the path's project/source"),
-    authorization: str = Header(..., description='Bearer API key in the Authorization header'),
+    authorization: Optional[str] = Header(
+        None,
+        description='Credential via Authorization header. Optional: may instead be supplied as the '
+        '?auth= query param, which AuthMiddleware also accepts.',
+    ),
 ) -> DataResult:
     r"""
     Process data uploads through RocketRide pipelines.

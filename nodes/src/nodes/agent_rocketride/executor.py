@@ -29,6 +29,7 @@ from __future__ import annotations
 import json
 import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from contextvars import copy_context
 from typing import Any, Dict, List
 
 import jmespath
@@ -482,7 +483,10 @@ def _execute_wave_calls(
 
     with ThreadPoolExecutor(max_workers=n) as pool:
         # Build a future→index mapping so we can place each result correctly.
-        future_to_idx = {pool.submit(_run_one, call): i for i, call in enumerate(tagged)}
+        # Run each task under a copy of the current context: a raw submit does not
+        # propagate context vars, so per-turn LLM usage (llm_adapter._TURN_CALLS) would
+        # not reach the open turn's collector and the agent's answer would under-count.
+        future_to_idx = {pool.submit(copy_context().run, _run_one, call): i for i, call in enumerate(tagged)}
         for future in as_completed(future_to_idx):
             idx = future_to_idx[future]
             try:

@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<title>Drop files</title>
+		<!-- Minimal pre-JS styling only; the shared design-system
+		     (../shared/theme.css) is imported by main.ts and inlined at build. -->
+		<style>
+			:root {
+				color-scheme: light dark;
+			}
+			body {
+				font:
+					13px/1.5 system-ui,
+					sans-serif;
+				margin: 12px;
+			}
+			.empty {
+				opacity: 0.6;
+				padding: 8px 0;
+			}
+		</style>
+	</head>
+	<body>
+		<div id="root" class="empty">Waiting for dropper info…</div>
+		<script type="module" src="./main.ts"></script>
+	</body>
+</html>

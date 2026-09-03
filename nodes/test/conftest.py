@@ -323,6 +323,9 @@ def pytest_generate_tests(metafunc):
             # Require live third-party API credentials (no live calls in default CI):
             'tool_xtrace_memory',
             'tool_mem0',
+            # Hits data.sec.gov from the services.json test block; opt in via
+            # ROCKETRIDE_INCLUDE_SKIP=authoritative_overlay.
+            'authoritative_overlay',
         }
         include_skip = {n.strip() for n in os.environ.get('ROCKETRIDE_INCLUDE_SKIP', '').split(',') if n.strip()}
 
