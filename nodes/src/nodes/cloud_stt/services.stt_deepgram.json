@@ -1,0 +1,183 @@
+{
+	//
+	// Required:
+	//		The displayable name of this node
+	//
+	"title": "Speech To Text (Deepgram)",
+	//
+	// Required:
+	//		The protocol is the endpoint protocol
+	//
+	"protocol": "stt_deepgram://",
+	//
+	// Required:
+	//		Class type of the node - what it does
+	//
+	"classType": ["audio"],
+	//
+	// Required:
+	//		Capabilities are flags that change the behavior of the underlying
+	//		engine. "experimental" marks this node as not yet production-ready --
+	//		the request/response shape is read from Deepgram's own reference docs
+	//		but has not been exercised against a live account.
+	//
+	"capabilities": ["experimental"],
+	//
+	// Optional:
+	//		Register is either filter, endpoint or ignored if not specified. If the
+	//		type is specified, a factory is registered of that given type
+	//
+	"register": "filter",
+	//
+	// Optional:
+	//		The node is the actual physical node to instantiate - if
+	//		not specified, the protocol will be used
+	//
+	"node": "python",
+	//
+	// Optional:
+	//		The path is the executable/script code. Shared package: a second cloud
+	//		STT vendor would dispatch by logicalType from the same nodes.cloud_stt,
+	//		mirroring nodes.cloud_tts.
+	//
+	"path": "nodes.cloud_stt",
+	//
+	// Required:
+	//		The prefix map when added/removed when converting URLs <=> paths
+	//
+	"prefix": "stt_deepgram",
+	//
+	// Optional:
+	//		Description of this driver
+	//
+	"description": ["Transcribes incoming audio/video to text using Deepgram's cloud speech-to-text API.", "Buffers the streamed clip and sends it to Deepgram as one request at END, unlike audio_transcribe's local real-time chunking. Calls the vendor API directly from the engine host over HTTPS.", "The API key falls back to the DEEPGRAM_API_KEY environment variable when blank."],
+	//
+	// Optional:
+	//	  The icon to display in the UI for this node
+	//
+	"icon": "deepgram.svg",
+	"documentation": "https://docs.rocketride.org",
+	//
+	//	Optional:
+	//		As a pipe component, define what this pipe component takes
+	//		and what it produces
+	//
+	"lanes": {
+		"audio": ["text"],
+		"video": ["text"]
+	},
+	//
+	//	Optional:
+	//		Profile section are configuration options used by the driver itself.
+	//		Single flat profile: unlike cloud_tts's per-model voice profiles, Deepgram's
+	//		model choice needs no nested per-model config, so there is no profile
+	//		selector field below -- connConfig never carries a "profile" key, which
+	//		keeps every field on the no-profile-key branch of Config.getNodeConfig
+	//		(top-level keys read directly) rather than the profile branch that drops
+	//		them (see #2070).
+	//
+	"preconfig": {
+		"default": "default",
+		"profiles": {
+			"default": {
+				"title": "Deepgram",
+				"apikey": "",
+				"model": "nova-3",
+				"language": "en",
+				"smartFormat": true,
+				"punctuate": true
+			}
+		}
+	},
+	//
+	// Optional:
+	//		Local field definitions - these define fields only for the
+	//		current service. You may specify them here, or directly
+	//		in the shape
+	//
+	"fields": {
+		"stt_deepgram.apikey": {
+			"type": "string",
+			"title": "API Key",
+			"description": "Deepgram API key (from https://deepgram.com)",
+			"default": "",
+			"secure": true,
+			"ui": {
+				"ui:widget": "ApiKeyWidget"
+			}
+		},
+		"stt_deepgram.model": {
+			"type": "string",
+			"title": "Model",
+			"description": "Deepgram transcription model",
+			"default": "nova-3",
+			"enum": [
+				["nova-3", "Nova-3 (latest, general)"],
+				["nova-2", "Nova-2"],
+				["enhanced", "Enhanced"],
+				["base", "Base"]
+			]
+		},
+		"stt_deepgram.language": {
+			"type": "string",
+			"title": "Language",
+			"description": "BCP-47 language code (e.g. en, en-US, es, fr)",
+			"default": "en"
+		},
+		"stt_deepgram.smartFormat": {
+			"type": "boolean",
+			"title": "Smart Format",
+			"description": "Apply formatting (dates, numbers, currency) to the transcript",
+			"default": true,
+			"enum": [
+				[true, "Yes"],
+				[false, "No"]
+			]
+		},
+		"stt_deepgram.punctuate": {
+			"type": "boolean",
+			"title": "Punctuate",
+			"description": "Add punctuation and capitalization to the transcript",
+			"default": true,
+			"enum": [
+				[true, "Yes"],
+				[false, "No"]
+			]
+		}
+	},
+	//
+	// Required:
+	//		Defines the fields (shape) of the service. Either source or target
+	//		may be specified, or both, but at least one is required
+	//
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Deepgram Speech To Text",
+			"properties": ["stt_deepgram.apikey", "stt_deepgram.model", "stt_deepgram.language", "stt_deepgram.smartFormat", "stt_deepgram.punctuate"]
+		}
+	],
+	//
+	// Optional:
+	//		Test configuration for automated node testing
+	//
+	"test": [
+		{
+			// No audio mock exists, so this runs only when a real key is present
+			// (ROCKETRIDE_STT_DEEPGRAM_KEY) and is skipped in CI otherwise.
+			"requires": ["ROCKETRIDE_STT_DEEPGRAM_KEY"],
+			"avoidMocks": true,
+			"profiles": ["default"],
+			"cases": [
+				{
+					"audio": "audio/Star Wars.mp3",
+					"expect": {
+						"text": {
+							"notEmpty": true
+						}
+					}
+				}
+			]
+		}
+	]
+}
