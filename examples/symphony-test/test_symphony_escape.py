@@ -620,12 +620,16 @@ async def run(args: argparse.Namespace) -> int:
         melody = None
         if synthesis:
             entries = synthesis.get('melody')
-            if isinstance(entries, list):
-                pairs = [
-                    (int(e['beat']), str(e['note']))
-                    for e in entries
-                    if isinstance(e, dict) and 'beat' in e and 'note' in e
-                ]
+            if isinstance(entries, list) and entries:
+                # Every entry must yield a pair. Filtering the malformed ones out
+                # would let a reply carrying the right 15 pairs PLUS a junk
+                # {"beat": 99} pass, because the junk would simply be discarded.
+                well_formed = all(isinstance(e, dict) and 'beat' in e and 'note' in e for e in entries)
+                pairs = (
+                    [(int(e['beat']), str(e['note'])) for e in entries]
+                    if well_formed and all(str(e['beat']).lstrip('-').isdigit() for e in entries)
+                    else []
+                )
                 # Check beat identity before discarding it: duplicate or
                 # out-of-range beats must not pass just because the sorted notes
                 # line up with the expected melody.

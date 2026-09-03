@@ -59,7 +59,16 @@ Create the database **outside any pipeline** — over the REST API, by whoever o
 
 Do not let a pipeline run create the database and then hand its ID to later runs. A database this node created is owned by that run and is deleted at its teardown, so the ID goes stale the moment the creating run ends — and a consumer still attached to it loses the database underneath itself. Sharing only works reliably when the database outlives every run that uses it, which means nothing that deletes it can be one of them.
 
-An attached database is never deleted by this node; managing its lifetime, including its TTL, is the caller's responsibility. Attached runs cannot build indexes because a Database API Token cannot retrieve the database's connection ID. Build indexes in the owning run that created the database.
+An attached database is never deleted by this node; managing its lifetime, including its TTL, is the caller's responsibility.
+
+**Indexes on a shared database have to be built outside the node.** `build_index` needs the database's `default_connection_id`, and a Database API Token gets 403 from `GET /v1/databases/{id}`, so an attached run cannot read it back — the node raises a clear error rather than guessing. There is no pipeline run that can do it either: a database created outside a pipeline has no owning run, and a database a run created is deleted when that run ends. So whoever creates the shared database keeps the `default_connection_id` from the create response and builds indexes itself:
+
+```http
+POST /v1/connections/{default_connection_id}/tables/{schema}/{table}/indexes
+{ "index_name": "...", "columns": ["..."], "index_type": "bm25" }
+```
+
+Build the index after the table exists and has rows. `bm25_search` and `vector_search` then work normally from every attached run — it is only index _creation_ that is closed to them.
 
 **An attached run assumes the default schema is `main`.** The same 403 that hides the connection ID hides the database's real default schema, so the node cannot read it back. If the owning run created the database with a different default schema, pass `schema` explicitly on `load_data` — otherwise rows land in `main.<table>` and the owning run's queries against its own schema will not see them.
 
