@@ -55,7 +55,9 @@ tolerated. Anything with no JSON in it raises rather than leaving an empty table
 
 ## Sharing a database between runs
 
-Create the database separately or let one pipeline run create it, then pass its ID to other runs through `database_id` (or `HOTDATA_DATABASE_ID`). Those runs attach to the same database instead of creating their own, so their agents can share tables and query results.
+Create the database **outside any pipeline** — over the REST API, by whoever owns the demo — then pass its ID to every run through `database_id` (or `HOTDATA_DATABASE_ID`). Those runs attach to it instead of creating their own, so their agents can share tables and query results.
+
+Do not let a pipeline run create the database and then hand its ID to later runs. A database this node created is owned by that run and is deleted at its teardown, so the ID goes stale the moment the creating run ends — and a consumer still attached to it loses the database underneath itself. Sharing only works reliably when the database outlives every run that uses it, which means nothing that deletes it can be one of them.
 
 An attached database is never deleted by this node; managing its lifetime, including its TTL, is the caller's responsibility. Attached runs cannot build indexes because a Database API Token cannot retrieve the database's connection ID. Build indexes in the owning run that created the database.
 
@@ -84,7 +86,7 @@ Hotdata runs **Apache DataFusion 54 behind the PostgreSQL parser dialect**. Trea
 - `allow_execute` is an application-level gate on raw SQL. It is **not** write protection — the SQL surface rejects writes regardless. It exists to keep untrusted callers from running expensive scans, which are billed per TB scanned.
 - **`load_data` is a write path, and the SQL read-only guarantee does not cover it.** `replace`, `update` and `delete` modes overwrite or remove existing rows, so they are disabled unless `allow_destructive_load` is on. Without that gate an agent asked to "delete the bad rows" will route around the SQL guard by calling `load_data` with `mode=replace`. Default is append/upsert only.
 - One statement per call; `SHOW TABLES` and `SHOW COLUMNS` error, so use `information_schema` or `DESCRIBE`.
-- **Ephemeral data is destroyed when the run ends.** The configured TTL is only a fallback for a crashed engine. Attached databases are left in place.
+- **Ephemeral data is destroyed when the run ends.** The configured TTL is only a fallback for a crashed engine. An attached database is left in place instead, and the `ttl` field does not apply to it — its expiry is whatever the creator set, so a database created with no TTL is never cleaned up automatically.
 - With a Database API Token, both `GET /v1/databases/{id}` and `DELETE /v1/databases/{id}` return 403, so attached databases rely on their TTL for cleanup.
 - **Writes to one table are serialized server-side.** A second concurrent writer is refused
   with `409 RESOURCE_LOCKED` ("retry shortly"). The node replays those — the request is

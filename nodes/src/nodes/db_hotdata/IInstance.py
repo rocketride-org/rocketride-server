@@ -95,6 +95,11 @@ _LOAD_MODES = frozenset({'append', 'replace', 'upsert', 'update', 'delete'})
 _DESTRUCTIVE_MODES = frozenset({'replace', 'update', 'delete'})
 _KEYED_MODES = frozenset({'upsert', 'update', 'delete'})
 
+#: How many times to re-read the table's columns and re-project a refused append.
+#: More than one because a concurrent producer can widen the table between the
+#: read and the retry; bounded because each attempt costs an upload.
+_WIDEN_ATTEMPTS = 3
+
 #: Index types. bm25 is full text, vector is semantic, sorted speeds range scans.
 _INDEX_TYPES = frozenset({'bm25', 'vector', 'sorted'})
 
@@ -266,20 +271,23 @@ def _json_from_text(text: str) -> Any:
     return seen
 
 
-#: Single-key wrapper names unwrapped into N rows. An allowlist, not "any single
-#: key holding a list of objects": a legitimate row like
-#: ``{"line_items": [{...}, {...}]}`` is one record with a nested list, and
-#: exploding it would silently lose the column and multiply the row count.
-_ROW_WRAPPER_KEYS = frozenset({'rows', 'records', 'items', 'data', 'results', 'entries'})
+#: The one reserved envelope key unwrapped into N rows. Deliberately just this
+#: one: ``items``, ``data`` and ``results`` are all plausible business column
+#: names, and unwrapping ``{"items": [{...}, {...}]}`` would turn one legitimate
+#: record with a nested list into several rows and drop the column. Guessing
+#: wrong in that direction loses data silently, while guessing wrong the other
+#: way produces one row with a visible nested value.
+_ROW_WRAPPER_KEY = 'rows'
 
 
 def _rows_from_payload(payload: Any) -> List[Dict[str, Any]]:
     """Normalize a decoded answer into the rows to load, or [] if it holds none.
 
-    A bare object is one row. A list of objects is many. A wrapper object whose
-    only key is one of ``_ROW_WRAPPER_KEYS`` and whose value is a list of objects
-    is that list - models produce that shape constantly, and loading it as a
-    single row would flatten every record into one unusable cell.
+    A bare object is one row. A list of objects is many. An object whose only key
+    is the reserved ``rows`` envelope, holding a list of objects, is that list -
+    models produce that shape constantly, and loading it as a single row would
+    flatten every record into one unusable cell. No other key is unwrapped: see
+    ``_ROW_WRAPPER_KEY``.
 
     A list holding anything that is not an object is rejected rather than
     filtered: dropping the bad entries would load a subset and report success.
@@ -287,7 +295,7 @@ def _rows_from_payload(payload: Any) -> List[Dict[str, Any]]:
     if isinstance(payload, dict):
         if len(payload) == 1:
             key, only = next(iter(payload.items()))
-            if str(key).lower() in _ROW_WRAPPER_KEYS and isinstance(only, list):
+            if str(key).lower() == _ROW_WRAPPER_KEY and isinstance(only, list):
                 if all(isinstance(item, dict) for item in only):
                     return only
                 raise ValueError(f'db_hotdata: "{key}" must hold objects, not scalars or lists')
@@ -1024,7 +1032,8 @@ ORDER BY table_schema, table_name, ordinal_position"""
             'INSERT does not work. Use mode=append to add, replace to overwrite, or upsert with key columns. '
             'Do not call this twice for the same data: append adds rows again rather than replacing them. '
             'An identical append repeated within one run is skipped and returns deduplicated=true. '
-            'Data lives only for this pipeline run.'
+            'In the default ephemeral mode the data lives only for this pipeline run; when the node '
+            'is attached to an existing database the data outlives the run.'
         ),
     )
     def load_data(self, args: Any) -> Dict[str, Any]:
@@ -1203,51 +1212,63 @@ ORDER BY table_schema, table_name, ordinal_position"""
                 # and a load the server does refuse this way leaves the table's
                 # row count unchanged. So there is no partial-commit state for
                 # the retry to duplicate.
-                columns = self._table_columns(schema, table)
-                if not columns:
-                    raise
-                projected = [{**{c: None for c in columns}, **row} for row in rows]
-                if projected == rows:
-                    raise
-                # For the message: columns the caller never supplied at all.
-                missing = [c for c in columns if not any(c in row for row in rows)]
-                debug(f'db_hotdata: widening {len(rows)} row(s) to the {len(columns)} columns of {schema}.{table}')
-                # A fresh upload: the failed load has already consumed the old one.
-                upload_id = glb.client.upload_bytes(
-                    _to_ndjson(projected),
-                    filename=f'{table}.ndjson',
-                    content_type='application/x-ndjson',
-                )
-                try:
-                    result = self._perform_load(
-                        glb,
-                        database_id=database_id,
-                        schema=schema,
-                        table=table,
-                        mode=mode,
-                        upload_id=upload_id,
-                        result_id=result_id,
-                        data_format=data_format,
-                        key=key,
-                        rows=projected,
-                    )
-                except Exception as widen_error:
-                    if not _is_type_conflict(widen_error):
+                # Re-read and re-project in a bounded loop rather than once. The
+                # shape that makes this necessary is concurrent: another producer
+                # can add a column between our schema read and our retry, so the
+                # widened payload is stale on arrival and refused for a different
+                # missing column. One attempt would surface that as a failure the
+                # caller cannot act on.
+                result = None
+                for _attempt in range(_WIDEN_ATTEMPTS):
+                    columns = self._table_columns(schema, table)
+                    if not columns:
                         raise
-                    # Filling a column with null works only while the column is
-                    # textual. A numeric or temporal column that is null in every
-                    # row of the batch is inferred as a string, and the server
-                    # refuses to change the column's type. There is no payload
-                    # that satisfies both rules, so say what the actual fix is
-                    # instead of surfacing a bare CONFLICT.
-                    raise ValueError(
-                        f'db_hotdata: rows of this shape cannot be appended to {schema}.{table}. '
-                        f'The table already has columns these rows do not set ({", ".join(missing)}), '
-                        'and filling them with null re-types them as text, which the server rejects. '
-                        'One table needs one row shape: give each kind of record its own table, or '
-                        'have every producer emit every column. '
-                        f'Server said: {widen_error}'
-                    ) from widen_error
+                    projected = [{**{c: None for c in columns}, **row} for row in rows]
+                    if projected == rows:
+                        raise
+                    # For the message: columns the caller never supplied at all.
+                    missing = [c for c in columns if not any(c in row for row in rows)]
+                    debug(f'db_hotdata: widening {len(rows)} row(s) to the {len(columns)} columns of {schema}.{table}')
+                    # A fresh upload: the failed load has already consumed the old one.
+                    upload_id = glb.client.upload_bytes(
+                        _to_ndjson(projected),
+                        filename=f'{table}.ndjson',
+                        content_type='application/x-ndjson',
+                    )
+                    try:
+                        result = self._perform_load(
+                            glb,
+                            database_id=database_id,
+                            schema=schema,
+                            table=table,
+                            mode=mode,
+                            upload_id=upload_id,
+                            result_id=result_id,
+                            data_format=data_format,
+                            key=key,
+                            rows=projected,
+                        )
+                        break
+                    except Exception as widen_error:
+                        if _is_missing_column(widen_error) and _attempt < _WIDEN_ATTEMPTS - 1:
+                            # The table grew underneath us; read it again.
+                            continue
+                        if not _is_type_conflict(widen_error):
+                            raise
+                        # Filling a column with null works only while the column is
+                        # textual. A numeric or temporal column that is null in every
+                        # row of the batch is inferred as a string, and the server
+                        # refuses to change the column's type. There is no payload
+                        # that satisfies both rules, so say what the actual fix is
+                        # instead of surfacing a bare CONFLICT.
+                        raise ValueError(
+                            f'db_hotdata: rows of this shape cannot be appended to {schema}.{table}. '
+                            f'The table already has columns these rows do not set ({", ".join(missing)}), '
+                            'and filling them with null re-types them as text, which the server rejects. '
+                            'One table needs one row shape: give each kind of record its own table, or '
+                            'have every producer emit every column. '
+                            f'Server said: {widen_error}'
+                        ) from widen_error
             if fingerprint:
                 glb.record_load(fingerprint, 'partial' if result.get('partial') else 'complete')
             # A partial append deliberately KEEPS its reservation. Append is not

@@ -34,6 +34,17 @@ HOTDATA_API = 'https://api.hotdata.dev'
 RETRY = False
 
 
+def _require_env(*names: str) -> int:
+    """Report missing credentials by name instead of dying on a raw KeyError."""
+    import os
+
+    missing = [n for n in names if not os.environ.get(n)]
+    if missing:
+        print('missing environment variable(s): ' + ', '.join(missing))
+        return 2
+    return 0
+
+
 def _call(method: str, path: str, body: dict | None = None, database_id: str = '') -> tuple[int, dict | str]:
     """Like _hotdata, but returns the status and body instead of raising."""
     headers = {
@@ -139,6 +150,9 @@ def main() -> int:
     global RETRY
     RETRY = args.retry
     _load_env()
+    missing = _require_env('ROCKETRIDE_DB_HOTDATA_KEY', 'ROCKETRIDE_DB_HOTDATA_WORKSPACE_ID')
+    if missing:
+        return missing
 
     db = _hotdata('POST', '/v1/databases', {'name': f'probe-{uuid.uuid4().hex[:8]}', 'expires_at': '1h'})
     database_id = db['id']

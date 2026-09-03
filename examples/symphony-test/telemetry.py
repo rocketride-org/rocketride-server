@@ -41,6 +41,10 @@ STATE_FILE = Path(__file__).parent / '.telemetry-db.json'
 #: anyway (403) and cleanup falls to expiry.
 TELEMETRY_TTL = '7d'
 
+#: Wall-clock ceiling on retrying one locked telemetry write, seconds. Telemetry is
+#: never worth stalling the run it is measuring.
+LOCK_RETRY_BUDGET_S = 60.0
+
 
 class TelemetryError(RuntimeError):
     pass
@@ -148,7 +152,10 @@ class Telemetry:
         upload_id = self._upload(payload)
 
         # Same contention the node hit: writes to one table are serialized, and a second
-        # writer is refused with RESOURCE_LOCKED rather than queued.
+        # writer is refused with RESOURCE_LOCKED rather than queued. Bounded by a wall-clock
+        # deadline, not just an attempt count: `write` promises not to fail the run it
+        # measures, and stalling it for several minutes breaks that promise just as surely.
+        deadline = time.monotonic() + LOCK_RETRY_BUDGET_S
         for attempt in range(1, 40):
             status, body = _call(
                 'POST',
@@ -157,6 +164,8 @@ class Telemetry:
                 database_id=self.database_id,
             )
             if not _locked(status, body):
+                break
+            if time.monotonic() >= deadline:
                 break
             time.sleep(0.5 * attempt + random.uniform(0, 0.5))
         if status >= 400:

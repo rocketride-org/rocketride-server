@@ -626,7 +626,11 @@ async def run(args: argparse.Namespace) -> int:
                     for e in entries
                     if isinstance(e, dict) and 'beat' in e and 'note' in e
                 ]
-                melody = [n for _b, n in sorted(pairs)] if pairs else None
+                # Check beat identity before discarding it: duplicate or
+                # out-of-range beats must not pass just because the sorted notes
+                # line up with the expected melody.
+                if pairs and sorted(b for b, _n in pairs) == list(range(1, len(pairs) + 1)):
+                    melody = [n for _b, n in sorted(pairs)]
         results.append(
             check(
                 'CONDUCTOR: reconstructed the melody from resolved evidence',
