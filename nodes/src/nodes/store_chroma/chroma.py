@@ -75,6 +75,7 @@ class Store(DocumentStoreBase):
     renderChunkSize: int = 32 * 1024 * 1024
     payload_limit: int = 32 * 1024 * 1024
     similarity: str = 'Cosine'
+    top_k: int | None = None
     client: chromadb.HttpClient
     collectionObj: chromadb.Collection | None = None
 
@@ -95,6 +96,12 @@ class Store(DocumentStoreBase):
         self.host = re.sub(r'^https?://', '', config.get('host', 'localhost').strip()).rstrip('/')
         self.port = self._coercePort(config.get('port', 8000))
         self.threshold_search = config.get('score', 0.5)
+
+        # Optional per-node retrieval limit. When set, it controls how many
+        # candidate documents are fetched from Chroma before score filtering,
+        # overriding the incoming DocFilter default (25). Left unset it falls
+        # back to the caller-supplied limit, so existing pipelines are unchanged.
+        self.top_k = self._coerceTopK(config.get('top_k', None))
 
         # Strip API key also
         self.apikey = config.get('apikey', None)
@@ -190,6 +197,37 @@ class Store(DocumentStoreBase):
             debug(f'chroma: port {parsed} is out of range 1-65535; using default {default}')
             return default
         return parsed
+
+    @staticmethod
+    def _coerceTopK(value: Any) -> int | None:
+        """
+        Validate the configured top_k and coerce it to a positive int.
+
+        Accepts int or float (whole numbers only), rejecting bool. Returns
+        None for an unset/blank value so retrieval falls back to the incoming
+        DocFilter limit.
+        """
+        if value is None or value == '':
+            return None
+        # bool is an int subclass; reject it explicitly.
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise ValueError(f'top_k must be an integer >= 1, got {value!r}')
+        if isinstance(value, float):
+            if not value.is_integer():
+                raise ValueError(f'top_k must be an integer >= 1, got {value!r}')
+            value = int(value)
+        if value < 1:
+            raise ValueError(f'top_k must be an integer >= 1, got {value!r}')
+        return value
+
+    def _effectiveLimit(self, docFilter: DocFilter) -> int | None:
+        """
+        Resolve the retrieval limit: the configured top_k wins when set,
+        otherwise the caller-supplied DocFilter limit is used.
+        """
+        if self.top_k is not None:
+            return self.top_k
+        return docFilter.limit
 
     def _getServerVersion(self) -> str | None:
         """
@@ -374,7 +412,7 @@ class Store(DocumentStoreBase):
             where=filters,
             where_document={'$contains': query.text},
             offset=docFilter.offset,
-            limit=docFilter.limit,
+            limit=self._effectiveLimit(docFilter),
             include=['metadatas', 'documents'],
         )
 
@@ -412,7 +450,9 @@ class Store(DocumentStoreBase):
             raise BaseException('Non-zero offset is not supported in semantic searching')
 
         # Perform the search
-        results = self.collectionObj.query(query_embeddings=[query.embedding], n_results=docFilter.limit, where=filters)
+        results = self.collectionObj.query(
+            query_embeddings=[query.embedding], n_results=self._effectiveLimit(docFilter), where=filters
+        )
 
         # Convert the points into groups
         docs = self._convertToDocs(results)
@@ -433,6 +473,11 @@ class Store(DocumentStoreBase):
         filter_dict = self._convertFilter(docFilter)
 
         # Perform the query
+        #
+        # Note: get() is an exact-fetch path (QuestionType.GET and, internally,
+        # full-table/full-document rehydration). It must honor the caller's
+        # limit directly — the node-level top_k applies only to similarity
+        # search (searchSemantic/searchKeyword), not to whole-object fetches.
         results = self.collectionObj.get(
             where=filter_dict,
             offset=docFilter.offset,

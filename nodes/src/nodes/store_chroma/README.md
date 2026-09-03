@@ -30,6 +30,7 @@ Documents must pass through an embedding node before reaching this node; chunks 
 | `serverName` | string | Default "chroma". Namespace for agent-facing tool names, e.g. 'chroma' exposes tools as chroma.search / chroma.upsert / chroma.delete. Change this when running multiple Chroma nodes in the same pipeline so their tool names do not collide. |
 | `profile` | string | Default "cloud". Connect to... |
 | `provider` | string |  |
+| `top_k` | integer | **Top K** — maximum candidate documents fetched from Chroma before score filtering. Unset ⇒ the caller's limit (25 on the data lane). Raise it to widen recall for a reranker. |
 
 ---
 
@@ -62,6 +63,14 @@ Tool calls run on the control plane and do not flow through the pipeline's embed
 - **Keyword search** uses ChromaDB's `$contains` document filter and supports offset/limit paging.
 - Raw distances are normalized to scores: cosine distances map to `(distance + 1) / 2`; `l2`/`ip` distances pass through a sigmoid. Results scoring below **0.20** are always dropped before they leave the node, regardless of the `score` threshold.
 - Filters on `nodeId`, `parent`, `objectId`, `tableId`, `chunkId` ranges, and permissions are translated to ChromaDB `where` clauses. Documents marked deleted are excluded with `$ne: true`, so records that never had an `isDeleted` key still match (they are treated as active).
+
+---
+
+## Retrieval tuning
+
+**Top K** (`top_k`) controls how many candidate chunks Chroma fetches before score filtering. Raise it (for example, to `20`) to widen the candidate pool for a reranker or for hard, specific queries. When unset, the caller's request limit is used (25 on the data lane; the `chroma.search` tool sets its own `top_k`). It applies to semantic and keyword search only, not to whole-object fetches.
+
+For the strongest results on precise questions, **retrieve generously and rerank down**: set a higher `Top K` here, then place a [Cohere Rerank](../rerank_cohere/README.md) node after this one to reorder the candidates and keep a small, high-relevance set. A complete example is at [`examples/rag-rerank-pipeline.pipe`](../../../../examples/rag-rerank-pipeline.pipe).
 
 ---
 

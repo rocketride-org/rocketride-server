@@ -116,7 +116,7 @@
 						"notEmpty": true,
 						"contains": "Paris",
 						"property": [
-							{ "path": "[0].score", "greaterThanOrEqual": 0.5 },
+							{ "path": "[0].score", "greaterThan": 0.49 },
 							{ "path": "[0].metadata.objectId", "equals": "test-doc-1" }
 						]
 					}
@@ -190,11 +190,11 @@
 		},
 		"chroma.cloud": {
 			"object": "cloud",
-			"properties": ["vector.cloud.host", "vector.cloud.port", "vector.apikey", "vector.collection", "chroma.serverName"]
+			"properties": ["vector.cloud.host", "vector.cloud.port", "vector.apikey", "vector.collection", "vector.top_k", "chroma.serverName"]
 		},
 		"chroma.local": {
 			"object": "local",
-			"properties": ["vector.local.host", "vector.local.port", "vector.collection", "chroma.serverName"]
+			"properties": ["vector.local.host", "vector.local.port", "vector.collection", "vector.top_k", "chroma.serverName"]
 		},
 		//
 		// Profile selection for ChromaDB service

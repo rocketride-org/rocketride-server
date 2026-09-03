@@ -62,6 +62,12 @@
 				[1.0, "Almost identical"]
 			]
 		},
+		"vector.top_k": {
+			"type": "integer",
+			"title": "Top K",
+			"minimum": 1,
+			"description": "Maximum number of candidate documents to retrieve before score filtering. Leave unset to use the pipeline default (25). Raise it to improve recall for precise, number-dense queries."
+		},
 		"vector.apikey": {
 			"type": "string",
 			"title": "API key",

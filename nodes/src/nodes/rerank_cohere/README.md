@@ -55,6 +55,20 @@ All profiles expose `top_n`, `min_score`, and the API key. The Custom profile ad
 
 ---
 
+## Wiring
+
+Reranking sits **between the vector store and the LLM**. The store enriches the question with its `top_k` matches and emits it on the `questions` lane; this node reranks those documents and emits the reordered set on `documents`; the prompt / LLM then builds its context from the reranked `documents`:
+
+```text
+… → embedding → store ──questions──▶ rerank_cohere ──documents──▶ prompt → llm → response
+```
+
+To maximise quality, **retrieve generously and rerank down**: set a higher `top_k` on the store (e.g. `20`) so the reranker has enough candidates to choose from, and a smaller `top_n` here (e.g. `5`) for the final context.
+
+A complete, runnable pipeline is at [`examples/rag-rerank-pipeline.pipe`](../../../../examples/rag-rerank-pipeline.pipe).
+
+---
+
 ## Authentication
 
 A Cohere API key is required. Set it in the node's **API Key** field. The node fails to initialize (with a warning) if the key is missing or blank.
