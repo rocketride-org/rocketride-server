@@ -28,6 +28,7 @@ import { EngineBackend, type StatusEmitter, type EngineInfo, type EngineBackendS
 import type { ConnectionMode } from '../../config';
 import { getUserConfigDir } from '../config/config-migration';
 import { EngineInstaller } from '../shared/engine-installer';
+import { connectionDiscoveryPath, parseConnectionDiscovery, serializeConnectionDiscovery } from './connectionDiscovery';
 import type { ConnectionGroupConfig } from '../../config';
 import { getLogger } from '../../shared/util/output';
 import { icons } from '../../shared/util/icons';
@@ -320,6 +321,7 @@ export class EngineLocal extends EngineBackend {
 
 			child.on('exit', (code, signal) => {
 				this.removePidFile(myPidFile);
+				if (child.pid) this.removeConnectionDiscovery(child.pid);
 
 				if (!processReady && !processErrored) {
 					// Exited during startup — treat as error
@@ -350,6 +352,7 @@ export class EngineLocal extends EngineBackend {
 						this.actualPort = parseInt(match[1], 10);
 						processReady = true;
 							this.logger.output(`${icons.success} Engine ready (port ${this.actualPort})`);
+						if (child.pid) this.writeConnectionDiscovery(child.pid);
 						resolve();
 					}
 				}
@@ -424,6 +427,52 @@ export class EngineLocal extends EngineBackend {
 		if (expectedPath && this.pidFilePath !== expectedPath) return;
 		try { fs.unlinkSync(this.pidFilePath); } catch { /* already gone */ }
 		this.pidFilePath = undefined;
+	}
+
+	/**
+	 * Writes the connection discovery file so any process on the machine can
+	 * find this engine's resolved URI (see connectionDiscovery.ts). Best-effort
+	 * and non-fatal: a write failure here must never break an otherwise-
+	 * successful engine start.
+	 *
+	 * apiKey is hardcoded to the local-mode default ('MYAPIKEY', the same
+	 * fallback `ConnectionManager.connect()` uses when no explicit apiKey is
+	 * configured) rather than plumbed through from the caller: EngineLocal
+	 * only knows the port it started on, not which connection-group config
+	 * ultimately drives the client's actual auth. This file is a discovery
+	 * convenience, not an auth source of truth -- a dev who customized their
+	 * local API key away from the default already knows to configure it
+	 * explicitly on the consuming side too.
+	 */
+	private writeConnectionDiscovery(pid: number): void {
+		if (this.actualPort === undefined) return;
+		try {
+			fs.writeFileSync(
+				connectionDiscoveryPath(this.installer.dir),
+				serializeConnectionDiscovery({
+					uri: `http://localhost:${this.actualPort}`,
+					apiKey: 'MYAPIKEY',
+					pid,
+					updatedAt: new Date().toISOString(),
+				}),
+			);
+		} catch {
+			/* best-effort */
+		}
+	}
+
+	/** Removes the connection discovery file, but only if it's still this
+	 * process's own entry -- an already-running second local engine (a
+	 * different VS Code window) may have overwritten it with its own, and
+	 * this process stopping must not clobber that live entry. */
+	private removeConnectionDiscovery(pid: number): void {
+		const filePath = connectionDiscoveryPath(this.installer.dir);
+		try {
+			const info = parseConnectionDiscovery(fs.readFileSync(filePath, 'utf8'));
+			if (info && info.pid === pid) fs.unlinkSync(filePath);
+		} catch {
+			/* already gone, or never written (e.g. exited before becoming ready) */
+		}
 	}
 
 	// =========================================================================

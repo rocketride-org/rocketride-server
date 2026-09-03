@@ -70,6 +70,14 @@ Cloud connections are not synced because their OAuth token is not an SDK API key
 
 The extension never automatically removes these keys: disconnecting, engine exit, or switching to cloud leaves the last-synced values in place. Remove them by hand if you no longer want them. Each development-group self-hosted connection syncs again, so a hand-edited `ROCKETRIDE_APIKEY` is overwritten on the next successful connection.
 
+## Local Engine Connection Discovery
+
+The local engine backend (`--port=0`) gets a fresh OS-assigned port on every start, which the `.env` Auto-Sync above only helps with for scripts reading `.env` from *this* workspace. For anything else — a long-running script that outlives an engine restart, or a process not tied to any particular workspace — the extension also writes the resolved URI to a small, fixed discovery file: `<user config dir>/engine/connection.json` (`~/Library/Application Support/RocketRide/engine/connection.json` on macOS, `%LOCALAPPDATA%\RocketRide\engine\connection.json` on Windows, `~/.config/RocketRide/engine/connection.json` on Linux — the same directory the engine binary and `version.json` already live in). It's removed when that engine process exits.
+
+The Python SDK checks this file automatically as a fallback: when `RocketRideClient()` gets no explicit `uri` and `ROCKETRIDE_URI` isn't set via the environment or `.env`, it reads this file instead of jumping straight to the cloud default (verifying the recorded PID is still alive first, so a crashed engine's stale entry isn't picked up). An explicit `uri`/`ROCKETRIDE_URI` always takes priority.
+
+This is a "last-connected" file, not a registry of every simultaneously-running local engine across multiple VS Code windows — for the common one-developer-one-local-engine case that's exactly the desired behavior.
+
 ## Monitoring Execution
 
 The **Status** page shows:

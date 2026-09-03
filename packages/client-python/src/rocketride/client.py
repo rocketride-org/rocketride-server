@@ -44,6 +44,7 @@ Basic Usage:
 import os
 from functools import cached_property
 from .core import DAPClient, RocketRideException, CONST_DEFAULT_WEB_CLOUD
+from ._connection_discovery import read_connection_discovery
 from .account import AccountApi
 from .billing import BillingApi
 from .database import DatabaseApi
@@ -105,7 +106,9 @@ class RocketRideClient(
 
     Args:
         uri (str, optional): Service URI of the RocketRide server (e.g., "http://localhost:5565").
-            If not provided, uses ROCKETRIDE_URI environment variable or default service.
+            If not provided, uses ROCKETRIDE_URI environment variable; if that's also unset, falls
+            back to a locally-running engine's connection discovery file (written by the VS Code
+            extension's local engine backend) before defaulting to the cloud service.
         auth (str, optional): Your API key or access token for authentication.
             If not provided, uses ROCKETRIDE_APIKEY environment variable. Required at connect time.
         **kwargs: Additional configuration options like custom module name
@@ -144,7 +147,9 @@ class RocketRideClient(
 
         Args:
             uri: WebSocket URI of your RocketRide server (e.g., "ws://localhost:5565").
-                Optional; uses ROCKETRIDE_URI from env or .env if empty.
+                Optional; uses ROCKETRIDE_URI from env or .env if empty, then a local
+                engine's connection discovery file if that's also unset (see
+                _connection_discovery.py), then the default cloud service.
             auth: Your API key or access token. Optional; uses ROCKETRIDE_APIKEY from env or .env if empty.
             **kwargs: Additional options:
                 - env: Dictionary of environment variables to use instead of os.environ
@@ -198,14 +203,25 @@ class RocketRideClient(
             # Use the provided env dictionary; copy it so the caller's dict is not mutated
             self._env = dict(env)
 
-        # If we didn't get the URI, look at the env. If not there,
-        # use the default
+        # If we didn't get the URI, look at the env. If not there, check
+        # whether a local engine (started by the VS Code extension) left
+        # behind a connection discovery hint -- see _connection_discovery.py.
+        # Only consulted as a last resort, so an explicit uri/env value
+        # always wins and nothing changes for anyone not relying on it.
+        discovery_info = None
         if not uri:
-            uri = self._env.get('ROCKETRIDE_URI', CONST_DEFAULT_WEB_CLOUD)
+            uri = self._env.get('ROCKETRIDE_URI', '')
+            if not uri:
+                discovery_info = read_connection_discovery()
+                uri = discovery_info['uri'] if discovery_info else CONST_DEFAULT_WEB_CLOUD
 
-        # If no explicit auth credential was given, fall back to the environment variable
+        # If no explicit auth credential was given, fall back to the environment
+        # variable, then (only when the URI itself came from the discovery hint
+        # above) that same hint's API key.
         if not auth:
             auth = self._env.get('ROCKETRIDE_APIKEY', None)
+            if not auth and discovery_info:
+                auth = discovery_info['apiKey'] or None
 
         # Normalize the URI into a fully-formed WebSocket address
         from .mixins.connection import ConnectionMixin
