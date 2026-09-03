@@ -47,7 +47,7 @@ Complete reference for building RocketRide pipelines across any project.
 }
 ```
 
-**Field ordering matters:** `components` must come first. The `project_id`, `viewport`, and `version` fields go at the bottom. The `source` field is optional: the VS Code extension manages it automatically.
+**Field ordering matters:** `components` must come first. The `project_id`, `viewport`, and `version` fields go at the bottom. The `source` field is optional **only when the pipeline has exactly one source-kind component**, in which case it is inferred; the VS Code extension sets it for you. With more than one, it must be set explicitly — see Rule 1.
 
 ---
 
@@ -111,7 +111,8 @@ Complete reference for building RocketRide pipelines across any project.
 
 - ID of the entry point component where data enters the pipeline
 - Managed automatically by the VS Code extension
-- When writing pipelines by hand, you can omit this field, the extension will add it
+- When writing pipelines by hand you can omit it **only if exactly one component is source-kind** — it is then inferred, and the extension will add it
+- With more than one source-kind component, inference raises `Pipeline has multiple source components, please specify one explicitly`, so the field is required
 
 ---
 
@@ -369,8 +370,10 @@ ROCKETRIDE_COLLECTION_NAME=documents
 
 ### Rule 1: Source Components
 
-- Every pipeline must have exactly one source component
-- The `source` field must reference this component's `id`
+- Every pipeline has exactly one **entry point** — the component where execution starts — named by the `source` field
+- A pipeline may contain more than one source-**kind** component (an ingest branch and a query branch, say). Only the entry point is started; run another by passing `source=` explicitly
+- The `source` field is optional **only when exactly one component is source-kind**, in which case it is inferred. With more than one, `resolve_implied_source` raises `Pipeline has multiple source components, please specify one explicitly` — so `source` must be set
+- The `source` field must reference that component's `id`
 - Source components typically don't have an `input` array
 - Examples: webhook, chat, dropper
 
@@ -391,6 +394,7 @@ Example:
 		{ "id": "parse_1", "provider": "parse", "config": {}, "input": [{ "lane": "tags", "from": "webhook_1" }] },
 		{ "id": "response_1", "provider": "response_text", "config": { "laneName": "text" }, "input": [{ "lane": "text", "from": "parse_1" }] }
 	],
+	"source": "webhook_1",
 	"project_id": "85be2a13-ad93-49ed-a1e1-4b0f763ca618",
 	"viewport": { "x": 0, "y": 0, "zoom": 1 },
 	"version": 1
@@ -758,6 +762,7 @@ Before deploying a pipeline:
 			"input": [{ "lane": "text", "from": "webhook_1" }]
 		}
 	],
+	"source": "webhook_1",
 	"project_id": "85be2a13-ad93-49ed-a1e1-4b0f763ca618",
 	"viewport": { "x": 0, "y": 0, "zoom": 1 },
 	"version": 1
@@ -775,6 +780,7 @@ Before deploying a pipeline:
 		{ "id": "llm_1", "provider": "llm_openai", "config": { "profile": "openai-5-2", "openai-5-2": { "apikey": "${ROCKETRIDE_OPENAI_KEY}" }, "parameters": {} }, "input": [{ "lane": "questions", "from": "qdrant_1" }] },
 		{ "id": "response_1", "provider": "response_answers", "config": { "laneName": "answers" }, "input": [{ "lane": "answers", "from": "llm_1" }] }
 	],
+	"source": "chat_1",
 	"project_id": "85be2a13-ad93-49ed-a1e1-4b0f763ca618",
 	"viewport": { "x": 0, "y": 0, "zoom": 1 },
 	"version": 1
