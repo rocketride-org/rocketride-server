@@ -257,8 +257,28 @@ function makeRunContractTestsAction() {
             await runPytest({
                 engine: ENGINE,
                 testsDir: path.join(TEST_DIR, 'test_contracts.py'),
-                extraArgs: ['-v', '--rootdir', PACKAGE_DIR],
+                // test_lane_forward_contract.py is a second, independent contract
+                // check (see nodes:lane-contract for the standalone CLI report) -
+                // riding along here means it runs in CI with no new wiring.
+                extraArgs: [path.join(TEST_DIR, 'test_lane_forward_contract.py'), '-v', '--rootdir', PACKAGE_DIR],
                 execOpts: { task, cwd: PACKAGE_DIR },
+            });
+        }
+    };
+}
+
+function makeLaneContractAction() {
+    return {
+        description: 'Print the lane-forwarding contract report (#2042) - no build, no server',
+        run: async (ctx, task) => {
+            // Pure-stdlib AST check (ast/pathlib/dataclasses/typing only, no
+            // rocketlib import) - runs under a plain interpreter in well under
+            // a second, deliberately not the built ENGINE, so this stays cheap
+            // enough to wire into a pre-commit hook as the issue asks for.
+            await execCommand('python3', [path.join(TEST_DIR, 'test_lane_forward_contract.py')], {
+                task,
+                cwd: PACKAGE_DIR,
+                stdio: 'inherit',
             });
         }
     };
@@ -320,6 +340,7 @@ module.exports = {
             description: 'Testing nodes (contracts)',
             steps: ['server:build', 'nodes:run-contracts']
         })},
+        { name: 'nodes:lane-contract', action: makeLaneContractAction },
         { name: 'nodes:clean', action: () => ({
             description: 'Cleaning nodes',
             run: async (ctx, task) => {
