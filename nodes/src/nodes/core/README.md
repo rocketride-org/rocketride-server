@@ -10,7 +10,7 @@ The directory holds three kinds of content:
 
 - **Concrete service definitions**: `services.filesys.json`, `services.parse.json`, `services.hash.json`, `services.indexer.json`, `services.zip.json`, and `services.null.json` each register one engine service (title, protocol, class type, capabilities, lanes, and config shape).
 - **Shared field libraries**: the `services.common*.json` files define reusable field groups (cloud-provider credentials, include/exclude path forms, vector-store settings, LLM access, anonymization, remote processing) that are merged into other service definitions as required.
-- **Shared code and assets**: `google_access.py` (the access/scope resolver used by Google tool nodes) and the SVG icons displayed in the UI for connector and processing nodes (Amazon S3, Azure Blob, Google Drive, OneDrive, SharePoint, Outlook, Gmail, Confluence, Slack, SMB, and others).
+- **Shared code and assets**: `google_access.py` (the access/scope resolver used by Google tool nodes), `gcp_auth.py` (ADC and service-account credentials for GCP nodes), and the SVG icons displayed in the UI for connector and processing nodes (Amazon S3, Azure Blob, Google Drive, OneDrive, SharePoint, Outlook, Gmail, Confluence, Slack, SMB, and others).
 
 The `hash/` and `parser/` subdirectories carry the per-service documentation pages for the Fingerprinter and Parser services.
 
@@ -92,6 +92,14 @@ These files define common fields that are merged into a service definition as re
 | `aws.accessKey` | string, secure, optional | Access key used to sign requests to Amazon S3. |
 | `aws.secretKey` | string, secure, optional | Secret key used to access AWS services. |
 | `aws.region` | enum | AWS region (us-east-1 through sa-east-1; default empty "Select Region"). |
+
+### Google Cloud Platform credentials (`services.common.gcp.json`)
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `gcp.authType` | enum `adc` / `service_account`, default `adc` | Choose how to authenticate to Google Cloud Platform. |
+| `gcp.serviceAccountKey` | data-url (`.json` upload) | Service Account JSON key file (used when authType is `service_account`). |
+| `gcp.projectId` | string, optional | Specify the Google Cloud Project ID explicitly. Leave blank to infer from credentials. |
 
 ### Google Workspace credentials (`services.common.google.json`)
 

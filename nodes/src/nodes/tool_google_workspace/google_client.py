@@ -147,24 +147,77 @@ def resolve_token_uri(svc: GoogleService, token_uri: object) -> str:
     return token_uri
 
 
+def _parsed_error_body(exc: Exception) -> dict:
+    """Return the JSON error body's ``error`` object, or ``{}`` if absent/malformed."""
+    content = getattr(exc, 'content', b'') or b''
+    if isinstance(content, bytes):
+        content = content.decode('utf-8', 'replace')
+    try:
+        error = json.loads(content).get('error')
+        return error if isinstance(error, dict) else {}
+    except (ValueError, AttributeError, TypeError):
+        return {}
+
+
+def _structured_errors(exc: Exception) -> list[dict]:
+    """Parse the JSON error body's reason-carrying entries, in either Google error shape.
+
+    Legacy Discovery-style APIs (Gmail, Drive) carry ``error.errors[]``, each item
+    already holding a ``reason`` (e.g. ``accessNotConfigured``). One Platform APIs
+    (Sheets, Docs) carry no ``errors[]`` at all — the reason instead lives in a
+    ``google.rpc.ErrorInfo`` entry inside ``error.details[]`` (e.g. ``reason:
+    'SERVICE_DISABLED'``). Returns whichever shape is present, or ``[]`` if the
+    body has neither (or is absent/malformed).
+    """
+    error = _parsed_error_body(exc)
+    legacy = [e for e in (error.get('errors') or []) if isinstance(e, dict)]
+    if legacy:
+        return legacy
+    return [
+        d
+        for d in (error.get('details') or [])
+        if isinstance(d, dict) and d.get('@type') == 'type.googleapis.com/google.rpc.ErrorInfo'
+    ]
+
+
+def _error_reason_code(exc: Exception) -> str | None:
+    """The first structured reason code verbatim (e.g. 'accessNotConfigured'), if present.
+
+    Google distinguishes ``accessNotConfigured`` (API disabled on the project),
+    ``forbidden`` (permission), and ``rateLimitExceeded``/``quotaExceeded`` under the
+    same HTTP 403 — the reason code is what actually names the fix. Legacy APIs
+    carry it in ``error.errors[].reason``; One Platform APIs carry it in an
+    ``error.details[]`` ErrorInfo's ``reason`` (SCREAMING_SNAKE_CASE, e.g.
+    ``SERVICE_DISABLED``), and when even that detail is absent this falls back to
+    the coarser gRPC ``error.status`` (e.g. ``PERMISSION_DENIED``).
+    """
+    for e in _structured_errors(exc):
+        if e.get('reason'):
+            return str(e['reason'])
+    status = _parsed_error_body(exc).get('status')
+    return str(status) if status else None
+
+
 def _is_rate_limit_403(exc: Exception) -> bool:
     """True when a 403 is a transient rate/quota limit (safe to retry) vs a permission error."""
     status = getattr(getattr(exc, 'resp', None), 'status', None)
     if not status or int(status) != 403:
         return False
     rate_reasons = {'ratelimitexceeded', 'userratelimitexceeded', 'quotaexceeded'}
+    structured = _structured_errors(exc)
+    # Prefer the structured error body over substring matching. Normalize away
+    # underscores so One Platform's SCREAMING_SNAKE_CASE ErrorInfo reasons (e.g.
+    # 'RATE_LIMIT_EXCEEDED') match the legacy camelCase set above.
+    if structured:
+        reasons = {str(e.get('reason', '')).lower().replace('_', '') for e in structured}
+        return bool(reasons & rate_reasons)
+    # Fallback for non-JSON bodies, transport-level wrappers, and any reason
+    # taxonomy _structured_errors doesn't recognize (e.g. a details[] entry
+    # whose @type isn't ErrorInfo) — keep this even as the parser above grows,
+    # since it is the only path a shape neither branch above covers still hits.
     content = getattr(exc, 'content', b'') or b''
     if isinstance(content, bytes):
         content = content.decode('utf-8', 'replace')
-    # Prefer the structured error body (error.errors[].reason) over substring matching.
-    try:
-        errors = (json.loads(content).get('error') or {}).get('errors') or []
-        reasons = {str(e.get('reason', '')).lower() for e in errors if isinstance(e, dict)}
-        if reasons:
-            return bool(reasons & rate_reasons)
-    except (ValueError, AttributeError, TypeError):
-        pass
-    # Fallback for non-JSON bodies and transport-level wrappers.
     blob = (str(getattr(exc, 'reason', '') or '') + ' ' + content).lower()
     return any(reason in blob for reason in rate_reasons)
 
@@ -417,12 +470,20 @@ def execute(svc: GoogleService, request: Any, *, binary: bool = False) -> Any:
                 _time.sleep(base_delay * (2**attempt))
                 continue
             detail = getattr(exc, 'reason', None) or str(exc)
-            if status and int(status) == 403:
-                raise ValueError(
-                    f'{svc.product} API 403: {detail}. If this is a scope error, disconnect '
-                    'and reconnect your Google account with the required access tier. If it is a '
-                    'sharing/ownership error, the account may lack permission on that resource.'
-                ) from exc
-            prefix = f'{svc.product} API {status}: ' if status else f'{svc.product} request failed: '
-            raise ValueError(f'{prefix}{detail}') from exc
+            reason_code = _error_reason_code(exc)
+            status_int = int(status) if status else None
+            if status_int == 403:
+                err = ValueError(
+                    f'{svc.product} API 403 ({reason_code or "forbidden"}): {detail}. If this is a scope '
+                    'error, disconnect and reconnect your Google account with the required access tier. '
+                    'If it is a sharing/ownership error, the account may lack permission on that resource. '
+                    'If it is accessNotConfigured or SERVICE_DISABLED, the Google Cloud project behind '
+                    'this credential has not enabled this API.'
+                )
+            else:
+                prefix = f'{svc.product} API {status}: ' if status else f'{svc.product} request failed: '
+                err = ValueError(f'{prefix}{detail}')
+            err.status = status_int
+            err.reason_code = reason_code
+            raise err from exc
     raise RuntimeError('execute: retry loop exhausted unexpectedly')  # unreachable

@@ -11,7 +11,7 @@ each expose multiple variants), which is why the catalog below lists **services*
 rather than directories.
 
 > This catalog is compiled by hand from the `services*.json` definitions on `develop`
-> (118 node directories → 148 services). For node testing, see
+> (121 node directories → 151 services). For node testing, see
 > [README-node-testing.md](README-node-testing.md).
 
 ---
@@ -172,6 +172,8 @@ channel; they have no data lanes and **bind to an agent** (see
 | `tool_xtrace_memory`| Long-term shared agent memory, backed by xTrace Memory Manager   |
 | `tool_mem0`         | Long-term shared agent memory, backed by the hosted Mem0 Platform |
 | `tool_gohighlevel`  | GoHighLevel (LeadConnector) v2 sub-account operations: contacts, opportunities, conversations, calendars |
+| `tool_gcs`          | Google Cloud Storage: list objects and download files            |
+| `tool_vertex_search`| Vertex AI Vector Search nearest-neighbor lookup                  |
 | `tool_crustdata`    | Crustdata company/people search: firmographics, funding, headcount, verified profiles |
 | `tool_notion`       | Notion workspace access: search, read pages and database rows, create/update content |
 
@@ -206,6 +208,7 @@ channel; they have no data lanes and **bind to an agent** (see
 | `db_mysql`      | answers, questions → answers, table, text | MySQL                                        |
 | `db_clickhouse` | questions → answers, table, text   | ClickHouse (NL-to-SQL)                       |
 | `db_hotdata`    | answers, questions → answers, table, text | Hotdata (ephemeral per-run database, load + index + NL-to-SQL) |
+| `db_firestore`  | - (agent tool)                     | Google Cloud Firestore Native-mode document get/set |
 
 ### Graph Databases
 
