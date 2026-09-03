@@ -1,6 +1,6 @@
 # tool_http_request
 
-A RocketRide tool node that lets an AI agent make HTTP requests to any API endpoint, like curl for agents.
+A RocketRide tool node that lets an AI agent make HTTP requests to public API endpoints, like curl for agents.
 
 ## What it does
 
@@ -12,12 +12,16 @@ structured response containing status, headers, body text, parsed JSON, and timi
 Uses the **requests** library to execute calls. The node has no lanes; it is attached to
 an agent purely as a tool.
 
-Three security guardrails are enforced before every request, all configured on the node:
+Four security guardrails are enforced before every request:
 
 - **Allowed methods**: per-method toggles. `GET`, `POST`, `PUT`, `PATCH`, `DELETE` are
   enabled by default; `HEAD` and `OPTIONS` are disabled by default.
 - **URL whitelist**: regex patterns the request URL must match. **Empty by default,
-  which allows all URLs** (config validation emits a warning when the whitelist is empty).
+  which allows all public URLs** (config validation emits a warning when the whitelist is empty).
+- **Network boundary**: loopback, private, link-local, shared, reserved, unspecified,
+  and multicast destination addresses are blocked. Redirects are returned to the agent
+  as 3xx responses and are not followed automatically. There is no private-network
+  override: localhost and internal API endpoints are intentionally unsupported.
 - **Rate limiting**: token-bucket limits per second and per minute, plus a concurrency
   cap. On by default (10/s, 100/min, 5 concurrent).
 
@@ -37,7 +41,7 @@ Three security guardrails are enforced before every request, all configured on t
 | `allowHEAD` | boolean | Default false.  |
 | `allowOPTIONS` | boolean | Default false.  |
 | `whitelistPattern` | string | Default empty.  |
-| `urlWhitelist` | array | Regex patterns for allowed URLs. A request URL must match at least one pattern. If empty, all URLs are allowed. |
+| `urlWhitelist` | array | Regex patterns for allowed public URLs. A request URL must match at least one pattern. If empty, all public URLs are allowed; non-public network destinations remain blocked. |
 | `rateLimitPerSecond` | number | Default 10. Maximum number of HTTP requests allowed per second. Uses a token-bucket algorithm for smooth enforcement. |
 | `rateLimitPerMinute` | number | Default 100. Maximum number of HTTP requests allowed per minute. Provides a broader throttle beyond the per-second limit. |
 | `maxConcurrentRequests` | number | Default 5. Maximum number of HTTP requests that can be in-flight simultaneously. |
@@ -45,9 +49,24 @@ Three security guardrails are enforced before every request, all configured on t
 
 The node ships one profile, **Default**, which sets `serverName` to `http`.
 
-Invalid whitelist regexes are skipped with a warning rather than failing the pipeline,
-so a typo in a pattern silently widens (or, if it was the only pattern, removes) the
-restriction, check the logs after editing the whitelist.
+Whitelist patterns are checked against the final URL after path parameters are resolved.
+An empty `urlWhitelist` (`[]`) allows all public URLs and emits a warning. Empty entries
+such as `[{"whitelistPattern": ""}]`, and invalid or malformed patterns, fail configuration
+validation instead of silently removing the intended restriction. Regex matching starts
+at the beginning of the URL; add `$` when the entire URL must match.
+
+The node connects directly to the validated destination and does not use environment
+proxies or implicit `.netrc` credentials. `REQUESTS_CA_BUNDLE` and `CURL_CA_BUNDLE`
+remain supported for custom HTTPS certificate authorities. A caller-supplied `Host`
+header is rejected because it could route an allowlisted URL to a different virtual host.
+The network classifier requires Python `3.10.14+`, `3.11.9+`, `3.12.4+`, or `3.13+`
+and the transport requires the Requests and urllib3 connection hooks used for
+validated-address pinning.
+
+Keep an outbound firewall or equivalent egress policy around the engine as a second
+boundary. RFC 6052 permits operator-chosen NAT64 prefixes that cannot be identified from
+an IPv6 address alone; the egress boundary must also block translated access to private
+networks.
 
 ---
 
@@ -82,8 +101,8 @@ is only applied when the corresponding advanced field is not also set.
 | Parameter      | Description                                                              |
 |----------------|---------------------------------------------------------------------------|
 | `query_params` | Key-value pairs appended to the URL as the query string                  |
-| `headers`      | Custom request headers                                                   |
-| `path_params`  | Replacements for `:name` placeholders in the URL (e.g. `{"id": "123"}` replaces `:id`) |
+| `headers`      | Custom request headers. `Host` cannot be overridden.                     |
+| `path_params`  | Replacements for `:name` placeholders in the URL path only (e.g. `{"id": "123"}` replaces `:id`) |
 | `timeout`      | Request timeout in seconds. Default `30`, capped at `300`.               |
 | `auth`         | Advanced auth config (see Authentication below). Prefer the shortcuts.   |
 | `body`         | Advanced body config (see Request bodies below). Prefer `body_json`.     |
@@ -104,7 +123,7 @@ is only applied when the corresponding advanced field is not also set.
 
 `json` is populated automatically when the response `Content-Type` contains `json` (or
 `javascript`) and the body parses; otherwise it is `null` and the raw text is in `body`.
-`elapsed_ms` is wall-clock request time in milliseconds.
+`elapsed_ms` is wall-clock request time, including DNS validation, in milliseconds.
 
 ---
 
@@ -174,7 +193,7 @@ non-zero value is clamped to a minimum of `1`.
 | `http_request.rateLimitPerMinute` | `number` | **Max requests per minute**<br/>Maximum number of HTTP requests allowed per minute. Provides a broader throttle beyond the per-second limit. | `100` |
 | `http_request.rateLimitPerSecond` | `number` | **Max requests per second**<br/>Maximum number of HTTP requests allowed per second. Uses a token-bucket algorithm for smooth enforcement. | `10` |
 | `http_request.serverName` | `string` | **Server name**<br/>Namespace prefix for the tool: <serverName>.http_request | `"http"` |
-| `http_request.urlWhitelist` | `array` | **URL Whitelist**<br/>Regex patterns for allowed URLs. A request URL must match at least one pattern. If empty, all URLs are allowed. |  |
+| `http_request.urlWhitelist` | `array` | **URL Whitelist**<br/>Regex patterns for allowed public URLs. A request URL must match at least one pattern. If empty, all public URLs are allowed; non-public network destinations remain blocked. |  |
 | `http_request.whitelistPattern` | `string` | **URL Pattern (regex)** | `""` |
 
 ## Source

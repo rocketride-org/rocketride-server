@@ -73,7 +73,9 @@ class IGlobal(IGlobalBase):
             if cfg.get(flag, method in ('GET', 'POST', 'PUT', 'PATCH', 'DELETE')):
                 enabled.add(method)
 
-        raw_whitelist = cfg.get('urlWhitelist') or []
+        raw_whitelist = cfg.get('urlWhitelist')
+        if raw_whitelist is None or raw_whitelist == '':
+            raw_whitelist = []
         if not isinstance(raw_whitelist, list):
             import json
 
@@ -84,15 +86,19 @@ class IGlobal(IGlobalBase):
             except (json.JSONDecodeError, TypeError, ValueError) as e:
                 raise ValueError(f'urlWhitelist is malformed and cannot be parsed: {e}') from e
         patterns: list[re.Pattern] = []
-        for row in raw_whitelist:
+        for index, row in enumerate(raw_whitelist):
             if not hasattr(row, 'get'):
-                continue
-            pat_str = str(row.get('whitelistPattern') or '').strip()
-            if pat_str:
-                try:
-                    patterns.append(re.compile(pat_str))
-                except re.error as e:
-                    warning(f'Invalid URL whitelist regex {pat_str!r}: {e}')
+                raise ValueError(f'urlWhitelist entry {index + 1} must be an object')
+            raw_pattern = row.get('whitelistPattern')
+            if not isinstance(raw_pattern, str):
+                raise ValueError(f'urlWhitelist entry {index + 1} whitelistPattern must be a string')
+            pat_str = raw_pattern.strip()
+            if not pat_str:
+                raise ValueError(f'urlWhitelist entry {index + 1} must contain a non-empty whitelistPattern')
+            try:
+                patterns.append(re.compile(pat_str))
+            except re.error as e:
+                raise ValueError(f'Invalid URL whitelist regex {pat_str!r}: {e}') from e
 
         return enabled, patterns
 
@@ -134,7 +140,7 @@ class IGlobal(IGlobalBase):
 
             _, patterns = self._build_guardrails(cfg)
             if not patterns:
-                warning('URL whitelist is empty — all URLs will be allowed')
+                warning('URL whitelist is empty — all public URLs will be allowed')
         except Exception as e:
             warning(str(e))
 

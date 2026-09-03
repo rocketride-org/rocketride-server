@@ -9,7 +9,7 @@
 	"prefix": "http",
 	"icon": "http.svg",
 	"documentation": "https://docs.rocketride.org",
-	"description": ["Makes HTTP requests to any API endpoint, like curl for agents.", "The agent provides the full request (method, URL, headers, body, auth).", "The node enforces security guardrails: only whitelisted URLs and enabled HTTP methods are permitted."],
+	"description": ["Makes HTTP requests to public API endpoints, like curl for agents.", "The agent provides the full request (method, URL, headers, body, auth).", "The node blocks non-public network destinations, returns 3xx responses without following them automatically, and enforces URL patterns and enabled HTTP methods."],
 	"tile": ["Tool: ${parameters.http_request.serverName}.http_request"],
 	"lanes": {},
 	"preconfig": {
@@ -101,7 +101,7 @@
 		},
 		"http_request.urlWhitelist": {
 			"title": "URL Whitelist",
-			"description": "Regex patterns for allowed URLs. A request URL must match at least one pattern. If empty, all URLs are allowed.",
+			"description": "Regex patterns for allowed public URLs. A request URL must match at least one pattern. If empty, all public URLs are allowed; non-public network destinations remain blocked.",
 			"type": "array",
 			"optional": true,
 			"minItems": 0,

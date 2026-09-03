@@ -24,9 +24,9 @@
 """
 HTTP Request tool node instance.
 
-Exposes a single ``http_request`` tool that can call any HTTP API endpoint.
-Security guardrails (allowed methods + URL whitelist) are enforced before
-every request.
+Exposes a single ``http_request`` tool that can call public HTTP API endpoints.
+Security guardrails (allowed methods, URL whitelist, and public-network-only
+destinations) are enforced before every request.
 """
 
 from __future__ import annotations
@@ -35,7 +35,7 @@ import json
 
 from rocketlib import IInstanceBase, tool_function
 
-from .http_client import execute_request
+from .http_client import _canonicalize_url, _resolve_path_params, execute_request
 from .IGlobal import IGlobal
 
 
@@ -84,7 +84,7 @@ class IInstance(IInstanceBase):
                 },
                 'path_params': {
                     'type': 'object',
-                    'description': 'Path parameter replacements (e.g. {"id": "123"} replaces :id in the URL)',
+                    'description': 'Path-only parameter replacements (e.g. {"id": "123"} replaces :id in the URL path)',
                     'additionalProperties': {'type': 'string'},
                 },
                 'auth': {
@@ -139,6 +139,7 @@ class IInstance(IInstanceBase):
             'For JSON bodies, pass "body_json" as a JSON object (e.g. {"name": "foo"}) — it is serialized automatically. '
             'For bearer auth, pass "bearer_token" as a string. '
             'For basic auth, pass "basic_auth": {"username": "...", "password": "..."}. '
+            'Non-public network destinations are blocked, and redirects are returned without being followed. '
             'Optional: "headers", "query_params", "path_params", "timeout" (seconds, default 30, max 300).'
         ),
     )
@@ -150,8 +151,9 @@ class IInstance(IInstanceBase):
         # Expand convenience shortcuts into canonical form
         _normalize_shortcuts(args)
 
-        # Validate guardrails from config
-        self._validate_guardrails(args)
+        # Resolve path-only placeholders first so the whitelist sees the exact
+        # URL that will be sent.
+        resolved_url = self._validate_guardrails(args)
 
         # Enforce rate limits before executing the request
         rate_limiter = self.IGlobal.rate_limiter
@@ -160,10 +162,10 @@ class IInstance(IInstanceBase):
 
         try:
             return execute_request(
-                url=args.get('url', ''),
+                url=resolved_url,
                 method=args.get('method', 'GET'),
                 query_params=args.get('query_params'),
-                path_params=args.get('path_params'),
+                path_params=None,
                 headers=args.get('headers'),
                 auth=args.get('auth'),
                 body=args.get('body'),
@@ -193,8 +195,9 @@ class IInstance(IInstanceBase):
         url = args.get('url')
         if not url or not isinstance(url, str):
             raise ValueError('url is required and must be a non-empty string')
-        if self.IGlobal.url_patterns and not any(p.search(url) for p in self.IGlobal.url_patterns):
-            raise ValueError(f'URL "{url}" does not match any allowed URL pattern.')
+        resolved_url = _canonicalize_url(_resolve_path_params(url, args.get('path_params')))
+        if self.IGlobal.url_patterns and not any(p.match(resolved_url) for p in self.IGlobal.url_patterns):
+            raise ValueError(f'URL "{resolved_url}" does not match any allowed URL pattern.')
 
         auth = args.get('auth')
         if auth is not None:
@@ -233,6 +236,8 @@ class IInstance(IInstanceBase):
                     raise ValueError(
                         f'body.raw.content_type must be one of {sorted(valid_raw_content_types)}; got {ct!r}'
                     )
+
+        return resolved_url
 
 
 def _normalize_shortcuts(args):
