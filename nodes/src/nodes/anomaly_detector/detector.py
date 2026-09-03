@@ -57,6 +57,21 @@ class AnomalyDetector:
         self._window: deque = deque(maxlen=self.window_size)
         self._lock = threading.Lock()
 
+        # Incremental z-score aggregates, maintained under self._lock.
+        # Assumed-mean shifted running sums over the current window:
+        #   _z_sx  = sum(x - _z_k)      _z_sxx = sum((x - _z_k) ** 2)
+        # These are updated in O(1) as values are appended/evicted and are
+        # rebuilt from scratch every _z_recompute_interval values to bound
+        # floating point drift and re-center the shift constant _z_k. See
+        # _update_z_aggregates / _recompute_z_aggregates / _format_z_score.
+        self._z_k = 0.0
+        self._z_sx = 0.0
+        self._z_sxx = 0.0
+        self._z_since_recompute = 0
+        self._z_recompute_interval = (
+            self.window_size if isinstance(self.window_size, int) and self.window_size >= 1 else 1
+        )
+
     def _add_value(self, value: float) -> None:
         """Add a value to the sliding window (thread-safe)."""
         with self._lock:
@@ -75,16 +90,92 @@ class AnomalyDetector:
             return 'warning'
         return 'normal'
 
-    def _detect_z_score(self, value: float, window: list) -> Dict[str, Any]:
+    def _update_z_aggregates(self, value: float, n: int) -> None:
         """
-        Z-Score detection: measures how many standard deviations
-        a value is from the mean.
+        Append ``value`` to the window and update the z-score running sums.
+
+        The caller must hold ``self._lock``. ``n`` is ``len(window)`` captured
+        before the append. Maintains the shifted sums in O(1); every
+        ``_z_recompute_interval`` values it rebuilds them from scratch
+        (amortized O(1)) to bound rounding drift and re-center the shift
+        constant.
         """
-        if len(window) < 2:
+        maxlen = self._window.maxlen
+        at_capacity = maxlen is not None and n > 0 and n == maxlen
+        # deque(maxlen) drops the oldest element on append without returning
+        # it, so capture the value about to be evicted first.
+        evicted = self._window[0] if at_capacity else 0.0
+
+        self._window.append(value)
+
+        if n == 0:
+            # First value in an (effectively) empty window: anchor the shift
+            # constant here so the shifted sums start at exactly zero.
+            self._z_k = value
+            self._z_sx = 0.0
+            self._z_sxx = 0.0
+        else:
+            d = value - self._z_k
+            self._z_sx += d
+            self._z_sxx += d * d
+            if at_capacity:
+                de = evicted - self._z_k
+                self._z_sx -= de
+                self._z_sxx -= de * de
+
+        self._z_since_recompute += 1
+        if self._z_since_recompute >= self._z_recompute_interval:
+            self._recompute_z_aggregates()
+            self._z_since_recompute = 0
+
+    def _recompute_z_aggregates(self) -> None:
+        """
+        Rebuild the shifted running sums from the current window contents.
+
+        Runs in O(W) and is called once every ``_z_recompute_interval``
+        updates, so the amortized per-value cost stays O(1). Re-centering the
+        shift constant on the current mean keeps the summed quantities small
+        (limiting floating point cancellation) even when the stream drifts,
+        and clears any rounding residue left by the incremental updates. The
+        caller must hold ``self._lock``.
+        """
+        n = len(self._window)
+        if n == 0:
+            self._z_k = 0.0
+            self._z_sx = 0.0
+            self._z_sxx = 0.0
+            return
+
+        k = sum(self._window) / n
+        sx = 0.0
+        sxx = 0.0
+        for x in self._window:
+            d = x - k
+            sx += d
+            sxx += d * d
+        self._z_k = k
+        self._z_sx = sx
+        self._z_sxx = sxx
+
+    def _format_z_score(self, value: float, n: int, k: float, sx: float, sxx: float) -> Dict[str, Any]:
+        """
+        Build the z-score result dict from the window aggregates.
+
+        Reproduces the original two-pass computation exactly: population
+        variance, the ``len < 2`` and zero-variance guards, and identical
+        rounding / formatting. Pure function of its arguments with no access
+        to shared state, so it runs outside the lock.
+        """
+        if n < 2:
             return {'score': 0.0, 'severity': 'normal', 'is_anomalous': False, 'details': 'insufficient data'}
 
-        mean = sum(window) / len(window)
-        variance = sum((x - mean) ** 2 for x in window) / len(window)
+        mean = k + sx / n
+        # Variance via the shifted sums. The tiny negative residue that
+        # rounding can produce on a zero/near-zero-variance window is clamped
+        # so sqrt never sees a negative argument.
+        variance = sxx / n - (sx / n) ** 2
+        if variance < 0.0:
+            variance = 0.0
         std_dev = math.sqrt(variance)
 
         if std_dev == 0:
@@ -192,27 +283,36 @@ class AnomalyDetector:
         """
         Run anomaly detection on a single numeric value.
 
-        The value is evaluated against the current window, then added.
-        Both operations are performed under a single lock to prevent
-        another thread from inserting between the snapshot and the add.
+        The value is evaluated against the window as it stood before this
+        value, then added. The read of the window state and the append happen
+        under a single lock so another thread cannot insert between them; the
+        scoring arithmetic itself runs outside the lock.
 
         Returns a dict with keys: score, severity, is_anomalous, details.
         """
         if not math.isfinite(value):
             return {'score': 0.0, 'severity': 'normal', 'is_anomalous': False, 'details': 'non-finite input'}
 
+        # IQR and rolling_avg keep the original snapshot-and-scan path: they
+        # need the full window contents (sorted / most-recent slice).
+        if self.method == 'iqr' or self.method == 'rolling_avg':
+            with self._lock:
+                window = list(self._window)
+                self._window.append(value)
+            if self.method == 'iqr':
+                return self._detect_iqr(value, window)
+            return self._detect_rolling_avg(value, window)
+
+        # z_score (and any unrecognized method, preserving the original
+        # fallback) is maintained incrementally. The result is a function of
+        # the window as it stood before this value, so capture the aggregates
+        # under the lock, then release it before the O(1) formatting work.
         with self._lock:
-            window = list(self._window)
-            self._window.append(value)
+            n = len(self._window)
+            k, sx, sxx = self._z_k, self._z_sx, self._z_sxx
+            self._update_z_aggregates(value, n)
 
-        if self.method == 'iqr':
-            result = self._detect_iqr(value, window)
-        elif self.method == 'rolling_avg':
-            result = self._detect_rolling_avg(value, window)
-        else:
-            result = self._detect_z_score(value, window)
-
-        return result
+        return self._format_z_score(value, n, k, sx, sxx)
 
     _NUMERIC_PATTERN = re.compile(r'-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?')
 
