@@ -36,10 +36,10 @@ class IGlobal(IGlobalBase):
         # Validate nonce_length: min 16, max 128
         nonce_length = raw.get('nonce_length', 16)
         if not isinstance(nonce_length, int) or nonce_length < 16:
-            warning(f"[PreScreen] nonce_length must be integer >= 16, got {nonce_length!r}; using 16")
+            warning(f'[PreScreen] nonce_length must be integer >= 16, got {nonce_length!r}; using 16')
             nonce_length = 16
         elif nonce_length > 128:
-            warning(f"[PreScreen] nonce_length must be <= 128, got {nonce_length}; using 128")
+            warning(f'[PreScreen] nonce_length must be <= 128, got {nonce_length}; using 128')
             nonce_length = 128
         config.nonce_length = nonce_length
 

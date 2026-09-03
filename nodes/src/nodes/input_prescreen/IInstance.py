@@ -135,7 +135,6 @@ class IInstance(IInstanceBase):
         """
         engine = self.IGlobal.heuristic_engine
         config = self.IGlobal.config
-        nonce_fencer = self.IGlobal.nonce_fencer
 
         if engine is None or config is None:
             self.instance.writeDocuments(documents)
