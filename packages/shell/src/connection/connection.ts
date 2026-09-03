@@ -1100,12 +1100,20 @@ export class ConnectionManager implements IConnectionManager {
 		// signed-out landing gets the sign-in banner instead of a false outage.
 		if (isNetworkFailure) {
 			const generation = this.connectionGeneration;
+			// Capture the exact failure object this probe is disambiguating.
+			// updateConnectionStatus latches a fresh object per failure, so a
+			// newer network failure — even one in this same generation — replaces
+			// the reference. Identity, not kind, is what proves the latch is still
+			// the one this probe was launched for.
+			const latchedFailure = this.connectionStatus.lastFailure;
 			void fetch('/version', { cache: 'no-store' }).then((res) => {
 				if (!res.ok) return;
 				if (this.connectionGeneration !== generation) return;
-				// Only downgrade the failure this call latched; a newer failure
-				// or a successful reconnect must not be overwritten.
-				if (this.connectionStatus.lastFailure?.kind !== 'network') return;
+				// Only downgrade the specific failure this probe latched. A newer
+				// failure (including another network one) or a reconnect that
+				// cleared the latch swaps the reference, and must not be
+				// overwritten with a session downgrade.
+				if (this.connectionStatus.lastFailure !== latchedFailure) return;
 				const message = 'Your session has expired — please sign in again.';
 				this.updateConnectionStatus({
 					state: ConnectionState.AUTH_FAILED,

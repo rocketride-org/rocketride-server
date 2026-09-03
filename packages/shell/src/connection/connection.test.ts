@@ -276,6 +276,45 @@ test('handleStoredTokenFailure keeps the network latch when the same-origin prob
 	}
 });
 
+test('handleStoredTokenFailure does not let a stale probe downgrade a newer network failure in the same generation', async () => {
+	const originalFetch = Object.getOwnPropertyDescriptor(globalThis, 'fetch');
+	let calls = 0;
+	Object.defineProperty(globalThis, 'fetch', {
+		configurable: true,
+		value: async () => {
+			calls += 1;
+			// The first (older) failure's probe finds the server reachable; the
+			// second (newer) failure's probe finds it genuinely down.
+			if (calls === 1) return { ok: true };
+			throw new TypeError('Failed to fetch');
+		},
+	});
+
+	try {
+		const { manager } = createTestManager();
+
+		// Two network failures latch back to back in the same generation, each
+		// firing its own probe. The older probe resolves ok, but by the time it
+		// does a newer network failure is latched — keying the downgrade on the
+		// exact latched object (not just kind === 'network') is what stops the
+		// older probe from clobbering the newer failure into a false session
+		// expiry.
+		manager.handleStoredTokenFailure(new ConnectionFailure('Failed to fetch', 'network'));
+		manager.handleStoredTokenFailure(new ConnectionFailure('Failed to fetch', 'network'));
+
+		await new Promise((resolve) => setImmediate(resolve));
+		await new Promise((resolve) => setImmediate(resolve));
+
+		// The newer failure's own probe failed, so the network banner stands.
+		assert.equal(calls, 2);
+		assert.equal(manager.connectionStatus.state, ConnectionState.FAILED);
+		assert.equal(manager.connectionStatus.lastFailure?.kind, 'network');
+	} finally {
+		if (originalFetch) Object.defineProperty(globalThis, 'fetch', originalFetch);
+		else delete (globalThis as { fetch?: typeof fetch }).fetch;
+	}
+});
+
 test('clearToken removes current and legacy stored tokens', () => {
 	const removedLocalKeys: string[] = [];
 	const removedSessionKeys: string[] = [];
