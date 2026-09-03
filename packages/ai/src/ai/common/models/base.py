@@ -252,6 +252,42 @@ def make_device_lock() -> contextlib.AbstractContextManager:
     return contextlib.nullcontext() if is_model_server_enabled() else threading.Lock()
 
 
+@contextlib.contextmanager
+def tf32_context(enabled: bool):
+    """Scope both process-global TF32 flags around a forward, restoring prior values.
+
+    cuDNN (convs) and cuBLAS matmul (attention/linears) are separate flags and both
+    matter for mixed conv/transformer models, so they are set together. TF32 is a
+    hardware no-op before Ampere and off-CUDA, so scoping it is always safe.
+
+    Concurrency: the flags are process-global, and the model server hosts many
+    models in one process and runs their forwards on concurrent threads
+    (``workers_per_model`` worker threads per model, ``streams_per_gpu`` concurrent
+    CUDA streams per GPU — see the model server's ModelWorker/GPUDispatcher), so an
+    overlapping ``tf32_context(True)`` from another model can leak TF32 into a
+    strict-fp32 (``dtype='float32'``) forward or restore stale flag values. A lock
+    here would serialize forwards that legitimately run concurrently on different
+    GPUs/streams, so it is deliberately unlocked: strict fp32 is only guaranteed
+    when no concurrent TF32-enabled model shares the process. Local engine mode is
+    unaffected — the node-side device lock (``make_device_lock``) serializes
+    in-process forwards there.
+
+    Lives in the models package (not cuda_utils) so the H100 bind-mount dev loop
+    covers it — the mounts only overlay ``ai/common/models``.
+    """
+    from ai.common.torch import torch
+
+    prev_matmul = torch.backends.cuda.matmul.allow_tf32
+    prev_cudnn = torch.backends.cudnn.allow_tf32
+    torch.backends.cuda.matmul.allow_tf32 = enabled
+    torch.backends.cudnn.allow_tf32 = enabled
+    try:
+        yield
+    finally:
+        torch.backends.cuda.matmul.allow_tf32 = prev_matmul
+        torch.backends.cudnn.allow_tf32 = prev_cudnn
+
+
 # =============================================================================
 # MODEL CLIENT
 # =============================================================================

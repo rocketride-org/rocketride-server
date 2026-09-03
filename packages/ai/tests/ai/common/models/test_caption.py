@@ -207,6 +207,43 @@ def test_facade_proxy_sends_prompt_and_decodes(monkeypatch):
     assert captured.get('disconnected') is True
 
 
+def test_sentence_count_survives_abbreviations_and_decimals():
+    # Abbreviation periods follow an UPPERCASE letter and must never count —
+    # observed captions: 'a sign that says "P.L."', '... a P.C. on it.'
+    assert capmod._sentence_count('a sign that says "P.L."') == 0
+    assert capmod._sentence_count('a sign that says "P.L." next to a door. A person stands nearby.') == 2
+    # A decimal in progress must not fire at end-of-text; a completed one counts.
+    assert capmod._sentence_count('The pool is about 1.') == 0
+    assert capmod._sentence_count('The pool is about 1.5 meters deep. A ladder is visible.') == 2
+    # Plain sentences: boundary at whitespace-confirmed and at end-of-text.
+    assert capmod._sentence_count('A red house. There are trees.') == 2
+    assert capmod._sentence_count('A red house. There are') == 1
+
+
+def test_trim_to_sentences_cuts_dangling_next_sentence():
+    assert capmod._trim_to_sentences('One here. Two here. Three', 2) == 'One here. Two here.'
+    assert capmod._trim_to_sentences('Only one sentence.', 2) == 'Only one sentence.'
+
+
+def test_facade_proxy_sends_max_sentences_only_when_set(monkeypatch):
+    captured = {'caption': 'ok'}
+    monkeypatch.setattr(capmod, 'get_model_server_address', lambda: 'localhost:5590')
+    monkeypatch.setattr(capmod, 'ModelClient', _fake_client_factory(captured))
+
+    cap = Captioner()
+    cap.caption(Image.new('RGB', (8, 8)))
+    assert 'max_sentences' not in captured['args']  # off by default: wire format unchanged
+
+    cap.caption(Image.new('RGB', (8, 8)), max_sentences=2)
+    assert captured['args']['max_sentences'] == 2
+
+    # Constructor default applies per-request, and is not part of load identity.
+    cap2 = Captioner(max_sentences=3)
+    cap2.caption(Image.new('RGB', (8, 8)))
+    assert captured['args']['max_sentences'] == 3
+    assert 'max_sentences' not in (captured['loads'][-1][2] or {})
+
+
 def test_facade_proxy_downscales_large_image(monkeypatch):
     """Large image is downscaled before captioning (payload shrinks); caption unchanged."""
     captured = {'caption': 'ok'}

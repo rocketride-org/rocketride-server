@@ -19,7 +19,7 @@
 	//		Capabilities are flags that change the behavior of the underlying
 	//		engine
 	//
-	"capabilities": ["gpu", "experimental"],
+	"capabilities": ["gpu"],
 	//
 	// Optional:
 	//		Register is either filter, endpoint or ignored if not specified. If the

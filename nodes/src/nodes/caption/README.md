@@ -18,8 +18,10 @@ this image") or ask a question about the image ("What color is the car?").
 Inference is delegated to the `Captioner` facade
 (`ai.common.models.vision.caption`), which runs on the model server when
 `--modelserver` is set, else locally. It runs on CPU, Apple Silicon (MPS), and
-CUDA (bfloat16 on CUDA, float32 elsewhere) with greedy decoding and a generation
-budget of 256 new tokens. Inputs are downscaled to a 1536 px long edge before
+CUDA (bfloat16 on CUDA, float32 elsewhere) with greedy decoding. Generation is
+bounded by a configurable token cap (256 by default) and, optionally, a sentence
+budget that stops decoding at a clean sentence boundary instead of a mid-sentence
+token cut. Inputs are downscaled to a 1536 px long edge before
 inference (quality-neutral; trims the model-server payload). Local inference is
 guarded by a 60 s watchdog; if inference fails for a frame, the node logs a
 warning and emits an empty string so the pipeline keeps flowing.
@@ -42,6 +44,8 @@ For object detection use **Object Detection**. For text reading use **OCR**.
 | Field | Type | Description |
 |---|---|---|
 | `caption.prompt` | string | Default "Describe this image in detail.". Steers the description; can focus on aspects or ask a question about the image |
+| `caption.max_new_tokens` | integer | Default 256. Hard cap on generated tokens per description; bounds worst-case latency |
+| `caption.max_sentences` | integer | Default 0 (off). Stop decoding after this many complete sentences — a clean cut instead of a mid-sentence token cut |
 | `caption.profile` | string | Default "smolvlm-500m". Selects the vision-language model |
 
 ---

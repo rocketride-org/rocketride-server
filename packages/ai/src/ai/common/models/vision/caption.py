@@ -70,6 +70,117 @@ INFERENCE_TIMEOUT = 60
 # trims the model-server payload on large images.
 INFER_MAX_EDGE = 1536
 
+# Sentence-boundary detection for max_sentences: a terminator run preceded by a
+# lowercase letter or digit — abbreviation periods ('P.L.', 'P.C.') follow an
+# UPPERCASE letter and never count — optionally followed by closing quotes or
+# brackets, confirmed by trailing whitespace. The end-of-text form additionally
+# requires a lowercase letter before the terminator so a decimal-in-progress
+# ('about 1.') never fires mid-number during incremental decode. A boundary the
+# guard skips (e.g. a sentence ending in an all-caps word) merely defers the
+# stop to the next boundary or max_new_tokens — over-generation, not truncation.
+_SENTENCE_CONFIRMED_RE = re.compile(r"[a-z0-9][.!?]+[\"')\]]*\s")
+_SENTENCE_TRAILING_RE = re.compile(r"[a-z][.!?]+[\"')\]]*$")
+_SENTENCE_TRIM_RE = re.compile(r"[a-z0-9][.!?]+[\"')\]]*(?=\s|$)")
+
+
+def _sentence_count(text: str) -> int:
+    """Count completed sentences in a (possibly partial) decoded caption.
+
+    Args:
+        text: Decoded generation so far (prompt echo already stripped).
+
+    Returns:
+        Number of sentence boundaries matching the safe pattern above.
+    """
+    return len(_SENTENCE_CONFIRMED_RE.findall(text)) + (1 if _SENTENCE_TRAILING_RE.search(text) else 0)
+
+
+def _trim_to_sentences(text: str, max_sentences: int) -> str:
+    """Cut a caption after its max_sentences-th sentence boundary.
+
+    Args:
+        text: Full decoded caption.
+        max_sentences: Sentence budget.
+
+    Returns:
+        The caption truncated at the boundary (unchanged if fewer sentences).
+    """
+    for i, match in enumerate(_SENTENCE_TRIM_RE.finditer(text), 1):
+        if i >= max_sentences:
+            return text[: match.end()]
+    return text
+
+
+def _sentence_stop_criteria(tokenizer: Any, prompt_len: int, max_sentences: int) -> Any:
+    """Build a StoppingCriteriaList that halts decode after max_sentences.
+
+    The criterion incrementally decodes the generated tokens each step and
+    counts safe sentence boundaries (~0.5% decode overhead measured on
+    Mage-VL/SmolVLM at 96 tokens). max_new_tokens stays the hard backstop.
+
+    Args:
+        tokenizer: Tokenizer used to decode the generated ids.
+        prompt_len: Token length of the prompt (generation starts after it).
+        max_sentences: Stop once this many sentence boundaries are seen.
+
+    Returns:
+        A transformers StoppingCriteriaList with the sentence criterion.
+    """
+    from transformers import StoppingCriteria, StoppingCriteriaList
+    from ai.common.torch import torch
+
+    class _SentenceStop(StoppingCriteria):
+        def __call__(self, input_ids, scores, **kwargs):
+            text = tokenizer.decode(input_ids[0, prompt_len:], skip_special_tokens=True)
+            done = _sentence_count(text) >= max_sentences
+            return torch.full((input_ids.shape[0],), done, device=input_ids.device, dtype=torch.bool)
+
+    return StoppingCriteriaList([_SentenceStop()])
+
+
+def _apply_qwen3_vl_fixes(model: Any, processor: Any, dtype: Any) -> None:
+    """Work around two Qwen3-VL crashes in this runtime.
+
+    1. ``Qwen3VLProcessor.replace_image_token`` multiplies a str by a 0-dim
+       tensor; torch raises a C++ ``c10::TypeError`` from ``__rmul__`` instead
+       of returning NotImplemented, and a C++ exception unwinding through the
+       engine's embedded interpreter aborts the whole process. Re-bind the
+       method on this instance with the count cast to a Python int. The body
+       mirrors transformers 5.14.1 exactly; guarded so a future refactor
+       falls back to the (fixed-upstream, hopefully) stock method.
+    2. cuDNN's bf16 Conv3d kernel segfaults in this runtime, and the vision
+       ``patch_embed`` is the model's only Conv3d. Run it in fp32 and cast
+       back — prefill-only cost, keeps cuDNN enabled everywhere else.
+
+    Args:
+        model: Loaded Qwen3-VL model.
+        processor: Its Qwen3VLProcessor instance.
+        dtype: Model compute dtype (fixes apply only for bfloat16).
+
+    Returns:
+        None.
+    """
+    from ai.common.torch import torch
+
+    if hasattr(processor, 'replace_image_token') and hasattr(processor, 'image_processor'):
+
+        def _replace_image_token(image_inputs: Dict[str, Any], image_idx: int) -> str:
+            merge_length = processor.image_processor.merge_size**2
+            num_image_tokens = image_inputs['image_grid_thw'][image_idx].prod() // merge_length
+            return processor.image_token * int(num_image_tokens)
+
+        processor.replace_image_token = _replace_image_token
+
+    patch_embed = getattr(getattr(getattr(model, 'model', None), 'visual', None), 'patch_embed', None)
+    if patch_embed is not None and dtype == torch.bfloat16:
+        patch_embed.float()
+        orig_forward = patch_embed.forward
+
+        def _fp32_patch_embed(hidden_states):
+            return orig_forward(hidden_states.float()).to(dtype)
+
+        patch_embed.forward = _fp32_patch_embed
+
 
 class CaptionerLoader(BaseLoader):
     """Static loader for image-text-to-text VLM captioning (SmolVLM, Qwen3-VL, Mage-VL, ...)."""
@@ -199,6 +310,17 @@ class CaptionerLoader(BaseLoader):
                 .eval()
             )
             processor = AutoProcessor.from_pretrained(model_name, revision=revision)
+            if config_dict.get('model_type') == 'qwen3_vl':
+                _apply_qwen3_vl_fixes(model, processor, dtype)
+
+        # Greedy open-ended generation needs a pad token; models that don't set
+        # one (e.g. Mage-VL) make generate() fall back to eos with a warning on
+        # every call. Mirror that fallback once here — perf-neutral, output
+        # identical, and the per-request warning goes away.
+        gen_config = getattr(model, 'generation_config', None)
+        if gen_config is not None and gen_config.pad_token_id is None and gen_config.eos_token_id is not None:
+            eos = gen_config.eos_token_id
+            gen_config.pad_token_id = eos[0] if isinstance(eos, (list, tuple)) else eos
 
         metadata = {'device': str(device), 'model_name': model_name, 'loader': 'caption'}
         return {'model': model, 'processor': processor, 'device': device, 'dtype': dtype}, metadata, gpu_index
@@ -235,6 +357,7 @@ class CaptionerLoader(BaseLoader):
         stream: Optional[Any] = None,
         prompt: Optional[str] = None,
         max_new_tokens: Optional[int] = None,
+        max_sentences: Optional[int] = None,
     ) -> Any:
         """Generate a caption per image for the per-request prompt.
 
@@ -245,6 +368,9 @@ class CaptionerLoader(BaseLoader):
             stream: Unused streaming handle.
             prompt: Per-request text prompt; None uses the default.
             max_new_tokens: Generation budget; None uses the default.
+            max_sentences: Stop decoding after this many sentences (bounds
+                latency at a clean sentence end instead of a mid-sentence
+                token cut); None disables the criterion entirely.
 
         Returns:
             List of caption strings (one per image).
@@ -270,7 +396,10 @@ class CaptionerLoader(BaseLoader):
                 ],
             }
         ]
-        chat_prompt = processor.apply_chat_template(messages, add_generation_prompt=True)
+        # tokenize=False explicitly: processors default to a prompt string, but
+        # processors that delegate to their tokenizer (e.g. Mage-VL) inherit the
+        # tokenizer default of tokenize=True and would return token ids here.
+        chat_prompt = processor.apply_chat_template(messages, add_generation_prompt=True, tokenize=False)
 
         captions: List[str] = []
         for image in preprocessed['images']:
@@ -278,16 +407,32 @@ class CaptionerLoader(BaseLoader):
             # Match pixel_values to the model dtype (bf16 on CUDA); input_ids stay long.
             if dtype is not None and 'pixel_values' in inputs:
                 inputs['pixel_values'] = inputs['pixel_values'].to(dtype)
-            with torch.no_grad():
+            gen_kwargs: Dict[str, Any] = {}
+            if max_sentences is not None:
+                tokenizer = getattr(processor, 'tokenizer', processor)
+                gen_kwargs['stopping_criteria'] = _sentence_stop_criteria(
+                    tokenizer, inputs['input_ids'].shape[1], max_sentences
+                )
+            # inference_mode over no_grad: also skips autograd view/version
+            # tracking, which is measurable at decode time (~15% on Mage-VL;
+            # greedy output is unchanged). Captions are decoded to plain
+            # strings, so no tensor ever needs grad downstream.
+            with torch.inference_mode():
                 generated_ids = mdl.generate(
                     **inputs,
                     max_new_tokens=max_new_tokens,
                     do_sample=False,  # greedy — deterministic and fast
+                    **gen_kwargs,
                 )
             # Decode only the newly generated tokens (strip the prompt echo).
             new_tokens = generated_ids[:, inputs['input_ids'].shape[1] :]
-            text = processor.batch_decode(new_tokens, skip_special_tokens=True)[0]
-            captions.append(text.strip())
+            text = processor.batch_decode(new_tokens, skip_special_tokens=True)[0].strip()
+            if max_sentences is not None:
+                # The criterion usually halts exactly on the Nth terminator; a
+                # boundary confirmed by a merged terminator+whitespace token can
+                # leave the first word of sentence N+1 dangling — trim it.
+                text = _trim_to_sentences(text, max_sentences)
+            captions.append(text)
         return captions
 
     @staticmethod
@@ -318,6 +463,7 @@ class Captioner:
         device: Optional[str] = None,
         prompt: str = DEFAULT_PROMPT,
         max_new_tokens: int = DEFAULT_MAX_NEW_TOKENS,
+        max_sentences: Optional[int] = None,
         revision: Optional[str] = None,
         **kwargs,
     ):
@@ -328,12 +474,15 @@ class Captioner:
             device: None/'server' → model server when --modelserver is set; else a local torch device.
             prompt: Default caption prompt (per-request; not part of identity).
             max_new_tokens: Default generation budget (per-request; not part of identity).
+            max_sentences: Default sentence budget — stop decoding at a clean
+                sentence boundary (per-request; not part of identity). None = off.
             revision: Optional pinned model revision (part of model identity).
             **kwargs: Extra identity-only loader options forwarded to load/load_model.
         """
         self.model_name = model_name
         self.prompt = prompt or DEFAULT_PROMPT
         self.max_new_tokens = max_new_tokens or DEFAULT_MAX_NEW_TOKENS
+        self.max_sentences = max_sentences
         self._revision = revision
 
         server_addr = get_model_server_address()
@@ -351,13 +500,20 @@ class Captioner:
                 model_name, device=device if device != 'server' else None, revision=revision, **kwargs
             )
 
-    def caption(self, image: Any, prompt: Optional[str] = None, max_new_tokens: Optional[int] = None) -> str:
+    def caption(
+        self,
+        image: Any,
+        prompt: Optional[str] = None,
+        max_new_tokens: Optional[int] = None,
+        max_sentences: Optional[int] = None,
+    ) -> str:
         """Return a caption string for one image.
 
         Args:
             image: PIL Image or encoded image bytes.
             prompt: Override the default caption prompt for this call.
             max_new_tokens: Override the default generation budget for this call.
+            max_sentences: Override the default sentence budget for this call.
 
         Returns:
             The caption as a plain string.
@@ -367,40 +523,53 @@ class Captioner:
 
         prompt = self.prompt if prompt is None else prompt
         max_new_tokens = self.max_new_tokens if max_new_tokens is None else max_new_tokens
+        max_sentences = self.max_sentences if max_sentences is None else max_sentences
         metrics.counter('gpu_inference_count', 1)
 
         from PIL import Image
         from ai.common.image.dense_resize import resize_for_inference
 
         # Downscale for inference (quality-neutral; shrinks the model-server payload).
-        if hasattr(image, 'size') and hasattr(image, 'mode'):
+        raw: Optional[bytes] = None
+        if isinstance(image, (bytes, bytearray)):
+            decoded = Image.open(io.BytesIO(image))
+            if max(decoded.size) <= INFER_MAX_EDGE:
+                # Already-encoded input within inference bounds: transport the
+                # original bytes — the server decodes the same pixels, and a
+                # decode -> PNG re-encode only inflates photo payloads.
+                raw = bytes(image)
+                image = decoded
+            else:
+                image, _ = resize_for_inference(decoded.convert('RGB'), INFER_MAX_EDGE)
+        elif hasattr(image, 'size') and hasattr(image, 'mode'):
             image, _ = resize_for_inference(image, INFER_MAX_EDGE)
-        elif isinstance(image, (bytes, bytearray)):
-            image, _ = resize_for_inference(Image.open(io.BytesIO(image)).convert('RGB'), INFER_MAX_EDGE)
 
         if self._proxy_mode:
             # The model server enforces its own per-request timeout/retry.
-            result = self._client.send_command(
-                'rrext_ms_inference',
-                {
-                    'data': image_to_bytes(image),
-                    'output_fields': ['caption'],
-                    'prompt': prompt,
-                    'max_new_tokens': max_new_tokens,
-                },
-            )
+            args = {
+                'data': raw if raw is not None else image_to_bytes(image),
+                'output_fields': ['caption'],
+                'prompt': prompt,
+                'max_new_tokens': max_new_tokens,
+            }
+            # Only sent when set: servers predating the field would reject an
+            # unknown kwarg, and omitting it keeps the off-path byte-identical.
+            if max_sentences is not None:
+                args['max_sentences'] = max_sentences
+            result = self._client.send_command('rrext_ms_inference', args)
             items = result.get('result', [])
             return items[0].get('caption', '') if items else ''
 
-        return self._caption_local(image, prompt, max_new_tokens)
+        return self._caption_local(image, prompt, max_new_tokens, max_sentences)
 
-    def _caption_local(self, image: Any, prompt: str, max_new_tokens: int) -> str:
+    def _caption_local(self, image: Any, prompt: str, max_new_tokens: int, max_sentences: Optional[int]) -> str:
         """Run local inference under a watchdog thread; raise TimeoutError if it hangs.
 
         Args:
             image: PIL Image or encoded image bytes.
             prompt: Caption prompt for this call.
             max_new_tokens: Generation budget for this call.
+            max_sentences: Sentence budget for this call; None = off.
 
         Returns:
             The caption string.
@@ -410,7 +579,7 @@ class Captioner:
 
         def _work():
             try:
-                result[0] = self._infer_local(image, prompt, max_new_tokens)
+                result[0] = self._infer_local(image, prompt, max_new_tokens, max_sentences)
             except BaseException as exc:  # propagated to the caller after join
                 error[0] = exc
 
@@ -423,13 +592,14 @@ class Captioner:
             raise error[0]
         return result[0] or ''
 
-    def _infer_local(self, image: Any, prompt: str, max_new_tokens: int) -> str:
+    def _infer_local(self, image: Any, prompt: str, max_new_tokens: int, max_sentences: Optional[int]) -> str:
         """Run preprocess→inference→postprocess locally and record per-phase timing.
 
         Args:
             image: PIL Image or encoded image bytes.
             prompt: Caption prompt for this call.
             max_new_tokens: Generation budget for this call.
+            max_sentences: Sentence budget for this call; None = off.
 
         Returns:
             The caption string.
@@ -438,7 +608,14 @@ class Captioner:
         pre = CaptionerLoader.preprocess(self._bundle, [image], self._metadata)
         t_pre = (time.perf_counter() - t0) * 1000
         t0 = time.perf_counter()
-        raw = CaptionerLoader.inference(self._bundle, pre, self._metadata, prompt=prompt, max_new_tokens=max_new_tokens)
+        raw = CaptionerLoader.inference(
+            self._bundle,
+            pre,
+            self._metadata,
+            prompt=prompt,
+            max_new_tokens=max_new_tokens,
+            max_sentences=max_sentences,
+        )
         t_gpu = (time.perf_counter() - t0) * 1000
         t0 = time.perf_counter()
         out = CaptionerLoader.postprocess(self._bundle, raw, 1, ['caption'], metadata=self._metadata)

@@ -56,6 +56,22 @@
 			"format": "textarea",
 			"default": "Describe this image in detail."
 		},
+		"caption.max_new_tokens": {
+			"title": "Max output tokens",
+			"description": "Hard cap on generated tokens per description. Generation time scales with output length, so this bounds worst-case latency; lower it (e.g. 48) for latency-sensitive pipelines with short prompts.",
+			"type": "integer",
+			"minimum": 1,
+			"maximum": 1024,
+			"default": 256
+		},
+		"caption.max_sentences": {
+			"title": "Max sentences",
+			"description": "Stops generation at a clean sentence boundary once this many sentences have been produced, instead of cutting off mid-sentence at the token cap. Set 0 to disable and rely on max output tokens alone.",
+			"type": "integer",
+			"minimum": 0,
+			"maximum": 16,
+			"default": 0
+		},
 		"caption.profile": {
 			"title": "Model",
 			"type": "string",
@@ -67,7 +83,7 @@
 		{
 			"section": "Pipe",
 			"title": "Describe",
-			"properties": ["caption.profile", "caption.prompt"]
+			"properties": ["caption.profile", "caption.prompt", "caption.max_new_tokens", "caption.max_sentences"]
 		}
 	],
 	"test": {

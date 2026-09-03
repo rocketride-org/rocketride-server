@@ -32,8 +32,15 @@ Background removal: foreground/alpha-matte loader + facade (vision family).
   --modelserver is set, else local. ``remove(image)`` returns an HxW uint8 alpha
   array. ``model_name`` is the model identity; ``max_edge`` is client-side.
 
-BiRefNet runs in **float32** on all devices: its deformable convolution kernel
-(``deformable_im2col``) has no bfloat16 implementation, so half precision crashes.
+BiRefNet weights stay **float32** on all devices: its deformable convolution
+kernel (``deformable_im2col``) has no half-precision implementation — model.half()
+crashes and autocast bf16 segfaults it (verified on H100/torch 2.10). Speed comes
+from TF32 tensor-core math instead: on CUDA the forward runs with both TF32 flags
+enabled (~2.3x, worst-pixel alpha drift <4%), scoped to the call so other models
+sharing the process keep their own numerics. ``dtype='float32'`` restores strict
+fp32. Pre/postprocessing also runs on the GPU on CUDA (resize + normalize in, the
+alpha matte is restored to source resolution and quantized to uint8 before the
+device→host copy).
 """
 
 import io
@@ -45,7 +52,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from ai.web.metrics import metrics
 from ai.common.utils.image_utils import image_to_bytes, encode_ndarray, decode_ndarray
 from ai.common.utils.cuda_utils import pick_torch_device, model_gpu_gb
-from ..base import BaseLoader, get_model_server_address, ModelClient
+from ..base import BaseLoader, get_model_server_address, ModelClient, tf32_context as _tf32
 
 logger = logging.getLogger('rocketlib.models.background')
 
@@ -80,6 +87,7 @@ class BackgroundRemoverLoader(BaseLoader):
         allocate_gpu: Optional[callable] = None,
         exclude_gpus: Optional[List[int]] = None,
         revision: Optional[str] = None,
+        dtype: Optional[str] = None,
         **kwargs,
     ) -> Tuple[Any, Dict[str, Any], int]:
         """Load BiRefNet in float32 (its deformable conv has no bf16/fp16 kernel).
@@ -90,18 +98,26 @@ class BackgroundRemoverLoader(BaseLoader):
             allocate_gpu: Server callable (memory_gb, exclude_gpus) -> (gpu_index, device).
             exclude_gpus: GPU indices the allocator must avoid.
             revision: Optional pinned model revision.
+            dtype: 'float32' disables the TF32 fast path (bit-exact fp32, ~2.3x
+                slower on CUDA); None/'auto' enables it. Weights are fp32 either way.
+                The TF32 flags are process-global, so on the model server strict
+                fp32 is only guaranteed when no concurrent TF32-enabled model
+                shares the process (see ``tf32_context``).
             **kwargs: Ignored extra loader options.
 
         Returns:
-            Tuple (bundle {'model','device','input_size'}, metadata dict, gpu_index) — -1 on CPU.
+            Tuple (bundle {'model','device','input_size','tf32'}, metadata dict, gpu_index) — -1 on CPU.
         """
         BackgroundRemoverLoader._ensure_dependencies()
 
         from ai.common.torch import torch
         from transformers import AutoModelForImageSegmentation
 
+        # Measured peaks (H100, fp32): 1K 3.4GB, HR 10.7GB — activations at the fixed
+        # square input dominate, so the footprint is per-variant, not per-image.
+        memory_gb = 12.0 if _INPUT_SIZE.get(model_name, _INPUT_SIZE_DEFAULT) >= 2048 else 4.0
         if allocate_gpu:
-            gpu_index, device = allocate_gpu(3.0, exclude_gpus or [])
+            gpu_index, device = allocate_gpu(memory_gb, exclude_gpus or [])
             logger.info(f'Allocated GPU {gpu_index} ({device}) for background_removal {model_name}')
         else:
             device = device or pick_torch_device()
@@ -111,9 +127,10 @@ class BackgroundRemoverLoader(BaseLoader):
         model.to(device, dtype=torch.float32)
         model.eval()
 
+        tf32 = str(device).startswith('cuda') and dtype not in ('float32', 'highest')
         input_size = _INPUT_SIZE.get(model_name, _INPUT_SIZE_DEFAULT)
         metadata = {'device': str(device), 'model_name': model_name, 'loader': 'background_removal'}
-        return {'model': model, 'device': device, 'input_size': input_size}, metadata, gpu_index
+        return {'model': model, 'device': device, 'input_size': input_size, 'tf32': tf32}, metadata, gpu_index
 
     @staticmethod
     def preprocess(model: Any, inputs: List[Any], metadata: Optional[Dict] = None) -> Dict[str, Any]:
@@ -161,28 +178,60 @@ class BackgroundRemoverLoader(BaseLoader):
 
         bundle = model if isinstance(model, dict) else getattr(model, 'model_obj', model)
         mdl, device, input_size = bundle['model'], bundle['device'], bundle['input_size']
+        on_cuda = str(device).startswith('cuda')
         mean = np.array(_IMAGENET_MEAN, dtype=np.float32)
         std = np.array(_IMAGENET_STD, dtype=np.float32)
+        if on_cuda:
+            # Constant across images — build the (1,3,1,1) normalization tensors once.
+            mean_t = torch.from_numpy(mean).view(1, 3, 1, 1).to(device)
+            std_t = torch.from_numpy(std).view(1, 3, 1, 1).to(device)
 
-        alphas: List[Any] = []
-        for image in preprocessed['images']:
-            src_w, src_h = image.size
-            square = image.resize((input_size, input_size), resample=Image.BILINEAR)
-
-            arr = np.asarray(square, dtype=np.float32) / 255.0
-            arr = (arr - mean) / std
-            tensor = torch.from_numpy(arr.transpose(2, 0, 1)).unsqueeze(0).to(device, dtype=torch.float32)
-
-            with torch.no_grad():
-                preds = mdl(tensor)
-
+        def _final_logit(preds):
             # BiRefNet returns a list/tuple of multi-scale logits (last = highest-res),
             # sometimes nested once more; a single tensor on some forks.
             logit = preds
             while isinstance(logit, (list, tuple)):
                 logit = logit[-1]
+            return logit
 
-            alpha = torch.sigmoid(logit).float().squeeze(0).squeeze(0).detach().cpu().numpy()
+        alphas: List[Any] = []
+        for image in preprocessed['images']:
+            src_w, src_h = image.size
+
+            if on_cuda:
+                # GPU path: resize + normalize + matte restore all on-device; only the
+                # small uint8 image goes up and only the uint8 matte comes back.
+                src = torch.from_numpy(np.array(image, dtype=np.uint8)).permute(2, 0, 1).unsqueeze(0)
+                with torch.inference_mode():
+                    tensor = src.to(device).float().div_(255.0)
+                    # Deliberate CPU/GPU divergence: antialias=True here vs PIL bilinear on the
+                    # CPU path, so alphas differ slightly between devices (golden-image tests).
+                    tensor = torch.nn.functional.interpolate(
+                        tensor, size=(input_size, input_size), mode='bilinear', antialias=True
+                    )
+                    tensor = (tensor - mean_t) / std_t
+                    with _tf32(bundle.get('tf32', False)):
+                        logit = _final_logit(mdl(tensor))
+                    alpha = torch.sigmoid(logit.float())
+                    # Restore to the input image's resolution in float, then quantize —
+                    # avoids the quantize-then-resize banding of the CPU path.
+                    alpha = torch.nn.functional.interpolate(
+                        alpha, size=(src_h, src_w), mode='bilinear', align_corners=False
+                    )
+                    alpha_u8 = alpha.clamp(0, 1).mul(255.0).to(torch.uint8).squeeze(0).squeeze(0).cpu().numpy()
+                alphas.append(alpha_u8)
+                continue
+
+            # CPU/MPS path (local engine fallback): PIL resize + numpy normalize.
+            square = image.resize((input_size, input_size), resample=Image.BILINEAR)
+            arr = np.asarray(square, dtype=np.float32) / 255.0
+            arr = (arr - mean) / std
+            tensor = torch.from_numpy(arr.transpose(2, 0, 1)).unsqueeze(0).to(device, dtype=torch.float32)
+
+            with torch.inference_mode():
+                logit = _final_logit(mdl(tensor))
+
+            alpha = torch.sigmoid(logit).float().squeeze(0).squeeze(0).cpu().numpy()
             alpha_u8 = (np.clip(alpha, 0.0, 1.0) * 255.0).astype(np.uint8)
             # Upsample the square alpha back to the input image's resolution.
             alphas.append(restore_dense_output(alpha_u8, (src_w, src_h), mode='bilinear'))
@@ -223,7 +272,8 @@ class BackgroundRemover:
             model_name: HF model id to load.
             device: None/'server' → model server when --modelserver is set; else a local torch device.
             revision: Optional pinned model revision (part of model identity).
-            **kwargs: Extra identity-only loader options forwarded to load/load_model.
+            **kwargs: Extra identity-only loader options forwarded to load/load_model
+                (e.g. ``dtype='float32'`` to disable the CUDA TF32 fast path).
         """
         self.model_name = model_name
         self._revision = revision

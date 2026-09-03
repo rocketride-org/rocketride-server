@@ -9,4 +9,4 @@
 # (use text-generation with a chat model), and tokenizer backend selection
 # is now automatic (no use_fast fallback).
 
-transformers==5.7.0
+transformers==5.14.1

@@ -2,18 +2,25 @@
 # Shared base for all vision-family loaders (CLIP/ViT, depth, detection, ...).
 # Per-model extras live in requirements_<x>.txt (installed after this base).
 # torch via ai.common.torch; numpy is a base engine dep (not declared).
-# transformers pin: 5.7.0 is the lowest stable release that satisfies every
-# in-repo floor: SAM 3 (Sam3Model/Sam3Processor — shipped with v5.0.0; latest
-# 4.x is 4.57.x), Qwen3-VL (Qwen3VLForConditionalGeneration, needs >=4.57),
-# and microsoft/Mage-VL, whose model card requires transformers>=5.7.
-# Existing loaders re-verified against the v5.7.0 docs: Mask2Former (processor
-# + post_process_instance/semantic_segmentation unchanged), Grounding-DINO
-# (post_process_grounded_object_detection threshold=), RT-DETR, TrOCR,
-# CLIP/ViT, Idefics3/SmolVLM, AutoModelForImageTextToText + dtype= kwarg.
+# transformers pin: floors are SAM 3 (Sam3Model/Sam3Processor — shipped with
+# v5.0.0), Qwen3-VL (Qwen3VLForConditionalGeneration, needs >=4.57), and
+# microsoft/Mage-VL, whose model card requires transformers>=5.7. 5.14.1 over
+# the 5.7.0 floor because Qwen3-VL's processor fix is only patchable there
+# (replace_image_token is a separate method; in 5.7 the buggy str*tensor is
+# inlined in __call__) — see _apply_qwen3_vl_fixes in vision/caption.py.
+# Existing loaders re-verified against the v5.14.1 source (github tag v5.14.1):
+# Mask2Former (processor + post_process_instance/semantic_segmentation — same
+# signatures/result keys; semantic gained an optional return_segmentation_scores
+# kwarg, default off), Grounding-DINO (post_process_grounded_object_detection
+# threshold=/text_threshold=/target_sizes=), RT-DETR (post_process_object_detection
+# threshold=/target_sizes=), SAM 3 (Sam3Model/Sam3Processor.post_process_instance_
+# segmentation; pred_logits/presence_logits/pred_masks/pred_boxes outputs), TrOCR
+# (TrOCRProcessor + VisionEncoderDecoderModel.generate), CLIP/ViT,
+# Idefics3/SmolVLM, AutoModelForImageTextToText + dtype= kwarg.
 # v5 image processors are torchvision-backed (torchvision ships via
 # ai.common.torch); TF/Flax classes are gone (unused here). NOTE: this pin
 # MUST stay identical to ../transformers/requirements_transformers.txt — the
 # engine's depends() compiles ALL requirements files into one constraint set,
 # so divergent pins fail the build.
-transformers==5.7.0
+transformers==5.14.1
 Pillow

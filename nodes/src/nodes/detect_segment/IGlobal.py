@@ -58,9 +58,8 @@ class IGlobal(IGlobalBase):
             warning(f'detect_segment: unknown mode "{mode}", falling back to {DEFAULT_MODE}.')
             mode = DEFAULT_MODE
 
-        # Canvas/.pipe configs nest UI field values under a 'parameters' object with the
-        # field prefix kept (parameters['detect_segment.prompt']); getNodeConfig neither
-        # merges that object nor strips prefixes, so read it directly before the fallbacks.
+        # UI field values arrive prefixed under connConfig['parameters']; see
+        # Config.resolve_node_param for the full story.
         params = conn.get('parameters')
         ui_prompt = params.get('detect_segment.prompt') if params is not None else None
         prompt = str(
@@ -73,7 +72,8 @@ class IGlobal(IGlobalBase):
             )
 
         model_name = (config.get('model') or '').strip() or None
-        raw_threshold = config.get('threshold', DEFAULT_THRESHOLD)
+        # Resolve threshold with None-checks so a valid 0.0 is not dropped.
+        raw_threshold = Config.resolve_node_param(conn, config, 'detect_segment', 'threshold', DEFAULT_THRESHOLD)
         try:
             threshold = float(raw_threshold)
         except (TypeError, ValueError):
@@ -81,8 +81,9 @@ class IGlobal(IGlobalBase):
         if threshold is None or not (0.0 <= threshold <= 1.0):
             warning(f'detect_segment: invalid threshold {raw_threshold!r}, using default {DEFAULT_THRESHOLD}')
             threshold = DEFAULT_THRESHOLD
+        raw_max_edge = Config.resolve_node_param(conn, config, 'detect_segment', 'maxEdge', DEFAULT_MAX_EDGE)
         try:
-            max_edge = int(config.get('maxEdge', DEFAULT_MAX_EDGE))
+            max_edge = int(raw_max_edge)
         except (TypeError, ValueError):
             max_edge = DEFAULT_MAX_EDGE
         max_edge = min(4096, max(256, max_edge))

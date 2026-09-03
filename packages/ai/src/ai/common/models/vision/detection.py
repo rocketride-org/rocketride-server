@@ -27,6 +27,8 @@ Object detection loader + facade (vision family).
 
 - RFDetrLoader / MmGDinoLoader: permissive-license backends exposing
   ``detect(image, prompt, threshold) -> [{label, score, box, centroid}]``.
+  MmGDinoLoader also serves the 'llmdet' backend (LLMDet is architecturally
+  MM-Grounding-DINO; only the checkpoint differs).
 - DetectorLoader: BaseLoader selecting a backend by ``backend`` at load time;
   returns canonical detection dicts (JSON-friendly).
 - Detector: user-facing facade. Model server when --modelserver is set, else
@@ -34,6 +36,7 @@ Object detection loader + facade (vision family).
   per-request (so one model copy is shared regardless of query/filter).
 """
 
+import contextlib
 import io
 import logging
 import os
@@ -43,7 +46,7 @@ from typing import Any, Dict, List, NamedTuple, Optional, Tuple
 from ai.web.metrics import metrics
 from ai.common.utils.image_utils import image_to_bytes
 from ai.common.utils.cuda_utils import pick_torch_device, model_gpu_gb
-from ..base import BaseLoader, get_model_server_address, ModelClient
+from ..base import BaseLoader, get_model_server_address, ModelClient, tf32_context as _tf32
 
 logger = logging.getLogger('rocketlib.models.detection')
 
@@ -59,6 +62,7 @@ class BackendSpec(NamedTuple):
 BACKENDS: Dict[str, BackendSpec] = {
     'rfdetr': BackendSpec(model='PekingU/rtdetr_r50vd', infer_edge=560, open_vocab=False),
     'mmgdino': BackendSpec(model='IDEA-Research/grounding-dino-tiny', infer_edge=1333, open_vocab=True),
+    'llmdet': BackendSpec(model='iSEE-Laboratory/llmdet_tiny', infer_edge=1333, open_vocab=True),
 }
 DEFAULT_BACKEND = 'rfdetr'
 DEFAULT_THRESHOLD = 0.3
@@ -81,6 +85,35 @@ def _parse_prompt(prompt: str) -> List[str]:
     if not prompt:
         return []
     return [c.strip() for c in prompt.replace('.', ',').split(',') if c.strip()]
+
+
+@contextlib.contextmanager
+def _untie_mm_gdino_bbox_heads(model_cls: Any):
+    """Temporarily strip transformers' bbox_embed weight ties from an MM-Grounding-DINO class.
+
+    Upstream bug (transformers <= 5.14): MMGroundingDinoForObjectDetection keeps
+    GroundingDino's tied-weights declaration for the decoder box heads even when
+    the checkpoint config says ``decoder_bbox_embed_share: False`` — GroundingDino's
+    own __init__ unties in that case, the MM port dropped it. The checkpoints store
+    six DISTINCT per-layer heads; with the ties in place layers 1..5 silently run
+    layer 0's head, so iterative box refinement corrupts geometry (boxes collapse
+    to slivers: correct centers, near-zero width or height). Stripping the ties
+    lets the per-layer weights load; wrap the from_pretrained call in this scope.
+
+    Scoped (not permanent) because ``_tied_weights_keys`` is class-level state
+    shared by every checkpoint loaded in the process: a checkpoint with
+    ``decoder_bbox_embed_share: True`` stores only layer 0's head and relies on
+    the tie declarations to populate layers 1..5, so leaving the ties stripped
+    would silently give it uninitialized box heads on a later load. The original
+    mapping is restored on exit (also on error). No-op when upstream has already
+    dropped the bbox ties (no 'bbox_embed' entries).
+    """
+    original = model_cls._tied_weights_keys
+    model_cls._tied_weights_keys = {k: v for k, v in original.items() if 'bbox_embed' not in k}
+    try:
+        yield
+    finally:
+        model_cls._tied_weights_keys = original
 
 
 def _outputs_to_cpu(outputs: Any) -> Any:
@@ -128,7 +161,6 @@ class RFDetrLoader:
         self._class_names: Dict[int, str] = {}
 
         try:
-            import contextlib
             import sys
             import types
 
@@ -210,7 +242,7 @@ class RFDetrLoader:
 
         torch = self._torch
         inputs = self._processor(images=image, return_tensors='pt').to(self.device)
-        with torch.no_grad():
+        with torch.inference_mode():
             outputs = self._model(**inputs)
 
         # Post-process on host: transformers converts tensors with .numpy()
@@ -251,19 +283,34 @@ class MmGDinoLoader:
             device: Torch device string, or None to auto-pick.
             revision: Optional pinned model revision.
         """
-        from transformers import AutoModelForZeroShotObjectDetection, AutoProcessor
+        from transformers import AutoConfig, AutoModelForZeroShotObjectDetection, AutoProcessor
 
         self.model_name = model_name or self.DEFAULT_MODEL
         self.threshold = float(threshold)
         self.text_threshold = float(text_threshold)
         self.device = device or pick_torch_device()
 
+        # MM-Grounding-DINO-architecture checkpoints (llmdet, openmmlab mmgdino) need
+        # the per-layer box-head untie scoped around the weight load — see
+        # _untie_mm_gdino_bbox_heads. Other checkpoints load under a null scope.
+        config = AutoConfig.from_pretrained(self.model_name, revision=revision)
+        untie_scope = contextlib.nullcontext()
+        if getattr(config, 'model_type', '') == 'mm-grounding-dino' and not getattr(
+            config, 'decoder_bbox_embed_share', True
+        ):
+            from transformers.models.mm_grounding_dino.modeling_mm_grounding_dino import (
+                MMGroundingDinoForObjectDetection,
+            )
+
+            untie_scope = _untie_mm_gdino_bbox_heads(MMGroundingDinoForObjectDetection)
+
         self._processor = AutoProcessor.from_pretrained(self.model_name, revision=revision)
-        self._model = (
-            AutoModelForZeroShotObjectDetection.from_pretrained(self.model_name, revision=revision)
-            .to(self.device)
-            .eval()
-        )
+        with untie_scope:
+            self._model = (
+                AutoModelForZeroShotObjectDetection.from_pretrained(self.model_name, revision=revision)
+                .to(self.device)
+                .eval()
+            )
 
     def detect(
         self, image: Any, prompt: Optional[str] = None, threshold: Optional[float] = None
@@ -290,7 +337,7 @@ class MmGDinoLoader:
 
         text = '. '.join(c.lower() for c in classes) + '.'
         inputs = self._processor(images=image, text=text, return_tensors='pt').to(self.device)
-        with torch.no_grad():
+        with torch.inference_mode():
             outputs = self._model(**inputs)
 
         # Post-process on host: transformers' grounded post-processing calls
@@ -324,7 +371,7 @@ def _build_backend(
     """Construct the underlying detector for a backend.
 
     Args:
-        backend: 'rfdetr' (closed-set) or 'mmgdino' (open-vocab).
+        backend: 'rfdetr' (closed-set) or 'mmgdino'/'llmdet' (open-vocab).
         model_name: HF/package model id.
         device: Torch device string, or None to auto-pick.
         revision: Optional pinned model revision (HF backends only).
@@ -332,13 +379,15 @@ def _build_backend(
     Returns:
         A loader exposing ``detect(image, prompt, threshold)``.
     """
-    if backend == 'mmgdino':
+    if backend in ('mmgdino', 'llmdet'):
+        # LLMDet is architecturally MM-Grounding-DINO and loads via
+        # AutoModelForZeroShotObjectDetection; only the checkpoint differs.
         return MmGDinoLoader(model_name=model_name, device=device, revision=revision)
     return RFDetrLoader(model_name=model_name, device=device, revision=revision)
 
 
 class DetectorLoader(BaseLoader):
-    """Static loader for object detection (RF-DETR / Grounding-DINO via ``backend``)."""
+    """Static loader for object detection (RF-DETR / Grounding-DINO / LLMDet via ``backend``)."""
 
     LOADER_TYPE: str = 'detection'
     _REQUIREMENTS_FILE = [
@@ -349,45 +398,65 @@ class DetectorLoader(BaseLoader):
 
     @staticmethod
     def load(
-        model_name: str = BACKENDS[DEFAULT_BACKEND].model,
+        model_name: Optional[str] = None,
         backend: str = DEFAULT_BACKEND,
         device: Optional[str] = None,
         allocate_gpu: Optional[callable] = None,
         exclude_gpus: Optional[List[int]] = None,
         revision: Optional[str] = None,
+        dtype: Optional[str] = None,
         **kwargs,
     ) -> Tuple[Any, Dict[str, Any], int]:
         """Build the detector for the chosen backend.
 
         Args:
-            model_name: HF/package model id (defaults to the backend's model).
-            backend: 'rfdetr' or 'mmgdino' (part of model identity).
+            model_name: HF/package model id; None resolves to the CHOSEN backend's
+                default (a fixed rfdetr default would crash the mmgdino backend).
+            backend: 'rfdetr', 'mmgdino' or 'llmdet' (part of model identity).
             device: Local torch device; ignored when allocate_gpu is provided.
             allocate_gpu: Server callable (memory_gb, exclude_gpus) -> (gpu_index, device).
             exclude_gpus: GPU indices the allocator must avoid.
             revision: Optional pinned model revision (identity only).
+            dtype: 'float32' disables the TF32 fast path (bit-exact fp32); None/'auto'
+                enables it on CUDA. Weights are fp32 either way. The TF32 flags are
+                process-global, so on the model server strict fp32 is only guaranteed
+                when no concurrent TF32-enabled model shares the process (see
+                ``tf32_context``).
             **kwargs: Ignored extra loader options.
 
         Returns:
-            Tuple (bundle {'detector','backend'}, metadata dict, gpu_index) — -1 on CPU.
+            Tuple (bundle {'detector','backend','tf32'}, metadata dict, gpu_index) — -1 on CPU.
         """
         DetectorLoader._ensure_dependencies()
 
+        model_name = model_name or BACKENDS.get(backend, BACKENDS[DEFAULT_BACKEND]).model
+
+        # Measured peaks (H100, fp32): rfdetr ~1GB; gdino-tiny/llmdet_tiny 2.0GB;
+        # llmdet_large 7.6GB (activation-heavy Swin-L) — headroom on top of each.
+        # The 'large' substring check keys off the shipped checkpoint names
+        # (e.g. iSEE-Laboratory/llmdet_large); custom checkpoints without
+        # 'large' in the name fall back to the 3.0 GB class.
+        if BACKENDS.get(backend, BACKENDS[DEFAULT_BACKEND]).open_vocab:
+            memory_gb = 9.0 if 'large' in model_name.lower() else 3.0
+        else:
+            memory_gb = 2.0
+
         if allocate_gpu:
-            gpu_index, device = allocate_gpu(2.0, exclude_gpus or [])
+            gpu_index, device = allocate_gpu(memory_gb, exclude_gpus or [])
             logger.info(f'Allocated GPU {gpu_index} ({device}) for detection {backend}/{model_name}')
         else:
             device = device or pick_torch_device()
             gpu_index = int(device.split(':')[1]) if str(device).startswith('cuda:') else -1
 
         detector = _build_backend(backend, model_name, device, revision=revision)
+        tf32 = str(device).startswith('cuda') and dtype not in ('float32', 'highest')
         metadata = {
             'device': str(device),
             'model_name': model_name,
             'backend': backend,
             'loader': 'detection',
         }
-        return {'detector': detector, 'backend': backend}, metadata, gpu_index
+        return {'detector': detector, 'backend': backend, 'tf32': tf32}, metadata, gpu_index
 
     @staticmethod
     def preprocess(model: Any, inputs: List[Any], metadata: Optional[Dict] = None) -> Dict[str, Any]:
@@ -437,7 +506,10 @@ class DetectorLoader(BaseLoader):
         """
         bundle = model if isinstance(model, dict) else getattr(model, 'model_obj', model)
         detector = bundle['detector']
-        return [detector.detect(img, prompt=prompt, threshold=threshold) for img in preprocessed['images']]
+        # TF32 is ~1.2x on mmgdino (Swin/BERT-heavy) and measured neutral on rfdetr;
+        # scoped uniformly here so both backends and any future ones are covered.
+        with _tf32(bundle.get('tf32', False)):
+            return [detector.detect(img, prompt=prompt, threshold=threshold) for img in preprocessed['images']]
 
     @staticmethod
     def postprocess(
@@ -474,13 +546,14 @@ class Detector:
         """Set up the detector in proxy (model server) or local mode.
 
         Args:
-            backend: 'rfdetr' or 'mmgdino' (part of model identity).
+            backend: 'rfdetr', 'mmgdino' or 'llmdet' (part of model identity).
             model_name: HF/package model id; defaults to the backend's model.
             device: None/'server' → model server when --modelserver is set; else a local device.
             threshold: Default confidence threshold (per-request; not part of identity).
             prompt: Default open-vocab prompt (per-request; not part of identity).
             revision: Optional pinned model revision (part of model identity).
-            **kwargs: Extra identity-only loader options.
+            **kwargs: Extra identity-only loader options (e.g. ``dtype='float32'``
+                to disable the CUDA TF32 fast path).
         """
         self.backend = backend
         self.model_name = model_name or BACKENDS.get(backend, BACKENDS[DEFAULT_BACKEND]).model

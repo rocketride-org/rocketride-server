@@ -28,6 +28,7 @@ from ai.common.config import Config
 
 DEFAULT_PROMPT = 'Describe this image in detail.'
 DEFAULT_MAX_NEW_TOKENS = 256
+DEFAULT_MAX_SENTENCES = 0  # 0 disables the sentence-boundary stop
 
 
 class IGlobal(IGlobalBase):
@@ -50,16 +51,36 @@ class IGlobal(IGlobalBase):
         if not model_name:
             warning(f'caption: no model configured, using default {DEFAULT_MODEL}')
             model_name = DEFAULT_MODEL
-        # Canvas/.pipe configs nest UI field values under a 'parameters' object with the
-        # field prefix kept (parameters['caption.prompt']); getNodeConfig neither merges
-        # that object nor strips prefixes, so read it directly before the fallbacks.
+        # UI field values arrive prefixed under connConfig['parameters']; see
+        # Config.resolve_node_param for the full story.
         params = conn.get('parameters')
         ui_prompt = params.get('caption.prompt') if params is not None else None
         self.prompt = (
-            str(ui_prompt or conn.get('caption.prompt') or config.get('prompt') or DEFAULT_PROMPT).strip()
+            str(
+                ui_prompt or conn.get('caption.prompt') or conn.get('prompt') or config.get('prompt') or DEFAULT_PROMPT
+            ).strip()
             or DEFAULT_PROMPT
         )
-        self.max_new_tokens = DEFAULT_MAX_NEW_TOKENS
+        # Resolve max_new_tokens with None-checks so a set value of 0 falls
+        # through to validation (and the default) rather than being skipped.
+        raw_max_tokens = Config.resolve_node_param(conn, config, 'caption', 'max_new_tokens', DEFAULT_MAX_NEW_TOKENS)
+        try:
+            max_new_tokens = int(raw_max_tokens)
+        except (TypeError, ValueError):
+            max_new_tokens = None
+        if max_new_tokens is None or not (1 <= max_new_tokens <= 1024):
+            warning(f'caption: invalid max_new_tokens {raw_max_tokens!r}, using default {DEFAULT_MAX_NEW_TOKENS}')
+            max_new_tokens = DEFAULT_MAX_NEW_TOKENS
+        self.max_new_tokens = max_new_tokens
+        # max_sentences: stop generation at a clean sentence boundary; 0 disables.
+        raw_max_sentences = Config.resolve_node_param(conn, config, 'caption', 'max_sentences', DEFAULT_MAX_SENTENCES)
+        try:
+            max_sentences = int(raw_max_sentences)
+        except (TypeError, ValueError):
+            max_sentences = None
+        if max_sentences is None or not (0 <= max_sentences <= 16):
+            warning(f'caption: invalid max_sentences {raw_max_sentences!r}, using default {DEFAULT_MAX_SENTENCES}')
+            max_sentences = DEFAULT_MAX_SENTENCES
         revision = (config.get('revision') or '').strip() or None
 
         # Profile-provided GPU allocation size (4B profiles set ~10-11 GB; the
@@ -70,7 +91,13 @@ class IGlobal(IGlobalBase):
             extra['memory_gb'] = float(memory_gb)
 
         # device=None -> model server when --modelserver is set, else local.
-        self.captioner = Captioner(model_name=model_name, device=None, revision=revision, **extra)
+        self.captioner = Captioner(
+            model_name=model_name,
+            device=None,
+            revision=revision,
+            max_sentences=max_sentences or None,
+            **extra,
+        )
 
         # Local inference must serialize GPU access
         from ai.common.models.base import make_device_lock

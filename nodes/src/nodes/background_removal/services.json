@@ -2,12 +2,12 @@
 	"title": "Background Removal",
 	"protocol": "background_removal://",
 	"classType": ["image"],
-	"capabilities": ["gpu", "experimental"],
+	"capabilities": ["gpu"],
 	"register": "filter",
 	"node": "python",
 	"path": "nodes.background_removal",
 	"prefix": "background_removal",
-	"description": ["Foreground / background separation using BiRefNet (MIT). Returns an RGBA cutout with a straight (non-premultiplied) alpha channel, so downstream nodes can re-composite over any background without dark fringes. ", "Two profiles are shipped: the default 1K BiRefNet and a higher-resolution 2K variant for fine hair / detailed edges. Runs on CPU, Apple Silicon (MPS), and CUDA."],
+	"description": ["Foreground / background separation using BiRefNet (MIT). Returns an RGBA cutout with a straight (non-premultiplied) alpha channel, so downstream nodes can re-composite over any background without dark fringes. ", "Two profiles are shipped: the default 1K BiRefNet (~4GB VRAM, runs on most laptop GPUs) and a higher-resolution 2K variant for fine hair / detailed edges (~11GB VRAM, workstation/datacenter GPUs). Runs on CPU, Apple Silicon (MPS), and CUDA; on pre-Ampere NVIDIA cards the TF32 fast path is inert and inference is plain fp32."],
 	"icon": "background-removal.svg",
 	"documentation": "https://docs.rocketride.org",
 	"tile": ["Model: ${parameters.background_removal.profile}", "Max edge: ${parameters.background_removal.maxEdge}"],
@@ -40,7 +40,7 @@
 				"maxEdge": 1024
 			},
 			"birefnet-hr": {
-				"title": "BiRefNet HR — 2K, finer hair / edge detail (MIT)",
+				"title": "BiRefNet HR — 2K, finer hair / edge detail (MIT, needs ~11GB VRAM)",
 				"model": "ZhengPeng7/BiRefNet_HR",
 				"revision": "a7a562f6fd16021180f2f4348f4de003a2d3d1e1",
 				"maxEdge": 2048

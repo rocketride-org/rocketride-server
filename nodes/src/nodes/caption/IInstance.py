@@ -23,7 +23,6 @@
 # =============================================================================
 
 from rocketlib import IInstanceBase, AVI_ACTION, warning
-from ai.common.image import ImageProcessor
 from .IGlobal import IGlobal
 
 
@@ -49,7 +48,7 @@ class IInstance(IInstanceBase):
         """Describe one image and write the result to the text lane.
 
         Args:
-            image: Decoded input PIL image for this frame.
+            image: Encoded image bytes for this frame.
         """
         if self.instance.hasListener('text'):
             with self.IGlobal.device_lock:
@@ -77,8 +76,11 @@ class IInstance(IInstanceBase):
             self._image_data += buffer
         elif action == AVI_ACTION.END:
             try:
-                image = ImageProcessor.load_image_from_bytes(self._image_data)
-                self._emit(image)
+                # Hand the encoded bytes straight to the facade: it decodes only
+                # when a downscale is needed and otherwise transports the
+                # original (smaller) encoding; decode errors still land in this
+                # except block either way.
+                self._emit(bytes(self._image_data))
             except Exception as e:
                 warning(f'caption: inference failed, passing empty: {e}')
                 if self.instance.hasListener('text'):

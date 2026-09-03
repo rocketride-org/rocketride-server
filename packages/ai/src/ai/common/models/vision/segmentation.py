@@ -46,7 +46,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 
 from ai.web.metrics import metrics
 from ai.common.utils.image_utils import image_to_bytes
-from ai.common.utils.cuda_utils import pick_torch_device, model_gpu_gb
+from ai.common.utils.cuda_utils import pick_torch_device, pick_torch_dtype, model_gpu_gb
 from ..base import BaseLoader, get_model_server_address, ModelClient
 
 logger = logging.getLogger('rocketlib.models.segmentation')
@@ -319,6 +319,7 @@ class Sam3ConceptLoader:
         threshold: float = DEFAULT_THRESHOLD,
         device: Optional[str] = None,
         revision: Optional[str] = None,
+        dtype: Optional[str] = None,
         **_kwargs,
     ):
         """Build the concept segmenter.
@@ -328,6 +329,7 @@ class Sam3ConceptLoader:
             threshold: Default minimum instance score.
             device: Torch device string, or None to auto-pick.
             revision: Optional pinned model revision.
+            dtype: Torch dtype name override (e.g. 'float32'); None auto-picks.
         """
         from transformers import Sam3Model, Sam3Processor
         from ai.common.torch import torch
@@ -337,7 +339,17 @@ class Sam3ConceptLoader:
         self.device = device or pick_torch_device()
 
         self._processor = Sam3Processor.from_pretrained(self.model_name, revision=revision)
-        self._model = Sam3Model.from_pretrained(self.model_name, revision=revision).to(self.device).eval()
+        # bf16 shifts scores slightly, so instances scored right at the
+        # threshold can flip vs fp32; segment() upcasts to fp32 before
+        # thresholding to contain the drift there. dtype='float32' restores
+        # exact fp32 outputs when that matters more than speed.
+        if dtype:
+            self._dtype = getattr(torch, dtype)
+        else:
+            self._dtype = pick_torch_dtype(self.device, cuda='bfloat16', mps='float32', cpu='float32')
+        self._model = (
+            Sam3Model.from_pretrained(self.model_name, revision=revision, dtype=self._dtype).to(self.device).eval()
+        )
         self._torch = torch
 
     def segment(
@@ -347,9 +359,10 @@ class Sam3ConceptLoader:
 
         SAM 3 answers ONE noun phrase per query, but the detect node's prompt
         convention is a ' . '-separated concept list ("grass . tree . stairs").
-        Split and query each concept against the already-loaded model so both
-        prompt styles behave the same across nodes; each instance keeps the
-        concept it matched as its label.
+        The list fans out to one query per concept — batched into a single
+        forward over shared image features, since the vision encoder is
+        independent of the text query — and each instance keeps the concept it
+        matched as its label.
 
         Args:
             image: PIL image.
@@ -369,30 +382,64 @@ class Sam3ConceptLoader:
             return []
 
         thr = self.threshold if threshold is None else float(threshold)
+        torch = self._torch
+        n = len(concepts)
+
+        # One processor call tokenizes all concepts as a batch; the image is
+        # preprocessed once (pixel_values stays batch-1 regardless of n).
+        inputs = self._processor(images=image, text=concepts, return_tensors='pt').to(self.device)
+        with torch.no_grad():
+            vision = self._model.get_vision_features(pixel_values=inputs['pixel_values'].to(self._dtype))
+            if n > 1:
+                # Broadcast the cached image features across the concept batch.
+                # expand() creates views, not copies — no extra GPU memory.
+                vision = type(vision)(
+                    fpn_hidden_states=tuple(t.expand(n, *t.shape[1:]) for t in vision.fpn_hidden_states),
+                    fpn_position_encoding=tuple(t.expand(n, *t.shape[1:]) for t in vision.fpn_position_encoding),
+                )
+            outputs = self._model(
+                vision_embeds=vision,
+                input_ids=inputs['input_ids'],
+                attention_mask=inputs.get('attention_mask'),
+            )
+
+        # GPU-side equivalent of Sam3Processor.post_process_instance_segmentation
+        # (scores = sigmoid(pred_logits) [* sigmoid(presence_logits)]; keep
+        # score > threshold; bilinear-upsample kept masks; binarize at
+        # MASK_THRESHOLD; scale normalized xyxy boxes by (w, h)). The processor
+        # method itself needs host tensors (.numpy() internally), which would
+        # force copying the full (n, queries, h, w) mask-logit tensor to CPU;
+        # filtering here first means only the kept queries ever leave the GPU.
+        # Numerics are upcast to fp32 so the model dtype only affects the
+        # forward pass.
+        scores_all = outputs.pred_logits.float().sigmoid()
+        if outputs.presence_logits is not None:
+            scores_all = scores_all * outputs.presence_logits.float().sigmoid()
+        target_h, target_w = image.height, image.width
+        box_scale = torch.tensor(
+            [target_w, target_h, target_w, target_h], dtype=torch.float32, device=scores_all.device
+        )
+
         out: List[Dict[str, Any]] = []
-        for concept in concepts:
-            out.extend(self._segment_concept(image, concept, thr))
+        for b, concept in enumerate(concepts):
+            keep = scores_all[b] > thr
+            if not bool(keep.any()):
+                continue
+            masks = outputs.pred_masks[b][keep].float().sigmoid()
+            masks = torch.nn.functional.interpolate(
+                masks.unsqueeze(0), size=(target_h, target_w), mode='bilinear', align_corners=False
+            ).squeeze(0)
+            result = {
+                'scores': scores_all[b][keep].cpu(),
+                'boxes': (outputs.pred_boxes[b][keep].float() * box_scale).cpu(),
+                'masks': (masks > self.MASK_THRESHOLD).to(torch.long).cpu(),
+            }
+            out.extend(self._collect_instances(concept, result, thr))
         return out
 
-    def _segment_concept(self, image: Any, concept: str, thr: float) -> List[Dict[str, Any]]:
-        """One PCS query: all instances of a single noun phrase."""
+    def _collect_instances(self, concept: str, results: Dict[str, Any], thr: float) -> List[Dict[str, Any]]:
+        """Extract InstanceMask dicts for one concept from its post-processed batch entry."""
         import numpy as np
-
-        torch = self._torch
-        inputs = self._processor(images=image, text=concept, return_tensors='pt').to(self.device)
-        with torch.no_grad():
-            outputs = self._model(**inputs)
-
-        # Post-process on host: transformers post-processing calls .numpy() on
-        # the tensors it is handed, which raises for CUDA tensors (see
-        # _outputs_to_cpu). Plain (h, w) sizes keep target_sizes device-free.
-        outputs = _outputs_to_cpu(outputs)
-        results = self._processor.post_process_instance_segmentation(
-            outputs,
-            threshold=thr,
-            mask_threshold=self.MASK_THRESHOLD,
-            target_sizes=[(image.height, image.width)],
-        )[0]
 
         masks = results.get('masks')
         scores = results.get('scores')
@@ -703,14 +750,21 @@ class Segmenter:
         if not raw:
             return []
         out = []
+        orig_w, orig_h = int(original_size[0]), int(original_size[1])
         for inst in raw:
             mask = inst.get('mask')
             if isinstance(mask, dict) and 'counts' in mask and 'size' in mask:
-                try:
-                    rescaled = restore_rle_mask(mask, original_size)
-                except ImportError as exc:
-                    warning(f'detect_segment: {exc}; emitting unscaled mask.')
+                # RLE size is [h, w]; skip the decode/resize/encode round trip
+                # when the mask is already at the target resolution (i.e. the
+                # inference downscale was a no-op).
+                if [int(mask['size'][0]), int(mask['size'][1])] == [orig_h, orig_w]:
                     rescaled = mask
+                else:
+                    try:
+                        rescaled = restore_rle_mask(mask, original_size)
+                    except ImportError as exc:
+                        warning(f'detect_segment: {exc}; emitting unscaled mask.')
+                        rescaled = mask
             else:
                 rescaled = mask
             box = inst.get('box') or {'x1': 0.0, 'y1': 0.0, 'x2': 0.0, 'y2': 0.0}

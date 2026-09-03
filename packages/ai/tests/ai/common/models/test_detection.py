@@ -25,6 +25,109 @@ def test_model_id_backend_is_identity():
     assert rfdetr == DetectorLoader.generate_model_id('PekingU/rtdetr_r50vd', backend='rfdetr')
     # Different backend -> different model identity (separate server copies).
     assert DetectorLoader.generate_model_id('IDEA-Research/grounding-dino-tiny', backend='mmgdino') != rfdetr
+    assert DetectorLoader.generate_model_id('PekingU/rtdetr_r50vd', backend='rfdetr', dtype='float32') != rfdetr
+    # Different checkpoint -> different model identity (llmdet tiny vs large).
+    assert DetectorLoader.generate_model_id('iSEE-Laboratory/llmdet_tiny', backend='llmdet') != (
+        DetectorLoader.generate_model_id('iSEE-Laboratory/llmdet_large', backend='llmdet')
+    )
+
+
+def test_llmdet_backend_registered():
+    """The llmdet backend is open-vocab (prompt required by the node) and defaults to the tiny checkpoint."""
+    assert 'llmdet' in detmod.BACKENDS
+    assert detmod.BACKENDS['llmdet'].open_vocab is True
+    assert detmod.BACKENDS['llmdet'].model == 'iSEE-Laboratory/llmdet_tiny'
+    assert 'llmdet' in detmod.OPEN_VOCAB_BACKENDS
+
+
+def test_build_backend_llmdet_uses_mmgdino_loader(monkeypatch):
+    """The llmdet backend routes to MmGDinoLoader (LLMDet is architecturally MM-Grounding-DINO)."""
+    captured = {}
+
+    def fake_init(self, model_name=None, threshold=0.3, text_threshold=0.25, device=None, revision=None):
+        captured['model'], captured['device'] = model_name, device
+
+    monkeypatch.setattr(detmod.MmGDinoLoader, '__init__', fake_init)
+
+    det = detmod._build_backend('llmdet', 'iSEE-Laboratory/llmdet_large', 'cpu')
+    assert isinstance(det, detmod.MmGDinoLoader)
+    assert captured['model'] == 'iSEE-Laboratory/llmdet_large'
+    assert captured['device'] == 'cpu'
+
+
+def test_build_backend_default_model_follows_backend(monkeypatch):
+    """load(backend='mmgdino') without model_name must resolve the mmgdino model,
+    not the rfdetr default (which crashes AutoModelForZeroShotObjectDetection).
+    """
+    from ai.common.models.vision.detection import BACKENDS
+
+    built = {}
+
+    def fake_build(backend, model_name, device, revision=None):
+        built['backend'], built['model'] = backend, model_name
+        return object()
+
+    monkeypatch.setattr(detmod, '_build_backend', fake_build)
+    monkeypatch.setattr(DetectorLoader, '_ensure_dependencies', staticmethod(lambda: None))
+
+    DetectorLoader.load(backend='mmgdino', device='cpu')
+    assert built['backend'] == 'mmgdino'
+    assert built['model'] == BACKENDS['mmgdino'].model
+
+
+def test_untie_mm_gdino_bbox_heads_strips_only_bbox_ties_within_scope():
+    original = {
+        'bbox_embed.(?![0])\\d+': 'bbox_embed.0',
+        'class_embed.(?![0])\\d+': '^class_embed.0',
+        'model.decoder.bbox_embed': 'bbox_embed',
+        'model.decoder.class_embed': 'class_embed',
+    }
+
+    class FakeModelCls:
+        _tied_weights_keys = dict(original)
+
+    with detmod._untie_mm_gdino_bbox_heads(FakeModelCls):
+        # Inside the scope: bbox_embed ties gone, class_embed ties intact.
+        assert FakeModelCls._tied_weights_keys == {
+            'class_embed.(?![0])\\d+': '^class_embed.0',
+            'model.decoder.class_embed': 'class_embed',
+        }
+
+    # After the scope the original ties are fully restored, so a later
+    # decoder_bbox_embed_share=True checkpoint in the same process still gets
+    # its layer-0 head tied into layers 1..5.
+    assert FakeModelCls._tied_weights_keys == original
+
+
+def test_untie_mm_gdino_bbox_heads_restores_on_error():
+    original = {
+        'bbox_embed.(?![0])\\d+': 'bbox_embed.0',
+        'model.decoder.class_embed': 'class_embed',
+    }
+
+    class FakeModelCls:
+        _tied_weights_keys = dict(original)
+
+    with pytest.raises(RuntimeError):
+        with detmod._untie_mm_gdino_bbox_heads(FakeModelCls):
+            raise RuntimeError('load failed')
+    assert FakeModelCls._tied_weights_keys == original
+
+
+def test_untie_mm_gdino_bbox_heads_noop_without_bbox_ties():
+    # Fixed-upstream fallback: no bbox_embed entries -> nothing changes,
+    # inside or after the scope.
+    only_class = {
+        'class_embed.(?![0])\\d+': '^class_embed.0',
+        'model.decoder.class_embed': 'class_embed',
+    }
+
+    class FakeModelCls:
+        _tied_weights_keys = dict(only_class)
+
+    with detmod._untie_mm_gdino_bbox_heads(FakeModelCls):
+        assert FakeModelCls._tied_weights_keys == only_class
+    assert FakeModelCls._tied_weights_keys == only_class
 
 
 def _fake_client_factory(captured):
@@ -168,9 +271,9 @@ class _FakeBatch(dict):
 
 
 def _install_fake_torch(monkeypatch):
-    """Provide ai.common.torch (no_grad only) without importing real torch."""
+    """Provide ai.common.torch (inference_mode only) without importing real torch."""
     mod = types.ModuleType('ai.common.torch')
-    mod.torch = types.SimpleNamespace(no_grad=contextlib.nullcontext)
+    mod.torch = types.SimpleNamespace(inference_mode=contextlib.nullcontext)
     monkeypatch.setitem(sys.modules, 'ai.common.torch', mod)
 
 
@@ -263,7 +366,7 @@ def test_rtdetr_postprocess_receives_host_tensors():
     det.threshold = 0.3
     det._impl = 'rtdetr'
     det._labels = {3: 'dog'}
-    det._torch = types.SimpleNamespace(no_grad=contextlib.nullcontext)
+    det._torch = types.SimpleNamespace(inference_mode=contextlib.nullcontext)
     det._processor = _FakeRtProcessor()
     det._model = lambda **inputs: _FakeOutputs(
         logits=_FakeTensor([0.4], device='cuda:1'),

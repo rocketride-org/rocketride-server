@@ -1,0 +1,15 @@
+#!/bin/bash
+set -e
+
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SERVER_DIR="$DIR/dist/server"
+ENGINE="$SERVER_DIR/engine"
+
+if [ ! -f "$ENGINE" ]; then
+    echo "error: engine not found at $SERVER_DIR/engine"
+    echo "run: ./builder server:build"
+    exit 1
+fi
+
+cd "$SERVER_DIR"
+exec ./engine ai/eaas.py "$@"

@@ -206,6 +206,73 @@ class Config:
         return config
 
     @staticmethod
+    def resolve_node_param(conn: Dict, node_cfg: Dict, prefix: str, key: str, default=None):
+        """
+        Resolve a single node parameter across every place a UI/.pipe config may put it.
+
+        Canvas/.pipe configs nest UI field values under a 'parameters' object with the
+        field prefix KEPT (e.g. connConfig['parameters']['detect.threshold']).
+        getNodeConfig neither merges that object nor strips prefixes — and its profile
+        branch drops ALL top-level user keys — so resolved node configs never see those
+        values. This helper applies the canonical fallback ladder, with explicit
+        `is None` checks at each step so set-but-falsy values (0, 0.0, '') survive:
+
+            1. conn['parameters']['<prefix>.<key>']   ('parameters' may be absent/None)
+            2. conn['<prefix>.<key>']
+            3. conn['<key>']
+            4. node_cfg['<key>'], else `default`
+
+        Args:
+            conn: Raw connConfig for the node.
+            node_cfg: Resolved node config (from getNodeConfig/resolve_node_config).
+            prefix: The node's UI field prefix (e.g. 'detect').
+            key: Parameter name without the prefix.
+            default: Returned when no layer defines the key.
+
+        Returns:
+            The first non-None value found, else `default`.
+        """
+        params = conn.get('parameters')
+        value = params.get(f'{prefix}.{key}') if params is not None else None
+        if value is None:
+            value = conn.get(f'{prefix}.{key}')
+        if value is None:
+            value = conn.get(key)
+        if value is None:
+            value = node_cfg.get(key, default)
+        return value
+
+    @staticmethod
+    def resolve_node_config(logicalType: str, connConfig: Dict, prefix: str) -> Dict:
+        """
+        Resolve a node's config via getNodeConfig, surfacing a UI-selected profile first.
+
+        The profile selector itself arrives nested under connConfig['parameters'] with
+        the field prefix kept (e.g. parameters['detect.profile']), but getNodeConfig
+        only looks at connConfig['profile']. If a UI profile is set and no top-level
+        'profile' is present, copy connConfig to a plain dict (via IJson.toDict when it
+        is an IJson), inject the profile, and resolve with that; otherwise resolve with
+        connConfig unchanged.
+
+        Args:
+            logicalType: The node's logical service type.
+            connConfig: Raw connConfig for the node.
+            prefix: The node's UI field prefix (e.g. 'detect').
+
+        Returns:
+            The resolved node config (see getNodeConfig).
+        """
+        params = connConfig.get('parameters')
+        ui_profile = params.get(f'{prefix}.profile') if params is not None else None
+        if ui_profile is None:
+            ui_profile = connConfig.get(f'{prefix}.profile')
+        if ui_profile and not connConfig.get('profile'):
+            effective = dict(IJson.toDict(connConfig) if isinstance(connConfig, IJson) else connConfig)
+            effective['profile'] = str(ui_profile)
+            return Config.getNodeConfig(logicalType, effective)
+        return Config.getNodeConfig(logicalType, connConfig)
+
+    @staticmethod
     def getProviderConfig(providerConfig: Dict[str, any]):
         """
         Get the provider and the configuration for the provider.

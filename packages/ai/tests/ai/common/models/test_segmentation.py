@@ -1,4 +1,6 @@
-"""Unit tests for the segmentation loader + facade (no torch/transformers needed)."""
+"""Unit tests for the segmentation loader + facade (no transformers/weights needed;
+the sam3 fakes run the real filtering math on small torch tensors).
+"""
 
 import ai.common.models.vision.segmentation as segmod
 from ai.common.models.vision.segmentation import SegmenterLoader, Segmenter, Sam3ConceptLoader
@@ -66,38 +68,13 @@ def test_facade_load_once_ignores_threshold_and_maxedge(monkeypatch):
 
 
 class _FakeTensor:
-    """Minimal tensor stand-in exercising the .detach().cpu() guard path."""
+    """Minimal stand-in for processor-batch tensors (pixel_values/input_ids)."""
 
     def __init__(self, data):
         self._data = data
 
-    def detach(self):
+    def to(self, *_args, **_kwargs):
         return self
-
-    def cpu(self):
-        return self
-
-    def numpy(self):
-        import numpy as np
-
-        return np.asarray(self._data)
-
-    def tolist(self):
-        return list(self._data)
-
-
-class _FakeOutputs(dict):
-    def __init__(self, **kwargs):
-        super().__init__(kwargs)
-
-
-class _FakeNoGradTorch:
-    class no_grad:
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *exc):
-            return False
 
 
 class _FakeBatch(dict):
@@ -105,33 +82,77 @@ class _FakeBatch(dict):
         return self
 
 
-def _make_sam3_backend(results, captured, threshold=0.5):
-    """Assemble a Sam3ConceptLoader without running __init__ (no transformers)."""
+class _FakeVision:
+    """Stand-in for Sam3VisionEncoderOutput (rebuilt via type(vision)(...) when batching)."""
+
+    def __init__(self, fpn_hidden_states=(), fpn_position_encoding=()):
+        self.fpn_hidden_states = fpn_hidden_states
+        self.fpn_position_encoding = fpn_position_encoding
+
+
+class _FakeSam3Outputs:
+    """Raw-output stand-in carrying real torch tensors for the GPU-side filter path."""
+
+    def __init__(self, pred_logits, pred_masks, pred_boxes, presence_logits=None):
+        self.pred_logits = pred_logits
+        self.pred_masks = pred_masks
+        self.pred_boxes = pred_boxes
+        self.presence_logits = presence_logits
+
+
+class _FakeModel:
+    """Model stand-in for the cached-vision batched forward path."""
+
+    def __init__(self, outputs=None):
+        self._outputs = outputs
+
+    def get_vision_features(self, pixel_values=None):
+        return _FakeVision()
+
+    def __call__(self, vision_embeds=None, input_ids=None, attention_mask=None, **kwargs):
+        return self._outputs
+
+
+def _sam3_outputs(scores, mask_logits, boxes):
+    """Build fake raw outputs from per-query scores (as probabilities -> logits),
+    mask logits, and NORMALIZED xyxy boxes — all batch-major lists.
+    """
+    import math
+
+    from ai.common.torch import torch
+
+    logits = [[math.log(s / (1.0 - s)) for s in row] for row in scores]
+    return _FakeSam3Outputs(
+        pred_logits=torch.tensor(logits, dtype=torch.float32),
+        pred_masks=torch.tensor(mask_logits, dtype=torch.float32),
+        pred_boxes=torch.tensor(boxes, dtype=torch.float32),
+    )
+
+
+def _make_sam3_backend(outputs, captured, threshold=0.5):
+    """Assemble a Sam3ConceptLoader without running __init__ (no weight downloads)."""
+    from ai.common.torch import torch
 
     class FakeProcessor:
         def __call__(self, images=None, text=None, return_tensors=None):
+            captured.setdefault('calls', []).append(text)
             captured['text'] = text
-            return _FakeBatch(pixel_values=_FakeTensor([0]))
-
-        def post_process_instance_segmentation(self, outputs, threshold=None, mask_threshold=None, target_sizes=None):
-            captured['pp_threshold'] = threshold
-            captured['pp_mask_threshold'] = mask_threshold
-            captured['pp_target_sizes'] = target_sizes
-            return [results]
+            return _FakeBatch(pixel_values=_FakeTensor([0]), input_ids=_FakeTensor([0]), attention_mask=None)
 
     backend = Sam3ConceptLoader.__new__(Sam3ConceptLoader)
     backend.model_name = SAM3_MODEL
     backend.threshold = threshold
     backend.device = 'cpu'
     backend._processor = FakeProcessor()
-    backend._model = lambda **kwargs: _FakeOutputs(pred_masks=_FakeTensor([0]))
-    backend._torch = _FakeNoGradTorch()
+    backend._model = _FakeModel(outputs)
+    backend._torch = torch
+    backend._dtype = torch.float32
     return backend
 
 
 def test_sam3_empty_prompt_returns_empty_without_inference():
     captured = {}
-    backend = _make_sam3_backend({}, captured)
+    backend = _make_sam3_backend(None, captured)
 
     from PIL import Image
 
@@ -149,71 +170,60 @@ def test_sam3_output_contract(monkeypatch):
 
     monkeypatch.setattr(segmod, '_encode_rle', lambda m: {'size': list(np.asarray(m).shape), 'counts': 'stub'})
 
-    keep = np.zeros((8, 8), dtype=np.uint8)
+    keep = np.zeros((8, 8))
     keep[2:5, 3:6] = 1
-    low_score = np.ones((8, 8), dtype=np.uint8)
-    empty = np.zeros((8, 8), dtype=np.uint8)
+    kept_logits = (keep * 20.0 - 10.0).tolist()  # binarizes back to `keep` at MASK_THRESHOLD
+    solid = np.full((8, 8), 10.0).tolist()  # all-ones mask but low score -> filtered
+    empty = np.full((8, 8), -10.0).tolist()  # high score but empty mask -> skipped
 
     captured = {}
-    results = {
-        'masks': [_FakeTensor(keep), _FakeTensor(low_score), _FakeTensor(empty)],
-        'boxes': [_FakeTensor([3.0, 2.0, 6.0, 5.0]), _FakeTensor([0, 0, 8, 8]), _FakeTensor([0, 0, 0, 0])],
-        'scores': [_FakeTensor(0.91).numpy(), 0.2, 0.9],  # plain floats/ndarray both fine
-    }
-    backend = _make_sam3_backend(results, captured, threshold=0.5)
+    outputs = _sam3_outputs(
+        scores=[[0.91, 0.2, 0.9]],
+        mask_logits=[[kept_logits, solid, empty]],
+        boxes=[[[3 / 8, 2 / 8, 6 / 8, 5 / 8], [0, 0, 1, 1], [0, 0, 0, 0]]],
+    )
+    backend = _make_sam3_backend(outputs, captured, threshold=0.5)
 
     out = backend.segment(Image.new('RGB', (8, 8)), prompt='yellow school bus')
 
-    assert captured['text'] == 'yellow school bus'
-    assert captured['pp_threshold'] == 0.5
-    assert captured['pp_mask_threshold'] == Sam3ConceptLoader.MASK_THRESHOLD
-    assert captured['pp_target_sizes'] == [(8, 8)]
+    assert captured['text'] == ['yellow school bus']
 
     # low-score instance filtered, all-empty mask skipped -> exactly one instance
     assert len(out) == 1
     inst = out[0]
     assert set(inst) == {'label', 'score', 'box', 'mask'}
     assert inst['label'] == 'yellow school bus'
-    assert inst['score'] == 0.91
+    assert abs(inst['score'] - 0.91) < 1e-6
     assert inst['box'] == {'x1': 3.0, 'y1': 2.0, 'x2': 6.0, 'y2': 5.0}
     assert inst['mask'] == {'size': [8, 8], 'counts': 'stub'}
 
 
 def test_sam3_prompt_list_splits_into_one_query_per_concept(monkeypatch):
     """' . '-separated prompts (the detect node convention) fan out to one PCS
-    query per concept, each instance labelled with the concept it matched.
+    query per concept — batched into a single forward — each instance labelled
+    with the concept it matched.
     """
     import numpy as np
     from PIL import Image
 
     monkeypatch.setattr(segmod, '_encode_rle', lambda m: {'size': list(np.asarray(m).shape), 'counts': 'stub'})
 
-    mask = np.ones((4, 4), dtype=np.uint8)
+    solid = np.full((4, 4), 10.0).tolist()
     captured = {}
-    queries = []
-    results = {'masks': [_FakeTensor(mask)], 'boxes': [_FakeTensor([0, 0, 4, 4])], 'scores': [0.9]}
-    backend = _make_sam3_backend(results, captured)
-
-    class RecordingProcessor:
-        def __init__(self, inner):
-            self._inner = inner
-
-        def __call__(self, images=None, text=None, return_tensors=None):
-            queries.append(text)
-            return self._inner(images=images, text=text, return_tensors=return_tensors)
-
-        def post_process_instance_segmentation(self, *args, **kwargs):
-            return self._inner.post_process_instance_segmentation(*args, **kwargs)
-
-    backend._processor = RecordingProcessor(backend._processor)
+    outputs = _sam3_outputs(
+        scores=[[0.9], [0.9], [0.9]],
+        mask_logits=[[solid], [solid], [solid]],
+        boxes=[[[0, 0, 1, 1]], [[0, 0, 1, 1]], [[0, 0, 1, 1]]],
+    )
+    backend = _make_sam3_backend(outputs, captured)
 
     out = backend.segment(Image.new('RGB', (4, 4)), prompt='grass . tree .  stairs ')
-    assert queries == ['grass', 'tree', 'stairs']
+    assert captured['calls'] == [['grass', 'tree', 'stairs']]  # one batched processor call
     assert [inst['label'] for inst in out] == ['grass', 'tree', 'stairs']
 
-    queries.clear()
+    captured.clear()
     assert backend.segment(Image.new('RGB', (4, 4)), prompt=' . . ') == []
-    assert queries == []  # separators only: no inference
+    assert 'calls' not in captured  # separators only: no inference
 
 
 def test_sam3_threshold_override(monkeypatch):
@@ -222,14 +232,14 @@ def test_sam3_threshold_override(monkeypatch):
 
     monkeypatch.setattr(segmod, '_encode_rle', lambda m: {'size': list(np.asarray(m).shape), 'counts': 'stub'})
 
-    mask = np.ones((4, 4), dtype=np.uint8)
+    solid = np.full((4, 4), 10.0).tolist()
     captured = {}
-    results = {'masks': [_FakeTensor(mask)], 'boxes': [_FakeTensor([0, 0, 4, 4])], 'scores': [0.4]}
-    backend = _make_sam3_backend(results, captured, threshold=0.5)
+    outputs = _sam3_outputs(scores=[[0.4]], mask_logits=[[solid]], boxes=[[[0, 0, 1, 1]]])
+    backend = _make_sam3_backend(outputs, captured, threshold=0.5)
 
     assert backend.segment(Image.new('RGB', (4, 4)), prompt='cat') == []  # 0.4 < default 0.5
     out = backend.segment(Image.new('RGB', (4, 4)), prompt='cat', threshold=0.3)
-    assert len(out) == 1 and captured['pp_threshold'] == 0.3
+    assert len(out) == 1 and abs(out[0]['score'] - 0.4) < 1e-6
 
 
 def test_sam3_model_id_mode_is_identity():
