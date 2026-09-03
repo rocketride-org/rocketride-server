@@ -32,7 +32,95 @@ from dataclasses import dataclass, field
 from sqlalchemy import text
 from sqlalchemy.sql.elements import TextClause
 
-_PLACEHOLDER = re.compile(r'\$(\d+)')
+
+# Quoted savepoint names (e.g. SAVEPOINT "Sp 1") don't match this pattern and
+# fall through to execute as raw SQL, bypassing the begin_nested() recovery
+# path in _handle_savepoint. Acceptable: Drizzle only ever emits simple spN
+# identifiers for its savepoints.
+_SAVEPOINT_STMT = re.compile(
+    r'^\s*(?:(?P<sp>savepoint)|(?P<rel>release)\s+savepoint|(?P<rb>rollback)\s+to\s+savepoint)'
+    r'\s+(?P<name>[A-Za-z_][\w]*)\s*;?\s*$',
+    re.IGNORECASE,
+)
+
+
+def _rewrite_placeholders(sql: str, params: list, binds: dict) -> str:
+    """Rewrite $n → :bn outside strings, identifiers, and comments."""
+    out: list[str] = []
+    i, n = 0, len(sql)
+    while i < n:
+        ch = sql[i]
+        if ch == "'":  # single-quoted string ('' doubling; E'...' backslash)
+            is_escape_string = out and out[-1] and out[-1][-1] in 'eE'
+            j = i + 1
+            while j < n:
+                if is_escape_string and sql[j] == '\\':
+                    j += 2
+                    continue
+                if sql[j] == "'":
+                    if j + 1 < n and sql[j + 1] == "'":
+                        j += 2
+                        continue
+                    j += 1
+                    break
+                j += 1
+            out.append(sql[i:j])
+            i = j
+        elif ch == '"':  # quoted identifier ("" doubling)
+            j = i + 1
+            while j < n:
+                if sql[j] == '"':
+                    if j + 1 < n and sql[j + 1] == '"':
+                        j += 2
+                        continue
+                    j += 1
+                    break
+                j += 1
+            out.append(sql[i:j])
+            i = j
+        elif ch == '-' and sql[i : i + 2] == '--':
+            j = sql.find('\n', i)
+            j = n if j == -1 else j
+            out.append(sql[i:j])
+            i = j
+        elif ch == '/' and sql[i : i + 2] == '/*':  # nested block comments
+            depth, j = 1, i + 2
+            while j < n and depth:
+                if sql[j : j + 2] == '/*':
+                    depth += 1
+                    j += 2
+                elif sql[j : j + 2] == '*/':
+                    depth -= 1
+                    j += 2
+                else:
+                    j += 1
+            out.append(sql[i:j])
+            i = j
+        elif ch == '$':
+            m = re.match(r'\$(\d+)', sql[i:])
+            if m:  # $<digits> is never a dollar-quote tag (tags cannot start with a digit)
+                idx = int(m.group(1))
+                if idx < 1 or idx > len(params):
+                    raise ValueError(f'placeholder ${idx} out of range for {len(params)} param(s)')
+                key = f'b{idx}'
+                binds[key] = params[idx - 1]
+                out.append(f':{key}')
+                i += m.end()
+                continue
+            tag = re.match(r'\$([A-Za-z_][\w]*)?\$', sql[i:])
+            if tag:  # dollar-quoted body — copy through to the closing tag
+                delim = tag.group(0)
+                end = sql.find(delim, i + len(delim))
+                j = n if end == -1 else end + len(delim)
+                out.append(sql[i:j])
+                i = j
+            else:
+                out.append(ch)
+                i += 1
+        else:
+            out.append(ch)
+            i += 1
+    return ''.join(out)
 
 
 def to_sqlalchemy_text(sql: str, params: list | None) -> tuple[TextClause, dict]:
@@ -40,29 +128,30 @@ def to_sqlalchemy_text(sql: str, params: list | None) -> tuple[TextClause, dict]
 
     Server-side binding means we never inline/escape values into SQL — the
     client forwards parameter values and the database driver binds them.
-    Caveat: a literal ``$n`` inside a string/dollar-quoted body would also be
-    rewritten; Sequelize-generated SQL uses clean ``$n`` placeholders so this
-    is acceptable for the dialect's traffic.
+    The rewrite is quote-aware: ``$n`` inside string literals, quoted
+    identifiers, dollar-quoted bodies, and comments is left untouched, and an
+    index past ``len(params)`` raises ``ValueError`` instead of corrupting.
     """
     if not params:
         return text(sql), {}
     binds: dict = {}
-
-    def _sub(m: re.Match) -> str:
-        idx = int(m.group(1))
-        key = f'b{idx}'
-        binds[key] = params[idx - 1]
-        return f':{key}'
-
-    return text(_PLACEHOLDER.sub(_sub, sql)), binds
+    return text(_rewrite_placeholders(sql, params, binds)), binds
 
 
-def shape_execute_result(result, max_rows: int) -> dict | None:
-    """Shape a SQLAlchemy result into ``{'rows', 'affected_rows'}`` (or None)."""
+def shape_execute_result(result, max_rows: int, row_mode: str = 'object') -> dict | None:
+    """Shape a SQLAlchemy result into ``{'rows', 'affected_rows'}`` (or None).
+
+    ``row_mode='array'`` returns each row as a positional list (column order =
+    ``result.keys()``) instead of a dict — required by ORM clients (Drizzle)
+    whose result mappers key columns by position, where dict rows would
+    silently collapse duplicate column names in joins.
+    """
     if result.returns_rows:
         rows = result.fetchmany(max_rows + 1)
         if len(rows) > max_rows:
             return None
+        if row_mode == 'array':
+            return {'rows': [list(row) for row in rows], 'affected_rows': 0}
         cols = result.keys()
         return {'rows': [dict(zip(cols, row)) for row in rows], 'affected_rows': 0}
     rc = result.rowcount
@@ -76,6 +165,8 @@ class _Held:
     last_used: float
     # Serialises calls on THIS session only; other sessions run concurrently.
     lock: threading.Lock = field(default_factory=threading.Lock)
+    # Stack of (name, NestedTransaction) for open SAVEPOINTs, oldest first.
+    savepoints: list = field(default_factory=list)
 
 
 class TransactionRegistry:
@@ -114,7 +205,7 @@ class TransactionRegistry:
                 raise
             return sid
 
-    def execute(self, session_id: str, sql: str, params: list | None = None) -> dict:
+    def execute(self, session_id: str, sql: str, params: list | None = None, row_mode: str = 'object') -> dict:
         """Run SQL on the held connection; refresh last_used; return shaped result.
 
         Note: on a max_rows RuntimeError the session remains open; the caller
@@ -128,13 +219,22 @@ class TransactionRegistry:
             with self._registry_lock:
                 if self._sessions.get(session_id) is not held:
                     raise KeyError(session_id)  # finalised/reaped while we waited
-            clause, binds = to_sqlalchemy_text(sql, params)
-            result = held.conn.execute(clause, binds)
-            held.last_used = self._clock()
-            shaped = shape_execute_result(result, self._max_rows)
-            if shaped is None:
-                raise RuntimeError(f'query exceeded max_rows={self._max_rows}')
-            return shaped
+            # last_used refreshes whether the statement succeeds or fails: a
+            # failed statement leaves the session in a recoverable state (the
+            # caller can roll back or retry), so it shouldn't age toward reap.
+            try:
+                m = _SAVEPOINT_STMT.match(sql)
+                if m:
+                    self._handle_savepoint(held, m)
+                    return {'rows': [], 'affected_rows': 0}
+                clause, binds = to_sqlalchemy_text(sql, params)
+                result = held.conn.execute(clause, binds)
+                shaped = shape_execute_result(result, self._max_rows, row_mode)
+                if shaped is None:
+                    raise RuntimeError(f'query exceeded max_rows={self._max_rows}')
+                return shaped
+            finally:
+                held.last_used = self._clock()
 
     def commit(self, session_id: str) -> None:
         """Commit the transaction and release the connection."""
@@ -172,6 +272,36 @@ class TransactionRegistry:
             with held.lock:
                 self._drop(sid, held, commit=False)
 
+    @staticmethod
+    def _handle_savepoint(held: _Held, m: re.Match) -> None:
+        """Map savepoint statements onto SQLAlchemy nested transactions.
+
+        Raw SAVEPOINT SQL cannot recover a connection after a DBAPI error
+        (SQLAlchemy raises PendingRollbackError); ``begin_nested()`` is the
+        supported path. Matches Postgres semantics: RELEASE destroys the target
+        and every later savepoint; ROLLBACK TO destroys later savepoints but
+        KEEPS the target re-rollbackable (the rolled-back SQLAlchemy object is
+        inactive, so the target is re-minted via a fresh ``begin_nested()``).
+        """
+        name = m.group('name').lower()
+        if m.group('sp'):
+            held.savepoints.append((name, held.conn.begin_nested()))
+            return
+        for i in range(len(held.savepoints) - 1, -1, -1):
+            if held.savepoints[i][0] == name:
+                is_release = bool(m.group('rel'))
+                # Resolve BEFORE deleting: if a commit/rollback raises mid-unwind,
+                # unresolved entries stay on the stack for _drop() to clean up.
+                for j in range(len(held.savepoints) - 1, i - 1, -1):
+                    sp = held.savepoints[j][1]
+                    if sp.is_active:
+                        sp.commit() if is_release else sp.rollback()
+                    del held.savepoints[j]
+                if not is_release:
+                    held.savepoints.append((name, held.conn.begin_nested()))
+                return
+        raise ValueError(f'unknown savepoint: {name}')
+
     def _require(self, session_id: str) -> _Held:
         with self._registry_lock:
             held = self._sessions.get(session_id)
@@ -196,6 +326,10 @@ class TransactionRegistry:
                 return False
             del self._sessions[session_id]
         try:
+            for _, sp in reversed(held.savepoints):
+                if sp.is_active:
+                    sp.commit() if commit else sp.rollback()
+            held.savepoints.clear()
             held.trans.commit() if commit else held.trans.rollback()
         finally:
             held.conn.close()

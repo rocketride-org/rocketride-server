@@ -25,6 +25,13 @@
 import { describe, it, expect, jest } from '@jest/globals';
 import { DatabaseApi } from '../src/client/database';
 
+// Compile-time regression check (CodeRabbit, PR #1908): a caller holding a
+// union-typed rowMode must be able to call query() — never executed.
+async function _rowModeUnionCompiles(db: DatabaseApi, rowMode: 'object' | 'array'): Promise<void> {
+	void (await db.query({ token: 't', sql: 'select 1', rowMode }));
+}
+void _rowModeUnionCompiles;
+
 function fakeClient() {
 	return { tool: jest.fn(async (a: unknown) => ({ ok: true, a })) } as any;
 }
@@ -116,6 +123,35 @@ describe('DatabaseApi transactions', () => {
 
 	it('query omits session_id and params when not provided', async () => {
 		const c = fakeClient();
+		const db = new DatabaseApi(c);
+		await db.query({ token: 't', sql: 'SELECT 1' });
+		expect(c.tool).toHaveBeenCalledWith({
+			token: 't',
+			tool: 'execute',
+			nodeId: undefined,
+			input: { sql: 'SELECT 1' },
+		});
+	});
+});
+
+describe('DatabaseApi.query rowMode', () => {
+	it('forwards row_mode: array in the tool input', async () => {
+		const c = fakeClient();
+		c.tool.mockResolvedValueOnce({ rows: [[1, 'x']], affected_rows: 0 });
+		const db = new DatabaseApi(c);
+		const res = await db.query({ token: 't', sql: 'SELECT 1', rowMode: 'array' });
+		expect(c.tool).toHaveBeenCalledWith({
+			token: 't',
+			tool: 'execute',
+			nodeId: undefined,
+			input: { sql: 'SELECT 1', row_mode: 'array' },
+		});
+		expect(res.rows).toEqual([[1, 'x']]);
+	});
+
+	it('omits row_mode by default', async () => {
+		const c = fakeClient();
+		c.tool.mockResolvedValueOnce({ rows: [{ a: 1 }], affected_rows: 0 });
 		const db = new DatabaseApi(c);
 		await db.query({ token: 't', sql: 'SELECT 1' });
 		expect(c.tool).toHaveBeenCalledWith({

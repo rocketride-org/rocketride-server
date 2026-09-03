@@ -26,7 +26,9 @@ import { describe, it, expect, jest } from '@jest/globals';
 import type { DatabaseLike } from '../src/client/database';
 import { makePgShim } from '../src/client/database/sequelize/pg-shim';
 
-type DbQuery = DatabaseLike['query'];
+// Object-mode call shape the shim uses (DatabaseLike['query'] is overloaded,
+// which jest.fn cannot infer; the shim never passes rowMode).
+type DbQuery = (options: { token: string; sql: string; nodeId?: string; sessionId?: string; params?: unknown[] }) => Promise<{ rows: Record<string, unknown>[]; affected_rows: number }>;
 type DbBeginTransaction = DatabaseLike['beginTransaction'];
 type DbCommit = DatabaseLike['commit'];
 type DbRollback = DatabaseLike['rollback'];
