@@ -162,6 +162,18 @@ function isConnectResult(body: unknown): body is ConnectResult {
 	);
 }
 
+function isVersionResponse(body: unknown): boolean {
+	// The reachability probe only proves THIS backend is up if the page origin
+	// answers with the server's own /version contract ({ status: 'OK', with a
+	// data.version string). A bare 200 from an unrelated origin must not qualify.
+	return (
+		typeof body === 'object' &&
+		body !== null &&
+		(body as Record<string, unknown>).status === 'OK' &&
+		typeof (body as { data?: Record<string, unknown> }).data?.version === 'string'
+	);
+}
+
 /**
  * Normalizes caller-supplied env metadata to the string map the SDK expects.
  *
@@ -1106,25 +1118,35 @@ export class ConnectionManager implements IConnectionManager {
 			// the reference. Identity, not kind, is what proves the latch is still
 			// the one this probe was launched for.
 			const latchedFailure = this.connectionStatus.lastFailure;
-			void fetch('/version', { cache: 'no-store' }).then((res) => {
-				if (!res.ok) return;
-				if (this.connectionGeneration !== generation) return;
-				// Only downgrade the specific failure this probe latched. A newer
-				// failure (including another network one) or a reconnect that
-				// cleared the latch swaps the reference, and must not be
-				// overwritten with a session downgrade.
-				if (this.connectionStatus.lastFailure !== latchedFailure) return;
-				const message = 'Your session has expired — please sign in again.';
-				this.updateConnectionStatus({
-					state: ConnectionState.AUTH_FAILED,
-					lastError: message,
-					progressMessage: undefined,
-					errorKind: 'session',
-					lastFailure: { kind: 'auth', lastError: message, errorKind: 'session' },
+			void fetch('/version', { cache: 'no-store' })
+				.then((res) => (res.ok ? res.json() : Promise.reject(new Error('probe not ok'))))
+				.then((body) => {
+					// A bare 200 does not prove THIS backend is reachable: a
+					// cross-origin serverUri (initialize({ uri })) can point at a
+					// backend that is down while the page origin still answers
+					// /version. Require the server's own /version contract, so an
+					// unrelated origin's 200 can't turn a real outage into a false
+					// session-expiry.
+					if (!isVersionResponse(body)) return;
+					if (this.connectionGeneration !== generation) return;
+					// Only downgrade the specific failure this probe latched. A newer
+					// failure (including another network one) or a reconnect that
+					// cleared the latch swaps the reference, and must not be
+					// overwritten with a session downgrade.
+					if (this.connectionStatus.lastFailure !== latchedFailure) return;
+					const message = 'Your session has expired — please sign in again.';
+					this.updateConnectionStatus({
+						state: ConnectionState.AUTH_FAILED,
+						lastError: message,
+						progressMessage: undefined,
+						errorKind: 'session',
+						lastFailure: { kind: 'auth', lastError: message, errorKind: 'session' },
+					});
+				})
+				.catch(() => {
+					// Probe failed, or the origin did not answer with this backend's
+					// own /version contract: genuinely unreachable, keep the banner.
 				});
-			}).catch(() => {
-				// Probe failed too: genuinely unreachable, keep the network banner.
-			});
 		}
 		return isAuthFailure;
 	}

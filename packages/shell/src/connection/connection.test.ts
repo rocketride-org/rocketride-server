@@ -223,7 +223,7 @@ test('handleStoredTokenFailure downgrades a network latch to session expiry when
 		configurable: true,
 		value: async (input: unknown) => {
 			probed = String(input);
-			return { ok: true };
+			return { ok: true, json: async () => ({ status: 'OK', data: { version: '3.3.0' } }) };
 		},
 	});
 
@@ -285,7 +285,7 @@ test('handleStoredTokenFailure does not let a stale probe downgrade a newer netw
 			calls += 1;
 			// The first (older) failure's probe finds the server reachable; the
 			// second (newer) failure's probe finds it genuinely down.
-			if (calls === 1) return { ok: true };
+			if (calls === 1) return { ok: true, json: async () => ({ status: 'OK', data: { version: '3.3.0' } }) };
 			throw new TypeError('Failed to fetch');
 		},
 	});
@@ -307,6 +307,32 @@ test('handleStoredTokenFailure does not let a stale probe downgrade a newer netw
 
 		// The newer failure's own probe failed, so the network banner stands.
 		assert.equal(calls, 2);
+		assert.equal(manager.connectionStatus.state, ConnectionState.FAILED);
+		assert.equal(manager.connectionStatus.lastFailure?.kind, 'network');
+	} finally {
+		if (originalFetch) Object.defineProperty(globalThis, 'fetch', originalFetch);
+		else delete (globalThis as { fetch?: typeof fetch }).fetch;
+	}
+});
+
+test('handleStoredTokenFailure keeps the network latch when the probe answers 200 but not the /version contract', async () => {
+	const originalFetch = Object.getOwnPropertyDescriptor(globalThis, 'fetch');
+	Object.defineProperty(globalThis, 'fetch', {
+		configurable: true,
+		// A page origin that merely returns 200 for /version without the server's
+		// own contract — e.g. a cross-origin serverUri whose real backend is down,
+		// while the page host answers /version with something unrelated.
+		value: async () => ({ ok: true, json: async () => ({ hello: 'not rocketride' }) }),
+	});
+
+	try {
+		const { manager } = createTestManager();
+
+		manager.handleStoredTokenFailure(new ConnectionFailure('Failed to fetch', 'network'));
+		await new Promise((resolve) => setImmediate(resolve));
+
+		// The probe did not prove the backend is reachable, so the network banner
+		// stands rather than being downgraded to a false session expiry.
 		assert.equal(manager.connectionStatus.state, ConnectionState.FAILED);
 		assert.equal(manager.connectionStatus.lastFailure?.kind, 'network');
 	} finally {
