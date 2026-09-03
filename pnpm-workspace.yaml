@@ -72,8 +72,9 @@ overrides:
   'minimatch@3>brace-expansion': '>=1.1.12 <2'
   'diff@7': '>=8.0.3 <9'
   dompurify: '>=3.4.13 <3.5.0'
-  # fast-uri SSRF / host-confusion set (GHSA-jqff-g426-hqxp, GHSA-f65p-4m7j-42xc,
-  # GHSA-w9m9-... ) — the 3.1.5 floor is one patch short of the fix; needs 3.1.6.
+  # fast-uri host-confusion / SSRF set (GHSA-jqff-g426-hqxp, GHSA-f65p-4m7j-42xc,
+  # GHSA-fph4-wmhf-6fwf, GHSA-5jgf-p345-68v8) — the prior 3.1.5 floor was one
+  # patch short of the fix; needs 3.1.6.
   fast-uri: '>=3.1.6 <4'
   # fflate infinite loop on malformed ZIP64 (GHSA-px8p-9vwx-vf98); stay on 0.4.x.
   fflate: '>=0.4.9 <0.5'
