@@ -1353,10 +1353,17 @@ def test_answers_lane_accepts_a_plain_json_string():
     assert _captured_rows('{"room": "room-3"}') == [{'room': 'room-3'}]
 
 
-def test_answers_lane_unwraps_a_named_row_wrapper():
-    """{"rows": [...]} must become N rows, not one row with a list in a cell."""
+def test_answers_lane_unwraps_only_the_reserved_rows_envelope():
+    """{"rows": [...]} becomes N rows. Nothing else does.
+
+    `items`, `data` and `results` are all plausible business column names, so
+    unwrapping them would turn one legitimate record into several and drop the
+    column - a silent loss. Guessing wrong the other way is visible.
+    """
     assert _captured_rows('{"rows": [{"id": 1}, {"id": 2}]}') == [{'id': 1}, {'id': 2}]
-    assert _captured_rows('{"records": [{"id": 3}]}') == [{'id': 3}]
+    for key in ('records', 'items', 'data', 'results', 'entries'):
+        payload = f'{{"{key}": [{{"id": 3}}]}}'
+        assert _captured_rows(payload) == [{key: [{'id': 3}]}], f'{key} must not be unwrapped'
 
 
 def test_answers_lane_does_not_explode_an_unnamed_nested_list():
@@ -1505,6 +1512,65 @@ def test_load_widens_rows_to_the_tables_full_column_set():
         'absent columns fill with null, and a new column the table lacks is kept'
     )
     assert out.get('row_count') == 1
+
+
+def test_widening_re_reads_a_table_that_grew_under_it():
+    """A concurrent producer can add a column between our schema read and our
+    retry, so the widened payload arrives stale and is refused for a DIFFERENT
+    missing column. One attempt would surface that as an unactionable failure.
+    """
+    uploads, loads = [], []
+    schema_reads = {'n': 0}
+    calls = {'load': 0}
+
+    def _load(**kw):
+        calls['load'] += 1
+        if calls['load'] == 1:
+            raise _MissingColumn('room')
+        if calls['load'] == 2:
+            raise _MissingColumn('wave')  # another writer widened the table
+        loads.append(kw)
+        return {'row_count': 1}
+
+    def _query(**_kw):
+        schema_reads['n'] += 1
+        cols = ['session', 'room'] if schema_reads['n'] == 1 else ['session', 'room', 'wave']
+        return {'rows': [{'column_name': c} for c in cols]}
+
+    g = _loaded_global(table='agent_answers')
+    g.client = SimpleNamespace(
+        create_table=lambda **_kw: {},
+        upload_bytes=lambda payload, **_k: (uploads.append(payload), f'up-{len(uploads)}')[1],
+        load_table=_load,
+        query=_query,
+    )
+    inst = _instance(g)
+    out = inst.load_data({'table': 'agent_answers', 'rows': [{'session': 's'}]})
+
+    assert schema_reads['n'] == 2, 'must re-read the schema after the second refusal'
+    widened = [json.loads(ln) for ln in uploads[-1].decode().split('\n') if ln.strip()]
+    assert widened == [{'session': 's', 'room': None, 'wave': None}]
+    assert out.get('row_count') == 1
+
+
+def test_widening_gives_up_after_a_bounded_number_of_attempts():
+    """Each attempt costs an upload, so a table that keeps growing must not spin."""
+    uploads = []
+
+    def _load(**_kw):
+        raise _MissingColumn('always-something-new')
+
+    g = _loaded_global(table='t')
+    g.client = SimpleNamespace(
+        create_table=lambda **_kw: {},
+        upload_bytes=lambda payload, **_k: (uploads.append(payload), 'up')[1],
+        load_table=_load,
+        query=lambda **_kw: {'rows': [{'column_name': c} for c in ('a', 'b')]},
+    )
+    inst = _instance(g)
+    with pytest.raises(RuntimeError, match='missing column'):
+        inst.load_data({'table': 't', 'rows': [{'a': 1}]})
+    assert len(uploads) <= iinstance_mod._WIDEN_ATTEMPTS + 1
 
 
 def test_load_does_not_widen_when_nothing_would_change():

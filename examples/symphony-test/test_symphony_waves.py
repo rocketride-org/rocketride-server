@@ -214,6 +214,13 @@ def melody_from(reply: object) -> list[str] | None:
         except (TypeError, ValueError):
             return None
     if pairs:
+        # Verify the beats before discarding them. Sorting pairs and keeping only
+        # the notes would accept a reply with duplicate, missing or out-of-range
+        # beats as long as its sorted note sequence happened to match - which
+        # defeats the point of asking for beats in the first place.
+        beats = sorted(b for b, _n in pairs)
+        if beats != list(range(1, len(pairs) + 1)):
+            return None
         return [note for _beat, note in sorted(pairs, key=lambda p: p[0])]
 
     return [str(e) for e in entries] if all(isinstance(e, str) for e in entries) else None
@@ -541,8 +548,17 @@ async def run(args: argparse.Namespace) -> int:
         elapsed = time.monotonic() - started
         rows = _sql(shared_id, 'SELECT room, beat, note FROM discoveries ORDER BY beat').get('rows', [])
         by_beat: dict[int, str] = {}
+        seen_beats: dict[int, int] = {}
         for r in rows:
-            by_beat.setdefault(int(r[1]), str(r[2]))
+            beat = int(r[1])
+            by_beat.setdefault(beat, str(r[2]))
+            seen_beats[beat] = seen_beats.get(beat, 0) + 1
+        # setdefault above hides a second row for the same beat, and the retry can
+        # produce one: each attempt is its own pipeline run, so if an attempt
+        # published and then failed downstream, attempt 2 appends the claim again.
+        # Never observed - the failures seen all happened before publication - but
+        # it must be visible rather than silently collapsed.
+        duplicated = {b: n for b, n in seen_beats.items() if n > 1}
 
         # 1. PUBLISH - the check that used to fail. Every room's verdict is in the
         #    shared database because the graph loaded it, not because the agent chose to.
@@ -551,6 +567,16 @@ async def run(args: argparse.Namespace) -> int:
                 f'PUBLISH: all {rooms} rooms landed a verdict in the shared database',
                 set(by_beat) == set(range(1, rooms + 1)),
                 f'{len(by_beat)}/{rooms} beats present, missing={sorted(set(range(1, rooms + 1)) - set(by_beat))}',
+            )
+        )
+
+        results.append(
+            check(
+                'NO DUPLICATES: each beat was published exactly once',
+                not duplicated,
+                f'beats published more than once: {duplicated}'
+                if duplicated
+                else f'{len(rows)} rows, {len(by_beat)} beats',
             )
         )
 

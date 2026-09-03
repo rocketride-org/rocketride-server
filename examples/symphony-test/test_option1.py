@@ -159,7 +159,7 @@ async def run(args: argparse.Namespace) -> int:
             # id into both fields (same class of error as the get_schema column
             # miscount in .context/hotdata-test/FINDINGS.md), so isolation is
             # asserted on data below, never on what the agent says its id is.
-            if a['private'] == b['private']:
+            if a.get('private') is not None and a.get('private') == b.get('private'):
                 print(
                     f'       note: agent reported identical private ids '
                     f'({a["private"]}) - verifying against data instead'
@@ -248,7 +248,11 @@ async def run(args: argparse.Namespace) -> int:
                 pass
         d = extract_json(inv_resp, 'discovery')
         results.append(
-            check('investigator solved in its own database', bool(d and d['discovery'].get('note') == 'A4'), f'got {d}')
+            check(
+                'investigator solved in its own database',
+                bool(d and isinstance(d.get('discovery'), dict) and d['discovery'].get('note') == 'A4'),
+                f'got {d}',
+            )
         )
         if d:
             results.append(

@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import sys
 import uuid
 from pathlib import Path
@@ -156,7 +157,13 @@ async def run() -> int:
             got = extract_json(r, 'note')
             print(f'  room-{beat}: solved {got.get("note") if got else "?"} (truth {note}, decoy {decoy})')
 
-        await asyncio.gather(*(room(b, n) for b, n in SCORE))
+        # One flaky agent must not abort every check. Without return_exceptions
+        # the first failure re-raises and checks 1-3 never run, so the result is
+        # a traceback instead of the far more useful "which rooms published".
+        outcomes = await asyncio.gather(*(room(b, n) for b, n in SCORE), return_exceptions=True)
+        for (beat, _note), outcome in zip(SCORE, outcomes):
+            if isinstance(outcome, BaseException):
+                print(f'  room-{beat}: FAILED {str(outcome)[:200]}')
 
         # 1. Every room published into the one shared database.
         rows = _sql(shared_id, 'SELECT room, beat, note FROM discoveries ORDER BY beat').get('rows', [])
@@ -216,6 +223,16 @@ async def run() -> int:
 
 def main() -> int:
     _load_env()
+    # swap_llm injects the OpenAI key by default, and _hotdata indexes its two
+    # variables directly - report them by name rather than dying on a KeyError.
+    missing = [
+        k
+        for k in ('ROCKETRIDE_DB_HOTDATA_KEY', 'ROCKETRIDE_DB_HOTDATA_WORKSPACE_ID', 'ROCKETRIDE_OPENAI_KEY')
+        if not os.environ.get(k)
+    ]
+    if missing:
+        print('missing environment variable(s): ' + ', '.join(missing))
+        return 2
     return asyncio.run(run())
 
 
