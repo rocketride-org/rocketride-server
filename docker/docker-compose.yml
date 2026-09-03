@@ -56,7 +56,7 @@ services:
 
   # ── PostgreSQL + pgvector ────────────────────────────────────────────────
   postgres:
-    image: pgvector/pgvector:pg16
+    image: pgvector/pgvector:0.8.0-pg16
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-rocketride}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
