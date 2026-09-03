@@ -52,15 +52,21 @@ _SERVICE = {
 }
 
 
-class _FakeIJson:
-    """Stands in for rocketlib.types.IJson: wraps a value and exposes a
-    recursive ``toDict`` that unwraps nested ``_FakeIJson``/dict/list values,
-    matching the real implementation closely enough to exercise #1839
-    defect 2 (array/object fields arriving as IJson instead of list/dict).
+class _EngineIJson:
+    """Stands in for ``engLib.IJson`` -- the pybind class the C++ engine actually
+    constructs and hands to a node's config.
+
+    The split between this and :class:`_FakeIJson` is the whole point: in
+    production ``rocketlib.types.IJson`` SUBCLASSES the engLib class, and
+    ``config.py`` imports the subclass. Every value the engine produces is a
+    base-class instance, so ``isinstance(value, IJson)`` is False for all of
+    them. Modelling both classes here keeps that trap reproducible -- a single
+    flat stub makes isinstance succeed in tests and fail in production, which is
+    exactly how the nested profile block (and a node's credentials) went missing.
     """
 
     def __init__(self, value):
-        """Wrap `value` (typically a dict or list) as this stub would arrive from the engine."""
+        """Wrap `value` (typically a dict or list) as it would arrive from the engine."""
         self.value = value
 
     def get(self, key, default=None):
@@ -75,10 +81,18 @@ class _FakeIJson:
             return self.value.items()
         return ()
 
+
+class _FakeIJson(_EngineIJson):
+    """Stands in for ``rocketlib.types.IJson``, the subclass ``config.py`` imports.
+
+    ``toDict`` tests against the BASE class, which is why it unwraps engine
+    values correctly where a bare ``isinstance(value, IJson)`` does not.
+    """
+
     @staticmethod
     def toDict(obj):
-        """Recursively unwrap `_FakeIJson`/dict/list values into native dict/list."""
-        if isinstance(obj, _FakeIJson):
+        """Recursively unwrap engine/dict/list values into native dict/list."""
+        if isinstance(obj, _EngineIJson):
             return _FakeIJson.toDict(obj.value)
         if isinstance(obj, dict):
             return {key: _FakeIJson.toDict(value) for key, value in obj.items()}
@@ -303,3 +317,38 @@ class TestScalarOverObjectDefault:
         """A dict on both sides still merges recursively rather than replacing."""
         cfg = Config.getNodeConfig('agent_x', {'capabilities': {'audio': True}})
         assert cfg['capabilities'] == {'vision': False, 'audio': True}
+
+
+class TestEngineSuppliedConfig:
+    """Config arriving as the engine's own IJson type, not the rocketlib subclass.
+
+    ``config.py`` imports ``rocketlib.IJson``, which subclasses the engLib class
+    the engine constructs, so ``isinstance(engine_value, IJson)`` is always
+    False in production. Type-testing the nested block on that check silently
+    discarded it -- every node whose credentials are nested under the profile
+    name (the shape the node test harness builds) resolved without an apikey.
+    """
+
+    def test_nested_block_from_engine_is_read(self):
+        """A nested profile block arriving as an engine value must still resolve."""
+        conn = _EngineIJson({'profile': 'default', 'default': _EngineIJson({'role': 'Analyst'})})
+        cfg = Config.getNodeConfig('agent_x', conn)
+        assert cfg['role'] == 'Analyst'
+
+    def test_nested_credentials_from_engine_survive(self):
+        """The harness's {profile, <profile>: {apikey}} shape keeps its apikey."""
+        conn = _EngineIJson({'profile': 'default', 'default': _EngineIJson({'apikey': 'mock-key'})})
+        cfg = Config.getNodeConfig('agent_x', conn)
+        assert cfg['apikey'] == 'mock-key'
+
+    def test_top_level_from_engine_still_wins(self):
+        """Precedence is unchanged when the config arrives as an engine value."""
+        conn = _EngineIJson({'profile': 'default', 'role': 'Editor', 'default': _EngineIJson({'role': 'Analyst'})})
+        cfg = Config.getNodeConfig('agent_x', conn)
+        assert cfg['role'] == 'Editor'
+
+    def test_engine_nested_list_does_not_crash(self):
+        """A nested block that is a list, not an object, is ignored rather than raising."""
+        conn = _EngineIJson({'profile': 'default', 'default': _EngineIJson(['not', 'an', 'object'])})
+        cfg = Config.getNodeConfig('agent_x', conn)
+        assert cfg['role'] == 'Assistant'

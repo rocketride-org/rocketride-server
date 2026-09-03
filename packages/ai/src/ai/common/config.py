@@ -223,15 +223,20 @@ class Config:
             by both branches below so they agree on where configuration can
             live, regardless of whether "profile" was set explicitly.
             """
-            nested = connConfig.get(nested_key)
-            if isinstance(nested, IJson):
-                combined = dict(IJson.toDict(nested))
-            elif isinstance(nested, dict):
-                combined = dict(nested)
-            else:
-                combined = {}
+            # Normalize before inspecting. rocketlib's IJson is a *subclass* of
+            # the engLib IJson the engine actually constructs, so
+            # isinstance(value, IJson) is False for every real engine value --
+            # type-testing here silently dropped the whole nested block (and with
+            # it a node's credentials). IJson.toDict tests against the correct
+            # base class and is a no-op on already-native values.
+            source = IJson.toDict(connConfig)
+            if not isinstance(source, dict):
+                return {}
 
-            for key, value in connConfig.items():
+            nested = source.get(nested_key)
+            combined = dict(nested) if isinstance(nested, dict) else {}
+
+            for key, value in source.items():
                 # "profile" is the branch selector, not a node field, and must
                 # never leak into the resolved config; a None placeholder must
                 # not clobber a populated nested value.
