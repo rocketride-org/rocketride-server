@@ -125,6 +125,16 @@ const GitHubMark: React.FC = () => (
 	</svg>
 );
 
+/** Default handler for action plan clicks — opens link in new tab or mailto. */
+function defaultActionClick(_plan: CheckoutPlan, action: PlanAction): void {
+	const href = actionHref(action);
+	if (action.type === 'link') {
+		window.open(href, '_blank', 'noopener,noreferrer');
+	} else {
+		window.location.href = href;
+	}
+}
+
 // =============================================================================
 // STYLES
 // =============================================================================
