@@ -570,11 +570,32 @@ export class Documents {
 			return;
 		}
 
-		// Load content if document not yet open
-		let doc = s.documents[uri];
-		if (!doc) {
-			let content: unknown = '';
-			let loadedOk = false;
+		// Load content when the document isn't open yet, or IS open but clean
+		// (nothing local to protect). A clean cached entry can be stale relative
+		// to the backing store -- restored from a persisted session, or written
+		// externally (another client, a direct store write) since it was last
+		// read -- so it's never trusted indefinitely; only a DIRTY document
+		// (genuine unsaved edits) is worth keeping as-is rather than re-read.
+		//
+		// static and isNew documents are exempt from that re-read even though
+		// both are also always clean: static documents are explicitly not
+		// backed by the VFS (saveDocument itself skips them), and an isNew
+		// (untitled) document has no counterpart on the store to validate
+		// freshness against. Re-reading either would call vfs.read() on a URI
+		// that was never a real file, and reconstructing the Document below
+		// would drop `static`/`isNew` since neither field is carried over --
+		// silently turning a static panel into a VFS-backed one, or an
+		// unsaved scratch buffer into what looks like a saved file.
+		const initialDoc = s.documents[uri];
+		let doc = initialDoc;
+		if (!doc || (!doc.dirty && !doc.static && !doc.isNew)) {
+			// `doc?.content ?? ''` would be wrong here: a saved document can
+			// legitimately carry `null` (or any other falsy-but-not-missing
+			// value) as its content -- saveDocument() preserves content
+			// verbatim while only flipping `dirty`. Only fall back to '' when
+			// there's no cached document at all to read content from.
+			let content: unknown = doc ? doc.content : '';
+			let loadedOk = !!doc; // a prior cached copy is a valid fallback if the read below fails
 			if (this._vfs) {
 				try {
 					const raw = await this._vfs.read(uri);
@@ -583,10 +604,10 @@ export class Documents {
 						loadedOk = true;
 					}
 				} catch {
-					/* read failed */
+					/* read failed -- fall back to whatever we already had, if anything */
 				}
 			}
-			doc = { uri, content, dirty: false, version: 1, editorCount: 0, isNew: !loadedOk };
+			doc = { uri, content, dirty: false, version: (doc?.version ?? 0) + 1, editorCount: 0, isNew: !loadedOk };
 		}
 
 		const editorId = this._nextEditorId();
@@ -602,9 +623,47 @@ export class Documents {
 
 		const finalDoc = doc;
 		this._update((prev) => {
-			const updatedDoc = { ...(prev.documents[uri] ?? finalDoc), editorCount: (prev.documents[uri]?.editorCount ?? 0) + 1 };
 			const group = prev.groups[targetGroup];
 			if (!group) return prev;
+
+			// The "already open in this group" check at the top of this method
+			// ran on a snapshot taken before the read above -- if that read
+			// actually suspended (an await), a second openDocument(uri,
+			// targetGroup) call (e.g. a rapid double-click) could have run
+			// entirely in between and already committed its own new editor for
+			// this exact uri+group. Re-checking here, against the LATEST state,
+			// catches that: activate the editor it already added instead of
+			// piling on a duplicate tab for the same document in the same pane.
+			const racedEditorId = group.editorIds.find((eid) => prev.editors[eid]?.documentUri === uri);
+			if (racedEditorId) {
+				const idx = group.editorIds.indexOf(racedEditorId);
+				return {
+					...prev,
+					groups: { ...prev.groups, [targetGroup]: { ...group, activeEditorIndex: idx } },
+					activeGroupId: targetGroup,
+				};
+			}
+
+			// If this document existed when the read started but is gone now,
+			// something deliberately removed it while the read was in flight --
+			// discardDocument() is the one caller that does this, specifically
+			// because the backing file was deleted from disk. Recreating it
+			// from finalDoc (a read that may have started before the deletion,
+			// or already be racing a since-vanished file) would silently
+			// resurrect a document the system just determined doesn't exist;
+			// respect the removal and abort instead of opening anything.
+			const current = prev.documents[uri];
+			if (initialDoc && !current) return prev;
+
+			// Otherwise, prefer this call's (possibly freshly re-read) result,
+			// UNLESS something else changed this document while the read was
+			// in flight -- e.g. a concurrent open of the same uri finishing
+			// first (in a DIFFERENT group), or the user editing it via another
+			// path. That live state must win over a read that's now stale by
+			// comparison; a referential match against the pre-read snapshot
+			// means nothing raced, so the fresh read is safe to apply.
+			const base = current === initialDoc ? finalDoc : (current ?? finalDoc);
+			const updatedDoc = { ...base, editorCount: (current?.editorCount ?? 0) + 1 };
 			const newEditorIds = [...group.editorIds, editorId];
 			return {
 				...prev,
