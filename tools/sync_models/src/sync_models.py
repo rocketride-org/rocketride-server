@@ -38,7 +38,12 @@ _TOOLS_SRC = Path(__file__).parent
 if str(_TOOLS_SRC) not in sys.path:
     sys.path.insert(0, str(_TOOLS_SRC))
 
-from core.merger import _LITELLM_AVAILABLE, get_openrouter_cache, is_openrouter_available
+from core.merger import (
+    _LITELLM_AVAILABLE,
+    find_swapped_output_profiles,
+    get_openrouter_cache,
+    is_openrouter_available,
+)
 from core.patcher import get_profiles
 from core.reporter import SyncReport, format_console, format_pr_body
 from providers.base import _active_protected_profiles
@@ -154,6 +159,7 @@ def sync_provider(
     enable_discovery: bool = False,
     allow_fallback_discovery: bool = False,
     use_config_overrides: bool = True,
+    verify_existing: bool = False,
 ) -> 'ProviderReport':  # noqa: F821
     """
     Sync a single provider.
@@ -237,7 +243,95 @@ def sync_provider(
         allow_fallback_discovery=allow_fallback_discovery,
         use_config_overrides=use_config_overrides,
         global_protected_profiles=global_protected,
+        verify_existing=verify_existing,
     )
+
+
+def check_swapped_outputs(
+    repo_root: Path, provider_names: List[str], config: Dict[str, Any], use_config_overrides: bool = True
+) -> tuple[List[tuple], List[tuple]]:
+    """
+    Find catalogue profiles whose ``modelOutputTokens`` equals ``modelTotalTokens``.
+
+    Equality only proves a broken value on a provider that caps completions below
+    its context window (``output_limit_below_context``), and only for profiles that
+    came from that provider's own API — an OpenRouter or LiteLLM alias is served
+    elsewhere. Everything else is reported but does not fail the run: on providers
+    with no separate completion limit the two values are legitimately equal.
+
+    Args:
+        repo_root: Repository root.
+        provider_names: Providers whose services.json should be checked.
+        config: Parsed sync_models.config.json.
+        use_config_overrides: False under --no-config-overrides, where the configured
+            overrides are not applied to the catalogue either — a value that is not in
+            play must not count as a confirmed limit and silence the check.
+
+    Returns:
+        (errors, warnings), each a list of (provider_name, profile_key, value).
+    """
+    providers_config = config.get('providers', {})
+    confirmed = (
+        set((config.get('model_output_tokens', {}) or {}).get('overrides', {}) or {}) if use_config_overrides else set()
+    )
+    errors: List[tuple] = []
+    warnings: List[tuple] = []
+    for provider_name in provider_names:
+        rel_path = _SERVICES_JSON_PATHS.get(provider_name)
+        if not rel_path:
+            continue
+        services_path = repo_root / rel_path
+        if not services_path.exists():
+            continue
+        profiles = get_profiles(str(services_path))
+        capped = bool(providers_config.get(provider_name, {}).get('output_limit_below_context', False))
+        failing = (
+            {key for key, _ in find_swapped_output_profiles(profiles, confirmed, native_only=True)} if capped else set()
+        )
+        for profile_key, value in find_swapped_output_profiles(profiles, confirmed):
+            target = errors if profile_key in failing else warnings
+            target.append((provider_name, profile_key, value))
+    return errors, warnings
+
+
+def _format_gate_markdown(errors: List[tuple], warnings: List[tuple]) -> str:
+    """
+    Render the catalogue gate findings as a markdown section for the PR body.
+
+    A scheduled run exits non-zero on errors, and the workflow opens the PR anyway,
+    so the findings have to travel in the body or nobody sees them.
+
+    Args:
+        errors: (provider, profile_key, value) tuples that fail the run.
+        warnings: (provider, profile_key, value) tuples reported only.
+
+    Returns:
+        Markdown to append to the PR body, or '' when there is nothing to report.
+    """
+    if not errors and not warnings:
+        return ''
+    lines = ['', '---', '']
+    if errors:
+        lines.append('### Blocking: profiles sending the context window as `max_tokens`')
+        lines.append('')
+        lines.append('Their provider caps completions below its window and rejects the call. ')
+        lines.append("Set the model's real limit in `model_output_tokens.overrides`.")
+        lines.append('')
+        for provider_name, profile_key, value in errors:
+            lines.append(f'- `{provider_name}` — `{profile_key}` ({value:,} / {value:,})')
+        lines.append('')
+    if warnings:
+        lines.append('### Profiles with `modelOutputTokens` equal to `modelTotalTokens`')
+        lines.append('')
+        lines.append(
+            'Legitimate where the provider has no separate completion limit. '
+            'Confirm one by adding it to `model_output_tokens.overrides`.'
+        )
+        lines.append('')
+        for provider_name, profile_key, value in warnings:
+            lines.append(f'- `{provider_name}` — `{profile_key}` ({value:,})')
+        lines.append('')
+    return '\n'.join(lines)
 
 
 def main() -> int:
@@ -274,6 +368,14 @@ def main() -> int:
         action='store_true',
         default=False,
         help='Write changes to disk. Without this flag the script runs in dry-run mode.',
+    )
+    parser.add_argument(
+        '--verify-existing',
+        action='store_true',
+        help=(
+            'Call every model already in the catalogue, not just new ones, and deprecate the ones the provider '
+            'reports as gone. Requires the provider API key. Slower: one request per profile.'
+        ),
     )
     parser.add_argument(
         '--pr-body',
@@ -387,23 +489,51 @@ def main() -> int:
             enable_discovery=args.enable_discovery,
             allow_fallback_discovery=args.allow_fallback_discovery,
             use_config_overrides=not args.no_config_overrides,
+            verify_existing=args.verify_existing,
         )
         report.add(pr)
 
+    # Catalogue gate — on a provider that caps completions, a native profile sending
+    # its whole context window as max_tokens is rejected at run time. Fail on those;
+    # report the rest, where the equality may well be legitimate. Rendered into the PR
+    # body too, so a scheduled run puts the findings in front of whoever reviews it.
+    errors, warnings = check_swapped_outputs(
+        repo_root, providers_to_sync, config, use_config_overrides=not args.no_config_overrides
+    )
+
     if args.pr_body:
-        print(format_pr_body(report))
+        body = format_pr_body(report) + _format_gate_markdown(errors, warnings)
+        print(body)
         # Also write to GITHUB_ENV for the CI workflow
         github_env = os.environ.get('GITHUB_ENV')
         if github_env:
             with open(github_env, 'a', encoding='utf-8') as fh:
-                body = format_pr_body(report)
                 fh.write(f'SYNC_OUTPUT<<EOF\n{body}\nEOF\n')
     else:
         print(format_console(report))
+        if warnings:
+            print(f'\nNote: {len(warnings)} profile(s) have modelOutputTokens equal to modelTotalTokens.')
+            print('      Legitimate where the provider has no separate completion limit; confirm a')
+            print('      value by adding it to model_output_tokens.overrides to silence this.')
+            for provider_name, profile_key, value in warnings:
+                print(f'      {provider_name}: {profile_key} ({value:,})')
 
     # Exit 1 if any provider had an error
     if any(p.error for p in report.providers):
         return 1
+
+    if errors:
+        print(
+            f'\nERROR: {len(errors)} profile(s) send the whole context window as max_tokens.\n'
+            '       Their provider caps completions below the window and rejects the call.\n'
+            "       Set the model's real completion limit in sync_models.config.json under\n"
+            '       model_output_tokens.overrides.',
+            file=sys.stderr,
+        )
+        for provider_name, profile_key, value in errors:
+            print(f'       {provider_name}: {profile_key} ({value:,} / {value:,})', file=sys.stderr)
+        return 1
+
     return 0
 
 

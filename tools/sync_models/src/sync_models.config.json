@@ -25,6 +25,13 @@
 			"auth_header": "Authorization",
 			"auth_prefix": "Bearer",
 			"smoke_test": "chat",
+			// This provider caps completions well below the context window and rejects a
+			// larger max_tokens with "This model supports at most N completion tokens".
+			// So modelOutputTokens equal to modelTotalTokens is a broken value here: token
+			// candidates carrying it are discarded, and native profiles still holding it
+			// fail the sync. Leave unset for providers with no separate completion limit
+			// (Mistral, xAI) — there the two values are legitimately equal.
+			"output_limit_below_context": true,
 			// model_filter controls which models from the API are considered.
 			// include_prefixes: if non-empty, model must start with one of these.
 			// exclude_patterns: substring match anywhere in model ID.
@@ -47,6 +54,14 @@
 			// Override token limits when the provider API and litellm are unreliable.
 			// Comment out to let litellm drive — restore when litellm has wrong values.
 			"token_limit_overrides": {
+				// The chat-latest family had its window hand-filled with its output limit
+				// (16384 in both fields). 16384 is the correct output; the window is
+				// 128000 per models.dev and litellm. Pinned so a source that reports no
+				// context window for these cannot let the wrong value back in.
+				"gpt-5-chat-latest": 128000,
+				"gpt-5.1-chat-latest": 128000,
+				"gpt-5.2-chat-latest": 128000,
+				"gpt-5.3-chat-latest": 128000,
 				// "gpt-3.5-turbo": 16385,
 				// "gpt-3.5-turbo-16k": 16385,
 				// "gpt-3.5-turbo-1106": 16385,
@@ -122,6 +137,9 @@
 				"anthropic-version": "2023-06-01"
 			},
 			"smoke_test": "chat",
+			// Anthropic caps completions below the window, and litellm reports the window
+			// as max_output_tokens here (see the WARNING further down). See llm_openai.
+			"output_limit_below_context": true,
 			"model_filter": {
 				"include_prefixes": ["claude-"],
 				"exclude_prefixes": [],

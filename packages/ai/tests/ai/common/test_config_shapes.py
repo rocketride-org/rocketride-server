@@ -45,6 +45,7 @@ _SERVICE = {
                 'role': 'Assistant',
                 'require_tool_call': False,
                 'entityTypes': [],
+                'capabilities': {'vision': False},
             },
         },
     }
@@ -198,13 +199,11 @@ class TestExplicitProfileBranchTopLevelFields:
 
     def test_explicit_none_top_level_does_not_clobber_nested_with_explicit_profile(self):
         """A None placeholder at the top level must not override a populated nested value."""
-        cfg = Config.getNodeConfig(
-            'agent_x', {'profile': 'default', 'role': None, 'default': {'role': 'Analyst'}}
-        )
+        cfg = Config.getNodeConfig('agent_x', {'profile': 'default', 'role': None, 'default': {'role': 'Analyst'}})
         assert cfg['role'] == 'Analyst'
 
     def test_profile_selector_key_is_not_leaked_into_resolved_config(self):
-        """"profile" is the branch selector, not a node field; it must not appear in the result."""
+        """The "profile" selector key is not a node field; it must not appear in the result."""
         cfg = Config.getNodeConfig('agent_x', {'profile': 'default', 'instructions': ['a']})
         assert 'profile' not in cfg
 
@@ -272,3 +271,35 @@ class TestRequireToolCallResolution:
     def test_top_level_true_beats_nested_false(self):
         """A real top-level True wins over a conflicting nested False."""
         assert self._flag({'require_tool_call': True, 'default': {'require_tool_call': False}}) is True
+
+
+class TestScalarOverObjectDefault:
+    """A non-dict value written over an object-valued profile default.
+
+    ``merge()`` recursed whenever the *default* was dict-like, without checking
+    the user's side, so a scalar or list reached ``.items()`` and raised
+    AttributeError. Real nodes ship object-valued defaults a user can plausibly
+    write a JSON string into (schema_validate's "category_metric_map",
+    normalize_facts' "label_to_metric", autopipe's "remote"), so this is
+    reachable rather than theoretical. The user's value must win instead.
+    """
+
+    def test_scalar_over_object_default_wins(self):
+        """A top-level string over an object-valued default resolves to the string."""
+        cfg = Config.getNodeConfig('agent_x', {'capabilities': 'vision'})
+        assert cfg['capabilities'] == 'vision'
+
+    def test_list_over_object_default_wins(self):
+        """A top-level list over an object-valued default resolves to the list."""
+        cfg = Config.getNodeConfig('agent_x', {'capabilities': ['vision']})
+        assert cfg['capabilities'] == ['vision']
+
+    def test_scalar_over_object_default_wins_with_explicit_profile(self):
+        """Same, on the explicit-profile branch, which now also reaches merge()."""
+        cfg = Config.getNodeConfig('agent_x', {'profile': 'default', 'capabilities': 'vision'})
+        assert cfg['capabilities'] == 'vision'
+
+    def test_dict_over_object_default_still_merges(self):
+        """A dict on both sides still merges recursively rather than replacing."""
+        cfg = Config.getNodeConfig('agent_x', {'capabilities': {'audio': True}})
+        assert cfg['capabilities'] == {'vision': False, 'audio': True}

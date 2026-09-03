@@ -39,6 +39,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import threading
 import time
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
@@ -85,6 +86,10 @@ class McpStdioClient:
 
         self._proc: subprocess.Popen[str] | None = None
         self._next_id = 1
+        # One request in flight at a time: responses are matched by id but read
+        # line-by-line by whichever thread is receiving, and a foreign id is
+        # dropped — so two concurrent requests would starve each other.
+        self._request_lock = threading.Lock()
 
     def start(self) -> None:
         if self._proc is not None:
@@ -212,13 +217,14 @@ class McpStdioClient:
         self._send(msg)
 
     def _request(self, method: str, params: Any) -> Any:  # noqa: ANN401
-        req_id = self._next_id
-        self._next_id += 1
-        msg: Dict[str, Any] = {'jsonrpc': '2.0', 'id': req_id, 'method': method}
-        if params is not None:
-            msg['params'] = params
-        self._send(msg)
-        return self._recv_response(req_id=req_id)
+        with self._request_lock:
+            req_id = self._next_id
+            self._next_id += 1
+            msg: Dict[str, Any] = {'jsonrpc': '2.0', 'id': req_id, 'method': method}
+            if params is not None:
+                msg['params'] = params
+            self._send(msg)
+            return self._recv_response(req_id=req_id)
 
     def _send(self, msg: Dict[str, Any]) -> None:
         proc = self._proc

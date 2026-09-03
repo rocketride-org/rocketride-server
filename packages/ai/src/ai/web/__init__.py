@@ -52,9 +52,21 @@ from fastapi.middleware.cors import CORSMiddleware
 
 # Include the basic support
 from ai.web.response import response, error, error_dap, formatException, exception, ResultBase, Result
-from ai.web.server import WebServer
 
-from ai.account import AccountInfo
+try:
+    from ai.web.server import WebServer
+    from ai.account import AccountInfo
+except ImportError as _exc:
+    # WebServer/AccountInfo need engine-env modules (rocketlib). In a plain
+    # venv (e.g. running the mcp module tests directly) they are unavailable —
+    # but rocketlib-free submodules of this package (ai.web.oauth_resource)
+    # must stay importable there, and importing THEM runs this __init__.
+    # Degrade to the submodules only; any OTHER import failure is a real
+    # breakage and must not be masked. Same narrowing as tests/conftest.py.
+    if (_exc.name or '').split('.')[0] != 'rocketlib':
+        raise
+    WebServer = None  # type: ignore[assignment,misc]
+    AccountInfo = None  # type: ignore[assignment,misc]
 
 __all__ = [
     'AccountInfo',

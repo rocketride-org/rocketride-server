@@ -18,7 +18,13 @@ from rocketlib import debug, warning
 from ai.common.schema import Answer, Question
 from ai.common.config import Config
 from ai.common.util import parseJson
-from ai.common.validation import validate_model_name, validate_max_tokens, validate_prompt
+from ai.common.validation import (
+    validate_model_name,
+    validate_max_tokens,
+    validate_prompt,
+    check_output_token_config,
+    hand_supplied_token_fields,
+)
 from ai.common.llm_native_stream import STOP_SEQUENCES_VAR, dispatch_native_chat_stream
 from ai.common.llm_adapter import LangChainAdapter, NativeOpenAIResponsesAdapter, drive_adapter
 
@@ -98,6 +104,21 @@ class ChatBase:
         self._model = validate_model_name(config.get('model'))
         self._modelTotalTokens = config.get('modelTotalTokens', 16384)  # Default to 16K if not specified
         self._modelOutputTokens = config.get('modelOutputTokens', 4096)  # Default to 4K if not specified
+
+        # Check what the author wrote, before the clamp below rewrites it — a value the
+        # provider would reject can be clamped into a plausible-looking one, and then
+        # there is nothing left to report. Only when a token field was hand-supplied:
+        # catalogue profiles are checked by the model sync, and warning about those on
+        # every run would be noise. Hand-written config is what the sync never sees.
+        if hand_supplied_token_fields(connConfig):
+            problem = check_output_token_config(
+                self._model,
+                self._modelOutputTokens,
+                self._modelTotalTokens,
+                Config.getNodeProfiles(provider),
+            )
+            if problem:
+                warning(f'{provider}: {problem}')
 
         # Validate and clamp output tokens against known safe maximums
         self._modelOutputTokens = validate_max_tokens(self._modelOutputTokens, self._modelTotalTokens)

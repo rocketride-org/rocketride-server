@@ -447,6 +447,12 @@ Any string value in `config` can use `${ROCKETRIDE_<name>}` to inject values fro
 
 Only variables prefixed with `ROCKETRIDE_` are substituted. Unknown variables are left unchanged.
 
+**For MCP callers**: the `list_integrations` tool reports per-integration
+credential readiness (`configured`/`unconfirmed`/`available`) plus which
+`ROCKETRIDE_*` variables a node still needs. `list_components`' `wiring`
+field gives the exact `${...}` placeholders to copy into `config` for
+components that are already configured.
+
 ---
 
 ## UI Layout (Optional)

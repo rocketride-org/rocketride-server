@@ -505,7 +505,10 @@ class IInstance(IInstanceBase):
                 'branch': {'type': 'string', 'description': 'Name of the branch to merge into the current branch.'},
             },
         },
-        description='Merge a branch into the current branch. Fast-forwards if possible, otherwise creates a merge commit. Raises on conflicts.',
+        description=(
+            'Merge a branch into the current branch. A merge that would change the repository requires a clean working '
+            'tree. Fast-forwards if possible, otherwise creates a merge commit. Raises on conflicts.'
+        ),
         is_write=True,
     )
     def merge(self, args: Dict[str, Any]) -> Any:

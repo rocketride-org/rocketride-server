@@ -119,6 +119,15 @@ export default defineConfig(({ command }) => {
 					// and /apps.json resolves to the generated app manifest.
 					{ name: path.join(process.env.ROCKETRIDE_BUILD_ROOT ?? path.resolve(__dirname, '../../build')), watch: false },
 				],
+				// Root-level SEO files are FastAPI routes on the backend (they embed
+				// request-derived absolute URLs, so they can't be static assets here).
+				// Without this proxy, the dev server's SPA html fallback would answer
+				// them with index.html. Prod has a single origin, so no proxy needed.
+				proxy: {
+					'/sitemap.xml': env.ROCKETRIDE_URI.replace(/^ws/, 'http'),
+					'/robots.txt': env.ROCKETRIDE_URI.replace(/^ws/, 'http'),
+					'/llms.txt': env.ROCKETRIDE_URI.replace(/^ws/, 'http'),
+				},
 			}),
 		},
 		plugins: [

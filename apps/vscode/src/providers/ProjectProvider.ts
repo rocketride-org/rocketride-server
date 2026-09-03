@@ -757,6 +757,10 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 						}
 						if (parsedUrl.protocol !== 'https:') {
 							this.logger.error(`[ProjectProvider] Blocked OAuth URL scheme: ${parsedUrl.protocol}`);
+							// A silent break here turns a misconfigured broker URL
+							// (e.g. an http:// dev override baked into the webview)
+							// into a dead button with no feedback — say so instead.
+							vscode.window.showErrorMessage(`Sign-in blocked: the OAuth broker URL must use https (got "${parsedUrl.protocol}//"). Rebuild the extension without a non-https REACT_APP_OAUTH_ROOT_URL override.`);
 							break;
 						}
 						// Key the waiter by the node that started the login so the
@@ -778,7 +782,7 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 							// A dead waiter would swallow a later unrelated deep link.
 							unregister();
 							this.logger.error(`[ProjectProvider] Failed to open OAuth URL: ${error}`);
-							vscode.window.showErrorMessage('Could not open the browser for Google sign-in. Check your default browser and try again.');
+							vscode.window.showErrorMessage('Could not open the browser for sign-in. Check your default browser and try again.');
 						}
 					}
 					break;

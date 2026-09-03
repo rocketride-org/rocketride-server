@@ -1,0 +1,49 @@
+{
+	"title": "Excel",
+	"protocol": "tool_excel://",
+	"classType": ["tool"],
+	"capabilities": ["invoke"],
+	"register": "filter",
+	"node": "python",
+	"path": "nodes.tool_microsoft_365.excel",
+	"prefix": "excel",
+	"icon": "excel.svg",
+	"documentation": "https://docs.rocketride.org",
+	"description": ["Exposes Microsoft Excel operations as agent tools.", "List worksheets and tables; read, write, and clear ranges; add worksheets, tables, table rows, and charts; recalculate; create workbooks. Operates on xlsx files in the acting user's OneDrive via the Microsoft Graph workbook API.", "Authenticates via an Entra app (client credentials) or user OAuth."],
+	"tile": ["Excel (${parameters.excel.access})"],
+	"lanes": {},
+	"preconfig": {
+		"default": "default",
+		"profiles": {
+			"default": {
+				"title": "Excel",
+				"authType": "service",
+				"tenantId": "",
+				"clientId": "",
+				"clientSecret": "",
+				"userPrincipalName": "",
+				"userToken": "",
+				"access": "write"
+			}
+		}
+	},
+	"fields": {
+		"excel.access": {
+			"type": "string",
+			"title": "Access level",
+			"description": "Graph scopes to request. readonly: read worksheets, ranges, and tables only. write: full read/write (update ranges, add worksheets/tables/charts, create workbooks).",
+			"default": "write",
+			"enum": [
+				["readonly", "Read-only"],
+				["write", "Read/write"]
+			]
+		}
+	},
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Excel",
+			"properties": ["type", "microsoft.authType", "excel.access"]
+		}
+	]
+}

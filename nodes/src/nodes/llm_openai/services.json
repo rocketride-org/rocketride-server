@@ -259,7 +259,7 @@
 				"title": "GPT-5.1 Chat Latest",
 				"model": "gpt-5.1-chat-latest",
 				"modelSource": "provider",
-				"modelTotalTokens": 16384, // manual
+				"modelTotalTokens": 128000, // manual
 				"modelOutputTokens": 16384, // manual
 				"apikey": ""
 			},
@@ -267,7 +267,7 @@
 				"title": "GPT-5.2 Chat Latest",
 				"model": "gpt-5.2-chat-latest",
 				"modelSource": "provider",
-				"modelTotalTokens": 16384, // manual
+				"modelTotalTokens": 128000, // manual
 				"modelOutputTokens": 16384, // manual
 				"apikey": ""
 			},
@@ -275,7 +275,7 @@
 				"title": "GPT-5.3 Chat Latest",
 				"model": "gpt-5.3-chat-latest",
 				"modelSource": "provider",
-				"modelTotalTokens": 16384, // manual
+				"modelTotalTokens": 128000, // manual
 				"modelOutputTokens": 16384, // manual
 				"apikey": ""
 			},
@@ -283,7 +283,7 @@
 				"title": "GPT-5 Chat Latest",
 				"model": "gpt-5-chat-latest",
 				"modelSource": "provider",
-				"modelTotalTokens": 16384, // manual
+				"modelTotalTokens": 128000, // manual
 				"modelOutputTokens": 16384, // manual
 				"apikey": ""
 			},

@@ -1,16 +1,28 @@
 {
-  "explorer.excludeGitIgnore": true,
-  "search.exclude": {
-    "**/build": true,
-    "**/dist": true,
-    "**/downloads": true,
-    "**/.*": true,
-    "**/__pycache__": true,
-    "**/node_modules": true,
-  },
+  "cmake.configureOnOpen": false,
   "cmake.sourceDirectory": "${workspaceFolder}/packages/server",
+  "explorer.excludeGitIgnore": true,
+  "python.analysis.exclude": [
+    "**/.*",
+    "**/__pycache__",
+    "**/dist",
+    "**/build",
+    "**/downloads",
+    "**/node_modules"
+  ],
   "python.analysis.extraPaths": [
     "packages/server/engine-lib/rocketlib-python/lib",
     "packages/ai/src"
-  ]
+  ],
+  "search.exclude": {
+    "**/.git": true,
+    "**/.mypy_cache": true,
+    "**/.pytest_cache": true,
+    "**/.ruff_cache": true,
+    "**/__pycache__": true,
+    "**/build": true,
+    "**/dist": true,
+    "**/downloads": true,
+    "**/node_modules": true
+  }
 }

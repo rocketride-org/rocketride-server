@@ -48,7 +48,8 @@ import os
 import time
 from typing import TYPE_CHECKING, Dict, Any, List, Tuple
 from rocketride import EVENT_TYPE
-from rocketlib import validatePipeline
+from rocketlib import getServiceDefinition, validatePipeline
+from ai.common.config import Config
 from ai.common.dap import DAPConn, TransportBase
 from ai.common.list_rows import paginate_rows
 from ai.account.models import resolve_task_permissions
@@ -59,6 +60,32 @@ from .cmd_monitor import owner_key
 # Only import for type checking to avoid circular import errors
 if TYPE_CHECKING:
     from ..task_server import TaskServer
+
+
+# Component-level keys that are not node configuration. The engine validates and
+# consumes these itself, so a profile does not discard them and an author must not be
+# told to move them inside one.
+_STRUCTURAL_CONFIG_KEYS = frozenset({'profile', 'parameters', 'secureParameters', 'name'})
+
+
+def _service_profile_names(provider: str) -> frozenset:
+    """Return every profile name the service declares, or an empty set.
+
+    A config saved by an editor carries one sub-object per profile, so an unselected
+    profile's own block would otherwise read as a key the resolver threw away.
+
+    Args:
+        provider: Component provider, e.g. 'llm_openai'.
+
+    Returns:
+        The declared profile names. Empty when the service or its preconfig is
+        unavailable, which leaves the caller reporting the key rather than hiding it.
+    """
+    try:
+        service = getServiceDefinition(provider)
+        return frozenset((service or {}).get('preconfig', {}).get('profiles', {}) or {})
+    except Exception:
+        return frozenset()
 
 
 class MiscCommands(DAPConn):
@@ -235,6 +262,81 @@ class MiscCommands(DAPConn):
 
         except Exception as e:
             self.debug_message(f'Pipeline validation failed: {str(e)}')
+            raise
+
+    async def on_rrext_resolve_config(self, request: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Handle DAP 'rrext_resolve_config' to resolve a component config as a node sees it.
+
+        Runs the config through the same ``Config.getNodeConfig`` a node calls at
+        load, so an author can see what the node actually receives rather than
+        what the .pipe appears to say. This has to happen engine-side: the
+        service catalog does not carry ``preconfig``, so profile resolution
+        cannot be reproduced from ``rrext_services``.
+
+        Args:
+            request (Dict[str, Any]): DAP request containing:
+                - arguments (Dict[str, Any]):
+                    - provider (str): Component provider, e.g. 'llm_openai'.
+                    - config (Dict[str, Any], optional): The component's config block.
+
+        Returns:
+            Dict[str, Any]: DAP response whose body carries:
+                - provider (str): The provider that was resolved.
+                - profile (str): The profile that applied, named or default.
+                - resolved (Dict[str, Any]): What the node receives.
+                - dropped (List[str]): Top-level config keys the resolver discarded.
+
+        Raises:
+            ValueError: If provider is missing or config is not an object.
+            Exception: If the service is unknown or has no preconfig section.
+        """
+        try:
+            args = request.get('arguments', {})
+            provider = args.get('provider')
+            if not provider:
+                raise ValueError('provider is required')
+
+            # Default only a genuinely absent config: `or {}` would coerce a
+            # falsy non-object such as [] and skip the type check below.
+            config = args.get('config')
+            if config is None:
+                config = {}
+            if not isinstance(config, dict):
+                raise ValueError('config must be an object')
+
+            resolved = Config.getNodeConfig(provider, config)
+            profile = config.get('profile')
+
+            # Report the keys the resolver discarded rather than leaving the author
+            # to infer it from an absence. With a profile set, getNodeConfig reads
+            # the user layer only from the sub-object named after that profile, so
+            # sibling top-level keys never reach the node (#1839).
+            dropped = []
+            if profile:
+                # Every sibling of the selected profile is discarded, so the value is
+                # not worth comparing: one that happens to match the profile's own is
+                # still a line the resolver never read.
+                #
+                # Two kinds of sibling are not user config and must not be reported.
+                # The structural keys below belong to the component, not the node, and
+                # the engine consumes them on its own path (pipeline_config.cpp Rule 5
+                # and Rule 6); telling an author to move them inside the profile would
+                # break the component. An unselected profile's own sub-object is the
+                # other: an editor-saved config keeps one per profile.
+                profiles = _service_profile_names(provider)
+                dropped = [k for k in config if k != profile and k not in _STRUCTURAL_CONFIG_KEYS and k not in profiles]
+
+            body = {
+                'provider': provider,
+                'profile': profile or 'default',
+                'resolved': resolved,
+                'dropped': dropped,
+            }
+            return self.build_response(request, body=body)
+
+        except Exception as e:
+            self.debug_message(f'Config resolution failed for {request.get("arguments", {}).get("provider")}: {str(e)}')
             raise
 
     async def on_rrext_dashboard(self, request: Dict[str, Any]) -> Dict[str, Any]:

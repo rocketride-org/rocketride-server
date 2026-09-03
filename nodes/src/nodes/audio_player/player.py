@@ -65,15 +65,22 @@ class Player(AudioReader):
             **kwargs,
         )
 
-    def onData(self, data: bytes):
+    def onData(self, data: bytes | None):
         """
         Accumulate small chunks and enqueue 16K buffers for playback.
 
         Args:
-            data (bytes): Raw PCM audio data.
+            data (bytes | None): Raw PCM audio data, or None at end-of-stream.
         """
         # Signal end of playback if no data is received
         if not data:
+            # Flush whatever never reached a full 16K chunk, otherwise the tail of
+            # every stream (and any stream shorter than 16K) is silently dropped.
+            if self._chunk_accumulator:
+                # Blocks if queue is full, preserving the same backpressure as full chunks
+                self._play_queue.put(bytes(self._chunk_accumulator))
+                self._chunk_accumulator = bytearray()
+
             self._play_queue.put(None)  # Signal end of playback
             return
 
@@ -90,7 +97,8 @@ class Player(AudioReader):
         """
         sounddevice.OutputStream callback to feed audio data.
 
-        Plays back accumulated chunks until exhausted, then stops cleanly without padding silence.
+        Plays back accumulated chunks until exhausted. The final block is padded with
+        silence so the last partial block is played instead of being cut off.
         """
         required_bytes = frames * self.CHANNELS * 2  # 2 bytes per int16 sample
         buf = self._play_callback_buffer
@@ -98,6 +106,7 @@ class Player(AudioReader):
         # If playback is marked finished, don't try to get more
         if self._playback_finished:
             if len(buf) == 0:
+                outdata.fill(0)
                 raise sd.CallbackStop()
         else:
             # Fill buffer until we have enough or hit the end of data
@@ -108,9 +117,27 @@ class Player(AudioReader):
                     break
                 buf.extend(chunk)
 
-        # If we have less than we need and we are finished... stop. This will cut off like
-        # the last 24ms of the audio
+        # End of stream with less than a full block left: play what remains, pad the
+        # rest with silence, and stop after sounddevice commits this terminal block.
         if self._playback_finished and len(buf) < required_bytes:
+            frame_bytes = self.CHANNELS * 2
+            tail_bytes = (len(buf) // frame_bytes) * frame_bytes  # whole frames only
+
+            # sounddevice requires every output callback to fill the whole buffer,
+            # including the callback that raises CallbackStop.
+            outdata.fill(0)
+
+            # Nothing playable left (EOF on a block boundary or a torn PCM frame).
+            if tail_bytes == 0:
+                buf.clear()
+                self._play_callback_buffer = buf
+                raise sd.CallbackStop()
+
+            tail = np.frombuffer(buf[:tail_bytes], dtype=np.int16).reshape(-1, self.CHANNELS)
+            outdata[: len(tail)] = tail
+
+            buf.clear()
+            self._play_callback_buffer = buf
             raise sd.CallbackStop()
 
         # Normal playback: fill full frame
@@ -125,6 +152,10 @@ class Player(AudioReader):
         # Save the new buffer
         self._play_callback_buffer = buf
 
+    def write(self, buffer: bytes):
+        self._wrote_any_data = True
+        super().write(buffer)
+
     def start(self):
         """
         Start the audio playback stream and the data extractor.
@@ -133,6 +164,7 @@ class Player(AudioReader):
         self._chunk_accumulator = bytearray()
         self._play_callback_buffer = bytearray()
         self._playback_finished = False
+        self._wrote_any_data = False
 
         # Create and start the audio output stream
         self._stream = sd.OutputStream(
@@ -156,9 +188,13 @@ class Player(AudioReader):
         # Stop parent processing
         super().stop()
 
-        # Wait until the queue is drained and all buffered audio is played
-        while not self._play_queue.empty() or len(self._play_callback_buffer) > 0 or not self._playback_finished:
-            time.sleep(0.1)  # Wait 100ms
+        # Nothing was ever written, so nothing will ever set _playback_finished
+        # (only onData, driven by the ffmpeg thread WRITE starts, does that) -
+        # waiting here would hang forever on an empty stream.
+        if self._wrote_any_data:
+            # Wait until the queue is drained and all buffered audio is played
+            while not self._play_queue.empty() or len(self._play_callback_buffer) > 0 or not self._playback_finished:
+                time.sleep(0.1)  # Wait 100ms
 
         # Stop the audio stream if it exists
         if self._stream:

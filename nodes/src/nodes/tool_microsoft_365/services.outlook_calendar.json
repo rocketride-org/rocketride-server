@@ -1,0 +1,49 @@
+{
+	"title": "Outlook Calendar",
+	"protocol": "tool_outlook_calendar://",
+	"classType": ["tool"],
+	"capabilities": ["invoke"],
+	"register": "filter",
+	"node": "python",
+	"path": "nodes.tool_microsoft_365.outlook_calendar",
+	"prefix": "outlook_calendar",
+	"icon": "outlook_calendar.svg",
+	"documentation": "https://docs.rocketride.org",
+	"description": ["Exposes Microsoft Outlook Calendar operations as agent tools.", "List and read events (including calendarView expansion of recurrences), create/update/delete events, respond to invitations, find meeting times, get free/busy schedules, list and create calendars, and delta-sync a calendar view, on the acting user's calendar via the Microsoft Graph calendar API.", "Authenticates via an Entra app (client credentials) or user OAuth."],
+	"tile": ["Outlook Calendar (${parameters.outlook_calendar.access})"],
+	"lanes": {},
+	"preconfig": {
+		"default": "default",
+		"profiles": {
+			"default": {
+				"title": "Outlook Calendar",
+				"authType": "service",
+				"tenantId": "",
+				"clientId": "",
+				"clientSecret": "",
+				"userPrincipalName": "",
+				"userToken": "",
+				"access": "write"
+			}
+		}
+	},
+	"fields": {
+		"outlook_calendar.access": {
+			"type": "string",
+			"title": "Access level",
+			"description": "Graph scopes to request. readonly: list and read events/calendars, find meeting times, get schedules, and delta-sync only. write: full read/write (default) — create/update/delete events, respond to invitations, and create calendars.",
+			"default": "write",
+			"enum": [
+				["readonly", "Read-only"],
+				["write", "Read/write"]
+			]
+		}
+	},
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Outlook Calendar",
+			"properties": ["type", "microsoft.authType", "outlook_calendar.access"]
+		}
+	]
+}

@@ -31,6 +31,9 @@ packages:
   # Documentation site
   - 'packages/docs'
 
+  # MCP Apps widgets (vite workspace embedded in the ai MCP module)
+  - 'packages/ai/src/ai/modules/mcp/apps'
+
   # Applications
   - 'apps/*'
 

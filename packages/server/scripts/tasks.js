@@ -29,7 +29,7 @@
 const path = require('path');
 const os = require('os');
 const { glob } = require('glob');
-const { getState, setState, updateState, removeDirs, syncDir, syncFile, removeFiles, formatSyncStats, execCommand, runPytest, PROJECT_ROOT, BUILD_ROOT, DIST_ROOT, isWindows, isMac, isLinux, exists, readFile, readJson, writeJson, mkdir, copyFile, removeFile, loadPackageJson, downloadGitHubFile, createArchive, extractArchive, parallel, whenNot, fingerprint, contentHash, taskDebug, STATE_FILE } = require('../../../scripts/lib');
+const { getState, setState, updateState, removeDirs, syncDir, syncFile, removeFiles, formatSyncStats, execCommand, runPytest, PROJECT_ROOT, BUILD_ROOT, DIST_ROOT, isWindows, isMac, isLinux, exists, readFile, readJson, writeJson, mkdir, copyFile, removeFile, loadPackageJson, downloadGitHubFile, createArchive, extractArchive, parallel, sequence, whenNot, fingerprint, contentHash, taskDebug, STATE_FILE } = require('../../../scripts/lib');
 const { runCompilerSetup } = require('../../../scripts/compiler');
 
 // Paths
@@ -1156,8 +1156,10 @@ function makeBuildAllAction() {
 		description: 'Build server (all modules)',
 		steps: [
 			'server:build',
-			// Build external modules
-			parallel(['nodes:build', 'ai:build', 'client-python:build'], 'Build modules'),
+			// Build external modules. mcp-widgets:build must complete before ai:build —
+			// it writes the widget bundle into packages/ai/src/ai/modules/mcp/apps/dist,
+			// and ai:build's sync step is what carries it into dist/server.
+			parallel(['nodes:build', sequence(['mcp-widgets:build', 'ai:build'], 'ai (with widgets)'), 'client-python:build'], 'Build modules'),
 		],
 	};
 }
@@ -1193,8 +1195,9 @@ function makeTestAction() {
 				// still skips the test-compile block across step boundaries.
 				condition: async (ctx) => ctx.serverDownloaded || Boolean(await getState('server.downloadHash')),
 				then: [
-					// Build modules needed for tests
-					parallel(['nodes:build', 'ai:build', 'client-python:build'], 'Build modules'),
+					// Build modules needed for tests. mcp-widgets:build must complete before
+					// ai:build — see makeBuildAllAction for the full rationale.
+					parallel(['nodes:build', sequence(['mcp-widgets:build', 'ai:build'], 'ai (with widgets)'), 'client-python:build'], 'Build modules'),
 					'server:compile-tests',
 					'server:copy-test-data',
 					parallel(['tika:submodule-test', 'server:run-aptest', 'server:run-engtest', 'server:run-rocketlib-test'], 'Run tests'),

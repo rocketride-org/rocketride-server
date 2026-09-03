@@ -340,6 +340,28 @@ Set these environment variables (required; no config file is used):
 
 \*Either `ROCKETRIDE_AUTH` or `ROCKETRIDE_APIKEY` must be set.
 
+## Connecting a remote client (Claude, ChatGPT)
+
+These clients cannot be given an API key — they only speak OAuth. They bootstrap
+from the endpoint itself:
+
+1. `POST /mcp` with no credentials → `401` with
+   `WWW-Authenticate: Bearer resource_metadata="https://api.rocketride.ai/.well-known/oauth-protected-resource/mcp"`
+2. `GET` that URL → the RFC 9728 document, which names
+   `https://auth.rocketride.ai` as the authorization server.
+3. `GET https://auth.rocketride.ai/.well-known/oauth-authorization-server` → the
+   RFC 8414 document with the authorize/token endpoints and `S256` PKCE support.
+4. Authorization-code + PKCE flow against Zitadel, using a client id issued to
+   you. Dynamic client registration is deliberately not enabled, so the client
+   id is configured rather than negotiated.
+5. Call `/mcp` again with `Authorization: Bearer <access_token>`.
+
+Users without a RocketRide account can sign up from the Zitadel login screen and
+then continue through the same flow.
+
+Cursor and other header-capable clients can keep using a static
+`Authorization: Bearer rr_...` key instead — that path is unchanged.
+
 ## Links
 
 - [Documentation](https://docs.rocketride.org/)

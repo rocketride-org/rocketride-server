@@ -1,0 +1,56 @@
+{
+	"title": "Outlook Mail",
+	"protocol": "tool_outlook_mail://",
+	"classType": ["tool"],
+	"capabilities": ["invoke"],
+	"register": "filter",
+	"node": "python",
+	"path": "nodes.tool_microsoft_365.outlook_mail",
+	"prefix": "outlook_mail",
+	"icon": "outlook_mail.svg",
+	"documentation": "https://docs.rocketride.org",
+	"description": ["Exposes Microsoft Outlook Mail operations as agent tools.", "List, search, and read messages, send mail and replies/forwards, manage drafts, move/organize messages and folders, manage attachments, and mark read state, on the acting user's mailbox via the Microsoft Graph mail API.", "Sending requires the send or modify tier; drafts, moves, and other mutations require the modify tier; permanent delete is additionally gated behind an explicit config flag. Authenticates via an Entra app (client credentials) or user OAuth."],
+	"tile": ["Outlook Mail (${parameters.outlook_mail.access})"],
+	"lanes": {},
+	"preconfig": {
+		"default": "default",
+		"profiles": {
+			"default": {
+				"title": "Outlook Mail",
+				"authType": "service",
+				"tenantId": "",
+				"clientId": "",
+				"clientSecret": "",
+				"userPrincipalName": "",
+				"userToken": "",
+				"access": "modify"
+			}
+		}
+	},
+	"fields": {
+		"outlook_mail.access": {
+			"type": "string",
+			"title": "Access level",
+			"description": "Graph scopes to request. readonly: list, search, and read messages/folders/attachments only. send: readonly plus sending mail, replies, and forwards. modify: full read/write (default) — drafts, moves, organizing, attachments, and permanent delete (when allowHardDelete is on), plus send.",
+			"default": "modify",
+			"enum": [
+				["readonly", "Read-only"],
+				["send", "Read + send"],
+				["modify", "Read/write + send"]
+			]
+		},
+		"outlook_mail.allowHardDelete": {
+			"type": "boolean",
+			"title": "Allow permanent delete",
+			"description": "Off by default. When off, delete moves messages to Deleted Items; permanent delete is refused. Turn on to allow permanent delete.",
+			"default": false
+		}
+	},
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Outlook Mail",
+			"properties": ["type", "microsoft.authType", "outlook_mail.access", "outlook_mail.allowHardDelete"]
+		}
+	]
+}

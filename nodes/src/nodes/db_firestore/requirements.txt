@@ -1,0 +1,2 @@
+google-auth>=2.23.3
+google-cloud-firestore>=2.13.0

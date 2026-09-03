@@ -63,6 +63,10 @@ class IInstance(IInstanceBase):
         # Pass through the original text
         self.instance.writeText(text)
 
+        # Suppress the engine's own forward of `text`. preventDefault() raises, so it
+        # goes after the forward above.
+        return self.preventDefault()
+
     def writeDocuments(self, documents: List[Doc]):
         """
         Process documents and extract named entities.
@@ -104,6 +108,9 @@ class IInstance(IInstanceBase):
 
         # Write enriched documents
         self.instance.writeDocuments(enriched_docs)
+
+        # Without this downstream also receives the un-enriched originals.
+        return self.preventDefault()
 
     def closing(self):
         """Called before close, finalize any pending operations."""
