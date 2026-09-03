@@ -14,6 +14,29 @@ A single shared parser instance is guarded by a lock, so documents are parsed on
 
 ---
 
+## Scale-header preservation
+
+Financial statements declare their magnitude in a caption above the table ("(In millions)", "$ in thousands", "amounts in millions of USD"). If that caption is separated from its table by downstream chunking or an LLM step, every figure reads as raw units and is silently 1,000x, 1,000,000x, or 1,000,000,000x off. Nothing downstream catches it, because a wrong-by-1e6 number looks exactly like a right one.
+
+To keep that loss visible, the parser post-processes the extracted Markdown:
+
+- **Detects scale captions** the parser already emitted ("(in millions)", "in thousands, except per share amounts", "(₹ in crore)", ...) and normalizes each to a unit, a numeric factor, and an optional currency. Prose uses of the same words ("millions of users", "billions served", "hundreds of thousands of dollars") are not treated as captions.
+- **Welds a marker to the table.** When a caption is in scope for a *numeric* table (same page/section, no page break between them), a normalized line is injected directly above the table, for example `> Scale: amounts in millions (x1,000,000)`. A later chunker or LLM cannot separate the scale from its figures. A caption is only welded onto a table that actually looks numeric, so a caption sitting over a prose or roster table is never mis-attached.
+- **Flags a missing scale, when the context is financial.** When a numeric table has no caption in scope *and* the document shows a financial signal (a caption detected elsewhere, or a currency marking in the table itself), a warning line is injected above it: `> [scale?] Scale not detected for this table. Figures may be in thousands, millions, or billions. Verify against the source.` The warning errs toward caution: a visible warning is far cheaper than a silent 1e6 error. Plain numeric tables with no financial signal (inventory counts, server metrics, sports standings) are left untouched, so ordinary documents pay nothing for this feature. The markers are plain ASCII, so they survive a cp1252 console without an encoding error.
+
+The welded markers travel in-band with the text and table lanes, so they are the durable downstream signal: whatever chunks or summarizes the output carries the scale (or the warning) with the figures.
+
+For observability, the same results are also recorded in `parsing_metadata` (debug-logged by the instance; not currently re-emitted onto a lane):
+
+- `detected_scales`: list of `{phrase, unit, factor, currency}` for each caption found.
+- `scale_warnings`: per-table `{table_index, status, ...}` where `status` is `scale_detected`, `scale_missing`, `not_financial`, or `already_annotated` (the table already carried one of our markers and was left as-is).
+
+Annotation is idempotent (re-running does not double-inject; the injected markers are not themselves read back as captions) and never blocks parsing: any failure falls back to the untouched text.
+
+**Out of scope.** Recovering a caption that LlamaParse dropped from the source entirely is not handled here. That needs an independent source-text extraction and belongs to the audit-grade **`datalab_parse`** node. This node makes an *emitted-but-separable* scale un-loseable and flags its *absence*; it does not re-parse the source.
+
+---
+
 ## Configuration
 
 ### Lanes
