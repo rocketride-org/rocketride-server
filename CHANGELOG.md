@@ -421,6 +421,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`tool_gohighlevel` node**: exposes the GoHighLevel (LeadConnector) v2 REST API to agents as 101 tools across 18 groups (contacts, notes, tasks, opportunities, pipelines, conversations, messages, message sending, calendars, appointments, custom fields, custom values, tags, businesses, locations, users), plus a generic `request` escape hatch. Authenticates with a sub-account Private Integration Token, publishes a 71-tool default group set that keeps outbound message sending opt-in, and can hide every write tool in read-only mode (#1676)
 - **`tool_pipedrive` node**: exposes the Pipedrive CRM REST API v1 to agents — deals, persons, organizations, activities, pipelines, stages, notes, leads, products, fields, files, users, roles, permission sets, teams, goals, filters, webhooks, subscriptions, mail threads, call logs and projects. 256 tools across 24 resource groups, plus a generic `request` tool that reaches any remaining v1 endpoint through the same auth, rate-limit and read-only layer. Because the full surface is larger than an LLM can choose between reliably, `pipedrive.toolGroups` controls which groups are published (default: the eight core CRM groups, 108 tools; `all` publishes everything). Supports personal API tokens and OAuth bearer tokens, company-domain base URLs, offset and cursor pagination, custom fields via an `extra` passthrough, and read-only mode (#1675)
 
+### Added
+
+#### New Nodes
+- **Steadwing RCA** — agent tool exposing Steadwing's AI root-cause analysis (`run_rca`). Given an error or stack trace (and optional source files), it opens a Steadwing investigation that correlates logs, metrics, traces, and code across the stack, and returns the investigation URL. REST-backed (`POST /api/mcp/analyze`, `X-API-Key`) with a secure API key (env fallback `ROCKETRIDE_STEADWING_KEY`). Experimental V0. (#1248)
+
 ## [3.3.0] - 2026-06-08
 
 ### ⚠ Breaking Changes: Client SDKs (`rocketride` / `rocketride-python`)
