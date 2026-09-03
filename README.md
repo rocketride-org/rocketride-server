@@ -46,7 +46,7 @@ _Design, test, and ship complex AI workflows from a visual canvas, right where y
 
 _Drop pipelines into any Python or TypeScript app with a few lines of code, no infrastructure glue required._
 
-## Two ways to run RocketRide
+### Two ways to run RocketRide
 
 _Let us handle the infrastructure, or own every layer._
 
