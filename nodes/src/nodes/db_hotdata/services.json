@@ -10,8 +10,8 @@
 	"icon": "hotdata.svg",
 	"documentation": "https://docs.rocketride.org",
 	"description": [
-		"Creates one ephemeral Hotdata database for each pipeline run.",
-		"Lets agents inspect its live schema and execute read-only SQL before the database is destroyed at teardown."
+		"Creates one ephemeral Hotdata database for each pipeline run, or attaches to an existing one so agents in separate runs can share it.",
+		"Lets agents inspect its live schema and execute read-only SQL; a database this node created is destroyed at teardown, an attached one is left in place."
 	],
 	"tile": [],
 	"lanes": {
@@ -50,6 +50,13 @@
 			"description": "Hotdata workspace ID.",
 			"default": ""
 		},
+		"hotdata.database_id": {
+			"type": "string",
+			"title": "Existing database ID",
+			"description": "Leave empty to create a fresh ephemeral database per run (the default). Set an existing database ID so agents in separate pipeline runs share one database. An attached database is never deleted by this node, and indexes cannot be built on one.",
+			"default": "",
+			"optional": true
+		},
 		"hotdata.api_url": {
 			"type": "string",
 			"title": "API URL",
@@ -60,7 +67,7 @@
 		"hotdata.ttl": {
 			"type": "string",
 			"title": "Database lifetime",
-			"description": "Crash-safety expiry for the ephemeral database.",
+			"description": "Crash-safety expiry for a database this node creates. Ignored when an existing database ID is set, since that database's lifetime belongs to whoever created it.",
 			"default": "24h",
 			"enum": [
 				["1h", "1 hour"],
@@ -145,6 +152,7 @@
 				"type",
 				"hotdata.apikey",
 				"hotdata.workspace_id",
+				"hotdata.database_id",
 				"hotdata.api_url",
 				"hotdata.ttl",
 				"hotdata.table",
