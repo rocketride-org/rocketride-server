@@ -47,6 +47,13 @@ import '../../styles/root.css';
 /** Available connection modes for dev/deploy targets. */
 export type ConnectionMode = 'cloud' | 'docker' | 'service' | 'onprem' | 'local';
 
+const SETTINGS_TAB_IDS = ['development', 'deployment', 'pipeline', 'integrations'] as const;
+type SettingsTabId = typeof SETTINGS_TAB_IDS[number];
+
+function isSettingsTabId(value: unknown): value is SettingsTabId {
+	return typeof value === 'string' && (SETTINGS_TAB_IDS as readonly string[]).includes(value);
+}
+
 /**
  * Per-group (development or deployment) connection configuration.
  * Null connectionMode means "use the other group's target" (shared mode).
@@ -601,9 +608,12 @@ export const Settings: React.FC = () => {
 					break;
 				}
 
-				case 'setFocus' as any:
-					if ((message as any).focus) setActiveTab((message as any).focus);
+				case 'setFocus' as any: {
+					const { focus } = message as unknown as { focus?: unknown };
+					if (!isSettingsTabId(focus)) break;
+					setActiveTab(focus);
 					break;
+				}
 
 				case 'authError' as any:
 					setAuthError((message as any).message || 'Authentication failed');

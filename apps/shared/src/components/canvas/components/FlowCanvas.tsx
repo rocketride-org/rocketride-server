@@ -57,7 +57,9 @@ import { useFlowPreferences, NavigationMode } from '../context/FlowPreferencesCo
 import FloatingToolbar, { type IToolbarPosition } from './toolbar/FloatingToolbar';
 import { useToolbarOrientation } from './toolbar';
 import CreateNodePanel from './panels/create-node/CreateNodePanel';
+import CloudCanvasPrompt from './CloudCanvasPrompt';
 import EmptyCanvasPrompt from './EmptyCanvasPrompt';
+import { shouldShowCloudPrompt as getShouldShowCloudPrompt } from './cloudPromptVisibility';
 import NodeConfigPanel from './panels/node-config';
 import FitIcon from '../../../assets/icons/FitIcon';
 import LockIcon from '../../../assets/icons/LockIcon';
@@ -73,6 +75,12 @@ import { usePrefs } from 'shell';
 import { isInVSCode } from 'shell';
 import { useAutoLayout } from '../hooks/useAutoLayout';
 import { useTemplateInstantiator } from '../hooks/useTemplateInstantiator';
+
+interface FlowCanvasProps {
+	cloudPromptDismissed?: boolean;
+	onDismissCloudPrompt?: () => void;
+	onDismissCloudPromptForever?: () => void;
+}
 
 // =============================================================================
 // Node type registry — maps NodeType to its React component
@@ -199,7 +207,7 @@ const ToolbarDivider = () => {
  *
  * @returns The ReactFlow canvas with background grid.
  */
-export default function Canvas(): ReactElement {
+export default function Canvas({ cloudPromptDismissed, onDismissCloudPrompt, onDismissCloudPromptForever }: FlowCanvasProps): ReactElement {
 	// --- Graph state from context ------------------------------------------
 	const { canvasRef, nodes, edges, nodeMap, setNodes, onNodesChange, onEdgesChange, onEdgeConnect, onNodesDelete, onDragOver, onDrop, onNodeDragStop, isValidConnection, editingNodeId, setEditingNodeId, addNode, onContentUpdated, isFlowReady, configSnackbar, setConfigSnackbar } = useFlowGraph();
 
@@ -218,8 +226,21 @@ export default function Canvas(): ReactElement {
 		[setPref]
 	);
 
-	const { onUndo, onRedo, onViewportChange, isDirty, isNew, onSave, onExport, initialViewport } = useFlowProject();
+	const { onUndo, onRedo, onViewportChange, isDirty, isNew, onSave, onExport, initialViewport, isConnected, cloudConnectionConfigured, onOpenCloudSetup } = useFlowProject();
 	const { fitView, zoomIn, zoomOut, setViewport } = useReactFlow();
+
+	const shouldShowCloudPrompt = getShouldShowCloudPrompt({
+		isConnected: Boolean(isConnected),
+		isReadonly,
+		isLocked,
+		isFlowReady,
+		nodeCount: nodes.length,
+		hasCloudSetupHandler: Boolean(onOpenCloudSetup),
+		hasDismissHandler: Boolean(onDismissCloudPrompt),
+		hasDismissForeverHandler: Boolean(onDismissCloudPromptForever),
+		cloudConnectionConfigured: Boolean(cloudConnectionConfigured),
+		cloudPromptDismissed: Boolean(cloudPromptDismissed),
+	});
 
 	// Keep a ref so the restore handler always sees the latest viewport value
 	// without needing to re-register the event listener.
@@ -470,6 +491,8 @@ export default function Canvas(): ReactElement {
 
 			{/* Empty canvas prompt — shown when no nodes and create panel is closed */}
 			{nodes.length === 0 && !showCreatePanel && isFlowReady && <EmptyCanvasPrompt instantiateTemplate={instantiateTemplate} onNodeAdded={onNodeAdded} />}
+
+			{shouldShowCloudPrompt && <CloudCanvasPrompt onOpenCloudSetup={onOpenCloudSetup!} onDismiss={onDismissCloudPrompt!} onDismissForever={onDismissCloudPromptForever!} />}
 
 			{/* Quick-add popup — appears at handle click position */}
 			<QuickAddPopup />

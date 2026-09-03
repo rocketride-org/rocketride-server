@@ -27,6 +27,7 @@
  * RocketRide extension for Visual Studio Code.
  */
 const path = require('path');
+const { pathToFileURL } = require('url');
 const { glob } = require('glob');
 const { execCommand, removeDirs, removeMatching, PROJECT_ROOT, BUILD_ROOT, DIST_ROOT, hasSourceChanged, saveSourceHash, setState, exists, copyFile, mkdir, rm, readFile, writeFile, syncDir } = require('../../../scripts/lib');
 
@@ -289,6 +290,32 @@ function makeCleanStagingAction() {
 	};
 }
 
+function makeTestAction() {
+	return {
+		description: 'Testing vscode',
+		run: async (ctx, task) => {
+			const testFiles = (await glob('src/test/*.test.ts', { cwd: APP_ROOT, nodir: true }))
+				// extension.test.ts requires the real extension-host-only `vscode` module.
+				// Compare basenames: glob yields backslash-separated paths on Windows.
+				.filter((file) => path.basename(file) !== 'extension.test.ts')
+				.sort();
+
+			// Fail rather than pass silently: this target exists because these tests
+			// previously ran nowhere, so a glob that matches nothing must not read as green.
+			if (testFiles.length === 0) {
+				throw new Error('No vscode test files found under src/test/ — expected at least one *.test.ts');
+			}
+
+			// The VS Code package has no package scripts or test dependencies of its own;
+			// resolve the same workspace-installed tsx loader used by shared:test.
+			// `--import` takes a URL: a bare Windows path (D:\...) is rejected by the ESM
+			// loader as an unsupported 'd:' protocol, so pass a file:// URL on every platform.
+			const tsxLoader = pathToFileURL(require.resolve('tsx', { paths: [path.join(PROJECT_ROOT, 'apps', 'shared')] })).href;
+			await execCommand('node', ['--import', tsxLoader, '--test', '--test-reporter=spec', ...testFiles], { task, cwd: APP_ROOT });
+		},
+	};
+}
+
 // =============================================================================
 // Module Definition
 // =============================================================================
@@ -309,6 +336,7 @@ module.exports = {
 		{ name: 'vscode:stage-files', action: makeStageFilesAction },
 		{ name: 'vscode:package-vsix', action: makePackageVsixAction },
 		{ name: 'vscode:clean-staging', action: makeCleanStagingAction },
+		{ name: 'vscode:test', action: makeTestAction },
 
 		// Public actions (have descriptions)
 		{

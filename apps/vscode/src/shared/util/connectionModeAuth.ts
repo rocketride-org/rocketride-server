@@ -23,6 +23,15 @@
 
 export type RocketRideConnectionMode = 'cloud' | 'docker' | 'service' | 'onprem' | 'local';
 
+export interface CloudConnectionConfig {
+	development: {
+		connectionMode: RocketRideConnectionMode | string | null;
+	};
+	deployment: {
+		connectionMode: RocketRideConnectionMode | string | null;
+	};
+}
+
 /**
  * Whether the mode requires the user to provide an API key manually.
  * Cloud uses OAuth2 (no manual key), docker/service use env-derived keys,
@@ -44,4 +53,14 @@ export function connectionModeUsesOAuth(connectionMode: RocketRideConnectionMode
  */
 export function connectionModeHasFixedUrl(connectionMode: RocketRideConnectionMode | string): boolean {
 	return connectionMode === 'cloud' || connectionMode === 'docker' || connectionMode === 'service' || connectionMode === 'local';
+}
+
+/**
+ * Whether either connection slot is configured to use Cloud.
+ * Team selection is server-profile scoped in the current VS Code architecture.
+ */
+export function isCloudConnectionConfigured(config: CloudConnectionConfig): boolean {
+	return [config.development, config.deployment].some((group) => {
+		return group.connectionMode === 'cloud';
+	});
 }
