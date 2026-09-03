@@ -33,6 +33,9 @@ and response normalisation. All tool methods in IInstance call through here.
 from __future__ import annotations
 
 from typing import Any
+import base64
+import datetime
+import json
 import time
 
 import requests
@@ -88,6 +91,78 @@ def _raise_github_error(resp: requests.Response) -> None:
 
 BASE_URL = 'https://api.github.com'
 DEFAULT_TIMEOUT = 30
+
+# GitHub caps App JWT exp at 10 minutes; use 9m30s to leave clock-skew margin.
+APP_JWT_TTL_SECONDS = 570
+
+
+def load_app_private_key(pem_text: str):
+    """Parse a PEM RSA private key for a GitHub App. Raises ValueError on malformed or non-RSA input."""
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric.rsa import RSAPrivateKey
+
+    try:
+        key = serialization.load_pem_private_key((pem_text or '').encode('utf-8'), password=None)
+    except (ValueError, TypeError) as exc:
+        raise ValueError(f'tool_github: invalid GitHub App private key: {exc}') from exc
+    if not isinstance(key, RSAPrivateKey):
+        raise ValueError('tool_github: GitHub App private key must be an RSA key (RS256 signing)')
+    return key
+
+
+def _b64url(data: bytes) -> str:
+    return base64.urlsafe_b64encode(data).rstrip(b'=').decode('ascii')
+
+
+def _sign_app_jwt(app_id: str, private_key_pem: str) -> str:
+    """Build and RS256-sign a short-lived JWT per GitHub App auth spec (iss=app_id)."""
+    from cryptography.hazmat.primitives import hashes
+    from cryptography.hazmat.primitives.asymmetric import padding
+
+    key = load_app_private_key(private_key_pem)
+    now = int(time.time())
+    header = {'alg': 'RS256', 'typ': 'JWT'}
+    payload = {'iat': now - 60, 'exp': now + APP_JWT_TTL_SECONDS, 'iss': app_id}
+    header_b64 = _b64url(json.dumps(header, separators=(',', ':')).encode())
+    payload_b64 = _b64url(json.dumps(payload, separators=(',', ':')).encode())
+    signing_input = f'{header_b64}.{payload_b64}'
+    signature = key.sign(signing_input.encode('ascii'), padding.PKCS1v15(), hashes.SHA256())
+    return f'{signing_input}.{_b64url(signature)}'
+
+
+def mint_installation_token(app_id: str, private_key_pem: str, installation_id: str) -> tuple[str, float]:
+    """Mint a short-lived GitHub App installation token.
+
+    POSTs to ``/app/installations/{installation_id}/access_tokens`` authenticated
+    with a freshly-signed App JWT. Returns ``(token, expiry_epoch_seconds)``.
+    """
+    jwt_token = _sign_app_jwt(app_id, private_key_pem)
+    headers = {
+        'Authorization': f'Bearer {jwt_token}',
+        'Accept': 'application/vnd.github+json',
+        'X-GitHub-Api-Version': '2022-11-28',
+    }
+    try:
+        resp = requests.request(
+            'POST',
+            f'{BASE_URL}/app/installations/{installation_id}/access_tokens',
+            headers=headers,
+            timeout=DEFAULT_TIMEOUT,
+        )
+    except requests.RequestException as exc:
+        raise ValueError(f'GitHub App token request failed: {exc}') from exc
+
+    if not resp.ok:
+        _raise_github_error(resp)
+
+    data = resp.json()
+    token = data.get('token')
+    expires_at = data.get('expires_at')
+    if not token or not expires_at:
+        raise GitHubAPIError(resp.status_code, 'installation token response missing token/expires_at')
+
+    expiry = datetime.datetime.fromisoformat(expires_at.replace('Z', '+00:00')).timestamp()
+    return token, expiry
 
 
 def call(
