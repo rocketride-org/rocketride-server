@@ -198,10 +198,30 @@ def _clean_channel(ch: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _clean_message(msg: Dict[str, Any]) -> Dict[str, Any]:
-    """Strip a conversations.history entry down to ts/user/text (+ thread_ts)."""
+    """Strip a conversations.history entry down to its content and classifiers.
+
+    The allowlist keeps the fields that carry the message (``ts``/``user``/
+    ``text``, plus ``thread_ts``) and the two that CLASSIFY it:
+
+    - ``subtype`` marks system events. A ``channel_join`` entry carries a ts, a
+      user, and a text of "<@U0123ABCD> has joined the channel", so without the
+      subtype it is byte-for-byte the shape of a real message and cannot be
+      filtered out downstream.
+    - ``bot_id`` marks a post made by a bot. ``check_connection`` already
+      returns the caller's own bot_id, so without this there is a value to
+      compare against and nothing to compare it to -- and an agent reading a
+      channel it also posts to sees its own output as new input.
+
+    Both are absent on ordinary user messages, so the shape is unchanged for
+    existing callers.
+    """
     cleaned = {'ts': msg.get('ts'), 'user': msg.get('user'), 'text': msg.get('text')}
     if msg.get('thread_ts'):
         cleaned['thread_ts'] = msg['thread_ts']
+    if msg.get('subtype'):
+        cleaned['subtype'] = msg['subtype']
+    if msg.get('bot_id'):
+        cleaned['bot_id'] = msg['bot_id']
     return cleaned
 
 
@@ -429,8 +449,11 @@ class SlackClient:
             latest: Only include messages before this Slack timestamp.
 
         Returns:
-            List of dicts with ``ts``/``user``/``text`` (plus ``thread_ts``
-            for threaded messages).
+            List of dicts with ``ts``/``user``/``text``, plus ``thread_ts`` for
+            threaded messages, ``subtype`` for system events (``channel_join``,
+            ``channel_topic``, …) and ``bot_id`` for messages posted by a bot.
+            The last two are absent on ordinary user messages — use them to
+            filter join/leave noise and to skip your own posts.
 
         Raises:
             ValueError: On a missing/empty ``channel`` or a non-numeric or
