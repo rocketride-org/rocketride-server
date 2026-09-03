@@ -6,8 +6,12 @@ without uv, pip, or a network. Every test redirects the "engine executable
 directory" into ``tmp_path`` so nothing touches a real engine cache.
 """
 
+import ctypes
+import importlib.metadata
 import os
+from io import StringIO
 from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -78,6 +82,16 @@ class TestComputeHash:
 
         assert depends._compute_hash([str(a)]) != depends._compute_hash([str(a), str(b)])
 
+    def test_changes_when_avx2_verdict_flips(self, tmp_path, monkeypatch):
+        """Cache key must change when the AVX2 verdict flips (warm cache across CPUs)."""
+        req = _write(tmp_path / 'req.txt', 'polars>=1.0.0\n')
+        monkeypatch.setattr(depends, '_is_x86_64_missing_avx2', lambda: False)
+        hash_avx2 = depends._compute_hash([str(req)])
+        monkeypatch.setattr(depends, '_is_x86_64_missing_avx2', lambda: True)
+        hash_no_avx2 = depends._compute_hash([str(req)])
+        assert hash_avx2 != hash_no_avx2
+        assert depends._compute_hash([str(req)]) == hash_no_avx2
+
 
 class TestCombineRequirements:
     def test_concatenates_in_order_with_source_markers(self, tmp_path):
@@ -90,6 +104,29 @@ class TestCombineRequirements:
         text = out.read_text(encoding='utf-8')
         assert text == f'# Source: {a}\npkg-a\n\n# Source: {b}\npkg-b>=1\n\n'
         assert text.index('pkg-a') < text.index('pkg-b')
+
+    def test_drops_unwanted_polars(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(depends, '_is_x86_64_missing_avx2', lambda: False)
+        src = _write(tmp_path / 'requirements.txt', 'polars>=1.0.0\npolars-lts-cpu>=1.0.0\n')
+        out = tmp_path / 'combined.txt'
+
+        depends._combine_requirements([str(src)], str(out))
+
+        contents = out.read_text(encoding='utf-8')
+        assert 'polars>=1.0.0\n' in contents.replace('polars-lts-cpu>=1.0.0', '')
+        assert '# excluded for this CPU: polars-lts-cpu>=1.0.0' in contents
+
+    def test_keeps_lts_when_avx2_missing(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(depends, '_is_x86_64_missing_avx2', lambda: True)
+        src = _write(tmp_path / 'requirements.txt', 'polars>=1.0.0\npolars-lts-cpu>=1.0.0\n')
+        out = tmp_path / 'combined.txt'
+
+        depends._combine_requirements([str(src)], str(out))
+
+        contents = out.read_text(encoding='utf-8')
+        assert 'polars-lts-cpu>=1.0.0\n' in contents
+        assert '# excluded for this CPU: polars>=1.0.0' in contents
+        assert '\npolars>=1.0.0\n' not in '\n' + contents
 
 
 class TestConstraintsArgs:
@@ -137,19 +174,189 @@ class TestWriteExcludesFile:
     def test_always_excludes_uv(self, exe_dir, monkeypatch):
         depends.engine_cache_dir(create=True)
         monkeypatch.setattr(depends.platform, 'system', lambda: 'Darwin')
+        monkeypatch.setattr(depends, '_is_x86_64_missing_avx2', lambda: False)
 
         path = depends._write_excludes_file()
 
         assert path == str(exe_dir / 'cache' / 'excludes.txt')
-        assert (exe_dir / 'cache' / 'excludes.txt').read_text(encoding='utf-8') == 'uv\n'
+        assert (exe_dir / 'cache' / 'excludes.txt').read_text(encoding='utf-8') == 'uv\npolars-lts-cpu\n'
 
     def test_excludes_plain_onnxruntime_off_darwin(self, exe_dir, monkeypatch):
         depends.engine_cache_dir(create=True)
         monkeypatch.setattr(depends.platform, 'system', lambda: 'Linux')
+        monkeypatch.setattr(depends, '_is_x86_64_missing_avx2', lambda: False)
 
         depends._write_excludes_file()
 
-        assert (exe_dir / 'cache' / 'excludes.txt').read_text(encoding='utf-8') == 'uv\nonnxruntime\n'
+        assert (exe_dir / 'cache' / 'excludes.txt').read_text(encoding='utf-8') == 'uv\nonnxruntime\npolars-lts-cpu\n'
+
+    def test_excludes_wrong_polars_variant(self, exe_dir, monkeypatch):
+        depends.engine_cache_dir(create=True)
+        monkeypatch.setattr(depends.platform, 'system', lambda: 'Darwin')
+
+        monkeypatch.setattr(depends, '_is_x86_64_missing_avx2', lambda: False)
+        contents = open(depends._write_excludes_file(), encoding='utf-8').read()
+        assert 'polars-lts-cpu\n' in contents
+        assert contents.replace('polars-lts-cpu\n', '').count('polars\n') == 0
+
+        monkeypatch.setattr(depends, '_is_x86_64_missing_avx2', lambda: True)
+        contents = open(depends._write_excludes_file(), encoding='utf-8').read()
+        assert 'polars\n' in contents
+        assert 'polars-lts-cpu\n' not in contents
+
+
+class TestIsX86_64MissingAvx2:
+    def setup_method(self):
+        depends._is_x86_64_missing_avx2.cache_clear()
+
+    def teardown_method(self):
+        depends._is_x86_64_missing_avx2.cache_clear()
+
+    def test_missing_avx2_non_x86(self, monkeypatch):
+        monkeypatch.setattr(depends.platform, 'system', lambda: 'Darwin')
+        monkeypatch.setattr(depends.platform, 'machine', lambda: 'arm64')
+        assert depends._is_x86_64_missing_avx2() is False
+
+        depends._is_x86_64_missing_avx2.cache_clear()
+        monkeypatch.setattr(depends.platform, 'machine', lambda: 'aarch64')
+        assert depends._is_x86_64_missing_avx2() is False
+
+    def test_missing_avx2_darwin_rosetta(self, monkeypatch):
+        monkeypatch.setattr(depends.platform, 'machine', lambda: 'x86_64')
+        monkeypatch.setattr(depends.platform, 'system', lambda: 'Darwin')
+
+        monkeypatch.setattr(depends.subprocess, 'check_output', lambda *a, **k: '0\n')
+        depends._is_x86_64_missing_avx2.cache_clear()
+        assert depends._is_x86_64_missing_avx2() is True
+
+        monkeypatch.setattr(depends.subprocess, 'check_output', lambda *a, **k: '1\n')
+        depends._is_x86_64_missing_avx2.cache_clear()
+        assert depends._is_x86_64_missing_avx2() is False
+
+        def _boom(*a, **k):
+            raise Exception('sysctl failed')
+
+        monkeypatch.setattr(depends.subprocess, 'check_output', _boom)
+        depends._is_x86_64_missing_avx2.cache_clear()
+        assert depends._is_x86_64_missing_avx2() is True
+
+    def test_missing_avx2_linux(self, monkeypatch):
+        monkeypatch.setattr(depends.platform, 'machine', lambda: 'x86_64')
+        monkeypatch.setattr(depends.platform, 'system', lambda: 'Linux')
+
+        cpuinfo_avx2 = (
+            'flags: fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat '
+            'pse36 clflush dts acpi mmx fxsr sse sse2 ss ht tm pbe syscall nx pdpe1gb '
+            'rdtscp lm constant_tsc art arch_perfmon pebs bts rep_good nopl xtopology '
+            'nonstop_tsc cpuid aperfmperf pni pclmulqdq dtes64 monitor ds_cpl vmx smx '
+            'est tm2 ssse3 sdbg fma cx16 xtpr pdcm pcid dca sse4_1 sse4_2 x2apic movbe '
+            'popcnt tsc_deadline_timer aes xsave avx f16c rdrand lahf_lm abm 3dnowprefetch '
+            'cpuid_fault epb cat_l3 cdp_l3 invpcid_single pti intel_ppin ssbd mba ibrs ibpb '
+            'stibp tpr_shadow vnmi flexpriority ept vpid ept_ad fsgsbase tsc_adjust bmi1 '
+            'avx2 smep bmi2 erms invpcid cqm mpx rdt_a avx512f avx512dq rdseed adx smap '
+            'clflushopt clwb intel_pt avx512cd avx512bw avx512vl xsaveopt xsavec xgetbv1 '
+            'xsaves cqm_llc cqm_occup_llc cqm_mbm_total cqm_mbm_local dtherm ida arat pln '
+            'pts pku ospke md_clear pconfig stibp_always_on flush_l1d arch_capabilities'
+        )
+
+        monkeypatch.setattr(depends, 'open', lambda *a, **k: StringIO(cpuinfo_avx2), raising=False)
+        depends._is_x86_64_missing_avx2.cache_clear()
+        assert depends._is_x86_64_missing_avx2() is False
+
+        monkeypatch.setattr(depends, 'open', lambda *a, **k: StringIO('flags: fpu vme de pse tsc'), raising=False)
+        depends._is_x86_64_missing_avx2.cache_clear()
+        assert depends._is_x86_64_missing_avx2() is True
+
+        def _boom(*a, **k):
+            raise Exception('Permission denied')
+
+        monkeypatch.setattr(depends, 'open', _boom, raising=False)
+        depends._is_x86_64_missing_avx2.cache_clear()
+        assert depends._is_x86_64_missing_avx2() is True
+
+    def test_missing_avx2_windows(self, monkeypatch):
+        monkeypatch.setattr(depends.platform, 'machine', lambda: 'AMD64')
+        monkeypatch.setattr(depends.platform, 'system', lambda: 'Windows')
+
+        mock_kernel32 = MagicMock()
+        mock_windll = MagicMock()
+        mock_windll.kernel32 = mock_kernel32
+
+        # Patch windll onto the real ctypes module (create=True for non-Windows).
+        # Replacing sys.modules['ctypes'] breaks engine-embedded pytest.
+        with patch.object(ctypes, 'windll', mock_windll, create=True):
+            mock_kernel32.IsProcessorFeaturePresent.return_value = True
+            depends._is_x86_64_missing_avx2.cache_clear()
+            assert depends._is_x86_64_missing_avx2() is False
+
+            mock_kernel32.IsProcessorFeaturePresent.return_value = False
+            depends._is_x86_64_missing_avx2.cache_clear()
+            assert depends._is_x86_64_missing_avx2() is True
+
+            mock_kernel32.IsProcessorFeaturePresent.side_effect = Exception('Failed')
+            depends._is_x86_64_missing_avx2.cache_clear()
+            assert depends._is_x86_64_missing_avx2() is True
+
+
+class TestReconcilePolarsVariant:
+    def test_uninstalls_wrong_build(self, monkeypatch):
+        """Already-installed wrong Polars variant must be removed (excludes won't do it)."""
+        calls = []
+        monkeypatch.setattr(depends, 'pip', lambda *args: calls.append(args) or True)
+
+        def version_polars(name):
+            if name == 'polars':
+                return '1.0.0'
+            raise importlib.metadata.PackageNotFoundError(name)
+
+        monkeypatch.setattr(depends, '_is_x86_64_missing_avx2', lambda: True)
+        monkeypatch.setattr(importlib.metadata, 'version', version_polars)
+        depends._reconcile_polars_variant()
+        assert calls == [('uninstall', '-y', 'polars')]
+
+        calls.clear()
+
+        def version_lts(name):
+            if name == 'polars-lts-cpu':
+                return '1.0.0'
+            raise importlib.metadata.PackageNotFoundError(name)
+
+        monkeypatch.setattr(depends, '_is_x86_64_missing_avx2', lambda: False)
+        monkeypatch.setattr(importlib.metadata, 'version', version_lts)
+        depends._reconcile_polars_variant()
+        assert calls == [('uninstall', '-y', 'polars-lts-cpu')]
+
+    def test_noop_when_absent(self, monkeypatch):
+        def missing(name):
+            raise importlib.metadata.PackageNotFoundError(name)
+
+        monkeypatch.setattr(depends, '_is_x86_64_missing_avx2', lambda: True)
+        monkeypatch.setattr(importlib.metadata, 'version', missing)
+        monkeypatch.setattr(depends, 'pip', lambda *a: pytest.fail('pip must not run'))
+        depends._reconcile_polars_variant()
+
+
+class TestPolarsRequirementFilter:
+    def test_requirement_dist_name_exact_match(self):
+        assert depends._requirement_dist_name('polars>=1.0.0\n') == 'polars'
+        assert depends._requirement_dist_name('polars-lts-cpu>=1.0.0\n') == 'polars-lts-cpu'
+        assert depends._requirement_dist_name('polars[pandas]>=1.2\n') == 'polars'
+        assert depends._requirement_dist_name('# polars>=1.0.0\n') is None
+        assert depends._requirement_dist_name('\n') is None
+
+    def test_copy_requirements_excluding_does_not_match_lts_as_polars(self, tmp_path):
+        """Stripping `polars` must not also strip `polars-lts-cpu`."""
+        src = _write(tmp_path / 'requirements.txt', 'img2table\npolars>=1.0.0\npolars-lts-cpu>=1.0.0\n')
+        dest = tmp_path / 'filtered.txt'
+
+        excluded = depends._copy_requirements_excluding(str(src), str(dest), {'polars'})
+
+        assert excluded is True
+        contents = dest.read_text(encoding='utf-8')
+        assert 'img2table\n' in contents
+        assert 'polars-lts-cpu>=1.0.0\n' in contents
+        assert '# excluded for this CPU: polars>=1.0.0' in contents
+        assert '\npolars>=1.0.0\n' not in contents
 
 
 class TestEnsureConstraints:
@@ -375,7 +582,7 @@ class TestSatisfiedVerdict:
     def test_schema_bump_invalidates_every_verdict(self, env, monkeypatch):
         """Bumping the schema retires verdicts recorded under the old resolve semantics."""
         self._cold_process(env)
-        monkeypatch.setattr(depends, '_VERDICT_SCHEMA', '2')
+        monkeypatch.setattr(depends, '_VERDICT_SCHEMA', '3')
         self._cold_process(env)
 
         assert len(env.resolves) == 2

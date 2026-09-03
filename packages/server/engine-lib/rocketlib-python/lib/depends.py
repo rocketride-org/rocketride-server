@@ -32,6 +32,7 @@ Two modes of operation:
 
 from __future__ import annotations
 
+import functools
 import hashlib
 import os
 import platform
@@ -692,6 +693,11 @@ def _find_override_files() -> list[str]:
 def _compute_hash(file_paths: list[str]) -> str:
     """Compute a fast hash from file metadata (mtime + size)."""
     hasher = hashlib.md5()
+
+    # Mix the AVX2 verdict into the hash so a copied cache invalidates if the CPU architecture changes
+    avx2_missing = '1' if _is_x86_64_missing_avx2() else '0'
+    hasher.update(f'avx2_missing:{avx2_missing}\n'.encode())
+
     for path in sorted(file_paths):
         stat = os.stat(path)
         entry = f'{path}:{stat.st_size}:{stat.st_mtime_ns}\n'
@@ -714,13 +720,123 @@ def _save_hash(hash_file: str, hash_value: str):
         f.write(hash_value)
 
 
+@functools.lru_cache()
+def _is_x86_64_missing_avx2() -> bool:
+    """Check if CPU is x86_64 but lacks AVX2 (e.g. Rosetta 2 or old Intel)."""
+    machine = platform.machine().lower()
+    if machine not in ('x86_64', 'amd64'):
+        return False
+
+    system = platform.system()
+    if system == 'Darwin':
+        # Check Rosetta or old Mac without AVX2
+        try:
+            output = subprocess.check_output(['sysctl', '-n', 'hw.optional.avx2_0'], text=True)
+            return output.strip() != '1'
+        except Exception:
+            return True
+    elif system == 'Linux':
+        try:
+            with open('/proc/cpuinfo', 'r', encoding='utf-8') as f:
+                return 'avx2' not in f.read()
+        except Exception:
+            return True
+    elif system == 'Windows':
+        try:
+            import ctypes
+
+            kernel32 = ctypes.windll.kernel32
+            kernel32.IsProcessorFeaturePresent.argtypes = [ctypes.c_uint32]
+            kernel32.IsProcessorFeaturePresent.restype = ctypes.c_int
+            # PF_AVX2_INSTRUCTIONS_AVAILABLE is 40
+            return not bool(kernel32.IsProcessorFeaturePresent(40))
+        except Exception:
+            return True
+
+    return False
+
+
+def _polars_variant_names() -> tuple[str, str]:
+    """Return ``(unwanted, wanted)`` Polars distribution names for this CPU."""
+    if _is_x86_64_missing_avx2():
+        return 'polars', 'polars-lts-cpu'
+    return 'polars-lts-cpu', 'polars'
+
+
+def _requirement_dist_name(line: str) -> Optional[str]:
+    """Return the distribution name for an active requirement line, else None."""
+    stripped = line.strip()
+    if not stripped or stripped.startswith('#') or stripped.startswith('-'):
+        return None
+    spec = stripped.split('#', 1)[0].split(';', 1)[0].strip()
+    if not spec:
+        return None
+    for sep in ('===', '==', '!=', '<=', '>=', '~=', '<', '>'):
+        if sep in spec:
+            spec = spec.split(sep, 1)[0]
+            break
+    spec = spec.split('[', 1)[0].strip()
+    return spec.lower() or None
+
+
+def _copy_requirements_excluding(src: str, dest: str, exclude_names: set[str]) -> bool:
+    """Copy a requirements file, commenting out dist names in ``exclude_names``.
+
+    Returns True if at least one requirement line was excluded.
+    """
+    excluded = False
+    with open(src, encoding='utf-8') as inp, open(dest, 'w', encoding='utf-8') as out:
+        for line in inp:
+            name = _requirement_dist_name(line)
+            if name and name in exclude_names:
+                out.write(f'# excluded for this CPU: {line.rstrip()}\n')
+                excluded = True
+                continue
+            out.write(line if line.endswith('\n') else f'{line}\n')
+    return excluded
+
+
+def _requirements_for_uv(requirements_path: str) -> str:
+    """Return a -r path with the CPU-wrong Polars wheel removed.
+
+    ``nodes/src/nodes/requirements.txt`` lists both ``polars`` and
+    ``polars-lts-cpu``. ``uv pip install --excludes`` is not enough on every
+    uv version when the omitted package is also a direct requirement line, so
+    drop that line before install/dry-run. Transitive ``img2table`` → ``polars``
+    is still handled by ``--excludes``.
+    """
+    unwanted, _wanted = _polars_variant_names()
+    cache_dir = engine_cache_dir()
+    os.makedirs(cache_dir, exist_ok=True)
+    digest = hashlib.md5(os.path.abspath(requirements_path).encode()).hexdigest()[:10]
+    dest = os.path.join(cache_dir, f'filtered-{digest}-{os.path.basename(requirements_path)}')
+    if _copy_requirements_excluding(requirements_path, dest, {unwanted}):
+        return dest
+    return requirements_path
+
+
+def _excludes_args(exe_dir: str) -> list[str]:
+    """``--excludes`` pointing at the CPU-specific excludes file, relative to exe_dir."""
+    # uv splits --excludes on whitespace, so an absolute path with a space (macOS
+    # "Application Support") breaks resolution; pass it relative to the cwd (exe_dir).
+    # See #1256.
+    return ['--excludes', os.path.relpath(_write_excludes_file(), exe_dir)]
+
+
 def _combine_requirements(file_paths: list[str], output_path: str):
-    """Concatenate all requirement files into one."""
+    """Concatenate all requirement files into one, dropping the CPU-wrong Polars wheel."""
+    unwanted, _wanted = _polars_variant_names()
+    skip = {unwanted}
     with open(output_path, 'w', encoding='utf-8') as out:
         for path in file_paths:
             out.write(f'# Source: {path}\n')
-            with open(path, 'r', encoding='utf-8') as inp:
-                out.write(inp.read())
+            with open(path, encoding='utf-8') as inp:
+                for line in inp:
+                    name = _requirement_dist_name(line)
+                    if name and name in skip:
+                        out.write(f'# excluded for this CPU: {line.rstrip()}\n')
+                        continue
+                    out.write(line if line.endswith('\n') else f'{line}\n')
             out.write('\n')
 
 
@@ -746,6 +862,7 @@ def _compile_constraints(constraints_path: str):
         '--no-build-isolation',  # Don't create temp venvs (engine.exe can't create venvs)
         '--emit-index-url',  # Preserve --extra-index-url etc. so install/dry-run can find packages (e.g. torch+cu128)
     ]
+    args.extend(_excludes_args(exe_dir))
     args.extend(_override_args(exe_dir))
     debug(f'Compile: {args}')
     result = subprocess.run(
@@ -834,19 +951,58 @@ def _excludes_content() -> str:
     Excludes `uv` (bootstrapped by depends.py; pip-installing it crashes on Windows)
     and, on non-Darwin, plain `onnxruntime` (it clobbers onnxruntime-gpu in the same
     folder; the gpu build provides `import onnxruntime`).
+
+    Also conditionally excludes the incorrect polars distribution for the current CPU.
+    polars and polars-lts-cpu both provide ``import polars`` and cannot be installed
+    together; ``--excludes`` keeps uv from resolving both. Direct requirement lines
+    are also stripped (see ``_requirements_for_uv``); ``--excludes`` still covers the
+    transitive ``img2table`` → ``polars`` edge. Already-installed wrong variants are
+    removed by ``_reconcile_polars_variant``.
     """
     excludes = 'uv\n'
     if platform.system() != 'Darwin':
         excludes += 'onnxruntime\n'
+    unwanted, _wanted = _polars_variant_names()
+    excludes += f'{unwanted}\n'
     return excludes
 
 
 def _write_excludes_file() -> str:
     """Write uv's resolution-excludes file (rewritten each call) and return its path."""
+    unwanted, wanted = _polars_variant_names()
+    debug(f'Polars variant: {wanted} (excluding {unwanted})')
     excludes_path = os.path.join(engine_cache_dir(), 'excludes.txt')
     with open(excludes_path, 'w', encoding='utf-8') as f:
         f.write(_excludes_content())
     return excludes_path
+
+
+def _reconcile_polars_variant() -> None:
+    """Uninstall any already-installed Polars distribution that doesn't match this CPU.
+
+    ``--excludes`` only changes resolution; ``uv pip install`` never removes an
+    already-present distribution. A cache/image built on an AVX2 host and later run
+    under Rosetta or on a pre-Haswell CPU can therefore keep standard ``polars``
+    alongside newly-installed ``polars-lts-cpu``. Both provide ``import polars`` and
+    collide — exactly the mismatched-native-binary crash this path exists to prevent.
+    Mirror the cleanup in the other direction as well.
+    """
+    import importlib
+    import importlib.metadata
+
+    unwanted, wanted = _polars_variant_names()
+
+    try:
+        importlib.metadata.version(unwanted)
+    except importlib.metadata.PackageNotFoundError:
+        return
+
+    debug(f'Removing incompatible Polars distribution {unwanted!r} (selected {wanted!r})')
+    if pip('uninstall', '-y', unwanted):
+        importlib.invalidate_caches()
+        sys.modules.pop('polars', None)
+    else:
+        debug(f'Failed to uninstall incompatible Polars distribution {unwanted!r}')
 
 
 # ---------------------------------------------------------------------------
@@ -869,7 +1025,8 @@ def _write_excludes_file() -> str:
 
 # Bump when the resolve's inputs or semantics change (uv arguments, what the
 # key covers), so verdicts recorded under the old behaviour are not reused.
-_VERDICT_SCHEMA = '1'
+# '2': CPU-wrong Polars is stripped from -r and listed in excludes (#1325 / #1376).
+_VERDICT_SCHEMA = '2'
 
 
 def _verdict_path(requirements_path: str) -> str:
@@ -1026,6 +1183,7 @@ def _install_dry_run(requirements_path: str, constraints_path: str) -> list[str]
         raise RuntimeError('uv executable not found')
 
     exe_dir = _get_executable_dir()
+    req_for_uv = _requirements_for_uv(requirements_path)
     args = [
         _uv_abs_path(),
         'pip',
@@ -1033,18 +1191,14 @@ def _install_dry_run(requirements_path: str, constraints_path: str) -> list[str]
         '--python',
         sys.executable,
         '-r',
-        requirements_path,
+        req_for_uv,
         '--index-strategy',
         'unsafe-best-match',
         '--no-build-isolation',
         '--dry-run',
         '--no-color',
     ]
-
-    # uv splits --excludes on whitespace, so an absolute path with a space (macOS
-    # "Application Support") breaks resolution; pass it relative to the cwd (exe_dir).
-    # See #1256.
-    args.extend(['--excludes', os.path.relpath(_write_excludes_file(), exe_dir)])
+    args.extend(_excludes_args(exe_dir))
 
     args.extend(_constraints_args(constraints_path, exe_dir))
     args.extend(_override_args(exe_dir))
@@ -1139,21 +1293,20 @@ def _install_requirements_inner(requirements_path: str, constraints_path: str):
 
     # Build uv command
     exe_dir = _get_executable_dir()
+    req_for_uv = _requirements_for_uv(requirements_path)
     uv_args = [
         _uv_abs_path(),
         'pip',
         'install',
         '-r',
-        requirements_path,
+        req_for_uv,
         '--python',
         sys.executable,
         '--index-strategy',
         'unsafe-best-match',
         '--no-build-isolation',  # Don't create temp venvs (engine.exe can't create venvs)
     ]
-
-    # Relative to cwd (exe_dir) — see the --excludes note in _install_dry_run (#1256).
-    uv_args.extend(['--excludes', os.path.relpath(_write_excludes_file(), exe_dir)])
+    uv_args.extend(_excludes_args(exe_dir))
 
     uv_args.extend(_constraints_args(constraints_path, exe_dir))
     uv_args.extend(_override_args(exe_dir))
@@ -1237,16 +1390,20 @@ def depends(requirements: Optional[str] = None):
         # Phase 1: Bootstrap
         bootstrap()
 
-        # Phase 2: Ensure constraints
+        # Phase 2: Drop any Polars build that doesn't match this CPU before resolution.
+        # --excludes alone cannot remove an already-present distribution.
+        _reconcile_polars_variant()
+
+        # Phase 3: Ensure constraints
         constraints_path = ensure_constraints()
 
-        # Phase 3: Install if requirements provided
+        # Phase 4: Install if requirements provided
         if requirements:
             _install_requirements(requirements, constraints_path)
             _processed.add(requirements)
             debug(f'  Completed: {os.path.basename(requirements)}')
 
-        # Phase 4: Apply platform-specific hacks (after packages may have been installed)
+        # Phase 5: Apply platform-specific hacks (after packages may have been installed)
         _apply_pywin32_hack()
 
 
@@ -1288,6 +1445,9 @@ def main():
     with FileLock(lock_path):
         # Bootstrap environment
         bootstrap()
+
+        # Drop any Polars build that doesn't match this CPU before resolution.
+        _reconcile_polars_variant()
 
         # Ensure constraints are ready
         ensure_constraints()

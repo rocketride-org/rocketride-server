@@ -25,3 +25,13 @@ safetensors
 # Needed for dependencies compilations
 Cython
 versioneer
+
+# OCR table-detection library. Installed at engine startup so a later OCR-node
+# depends() cannot hot-swap native binaries (numpy/opencv/polars) already in
+# memory. Polars is listed twice on purpose: depends.py keeps exactly one
+# variant (standard vs polars-lts-cpu) based on AVX2 detection.
+img2table
+# Explicit polars requirements
+polars>=1.0.0
+# Included explicitly for older/emulated CPUs without AVX2 (see depends.py)
+polars-lts-cpu>=1.0.0

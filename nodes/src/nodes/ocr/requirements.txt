@@ -2,11 +2,7 @@
 #
 # Note: PyTorch and OCR model dependencies (EasyOCR, DocTR, etc.) are handled
 # by ai.common.models which uses ai.common.torch for torch installation.
-# This node only needs img2table for table structure detection.
+# This node only needs table structure detection.
 #
-# numpy and pillow are base engine dependencies - don't reinstall them here
+# numpy and the table detection library are base engine dependencies, and pillow arrives transitively via them - don't reinstall them here
 # as that can corrupt already-loaded modules in the server process.
-#
-img2table
-pillow
-numpy
