@@ -1,3 +1,5 @@
+--index-url https://pypi.org/simple
+
 absl-py==2.4.0
     # via mediapipe
 accelerate==1.14.0
@@ -66,7 +68,7 @@ appdirs==1.4.4
     #   crewai-cli
     #   crewai-core
 astrapy==2.2.1
-    # via -r nodes/src/nodes/astra_db/requirements.txt
+    # via -r nodes/src/nodes/store_astra/requirements.txt
 asttokens==3.0.1
     # via stack-data
 asynch==0.2.5
@@ -79,7 +81,7 @@ attrs==26.1.0
     #   referencing
 authlib==1.7.2
     # via
-    #   -r nodes/src/nodes/weaviate/requirements.txt
+    #   -r nodes/src/nodes/store_weaviate/requirements.txt
     #   weaviate-client
 av==17.1.0
     # via
@@ -124,6 +126,7 @@ certifi==2026.6.17
     #   -r nodes/src/nodes/requirements.txt
     #   crewai-cli
     #   elastic-transport
+    #   google-cloud-aiplatform
     #   httpcore
     #   httpx
     #   kubernetes
@@ -145,7 +148,7 @@ charset-normalizer==3.4.7
 chromadb==1.1.1
     # via crewai
 chromadb-client==1.5.9
-    # via -r nodes/src/nodes/chroma/requirements.txt
+    # via -r nodes/src/nodes/store_chroma/requirements.txt
 ciso8601==2.3.3
     # via asynch
 click==8.4.2
@@ -209,6 +212,7 @@ cryptography==46.0.7
     #   joserfc
     #   pdfminer-six
     #   pyjwt
+    #   pyopenssl
     #   pyspnego
     #   smbprotocol
 csvw==4.0.0
@@ -277,26 +281,25 @@ dlinfo==2.0.0
     # via phonemizer-fork
 dnspython==2.8.0
     # via
-    #   -r nodes/src/nodes/atlas/requirements.txt
+    #   -r nodes/src/nodes/store_atlas/requirements.txt
     #   email-validator
     #   pymongo
-docopt==0.6.2
-    # via num2words
 docstring-parser==0.18.0
     # via
     #   anthropic
+    #   google-cloud-aiplatform
     #   instructor
 durationpy==0.10
     # via kubernetes
 elastic-transport==8.17.1
     # via elasticsearch
 elasticsearch==8.19.3
-    # via -r nodes/src/nodes/index_search/requirements.txt
+    # via -r nodes/src/nodes/store_elasticsearch/requirements.txt
 email-validator==2.3.0
     # via pydantic
 environs==14.6.0
     # via
-    #   -r nodes/src/nodes/milvus/requirements.txt
+    #   -r nodes/src/nodes/store_milvus/requirements.txt
     #   daytona
 espeakng-loader==0.2.4
     # via misaki
@@ -311,7 +314,7 @@ executing==2.2.1
 faiss-cpu==1.14.3 ; sys_platform != 'win32'
     # via milvus-lite
 falkordb==1.6.1
-    # via -r nodes/src/nodes/tool_falkordb/requirements.txt
+    # via -r nodes/src/nodes/graph_falkordb/requirements.txt
 fastapi==0.138.2
     # via
     #   -r nodes/src/nodes/remote/requirements.txt
@@ -349,29 +352,84 @@ fsspec==2026.6.0
     #   huggingface-hub
     #   llama-index-core
     #   torch
-gliner==0.2.24 ; python_full_version >= '3.14'
-    # via -r nodes/src/nodes/anonymize/requirements.txt
-gliner==0.2.27 ; python_full_version < '3.14'
+gliner==0.2.27
     # via -r nodes/src/nodes/anonymize/requirements.txt
 google-api-core==2.31.0
-    # via -r nodes/src/nodes/llm_gemini/requirements.txt
-google-auth==2.55.1
     # via
     #   -r nodes/src/nodes/llm_gemini/requirements.txt
+    #   google-api-python-client
+    #   google-cloud-aiplatform
+    #   google-cloud-bigquery
+    #   google-cloud-core
+    #   google-cloud-firestore
+    #   google-cloud-resource-manager
+    #   google-cloud-storage
+google-api-python-client==2.200.0
+    # via -r nodes/src/nodes/tool_google_workspace/requirements.txt
+google-auth==2.55.1
+    # via
+    #   -r nodes/src/nodes/db_firestore/requirements.txt
+    #   -r nodes/src/nodes/llm_gemini/requirements.txt
+    #   -r nodes/src/nodes/tool_gcs/requirements.txt
+    #   -r nodes/src/nodes/tool_google_workspace/requirements.txt
+    #   -r nodes/src/nodes/tool_vertex_search/requirements.txt
     #   google-api-core
+    #   google-api-python-client
+    #   google-auth-httplib2
+    #   google-auth-oauthlib
+    #   google-cloud-aiplatform
+    #   google-cloud-bigquery
+    #   google-cloud-core
+    #   google-cloud-firestore
+    #   google-cloud-resource-manager
+    #   google-cloud-storage
     #   google-genai
+google-auth-httplib2==0.4.2
+    # via
+    #   -r nodes/src/nodes/tool_google_workspace/requirements.txt
+    #   google-api-python-client
+google-auth-oauthlib==1.4.1
+    # via -r nodes/src/nodes/tool_google_workspace/requirements.txt
+google-cloud-aiplatform==2.1.0
+    # via -r nodes/src/nodes/tool_vertex_search/requirements.txt
+google-cloud-bigquery==3.44.0
+    # via google-cloud-aiplatform
+google-cloud-core==2.7.0
+    # via
+    #   google-cloud-bigquery
+    #   google-cloud-firestore
+    #   google-cloud-storage
+google-cloud-firestore==2.29.0
+    # via -r nodes/src/nodes/db_firestore/requirements.txt
+google-cloud-resource-manager==1.18.0
+    # via google-cloud-aiplatform
+google-cloud-storage==3.13.1
+    # via
+    #   -r nodes/src/nodes/tool_gcs/requirements.txt
+    #   google-cloud-aiplatform
+google-crc32c==1.8.0
+    # via
+    #   google-cloud-storage
+    #   google-resumable-media
 google-genai==2.10.0
     # via
     #   -r nodes/src/nodes/accessibility_describe/requirements.txt
     #   -r nodes/src/nodes/llm_gemini/requirements.txt
     #   -r nodes/src/nodes/llm_vision_gemini/requirements.txt
+    #   google-cloud-aiplatform
     #   langchain-google-genai
 google-re2==1.1.20251105
     # via cel-python
+google-resumable-media==2.10.2
+    # via
+    #   google-cloud-bigquery
+    #   google-cloud-storage
 googleapis-common-protos==1.75.0
     # via
     #   -r nodes/src/nodes/llm_gemini/requirements.txt
     #   google-api-core
+    #   grpc-google-iam-v1
+    #   grpcio-status
     #   opentelemetry-exporter-otlp-proto-grpc
     #   opentelemetry-exporter-otlp-proto-http
 greenlet==3.5.3
@@ -384,13 +442,21 @@ griffelib==2.1.0
     # via
     #   griffe
     #   griffecli
+grpc-google-iam-v1==0.14.5
+    # via google-cloud-resource-manager
 grpcio==1.81.1
     # via
-    #   -r nodes/src/nodes/milvus/requirements.txt
-    #   -r nodes/src/nodes/qdrant/requirements.txt
-    #   -r nodes/src/nodes/weaviate/requirements.txt
+    #   -r nodes/src/nodes/store_milvus/requirements.txt
+    #   -r nodes/src/nodes/store_qdrant/requirements.txt
+    #   -r nodes/src/nodes/store_weaviate/requirements.txt
     #   chromadb
+    #   google-api-core
+    #   google-cloud-firestore
+    #   google-cloud-resource-manager
+    #   googleapis-common-protos
+    #   grpc-google-iam-v1
     #   grpcio-health-checking
+    #   grpcio-status
     #   grpcio-tools
     #   milvus-lite
     #   opensearch-protobufs
@@ -400,12 +466,14 @@ grpcio==1.81.1
     #   weaviate-client
 grpcio-health-checking==1.81.1
     # via
-    #   -r nodes/src/nodes/weaviate/requirements.txt
+    #   -r nodes/src/nodes/store_weaviate/requirements.txt
     #   weaviate-client
+grpcio-status==1.81.1
+    # via google-api-core
 grpcio-tools==1.81.1
     # via
-    #   -r nodes/src/nodes/qdrant/requirements.txt
-    #   -r nodes/src/nodes/weaviate/requirements.txt
+    #   -r nodes/src/nodes/store_qdrant/requirements.txt
+    #   -r nodes/src/nodes/store_weaviate/requirements.txt
 h11==0.16.0
     # via
     #   astrapy
@@ -419,13 +487,17 @@ hpack==4.2.0
     # via h2
 httpcore==1.0.9
     # via httpx
+httplib2==0.32.0
+    # via
+    #   google-api-python-client
+    #   google-auth-httplib2
 httptools==0.8.0
     # via uvicorn
 httpx==0.28.1
     # via
-    #   -r nodes/src/nodes/qdrant/requirements.txt
     #   -r nodes/src/nodes/requirements.txt
-    #   -r nodes/src/nodes/weaviate/requirements.txt
+    #   -r nodes/src/nodes/store_qdrant/requirements.txt
+    #   -r nodes/src/nodes/store_weaviate/requirements.txt
     #   anthropic
     #   astrapy
     #   chromadb
@@ -471,6 +543,9 @@ hyperframe==6.1.0
 idna==3.18
     # via
     #   -r nodes/src/nodes/requirements.txt
+    #   -r nodes/src/nodes/tool_google_workspace/requirements.txt
+    #   -r nodes/src/nodes/tool_guild/requirements.txt
+    #   -r nodes/src/nodes/tool_n8n/requirements.txt
     #   anyio
     #   email-validator
     #   httpx
@@ -655,6 +730,8 @@ language-tags==1.3.1
     # via csvw
 lark==1.3.1
     # via cel-python
+laser-sdk==0.0.1rc21
+    # via -r nodes/src/nodes/tool_laserdata_memory/requirements.txt
 leb128==1.0.9
     # via asynch
 linkify-it-py==2.1.0
@@ -674,6 +751,8 @@ llama-parse==0.5.20
     # via -r nodes/src/nodes/llamaparse/requirements.txt
 loguru==0.7.3
     # via kokoro
+lxml==6.1.3
+    # via python-docx
 lz4==4.4.5
     # via asynch
 markdown-it-py==4.2.0
@@ -685,7 +764,7 @@ markupsafe==3.0.3
     # via jinja2
 marshmallow==4.3.0
     # via
-    #   -r nodes/src/nodes/milvus/requirements.txt
+    #   -r nodes/src/nodes/store_milvus/requirements.txt
     #   dataclasses-json
     #   environs
     #   marshmallow-enum
@@ -704,7 +783,7 @@ mdurl==0.1.2
 mediapipe==0.10.35
     # via -r nodes/src/nodes/face_detection/requirements.txt
 milvus-lite==3.0 ; sys_platform != 'win32'
-    # via -r nodes/src/nodes/milvus/requirements.txt
+    # via -r nodes/src/nodes/store_milvus/requirements.txt
 misaki==0.9.4
     # via kokoro
 mistral-common==1.11.5
@@ -737,7 +816,7 @@ murmurhash==1.0.15
 mypy-extensions==1.1.0
     # via typing-inspect
 neo4j==6.2.0
-    # via -r nodes/src/nodes/db_neo4j/requirements.txt
+    # via -r nodes/src/nodes/graph_neo4j/requirements.txt
 nest-asyncio==1.6.0
     # via
     #   -r nodes/src/nodes/remote/requirements.txt
@@ -749,19 +828,19 @@ networkx==3.6.1
     #   torch
 nltk==3.9.4
     # via llama-index-core
-num2words==0.5.14
+num2words==0.5.6
     # via misaki
 numpy==2.3.5 ; python_full_version < '3.13'
     # via
     #   -r nodes/src/nodes/audio_tts/requirements.txt
     #   -r nodes/src/nodes/embedding_transformer/requirements.txt
     #   -r nodes/src/nodes/face_detection/requirements.txt
-    #   -r nodes/src/nodes/index_search/requirements.txt
-    #   -r nodes/src/nodes/milvus/requirements.txt
     #   -r nodes/src/nodes/ocr/requirements.txt
-    #   -r nodes/src/nodes/qdrant/requirements.txt
     #   -r nodes/src/nodes/requirements.txt
-    #   -r nodes/src/nodes/weaviate/requirements.txt
+    #   -r nodes/src/nodes/store_elasticsearch/requirements.txt
+    #   -r nodes/src/nodes/store_milvus/requirements.txt
+    #   -r nodes/src/nodes/store_qdrant/requirements.txt
+    #   -r nodes/src/nodes/store_weaviate/requirements.txt
     #   accelerate
     #   blis
     #   chromadb
@@ -794,12 +873,12 @@ numpy==2.5.0 ; python_full_version >= '3.13'
     #   -r nodes/src/nodes/audio_tts/requirements.txt
     #   -r nodes/src/nodes/embedding_transformer/requirements.txt
     #   -r nodes/src/nodes/face_detection/requirements.txt
-    #   -r nodes/src/nodes/index_search/requirements.txt
-    #   -r nodes/src/nodes/milvus/requirements.txt
     #   -r nodes/src/nodes/ocr/requirements.txt
-    #   -r nodes/src/nodes/qdrant/requirements.txt
     #   -r nodes/src/nodes/requirements.txt
-    #   -r nodes/src/nodes/weaviate/requirements.txt
+    #   -r nodes/src/nodes/store_elasticsearch/requirements.txt
+    #   -r nodes/src/nodes/store_milvus/requirements.txt
+    #   -r nodes/src/nodes/store_qdrant/requirements.txt
+    #   -r nodes/src/nodes/store_weaviate/requirements.txt
     #   accelerate
     #   blis
     #   chromadb
@@ -906,7 +985,7 @@ openpyxl==3.1.5
 opensearch-protobufs==1.2.0
     # via opensearch-py
 opensearch-py==3.2.0
-    # via -r nodes/src/nodes/index_search/requirements.txt
+    # via -r nodes/src/nodes/store_elasticsearch/requirements.txt
 opentelemetry-api==1.42.1
     # via
     #   chromadb
@@ -969,6 +1048,8 @@ packaging==26.2
     #   crewai-core
     #   deprecation
     #   faiss-cpu
+    #   google-cloud-aiplatform
+    #   google-cloud-bigquery
     #   huggingface-hub
     #   lancedb
     #   langchain-core
@@ -976,13 +1057,14 @@ packaging==26.2
     #   matplotlib
     #   onnxruntime
     #   onnxruntime-gpu
+    #   python-arango
     #   spacy
     #   thinc
     #   transformers
     #   weasel
 pandas==3.0.3
     # via
-    #   -r nodes/src/nodes/milvus/requirements.txt
+    #   -r nodes/src/nodes/store_milvus/requirements.txt
     #   pymilvus
 parso==0.8.7
     # via jedi
@@ -995,12 +1077,15 @@ pendulum==3.2.0
 pexpect==4.9.0 ; sys_platform != 'emscripten' and sys_platform != 'win32'
     # via ipython
 pgvector==0.4.2
-    # via -r nodes/src/nodes/vectordb_postgres/requirements.txt
+    # via
+    #   -r nodes/src/nodes/rocketride_vector/requirements.txt
+    #   -r nodes/src/nodes/store_postgres/requirements.txt
 phonemizer-fork==3.3.2
     # via misaki
 pillow==12.2.0
     # via
     #   -r nodes/src/nodes/face_detection/requirements.txt
+    #   -r nodes/src/nodes/frame_grabber/requirements.txt
     #   -r nodes/src/nodes/image_cleanup/requirements.txt
     #   -r nodes/src/nodes/ocr/requirements.txt
     #   llama-index-core
@@ -1008,11 +1093,11 @@ pillow==12.2.0
     #   mistral-common
     #   pdfplumber
 pinecone==9.1.0
-    # via -r nodes/src/nodes/pinecone/requirements.txt
+    # via -r nodes/src/nodes/store_pinecone/requirements.txt
 pinecone-plugin-assistant==3.0.3
-    # via -r nodes/src/nodes/pinecone/requirements.txt
+    # via -r nodes/src/nodes/store_pinecone/requirements.txt
 pinecone-plugin-interface==0.0.7
-    # via -r nodes/src/nodes/pinecone/requirements.txt
+    # via -r nodes/src/nodes/store_pinecone/requirements.txt
 platformdirs==4.10.0
     # via
     #   banks
@@ -1020,7 +1105,7 @@ platformdirs==4.10.0
     #   textual
 portalocker==2.7.0
     # via
-    #   -r nodes/src/nodes/qdrant/requirements.txt
+    #   -r nodes/src/nodes/store_qdrant/requirements.txt
     #   crewai
     #   crewai-core
     #   qdrant-client
@@ -1040,13 +1125,22 @@ proto-plus==1.28.0
     # via
     #   -r nodes/src/nodes/llm_gemini/requirements.txt
     #   google-api-core
+    #   google-cloud-aiplatform
+    #   google-cloud-firestore
+    #   google-cloud-resource-manager
 protobuf==6.33.6
     # via
     #   -r nodes/src/nodes/llm_gemini/requirements.txt
-    #   -r nodes/src/nodes/milvus/requirements.txt
+    #   -r nodes/src/nodes/store_milvus/requirements.txt
+    #   -r nodes/src/nodes/tool_google_workspace/requirements.txt
     #   google-api-core
+    #   google-cloud-aiplatform
+    #   google-cloud-firestore
+    #   google-cloud-resource-manager
     #   googleapis-common-protos
+    #   grpc-google-iam-v1
     #   grpcio-health-checking
+    #   grpcio-status
     #   grpcio-tools
     #   onnxruntime
     #   onnxruntime-gpu
@@ -1062,7 +1156,10 @@ psutil==7.2.2
 psycopg2-binary==2.9.12
     # via
     #   -r nodes/src/nodes/db_postgres/requirements.txt
-    #   -r nodes/src/nodes/vectordb_postgres/requirements.txt
+    #   -r nodes/src/nodes/rocketride_graph/requirements.txt
+    #   -r nodes/src/nodes/rocketride_sql/requirements.txt
+    #   -r nodes/src/nodes/rocketride_vector/requirements.txt
+    #   -r nodes/src/nodes/store_postgres/requirements.txt
 ptyprocess==0.7.0 ; sys_platform != 'emscripten' and sys_platform != 'win32'
     # via pexpect
 pure-eval==0.2.3
@@ -1090,10 +1187,10 @@ pycparser==3.0
 pydantic==2.12.5
     # via
     #   -r nodes/src/nodes/agent_deepagent/requirements.txt
-    #   -r nodes/src/nodes/atlas/requirements.txt
-    #   -r nodes/src/nodes/qdrant/requirements.txt
     #   -r nodes/src/nodes/requirements.txt
-    #   -r nodes/src/nodes/weaviate/requirements.txt
+    #   -r nodes/src/nodes/store_atlas/requirements.txt
+    #   -r nodes/src/nodes/store_qdrant/requirements.txt
+    #   -r nodes/src/nodes/store_weaviate/requirements.txt
     #   anthropic
     #   apify-client
     #   banks
@@ -1110,6 +1207,7 @@ pydantic==2.12.5
     #   daytona-toolbox-api-client-async
     #   fastapi
     #   firecrawl-py
+    #   google-cloud-aiplatform
     #   google-genai
     #   instructor
     #   lance-namespace-urllib3-client
@@ -1168,16 +1266,20 @@ pyjwt==2.13.0
     #   crewai-cli
     #   crewai-core
     #   mcp
+    #   python-arango
 pymilvus==3.0.0
-    # via -r nodes/src/nodes/milvus/requirements.txt
+    # via -r nodes/src/nodes/store_milvus/requirements.txt
 pymongo==4.17.0
     # via
-    #   -r nodes/src/nodes/atlas/requirements.txt
+    #   -r nodes/src/nodes/store_atlas/requirements.txt
     #   astrapy
 pymysql==1.2.0
     # via -r nodes/src/nodes/db_mysql/requirements.txt
+pyopenssl==26.2.0
+    # via google-auth
 pyparsing==3.3.2
     # via
+    #   httplib2
     #   matplotlib
     #   rdflib
 pypdfium2==5.11.0
@@ -1194,6 +1296,8 @@ pyspnego==0.12.1
     # via
     #   -r nodes/src/nodes/text_output/requirements.txt
     #   smbprotocol
+python-arango==8.3.5
+    # via -r nodes/src/nodes/graph_arango/requirements.txt
 python-dateutil==2.9.0.post0
     # via
     #   botocore
@@ -1204,6 +1308,7 @@ python-dateutil==2.9.0.post0
     #   daytona-toolbox-api-client-async
     #   elasticsearch
     #   falkordb
+    #   google-cloud-bigquery
     #   kubernetes
     #   lance-namespace-urllib3-client
     #   matplotlib
@@ -1212,6 +1317,8 @@ python-dateutil==2.9.0.post0
     #   pandas
     #   pendulum
     #   posthog
+python-docx==1.2.0
+    # via -r nodes/src/nodes/tool_microsoft_365/requirements.txt
 python-dotenv==1.2.2
     # via
     #   crewai
@@ -1249,14 +1356,14 @@ pyyaml==6.0.3
     #   mistralai
     #   transformers
     #   uvicorn
-qdrant-client==1.18.0
-    # via -r nodes/src/nodes/qdrant/requirements.txt
+qdrant-client==1.17.1
+    # via -r nodes/src/nodes/store_qdrant/requirements.txt
 rdflib==7.6.0
     # via csvw
 redis==7.4.1
     # via
+    #   -r nodes/src/nodes/graph_falkordb/requirements.txt
     #   -r nodes/src/nodes/memory_persistent/requirements.txt
-    #   -r nodes/src/nodes/tool_falkordb/requirements.txt
     #   falkordb
 reductoai==0.22.0
     # via -r nodes/src/nodes/reducto/requirements.txt
@@ -1276,23 +1383,35 @@ regex==2026.1.15
     #   transformers
 requests==2.34.2
     # via
+    #   -r nodes/src/nodes/cloud_tts/requirements.txt
+    #   -r nodes/src/nodes/graph_hydradb/requirements.txt
     #   -r nodes/src/nodes/requirements.txt
     #   -r nodes/src/nodes/search_exa/requirements.txt
+    #   -r nodes/src/nodes/store_weaviate/requirements.txt
     #   -r nodes/src/nodes/telegram/requirements.txt
     #   -r nodes/src/nodes/tool_bland_ai/requirements.txt
+    #   -r nodes/src/nodes/tool_cognee/requirements.txt
+    #   -r nodes/src/nodes/tool_crustdata/requirements.txt
     #   -r nodes/src/nodes/tool_deepl/requirements.txt
     #   -r nodes/src/nodes/tool_exa_search/requirements.txt
     #   -r nodes/src/nodes/tool_github/requirements.txt
+    #   -r nodes/src/nodes/tool_gohighlevel/requirements.txt
+    #   -r nodes/src/nodes/tool_guild/requirements.txt
     #   -r nodes/src/nodes/tool_mem0/requirements.txt
+    #   -r nodes/src/nodes/tool_n8n/requirements.txt
+    #   -r nodes/src/nodes/tool_notion/requirements.txt
+    #   -r nodes/src/nodes/tool_oura/requirements.txt
+    #   -r nodes/src/nodes/tool_pipedrive/requirements.txt
     #   -r nodes/src/nodes/tool_tavily/requirements.txt
     #   -r nodes/src/nodes/tool_v0/requirements.txt
     #   -r nodes/src/nodes/tool_xtrace_memory/requirements.txt
-    #   -r nodes/src/nodes/weaviate/requirements.txt
     #   clickhouse-sqlalchemy
     #   cohere
     #   firecrawl-py
     #   google-api-core
     #   google-auth
+    #   google-cloud-bigquery
+    #   google-cloud-storage
     #   google-genai
     #   instructor
     #   kubernetes
@@ -1305,14 +1424,19 @@ requests==2.34.2
     #   pinecone-plugin-assistant
     #   posthog
     #   pymilvus
+    #   python-arango
     #   requests-oauthlib
     #   requests-toolbelt
     #   spacy
     #   tiktoken
 requests-oauthlib==2.0.0
-    # via kubernetes
+    # via
+    #   google-auth-oauthlib
+    #   kubernetes
 requests-toolbelt==1.0.0
-    # via langsmith
+    # via
+    #   langsmith
+    #   python-arango
 rfc3986==1.5.0
     # via csvw
 rich==14.3.4
@@ -1357,6 +1481,8 @@ six==1.17.0
     #   kubernetes
     #   posthog
     #   python-dateutil
+slack-sdk==3.44.1
+    # via -r nodes/src/nodes/tool_slack/requirements.txt
 smart-open==8.0.0
     # via weasel
 smbprotocol==1.16.1
@@ -1415,7 +1541,11 @@ sympy==1.14.0
     #   torch
 tenacity==9.1.4
     # via
+    #   -r nodes/src/nodes/tool_cognee/requirements.txt
+    #   -r nodes/src/nodes/tool_github/requirements.txt
+    #   -r nodes/src/nodes/tool_gohighlevel/requirements.txt
     #   -r nodes/src/nodes/tool_mem0/requirements.txt
+    #   -r nodes/src/nodes/tool_pipedrive/requirements.txt
     #   -r nodes/src/nodes/tool_xtrace_memory/requirements.txt
     #   chromadb
     #   chromadb-client
@@ -1483,14 +1613,7 @@ traitlets==5.15.1
     # via
     #   ipython
     #   matplotlib-inline
-transformers==5.6.2 ; python_full_version < '3.14'
-    # via
-    #   -r nodes/src/nodes/embedding_image/requirements.txt
-    #   -r nodes/src/nodes/embedding_video/requirements.txt
-    #   -r nodes/src/nodes/preprocessor_langchain/requirements.txt
-    #   gliner
-    #   kokoro
-transformers==5.12.1 ; python_full_version >= '3.14'
+transformers==5.6.2
     # via
     #   -r nodes/src/nodes/embedding_image/requirements.txt
     #   -r nodes/src/nodes/embedding_video/requirements.txt
@@ -1541,6 +1664,7 @@ typing-extensions==4.15.0
     #   daytona-toolbox-api-client-async
     #   elasticsearch
     #   fastapi
+    #   google-cloud-aiplatform
     #   google-genai
     #   grpcio
     #   huggingface-hub
@@ -1565,6 +1689,8 @@ typing-extensions==4.15.0
     #   pydantic
     #   pydantic-core
     #   pydantic-extra-types
+    #   pyopenssl
+    #   python-docx
     #   reductoai
     #   referencing
     #   soundfile
@@ -1598,14 +1724,16 @@ tzlocal==5.4.4
 uc-micro-py==2.0.0
     # via linkify-it-py
 ujson==5.13.0
-    # via -r nodes/src/nodes/milvus/requirements.txt
+    # via -r nodes/src/nodes/store_milvus/requirements.txt
 uritemplate==4.2.0
-    # via csvw
+    # via
+    #   csvw
+    #   google-api-python-client
 urllib3==2.7.0
     # via
-    #   -r nodes/src/nodes/atlas/requirements.txt
-    #   -r nodes/src/nodes/qdrant/requirements.txt
     #   -r nodes/src/nodes/requirements.txt
+    #   -r nodes/src/nodes/store_atlas/requirements.txt
+    #   -r nodes/src/nodes/store_qdrant/requirements.txt
     #   botocore
     #   daytona-api-client
     #   daytona-api-client-async
@@ -1615,6 +1743,7 @@ urllib3==2.7.0
     #   kubernetes
     #   lance-namespace-urllib3-client
     #   opensearch-py
+    #   python-arango
     #   qdrant-client
     #   requests
     #   types-requests
@@ -1635,7 +1764,7 @@ uvloop==0.22.1 ; platform_python_implementation != 'PyPy' and sys_platform != 'c
     # via uvicorn
 validators==0.35.0
     # via
-    #   -r nodes/src/nodes/weaviate/requirements.txt
+    #   -r nodes/src/nodes/store_weaviate/requirements.txt
     #   weaviate-client
 versioneer==0.29
     # via -r nodes/src/nodes/requirements.txt
@@ -1653,7 +1782,7 @@ wcwidth==0.8.2
 weasel==1.0.0
     # via spacy
 weaviate-client==4.16.2
-    # via -r nodes/src/nodes/weaviate/requirements.txt
+    # via -r nodes/src/nodes/store_weaviate/requirements.txt
 websocket-client==1.9.0
     # via kubernetes
 websockets==15.0.1
