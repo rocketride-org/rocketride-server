@@ -340,6 +340,33 @@ def _validate_midi(blob: bytes, expected_notes: int) -> tuple[bool, str]:
     return True, f'{len(blob)} bytes, {note_ons} notes'
 
 
+def beat_note_pairs(entries: object) -> list[tuple[int, str]]:
+    """Every entry as a (beat, note) pair, or [] if any entry is not one.
+
+    All-or-nothing on purpose. Filtering the malformed entries out would let a
+    reply carrying the right 15 pairs PLUS a junk {"beat": 99} pass, because the
+    junk would simply be discarded before the beat sequence was checked.
+
+    The conversion is guarded by try/except rather than a string predicate:
+    `str(beat).lstrip('-').isdigit()` strips *every* leading hyphen, so "--1"
+    passes the test and then raises on int().
+    """
+    if not isinstance(entries, list) or not entries:
+        return []
+    pairs: list[tuple[int, str]] = []
+    for entry in entries:
+        if not (isinstance(entry, dict) and 'beat' in entry and 'note' in entry):
+            return []
+        beat = entry['beat']
+        if isinstance(beat, bool) or not isinstance(beat, (int, str)):
+            return []
+        try:
+            pairs.append((int(beat), str(entry['note'])))
+        except (TypeError, ValueError):
+            return []
+    return pairs
+
+
 def claims_from(reply: object) -> list[dict]:
     """Every claim object in an agent's reply, whatever shape it wrapped them in."""
     out = extract_json(reply, 'beat')
@@ -619,22 +646,12 @@ async def run(args: argparse.Namespace) -> int:
 
         melody = None
         if synthesis:
-            entries = synthesis.get('melody')
-            if isinstance(entries, list) and entries:
-                # Every entry must yield a pair. Filtering the malformed ones out
-                # would let a reply carrying the right 15 pairs PLUS a junk
-                # {"beat": 99} pass, because the junk would simply be discarded.
-                well_formed = all(isinstance(e, dict) and 'beat' in e and 'note' in e for e in entries)
-                pairs = (
-                    [(int(e['beat']), str(e['note'])) for e in entries]
-                    if well_formed and all(str(e['beat']).lstrip('-').isdigit() for e in entries)
-                    else []
-                )
-                # Check beat identity before discarding it: duplicate or
-                # out-of-range beats must not pass just because the sorted notes
-                # line up with the expected melody.
-                if pairs and sorted(b for b, _n in pairs) == list(range(1, len(pairs) + 1)):
-                    melody = [n for _b, n in sorted(pairs)]
+            pairs = beat_note_pairs(synthesis.get('melody'))
+            # Check beat identity before discarding it: duplicate or out-of-range
+            # beats must not pass just because the sorted notes line up with the
+            # expected melody.
+            if pairs and sorted(b for b, _n in pairs) == list(range(1, len(pairs) + 1)):
+                melody = [n for _b, n in sorted(pairs)]
         results.append(
             check(
                 'CONDUCTOR: reconstructed the melody from resolved evidence',
