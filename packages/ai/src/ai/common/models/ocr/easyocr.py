@@ -98,7 +98,7 @@ class EasyOCRLoader(BaseLoader):
         from ai.common.opencv import cv2  # noqa: F401
 
         import easyocr
-        from ai.common.torch import torch
+        from ai.common.torch import torch, probe_cuda
 
         languages = languages or ['en']
         exclude_gpus = exclude_gpus or []
@@ -127,6 +127,19 @@ class EasyOCRLoader(BaseLoader):
                 torch_device = 'cuda:0'
                 use_gpu = True
 
+            # Local mode only, matching the other torch loaders. In server mode the
+            # allocator owns device selection and tracks the reservation, so falling
+            # back to CPU here would leave it holding a GPU nothing is using.
+            #
+            # Probing only gpu_index is sufficient: the DataParallel unwrap below
+            # pins the detector and recognizer to this one device, so EasyOCR never
+            # scatters work onto another card whose kernels went untested.
+            if use_gpu and not probe_cuda(gpu_index):
+                logger.warning(f'CUDA device {gpu_index} kernel probe failed, falling back to CPU for EasyOCR')
+                use_gpu = False
+                gpu_index = -1
+                torch_device = 'cpu'
+
         logger.info(f'Loading EasyOCR with languages {languages} on {torch_device}')
 
         try:
@@ -136,8 +149,26 @@ class EasyOCRLoader(BaseLoader):
                 verbose=False,
             )
         except Exception as e:
-            logger.error(f'Failed to load EasyOCR: {e}')
-            raise Exception(f'Failed to load EasyOCR: {e}')
+            # Only local mode may degrade to CPU. In server mode allocate_gpu()
+            # holds a reservation for this model, and silently switching to CPU
+            # would leave the allocator lending out a GPU nothing runs on, so the
+            # failure has to surface and let the caller release the reservation.
+            if use_gpu and allocate_gpu is None:
+                # The probe above clears kernel incompatibility, so a failure here is
+                # something it cannot see (driver state, VRAM exhaustion, a backend
+                # EasyOCR loads on its own). Retry on CPU rather than fail the load.
+                logger.warning(f'EasyOCR GPU load failed ({e}), falling back to CPU')
+                use_gpu = False
+                gpu_index = -1
+                torch_device = 'cpu'
+                try:
+                    reader = easyocr.Reader(languages, gpu=False, verbose=False)
+                except Exception as cpu_e:
+                    logger.error(f'Failed to load EasyOCR: {cpu_e}')
+                    raise Exception(f'Failed to load EasyOCR: {cpu_e}') from cpu_e
+            else:
+                logger.error(f'Failed to load EasyOCR: {e}')
+                raise Exception(f'Failed to load EasyOCR: {e}') from e
 
         # EasyOCR wraps its detector and recognizer in DataParallel, which
         # scatters every batch across ALL visible GPUs via parallel_apply().
