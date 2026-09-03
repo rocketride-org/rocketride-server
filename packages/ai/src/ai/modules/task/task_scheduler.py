@@ -69,6 +69,12 @@ _SCHEDULER_ACTOR = {'userId': 'system:scheduler', 'display': 'Scheduler', 'email
 # returned a real token" — a tick due in that window must still skip.
 _DISPATCHING = '__dispatching__'
 
+# Consecutive-skip counts at which a wedged schedule (the overlap guard
+# never clears because the previous run never completes, e.g. a
+# non-terminating source) gets a visibility warning. Edit this tuple to
+# change the cadence.
+_SKIP_WARN_THRESHOLDS = (3, 10, 100)
+
 # (team_id, project_id, source_id) — the schedule identity.
 RunKey = Tuple[str, str, str]
 
@@ -96,6 +102,8 @@ class TaskScheduler:
         self._entries: Dict[RunKey, ScheduledRun] = {}
         # key -> token of the most-recently dispatched run (overlap guard)
         self._active_tokens: Dict[RunKey, str] = {}
+        # key -> consecutive skip count (overlap guard visibility, issue #1838)
+        self._skip_counts: Dict[RunKey, int] = {}
         self._scheduling: asyncio.Task | None = None
         self._inflight_starts: set[asyncio.Task] = set()
 
@@ -129,8 +137,11 @@ class TaskScheduler:
             # Disabled/errored/removed deployments also lose their overlap guards.
             for key in [k for k in self._active_tokens if k[0] == team_id and k[1] == project_id]:
                 self._active_tokens.pop(key, None)
+            for key in [k for k in self._skip_counts if k[0] == team_id and k[1] == project_id]:
+                self._skip_counts.pop(key, None)
             return
 
+        scheduled_keys = set()
         for source_id, sched in (deployment.get('schedules') or {}).items():
             cron = (sched or {}).get('cron')
             if not cron or sched.get('paused', False):
@@ -143,6 +154,15 @@ class TaskScheduler:
             entry = ScheduledRun(next_run=next_run, key=(team_id, project_id, source_id), org_id=org_id, cron=cron)
             self._entries[entry.key] = entry
             heapq.heappush(self._schedule, entry)
+            scheduled_keys.add(entry.key)
+
+        # A source that was removed, paused, or has a bad cron no longer has
+        # a live entry - drop its skip count too, or a later resume would
+        # continue a stale streak and could fire a false warning.
+        for key in [
+            k for k in self._skip_counts if k[0] == team_id and k[1] == project_id and k not in scheduled_keys
+        ]:
+            self._skip_counts.pop(key, None)
 
     def is_run_active(self, team_id: str, project_id: str, source_id: str) -> bool:
         """True while a dispatched run of the source is starting or running.
@@ -262,7 +282,11 @@ class TaskScheduler:
                     # is still active — schedules never overlap themselves.
                     if self._is_previous_run_active(entry.key):
                         debug(f'[SCHEDULER] {entry.key}: previous run still active, skipping')
+                        self._note_skip(entry.key)
                         continue
+
+                    # A tick is about to dispatch: only consecutive skips matter.
+                    self._skip_counts.pop(entry.key, None)
 
                     # Mark the key in-flight BEFORE the dispatch task exists,
                     # so a tick due during startup sees the guard closed.
@@ -303,6 +327,22 @@ class TaskScheduler:
             return True
         ctrl = self._server._task_control.get(token)
         return bool(ctrl and not ctrl.task.is_task_complete())
+
+    def _note_skip(self, key: RunKey) -> None:
+        """Count a consecutive overlap-guard skip and warn at thresholds.
+
+        A source that never terminates leaves the guard closed forever, so
+        the schedule stops firing while still reporting itself active. This
+        only makes that visible in the logs — it never changes the guard's
+        decision or the deployment's state.
+        """
+        count = self._skip_counts.get(key, 0) + 1
+        self._skip_counts[key] = count
+        if count in _SKIP_WARN_THRESHOLDS:
+            warning(
+                f'[SCHEDULER] {key}: {count} consecutive skips - the previous run has not '
+                'completed, so this schedule is not firing'
+            )
 
     async def _start_run(self, entry: ScheduledRun) -> None:
         """Fire one (team, project, source) occurrence via trusted dispatch."""
