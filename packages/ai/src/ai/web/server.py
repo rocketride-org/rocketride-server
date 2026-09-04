@@ -51,6 +51,7 @@ Usage::
 import os
 import secrets
 import signal
+import socket
 import sys
 import threading
 import urllib.parse
@@ -805,6 +806,14 @@ class WebServer:
         # Delegate to the shared inner authentication method
         return await self._authenticate_credential_inner(authorization)
 
+    def _set_port(self, port: int) -> int:
+        """Cache the resolved port and publish RR_BASE_URL if it is not already set."""
+        self._port = port
+        # Deferred from _create_server when port was 0
+        if not os.environ.get('RR_BASE_URL'):
+            os.environ['RR_BASE_URL'] = f'{self._base_url_scheme}://{self._base_url_host}:{port}'
+        return self._port
+
     def get_port(self) -> int:
         """
         Get the port number on which the server is running.
@@ -812,6 +821,9 @@ class WebServer:
         Resolved lazily from the bound socket on first use: with port=0 the OS
         assigns the real port at bind time, which uvicorn does *after* the
         lifespan startup hook, so self._port is still 0 until a request arrives.
+        On a dual-stack host, uvicorn binds one socket per address family and
+        the OS may assign each a different port; the IPv4 socket is preferred,
+        falling back to IPv6 only when no IPv4 socket is bound.
 
         Returns:
             int: The port number actually bound by uvicorn.
@@ -821,6 +833,7 @@ class WebServer:
             5565
         """
         if not self._port and self.server is not None:
+            fallback_port: int | None = None
             for srv in getattr(self.server, 'servers', None) or []:
                 for sock in getattr(srv, 'sockets', None) or []:
                     try:
@@ -828,12 +841,18 @@ class WebServer:
                     except OSError:
                         continue  # closed/bad socket; try the next one
                     bound_port = bound[1] if isinstance(bound, tuple) and len(bound) >= 2 else None
-                    if bound_port:
-                        self._port = bound_port
-                        # Deferred from _create_server when port was 0
-                        if not os.environ.get('RR_BASE_URL'):
-                            os.environ['RR_BASE_URL'] = f'{self._base_url_scheme}://{self._base_url_host}:{bound_port}'
-                        return self._port
+                    if not bound_port:
+                        continue
+                    # On dual-stack hosts with port=0, uvicorn binds once per address family
+                    # and the kernel assigns a different ephemeral port to each. Prefer IPv4
+                    # so in-process clients resolving 'localhost' reach a listening port on
+                    # the first attempt regardless of getaddrinfo ordering. See #994.
+                    if getattr(sock, 'family', None) == socket.AF_INET:
+                        return self._set_port(bound_port)
+                    if fallback_port is None:
+                        fallback_port = bound_port
+            if fallback_port is not None:
+                return self._set_port(fallback_port)
         return self._port
 
     def registerStatusCallback(self, callback: Callable[[Dict[str, any]], None]) -> None:
