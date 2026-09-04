@@ -212,6 +212,12 @@ jobs:
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - uses: astral-sh/ruff-action@4919ec5cf1f49eff0871dbcea0da843445b837e6 # v3
+        # The SHA above pins only the action, not the ruff version it installs
+        # (resolves to `latest` otherwise). Pin the version here so an upstream
+        # ruff release can't turn develop red on untouched files; bump
+        # deliberately, run the formatter, review the diff (#1876).
+        with:
+          version: "0.16.2"
       - run: ruff check
       - run: ruff format --check
 
