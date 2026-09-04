@@ -76,6 +76,17 @@ except ImportError:
     from rocketride import RocketRideClient
 
 
+def positive_int(value: str) -> int:
+    """Parse a flag value that must be a whole number of at least 1."""
+    try:
+        number = int(value)
+    except ValueError:
+        number = 0
+    if number < 1:
+        raise argparse.ArgumentTypeError(f'must be a positive integer, got {value!r}')
+    return number
+
+
 class RocketRideCLI:
     """
     Main CLI class with command routing.
@@ -404,12 +415,20 @@ class RocketRideCLI:
             help='Pipeline file to start new task',
         )
 
-        # Thread configuration for concurrent uploads
+        # Thread configuration when starting a new pipeline
         upload_parser.add_argument(
             '--threads',
             type=int,
             default=4,
-            help='Number of threads (default: %(default)s)',
+            help='Number of threads for pipeline execution (default: %(default)s)',
+        )
+
+        # Upload fan-out, same flag as the TypeScript CLI
+        upload_parser.add_argument(
+            '--max-concurrent',
+            type=positive_int,
+            default=5,
+            help='Maximum number of concurrent file uploads (default: %(default)s)',
         )
 
         # Files to upload - supports multiple files, wildcards, directories
