@@ -412,6 +412,17 @@ class RocketRideCLI:
             help='Number of threads (default: %(default)s)',
         )
 
+        # Upload fan-out. Distinct from --threads above, which is pipeline execution
+        # concurrency and is forwarded to use(); this one bounds how many files the
+        # client uploads at once. Mirrors the TypeScript CLI's --max-concurrent.
+        upload_parser.add_argument(
+            '--max-concurrent',
+            dest='max_concurrent',
+            type=int,
+            default=5,
+            help='Maximum number of concurrent file uploads (default: %(default)s)',
+        )
+
         # Files to upload - supports multiple files, wildcards, directories
         upload_parser.add_argument(
             'files',
@@ -562,10 +573,18 @@ class RocketRideCLI:
                 print('Error: Store subcommand is required (dir, type, write, rm, mkdir, stat)')
                 return 1
 
-        elif self.args.command == 'upload' and not self.args.pipeline_path and not self.args.token:
+        elif self.args.command == 'upload':
             # Upload needs either pipeline file to create task or existing token
-            print('Error: Either --pipeline_path or --token must be specified for upload command')
-            return 1
+            if not self.args.pipeline_path and not self.args.token:
+                print('Error: Either --pipeline_path or --token must be specified for upload command')
+                return 1
+
+            # argparse's type=int already rejects anything non-integer; zero and
+            # negatives reach here, and send_files() would raise ValueError on them
+            # after the pipeline had already been started.
+            if self.args.max_concurrent < 1:
+                print('Error: --max-concurrent must be a positive integer')
+                return 1
 
         elif self.args.command == 'events':
             # Parse event types (no validation - let server handle it)
