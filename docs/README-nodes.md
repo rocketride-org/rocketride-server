@@ -272,10 +272,11 @@ channel; they have no data lanes and **bind to an agent** (see
 
 ### Sources
 
-| Service    | Data flow (in → out)                              | Description                                  |
-| ---------- | ------------------------------------------------- | -------------------------------------------- |
-| `webhook`  | _source → questions / tags / audio, image, text, video … | HTTP intake: chat, dropper, and ADS variants |
-| `telegram` | _source → audio, image, tags, text, video         | Telegram Bot message source                  |
+| Service          | Data flow (in → out)                              | Description                                  |
+| ---------------- | ------------------------------------------------- | -------------------------------------------- |
+| `webhook`        | _source → questions / tags / audio, image, text, video … | HTTP intake: chat, dropper, and ADS variants |
+| `telegram`       | _source → audio, image, tags, text, video         | Telegram Bot message source                  |
+| `dataset_cobalt` | _source → questions                               | Cobalt evaluation dataset loader             |
 
 > Filesystem and cloud connector sources (Google Drive, OneDrive, SharePoint,
 > Slack, Confluence, SMB, S3, Azure Blob, GCS, …) are provided by the **`core`**
@@ -296,6 +297,12 @@ channel; they have no data lanes and **bind to an agent** (see
 | `authoritative_overlay` | answers, text → answers                         | SEC EDGAR period-scoped number cross-check (abstain on mismatch) |
 | `rerank_cohere` | questions → answers, documents                        | Cohere Rerank for retrieval quality          |
 | `search_exa`    | questions → answers, text                             | Direct Exa web search (non-tool)             |
+
+### Evaluation
+
+| Service       | Data flow (in → out) | Description                                  |
+| ------------- | -------------------- | -------------------------------------------- |
+| `eval_cobalt` | answers → answers    | Answer quality scoring and threshold gating  |
 
 ### Outputs & Routing
 

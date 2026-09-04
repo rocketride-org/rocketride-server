@@ -109,11 +109,14 @@ For VS Code extension development details, see [README-vscode.md](../README-vsco
 
 For information on writing and running node-level tests, see [README-node-testing.md](../README-node-testing.md).
 
+For the Cobalt evaluator suites and the `eval_cobalt` evaluator reference, see [README-cobalt-testing.md](README-cobalt-testing.md).
+
 ## Further Reading
 
 - [Build System](../README-builder.md) -- declarative build system reference
 - [Engine Reference](../README-engine.md) -- C++ engine architecture, CLI options, task types
 - [Pipeline Nodes](../README-nodes.md) -- writing and extending pipeline nodes
+- [Cobalt Pipeline Testing](README-cobalt-testing.md) -- evaluator reference and the offline quality suites
 - [VS Code Extension](../README-vscode.md) -- extension development
 - [Pre-commit Hooks](../README-pre-commit-hooks.md) -- code quality automation
 - [Contributing Guide](../../CONTRIBUTING.md) -- contribution workflow and code style

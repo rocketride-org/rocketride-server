@@ -10,6 +10,8 @@ Each input lane maps to a different section of the rendered prompt. Inputs are c
 
 If no `instructions` are configured, the default profile supplies a single instruction: `"Please provide a detailed and helpful response to the following question:"`. If an error occurs during the merge, the node logs the error and the enriched question is not emitted.
 
+The node emits a question it assembles itself rather than the one it received, so `metadata` on the incoming questions is carried across explicitly — the keys of every collected question are unioned onto the emitted one. `metadata` is never rendered into the prompt, so a value a later node needs (such as the reference answer `dataset_cobalt` attaches for `eval_cobalt` to score against) passes through this node without being exposed to the model.
+
 The node registers as a `filter` with class type `text` and runs as a pure Python transformation (no external service or model is called).
 
 ---

@@ -42,6 +42,7 @@ const CATEGORY_DESCRIPTIONS = {
 	Guardrails: 'Validate and constrain inputs and outputs for safety and policy.',
 	Outputs: 'Send results out of the pipeline: responses, files, and external systems.',
 	Infrastructure: 'Plumbing that supports execution rather than transforming data.',
+	Evaluation: 'Score pipeline outputs against quality criteria and gate on thresholds.',
 	Other: 'Nodes that do not fall into a single category above.'
 };
 
