@@ -171,74 +171,27 @@ chat -> agent (RocketRide Wave) -> response
 
 **Required env vars:** `ROCKETRIDE_ANTHROPIC_KEY`, `ROCKETRIDE_GUILD_KEY_ID`, `ROCKETRIDE_GUILD_KEY_SECRET`, `ROCKETRIDE_GUILD_OWNER`, `ROCKETRIDE_GUILD_WORKSPACE`, `ROCKETRIDE_GUILD_AGENT`
 
-### hydra/
+### symphony/
 
-**Two thousand agents, two thousand databases, nobody wrote the queries.** A runnable demo
-app: three pipelines plus a swarm driver.
+**Multi-agent coordination through a shared Hotdata database.** Two `.pipe` templates
+showing how agents keep private state and share conclusions.
 
-```text
-Hunt:       driver -> N pipeline runs -> N agents, each on its own beat, through its own lens,
-                      each in its own private mutable Hotdata database it is free to wreck
-Refutation: every claim -> 3 skeptics -> 3 fresh databases holding rows the discoverer never saw
-Leaderboard: chat -> head of intelligence -> ONE Hotdata database of the survivors
-```
+| Template            | Shape                                                                                                                      |
+| ------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `investigator.pipe` | One agent, a private database it creates and destroys, and a shared one it attaches to. The unit the fan-out is built from |
+| `hub.pipe`          | Two agents in one pipeline sharing a single `db_hotdata` node, each with its own private database as well                  |
 
-- Nobody tells the swarm what to look for. Heads are assigned a corner of the data and one of twenty ways of looking at it
-- Claims survive only if they replicate out of sample, on a hash-disjoint slice with provably zero overlap
-- Runs against a control arm - one analyst, one database, all the data - and scores both against a planted answer key
-- Includes a trap: a real pattern confined to one narrow window, which the refutation round exists to kill
+The pattern worth copying: **an agent's `answers` lane is wired into the shared database
+node**, so the pipeline writes the row rather than the agent choosing to. An agent
+instructed to call `load_data` on a shared database skips it most of the time — see
+[the node's README](../../nodes/src/nodes/db_hotdata/README.md#publishing-into-a-shared-database).
 
-**Required env vars:** `ROCKETRIDE_ANTHROPIC_KEY`, `ROCKETRIDE_DB_HOTDATA_KEY`, `ROCKETRIDE_DB_HOTDATA_WORKSPACE_ID`
+One caveat worth knowing before scaling this shape up: agent nodes in a single pipeline
+run close to serially (measured at ~7.6s each across 1, 4, 8 and 20 agents), while the
+same agents as separate pipeline runs are genuinely concurrent. Put the fan-out in the
+driver, not on the canvas, when you want the parallelism to be real.
 
-See [`hydra/README.md`](hydra/README.md). Try `python hydra.py --dry-run` first: no keys, no network.
-
----
-
-### blast-radius/
-
-**One ephemeral Hotdata database per tenant, all of them at once.** The calmer sibling of
-`hydra/`: forensic rather than exploratory, same architecture with a straight face. Two
-pipelines plus a fan-out driver.
-
-```text
-Fan-out:  driver -> N pipeline runs -> N agents -> N private Hotdata databases -> N verdicts
-Roll-up:  chat -> incident commander agent -> ONE Hotdata database holding all N verdicts
-```
-
-- Every tenant is investigated in its own database, so isolation is structural rather than a `WHERE` clause
-- Each analyst agent loads the tenant's logs and invoices, builds a BM25 index, queries in SQL, and returns one verdict row
-- The roll-up agent answers natural-language questions across the whole population
-- The corpus is generated with known ground truth and decoys, so the run scores its own precision and recall
-
-**Required env vars:** `ROCKETRIDE_ANTHROPIC_KEY`, `ROCKETRIDE_DB_HOTDATA_KEY`, `ROCKETRIDE_DB_HOTDATA_WORKSPACE_ID`
-
-See [`blast-radius/README.md`](blast-radius/README.md). Try `python blast_radius.py --dry-run` first: no keys, no network.
-
----
-
-### symphony-test/
-
-**Twenty agents, twenty-two databases, verified against a live engine.** Not a demo app: the
-acceptance harness that proves the multi-agent patterns actually hold, and the place their
-failure modes are recorded.
-
-```text
-Rooms:      20 independent runs -> 20 private databases (created and destroyed per run)
-Evidence:   all 20 attach to ONE shared database; verdicts published by the answers lane
-Telemetry:  a 22nd database whose id persists to disk, so runs accumulate across sessions
-Composer:   one run over shared evidence, after every room is gone
-```
-
-- Dependency-ordered waves: later rooms hold only a decoy and cannot answer without reading
-  what an earlier wave published
-- Publishing is wiring, not an instruction — agents told to write to a shared database do it
-  roughly one time in four
-- Telemetry is queried live at the end: cross-session, cross-agent, concurrency and failure patterns
-
-**Required env vars:** `ROCKETRIDE_OPENAI_KEY`, `ROCKETRIDE_DB_HOTDATA_KEY`, `ROCKETRIDE_DB_HOTDATA_WORKSPACE_ID`. The runners rewrite every LLM node to OpenAI by default, so that is all you need. Other providers are needed only when you select them: `ROCKETRIDE_GEMINI_KEY` for `--model gemini` or for opening the `.pipe` files directly on the canvas, which reference Gemini, and `ROCKETRIDE_ANTHROPIC_KEY` for `--model anthropic` (or `--composer-model anthropic`).
-
-See [`symphony-test/RESULTS.md`](symphony-test/RESULTS.md). Try
-`python test_symphony_waves.py --wiring-only` first: no keys, no network.
+**Required env vars:** `ROCKETRIDE_OPENAI_KEY`, `ROCKETRIDE_DB_HOTDATA_KEY`, `ROCKETRIDE_DB_HOTDATA_WORKSPACE_ID`
 
 ---
 
