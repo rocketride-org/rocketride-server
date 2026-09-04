@@ -21,6 +21,9 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import asyncio
+import contextlib
+import hmac
 import logging
 import os
 
@@ -45,6 +48,16 @@ logger = logging.getLogger(__name__)
 
 _API_KEY = os.environ.get('MCP_API_KEY', '')
 
+# Whole-probe budget for /health. RocketRideClient.connect() bounds only the
+# WebSocket handshake — the authentication request that follows has no default
+# timeout — so an engine that accepts the socket and then goes quiet would
+# leave the probe pending forever.
+_HEALTH_PROBE_TIMEOUT = 10.0
+
+# Separate budget for closing the probe connection, so a disconnect that
+# blocks cannot extend the endpoint past the probe budget above.
+_HEALTH_CLEANUP_TIMEOUT = 5.0
+
 
 class AuthMiddleware(BaseHTTPMiddleware):
     """Require Bearer token for all non-health endpoints."""
@@ -55,17 +68,42 @@ class AuthMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
         if _API_KEY:
             auth = request.headers.get('authorization', '')
-            if auth != f'Bearer {_API_KEY}':
+            # compare_digest, not '!=': a plain comparison short-circuits on
+            # the first differing byte and leaks the token a byte at a time.
+            if not hmac.compare_digest(auth, f'Bearer {_API_KEY}'):
                 return JSONResponse({'error': 'unauthorized'}, status_code=401)
         return await call_next(request)
 
 
+async def _close_quietly(client: RocketRideClient) -> None:
+    """Close a probe connection under its own deadline, swallowing failures.
+
+    Deliberately called from the request handler rather than from inside the
+    probe coroutine. Cleanup attached to a cancelled await runs *during*
+    cancellation, and ``asyncio.wait_for`` waits for that cancellation to
+    finish — so a disconnect that blocks would push /health past the very
+    budget the timeout exists to enforce. Run here, the close is an ordinary
+    await in an uncancelled coroutine with a bound of its own.
+
+    A close that fails on its own is suppressed rather than downgrading the
+    verdict: the engine already answered, which is what the probe asked.
+    """
+    with contextlib.suppress(Exception):
+        await asyncio.wait_for(client.disconnect(), timeout=_HEALTH_CLEANUP_TIMEOUT)
+
+
 def _get_client() -> RocketRideClient:
-    """Create a RocketRideClient from environment/settings."""
+    """Create a RocketRideClient from environment/settings.
+
+    The credential lives on ``Settings.apikey`` — the same field the stdio
+    server reads. This used to say ``settings.auth``, a field that has never
+    existed on the dataclass, so every tool call and every health probe died
+    with AttributeError before reaching the engine.
+    """
     settings = load_settings()
     return RocketRideClient(
         uri=settings.uri,
-        auth=settings.auth or '',
+        auth=settings.apikey or '',
     )
 
 
@@ -154,15 +192,44 @@ def create_app() -> Starlette:
         return Response()
 
     async def health(_request: Request) -> JSONResponse:
-        """Return server health status and engine reachability."""
+        """Report whether this server can actually serve a tool call.
+
+        Answers 503 — not 200 — when it cannot. The Docker HEALTHCHECK is a
+        bare ``urlopen``, so a 200 with ``status: degraded`` in the body left
+        the container marked healthy while every tool call failed; that is how
+        the ``settings.auth`` crash shipped unnoticed.
+
+        A configuration fault (missing env vars, a wiring bug in this module)
+        is reported separately from an engine that is simply not answering:
+        collapsing both into ``engine: unreachable`` sent operators looking at
+        the wrong process.
+        """
         status: dict = {'status': 'ok', 'server': 'rocketride-mcp'}
         try:
             client = _get_client()
-            await client.connect()
-            await client.disconnect()
         except Exception:
+            # The exception text can carry ROCKETRIDE_URI or the credential,
+            # and /health is deliberately unauthenticated (it bypasses the
+            # Bearer check above) — so the detail goes to the log, which is
+            # already trusted, and the body stays a fixed string.
+            logger.exception('health: cannot build engine client')
+            status['status'] = 'error'
+            status['error'] = 'configuration'
+            status['detail'] = 'engine client could not be constructed; see server logs'
+            return JSONResponse(status, status_code=503)
+
+        try:
+            await asyncio.wait_for(client.connect(), timeout=_HEALTH_PROBE_TIMEOUT)
+        except Exception as exc:
+            logger.warning('health: engine unreachable: %s', exc)
             status['status'] = 'degraded'
             status['engine'] = 'unreachable'
+            return JSONResponse(status, status_code=503)
+        finally:
+            # Runs on both paths, including the timeout — the connection is
+            # closed whether or not the engine answered.
+            await _close_quietly(client)
+
         return JSONResponse(status)
 
     middleware = [Middleware(AuthMiddleware)] if _API_KEY else []

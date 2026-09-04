@@ -325,7 +325,15 @@ pip install rocketride-mcp[sse]
 rocketride-mcp-sse --host 0.0.0.0 --port 8080
 ```
 
-SSE mode supports optional Bearer token authentication via the `MCP_API_KEY` environment variable. The `/health` endpoint is always accessible for monitoring.
+SSE mode supports optional Bearer token authentication via the `MCP_API_KEY` environment variable. The `/health` endpoint is always accessible for monitoring — it bypasses the Bearer check so a probe does not need the API key.
+
+`/health` answers `200` only when it can open and close a connection to the engine. Otherwise it answers `503`, so a container `HEALTHCHECK` that only looks at the status code is meaningful:
+
+| Status | Body                                                 | Meaning                                                               |
+| ------ | ---------------------------------------------------- | --------------------------------------------------------------------- |
+| `200`  | `{"status": "ok", ...}`                              | The engine round-tripped; tool calls should work.                     |
+| `503`  | `{"status": "degraded", "engine": "unreachable"}`    | This server is fine; the engine at `ROCKETRIDE_URI` is not answering. |
+| `503`  | `{"status": "error", "error": "configuration", ...}` | This server cannot build a client at all — check the env vars.        |
 
 ## Configuration
 
