@@ -27,6 +27,7 @@ import { PipelineFileParser } from '../shared/util/pipelineParser';
 import { isSubscribed } from '../shared/util/subscriptionGate';
 import { isDeployRunBody } from '../shared/util/runClassification';
 import { handleMissingEnvVars } from '../shared/util/envVarCheck';
+import { routeEmbeddedClipboardCommand, type EmbeddedClipboardCommand } from '../shared/util/embeddedClipboardBridge';
 import { savePipelineDocument } from '../shared/util/pipelineSave';
 import { resolveDeployTeams, mapVersionCards, mapHistoryRows, mapTeamDeploymentRows, mapScheduleRows, teamNameOf, mapDeploymentInfo } from '../shared/util/deployMapping';
 import type { DeploymentWebviewToHost, DeploymentLoadPayload } from './types/deployTypes';
@@ -79,6 +80,7 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 	private connectionManager = ConnectionManager.getInstance();
 	private logger = getLogger();
 	private savesForRun: Set<string> = new Set();
+	private activeExternalPanel?: vscode.WebviewPanel;
 	// OAuth tokens that arrived while no live webview existed for their
 	// document (e.g. the editor was recycled during the browser round-trip),
 	// keyed by document URI. Redelivered after the next view:ready.
@@ -394,10 +396,31 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 					await vscode.commands.executeCommand('workbench.action.reloadWindow');
 				}
 			}),
+
+			vscode.commands.registerCommand('rocketride.embedded.copy', () => this.routeEmbeddedClipboard('copy')),
+
+			vscode.commands.registerCommand('rocketride.embedded.cut', () => this.routeEmbeddedClipboard('cut')),
+
+			vscode.commands.registerCommand('rocketride.embedded.paste', () => this.routeEmbeddedClipboard('paste')),
+
+			vscode.commands.registerCommand('rocketride.embedded.selectAll', () => this.routeEmbeddedClipboard('selectAll')),
 		];
 
 		this.disposables.push(...commands);
 		commands.forEach((command) => this.context.subscriptions.push(command));
+	}
+
+	/**
+	 * Routes an editor clipboard shortcut to the active embedded panel and
+	 * logs failures, which routeEmbeddedClipboardCommand reports as false.
+	 */
+	private async routeEmbeddedClipboard(command: EmbeddedClipboardCommand): Promise<boolean> {
+		const target = this.activeExternalPanel?.webview;
+		const routed = await routeEmbeddedClipboardCommand(target, vscode.env.clipboard, command);
+		if (!routed && target) {
+			this.logger.error(`[ProjectProvider] Embedded clipboard command failed: ${command}`);
+		}
+		return routed;
 	}
 
 	// =========================================================================
@@ -1592,6 +1615,26 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 			enableScripts: true,
 			retainContextWhenHidden: true,
 		});
+		this.activeExternalPanel = panel;
+		const viewStateSubscription = panel.onDidChangeViewState(({ webviewPanel }) => {
+			if (webviewPanel.active) this.activeExternalPanel = webviewPanel;
+		});
+		panel.onDidDispose(() => {
+			viewStateSubscription.dispose();
+			if (this.activeExternalPanel === panel) this.activeExternalPanel = undefined;
+		});
+
+		// URL.searchParams keeps the markers ahead of any hash route so the
+		// embedded app can read _rocketrideHost from location.search.
+		let iframeSrc: string;
+		try {
+			const parsedUrl = new URL(url);
+			parsedUrl.searchParams.set('_t', String(Date.now()));
+			parsedUrl.searchParams.set('_rocketrideHost', 'vscode');
+			iframeSrc = parsedUrl.toString();
+		} catch {
+			iframeSrc = `${url}${url.includes('?') ? '&' : '?'}_t=${Date.now()}&_rocketrideHost=vscode`;
+		}
 
 		panel.webview.html = `<!DOCTYPE html>
 <html><head>
@@ -1599,7 +1642,7 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <style>body{margin:0;padding:0}iframe{width:100%;height:100vh;border:none}</style>
 </head><body>
-<iframe id="app-iframe" src="${url}${url.includes('?') ? '&' : '?'}_t=${Date.now()}" allow="clipboard-read; clipboard-write"></iframe>
+<iframe id="app-iframe" src="${iframeSrc}" allow="clipboard-read; clipboard-write"></iframe>
 <script>
 (function() {
 	const vscode = acquireVsCodeApi();
@@ -1682,6 +1725,7 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 		const msg = event.data;
 		if (msg.type === 'themeChanged') setTimeout(() => sendDataToIframe(), 50);
 		if (msg.type === 'pasteContent' && msg.text && iframe.contentWindow) iframe.contentWindow.postMessage({ type: 'paste', text: msg.text }, iframeOrigin);
+		if (msg.type === 'clipboardCommand' && iframe.contentWindow) iframe.contentWindow.postMessage(msg, iframeOrigin);
 		if (msg.type === 'nativeFilesSelected' && iframe.contentWindow) iframe.contentWindow.postMessage({ type: 'nativeFilesSelected', files: msg.files }, iframeOrigin);
 	});
 })();

@@ -28,9 +28,23 @@ import { VSCodeProvider, VSCodeContextType } from './hooks/useVSCode';
 import { ChatContainer } from './components/ChatContainer';
 import { API_CONFIG, setAPIConfig } from './config/apiConfig';
 import { startClient } from './hooks/clientSingleton';
+import {
+	getChatHostCapabilities,
+	getEmbeddedClipboardCommand,
+	getSanitizedChatPath,
+	getSelectedClipboardText,
+	isClipboardTextControl,
+	selectAllChatContent,
+	type EmbeddedClipboardCommand,
+} from './clipboardBridge';
 
 const App: React.FC = () => {
-	const [isVSCode] = useState(() => 'acquireVsCodeApi' in window);
+	// A top-level webview can use the editor theme directly. Pipeline Chat is a
+	// nested HTTP iframe instead, so it uses an explicit marker only for the
+	// parent clipboard bridge and keeps the existing RocketRide theme.
+	const [{ isVSCode, isEmbeddedVSCode }] = useState(() =>
+		getChatHostCapabilities('acquireVsCodeApi' in window, window.location.search)
+	);
 	const [authToken, setAuthToken] = useState<string | null>(null);
 
 	// Initialize VSCode state
@@ -40,6 +54,7 @@ const App: React.FC = () => {
 			return {
 				theme: null,
 				isVSCode: false,
+				isEmbeddedVSCode,
 				isReady: true,
 			};
 		} else {
@@ -47,28 +62,71 @@ const App: React.FC = () => {
 			return {
 				theme: null,
 				isVSCode: true,
+				isEmbeddedVSCode,
 				isReady: false,
 			};
 		}
 	});
 
-	// Bridge copy to parent VS Code webview so Cmd/Ctrl+C works in the iframe
+	// Handle clipboard commands relayed by the VS Code/Cursor extension host.
 	useEffect(() => {
-		if (!isVSCode) return;
+		if (!isEmbeddedVSCode) return;
 
-		const handleCopy = (e: KeyboardEvent) => {
-			if ((e.metaKey || e.ctrlKey) && e.key === 'c') {
-				const selection = window.getSelection()?.toString();
-				if (selection) {
-					e.preventDefault();
-					window.parent.postMessage({ type: 'copyText', text: selection }, '*');
-				}
+		const selectTranscript = () => {
+			const transcript = document.querySelector('[data-chat-transcript]');
+			const selection = window.getSelection();
+			if (!transcript || !selection) return false;
+
+			const range = document.createRange();
+			range.selectNodeContents(transcript);
+			selection.removeAllRanges();
+			selection.addRange(range);
+			return true;
+		};
+
+		const runClipboardCommand = (
+			command: Exclude<EmbeddedClipboardCommand, 'paste'>,
+			preventDefault?: () => void
+		) => {
+			const activeElement = document.activeElement;
+			if (command === 'selectAll') {
+				preventDefault?.();
+				selectAllChatContent(activeElement, selectTranscript);
+				return;
+			}
+
+			// ChatInput owns controlled-input mutation for Cut. The App handles
+			// transcript Cut as a safe, non-destructive copy.
+			if (command === 'cut' && isClipboardTextControl(activeElement)) return;
+
+			const text = getSelectedClipboardText(activeElement, window.getSelection()?.toString() ?? '');
+			if (text) {
+				preventDefault?.();
+				window.parent.postMessage({ type: 'copyText', text }, '*');
 			}
 		};
 
-		document.addEventListener('keydown', handleCopy);
-		return () => document.removeEventListener('keydown', handleCopy);
-	}, [isVSCode]);
+		const handleClipboardCommand = (event: MessageEvent) => {
+			if (event.source !== window.parent) return;
+
+			const command = event.data?.type === 'clipboardCommand' ? event.data.command : undefined;
+			if (command !== 'copy' && command !== 'cut' && command !== 'selectAll') return;
+			runClipboardCommand(command);
+		};
+
+		const handleClipboardKeyDown = (event: KeyboardEvent) => {
+			const command = getEmbeddedClipboardCommand(event);
+			if (!command || command === 'paste') return;
+			runClipboardCommand(command, () => event.preventDefault());
+		};
+
+		window.addEventListener('message', handleClipboardCommand);
+		document.addEventListener('keydown', handleClipboardKeyDown);
+		return () => {
+			window.removeEventListener('message', handleClipboardCommand);
+			document.removeEventListener('keydown', handleClipboardKeyDown);
+		};
+	}, [isEmbeddedVSCode]);
 
 	useEffect(() => {
 		// Handle authentication
@@ -96,7 +154,11 @@ const App: React.FC = () => {
 		// left over from a previous task on the same origin.
 		token = urlParams.get('auth') || '';
 		if (token) {
-			window.history.replaceState({}, '', window.location.pathname);
+			window.history.replaceState(
+				{},
+				'',
+				getSanitizedChatPath(window.location.pathname, window.location.search)
+			);
 		} else if (!isVSCode) {
 			// Fall back to session storage (skip in VSCode webview - shared storage would mix auth across tabs)
 			token = sessionStorage.getItem('auth') || '';
@@ -147,6 +209,7 @@ const App: React.FC = () => {
 					setVscodeState({
 						theme: message.theme,
 						isVSCode: true,
+						isEmbeddedVSCode,
 						isReady: true,
 					});
 				}
@@ -162,7 +225,7 @@ const App: React.FC = () => {
 			// For non-VSCode environments, add loaded class immediately
 			return undefined;
 		}
-	}, [isVSCode]);
+	}, [isEmbeddedVSCode, isVSCode]);
 
 	// CRITICAL: Absolutely do not render anything until ready
 	if (!vscodeState.isReady) {

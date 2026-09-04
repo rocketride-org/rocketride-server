@@ -22,8 +22,11 @@
  * SOFTWARE.
  */
 
-import React from 'react';
+import React, { useEffect, useRef, useState } from 'react';
+import { Check, Copy } from 'lucide-react';
 import { Message as MessageType } from '../types/chat.types';
+import { copyChatText } from '../clipboardBridge';
+import { useVSCode } from '../hooks/useVSCode';
 import { MarkdownRenderer } from './MarkdownRenderer';
 
 interface MessageProps {
@@ -39,6 +42,14 @@ interface MessageProps {
  * @param message - Message data to display
  */
 export const Message: React.FC<MessageProps> = ({ message }) => {
+	const [copied, setCopied] = useState(false);
+	const resetTimer = useRef<ReturnType<typeof setTimeout>>();
+	const { isEmbeddedVSCode } = useVSCode();
+
+	useEffect(() => () => {
+		if (resetTimer.current) clearTimeout(resetTimer.current);
+	}, []);
+
 	if (message.sender === 'status') {
 		return (
 			<div className="message-status">
@@ -47,6 +58,32 @@ export const Message: React.FC<MessageProps> = ({ message }) => {
 			</div>
 		);
 	}
+
+	const handleCopy = async () => {
+		const didCopy = await copyChatText(
+			message.text,
+			isEmbeddedVSCode,
+			postedMessage => window.parent.postMessage(postedMessage, '*'),
+			text => navigator.clipboard.writeText(text)
+		);
+		if (!didCopy) return;
+
+		setCopied(true);
+		if (resetTimer.current) clearTimeout(resetTimer.current);
+		resetTimer.current = setTimeout(() => setCopied(false), 1500);
+	};
+
+	const copyButton = (
+		<button
+			type="button"
+			className="message-copy-button"
+			onClick={handleCopy}
+			title={copied ? 'Copied' : 'Copy message'}
+			aria-label={copied ? 'Copied' : 'Copy message'}
+		>
+			{copied ? <Check size={14} /> : <Copy size={14} />}
+		</button>
+	);
 
 	if (message.sender === 'bot' || message.sender === 'system') {
 		const hasChart = message.text.includes('```chartjs');
@@ -61,6 +98,7 @@ export const Message: React.FC<MessageProps> = ({ message }) => {
 						{message.resultKey && <span className="message-result-key">{message.resultKey}</span>}
 					</div>
 				</div>
+				{copyButton}
 			</div>
 		);
 	}
@@ -68,6 +106,7 @@ export const Message: React.FC<MessageProps> = ({ message }) => {
 	// User message
 	return (
 		<div className="message-wrapper user">
+			{copyButton}
 			<div className="message-bubble user">
 				<div className="user-bubble-content">
 					<p>{message.text}</p>

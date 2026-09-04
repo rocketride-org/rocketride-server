@@ -453,6 +453,26 @@
 				"category": "RocketRide"
 			},
 			{
+				"command": "rocketride.embedded.copy",
+				"title": "Copy in Embedded App",
+				"category": "RocketRide"
+			},
+			{
+				"command": "rocketride.embedded.cut",
+				"title": "Cut in Embedded App",
+				"category": "RocketRide"
+			},
+			{
+				"command": "rocketride.embedded.paste",
+				"title": "Paste in Embedded App",
+				"category": "RocketRide"
+			},
+			{
+				"command": "rocketride.embedded.selectAll",
+				"title": "Select All in Embedded App",
+				"category": "RocketRide"
+			},
+			{
 				"command": "rocketride.app.create",
 				"title": "New App",
 				"category": "RocketRide"
@@ -469,6 +489,30 @@
 			}
 		],
 		"keybindings": [
+			{
+				"command": "rocketride.embedded.copy",
+				"key": "ctrl+c",
+				"mac": "cmd+c",
+				"when": "activeWebviewPanelId == 'externalContent'"
+			},
+			{
+				"command": "rocketride.embedded.cut",
+				"key": "ctrl+x",
+				"mac": "cmd+x",
+				"when": "activeWebviewPanelId == 'externalContent'"
+			},
+			{
+				"command": "rocketride.embedded.paste",
+				"key": "ctrl+v",
+				"mac": "cmd+v",
+				"when": "activeWebviewPanelId == 'externalContent'"
+			},
+			{
+				"command": "rocketride.embedded.selectAll",
+				"key": "ctrl+a",
+				"mac": "cmd+a",
+				"when": "activeWebviewPanelId == 'externalContent'"
+			},
 			{
 				"command": "rocketride.pipeline.save",
 				"key": "ctrl+s",
@@ -558,6 +602,22 @@
 				},
 				{
 					"command": "rocketride.agents.uninstall",
+					"when": "false"
+				},
+				{
+					"command": "rocketride.embedded.copy",
+					"when": "false"
+				},
+				{
+					"command": "rocketride.embedded.cut",
+					"when": "false"
+				},
+				{
+					"command": "rocketride.embedded.paste",
+					"when": "false"
+				},
+				{
+					"command": "rocketride.embedded.selectAll",
 					"when": "false"
 				},
 				{

@@ -79,6 +79,24 @@ The **Status** page shows:
 - **Metrics**: Completion rates and timing charts.
 - **Errors**: Detailed error messages and logs for failed components.
 
+## Embedded Chat Keyboard Shortcuts
+
+RocketRide chat panels preserve the standard clipboard shortcuts inside VS Code
+and Cursor:
+
+- **Copy**: `Cmd+C` on macOS or `Ctrl+C` on Windows/Linux copies the selection
+  from either the focused chat input or the transcript.
+- **Cut**: `Cmd+X` on macOS or `Ctrl+X` on Windows/Linux cuts the selection from
+  the focused chat input. In the read-only transcript, it copies the selection
+  without deleting conversation content.
+- **Paste**: `Cmd+V` on macOS or `Ctrl+V` on Windows/Linux inserts external
+  clipboard text at the current input selection.
+- **Select All**: `Cmd+A` on macOS or `Ctrl+A` on Windows/Linux selects the
+  complete draft when the input is focused, or the complete transcript
+  otherwise.
+- **Copy a complete message**: Use the square copy button beside any user,
+  assistant, or system message to copy its full text without selecting it first.
+
 ## AI-Assisted Development
 
 When enabled, the Copilot and Cursor integrations provide:
