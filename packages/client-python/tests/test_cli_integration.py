@@ -396,6 +396,30 @@ class TestCliUpload:
                 await client.disconnect()
 
 
+class TestCliEval:
+    """Test the eval command's pre-connect spec handling."""
+
+    @pytest.mark.asyncio
+    async def test_should_fail_on_a_missing_spec_file(self, tmp_path):
+        missing = str(tmp_path / 'no-such.eval.json')
+        code, output = await run_cli('eval', missing, *server_args())
+
+        # Specs are loaded before the CLI connects, so a missing spec is a
+        # usage error (exit 2), never a failed-case result (exit 1)
+        assert code == 2, output
+        assert 'Error:' in output
+
+    @pytest.mark.asyncio
+    async def test_should_fail_on_an_unparsable_spec_file(self, tmp_path):
+        broken = tmp_path / 'broken.eval.json'
+        broken.write_text('{ not json', encoding='utf-8')
+
+        code, output = await run_cli('eval', str(broken), *server_args())
+
+        assert code == 2, output
+        assert 'Error:' in output
+
+
 class TestCliDispatch:
     """Test argument handling shared by every command."""
 

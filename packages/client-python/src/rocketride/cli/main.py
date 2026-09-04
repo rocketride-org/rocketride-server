@@ -67,6 +67,7 @@ from .commands.stop import StopCommand
 from .commands.events import EventsCommand
 from .commands.list import ListCommand
 from .commands.store import StoreCommand
+from .commands.eval import EvalCommand
 
 try:
     # Try importing from installed package first
@@ -463,6 +464,50 @@ class RocketRideCLI:
             help='Output results in JSON format',
         )
 
+        # Eval command - runs golden-dataset evaluations against pipelines
+        eval_parser = subparsers.add_parser(
+            'eval',
+            help='Run golden-dataset evals against pipelines',
+            description='Run golden-dataset eval specs (<name>.eval.json) against their pipelines. '
+            'Exit codes: 0 = all cases passed; 1 = at least one case failed; '
+            '2 = usage error, spec parse/validation error, connection failure, '
+            'or no case produced a result.',
+        )
+        add_common_args(eval_parser)
+
+        # Eval spec files as positional arguments - supports glob patterns
+        eval_parser.add_argument(
+            'files',
+            nargs='+',
+            help='Eval spec files or glob patterns (<name>.eval.json)',
+        )
+
+        # Optional substring filter on case names
+        eval_parser.add_argument(
+            '--case',
+            help='Only run cases whose name contains this substring',
+        )
+
+        # Stop at the first failing case
+        eval_parser.add_argument(
+            '--fail-fast',
+            action='store_true',
+            help='Stop at the first failing case',
+        )
+
+        # Optional JSON output format
+        eval_parser.add_argument(
+            '--json',
+            action='store_true',
+            help='Output results in JSON format',
+        )
+
+        # Optional JUnit XML report path
+        eval_parser.add_argument(
+            '--junit',
+            help='Write a JUnit XML report to this path (in addition to normal output)',
+        )
+
         # Store command - file store and domain storage operations
         store_common_parser = argparse.ArgumentParser(add_help=False)
         add_common_args(store_common_parser)
@@ -605,6 +650,7 @@ class RocketRideCLI:
                 'events': EventsCommand,
                 'list': ListCommand,
                 'store': StoreCommand,
+                'eval': EvalCommand,
             }
 
             if self.args.command in command_map:

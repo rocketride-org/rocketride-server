@@ -1,0 +1,36 @@
+{
+	"pipeline": "rag-pipeline.pipe",
+	"source": "chat_1",
+	"cases": [
+		{
+			"name": "answers-what-is-rocketride",
+			"input": "According to the ingested documents, what is RocketRide?",
+			"expect": [
+				{ "type": "contains", "value": "pipeline", "ignore_case": true },
+				{ "type": "min_length", "value": 40 },
+				{ "type": "latency_max_ms", "value": 60000 }
+			]
+		},
+		{
+			"name": "summarizes-without-boilerplate",
+			"input": "In one paragraph, summarize what the ingested documents say about running pipelines.",
+			"expect": [
+				{ "type": "regex", "pattern": "(?i)pipeline" },
+				{ "type": "not_contains", "value": "as an AI language model", "ignore_case": true },
+				{ "type": "max_length", "value": 2000 }
+			]
+		},
+		{
+			"name": "declines-without-context",
+			"input": "What was the closing price of RocketRide stock on 1900-01-01?",
+			"expect": [
+				{ "type": "min_length", "value": 10 },
+				{
+					"type": "llm_judge",
+					"criteria": "The answer states that the provided context does not contain this information (or that it cannot answer from the documents). It must not invent a stock price or state any specific number as the answer.",
+					"min_score": 0.7
+				}
+			]
+		}
+	]
+}

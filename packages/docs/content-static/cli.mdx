@@ -14,9 +14,9 @@ installing either package puts `rocketride` on your path.
 
 > **Python vs TypeScript CLI:** Both packages ship a `rocketride` command. The
 > core commands (`start`, `upload`, `status`, `stop`, `store`) are available in
-> both, but flag names differ in a few places and the Python CLI includes two
-> additional commands (`events`, `list`) not present in TypeScript. Differences
-> are called out inline below.
+> both, but flag names differ in a few places and the Python CLI includes three
+> additional commands (`events`, `list`, `eval`) not present in TypeScript.
+> Differences are called out inline below.
 
 ## Install
 
@@ -140,6 +140,7 @@ connection is encrypted.
 | `stop`   | Stop a running task.                                                       |
 | `events` | Stream all raw events from a running task. Python CLI only.                |
 | `list`   | List all active tasks. Python CLI only.                                    |
+| `eval`   | Run golden-dataset eval specs (`.eval.json`) against pipelines. Python CLI only. |
 | `store`  | File-store operations: `dir`, `type`, `write`, `rm`, `mkdir`, `stat`.     |
 
 ### start
@@ -264,6 +265,147 @@ Key flags:
 | Flag | Description |
 | --- | --- |
 | `--json` | Output results as JSON instead of human-readable text. |
+
+> Available in the Python CLI only.
+
+### eval
+
+Use `eval` to run golden-dataset regression tests against your pipelines. An
+eval spec (`<name>.eval.json`) pairs a `.pipe` file with named cases: each case
+sends an input through the pipeline's chat source and checks the output against
+a list of assertions. Run it locally while editing a pipeline, or in CI to gate
+`.pipe` changes.
+
+```bash
+# Run one spec
+rocketride eval rag-pipeline.eval.json
+
+# Run many specs (globs are expanded by the CLI, so they work on any shell)
+rocketride eval evals/*.eval.json
+
+# Only cases whose name contains a substring, stop at the first failure
+rocketride eval evals/*.eval.json --case greeting --fail-fast
+
+# Machine-readable output / JUnit XML for CI
+rocketride eval evals/*.eval.json --json
+rocketride eval evals/*.eval.json --junit reports/evals.xml
+```
+
+Key flags:
+
+| Flag | Description |
+| --- | --- |
+| `files` positional | One or more eval spec files or glob patterns. |
+| `--case <substring>` | Only run cases whose name contains the substring. |
+| `--fail-fast` | Stop at the first failing case. |
+| `--json` | Print one JSON document (`{"specs": [...], "summary": {...}}`) instead of human-readable text. |
+| `--junit <path>` | Write a JUnit XML report to `<path>` in addition to the normal output. |
+
+Exit codes (CI-friendly): `0` all cases passed, `1` at least one case failed or
+errored, `2` usage error, spec parse/validation error, connection failure, or
+no case produced a result (e.g. a `--case` filter that matches nothing). Every
+spec is validated before the CLI connects, so a broken spec means nothing runs.
+
+**Spec format** — strict JSON; the `pipeline` and `judge_pipeline` paths are
+resolved relative to the spec file:
+
+```json
+{
+  "pipeline": "rag-pipeline.pipe",
+  "source": "chat_1",
+  "cases": [
+    {
+      "name": "answers-what-is-rocketride",
+      "input": "According to the ingested documents, what is RocketRide?",
+      "expect": [
+        { "type": "contains", "value": "pipeline", "ignore_case": true },
+        { "type": "min_length", "value": 40 }
+      ]
+    }
+  ]
+}
+```
+
+`pipeline` and a non-empty `cases` list are required; every case needs a unique
+`name`, an `input` string, and a non-empty `expect` list. `source` selects the
+source component for pipelines that have more than one. `judge_pipeline`
+(spec-level or per-case) overrides the default LLM judge.
+
+**Assertion types** — each entry of `expect` is one of:
+
+| Type | Passes when | Example |
+| --- | --- | --- |
+| `contains` | Output contains `value` (optional `ignore_case`, default `false`). | `{ "type": "contains", "value": "hello", "ignore_case": true }` |
+| `not_contains` | Output does not contain `value` (optional `ignore_case`). | `{ "type": "not_contains", "value": "error" }` |
+| `regex` | `pattern` matches the output (`re.search` semantics). | `{ "type": "regex", "pattern": "(?i)order #\\d+" }` |
+| `equals` | Output equals `value` (optional `ignore_case`, default `false`; `strip`, default `true`). | `{ "type": "equals", "value": "42" }` |
+| `min_length` | Output length is at least `value` characters. | `{ "type": "min_length", "value": 40 }` |
+| `max_length` | Output length is at most `value` characters. | `{ "type": "max_length", "value": 2000 }` |
+| `json_path` | Output parses as JSON and the dot-path `path` (`a.b.0.c`, integer segments index lists) exists and satisfies every supplied `equals` / `gte` / `lte` check (bounds inclusive). | `{ "type": "json_path", "path": "result.score", "gte": 0.5 }` |
+| `latency_max_ms` | The chat round-trip took at most `value` milliseconds. | `{ "type": "latency_max_ms", "value": 60000 }` |
+| `llm_judge` | An LLM judge scores the output at least `min_score` (0–1, default `0.7`) against `criteria`. | `{ "type": "llm_judge", "criteria": "The answer is polite.", "min_score": 0.8 }` |
+
+**LLM-as-judge:** the judge is itself a `.pipe` pipeline run on the same
+engine, so no extra model-provider dependencies are needed. A default judge
+ships inside the Python package (an OpenAI GPT-4o chain that reads
+`${ROCKETRIDE_OPENAI_KEY}` from your environment); override it with
+`judge_pipeline` at the spec level or per case. The judge sees the criteria,
+the case input, and the output in clearly delimited sections, is instructed to
+ignore any instructions embedded in the evaluated output, and must reply with
+a strict JSON verdict `{"score": 0..1, "reasoning": "..."}`. An unparseable
+verdict fails that assertion — with the raw reply in the assertion detail — it
+never crashes the run.
+
+**Gating pull requests:** `eval` is a behavioral gate, and its 0/1/2 exit-code
+contract drops straight into CI. Pair it with a structural check — the SDK's
+`client.validate()` call verifies a pipeline configuration without executing
+it — if you also want malformed pipelines caught before any case runs:
+
+```yaml
+name: pipeline-evals
+on: pull_request
+
+jobs:
+  eval:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install rocketride
+      - run: rocketride eval pipelines/*.eval.json --junit reports/evals.xml
+        env:
+          ROCKETRIDE_URI: ${{ secrets.ROCKETRIDE_URI }}
+          ROCKETRIDE_APIKEY: ${{ secrets.ROCKETRIDE_APIKEY }}
+          ROCKETRIDE_OPENAI_KEY: ${{ secrets.ROCKETRIDE_OPENAI_KEY }}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: eval-report
+          path: reports/evals.xml
+```
+
+Troubleshooting:
+
+- `Error: <file>: ...` and exit `2` before any case runs — the spec failed
+  parsing or validation (bad JSON, duplicate case name, unknown assertion type,
+  missing or unknown/misspelled assertion parameter, `min_score` out of range).
+  The message names the file, case, and assertion index.
+- Exit `2` after a run — no case produced a result: every spec errored, or the
+  `--case` filter matched nothing.
+- `judge verdict unparseable` on an `llm_judge` assertion — the judge pipeline
+  replied with something other than the strict JSON verdict; the raw reply is
+  included in the assertion detail. Check the judge pipeline's model or prompt,
+  or point `judge_pipeline` at your own judge.
+- `judge run failed` — the judge pipeline could not start or errored; for the
+  default judge, make sure `ROCKETRIDE_OPENAI_KEY` is set where the CLI runs.
+- A case that errors mid-chat is recorded as a failed case with its error
+  message; the pipeline under test is always torn down, and the remaining
+  cases still run unless `--fail-fast` is set.
+
+See [`examples/rag-pipeline.eval.json`](https://github.com/rocketride-org/rocketride-server/blob/develop/examples/rag-pipeline.eval.json)
+for a runnable spec against the example RAG pipeline.
 
 > Available in the Python CLI only.
 

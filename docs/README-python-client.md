@@ -570,10 +570,114 @@ rocketride status --token <token>            # Monitor task progress
 rocketride stop --token <token>              # Terminate a running task
 rocketride list                              # List all active tasks
 rocketride events ALL --token <token>        # Stream task events
+rocketride eval tests/*.eval.json            # Run golden-dataset evals
 rocketride rrext_store get_all_projects      # List stored projects
 ```
 
 All commands accept `--uri` and `--apikey` flags, or read from environment variables.
+
+### rocketride eval
+
+Golden-dataset regression tests for pipelines. An eval spec (`<name>.eval.json`) pairs a `.pipe` file with named cases: each case sends an input through the pipeline's chat source and checks the output against a list of assertions. Use it locally to catch regressions while editing a pipeline, and in CI to gate `.pipe` changes.
+
+```bash
+rocketride eval rag-pipeline.eval.json                     # Run one spec
+rocketride eval evals/*.eval.json                          # Run many (globs expanded in-CLI)
+rocketride eval evals/*.eval.json --case greeting          # Only cases whose name contains "greeting"
+rocketride eval evals/*.eval.json --fail-fast              # Stop at the first failing case
+rocketride eval evals/*.eval.json --json                   # Machine-readable output
+rocketride eval evals/*.eval.json --junit reports/evals.xml  # JUnit XML for CI
+```
+
+| Flag          | Description                                                                       |
+| ------------- | --------------------------------------------------------------------------------- |
+| `files`       | One or more eval spec files or glob patterns (positional, required).              |
+| `--case <s>`  | Only run cases whose name contains the substring `<s>`.                           |
+| `--fail-fast` | Stop at the first failing case.                                                   |
+| `--json`      | Print a single JSON document (`{"specs": [...], "summary": {...}}`) to stdout.    |
+| `--junit <p>` | Write a JUnit XML report to `<p>` in addition to the normal output.               |
+
+Plus the shared connection flags: `--uri`, `--apikey`, `--token` (env fallbacks `ROCKETRIDE_URI`, `ROCKETRIDE_APIKEY`, `ROCKETRIDE_TOKEN`).
+
+**Exit codes:** `0` all cases passed · `1` at least one case failed or errored · `2` usage error, spec parse/validation error, connection failure, or no case produced a result (e.g. a `--case` filter that matches nothing). All specs are validated before the CLI connects, so a broken spec means nothing runs.
+
+**Spec format** (strict JSON; `pipeline` and `judge_pipeline` paths are resolved relative to the spec file):
+
+```json
+{
+  "pipeline": "rag-pipeline.pipe",
+  "source": "chat_1",
+  "judge_pipeline": "my-judge.pipe",
+  "cases": [
+    {
+      "name": "answers-what-is-rocketride",
+      "input": "According to the ingested documents, what is RocketRide?",
+      "expect": [
+        { "type": "contains", "value": "pipeline", "ignore_case": true },
+        { "type": "min_length", "value": 40 }
+      ]
+    }
+  ]
+}
+```
+
+- `pipeline` (required): the `.pipe` file under test.
+- `source` (optional): source component to start, for pipelines with more than one source.
+- `judge_pipeline` (optional): overrides the packaged default judge for `llm_judge` assertions; can also be set per case.
+- `cases` (required, non-empty): each case needs a unique `name`, an `input` string, and a non-empty `expect` list.
+
+**Assertion types** — each entry of `expect` is one of:
+
+| Type            | Passes when                                                                            | Example                                                          |
+| --------------- | --------------------------------------------------------------------------------------- | ----------------------------------------------------------------- |
+| `contains`      | Output contains `value`; optional `ignore_case` (default `false`).                     | `{ "type": "contains", "value": "hello", "ignore_case": true }`  |
+| `not_contains`  | Output does not contain `value`; optional `ignore_case`.                               | `{ "type": "not_contains", "value": "error" }`                   |
+| `regex`         | `pattern` matches the output (`re.search` semantics).                                  | `{ "type": "regex", "pattern": "(?i)order #\\d+" }`              |
+| `equals`        | Output equals `value`; optional `ignore_case` (default `false`), `strip` (default `true`, strips both sides). | `{ "type": "equals", "value": "42" }`         |
+| `min_length`    | Output length >= `value` characters (inclusive).                                        | `{ "type": "min_length", "value": 40 }`                          |
+| `max_length`    | Output length <= `value` characters (inclusive).                                        | `{ "type": "max_length", "value": 2000 }`                        |
+| `json_path`     | Output parses as JSON and the dot-path `path` (`a.b.0.c`, integer segments index lists) exists and satisfies every supplied check: `equals`, `gte`, `lte` (bounds inclusive). | `{ "type": "json_path", "path": "result.score", "gte": 0.5 }` |
+| `latency_max_ms`| The chat round-trip took at most `value` milliseconds.                                  | `{ "type": "latency_max_ms", "value": 60000 }`                   |
+| `llm_judge`     | An LLM judge scores the output at least `min_score` (0..1, default `0.7`) against `criteria`. | `{ "type": "llm_judge", "criteria": "The answer is polite.", "min_score": 0.8 }` |
+
+**LLM-as-judge:** the judge is itself a `.pipe` pipeline run on the same engine — no extra model-provider dependencies. A default judge ships inside the wheel (`rocketride/evals/templates/judge-default.pipe`, an OpenAI GPT-4o chain that reads `${ROCKETRIDE_OPENAI_KEY}` from your environment). Override it with `judge_pipeline` at the spec level, or per case for individual overrides. The judge receives the criteria, the case input, and the output in clearly delimited sections, is instructed to ignore any instructions embedded in the evaluated output, and must reply with a strict JSON verdict `{"score": 0..1, "reasoning": "..."}`. An unparseable verdict fails that assertion (with the raw reply in the detail) — it never crashes the run.
+
+**CI:** `rocketride eval` gates the behavior of `.pipe` pull requests, and its 0/1/2 exit-code contract slots straight into GitHub Actions. Pair it with a structural check — the SDK's [`client.validate()`](#services-validation-and-ping) call, which verifies a pipeline configuration without executing it — if you also want to catch malformed pipelines before any case runs:
+
+```yaml
+name: pipeline-evals
+on: pull_request
+
+jobs:
+  eval:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install rocketride
+      - run: rocketride eval pipelines/*.eval.json --junit reports/evals.xml
+        env:
+          ROCKETRIDE_URI: ${{ secrets.ROCKETRIDE_URI }}
+          ROCKETRIDE_APIKEY: ${{ secrets.ROCKETRIDE_APIKEY }}
+          ROCKETRIDE_OPENAI_KEY: ${{ secrets.ROCKETRIDE_OPENAI_KEY }}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: eval-report
+          path: reports/evals.xml
+```
+
+**Troubleshooting:**
+
+- `Error: <file>: ...` and exit `2` before any case output — the spec failed parsing or validation (bad JSON, duplicate case name, unknown assertion type, missing or unknown/misspelled assertion parameter, `min_score` out of range). The message names the file, case, and assertion index. Nothing ran.
+- Exit `2` after a run — no case produced a result: every spec errored, or your `--case` filter matched nothing.
+- `judge verdict unparseable` on an `llm_judge` assertion — the judge pipeline replied with something other than the strict JSON verdict; the raw reply is included in the assertion detail. Check the judge pipeline's model/prompt or point `judge_pipeline` at your own judge.
+- `judge run failed` — the judge pipeline itself could not start or errored (for the default judge, make sure `ROCKETRIDE_OPENAI_KEY` is set where the CLI runs).
+- A case that raises during `chat()` is recorded as an errored (failed) case with its error message; the pipeline under test is always torn down, and remaining cases still run unless `--fail-fast` is set.
+
+See [`examples/rag-pipeline.eval.json`](https://github.com/rocketride-org/rocketride-server/blob/develop/examples/rag-pipeline.eval.json) for a runnable spec against the example RAG pipeline.
 
 ## Configuration
 

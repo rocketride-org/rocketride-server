@@ -20,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **ci**: migrate Discord notifier workflows to forum channels (tags + auto-archive) (#1510)
 - **ci**: on-demand + monthly multi-OS compile/test matrix (#1537)
 - **ci**: keep Discord forum tags live (re-apply on state/label change via bot) (#1722)
+- **client-python**: `rocketride eval` — golden-dataset evaluation runner for `.pipe` files (assertions, pipeline-as-judge, JUnit) (#1581)
 - **database**: Sequelize ORM over pipes + server-side DB transactions (#1467)
 - **deploy-2**: teams-as-environments deploy, owner-scoped task identity, push-driven surfaces (#1764)
 - **events-ui**: real-time DAP event monitor micro-frontend (#1484)
