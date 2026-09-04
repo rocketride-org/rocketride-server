@@ -39,7 +39,10 @@ class DocumentStoreBase(ABC):
         """
         Create the collection.
 
-        This the abstract method that the driver must implement
+        This the abstract method that the driver must implement. Implementations
+        must either raise on failure or explicitly return False; the caller
+        (createCollection) treats a return value of exactly False as failure and
+        aborts before indexing any documents.
         """
 
     @abstractmethod
@@ -515,7 +518,14 @@ class DocumentStoreBase(ABC):
             doc.embedding = [0] * vectorSize  # List of zeros for validation purposes
 
             # Create the actual collection with the specified vector size
-            self._createCollection(vectorSize)
+            created = self._createCollection(vectorSize)
+
+            # Some drivers signal failure by returning False instead of raising;
+            # honor that instead of silently indexing into a collection that was
+            # never created (do not treat None as failure - a few drivers return
+            # nothing on success).
+            if created is False:
+                raise Exception(f'{type(self).__name__} failed to create the vector collection')
 
             # Add the "bogus" document to the collection
             self.addChunks([doc], checkCollection=False)
