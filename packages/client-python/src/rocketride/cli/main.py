@@ -67,6 +67,7 @@ from .commands.stop import StopCommand
 from .commands.events import EventsCommand
 from .commands.list import ListCommand
 from .commands.store import StoreCommand
+from .commands.otel import OtelCommand
 
 try:
     # Try importing from installed package first
@@ -327,6 +328,7 @@ class RocketRideCLI:
             - status: Monitor task execution status
             - stop: Terminate running task
             - events: Monitor task events with filtering
+            - otel: Export pipeline traces and metrics over OpenTelemetry
         """
         # Create main parser with description and help text
         parser = argparse.ArgumentParser(
@@ -450,6 +452,78 @@ class RocketRideCLI:
         events_parser.add_argument(
             '--log',
             help='Optional log file to write all events (e.g., --log=events.log)',
+        )
+
+        # Otel command - exports pipeline traces and metrics over OTLP
+        otel_parser = subparsers.add_parser(
+            'otel',
+            help='Export pipeline traces and metrics to an OpenTelemetry collector',
+        )
+        add_common_args(otel_parser)
+
+        # OTLP endpoint base URL (signal paths are appended automatically)
+        otel_parser.add_argument(
+            '--endpoint',
+            default=None,
+            help='OTLP endpoint base URL (default: OTEL_EXPORTER_OTLP_ENDPOINT or http://localhost:4318)',
+        )
+
+        # OTLP transport protocol
+        otel_parser.add_argument(
+            '--protocol',
+            choices=['http', 'grpc'],
+            default='http',
+            help='OTLP transport protocol (default: %(default)s)',
+        )
+
+        # service.name resource attribute
+        otel_parser.add_argument(
+            '--service-name',
+            dest='service_name',
+            default=None,
+            help='service.name resource attribute (default: OTEL_SERVICE_NAME or rocketride-engine)',
+        )
+
+        # OTLP headers for collector authentication (Langfuse, LangSmith, ...)
+        otel_parser.add_argument(
+            '--headers',
+            default=None,
+            help='OTLP headers as comma-separated key=value pairs (default: OTEL_EXPORTER_OTLP_HEADERS)',
+        )
+
+        # Privacy gate: payload content is excluded from spans by default
+        otel_parser.add_argument(
+            '--include-content',
+            dest='include_content',
+            action='store_true',
+            help='Include pipeline payload content in spans, size-capped (default: content excluded)',
+        )
+
+        # Transport-security opt-out for the cleartext-credential guard
+        otel_parser.add_argument(
+            '--insecure',
+            action='store_true',
+            help='Allow exporting OTLP credential headers over cleartext transport to a '
+            'non-loopback collector (default: refuse; also ROCKETRIDE_OTEL_ALLOW_INSECURE=1)',
+        )
+
+        # Metrics toggle: traces-only export
+        otel_parser.add_argument(
+            '--no-metrics',
+            dest='no_metrics',
+            action='store_true',
+            help='Disable metrics export; export traces only',
+        )
+
+        # Informational only: the bridge cannot set the trace level of runs
+        # it did not start (pipelineTraceLevel is an execute-time argument)
+        otel_parser.add_argument(
+            '--trace-level',
+            dest='trace_level',
+            choices=['none', 'metadata', 'summary', 'full'],
+            default=None,
+            help='Informational only: FLOW spans require runs started with pipelineTraceLevel; '
+            'the bridge cannot change the trace level of running tasks',
         )
 
         # List command - lists all active tasks
@@ -605,6 +679,7 @@ class RocketRideCLI:
                 'events': EventsCommand,
                 'list': ListCommand,
                 'store': StoreCommand,
+                'otel': OtelCommand,
             }
 
             if self.args.command in command_map:

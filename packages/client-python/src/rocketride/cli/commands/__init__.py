@@ -34,6 +34,7 @@ Available Commands:
     EventsCommand: Monitor real-time pipeline events
     ListCommand: List all active tasks
     StoreCommand: Project and template storage operations
+    OtelCommand: Export pipeline traces and metrics over OpenTelemetry
 """
 
 from .start import StartCommand
@@ -43,6 +44,7 @@ from .stop import StopCommand
 from .events import EventsCommand
 from .list import ListCommand
 from .store import StoreCommand
+from .otel import OtelCommand
 
 __all__ = [
     'StartCommand',
@@ -52,4 +54,5 @@ __all__ = [
     'EventsCommand',
     'ListCommand',
     'StoreCommand',
+    'OtelCommand',
 ]

@@ -14,9 +14,9 @@ installing either package puts `rocketride` on your path.
 
 > **Python vs TypeScript CLI:** Both packages ship a `rocketride` command. The
 > core commands (`start`, `upload`, `status`, `stop`, `store`) are available in
-> both, but flag names differ in a few places and the Python CLI includes two
-> additional commands (`events`, `list`) not present in TypeScript. Differences
-> are called out inline below.
+> both, but flag names differ in a few places and the Python CLI includes three
+> additional commands (`events`, `list`, `otel`) not present in TypeScript.
+> Differences are called out inline below.
 
 ## Install
 
@@ -140,6 +140,7 @@ connection is encrypted.
 | `stop`   | Stop a running task.                                                       |
 | `events` | Stream all raw events from a running task. Python CLI only.                |
 | `list`   | List all active tasks. Python CLI only.                                    |
+| `otel`   | Export live pipeline traces and metrics to an OpenTelemetry collector. Python CLI only. |
 | `store`  | File-store operations: `dir`, `type`, `write`, `rm`, `mkdir`, `stat`.     |
 
 ### start
@@ -266,6 +267,53 @@ Key flags:
 | `--json` | Output results as JSON instead of human-readable text. |
 
 > Available in the Python CLI only.
+
+### otel
+
+Use `otel` to export live pipeline traces and metrics to any OpenTelemetry
+collector over OTLP — Jaeger, Grafana, Datadog, Langfuse, LangSmith, or anything
+else that speaks OTLP. The command is a pure consumer of the engine's
+[monitor event stream](/protocols/websocket/observability): it subscribes to all
+tasks your API key owns and maps lifecycle, flow, and status events to OTel
+spans and metrics. It runs until interrupted (Ctrl+C), closing open spans and
+flushing exporters on shutdown.
+
+```bash
+# Requires the optional OpenTelemetry extra
+pip install 'rocketride[otel]'
+
+# Export to a local collector (default endpoint http://localhost:4318)
+rocketride otel
+
+# Export to a specific backend — pass auth via the env var so the secret
+# stays out of shell history and process listings
+export OTEL_EXPORTER_OTLP_HEADERS="Authorization=Basic ${AUTH_VALUE}"
+rocketride otel --endpoint https://cloud.langfuse.com/api/public/otel --no-metrics
+
+# Include pipeline payload content in spans (excluded by default, 8 KB cap)
+rocketride otel --include-content
+```
+
+Key flags:
+
+| Flag | Description |
+| --- | --- |
+| `--endpoint <url>` | OTLP base URL; `/v1/traces` and `/v1/metrics` are appended automatically. Defaults to `OTEL_EXPORTER_OTLP_ENDPOINT`, honoring the signal-specific `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` / `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT` variables when neither is set, else the exporter default (`http://localhost:4318` for http, `localhost:4317` for grpc). |
+| `--protocol <http\|grpc>` | OTLP transport. Default `http` (http/protobuf); `grpc` needs the separate gRPC exporter package. |
+| `--service-name <name>` | `service.name` resource attribute. Defaults to `OTEL_SERVICE_NAME` or `rocketride-engine`. |
+| `--headers <k=v,k=v>` | Headers sent with every OTLP request. Prefer `OTEL_EXPORTER_OTLP_HEADERS` for secrets — command-line arguments are visible in shell history and `ps` output. |
+| `--include-content` | Include pipeline payload content in spans, size-capped. By default no payload content is exported. |
+| `--no-metrics` | Export traces only. |
+| `--insecure` | Allow credential-bearing OTLP headers over cleartext transport to a non-loopback collector. Without it the bridge exits `2` rather than putting an `Authorization` / `x-api-key` value on the wire in the clear. Also settable with `ROCKETRIDE_OTEL_ALLOW_INSECURE=1`. |
+
+Per-component flow spans appear only for runs started with a
+`pipelineTraceLevel` (e.g. `client.use(..., pipelineTraceLevel='summary')`) —
+the bridge cannot change the trace level of runs it did not start. Task
+lifecycle spans and metrics are exported regardless. See the
+[Observability](/protocols/websocket/observability) page for the underlying
+event stream.
+
+> Available in the Python CLI only. Requires `pip install 'rocketride[otel]'`.
 
 ### store
 
