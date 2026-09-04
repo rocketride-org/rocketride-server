@@ -1,0 +1,221 @@
+name: 'Validate RocketRide Pipelines'
+description: >-
+  Start a RocketRide engine in Docker and validate .pipe pipeline files with
+  the rocketride CLI. Fails the job when any pipeline is invalid.
+author: 'RocketRide'
+
+branding:
+  icon: 'check-circle'
+  color: 'orange'
+
+inputs:
+  files:
+    description: >-
+      Glob pattern(s) selecting the .pipe files to validate. Multiple patterns
+      may be separated by whitespace. Patterns are expanded with bash globstar,
+      so '**' recurses into subdirectories.
+    required: false
+    default: '**/*.pipe'
+  changed-only:
+    description: >-
+      On pull_request events, validate only the matching .pipe files that
+      changed relative to the PR base (via git diff). Ignored on other events.
+    required: false
+    default: 'true'
+  engine-image:
+    description: 'Docker image of the RocketRide engine to validate against.'
+    required: false
+    default: 'ghcr.io/rocketride-org/rocketride-engine:latest'
+  engine-port:
+    description: "Host port mapped to the engine container's internal port 5565."
+    required: false
+    default: '5565'
+  api-key:
+    description: >-
+      Optional API key for the engine (passed to the CLI via the
+      ROCKETRIDE_APIKEY environment variable, never via argv).
+    required: false
+    default: ''
+  python-version:
+    description: 'Python version used to run the rocketride CLI.'
+    required: false
+    default: '3.12'
+  cli-version:
+    description: >-
+      pip version specifier for the rocketride CLI (e.g. '==1.2.3' or
+      '>=1.2.3'). Must resolve to a release that includes the validate
+      subcommand; the install step fails fast when it does not. Installs
+      the latest release when empty.
+    required: false
+    default: ''
+  fail-on-warnings:
+    description: >-
+      Fail the job when a pipeline validates with warnings (the CLI itself
+      exits 0 on warnings).
+    required: false
+    default: 'false'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+      with:
+        python-version: ${{ inputs.python-version }}
+
+    - name: Install rocketride CLI
+      shell: bash
+      env:
+        CLI_VERSION: ${{ inputs.cli-version }}
+      run: |
+        set -euo pipefail
+        python -m pip install --quiet --upgrade pip
+        python -m pip install --quiet "rocketride${CLI_VERSION}"
+        rocketride --help > /dev/null
+        # Fail fast when the installed release predates the validate command;
+        # otherwise the failure would surface later as a confusing argparse
+        # "invalid choice: 'validate'" usage error (exit code 2).
+        if ! rocketride validate --help > /dev/null 2>&1; then
+          installed="$(python -m pip show rocketride | sed -n 's/^Version: //p')"
+          echo "::error::rocketride ${installed:-unknown} does not support the 'validate' subcommand. Set the cli-version input to a release that includes it."
+          exit 2
+        fi
+
+    - name: Start RocketRide engine
+      id: engine
+      shell: bash
+      env:
+        ENGINE_IMAGE: ${{ inputs.engine-image }}
+        ENGINE_PORT: ${{ inputs.engine-port }}
+      run: |
+        set -euo pipefail
+        if ! [[ "${ENGINE_PORT}" =~ ^[0-9]+$ ]]; then
+          echo "::error::engine-port must be a number, got '${ENGINE_PORT}'"
+          exit 2
+        fi
+        # The engine always listens on 5565 inside the container
+        # (see docker/docker-compose.yml).
+        cid="$(docker run -d -p "${ENGINE_PORT}:5565" "${ENGINE_IMAGE}")"
+        echo "cid=${cid}" >> "${GITHUB_OUTPUT}"
+        echo "Started engine container ${cid} (${ENGINE_IMAGE}) on host port ${ENGINE_PORT}."
+
+    - name: Wait for engine health
+      shell: bash
+      env:
+        ENGINE_PORT: ${{ inputs.engine-port }}
+        ENGINE_CID: ${{ steps.engine.outputs.cid }}
+      run: |
+        set -euo pipefail
+        # /version is the engine's unconditionally public route (server.py
+        # registers it outside the standardEndpoints gate), so it works on
+        # every published engine image; /ping is gated and 404s on some.
+        deadline=$(( SECONDS + 120 ))
+        until curl -fsS "http://127.0.0.1:${ENGINE_PORT}/version" > /dev/null 2>&1; do
+          if (( SECONDS >= deadline )); then
+            echo "::error::RocketRide engine did not become healthy within 120s."
+            echo '--- engine logs (last 100 lines) ---'
+            docker logs --tail 100 "${ENGINE_CID}" || true
+            exit 2
+          fi
+          sleep 2
+        done
+        echo 'Engine is healthy.'
+
+    - name: Validate pipeline files
+      shell: bash
+      env:
+        FILES_GLOB: ${{ inputs.files }}
+        CHANGED_ONLY: ${{ inputs.changed-only }}
+        FAIL_ON_WARNINGS: ${{ inputs.fail-on-warnings }}
+        EVENT_NAME: ${{ github.event_name }}
+        BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        ROCKETRIDE_URI: http://127.0.0.1:${{ inputs.engine-port }}
+        RR_API_KEY_INPUT: ${{ inputs.api-key }}
+      run: |
+        set -euo pipefail
+        shopt -s globstar nullglob
+
+        # Expand the configured glob pattern(s).
+        candidates=()
+        declare -A seen=()
+        read -ra patterns <<< "${FILES_GLOB//$'\n'/ }"
+        for pattern in "${patterns[@]}"; do
+          # shellcheck disable=SC2086 # intentional glob expansion
+          for f in ${pattern}; do
+            if [[ -f "${f}" && -z "${seen[${f}]:-}" ]]; then
+              seen["${f}"]=1
+              candidates+=("${f}")
+            fi
+          done
+        done
+
+        # On pull requests, optionally narrow to files changed vs the base.
+        files=()
+        if [[ "${CHANGED_ONLY}" == 'true' && "${EVENT_NAME}" == 'pull_request' && -n "${BASE_SHA}" ]]; then
+          if git fetch --quiet --no-tags --depth=1 origin "${BASE_SHA}"; then
+            declare -A changed=()
+            while IFS= read -r f; do
+              if [[ -n "${f}" ]]; then
+                changed["${f}"]=1
+              fi
+            done < <(git diff --name-only --diff-filter=ACMR "${BASE_SHA}" HEAD)
+            for f in ${candidates[@]+"${candidates[@]}"}; do
+              if [[ -n "${changed[${f}]:-}" ]]; then
+                files+=("${f}")
+              fi
+            done
+          else
+            echo "::warning::Could not fetch PR base ${BASE_SHA}; validating all matching files instead."
+            files=(${candidates[@]+"${candidates[@]}"})
+          fi
+        else
+          files=(${candidates[@]+"${candidates[@]}"})
+        fi
+
+        if (( ${#files[@]} == 0 )); then
+          echo "::warning::No .pipe files to validate (files='${FILES_GLOB}', changed-only=${CHANGED_ONLY})."
+          exit 0
+        fi
+
+        # Pass the API key via the environment only when set, never via argv.
+        if [[ -n "${RR_API_KEY_INPUT}" ]]; then
+          export ROCKETRIDE_APIKEY="${RR_API_KEY_INPUT}"
+        fi
+
+        echo "Validating ${#files[@]} file(s) against ${ROCKETRIDE_URI}:"
+        printf '  %s\n' "${files[@]}"
+
+        if [[ "${FAIL_ON_WARNINGS}" == 'true' ]]; then
+          report="${RUNNER_TEMP}/rocketride-validate-report.json"
+          rc=0
+          rocketride validate "${files[@]}" --json > "${report}" || rc=$?
+          cat "${report}"
+          if (( rc != 0 )); then
+            exit "${rc}"
+          fi
+          python3 - "${report}" <<'PY'
+        import json
+        import sys
+
+        with open(sys.argv[1], encoding='utf-8') as fh:
+            report = json.load(fh)
+
+        warned = [f['file'] for f in report.get('files', []) if f.get('warnings')]
+        for name in warned:
+            print(f'::error::fail-on-warnings: {name} validated with warnings')
+        sys.exit(1 if warned else 0)
+        PY
+        else
+          rocketride validate "${files[@]}"
+        fi
+
+    - name: Stop RocketRide engine
+      if: always()
+      shell: bash
+      env:
+        ENGINE_CID: ${{ steps.engine.outputs.cid }}
+      run: |
+        set -euo pipefail
+        if [[ -n "${ENGINE_CID}" ]]; then
+          docker rm -f "${ENGINE_CID}" > /dev/null 2>&1 || true
+        fi

@@ -34,6 +34,7 @@ Available Commands:
     EventsCommand: Monitor real-time pipeline events
     ListCommand: List all active tasks
     StoreCommand: Project and template storage operations
+    ValidateCommand: Validate pipeline configuration files
 """
 
 from .start import StartCommand
@@ -43,6 +44,7 @@ from .stop import StopCommand
 from .events import EventsCommand
 from .list import ListCommand
 from .store import StoreCommand
+from .validate import ValidateCommand
 
 __all__ = [
     'StartCommand',
@@ -52,4 +54,5 @@ __all__ = [
     'EventsCommand',
     'ListCommand',
     'StoreCommand',
+    'ValidateCommand',
 ]

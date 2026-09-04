@@ -67,6 +67,7 @@ from .commands.stop import StopCommand
 from .commands.events import EventsCommand
 from .commands.list import ListCommand
 from .commands.store import StoreCommand
+from .commands.validate import ValidateCommand
 
 try:
     # Try importing from installed package first
@@ -463,6 +464,37 @@ class RocketRideCLI:
             help='Output results in JSON format',
         )
 
+        # Validate command - validates pipeline files without executing them
+        validate_parser = subparsers.add_parser(
+            'validate',
+            help='Validate pipeline files',
+            description='Validate pipeline files against the server without executing them. '
+            'Exit codes: 0 = all files valid; 1 = at least one file failed validation; '
+            '2 = usage error, connection failure, or no file could be processed at all '
+            '(no file received a server validation verdict).',
+        )
+        add_common_args(validate_parser)
+
+        # Pipeline files as positional arguments - supports glob patterns
+        validate_parser.add_argument(
+            'files',
+            nargs='+',
+            help='Pipeline files or glob patterns to validate',
+        )
+
+        # Optional source component override passed through to validation
+        validate_parser.add_argument(
+            '--source',
+            help='Override source component ID for validation',
+        )
+
+        # Optional JSON output format
+        validate_parser.add_argument(
+            '--json',
+            action='store_true',
+            help='Output results in JSON format',
+        )
+
         # Store command - file store and domain storage operations
         store_common_parser = argparse.ArgumentParser(add_help=False)
         add_common_args(store_common_parser)
@@ -605,6 +637,7 @@ class RocketRideCLI:
                 'events': EventsCommand,
                 'list': ListCommand,
                 'store': StoreCommand,
+                'validate': ValidateCommand,
             }
 
             if self.args.command in command_map:

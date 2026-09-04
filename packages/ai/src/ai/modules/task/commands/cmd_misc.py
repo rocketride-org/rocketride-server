@@ -198,10 +198,15 @@ class MiscCommands(DAPConn):
         2. ``source`` field inside the pipeline config
         3. Implied source: the single component whose config.mode == 'Source'
 
+        The ``pipeline`` argument may be flat (the shape the SDK documents) or
+        already wrapped in the ``{'pipeline': {...}}`` envelope; either way the
+        engine receives exactly one envelope.
+
         Args:
             request (Dict[str, Any]): DAP request containing:
                 - arguments (Dict[str, Any]):
-                    - pipeline (Dict[str, Any]): Pipeline configuration to validate
+                    - pipeline (Dict[str, Any]): Pipeline configuration to validate,
+                      flat or already enveloped
                     - source (str, optional): Override source component ID
 
         Returns:
@@ -217,6 +222,13 @@ class MiscCommands(DAPConn):
 
             args = request.get('arguments', {})
             pipeline = args.get('pipeline', {})
+
+            # Callers that already send the {'pipeline': ...} envelope must not be
+            # double-wrapped: the MCP validate_pipeline tool (modules/mcp/tools/
+            # introspection.py, #2082) pre-wraps client-side as a workaround for
+            # the very bug this handler now fixes. Unwrap first, wrap once below.
+            if isinstance(pipeline.get('pipeline'), dict):
+                pipeline = pipeline['pipeline']
 
             # Build merged environment for variable resolution (same as execute)
             merged_env: Dict[str, str] = {}
@@ -254,8 +266,10 @@ class MiscCommands(DAPConn):
             if source:
                 inner['source'] = source
 
-            # Validate it
-            data = validatePipeline(inner)
+            # validatePipeline expects the config under a top-level 'pipeline'
+            # key — same envelope pipe_Validate (modules/pipe) builds; without
+            # it every config fails with "'pipeline' is missing or invalid"
+            data = validatePipeline({'pipeline': inner})
 
             # Return the results
             return self.build_response(request, body=data)

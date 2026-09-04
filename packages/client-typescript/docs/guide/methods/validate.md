@@ -19,6 +19,8 @@ The `validate()` method checks a pipeline configuration for structural correctne
 
 Authentication is **not required** for validation: the endpoint is public.
 
+The same check is available from a terminal as `rocketride validate <files…>`, which reads `.pipe`/JSON files and reports errors per file — see the [CLI reference](/cli).
+
 ## **Method Signature**
 
 ### Python (async)

@@ -50,6 +50,7 @@
  * - upload: Upload files to a pipeline (with --pipeline or --token)
  * - status: Monitor real-time status of a running pipeline
  * - stop: Terminate a running pipeline gracefully
+ * - validate: Validate pipeline configuration files without executing them
  *
  * @example
  * ```bash
@@ -64,6 +65,9 @@
  *
  * # Stop a pipeline
  * rocketride stop --token TASK_TOKEN
+ *
+ * # Validate pipeline files
+ * rocketride validate examples/*.pipe --json
  * ```
  */
 
@@ -775,6 +779,8 @@ interface CLIArgs {
 	files?: string[];
 	max_concurrent?: number;
 	pipeline_args?: string[];
+	source?: string;
+	json?: boolean;
 	[key: string]: unknown;
 }
 
@@ -784,6 +790,139 @@ interface UploadStats {
 	successful_uploads: number;
 	failed_uploads: number;
 	upload_times: number[];
+}
+
+/**
+ * A pipeline file loaded for validation: either a parsed config or a load error.
+ */
+export interface ValidateFileLoad {
+	file: string;
+	config?: Record<string, unknown>;
+	error?: string;
+}
+
+/**
+ * Validation outcome for a single file.
+ *
+ * `processed` is true only when the server returned a validation result for
+ * the file (as opposed to a local read/parse failure or a request error).
+ */
+export interface FileValidationResult {
+	file: string;
+	valid: boolean;
+	errors: unknown[];
+	warnings: unknown[];
+	processed: boolean;
+}
+
+/**
+ * Machine-readable report emitted by `rocketride validate --json`.
+ */
+export interface ValidateReport {
+	files: Array<{ file: string; valid: boolean; errors: unknown[]; warnings: unknown[] }>;
+	summary: { total: number; valid: number; invalid: number };
+}
+
+/**
+ * Expand shell-style glob patterns into a deduplicated file list.
+ *
+ * Globs are expanded in-CLI (Windows shells do not expand them). A pattern
+ * with no matches is kept as a literal path so it is later reported as
+ * unreadable instead of being silently dropped.
+ */
+export function expandFilePatterns(patterns: string[]): string[] {
+	const files: string[] = [];
+
+	for (const pattern of patterns) {
+		const matches = glob.sync(pattern, { nodir: true, windowsPathsNoEscape: process.platform === 'win32' }).sort();
+		if (matches.length > 0) {
+			files.push(...matches);
+		} else {
+			files.push(pattern);
+		}
+	}
+
+	return [...new Set(files)];
+}
+
+/**
+ * Read and parse a pipeline file for validation.
+ *
+ * Returns the parsed pipeline config, or a human-readable error when the file
+ * cannot be read, is not valid JSON, or is not a JSON object.
+ */
+export function loadPipelineFile(file: string): ValidateFileLoad {
+	// Mirror the Python CLI: a path that is not an existing regular file is
+	// reported as not found (message skeletons match across both CLIs).
+	if (!fs.existsSync(file) || !fs.statSync(file).isFile()) {
+		return { file, error: `File not found: ${file}` };
+	}
+
+	let content: string;
+	try {
+		content = fs.readFileSync(file, 'utf-8');
+	} catch (error) {
+		return { file, error: `Cannot read ${file}: ${error instanceof Error ? error.message : error}` };
+	}
+
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(content);
+	} catch (error) {
+		return { file, error: `Invalid JSON in ${file}: ${error instanceof Error ? error.message : error}` };
+	}
+
+	if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+		return { file, error: `Invalid pipeline format in ${file}: expected a JSON object` };
+	}
+
+	// .pipe files wrap the config in { "pipeline": { ... } } — unwrap if present
+	const record = parsed as Record<string, unknown>;
+	const inner = record.pipeline;
+	const config = inner && typeof inner === 'object' && !Array.isArray(inner) ? (inner as Record<string, unknown>) : record;
+	return { file, config };
+}
+
+/**
+ * Build the machine-readable validation report for `--json` output.
+ */
+export function buildValidateReport(results: FileValidationResult[]): ValidateReport {
+	const validCount = results.filter((r) => r.valid).length;
+	return {
+		files: results.map((r) => ({ file: r.file, valid: r.valid, errors: r.errors, warnings: r.warnings })),
+		summary: { total: results.length, valid: validCount, invalid: results.length - validCount },
+	};
+}
+
+/**
+ * Map validation results to the CLI exit code.
+ *
+ * 0 = all files valid, 1 = at least one file invalid (including unreadable or
+ * unparseable files when at least one other file was processed), 2 = no file
+ * could be processed at all. A file counts as processed only when the server
+ * returned a validation verdict for it, so per-file server errors on every
+ * file also yield exit code 2.
+ */
+export function validateExitCode(results: FileValidationResult[]): number {
+	if (results.length === 0 || !results.some((r) => r.processed)) {
+		return 2;
+	}
+	return results.every((r) => r.valid) ? 0 : 1;
+}
+
+/**
+ * Format a single validation error/warning entry for human-readable output.
+ */
+export function formatValidationIssue(issue: unknown): string {
+	if (typeof issue === 'string') {
+		return issue;
+	}
+	if (issue && typeof issue === 'object') {
+		const record = issue as Record<string, unknown>;
+		const message = typeof record.message === 'string' ? record.message : JSON.stringify(issue);
+		return record.id ? `${message} (${record.id})` : message;
+	}
+	return String(issue);
 }
 
 export class RocketRideCLI {
@@ -1025,6 +1164,49 @@ export class RocketRideCLI {
 			});
 
 		addCommonOptions(stopCmd);
+
+		// Validate command
+		const validateCmd = program
+			.command('validate')
+			.description('Validate pipeline files without executing them')
+			.argument('<files...>', 'Pipeline .pipe files or glob patterns to validate')
+			.option('--source <id>', 'Override source component ID for validation')
+			.option('--json', 'Output machine-readable JSON results to stdout')
+			.addHelpText(
+				'after',
+				'\nExit codes:\n' +
+					'  0  all files valid\n' +
+					'  1  at least one file failed validation\n' +
+					'  2  usage error, connection failure, or no file could be processed at all\n' +
+					'     (no file received a server validation verdict)',
+			)
+			.action(async (files, options) => {
+				this.args = {
+					command: 'validate',
+					...options,
+					files,
+				};
+				this.uri = options.uri;
+
+				try {
+					const exitCode = await this.cmdValidate();
+					if (!this.isCancelled()) {
+						process.exit(exitCode);
+					}
+				} finally {
+					if (!this.isCancelled()) {
+						this.cancel();
+						await this.cleanupClient();
+					}
+				}
+			});
+
+		// Usage errors (e.g. missing <files...>) must exit with code 2
+		validateCmd.exitOverride((err) => {
+			process.exit(err.exitCode === 0 ? 0 : 2);
+		});
+
+		addCommonOptions(validateCmd);
 
 		// Store command with file system subcommands
 		const storeCmd = program.command('store').description('File store operations');
@@ -1751,6 +1933,73 @@ export class RocketRideCLI {
 		} finally {
 			await this.cleanupClient();
 		}
+	}
+
+	async cmdValidate(): Promise<number> {
+		try {
+			const files = expandFilePatterns(this.args.files || []);
+			const loaded = files.map((file) => loadPipelineFile(file));
+
+			// Only connect when at least one file parsed successfully
+			let client: RocketRideClient | undefined;
+			if (loaded.some((entry) => entry.config !== undefined)) {
+				try {
+					client = await this.createAndConnectClient();
+				} catch (error) {
+					console.error(`Error: Failed to connect to ${this.uri}: ${error instanceof Error ? error.message : error}`);
+					return 2;
+				}
+			}
+
+			const results: FileValidationResult[] = [];
+			for (const entry of loaded) {
+				if (entry.config === undefined) {
+					results.push({ file: entry.file, valid: false, errors: [{ message: entry.error }], warnings: [], processed: false });
+					continue;
+				}
+
+				try {
+					const result = await client!.validate({ pipeline: entry.config, source: this.args.source });
+					const errors = Array.isArray(result.errors) ? result.errors : [];
+					const warnings = Array.isArray(result.warnings) ? result.warnings : [];
+					results.push({ file: entry.file, valid: errors.length === 0, errors, warnings, processed: true });
+				} catch (error) {
+					results.push({ file: entry.file, valid: false, errors: [{ message: error instanceof Error ? error.message : String(error) }], warnings: [], processed: false });
+				}
+			}
+
+			if (this.args.json) {
+				// Machine-readable output only — keep stdout pipeable
+				console.log(JSON.stringify(buildValidateReport(results), null, 2));
+			} else {
+				this.printValidateResults(results);
+			}
+
+			return validateExitCode(results);
+		} finally {
+			await this.cleanupClient();
+		}
+	}
+
+	private printValidateResults(results: FileValidationResult[]): void {
+		for (const result of results) {
+			if (result.valid) {
+				console.log(`${ANSI_GREEN}${CHR_CHECK}${ANSI_RESET} ${result.file}: valid`);
+			} else {
+				console.log(`${ANSI_RED}${CHR_CROSS}${ANSI_RESET} ${result.file}: invalid`);
+			}
+
+			for (const error of result.errors) {
+				console.log(`    ${ANSI_RED}error${ANSI_RESET}: ${formatValidationIssue(error)}`);
+			}
+			for (const warning of result.warnings) {
+				console.log(`    ${ANSI_YELLOW}warning${ANSI_RESET}: ${formatValidationIssue(warning)}`);
+			}
+		}
+
+		const validCount = results.filter((r) => r.valid).length;
+		console.log('');
+		console.log(`Summary: ${results.length} file(s), ${validCount} valid, ${results.length - validCount} invalid`);
 	}
 
 	async run(): Promise<number> {

@@ -719,6 +719,7 @@ asyncio.run(main())
 The `rocketride` command is installed automatically with the package.
 
 ```bash
+rocketride validate ./pipelines/*.pipe       # Validate .pipe files without running them
 rocketride start pipeline.json              # Start a pipeline
 rocketride upload *.pdf --token <token>      # Upload files to a running pipeline
 rocketride status --token <token>            # Monitor task progress
