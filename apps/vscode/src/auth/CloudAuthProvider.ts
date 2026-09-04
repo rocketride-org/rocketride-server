@@ -21,7 +21,7 @@
  */
 
 import * as vscode from 'vscode';
-import { RocketRideClient } from 'rocketride';
+import { RocketRideClient, CONST_DEFAULT_WEB_CLOUD } from 'rocketride';
 import type { ConnectResult } from 'rocketride';
 import { generatePkce, buildAuthUrl } from './pkce';
 import { resolveCloudAppUrl } from './resolveCloudAppUrl';
@@ -194,11 +194,7 @@ export class CloudAuthProvider implements vscode.UriHandler, vscode.Disposable {
 		// Always use the cloud URI for token exchange -- the OAuth code must
 		// be exchanged against the cloud server regardless of the current
 		// connection mode (local, docker, etc.).
-		const cloudUrl = process.env.ROCKETRIDE_URI;
-		if (!cloudUrl) {
-			vscode.window.showErrorMessage('RocketRide Cloud sign-in failed: cloud endpoint is not configured (ROCKETRIDE_URI).');
-			return;
-		}
+		const cloudUrl = CONST_DEFAULT_WEB_CLOUD;
 
 		let result: ConnectResult;
 		try {
@@ -241,7 +237,13 @@ export class CloudAuthProvider implements vscode.UriHandler, vscode.Disposable {
 		);
 		if (selection === 'Open RocketRide Cloud') {
 			try {
-				await vscode.env.openExternal(vscode.Uri.parse(resolveCloudAppUrl(cloudUrl)));
+				const opened = await vscode.env.openExternal(
+					vscode.Uri.parse(resolveCloudAppUrl(cloudUrl))
+				);
+
+				if (!opened) {
+					vscode.window.showErrorMessage('Failed to open RocketRide Cloud.');
+				}
 			} catch (error) {
 				const msg = error instanceof Error ? error.message : String(error);
 				vscode.window.showErrorMessage(`Failed to open RocketRide Cloud: ${msg}`);
