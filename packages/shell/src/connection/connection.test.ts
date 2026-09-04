@@ -54,7 +54,7 @@ type TestOperation = {
 type ConnectionManagerTestAdapter = {
 	client: TestClient | RocketRideClient | null;
 	manager: { disconnect(client: RocketRideClient): Promise<void> } | null;
-	_attachPromise: Promise<void>;
+	_attachPromise: Promise<void> | undefined;
 	serverUri: string;
 	pendingEvents: Map<string, unknown>;
 	lifecycleOwner?: TestOperation;
@@ -85,6 +85,7 @@ type ConnectionManagerTestAdapter = {
 	connect(credential?: unknown): Promise<ConnectResult | null>;
 	bootstrap(): Promise<{ result: ConnectResult; appId: string } | null>;
 	disconnect(): Promise<void>;
+	reconnect(): Promise<void>;
 	logout(): Promise<void>;
 };
 
@@ -741,6 +742,132 @@ test('disconnect and logout invalidate an in-flight operation before client clea
 			[{ event: 'shell:disconnected', payload: { reason: 'Disconnected by request', hasError: false } }],
 		);
 	}
+});
+
+test('disconnect detaches the shared client even when no RemoteManager is bound', async () => {
+	const { manager, emitted } = createTestManager();
+	let disconnectCalls = 0;
+	manager.client = testClient({
+		disconnect: async () => { disconnectCalls++; },
+	});
+	manager.manager = null;
+
+	await manager.disconnect();
+
+	assert.equal(disconnectCalls, 1);
+	assert.equal(manager.connectionStatus.state, ConnectionState.DISCONNECTED);
+	assert.deepEqual(
+		emitted.filter(({ event }) => event === 'shell:disconnected'),
+		[{ event: 'shell:disconnected', payload: { reason: 'Disconnected by request', hasError: false } }],
+	);
+});
+
+test('reconnect clears a stale connect operation and logs in again with the stored token', async () => {
+	const { manager, emitted } = createTestManager();
+	manager.serverUri = 'https://shell.example.test';
+	let loginCalls = 0;
+	let disconnectCalls = 0;
+	manager.loadToken = () => 'stored-token';
+	manager.clearToken = () => {};
+	manager.clearSessionAppId = () => {};
+	manager.refreshServices = async () => {};
+	manager.client = testClient({
+		login: async () => {
+			loginCalls++;
+			return authenticatedResult;
+		},
+		disconnect: async () => { disconnectCalls++; },
+		getAccountInfo: () => authenticatedResult,
+	});
+	manager.manager = {
+		disconnect: async () => { disconnectCalls++; },
+	};
+
+	const hungKey = `${RocketRideClient.normalizeUri(manager.serverUri)}\u0000stored-token`;
+	const hung: TestOperation = {
+		key: hungKey,
+		generation: 1,
+		credential: 'stored-token',
+		promise: new Promise(() => {}),
+		connectedPublished: false,
+	};
+	manager.connectionOperation = hung;
+	manager.lifecycleOwner = hung;
+	manager.connectionGeneration = 1;
+	manager.connectionStatus.state = ConnectionState.CONNECTING;
+	manager._attachPromise = Promise.resolve();
+
+	await manager.reconnect();
+
+	assert.equal(disconnectCalls, 1);
+	assert.equal(loginCalls, 1);
+	assert.equal(manager.connectionStatus.state, ConnectionState.CONNECTED);
+	assert.equal(manager._attachPromise, undefined);
+	assert.equal(
+		emitted.some(({ event }) => event === 'shell:login'),
+		true,
+	);
+});
+
+test('reconnect flushes a stale onDisconnected microtask before connecting again', async () => {
+	const { manager, emitted } = createTestManager();
+	manager.serverUri = 'https://shell.example.test';
+	let loginCalls = 0;
+	let disconnectCalls = 0;
+	manager.loadToken = () => 'stored-token';
+	manager.clearToken = () => {};
+	manager.clearSessionAppId = () => {};
+	manager.refreshServices = async () => {};
+	manager.client = testClient({
+		login: async () => {
+			loginCalls++;
+			return authenticatedResult;
+		},
+		disconnect: async () => { disconnectCalls++; },
+		getAccountInfo: () => authenticatedResult,
+	});
+	manager.manager = {
+		disconnect: async () => {
+			disconnectCalls++;
+			// Mimic a late SDK onDisconnected: queued after disconnect returns.
+			// reconnect()'s microtask flush must drain this while lifecycleOwner
+			// is still unset; otherwise it can flip a fresh connect back to
+			// CONNECTING (#1628).
+			queueMicrotask(() => {
+				if (!manager.lifecycleOwner) return;
+				if (manager.connectionStatus.state !== ConnectionState.AUTH_FAILED) {
+					manager.updateConnectionStatus({ state: ConnectionState.CONNECTING, errorKind: undefined });
+				}
+				manager.emit('shell:disconnected', { reason: 'stale transport close', hasError: false });
+			});
+		},
+	};
+
+	const hung: TestOperation = {
+		key: 'hung',
+		generation: 1,
+		credential: 'stored-token',
+		promise: new Promise(() => {}),
+		connectedPublished: true,
+	};
+	manager.connectionOperation = hung;
+	manager.lifecycleOwner = hung;
+	manager.connectionGeneration = 1;
+	manager.connectionStatus.state = ConnectionState.CONNECTING;
+	manager._attachPromise = Promise.resolve();
+
+	await manager.reconnect();
+	await Promise.resolve();
+
+	assert.equal(disconnectCalls, 1);
+	assert.equal(loginCalls, 1);
+	assert.equal(manager.connectionStatus.state, ConnectionState.CONNECTED);
+	assert.equal(
+		emitted.filter(({ event, payload }) =>
+			event === 'shell:disconnected' && (payload as { reason?: string }).reason === 'stale transport close',
+		).length,
+		0,
+	);
 });
 
 test('disconnect does not publish an intentional disconnected event after a newer generation takes ownership', async () => {
