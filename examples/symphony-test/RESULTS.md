@@ -254,6 +254,47 @@ python3 examples/symphony-test/probe_concurrent_loads.py --writers 12 --retry
 
 Credentials are read from `.context/hotdata-test/.env`, then the repo-root `.env`.
 
+## Checking the artifact's claims, not just the outcome
+
+`test_symphony_escape.py` checks what the run produces. `test_symphony_artifact.py`
+checks the claims Divya's published debrief makes about _how_ it produces it — the
+things a passing outcome cannot vouch for, since a run can return the right melody
+while every one of them is false. The claims are transcribed in `ARTIFACT.md`, along
+with the two places this implementation deliberately differs from her text.
+
+```bash
+python3 examples/symphony-test/test_symphony_artifact.py
+python3 examples/symphony-test/test_symphony_artifact.py --wiring-only
+```
+
+Eight claims: DATABASES, ISOLATION, REGISTRY, ATTRIBUTION, BLOCKED, APPEND_ONLY,
+CONTRADICTIONS, REPLAY.
+
+The one worth calling out is ISOLATION, because nothing here had verified it. The
+private rooms were taken on trust — a Database API Token cannot list databases, so
+"each agent has its own" rested on the node's behaviour plus the agents' self-report.
+It does not have to: an agent can report the id of the database its own `db_private_1`
+node provisioned, and the driver can then query _that database directly_, while the run
+is still alive, and read what is in it. The self-report shrinks to one opaque id the
+agent has no way to fake usefully. The check reads each room's `clues` table and fails
+if it holds any beat but its own and the one it was handed a decoy about.
+
+Two claims are expected to be interesting rather than green:
+
+- **DATABASES** asks each agent for five `load_data` calls into its own database
+  (`clues`, `observations`, `hypotheses`, `evidence`, `discoveries`) rather than the one
+  `workings` table the escape test uses. That is five chances to do what agents were
+  already measured doing one time in four — deciding not to write. If it comes back
+  short, that is the finding, and it is the same finding as "publishing must be wiring".
+- **CONTRADICTIONS** passes on three or more, not exactly three. Her live-agent run
+  found 4 — the three planted decoys plus one from a genuine race — so a fourth is the
+  append-only model working, and the check reports extras rather than failing them.
+
+**Status: written and statically verified, not yet run live.** Graph construction, lint
+and the pure check logic are exercised; the eight claims need an engine. The local
+prebuilt (`server-v3.3.1`) predates `db_hotdata`, and the worktree that ran the earlier
+results was in `/tmp` and has been cleaned.
+
 ## Earlier results, still valid
 
 The first round of testing (`test_option1.py`, `test_attach.py`) established the pieces
@@ -346,3 +387,59 @@ CONFLICT up. The demo follows its own advice: telemetry is written to `answers_i
   earlier, too-weak check that only looked at the magic bytes. The Composer now renders the
   file in its sandbox and reports the sha256; the driver rebuilds the same bytes and requires
   the digests to match. Same artifact, proven identical, and the wave dropped to 13 seconds.
+
+---
+
+## Twenty agent nodes in ONE pipeline: it works, and it is slower
+
+The escape runs 20 agents as 20 independent pipeline runs. The obvious alternative is to
+put all twenty on one canvas — which is what a hackathon team will try first, because it
+is the version you can see. `make_swarm_pipe.py` generates it and `test_swarm_pipe.py`
+runs it.
+
+The graph: 64 nodes — 1 chat source, 20 `agent_rocketride`, 20 private `db_hotdata` (no
+`database_id`, so each provisions its own), 20 `memory_internal`, 1 shared `db_hotdata`
+fed by all twenty agents' `answers` lanes, 1 `response_answers`, 1 `llm_openai` carrying
+41 control connections.
+
+### What works
+
+| Claim                                                                     | Result                                                 |
+| ------------------------------------------------------------------------- | ------------------------------------------------------ |
+| The engine opens a 64-node graph with 20 agent nodes                      | PASS — 2.5s                                            |
+| One `db_hotdata` node accepts the `answers` lane from 20 different agents | PASS — many-to-one on a lane, not previously exercised |
+| All 20 agents produce a verdict through that one shared node              | PASS — 20/20                                           |
+| Every verdict beats its decoy                                             | PASS — melody exact                                    |
+
+Sharing needs no `database_id` here: inside one pipeline the node _is_ the shared thing.
+Attach mode is for the case this shape cannot express — agents in **separate** runs.
+
+### What does not: they run in series
+
+| rooms      | 1   | 4   | 8   | 20   |
+| ---------- | --- | --- | --- | ---- |
+| wall clock | 7s  | 28s | 57s | 152s |
+
+About 7.6 seconds per agent, near-perfectly linear. **Twenty agent nodes on one canvas is
+not twenty parallel agents.** The same twenty agents as twenty separate pipeline runs
+finish in ~83s, and that version also gets dependency-ordered waves, which this one
+cannot express at all — one source emits once, so nothing can hold a later batch back.
+
+Giving each agent its own LLM node rather than sharing one changes nothing (8 rooms: 55s
+against 57s), so a contended LLM node is not the cause. The mechanism is not established
+— only that it is not that.
+
+### What to tell anyone building on this
+
+Use the canvas fan-out when the graph is the message: it is far more legible, and for a
+handful of agents the difference does not matter. Use separate pipeline runs when you
+want the parallelism to be real. The two are not interchangeable, and the slow one is the
+one that looks right.
+
+Reproduce:
+
+```bash
+python3 examples/symphony-test/make_swarm_pipe.py            # writes swarm20.pipe
+python3 examples/symphony-test/test_swarm_pipe.py --rooms 8  # 57s
+python3 examples/symphony-test/test_swarm_pipe.py            # 20 agents, 152s
+```
