@@ -104,6 +104,58 @@ jobs:
           labels: |
             org.opencontainers.image.revision=${{ steps.revision.outputs.sha }}
 
+      # The image is built, pushed and signed — but until this step nothing
+      # ever STARTED it. Three broken images reached the registry that way:
+      # onnxruntime-gpu==1.20.1 unsatisfiable (#1754), the runtime install set,
+      # and "No module named 'jwt'" (#1828). Each exited within ~60s of
+      # `docker run`, and each was found by someone pulling `latest`.
+      #
+      # Our own deployments never caught them: the cloud image is assembled
+      # differently and its extension happens to supply what the engine forgets
+      # to declare. "It works for us" is therefore not evidence about the
+      # artefact we publish. This step runs the artefact.
+      #
+      # Deliberately BEFORE signing — a container that cannot start should not
+      # acquire a signature.
+      - name: Smoke test — the published image must start
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+          IMAGE: ghcr.io/${{ github.repository_owner }}/rocketride-engine
+        run: |
+          set -u
+          # -i is load-bearing: with no stdin the engine's watcher thread
+          # busy-polls /dev/null and pins a core (diagnosed in saas #280).
+          docker run -d -i --name rr-smoke -p 5565:5565 "${IMAGE}@${DIGEST}"
+
+          fail() {
+            echo "::error::$1"
+            echo "----- docker logs -----"
+            docker logs rr-smoke 2>&1 | tail -100
+            docker inspect rr-smoke --format 'exit={{.State.ExitCode}} oom={{.State.OOMKilled}} err={{.State.Error}}'
+            exit 1
+          }
+
+          # Failure mode one: the process dies. All three known breakages look
+          # like this and they show up fast.
+          for _ in $(seq 1 36); do
+            running=$(docker inspect -f '{{.State.Running}}' rr-smoke 2>/dev/null || echo false)
+            if [ "$running" != "true" ]; then
+              fail "Container exited before serving — the crash-on-start class."
+            fi
+            code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 http://127.0.0.1:5565/version 2>/dev/null || echo 000)
+            if [ "$code" != "000" ]; then
+              echo "Engine answered /version with HTTP $code"
+              docker rm -f rr-smoke >/dev/null 2>&1 || true
+              exit 0
+            fi
+            sleep 5
+          done
+
+          # Alive but never served. Not one of the known three, but a wedged
+          # engine reads as healthy to a TCP probe (saas #461), so fail rather
+          # than assume it is merely slow.
+          fail "Running but never answered /version within 180s."
+
       # Cosign keyless signing via GitHub OIDC. Signs the image manifest by
       # digest, which covers every tag pointing at it. Verification:
       #   cosign verify ghcr.io/<owner>/rocketride-engine:<tag> \
