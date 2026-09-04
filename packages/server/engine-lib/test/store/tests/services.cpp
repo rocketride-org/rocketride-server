@@ -41,4 +41,13 @@ TEST_CASE("store::Services") {
         REQUIRE(schema.isMember("services"));
         REQUIRE(schema["services"].isObject());
     }
+
+    SECTION("missing provider explains local node setup") {
+        REQUIRE_ERROR(
+            IServices::getServiceDefinition("missing_local_node"),
+            Ec::InvalidSchema,
+            "The service missing_local_node was not found. Check the provider "
+            "name; for a workspace-local node, start the engine with "
+            "--node_path=<directory containing local_nodes>");
+    }
 }
