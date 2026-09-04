@@ -30,12 +30,24 @@ namespace ap::crypto {
 _const auto Base64Table =
     "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"_tv;
 
+// Reverse lookup: alphabet character -> 0..63, 0xFF for everything else
+// (including '=', whitespace, and any other byte). A single lookup per input
+// character then reproduces both the "stop at '='" and "stop at first invalid"
+// behavior of the previous double linear scan.
+_const auto B64Reverse = [] {
+    std::array<uint8_t, 256> table{};
+    for (auto &entry : table) entry = 0xFF;
+    for (uint8_t i = 0; i < Base64Table.size(); ++i)
+        table[_cast<uint8_t>(Base64Table[i])] = i;
+    return table;
+}();
+
 // Encode a string as a base 64 string
 inline Text base64Encode(InputData input) noexcept {
     StackTextArena arena;
     StackText result{arena};
 
-    result.reserve(input.size());
+    result.reserve((input.size() + 2) / 3 * 4);
 
     int i = 0;
     int j = 0;
@@ -79,8 +91,9 @@ inline Text base64Encode(InputData input) noexcept {
 
 // Decode a string from base64
 inline ErrorOr<Buffer> base64Decode(TextView input) noexcept {
+    if (!input) return Buffer{};
+
     int i = 0, j = 0;
-    size_t index;
     unsigned char chr4[4], chr3[3];
 
     StackTextArena arena;
@@ -88,18 +101,16 @@ inline ErrorOr<Buffer> base64Decode(TextView input) noexcept {
 
     result.reserve(input.size());
 
-    while (input && *input != '=' &&
-           (Base64Table.find_first_of(*input)) != string::npos) {
-        chr4[i++] = *input++;
+    // A single table lookup replaces the previous double linear scan of the
+    // alphabet. The sentinel (0xFF) covers '=', whitespace, and any other
+    // non-alphabet byte, so this one check reproduces both the stop-at-'=' and
+    // stop-at-first-invalid termination of the original loop.
+    while (input) {
+        uint8_t value = B64Reverse[_cast<uint8_t>(*input)];
+        if (value == 0xFF) break;
+        chr4[i++] = value;
+        ++input;
         if (i == 4) {
-            for (i = 0; i < 4; i++) {
-                index = Base64Table.find_first_of(chr4[i]);
-                if (index == string::npos)
-                    return Error{Ec::InvalidParam, _location,
-                                 "Failed to decode base64 data"};
-                chr4[i] = _cast<char>(index);
-            }
-
             chr3[0] = (chr4[0] << 2) + ((chr4[1] & 0x30) >> 4);
             chr3[1] = ((chr4[1] & 0xf) << 4) + ((chr4[2] & 0x3c) >> 2);
             chr3[2] = ((chr4[2] & 0x3) << 6) + chr4[3];
@@ -110,14 +121,6 @@ inline ErrorOr<Buffer> base64Decode(TextView input) noexcept {
     }
 
     if (i) {
-        for (j = 0; j < i; j++) {
-            index = Base64Table.find_first_of(chr4[j]);
-            if (index == string::npos)
-                return Error{Ec::InvalidParam, _location,
-                             "Failed to decode base64 data"};
-            chr4[j] = _cast<char>(index);
-        }
-
         chr3[0] = (chr4[0] << 2) + ((chr4[1] & 0x30) >> 4);
         chr3[1] = ((chr4[1] & 0xf) << 4) + ((chr4[2] & 0x3c) >> 2);
 
