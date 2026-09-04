@@ -29,6 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **nodes**: add answer_documents node to bridge answers into documents (#1506)
 - **nodes**: add authoritative_overlay SEC period-scoped cross-check guard (#1430)
 - **nodes**: add cognee node (#1501)
+- **nodes**: add context_optimizer node — fits questions into the model context window by token budget (#1489)
 - **nodes**: add currency_convert_explicit node (#1497)
 - **nodes**: add extract_facts node — document-context + cell-by-cell reader + validator (#1426) (#1545)
 - **nodes**: add n8n workflow-automation node (#1231)

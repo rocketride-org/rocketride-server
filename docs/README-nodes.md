@@ -241,6 +241,7 @@ channel; they have no data lanes and **bind to an agent** (see
 | `anonymize`     | text → text                                | PII detection and redaction                  |
 | `summarization` | text → documents, text                     | Summaries and key points                     |
 | `dictionary`    | text → documents                           | Extracts a dictionary of key terms           |
+| `context_optimizer` | questions → questions                  | Fits questions into the model context window by token budget (experimental) |
 
 ### Image
 
