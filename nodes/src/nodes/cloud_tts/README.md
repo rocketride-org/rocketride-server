@@ -1,22 +1,23 @@
 # Cloud Text To Speech (`cloud_tts`)
 
-One node directory that backs two cloud TTS vendor registrations sharing a single
-`requests`-only engine. The vendor is resolved from the node `logicalType` at
-runtime (same pattern as `index_search`). Audio is emitted as MP3 on the `audio`
-lane; calls go directly from the engine host over HTTPS, **not** through the
-model server.
+One node directory that backs several cloud TTS vendor registrations sharing a
+single `requests`-only engine. The vendor is resolved from the node `logicalType`
+at runtime (same pattern as `index_search`). Audio is emitted as MP3 on the
+`audio` lane; calls go directly from the engine host over HTTPS, **not** through
+the model server.
 
 | Registration                  | Node              | Endpoint                                          | Key env             |
 | ----------------------------- | ----------------- | ------------------------------------------------- | ------------------- |
 | `services.tts_openai.json`     | OpenAI TTS        | `api.openai.com/v1/audio/speech`                  | `OPENAI_API_KEY`    |
 | `services.tts_elevenlabs.json` | ElevenLabs TTS    | `api.elevenlabs.io/v1/text-to-speech/{voice}`     | `ELEVENLABS_API_KEY`|
+| `services.tts_rime.json`       | Rime TTS          | `users.rime.ai/v1/rime-tts`                       | `RIME_API_KEY`      |
 
 ## Configuration
 
 | Field   | Source            | Notes                                                              |
 | ------- | ----------------- | ------------------------------------------------------------------ |
 | Model   | profile           | One profile per model. Model lists maintained manually.            |
-| Voice   | `<prefix>.voice`  | Static per-vendor list.                                            |
+| Voice   | `<prefix>.voice`  | Static per-vendor list. Rime speakers are model-specific, so each Rime profile carries its own `tts_rime.<model>.voice` enum, all merged under `voice`. |
 | API key | `apikey` / env    | Falls back to the vendor environment variable when blank.         |
 
 ## Lanes
@@ -27,13 +28,14 @@ model server.
 
 Each record is sent to the vendor in a single request — there is no chunking.
 The vendor caps per-request input length (OpenAI rejects text over ~4096
-characters with a 400; ElevenLabs ~5000), so split long inputs upstream (e.g. a
-chunker node) before this node. One record over the cap fails that record.
+characters with a 400; ElevenLabs ~5000; Rime 1,000 for coda/mistv2/mistv3 and
+unlimited for arcana), so split long inputs upstream (e.g. a chunker node)
+before this node. One record over the cap fails that record.
 
 ## Code layout
 
 - `IGlobal.py` — resolves the vendor from `logicalType`, holds model/voice/key, dispatches `synthesize`.
-- `openai_tts.py` / `elevenlabs_tts.py` — the per-vendor HTTPS call (returns MP3 bytes).
+- `openai_tts.py` / `elevenlabs_tts.py` / `rime_tts.py` — the per-vendor HTTPS call (returns MP3 bytes).
 - `IInstance.py` — shared lane plumbing (text/documents/questions/answers → audio).
 
 ## Adding a vendor

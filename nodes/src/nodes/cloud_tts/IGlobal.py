@@ -11,7 +11,7 @@ from typing import Any, Tuple
 from rocketlib import IGlobalBase, OPEN_MODE
 from ai.common.config import Config
 
-from . import elevenlabs_tts, openai_tts
+from . import elevenlabs_tts, openai_tts, rime_tts
 
 _MP3_MIME = 'audio/mpeg'
 
@@ -32,6 +32,15 @@ _ENGINES = {
         'default_voice': 'EXAVITQu4vr4xnSDxMaL',
         'env_key': 'ELEVENLABS_API_KEY',
         'label': 'ElevenLabs',
+    },
+    # Rime speakers are model-specific; the services.tts_rime.json profile
+    # conditional renders one speaker enum per model, all merged under `voice`.
+    'rime': {
+        'synthesize': rime_tts.synthesize,
+        'default_model': 'coda',
+        'default_voice': 'astra',
+        'env_key': 'RIME_API_KEY',
+        'label': 'Rime',
     },
 }
 
@@ -91,7 +100,11 @@ class IGlobal(IGlobalBase):
         handed straight to the caller — no temp file round-trip.
         """
         synth = _ENGINES[self._engine]['synthesize']
-        return synth(text, self._model, self._voice, self._api_key), _MP3_MIME
+        audio = synth(text, self._model, self._voice, self._api_key)
+        if not audio:
+            # A 200 with an empty body would otherwise become a zero-byte clip.
+            raise Exception(f'{_ENGINES[self._engine]["label"]} returned no audio for the request')
+        return audio, _MP3_MIME
 
     def endGlobal(self):
         """Nothing to release — the HTTP client is created per request."""
