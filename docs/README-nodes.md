@@ -131,6 +131,7 @@ the same `tool_github` or `tool_tavily` can attach to `agent_deepagent`,
 | `llm_perplexity` | questions → answers  | Perplexity Sonar (web-search models)         |
 | `llm_gmi_cloud`  | questions → answers  | GMI Cloud models                             |
 | `llm_baidu_qianfan` | questions → answers | Baidu Qianfan / ERNIE (OpenAI-compatible Qianfan API) |
+| `llm_glm`        | questions → answers  | Zhipu AI GLM hybrid-reasoning models (Z.ai API or self-hosted vLLM/SGLang) |
 | `llm_openai_api` | questions → answers  | Any OpenAI-compatible endpoint (also ships a Nebius Token Factory preset) |
 
 > `nodes/src/nodes/llm_ibm_watson/` exists but currently ships **no service

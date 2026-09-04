@@ -32,6 +32,7 @@ from markers import (
     requires_qwen,
     requires_minimax,
     requires_baidu_qianfan,
+    requires_glm,
 )
 from core.patcher import get_profiles
 
@@ -307,3 +308,24 @@ def test_baidu_qianfan_profiles_exist_in_api():
         base_url='https://qianfan.baidubce.com/v2',
     )
     _check_missing_models(profiles, live_ids, 'llm_baidu_qianfan')
+
+
+# ---------------------------------------------------------------------------
+# Zhipu AI GLM
+# ---------------------------------------------------------------------------
+
+
+@requires_glm
+def test_glm_profiles_exist_in_api():
+    """Every non-deprecated llm_glm profile model ID must be in the live API.
+
+    Local vLLM/SGLang profiles reuse the cloud model IDs, so they resolve
+    against the live Z.ai API as well.
+    """
+    api_key = os.environ['ROCKETRIDE_GLM_KEY']
+    profiles = _load_profiles('llm_glm')
+    live_ids = _fetch_openai_model_ids(
+        api_key,
+        base_url='https://api.z.ai/api/paas/v4',
+    )
+    _check_missing_models(profiles, live_ids, 'llm_glm')
