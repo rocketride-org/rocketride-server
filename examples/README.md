@@ -171,30 +171,6 @@ chat -> agent (RocketRide Wave) -> response
 
 **Required env vars:** `ROCKETRIDE_ANTHROPIC_KEY`, `ROCKETRIDE_GUILD_KEY_ID`, `ROCKETRIDE_GUILD_KEY_SECRET`, `ROCKETRIDE_GUILD_OWNER`, `ROCKETRIDE_GUILD_WORKSPACE`, `ROCKETRIDE_GUILD_AGENT`
 
-### symphony/
-
-**Multi-agent coordination through a shared Hotdata database.** Two `.pipe` templates
-showing how agents keep private state and share conclusions.
-
-| Template            | Shape                                                                                                                      |
-| ------------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| `investigator.pipe` | One agent, a private database it creates and destroys, and a shared one it attaches to. The unit the fan-out is built from |
-| `hub.pipe`          | Two agents in one pipeline sharing a single `db_hotdata` node, each with its own private database as well                  |
-
-The pattern worth copying: **an agent's `answers` lane is wired into the shared database
-node**, so the pipeline writes the row rather than the agent choosing to. An agent
-instructed to call `load_data` on a shared database skips it most of the time — see
-[the node's README](../../nodes/src/nodes/db_hotdata/README.md#publishing-into-a-shared-database).
-
-One caveat worth knowing before scaling this shape up: agent nodes in a single pipeline
-run close to serially (measured at ~7.6s each across 1, 4, 8 and 20 agents), while the
-same agents as separate pipeline runs are genuinely concurrent. Put the fan-out in the
-driver, not on the canvas, when you want the parallelism to be real.
-
-**Required env vars:** `ROCKETRIDE_OPENAI_KEY`, `ROCKETRIDE_DB_HOTDATA_KEY`, `ROCKETRIDE_DB_HOTDATA_WORKSPACE_ID`
-
----
-
 ## Getting Started
 
 1. Copy a template to your project directory
@@ -202,7 +178,6 @@ driver, not on the canvas, when you want the parallelism to be real.
 3. Open the `.pipe` file in VS Code with the RocketRide extension, or run it with the SDK:
 
 **Python:**
-
 ```python
 from rocketride import RocketRideClient
 
@@ -212,7 +187,6 @@ result = await client.use(filepath='rag-pipeline.pipe')
 ```
 
 **TypeScript:**
-
 ```typescript
 import { RocketRideClient } from 'rocketride';
 
