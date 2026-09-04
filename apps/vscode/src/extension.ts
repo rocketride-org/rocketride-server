@@ -397,7 +397,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 				const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
 				if (workspaceFolder) {
 					const agentMgr = new AgentManager();
-					agentMgr.autoInstall(context.extensionPath, workspaceFolder.uri).catch((error) => {
+					agentMgr.autoInstall(context, context.extensionPath, workspaceFolder.uri).catch((error) => {
 						logger.output(`${icons.warning} Auto agent integration failed: ${error}`);
 					});
 				}
