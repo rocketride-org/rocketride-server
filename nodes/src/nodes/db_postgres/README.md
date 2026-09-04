@@ -8,7 +8,7 @@ Plays two roles in a pipeline. As a pipeline node, it receives natural-language 
 
 Uses SQLAlchemy with the psycopg2 driver (`psycopg2-binary`). The connection string is built as `postgresql+psycopg2://user:password@host/database`; user, password, and database are URL-encoded so reserved characters (`@`, `/`, `#`, `:`) are safe, and the host may carry an explicit port (e.g. `localhost:5433`).
 
-Safety defaults: only `SELECT` statements are permitted for queries (whitelist check, see SQL safety below), generated SQL is validated with `EXPLAIN` against the live database before execution, and raw SQL execution (`QuestionType.EXECUTE`) is disabled by default via `allow_execute`.
+Safety defaults: generated queries run inside a server-side read-only transaction with a statement timeout; only `SELECT`-shaped statements pass the whitelist check (see SQL safety below); generated SQL is validated with `EXPLAIN` against the live database before execution; and raw SQL execution (`QuestionType.EXECUTE`) is disabled by default via `allow_execute`.
 
 The same implementation also ships as a Supabase preset (`services.supabase.json`, protocol `db_supabase://`): Supabase is managed Postgres, so it is a branded configuration, not separate code.
 
@@ -98,6 +98,10 @@ Generated SQL passes two gates before execution:
 
 1. **Whitelist check**: only statements beginning with `SELECT` (optionally prefixed by `EXPLAIN`) are allowed; everything else is rejected. Comments are stripped first so comment-based bypasses are neutralised, every statement in a multi-statement input is checked, `SELECT ... INTO OUTFILE/DUMPFILE` is blocked, and `WITH` (CTE) is deliberately excluded because PostgreSQL accepts CTE-into-mutation (e.g. `WITH x AS (...) DELETE ...`).
 2. **`EXPLAIN` validation**: the query is validated against the live database. If `EXPLAIN` rejects it, the rejected SQL and the database error are fed back to the LLM for a corrected query, up to `max_attempts` times (default 5).
+
+**What enforces read-only.** Both gates above are checks on the statement — its _shape_ and its plan. Neither can tell whether a `SELECT` has side effects, because the difference lives in what the called functions do: `pg_terminate_backend` kills sessions, `pg_read_file`/`LOAD_FILE` read files off the database host, `dblink` opens outbound connections, `nextval` advances a sequence, `FOR UPDATE` takes locks, `pg_sleep` burns the server. The guarantee therefore comes from the database itself: every generated query runs inside a server-side **read-only transaction** with a **statement timeout** (30s by default). The two gates remain as cheap passes in front of it.
+
+**Grant this node a read-only role.** A read-only transaction stops writes, but it cannot stop a privileged connection from reading server-side files or signalling other backends. Point the node at a role with `SELECT` on exactly the tables it needs and nothing else — that is the control that covers those cases.
 
 Insert operations never go through SQL generation; they use the `answers` lane.
 

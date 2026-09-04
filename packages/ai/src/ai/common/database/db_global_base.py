@@ -39,6 +39,7 @@ session lifecycle — is handled here and is dialect-agnostic.
 """
 
 from abc import ABC, abstractmethod
+from contextlib import contextmanager
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -62,6 +63,13 @@ from ai.common.config import Config
 
 DEFAULT_MAX_EXECUTE_ROWS = 25000
 
+# Seconds a generated query may run before the server cancels it. Applied as a
+# statement timeout inside read_only_connection(); there was previously no
+# bound on execution time at all, so a single pg_sleep() or cartesian product
+# could hold a worker and a connection indefinitely.
+DEFAULT_QUERY_TIMEOUT_SECONDS = 30
+MAX_QUERY_TIMEOUT_SECONDS = 3600
+
 
 class DatabaseGlobalBase(IGlobalBase, ABC):
     """Abstract base for the IGlobal layer of any relational database node."""
@@ -76,6 +84,84 @@ class DatabaseGlobalBase(IGlobalBase, ABC):
     max_validation_attempts: int = 5
     allow_execute: bool = False
     max_execute_rows: int = DEFAULT_MAX_EXECUTE_ROWS
+    query_timeout: int = DEFAULT_QUERY_TIMEOUT_SECONDS
+
+    # ------------------------------------------------------------------
+    # Read-only execution
+    # ------------------------------------------------------------------
+
+    @contextmanager
+    def read_only_connection(self):
+        """Yield a connection the database itself will not let write.
+
+        ``is_sql_safe`` checks statement SHAPE, which cannot decide whether a
+        ``SELECT`` has side effects — the difference lives in what the called
+        functions do. ``SELECT ... INTO``, ``nextval()``, ``FOR UPDATE`` and a
+        volatile UDF that writes all pass a text check and are all refused by
+        a server-side read-only transaction, because the engine knows what
+        they do.
+
+        A statement timeout rides along: without one, ``pg_sleep(3600)`` or a
+        cartesian product holds a worker and a connection for as long as it
+        likes. Neither existed before — ``create_engine`` was called with a
+        connect timeout and nothing else.
+
+        Unknown dialects yield a plain connection rather than failing closed:
+        this is defence in depth behind ``is_sql_safe``, and refusing to run
+        on an unrecognised backend would break working deployments for a
+        guarantee that was never there before.
+        """
+        if self.engine is None:
+            raise RuntimeError('Database engine not initialized')
+
+        conn = self.engine.connect()
+        try:
+            for statement in self._read_only_statements(self.engine.dialect.name):
+                conn.exec_driver_sql(statement)
+            yield conn
+        finally:
+            # A read path never commits. Roll back explicitly so a dialect
+            # whose DDL escaped the read-only check cannot persist by way of
+            # some later commit.
+            try:
+                conn.rollback()
+            except Exception as exc:  # pragma: no cover - teardown best effort
+                error(f'read-only connection rollback failed: {exc}')
+            conn.close()
+
+    def _read_only_statements(self, dialect: str) -> List[str]:
+        """Per-dialect statements that open a bounded, read-only transaction.
+
+        Returns an empty list for a dialect we do not recognise; the caller
+        then runs with no server-side guarantee, exactly as it did before.
+        """
+        timeout_ms = max(1, int(self.query_timeout)) * 1000
+        if dialect in ('postgresql', 'postgres'):
+            return [
+                'BEGIN READ ONLY',
+                f'SET LOCAL statement_timeout = {timeout_ms}',
+                f'SET LOCAL idle_in_transaction_session_timeout = {timeout_ms}',
+            ]
+        if dialect == 'mysql':
+            return [
+                f'SET SESSION max_execution_time = {timeout_ms}',
+                'START TRANSACTION READ ONLY',
+            ]
+        if dialect == 'mariadb':
+            # MariaDB never adopted MySQL's max_execution_time. Its own knob is
+            # max_statement_time, and it is in SECONDS, not milliseconds —
+            # sending the MySQL spelling here raises "unknown system variable"
+            # and takes the whole connection down with it.
+            return [
+                f'SET SESSION max_statement_time = {max(1, int(self.query_timeout))}',
+                'START TRANSACTION READ ONLY',
+            ]
+        if dialect == 'clickhouse':
+            return [
+                'SET readonly = 1',
+                f'SET max_execution_time = {max(1, int(self.query_timeout))}',
+            ]
+        return []
 
     # ------------------------------------------------------------------
     # Abstract interface — derived classes MUST implement these two methods
@@ -88,6 +174,19 @@ class DatabaseGlobalBase(IGlobalBase, ABC):
         Must return a dict with exactly these keys:
             host, user, password, database, table
         """
+
+    def _query_timeout(self, config: Dict[str, Any]) -> int:
+        """Seconds a generated query may run before the server cancels it.
+
+        Override in a derived class to read the value from the node's config.
+        """
+        raw = config.get('queryTimeout')
+        if raw is None:
+            return DEFAULT_QUERY_TIMEOUT_SECONDS
+        try:
+            return max(1, min(int(raw), MAX_QUERY_TIMEOUT_SECONDS))
+        except (TypeError, ValueError):
+            return DEFAULT_QUERY_TIMEOUT_SECONDS
 
     def _max_validation_attempts(self, config: Dict[str, Any]) -> int:
         """Return the maximum number of EXPLAIN-validation retries for generated SQL.
@@ -428,7 +527,10 @@ class DatabaseGlobalBase(IGlobalBase, ABC):
         if not self.engine:
             return False, 'Database engine not initialized'
         try:
-            with self.engine.connect() as conn:
+            # Planning a statement should not be able to change anything, but
+            # the validation path is fed LLM output too — run it under the
+            # same read-only transaction the execution path uses.
+            with self.read_only_connection() as conn:
                 conn.execute(text(f'EXPLAIN {query}'))
             return True, ''
         except Exception as e:
@@ -446,6 +548,7 @@ class DatabaseGlobalBase(IGlobalBase, ABC):
         # Read behavior settings from config before opening the engine so
         # they're available to the instance as soon as beginGlobal returns.
         self.max_validation_attempts = max(1, self._max_validation_attempts(raw))
+        self.query_timeout = self._query_timeout(raw)
         self.db_description = (self._db_description(raw) or '').strip()
 
         # The execute tool is opt-in: callers invoking the 'execute' tool

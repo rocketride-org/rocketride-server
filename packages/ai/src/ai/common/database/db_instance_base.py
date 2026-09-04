@@ -561,9 +561,15 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
         return result.answer
 
     def _executeSQLQuery(self, query: str) -> list[dict] | None:
-        """Execute a SQL SELECT query and return rows as a list of dicts."""
+        """Execute an LLM-generated query and return rows as a list of dicts.
+
+        Runs inside ``read_only_connection()``: the statement has passed the
+        shape check in ``is_sql_safe``, which cannot tell whether a SELECT has
+        side effects, so the read-only guarantee is taken from the database
+        rather than from the text of the query.
+        """
         try:
-            with self.IGlobal.engine.connect() as conn:
+            with self.IGlobal.read_only_connection() as conn:
                 result = conn.execute(text(query))
                 rows = result.fetchall()
                 column_names = result.keys()
