@@ -527,6 +527,46 @@
 				"ernie-4.5-turbo-32k": 32768,
 				"ernie-5.0-thinking-preview": 128000
 			}
+		},
+		// ----------------------------------------------------------------------
+		// NVIDIA Nemotron — Nemotron text chat models through the OpenAI-compatible
+		// build.nvidia.com API. The /v1/models endpoint lists the full multi-vendor
+		// catalog (Llama, GLM, Kimi, Mistral, ...), so the include filter keeps only
+		// the nvidia/*nemotron* family; vision (VL/Omni), safety, parse, retriever,
+		// and speech variants are excluded (they belong in dedicated nodes).
+		// ----------------------------------------------------------------------
+		"llm_nemotron": {
+			"handler": "cloud",
+			"env_var": "ROCKETRIDE_NVIDIA_KEY",
+			"module": "nemotron",
+			"models_endpoint": "https://integrate.api.nvidia.com/v1/models",
+			"auth_header": "Authorization",
+			"auth_prefix": "Bearer",
+			"smoke_test": "chat",
+			"model_filter": {
+				"include_prefixes": ["nvidia/nemotron", "nvidia/llama-3.1-nemotron", "nvidia/llama-3.3-nemotron"],
+				"exclude_prefixes": [],
+				"exclude_patterns": ["vl", "vision", "omni", "safety", "guard", "parse", "ocr", "embed", "rerank", "retriever", "asr", "tts", "speech", "audio", "reward"]
+			},
+			// Local NIM profiles reuse the cloud model IDs, so they resolve against
+			// the live API too — protect them (and the seeded cloud set) so the
+			// keyless OpenRouter fallback can never wrongly retire them.
+			"protected_profiles": [
+				["custom", "2126-04-09"],
+				["nemotron-3-super", "2027-02-01"],
+				["nemotron-3-ultra", "2027-02-01"],
+				["nemotron-3-nano", "2027-02-01"],
+				["nemotron-3-super-local", "2027-02-01"],
+				["nemotron-3-nano-local", "2027-02-01"]
+			],
+			// NVIDIA's /v1/models omits context_window; lock the seeded models at
+			// their model-card values.
+			"default_context_window": 131072,
+			"token_limit_overrides": {
+				"nvidia/nemotron-3-super-120b-a12b": 1000000,
+				"nvidia/nemotron-3-ultra-550b-a55b": 1000000,
+				"nvidia/nemotron-3-nano-30b-a3b": 262144
+			}
 		}
 	},
 	// --------------------------------------------------------------------------
@@ -570,6 +610,8 @@
 		"minimax-": "MiniMax ",
 		"kimi-": "Kimi ",
 		"moonshot-": "Moonshot ",
+		"nvidia/nemotron-": "Nemotron ",
+		"nvidia/llama-": "Llama ",
 		"text-embedding-": "Text Embedding ",
 		"o1": "o1",
 		"o3": "o3",
@@ -631,7 +673,13 @@
 			// // Baidu Qianfan
 			"ernie-4.5-turbo-128k": 4096,
 			"ernie-4.5-turbo-32k": 4096,
-			"ernie-5.0-thinking-preview": 8192
+			"ernie-5.0-thinking-preview": 8192,
+			// NVIDIA Nemotron — reasoning models with configurable thinking budgets;
+			// NVIDIA's /v1/models publishes no output limit, so pin a budget large
+			// enough that thinking + answer are not truncated.
+			"nvidia/nemotron-3-super-120b-a12b": 32768,
+			"nvidia/nemotron-3-ultra-550b-a55b": 32768,
+			"nvidia/nemotron-3-nano-30b-a3b": 32768
 		}
 	},
 	// --------------------------------------------------------------------------

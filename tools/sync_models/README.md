@@ -82,6 +82,7 @@ python tools/sync_models/src/sync_models.py --provider llm_openai --model-source
 | `llm_minimax`        | `llm_minimax`        | `ROCKETRIDE_MINIMAX_KEY`          |
 | `llm_kimi`           | `llm_kimi`           | `ROCKETRIDE_KIMI_KEY`             |
 | `llm_baidu_qianfan`  | `llm_baidu_qianfan`  | `ROCKETRIDE_BAIDU_QIANFAN_KEY`    |
+| `llm_nemotron`       | `llm_nemotron`       | `ROCKETRIDE_NVIDIA_KEY`           |
 
 If an API key env var is not set the provider is skipped with a warning (not an error).
 Set keys in a `.env` file in the repo root or export them in the shell.

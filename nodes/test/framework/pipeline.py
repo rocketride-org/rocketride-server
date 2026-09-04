@@ -130,6 +130,7 @@ _LLM_MOCK_CREDENTIALS = {
     'llm_qwen': {'apikey': 'sk-mock-placeholder-for-tests'},
     'llm_minimax': {'apikey': 'sk-mock-placeholder-for-tests'},
     'llm_baidu_qianfan': {'apikey': 'mock-baidu-qianfan-placeholder-for-tests'},
+    'llm_nemotron': {'apikey': 'nvapi-mock-placeholder-for-tests'},
     'llm_vision_ollama': {'apikey': 'sk-mock-placeholder-for-tests'},
     'rerank_cohere': {'apikey': 'mock-cohere-placeholder-for-tests'},
     'tool_apify': {'apikey': 'mock-apify-placeholder-for-tests'},
