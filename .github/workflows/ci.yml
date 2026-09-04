@@ -216,6 +216,33 @@ jobs:
       - run: ruff format --check
 
   # ---------------------------------------------------------------------------
+  #  README sources — the four registry READMEs (npm, PyPI x2, VS Code
+  #  Marketplace + OpenVSX) are NOT stored in git: each package's
+  #  scripts/tasks.js copies one in from docs/ at build time. That copy is
+  #  silent when it breaks, and a registry README cannot be corrected without
+  #  publishing a new version — so a stale one is live until the next release
+  #  of that artifact. This makes the three ways it breaks loud instead.
+  # ---------------------------------------------------------------------------
+  readme-sources:
+    name: README sources
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+      # Dependency-free (node:fs + node:path only), so no install step.
+      #
+      # The gate's own regression test runs FIRST and in the same job. A gate
+      # that has quietly stopped detecting anything still exits 0, so the test
+      # is the only thing standing between "green" and "green and meaningless".
+      # Running it here rather than in a job of its own keeps the two from
+      # drifting apart — you cannot end up running the gate without its test.
+      - run: node --test .github/scripts/check-readme-sources.test.mjs
+      - run: node .github/scripts/check-readme-sources.mjs
+
+  # ---------------------------------------------------------------------------
   #  gitleaks — secret scan. Installs the binary directly because the upstream
   #  gitleaks-action v2 requires a paid GITLEAKS_LICENSE for org-owned repos;
   #  the binary itself is MIT-licensed and free. Mirrors the local lefthook hook.
@@ -335,7 +362,7 @@ jobs:
   # ---------------------------------------------------------------------------
   ci-ok:
     name: CI OK
-    needs: [init, changes, build, helm-changes, helm-lint, ruff-check, gitleaks, shell-contract]
+    needs: [init, changes, build, helm-changes, helm-lint, ruff-check, gitleaks, shell-contract, readme-sources]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -343,11 +370,11 @@ jobs:
         run: |
           if [[ "${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}" == "true" ]]; then
             echo "❌ One or more CI jobs failed or were cancelled."
-            echo "Results: init=${{ needs.init.result }}, changes=${{ needs.changes.result }}, build=${{ needs.build.result }}, helm-changes=${{ needs.helm-changes.result }}, helm-lint=${{ needs.helm-lint.result }}, ruff-check=${{ needs['ruff-check'].result }}, gitleaks=${{ needs.gitleaks.result }}, shell-contract=${{ needs['shell-contract'].result }}"
+            echo "Results: init=${{ needs.init.result }}, changes=${{ needs.changes.result }}, build=${{ needs.build.result }}, helm-changes=${{ needs.helm-changes.result }}, helm-lint=${{ needs.helm-lint.result }}, ruff-check=${{ needs['ruff-check'].result }}, gitleaks=${{ needs.gitleaks.result }}, shell-contract=${{ needs['shell-contract'].result }}, readme-sources=${{ needs['readme-sources'].result }}"
             exit 1
           fi
           echo "✅ All CI checks passed (or were correctly skipped)."
-          echo "Results: init=${{ needs.init.result }}, changes=${{ needs.changes.result }}, build=${{ needs.build.result }}, helm-changes=${{ needs.helm-changes.result }}, helm-lint=${{ needs.helm-lint.result }}, ruff-check=${{ needs['ruff-check'].result }}, gitleaks=${{ needs.gitleaks.result }}, shell-contract=${{ needs['shell-contract'].result }}"
+          echo "Results: init=${{ needs.init.result }}, changes=${{ needs.changes.result }}, build=${{ needs.build.result }}, helm-changes=${{ needs.helm-changes.result }}, helm-lint=${{ needs.helm-lint.result }}, ruff-check=${{ needs['ruff-check'].result }}, gitleaks=${{ needs.gitleaks.result }}, shell-contract=${{ needs['shell-contract'].result }}, readme-sources=${{ needs['readme-sources'].result }}"
 
   # ---------------------------------------------------------------------------
   #  Discord — update PR embed with final check counts after CI completes.
