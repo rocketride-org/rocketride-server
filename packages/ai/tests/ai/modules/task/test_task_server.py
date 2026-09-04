@@ -994,3 +994,99 @@ def test_build_task_account_info_populates_organization():
     # The task's own team is present with the granted permissions, so a pk_
     # subscriber resolves to a non-empty permission list for its own task.
     assert resolve_task_permissions(info, 'team-1') == ['task.data']
+
+
+# ---------------------------------------------------------------------------
+# _monitor_ttl: the counter itself, and the two halves of the trade
+# ---------------------------------------------------------------------------
+
+
+def _ttl_task(*, ttl, idle):
+    """A task stand-in whose ``_idle_time`` is a real int, not a MagicMock attribute.
+
+    The existing TTL tests assert only on ``stop_task``, so a mutation of the
+    counter passes silently. These assert the counter.
+    """
+    task = MagicMock()
+    task.is_task_complete = MagicMock(return_value=False)
+    task._ttl = ttl
+    task._idle_time = idle
+    return task
+
+
+async def _one_ttl_cycle(monkeypatch, ts, *, check=60):
+    """Drive exactly one iteration of ``_monitor_ttl`` and stop."""
+    from ai.modules.task import task_server as ts_mod
+
+    counter = {'n': 0}
+
+    async def _sleep_one_then_stop(_delay):
+        counter['n'] += 1
+        if counter['n'] > 1:
+            raise _LoopBreak
+
+    monkeypatch.setattr(ts_mod.asyncio, 'sleep', _sleep_one_then_stop)
+    monkeypatch.setattr(ts_mod, 'CONST_TTL_CHECK', check)
+
+    with pytest.raises(_LoopBreak):
+        await TaskServer._monitor_ttl(ts)
+
+
+@pytest.mark.asyncio
+async def test_monitor_ttl_ages_a_silent_task(monkeypatch):
+    """A task nothing has touched still ages, so the reaper is not disabled."""
+    ts = _make_server()
+    ts.stop_task = AsyncMock()
+    task = _ttl_task(ttl=900, idle=0)
+    ts._task_control['tk_quiet'] = _make_control(token='tk_quiet', task=task)
+
+    await _one_ttl_cycle(monkeypatch, ts)
+
+    assert task._idle_time == 60, 'a silent task must accumulate idle time'
+    ts.stop_task.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_monitor_ttl_reaps_a_task_that_stayed_silent(monkeypatch):
+    """The other half of the trade: an abandoned task is still collected."""
+    ts = _make_server()
+    ts.stop_task = AsyncMock()
+    task = _ttl_task(ttl=900, idle=860)
+    ts._task_control['tk_abandoned'] = _make_control(token='tk_abandoned', task=task)
+
+    await _one_ttl_cycle(monkeypatch, ts)
+
+    ts.stop_task.assert_awaited_once_with('tk_abandoned', reason='ttl')
+
+
+@pytest.mark.asyncio
+async def test_monitor_ttl_spares_a_task_whose_timer_was_reset(monkeypatch):
+    """Work resets the counter, so a busy task survives a cycle it would have died in.
+
+    This is the whole point of the change: on_event zeroes ``_idle_time`` for a
+    working dev task, and the reaper then sees it as young.
+    """
+    ts = _make_server()
+    ts.stop_task = AsyncMock()
+    task = _ttl_task(ttl=900, idle=860)
+    task._idle_time = 0  # what on_event does when the pipeline reports work
+    ts._task_control['tk_busy'] = _make_control(token='tk_busy', task=task)
+
+    await _one_ttl_cycle(monkeypatch, ts)
+
+    assert task._idle_time == 60
+    ts.stop_task.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_monitor_ttl_leaves_a_zero_ttl_counter_alone(monkeypatch):
+    """``ttl: 0`` skips before the increment, so its idle counter never moves."""
+    ts = _make_server()
+    ts.stop_task = AsyncMock()
+    task = _ttl_task(ttl=0, idle=0)
+    ts._task_control['tk_immortal'] = _make_control(token='tk_immortal', task=task)
+
+    await _one_ttl_cycle(monkeypatch, ts)
+
+    assert task._idle_time == 0
+    ts.stop_task.assert_not_awaited()
