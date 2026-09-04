@@ -46,6 +46,34 @@ import {
 // Global counter for generating unique client IDs
 let clientId = 0;
 
+/** Server-side hard cap on one media_read (MAX_CHUNK_SIZE in file_store.py). */
+const MEDIA_CHUNK_SIZE = 4_194_304;
+
+/** The MP4 `codecs=` string, read from its `avcC` box. MediaSource rejects a guess. */
+function mp4CodecFromInitSegment(chunk: Uint8Array): string | undefined {
+	// avcC = AVCDecoderConfigurationRecord: version, profile, constraints, level.
+	for (let i = 0; i + 8 < chunk.length; i++) {
+		if (chunk[i] === 0x61 && chunk[i + 1] === 0x76 && chunk[i + 2] === 0x63 && chunk[i + 3] === 0x43) {
+			const profile = chunk[i + 5];
+			const constraints = chunk[i + 6];
+			const level = chunk[i + 7];
+			const hex = (b: number) => b.toString(16).padStart(2, '0');
+			return `video/mp4; codecs="avc1.${hex(profile)}${hex(constraints)}${hex(level)}"`;
+		}
+	}
+	return undefined;
+}
+
+/** The MIME to hand MediaSource, or undefined to fall back to Blob playback. */
+function playableMseType(mime: string, initSegment: Uint8Array): string | undefined {
+	if (typeof MediaSource === 'undefined') return undefined;
+	const base = mime.split(';')[0].trim();
+	let candidate: string | undefined;
+	if (base === 'video/mp4') candidate = mp4CodecFromInitSegment(initSegment);
+	else if (base === 'audio/mpeg') candidate = base;
+	return candidate && MediaSource.isTypeSupported(candidate) ? candidate : undefined;
+}
+
 /**
  * Streaming data pipe for sending large datasets to RocketRide pipelines.
  *
@@ -1766,7 +1794,8 @@ export class RocketRideClient extends DAPClient {
 			mimetype?: string;
 		}>,
 		token: string,
-		maxConcurrent = 5
+		maxConcurrent = 5,
+		onSSE?: (type: string, data: Record<string, unknown>) => Promise<void>
 	): Promise<UPLOAD_RESULT[]> {
 		const results: UPLOAD_RESULT[] = new Array(files.length);
 		if (!Number.isFinite(maxConcurrent) || !Number.isInteger(maxConcurrent) || maxConcurrent < 1) {
@@ -1817,7 +1846,7 @@ export class RocketRideClient extends DAPClient {
 
 			try {
 				// Step 1: Create and open pipe (waits for server to allocate)
-				pipe = await this.pipe(token, this._objinfoWithSize({ name: file.name, ...objinfo }, fileSize), finalMimetype);
+				pipe = await this.pipe(token, this._objinfoWithSize({ name: file.name, ...objinfo }, fileSize), finalMimetype, undefined, onSSE);
 				await pipe.open();
 
 				// Step 2: Send status update AFTER we have the pipe
@@ -2822,6 +2851,207 @@ export class RocketRideClient extends DAPClient {
 	async appWhere(appId: string): Promise<Array<{ rung: string; handle: string; version: number; appVersion: string; state: string; deployedAt?: number }>> {
 		const body = await this.call('rrext_app_deploy', { subcommand: 'where', appId });
 		return (body as any)?.pins ?? [];
+	}
+
+	// ============================================================================
+	// MEDIA STREAMING (reliable chunk pull for consumers without task.store)
+	// ============================================================================
+
+	/**
+	 * Open a produced media artifact for reading over the reliable DAP channel.
+	 *
+	 * Unlike {@link fsOpen}, this requires only `task.data` (the same permission
+	 * that receives the `artifact_path` announcement) and is restricted to the
+	 * `outputs/` prefix server-side — so a consumer without `task.store` can pull
+	 * its own produced media.
+	 *
+	 * @param path - Artifact path from the `artifact_path` SSE event (under `outputs/`)
+	 * @returns `handle`, the bytes available *so far*, and whether the producer finished
+	 */
+	async mediaOpen(path: string): Promise<{ handle: string; size: number; complete: boolean }> {
+		return this.call('rrext_media', { subcommand: 'media_open', path });
+	}
+
+	/**
+	 * Read one chunk from an open media handle.
+	 *
+	 * Waits for the producing node: empty bytes always mean the stream ended.
+	 *
+	 * @param handle - Handle from {@link mediaOpen}
+	 * @param offset - Byte offset to read from
+	 * @param length - Max bytes to read (default and max 4 MiB)
+	 * @returns The bytes read, and whether the producer has finished
+	 */
+	async mediaRead(
+		handle: string,
+		offset: number = 0,
+		length: number = MEDIA_CHUNK_SIZE
+	): Promise<{ data: Uint8Array; complete: boolean }> {
+		// call() unwraps response.body and would drop response.arguments, where the
+		// server puts the binary payload.
+		const message = this.buildRequest('rrext_media', {
+			arguments: { subcommand: 'media_read', handle, offset, length },
+		});
+		this._onTrace?.(TraceType.Request, message);
+		const response = await this.request(message);
+		if (response.success === false) {
+			this._onTrace?.(TraceType.Error, response);
+			throw new Error(response.message ?? 'media_read failed');
+		}
+		this._onTrace?.(TraceType.Success, response);
+		return {
+			data: ((response as any).arguments?.data as Uint8Array) || new Uint8Array(0),
+			complete: Boolean((response as any).body?.complete),
+		};
+	}
+
+	/** Close a media read handle. */
+	async mediaClose(handle: string): Promise<void> {
+		await this.call('rrext_media', { subcommand: 'media_close', handle });
+	}
+
+	/**
+	 * Pull a produced media artifact chunk by chunk, yielding each as it arrives.
+	 *
+	 * Each read blocks server-side until bytes exist; stops at the first empty chunk.
+	 *
+	 * @param path - Artifact path from the `artifact_path` SSE event
+	 */
+	async *mediaChunks(path: string): AsyncGenerator<Uint8Array, void, void> {
+		const { handle } = await this.mediaOpen(path);
+		try {
+			let offset = 0;
+			for (;;) {
+				const { data } = await this.mediaRead(handle, offset);
+				if (data.length === 0) return;
+				offset += data.length;
+				yield data;
+			}
+		} finally {
+			await this.mediaClose(handle).catch(() => undefined);
+		}
+	}
+
+	/**
+	 * Pull a produced media artifact and reassemble it into a Blob.
+	 *
+	 * Waits for the whole artifact; prefer {@link mediaPlaybackUrl} for playback.
+	 *
+	 * @param path - Artifact path from the `artifact_path` SSE event
+	 * @param mime - MIME type to stamp on the Blob (from the same event)
+	 */
+	async mediaFetchBlob(path: string, mime?: string): Promise<Blob> {
+		const chunks: Uint8Array[] = [];
+		for await (const chunk of this.mediaChunks(path)) chunks.push(chunk);
+		return new Blob(chunks as BlobPart[], mime ? { type: mime } : undefined);
+	}
+
+	/**
+	 * A `src` for an `<audio>`/`<video>` element that plays while the media is
+	 * still being produced.
+	 *
+	 * Reads the first chunk before deciding: for MP4 the codec lives in the init segment.
+	 * A browser that cannot play it progressively gets the whole artifact as a Blob.
+	 * Revoke the returned URL when the element goes away.
+	 *
+	 * @param path - Artifact path from the `artifact_path` SSE event
+	 * @param mime - MIME type from the same event
+	 */
+	async mediaPlaybackUrl(path: string, mime?: string, signal?: AbortSignal): Promise<string> {
+		const chunks = this.mediaChunks(path);
+		// Aborting closes the generator — its `finally` sends `mediaClose` — so the server-side
+		// handle is released even if the returned URL is never attached and the pump never starts
+		// (its `sourceopen` never fires), or the caller navigates away mid-stream.
+		if (signal) signal.addEventListener('abort', () => void chunks.return(undefined), { once: true });
+		const first = await chunks.next();
+		if (first.done) return URL.createObjectURL(new Blob([], mime ? { type: mime } : undefined));
+
+		const type = mime ? playableMseType(mime, first.value) : undefined;
+		if (!type) {
+			// No progressive path: drain the rest and play the whole thing.
+			const rest: Uint8Array[] = [first.value];
+			for await (const chunk of chunks) rest.push(chunk);
+			return URL.createObjectURL(new Blob(rest as BlobPart[], mime ? { type: mime } : undefined));
+		}
+
+		const mediaSource = new MediaSource();
+		const url = URL.createObjectURL(mediaSource);
+		mediaSource.addEventListener(
+			'sourceopen',
+			() => void this.pumpIntoSourceBuffer(type, first.value, chunks, mediaSource),
+			{ once: true }
+		);
+		return url;
+	}
+
+	/** Feed the first chunk and everything after it into a SourceBuffer, in order. */
+	private async pumpIntoSourceBuffer(
+		type: string,
+		first: Uint8Array,
+		rest: AsyncGenerator<Uint8Array, void, void>,
+		mediaSource: MediaSource
+	): Promise<void> {
+		try {
+			const buffer = mediaSource.addSourceBuffer(type);
+			// Our encoders stamp real timestamps (a first frame can land at t=2s), and the
+			// element would sit at t=0 on an empty buffer. 'sequence' rebases onto zero.
+			buffer.mode = 'sequence';
+
+			// A rejected chunk fires `error` then `updateend`; waiting only for updateend would
+			// keep feeding a dead buffer in silence. (appendBuffer itself throws synchronously on
+			// QuotaExceededError — handled in appendWithEviction below.)
+			const appended = () =>
+				new Promise<void>((resolve, reject) => {
+					const done = () => {
+						cleanup();
+						resolve();
+					};
+					const failed = () => {
+						cleanup();
+						reject(new Error(`SourceBuffer rejected a ${type} chunk`));
+					};
+					const cleanup = () => {
+						buffer.removeEventListener('updateend', done);
+						buffer.removeEventListener('error', failed);
+					};
+					buffer.addEventListener('updateend', done);
+					buffer.addEventListener('error', failed);
+				});
+
+			// appendBuffer throws QuotaExceededError synchronously once the SourceBuffer's
+			// coded-frame budget is full (tens of MB in Chrome). Nothing evicts on its own, so a
+			// long video would otherwise die partway with a decode error. Drop the oldest
+			// (already-played, on a progressive stream) range, keeping a window near the playhead,
+			// and retry the append.
+			const KEEP_SECONDS = 30;
+			const appendWithEviction = async (chunk: BufferSource): Promise<void> => {
+				try {
+					buffer.appendBuffer(chunk);
+					await appended();
+					return;
+				} catch (e) {
+					if ((e as { name?: string }).name !== 'QuotaExceededError' || buffer.buffered.length === 0) throw e;
+				}
+				const start = buffer.buffered.start(0);
+				const end = buffer.buffered.end(buffer.buffered.length - 1);
+				const removeEnd = Math.max(start, end - KEEP_SECONDS);
+				if (removeEnd > start) {
+					buffer.remove(start, removeEnd);
+					await appended();
+				}
+				buffer.appendBuffer(chunk);
+				await appended();
+			};
+
+			await appendWithEviction(first as BufferSource);
+			for await (const chunk of rest) {
+				await appendWithEviction(chunk as BufferSource);
+			}
+			if (mediaSource.readyState === 'open') mediaSource.endOfStream();
+		} catch (e) {
+			console.error(`media: progressive playback failed for ${type}`, e);
+			if (mediaSource.readyState === 'open') mediaSource.endOfStream('decode');
+		}
 	}
 
 	// ============================================================================

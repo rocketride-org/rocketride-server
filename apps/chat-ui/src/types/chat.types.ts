@@ -36,6 +36,14 @@ export interface Message {
 	timestamp: string;
 	resultKey?: string | undefined;
 	sseType?: string;
+	// Inline media: the message renders a player instead of markdown. filePath is
+	// pulled over rrext_media; mediaUrl is a data URI (the base64 fallback).
+	filePath?: string | undefined;
+	mediaUrl?: string | undefined;
+	// Live WHEP url — the renderer opens a WebRTC stream instead of pulling.
+	whepUrl?: string | undefined;
+	mediaMime?: string | undefined;
+	mediaName?: string | undefined;
 }
 
 /**

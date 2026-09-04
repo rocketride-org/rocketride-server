@@ -296,6 +296,32 @@ const downloadUrl = await client.fsGetUrl('uploads/video.mp4', undefined, 'my vi
 ```
 
 
+### Live media (produced audio/video)
+
+Pull media a pipeline produces — progressively while it is still being produced, or live over WebRTC. The engine spools each produced artifact to the store and, when an SFU is configured, also pushes it live; the `artifact_path` SSE event carries the `path`, the `mime_type`, and (for live) a WHEP `url`. Prefer `mediaPlaybackUrl` for playback and `openWhepStream` for the live case.
+
+| Method | Signature | Returns | Description |
+| --- | --- | --- | --- |
+| `mediaPlaybackUrl` | `mediaPlaybackUrl(path: string, mime?: string, signal?: AbortSignal): Promise<string>` | `Promise<string>` | A `src` for an `<audio>`/`<video>` element that plays while the media is still being produced (progressive MSE where the browser supports it, else the whole Blob). Revoke the URL when the element goes away; pass an `AbortSignal` and abort it on unmount to release the server-side read handle. |
+| `mediaFetchBlob` | `mediaFetchBlob(path: string, mime?: string): Promise<Blob>` | `Promise<Blob>` | Pull the whole artifact and reassemble it into a `Blob`. Waits for completion — prefer `mediaPlaybackUrl` for playback. |
+| `mediaChunks` | `mediaChunks(path: string): AsyncGenerator<Uint8Array>` | `AsyncGenerator<Uint8Array>` | Yield the artifact chunk by chunk as it arrives; each read blocks server-side until bytes exist, stopping at the first empty chunk. Closing the generator sends `mediaClose`. |
+| `mediaOpen` / `mediaRead` / `mediaClose` | `mediaOpen(path)` / `mediaRead(handle, offset)` / `mediaClose(handle)` | — | Low-level handle lifecycle behind `mediaChunks`; prefer the generator. |
+
+**`openWhepStream`** (standalone export, browser) — `openWhepStream(url: string): Promise<{ stream: MediaStream; close: () => void }>`: opens the live WHEP stream the announce named; attach `stream` via `srcObject`, and `close()` tears down the peer connection and releases the WHEP session.
+
+```typescript
+// Progressive playback from a produced artifact (announce carries path + mime_type)
+const controller = new AbortController();
+videoEl.src = await client.mediaPlaybackUrl(path, mimeType, controller.signal);
+// on unmount: controller.abort();
+
+// Live WHEP (announce carries live: true + url)
+const { stream, close } = await openWhepStream(url);
+videoEl.srcObject = stream;
+// on unmount: close();
+```
+
+
 ### App publish ladder
 
 Typed wrappers over `rrext_app_deploy` — the publish ladder for RocketRide apps.

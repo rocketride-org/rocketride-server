@@ -4,14 +4,16 @@ A RocketRide pipe node that converts incoming text into spoken audio using the K
 
 ## What it does
 
-Takes text arriving on any of its input lanes, synthesizes it with Kokoro-82M (`hexgrad/Kokoro-82M`), and emits the result on the **audio** lane as WAV bytes (MIME `audio/wav`) via the `writeAudio` BEGIN / WRITE / END sequence. Locally generated audio is mono, 16-bit, 24 kHz; synthesis speed is fixed at 1.
+Takes text arriving on any of its input lanes, synthesizes it with Kokoro-82M (`hexgrad/Kokoro-82M`), and emits the result on the **audio** lane as MP3 frames (MIME `audio/mpeg`) via the `writeAudio` BEGIN / WRITE / END sequence. Locally generated audio is mono, 24 kHz, encoded at 128 kbps; synthesis speed is fixed at 1.
+
+**Audio streams as it is synthesized.** `BEGIN` is emitted before the model runs, and each chunk Kokoro produces is encoded and sent immediately — one `WRITE` per chunk, not one for the whole utterance. A listener hears the first words while the rest is still being generated. MP3 makes this possible: its frames are self-contained, whereas a WAV header must declare the total length up front, which a stream does not know. This node previously emitted `audio/wav`; consumers that assumed WAV must be updated.
 
 The node runs in one of two modes, chosen automatically at startup:
 
-- **Local**: when no model server is configured, the node installs its own requirements (`numpy`, `kokoro`, `soundfile`) at runtime and constructs a `kokoro.KPipeline` in-process. The spaCy `en_core_web_sm` model (needed by Kokoro's misaki G2P) is downloaded and installed automatically, matched to the installed spaCy version.
-- **Model server (`--modelserver`)**: when a model server address is available, the node connects a `ModelClient` and loads the `kokoro` loader on the server instead. The heavy local dependencies are skipped entirely; audio comes back base64-encoded over the inference command.
+- **Local**: when no model server is configured, the node installs its own requirements (`numpy`, `kokoro`, `soundfile`, `lameenc`) at runtime and constructs a `kokoro.KPipeline` in-process. The pipeline is a generator, so its chunks are encoded and forwarded as they arrive. The spaCy `en_core_web_sm` model (needed by Kokoro's misaki G2P) is downloaded and installed automatically, matched to the installed spaCy version.
+- **Model server (`--modelserver`)**: when a model server address is available, the node connects a `ModelClient` and loads the `kokoro` loader on the server instead. The heavy local dependencies are skipped entirely. The server has no streaming endpoint and answers with a whole WAV, so this mode encodes it in one pass — the output format is identical, only the arrival is not progressive.
 
-Audio is written to a temporary WAV file during synthesis and deleted as soon as the bytes have been streamed, including on error, so no orphan files are left on disk. Empty or whitespace-only input is silently skipped and produces no output. Startup fails with `Kokoro: choose a voice from the list` if no voice is configured.
+Nothing is buffered whole and no temporary file is written. Empty or whitespace-only input is silently skipped and produces no output. `END` is emitted even when synthesis fails, so a downstream stream is never left open. Startup fails with `Kokoro: choose a voice from the list` if no voice is configured.
 
 ---
 

@@ -8,4 +8,9 @@ numpy
 # Kokoro-82M: official inference package (not transformers AutoModel)
 kokoro>=0.9.4
 soundfile>=0.13.1
+
+# LAME: encodes Kokoro's PCM to MP3 frame by frame, so audio streams as it is
+# synthesised. Ships wheels for every supported platform — no compiler needed.
+--only-binary lameenc
+lameenc>=1.8.1
 # en_core_web_sm is installed dynamically via spacy_en_model.ensure_spacy_en_model()

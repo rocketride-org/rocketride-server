@@ -21,10 +21,10 @@
 // SOFTWARE.
 
 // =============================================================================
-// FROZEN shell-api contract — ShellApiV0 — never edit by hand
+// FROZEN shell-api contract — ShellApiV2 — never edit by hand
 // =============================================================================
-// Generated:     2026-08-10T15:20:25.899Z
-// Source commit: a1beeb3e49460be2614c8f822d4f33ade99dd342
+// Generated:     2026-08-27T14:11:12.194Z
+// Source commit: 5b04392e27424bb0f1b9303fce93c81526ada603
 // Generator:     dts-bundle-generator@9.5.1
 // Produced by:   ./builder shell:freeze
 // =============================================================================
@@ -9626,6 +9626,51 @@ export interface IModalProps {
  * @returns The modal element.
  */
 export declare function Modal({ title, onClose, children, footer, showClose, closeOnEscape, width, noBodyPadding, ariaLabel, }: IModalProps): React$1.ReactElement;
+/** One selectable file type — the OS Save-dialog "Save as type" vocabulary. */
+export interface ISaveFileType {
+    /** Human-readable type label, e.g. "RocketRide Pipeline". */
+    label: string;
+    /** Extension appended to the typed name, WITH the leading dot, e.g. ".pipe". */
+    extension: string;
+}
+/** Props for the {@link SaveFileDialog} component. */
+export interface ISaveFileDialogProps {
+    /** Dialog title, e.g. "Save Pipeline As". */
+    title: string;
+    /** File system the dialog browses — only `list` and `mkdir` are called. */
+    vfs: IVirtualFileSystem;
+    /**
+     * Selectable file types. The FIRST entry is the initial selection; a
+     * single-entry list hides the type picker (the extension still shows as the
+     * name input's suffix).
+     */
+    fileTypes: ISaveFileType[];
+    /** Label rendered for the tree root row. Default "$/". */
+    rootLabel?: string;
+    /**
+     * Directory preselected on open — relative to the VFS root, '/'-separated.
+     * Rendered as a dimmed ghost row when it does not exist yet; the missing
+     * segments are created on save.
+     */
+    defaultDir?: string;
+    /** Initial value of the name input (no extension). */
+    initialName?: string;
+    /**
+     * Called with the chosen path (relative to the VFS root, extension
+     * included) AFTER any missing directories were created. The caller
+     * performs the actual write.
+     */
+    onConfirm: (path: string) => void;
+    /** Called when the dialog is dismissed (Cancel or Escape). */
+    onCancel: () => void;
+}
+/**
+ * Renders the stock Save-As dialog over a virtual file system.
+ *
+ * @param props - {@link ISaveFileDialogProps}.
+ * @returns The dialog element.
+ */
+export declare function SaveFileDialog({ title, vfs, fileTypes, rootLabel, defaultDir, initialName, onConfirm, onCancel }: ISaveFileDialogProps): React$1.ReactElement;
 /** Props for the {@link SidebarMenu} component. */
 export interface ISidebarMenuProps {
     /** The declared menu whose entries render as the vertical list. */
@@ -11336,6 +11381,38 @@ interface PlanPickerProps {
      * selection, e.g. the upgrade/top-up modals).
      */
     autoSelectDefault?: boolean;
+    /**
+     * Optional decorative image rendered inside each plan card, directly under
+     * the card header and above the feature list. When omitted, no image is
+     * rendered (the default — keeps the checkout modal unchanged). Host apps
+     * (e.g. the pricing page) pass a themed asset URL here.
+     */
+    cardImageSrc?: string;
+    /**
+     * Aspect ratio (width / height) of the ``cardImageSrc`` asset. When set,
+     * the image is treated as a single wide panorama sliced across the visible
+     * cards: card *i* of *n* shows the *i*-th horizontal segment of the strip,
+     * so the artwork reads continuously across the card row. When omitted, the
+     * image renders whole in every card (the original behavior).
+     */
+    cardImageAspect?: number;
+    /**
+     * When true, every card's feature list is padded (with invisible spacer
+     * rows) to the largest description length across ALL passed plans — both
+     * intervals included. Because the grid stretches cards to equal height, this
+     * keeps card height constant when toggling Monthly/Annual, even though the
+     * annual tiers carry extra bonus lines. Default ``false`` (checkout/upgrade
+     * modals render their natural, unpadded height).
+     */
+    uniformCardHeight?: boolean;
+    /**
+     * Overrides the feature-line font size (in px). When set, feature lines are
+     * also forced onto a single line (``white-space: nowrap``) so the larger
+     * size does not wrap inside the card. Default undefined → the base 11px with
+     * wrapping allowed (checkout/upgrade modals). The pricing page passes a
+     * larger value for bigger, single-line bullets.
+     */
+    featureFontSize?: number;
 }
 /**
  * Shared plan card grid with interval toggle.
@@ -11402,6 +11479,7 @@ export declare const shellApi: {
     readonly TabPanel: typeof TabPanel;
     readonly Modal: typeof Modal;
     readonly CLOSE_GLYPH: string;
+    readonly SaveFileDialog: typeof SaveFileDialog;
     readonly SidebarMenu: typeof SidebarMenu;
     readonly SidebarCollapsedProvider: import("react").FC<ISidebarCollapsedProviderProps>;
     readonly SidebarCollapsedGate: import("react").FC<ISidebarCollapsedGateProps>;
@@ -11603,4 +11681,4 @@ export declare function getShellApi(): ShellApiShape;
 export { AppManifestEntry$1 as AppManifestEntry, ConnectResult as AuthUser, Document$1 as Document, Explorer as DocExplorer, ExplorerChild as DocEntryChild, ExplorerConfig as DocExplorerConfig, ExplorerEntry as DocEntry, ExplorerStatus as DocEntryStatus, IConfirmDialogProps as ConfirmDialogProps, IExplorerProps as DocExplorerProps, PipelineControlConnection as IControlConnection, PipelineInputConnection as IInputConnection, PromoRedemption$1 as PromoRedemption, PromoValidation$1 as PromoValidation, ShellConnectionEventMap as ShellEventMap, TASK_STATE as ITaskState, TASK_STATUS as ITaskStatus, TASK_STATUS_FLOW as IFlowData, };
 export {};
 // ===== END FROZEN BUNDLE =====
-export type ShellApiV0 = ShellApiShape;
+export type ShellApiV2 = ShellApiShape;

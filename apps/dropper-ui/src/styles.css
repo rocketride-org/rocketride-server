@@ -1098,6 +1098,34 @@ body {
 	opacity: 0.8;
 }
 
+/* Media (video / audio) players — pipeline outputs streamed by URL */
+.media-grid {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+	gap: 12px;
+}
+
+.media-wrapper {
+	display: flex;
+	justify-content: center;
+	background: var(--bg-secondary);
+	border-radius: 4px;
+	padding: 12px;
+}
+
+.processed-video {
+	width: 100%;
+	max-height: 360px;
+	border-radius: 4px;
+	display: block;
+	background: #000;
+}
+
+.processed-audio {
+	width: 100%;
+	display: block;
+}
+
 /* Carousel - Full-screen image viewer */
 .carousel-overlay {
 	position: fixed;

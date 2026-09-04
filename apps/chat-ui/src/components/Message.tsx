@@ -25,6 +25,7 @@
 import React from 'react';
 import { Message as MessageType } from '../types/chat.types';
 import { MarkdownRenderer } from './MarkdownRenderer';
+import { InlineMediaRenderer } from './InlineMediaRenderer';
 
 interface MessageProps {
 	message: MessageType;
@@ -54,7 +55,17 @@ export const Message: React.FC<MessageProps> = ({ message }) => {
 			<div className="message-wrapper bot">
 				<div className={`message-bubble bot${hasChart ? ' has-chart' : ''}`}>
 					<div className="markdown-content">
-						<MarkdownRenderer content={message.text} />
+						{message.filePath || message.mediaUrl || message.whepUrl ? (
+							<InlineMediaRenderer
+								path={message.filePath}
+								directUrl={message.mediaUrl}
+								whepUrl={message.whepUrl}
+								mime={message.mediaMime}
+								name={message.mediaName}
+							/>
+						) : (
+							<MarkdownRenderer content={message.text} />
+						)}
 					</div>
 					<div className="message-timestamp">
 						{message.timestamp}

@@ -3,11 +3,8 @@
 # Copyright (c) 2026 Aparavi Software AG
 # =============================================================================
 
-import os
-from typing import Optional
-
 from rocketlib import IInstanceBase, AVI_ACTION, warning
-from .IGlobal import IGlobal
+from .IGlobal import IGlobal, MP3_MIME
 
 
 class IInstance(IInstanceBase):
@@ -29,26 +26,19 @@ class IInstance(IInstanceBase):
         self.writeText(text)
 
     def writeText(self, text: str):
+        """Synthesise ``text``, emitting one MP3 frame at a time as it is produced.
+        BEGIN precedes the model; END always fires, so no stream is left open.
+        """
         value = (text or '').strip()
         if not value:
             return
 
-        temp_path: Optional[str] = None
+        self.instance.writeAudio(AVI_ACTION.BEGIN, MP3_MIME)
         try:
-            payload = self.IGlobal.synthesize(value)
-            temp_path = payload['path']
-            with open(temp_path, 'rb') as fin:
-                raw = fin.read()
-            mime = payload['mime_type']
-            self.instance.writeAudio(AVI_ACTION.BEGIN, mime)
-            self.instance.writeAudio(AVI_ACTION.WRITE, mime, raw)
-            self.instance.writeAudio(AVI_ACTION.END, mime)
+            for frames in self.IGlobal.synthesize_stream(value):
+                self.instance.writeAudio(AVI_ACTION.WRITE, MP3_MIME, frames)
         except Exception as e:
             warning(f'TTS synthesis failed: {e}')
             raise
         finally:
-            if temp_path:
-                try:
-                    os.remove(temp_path)
-                except OSError:
-                    pass
+            self.instance.writeAudio(AVI_ACTION.END, MP3_MIME)
