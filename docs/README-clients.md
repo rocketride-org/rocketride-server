@@ -1,6 +1,6 @@
 # RocketRide Client Libraries
 
-Official client libraries for the RocketRide Engine. The TypeScript and Python clients communicate with the server over DAP (Debug Adapter Protocol) on WebSocket and offer the same capabilities. The MCP client provides AI assistant integration via the Model Context Protocol.
+Official client libraries for the RocketRide Engine. The TypeScript and Python clients communicate with the server over DAP (Debug Adapter Protocol) on WebSocket and offer the same capabilities. The MCP client provides AI assistant integration via the Model Context Protocol. The chat widget embeds a brandable pipeline chat UI in any web page.
 
 ---
 
@@ -18,11 +18,12 @@ URIs: clients accept `http`/`https` or `ws`/`wss` and convert to WebSocket (`htt
 
 ## Client SDK Documentation
 
-| Client         | Package          | Document                                                   |
-| -------------- | ---------------- | ---------------------------------------------------------- |
-| **TypeScript** | `rocketride`     | [README-typescript-client.md](README-typescript-client.md) |
-| **Python**     | `rocketride`     | [README-python-client.md](README-python-client.md)         |
-| **MCP**        | `rocketride-mcp` | [README-mcp-client.md](README-mcp-client.md)               |
+| Client          | Package                  | Document                                                   |
+| --------------- | ------------------------ | ---------------------------------------------------------- |
+| **TypeScript**  | `rocketride`             | [README-typescript-client.md](README-typescript-client.md) |
+| **Python**      | `rocketride`             | [README-python-client.md](README-python-client.md)         |
+| **MCP**         | `rocketride-mcp`         | [README-mcp-client.md](README-mcp-client.md)               |
+| **Chat Widget** | `rocketride-chat-widget` | [README-chat-widget.md](README-chat-widget.md)             |
 
 Each document lists every constructor option, method, type, and usage example for that client.
 
@@ -43,15 +44,23 @@ pip install rocketride
 pip install rocketride-mcp
 ```
 
+The chat widget is **not on a public registry yet**; build it from this repository and self-host the bundle:
+
+```bash
+./builder chat-widget:build   # -> packages/chat-widget/dist/rocketride-chat.js
+```
+
+See [README-chat-widget.md](README-chat-widget.md#getting-the-bundle) for the embed snippets and for what changes once `rocketride-chat-widget` is published.
+
 ### From the Engine (self-hosted download)
 
 The engine serves the latest client packages via HTTP endpoints. Once the server is running, download them directly:
 
-| Endpoint                 | Package                | Response                                |
-| ------------------------ | ---------------------- | --------------------------------------- |
-| `GET /client/python/{filename}` | Python SDK wheel | `rocketride-{version}-py3-none-any.whl` |
-| `GET /client/typescript` | TypeScript SDK tarball | `rocketride-{version}.tgz`              |
-| `GET /client/vscode`     | VSCode extension       | `rocketride-{version}.vsix`             |
+| Endpoint                        | Package                | Response                                |
+| ------------------------------- | ---------------------- | --------------------------------------- |
+| `GET /client/python/{filename}` | Python SDK wheel       | `rocketride-{version}-py3-none-any.whl` |
+| `GET /client/typescript`        | TypeScript SDK tarball | `rocketride-{version}.tgz`              |
+| `GET /client/vscode`            | VSCode extension       | `rocketride-{version}.vsix`             |
 
 ```bash
 # Download and install Python client (use "latest" as filename for newest version)

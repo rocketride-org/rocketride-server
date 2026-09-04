@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **ai**: every subprocess exposes /task/data via a shared web server (#912)
 - **analytics**: shared, transport-agnostic telemetry core (loose report + app) (#1523)
 - **anonymize**: configurable entity types + token redaction style (#1447)
+- **chat-widget**: embeddable, brandable chat widget — web component + script-tag bubble (#1586)
 - **ci**: migrate Discord notifier workflows to forum channels (tags + auto-archive) (#1510)
 - **ci**: on-demand + monthly multi-OS compile/test matrix (#1537)
 - **ci**: keep Discord forum tags live (re-apply on state/label change via bot) (#1722)
