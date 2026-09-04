@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Confluence source node — demo output</title>
+<style>
+  :root {
+    --bg: #ffffff;
+    --surface: #f6f6f4;
+    --border: #e0e0dc;
+    --text: #1a1a18;
+    --text-secondary: #5f5e5a;
+    --accent: #185fa5;
+    --accent-bg: #e6f1fb;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #161614;
+      --surface: #201f1c;
+      --border: #38372f;
+      --text: #ececea;
+      --text-secondary: #b4b2a9;
+      --accent: #85b7eb;
+      --accent-bg: #0c447c;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    margin: 0;
+    padding: 2rem 1.5rem 4rem;
+    line-height: 1.6;
+  }
+  .wrap { max-width: 760px; margin: 0 auto; }
+  h1 { font-size: 22px; font-weight: 500; margin: 0 0 4px; }
+  .sub { color: var(--text-secondary); font-size: 14px; margin: 0 0 2rem; }
+  .flow {
+    display: flex; align-items: center; gap: 8px; margin-bottom: 2.5rem;
+    font-size: 13px; color: var(--text-secondary); flex-wrap: wrap;
+  }
+  .flow .step {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+    padding: 8px 12px; font-weight: 500; color: var(--text);
+  }
+  .page-card {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+    padding: 1.25rem 1.5rem; margin-bottom: 1.75rem;
+  }
+  .page-title {
+    font-size: 16px; font-weight: 500; margin: 0 0 2px;
+  }
+  .page-source {
+    font-size: 12px; color: var(--text-secondary); margin: 0 0 1rem;
+  }
+  .lane-label {
+    font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em;
+    color: var(--accent); background: var(--accent-bg); display: inline-block;
+    padding: 2px 8px; border-radius: 4px; margin: 0 0 8px;
+  }
+  .lane-text p { font-size: 14px; margin: 0 0 8px; }
+  .lane-text p:last-child { margin-bottom: 0; }
+  table {
+    width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 4px;
+  }
+  th, td {
+    text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--border);
+  }
+  th { color: var(--text-secondary); font-weight: 500; }
+  .tables-wrap { margin-top: 1.25rem; }
+  .tables-wrap + .tables-wrap { margin-top: 1rem; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Confluence source node — demo output</h1>
+  <p class="sub">Real conversion output from the RocketRide Confluence node, run against a live Confluence Cloud space. The page content itself is synthetic fixture text written for this demo (fictional services, people, and channels) — no real organizational data.</p>
+
+  <div class="flow">
+    <div class="step">Confluence space</div>
+    <span>&rarr;</span>
+    <div class="step">confluence node</div>
+    <span>&rarr;</span>
+    <div class="step">text lane</div>
+    <span>+</span>
+    <div class="step">table lane</div>
+  </div>
+
+  <div class="page-card">
+    <p class="page-title">Deploy Runbook</p>
+    <p class="page-source">Source: Confluence page &ldquo;Deploy Runbook&rdquo;</p>
+    <span class="lane-label">text lane</span>
+    <div class="lane-text">
+      <p>This runbook describes how to deploy the checkout service to production. Follow every step in order and do not skip the smoke test at the end.</p>
+      <p><strong>Pre-deploy checklist</strong><br>Before starting a deploy, confirm the on-call engineer has acknowledged the release window and that the previous deploy's canary has been running cleanly for at least two hours. Check the dashboard for error rate and latency regressions before proceeding.</p>
+      <p><strong>Deploy steps</strong><br>Cut a release branch from main, tag it with the current date, and push the tag. The CI pipeline builds the image automatically once the tag lands. Wait for the build to go green, then promote the image to the staging cluster first. Run the staging smoke tests, and only promote to production once staging has been stable for fifteen minutes.</p>
+      <p><strong>Rollback</strong><br>If the smoke test fails, immediately revert the production deploy to the previous tag and notify the incident channel. Do not attempt to patch forward during a rollback situation.</p>
+    </div>
+    <div class="tables-wrap">
+      <span class="lane-label">table lane</span>
+      <table>
+        <thead>
+          <tr><th scope="col">Service</th><th scope="col">Owner</th><th scope="col">Escalation</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>checkout-api</td><td>Priya Nair</td><td>#checkout-oncall</td></tr>
+          <tr><td>payments-gateway</td><td>Alex Chen</td><td>#payments-oncall</td></tr>
+          <tr><td>inventory-sync</td><td>Jordan Blake</td><td>#inventory-oncall</td></tr>
+          <tr><td>notifications</td><td>Sam Okafor</td><td>#platform-oncall</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="page-card">
+    <p class="page-title">Service Directory</p>
+    <p class="page-source">Source: Confluence page &ldquo;Service Directory&rdquo;</p>
+    <span class="lane-label">text lane</span>
+    <div class="lane-text">
+      <p>This page lists the internal services maintained by the platform team, along with their primary language, data store, and current status. Use this as the source of truth when onboarding a new engineer or investigating a cross-service incident.</p>
+      <p><strong>Overview</strong><br>Each service below is independently deployable and owns its own database. Services communicate over internal gRPC, with a shared event bus used for asynchronous workflows like order fulfillment and email notifications.</p>
+      <p><strong>Deprecation notes</strong><br>legacy-billing is being replaced by payments-gateway and is scheduled for decommission next quarter. New integrations should not depend on legacy-billing endpoints.</p>
+    </div>
+    <div class="tables-wrap">
+      <span class="lane-label">table lane</span>
+      <table>
+        <thead>
+          <tr><th scope="col">Service</th><th scope="col">Language</th><th scope="col">Data store</th><th scope="col">Status</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>checkout-api</td><td>Go</td><td>Postgres</td><td>Active</td></tr>
+          <tr><td>payments-gateway</td><td>Java</td><td>Postgres</td><td>Active</td></tr>
+          <tr><td>inventory-sync</td><td>Python</td><td>Redis</td><td>Active</td></tr>
+          <tr><td>notifications</td><td>Node.js</td><td>DynamoDB</td><td>Active</td></tr>
+          <tr><td>legacy-billing</td><td>Python</td><td>MySQL</td><td>Deprecated</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="page-card">
+    <p class="page-title">Incident Response checklist</p>
+    <p class="page-source">Source: Confluence page &ldquo;Incident Response checklist&rdquo;</p>
+    <span class="lane-label">text lane</span>
+    <div class="lane-text">
+      <p>Use this checklist during any production incident classified as SEV-1 or SEV-2. The goal is to restore service quickly and capture enough detail for a clean postmortem.</p>
+      <p><strong>First five minutes</strong><br>Declare the incident in the incident channel, assign an incident commander, and start a timeline document. The incident commander is responsible for coordination only and should not personally debug the issue unless no one else is available.</p>
+      <p><strong>Communication</strong><br>Post an update every fifteen minutes during a SEV-1, even if the update is &ldquo;still investigating.&rdquo; Silence during an active incident causes more anxiety than a lack of progress.</p>
+      <p><strong>After the incident</strong><br>Once service is restored, schedule a postmortem within two business days while details are still fresh. The postmortem should focus on process and system gaps, not on assigning blame to an individual.</p>
+    </div>
+    <div class="tables-wrap">
+      <span class="lane-label">table lane</span>
+      <table>
+        <thead>
+          <tr><th scope="col">Severity</th><th scope="col">Definition</th><th scope="col">Response time</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>SEV-1</td><td>Full outage or data loss</td><td>Immediate</td></tr>
+          <tr><td>SEV-2</td><td>Major feature degraded</td><td>15 minutes</td></tr>
+          <tr><td>SEV-3</td><td>Minor feature degraded</td><td>1 business day</td></tr>
+          <tr><td>SEV-4</td><td>Cosmetic or low impact</td><td>Best effort</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>

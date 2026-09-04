@@ -1,0 +1,145 @@
+{
+	//
+	// Required:
+	//		The displayable name of this node
+	//
+	"title": "Confluence",
+	//
+	// Required:
+	//		The protocol is the endpoint protocol
+	//
+	"protocol": "confluence://",
+	//
+	// Required:
+	//		Class type of the node - what it does
+	//
+	"classType": ["source"],
+	//
+	// Required:
+	//		Capabilities are flags that change the behavior of the underlying
+	//		engine
+	//
+	"capabilities": ["noinclude"],
+	//
+	// Optional:
+	//		Register is either filter, endpoint or ignored if not specified. If the
+	//		type is specified, a factory is registered of that given type
+	//
+	"register": "endpoint",
+	//
+	// Optional:
+	//		The node is the actual physical node to instantiate - if
+	//		not specified, the protocol will be used
+	//
+	"node": "python",
+	//
+	// Optional:
+	//		The path is the executable/script code - it is node dependent
+	//		and is optional for most nodes
+	//
+	"path": "nodes.confluence",
+	//
+	// Required:
+	//		The prefix map when added/removed when converting URLs <=> paths
+	//
+	"prefix": "confluence",
+	//
+	// Optional:
+	//	Description to of this driver
+	//
+	"description": ["A Confluence source node that pulls every page from a configured Confluence Cloud space. ", "Each page's body is emitted on the text lane (converted from Confluence storage format), ", "and any tables in the page are emitted separately on the table lane in Markdown format."],
+	//
+	// Optional:
+	//	  The icon is the icon to display in the UI for this node
+	//
+	"icon": "confluence.svg",
+	"documentation": "https://docs.rocketride.org",
+	//
+	// Optional:
+	//	 The tile is the displayable name of this node
+	//
+	"tile": ["Space: ${parameters.confluence.spaceKey}"],
+	//
+	//	Optional:
+	//		As a pipe component, define what this pipe component takes
+	//		and what it produces
+	//
+	"lanes": {
+		"_source": ["text", "table"]
+	},
+	//
+	//	Optional:
+	//		Profile section are configuration options used by the driver itself
+	//
+	"preconfig": {
+		"default": "default",
+		"profiles": {
+			"default": {}
+		}
+	},
+	//
+	// Optional:
+	//		Local field definitions - these define fields only for the
+	//		current service.
+	//
+	"fields": {
+		"confluence.baseUrl": {
+			"type": "string",
+			"title": "Base URL",
+			"description": "Your Confluence Cloud wiki base URL, e.g. https://yoursite.atlassian.net/wiki",
+			"optional": false
+		},
+		"confluence.email": {
+			"type": "string",
+			"title": "Email",
+			"description": "Atlassian account email used to generate the API token",
+			"optional": false
+		},
+		"confluence.apiToken": {
+			"type": "string",
+			"title": "API Token",
+			"description": "Confluence Cloud API token, generated at id.atlassian.com/manage-profile/security/api-tokens",
+			"optional": false,
+			"secure": true,
+			"ui": {
+				"ui:widget": "ApiKeyWidget"
+			}
+		},
+		"confluence.spaceKey": {
+			"type": "string",
+			"title": "Space Key",
+			"description": "The Confluence space key to pull pages from (e.g. ENG)",
+			"optional": false
+		},
+		"confluence.limit": {
+			"type": "number",
+			"title": "Page Batch Size",
+			"description": "Number of pages to request per API call while paginating through the space (1-250). This is the API page size, not a cap on the total pull — see Max Pages for that.",
+			"default": 25,
+			"optional": true
+		},
+		"confluence.maxPages": {
+			"type": "number",
+			"title": "Max Pages",
+			"description": "Hard cap on the total number of pages pulled in one run, regardless of how many more the space has. Keeps a large space from being fully re-ingested (and re-embedded downstream) on every run by default.",
+			"default": 1000,
+			"optional": true
+		},
+		"Pipe.source.parameters": {
+			"section": "parameters",
+			"title": "Confluence Configuration",
+			"properties": ["confluence.baseUrl", "confluence.email", "confluence.apiToken", "confluence.spaceKey", "confluence.limit", "confluence.maxPages"]
+		}
+	},
+	//
+	// Required:
+	//		Defines the fields (shape) of the service.
+	//
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Confluence",
+			"properties": ["type", "Pipe.source.parameters"]
+		}
+	]
+}
