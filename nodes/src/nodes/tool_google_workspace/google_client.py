@@ -39,8 +39,10 @@ This file owns everything that guards credentials and requests:
 - scope diagnostics (:func:`token_scope_report`) shared by ``validateConfig``,
   ``check_connection``, and ``build_service`` so the three checks cannot drift;
 - request execution with exponential backoff on 429/5xx and on rate-limit
-  403s (parsed from the structured error body), while permission 403s and
-  other errors fail fast with an agent-readable message.
+  403s (parsed from the structured error body), plus the same backoff for
+  status-less transport faults on GET requests only, all on a per-thread
+  transport (httplib2 is not thread safe under parallel agent tool calls);
+  permission 403s and other errors fail fast with an agent-readable message.
 
 Per-service subpackages keep only their tool functions and response cleaners,
 and bind these functions via ``functools.partial`` (see e.g. ``sheets/client.py``).
@@ -52,6 +54,7 @@ import base64
 import binascii
 import json
 import os
+import threading
 import time as _time
 from dataclasses import dataclass, field
 from typing import Any
@@ -452,21 +455,66 @@ def build_service(svc: GoogleService, auth_type: str, cfg: dict, scopes: list[st
     return build(svc.api, svc.version, credentials=creds, cache_discovery=False)
 
 
+_thread_transport = threading.local()
+
+
+def _request_http(request: Any):
+    """Per-thread transport for a request built on a shared service handle.
+
+    googleapiclient services carry one httplib2 transport and every request
+    built from a service inherits it. httplib2 is not thread safe: concurrent
+    ``execute()`` calls on the same handle can interleave on one TLS
+    connection, which surfaces as ``[SSL] record layer failure`` when an agent
+    executor runs a wave of tool calls in parallel threads. Rebuild the
+    authorized transport once per thread, keyed by the credential object, so
+    parallel calls never share a connection. Returns None (keep the request's
+    own transport) when there is nothing to rebuild from.
+    """
+    shared = getattr(request, 'http', None)
+    creds = getattr(shared, 'credentials', None)
+    if creds is None:
+        return None
+    try:
+        import google_auth_httplib2
+        import httplib2
+    except ImportError:
+        return None
+    cache = getattr(_thread_transport, 'by_creds', None)
+    if cache is None:
+        cache = {}
+        _thread_transport.by_creds = cache
+    http = cache.get(id(creds))
+    if http is None:
+        http = google_auth_httplib2.AuthorizedHttp(creds, http=httplib2.Http())
+        cache[id(creds)] = http
+    return http
+
+
 def execute(svc: GoogleService, request: Any, *, binary: bool = False) -> Any:
     """Run an API request with exponential backoff on 429/5xx and rate-limit 403s.
+
+    Status-less failures (connection reset, TLS fault, timeout) are retried
+    with the same backoff for GET requests only. A mutation whose response was
+    lost may still have landed on Google's side, so it fails fast and leaves
+    the re-check to the caller rather than risking a duplicated side effect.
+    Requests run on a per-thread transport (see ``_request_http``).
 
     ``binary=True`` returns the raw response (bytes from get_media/export_media);
     otherwise the JSON dict (or {} when the API returns no body). With 4 attempts
     the sleeps are 1s, 2s, 4s — worst case ~7s before the final raise.
     """
     base_delay = 1.0
+    http = _request_http(request)
     for attempt in range(4):
         try:
-            result = request.execute()
+            result = request.execute(http=http) if http is not None else request.execute()
             return result if binary else (result or {})
         except Exception as exc:  # googleapiclient.errors.HttpError and transport errors
             status = getattr(getattr(exc, 'resp', None), 'status', None)
             if status and (int(status) in _RETRY_STATUSES or _is_rate_limit_403(exc)) and attempt < 3:
+                _time.sleep(base_delay * (2**attempt))
+                continue
+            if status is None and attempt < 3 and getattr(request, 'method', None) == 'GET':
                 _time.sleep(base_delay * (2**attempt))
                 continue
             detail = getattr(exc, 'reason', None) or str(exc)
