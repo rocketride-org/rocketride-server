@@ -1,0 +1,499 @@
+# MIT License
+#
+# Copyright (c) 2026 Aparavi Software AG
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+
+# Composite action that posts a semantic diff of changed .pipe pipeline files as
+# a sticky pull-request comment. It wraps the local `rocketride diff` subcommand
+# (Python SDK/CLI): the comparison itself runs on the runner against parsed .pipe
+# JSON and needs no RocketRide engine and no credentials. The action around it
+# does use the network — it installs the CLI (from PyPI, or from `install-from`),
+# fetches the PR base commit, and calls the GitHub comments API when
+# comment=true. Raw JSON diffs of .pipe files are dominated by canvas coordinate
+# churn (the per-node "ui" block and the top-level "viewport"); this surfaces
+# what actually changed — nodes, edges, and config — so reviewers see signal
+# instead of layout noise.
+name: RocketRide Pipe Diff
+description: >-
+  Comment a semantic diff of changed .pipe pipeline files on a pull request,
+  hiding canvas-layout noise. The comparison runs locally with no RocketRide
+  engine and no credentials; the action itself installs the CLI, fetches the PR
+  base, and uses the GitHub comments API when comment=true.
+author: RocketRide, Inc.
+
+# Branding for the GitHub Marketplace / action listing.
+branding:
+  icon: git-pull-request
+  color: purple
+
+inputs:
+  files:
+    description: >-
+      Git pathspec glob (":(glob)" magic is applied automatically) selecting the
+      .pipe files to consider. The action diffs only those that actually changed
+      versus the PR base.
+    required: false
+    default: '**/*.pipe'
+  python-version:
+    description: Python version passed to actions/setup-python (RocketRide requires >= 3.10).
+    required: false
+    default: '3.12'
+  cli-version:
+    description: >-
+      pip version specifier appended to the "rocketride" requirement, e.g.
+      "==1.4.0" or ">=1.4,<2". Leave empty to install the latest published
+      release. Ignored when "install-from" is set. The run fails fast with a
+      clear message if the installed CLI does not provide the "diff" subcommand.
+    required: false
+    default: ''
+  install-from:
+    description: >-
+      Install the CLI from this local path or pip source instead of PyPI, e.g.
+      "./packages/client-python". Use it to exercise the action against an
+      in-repo checkout before a release that ships "rocketride diff" is
+      published. Takes precedence over "cli-version". SECURITY: this value is
+      handed to "python -m pip install", which executes the source's build and
+      install code (setup.py, PEP 517 backends, install hooks) with the job's
+      privileges. Point it only at code you trust. In a pull_request_target
+      workflow — which runs with a writable token and the base repository's
+      secrets — it must never resolve to pull-request-controlled code, so do not
+      set it to a path inside a checkout of the PR head.
+    required: false
+    default: ''
+  comment:
+    description: >-
+      When "true" (default), post or update ONE sticky PR comment with the diff.
+      Set to "false" to compute the diff and write only a job summary, without
+      commenting (requires no pull-requests:write permission). The diff is
+      written to the job summary either way, so a fork pull request — where the
+      default GITHUB_TOKEN is read-only and commenting is refused with 403 —
+      still surfaces the report.
+    required: false
+    default: 'true'
+  include-layout:
+    description: >-
+      When "true", treat canvas layout churn (per-node "ui" blocks and the
+      top-level "viewport") as meaningful and enumerate it as "ui.*" and
+      "viewport.*" field changes. Default "false" hides it and reports a
+      pure-layout change as "no semantic changes".
+    required: false
+    default: 'false'
+
+outputs:
+  changed-files:
+    description: Number of changed .pipe files considered (added or modified vs the PR base).
+    value: ${{ steps.diff.outputs.changed-files }}
+  has-semantic-changes:
+    description: '"true" when at least one changed .pipe file has semantic changes, else "false".'
+    value: ${{ steps.diff.outputs.has-semantic-changes }}
+  comment-body-file:
+    description: Path to the generated Markdown comment body (useful for debugging or reuse).
+    value: ${{ steps.diff.outputs.comment-body-file }}
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+      with:
+        python-version: ${{ inputs.python-version }}
+
+    - name: Install RocketRide CLI
+      shell: bash
+      env:
+        CLI_VERSION: ${{ inputs.cli-version }}
+        INSTALL_FROM: ${{ inputs.install-from }}
+      run: |
+        set -euo pipefail
+        # INSTALL_FROM wins when set: it is a local path (or any pip source) and
+        # is how this repository dogfoods the action before a release ships
+        # `rocketride diff`. Otherwise build the PyPI requirement; CLI_VERSION,
+        # when set, is a PEP 508 specifier appended to the distribution name
+        # (e.g. "==1.4.0", ">=1.4").
+        if [ -n "${INSTALL_FROM}" ]; then
+          requirement="${INSTALL_FROM}"
+        elif [ -n "${CLI_VERSION}" ]; then
+          requirement="rocketride${CLI_VERSION}"
+        else
+          requirement="rocketride"
+        fi
+        echo "Installing ${requirement}"
+        python -m pip install --disable-pip-version-check --quiet "${requirement}"
+
+    - name: Verify the CLI provides 'diff'
+      shell: bash
+      env:
+        INSTALL_FROM: ${{ inputs.install-from }}
+      run: |
+        set -euo pipefail
+        if ! command -v rocketride >/dev/null 2>&1; then
+          echo "::error::'rocketride' CLI is not on PATH after installation."
+          exit 1
+        fi
+        # `rocketride diff --help` exits 0 only when the subcommand exists;
+        # argparse exits non-zero ("invalid choice: 'diff'") on older releases.
+        if ! rocketride diff --help >/dev/null 2>&1; then
+          installed="$(python -c 'import importlib.metadata as m; print(m.version("rocketride"))' 2>/dev/null || echo unknown)"
+          if [ -n "${INSTALL_FROM}" ]; then
+            echo "::error::The 'rocketride' CLI installed from '${INSTALL_FROM}' (version ${installed}) does not provide the 'diff' subcommand."
+          else
+            echo "::error::The installed 'rocketride' CLI (version ${installed}) does not provide the 'diff' subcommand. Pin a release that includes it via the action's 'cli-version' input once 'rocketride diff' is published, or point 'install-from' at a checkout that has it."
+          fi
+          exit 1
+        fi
+        echo "rocketride diff is available."
+
+    - name: Compute semantic pipe diffs
+      id: diff
+      shell: bash
+      env:
+        FILES_GLOB: ${{ inputs.files }}
+        INCLUDE_LAYOUT: ${{ inputs.include-layout }}
+        BASE_SHA: ${{ github.event.pull_request.base.sha }}
+      run: |
+        # Backticks in the single-quoted printf formats below are LITERAL
+        # Markdown code-span characters, not command substitutions; single
+        # quotes are required to keep them literal (SC2016 is a false positive).
+        # shellcheck disable=SC2016
+        set -euo pipefail
+
+        marker='<!-- rocketride-pipe-diff -->'
+        body_file="${RUNNER_TEMP:-/tmp}/rocketride-pipe-diff-comment.md"
+        : > "${body_file}"
+
+        # Longest run of backticks in $1, printed as a delimiter one backtick
+        # longer (at least $2). CommonMark closes a code span or fence only on a
+        # run of *exactly* the opening length (span) or at least it (fence), so a
+        # delimiter longer than anything in the value cannot be closed early by
+        # the value itself. Pure bash: no fork per path.
+        backtick_delim() {
+          local s="$1" min="$2"
+          local longest=0 run=0 index char
+          for (( index = 0; index < ${#s}; index++ )); do
+            char="${s:index:1}"
+            if [ "${char}" = '`' ]; then
+              run=$(( run + 1 ))
+              if [ "${run}" -gt "${longest}" ]; then
+                longest="${run}"
+              fi
+            else
+              run=0
+            fi
+          done
+          local width=$(( longest + 1 ))
+          if [ "${width}" -lt "${min}" ]; then
+            width="${min}"
+          fi
+          local pad
+          printf -v pad '%*s' "${width}" ''
+          printf '%s' "${pad// /\`}"
+        }
+
+        # File paths and CLI stderr are untrusted PR content: a crafted path or
+        # error message would otherwise be interpolated raw into a Markdown
+        # heading (breaking out into headings/@-mentions in the auto-posted
+        # comment). Render them inside a code span with newlines collapsed and a
+        # collision-safe delimiter, so a path containing backticks cannot close
+        # the span. The padding spaces are stripped by the Markdown renderer.
+        md_code() {
+          local s="${1//$'\n'/ }"
+          s="${s//$'\r'/ }"
+          local delim
+          delim="$(backtick_delim "${s}" 2)"
+          printf '%s %s %s' "${delim}" "${s}" "${delim}"
+        }
+
+        # A workflow command is one line of the form
+        # "::error <prop>=<value>,...::<data>", so a raw newline in an
+        # interpolated value ends the command and lets the rest of the value
+        # start a NEW command -- and a raw ":" or "," in a property value ends
+        # the property list. File paths and CLI stderr are PR-controlled, so
+        # percent-encode them exactly as @actions/core does before they are
+        # interpolated: data escapes "%", CR and LF; a property escapes those
+        # plus ":" and ",". "%" must be substituted first or it would re-encode
+        # the escapes this function itself introduces.
+        wc_escape_data() {
+          local s="${1//%/%25}"
+          s="${s//$'\r'/%0D}"
+          s="${s//$'\n'/%0A}"
+          printf '%s' "${s}"
+        }
+
+        wc_escape_property() {
+          local s
+          s="$(wc_escape_data "$1")"
+          s="${s//:/%3A}"
+          s="${s//,/%2C}"
+          printf '%s' "${s}"
+        }
+
+        # The report is written to the job summary on every path -- including
+        # the ones that end in `exit 1` -- so `comment: false` and fork pull
+        # requests (read-only GITHUB_TOKEN -> comment 403) still surface it.
+        write_job_summary() {
+          if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+            cat "${body_file}" >> "${GITHUB_STEP_SUMMARY}"
+          fi
+        }
+
+        # Emit step outputs in one place so every early return stays consistent.
+        emit_outputs() {
+          write_job_summary
+          {
+            echo "changed-files=${1}"
+            echo "has-semantic-changes=${2}"
+            echo "pipe-files-changed=${3}"
+            echo "errored=${4}"
+            echo "comment-body-file=${body_file}"
+          } >> "${GITHUB_OUTPUT}"
+        }
+
+        # A pull_request event is required: the base commit is what we diff
+        # against. Outside that context there is nothing to compare, so skip.
+        if [ -z "${BASE_SHA}" ]; then
+          echo "::warning::No pull_request base SHA in context; the pipe-diff action only runs on pull_request events. Skipping."
+          printf '%s\n' "${marker}" > "${body_file}"
+          emit_outputs 0 false false false
+          exit 0
+        fi
+
+        # actions/checkout uses fetch-depth 1 by default, so the base commit is
+        # usually absent. Fetch just that object. GitHub allows fetching an
+        # arbitrary reachable SHA directly.
+        if ! git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null; then
+          echo "Fetching PR base commit ${BASE_SHA}"
+          git fetch --no-tags --depth=1 origin "${BASE_SHA}" 2>/dev/null \
+            || git fetch --no-tags origin "${BASE_SHA}" 2>/dev/null \
+            || true
+        fi
+        if ! git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null; then
+          # This path fails the step, but it still has to leave a report behind:
+          # `comment: false` and fork pull requests have no other channel, and
+          # the job summary is documented as written on every path. Build the
+          # body, write the summary, then annotate and fail.
+          {
+            printf '%s\n' "${marker}"
+            printf '## RocketRide pipeline diff\n\n'
+            printf 'Could not fetch the pull-request base commit %s, so no diff was computed.\n\n' "$(md_code "${BASE_SHA}")"
+            printf 'Ensure `actions/checkout` runs before this action and leaves its credentials available (the default).\n'
+          } > "${body_file}"
+          write_job_summary
+          echo "::error::Could not fetch the PR base commit ${BASE_SHA}. Ensure actions/checkout ran before this action and left credentials available (the default)."
+          exit 1
+        fi
+
+        # Collect changed .pipe files (added or modified; deletions handled
+        # separately). NUL-delimited to survive unusual path characters.
+        changed_files=()
+        while IFS= read -r -d '' path; do
+          changed_files+=("${path}")
+        done < <(git diff -z --name-only --diff-filter=d "${BASE_SHA}" HEAD -- ":(glob)${FILES_GLOB}")
+
+        # Deleted .pipe files: reported as a note (no working-tree file to diff).
+        deleted_files=()
+        while IFS= read -r -d '' path; do
+          deleted_files+=("${path}")
+        done < <(git diff -z --name-only --diff-filter=D "${BASE_SHA}" HEAD -- ":(glob)${FILES_GLOB}")
+
+        changed_count="${#changed_files[@]}"
+        deleted_count="${#deleted_files[@]}"
+
+        # Nothing to report: emit an empty (marker-only) body. The comment step
+        # will refresh an existing sticky comment but will NOT create a new one.
+        if [ "${changed_count}" -eq 0 ] && [ "${deleted_count}" -eq 0 ]; then
+          echo "No changed .pipe files versus the base."
+          {
+            printf '%s\n' "${marker}"
+            printf '## RocketRide pipeline diff\n\n'
+            printf 'No `.pipe` files changed in this pull request.\n'
+          } > "${body_file}"
+          emit_outputs 0 false false false
+          exit 0
+        fi
+
+        include_layout_flag=""
+        if [ "${INCLUDE_LAYOUT}" = "true" ]; then
+          include_layout_flag="--include-layout"
+        fi
+
+        sections_file="${RUNNER_TEMP:-/tmp}/rocketride-pipe-diff-sections.md"
+        : > "${sections_file}"
+
+        any_semantic=false
+        any_error=false
+        err_file="${RUNNER_TEMP:-/tmp}/rocketride-pipe-diff-stderr.txt"
+
+        # The "${arr[@]+...}" guard expands to nothing for an empty array, so the
+        # loop is a no-op under `set -u` on every bash version (a bare
+        # "${arr[@]}" of an empty array errors on bash < 4.4).
+        for f in ${changed_files[@]+"${changed_files[@]}"}; do
+          printf '### %s\n\n' "$(md_code "${f}")" >> "${sections_file}"
+
+          # Build the command as an always-non-empty array so "${cmd[@]}" is
+          # safe under `set -u` on every bash version (an empty-array expansion
+          # errors on bash < 4.4).
+          cmd=(rocketride diff --git "${BASE_SHA}" "${f}" --markdown)
+          if [ -n "${include_layout_flag}" ]; then
+            cmd+=("${include_layout_flag}")
+          fi
+
+          set +e
+          out="$("${cmd[@]}" 2>"${err_file}")"
+          rc=$?
+          set -e
+
+          case "${rc}" in
+            0)
+              # Exit 0 = the CLI found no change it counts. Whether the textual
+              # change was layout churn or pure formatting is the CLI's own
+              # report to make, so do not assert "layout only" here.
+              printf 'No semantic changes.\n\n' >> "${sections_file}"
+              ;;
+            1)
+              any_semantic=true
+              printf '%s\n\n' "${out}" >> "${sections_file}"
+              ;;
+            *)
+              any_error=true
+              err_msg="$(cat "${err_file}")"
+              # Both the path and the stderr are untrusted PR content, and both
+              # land in the same single-line workflow command, so both are
+              # percent-encoded: the path once as the "file" property and once as
+              # message data, the message as data. Encoding rather than stripping
+              # keeps the text intact (GitHub decodes %0A back to a line break in
+              # the rendered annotation) while making a second "::" command
+              # unrepresentable.
+              annotation_file="$(wc_escape_property "${f}")"
+              annotation_path="$(wc_escape_data "${f}")"
+              annotation_msg="$(wc_escape_data "${err_msg}")"
+              echo "::error file=${annotation_file}::rocketride diff failed for ${annotation_path}: ${annotation_msg}"
+              # The fence is one backtick longer than the longest run in the
+              # message (minimum 4), so no fence line inside the untrusted
+              # stderr can close the block early and escape into Markdown.
+              err_fence="$(backtick_delim "${err_msg}" 4)"
+              {
+                printf 'Could not diff this file (exit %s):\n\n' "${rc}"
+                printf '%stext\n%s\n%s\n\n' "${err_fence}" "${err_msg}" "${err_fence}"
+              } >> "${sections_file}"
+              ;;
+          esac
+        done
+
+        for f in ${deleted_files[@]+"${deleted_files[@]}"}; do
+          # Deleting a pipeline is a semantic change by any reading; the old
+          # code left any_semantic false, so a deletion-only PR reported
+          # "no semantic changes" and has-semantic-changes=false.
+          any_semantic=true
+          printf '### %s\n\n' "$(md_code "${f}")" >> "${sections_file}"
+          printf 'Pipeline file removed in this pull request.\n\n' >> "${sections_file}"
+        done
+
+        # Top summary line.
+        if [ "${any_error}" = "true" ]; then
+          summary='One or more pipeline files could not be diffed. See details below.'
+        elif [ "${any_semantic}" = "true" ]; then
+          summary='Semantic pipeline changes detected. See details below.'
+        else
+          summary='No semantic changes in the changed `.pipe` files.'
+        fi
+
+        {
+          printf '%s\n' "${marker}"
+          printf '## RocketRide pipeline diff\n\n'
+          printf '%s\n\n' "${summary}"
+          cat "${sections_file}"
+          printf -- '---\n'
+          printf '<sub>Semantic diff of `.pipe` files versus the PR base. Canvas layout (per-node `ui` and the top-level `viewport`) is ignored by default. Generated by the RocketRide pipe-diff action.</sub>\n'
+        } > "${body_file}"
+
+        emit_outputs "${changed_count}" "${any_semantic}" true "${any_error}"
+
+    - name: Post or update sticky PR comment
+      if: ${{ inputs.comment == 'true' && github.event_name == 'pull_request' }}
+      uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7
+      env:
+        BODY_FILE: ${{ steps.diff.outputs.comment-body-file }}
+        PIPE_FILES_CHANGED: ${{ steps.diff.outputs.pipe-files-changed }}
+      with:
+        script: |
+          const fs = require('fs');
+          const marker = '<!-- rocketride-pipe-diff -->';
+          const body = fs.readFileSync(process.env.BODY_FILE, 'utf8');
+          const pipeFilesChanged = process.env.PIPE_FILES_CHANGED === 'true';
+          const { owner, repo } = context.repo;
+          const issue_number = context.issue.number;
+
+          if (!issue_number) {
+            core.info('No pull-request number in context; skipping comment.');
+            return;
+          }
+
+          // Find our one sticky comment by its hidden marker. The author check
+          // matters: without it, a human comment that merely quotes the marker
+          // (in a review of this very action, say) would be overwritten.
+          const comments = await github.paginate(github.rest.issues.listComments, {
+            owner, repo, issue_number, per_page: 100,
+          });
+          const existing = comments.find((c) =>
+            c.body && c.body.includes(marker) &&
+            c.user && c.user.type === 'Bot' && c.user.login === 'github-actions[bot]'
+          );
+
+          // On a pull_request event from a fork the default GITHUB_TOKEN is
+          // read-only no matter what the workflow's permissions block says, so
+          // the write 403s. That is the common case for an OSS repo, and it is
+          // not a reason to fail the check: the same report is already in the
+          // job summary.
+          const writeOrWarn = async (label, fn) => {
+            try {
+              await fn();
+              core.info(label);
+            } catch (error) {
+              if (error && error.status === 403) {
+                core.warning(
+                  'Cannot comment on this pull request: the GITHUB_TOKEN is read-only ' +
+                  '(the usual case for a fork PR on a pull_request event). ' +
+                  'The pipeline diff is in this job\'s summary instead.'
+                );
+                return;
+              }
+              throw error;
+            }
+          };
+
+          if (existing) {
+            await writeOrWarn(`Updated sticky pipe-diff comment (${existing.id}).`, () =>
+              github.rest.issues.updateComment({ owner, repo, comment_id: existing.id, body })
+            );
+          } else if (pipeFilesChanged) {
+            await writeOrWarn('Created sticky pipe-diff comment.', () =>
+              github.rest.issues.createComment({ owner, repo, issue_number, body })
+            );
+          } else {
+            core.info('No .pipe changes and no existing comment; nothing to post.');
+          }
+
+    - name: Fail if any pipe file could not be diffed
+      if: ${{ steps.diff.outputs.errored == 'true' }}
+      shell: bash
+      run: |
+        set -euo pipefail
+        echo "::error::One or more changed .pipe files could not be parsed or diffed. See the annotations and the PR comment above."
+        exit 1

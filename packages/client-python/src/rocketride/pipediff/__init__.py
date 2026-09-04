@@ -21,38 +21,41 @@
 # SOFTWARE.
 
 """
-CLI Command Implementations.
+Semantic diff for RocketRide ``.pipe`` pipeline files.
 
-This module exports all available CLI command classes for the RocketRide command-line interface.
-Each command provides a specific operation for interacting with RocketRide pipelines and services.
+``rocketride diff`` surfaces what actually changed between two pipeline
+definitions — added/removed/reconfigured nodes and rewired edges — instead of the
+raw JSON churn dominated by canvas coordinates. This package is the pure,
+network-free implementation behind the CLI subcommand and the PR-comment GitHub
+Action.
 
-Available Commands:
-    StartCommand: Start and run a pipeline from configuration
-    UploadCommand: Upload files for pipeline processing
-    StatusCommand: Query pipeline status and execution metrics
-    StopCommand: Terminate running pipeline tasks
-    EventsCommand: Monitor real-time pipeline events
-    ListCommand: List all active tasks
-    StoreCommand: Project and template storage operations
-    DiffCommand: Semantic diff of two local .pipe pipeline files (no server)
+Public API:
+    Data model:
+        NodeChange, FieldChange, EdgeChange, PipeDiff
+    Engine:
+        load_pipe, diff_pipes, deep_diff_config, PipeDiffError
+    Git resolution:
+        resolve_git_ref
+    Reporters (rendering):
+        render_human, render_json, render_markdown
 """
 
-from .start import StartCommand
-from .upload import UploadCommand
-from .status import StatusCommand
-from .stop import StopCommand
-from .events import EventsCommand
-from .list import ListCommand
-from .store import StoreCommand
-from .diff import DiffCommand
+from .engine import PipeDiffError, deep_diff_config, diff_pipes, load_pipe
+from .gitref import resolve_git_ref
+from .model import EdgeChange, FieldChange, NodeChange, PipeDiff
+from .reporters import render_human, render_json, render_markdown
 
 __all__ = [
-    'StartCommand',
-    'UploadCommand',
-    'StatusCommand',
-    'StopCommand',
-    'EventsCommand',
-    'ListCommand',
-    'StoreCommand',
-    'DiffCommand',
+    'NodeChange',
+    'FieldChange',
+    'EdgeChange',
+    'PipeDiff',
+    'PipeDiffError',
+    'load_pipe',
+    'diff_pipes',
+    'deep_diff_config',
+    'resolve_git_ref',
+    'render_human',
+    'render_json',
+    'render_markdown',
 ]

@@ -67,6 +67,7 @@ from .commands.stop import StopCommand
 from .commands.events import EventsCommand
 from .commands.list import ListCommand
 from .commands.store import StoreCommand
+from .commands.diff import DiffCommand
 
 try:
     # Try importing from installed package first
@@ -508,6 +509,58 @@ class RocketRideCLI:
         )
         stat_parser.add_argument('path', help='File or directory path')
 
+        # Diff command - semantic diff of two .pipe pipeline files.
+        #
+        # This command is intentionally *local only*: it never contacts the engine
+        # or the network, so it does NOT take the shared --uri/--apikey/--token
+        # connection arguments (add_common_args) that every other command uses.
+        diff_parser = subparsers.add_parser(
+            'diff',
+            help='Semantic diff of two .pipe pipeline files (local; no server)',
+            description=(
+                'Compare two RocketRide .pipe pipeline files semantically, surfacing node, '
+                'edge, and config changes while ignoring canvas layout noise (the per-node '
+                '"ui" block and top-level "viewport"). This command runs entirely locally '
+                'and never connects to the engine or network, so it takes no '
+                '--uri/--apikey/--token arguments.'
+            ),
+        )
+        diff_parser.add_argument(
+            'paths',
+            nargs='*',
+            metavar='FILE',
+            help='Two pipe files to compare (old new), or a single FILE when using --git',
+        )
+        diff_parser.add_argument(
+            '--git',
+            metavar='REF',
+            help='Diff the working-tree FILE against this git ref (via "git show REF:FILE")',
+        )
+        diff_parser.add_argument(
+            '--include-layout',
+            action='store_true',
+            help='Include layout churn (per-node "ui" blocks and top-level "viewport") ignored by default',
+        )
+
+        # --json and --markdown select mutually exclusive output formats.
+        diff_format_group = diff_parser.add_mutually_exclusive_group()
+        diff_format_group.add_argument(
+            '--json',
+            action='store_true',
+            help='Emit the diff as a single JSON document to stdout',
+        )
+        diff_format_group.add_argument(
+            '--markdown',
+            action='store_true',
+            help='Emit the diff as compact, PR-comment-friendly Markdown to stdout',
+        )
+
+        diff_parser.add_argument(
+            '--exit-zero',
+            action='store_true',
+            help='Always exit 0 on a successful run, even when changes are found (non-gating)',
+        )
+
         return parser
 
     async def run(self) -> int:
@@ -518,7 +571,9 @@ class RocketRideCLI:
         routes to appropriate command implementation, and handles errors.
 
         Returns:
-            int: Exit code (0 for success, 1 for error)
+            int: Exit code (0 for success, 1 for error). The ``diff`` command has
+                its own contract: 0 when there are no semantic changes, 1 when
+                changes were found, and 2 for a usage / parse / git error.
 
         Execution Flow:
             1. Parse command line arguments and validate
@@ -536,6 +591,13 @@ class RocketRideCLI:
         if not self.args.command:
             parser.print_help()
             return 1
+
+        # Diff command is fully local: no server connection, no auth, no client.
+        # Dispatch it here, before any connection setup, since it does not carry
+        # the shared --uri/--apikey/--token arguments the other commands rely on.
+        if self.args.command == 'diff':
+            self.command = DiffCommand(self, self.args)
+            return await self.command.execute()
 
         # Validate we have something for apikey
         if not self.args.apikey:

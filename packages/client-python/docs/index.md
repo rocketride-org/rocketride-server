@@ -726,9 +726,10 @@ rocketride stop --token <token>              # Terminate a running task
 rocketride list                              # List all active tasks
 rocketride events ALL --token <token>        # Stream task events
 rocketride rrext_store get_all_projects      # List stored projects
+rocketride diff old.pipe new.pipe            # Semantic diff of two .pipe files (local; no server)
 ```
 
-All commands accept `--uri` and `--apikey` flags, or read from environment variables.
+All commands **except `diff`** accept `--uri` and `--apikey` flags, or read from environment variables. `diff` compares parsed `.pipe` JSON entirely on your machine — it never connects to an engine, so it takes no connection flags. See the [CLI reference](/cli) for its flags and exit codes.
 
 ## Configuration
 
