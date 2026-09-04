@@ -60,7 +60,7 @@ import os
 from typing import Dict, Any, List, Optional
 from ..core import DAPClient
 from ..types.pipeline import PipelineConfig
-from ..types.task import TASK_STATUS
+from ..types.task import TASK_STATUS, TASK_STATE
 
 try:
     import json5
@@ -383,14 +383,14 @@ class ExecutionMixin(DAPClient):
             token: Task token of the pipeline to check (from use())
 
         Returns:
-            Dict containing status information:
-            - state: Current execution state ('starting', 'running', 'completed', 'failed', etc.)
-            - progress: Progress information if available (items processed, percentage, etc.)
-            - error: Error message if pipeline failed
-            - started_at: When execution started (timestamp)
-            - completed_at: When execution finished (timestamp, if completed)
-            - performance: Processing speed and resource usage metrics
-            - Additional pipeline-specific status data
+            A TASK_STATUS model with status information, including:
+            - state: Current lifecycle state, a TASK_STATE enum value
+              (NONE, STARTING, INITIALIZING, RUNNING, STOPPING, COMPLETED, CANCELLED)
+            - completed: True once the task has finished execution
+            - errors / warnings: Recent error and warning message history
+            - startTime / endTime: Execution timestamps (Unix time)
+            - metrics / tokens: Performance and resource usage data
+            - Additional pipeline-specific status fields (see TASK_STATUS)
 
         Raises:
             RuntimeError: If status retrieval fails
@@ -407,37 +407,29 @@ class ExecutionMixin(DAPClient):
             # Monitor until completion
             while True:
                 status = await client.get_task_status(token)
-                state = status.get('state')
 
-                if state == 'running':
-                    progress = status.get('progress', {})
-                    print(f"Processing: {progress.get('percentage', 0):.1f}%")
-                elif state == 'completed':
+                if status.state == TASK_STATE.RUNNING.value:
+                    print(f"Processing: {status.completedCount}/{status.totalCount}")
+                elif status.completed and status.state == TASK_STATE.COMPLETED.value:
                     print("Pipeline completed successfully!")
                     break
-                elif state == 'failed':
-                    error = status.get('error', 'Unknown error')
-                    print(f"Pipeline failed: {error}")
+                elif status.exitCode != 0:
+                    print(f"Pipeline failed: {status.exitMessage or status.errors}")
                     break
 
                 await asyncio.sleep(1)  # Check every second
 
-        Status States:
-            - 'starting': Pipeline is initializing
-            - 'running': Pipeline is actively processing data
-            - 'waiting': Pipeline is waiting for more data
-            - 'completed': Pipeline finished successfully
-            - 'failed': Pipeline encountered an error
-            - 'terminated': Pipeline was stopped by user
-
         Tips:
             - Poll status regularly for long-running operations
-            - Check 'progress' field for completion percentage
-            - Use 'error' field for detailed error information
-            - Performance metrics help optimize pipeline configurations
+            - Compare 'state' against TASK_STATE enum members, not strings
+            - Check 'completedCount'/'totalCount' for progress
+            - Use 'errors'/'exitMessage' for failure details
+            - 'metrics'/'tokens' help optimize pipeline configurations
         """
-        # Send status request
-        return await self.call('rrext_get_task_status', token=token)
+        # Send status request and validate the raw response into TASK_STATUS
+        # so the annotation, docstring, and runtime behavior all agree.
+        raw = await self.call('rrext_get_task_status', token=token)
+        return TASK_STATUS.model_validate(raw)
 
     async def get_task_token(self, project_id: str, source: str, *, team_id: str = '') -> str | None:
         """
