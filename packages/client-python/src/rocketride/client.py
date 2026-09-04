@@ -75,6 +75,32 @@ __all__ = [
 ]
 
 
+# Keyword arguments consumed by this constructor or by the DAP client base
+# chain (ConnectionMixin, EventMixin, DAPClient, DAPBase). Anything else is a
+# misspelling or an option this SDK version does not know; it is rejected
+# rather than silently dropped (#1837).
+_KNOWN_CONSTRUCTOR_KWARGS = frozenset(
+    {
+        'env',
+        'ws_path',
+        'client_name',
+        'client_version',
+        'on_trace',
+        'public',
+        'module',
+        'persist',
+        'max_retry_time',
+        'on_event',
+        'on_connected',
+        'on_disconnected',
+        'on_connect_error',
+        'on_protocol_message',
+        'on_debug_message',
+        'request_timeout',
+    }
+)
+
+
 class RocketRideClient(
     ConnectionMixin,
     ExecutionMixin,
@@ -113,6 +139,8 @@ class RocketRideClient(
     Raises:
         ValueError: If auth is not provided and ROCKETRIDE_APIKEY env var is not set
         ConnectionError: If unable to connect to the specified server
+        TypeError: If an unrecognized keyword argument is passed — a misspelled
+            or unsupported option is rejected instead of silently ignored
 
     Example:
         # Explicit connection management
@@ -154,13 +182,32 @@ class RocketRideClient(
                 - request_timeout: Default timeout in ms for individual requests (default: no timeout)
                 - max_retry_time: Max total time in ms to keep retrying connections (default: forever)
                 - persist: Enable automatic reconnection with exponential backoff (default: False)
+                - client_name: Custom display name sent in the auth handshake
+                    (default: 'Python SDK')
+                - client_version: Custom display version sent in the auth handshake
+                    (default: the installed SDK version)
+                - public: Run in permanently unauthenticated public mode (default: False)
+                - on_trace: Callable[[int, DAPMessage], None] observing all call() traffic
+                - on_event: Callable for protocol events
+                - on_connected: Callable invoked when the connection is established
+                - on_disconnected: Callable invoked when the connection is closed
+                - on_connect_error: Callable invoked when a connection attempt fails
                 - on_protocol_message: Callable[[str], None] for logging raw DAP messages
                 - on_debug_message: Callable[[str], None] for debug output
 
         Raises:
             ValueError: If URI is empty or not a string
+            TypeError: If an unrecognized keyword argument is passed - a misspelled
+                or unsupported option is rejected instead of silently ignored
         """
         global client_id
+
+        # Reject unknown arguments before touching environment, URI, or client
+        # state so an invalid call has no observable side effects.
+        unknown = set(kwargs) - _KNOWN_CONSTRUCTOR_KWARGS
+        if unknown:
+            names = ', '.join(sorted(unknown))
+            raise TypeError(f'RocketRideClient.__init__() got unexpected keyword argument(s): {names}')
 
         # Get or load environment variables
         env = kwargs.get('env', None)
