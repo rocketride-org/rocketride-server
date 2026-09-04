@@ -95,7 +95,7 @@
 				"model": "models/gemini-3.1-flash-image-preview",
 				"modelSource": "manual",
 				"modelTotalTokens": 131072, // sync_models.config.json
-				"modelOutputTokens": 65536, // openrouter
+				"modelOutputTokens": 58982, // openrouter
 				"apikey": ""
 			},
 			"gemini-3_1-flash-lite-preview": {
@@ -111,7 +111,7 @@
 				"model": "models/gemini-3-flash-preview",
 				"modelSource": "manual",
 				"modelTotalTokens": 1048576, // sync_models.config.json
-				"modelOutputTokens": 65535, // openrouter
+				"modelOutputTokens": 65536, // openrouter
 				"apikey": ""
 			},
 			"gemini-3-pro-image-preview": {
@@ -274,7 +274,7 @@
 				"model": "models/gemini-3.1-flash-lite-image",
 				"modelSource": "openrouter",
 				"modelTotalTokens": 65536, // openrouter
-				"modelOutputTokens": 66000, // openrouter
+				"modelOutputTokens": 58982, // openrouter
 				"apikey": ""
 			},
 			"models-gemini-3-5-flash": {
@@ -296,6 +296,94 @@
 			"models-gemini-3-6-flash": {
 				"title": "Google: Gemini 3.6 Flash",
 				"model": "models/gemini-3.6-flash",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 1048576, // openrouter
+				"modelOutputTokens": 65536, // openrouter
+				"apikey": ""
+			},
+			"models-gemini-2-5-flash-batch": {
+				"title": "Google: Gemini 2.5 Flash (batch)",
+				"model": "models/gemini-2.5-flash:batch",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 1048576, // openrouter
+				"modelOutputTokens": 65535, // openrouter
+				"apikey": ""
+			},
+			"models-gemini-2-5-flash-lite-batch": {
+				"title": "Google: Gemini 2.5 Flash Lite (batch)",
+				"model": "models/gemini-2.5-flash-lite:batch",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 1048576, // openrouter
+				"modelOutputTokens": 65535, // openrouter
+				"apikey": ""
+			},
+			"models-gemini-2-5-pro-batch": {
+				"title": "Google: Gemini 2.5 Pro (batch)",
+				"model": "models/gemini-2.5-pro:batch",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 1048576, // openrouter
+				"modelOutputTokens": 65536, // openrouter
+				"apikey": ""
+			},
+			"models-gemini-3-1-flash-lite-batch": {
+				"title": "Google: Gemini 3.1 Flash Lite (batch)",
+				"model": "models/gemini-3.1-flash-lite:batch",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 1048576, // openrouter
+				"modelOutputTokens": 65536, // openrouter
+				"apikey": ""
+			},
+			"models-gemini-3-1-pro-preview-batch": {
+				"title": "Google: Gemini 3.1 Pro Preview (batch)",
+				"model": "models/gemini-3.1-pro-preview:batch",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 1048576, // openrouter
+				"modelOutputTokens": 65536, // openrouter
+				"apikey": ""
+			},
+			"models-gemini-3-5-flash-batch": {
+				"title": "Google: Gemini 3.5 Flash (batch)",
+				"model": "models/gemini-3.5-flash:batch",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 1048576, // openrouter
+				"modelOutputTokens": 65536, // openrouter
+				"apikey": ""
+			},
+			"models-gemini-3-5-flash-lite-batch": {
+				"title": "Google: Gemini 3.5 Flash Lite (batch)",
+				"model": "models/gemini-3.5-flash-lite:batch",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 1048576, // openrouter
+				"modelOutputTokens": 65536, // openrouter
+				"apikey": ""
+			},
+			"models-gemini-3-6-flash-batch": {
+				"title": "Google: Gemini 3.6 Flash (batch)",
+				"model": "models/gemini-3.6-flash:batch",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 1048576, // openrouter
+				"modelOutputTokens": 65536, // openrouter
+				"apikey": ""
+			},
+			"models-gemini-3-7-flash": {
+				"title": "Google: Gemini 3.7 Flash",
+				"model": "models/gemini-3.7-flash",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 1048576, // openrouter
+				"modelOutputTokens": 65536, // openrouter
+				"apikey": ""
+			},
+			"models-gemini-3-7-flash-batch": {
+				"title": "Google: Gemini 3.7 Flash (batch)",
+				"model": "models/gemini-3.7-flash:batch",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 1048576, // openrouter
+				"modelOutputTokens": 65536, // openrouter
+				"apikey": ""
+			},
+			"models-gemini-3-flash-preview-batch": {
+				"title": "Google: Gemini 3 Flash Preview (batch)",
+				"model": "models/gemini-3-flash-preview:batch",
 				"modelSource": "openrouter",
 				"modelTotalTokens": 1048576, // openrouter
 				"modelOutputTokens": 65536, // openrouter
@@ -600,6 +688,72 @@
 					"properties": [
 						"gemini.models-gemini-3-6-flash"
 					]
+				},
+				{
+					"value": "models-gemini-2-5-flash-batch",
+					"properties": [
+						"gemini.models-gemini-2-5-flash-batch"
+					]
+				},
+				{
+					"value": "models-gemini-2-5-flash-lite-batch",
+					"properties": [
+						"gemini.models-gemini-2-5-flash-lite-batch"
+					]
+				},
+				{
+					"value": "models-gemini-2-5-pro-batch",
+					"properties": [
+						"gemini.models-gemini-2-5-pro-batch"
+					]
+				},
+				{
+					"value": "models-gemini-3-1-flash-lite-batch",
+					"properties": [
+						"gemini.models-gemini-3-1-flash-lite-batch"
+					]
+				},
+				{
+					"value": "models-gemini-3-1-pro-preview-batch",
+					"properties": [
+						"gemini.models-gemini-3-1-pro-preview-batch"
+					]
+				},
+				{
+					"value": "models-gemini-3-5-flash-batch",
+					"properties": [
+						"gemini.models-gemini-3-5-flash-batch"
+					]
+				},
+				{
+					"value": "models-gemini-3-5-flash-lite-batch",
+					"properties": [
+						"gemini.models-gemini-3-5-flash-lite-batch"
+					]
+				},
+				{
+					"value": "models-gemini-3-6-flash-batch",
+					"properties": [
+						"gemini.models-gemini-3-6-flash-batch"
+					]
+				},
+				{
+					"value": "models-gemini-3-7-flash",
+					"properties": [
+						"gemini.models-gemini-3-7-flash"
+					]
+				},
+				{
+					"value": "models-gemini-3-7-flash-batch",
+					"properties": [
+						"gemini.models-gemini-3-7-flash-batch"
+					]
+				},
+				{
+					"value": "models-gemini-3-flash-preview-batch",
+					"properties": [
+						"gemini.models-gemini-3-flash-preview-batch"
+					]
 				}
 			]
 		},
@@ -682,6 +836,83 @@
 		},
 		"gemini.models-gemini-3-6-flash": {
 			"object": "models-gemini-3-6-flash",
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
+		},
+		"gemini.models-gemini-2-5-flash-batch": {
+			"object": "models-gemini-2-5-flash-batch",
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
+		},
+		"gemini.models-gemini-2-5-flash-lite-batch": {
+			"object": "models-gemini-2-5-flash-lite-batch",
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
+		},
+		"gemini.models-gemini-2-5-pro-batch": {
+			"object": "models-gemini-2-5-pro-batch",
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
+		},
+		"gemini.models-gemini-3-1-flash-lite-batch": {
+			"object": "models-gemini-3-1-flash-lite-batch",
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
+		},
+		"gemini.models-gemini-3-1-pro-preview-batch": {
+			"object": "models-gemini-3-1-pro-preview-batch",
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
+		},
+		"gemini.models-gemini-3-5-flash-batch": {
+			"object": "models-gemini-3-5-flash-batch",
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
+		},
+		"gemini.models-gemini-3-5-flash-lite-batch": {
+			"object": "models-gemini-3-5-flash-lite-batch",
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
+		},
+		"gemini.models-gemini-3-6-flash-batch": {
+			"object": "models-gemini-3-6-flash-batch",
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
+		},
+		"gemini.models-gemini-3-7-flash": {
+			"object": "models-gemini-3-7-flash",
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
+		},
+		"gemini.models-gemini-3-7-flash-batch": {
+			"object": "models-gemini-3-7-flash-batch",
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
+		},
+		"gemini.models-gemini-3-flash-preview-batch": {
+			"object": "models-gemini-3-flash-preview-batch",
 			"properties": [
 				"llm.cloud.apikey",
 				"llm.cloud.modelSource"

@@ -354,16 +354,18 @@
 				"title": "OpenAI: GPT-5.1 Chat",
 				"model": "gpt-5.1-chat",
 				"modelSource": "openrouter",
-				"modelTotalTokens": 128000, // openrouter
-				"modelOutputTokens": 16384, // openrouter
+				"modelTotalTokens": 128000, // manual
+				"modelOutputTokens": 16384, // manual
+				"deprecated": true,
+				"migration": "Model no longer listed in OpenRouter. Please select a current model.",
 				"apikey": ""
 			},
 			"gpt-5-3-chat": {
 				"title": "OpenAI: GPT-5.3 Chat",
 				"model": "gpt-5.3-chat",
 				"modelSource": "openrouter",
-				"modelTotalTokens": 128000, // openrouter
-				"modelOutputTokens": 16384, // openrouter
+				"modelTotalTokens": 128000, // manual
+				"modelOutputTokens": 16384, // manual
 				"deprecated": true,
 				"migration": "Model deprecated by OpenRouter (expiration date: 2026-08-10). Please select a current model.",
 				"apikey": ""
@@ -438,8 +440,10 @@
 				"title": "OpenAI: GPT-5 Chat",
 				"model": "gpt-5-chat",
 				"modelSource": "openrouter",
-				"modelTotalTokens": 128000, // openrouter
-				"modelOutputTokens": 16384, // openrouter
+				"modelTotalTokens": 128000, // manual
+				"modelOutputTokens": 16384, // manual
+				"deprecated": true,
+				"migration": "Model no longer listed in OpenRouter. Please select a current model.",
 				"apikey": ""
 			},
 			"gpt-chat-latest": {
@@ -477,7 +481,7 @@
 				"model": "gpt-oss-120b",
 				"modelSource": "openrouter",
 				"modelTotalTokens": 131072, // openrouter
-				"modelOutputTokens": 131072, // openrouter
+				"modelOutputTokens": 117964, // openrouter
 				"capabilities": {
 					"reasoning": true
 				},
@@ -501,7 +505,7 @@
 				"model": "gpt-oss-20b",
 				"modelSource": "openrouter",
 				"modelTotalTokens": 131072, // openrouter
-				"modelOutputTokens": 131072, // openrouter
+				"modelOutputTokens": 117964, // openrouter
 				"capabilities": {
 					"reasoning": true
 				},
@@ -511,8 +515,10 @@
 				"title": "OpenAI: gpt-oss-20b (free)",
 				"model": "gpt-oss-20b:free",
 				"modelSource": "openrouter",
-				"modelTotalTokens": 131072, // openrouter
-				"modelOutputTokens": 32768, // openrouter
+				"modelTotalTokens": 131072, // manual
+				"modelOutputTokens": 32768, // manual
+				"deprecated": true,
+				"migration": "Model no longer listed in OpenRouter. Please select a current model.",
 				"capabilities": {
 					"reasoning": true
 				},
@@ -557,6 +563,36 @@
 				"modelSource": "openrouter",
 				"modelTotalTokens": 200000, // openrouter
 				"modelOutputTokens": 100000, // openrouter
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"gpt-5-2-chat": {
+				"title": "OpenAI: GPT-5.2 Chat",
+				"model": "gpt-5.2-chat",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 128000, // openrouter
+				"modelOutputTokens": 32000, // openrouter
+				"apikey": ""
+			},
+			"gpt-oss-120b-batch": {
+				"title": "OpenAI: gpt-oss-120b (batch)",
+				"model": "gpt-oss-120b:batch",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 131072, // openrouter
+				"modelOutputTokens": 117964, // openrouter
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"gpt-oss-20b-batch": {
+				"title": "OpenAI: gpt-oss-20b (batch)",
+				"model": "gpt-oss-20b:batch",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 131072, // openrouter
+				"modelOutputTokens": 117964, // openrouter
 				"capabilities": {
 					"reasoning": true
 				},
@@ -969,6 +1005,24 @@
 					"properties": [
 						"openai.o4-mini-high"
 					]
+				},
+				{
+					"value": "gpt-5-2-chat",
+					"properties": [
+						"openai.gpt-5-2-chat"
+					]
+				},
+				{
+					"value": "gpt-oss-120b-batch",
+					"properties": [
+						"openai.gpt-oss-120b-batch"
+					]
+				},
+				{
+					"value": "gpt-oss-20b-batch",
+					"properties": [
+						"openai.gpt-oss-20b-batch"
+					]
 				}
 			]
 		},
@@ -1226,6 +1280,27 @@
 		},
 		"openai.o4-mini-high": {
 			"object": "o4-mini-high",
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
+		},
+		"openai.gpt-5-2-chat": {
+			"object": "gpt-5-2-chat",
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
+		},
+		"openai.gpt-oss-120b-batch": {
+			"object": "gpt-oss-120b-batch",
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
+		},
+		"openai.gpt-oss-20b-batch": {
+			"object": "gpt-oss-20b-batch",
 			"properties": [
 				"llm.cloud.apikey",
 				"llm.cloud.modelSource"

@@ -176,7 +176,7 @@
 				"model": "grok-4.20",
 				"modelSource": "openrouter",
 				"modelTotalTokens": 2000000, // openrouter
-				"modelOutputTokens": 4096, // default
+				"modelOutputTokens": 1800000, // openrouter
 				"apikey": "",
 				"capabilities": {
 					"reasoning": true
@@ -187,7 +187,7 @@
 				"model": "grok-4.20-multi-agent",
 				"modelSource": "openrouter",
 				"modelTotalTokens": 2000000, // openrouter
-				"modelOutputTokens": 4096, // default
+				"modelOutputTokens": 1800000, // openrouter
 				"apikey": "",
 				"capabilities": {
 					"reasoning": true
@@ -208,7 +208,7 @@
 				"model": "grok-4.3",
 				"modelSource": "openrouter",
 				"modelTotalTokens": 1000000, // openrouter
-				"modelOutputTokens": 1000000, // litellm
+				"modelOutputTokens": 900000, // openrouter
 				"capabilities": {
 					"reasoning": true
 				},
@@ -219,7 +219,7 @@
 				"model": "grok-4.5",
 				"modelSource": "openrouter",
 				"modelTotalTokens": 500000, // openrouter
-				"modelOutputTokens": 500000, // litellm
+				"modelOutputTokens": 450000, // openrouter
 				"capabilities": {
 					"reasoning": true
 				},
@@ -230,7 +230,7 @@
 				"model": "grok-build-0.1",
 				"modelSource": "openrouter",
 				"modelTotalTokens": 256000, // openrouter
-				"modelOutputTokens": 4096, // default
+				"modelOutputTokens": 230400, // openrouter
 				"capabilities": {
 					"reasoning": true
 				},
@@ -241,7 +241,18 @@
 				"model": "grok-latest",
 				"modelSource": "openrouter",
 				"modelTotalTokens": 500000, // openrouter
-				"modelOutputTokens": 4096, // default
+				"modelOutputTokens": 450000, // openrouter
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"grok-4-6": {
+				"title": "SpaceXAI: Grok 4.6",
+				"model": "grok-4.6",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 500000, // openrouter
+				"modelOutputTokens": 450000, // openrouter
 				"capabilities": {
 					"reasoning": true
 				},
@@ -453,6 +464,12 @@
 					"properties": [
 						"xai.grok-latest"
 					]
+				},
+				{
+					"value": "grok-4-6",
+					"properties": [
+						"xai.grok-4-6"
+					]
 				}
 			]
 		},
@@ -521,6 +538,13 @@
 		},
 		"xai.grok-latest": {
 			"object": "grok-latest",
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
+		},
+		"xai.grok-4-6": {
+			"object": "grok-4-6",
 			"properties": [
 				"llm.cloud.apikey",
 				"llm.cloud.modelSource"

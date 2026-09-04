@@ -167,7 +167,7 @@
 				"model": "deepseek-chat-v3-0324",
 				"modelSource": "openrouter",
 				"modelTotalTokens": 163840, // openrouter
-				"modelOutputTokens": 65536, // openrouter
+				"modelOutputTokens": 147456, // openrouter
 				"apikey": ""
 			},
 			"deepseek-chat-v3-1": {
@@ -175,7 +175,7 @@
 				"model": "deepseek-chat-v3.1",
 				"modelSource": "openrouter",
 				"modelTotalTokens": 163840, // openrouter
-				"modelOutputTokens": 32768, // openrouter
+				"modelOutputTokens": 144900, // openrouter
 				"apikey": "",
 				"capabilities": {
 					"reasoning": true
@@ -185,7 +185,7 @@
 				"title": "DeepSeek: R1",
 				"model": "deepseek-r1",
 				"modelSource": "openrouter",
-				"modelTotalTokens": 163840, // openrouter
+				"modelTotalTokens": 64000, // openrouter
 				"modelOutputTokens": 16000, // openrouter
 				"apikey": "",
 				"capabilities": {
@@ -208,7 +208,7 @@
 				"model": "deepseek-r1-distill-llama-70b",
 				"modelSource": "openrouter",
 				"modelTotalTokens": 8192, // openrouter
-				"modelOutputTokens": 8192, // openrouter
+				"modelOutputTokens": 7372, // openrouter
 				"apikey": "",
 				"capabilities": {
 					"reasoning": true
@@ -292,7 +292,7 @@
 				"model": "deepseek-v4-flash",
 				"modelSource": "openrouter",
 				"modelTotalTokens": 1048576, // openrouter
-				"modelOutputTokens": 393216, // openrouter
+				"modelOutputTokens": 384000, // openrouter
 				"apikey": "",
 				"capabilities": {
 					"reasoning": true
@@ -308,6 +308,72 @@
 				"capabilities": {
 					"reasoning": true
 				}
+			},
+			"deepseek-v4-flash-0731": {
+				"title": "DeepSeek: DeepSeek V4 Flash 0731",
+				"model": "deepseek-v4-flash-0731",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 1310720, // openrouter
+				"modelOutputTokens": 943718, // openrouter
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"deepseek-v4-flash-0731-batch": {
+				"title": "DeepSeek: DeepSeek V4 Flash 0731 (batch)",
+				"model": "deepseek-v4-flash-0731:batch",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 1048576, // openrouter
+				"modelOutputTokens": 943718, // openrouter
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"deepseek-v4-flash-latest": {
+				"title": "DeepSeek V4 Flash Latest",
+				"model": "deepseek-v4-flash-latest",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 1310720, // openrouter
+				"modelOutputTokens": 393216, // openrouter
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"deepseek-v4-flash-vision-exp": {
+				"title": "DeepSeek: DeepSeek V4 Flash Vision Exp",
+				"model": "deepseek-v4-flash-vision-exp",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 1048576, // openrouter
+				"modelOutputTokens": 384000, // openrouter
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"deepseek-v4-pro-0813": {
+				"title": "DeepSeek: DeepSeek V4 Pro 0813",
+				"model": "deepseek-v4-pro-0813",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 1048576, // openrouter
+				"modelOutputTokens": 384000, // openrouter
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"deepseek-v4-pro-0813-batch": {
+				"title": "DeepSeek: DeepSeek V4 Pro 0813 (batch)",
+				"model": "deepseek-v4-pro-0813:batch",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 1048576, // openrouter
+				"modelOutputTokens": 943718, // openrouter
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
 			}
 		}
 	},
@@ -537,6 +603,42 @@
 					"properties": [
 						"deepseek.deepseek-v4-pro"
 					]
+				},
+				{
+					"value": "deepseek-v4-flash-0731",
+					"properties": [
+						"deepseek.deepseek-v4-flash-0731"
+					]
+				},
+				{
+					"value": "deepseek-v4-flash-0731-batch",
+					"properties": [
+						"deepseek.deepseek-v4-flash-0731-batch"
+					]
+				},
+				{
+					"value": "deepseek-v4-flash-latest",
+					"properties": [
+						"deepseek.deepseek-v4-flash-latest"
+					]
+				},
+				{
+					"value": "deepseek-v4-flash-vision-exp",
+					"properties": [
+						"deepseek.deepseek-v4-flash-vision-exp"
+					]
+				},
+				{
+					"value": "deepseek-v4-pro-0813",
+					"properties": [
+						"deepseek.deepseek-v4-pro-0813"
+					]
+				},
+				{
+					"value": "deepseek-v4-pro-0813-batch",
+					"properties": [
+						"deepseek.deepseek-v4-pro-0813-batch"
+					]
 				}
 			]
 		},
@@ -633,6 +735,48 @@
 		},
 		"deepseek.deepseek-v4-pro": {
 			"object": "deepseek-v4-pro",
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
+		},
+		"deepseek.deepseek-v4-flash-0731": {
+			"object": "deepseek-v4-flash-0731",
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
+		},
+		"deepseek.deepseek-v4-flash-0731-batch": {
+			"object": "deepseek-v4-flash-0731-batch",
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
+		},
+		"deepseek.deepseek-v4-flash-latest": {
+			"object": "deepseek-v4-flash-latest",
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
+		},
+		"deepseek.deepseek-v4-flash-vision-exp": {
+			"object": "deepseek-v4-flash-vision-exp",
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
+		},
+		"deepseek.deepseek-v4-pro-0813": {
+			"object": "deepseek-v4-pro-0813",
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
+		},
+		"deepseek.deepseek-v4-pro-0813-batch": {
+			"object": "deepseek-v4-pro-0813-batch",
 			"properties": [
 				"llm.cloud.apikey",
 				"llm.cloud.modelSource"
