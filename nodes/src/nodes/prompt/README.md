@@ -10,6 +10,20 @@ Each input lane maps to a different section of the rendered prompt. Inputs are c
 
 If no `instructions` are configured, the default profile supplies a single instruction: `"Please provide a detailed and helpful response to the following question:"`. If an error occurs during the merge, the node logs the error and the enriched question is not emitted.
 
+### Grounding
+
+When the `documents` lane is connected, the node appends a `Grounding` instruction after your own. A store dispatches that lane even when its search matched nothing, so the node can tell a retrieval miss from a pipeline that does not retrieve at all:
+
+| Documents lane | Documents received | Appended instruction |
+|---|---|---|
+| connected | one or more | answer from the documents provided, introduce no new figures |
+| connected | none | say the information is not available, do not answer from memory |
+| not connected | n/a | none, the question is left exactly as before |
+
+The third row is what keeps a prompt node used to merge branches unchanged. Nothing is blocked here: the instruction asks the model to abstain, and the [guardrails](../guardrails/README.md) node with `require_grounding` is what refuses delivery if it answers anyway. An abstention passes that guard, so the refusal reaches the user.
+
+State does not carry between objects: each one starts a fresh question, so a later turn is never grounded in an earlier turn's documents.
+
 The node registers as a `filter` with class type `text` and runs as a pure Python transformation (no external service or model is called).
 
 ---
@@ -42,6 +56,7 @@ When the question is consumed by an LLM or agent, it is rendered in this order:
 ```
 ### System Instructions:
     1) **User Instruction**: [your configured instructions]
+    2) **Grounding**: [added when the documents lane is connected]
 
 ### Context:
     1) [text or table content from text/table lanes]

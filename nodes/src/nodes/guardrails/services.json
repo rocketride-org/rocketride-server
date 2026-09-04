@@ -124,6 +124,7 @@
 				"enable_content_safety": false,
 				"enable_pii_detection": true,
 				"enable_hallucination_check": false,
+				"require_grounding": false,
 				"max_input_length": 0,
 				"max_tokens_estimate": 0,
 				"expected_format": "",
@@ -137,6 +138,7 @@
 				"enable_content_safety": true,
 				"enable_pii_detection": true,
 				"enable_hallucination_check": true,
+				"require_grounding": true,
 				"max_input_length": 50000,
 				"max_tokens_estimate": 4096,
 				"expected_format": "",
@@ -150,6 +152,7 @@
 				"enable_content_safety": true,
 				"enable_pii_detection": true,
 				"enable_hallucination_check": true,
+				"require_grounding": false,
 				"max_input_length": 0,
 				"max_tokens_estimate": 0,
 				"expected_format": "",
@@ -207,6 +210,12 @@
 			"type": "boolean",
 			"title": "Enable hallucination check",
 			"description": "Verify that output claims are grounded in source documents",
+			"default": false
+		},
+		"require_grounding": {
+			"type": "boolean",
+			"title": "Require grounding",
+			"description": "Treat an answer produced with no source documents as a violation. Without this the hallucination check passes when retrieval returned nothing, which is when a model is most likely to answer from memory.",
 			"default": false
 		},
 		"max_input_length": {
@@ -273,6 +282,7 @@
 				"enable_content_safety",
 				"enable_pii_detection",
 				"enable_hallucination_check",
+				"require_grounding",
 				"max_input_length",
 				"max_tokens_estimate",
 				"expected_format",

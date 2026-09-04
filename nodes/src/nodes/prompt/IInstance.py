@@ -27,6 +27,21 @@ from ai.common.schema import Question
 from rocketlib import debug, Entry
 
 
+# Appended when retrieval ran and returned something, so the answer is drawn from the
+# documents rather than from what the model happens to remember.
+_GROUNDING_INSTRUCTION = (
+    'Base your answer on the documents and context provided below. Do not introduce '
+    'facts, figures or dates that do not appear there.'
+)
+
+# Appended when retrieval ran and returned nothing. Saying so is the useful answer;
+# answering anyway is where invented figures come from.
+_ABSTAIN_INSTRUCTION = (
+    'No documents were retrieved for this question. Say that you do not have the '
+    'information to answer it. Do not answer from memory.'
+)
+
+
 class IInstance(IInstanceBase):
     IGlobal: IGlobal
 
@@ -36,9 +51,17 @@ class IInstance(IInstanceBase):
         self.collected_inputs = []
         self.has_output = False
         self.question = Question()
+        self.retrieval_ran = False
+        self.documents_received = False
 
     def open(self, entry: Entry):
-        pass
+        # The instance is reused across objects. Without a fresh question the
+        # previous turn's questions, instructions and documents all carry into this
+        # one, which left an abstain instruction rendered above the documents a
+        # different question retrieved.
+        self.question = Question()
+        self.retrieval_ran = False
+        self.documents_received = False
 
     def writeQuestions(self, question: Question):
         """
@@ -51,6 +74,12 @@ class IInstance(IInstanceBase):
         """
         Collect documents for merging.
         """
+        # A store dispatches this lane even when its search found nothing, so being
+        # called at all is what separates "retrieval missed" from "no retrieval here".
+        self.retrieval_ran = True
+        if documents:
+            self.documents_received = True
+
         # Create a question from documents
         self.question.addDocuments(documents)
 
@@ -88,6 +117,12 @@ class IInstance(IInstanceBase):
             for i, instruction in enumerate(instructions):
                 instruction_name = f'User Instruction {i + 1}' if len(instructions) > 1 else 'User Instruction'
                 self.question.addInstruction(instruction_name, instruction)
+
+            # Only a pipeline that retrieves gets a grounding rule. A prompt node used
+            # to merge branches has no documents lane, so it is left exactly as it was.
+            if self.retrieval_ran:
+                body = _GROUNDING_INSTRUCTION if self.documents_received else _ABSTAIN_INSTRUCTION
+                self.question.addInstruction('Grounding', body)
 
             debug(f'Enhanced question: {self.question.getPrompt()}')
 
