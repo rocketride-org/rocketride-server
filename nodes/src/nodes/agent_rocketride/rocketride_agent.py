@@ -31,7 +31,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List
 
-from rocketlib import debug, error
+from rocketlib import debug, error, warning
 
 from ai.common.agent import AgentBase, AgentContext
 from ai.common.agent.types import AgentRunResult
@@ -47,6 +47,31 @@ from .executor import execute_wave, resolve_answer_refs
 # Prevents runaway loops if the LLM fails to converge on done=true.
 # Can be overridden via the ``max_waves`` node configuration field.
 _DEFAULT_MAX_WAVES = 10
+
+# Bounds declared for ``max_waves`` in services.json. Schema minimum/maximum
+# are not enforced at config validation, so an out-of-range value (e.g. 60)
+# used to be accepted and run as-is; clamp here so the schema's stated
+# contract holds at runtime.
+_MAX_WAVES_BOUNDS = (1, 50)
+
+
+def _resolve_max_waves(value: Any) -> int:
+    """Return ``max_waves`` as an int clamped to the services.json bounds.
+
+    Non-numeric values fall back to the default rather than failing later
+    inside the wave loop.
+    """
+    lo, hi = _MAX_WAVES_BOUNDS
+    try:
+        waves = int(value)
+    except (TypeError, ValueError):
+        warning(f'agent_rocketride: max_waves={value!r} is not an integer; using {_DEFAULT_MAX_WAVES}')
+        return _DEFAULT_MAX_WAVES
+    if waves < lo or waves > hi:
+        clamped = max(lo, min(hi, waves))
+        warning(f'agent_rocketride: max_waves={waves} is outside the schema bounds [{lo}, {hi}]; using {clamped}')
+        return clamped
+    return waves
 
 
 class RocketRideDriver(AgentBase):
@@ -71,7 +96,7 @@ class RocketRideDriver(AgentBase):
         """Initialize the Wave driver and load host services."""
         super().__init__(iGlobal)
         config = Config.getNodeConfig(iGlobal.glb.logicalType, iGlobal.glb.connConfig)
-        self._max_waves = config.get('max_waves', _DEFAULT_MAX_WAVES)
+        self._max_waves = _resolve_max_waves(config.get('max_waves', _DEFAULT_MAX_WAVES))
 
     # ------------------------------------------------------------------
     # Main driver
