@@ -47,7 +47,9 @@ Usage:
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
+from urllib.parse import urlparse
 
+from .core import CONST_DEFAULT_WEB_CLOUD
 from .types.deploy import (
     Deployment,
     DeployHistoryResult,
@@ -60,7 +62,6 @@ from .types.pipeline import PipelineConfig
 
 if TYPE_CHECKING:
     from .client import RocketRideClient
-
 
 def _list_args(
     kwargs: dict,
@@ -105,6 +106,17 @@ class DeployApi:
         """
         self._client = client
 
+    def _ensure_supported(self) -> None:
+        uri = self._client.get_connection_info().get('uri', '')
+
+        cloud_host = (urlparse(CONST_DEFAULT_WEB_CLOUD).hostname or '').rstrip('.')
+        current_host = (urlparse(uri).hostname or '').rstrip('.')
+
+        if current_host == cloud_host:
+            raise RuntimeError(
+                'Deploy operations are not supported on RocketRide Cloud.'
+            )    
+
     # =========================================================================
     # PUBLISH — immutable artifact into the org registry
     # =========================================================================
@@ -137,6 +149,8 @@ class DeployApi:
             ``{'artifact': ...}`` plus ``'deployment'`` when ``deploy_to``
             was given.
         """
+        self._ensure_supported()
+
         kwargs: dict = {'subcommand': 'publish', 'pipeline': pipeline}
         if comment is not None:
             kwargs['comment'] = comment
@@ -164,6 +178,8 @@ class DeployApi:
         Returns:
             The updated deployment record, registry-joined.
         """
+        self._ensure_supported()
+
         return await self._client.call(
             'rrext_deploy', subcommand='deploy', projectId=project_id, version=version, teamId=team_id
         )
@@ -197,6 +213,7 @@ class DeployApi:
         Returns:
             ``{'rows', 'total', 'page', 'pageSize'}``.
         """
+        self._ensure_supported()
         kwargs: dict = {'subcommand': 'list'}
         if team_id is not None:
             kwargs['teamId'] = team_id
@@ -213,6 +230,7 @@ class DeployApi:
         Returns:
             The deployment record (version, state, schedules, actors).
         """
+        self._ensure_supported()
         return await self._client.call('rrext_deploy', subcommand='get', projectId=project_id, teamId=team_id)
 
     async def versions(
@@ -240,6 +258,7 @@ class DeployApi:
         Returns:
             ``{'rows', 'total', 'page', 'pageSize'}``.
         """
+        self._ensure_supported()
         kwargs: dict = {'subcommand': 'versions', 'projectId': project_id}
         return await self._client.call('rrext_deploy', **_list_args(kwargs, page, page_size, search, filters, sort))
 
@@ -260,6 +279,7 @@ class DeployApi:
         Returns:
             ``{'token', 'version'}`` of the started run.
         """
+        self._ensure_supported()
         return await self._client.call(
             'rrext_deploy', subcommand='run', projectId=project_id, sourceId=source_id, teamId=team_id
         )
@@ -279,6 +299,7 @@ class DeployApi:
         Returns:
             The pipeline definition exactly as published.
         """
+        self._ensure_supported()
         return await self._client.call('rrext_deploy', subcommand='artifact', projectId=project_id, version=version)
 
     async def history(
@@ -314,6 +335,7 @@ class DeployApi:
         Returns:
             ``{'rows', 'total', 'page', 'pageSize'}``.
         """
+        self._ensure_supported()
         kwargs: dict = {'subcommand': 'history', 'projectId': project_id}
         if team_id is not None:
             kwargs['teamId'] = team_id
@@ -336,6 +358,7 @@ class DeployApi:
         Returns:
             The updated deployment record.
         """
+        self._ensure_supported()
         return await self._client.call('rrext_deploy', subcommand='disable', projectId=project_id, teamId=team_id)
 
     async def enable(self, project_id: str, team_id: str) -> Deployment:
@@ -349,6 +372,7 @@ class DeployApi:
         Returns:
             The updated deployment record.
         """
+        self._ensure_supported()
         return await self._client.call('rrext_deploy', subcommand='enable', projectId=project_id, teamId=team_id)
 
     async def remove(self, project_id: str, team_id: str) -> Deployment:
@@ -366,6 +390,7 @@ class DeployApi:
         Returns:
             The final deployment record (state ``removed``).
         """
+        self._ensure_supported()
         return await self._client.call('rrext_deploy', subcommand='remove', projectId=project_id, teamId=team_id)
 
     # =========================================================================
@@ -400,6 +425,7 @@ class DeployApi:
         Returns:
             The updated deployment record.
         """
+        self._ensure_supported()
         kwargs: dict = {
             'subcommand': 'schedule_set',
             'projectId': project_id,
@@ -439,6 +465,7 @@ class DeployApi:
         Returns:
             The updated deployment record.
         """
+        self._ensure_supported()
         kwargs: dict = {
             'subcommand': 'source_config',
             'projectId': project_id,
@@ -463,6 +490,7 @@ class DeployApi:
         Returns:
             The updated deployment record.
         """
+        self._ensure_supported()
         return await self._client.call(
             'rrext_deploy', subcommand='schedule_pause', projectId=project_id, sourceId=source_id, teamId=team_id
         )
@@ -479,6 +507,7 @@ class DeployApi:
         Returns:
             The updated deployment record.
         """
+        self._ensure_supported()
         return await self._client.call(
             'rrext_deploy', subcommand='schedule_resume', projectId=project_id, sourceId=source_id, teamId=team_id
         )
@@ -498,6 +527,7 @@ class DeployApi:
         Returns:
             ``{'valid', 'next'}`` plus ``'error'`` when invalid.
         """
+        self._ensure_supported()
         kwargs: dict = {'subcommand': 'preview', 'schedule': schedule}
         if count is not None:
             kwargs['count'] = count
