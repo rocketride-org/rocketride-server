@@ -1,0 +1,117 @@
+{
+	"title": "Discord Bot",
+	"protocol": "discord://",
+	"classType": ["source"],
+	"capabilities": ["noinclude"],
+	"register": "endpoint",
+	"node": "python",
+	"path": "nodes.discord",
+	"prefix": "Discord",
+	"description": [
+		"A Discord Bot source node that receives messages from channels and DMs via the Discord Gateway. ",
+		"Supports text messages and media attachments (images, audio, video, documents). ",
+		"Each message type is routed to the appropriate pipeline lane. ",
+		"Pipeline responses are automatically sent back as replies to the originating channel or thread. ",
+		"Supports message content intent, attachment downloading, reply threading, and long-message chunking."
+	],
+	"icon": "discord.svg",
+	"tile": ["Status: ${parameters.discord.botToken ? 'connected' : 'pending'}"],
+	"lanes": {
+		"_source": ["text", "image", "audio", "video", "tags"]
+	},
+	"preconfig": {
+		"default": "default",
+		"profiles": {
+			"default": {}
+		}
+	},
+	"fields": {
+		"discord.botToken": {
+			"type": "string",
+			"title": "Bot Token",
+			"description": "Discord bot token from the Developer Portal (keep this secret - do not share)",
+			"optional": false,
+			"secure": true,
+			"ui": {
+				"ui:widget": "ApiKeyWidget"
+			}
+		},
+		"discord.guildIds": {
+			"type": "array",
+			"items": {
+				"type": "string"
+			},
+			"title": "Server IDs (Guild IDs)",
+			"description": "List of Discord server IDs to listen to. Leave empty to listen to all servers the bot is in.",
+			"optional": true
+		},
+		"discord.channelIds": {
+			"type": "array",
+			"items": {
+				"type": "string"
+			},
+			"title": "Channel IDs",
+			"description": "List of channel IDs to listen to. Leave empty to listen to all channels.",
+			"optional": true
+		},
+		"discord.ignoreBots": {
+			"type": "boolean",
+			"title": "Ignore Bot Messages",
+			"description": "If true (default), messages from other bots are ignored to prevent loops.",
+			"default": true
+		},
+		"discord.requireMention": {
+			"type": "boolean",
+			"title": "Require @Mention",
+			"description": "If true, the bot only responds when explicitly @mentioned. If false, responds to all messages.",
+			"default": false
+		},
+		"discord.replyMode": {
+			"type": "string",
+			"title": "Reply Mode",
+			"description": "How the bot sends answers: 'channel' (post as normal message), 'reply' (reply to the message), or 'thread' (post in a thread).",
+			"enum": ["channel", "reply", "thread"],
+			"default": "reply"
+		},
+		"discord.showTyping": {
+			"type": "boolean",
+			"title": "Show Typing Indicator",
+			"description": "If true, show a typing indicator while processing the pipeline.",
+			"default": true
+		},
+		"discord.maxAttachmentBytes": {
+			"type": "number",
+			"title": "Max Attachment Size (bytes)",
+			"description": "Maximum size of attachments to download. Larger files are skipped. Default 25 MB.",
+			"default": 26214400
+		},
+		"discord.sendResponses": {
+			"type": "boolean",
+			"title": "Send Responses",
+			"description": "If true, the bot sends pipeline answers back to Discord. If false, only processes messages.",
+			"default": true
+		},
+		"Pipe.source.parameters": {
+			"section": "parameters",
+			"title": "Discord Bot Configuration",
+			"properties": [
+				"discord.botToken",
+				"discord.guildIds",
+				"discord.channelIds",
+				"discord.ignoreBots",
+				"discord.requireMention",
+				"discord.replyMode",
+				"discord.showTyping",
+				"discord.maxAttachmentBytes",
+				"discord.sendResponses"
+			]
+		}
+	},
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Discord Bot",
+			"properties": ["type", "Pipe.source.parameters"]
+		}
+	]
+}
