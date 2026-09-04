@@ -67,7 +67,33 @@ jobs:
           npm run lint
           npm test
 
-      - name: Publish to npm (OIDC trusted publishing + provenance)
+      # TEMPORARY — remove once the package exists on the registry.
+      #
+      # Trusted publishing cannot be configured for a package that has never
+      # been published: `npm trust github n8n-nodes-rocketride ...` returns
+      # 404 POST /-/package/n8n-nodes-rocketride/trust. So the FIRST publish
+      # has to authenticate with a token.
+      #
+      # Provenance is unaffected by how we authenticate — it comes from
+      # `id-token: write` plus `--provenance`, which are already here. That
+      # matters because n8n Cloud requires provenance as of 1 May 2026, so a
+      # local `npm publish` would produce a package unusable where it is meant
+      # to be installed.
+      #
+      # AFTER THE FIRST SUCCESSFUL RUN:
+      #   1. npm trust github n8n-nodes-rocketride --file n8n-nodes-release.yml \
+      #        --repo rocketride-org/rocketride-server --env release
+      #   2. delete the NPM_TOKEN secret
+      #   3. revert this commit — the step below returns to tokenless OIDC
+      - name: Publish to npm (token auth for first publish + provenance)
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
+          if [ -z "${NODE_AUTH_TOKEN}" ]; then
+            echo "::error::NPM_TOKEN is not set. This workflow is in its first-publish"
+            echo "::error::configuration and needs a one-time granular token scoped to"
+            echo "::error::n8n-nodes-rocketride. See the comment above this step."
+            exit 1
+          fi
           # npm 11.19.0 supports OIDC trusted publishing and npm trust configuration (npm trust requires >= 11.15.0).
           npm publish --provenance --access public
