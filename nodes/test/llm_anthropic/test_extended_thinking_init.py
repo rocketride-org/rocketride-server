@@ -98,3 +98,22 @@ def test_string_false_from_the_form_stays_off(monkeypatch, falsy):
 
     assert chat._thinking_mode_kwargs == {}
     assert chat._native_stream_provider == ''
+
+
+@pytest.mark.parametrize('model', ['claude-sonnet-5', 'claude-opus-5', 'claude-fable-5', 'claude-mythos-5'])
+def test_claude_5_models_use_adaptive_thinking(monkeypatch, model):
+    config = {
+        'model': model,
+        'apikey': 'sk-ant-test',
+        'modelTotalTokens': 200000,
+        'modelOutputTokens': 8192,
+        'capabilities': {'reasoning': True},
+        'extendedThinking': True,
+    }
+    monkeypatch.setattr(Config, 'getNodeConfig', staticmethod(lambda *a, **k: dict(config)))
+    chat = _load_node_module().Chat('anthropic', {}, {})
+
+    # Assert the exact adaptive payload — not just the type — so a future edit
+    # that reintroduces legacy fields (budget_tokens, betas) for a Claude 5
+    # model fails this test instead of silently passing.
+    assert chat._thinking_mode_kwargs == {'thinking': {'type': 'adaptive', 'display': 'summarized'}}

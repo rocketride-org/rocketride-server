@@ -172,3 +172,93 @@ TEST_CASE("Location::sanitizeFunctionName") {
         REQUIRE(ap::Location::sanitizeFunctionName("").empty());
     }
 }
+
+TEST_CASE("Location::toString") {
+    const ap::Location loc{"/usr/src/apLib/Location.hpp", 91, "fileName"};
+
+    // Count groups digits, so a line past 999 is not rendered as bare digits.
+    SECTION("a line number past 999 is grouped") {
+        const ap::Location deepLoc{"services.cpp", 2047, "run"};
+        Text buff;
+        deepLoc.toString(buff, true, true);
+        REQUIRE(buff == "services.cpp:2,047-run");
+    }
+
+    SECTION("file and function together") {
+        Text buff;
+        loc.toString(buff, true, true);
+        REQUIRE(buff == "Location.hpp:91-fileName");
+    }
+
+    SECTION("the defaults render the file only") {
+        Text buff;
+        loc.toString(buff);
+        REQUIRE(buff == "Location.hpp:91");
+    }
+
+    SECTION("file only") {
+        Text buff;
+    SECTION("the defaults render the file only") {
+        Text buff;
+        loc.toString(buff);
+        REQUIRE(buff == "Location.hpp:91");
+    }
+
+    SECTION("file only") {
+        Text buff;
+        loc.toString(buff, false, true);
+        REQUIRE(buff == "Location.hpp:91");
+    }
+        REQUIRE(buff == "Location.hpp:91");
+    }
+
+    SECTION("function only") {
+        Text buff;
+        loc.toString(buff, true, false);
+        REQUIRE(buff == "fileName");
+    }
+
+    SECTION("neither file nor function renders nothing") {
+        Text buff;
+        loc.toString(buff, false, false);
+        REQUIRE(buff.empty());
+    }
+
+    SECTION("an unset location renders the separator and a zero line") {
+        Text buff;
+        ap::Location{}.toString(buff, false, true);
+        REQUIRE(buff == ":0");
+    }
+        Text buff;
+        loc.toString(buff, false, false);
+        REQUIRE(buff.empty());
+    }
+
+    SECTION("an unset location reaches toString via the unguarded pack API shape") {
+        const ap::Location unsetLoc{};
+        Text buff;
+        unsetLoc.toString(buff, false);
+        REQUIRE(buff == ":0");
+    }
+
+    SECTION("full path mode keeps the directory") {
+        const ap::Location fullPathLoc{"/usr/src/apLib/Location.hpp", 91, "fileName", true};
+        Text buff;
+        fullPathLoc.toString(buff, true, true);
+        REQUIRE(buff == "/usr/src/apLib/Location.hpp:91-fileName");
+    }
+
+    SECTION("a lambda function name is sanitized in the rendered output") {
+        const ap::Location lambdaLoc{"a.cpp", 1, "pybind11_init::<lambda_96>::operator()"};
+        Text buff;
+        lambdaLoc.toString(buff, true, false);
+        REQUIRE(buff == "pybind11_init::[lambda]");
+    }
+
+    SECTION("a line number past 999 is grouped") {
+        const ap::Location deepLoc{"services.cpp", 2047, "run"};
+        Text buff;
+        deepLoc.toString(buff, true, true);
+        REQUIRE(buff == "services.cpp:2,047-run");
+    }
+}
