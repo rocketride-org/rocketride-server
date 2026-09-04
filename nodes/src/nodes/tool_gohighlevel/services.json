@@ -8,7 +8,7 @@
 	"path": "nodes.tool_gohighlevel",
 	"prefix": "gohighlevel",
 	"icon": "gohighlevel.svg",
-	"documentation": "https://docs.rocketride.org",
+	"documentation": "https://docs.rocketride.org/nodes/tool_gohighlevel",
 	"description": ["Exposes the GoHighLevel (LeadConnector) v2 REST API as agent tools.", "Covers contacts, notes, tasks, opportunities, pipelines, conversations, messages,", "calendars, appointments, custom fields, custom values, tags, businesses and users."],
 	"tile": ["GoHighLevel${parameters.gohighlevel.locationId ? ': ' + parameters.gohighlevel.locationId : ''}"],
 	"lanes": {},

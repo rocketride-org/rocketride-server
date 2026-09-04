@@ -45,6 +45,7 @@
 	//		The icon to display in the UI for this node.
 	//
 	"icon": "exa.svg",
+	"documentation": "https://docs.rocketride.org/nodes/tool_exa_search",
 	//
 	// Optional:
 	//		Description of this node shown in the pipeline builder.

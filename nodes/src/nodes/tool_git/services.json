@@ -58,7 +58,7 @@
 	// Optional:
 	//		Link rendered behind the node's docs button.
 	//
-	"documentation": "https://docs.rocketride.org",
+	"documentation": "https://docs.rocketride.org/nodes/tool_git",
 	//
 	// Optional:
 	//		Description shown in the node palette and node info pane.

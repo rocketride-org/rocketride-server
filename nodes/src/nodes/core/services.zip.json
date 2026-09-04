@@ -36,6 +36,7 @@
 	//		The prefix map when added/removed when convertting URLs <=> paths
 	//
 	"prefix": "Zip",
+	"documentation": "https://docs.rocketride.org/nodes/core",
 	//
 	// Optional:
 	//		Local fields definitions - these define fields only for the

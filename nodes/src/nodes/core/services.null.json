@@ -34,6 +34,7 @@
 	//		The prefix map when added/removed when convertting URLs <=> paths
 	//
 	"prefix": "Null",
+	"documentation": "https://docs.rocketride.org/nodes/core",
 	//
 	//	Optional:
 	//		As a pipe component, define what this pipe component takes

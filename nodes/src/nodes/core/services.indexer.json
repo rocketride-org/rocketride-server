@@ -31,6 +31,7 @@
 	//		The prefix map when added/removed when convertting URLs <=> paths
 	//
 	"prefix": "Indexer",
+	"documentation": "https://docs.rocketride.org/nodes/core",
 	//
 	//	Optional:
 	//		Profile section are configuration optoins used by the driver

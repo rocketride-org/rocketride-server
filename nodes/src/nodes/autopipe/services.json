@@ -43,6 +43,7 @@
 	//		The prefix map when added/removed when convertting URLs <=> paths
 	//
 	"prefix": "Autopipe",
+	"documentation": "https://docs.rocketride.org/nodes/autopipe",
 	//
 	// Optional:
 	//		Description to of this driver

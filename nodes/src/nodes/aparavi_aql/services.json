@@ -46,6 +46,7 @@
 	//		The prefix map when added/removed when converting URLs <=> paths
 	//
 	"prefix": "aparavi",
+	"documentation": "https://docs.rocketride.org/nodes/aparavi_aql",
 	//
 	// Optional:
 	//		Description of this driver

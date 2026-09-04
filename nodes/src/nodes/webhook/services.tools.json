@@ -54,7 +54,7 @@
 	//	  The icon is the icon to display in the UI for this node
 	//
 	"icon": "webhook.svg",
-	"documentation": "https://docs.rocketride.org",
+	"documentation": "https://docs.rocketride.org/nodes/webhook/tools",
 	//
 	//  Optional:
 	//      Rendering hints to the UI which indicate which fields of

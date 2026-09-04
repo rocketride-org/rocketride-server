@@ -42,7 +42,7 @@
 	// Optional: The UI icon (co-located svg)
 	//
 	"icon": "hydradb.svg",
-	"documentation": "https://docs.rocketride.org",
+	"documentation": "https://docs.rocketride.org/nodes/graph_hydradb",
 	//
 	// Optional: Lanes - this MVP is a pure agent-tool surface, so no data-flow lanes.
 	//

@@ -8,7 +8,7 @@
 	"path": "nodes.tool_github",
 	"prefix": "github",
 	"icon": "github.svg",
-	"documentation": "https://docs.rocketride.org",
+	"documentation": "https://docs.rocketride.org/nodes/tool_github",
 	"description": ["Exposes GitHub repository operations as agent tools.", "Covers files, issues, pull requests, reviews, releases, workflows, orgs, users,", "code search, and commit history."],
 	"tile": ["GitHub${parameters.github.defaultRepo ? ': ' + parameters.github.defaultRepo : ''}"],
 	"lanes": {},

@@ -8,7 +8,7 @@
 	"path": "nodes.tool_slack",
 	"prefix": "slack",
 	"icon": "slack.svg",
-	"documentation": "https://docs.rocketride.org",
+	"documentation": "https://docs.rocketride.org/nodes/tool_slack",
 	"description": ["Exposes Slack workspace operations as agent tools.", "Post messages to channels or threads, list public channels, read channel history,", "and verify the connection. Authenticates with a bot token, or an incoming-webhook", "URL for zero-scope post-only setups."],
 	"tile": ["Slack${parameters.slack.webhookUrl ? ' (webhook)' : ''}"],
 	"lanes": {},

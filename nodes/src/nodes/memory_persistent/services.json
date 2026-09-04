@@ -8,6 +8,7 @@
 	"path": "nodes.memory_persistent",
 	"prefix": "memory",
 	"icon": "memory.svg",
+	"documentation": "https://docs.rocketride.org/nodes/memory_persistent",
 	"description": [
 		"A persistent cross-session memory node that retains data across pipeline",
 		"invocations. Supports Redis for production and in-memory backends for",

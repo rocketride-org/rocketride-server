@@ -53,7 +53,7 @@
 	//	  The icon is the icon to display in the UI for this node
 	//
 	"icon": "bedrock.svg",
-	"documentation": "https://docs.rocketride.org",
+	"documentation": "https://docs.rocketride.org/nodes/llm_bedrock",
 	//
 	//
 	//  Optional:
