@@ -448,6 +448,14 @@ class Store(DocumentStoreBase):
                 metadata['isTable'] = False
                 metadata['tableId'] = 0
 
+            # Pinecone rejects an entire upsert if any metadata value is null:
+            # "Metadata value must be a string, number, boolean or list of
+            # strings, got 'null' for field '<name>'". Several DocMetadata fields
+            # are typed non-optional but default to None, so an unset one takes
+            # the whole batch down. Omitting the key is equivalent on read --
+            # DocMetadata(**record) restores the same default.
+            metadata = {key: value for key, value in metadata.items() if value is not None}
+
             # Append the points // create a unique identifier that fits into an int64 id field
             vector_struct = {
                 'id': str(uuid4()),

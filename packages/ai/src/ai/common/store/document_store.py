@@ -505,6 +505,15 @@ class DocumentStoreBase(ABC):
                 vectorSize=vectorSize,  # Store vector size for future validation
                 modelName=modelName,  # Store embedding model name
                 isDeleted=True,  # Marked as deleted to avoid retrieval in normal searches
+                # Explicitly empty rather than left unset. DocMetadata declares
+                # `signature: str` but defaults it to None, and this document is
+                # not built through defaultMetadata(), which is what normally
+                # fills it in. Backends that reject null metadata values -- Pinecone
+                # among them -- refuse the whole upsert, so the control document
+                # never lands. The collection is created regardless, and every
+                # later open then reports "Collection does not have control
+                # document, found 0" on a collection RocketRide made itself.
+                signature='',
             )
 
             # Create the "bogus" document with empty content and metadata
