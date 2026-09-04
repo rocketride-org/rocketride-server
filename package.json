@@ -32,7 +32,9 @@
 		"pipeline"
 	],
 	"scripts": {
-		"prepare": "lefthook install --force"
+		"prepare": "lefthook install --force",
+		"check:action-pins": "node scripts/verify-action-pins.mjs",
+		"test:action-pins": "node --test scripts/verify-action-pins.test.mjs"
 	},
 	"packageManager": "pnpm@10.33.0",
 	"engines": {
