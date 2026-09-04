@@ -28,6 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **n8n-nodes**: add n8n-nodes-rocketride community node package (#1255)
 - **nodes**: add answer_documents node to bridge answers into documents (#1506)
 - **nodes**: add authoritative_overlay SEC period-scoped cross-check guard (#1430)
+- **nodes**: add chunker — recursive / sentence / token text chunking with configurable overlap (#897)
 - **nodes**: add cognee node (#1501)
 - **nodes**: add currency_convert_explicit node (#1497)
 - **nodes**: add extract_facts node — document-context + cell-by-cell reader + validator (#1426) (#1545)
