@@ -29,7 +29,7 @@ import hashlib
 import os
 import sys
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -74,6 +74,10 @@ def _task(*, source='src-id', task_name=None, pipeline=None, status=None):
     t._threads = 4
     t._pipelineTraceLevel = None
     t._run_kind = 'dev'
+    # Replica identity: 0 is the primary (the unreplicated default), and
+    # 0 torch threads means "inject nothing" — today's behaviour.
+    t.replica_index = 0
+    t._torch_threads = 0
     t._status = status if status is not None else SimpleNamespace(name='', state=0, exitMessage='')
     t._debugger = None
     t._debug_port = None
@@ -839,6 +843,121 @@ async def test_subprocess_env_unconfigured_account_is_nonfatal(monkeypatch):
     env = await Task._build_subprocess_env(_env_task(pipeline=_DB_PIPELINE))
     assert 'ROCKETRIDE_DB_DSN' not in env
     assert 'ROCKETRIDE_DB_RESOLVE_ERROR' not in env
+
+
+# ---------------------------------------------------------------------------
+# _build_subprocess_env — per-replica BLAS/OMP thread pinning
+# ---------------------------------------------------------------------------
+
+_THREAD_VARS = (
+    'OMP_NUM_THREADS',
+    'MKL_NUM_THREADS',
+    'OPENBLAS_NUM_THREADS',
+    'VECLIB_MAXIMUM_THREADS',
+    'NUMEXPR_NUM_THREADS',
+    'TORCH_NUM_THREADS',
+)
+
+
+@pytest.mark.asyncio
+async def test_subprocess_env_pins_all_six_thread_variables():
+    """
+    All six, or none of them.
+
+    Pinning OMP alone still lets MKL or OpenBLAS spawn cpu_count threads
+    inside every replica, which is exactly the thrashing `torchThreads`
+    exists to prevent.
+    """
+    t = _env_task()
+    t._torch_threads = 4
+
+    env = await Task._build_subprocess_env(t)
+
+    assert {var: env[var] for var in _THREAD_VARS} == {var: '4' for var in _THREAD_VARS}
+
+
+@pytest.mark.asyncio
+async def test_subprocess_env_injects_nothing_when_threads_are_unset(monkeypatch):
+    """
+    A task with no resolved thread count behaves exactly as it did before
+    replicas existed: whatever the operator set in the parent environment
+    is inherited untouched, and nothing is invented.
+    """
+    monkeypatch.setenv('OMP_NUM_THREADS', 'operator-set')
+    t = _env_task()
+    t._torch_threads = 0
+
+    env = await Task._build_subprocess_env(t)
+
+    assert env['OMP_NUM_THREADS'] == 'operator-set'
+    for var in _THREAD_VARS:
+        if var != 'OMP_NUM_THREADS':
+            assert var not in env
+
+
+@pytest.mark.asyncio
+async def test_subprocess_env_pinning_overrides_an_inherited_value(monkeypatch):
+    """An explicit per-replica count must win over the parent's environment."""
+    for var in _THREAD_VARS:
+        monkeypatch.setenv(var, '64')
+    t = _env_task()
+    t._torch_threads = 2
+
+    env = await Task._build_subprocess_env(t)
+
+    assert {env[var] for var in _THREAD_VARS} == {'2'}
+
+
+# ---------------------------------------------------------------------------
+# Replica identity on the wire
+# ---------------------------------------------------------------------------
+
+
+def test_build_task_names_the_replica_in_the_task_file():
+    """Replicas differ only by index in the file; without it a task-file dump
+    cannot say which subprocess it belongs to.
+    """
+    t = _task(pipeline={'source': 'src', 'components': []})
+    t.replica_index = 2
+
+    config = Task._build_task(t, {'source': 'src', 'components': []})
+
+    assert config['config']['replica'] == 2
+
+
+@pytest.mark.asyncio
+async def test_forwarded_events_carry_the_replica_index():
+    """Every replica broadcasts under the SAME token, so the stamp is the only
+    thing that lets a client tell N interleaved streams apart.
+    """
+    t = _task()
+    t.replica_index = 3
+    t._server = MagicMock()
+    t._server.broadcast_task_event = AsyncMock()
+    t.token = 'tk_test'
+
+    from rocketride import EVENT_TYPE
+
+    await Task._forward_task_event(t, EVENT_TYPE.SUMMARY, {'event': 'apaevt_status', 'body': {}})
+
+    sent = t._server.broadcast_task_event.await_args.kwargs['event']
+    assert sent['body']['replica'] == 3
+
+
+@pytest.mark.asyncio
+async def test_an_existing_replica_stamp_is_left_alone():
+    """The stamp is a safety net, not an overwrite — idempotent like the others."""
+    t = _task()
+    t.replica_index = 3
+    t._server = MagicMock()
+    t._server.broadcast_task_event = AsyncMock()
+
+    from rocketride import EVENT_TYPE
+
+    await Task._forward_task_event(t, EVENT_TYPE.SUMMARY, {'event': 'e', 'body': {'replica': 1}})
+
+    sent = t._server.broadcast_task_event.await_args.kwargs['event']
+    assert sent['body']['replica'] == 1
 
 
 # ---------------------------------------------------------------------------

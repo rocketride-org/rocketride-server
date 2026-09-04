@@ -415,8 +415,10 @@ class TaskCommands(DAPConn):
                 if not resolve_task_permissions(self._account_info, control.teamId):
                     continue
 
-                # Get current status for name and status string
-                status = control.task.get_status()
+                # Get current status for name and status string. The CONTROL's
+                # status, not the primary's — a replicated token's counters
+                # live one per engine.
+                status = control.get_status()
 
                 # Read name and description from the flat project
                 project = control.pipeline or {}

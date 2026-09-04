@@ -411,6 +411,9 @@ async def test_on_rrext_get_tasks_filters_to_caller_and_running_only():
             source='src',
             pipeline={'name': 'my-pipeline', 'description': 'desc'},
             task=task,
+            tasks=[task],
+            # Status now comes from the CONTROL (it folds replicas).
+            get_status=task.get_status,
         )
 
     server = MagicMock()
@@ -453,6 +456,8 @@ async def test_on_rrext_get_tasks_falls_back_to_source_name():
         source='my-source',
         pipeline=None,
         task=task,
+        tasks=[task],
+        get_status=task.get_status,
     )
 
     server = MagicMock()

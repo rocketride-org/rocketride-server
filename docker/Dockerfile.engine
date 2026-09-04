@@ -33,6 +33,13 @@ USER rocketride
 
 EXPOSE 5565
 
+# Server-wide throughput defaults, applied when a client's `use()` call omits
+# `replicas` / `torchThreads`. Uncomment to change the container's defaults;
+# see docs/README-throughput.md. Keep ROCKETRIDE_TASK_REPLICAS *
+# ROCKETRIDE_TORCH_THREADS <= the container's vCPU limit.
+# ENV ROCKETRIDE_TASK_REPLICAS=1
+# ENV ROCKETRIDE_TORCH_THREADS=4
+
 # /version is public; /ping returns 401 behind the auth gate. See #1295.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD curl -f http://localhost:5565/version || exit 1

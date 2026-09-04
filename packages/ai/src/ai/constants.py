@@ -26,6 +26,52 @@ RocketRide AI Configuration Constants.
 Global configuration values for metrics, billing, and system tuning.
 """
 
+import logging
+import os
+
+_log = logging.getLogger(__name__)
+
+
+def _env_int(name: str, default: int, *, minimum: int = None, maximum: int = None) -> int:
+    """
+    Read an integer from the environment, defensively.
+
+    Operators set these in a Dockerfile, a Helm values file or a shell — all
+    places where a typo is silent. Anything unparseable or out of range falls
+    back to the default WITH A WARNING rather than crashing the server at
+    import time or, worse, silently launching a wildly wrong number of
+    subprocesses.
+
+    Args:
+        name: Environment variable name.
+        default: Value used when unset, empty, unparseable, or out of range.
+        minimum: Lowest accepted value, if any.
+        maximum: Highest accepted value, if any.
+
+    Returns:
+        int: The parsed value, or ``default``.
+    """
+    raw = os.environ.get(name)
+    if raw is None or not str(raw).strip():
+        return default
+
+    try:
+        value = int(str(raw).strip())
+    except (TypeError, ValueError):
+        _log.warning('Ignoring invalid %s=%r (not an integer); using %d', name, raw, default)
+        return default
+
+    if minimum is not None and value < minimum:
+        _log.warning('Ignoring out-of-range %s=%r (minimum %d); using %d', name, raw, minimum, default)
+        return default
+
+    if maximum is not None and value > maximum:
+        _log.warning('Ignoring out-of-range %s=%r (maximum %d); using %d', name, raw, maximum, default)
+        return default
+
+    return value
+
+
 # =============================================================================
 # Metrics Sampling and Reporting Intervals
 # =============================================================================
@@ -54,6 +100,36 @@ CONST_SUBPROCESS_BUFFER_LIMIT = 16 * 1024 * 1024  # bytes for subprocess stdin/s
 CONST_STATUS_UPDATE_CANCEL_TIMEOUT = 2.0  # seconds to wait for status update task cancellation
 CONST_DEFAULT_TTL = 15 * 60  # default time-to-live for idle tasks in seconds (15 minutes)
 CONST_TTL_CHECK = 60  # check for tasks to kill every 60 seconds
+
+# =============================================================================
+# Task Replicas and Per-Replica BLAS/OMP Threads
+# =============================================================================
+# ONE task = one engine subprocess = one model copy behind one lock, so a
+# single task runs one inference at a time no matter how large `threads` is
+# (`threads` is admission width / the engine's component pool, NOT inference
+# parallelism). `replicas` is the throughput lever: N subprocesses behind ONE
+# token, inputs round-robined across them.
+CONST_MAX_REPLICAS = 32  # hard ceiling on replicas per task (requests are clamped)
+
+# Server-wide default replica count, overridable per request.
+CONST_DEFAULT_REPLICAS = _env_int('ROCKETRIDE_TASK_REPLICAS', 1, minimum=1, maximum=CONST_MAX_REPLICAS)
+
+# Server-wide default per-replica BLAS/OMP thread count. 0 means "auto":
+# cpu_count // replicas when replicas > 1, and inject nothing at all when
+# replicas == 1 (preserving the pre-replica behavior exactly).
+CONST_DEFAULT_TORCH_THREADS = _env_int('ROCKETRIDE_TORCH_THREADS', 0, minimum=0)
+
+# The six variables every BLAS/OMP stack in the engine reads. They must be set
+# TOGETHER — pinning only OMP still lets MKL or OpenBLAS spawn cpu_count
+# threads per replica, and N replicas × cpu_count threads thrashes the box.
+CONST_TORCH_THREAD_ENV_VARS = (
+    'OMP_NUM_THREADS',
+    'MKL_NUM_THREADS',
+    'OPENBLAS_NUM_THREADS',
+    'VECLIB_MAXIMUM_THREADS',
+    'NUMEXPR_NUM_THREADS',
+    'TORCH_NUM_THREADS',
+)
 
 # =============================================================================
 # Run Logging (per-task JSONL event continuum) Configuration

@@ -30,6 +30,8 @@ result = await client.use(
     token=None,
     source=None,
     threads=None,
+    replicas=None,
+    torch_threads=None,
     use_existing=None,
     args=None,
     ttl=None,
@@ -45,6 +47,8 @@ const result = await client.use({
     token: undefined,
     source: undefined,
     threads: undefined,
+    replicas: undefined,
+    torchThreads: undefined,
     useExisting: undefined,
     args: undefined,
     ttl: undefined,
@@ -60,7 +64,9 @@ const result = await client.use({
 | `filepath` | `str` / `string` | One of `pipeline` or `filepath` required | Path to a JSON or JSON5 pipeline configuration file |
 | `token` | `str` / `string` | No | Custom task token (server generates one if not provided) |
 | `source` | `str` / `string` | No | Override the source component specified in the pipeline config |
-| `threads` | `int` / `number` | No | Number of processing threads (server decides default) |
+| `threads` | `int` / `number` | No | Admission width per connection — the engine's component thread pool / data-admission queue (server default 64). Does **not** parallelize model inference; a task still runs one inference at a time. See `replicas` |
+| `replicas` | `int` / `number` | No | Number of engine subprocesses (tasks) launched behind this one token, for concurrent inference (server default 1, clamped to 1–32). Inputs sent to the token are round-robined across replicas |
+| `torch_threads` / `torchThreads` | `int` / `number` | No | Per-replica BLAS/OMP thread count (`OMP_NUM_THREADS`, `MKL_NUM_THREADS`, etc.). Unset with `replicas > 1` defaults to `cores // replicas`; unset with `replicas == 1` injects nothing |
 | `use_existing` / `useExisting` | `bool` / `boolean` | No | Reuse an existing pipeline with the same token. The submitted pipeline is **not** applied to an instance that is already running — see `reused` below |
 | `args` | `list[str]` / `string[]` | No | Command-line style arguments to pass to the pipeline |
 | `ttl` | `int` / `number` | No | Time-to-live in seconds for idle pipelines (0 = no timeout) |
@@ -71,7 +77,7 @@ const result = await client.use({
 - **Type**: `Dict[str, Any]` (Python) / `Record<string, unknown> & { token: string }` (TypeScript)
 - **Description**: Object containing the task `token` and other pipeline startup metadata
 
-The returned `token` is required for all subsequent operations: sending data, checking status, and terminating the pipeline.
+The returned `token` is required for all subsequent operations: sending data, checking status, and terminating the pipeline. The response also includes `replicas`: the number of engine subprocesses actually running behind that token.
 
 `reused` is `true` when `useExisting` returned an instance that was already running rather than starting the pipeline you submitted. In that case the running instance keeps the configuration it was created with, and the pipeline in this call is ignored — including any edits since. It also keeps whatever state that instance has accumulated. Check this flag before treating a result as a run of the configuration you just sent; benchmarks and A/B comparisons are where an unnoticed reuse is most costly. Call `restart()` to apply new configuration to a live token.
 

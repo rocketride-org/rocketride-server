@@ -65,6 +65,7 @@ Central orchestration server managing:
 - Multi-tenant security (API key isolation and access control)
 """
 
+import os
 import time
 import errno
 import socket
@@ -73,7 +74,7 @@ import asyncio
 import uuid
 from typing import List
 from fastapi import WebSocket
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Dict, Any, Optional, Set
 from ai.constants import (
     CONST_CLEANUP_DELAY_TIME,
@@ -82,19 +83,98 @@ from ai.constants import (
     CONST_TTL_CHECK,
     CONST_MAX_UNAUTHED_CONNS_PER_IP,
     CONST_MAX_UNAUTHED_IPS,
+    CONST_DEFAULT_REPLICAS,
+    CONST_MAX_REPLICAS,
+    CONST_DEFAULT_TORCH_THREADS,
 )
 from ai.common.dap import TransportWebSocket, DAPBase
-from rocketride import TASK_STATUS, EVENT_TYPE
+from rocketride import TASK_STATUS, TASK_STATE, EVENT_TYPE
 from ai.web import WebServer
 from ai.account.models import AccountInfo, resolve_task_permissions
 from ai.account.store import Store
 from .task_conn import TaskConn
 from .task_engine import Task
-from .types import LAUNCH_TYPE, TaskError
+from .types import LAUNCH_TYPE, TaskError, decode_pipe_id
 from .pipeline import resolve_implied_source
 from .commands.cmd_monitor import owner_key
 
 from rocketlib import debug
+
+
+def _is_task_running(task: Task) -> bool:
+    """
+    True when an engine is in the RUNNING state and can take work.
+
+    Defensive by design: this decides where inputs go, and a status read that
+    throws (a task torn down mid-scan) must mean "not a candidate", never an
+    exception out of the data path.
+    """
+    if task is None:
+        return False
+    try:
+        return task.get_status().state == TASK_STATE.RUNNING.value
+    except Exception:
+        return False
+
+
+def resolve_replicas(requested: Any) -> int:
+    """
+    Parse and clamp the requested replica count.
+
+    Args:
+        requested: The request's ``replicas`` argument. None/absent falls back
+            to the server-wide default (``ROCKETRIDE_TASK_REPLICAS``).
+
+    Returns:
+        int: A count in 1..CONST_MAX_REPLICAS. Anything unparseable falls back
+            to the default rather than failing the launch — a bad number is
+            never worth refusing to run a pipeline over.
+    """
+    if requested is None:
+        return CONST_DEFAULT_REPLICAS
+
+    try:
+        value = int(requested)
+    except (TypeError, ValueError):
+        return CONST_DEFAULT_REPLICAS
+
+    return max(1, min(value, CONST_MAX_REPLICAS))
+
+
+def resolve_torch_threads(requested: Any, replicas: int) -> int:
+    """
+    Resolve the per-replica BLAS/OMP thread count.
+
+    The rule, in order:
+      * an explicit positive value wins;
+      * otherwise the server-wide default (``ROCKETRIDE_TORCH_THREADS``);
+      * otherwise, with more than one replica, ``cpu_count // replicas`` — so
+        the replicas of one pipeline share the box instead of each spawning
+        cpu_count threads and thrashing it;
+      * otherwise 0, meaning inject nothing at all. A single unreplicated task
+        must behave exactly as it did before replicas existed.
+
+    Args:
+        requested: The request's ``torchThreads`` argument (None if absent).
+        replicas: The resolved replica count.
+
+    Returns:
+        int: Threads per replica, or 0 for "inject nothing".
+    """
+    raw = requested if requested is not None else CONST_DEFAULT_TORCH_THREADS
+
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        value = 0
+
+    if value > 0:
+        return value
+
+    if replicas > 1:
+        return max(1, (os.cpu_count() or 1) // replicas)
+
+    return 0
 
 
 @dataclass
@@ -109,7 +189,10 @@ class TASK_CONTROL:
     Attributes:
         token (str): Unique identifier for the task instance
         apikey (str): Authentication key for task access control and tenant isolation
-        task (Optional[Task]): Reference to the actual Task instance managing execution
+        task (Optional[Task]): The PRIMARY engine (replica 0) — the one every
+            status, attach, debug and monitor path talks to
+        replica_tasks (List[Task]): The additional engines (replicas 1..N-1)
+            running the same pipeline behind the same token
         launch_type (LAUNCH_TYPE): The method used to create this task (launch/execute)
         pipeline (Optional[Dict[str, Any]]): Task configuration and execution parameters
     """
@@ -146,8 +229,229 @@ class TASK_CONTROL:
     provider: str = None
     pipeline: Optional[Dict[str, Any]] = None
 
-    # And finally, the task reference
+    # And finally, the task reference. `task` is the PRIMARY engine (replica
+    # 0) and stays the single answer for every status / attach / debug /
+    # monitor path, so all the callers that predate replicas keep working
+    # unchanged. `replica_tasks` holds replicas 1..N-1 — same token, same
+    # pipeline, same launch args, separate subprocesses.
     task: Optional[Task] = None
+    replica_tasks: List[Task] = field(default_factory=list)
+
+    # Round-robin cursor for pick_data_task. Not an index into `tasks`: it
+    # only ever advances, and the modulo is taken against the currently
+    # running set, so replicas coming and going cannot make it point past
+    # the end.
+    data_cursor: int = 0
+
+    # Latch: has an apaevt_task 'begin' already been broadcast for this
+    # control? Every replica emits its own, but clients fold task events by
+    # {projectId, source, action} — N begins read as N pipelines starting.
+    # The FIRST replica to begin speaks for the control.
+    begin_broadcast: bool = False
+
+    @property
+    def tasks(self) -> List[Task]:
+        """
+        Every engine behind this token, primary first.
+
+        The primary is included so the single-replica case (the overwhelming
+        majority) is just a one-element list — lifecycle code iterates this
+        and needs no branch for "replicated or not".
+        """
+        if self.task is None:
+            return list(self.replica_tasks)
+        return [self.task, *self.replica_tasks]
+
+    @property
+    def replicas(self) -> int:
+        """How many engines are running behind this token."""
+        return len(self.tasks)
+
+    def pick_data_task(self) -> Optional[Task]:
+        """
+        Choose the engine that should receive the next input, round-robin.
+
+        Only RUNNING engines are candidates: a replica that is still
+        initializing, or one whose subprocess died, would otherwise take a
+        1/N share of the traffic and block or fail it. When nothing is
+        running yet the primary is returned — the data path awaits
+        ``wait_for_running()`` on it, which is exactly the pre-replica
+        behavior for a task that has not finished starting.
+
+        Returns:
+            Optional[Task]: The engine to send to, or None when the control
+                holds no task at all.
+        """
+        tasks = self.tasks
+        if not tasks:
+            return None
+
+        # The common case: no replicas, nothing to choose between.
+        if len(tasks) == 1:
+            return tasks[0]
+
+        running = [task for task in tasks if _is_task_running(task)]
+        if not running:
+            return self.task
+
+        picked = running[self.data_cursor % len(running)]
+        self.data_cursor += 1
+        return picked
+
+    def route_data_request(self, request: Dict[str, Any]) -> tuple:
+        """
+        Resolve ONE data request to the engine that must serve it.
+
+        The SDK pipe protocol is ``open`` -> N x ``write`` -> ``close`` against
+        a single pipe id, and a pipe lives inside ONE engine subprocess. So
+        round-robin applies only to requests that do not name a pipe:
+
+        - No ``pipe_id`` (an ``open``, or a standalone ``tool`` call that
+          borrows a pool pipe): round-robin. The reply's pipe id is qualified
+          by the caller so the client's next request can find its way back.
+        - A ``pipe_id``: decode the replica out of it and route there,
+          rewriting the id back to the engine-local one the subprocess knows.
+
+        The qualification is stateless (see the codec in ``types.py``), so
+        nothing here keeps a pipe table and a supervisor restart loses no
+        routing information the client does not already hold.
+
+        An UNREPLICATED control short-circuits: same engine, same request
+        object, no decode — byte-identical to the pre-replica path.
+
+        Args:
+            request: The inbound DAP request.
+
+        Returns:
+            tuple: ``(task, request_to_send)``. The request is the original
+                object unless a pipe id had to be localised.
+
+        Raises:
+            ValueError: If the id names a replica this control does not have,
+                or one that is not running.
+        """
+        tasks = self.tasks
+        if len(tasks) <= 1:
+            return self.task, request
+
+        args = request.get('arguments') or {}
+        wire_id = args.get('pipe_id', None)
+
+        # Nothing to be affine to — spread the load.
+        if not isinstance(wire_id, int) or isinstance(wire_id, bool):
+            return self.pick_data_task(), request
+
+        local_id, index = decode_pipe_id(wire_id)
+        if index >= len(tasks):
+            raise ValueError(f'Pipe id {wire_id} names replica {index}, but this pipeline runs {len(tasks)} replica(s)')
+
+        task = tasks[index]
+        if not _is_task_running(task):
+            # Fail loudly. Re-routing to a live replica would find no such
+            # pipe there and report a confusing "pipe not found" instead of
+            # the truth: the engine holding that pipe is gone.
+            raise ValueError(
+                f'Pipe id {wire_id} belongs to replica {index} of this pipeline, which is no longer running'
+            )
+
+        localised = dict(request)
+        localised_args = dict(args)
+        localised_args['pipe_id'] = local_id
+        localised['arguments'] = localised_args
+        return task, localised
+
+    def get_status(self) -> TASK_STATUS:
+        """
+        The status of the TOKEN — every replica folded into one row.
+
+        Counters are per-engine, and inputs are round-robined, so reading the
+        primary alone reports roughly 1/N of the work a replicated pipeline
+        actually did. Totals sum, timings take the outermost bound, and the
+        lifecycle fields stay the PRIMARY's: the primary is what every
+        attach/debug/status path resolves to, so the state a client sees here
+        matches the process it is talking to.
+
+        Returns:
+            TASK_STATUS: The primary's own status object when unreplicated
+                (no copy, no cost); otherwise an aggregate copy.
+        """
+        tasks = self.tasks
+        primary = tasks[0].get_status()
+        if len(tasks) == 1:
+            return primary
+
+        statuses = [primary, *[task.get_status() for task in tasks[1:]]]
+
+        # Copy so the primary's live status object is never mutated — it is
+        # the same instance the Task keeps updating.
+        merged = primary.model_copy(deep=True)
+
+        for name in (
+            'totalSize',
+            'totalCount',
+            'completedSize',
+            'completedCount',
+            'failedSize',
+            'failedCount',
+            'wordsSize',
+            'wordsCount',
+            'rateSize',
+            'rateCount',
+        ):
+            setattr(merged, name, sum(getattr(status, name, 0) or 0 for status in statuses))
+
+        # The run spans from the first engine to start to the last to finish.
+        merged.startTime = min((status.startTime for status in statuses if status.startTime), default=0.0)
+        merged.endTime = max((status.endTime or 0.0 for status in statuses), default=0.0)
+
+        # Resource usage is the sum across processes (that is what the box
+        # actually spends); peaks are the sum of peaks — an upper bound, and
+        # the number that matters for capacity.
+        for name in (
+            'cpu_percent',
+            'cpu_memory_mb',
+            'gpu_memory_mb',
+            'peak_cpu_percent',
+            'peak_cpu_memory_mb',
+            'peak_gpu_memory_mb',
+            'avg_cpu_percent',
+            'avg_cpu_memory_mb',
+            'avg_gpu_memory_mb',
+        ):
+            setattr(
+                merged.metrics,
+                name,
+                sum(getattr(status.metrics, name, 0.0) or 0.0 for status in statuses),
+            )
+
+        # Billing is cumulative per process; the token's cost is their sum.
+        for name in ('cpu_utilization', 'cpu_memory', 'gpu_memory', 'gpu_inference', 'total'):
+            setattr(
+                merged.tokens,
+                name,
+                sum(getattr(status.tokens, name, 0.0) or 0.0 for status in statuses),
+            )
+
+        # Warnings and errors from every engine, or a failing replica is
+        # invisible to anyone watching the token.
+        for status in statuses[1:]:
+            merged.warnings.extend(status.warnings)
+            merged.errors.extend(status.errors)
+        merged.warnings = merged.warnings[-50:]
+        merged.errors = merged.errors[-50:]
+
+        return merged
+
+    @property
+    def idle_time(self) -> float:
+        """
+        The token's idle time: the BUSIEST replica's.
+
+        Inputs round-robin, so the group has only been idle as long as the
+        replica that most recently did something.
+        """
+        idles = [getattr(task, '_idle_time', 0) or 0 for task in self.tasks]
+        return min(idles) if idles else 0
 
     @property
     def owner_id(self) -> str:
@@ -339,13 +643,20 @@ class TaskServer(DAPBase):
                     if not control:
                         continue  # Task may have been removed by another process
 
-                    # Skip tasks that are still actively runnings
-                    if not control.task.is_task_complete():
+                    # Skip tasks that are still actively running. A replicated
+                    # control is complete only when EVERY replica is: removing
+                    # it while one still runs would orphan that subprocess and
+                    # leave its events broadcasting under a dead token.
+                    control_tasks = control.tasks
+                    if not control_tasks:
+                        continue
+                    if any(not task.is_task_complete() for task in control_tasks):
                         continue
 
-                    # Check if sufficient time has passed since completion
-                    task_status = control.task.get_status()
-                    if task_status.endTime + CONST_CLEANUP_DELAY_TIME < current_time:
+                    # Check if sufficient time has passed since completion —
+                    # measured from the LAST replica to finish.
+                    end_time = max(task.get_status().endTime for task in control_tasks)
+                    if end_time + CONST_CLEANUP_DELAY_TIME < current_time:
                         # Remove the expired completed task
                         await self.remove_task(control.token)
 
@@ -395,21 +706,31 @@ class TaskServer(DAPBase):
                     if not control or not control.task:
                         continue  # Task may have been removed
 
-                    # Skip completed tasks (handled by cleanup process)
-                    if control.task.is_task_complete():
-                        continue
-
-                    # Skip TTL enforcement if ttl is 0 (no timeout)
+                    # Skip TTL enforcement if ttl is 0 (no timeout). All
+                    # replicas of a token carry the same ttl (one launch, one
+                    # value), so the primary's answer is the group's.
                     if control.task._ttl == 0:
                         continue
 
-                    # Increment the idle timer by the check interval
-                    control.task._idle_time += check_interval
+                    # Age every replica that is still alive. Completed ones
+                    # are the cleanup loop's business and must not hold the
+                    # group's idle clock back.
+                    live = [task for task in control.tasks if not task.is_task_complete()]
+                    if not live:
+                        continue
 
-                    # Check if task has exceeded its TTL
-                    if control.task._idle_time >= control.task._ttl:
+                    for task in live:
+                        task._idle_time += check_interval
+
+                    # THE GROUP IS IDLE ONLY WHEN EVERY REPLICA IS. Inputs are
+                    # round-robined, so one busy replica means the pipeline is
+                    # in use — killing the token because its siblings happened
+                    # to be between documents would cut a live run short.
+                    if all(task._idle_time >= task._ttl for task in live):
+                        idle = min(task._idle_time for task in live)
                         self.debug_message(
-                            f'Task "{control.id}" exceeded TTL ({control.task._idle_time}s >= {control.task._ttl}s), terminating...'
+                            f'Task "{control.id}" exceeded TTL ({idle}s >= {control.task._ttl}s) '
+                            f'across all {len(live)} replica(s), terminating...'
                         )
                         # Terminate the idle task — reason 'ttl', so the
                         # run records as completed, never as cancelled.
@@ -562,12 +883,15 @@ class TaskServer(DAPBase):
         # Process all tasks for disconnection cleanup
         for control in list(self._task_control.values()):
             try:
-                # Detach this connection from the task
-                await control.task.detach_task(conn)
+                # Detach this connection from every replica — a client that
+                # attached to the token is attached to all of them.
+                for task in control.tasks:
+                    await task.detach_task(conn)
 
                 # Auto-terminate launched tasks when the launching client disconnects
                 if control.launch_type == LAUNCH_TYPE.LAUNCH and control.launch_owner == conn:
-                    await control.task.stop_task()
+                    for task in control.tasks:
+                        await task.stop_task()
                     self.debug_message(f'Auto-terminated launched task "{control.id}" after client disconnect')
 
             except Exception as e:
@@ -986,6 +1310,59 @@ class TaskServer(DAPBase):
             except Exception as e:
                 self.debug_message(f'push_account_update failed for conn {conn.get_connection_id()}: {e}')
 
+    def _should_forward_lifecycle_event(self, control: TASK_CONTROL, event: Dict[str, Any]) -> bool:
+        """
+        Decide whether one replica's ``apaevt_task`` speaks for the whole token.
+
+        Every replica emits its own begin/end, but clients fold task events by
+        {projectId, source, action} and ignore the replica stamp — so N begins
+        read as N pipelines starting, and the FIRST replica to exit marks the
+        whole pipeline stopped while the rest are still serving traffic.
+
+        The rule:
+
+        - ``begin``: the first replica to begin carries it (latched on the
+          control), the rest are dropped.
+        - ``end``: only the LAST replica to finish carries it — by then every
+          task in the control reports complete, so the token really is done.
+        - ``restart``: the primary carries it; a restart drives every replica
+          through the same transition, so one event describes all of them.
+
+        Every other event (status, output, trace, flow, SSE) is per-replica by
+        nature and passes through untouched, still carrying its ``replica``
+        stamp.
+
+        Args:
+            control: The control the event belongs to.
+            event: The DAP event about to be broadcast.
+
+        Returns:
+            bool: True to broadcast.
+        """
+        # An unreplicated token has nothing to fold — never touch its stream.
+        if len(control.tasks) <= 1:
+            return True
+
+        if event.get('event') != 'apaevt_task':
+            return True
+
+        body = event.get('body') or {}
+        action = body.get('action')
+
+        if action == 'begin':
+            if control.begin_broadcast:
+                return False
+            control.begin_broadcast = True
+            return True
+
+        if action == 'end':
+            return all(task.is_task_complete() for task in control.tasks)
+
+        if action == 'restart':
+            return body.get('replica', 0) == 0
+
+        return True
+
     async def broadcast_task_event(self, event_type: EVENT_TYPE, token: str, event: Dict[str, Any]) -> None:
         """
         Broadcast a task-scoped event to all connections that are subscribed to the given task.
@@ -1007,6 +1384,10 @@ class TaskServer(DAPBase):
         # cleanup raced with pending broadcasts), skip silently instead of
         # spamming "Your pipeline is not running" for every connection.
         if token not in self._task_control:
+            return
+
+        # One lifecycle event per TOKEN, not per replica.
+        if not self._should_forward_lifecycle_event(self._task_control[token], event):
             return
 
         # Snapshot to list() so a connection joining or dropping mid-broadcast
@@ -1110,8 +1491,14 @@ class TaskServer(DAPBase):
         if not control:
             raise TaskError(TaskError.NOT_REGISTERED, 'Your pipeline is not running')
 
-        # Ensure task is properly stopped and resources are cleaned up
-        await control.task.stop_task()
+        # Ensure every engine behind the token is stopped and cleaned up.
+        # Concurrently: each stop waits out its own subprocess termination
+        # timeout, and serialising N of those turns a removal into minutes.
+        # return_exceptions keeps one stubborn replica from stranding the rest.
+        results = await asyncio.gather(*(task.stop_task() for task in control.tasks), return_exceptions=True)
+        for result in results:
+            if isinstance(result, BaseException):
+                self.debug_message(f'Error stopping a replica of task "{control.id}": {result}')
 
         # Remove monitor subscriptions that reference this task from all
         # connections — keys are owner-scoped, so build from the control
@@ -1165,7 +1552,11 @@ class TaskServer(DAPBase):
 
         Args:
             request (Dict[str, Any]): Task creation request containing:
-                - arguments: Task configuration including Optional(token), pipeline
+                - arguments: Task configuration including Optional(token), pipeline,
+                  and optionally `replicas` (engine subprocesses behind this one
+                  token, clamped to 1..CONST_MAX_REPLICAS) and `torchThreads`
+                  (per-replica BLAS/OMP threads; omitted means the auto rule in
+                  resolve_torch_threads)
                 - command: Launch type (launch/execute) determining task behavior
             conn (TaskConn, optional): Connection to associate with task for monitoring
 
@@ -1223,6 +1614,10 @@ class TaskServer(DAPBase):
                 'source': control.source,
                 'provider': control.provider,
                 'reused': reused,
+                # How many engines actually run behind this token. Callers
+                # sizing their own concurrency need the number the server
+                # settled on, not the one they asked for (it is clamped).
+                'replicas': control.replicas,
             }
 
         # Initialize task control structure for new task
@@ -1234,6 +1629,13 @@ class TaskServer(DAPBase):
 
         # Extract TTL from args (use server-configured default if not provided)
         ttl = args.get('ttl', CONST_DEFAULT_TTL)
+
+        # Replication: N engine subprocesses behind ONE token, inputs
+        # round-robined across them. This is the only lever that parallelises
+        # inference — `threads` is admission width, and one engine holds one
+        # model copy behind one lock however wide that is.
+        replicas = resolve_replicas(args.get('replicas', None))
+        torch_threads = resolve_torch_threads(args.get('torchThreads', None), replicas)
 
         # Parse task configuration from request arguments
         control.client_id = client_id
@@ -1365,8 +1767,19 @@ class TaskServer(DAPBase):
                             'submitted pipeline, which differs from the running one. Restart the task to '
                             'apply it.'
                         )
+                    # Replica count is not applied to a running instance either,
+                    # and it is the throughput knob — silently serving 1 replica
+                    # to a caller who asked for 8 reads as a measurement of 8.
+                    existing_replicas = existing_control.replicas
+                    if replicas != existing_replicas:
+                        self.debug_message(
+                            f'Task "{existing_control.id}" is already running with {existing_replicas} '
+                            f'replica(s): reusing it and ignoring the requested {replicas}, which differs '
+                            'from the running one. Restart the task to apply it.'
+                        )
                     if wait_for_running:
-                        await existing_control.task.wait_for_running()
+                        # Every replica: the caller is told the TOKEN is ready.
+                        await asyncio.gather(*(task.wait_for_running() for task in existing_control.tasks))
                     return _return_results(existing_control, reused=True)
 
                 # We are absolutely supposed to create a task or the user did
@@ -1378,44 +1791,77 @@ class TaskServer(DAPBase):
             self.debug_message(f'Replaced completed task "{control.id}"...')
 
         try:
-            # Create new Task instance with complete configuration
-            control.task = Task(
-                server=self,
-                id=control.id,
-                project_id=control.project_id,
-                source=control.source,
-                token=control.token,
-                public_auth=control.public_auth,
-                pipeline=control.pipeline,
-                launch_args=args,
-                launch_type=control.launch_type,
-                provider=control.provider,
-                ttl=ttl,
-                client_id=control.client_id,
-                team_id=control.teamId,
-                org_id=control.orgId,
-                env=env or {},
-                run_kind=run_kind,
-                trigger=trigger,
-            )
+            # Create the engine instances. Replicas share the token, the
+            # pipeline and the launch args, and differ in exactly three
+            # things: their display/temp-file id, their replica index, and
+            # the ports they are handed (assign_port hands out a distinct
+            # one per call, and Task calls it during its own start_task).
+            engines = [
+                Task(
+                    server=self,
+                    # A distinct id per replica: it names the temp task file,
+                    # the DAP module and the metrics row. Sharing one would
+                    # make the three indistinguishable in a log.
+                    id=control.id if index == 0 else f'{control.id}#{index}',
+                    project_id=control.project_id,
+                    source=control.source,
+                    token=control.token,
+                    public_auth=control.public_auth,
+                    pipeline=control.pipeline,
+                    launch_args=args,
+                    launch_type=control.launch_type,
+                    provider=control.provider,
+                    ttl=ttl,
+                    client_id=control.client_id,
+                    team_id=control.teamId,
+                    org_id=control.orgId,
+                    env=env or {},
+                    run_kind=run_kind,
+                    trigger=trigger,
+                    replica_index=index,
+                    replica_count=replicas,
+                    torch_threads=torch_threads,
+                )
+                for index in range(replicas)
+            ]
+
+            # Replica 0 is the primary: the task every status, attach, debug
+            # and monitor path resolves to.
+            control.task = engines[0]
+            control.replica_tasks = engines[1:]
 
             # Register task in central registry
             self._task_control[control.token] = control
 
-            # Start task execution
-            await control.task.start_task()
+            # Start every engine concurrently. Serially, N replicas would pay
+            # N model-load times before the token answers at all — and the
+            # loads are the whole reason a replica is expensive.
+            results = await asyncio.gather(*(task.start_task() for task in engines), return_exceptions=True)
+            failures = [result for result in results if isinstance(result, BaseException)]
+            if failures:
+                # A partial start is not a working pipeline: the ones that
+                # came up are torn down here, and the FIRST failure is what
+                # the caller sees (the others are usually its consequences).
+                raise failures[0]
 
             # Log successful task creation
-            self.debug_message(f'Task "{control.id}" started... (type: {control.launch_type.value})')
+            self.debug_message(
+                f'Task "{control.id}" started... (type: {control.launch_type.value}, replicas: {replicas})'
+            )
 
-            # If debugging is available, attach to it
+            # If debugging is available, attach to it. The debugger attaches
+            # to the PRIMARY only — one client, one process, one set of
+            # breakpoints; replicas run undebugged (and `replicas` is a
+            # throughput knob, not a debugging one).
             if attach_debugger and control.task.is_debug_available():
                 await self.attach_task(control.token, conn)
 
             # Retrieve the task instance for status monitoring
             if wait_for_running:
-                # Block until the task transitions to running state
-                await control.task.wait_for_running()
+                # Block until EVERY replica transitions to running state: the
+                # token is only as ready as its slowest engine, and inputs
+                # start round-robining across all of them immediately.
+                await asyncio.gather(*(task.wait_for_running() for task in engines))
 
             # Return formatted results
             return _return_results(control)
@@ -1427,17 +1873,24 @@ class TaskServer(DAPBase):
             # propagates here but the task was NOT a creation failure.
             if control.task and control.task._stop_requested:
                 self.debug_message(f'Task stopped during startup: {control.id}...')
+                # The user's stop named the token, and the primary already
+                # honoured it; any replica it did not reach is still an
+                # orphan and has to go the same way.
+                orphans = [task for task in control.tasks if not task._stop_requested]
             else:
                 self.debug_message(f'Task creation failed, cleaned up: {control.id}...')
-                # Kill the subprocess so it doesn't linger as an orphan
+                # Kill the subprocesses so they don't linger as orphans
                 # consuming resources and reporting stale metrics.
-                if control.task:
-                    try:
-                        await asyncio.wait_for(control.task.stop_task(), timeout=30)
-                    except asyncio.TimeoutError:
-                        self.debug_message(f'Warning: timed out stopping orphaned task: {control.id}')
-                    except Exception:
-                        self.debug_message(f'Warning: failed to stop orphaned task: {control.id}')
+                orphans = control.tasks
+
+            for task in orphans:
+                try:
+                    await asyncio.wait_for(task.stop_task(), timeout=30)
+                except asyncio.TimeoutError:
+                    self.debug_message(f'Warning: timed out stopping orphaned task: {task.id}')
+                except Exception:
+                    self.debug_message(f'Warning: failed to stop orphaned task: {task.id}')
+
             self._task_control.pop(control.token, None)
             raise
 
@@ -1565,23 +2018,36 @@ class TaskServer(DAPBase):
             # by Task.restart_task, and control.pipeline still naming the old one.
             pipeline = _apply_source_defaults(pipeline, control.source)
 
-            # Call the Task's restart method to restart the engine process
-            # This preserves all statistics and monitoring while restarting the subprocess
-            await control.task.restart_task(
-                pipeline=pipeline,
-                project_id=control.project_id,
-                source=control.source,
-                provider=control.provider,
+            # Call the Task's restart method to restart the engine process.
+            # This preserves all statistics and monitoring while restarting
+            # the subprocess. EVERY replica restarts: they are one pipeline
+            # behind one token, and leaving some on the old configuration
+            # would make the token answer differently per request.
+            results = await asyncio.gather(
+                *(
+                    task.restart_task(
+                        pipeline=pipeline,
+                        project_id=control.project_id,
+                        source=control.source,
+                        provider=control.provider,
+                    )
+                    for task in control.tasks
+                ),
+                return_exceptions=True,
             )
+            failures = [result for result in results if isinstance(result, BaseException)]
+            if failures:
+                raise failures[0]
 
             # The control now describes the pipeline that is running: without this the
             # record still holds whatever was launched originally, so a later
             # useExisting compares against a configuration that was replaced here.
             control.pipeline = pipeline
 
-            # Wait for running state if requested
+            # Wait for running state if requested — for every replica, since
+            # the caller is told the token is ready, not one engine of it.
             if wait_for_running:
-                await control.task.wait_for_running()
+                await asyncio.gather(*(task.wait_for_running() for task in control.tasks))
 
             # Log successful restart
             self.debug_message(f'Task "{control.id}" restarted successfully')
@@ -1594,6 +2060,7 @@ class TaskServer(DAPBase):
                 'projectId': control.project_id,
                 'source': control.source,
                 'provider': control.provider,
+                'replicas': control.replicas,
             }
 
         except Exception as e:
@@ -1631,7 +2098,16 @@ class TaskServer(DAPBase):
 
             # Only terminate tasks that were launched or executed directly
             if control.launch_type in (LAUNCH_TYPE.LAUNCH, LAUNCH_TYPE.EXECUTE):
-                await control.task.stop_task(reason)
+                # Every replica, concurrently — the token is the unit a user
+                # stops, and a surviving replica would keep serving inputs
+                # under a token its owner believes is gone.
+                results = await asyncio.gather(
+                    *(task.stop_task(reason) for task in control.tasks),
+                    return_exceptions=True,
+                )
+                for result in results:
+                    if isinstance(result, BaseException):
+                        self.debug_message(f'Error stopping a replica of task "{control.id}": {result}')
                 self.debug_message(f'Task "{control.id}" stopped on request')
 
         except Exception as e:

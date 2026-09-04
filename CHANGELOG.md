@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
      release that does not exist. -->
 
 ### Added
+- **ai**: `replicas` + `torchThreads` on `use()`/`execute` — run N task replicas behind one token for concurrent inference, with per-replica BLAS/OMP thread control (#2128). Note: the TypeScript contract floor `packages/client-typescript/contract/versions/v1.3.d.ts` was not regenerated with these fields; `replicas`/`torchThreads` need `./builder client-typescript:freeze` (or a new v1.4 floor) before they are contract-visible.
 - **ai**: every subprocess exposes /task/data via a shared web server (#912)
 - **analytics**: shared, transport-agnostic telemetry core (loose report + app) (#1523)
 - **anonymize**: configurable entity types + token redaction style (#1447)

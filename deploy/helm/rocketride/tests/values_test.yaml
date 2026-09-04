@@ -36,7 +36,7 @@ engine:
 
   env:
     LOG_LEVEL: 'debug'
-    WORKER_THREADS: '2'
+    ROCKETRIDE_TASK_REPLICAS: '2'
 
   existingSecret: ''
 

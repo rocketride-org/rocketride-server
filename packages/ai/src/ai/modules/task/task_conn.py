@@ -560,25 +560,25 @@ class TaskConn(
         # task's team is known, so we can resolve against the correct team.
         return token
 
-    def get_task(self, request: Dict[str, Any], permissions: str = '') -> 'Task':
+    def get_task_control(self, request: Dict[str, Any], permissions: str = ''):
         """
-        Retrieve the task instance associated with the given request.
+        Resolve a request to its task control, enforcing access.
 
-        If a task token is specified in request.arguments:
-            - If the initial auth token is an apikey, no problem
-            - If the initial auth token is a task or public key token,
-            the token pass here must match (no cross task access)
-        If a task token is not specfied, we use the initial auth token
+        The permission rules used to live inline in ``get_task``; they are
+        here so the data path (which needs the whole control to route across
+        replicas) applies EXACTLY the same checks rather than a copy that can
+        drift.
 
         Args:
-            apikey (str): API key for authentication.
-            token (str): The task token to look up.
+            request: The inbound DAP request.
+            permissions: Permission required on the task's team, if any.
 
         Returns:
-            TASK: The task instance corresponding to the token.
+            TASK_CONTROL: The authorised control.
 
         Raises:
-            KeyError: If the task with the specified token does not exist.
+            PermissionError: If the caller may not touch this task.
+            TaskError: If the token names no live task.
         """
         # Get the token
         token = self.get_task_token(request, permissions)
@@ -596,6 +596,60 @@ class TaskConn(
                     raise PermissionError('Access denied: no permissions for this task')
                 if permissions and permissions not in perms:
                     raise PermissionError(f'Permission {permissions!r} denied for this task')
+
+        return control
+
+    def get_data_route(self, request: Dict[str, Any], permissions: str = 'task.data') -> tuple:
+        """
+        Resolve a DATA request to the engine that must serve it.
+
+        Unlike :pyfunc:`get_task`, this returns the request to actually send
+        alongside the engine: a request naming a pipe is routed to the replica
+        that owns that pipe and has its id rewritten to that engine's local
+        one. See ``TASK_CONTROL.route_data_request``.
+
+        Args:
+            request: The inbound DAP request.
+            permissions: Permission required on the task's team.
+
+        Returns:
+            tuple: ``(task, request_to_send)``.
+        """
+        control = self.get_task_control(request, permissions)
+        return control.route_data_request(request)
+
+    def get_task(self, request: Dict[str, Any], permissions: str = '', for_data: bool = False) -> 'Task':
+        """
+        Retrieve the task instance associated with the given request.
+
+        If a task token is specified in request.arguments:
+            - If the initial auth token is an apikey, no problem
+            - If the initial auth token is a task or public key token,
+            the token pass here must match (no cross task access)
+        If a task token is not specfied, we use the initial auth token
+
+        Args:
+            apikey (str): API key for authentication.
+            token (str): The task token to look up.
+            for_data (bool): True for the DATA path, which is the only caller
+                that should be spread across replicas — it returns the next
+                engine in the control's round-robin instead of the primary.
+                Status, attach, debug and monitor callers must keep resolving
+                to the primary: they are about ONE process's state, and a
+                round-robined answer would report a different engine each
+                call. Prefer :pyfunc:`get_data_route` for the pipe protocol —
+                it is pipe-affine, where this is not.
+
+        Returns:
+            TASK: The task instance corresponding to the token.
+
+        Raises:
+            KeyError: If the task with the specified token does not exist.
+        """
+        control = self.get_task_control(request, permissions)
+
+        if for_data:
+            return control.pick_data_task()
 
         return control.task
 

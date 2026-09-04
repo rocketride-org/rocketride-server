@@ -1529,6 +1529,9 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 				name,
 				// ttl comes straight from settings (0 = no timeout).
 				...(cfg.pipelineTtl !== undefined ? { ttl: cfg.pipelineTtl } : {}),
+				...(cfg.pipelineReplicas > 1 ? { replicas: cfg.pipelineReplicas } : {}),
+				...(cfg.pipelineTorchThreads > 0 ? { torchThreads: cfg.pipelineTorchThreads } : {}),
+				...(cfg.pipelineThreads > 0 ? { threads: cfg.pipelineThreads } : {}),
 			});
 		} catch (error: unknown) {
 			const message = error instanceof Error ? error.message : String(error);

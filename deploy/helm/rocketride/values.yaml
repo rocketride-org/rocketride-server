@@ -103,8 +103,16 @@ engine:
   env:
     # -- Log level (debug, info, warn, error)
     LOG_LEVEL: 'info'
-    # -- Number of worker threads
-    WORKER_THREADS: '4'
+    # -- Server-wide default replica count: engine subprocesses (tasks) launched
+    # behind one token when a client's `use()` call omits `replicas`. This is the
+    # throughput lever for concurrent inference (one task = one model copy = one
+    # inference at a time); does not affect `threads` (admission width).
+    ROCKETRIDE_TASK_REPLICAS: '1'
+    # -- Server-wide default per-replica BLAS/OMP thread count (OMP_NUM_THREADS,
+    # MKL_NUM_THREADS, etc.), applied when a client omits `torchThreads`. Unset
+    # (commented) = auto: max(1, cores // ROCKETRIDE_TASK_REPLICAS). Keep
+    # ROCKETRIDE_TASK_REPLICAS * ROCKETRIDE_TORCH_THREADS <= pod vCPU count.
+    # ROCKETRIDE_TORCH_THREADS: '4'
 
   # -- Name of an existing Secret to use instead of creating one
   # If set, the chart will not create a Secret resource

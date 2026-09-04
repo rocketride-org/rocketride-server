@@ -88,6 +88,18 @@ The deployment target can use a separate connection or share the development con
 | `rocketride.pipelineRestartBehavior`           | `string`  | `"prompt"`                       | Behavior when a `.pipe` file changes while the pipeline is running: `"auto"`, `"manual"`, or `"prompt"`        |
 | `rocketride.welcomeDismissed`                  | `boolean` | `false`                          | Set to `true` to skip the welcome page on startup                                                              |
 
+### Pipeline Execution
+
+One task = one model copy = one inference at a time. These settings control
+how many tasks run behind a pipeline and how their inference threads are
+sized; see [Throughput](README-throughput.md) for the full model.
+
+| Setting                                | Type     | Default | Description                                                                                                              |
+| --------------------------------------- | -------- | ------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `rocketride.pipelineReplicas`           | `number` | `1`     | Number of task replicas to launch per pipeline run (1-32). Each replica is a full model copy running its own inference. |
+| `rocketride.pipelineTorchThreads`       | `number` | `0`     | Per-replica BLAS/OMP thread count (`OMP_NUM_THREADS` and friends). `0` = auto (`cores / pipelineReplicas`) when `pipelineReplicas` > 1; when `pipelineReplicas` is 1, no thread limits are injected.             |
+| `rocketride.pipelineThreads`            | `number` | `0`     | Admission width per connection (engine component thread pool), not inference parallelism. `0` = server default (64).   |
+
 ### Agent Integrations
 
 | Setting                                        | Type      | Default | Description                                                                    |
