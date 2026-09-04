@@ -1,6 +1,6 @@
 # tool_python
 
-A RocketRide tool node that lets an AI agent execute Python code in a restricted in-process sandbox.
+A RocketRide tool node that lets an AI agent execute Python code in a restricted sandbox, run in a short-lived child process.
 
 ## What it does
 
@@ -8,7 +8,7 @@ Gives an agent the ability to run Python scripts directly: for data manipulation
 
 Uses **RestrictedPython**: code is compiled with `compile_restricted`, which injects runtime guards against attribute/item access escapes, and runs against `safe_builtins` with dangerous builtins removed. Imports are gated by an allowlist: only a default set of safe, pure-computation stdlib modules (plus any extras you configure) can be imported; everything else raises `ImportError`. With the default allowlist there is no network, filesystem, or subprocess access.
 
-Execution is bounded by a timeout (**20 seconds by default**, configurable up to 1200) and output is truncated to 50 KB. The node has no lanes: it is attached to an agent as a tool.
+Each call runs in its own child process, bounded by a timeout (**20 seconds by default**, configurable up to 1200); output is truncated to 50 KB. Overrunning the deadline kills the process, so a runaway script cannot outlive it. The node has no lanes: it is attached to an agent as a tool.
 
 ---
 
@@ -53,7 +53,7 @@ Execute a Python script and return its output. The tool description shown to the
 }
 ```
 
-- `exit_code` is `0` on success, `1` on exception (or blocked compilation), `-1` on timeout.
+- `exit_code` is `0` on success, `1` on exception, blocked compilation, or a sandbox that could not start or died without answering, `-1` on timeout. The last two are the `exit_code: 1` cases that are not about the submitted script: they report `timed_out: false` and name the condition in `stderr`.
 - `stdout` is the captured `print()` output; `stderr` carries the traceback if the script raised.
 - If the script assigns a value to a variable named `result`, it is returned in the `result` field. JSON-compatible values (`str`, `int`, `float`, `bool`, `list`, `dict`, `None`) are returned as-is; anything else is returned as its `repr()`.
 - `stdout` and `stderr` are each truncated to 50 KB, keeping the head and tail with a truncation marker in between.
@@ -63,12 +63,16 @@ Execute a Python script and return its output. The tool description shown to the
 
 ## Sandbox
 
-Code runs in a restricted in-process sandbox built on **RestrictedPython**:
+Code runs in a restricted sandbox built on **RestrictedPython**, in a child process of the engine:
 
 1. **Restricted compilation**: `compile_restricted` transforms the AST to inject runtime guard calls that prevent attribute/item access escapes. Code that violates the compilation policy is rejected with `exit_code: 1`.
 2. **Safe builtins**: RestrictedPython's `safe_builtins` replaces the full `__builtins__`. A curated set of everyday data-work builtins is added back (`dict`, `list`, `set`, `enumerate`, `map`, `filter`, `max`, `min`, `sum`, `print`, `type`, and similar).
 3. **Allowlist-only imports**: a gated `__import__` permits only allowlisted modules (matched on the top-level package name). Everything else raises `ImportError` listing the allowed modules.
-4. **Timeout enforcement**: the script runs in a daemon thread; if it exceeds the timeout the call returns with `timed_out: true` and `exit_code: -1`.
+4. **Process isolation and timeout**: each call runs the script in its own short-lived child process. When the deadline passes the child is killed, so the kernel reclaims its CPU and memory whatever the script was doing — no cooperation from the script is needed, and a script that catches every exception cannot outlive its deadline. The call returns with `timed_out: true` and `exit_code: -1`.
+
+   The child is the reason the guarantee holds. Interrupting a thread in-process is not safe: an asynchronous exception lands at an arbitrary bytecode boundary, including inside library code holding a lock that is not written to survive one, which can deadlock the whole interpreter.
+
+   Two consequences worth knowing. A timed-out call reports an **empty `stdout`** — the script's prints die with the process. And each call pays process-startup cost (tens to a couple of hundred milliseconds), which matters for chatty agents doing many small computations.
 
 ### Default allowed modules
 
