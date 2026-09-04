@@ -281,6 +281,42 @@ channel; they have no data lanes and **bind to an agent** (see
 > Slack, Confluence, SMB, S3, Azure Blob, GCS, …) are provided by the **`core`**
 > module (see [Core module](#core-module)).
 
+#### Source node contract
+
+Source nodes (`classType: ["source"]`) are pipeline entry points. The catalog
+table above lists them; this section states the conventions shipped sources
+already follow so new sources do not hang, leak unintended paths, or register
+without emitting.
+
+**`capabilities: ["noinclude"]`.** Chat, webhook, dropper, Telegram, and File
+Store Source all set this flag. With `noinclude`, the engine scans a single root
+(`/`) and does **not** expand path *includes* from the job selections into the
+scan queue (`Scanner::scanService` in the C++ store). Omit it only when the
+source intentionally consumes include-path selections; otherwise unexpected
+paths/files can enter the scan and look like “extra” documents on the lane.
+
+**`serviceConfig`.** At runtime the engine exposes the node’s config on
+`IEndpoint.endpoint.serviceConfig` (see `rocketlib.filters.IServiceEndpoint`).
+Read parameters from `serviceConfig['parameters']` — the engine stores them
+flat after stripping field-namespace prefixes (Telegram and File Store Source
+do this). Do not invent a parallel config channel.
+
+**Emitting work (`sendText` and siblings).** Downstream text/document producers
+push into the pipe with `IInstance` helpers such as `sendText`, `sendJson`,
+`sendTagData`, and the other `send*` methods on the instance (`rocketlib`).
+A source that registers but never emits looks “alive” while the rest of the
+pipeline stays idle. Prefer the same emit APIs as existing nodes rather than
+writing only to stdout.
+
+**Lifecycle / return.** Long-lived sources (Chat, webhook, Telegram) are
+allowed to **block inside `scanObjects` / `_run` until the task shuts down** —
+webhook waits on a shutdown event so the DAP data-plane stays up. That is not
+a hang; it is the source’s job. What *is* a hang: a scan path that neither
+returns nor installs a shutdown wait, so the engine never completes and never
+reports an error. Finite sources (one-shot filesystem scans) should finish
+`scanObjects` and return when the scan is done. Always provide a clear exit
+path (return after work, or block on an explicit shutdown signal).
+
 ### Memory
 
 | Service             | Data flow (in → out)                 | Description                                  |
@@ -357,7 +393,9 @@ standalone catalog nodes.
 3. Add a `services.json` (or `services.<variant>.json`) node definition. This is
    where you declare `classType`, `capabilities`, the `lanes` block (which makes
    the node wire-compatible with others), and the `fields` / `shape` config schema
-   the canvas renders.
+   the canvas renders. If `classType` includes `source`, follow the
+   [Source node contract](#source-node-contract) (`noinclude`, `serviceConfig`,
+   emit via `send*` APIs, and a defined `scanObjects` lifecycle).
 4. Drop the node icon SVG next to `services.json` and reference it by filename:
 
    ```json

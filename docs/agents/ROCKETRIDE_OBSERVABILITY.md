@@ -11,18 +11,30 @@ is not listed here, it likely does not exist in the server.
 ## 1. What RocketRide ships for observability
 
 RocketRide does **not** expose OpenTelemetry, Jaeger, Prometheus `/metrics`,
-Sentry, webhook registration, audit-log tables, or a queryable history database.
-There is no SQL store of past runs to read from.
+Sentry, webhook registration, or SQL audit-log tables. Do not assume those
+exist.
 
-Everything is delivered live over a single channel: a **WebSocket Debug Adapter
-Protocol (DAP) connection** on which the server emits typed events. To capture
-historical data, your service must connect, subscribe, and write the events to
-its own database as they arrive.
+It **does** persist a per-task **run log** (DVR continuum): one continuous JSONL
+event stream per identity (`projectId` + `source`, optionally scoped by
+`teamId` for deploy). Individual runs are chapters inside that stream. The log
+survives disconnects and restarts, supports seek/replay through the SDKs
+(`client.log` / `client.log.openEventStream` in TypeScript;
+`client.log.open_event_stream` in Python), and is retained on a size ring plus
+an age window. Prefer the run-log APIs when you need queryable history —
+you should **not** build a parallel “history database” just to store the same
+lifecycle/flow/output events.
+
+**Live** monitoring still uses a **WebSocket Debug Adapter Protocol (DAP)**
+connection: the server emits typed events as work happens. Use DAP when you
+need real-time dashboards or to mirror events into *your* product database for
+reasons the run log does not cover (cross-product analytics, custom schemas,
+long-term warehouses). The run log already covers task history and replay.
 
 The features that _do_ exist:
 
 | Feature                                                                   | Surface                                                             | Granularity        |
 | ------------------------------------------------------------------------- | ------------------------------------------------------------------- | ------------------ |
+| Persisted run history / replay (chapters, seek, play)                     | SDK `client.log` (run-log / DVR continuum)                          | Per identity       |
 | Task lifecycle events (`begin` / `end` / `running` / `restart`)           | DAP event `apaevt_task`                                             | Per task           |
 | Periodic full task status (counts, rates, errors, metrics, tokens)        | DAP event `apaevt_status_update`                                    | Per task, periodic |
 | Pipeline flow / component traces (op, lane, input/output, result, error)  | DAP event `apaevt_flow`                                             | Per pipe, per op   |
@@ -30,6 +42,10 @@ The features that _do_ exist:
 | Real-time node→UI custom messages (`monitorSSE`)                          | DAP event `apaevt_sse`                                              | Per pipe           |
 | File upload progress                                                      | DAP event `apaevt_status_upload`                                    | Per upload         |
 | Server/admin dashboard events (connection added/removed, monitor changes) | DAP event `apaevt_dashboard`                                        | Server-wide        |
+
+> Details and code samples for the run log live in the TypeScript client guide
+> `packages/client-typescript/docs/guide/methods/log.md` (and the matching
+> Python SDK `client.log` namespace).
 
 ---
 
@@ -409,28 +425,41 @@ event message. Source: `packages/client-python/src/rocketride/` and
 
 ---
 
-## 8. Recommended ingestion design for the agents database
+## 8. Recommended design for an agents / product database
+
+**Prefer the persisted run log for history and replay.** Use the SDK run-log
+APIs (`client.log.openEventStream` / `open_event_stream`) to seek, seed, and
+play chapters. Do **not** duplicate that continuum into your own
+`pipeline_runs` / `pipeline_run_traces` / `pipeline_run_logs` tables just to
+store the same lifecycle, flow, and output events.
+
+Use a live DAP subscription only when you need something the run log is not
+for:
+
+- real-time product UI that must react before a chapter is seekable,
+- cross-product analytics with a schema the run log does not provide,
+- long-term warehouses beyond the engine retention window.
+
+If you do subscribe live:
 
 1. Open one long-lived WebSocket to `ws://<rocketride-host>:5565/task/service`.
 2. Send `auth` with the service-account API key.
 3. Send `rrext_monitor` with `token: "*"` and
    `types: ["TASK", "SUMMARY", "FLOW", "OUTPUT", "SSE"]`.
-4. For every inbound `event` message, switch on `event` and write to your DB:
-   - `apaevt_task` → `pipeline_runs` (insert on `begin`, update on `end`,
-     reconcile from `running` snapshot at startup).
-     by `(project_id, source, startTime)`.
-   - `apaevt_flow` → append to `pipeline_run_traces` keyed by
-     `(project_id, source, id /*pipe*/, op, seq)`. Store `trace.data`,
-     `trace.result`, `trace.error` as JSONB.
-   - `apaevt_sse` → append to `pipeline_run_node_events`.
-   - `output` events → append to `pipeline_run_logs`.
-5. Correlate runs: there is no global run-id. Use
-   `(project_id, source, startTime)` from `TASK_STATUS` as the run key, or
-   capture the `token` from `running`/`apaevt_task` and your own `execute`
-   responses.
-6. Reconnect on disconnect; the SDK handles auto-resubscribe of monitors,
-   and the next `running` snapshot will let you reconcile any missed
-   `begin`/`end` you slept through.
+4. Treat inbound events as **derived analytics** (counters, alerts, custom
+   joins) — not as a second copy of the run log. Keep `client.log` as the
+   source of truth for “what happened in this run.”
+5. When you need a join key into the run log, do **not** rely only on
+   `(project_id, source, startTime)` — those can collide across users, teams,
+   or run kinds. Prefer one of:
+   - the `token` from `running` / your own `execute` responses (maps to the
+     continuum the SDK already opens), or
+   - the full run-log identity: owner scope (`users/<clientId>/…` for
+     development, `@/Team/=<teamId>/` for deploy) plus `run_kind`
+     (`dev` / `deploy`) together with `(project_id, source)` / stream name
+     (`project.source.run_kind`). Persist a server-issued mapping if your
+     warehouse cannot carry that full key.
+6. Reconnect on disconnect; the SDK auto-resubscribes monitors.
 7. If you need full per-component data flow, ensure pipelines are launched
    with `pipelineTraceLevel: "summary"` (or `"full"` for debugging). Without
    it `apaevt_flow` does not fire.
