@@ -243,6 +243,9 @@ export class WelcomeProvider {
 
 			// Step 6: Close panel — engines are starting, CMs will auto-connect
 			this.panel?.dispose();
+
+			// Auto-launch blank canvas after welcome completes so user lands in the builder
+			void vscode.commands.executeCommand('rocketride.pipeline.new');
 		} catch (error) {
 			console.error('[WelcomeProvider] Failed to save settings:', error);
 			this.panel?.webview.postMessage({ type: 'showMessage', level: 'error', message: `Failed to save settings: ${error}` });
