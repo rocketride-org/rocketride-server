@@ -1,0 +1,50 @@
+{
+	"title": "Date & Time",
+	"protocol": "tool_datetime://",
+	"classType": ["tool"],
+	"capabilities": ["invoke"],
+	"register": "filter",
+	"node": "python",
+	"path": "nodes.tool_datetime",
+	"prefix": "datetime",
+	"documentation": "https://docs.rocketride.org",
+	"description": [
+		"Gives an agent a clock and a calendar it can trust.",
+		"A model has no clock, and telling it today's date does not fix arithmetic: it can know today is Thursday and still book a follow-up on the wrong Tuesday, or add a month to 31 January and produce a date that does not exist.",
+		"Every instant is a unix timestamp, so nothing is lost passing one between the model, this tool and whatever it writes to. The optional timezone argument decides what date an instant falls on.",
+		"Each tool's description states the current time and is refreshed on every read, so an agent learns what now is from the tool itself."
+	],
+	"tile": ["Tool: ${parameters.tool_datetime.serverName}.now"],
+	"lanes": {},
+	"preconfig": {
+		"default": "default",
+		"profiles": {
+			"default": {
+				"title": "Default",
+				"serverName": "datetime"
+			}
+		}
+	},
+	"fields": {
+		"tool_datetime.serverName": {
+			"hidden": true,
+			"type": "string",
+			"title": "Server name",
+			"description": "Namespace prefix for the tools: <serverName>.now, <serverName>.shift, and so on",
+			"default": "datetime"
+		},
+		"tool_datetime.defaultTimezone": {
+			"type": "string",
+			"title": "Default timezone",
+			"description": "IANA name, e.g. America/Los_Angeles. Used only when a caller names no zone of its own. Leave empty for UTC. A deployment-wide default cannot know where the person asking actually is, so every answer names the zone it used.",
+			"default": ""
+		}
+	},
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Date & Time",
+			"properties": ["type", "tool_datetime.defaultTimezone"]
+		}
+	]
+}
