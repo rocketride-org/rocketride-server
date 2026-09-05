@@ -338,6 +338,12 @@
 			"default": false,
 			"description": "Enable Anthropic extended thinking (reasoning) for this node. Off by default. Applies to reasoning-capable models on the interactive chat path."
 		},
+		"workspaceId": {
+			"type": "string",
+			"title": "Workspace ID",
+			"default": "",
+			"description": "Anthropic workspace this key acts in. Required only for an identity-linked API key, which carries no workspace of its own and is refused with \"anthropic-workspace-id is required\". Leave empty for a workspace-scoped key: sending a workspace id it does not expect is itself an error."
+		},
 		"anthropic.custom": {
 			"object": "custom",
 			"properties": [

@@ -82,11 +82,36 @@ class Chat(ChatBase):
         if self._extended_thinking:
             self._native_stream_provider = 'anthropic'
 
+        # The workspace an identity-linked key acts in.
+        #
+        # Anthropic binds a key either to a workspace or to a user identity. An
+        # identity-linked key does not carry a workspace of its own, so the API
+        # refuses the request outright: "anthropic-workspace-id is required when
+        # authenticating with an identity-linked API key". Nothing about such a
+        # key looks unusual — same `sk-ant-api03` prefix, same length — so the
+        # first sign of it is a 400 on the first turn.
+        #
+        # OPTIONAL, and silent when unset. A workspace-scoped key needs no
+        # header and is rejected if sent a wrong one, so this must stay absent
+        # unless a real value was configured — which is why an unresolved
+        # `${...}` is treated as unset rather than passed along. An engine that
+        # leaves the reference in place when nothing is set would otherwise send
+        # the literal text as the workspace id, and the resulting error names a
+        # workspace nobody has.
+        workspace = str(config.get('workspaceId') or '').strip()
+        if workspace.startswith('${'):
+            workspace = ''
+
+        client_kwargs: Dict[str, Any] = {}
+        if workspace:
+            client_kwargs['default_headers'] = {'anthropic-workspace-id': workspace}
+
         self._llm = ChatAnthropic(
             model=model,
             api_key=apikey,
             max_tokens=self._modelOutputTokens,
             custom_get_token_ids=_estimate_token_ids,
+            **client_kwargs,
         )
 
         # Save our chat class into the bag
