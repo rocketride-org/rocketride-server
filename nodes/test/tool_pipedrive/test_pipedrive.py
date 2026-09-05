@@ -9,6 +9,7 @@ env-gated live suite.
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import sys
 import traceback
@@ -22,6 +23,17 @@ import pytest
 import requests
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'src' / 'nodes'))
+# `zone_audit` is loaded by path, not by import. `nodes/test/` cannot go on
+# sys.path: the test packages under it are named `tool_pipedrive` and
+# `tool_gohighlevel`, so putting that directory ahead of `src/nodes` makes them
+# shadow the very nodes these tests import.
+_ZONE_AUDIT_SPEC = importlib.util.spec_from_file_location(
+    'zone_audit', Path(__file__).resolve().parents[1] / 'zone_audit.py'
+)
+zone_audit = importlib.util.module_from_spec(_ZONE_AUDIT_SPEC)
+_ZONE_AUDIT_SPEC.loader.exec_module(zone_audit)
+audit_time_fields = zone_audit.audit_time_fields
+
 
 _STUB_MODULE_NAMES = ('rocketlib', 'ai', 'ai.common', 'ai.common.config', 'ai.common.utils')
 
@@ -1090,3 +1102,47 @@ class TestCursorPagination:
         result = _instance().person_search({'term': 'ada', 'cursor': 'page1'})
         assert mock_request.call_args[1]['params']['cursor'] == 'page1'
         assert result['next_cursor'] == 'page2'
+
+
+# ---------------------------------------------------------------------------
+# Every field that carries a time of day names its zone
+# ---------------------------------------------------------------------------
+# THE BUG THIS PINS. `due_time` was documented as 'Due time, HH:MM.' and nothing
+# more. Pipedrive stores it as UTC and renders it in each viewer's own zone, so a
+# meeting asked for at 12:30 in California was written as "12:30" and shown back
+# to the person who asked for it as 05:30. Nothing rejected it — a wrong hour
+# looks exactly like a right one.
+#
+# A model cannot infer a field's zone. It reads the description, and where the
+# description is silent it writes the words the person said.
+#
+# The same audit runs against `tool_gohighlevel`, which was already keeping this
+# rule when Pipedrive was not. Two CRMs, two different correct answers, one
+# obligation — which is what makes this the CRM-agnostic half of the fix.
+
+
+class TestEveryTimeFieldNamesItsZone:
+    #: A LENGTH, not an instant. "A two-hour meeting" is 02:00 in every zone
+    #: there is, and converting it would turn a duration into a wrong duration.
+    #: Exempt by decision rather than by the matcher missing it.
+    ALLOWED = ('duration',)
+
+    def test_no_published_parameter_describes_a_time_without_saying_which_zone(self):
+        assert audit_time_fields(IInstance, self.ALLOWED) == []
+
+    def test_the_audit_can_actually_fail(self):
+        """
+        The guard on the guard.
+
+        A matcher that silently stopped matching would leave the test above
+        passing for ever while saying nothing, which is the failure mode of
+        every audit written against a live surface.
+        """
+
+        class Silent:
+            def book(self):
+                pass
+
+            book.__tool_meta__ = {'input_schema': {'properties': {'due_time': {'description': 'Due time, HH:MM.'}}}}
+
+        assert audit_time_fields(Silent) == ['book.due_time']

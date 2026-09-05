@@ -95,6 +95,31 @@ create and update tool accepts:
 `extra` is merged into the request body after the typed parameters, so it also
 reaches any API parameter this node does not model explicitly.
 
+### Times are UTC, in both directions
+
+Every field carrying a time of day — an activity's `due_date` and `due_time`, a
+record's `add_time` — is UTC on the wire. Pipedrive displays those values in each
+viewer's own timezone, and validates none of them, so a local wall-clock time sent
+here is not rejected. It is stored, and from then on it reads as a real time.
+
+A meeting asked for at 12:30 in California and written as `12:30` comes back to the
+person who asked for it as 05:30.
+
+Convert before writing and convert back before reporting. The hour moves the **date**
+as well: 20:00 Pacific on a Wednesday is 03:00 UTC on the Thursday, so a converted
+time beside an unconverted date is a booking on the wrong day — take both from the
+same rendering. The `tool_datetime` node returns `utc_date` and `utc_time` next to
+`date` and `time` for exactly this.
+
+Two things this does **not** apply to. A `duration` is a length, not an instant:
+`02:00` is two hours in every timezone there is, and converting it corrupts it. A
+pure date with no time — `expected_close_date`, a goal's period — names no instant,
+so no zone can be wrong about it.
+
+The `start_date` / `end_date` filters on `activity_list` and `note_list` compare
+against those same UTC values, so a range that means one whole local day may need
+widening by a day at each end.
+
 ---
 
 ## Authentication

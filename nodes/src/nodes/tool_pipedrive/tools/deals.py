@@ -49,6 +49,7 @@ from ._base import (
     PAGING,
     PAGING_V2,
     STR,
+    UTC_TIME_DESC,
     PipedriveToolsBase,
     args_of,
     body_from,
@@ -94,7 +95,7 @@ _DEAL_WRITE_PROPS = {
     'lost_reason': STR('Free-text reason, only meaningful when status is "lost".'),
     'visible_to': ENUM('Visibility group id.', ['1', '3', '5', '7']),
     'label': STR('Deal label id, or a comma-separated list of label ids.'),
-    'add_time': STR('Creation timestamp, YYYY-MM-DD HH:MM:SS. Use to backdate an imported record.'),
+    'add_time': STR(f'Creation timestamp, YYYY-MM-DD HH:MM:SS. Use to backdate an imported record. {UTC_TIME_DESC}'),
     'extra': EXTRA(),
 }
 
