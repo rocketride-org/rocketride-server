@@ -1392,6 +1392,28 @@ module.exports = {
 						args.push('--saas');
 					}
 
+					// --logfile[=PATH] → write the engine's log to a file.
+					//
+					// OPT-IN, because the engine's own wording is "log to file INSTEAD
+					// of stdout": turning it on by default would empty the dev console,
+					// which is where everyone actually reads this.
+					//
+					// Worth having at all because without it a node failure exists only
+					// in whichever terminal happened to be open. Two failures in this
+					// tree — a settings outage and a model credential — had to be
+					// reconstructed by reproducing them against the database, because
+					// the exception that said so had already scrolled away.
+					//
+					// The timestamp rides along: a log whose lines cannot be placed in
+					// time does not settle "is this error still happening", which is
+					// the first question asked of one.
+					if (options.logfile) {
+						const logPath =
+							options.logfile === true ? path.join(DIST_DIR, 'engine.log') : options.logfile;
+						args.push(`--log.file=${logPath}`);
+						args.push('--log.includeDateTime');
+					}
+
 					// An overlay repository can carry workspace-local nodes in a
 					// `local_nodes` folder at its root, and the engine scans that folder
 					// only when --node_path names its parent. The flag has to be on argv:

@@ -163,6 +163,13 @@ function parseArgs(args) {
 		} else if (arg.startsWith('--modelserver=')) {
 			// --modelserver=host:port or port: use an existing model server at that address
 			options.modelserver = arg.substring('--modelserver='.length);
+		} else if (arg === '--logfile') {
+			// Bare --logfile: engine writes its log to dist/server/engine.log
+			// INSTEAD of stdout, which is why it is opt-in — see server:dev.
+			options.logfile = true;
+		} else if (arg.startsWith('--logfile=')) {
+			// --logfile=PATH: same, to a chosen path.
+			options.logfile = arg.substring('--logfile='.length);
 		} else if (arg.startsWith('--version=')) {
 			options.buildVersion = arg.substring('--version='.length);
 		} else if (arg.startsWith('--hash=')) {
