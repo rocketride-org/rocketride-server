@@ -1,0 +1,195 @@
+{
+	//
+	// Required:
+	//		The displayable name of this node
+	//
+	"title": "Prompt Template",
+	//
+	// Required:
+	//		The protocol is the endpoint protocol
+	//
+	"protocol": "prompt-template://",
+	//
+	// Required:
+	//		Class type of the node - what it does
+	//
+	"classType": [
+		"text"
+	],
+	//
+	// Required:
+	//		Capabilities are flags that change the behavior of the underlying
+	//		engine
+	//
+	"capabilities": ["experimental"],
+	//
+	// Optional:
+	//		Register is either filter, endpoint or ignored if not specified. If the
+	//		type is specified, a factory is registered of that given type
+	//
+	"register": "filter",
+	//
+	// Optional:
+	//		The node is the actual pyhsical node to instantiate - if
+	//		not specified, the protocol will be used
+	//
+	"node": "python",
+	//
+	// Optional:
+	//		The path is the executable/script code - it is node dependent
+	// 		and is optional for most node
+	//
+	"path": "nodes.prompt_template",
+	//
+	// Required:
+	//		The prefix map when added/removed when convertting URLs <=> paths
+	//
+	"prefix": "prompt_template",
+	//
+	// Optional:
+	//		Description to of this driver
+	//
+	"description": [
+		"A transformation component that renders prompt templates with dynamic ",
+		"variable substitution. Supports {{variable}} placeholders resolved from ",
+		"pipeline context, built-in helpers ({{now}}, {{uuid}}, {{random}}), ",
+		"conditional sections ({% if var %}...{% endif %}), loop support ",
+		"({% for item in list %}...{% endfor %}), and escape sequences for ",
+		"literal braces. Implemented with stdlib only — no Jinja2 dependency."
+	],
+	//
+	// Optional:
+	//	  The icon is the icon to display in the UI for this node
+	//
+	"icon": "prompt.svg",
+	//
+	// Optional:
+	//	 The tile is the displayable name of this node
+	//
+	"tile": [],
+	//
+	//	Optional:
+	//		As a pipe component, define what this pipe component takes
+	//		and what it produces
+	//
+	"lanes": {
+		"text": ["text"],
+		"questions": ["questions"]
+	},
+	"input": [
+		{
+			"lane": "text",
+			"description": "Text input - used as context variables for template rendering",
+			"output": [
+				{
+					"lane": "text",
+					"description": "Rendered template output as text"
+				}
+			]
+		},
+		{
+			"lane": "questions",
+			"description": "Questions input - question text is rendered through the template",
+			"output": [
+				{
+					"lane": "questions",
+					"description": "Questions with template-rendered text"
+				}
+			]
+		}
+	],
+	//
+	//	Optional:
+	//		Profile section are configuration options used by the driver
+	//		itself
+	//
+	"preconfig": {
+		"default": "default",
+		"profiles": {
+			"default": {
+				"template": "{{input}}",
+				"variables": {}
+			}
+		}
+	},
+	//
+	//	Test configuration for automated node testing
+	//
+	"test": {
+		"profiles": ["default"],
+		"cases": [
+			{
+				"questions": {
+					"questions": [{"text": "Hello world"}]
+				},
+				"expect": {
+					"questions": {
+						"notEmpty": true
+					}
+				}
+			},
+			{
+				"config": {
+					"template": "Summarize the following: {{input}}",
+					"variables": {"input": "The quick brown fox jumps over the lazy dog."}
+				},
+				"questions": {
+					"questions": [{"text": "test prompt"}]
+				},
+				"expect": {
+					"questions": {
+						"notEmpty": true,
+						"contains": "Summarize the following:"
+					}
+				}
+			},
+			{
+				"config": {
+					"template": "Q={{question}} | I={{input}}",
+					"variables": {"input": "ctx"}
+				},
+				"questions": {
+					"questions": [{"text": "what is this?"}]
+				},
+				"expect": {
+					"questions": {
+						"contains": "Q=what is this?"
+					}
+				}
+			}
+		]
+	},
+	//
+	// Optional:
+	//		Local fields defintions - these define fields only for the
+	//		current service. You may specify them here, or directly
+	//		in the shape
+	//
+	"fields": {
+		"template": {
+			"type": "string",
+			"title": "Template",
+			"description": "Prompt template with {{variable}} placeholders, conditionals ({% if %}), and loops ({% for %})"
+		},
+		"variables": {
+			"type": "object",
+			"title": "Variables",
+			"description": "Key-value pairs of variables to substitute into the template"
+		}
+	},
+	//
+	// Required:
+	//		Defines the fields (shape) of the service. Either source or target
+	//		map be specified, or both, but at least one is required
+	//
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Template",
+			"properties": [
+				"template",
+				"variables"
+			]
+		}
+	]
+}
