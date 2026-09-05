@@ -56,7 +56,7 @@ Each ingested chunk is stored with these properties alongside its vector: `conte
 | Weaviate cloud server      | `cloud` | _(your Weaviate Cloud endpoint)_ | `443`  |
 | Your own Weaviate server   | `local` | `localhost`                      | `8080` |
 
-The preconfig default profile is `cloud`. The cloud profile exposes host, API key, score, and collection; the local profile exposes host, port, gRPC port, score, and collection.
+The default profile is `local`, both for a config that names no profile and for a node dropped in the editor. The cloud profile exposes host, API key, score, and collection; the local profile exposes host, port, gRPC port, score, and collection.
 
 ---
 
