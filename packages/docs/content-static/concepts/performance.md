@@ -26,8 +26,7 @@ not how many inferences run in parallel.
 To run more than one inference concurrently, request multiple task
 `replicas` behind the same token — each replica is a full, independent
 model copy, so replicas do not share the lock. See the repository's
-`docs/README-throughput.md` for the full model, including `torchThreads`
-and measured results.
+`docs/README-throughput.md` for the full model, including `torchThreads`.
 
 ## Streaming execution
 

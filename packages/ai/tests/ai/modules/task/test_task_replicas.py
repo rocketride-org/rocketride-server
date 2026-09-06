@@ -28,7 +28,6 @@ Covered here:
 from __future__ import annotations
 
 import asyncio
-import importlib
 import time
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
@@ -37,7 +36,7 @@ import pytest
 
 from rocketride import EVENT_TYPE, TASK_STATE
 
-from ai.constants import CONST_MAX_REPLICAS, CONST_TORCH_THREAD_ENV_VARS
+from ai.constants import CONST_MAX_REPLICAS
 from ai.modules.task import task_server as ts_mod
 from ai.modules.task.task_engine import Task
 from ai.modules.task.task_server import (
@@ -168,11 +167,6 @@ def _control_with(states):
 # ---------------------------------------------------------------------------
 
 
-def test_absent_replicas_falls_back_to_the_server_default():
-    """No `replicas` in the request means the server-wide default (1)."""
-    assert resolve_replicas(None) == ts_mod.CONST_DEFAULT_REPLICAS
-
-
 @pytest.mark.parametrize('requested', [0, -7])
 def test_replicas_below_one_clamp_up(requested):
     """Zero or negative engines is not a pipeline; the floor is 1."""
@@ -192,7 +186,7 @@ def test_replicas_accepts_a_numeric_string():
 @pytest.mark.parametrize('requested', ['lots', object(), [3]])
 def test_unparseable_replicas_fall_back_instead_of_failing_the_launch(requested):
     """A bad number must never be the reason a pipeline refuses to run."""
-    assert resolve_replicas(requested) == ts_mod.CONST_DEFAULT_REPLICAS
+    assert resolve_replicas(requested) == 1
 
 
 # ---------------------------------------------------------------------------
@@ -445,6 +439,27 @@ async def test_reuse_waits_for_every_replica_to_be_running():
     assert waited == engines
 
 
+@pytest.mark.asyncio
+async def test_reuse_is_not_replaced_when_a_replica_outlives_the_primary():
+    """The uniqueness check asks every replica, not just the primary — a
+    control is not up for replacement while any engine behind it still runs.
+    """
+    ts = _make_server()
+    control, engines = _control_with([TASK_STATE.COMPLETED.value, TASK_STATE.RUNNING.value])
+    engines[0]._complete = True
+    control.project_id = 'project-1'
+    control.source = 'src'
+    control.provider = 'webhook'
+    control.public_auth = 'pk_public'
+    control.pipeline = _pipeline()
+    ts._task_control['tk_test'] = control
+
+    result = await ts.start_task(_request(useExisting=True), conn=MagicMock())
+
+    assert result['reused'] is True
+    assert ts._task_control['tk_test'] is control
+
+
 # ---------------------------------------------------------------------------
 # pick_data_task
 # ---------------------------------------------------------------------------
@@ -483,49 +498,6 @@ def test_pick_data_task_on_an_unreplicated_control_is_just_the_task():
 
     assert control.pick_data_task() is engines[0]
     assert control.data_cursor == 0
-
-
-def test_pick_data_task_survives_a_status_read_that_throws():
-    """A task torn down mid-scan means 'not a candidate', never an exception."""
-    control, engines = _control_with([TASK_STATE.RUNNING.value, TASK_STATE.RUNNING.value])
-    engines[1].get_status = MagicMock(side_effect=RuntimeError('gone'))
-
-    assert control.pick_data_task() is engines[0]
-
-
-def test_an_empty_control_picks_nothing():
-    """A control with no engine at all answers None rather than raising."""
-    control = TASK_CONTROL()
-    assert control.pick_data_task() is None
-
-
-# ---------------------------------------------------------------------------
-# Data ingress routing
-# ---------------------------------------------------------------------------
-
-
-def test_the_data_path_asks_for_a_replica_and_the_others_ask_for_the_primary():
-    """
-    for_data is what makes `replicas` do anything.
-
-    Status / attach / debug / monitor must keep resolving to the primary: a
-    round-robined answer would report a different process on each call.
-    """
-    from ai.modules.task.task_conn import TaskConn
-
-    control, engines = _control_with([TASK_STATE.RUNNING.value, TASK_STATE.RUNNING.value])
-    control.teamId = 'team-1'
-
-    conn = TaskConn.__new__(TaskConn)
-    conn._account_info = None
-    conn._server = MagicMock()
-    conn._server.get_task_control = MagicMock(return_value=control)
-    conn.get_task_token = MagicMock(return_value='tk_test')
-
-    assert TaskConn.get_task(conn, {}, 'task.monitor') is engines[0]
-    assert TaskConn.get_task(conn, {}, 'task.monitor') is engines[0]
-    assert TaskConn.get_task(conn, {}, 'task.data', for_data=True) is engines[0]
-    assert TaskConn.get_task(conn, {}, 'task.data', for_data=True) is engines[1]
 
 
 # ---------------------------------------------------------------------------
@@ -806,13 +778,9 @@ def test_only_the_first_replica_to_begin_speaks_for_the_token():
     """Clients fold task events by {projectId, source, action} and ignore the
     replica stamp, so N begins read as N pipelines starting.
     """
-    ts = _make_server()
     control, _ = _control_with([TASK_STATE.RUNNING.value] * 3)
-    ts._task_control['tk_test'] = control
 
-    forwarded = [
-        TaskServer._should_forward_lifecycle_event(ts, control, _lifecycle_event('begin', replica=i)) for i in range(3)
-    ]
+    forwarded = [control.should_forward_event(_lifecycle_event('begin', replica=i)) for i in range(3)]
 
     assert forwarded == [True, False, False]
 
@@ -822,59 +790,60 @@ def test_end_waits_for_the_last_replica():
     The first replica to exit must NOT mark the whole pipeline stopped while
     its siblings are still serving traffic.
     """
-    ts = _make_server()
     control, engines = _control_with([TASK_STATE.RUNNING.value] * 3)
-    ts._task_control['tk_test'] = control
 
     # Replica 0 exits first: two engines still live, so its end is dropped.
     engines[0]._complete = True
-    assert not TaskServer._should_forward_lifecycle_event(ts, control, _lifecycle_event('end', replica=0))
+    assert not control.should_forward_event(_lifecycle_event('end', replica=0))
 
     engines[1]._complete = True
-    assert not TaskServer._should_forward_lifecycle_event(ts, control, _lifecycle_event('end', replica=1))
+    assert not control.should_forward_event(_lifecycle_event('end', replica=1))
 
     # The last one out carries the event for the token.
     engines[2]._complete = True
-    assert TaskServer._should_forward_lifecycle_event(ts, control, _lifecycle_event('end', replica=2))
+    assert control.should_forward_event(_lifecycle_event('end', replica=2))
+
+
+def test_end_is_latched_against_two_replicas_finishing_in_the_same_tick():
+    """Two replicas both observing 'all complete' in the same gather must not
+    both get to speak for the token — only the first end wins.
+    """
+    control, engines = _control_with([TASK_STATE.RUNNING.value] * 2)
+    for engine in engines:
+        engine._complete = True
+
+    assert control.should_forward_event(_lifecycle_event('end', replica=0))
+    assert not control.should_forward_event(_lifecycle_event('end', replica=1))
 
 
 def test_restart_is_announced_once_by_the_primary():
     """A restart drives every replica through the same transition."""
-    ts = _make_server()
     control, _ = _control_with([TASK_STATE.RUNNING.value] * 3)
-    ts._task_control['tk_test'] = control
 
-    forwarded = [
-        TaskServer._should_forward_lifecycle_event(ts, control, _lifecycle_event('restart', replica=i))
-        for i in range(3)
-    ]
+    forwarded = [control.should_forward_event(_lifecycle_event('restart', replica=i)) for i in range(3)]
 
     assert forwarded == [True, False, False]
 
 
 def test_per_replica_events_are_never_folded():
     """Status, output, trace and SSE are per-engine by nature — all pass."""
-    ts = _make_server()
     control, _ = _control_with([TASK_STATE.RUNNING.value] * 2)
-    ts._task_control['tk_test'] = control
 
     for event in (
         {'event': 'apaevt_status_update', 'body': {'replica': 1}},
         {'event': 'apaevt_sse', 'body': {'replica': 1}},
         {'event': 'output', 'body': {'replica': 1}},
     ):
-        assert TaskServer._should_forward_lifecycle_event(ts, control, event)
+        assert control.should_forward_event(event)
 
 
 def test_an_unreplicated_token_folds_nothing():
     """A single engine's begin/end is the token's begin/end, as it always was."""
-    ts = _make_server()
     control, _ = _control_with([TASK_STATE.RUNNING.value])
-    ts._task_control['tk_test'] = control
 
-    assert TaskServer._should_forward_lifecycle_event(ts, control, _lifecycle_event('begin'))
-    assert TaskServer._should_forward_lifecycle_event(ts, control, _lifecycle_event('begin'))
-    assert TaskServer._should_forward_lifecycle_event(ts, control, _lifecycle_event('end'))
+    assert control.should_forward_event(_lifecycle_event('begin'))
+    assert control.should_forward_event(_lifecycle_event('begin'))
+    assert control.should_forward_event(_lifecycle_event('end'))
 
 
 @pytest.mark.asyncio
@@ -1122,37 +1091,6 @@ async def test_restart_drives_every_replica():
 
 
 @pytest.mark.asyncio
-async def test_restart_preserves_replica_identity_and_thread_pinning():
-    """
-    A restart resets the RUN, not the engine's identity.
-
-    replica_index decides pipe-id qualification and run-log ownership, and
-    torch_threads is the box-sharing contract — silently losing either on a
-    restart would leave the token routing to the wrong engine and every
-    replica spawning cpu_count threads again.
-    """
-    from rocketride import TASK_STATUS
-
-    task = Task.__new__(Task)
-    task.replica_index = 2
-    task.replica_count = 4
-    task._torch_threads = 8
-    task._status = TASK_STATUS(completedCount=17, state=TASK_STATE.RUNNING.value)
-    task._status_trace = ['noise']
-    task.info = {'a': 1}
-
-    Task._reset_status(task)
-
-    # The run's counters are cleared...
-    assert task._status.completedCount == 0
-    assert task._status_trace == []
-    # ...and the engine's identity survives.
-    assert task.replica_index == 2
-    assert task.replica_count == 4
-    assert task._torch_threads == 8
-
-
-@pytest.mark.asyncio
 async def test_partial_restart_failure_stops_the_whole_group_and_raises():
     """
     A token that answers from two different pipelines is worse than no token.
@@ -1396,70 +1334,23 @@ async def test_a_completed_replica_does_not_hold_the_idle_clock_back(monkeypatch
 # ---------------------------------------------------------------------------
 
 
-def _reload_constants(monkeypatch, **env):
-    """Reimport ai.constants with the given environment in place."""
-    import ai.constants as constants
-
-    for name in ('ROCKETRIDE_TASK_REPLICAS', 'ROCKETRIDE_TORCH_THREADS'):
-        monkeypatch.delenv(name, raising=False)
-    for name, value in env.items():
-        monkeypatch.setenv(name, value)
-
-    return importlib.reload(constants)
+def test_replicas_env_default_is_parsed(monkeypatch):
+    """The env default reaches resolve_replicas as a raw string; it must be parsed."""
+    monkeypatch.setattr(ts_mod, 'CONST_DEFAULT_REPLICAS', '3')
+    assert resolve_replicas(None) == 3
 
 
-@pytest.fixture(autouse=True)
-def _restore_constants():
-    """Leave ai.constants exactly as it was found, whatever a reload did."""
-    yield
-    import ai.constants as constants
-
-    importlib.reload(constants)
+@pytest.mark.parametrize('default,expected', [('abc', 1), ('0', 1), ('99', CONST_MAX_REPLICAS)])
+def test_an_invalid_or_out_of_range_replicas_default_is_clamped(monkeypatch, default, expected):
+    """A typo or an out-of-range values.yaml default must not crash the server."""
+    monkeypatch.setattr(ts_mod, 'CONST_DEFAULT_REPLICAS', default)
+    assert resolve_replicas(None) == expected
 
 
-def test_replica_default_comes_from_the_environment(monkeypatch):
-    """Operators set the fleet-wide default in Docker/Helm, not per request."""
-    constants = _reload_constants(monkeypatch, ROCKETRIDE_TASK_REPLICAS='4')
-    assert constants.CONST_DEFAULT_REPLICAS == 4
+def test_torch_threads_env_default_is_parsed_or_falls_back_to_auto(monkeypatch):
+    monkeypatch.setattr(ts_mod, 'CONST_DEFAULT_TORCH_THREADS', '4')
+    assert resolve_torch_threads(None, 2) == 4
 
-
-def test_torch_thread_default_comes_from_the_environment(monkeypatch):
-    constants = _reload_constants(monkeypatch, ROCKETRIDE_TORCH_THREADS='6')
-    assert constants.CONST_DEFAULT_TORCH_THREADS == 6
-
-
-def test_unset_environment_keeps_the_pre_replica_defaults(monkeypatch):
-    """Nothing set means one replica and no thread pinning: today's behaviour."""
-    constants = _reload_constants(monkeypatch)
-    assert constants.CONST_DEFAULT_REPLICAS == 1
-    assert constants.CONST_DEFAULT_TORCH_THREADS == 0
-
-
-@pytest.mark.parametrize('value', ['', '   ', 'four', '3.5', '-2'])
-def test_an_invalid_replica_env_falls_back_rather_than_crashing_the_server(monkeypatch, value):
-    """A typo in a values.yaml must not stop the server from booting."""
-    constants = _reload_constants(monkeypatch, ROCKETRIDE_TASK_REPLICAS=value)
-    assert constants.CONST_DEFAULT_REPLICAS == 1
-
-
-def test_a_replica_env_over_the_ceiling_falls_back_to_the_default(monkeypatch):
-    """Out of range is a mistake, not an instruction to run 1000 subprocesses."""
-    constants = _reload_constants(monkeypatch, ROCKETRIDE_TASK_REPLICAS='1000')
-    assert constants.CONST_DEFAULT_REPLICAS == 1
-
-
-def test_an_invalid_torch_thread_env_falls_back_to_auto(monkeypatch):
-    constants = _reload_constants(monkeypatch, ROCKETRIDE_TORCH_THREADS='lots')
-    assert constants.CONST_DEFAULT_TORCH_THREADS == 0
-
-
-def test_the_six_thread_variables_are_pinned_together():
-    """Pinning only some lets an unpinned stack spawn cpu_count threads anyway."""
-    assert CONST_TORCH_THREAD_ENV_VARS == (
-        'OMP_NUM_THREADS',
-        'MKL_NUM_THREADS',
-        'OPENBLAS_NUM_THREADS',
-        'VECLIB_MAXIMUM_THREADS',
-        'NUMEXPR_NUM_THREADS',
-        'TORCH_NUM_THREADS',
-    )
+    monkeypatch.setattr(ts_mod, 'CONST_DEFAULT_TORCH_THREADS', 'abc')
+    monkeypatch.setattr(ts_mod.os, 'cpu_count', lambda: 2)
+    assert resolve_torch_threads(None, 2) == 1

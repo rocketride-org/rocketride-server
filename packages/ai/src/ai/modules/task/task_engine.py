@@ -1405,9 +1405,11 @@ class Task(DAPBase):
             body['userId'] = self.client_id
         # Replica stamp: every replica of a token broadcasts under that ONE
         # token, so without this a client watching a replicated pipeline sees
-        # N interleaved event streams it cannot tell apart. Idempotent like
-        # the stamps above.
-        if isinstance(body, dict) and 'replica' not in body:
+        # N interleaved event streams it cannot tell apart. Present ONLY when
+        # actually replicated — a plain single-engine run must not grow a
+        # "replica": 0 field it never had before replicas existed. Idempotent
+        # like the stamps above.
+        if self.replica_count > 1 and isinstance(body, dict) and 'replica' not in body:
             body['replica'] = self.replica_index
 
         # Append to the run-log continuum: what clients see is what replay
@@ -1565,7 +1567,7 @@ class Task(DAPBase):
         Returns:
             The id to put on the wire.
         """
-        if self.replica_count <= 1 or not isinstance(local_id, int) or isinstance(local_id, bool):
+        if self.replica_count <= 1 or not isinstance(local_id, int):
             return local_id
         return encode_pipe_id(local_id, self.replica_index)
 

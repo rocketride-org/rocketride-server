@@ -4652,7 +4652,7 @@ export declare class RocketRideClient extends DAPClient {
      * @param options.filepath - Path to a `.pipe` or JSON file containing pipeline configuration (Node.js only)
      * @param options.pipeline - Flat PipelineConfig object (alternative to filepath)
      * @param options.source - Override pipeline source
-     * @param options.threads - Admission width per connection (default: 64, server decides); does not parallelize inference — use `replicas`
+     * @param options.threads - Number of threads for execution (default: 1)
      * @param options.useExisting - Use existing pipeline instance
      * @param options.args - Command line arguments to pass to pipeline
      * @param options.ttl - Time-to-live in seconds for idle pipelines (optional, server default if not provided; use 0 for no timeout)

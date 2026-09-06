@@ -82,19 +82,18 @@ Path resolution supports `~` for the user home directory on both Unix and Window
 
 ### Engine Options
 
-| Option                       | Description                                      |
-| ----------------------------- | ------------------------------------------------ |
-| `--monitor TYPE`               | Monitor type: `Console`, `App`, or `TestConsole` |
-| `--pipeline CONFIG`             | Pipeline configuration override                  |
-| `--nodeId ID`                   | Set engine node identifier                       |
-| `--java`                        | Enable Java/Tika support                         |
-| `--python`                      | Enable Python integration                        |
-| `--tika`                        | External Tika service support                    |
-| `--serviceCategory CAT`         | Service category filter                          |
-| `--serviceName NAME`            | Service name filter                              |
-| `--url.keystorenet URL`         | Remote keystore URL                              |
-| `--modelserver` | Bare flag: start a local model server. Routes model inference through a shared model-serving process instead of a per-task lock, enabling true concurrent inference within one task. Not shipped in this open-source repository; see [Throughput](README-throughput.md). |
-| `--modelserver=<PORT\|HOST:PORT>` | With an address: use an existing model server at that address instead of starting a local one. Same concurrent-inference behavior as the bare flag. Not shipped in this open-source repository; see [Throughput](README-throughput.md). |
+| Option                  | Description                                      |
+| ----------------------- | ------------------------------------------------ |
+| `--monitor TYPE`        | Monitor type: `Console`, `App`, or `TestConsole` |
+| `--pipeline CONFIG`     | Pipeline configuration override                  |
+| `--nodeId ID`           | Set engine node identifier                       |
+| `--java`                | Enable Java/Tika support                         |
+| `--python`              | Enable Python integration                        |
+| `--tika`                | External Tika service support                    |
+| `--serviceCategory CAT` | Service category filter                          |
+| `--serviceName NAME`    | Service name filter                              |
+| `--url.keystorenet URL` | Remote keystore URL                              |
+| `--modelserver=<PORT\|HOST:PORT>` | Task-server (`eaas.py`) option, forwarded to every task subprocess: model clients proxy inference to the model server at that address instead of loading a private copy. The model server is not part of this repository; see [Throughput](README-throughput.md). |
 
 ### Throughput-related Environment Variables
 
@@ -103,9 +102,9 @@ Path resolution supports `~` for the user home directory on both Unix and Window
 | `ROCKETRIDE_TASK_REPLICAS`   | Server-wide default for `replicas` (task count per `use()`) when a request omits the field.      | `1`                    |
 | `ROCKETRIDE_TORCH_THREADS`   | Server-wide default for `torchThreads` (per-replica BLAS/OMP thread count) when a request omits the field. | unset (auto: `cores // replicas` when `replicas > 1`; nothing injected when `replicas == 1`) |
 
-Invalid values fall back to the default and log a warning. See
-[Throughput](README-throughput.md) for the full model of `threads` vs.
-`replicas` vs. `torchThreads`, and measured results.
+Invalid values fall back to the default. See
+[Throughput](README-throughput.md) for how `threads`, `replicas` and
+`torchThreads` relate.
 
 ### Logging Options
 

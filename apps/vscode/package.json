@@ -204,12 +204,6 @@
 					"minimum": 0,
 					"description": "Per-replica BLAS/OMP thread count. 0 = auto: cores / pipelineReplicas, but only when pipelineReplicas is greater than 1; otherwise no thread limits are set."
 				},
-				"rocketride.pipelineThreads": {
-					"type": "integer",
-					"default": 0,
-					"minimum": 0,
-					"description": "Admission width per connection (engine component thread pool / data-admission queue). 0 = server default (64). Does not parallelize inference; use pipelineReplicas for that."
-				},
 				"rocketride.pipelineDebugOutput": {
 					"type": "boolean",
 					"default": false,

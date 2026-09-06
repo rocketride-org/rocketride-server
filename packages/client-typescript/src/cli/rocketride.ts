@@ -866,14 +866,17 @@ export class RocketRideCLI {
 		process.on('SIGTERM', () => signalHandler('SIGTERM'));
 	}
 
-	// parseInt silently truncates '2.5' to 2; require the raw string to be a
-	// whole number before accepting it.
-	private parseIntegerOption(name: string, value: string): number {
-		if (!/^\d+$/.test(value)) {
-			console.error(`Error: ${name} must be an integer`);
-			process.exit(1);
-		}
-		return parseInt(value, 10);
+	// Commander option parser for integer counts. parseInt would silently
+	// truncate '2.5' to 2; reject it instead.
+	private static integerOption(name: string, minimum: number): (value: string) => number {
+		return (value: string): number => {
+			const parsed = Number(value);
+			if (!Number.isInteger(parsed) || parsed < minimum) {
+				console.error(`Error: ${name} must be an integer >= ${minimum}`);
+				process.exit(1);
+			}
+			return parsed;
+		};
 	}
 
 	private createProgram(): Command {
@@ -892,9 +895,9 @@ export class RocketRideCLI {
 			.description('Start a new pipeline')
 			.option('--pipeline <file>', 'Path to .pipeline file containing pipeline configuration (can use ROCKETRIDE_PIPELINE in .env or env var)', process.env.ROCKETRIDE_PIPELINE)
 			.option('--token <token>', 'Optional existing task token for pipeline resume/control (can use ROCKETRIDE_TOKEN in .env or env var)', process.env.ROCKETRIDE_TOKEN)
-			.option('--threads <num>', 'Admission width per connection (server default 64, does not parallelize inference)')
-			.option('--replicas <num>', 'Number of engine subprocesses (tasks) to launch behind one token, for concurrent inference (server default 1, max 32)')
-			.option('--torch-threads <num>', 'Per-replica BLAS/OMP thread count (server default: auto = cores / replicas)')
+			.option('--threads <num>', 'Admission width per connection (server default 64, does not parallelize inference)', RocketRideCLI.integerOption('--threads', 1))
+			.option('--replicas <num>', 'Number of engine subprocesses (tasks) to launch behind one token, for concurrent inference (server default 1, max 32)', RocketRideCLI.integerOption('--replicas', 1))
+			.option('--torch-threads <num>', 'Per-replica BLAS/OMP thread count (server default: auto = cores / replicas)', RocketRideCLI.integerOption('--torch-threads', 0))
 			.option('--args <args...>', 'Additional arguments to pass to pipeline execution')
 			.action(async (options) => {
 				// Validate required arguments - validation will happen in createAndConnectClient
@@ -907,9 +910,9 @@ export class RocketRideCLI {
 					command: 'start',
 					...options,
 					pipeline: options.pipeline,
-					threads: options.threads !== undefined ? this.parseIntegerOption('--threads', options.threads) : undefined,
-					replicas: options.replicas !== undefined ? this.parseIntegerOption('--replicas', options.replicas) : undefined,
-					torch_threads: options.torchThreads !== undefined ? this.parseIntegerOption('--torch-threads', options.torchThreads) : undefined,
+					threads: options.threads,
+					replicas: options.replicas,
+					torch_threads: options.torchThreads,
 					pipeline_args: options.args,
 				};
 				this.uri = options.uri;
@@ -936,10 +939,10 @@ export class RocketRideCLI {
 			.argument('<files...>', 'Files, wildcards, or directories to upload')
 			.option('--pipeline <file>', 'Pipeline file to start new task (can use ROCKETRIDE_PIPELINE in .env or env var)', process.env.ROCKETRIDE_PIPELINE)
 			.option('--token <token>', 'Existing task token to use for uploads (can use ROCKETRIDE_TOKEN in .env or env var)', process.env.ROCKETRIDE_TOKEN)
-			.option('--threads <num>', 'Admission width per connection (server default 64, does not parallelize inference)')
-			.option('--replicas <num>', 'Number of engine subprocesses (tasks) to launch behind one token, for concurrent inference (server default 1, max 32)')
-			.option('--torch-threads <num>', 'Per-replica BLAS/OMP thread count (server default: auto = cores / replicas)')
-			.option('--max-concurrent <num>', 'Maximum number of concurrent file uploads', '5')
+			.option('--threads <num>', 'Admission width per connection (server default 64, does not parallelize inference)', RocketRideCLI.integerOption('--threads', 1))
+			.option('--replicas <num>', 'Number of engine subprocesses (tasks) to launch behind one token, for concurrent inference (server default 1, max 32)', RocketRideCLI.integerOption('--replicas', 1))
+			.option('--torch-threads <num>', 'Per-replica BLAS/OMP thread count (server default: auto = cores / replicas)', RocketRideCLI.integerOption('--torch-threads', 0))
+			.option('--max-concurrent <num>', 'Maximum number of concurrent file uploads', RocketRideCLI.integerOption('--max-concurrent', 1), 5)
 			.option('--args <args...>', 'Additional arguments to pass to pipeline execution')
 			.action(async (files, options) => {
 				// Validate required arguments - validation will happen in createAndConnectClient
@@ -947,20 +950,14 @@ export class RocketRideCLI {
 					console.error('Error: Either --pipeline or --token must be specified for upload command. Use --pipeline/--token or set ROCKETRIDE_PIPELINE/ROCKETRIDE_TOKEN in .env file');
 					process.exit(1);
 				}
-				const maxConcurrent = Number(options.maxConcurrent || '5');
-				if (!Number.isInteger(maxConcurrent) || maxConcurrent < 1) {
-					console.error('Error: --max-concurrent must be a positive integer');
-					process.exit(1);
-				}
-
 				this.args = {
 					command: 'upload',
 					...options,
 					files,
-					threads: options.threads !== undefined ? this.parseIntegerOption('--threads', options.threads) : undefined,
-					replicas: options.replicas !== undefined ? this.parseIntegerOption('--replicas', options.replicas) : undefined,
-					torch_threads: options.torchThreads !== undefined ? this.parseIntegerOption('--torch-threads', options.torchThreads) : undefined,
-					max_concurrent: maxConcurrent,
+					threads: options.threads,
+					replicas: options.replicas,
+					torch_threads: options.torchThreads,
+					max_concurrent: options.maxConcurrent,
 					pipeline_args: options.args,
 				};
 				this.uri = options.uri;

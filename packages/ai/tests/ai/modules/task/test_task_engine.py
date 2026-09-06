@@ -77,6 +77,7 @@ def _task(*, source='src-id', task_name=None, pipeline=None, status=None):
     # Replica identity: 0 is the primary (the unreplicated default), and
     # 0 torch threads means "inject nothing" — today's behaviour.
     t.replica_index = 0
+    t.replica_count = 1
     t._torch_threads = 0
     t._status = status if status is not None else SimpleNamespace(name='', state=0, exitMessage='')
     t._debugger = None
@@ -939,6 +940,7 @@ async def test_forwarded_events_carry_the_replica_index():
     """
     t = _task()
     t.replica_index = 3
+    t.replica_count = 4
     t._server = MagicMock()
     t._server.broadcast_task_event = AsyncMock()
     t.token = 'tk_test'
@@ -956,6 +958,7 @@ async def test_an_existing_replica_stamp_is_left_alone():
     """The stamp is a safety net, not an overwrite — idempotent like the others."""
     t = _task()
     t.replica_index = 3
+    t.replica_count = 4
     t._server = MagicMock()
     t._server.broadcast_task_event = AsyncMock()
 
@@ -965,6 +968,21 @@ async def test_an_existing_replica_stamp_is_left_alone():
 
     sent = t._server.broadcast_task_event.await_args.kwargs['event']
     assert sent['body']['replica'] == 1
+
+
+@pytest.mark.asyncio
+async def test_an_unreplicated_task_adds_no_replica_key():
+    """A plain single-engine run must not grow a "replica": 0 it never had."""
+    t = _task()
+    t._server = MagicMock()
+    t._server.broadcast_task_event = AsyncMock()
+
+    from rocketride import EVENT_TYPE
+
+    await Task._forward_task_event(t, EVENT_TYPE.SUMMARY, {'event': 'apaevt_status', 'body': {}})
+
+    sent = t._server.broadcast_task_event.await_args.kwargs['event']
+    assert 'replica' not in sent['body']
 
 
 # ---------------------------------------------------------------------------

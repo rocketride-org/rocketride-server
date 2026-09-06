@@ -133,22 +133,12 @@ class ExecutionMixin(DAPClient):
             filepath: Path to a ``.pipe`` or JSON/JSON5 pipeline configuration file
             pipeline: Flat PipelineConfig dict (components, source, project_id at top level)
             source: Override the source specified in the pipeline config
-            threads: Admission width per connection — the size of the engine's
-                component thread pool and data-admission queue (server default 64).
-                This does NOT parallelize model inference; a single task still runs
-                one inference at a time behind a per-model lock. Use ``replicas`` for
-                inference throughput.
-            replicas: Number of engine subprocesses (tasks) to launch behind this one
-                token (default 1, clamped to 1..32 server-side). Inputs sent to the
-                token are round-robined across replicas; events from all replicas are
-                broadcast under the same token. This is the throughput lever for
-                concurrent inference.
-            torch_threads: Per-replica BLAS/OMP thread count. When set, the server
-                injects OMP_NUM_THREADS, MKL_NUM_THREADS, OPENBLAS_NUM_THREADS,
-                VECLIB_MAXIMUM_THREADS, NUMEXPR_NUM_THREADS, and TORCH_NUM_THREADS
-                into each replica subprocess. When not set and replicas > 1, the
-                server defaults to ``max(1, os.cpu_count() // replicas)``. When not
-                set and replicas == 1, nothing is injected (unchanged behavior).
+            threads: Admission width per connection (server default 64). Does not
+                parallelize inference; a task runs one inference at a time
+            replicas: Engine subprocesses (each a full model copy) behind this one
+                token, 1..32 (server default 1). Inputs round-robin across them
+            torch_threads: BLAS/OMP threads per replica. Unset: ``cores // replicas``
+                when replicas > 1, nothing injected at 1. See docs/README-throughput.md
             use_existing: Whether to reuse existing pipeline with same token
             args: Command-line style arguments to pass to the pipeline
             ttl: Time-to-live in seconds for idle pipelines (optional, server default
@@ -160,6 +150,7 @@ class ExecutionMixin(DAPClient):
         Returns:
             Dict containing:
             - token: Task token for sending data and monitoring (str)
+            - replicas: Engine subprocesses actually running behind the token (int)
             - Additional pipeline startup information
 
         Raises:

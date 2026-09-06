@@ -93,6 +93,10 @@ def _make_control(*, token='tk_1', user_id='user-1', team_id='team-1', public_au
         # cannot, so the list is materialised here. Lifecycle code
         # (cleanup / ttl / remove / stop) iterates it.
         tasks=[primary, *replicas],
+        # Unreplicated by default here (no test using this stand-in exercises
+        # multi-replica lifecycle folding) — matches the real method's own
+        # single-engine short-circuit.
+        should_forward_event=lambda event: True,
     )
 
 

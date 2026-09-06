@@ -82,9 +82,6 @@ export interface ConfigManagerInfo {
 
 	/** Default per-replica BLAS/OMP thread count; 0 = auto (server decides). */
 	pipelineTorchThreads: number;
-
-	/** Default admission width per connection; 0 = server default (64). Does not parallelize inference. */
-	pipelineThreads: number;
 }
 
 /** Per-group settings sent from the Settings UI on save. */
@@ -153,7 +150,6 @@ export class ConfigManager {
 		pipelineDebugOutput: false,
 		pipelineReplicas: 0,
 		pipelineTorchThreads: 0,
-		pipelineThreads: 0,
 	};
 
 	private constructor() {}
@@ -250,7 +246,6 @@ export class ConfigManager {
 			pipelineDebugOutput: config.get('pipelineDebugOutput', false),
 			pipelineReplicas: config.get('pipelineReplicas', 0),
 			pipelineTorchThreads: config.get('pipelineTorchThreads', 0),
-			pipelineThreads: config.get('pipelineThreads', 0),
 		};
 	}
 
@@ -289,7 +284,6 @@ export class ConfigManager {
 			pipelineDebugOutput: this.config.pipelineDebugOutput,
 			pipelineReplicas: this.config.pipelineReplicas,
 			pipelineTorchThreads: this.config.pipelineTorchThreads,
-			pipelineThreads: this.config.pipelineThreads,
 		};
 	}
 

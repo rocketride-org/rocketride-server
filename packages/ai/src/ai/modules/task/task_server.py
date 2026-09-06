@@ -102,42 +102,18 @@ from rocketlib import debug
 
 
 def _is_task_running(task: Task) -> bool:
-    """
-    True when an engine is in the RUNNING state and can take work.
-
-    Defensive by design: this decides where inputs go, and a status read that
-    throws (a task torn down mid-scan) must mean "not a candidate", never an
-    exception out of the data path.
-    """
-    if task is None:
-        return False
-    try:
-        return task.get_status().state == TASK_STATE.RUNNING.value
-    except Exception:
-        return False
+    """True when an engine is in the RUNNING state and can take work."""
+    return task.get_status().state == TASK_STATE.RUNNING.value
 
 
 def resolve_replicas(requested: Any) -> int:
-    """
-    Parse and clamp the requested replica count.
-
-    Args:
-        requested: The request's ``replicas`` argument. None/absent falls back
-            to the server-wide default (``ROCKETRIDE_TASK_REPLICAS``).
-
-    Returns:
-        int: A count in 1..CONST_MAX_REPLICAS. Anything unparseable falls back
-            to the default rather than failing the launch — a bad number is
-            never worth refusing to run a pipeline over.
-    """
+    """Parse and clamp the requested replica count (None → server default)."""
     if requested is None:
-        return CONST_DEFAULT_REPLICAS
-
+        requested = CONST_DEFAULT_REPLICAS
     try:
         value = int(requested)
     except (TypeError, ValueError):
-        return CONST_DEFAULT_REPLICAS
-
+        value = 1
     return max(1, min(value, CONST_MAX_REPLICAS))
 
 
@@ -145,21 +121,9 @@ def resolve_torch_threads(requested: Any, replicas: int) -> int:
     """
     Resolve the per-replica BLAS/OMP thread count.
 
-    The rule, in order:
-      * an explicit positive value wins;
-      * otherwise the server-wide default (``ROCKETRIDE_TORCH_THREADS``);
-      * otherwise, with more than one replica, ``cpu_count // replicas`` — so
-        the replicas of one pipeline share the box instead of each spawning
-        cpu_count threads and thrashing it;
-      * otherwise 0, meaning inject nothing at all. A single unreplicated task
-        must behave exactly as it did before replicas existed.
-
-    Args:
-        requested: The request's ``torchThreads`` argument (None if absent).
-        replicas: The resolved replica count.
-
-    Returns:
-        int: Threads per replica, or 0 for "inject nothing".
+    The rule, in order: an explicit positive value wins; otherwise the
+    server-wide default; otherwise, with more than one replica,
+    ``cpu_count // replicas``; otherwise 0, meaning inject nothing at all.
     """
     raw = requested if requested is not None else CONST_DEFAULT_TORCH_THREADS
 
@@ -249,6 +213,11 @@ class TASK_CONTROL:
     # The FIRST replica to begin speaks for the control.
     begin_broadcast: bool = False
 
+    # Latch: has an apaevt_task 'end' already been broadcast for this
+    # control? Two replicas finishing in the same gather can both observe
+    # "all complete" — only the first gets to speak for the token.
+    end_broadcast: bool = False
+
     @property
     def tasks(self) -> List[Task]:
         """
@@ -267,7 +236,7 @@ class TASK_CONTROL:
         """How many engines are running behind this token."""
         return len(self.tasks)
 
-    def pick_data_task(self) -> Optional[Task]:
+    def pick_data_task(self) -> Task:
         """
         Choose the engine that should receive the next input, round-robin.
 
@@ -279,12 +248,9 @@ class TASK_CONTROL:
         behavior for a task that has not finished starting.
 
         Returns:
-            Optional[Task]: The engine to send to, or None when the control
-                holds no task at all.
+            Task: The engine to send to.
         """
         tasks = self.tasks
-        if not tasks:
-            return None
 
         # The common case: no replicas, nothing to choose between.
         if len(tasks) == 1:
@@ -302,33 +268,15 @@ class TASK_CONTROL:
         """
         Resolve ONE data request to the engine that must serve it.
 
-        The SDK pipe protocol is ``open`` -> N x ``write`` -> ``close`` against
-        a single pipe id, and a pipe lives inside ONE engine subprocess. So
-        round-robin applies only to requests that do not name a pipe:
-
-        - No ``pipe_id`` (an ``open``, or a standalone ``tool`` call that
-          borrows a pool pipe): round-robin. The reply's pipe id is qualified
-          by the caller so the client's next request can find its way back.
-        - A ``pipe_id``: decode the replica out of it and route there,
-          rewriting the id back to the engine-local one the subprocess knows.
-
-        The qualification is stateless (see the codec in ``types.py``), so
-        nothing here keeps a pipe table and a supervisor restart loses no
-        routing information the client does not already hold.
-
-        An UNREPLICATED control short-circuits: same engine, same request
-        object, no decode — byte-identical to the pre-replica path.
-
-        Args:
-            request: The inbound DAP request.
+        No ``pipe_id``: round-robin. A ``pipe_id``: decode the replica out of
+        it, route there, and localise the id. Unreplicated: passthrough.
 
         Returns:
-            tuple: ``(task, request_to_send)``. The request is the original
-                object unless a pipe id had to be localised.
+            tuple: ``(task, request_to_send)``.
 
         Raises:
-            ValueError: If the id names a replica this control does not have,
-                or one that is not running.
+            ValueError: The id names a replica this control lacks, or one
+                that is not running.
         """
         tasks = self.tasks
         if len(tasks) <= 1:
@@ -338,7 +286,7 @@ class TASK_CONTROL:
         wire_id = args.get('pipe_id', None)
 
         # Nothing to be affine to — spread the load.
-        if not isinstance(wire_id, int) or isinstance(wire_id, bool):
+        if not isinstance(wire_id, int):
             return self.pick_data_task(), request
 
         local_id, index = decode_pipe_id(wire_id)
@@ -366,10 +314,12 @@ class TASK_CONTROL:
 
         Counters are per-engine, and inputs are round-robined, so reading the
         primary alone reports roughly 1/N of the work a replicated pipeline
-        actually did. Totals sum, timings take the outermost bound, and the
-        lifecycle fields stay the PRIMARY's: the primary is what every
-        attach/debug/status path resolves to, so the state a client sees here
-        matches the process it is talking to.
+        actually did. Counters, resources and billing sum; startTime/endTime
+        take the outermost bound; ``completed`` means every replica has ended;
+        warnings and errors are concatenated. ``state`` and the run analytics
+        (``completionSeconds``, ``idleSeconds``, ``componentStats``,
+        ``slowestDocs``, ``pipeflow``) stay the PRIMARY's — the process every
+        attach/debug path talks to.
 
         Returns:
             TASK_STATUS: The primary's own status object when unreplicated
@@ -408,6 +358,8 @@ class TASK_CONTROL:
             merged.endTime = max(status.endTime or 0.0 for status in statuses)
         else:
             merged.endTime = 0.0
+        # Same fact as endTime above: every replica has ended.
+        merged.completed = all(status.completed for status in statuses)
 
         # Resource usage is the sum across processes (that is what the box
         # actually spends); peaks are the sum of peaks — an upper bound, and
@@ -442,8 +394,6 @@ class TASK_CONTROL:
         for status in statuses[1:]:
             merged.warnings.extend(status.warnings)
             merged.errors.extend(status.errors)
-        merged.warnings = merged.warnings[-50:]
-        merged.errors = merged.errors[-50:]
 
         return merged
 
@@ -455,11 +405,10 @@ class TASK_CONTROL:
         Inputs round-robin, so the group has only been idle as long as the
         replica that most recently did something.
         """
-        live_idles = [getattr(task, '_idle_time', 0) or 0 for task in self.tasks if not task.is_task_complete()]
-        if live_idles:
-            return min(live_idles)
-        idles = [getattr(task, '_idle_time', 0) or 0 for task in self.tasks]
-        return min(idles) if idles else 0
+        # Completed replicas stop aging (the TTL monitor skips them), so they
+        # would pin the group's idle time at a stale low value.
+        live = [task for task in self.tasks if not task.is_task_complete()] or self.tasks
+        return min((task._idle_time for task in live), default=0)
 
     @property
     def owner_id(self) -> str:
@@ -469,6 +418,48 @@ class TASK_CONTROL:
         value — never by the attribution teamId of a dev run.
         """
         return self.teamId if self.run_kind == 'deploy' else self.userId
+
+    def should_forward_event(self, event: Dict[str, Any]) -> bool:
+        """
+        Decide whether one replica's ``apaevt_task`` speaks for the whole token.
+
+        - ``begin``: first replica to begin (latched), rest dropped.
+        - ``end``: last replica to finish, latched so two finishing in the
+          same tick cannot both pass.
+        - ``restart``: the primary only.
+        - Everything else (status, output, trace, flow, SSE) passes through.
+
+        Returns:
+            bool: True to broadcast.
+        """
+        # An unreplicated token has nothing to fold — never touch its stream.
+        if len(self.tasks) <= 1:
+            return True
+
+        if event.get('event') != 'apaevt_task':
+            return True
+
+        body = event.get('body') or {}
+        action = body.get('action')
+
+        if action == 'begin':
+            if self.begin_broadcast:
+                return False
+            self.begin_broadcast = True
+            return True
+
+        if action == 'end':
+            if self.end_broadcast:
+                return False
+            if not all(task.is_task_complete() for task in self.tasks):
+                return False
+            self.end_broadcast = True
+            return True
+
+        if action == 'restart':
+            return body.get('replica', 0) == 0
+
+        return True
 
 
 def _apply_source_defaults(pipeline: Dict[str, Any], source: str) -> Dict[str, Any]:
@@ -656,8 +647,6 @@ class TaskServer(DAPBase):
                     # it while one still runs would orphan that subprocess and
                     # leave its events broadcasting under a dead token.
                     control_tasks = control.tasks
-                    if not control_tasks:
-                        continue
                     if any(not task.is_task_complete() for task in control_tasks):
                         continue
 
@@ -891,16 +880,8 @@ class TaskServer(DAPBase):
         # Process all tasks for disconnection cleanup
         for control in list(self._task_control.values()):
             try:
-                # Detach this connection from every replica — a client that
-                # attached to the token is attached to all of them. Concurrently,
-                # so one replica raising cannot skip detaching the rest.
-                detach_results = await asyncio.gather(
-                    *(task.detach_task(conn) for task in control.tasks),
-                    return_exceptions=True,
-                )
-                for result in detach_results:
-                    if isinstance(result, BaseException):
-                        self.debug_message(f'Error detaching a replica of task "{control.id}": {result}')
+                # Only the primary is ever attached (attach_task is primary-only).
+                await control.task.detach_task(conn)
 
                 # Auto-terminate launched tasks when the launching client disconnects
                 if control.launch_type == LAUNCH_TYPE.LAUNCH and control.launch_owner == conn:
@@ -1329,59 +1310,6 @@ class TaskServer(DAPBase):
             except Exception as e:
                 self.debug_message(f'push_account_update failed for conn {conn.get_connection_id()}: {e}')
 
-    def _should_forward_lifecycle_event(self, control: TASK_CONTROL, event: Dict[str, Any]) -> bool:
-        """
-        Decide whether one replica's ``apaevt_task`` speaks for the whole token.
-
-        Every replica emits its own begin/end, but clients fold task events by
-        {projectId, source, action} and ignore the replica stamp — so N begins
-        read as N pipelines starting, and the FIRST replica to exit marks the
-        whole pipeline stopped while the rest are still serving traffic.
-
-        The rule:
-
-        - ``begin``: the first replica to begin carries it (latched on the
-          control), the rest are dropped.
-        - ``end``: only the LAST replica to finish carries it — by then every
-          task in the control reports complete, so the token really is done.
-        - ``restart``: the primary carries it; a restart drives every replica
-          through the same transition, so one event describes all of them.
-
-        Every other event (status, output, trace, flow, SSE) is per-replica by
-        nature and passes through untouched, still carrying its ``replica``
-        stamp.
-
-        Args:
-            control: The control the event belongs to.
-            event: The DAP event about to be broadcast.
-
-        Returns:
-            bool: True to broadcast.
-        """
-        # An unreplicated token has nothing to fold — never touch its stream.
-        if len(control.tasks) <= 1:
-            return True
-
-        if event.get('event') != 'apaevt_task':
-            return True
-
-        body = event.get('body') or {}
-        action = body.get('action')
-
-        if action == 'begin':
-            if control.begin_broadcast:
-                return False
-            control.begin_broadcast = True
-            return True
-
-        if action == 'end':
-            return all(task.is_task_complete() for task in control.tasks)
-
-        if action == 'restart':
-            return body.get('replica', 0) == 0
-
-        return True
-
     async def broadcast_task_event(self, event_type: EVENT_TYPE, token: str, event: Dict[str, Any]) -> None:
         """
         Broadcast a task-scoped event to all connections that are subscribed to the given task.
@@ -1406,7 +1334,7 @@ class TaskServer(DAPBase):
             return
 
         # One lifecycle event per TOKEN, not per replica.
-        if not self._should_forward_lifecycle_event(self._task_control[token], event):
+        if not self._task_control[token].should_forward_event(event):
             return
 
         # Snapshot to list() so a connection joining or dropping mid-broadcast
@@ -1772,7 +1700,7 @@ class TaskServer(DAPBase):
             existing_control = self._task_control[control.token]
 
             # Prevent duplicate active tasks
-            if not existing_control.task.is_task_complete():
+            if any(not task.is_task_complete() for task in existing_control.tasks):
                 # This is an active task, if we are told we can use it, then,
                 # make sure the user actually specified the task to use. If so,
                 # then all is ok, just use the existing task

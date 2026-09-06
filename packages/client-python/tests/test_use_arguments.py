@@ -81,14 +81,3 @@ async def test_use_forwards_threads_unchanged():
 
     _, kwargs = client.call.call_args
     assert kwargs['threads'] == 16
-
-
-@pytest.mark.asyncio
-async def test_use_forwards_replicas_and_torch_threads_together():
-    client = _make_client()
-
-    await client.use(pipeline=get_echo_pipeline(), token='tok-1', replicas=2, torch_threads=4)
-
-    _, kwargs = client.call.call_args
-    assert kwargs['replicas'] == 2
-    assert kwargs['torchThreads'] == 4

@@ -135,18 +135,11 @@ Each `.pipe` file contains a single pipeline (`{ components, project_id, viewpor
 
 On the server, a running pipeline's task identity is the triple
 `{owner, project_id, source}`. Two `use()` calls that share this triple
-resolve to the same running task; calls with a distinct `project_id` (or
-`source`) always produced a distinct task, each with its own model copy
-and its own inference lock. Before `replicas` existed, this was the only
-way to get more than one concurrent inference: manually run N pipeline
-copies under N distinct `project_id`s, each with its own connection and
-token.
-
-`replicas` does the same thing under one token: passing `replicas: N` to
-`use()` launches N task replicas (still one `{owner, project_id, source}`
-identity) instead of one, round-robins inputs across them, and broadcasts
-events from all of them back on the same token. See
-[README-throughput.md](../README-throughput.md) for the full model.
+resolve to the same running task. A task is one engine subprocess with one
+model copy behind one lock, so it runs one inference at a time. Passing
+`replicas: N` to `use()` launches N such subprocesses behind one token,
+round-robins inputs across them, and broadcasts events from all of them on
+that token. See [README-throughput.md](../README-throughput.md).
 
 ---
 
