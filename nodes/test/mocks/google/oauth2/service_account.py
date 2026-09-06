@@ -16,5 +16,8 @@ class Credentials:
     def from_service_account_info(cls, info, scopes=None, **kwargs):
         return cls(info=info, scopes=scopes)
 
+    def with_scopes(self, scopes):
+        return Credentials(info=self.info, scopes=scopes, subject=self.subject)
+
     def with_subject(self, subject):
         return Credentials(info=self.info, scopes=self.scopes, subject=subject)

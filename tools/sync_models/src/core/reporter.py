@@ -29,6 +29,11 @@ class ProviderReport:
         deprecated: list of profile_key strings
         skipped: list of (model_id, reason) tuples (smoke test failures)
         unchanged_count: number of profiles with no changes
+        retired: list of (profile_key, provider_message) for profiles a direct call
+                          reported as gone, under --verify-existing
+        reappeared_deprecated: list of profile_key strings the source listed again while the
+                          profile stays deprecated — a hand-applied mark, or no authority to
+                          lift it; needs a human to confirm or clear
         estimated_tokens: list of profile_key strings added with a best-guess token limit
                           (no authoritative source); flagged for manual review
         warning: set when the provider was intentionally skipped (e.g. no API key);
@@ -43,6 +48,9 @@ class ProviderReport:
     deprecated: List[str] = field(default_factory=list)
     skipped: List[tuple] = field(default_factory=list)
     estimated_tokens: List[str] = field(default_factory=list)
+    reappeared_deprecated: List[str] = field(default_factory=list)
+    retired: List[tuple] = field(default_factory=list)
+    unverified: List[tuple] = field(default_factory=list)
     unchanged_count: int = 0
     warning: Optional[str] = None
     error: Optional[str] = None
@@ -52,8 +60,14 @@ class ProviderReport:
     discovery_skipped: bool = False
 
     def has_changes(self) -> bool:
-        """Return True if any adds, updates, or deprecations occurred."""
-        return bool(self.added or self.updated or self.deprecated)
+        """
+        Return True if there is anything to show for this provider.
+
+        Includes reappeared_deprecated: those need a human decision, and a
+        provider whose only finding is one of them must not be rendered as a
+        pure skip — the early return above would drop the finding entirely.
+        """
+        return bool(self.added or self.updated or self.deprecated or self.reappeared_deprecated or self.unverified)
 
 
 @dataclass
@@ -145,6 +159,15 @@ def format_console(report: SyncReport) -> str:
 
         for key in pr.estimated_tokens:
             lines.append(_c(f'  ? {key:<30} token limit is estimated — verify manually', '33'))
+
+        for profile_key, _reason in pr.retired:
+            lines.append(_c(f'  - {profile_key:<30} retired upstream (verified by call)', '90'))
+
+        for profile_key, _reason in pr.unverified:
+            lines.append(_c(f'  ? {profile_key:<30} 404 on call — retired, or no access with this key', '33'))
+
+        for key in pr.reappeared_deprecated:
+            lines.append(_c(f'  ? {key:<30} listed again but still deprecated — confirm or clear', '33'))
 
         if not pr.has_changes() and not pr.skipped:
             lines.append(_c(f'  (no changes — {pr.unchanged_count} profiles unchanged)', '90'))
@@ -244,6 +267,27 @@ def format_pr_body(report: SyncReport) -> str:
             lines.append('**Estimated token limits** (no authoritative source — verify manually):')
             lines.append('')
             for key in pr.estimated_tokens:
+                lines.append(f'- `{key}`')
+            lines.append('')
+
+        if pr.retired:
+            lines.append('**Retired upstream** (a direct call reports the model as gone):')
+            lines.append('')
+            for profile_key, reason in pr.retired:
+                lines.append(f'- `{profile_key}` — {reason[:200]}')
+            lines.append('')
+
+        if pr.unverified:
+            lines.append('**Could not be called** (404 — either retired, or not reachable with the key used):')
+            lines.append('')
+            for profile_key, reason in pr.unverified:
+                lines.append(f'- `{profile_key}` — {reason[:200]}')
+            lines.append('')
+
+        if pr.reappeared_deprecated:
+            lines.append('**Listed again but still deprecated** (marked by hand, or this source cannot lift it):')
+            lines.append('')
+            for key in pr.reappeared_deprecated:
                 lines.append(f'- `{key}`')
             lines.append('')
 

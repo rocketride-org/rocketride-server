@@ -15,6 +15,7 @@
 
 import React from 'react';
 import ReactDOM from 'react-dom/client';
+import { capturePrerenderedContent } from './util/prerenderFallback';
 import '@fontsource-variable/figtree';
 import './themes/global.css';
 import { RocketRideClient } from 'rocketride';
@@ -71,6 +72,11 @@ async function main() {
 		portal.id = 'rr-popup-portal';
 		document.body.appendChild(portal);
 	}
+
+	// Snapshot a prerendered capture's #root HTML before createRoot clears it,
+	// so a stranded crawler boot can keep the good content instead of the
+	// connection-error surface (see util/prerenderFallback.ts).
+	capturePrerenderedContent();
 
 	// Render the shell
 	ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(

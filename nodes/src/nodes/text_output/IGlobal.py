@@ -24,7 +24,7 @@
 # ------------------------------------------------------------------------------
 # This class controls the data shared between all threads for the task
 # ------------------------------------------------------------------------------
-from rocketlib import IGlobalBase, OPEN_MODE
+from rocketlib import IGlobalBase
 
 
 # ----------------------------------
@@ -32,21 +32,18 @@ from rocketlib import IGlobalBase, OPEN_MODE
 # ----------------------------------
 class IGlobal(IGlobalBase):
     def beginGlobal(self):
-        # Are we in config mode or some other mode?
-        if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
-            # We are going to get a call to configureService but
-            # we don't actually need to load the driver for that
-            pass
-        else:
-            # Read the requirements file
-            import os
+        """Call from engLib, task startup hook.
 
-            requirements = os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt'
-
-            # Load any dependencies
-            from depends import depends  # type: ignore
-
-            depends(requirements)
+        Intentionally a no-op: `endpoint.py` resolves this node's dependencies
+        with `depends()` at module import time, so there is nothing left to
+        prepare once the task begins.
+        """
+        pass
 
     def endGlobal(self):
+        """Call from engLib, task teardown hook.
+
+        Intentionally a no-op: the SMB client owns its own connection state and
+        `beginGlobal` allocates nothing that needs releasing here.
+        """
         pass

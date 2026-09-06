@@ -72,9 +72,13 @@ Routing prefixes such as `openrouter/anthropic/` are stripped before matching.
 
 | Model                                  | Thinking parameters sent                                                                                                                                                                                                                      |
 | -------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Legacy Claude 3 / 3.5 Haiku            | None. Those models have no extended thinking; sending parameters would return a 400. Haiku 4.5 and newer are not excluded and follow the row below.                                                                                            |
-| `claude-opus-4-7` / `claude-opus-4-8` | `thinking: {type: "adaptive", display: "summarized"}` (adaptive thinking)                                                                                                                                                                    |
-| Other Claude models                    | `thinking: {type: "enabled", budget_tokens: N}` plus the `interleaved-thinking-2025-05-14` beta header, where `N` is half the output-token limit (minimum 2,048, always below `max_tokens`). Skipped entirely if the output window is too small for a valid budget. |
+| Legacy Claude 3 / 3.5 Haiku            | None. Those models have no extended thinking; sending parameters would return a 400. Haiku 4.5 is not excluded and follows the legacy row below.                                                                                               |
+| Legacy models (Claude 3.x _except_ Claude 3 / 3.5 Haiku, plus 4.0, 4.1, 4.5 incl. Haiku 4.5 and its `claude-haiku-latest` alias, 4.6, Mythos Preview) | `thinking: {type: "enabled", budget_tokens: N}` plus the `interleaved-thinking-2025-05-14` beta header, where `N` is half the output-token limit (minimum 2,048, always below `max_tokens`). Skipped entirely if the output window is too small for a valid budget. |
+| All other Claude models (`claude-opus-4-7`, `claude-opus-4-8`, and the Claude 5 family — `claude-sonnet-5`, `claude-opus-5`, `claude-fable-5`, `claude-mythos-5` — plus any future model) | `thinking: {type: "adaptive", display: "summarized"}` (adaptive thinking). Claude 4.7+ rejects the legacy `enabled` + `budget_tokens` shape with an HTTP 400, so the legacy models are an explicit allowlist and unknown or future models default to adaptive. |
+
+The legacy list matches whole model ids, after `-YYYYMMDD` dated and `-fast`
+deployment suffixes are stripped — never an open-ended prefix — so a future id
+such as `claude-sonnet-4-50` is not mistaken for `claude-sonnet-4-5`.
 
 When thinking is actually enabled, responses are streamed through the native
 Anthropic Messages API handler (`ai.common.llm_native_stream`, provider

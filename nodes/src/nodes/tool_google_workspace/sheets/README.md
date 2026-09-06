@@ -49,8 +49,9 @@ deletion is a Drive operation and lives in `tool_drive`.
   and sheet deletion all go through it. `sheet_add` / `sheet_delete` /
   `sheet_duplicate` are convenience wrappers over the same endpoint;
   `sheet_copy_to` is the separate `spreadsheets.sheets.copyTo` endpoint.
-- **Diagnostics:** `check_connection` verifies that granted OAuth scopes cover
-  the configured access tier.
+- **Diagnostics:** `check_connection` probes the Sheets API with a live call;
+  for user OAuth it also verifies that granted scopes cover the configured
+  access tier (service-account auth has no per-user scope grant to check).
 
 ## Setup
 
