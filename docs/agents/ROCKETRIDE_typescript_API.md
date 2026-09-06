@@ -435,7 +435,7 @@ Start a RocketRide pipeline for processing data. Automatically performs environm
 - `useExisting?: boolean` - Use existing pipeline instance
 - `args?: string[]` - Command line arguments to pass to pipeline
 - `ttl?: number` - Time-to-live in seconds for idle pipelines (optional, server default if not provided; use 0 for no timeout)
-- `pipelineTraceLevel?: 'none' | 'metadata' | 'summary' | 'full'` - When set, captures every lane write and invoke call in the response under `_trace`
+- `pipelineTraceLevel?: 'none' | 'metadata' | 'summary' | 'full'` - Does not add a `_trace` field to this response -- for any level other than `'none'` (the default if omitted), every lane write and invoke call is captured server-side as an `apaevt_flow` event and rolled up into run analytics on the task status (`componentStats`, `slowestDocs`, `completionSeconds`, `idleSeconds`, `idleLongestSeconds`, `idleLongestAt`, via `getTaskStatus`); both stay empty at `'none'`. Retrieve trace data through a `LogEventStream` monitor session: `client.log.openEventStream(...)`, then `await session.seek('live')` (or another position) before `getTraces(n)` (open + the `n` most-recently-closed trace summaries, `n` must be <= 50) -- it reads state as of the session's position and returns nothing before a seek. `getTrace(traceId)` returns that trace's full event set, is position-independent, and needs no prior seek; `traceId` is the trace's begin-event continuum seq (its permanent identity), not the flow event's `body.id`, which is a reused pipe slot.
 
 ##### `terminate(token: string): Promise<void>`
 
