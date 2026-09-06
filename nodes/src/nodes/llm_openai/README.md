@@ -10,9 +10,11 @@ model, and can also be wired directly via lanes: send a question in, receive a g
 answer out.
 
 Built on **langchain-openai** (`ChatOpenAI`) with the **openai** SDK underneath.
-Non-reasoning models are invoked through the Chat Completions API with `temperature: 0`
-and `max_tokens` set to the profile's output-token limit, so responses are deterministic
-by default.
+Non-reasoning models are invoked through the Chat Completions API with `max_tokens` set to
+the profile's output-token limit. `temperature` is configurable (default `0`, which is
+generally more deterministic than higher values, though OpenAI does not guarantee identical
+output for identical input); it is ignored for reasoning models, which OpenAI's Responses
+API controls separately.
 
 Reasoning-capable models (flagged via `capabilities.reasoning` in the model configuration)
 are routed through the **OpenAI Responses API** instead, using `max_completion_tokens`.
@@ -48,10 +50,11 @@ errors are not, and are mapped to friendly messages (e.g. `Invalid API key.`).
 | `model`            | string | OpenAI model name. Only editable in the `custom` profile.                                |
 | `modelTotalTokens` | number | Total token (context) limit. Only editable in the `custom` profile (default `16384`). Must be greater than 0. |
 | `modelSource`      | enum   | Where the model is hosted (standard cloud-LLM field, default `provider`).                |
+| `temperature`      | number | Sampling temperature for non-reasoning models, range `0`-`2` (default `0`). Available for every profile. Ignored by reasoning models. |
 
-Preconfigured profiles only expose `apikey` and `modelSource`; the model name and token
-limits come from the profile. The `custom` profile additionally exposes `model` and
-`modelTotalTokens` for any OpenAI model not in the list.
+Preconfigured profiles only expose `apikey`, `modelSource`, and `temperature`; the model
+name and token limits come from the profile. The `custom` profile additionally exposes
+`model` and `modelTotalTokens` for any OpenAI model not in the list.
 
 ---
 
@@ -132,6 +135,7 @@ Automated node tests are declared in `services.json`:
 | `model` | `string` | **Model**<br/>OpenAI model |  |
 | `modelTotalTokens` | `number` | **Tokens**<br/>Total Tokens |  |
 | `openai.profile` | `string` | **Model**<br/>LLM model | `"openai-5-2"` |
+| `temperature` | `number` | **Temperature**<br/>Sampling temperature for non-reasoning models: 0 is generally more deterministic, higher values increase variety. Ignored for reasoning models (o1, o3, GPT-5 reasoning variants, ...), which OpenAI's Responses API controls separately. | `0` |
 
 ## Dependencies
 
