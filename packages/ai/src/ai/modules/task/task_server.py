@@ -402,7 +402,12 @@ class TASK_CONTROL:
 
         # The run spans from the first engine to start to the last to finish.
         merged.startTime = min((status.startTime for status in statuses if status.startTime), default=0.0)
-        merged.endTime = max((status.endTime or 0.0 for status in statuses), default=0.0)
+        # endTime is only meaningful once every replica has reported one; a
+        # live engine reports endTime == 0.0.
+        if all(status.endTime for status in statuses):
+            merged.endTime = max(status.endTime or 0.0 for status in statuses)
+        else:
+            merged.endTime = 0.0
 
         # Resource usage is the sum across processes (that is what the box
         # actually spends); peaks are the sum of peaks — an upper bound, and
@@ -450,6 +455,9 @@ class TASK_CONTROL:
         Inputs round-robin, so the group has only been idle as long as the
         replica that most recently did something.
         """
+        live_idles = [getattr(task, '_idle_time', 0) or 0 for task in self.tasks if not task.is_task_complete()]
+        if live_idles:
+            return min(live_idles)
         idles = [getattr(task, '_idle_time', 0) or 0 for task in self.tasks]
         return min(idles) if idles else 0
 
@@ -884,14 +892,25 @@ class TaskServer(DAPBase):
         for control in list(self._task_control.values()):
             try:
                 # Detach this connection from every replica — a client that
-                # attached to the token is attached to all of them.
-                for task in control.tasks:
-                    await task.detach_task(conn)
+                # attached to the token is attached to all of them. Concurrently,
+                # so one replica raising cannot skip detaching the rest.
+                detach_results = await asyncio.gather(
+                    *(task.detach_task(conn) for task in control.tasks),
+                    return_exceptions=True,
+                )
+                for result in detach_results:
+                    if isinstance(result, BaseException):
+                        self.debug_message(f'Error detaching a replica of task "{control.id}": {result}')
 
                 # Auto-terminate launched tasks when the launching client disconnects
                 if control.launch_type == LAUNCH_TYPE.LAUNCH and control.launch_owner == conn:
-                    for task in control.tasks:
-                        await task.stop_task()
+                    stop_results = await asyncio.gather(
+                        *(task.stop_task() for task in control.tasks),
+                        return_exceptions=True,
+                    )
+                    for result in stop_results:
+                        if isinstance(result, BaseException):
+                            self.debug_message(f'Error stopping a replica of task "{control.id}": {result}')
                     self.debug_message(f'Auto-terminated launched task "{control.id}" after client disconnect')
 
             except Exception as e:
@@ -1883,13 +1902,16 @@ class TaskServer(DAPBase):
                 # consuming resources and reporting stale metrics.
                 orphans = control.tasks
 
-            for task in orphans:
-                try:
-                    await asyncio.wait_for(task.stop_task(), timeout=30)
-                except asyncio.TimeoutError:
+            # Concurrently — one stubborn orphan should not delay stopping the rest.
+            orphan_results = await asyncio.gather(
+                *(asyncio.wait_for(task.stop_task(), timeout=30) for task in orphans),
+                return_exceptions=True,
+            )
+            for task, result in zip(orphans, orphan_results):
+                if isinstance(result, asyncio.TimeoutError):
                     self.debug_message(f'Warning: timed out stopping orphaned task: {task.id}')
-                except Exception:
-                    self.debug_message(f'Warning: failed to stop orphaned task: {task.id}')
+                elif isinstance(result, BaseException):
+                    self.debug_message(f'Warning: failed to stop orphaned task: {task.id}: {result}')
 
             self._task_control.pop(control.token, None)
             raise
@@ -2037,6 +2059,11 @@ class TaskServer(DAPBase):
             )
             failures = [result for result in results if isinstance(result, BaseException)]
             if failures:
+                # A partial restart leaves the group half old / half new pipeline,
+                # answering the same token two different ways — worse than no
+                # token at all. Tear the whole thing down and raise the first
+                # failure (the others are usually its consequences).
+                await self.remove_task(control.token)
                 raise failures[0]
 
             # The control now describes the pipeline that is running: without this the

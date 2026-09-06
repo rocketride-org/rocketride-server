@@ -866,6 +866,16 @@ export class RocketRideCLI {
 		process.on('SIGTERM', () => signalHandler('SIGTERM'));
 	}
 
+	// parseInt silently truncates '2.5' to 2; require the raw string to be a
+	// whole number before accepting it.
+	private parseIntegerOption(name: string, value: string): number {
+		if (!/^\d+$/.test(value)) {
+			console.error(`Error: ${name} must be an integer`);
+			process.exit(1);
+		}
+		return parseInt(value, 10);
+	}
+
 	private createProgram(): Command {
 		const program = new Command();
 
@@ -897,9 +907,9 @@ export class RocketRideCLI {
 					command: 'start',
 					...options,
 					pipeline: options.pipeline,
-					threads: options.threads !== undefined ? parseInt(options.threads) : undefined,
-					replicas: options.replicas !== undefined ? parseInt(options.replicas) : undefined,
-					torch_threads: options.torchThreads !== undefined ? parseInt(options.torchThreads) : undefined,
+					threads: options.threads !== undefined ? this.parseIntegerOption('--threads', options.threads) : undefined,
+					replicas: options.replicas !== undefined ? this.parseIntegerOption('--replicas', options.replicas) : undefined,
+					torch_threads: options.torchThreads !== undefined ? this.parseIntegerOption('--torch-threads', options.torchThreads) : undefined,
 					pipeline_args: options.args,
 				};
 				this.uri = options.uri;
@@ -947,9 +957,9 @@ export class RocketRideCLI {
 					command: 'upload',
 					...options,
 					files,
-					threads: options.threads !== undefined ? parseInt(options.threads) : undefined,
-					replicas: options.replicas !== undefined ? parseInt(options.replicas) : undefined,
-					torch_threads: options.torchThreads !== undefined ? parseInt(options.torchThreads) : undefined,
+					threads: options.threads !== undefined ? this.parseIntegerOption('--threads', options.threads) : undefined,
+					replicas: options.replicas !== undefined ? this.parseIntegerOption('--replicas', options.replicas) : undefined,
+					torch_threads: options.torchThreads !== undefined ? this.parseIntegerOption('--torch-threads', options.torchThreads) : undefined,
 					max_concurrent: maxConcurrent,
 					pipeline_args: options.args,
 				};

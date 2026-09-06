@@ -193,10 +193,10 @@
 				},
 				"rocketride.pipelineReplicas": {
 					"type": "integer",
-					"default": 1,
-					"minimum": 1,
+					"default": 0,
+					"minimum": 0,
 					"maximum": 32,
-					"description": "Number of engine subprocesses (tasks) to launch behind one token. One task = one model copy = one inference at a time; raise this for concurrent inference throughput."
+					"description": "Number of engine subprocesses (tasks) to launch behind one token. One task = one model copy = one inference at a time; raise this for concurrent inference throughput. 0 = server default (ROCKETRIDE_TASK_REPLICAS, normally 1); each replica is a full model copy."
 				},
 				"rocketride.pipelineTorchThreads": {
 					"type": "integer",

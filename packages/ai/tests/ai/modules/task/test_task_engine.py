@@ -883,6 +883,9 @@ async def test_subprocess_env_injects_nothing_when_threads_are_unset(monkeypatch
     replicas existed: whatever the operator set in the parent environment
     is inherited untouched, and nothing is invented.
     """
+    # The runner's own ambient env must not leak into the assertion below.
+    for var in _THREAD_VARS:
+        monkeypatch.delenv(var, raising=False)
     monkeypatch.setenv('OMP_NUM_THREADS', 'operator-set')
     t = _env_task()
     t._torch_threads = 0
@@ -913,10 +916,14 @@ async def test_subprocess_env_pinning_overrides_an_inherited_value(monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def test_build_task_names_the_replica_in_the_task_file():
+def test_build_task_names_the_replica_in_the_task_file(tmp_path, monkeypatch):
     """Replicas differ only by index in the file; without it a task-file dump
     cannot say which subprocess it belongs to.
     """
+    # Pin sys.executable / makedirs so the function does not touch the real fs.
+    monkeypatch.setattr(sys, 'executable', str(tmp_path / 'bin' / 'engine.exe'))
+    monkeypatch.setattr(os, 'makedirs', lambda p, exist_ok=False: None)
+
     t = _task(pipeline={'source': 'src', 'components': []})
     t.replica_index = 2
 

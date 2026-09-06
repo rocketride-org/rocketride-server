@@ -1152,6 +1152,54 @@ async def test_restart_preserves_replica_identity_and_thread_pinning():
     assert task._torch_threads == 8
 
 
+@pytest.mark.asyncio
+async def test_partial_restart_failure_stops_the_whole_group_and_raises():
+    """
+    A token that answers from two different pipelines is worse than no token.
+
+    If one replica's restart fails, the group is left half on the old
+    pipeline and half on the new one. Rather than leave that half-and-half
+    control behind, every replica is stopped and the control is removed —
+    then the failure is raised.
+    """
+
+    class _Restartable(_FakeTask):
+        def has_attached_debugger(self):
+            return False
+
+        async def restart_task(self, pipeline, project_id, source, provider):
+            if self.replica_index == 1:
+                raise RuntimeError('engine refused to restart')
+
+    ts = _make_server()
+    engines = [
+        _Restartable(id=f'task#{i}', replica_index=i, replica_count=3, _torch_threads=4, torch_threads=4)
+        for i in range(3)
+    ]
+    control = TASK_CONTROL()
+    control.token = 'tk_test'
+    control.id = 'abcd1234.src'
+    control.project_id = 'project-1'
+    control.source = 'src'
+    control.provider = 'webhook'
+    control.public_auth = 'pk_public'
+    control.pipeline = _pipeline()
+    control.task = engines[0]
+    control.replica_tasks = engines[1:]
+    ts._task_control['tk_test'] = control
+    ts.get_task_control = lambda token: control
+
+    request = {'arguments': {'token': 'tk_test', 'pipeline': _pipeline()}}
+
+    with pytest.raises(RuntimeError, match='engine refused to restart'):
+        await TaskServer.restart_task(ts, request, conn=None)
+
+    # Every replica was stopped, including the ones whose restart succeeded.
+    assert all(task.stop_calls for task in engines)
+    # And the half-restarted control never stays in the registry.
+    assert 'tk_test' not in ts._task_control
+
+
 # ---------------------------------------------------------------------------
 # Lifecycle: cleanup
 # ---------------------------------------------------------------------------

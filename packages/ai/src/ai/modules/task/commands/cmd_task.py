@@ -283,11 +283,12 @@ class TaskCommands(DAPConn):
             Exception: If task retrieval fails or status cannot be obtained
         """
         try:
-            # Get the task instance
-            task = self.get_task(request, 'task.monitor')
+            # Get the task control — status is reported for the whole token,
+            # not just the primary replica.
+            control = self.get_task_control(request, 'task.monitor')
 
             # Retrieve current task status
-            status = task.get_status()
+            status = control.get_status()
 
             # Convert status to dictionary format for response
             response = status.model_dump()

@@ -679,7 +679,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 				args: ConfigManager.getInstance().getTaskArgs(),
 				name: pipeName,
 				...(cfg.pipelineTtl !== undefined ? { ttl: cfg.pipelineTtl } : {}),
-				...(cfg.pipelineReplicas > 1 ? { replicas: cfg.pipelineReplicas } : {}),
+				...(cfg.pipelineReplicas > 0 ? { replicas: cfg.pipelineReplicas } : {}),
 				...(cfg.pipelineTorchThreads > 0 ? { torchThreads: cfg.pipelineTorchThreads } : {}),
 				...(cfg.pipelineThreads > 0 ? { threads: cfg.pipelineThreads } : {}),
 			});

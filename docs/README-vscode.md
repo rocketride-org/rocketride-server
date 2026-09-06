@@ -96,7 +96,7 @@ sized; see [Throughput](README-throughput.md) for the full model.
 
 | Setting                                | Type     | Default | Description                                                                                                              |
 | --------------------------------------- | -------- | ------- | ---------------------------------------------------------------------------------------------------------------------- |
-| `rocketride.pipelineReplicas`           | `number` | `1`     | Number of task replicas to launch per pipeline run (1-32). Each replica is a full model copy running its own inference. |
+| `rocketride.pipelineReplicas`           | `number` | `0`     | Number of task replicas to launch per pipeline run (0-32). `0` = server default (`ROCKETRIDE_TASK_REPLICAS`, normally 1). Each replica is a full model copy running its own inference. |
 | `rocketride.pipelineTorchThreads`       | `number` | `0`     | Per-replica BLAS/OMP thread count (`OMP_NUM_THREADS` and friends). `0` = auto (`cores / pipelineReplicas`) when `pipelineReplicas` > 1; when `pipelineReplicas` is 1, no thread limits are injected.             |
 | `rocketride.pipelineThreads`            | `number` | `0`     | Admission width per connection (engine component thread pool), not inference parallelism. `0` = server default (64).   |
 
