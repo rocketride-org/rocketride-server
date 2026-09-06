@@ -301,10 +301,22 @@ class CrewManager(CrewBase):
         else:
             manager_backstory = base_backstory
 
+        # The manager's own `tool` channel (if wired) is intentionally the ONLY
+        # source of tools on manager_agent. CrewAI's hierarchical process always
+        # executes tasks through `_get_agent_to_use()` -> manager_agent, and
+        # resolves `task.tools or agent_to_use.tools`. Step 3 above already
+        # clears `task_obj.tools` per delegate so the manager never inherits a
+        # DELEGATE's tools through that fallback; what lands here instead is
+        # only the manager's own cross-cutting tools (e.g. a dedup/lookup check
+        # the manager should run before finalizing any delegated result), and
+        # those are correctly available on every task the manager executes.
+        manager_tools = self._build_crew_tools(context, context.tools.list)
+
         manager_agent = Agent(
             role=_MGR_ROLE,
             goal=ig.goal or _MGR_GOAL,
             backstory=manager_backstory,
+            tools=manager_tools,
             llm=manager_llm,
             verbose=False,
             allow_delegation=True,

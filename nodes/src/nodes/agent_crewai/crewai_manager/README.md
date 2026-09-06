@@ -19,6 +19,7 @@ Hierarchical [CrewAI](https://docs.crewai.com/) manager node. Fans out to all co
 | Channel  | Required    | Description                               |
 | -------- | ----------- | ----------------------------------------- |
 | `llm`    | yes         | LLM for the manager agent (and planning, when enabled) |
+| `tool`   | no          | Cross-cutting tools available to the manager itself, e.g. a dedup/lookup check it should run before finalizing a delegated result |
 | `crewai` | yes (min 1) | Connected `CrewAI Subagent` nodes (min 1) |
 
 The `crewai` channel accepts only `CrewAI Subagent` nodes. `CrewAI Agent` nodes cannot be used as sub-agents, their `classType` does not include `crewai`. The Manager itself also cannot be nested under another Manager (it lacks `classType: "crewai"`); cross-Manager composition is supported via `tool.run_agent` instead.
@@ -44,7 +45,7 @@ By default only **Instructions** is shown. Toggle **Advanced Mode** to expose th
 
 1. Fans out `describe` to each connected `CrewAI Subagent` node individually
 2. Each `CrewAI Subagent` responds with its role, goal, backstory, task description, expected output, and tools
-3. The manager builds an `Agent + Task` per sub-agent, routing LLM and tool calls back through that sub-agent's own pipeline channels
+3. The manager builds an `Agent + Task` per sub-agent, routing LLM and tool calls back through that sub-agent's own pipeline channels. Each delegate task is built with no tools of its own, so delegation always resolves to that sub-agent's tools, never the manager's — the manager's own `tool` channel (if wired) is separate and available to it on every task it executes, not routed to any sub-agent
 4. Kicks off a hierarchical Crew, running CrewAI's planner with the manager's LLM only when **Crew Planning** is enabled (off by default)
 
 The node raises an error at runtime if no sub-agents are connected or none respond to `describe`.

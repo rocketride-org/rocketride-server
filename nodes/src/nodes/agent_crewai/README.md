@@ -25,7 +25,7 @@ CrewAI 1.14.x planning and delegation are patched at import time (`crewai_base.p
 | Variant | Lanes | `llm` channel | `tool` channel | `crewai` channel |
 |---|---|---|---|---|
 | CrewAI Agent | `questions` -> `answers` | required (min 1) | optional | n/a |
-| CrewAI Manager | `questions` -> `answers` | required (min 1) | n/a | required (min 1 Subagent) |
+| CrewAI Manager | `questions` -> `answers` | required (min 1) | optional | required (min 1 Subagent) |
 | CrewAI Subagent | none | required (min 1) | optional | n/a |
 
 The Agent and Manager are registered as tools too (`classType: ["agent", "tool"]`) and expose themselves as `<nodeId>.run_agent`, so a parent agent can delegate to them in hierarchical pipelines. The `run_agent` tool accepts `{query: string, context?: object}` and returns `{content, meta, stack}`. Tools attach through the `tool` invoke channel (control-plane invoke), not through lanes.
