@@ -21,6 +21,7 @@
 // ! parseArgs() is called first and global variables are set.
 // !
 const path = require('path');
+const fs = require('fs');
 
 const ROOT = path.join(__dirname, '..');
 
@@ -35,6 +36,27 @@ async function handleTermination(signal) {
 		console.log(`Log written to ${currentLogFile}`);
 	}
 	process.exit(130); // Standard exit code for SIGINT
+}
+
+/**
+ * Resolve an --overlay-root argument to a canonical absolute path.
+ *
+ * A symlinked checkout is the common case on macOS (~/rocketride pointing at a
+ * volume), and the two sides of the subdirectory check must spell the directory
+ * the same way or the overlay is rejected. Falls back to the resolved path when
+ * the directory does not exist yet — realpath cannot canonicalize what is not
+ * there, and a not-yet-created overlay root is legitimate.
+ *
+ * @param {string} value - The raw --overlay-root value.
+ * @returns {string} Absolute, symlink-resolved path.
+ */
+function resolveOverlayRoot(value) {
+	const resolved = path.resolve(value);
+	try {
+		return fs.realpathSync(resolved);
+	} catch {
+		return resolved;
+	}
 }
 
 function parseArgs(args) {
@@ -122,7 +144,11 @@ function parseArgs(args) {
 			// client:update); beats ROCKETRIDE_URI from .config/.env.
 			options.shell = arg.substring('--shell='.length);
 		} else if (arg.startsWith('--overlay-root=')) {
-			options.overlayRoot = path.resolve(arg.substring('--overlay-root='.length));
+			// Canonicalized: on a symlinked checkout (~/rocketride -> /Volumes/...)
+			// the sync's destination is realpath'd while this side was not, so the
+			// "is it inside SERVER_DIR" check compared two spellings of the same
+			// directory and failed. resolveOverlayRoot keeps both sides in one form.
+			options.overlayRoot = resolveOverlayRoot(arg.substring('--overlay-root='.length));
 			const paths = require('./lib/paths');
 			paths.BUILD_ROOT = path.join(options.overlayRoot, 'build');
 			paths.DIST_ROOT = path.join(options.overlayRoot, 'dist');
@@ -498,4 +524,10 @@ async function main() {
 	}
 }
 
-main();
+// Exported for the unit tests. Guarded so requiring this file does not run a
+// build: the tests want the argument parsing, not the side effects.
+module.exports = { resolveOverlayRoot };
+
+if (require.main === module) {
+	main();
+}

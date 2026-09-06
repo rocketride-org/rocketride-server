@@ -127,6 +127,14 @@ export default defineConfig(({ command }) => {
 					'/sitemap.xml': env.ROCKETRIDE_URI.replace(/^ws/, 'http'),
 					'/robots.txt': env.ROCKETRIDE_URI.replace(/^ws/, 'http'),
 					'/llms.txt': env.ROCKETRIDE_URI.replace(/^ws/, 'http'),
+					// Backend routes the shell calls on its own origin. Without these the
+					// SPA fallback answers 404 and the boot never finishes: the auth
+					// bootstrap awaits a transport attach that can never happen, and the
+					// shell sits on its loading screen with nothing in the console.
+					// ws:true on /api — the client's socket is upgraded through here.
+					'/auth': { target: env.ROCKETRIDE_URI.replace(/^ws/, 'http') },
+					'/api': { target: env.ROCKETRIDE_URI.replace(/^ws/, 'http'), ws: true },
+					'/marketplace': { target: env.ROCKETRIDE_URI.replace(/^ws/, 'http') },
 				},
 			}),
 		},

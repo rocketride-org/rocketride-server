@@ -162,9 +162,22 @@ class MiscCommands(DAPConn):
             args = request.get('arguments', {})
             service = args.get('service', None)
 
+            # Installed node capsules the caller owns, read live from the store so a
+            # node just installed appears in the palette with no reconnect. Best-effort:
+            # a store failure never blocks the built-in catalog.
+            from ai.account import Store
+            from ai.account.node_install import installed_node_catalog, installed_node_definition
+
             if service:
                 # Retrieve the full cached entry (config schema included)
                 schema = await services_catalog.get_service(service)
+
+                # Fall back to an installed capsule before declaring not-found.
+                if not schema:
+                    try:
+                        schema = await installed_node_definition(Store.file_store(self.request_context()), service)
+                    except Exception as e:
+                        self.debug_message(f'node overlay lookup failed for {service!r}: {e}')
 
                 # Validate the service exists
                 if not schema:
@@ -172,6 +185,20 @@ class MiscCommands(DAPConn):
             else:
                 # The cached summary view: display fields + inline icons
                 schema = await services_catalog.get_summary()
+
+                # Overlay the caller's installed nodes (built-ins win on collision).
+                try:
+                    overlay_services, overlay_icons = await installed_node_catalog(
+                        Store.file_store(self.request_context())
+                    )
+                    if overlay_services:
+                        schema = {
+                            'services': {**overlay_services, **schema.get('services', {})},
+                            'icons': {**schema.get('icons', {}), **overlay_icons},
+                            'version': schema.get('version'),
+                        }
+                except Exception as e:
+                    self.debug_message(f'node overlay failed (built-in catalog stands): {e}')
 
             # Return successful response with service definition(s)
             return self.build_response(request, body=schema)

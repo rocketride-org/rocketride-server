@@ -38,7 +38,7 @@ import { getDocs } from '../docs';
 import { SidebarView } from 'shared/modules/sidebar/SidebarView';
 import { BxExport, useSidebarCollapsed } from 'shell';
 import { foldTaskEvent } from 'shared/modules/sidebar/taskFold';
-import type { ProjectEntry, ActiveTaskState, UnknownTask, ConnectionInfo, SidebarMode } from 'shared/modules/sidebar/types';
+import type { ProjectEntry, ActiveTaskState, UnknownTask, ConnectionInfo, SidebarMode, NodeListItem } from 'shared/modules/sidebar/types';
 import type { TaskLifecycleEvent } from 'shared/modules/sidebar/taskFold';
 import { loadProject, listProjectDir, isPipelineFile, pipelineExtension } from '../utils/projectStore';
 import { downloadJson } from '../utils/downloadFile';
@@ -455,6 +455,83 @@ const SidebarProvider: React.FC = () => {
 		[client]
 	);
 
+	// --- Node Builder (Nodes tab) --------------------------------------------
+
+	const [installedNodes, setInstalledNodes] = useState<NodeListItem[]>([]);
+
+	/** Reload the installed custom-node list from the engine (rrext_node_dev list). */
+	const refreshNodes = useCallback(async () => {
+		if (!client || !isConnected) {
+			setInstalledNodes([]);
+			return;
+		}
+		try {
+			const res: any = await client.call('rrext_node_dev', { subcommand: 'list' });
+			const names: string[] = res?.nodes ?? [];
+			setInstalledNodes(names.map((name) => ({ name, protocol: `${name}://` })));
+		} catch {
+			setInstalledNodes([]);
+		}
+	}, [client, isConnected]);
+
+	useEffect(() => {
+		refreshNodes();
+	}, [refreshNodes]);
+
+	/** Scaffold a new node and install it so it appears in the catalog at once. */
+	const handleNewNode = useCallback(async () => {
+		if (!client) return;
+		const name = window.prompt('New node name (lowercase, e.g. my_filter):')?.trim();
+		if (!name) return;
+		const kind = window.confirm('Source node? (OK = source, Cancel = filter)') ? 'source' : 'filter';
+		try {
+			const scaffolded: any = await client.call('rrext_node_dev', { subcommand: 'scaffold', name, kind });
+			const packed: any = await client.call('rrext_node_dev', { subcommand: 'pack', name, files: scaffolded.files });
+			await client.call('rrext_node_dev', { subcommand: 'install', capsule: packed.capsule });
+			await refreshNodes();
+		} catch (err) {
+			setActionError(`Could not create node: ${err instanceof Error ? err.message : err}`);
+		}
+	}, [client, refreshNodes]);
+
+	/** Pick a .rrc capsule and install it. */
+	const handleImportCapsule = useCallback(() => {
+		if (!client) return;
+		const input = document.createElement('input');
+		input.type = 'file';
+		input.accept = '.rrc';
+		input.onchange = async () => {
+			const file = input.files?.[0];
+			if (!file) return;
+			try {
+				const bytes = new Uint8Array(await file.arrayBuffer());
+				let binary = '';
+				for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]!);
+				await client.call('rrext_node_dev', { subcommand: 'install', capsule: btoa(binary) });
+				await refreshNodes();
+			} catch (err) {
+				setActionError(`Could not import capsule: ${err instanceof Error ? err.message : err}`);
+			}
+		};
+		input.click();
+	}, [client, refreshNodes]);
+
+	/** Uninstall a custom node after confirmation. */
+	const handleUninstallNode = useCallback(
+		async (name: string) => {
+			if (!client) return;
+			const ok = await showConfirm('Uninstall node', `Remove custom node "${name}"?`, 'Uninstall');
+			if (!ok) return;
+			try {
+				await client.call('rrext_node_dev', { subcommand: 'uninstall', name });
+				await refreshNodes();
+			} catch (err) {
+				setActionError(`Could not uninstall node: ${err instanceof Error ? err.message : err}`);
+			}
+		},
+		[client, refreshNodes, showConfirm]
+	);
+
 	// --- Render ----------------------------------------------------------------
 
 	// Mode tab selection (Pipelines | Nodes on this host — no app builder).
@@ -471,7 +548,7 @@ const SidebarProvider: React.FC = () => {
 	return (
 		<>
 			<SidebarCollapsedGate>
-				<SidebarView connection={connection} entries={entries} activeTasks={activeTasks} unknownTasks={unknownTasks} activeFilePath={activeFilePath} onNavigate={handleNavigate} onOpenFile={handleOpenFile} onFileManage={handleFileManage} fileActions={[{ id: 'export', label: 'Export', icon: <BxExport size={16} />, onSelect: handleExportPipeline }]} onSourceAction={handleSourceAction} onOpenUnknownTask={handleOpenUnknownTask} onRefresh={refresh} showModeStrip sidebarMode={sidebarMode} onSidebarModeChange={setSidebarMode} />
+				<SidebarView connection={connection} entries={entries} activeTasks={activeTasks} unknownTasks={unknownTasks} activeFilePath={activeFilePath} onNavigate={handleNavigate} onOpenFile={handleOpenFile} onFileManage={handleFileManage} fileActions={[{ id: 'export', label: 'Export', icon: <BxExport size={16} />, onSelect: handleExportPipeline }]} onSourceAction={handleSourceAction} onOpenUnknownTask={handleOpenUnknownTask} onRefresh={refresh} nodeBuilder={{ nodes: installedNodes, onNewNode: handleNewNode, onImportCapsule: handleImportCapsule, onUninstall: handleUninstallNode }} showModeStrip sidebarMode={sidebarMode} onSidebarModeChange={setSidebarMode} />
 			</SidebarCollapsedGate>
 			{confirmState && <ConfirmDialog title={confirmState.title} message={confirmState.message} confirmLabel={confirmState.confirmLabel} cancelLabel="Cancel" onConfirm={() => handleConfirmResult(true)} onCancel={() => handleConfirmResult(false)} />}
 			{actionError && <ConfirmDialog title="Pipeline Error" message={actionError} confirmLabel="OK" onConfirm={() => setActionError(null)} onCancel={() => setActionError(null)} />}

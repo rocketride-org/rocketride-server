@@ -321,6 +321,10 @@ class Task(DAPBase):
         # Guard against _terminated() being called more than once
         self._terminated_called = False
 
+        # Per-run dir where installed node capsules are materialized from the
+        # store for the task subprocess to load via --node_path (removed on stop).
+        self._node_path_dir = None
+
         # Server reference
         self._server = server
 
@@ -2124,13 +2128,20 @@ class Task(DAPBase):
                         child_args.append(arg)
                         break
 
-            # Inherit parent engine's --node_path so workspace-local nodes load
-            # in the task subprocess too (Opt reads argv only, not the env).
+            # Load the caller's installed node capsules: materialize them from the
+            # store into a per-run dir and point --node_path there, so installed
+            # nodes load with no manual flag (docker/SaaS). When nothing is
+            # installed this returns None and we fall back to inheriting the parent
+            # engine's --node_path (the VSCode-workspace path) exactly as before.
             if not any(a.startswith('--node_path=') for a in child_args):
-                for arg in startup_args():
-                    if arg.startswith('--node_path='):
-                        child_args.append(arg)
-                        break
+                materialized = await self._materialize_installed_nodes()
+                if materialized:
+                    child_args.append(f'--node_path={materialized}')
+                else:
+                    for arg in startup_args():
+                        if arg.startswith('--node_path='):
+                            child_args.append(arg)
+                            break
 
             await self._send_status_update()
 
@@ -2296,6 +2307,68 @@ class Task(DAPBase):
             self.debug_message(f'Task startup failed: {e}')
             raise
 
+    async def _materialize_installed_nodes(self):
+        """Copy the caller's installed node capsules from the store into a per-run
+        dir and return it (to pass as ``--node_path``), or None when none are
+        installed. Any parent ``--node_path`` local_nodes are merged in first, and
+        installed capsules win on a name collision — so the workspace fallback
+        survives alongside installed capsules. Best-effort: failures return None.
+        """
+        from ai.account import RequestContext, Store
+
+        names = []
+        fs = None
+        try:
+            fs = Store.file_store(RequestContext.internal('node-materialize'), client_id=self.client_id)
+            listing = await fs.list_dir('local_nodes')
+            names = [e['name'] for e in listing.get('entries', []) if e.get('type') == 'dir']
+        except Exception as e:
+            self.debug_message(f'no installed node capsules to materialize: {e}')
+        if not names:
+            return None  # nothing installed → caller forwards the parent --node_path unchanged
+
+        node_dir = tempfile.mkdtemp(prefix='rr-nodes-')
+        self._node_path_dir = node_dir
+        dst_root = os.path.join(node_dir, 'local_nodes')
+        os.makedirs(dst_root, exist_ok=True)
+        open(os.path.join(dst_root, '__init__.py'), 'w', encoding='utf-8').close()
+
+        # Merge the parent --node_path workspace nodes first; store capsules win.
+        for arg in startup_args():
+            if arg.startswith('--node_path='):
+                parent_local = os.path.join(arg[len('--node_path=') :], 'local_nodes')
+                if os.path.isdir(parent_local):
+                    for entry in os.listdir(parent_local):
+                        src = os.path.join(parent_local, entry)
+                        if entry != '__pycache__' and os.path.isdir(src):
+                            shutil.copytree(src, os.path.join(dst_root, entry), dirs_exist_ok=True)
+                break
+
+        for name in names:
+            await self._copy_store_tree(fs, f'local_nodes/{name}', os.path.join(dst_root, name))
+        self.debug_message(f'materialized {len(names)} installed node(s) at {node_dir}')
+        return node_dir
+
+    async def _copy_store_tree(self, fs, store_path: str, dst: str) -> None:
+        """Recursively copy a store subtree to a local dir (utf-8-safe bytes)."""
+        os.makedirs(dst, exist_ok=True)
+        listing = await fs.list_dir(store_path)
+        for e in listing.get('entries', []):
+            src = f'{store_path}/{e["name"]}'
+            target = os.path.join(dst, e['name'])
+            if e.get('type') == 'dir':
+                await self._copy_store_tree(fs, src, target)
+            else:
+                with open(target, 'wb') as fh:
+                    fh.write(await fs.read(src))
+
+    def _cleanup_materialized_nodes(self) -> None:
+        """Remove the per-run materialized local_nodes dir, if one was created."""
+        node_dir = self._node_path_dir
+        self._node_path_dir = None
+        if node_dir:
+            shutil.rmtree(node_dir, ignore_errors=True)
+
     async def stop_task(self, reason: str = 'user') -> None:
         """
         Initiate graceful task termination with resource cleanup.
@@ -2350,3 +2423,6 @@ class Task(DAPBase):
 
         except Exception as e:
             self.debug_message(f'Unexpected error during task termination: {e}')
+        finally:
+            # Remove the per-run materialized node dir regardless of how we stopped.
+            self._cleanup_materialized_nodes()
