@@ -124,6 +124,13 @@ class CProfileCommands(DAPConn):
         # the TASK'S team. Without this, any defaultTeam task.control holder
         # could drive the profiler inside another team's engine subprocess.
         control = self._server.get_task_control(target, self._account_info, require='task.control')
+
+        # The PRIMARY replica, deliberately — not the data round-robin. A
+        # profile is a start/stop pair against one process; round-robining
+        # would start it in one subprocess and stop it in another, and the
+        # session state cProfileCommands tracks per owner assumes one target.
+        # Profiling a specific replica is not reachable today; the primary is
+        # the representative process.
         task = control.task
 
         # Wait for the task to reach running state

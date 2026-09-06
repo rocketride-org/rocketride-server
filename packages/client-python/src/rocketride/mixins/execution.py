@@ -98,6 +98,8 @@ class ExecutionMixin(DAPClient):
         pipeline: Optional[PipelineConfig] = None,
         source: str = None,
         threads: int = None,
+        replicas: int = None,
+        torch_threads: int = None,
         use_existing: bool = None,
         args: List[str] = None,
         ttl: int = None,
@@ -131,7 +133,12 @@ class ExecutionMixin(DAPClient):
             filepath: Path to a ``.pipe`` or JSON/JSON5 pipeline configuration file
             pipeline: Flat PipelineConfig dict (components, source, project_id at top level)
             source: Override the source specified in the pipeline config
-            threads: Number of processing threads to use (default: server decides)
+            threads: Admission width per connection (server default 64). Does not
+                parallelize inference; a task runs one inference at a time
+            replicas: Engine subprocesses (each a full model copy) behind this one
+                token, 1..32 (server default 1). Inputs round-robin across them
+            torch_threads: BLAS/OMP threads per replica. Unset: ``cores // replicas``
+                when replicas > 1, nothing injected at 1. See docs/README-throughput.md
             use_existing: Whether to reuse existing pipeline with same token
             args: Command-line style arguments to pass to the pipeline
             ttl: Time-to-live in seconds for idle pipelines (optional, server default
@@ -143,6 +150,7 @@ class ExecutionMixin(DAPClient):
         Returns:
             Dict containing:
             - token: Task token for sending data and monitoring (str)
+            - replicas: Engine subprocesses actually running behind the token (int)
             - Additional pipeline startup information
 
         Raises:
@@ -162,7 +170,8 @@ class ExecutionMixin(DAPClient):
             # Start with custom parameters
             result = await client.use(
                 filepath='data_processor.pipe',
-                threads=8,                    # Use 8 processing threads
+                threads=8,                    # Admission width (not inference parallelism)
+                replicas=4,                   # 4 engine subprocesses for concurrent inference
                 args=['--verbose'],           # Enable verbose logging
                 source='custom_input'         # Override input source
             )
@@ -197,7 +206,8 @@ class ExecutionMixin(DAPClient):
 
         Tips:
             - JSON5 files support comments and trailing commas for easier editing
-            - Use threads parameter for CPU-intensive operations
+            - Use replicas for concurrent inference throughput; threads only widens
+              admission, it does not parallelize inference
             - Custom args are passed to pipeline steps that support them
             - The returned token is needed for all data operations with this pipeline
         """
@@ -249,6 +259,10 @@ class ExecutionMixin(DAPClient):
             arguments['token'] = token
         if threads is not None:
             arguments['threads'] = threads
+        if replicas is not None:
+            arguments['replicas'] = replicas
+        if torch_threads is not None:
+            arguments['torchThreads'] = torch_threads
         if use_existing is not None:
             arguments['useExisting'] = use_existing
         if pipelineTraceLevel is not None:

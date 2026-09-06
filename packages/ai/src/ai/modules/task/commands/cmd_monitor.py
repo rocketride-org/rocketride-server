@@ -319,7 +319,10 @@ class MonitorCommands(DAPConn):
                     await self.send_event(
                         event='apaevt_status_update',
                         id=control.id,
-                        body=control.task.get_status().model_dump(),
+                        # The CONTROL's status: a replicated token's counters
+                        # are spread one per engine, so the primary alone
+                        # reports a fraction of the work.
+                        body=control.get_status().model_dump(),
                     )
                 elif project_id is not None and source is not None:
                     # Task is not running: send empty state so client shows "not running"
@@ -347,8 +350,8 @@ class MonitorCommands(DAPConn):
                     if not resolve_task_permissions(self._account_info, target.teamId):
                         continue
 
-                    # Get the task status once
-                    status = target.task.get_status()
+                    # Get the task status once — folded across replicas.
+                    status = target.get_status()
 
                     # Only include tasks that are "active" (not idle, not completed)
                     # Active states: STARTING(1), INITIALIZING(2), RUNNING(3), STOPPING(4)

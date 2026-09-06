@@ -431,7 +431,9 @@ Start a RocketRide pipeline for processing data. Automatically performs environm
 - `filepath?: string` - Path to a `.pipe` or JSON file containing pipeline configuration (Node.js only).
 - `token?: string` - Custom token for the pipeline (auto-generated if not provided)
 - `source?: string` - Override pipeline source
-- `threads?: number` - Number of threads for execution (default: 1)
+- `threads?: number` - Admission width per connection -- the engine's component thread pool / data-admission semaphore size (default: 64, server decides). This is not inference parallelism; a single task still runs one inference at a time. Use `replicas` to run more inferences concurrently.
+- `replicas?: number` - Number of task replicas (engine subprocesses) to launch behind one token for this pipeline (default: 1, max 32). Inputs are round-robined across replicas; each replica is a full model copy. See [README-throughput.md](../README-throughput.md).
+- `torchThreads?: number` - Per-replica BLAS/OMP thread count. When unset and `replicas > 1`, the server defaults to `cores / replicas`; when unset and `replicas === 1`, nothing is injected.
 - `useExisting?: boolean` - Use existing pipeline instance
 - `args?: string[]` - Command line arguments to pass to pipeline
 - `ttl?: number` - Time-to-live in seconds for idle pipelines (optional, server default if not provided; use 0 for no timeout)

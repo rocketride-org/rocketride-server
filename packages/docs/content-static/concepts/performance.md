@@ -10,13 +10,23 @@ decisions about node selection, chunk sizes, and deployment topology.
 
 ## Multithreaded C++ core
 
-The engine is written in C++ and runs each pipeline run on its own thread pool.
-Concurrent requests to the same pipeline do not queue behind each other —
-the engine spawns an independent execution context for each incoming task.
+The engine is written in C++ and runs each pipeline run (task) on its own
+thread pool. Concurrent requests against *different* tasks do not queue
+behind each other — the engine spawns an independent execution context for
+each running task, and a slow request on one task does not block a fast
+request on another.
 
-This means a slow request (a large document going through OCR, embedding, and
-an LLM call) does not block a fast one (a short question answered directly by
-the LLM).
+Within a single task, though, each model instance is guarded by a lock, so
+concurrent requests **do** queue: one task runs one inference at a time,
+regardless of how many requests hit it concurrently. Raising `threads`
+(admission width) does not change this — it only affects how many requests
+can be in flight and how much non-inference work the engine can do at once,
+not how many inferences run in parallel.
+
+To run more than one inference concurrently, request multiple task
+`replicas` behind the same token — each replica is a full, independent
+model copy, so replicas do not share the lock. See the repository's
+`docs/README-throughput.md` for the full model, including `torchThreads`.
 
 ## Streaming execution
 

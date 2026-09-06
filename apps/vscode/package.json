@@ -191,6 +191,19 @@
 					"default": "",
 					"description": "Additional command-line arguments passed to each pipeline task."
 				},
+				"rocketride.pipelineReplicas": {
+					"type": "integer",
+					"default": 0,
+					"minimum": 0,
+					"maximum": 32,
+					"description": "Number of engine subprocesses (tasks) to launch behind one token. One task = one model copy = one inference at a time; raise this for concurrent inference throughput. 0 = server default (ROCKETRIDE_TASK_REPLICAS, normally 1); each replica is a full model copy."
+				},
+				"rocketride.pipelineTorchThreads": {
+					"type": "integer",
+					"default": 0,
+					"minimum": 0,
+					"description": "Per-replica BLAS/OMP thread count. 0 = auto: cores / pipelineReplicas, but only when pipelineReplicas is greater than 1; otherwise no thread limits are set."
+				},
 				"rocketride.pipelineDebugOutput": {
 					"type": "boolean",
 					"default": false,

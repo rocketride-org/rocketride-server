@@ -131,6 +131,16 @@ Pipelines are directed acyclic graphs (DAGs) of components connected by typed da
 
 Each `.pipe` file contains a single pipeline (`{ components, project_id, viewport, version }`). To build multi-pipeline workflows (e.g., an ingestion pipeline + a query pipeline sharing the same vector DB collection), create separate `.pipe` files and use the same collection name in the vector DB config to share data between them.
 
+### Task Identity and Concurrency
+
+On the server, a running pipeline's task identity is the triple
+`{owner, project_id, source}`. Two `use()` calls that share this triple
+resolve to the same running task. A task is one engine subprocess with one
+model copy behind one lock, so it runs one inference at a time. Passing
+`replicas: N` to `use()` launches N such subprocesses behind one token,
+round-robins inputs across them, and broadcasts events from all of them on
+that token. See [README-throughput.md](../README-throughput.md).
+
 ---
 
 ## Data Lanes

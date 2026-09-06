@@ -283,11 +283,12 @@ class TaskCommands(DAPConn):
             Exception: If task retrieval fails or status cannot be obtained
         """
         try:
-            # Get the task instance
-            task = self.get_task(request, 'task.monitor')
+            # Get the task control — status is reported for the whole token,
+            # not just the primary replica.
+            control = self.get_task_control(request, 'task.monitor')
 
             # Retrieve current task status
-            status = task.get_status()
+            status = control.get_status()
 
             # Convert status to dictionary format for response
             response = status.model_dump()
@@ -415,8 +416,10 @@ class TaskCommands(DAPConn):
                 if not resolve_task_permissions(self._account_info, control.teamId):
                     continue
 
-                # Get current status for name and status string
-                status = control.task.get_status()
+                # Get current status for name and status string. The CONTROL's
+                # status, not the primary's — a replicated token's counters
+                # live one per engine.
+                status = control.get_status()
 
                 # Read name and description from the flat project
                 project = control.pipeline or {}

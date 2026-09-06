@@ -18,7 +18,9 @@ Classes:
     Task: Main pipeline task execution and lifecycle management
 
 Constants:
-    CONST_DEFAULT_MAX_THREADS: Default thread pool size (4)
+    CONST_DEFAULT_MAX_THREADS: Default engine component pool / data-admission
+        width (64). This is admission width, NOT inference parallelism — one
+        task holds one model copy behind one lock. See `replicas`.
     CONST_CANCEL_WAIT_TIMEOUT_SECONDS: Graceful termination timeout (5s)
     CONST_STATUS_UPDATE_FREQ: Status update frequency (100ms)
     CONST_MAX_READY_TIME: Maximum time to wait for task readiness (30s)
@@ -44,6 +46,7 @@ from tenacity import retry, stop_after_attempt, wait_fixed
 from rocketlib import debug, args as startup_args
 from ai.constants import (
     CONST_DEFAULT_MAX_THREADS,
+    CONST_TORCH_THREAD_ENV_VARS,
     CONST_CANCEL_WAIT_TIMEOUT_SECONDS,
     CONST_STATUS_UPDATE_FREQ,
     CONST_MAX_READY_TIME,
@@ -67,7 +70,7 @@ from rocketride import (
 from .dbg_debugpy import DbgDebugpy
 from .dbg_stdio import DbgStdio
 from .pipeline import resolve_pipeline_env
-from .types import LAUNCH_TYPE, TaskError
+from .types import LAUNCH_TYPE, TaskError, encode_pipe_id
 from .task_conn import TaskConn
 from .task_metrics import TaskMetrics
 
@@ -278,6 +281,9 @@ class Task(DAPBase):
         env: Dict[str, str] = None,
         run_kind: str = 'dev',
         trigger: str = 'manual',
+        replica_index: int = 0,
+        replica_count: int = 1,
+        torch_threads: int = 0,
         **kwargs,
     ) -> None:
         """
@@ -299,6 +305,15 @@ class Task(DAPBase):
                 '' is the interactive-dev spelling (only the trusted
                 dispatch stamps manual/schedule); stamped on the
                 run-begin marker
+            replica_index: This task's position (0..N-1) among the replicas
+                sharing one token. 0 is the PRIMARY — it owns the run-log
+                continuum, the debugger and the status the control reports.
+            replica_count: How many replicas share the token. 1 (the default)
+                turns pipe-id qualification off entirely, so an unreplicated
+                task speaks exactly the pre-replica wire protocol.
+            torch_threads: Per-replica BLAS/OMP thread count. >0 injects the
+                six thread env vars into the subprocess; 0 injects nothing
+                (today's behavior for a single, unreplicated task).
             **kwargs: Additional DAP configuration (forwarded to DAPBase)
         """
         # Store authentication
@@ -310,6 +325,19 @@ class Task(DAPBase):
         self.client_id = client_id
         self.team_id = team_id
         self.org_id = org_id
+
+        # Position among the replicas sharing this token (0 = primary).
+        # Rides every forwarded event body and the task file's config so a
+        # client watching one token can tell which engine spoke.
+        self.replica_index = replica_index
+
+        # How many engines share the token. Only used to decide whether pipe
+        # ids need replica qualification at all — 1 means "speak the
+        # pre-replica protocol exactly".
+        self.replica_count = replica_count or 1
+
+        # Per-replica BLAS/OMP thread pinning (0 = inject nothing).
+        self._torch_threads = torch_threads or 0
 
         # TTL management - count-up timer approach
         self._ttl = ttl  # Maximum idle time in seconds
@@ -484,8 +512,20 @@ class Task(DAPBase):
         that actually contain one of the DB nodes. Identity is NOT delivered
         through the environment (it rides the task file's 'identity' block —
         the ROCKETRIDE_* env namespace is caller-influenced by design).
+
+        Thread pinning: when the task carries a resolved ``torch_threads``,
+        all six BLAS/OMP variables are set together (see
+        CONST_TORCH_THREAD_ENV_VARS). Setting fewer would let an unpinned
+        stack still spawn cpu_count threads inside every replica.
         """
         subprocess_env = os.environ.copy()
+
+        # Per-replica BLAS/OMP thread pinning. Only when resolved (>0): an
+        # unreplicated task injects nothing and inherits whatever the
+        # operator configured, exactly as before replicas existed.
+        if self._torch_threads > 0:
+            for var in CONST_TORCH_THREAD_ENV_VARS:
+                subprocess_env[var] = str(self._torch_threads)
 
         subprocess_env.pop('ROCKETRIDE_DB_BROKER_URL', None)
         subprocess_env.pop('ROCKETRIDE_DB_BROKER_TOKEN', None)
@@ -581,6 +621,11 @@ class Task(DAPBase):
             },
             'threadCount': self._threads,
             'pipelineTraceLevel': self._pipelineTraceLevel or None,
+            # Which replica of the token this subprocess is. Replicas share
+            # the token, the pipeline and the launch args and differ only
+            # here, so the engine (and anything reading the task file when
+            # diagnosing a run) can name the process it is looking at.
+            'replica': self.replica_index,
         }
 
         return {
@@ -1112,6 +1157,59 @@ class Task(DAPBase):
 
         self.debug_message('Resource cleanup completed successfully')
 
+    async def _open_run_log(self) -> None:
+        """
+        Open this run's log continuum. Best-effort: any failure leaves the
+        task running unlogged rather than failing the launch.
+
+        Only the PRIMARY replica calls this — see the caller in start_task
+        for why a shared stream must have exactly one writer.
+        """
+        try:
+            # The account-scoped FileStore handles user path scoping (and
+            # REFUSES an empty client_id — such a task runs unlogged and
+            # says so, rather than writing into a collapsed users/ path).
+            # Internal identity: the run-log writer is the ONLY legal
+            # writer of .logs content (the store's policy denies every
+            # user identity — internal-only entry).
+            from ai.account import RequestContext, Store
+
+            # The store view anchors at the run's OWNER namespace: the
+            # TEAM for deploy runs (which carry no user identity — every
+            # path they write is '@/Team/=<id>/'-prefixed anyway), the
+            # user for dev runs. An internal-context store REQUIRES a
+            # concrete anchor — an empty one raises, and the except below
+            # would silently disable the run log for the whole run.
+            self._run_log = RunLogWriter(
+                Store.file_store(
+                    RequestContext.internal('run-log'),
+                    client_id=self.team_id if self._run_kind == 'deploy' else self.client_id,
+                ),
+                self.client_id,
+                self.project_id,
+                self.source,
+                self._run_kind,
+                self.stamp_log_event,
+                self.raise_log_seq_floor,
+                # Deploy runs write the TEAM continuum (teams are the
+                # environments — teammates watch/replay the same stream);
+                # dev runs stay in the owner's tree. The writer's scope
+                # helper turns this into the '@/Team/=<id>/' store prefix.
+                team_id=self.team_id if self._run_kind == 'deploy' else '',
+                debug=self.debug_message,
+            )
+            await self._run_log.open(
+                trigger=self._run_trigger,
+                user=self.client_id,
+                pipeline_hash=hashlib.sha256(
+                    json.dumps(self._pipeline, sort_keys=True, default=str).encode('utf-8')
+                ).hexdigest()[:16],
+                trace_level=self._pipelineTraceLevel,
+            )
+        except Exception as e:
+            self._run_log = None
+            self.debug_message(f'Run-log setup failed (task continues unlogged): {e}')
+
     def _on_metrics_updated(self) -> None:
         """
         Handle metrics update notification from TaskMetrics.
@@ -1305,6 +1403,14 @@ class Task(DAPBase):
             body['runKind'] = self._run_kind
             body['teamId'] = self.team_id
             body['userId'] = self.client_id
+        # Replica stamp: every replica of a token broadcasts under that ONE
+        # token, so without this a client watching a replicated pipeline sees
+        # N interleaved event streams it cannot tell apart. Present ONLY when
+        # actually replicated — a plain single-engine run must not grow a
+        # "replica": 0 field it never had before replicas existed. Idempotent
+        # like the stamps above.
+        if self.replica_count > 1 and isinstance(body, dict) and 'replica' not in body:
+            body['replica'] = self.replica_index
 
         # Append to the run-log continuum: what clients see is what replay
         # reproduces (the writer filters/samples/caps internally; never
@@ -1447,6 +1553,60 @@ class Task(DAPBase):
             # Merge/update the info dictionary with new data
             self.info.update(info_data)
 
+    def encode_pipe_id(self, local_id: Any) -> Any:
+        """
+        Qualify an engine-local pipe id for the wire.
+
+        A no-op for an unreplicated task (and for anything that is not an
+        int), so the single-engine protocol is untouched. See the codec
+        comment in ``types.py`` for why the qualification exists.
+
+        Args:
+            local_id: The pipe id as this engine subprocess knows it.
+
+        Returns:
+            The id to put on the wire.
+        """
+        if self.replica_count <= 1 or not isinstance(local_id, int):
+            return local_id
+        return encode_pipe_id(local_id, self.replica_index)
+
+    def _qualify_event_pipe_ids(self, message: Dict[str, Any]) -> None:
+        """
+        Rewrite engine-local pipe ids in an inbound event to wire ids.
+
+        Done at INGRESS, before anything consumes the event, so the pipe id
+        is qualified everywhere at once: the status body's ``pipeflow.byPipe``
+        keys, the derived ``apaevt_flow``, the run analytics, the run-log
+        continuum and the client broadcast all agree, and a client that
+        narrows an SSE subscription by the id it got from ``open`` matches
+        the id the SSE event carries.
+
+        Two fields carry a real pipe id (``apaevt_trace.body.pipe_id`` does
+        NOT — despite the name it holds the component id):
+
+        - ``apaevt_sse.body.pipe_id`` — the pipe the node is streaming for
+        - ``apaevt_trace.body.id`` — the pipe index of the traced document,
+          which becomes ``apaevt_flow.body.id``
+
+        No-op for an unreplicated task.
+
+        Args:
+            message: The inbound event, mutated in place.
+        """
+        if self.replica_count <= 1:
+            return
+
+        event_type = message.get('event', '')
+        body = message.get('body')
+        if not isinstance(body, dict):
+            return
+
+        if event_type == 'apaevt_sse' and 'pipe_id' in body:
+            body['pipe_id'] = self.encode_pipe_id(body['pipe_id'])
+        elif event_type == 'apaevt_trace' and 'id' in body:
+            body['id'] = self.encode_pipe_id(body['id'])
+
     async def on_event(self, message: Dict[str, Any]) -> None:
         """
         Process incoming events from subprocess.
@@ -1462,6 +1622,11 @@ class Task(DAPBase):
 
         # Add task token for correlation
         message['__id'] = self.id
+
+        # Replica-qualify pipe ids before ANY consumer sees them, so every
+        # derived artifact (status, flow, analytics, run log, broadcast)
+        # carries the same id the client received from `open`.
+        self._qualify_event_pipe_ids(message)
 
         # Extract event details
         event_type = message.get('event', '')
@@ -2173,50 +2338,20 @@ class Task(DAPBase):
             # Open the run-log continuum for this run. Logging is best-effort
             # observability: any failure here is logged and the task runs
             # unlogged rather than failing execution.
-            try:
-                # The account-scoped FileStore handles user path scoping (and
-                # REFUSES an empty client_id — such a task runs unlogged and
-                # says so, rather than writing into a collapsed users/ path).
-                # Internal identity: the run-log writer is the ONLY legal
-                # writer of .logs content (the store's policy denies every
-                # user identity — internal-only entry).
-                from ai.account import RequestContext, Store
-
-                # The store view anchors at the run's OWNER namespace: the
-                # TEAM for deploy runs (which carry no user identity — every
-                # path they write is '@/Team/=<id>/'-prefixed anyway), the
-                # user for dev runs. An internal-context store REQUIRES a
-                # concrete anchor — an empty one raises, and the except below
-                # would silently disable the run log for the whole run.
-                self._run_log = RunLogWriter(
-                    Store.file_store(
-                        RequestContext.internal('run-log'),
-                        client_id=self.team_id if self._run_kind == 'deploy' else self.client_id,
-                    ),
-                    self.client_id,
-                    self.project_id,
-                    self.source,
-                    self._run_kind,
-                    self.stamp_log_event,
-                    self.raise_log_seq_floor,
-                    # Deploy runs write the TEAM continuum (teams are the
-                    # environments — teammates watch/replay the same stream);
-                    # dev runs stay in the owner's tree. The writer's scope
-                    # helper turns this into the '@/Team/=<id>/' store prefix.
-                    team_id=self.team_id if self._run_kind == 'deploy' else '',
-                    debug=self.debug_message,
-                )
-                await self._run_log.open(
-                    trigger=self._run_trigger,
-                    user=self.client_id,
-                    pipeline_hash=hashlib.sha256(
-                        json.dumps(self._pipeline, sort_keys=True, default=str).encode('utf-8')
-                    ).hexdigest()[:16],
-                    trace_level=self._pipelineTraceLevel,
-                )
-            except Exception as e:
+            #
+            # ONLY THE PRIMARY REPLICA WRITES. A run-log stream is identified
+            # by projectId.source.runKind — which every replica of a token
+            # shares — so N writers would open the SAME control file and the
+            # SAME spool segments, interleaving seq counters and racing each
+            # other's seals. Replicas > 0 therefore run unlogged; their events
+            # still reach clients (they broadcast under the shared token and
+            # carry a `replica` stamp), and the recorded continuum stays a
+            # single well-formed stream.
+            if self.replica_index != 0:
                 self._run_log = None
-                self.debug_message(f'Run-log setup failed (task continues unlogged): {e}')
+                self.debug_message(f'Replica {self.replica_index} runs unlogged (the primary owns the continuum)')
+            else:
+                await self._open_run_log()
 
             # Initialize metrics tracking (uses default sample_interval from constants)
             try:

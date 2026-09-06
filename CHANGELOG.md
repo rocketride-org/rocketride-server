@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
      release that does not exist. -->
 
 ### Added
+- **ai**: `replicas` + `torchThreads` on `use()`/`execute` — run N task replicas behind one token for concurrent inference, with per-replica BLAS/OMP thread control; `ROCKETRIDE_TASK_REPLICAS` / `ROCKETRIDE_TORCH_THREADS` set server-wide defaults and replace the unused Helm `WORKER_THREADS` (#2128)
 - **ai**: every subprocess exposes /task/data via a shared web server (#912)
 - **analytics**: shared, transport-agnostic telemetry core (loose report + app) (#1523)
 - **anonymize**: configurable entity types + token redaction style (#1447)
@@ -118,6 +119,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - bind engine to explicit 127.0.0.1 instead of the ambiguous localhost name (#1649)
 
 ### Changed
+- **client-typescript**: the CLI no longer forces `threads=4` on `start`/`upload`; the server default applies unless `--threads` is given (#2128)
 - **nodes**: rename vector stores to store_* and graph-first db to graph_* (#1636)
 - **nodes**: unify vector stores on a shared StoreBase (#1663)
 

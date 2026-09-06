@@ -335,8 +335,14 @@ async def test_on_rrext_dashboard_filters_to_caller_user_id(monkeypatch):
         owner_id='user-1',
         provider='node-x',
         task=own_task,
+        tasks=[own_task],
+        # Rows read the CONTROL's folded status / idle time / replica count.
+        get_status=lambda: own_status,
+        idle_time=0,
+        replicas=1,
         launch_type=SimpleNamespace(value='LAUNCH'),
     )
+    other_task = MagicMock()
     other_control = SimpleNamespace(
         id='task-2',
         userId='other-user',
@@ -347,7 +353,11 @@ async def test_on_rrext_dashboard_filters_to_caller_user_id(monkeypatch):
         run_kind='dev',
         owner_id='other-user',
         provider='node-y',
-        task=MagicMock(),
+        task=other_task,
+        tasks=[other_task],
+        get_status=other_task.get_status,
+        idle_time=0,
+        replicas=1,
         launch_type=SimpleNamespace(value='EXECUTE'),
     )
 
@@ -384,6 +394,27 @@ async def test_on_rrext_dashboard_tk_auth_locks_to_owning_task(monkeypatch):
 
     def _make_control(token):
         """Build a minimal task control with the matching token."""
+
+        def _status():
+            return SimpleNamespace(
+                name='task.s',
+                startTime=900.0,
+                endTime=0,
+                completed=False,
+                state=3,
+                totalCount=0,
+                completedCount=0,
+                rateCount=0,
+                rateSize=0,
+                metrics=None,
+            )
+
+        task = SimpleNamespace(
+            get_status=_status,
+            get_connection_count=lambda: 0,
+            _idle_time=0,
+            _ttl=600,
+        )
         return SimpleNamespace(
             id=token,
             userId='user-1',
@@ -395,23 +426,12 @@ async def test_on_rrext_dashboard_tk_auth_locks_to_owning_task(monkeypatch):
             # Real controls always expose owner_id (dev run -> the user).
             owner_id='user-1',
             provider='node-x',
-            task=SimpleNamespace(
-                get_status=lambda: SimpleNamespace(
-                    name='task.s',
-                    startTime=900.0,
-                    endTime=0,
-                    completed=False,
-                    state=3,
-                    totalCount=0,
-                    completedCount=0,
-                    rateCount=0,
-                    rateSize=0,
-                    metrics=None,
-                ),
-                get_connection_count=lambda: 0,
-                _idle_time=0,
-                _ttl=600,
-            ),
+            task=task,
+            tasks=[task],
+            # Rows read the CONTROL's folded status / idle time / replicas.
+            get_status=_status,
+            idle_time=0,
+            replicas=1,
             launch_type=SimpleNamespace(value='LAUNCH'),
         )
 
@@ -474,6 +494,12 @@ def _list_control(task_id, *, name=None, start=900.0, provider='node-x', team_id
         rateSize=0,
         metrics=None,
     )
+    task = SimpleNamespace(
+        get_status=lambda: status,
+        get_connection_count=lambda: 0,
+        _idle_time=0,
+        _ttl=600,
+    )
     return SimpleNamespace(
         id=task_id,
         userId='user-1',
@@ -483,12 +509,12 @@ def _list_control(task_id, *, name=None, start=900.0, provider='node-x', team_id
         project_id='proj-1',
         run_kind='dev',
         provider=provider,
-        task=SimpleNamespace(
-            get_status=lambda: status,
-            get_connection_count=lambda: 0,
-            _idle_time=0,
-            _ttl=600,
-        ),
+        task=task,
+        tasks=[task],
+        # Rows read the CONTROL's folded status / idle time / replicas.
+        get_status=lambda: status,
+        idle_time=0,
+        replicas=1,
         launch_type=SimpleNamespace(value='LAUNCH'),
     )
 

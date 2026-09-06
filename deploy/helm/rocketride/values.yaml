@@ -103,8 +103,13 @@ engine:
   env:
     # -- Log level (debug, info, warn, error)
     LOG_LEVEL: 'info'
-    # -- Number of worker threads
-    WORKER_THREADS: '4'
+    # -- Default engine subprocesses per pipeline when `use()` omits `replicas`
+    # (each is a full model copy; see docs/README-throughput.md)
+    ROCKETRIDE_TASK_REPLICAS: '1'
+    # -- Default BLAS/OMP threads per replica when `use()` omits `torchThreads`
+    # (unset = cores // replicas when replicas > 1, nothing at 1). Keep
+    # replicas * threads <= pod vCPU count.
+    # ROCKETRIDE_TORCH_THREADS: '4'
 
   # -- Name of an existing Secret to use instead of creating one
   # If set, the chart will not create a Secret resource

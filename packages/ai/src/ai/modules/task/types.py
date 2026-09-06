@@ -45,6 +45,58 @@ and ensuring consistent event handling across the distributed system.
 """
 
 from enum import Enum
+from typing import Tuple
+
+from ai.constants import CONST_MAX_REPLICAS
+
+# =============================================================================
+# REPLICA-QUALIFIED PIPE IDS
+# =============================================================================
+# A pipe id is minted by the ENGINE (IServiceFilterPipe.pipeId) and is only
+# unique within one engine subprocess. Replicas of a token are separate
+# subprocesses, so replica 0 and replica 1 both mint pipe id 1 — and the SDK
+# pipe protocol is open -> N x write -> close against one id. Routing each
+# request independently would send the writes of file A into file B's pipe,
+# or fail with "Write pipe with id 1 not found".
+#
+# So the id the CLIENT sees is qualified with the replica that minted it:
+#
+#     wire_id = local_id * CONST_MAX_REPLICAS + replica_index
+#
+# The encoding is STATELESS — it needs no per-connection pipe table, survives
+# a supervisor restart, and any request carrying a wire id decodes back to
+# (engine, local id) on its own. CONST_MAX_REPLICAS is the stride because it
+# is the hard ceiling on replicas, so the residue is always the real index.
+#
+# An UNREPLICATED task never encodes: wire id == local id, byte-identical to
+# the pre-replica protocol.
+
+
+def encode_pipe_id(local_id: int, replica_index: int) -> int:
+    """
+    Qualify an engine-local pipe id with the replica that minted it.
+
+    Args:
+        local_id: The pipe id as the engine subprocess knows it.
+        replica_index: Which replica of the token minted it (0..N-1).
+
+    Returns:
+        int: The id the client sees.
+    """
+    return local_id * CONST_MAX_REPLICAS + replica_index
+
+
+def decode_pipe_id(wire_id: int) -> Tuple[int, int]:
+    """
+    Split a client-visible pipe id back into (local id, replica index).
+
+    Args:
+        wire_id: The id as the client sent it.
+
+    Returns:
+        Tuple[int, int]: ``(local_id, replica_index)``.
+    """
+    return wire_id // CONST_MAX_REPLICAS, wire_id % CONST_MAX_REPLICAS
 
 
 class LAUNCH_TYPE(Enum):

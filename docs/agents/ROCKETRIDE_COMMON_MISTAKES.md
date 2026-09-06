@@ -686,6 +686,13 @@ await client.disconnect();
 
 **Rule:** Start pipelines once, use them many times. Only disconnect when completely done.
 
+**Caveat:** reusing one token does not give you concurrent inference. One
+task = one model copy = one inference at a time; concurrent `chat()`/`send()`
+calls against the same token queue up behind that task's model lock. If you
+need to serve concurrent requests, pass `replicas` to `use()` to launch
+multiple task replicas behind the same token instead of starting separate
+pipelines. See [README-throughput.md](../README-throughput.md).
+
 ---
 
 ### Mistake 10: "Pipeline Already Running" Error

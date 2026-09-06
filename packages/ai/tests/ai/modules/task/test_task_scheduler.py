@@ -267,9 +267,12 @@ class TestOverlapGuard:
         entry = _entry(scheduler)
         await scheduler._start_run(entry)
 
-        # Simulate the previous task still running in the registry.
+        # Simulate the previous task still running in the registry. The guard
+        # scans every replica of the control, so the stand-in exposes the
+        # same one-engine list a real unreplicated control would.
         running = MagicMock()
         running.task.is_task_complete.return_value = False
+        running.tasks = [running.task]
         scheduler._server._task_control['tk_dispatched'] = running
 
         # Assert the scheduler's OWN predicate — the exact guard the tick
@@ -293,6 +296,7 @@ class TestOverlapGuard:
         # guard for the next cron tick.
         running = MagicMock()
         running.task.is_task_complete.return_value = False
+        running.tasks = [running.task]
         scheduler._server._task_control['tk_manual'] = running
         scheduler.register_manual_run('team-1', 'proj-1', 'src-1', 'tk_manual')
         assert scheduler.is_run_active('team-1', 'proj-1', 'src-1')
