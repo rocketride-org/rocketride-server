@@ -37,6 +37,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { getLogger } from '../shared/util/output';
 import { icons } from '../shared/util/icons';
+import { CONSENT_CHOICES, CONSENT_PROMPT_DETAIL, ConsentChoice, RecordedConsent, decideAutoInstallConsent } from '../shared/util/autoInstallConsent';
 import { BaseAgentInstaller } from './base-installer';
 import { CursorInstaller } from './cursor-installer';
 import { ClaudeCodeInstaller } from './claude-code-installer';
@@ -138,24 +139,27 @@ export class AgentManager {
 	 *   - 'Install': proceed now and remember to never ask again.
 	 *   - 'Not now': skip this activation, ask again next time.
 	 *   - "Don't ask again": remember to never ask (or auto-install) again.
+	 *
+	 * The decision itself lives in `decideAutoInstallConsent` so it can be tested
+	 * without the `vscode` module; this method is the I/O around it.
 	 */
 	private async getAutoInstallConsent(context: vscode.ExtensionContext, detected: BaseAgentInstaller[]): Promise<boolean> {
-		const recorded = context.globalState.get<'accepted' | 'declined'>(AUTO_INSTALL_CONSENT_KEY);
-		if (recorded === 'accepted') return true;
-		if (recorded === 'declined') return false;
+		const recorded = context.globalState.get<RecordedConsent>(AUTO_INSTALL_CONSENT_KEY);
+
+		// Skip the prompt entirely on an answer we already hold, so a recorded
+		// user never sees the dialog again.
+		if (recorded !== undefined) {
+			return decideAutoInstallConsent(recorded, undefined).grant;
+		}
 
 		const names = detected.map((installer) => installer.name).join(', ');
-		const choice = await vscode.window.showInformationMessage(`RocketRide detected ${names} in this project. Install RocketRide's agent integration docs (.rocketride/, agent stub files)?`, 'Install', 'Not now', "Don't ask again");
+		const choice = (await vscode.window.showInformationMessage(`RocketRide detected ${names} in this project. ${CONSENT_PROMPT_DETAIL}`, ...CONSENT_CHOICES)) as ConsentChoice | undefined;
 
-		if (choice === 'Install') {
-			await context.globalState.update(AUTO_INSTALL_CONSENT_KEY, 'accepted');
-			return true;
+		const decision = decideAutoInstallConsent(recorded, choice);
+		if (decision.persist !== undefined) {
+			await context.globalState.update(AUTO_INSTALL_CONSENT_KEY, decision.persist);
 		}
-		if (choice === "Don't ask again") {
-			await context.globalState.update(AUTO_INSTALL_CONSENT_KEY, 'declined');
-			return false;
-		}
-		return false;
+		return decision.grant;
 	}
 
 	/**

@@ -107,9 +107,11 @@ open. The prompt offers three choices:
 - **Not now** — write nothing this time; you will be asked again on the next activation.
 - **Don't ask again** — write nothing, and never auto-install again.
 
-The answer is stored globally, so you are asked at most once across all workspaces rather
-than once per project. To change your mind later, turn `autoAgentIntegration` off, or use
-one of the manual paths below.
+**Install** and **Don't ask again** are stored globally, so either answer settles the
+question at most once across all workspaces rather than once per project. **Not now** is
+deliberately not stored — it skips only the current activation, and the prompt returns next
+time. To change your mind later, turn `autoAgentIntegration` off, or use one of the manual
+paths below.
 
 Manual opt-in is unaffected by the prompt and installs immediately, since checking a box or
 running a command is already explicit consent: tick an integration under

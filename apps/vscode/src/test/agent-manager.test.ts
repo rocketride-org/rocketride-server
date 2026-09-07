@@ -53,6 +53,25 @@ suite('AgentManager', () => {
 		assert.ok(!detected.some((installer) => installer.name === 'Copilot'), 'Copilot should not be auto-detected without the real Copilot extension installed');
 	});
 
+	// The negative case above rides on the host profile having no Copilot; these
+	// two pin the other half of the contract — that the real extension IDs, and
+	// only those, are what turns detection on.
+	for (const extensionId of ['GitHub.copilot', 'GitHub.copilot-chat']) {
+		test(`detectEnvironment auto-detects Copilot when ${extensionId} is installed`, async () => {
+			const originalGetExtension = vscode.extensions.getExtension;
+			vscode.extensions.getExtension = ((id: string) => (id === extensionId ? ({ id } as vscode.Extension<unknown>) : undefined)) as typeof vscode.extensions.getExtension;
+
+			try {
+				const manager = new AgentManager();
+				const detected = await manager.detectEnvironment();
+
+				assert.ok(detected.some((installer) => installer.name === 'Copilot'), `Copilot should be auto-detected when ${extensionId} is installed`);
+			} finally {
+				vscode.extensions.getExtension = originalGetExtension;
+			}
+		});
+	}
+
 	test('autoInstall does not write to the workspace when the user declines the consent prompt', async () => {
 		const workspaceRoot = vscode.Uri.file(path.join(os.tmpdir(), `rocketride-test-${Date.now()}`));
 		const originalShowInformationMessage = vscode.window.showInformationMessage;
