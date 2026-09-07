@@ -72,7 +72,7 @@ def _client(monkeypatch, tmp_path, apps, capture=None, servable=(7,)):
             capture.append(token)
         return apps
 
-    async def fake_version_dirs_for(token: str, app_id: str) -> dict:
+    async def fake_version_dirs_for(token: str, app_id: str, want: int | None = None) -> dict:
         """The canned servable map: version -> dist dir (dir never read)."""
         return {version: f'{app_id}/v{version}/dist' for version in servable}
 

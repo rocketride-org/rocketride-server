@@ -239,7 +239,7 @@ async def _app_entry_info(token: str, app_id: str) -> Optional[dict]:
         if not registry_version:
             return None
         version = int(registry_version)
-        if version not in await _version_dirs_for(token, app_id):
+        if version not in await _version_dirs_for(token, app_id, want=version):
             return None
         return {
             'appId': app_id,
@@ -290,27 +290,53 @@ async def _authorize_app(token: str, app_id: str) -> bool:
 # are IMMUTABLE per version, so caching is aggressive; the entitlement
 # VERDICT is cached with a HARD expiry — deliberately never slid — so a
 # pulled publish stops serving within minutes no matter how hot the traffic
-# is.
+# is. The reverse move (a publish that ADDS a version — deploy, fleet bump)
+# converges immediately instead: a request for a version MISSING from a
+# warm map forces one re-resolution, refractory-limited below.
 
 _VERSION_SEG = re.compile(r'^v(\d{1,9})$')
 _APP_ID_SEG = re.compile(r'^[A-Za-z0-9_][A-Za-z0-9_.\-]*$')
 _IMMUTABLE_CACHE = 'private, max-age=31536000, immutable'
-# sha256('<token>.<app_id>') -> {'dirs': {version: dist_dir}, 'expiry'} —
-# HARD expiry (contrast _app_auth_cache's sliding window).
+# sha256('<token>.<app_id>') -> {'dirs': {version: dist_dir}, 'expiry',
+# 'resolvedAt', 'floor'} — HARD expiry (contrast _app_auth_cache's sliding
+# window).
 _version_dir_cache: dict = {}
+# BASE floor between miss-forced re-resolutions of one caller's map: a map
+# younger than its key's CURRENT floor answers as-is even when it lacks the
+# requested version. A FRUITLESS forced walk (the wanted version still
+# absent afterwards) doubles the key's floor, capped at the hard expiry; a
+# walk that satisfies the caller resets it to this base — so a real publish
+# (forward, backward, or several bumps inside one window) converges on the
+# first ask, while a nonexistent-version prober decays to one DB walk per
+# minutes per key.
+_VERSION_MISS_REFRACTORY = 5.0
 
 
-async def _version_dirs_for(token: str, app_id: str) -> dict:
+async def _version_dirs_for(token: str, app_id: str, want: Optional[int] = None) -> dict:
     """Hard-expiry cached: registry version -> servable dist dir for a caller.
 
     SaaS resolves the caller's entitled set (anonymous = public only);
     OSS resolves every built version (open serving — single-tenant).
+
+    ``want`` is the version the caller is about to look up: a warm map that
+    LACKS it is re-resolved on the spot (bounded by the key's escalating
+    refractory floor — see _VERSION_MISS_REFRACTORY) rather than answered
+    stale — so a fresh publish/fleet bump serves as soon as clients ask for
+    the new version instead of 404ing until the hard expiry. Entitlement
+    stays conservative both ways: the refresh can only ADD what the DB now
+    grants, and revocation still converges on the hard expiry as before.
     """
     key = hashlib.sha256(f'{token}.{app_id}'.encode('utf-8')).hexdigest()
     now = time.time()
     hit = _version_dir_cache.get(key)
     if hit is not None and hit['expiry'] > now:  # no slide — HARD expiry
-        return hit['dirs']
+        # A hit only answers when it can satisfy the caller: an absent
+        # ``want`` on a map old enough to re-resolve falls through to a
+        # fresh DB walk below (the miss-refresh); a map younger than the
+        # key's current floor answers stale to keep the miss path from
+        # becoming a per-request walk.
+        if want is None or want in hit['dirs'] or now - hit['resolvedAt'] < hit['floor']:
+            return hit['dirs']
 
     from ai.account import account
     from ai.account.app_deploy import entitled_version_dirs, open_version_dirs
@@ -328,7 +354,14 @@ async def _version_dirs_for(token: str, app_id: str) -> dict:
     else:
         dirs = await open_version_dirs(app_id)
 
-    _version_dir_cache[key] = {'dirs': dirs, 'expiry': now + _APP_AUTH_TTL}
+    # The key's NEXT floor: a miss-forced walk that still lacks the wanted
+    # version was fruitless — double the floor (capped at the TTL) so a
+    # prober decays; any walk that satisfies the caller (or a plain
+    # cold/expired resolution) resets to the base, so a real publish always
+    # converges on the first ask.
+    fruitless = hit is not None and hit['expiry'] > now and want is not None and want not in dirs
+    floor = min(hit['floor'] * 2, _APP_AUTH_TTL) if fruitless else _VERSION_MISS_REFRACTORY
+    _version_dir_cache[key] = {'dirs': dirs, 'expiry': now + _APP_AUTH_TTL, 'resolvedAt': now, 'floor': floor}
     # Bounded like _app_auth_cache: expired first, then soonest-to-expire.
     if len(_version_dir_cache) > 4096:
         for k in [k for k, v in _version_dir_cache.items() if v['expiry'] <= now]:
@@ -355,7 +388,7 @@ async def _serve_versioned(request: Request, app_id: str, version: int, rest: li
         if not seg or seg in ('.', '..') or '\\' in seg or ':' in seg:
             raise HTTPException(status_code=404, detail='Not found')
 
-    dirs = await _version_dirs_for(request.cookies.get(_APP_COOKIE, ''), app_id)
+    dirs = await _version_dirs_for(request.cookies.get(_APP_COOKIE, ''), app_id, want=version)
     dist_dir = dirs.get(version)
     if not dist_dir:
         raise HTTPException(status_code=404, detail='Not found')
