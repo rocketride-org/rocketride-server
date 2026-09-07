@@ -354,16 +354,19 @@
 				"title": "OpenAI: GPT-5.1 Chat",
 				"model": "gpt-5.1-chat",
 				"modelSource": "openrouter",
-				"modelTotalTokens": 128000, // openrouter
-				"modelOutputTokens": 16384, // openrouter
+				"modelTotalTokens": 128000, // manual
+				"modelOutputTokens": 16384, // manual
+				"deprecated": true,
+				"deprecatedBy": "openrouter",
+				"migration": "Model no longer listed in OpenRouter. Please select a current model.",
 				"apikey": ""
 			},
 			"gpt-5-3-chat": {
 				"title": "OpenAI: GPT-5.3 Chat",
 				"model": "gpt-5.3-chat",
 				"modelSource": "openrouter",
-				"modelTotalTokens": 128000, // openrouter
-				"modelOutputTokens": 16384, // openrouter
+				"modelTotalTokens": 128000, // manual
+				"modelOutputTokens": 16384, // manual
 				"deprecated": true,
 				"migration": "Model deprecated by OpenRouter (expiration date: 2026-08-10). Please select a current model.",
 				"apikey": ""
@@ -438,8 +441,11 @@
 				"title": "OpenAI: GPT-5 Chat",
 				"model": "gpt-5-chat",
 				"modelSource": "openrouter",
-				"modelTotalTokens": 128000, // openrouter
-				"modelOutputTokens": 16384, // openrouter
+				"modelTotalTokens": 128000, // manual
+				"modelOutputTokens": 16384, // manual
+				"deprecated": true,
+				"deprecatedBy": "openrouter",
+				"migration": "Model no longer listed in OpenRouter. Please select a current model.",
 				"apikey": ""
 			},
 			"gpt-chat-latest": {
@@ -477,7 +483,7 @@
 				"model": "gpt-oss-120b",
 				"modelSource": "openrouter",
 				"modelTotalTokens": 131072, // openrouter
-				"modelOutputTokens": 131072, // openrouter
+				"modelOutputTokens": 117964, // openrouter
 				"capabilities": {
 					"reasoning": true
 				},
@@ -501,7 +507,7 @@
 				"model": "gpt-oss-20b",
 				"modelSource": "openrouter",
 				"modelTotalTokens": 131072, // openrouter
-				"modelOutputTokens": 131072, // openrouter
+				"modelOutputTokens": 117964, // openrouter
 				"capabilities": {
 					"reasoning": true
 				},
@@ -511,8 +517,11 @@
 				"title": "OpenAI: gpt-oss-20b (free)",
 				"model": "gpt-oss-20b:free",
 				"modelSource": "openrouter",
-				"modelTotalTokens": 131072, // openrouter
-				"modelOutputTokens": 32768, // openrouter
+				"modelTotalTokens": 131072, // manual
+				"modelOutputTokens": 32768, // manual
+				"deprecated": true,
+				"deprecatedBy": "openrouter",
+				"migration": "Model no longer listed in OpenRouter. Please select a current model.",
 				"capabilities": {
 					"reasoning": true
 				},
@@ -554,6 +563,378 @@
 			"o4-mini-high": {
 				"title": "OpenAI: o4 Mini High",
 				"model": "o4-mini-high",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 200000, // openrouter
+				"modelOutputTokens": 100000, // openrouter
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"gpt-3-5-turbo-batch": {
+				"title": "OpenAI: GPT-3.5 Turbo (batch)",
+				"model": "gpt-3.5-turbo:batch",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 16385, // openrouter
+				"modelOutputTokens": 4096, // openrouter
+				"apikey": ""
+			},
+			"gpt-4-1-batch": {
+				"title": "OpenAI: GPT-4.1 (batch)",
+				"model": "gpt-4.1:batch",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 1047576, // openrouter
+				"modelOutputTokens": 32768, // openrouter
+				"apikey": ""
+			},
+			"gpt-4-1-mini-batch": {
+				"title": "OpenAI: GPT-4.1 Mini (batch)",
+				"model": "gpt-4.1-mini:batch",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 1047576, // openrouter
+				"modelOutputTokens": 32768, // openrouter
+				"apikey": ""
+			},
+			"gpt-4-1-nano-batch": {
+				"title": "OpenAI: GPT-4.1 Nano (batch)",
+				"model": "gpt-4.1-nano:batch",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 1047576, // openrouter
+				"modelOutputTokens": 32768, // openrouter
+				"apikey": ""
+			},
+			"gpt-4-turbo-batch": {
+				"title": "OpenAI: GPT-4 Turbo (batch)",
+				"model": "gpt-4-turbo:batch",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 128000, // openrouter
+				"modelOutputTokens": 4096, // openrouter
+				"apikey": ""
+			},
+			"gpt-4o-batch": {
+				"title": "OpenAI: GPT-4o (batch)",
+				"model": "gpt-4o:batch",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 128000, // openrouter
+				"modelOutputTokens": 16384, // openrouter
+				"apikey": ""
+			},
+			"gpt-4o-mini-batch": {
+				"title": "OpenAI: GPT-4o-mini (batch)",
+				"model": "gpt-4o-mini:batch",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 128000, // openrouter
+				"modelOutputTokens": 16384, // openrouter
+				"apikey": ""
+			},
+			"gpt-5-1-batch": {
+				"title": "OpenAI: GPT-5.1 (batch)",
+				"model": "gpt-5.1:batch",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 400000, // openrouter
+				"modelOutputTokens": 128000, // openrouter
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"gpt-5-2-batch": {
+				"title": "OpenAI: GPT-5.2 (batch)",
+				"model": "gpt-5.2:batch",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 400000, // openrouter
+				"modelOutputTokens": 128000, // openrouter
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"gpt-5-2-chat": {
+				"title": "OpenAI: GPT-5.2 Chat",
+				"model": "gpt-5.2-chat",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 128000, // openrouter
+				"modelOutputTokens": 32000, // openrouter
+				"apikey": ""
+			},
+			"gpt-5-2-pro-batch": {
+				"title": "OpenAI: GPT-5.2 Pro (batch)",
+				"model": "gpt-5.2-pro:batch",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 400000, // openrouter
+				"modelOutputTokens": 128000, // openrouter
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"gpt-5-4-batch": {
+				"title": "OpenAI: GPT-5.4 (batch)",
+				"model": "gpt-5.4:batch",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 1050000, // openrouter
+				"modelOutputTokens": 128000, // openrouter
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"gpt-5-4-mini-batch": {
+				"title": "OpenAI: GPT-5.4 Mini (batch)",
+				"model": "gpt-5.4-mini:batch",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 400000, // openrouter
+				"modelOutputTokens": 128000, // openrouter
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"gpt-5-4-nano-batch": {
+				"title": "OpenAI: GPT-5.4 Nano (batch)",
+				"model": "gpt-5.4-nano:batch",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 400000, // openrouter
+				"modelOutputTokens": 128000, // openrouter
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"gpt-5-4-pro-batch": {
+				"title": "OpenAI: GPT-5.4 Pro (batch)",
+				"model": "gpt-5.4-pro:batch",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 1050000, // openrouter
+				"modelOutputTokens": 128000, // openrouter
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"gpt-5-5-batch": {
+				"title": "OpenAI: GPT-5.5 (batch)",
+				"model": "gpt-5.5:batch",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 1050000, // openrouter
+				"modelOutputTokens": 128000, // openrouter
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"gpt-5-5-pro-batch": {
+				"title": "OpenAI: GPT-5.5 Pro (batch)",
+				"model": "gpt-5.5-pro:batch",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 1050000, // openrouter
+				"modelOutputTokens": 128000, // openrouter
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"gpt-5-6-luna-batch": {
+				"title": "OpenAI: GPT-5.6 Luna (batch)",
+				"model": "gpt-5.6-luna:batch",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 1050000, // openrouter
+				"modelOutputTokens": 128000, // openrouter
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"gpt-5-6-luna-pro-batch": {
+				"title": "OpenAI: GPT-5.6 Luna Pro (batch)",
+				"model": "gpt-5.6-luna-pro:batch",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 1050000, // openrouter
+				"modelOutputTokens": 128000, // openrouter
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"gpt-5-6-sol-batch": {
+				"title": "OpenAI: GPT-5.6 Sol (batch)",
+				"model": "gpt-5.6-sol:batch",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 1050000, // openrouter
+				"modelOutputTokens": 128000, // openrouter
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"gpt-5-6-sol-pro-batch": {
+				"title": "OpenAI: GPT-5.6 Sol Pro (batch)",
+				"model": "gpt-5.6-sol-pro:batch",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 1050000, // openrouter
+				"modelOutputTokens": 128000, // openrouter
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"gpt-5-6-terra-batch": {
+				"title": "OpenAI: GPT-5.6 Terra (batch)",
+				"model": "gpt-5.6-terra:batch",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 1050000, // openrouter
+				"modelOutputTokens": 128000, // openrouter
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"gpt-5-6-terra-pro-batch": {
+				"title": "OpenAI: GPT-5.6 Terra Pro (batch)",
+				"model": "gpt-5.6-terra-pro:batch",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 1050000, // openrouter
+				"modelOutputTokens": 128000, // openrouter
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"gpt-5-batch": {
+				"title": "OpenAI: GPT-5 (batch)",
+				"model": "gpt-5:batch",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 400000, // openrouter
+				"modelOutputTokens": 128000, // openrouter
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"gpt-5-mini-batch": {
+				"title": "OpenAI: GPT-5 Mini (batch)",
+				"model": "gpt-5-mini:batch",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 400000, // openrouter
+				"modelOutputTokens": 128000, // openrouter
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"gpt-5-nano-batch": {
+				"title": "OpenAI: GPT-5 Nano (batch)",
+				"model": "gpt-5-nano:batch",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 400000, // openrouter
+				"modelOutputTokens": 128000, // openrouter
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"gpt-5-pro-batch": {
+				"title": "OpenAI: GPT-5 Pro (batch)",
+				"model": "gpt-5-pro:batch",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 400000, // openrouter
+				"modelOutputTokens": 128000, // openrouter
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"gpt-6-astra": {
+				"title": "OpenAI: GPT-6 Astra",
+				"model": "gpt-6-astra",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 1050000, // openrouter
+				"modelOutputTokens": 128000, // openrouter
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"gpt-6-astra-batch": {
+				"title": "OpenAI: GPT-6 Astra (batch)",
+				"model": "gpt-6-astra:batch",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 1050000, // openrouter
+				"modelOutputTokens": 128000, // openrouter
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"gpt-6-astra-pro": {
+				"title": "OpenAI: GPT-6 Astra Pro",
+				"model": "gpt-6-astra-pro",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 1050000, // openrouter
+				"modelOutputTokens": 128000, // openrouter
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"gpt-6-astra-pro-batch": {
+				"title": "OpenAI: GPT-6 Astra Pro (batch)",
+				"model": "gpt-6-astra-pro:batch",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 1050000, // openrouter
+				"modelOutputTokens": 128000, // openrouter
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"gpt-oss-120b-batch": {
+				"title": "OpenAI: gpt-oss-120b (batch)",
+				"model": "gpt-oss-120b:batch",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 131072, // openrouter
+				"modelOutputTokens": 117964, // openrouter
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"gpt-oss-20b-batch": {
+				"title": "OpenAI: gpt-oss-20b (batch)",
+				"model": "gpt-oss-20b:batch",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 131072, // openrouter
+				"modelOutputTokens": 117964, // openrouter
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"o3-batch": {
+				"title": "OpenAI: o3 (batch)",
+				"model": "o3:batch",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 200000, // openrouter
+				"modelOutputTokens": 100000, // openrouter
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"o3-mini-batch": {
+				"title": "OpenAI: o3 Mini (batch)",
+				"model": "o3-mini:batch",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 200000, // openrouter
+				"modelOutputTokens": 100000, // openrouter
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"o4-mini-batch": {
+				"title": "OpenAI: o4 Mini (batch)",
+				"model": "o4-mini:batch",
 				"modelSource": "openrouter",
 				"modelTotalTokens": 200000, // openrouter
 				"modelOutputTokens": 100000, // openrouter
@@ -969,6 +1350,222 @@
 					"properties": [
 						"openai.o4-mini-high"
 					]
+				},
+				{
+					"value": "gpt-3-5-turbo-batch",
+					"properties": [
+						"openai.gpt-3-5-turbo-batch"
+					]
+				},
+				{
+					"value": "gpt-4-1-batch",
+					"properties": [
+						"openai.gpt-4-1-batch"
+					]
+				},
+				{
+					"value": "gpt-4-1-mini-batch",
+					"properties": [
+						"openai.gpt-4-1-mini-batch"
+					]
+				},
+				{
+					"value": "gpt-4-1-nano-batch",
+					"properties": [
+						"openai.gpt-4-1-nano-batch"
+					]
+				},
+				{
+					"value": "gpt-4-turbo-batch",
+					"properties": [
+						"openai.gpt-4-turbo-batch"
+					]
+				},
+				{
+					"value": "gpt-4o-batch",
+					"properties": [
+						"openai.gpt-4o-batch"
+					]
+				},
+				{
+					"value": "gpt-4o-mini-batch",
+					"properties": [
+						"openai.gpt-4o-mini-batch"
+					]
+				},
+				{
+					"value": "gpt-5-1-batch",
+					"properties": [
+						"openai.gpt-5-1-batch"
+					]
+				},
+				{
+					"value": "gpt-5-2-batch",
+					"properties": [
+						"openai.gpt-5-2-batch"
+					]
+				},
+				{
+					"value": "gpt-5-2-chat",
+					"properties": [
+						"openai.gpt-5-2-chat"
+					]
+				},
+				{
+					"value": "gpt-5-2-pro-batch",
+					"properties": [
+						"openai.gpt-5-2-pro-batch"
+					]
+				},
+				{
+					"value": "gpt-5-4-batch",
+					"properties": [
+						"openai.gpt-5-4-batch"
+					]
+				},
+				{
+					"value": "gpt-5-4-mini-batch",
+					"properties": [
+						"openai.gpt-5-4-mini-batch"
+					]
+				},
+				{
+					"value": "gpt-5-4-nano-batch",
+					"properties": [
+						"openai.gpt-5-4-nano-batch"
+					]
+				},
+				{
+					"value": "gpt-5-4-pro-batch",
+					"properties": [
+						"openai.gpt-5-4-pro-batch"
+					]
+				},
+				{
+					"value": "gpt-5-5-batch",
+					"properties": [
+						"openai.gpt-5-5-batch"
+					]
+				},
+				{
+					"value": "gpt-5-5-pro-batch",
+					"properties": [
+						"openai.gpt-5-5-pro-batch"
+					]
+				},
+				{
+					"value": "gpt-5-6-luna-batch",
+					"properties": [
+						"openai.gpt-5-6-luna-batch"
+					]
+				},
+				{
+					"value": "gpt-5-6-luna-pro-batch",
+					"properties": [
+						"openai.gpt-5-6-luna-pro-batch"
+					]
+				},
+				{
+					"value": "gpt-5-6-sol-batch",
+					"properties": [
+						"openai.gpt-5-6-sol-batch"
+					]
+				},
+				{
+					"value": "gpt-5-6-sol-pro-batch",
+					"properties": [
+						"openai.gpt-5-6-sol-pro-batch"
+					]
+				},
+				{
+					"value": "gpt-5-6-terra-batch",
+					"properties": [
+						"openai.gpt-5-6-terra-batch"
+					]
+				},
+				{
+					"value": "gpt-5-6-terra-pro-batch",
+					"properties": [
+						"openai.gpt-5-6-terra-pro-batch"
+					]
+				},
+				{
+					"value": "gpt-5-batch",
+					"properties": [
+						"openai.gpt-5-batch"
+					]
+				},
+				{
+					"value": "gpt-5-mini-batch",
+					"properties": [
+						"openai.gpt-5-mini-batch"
+					]
+				},
+				{
+					"value": "gpt-5-nano-batch",
+					"properties": [
+						"openai.gpt-5-nano-batch"
+					]
+				},
+				{
+					"value": "gpt-5-pro-batch",
+					"properties": [
+						"openai.gpt-5-pro-batch"
+					]
+				},
+				{
+					"value": "gpt-6-astra",
+					"properties": [
+						"openai.gpt-6-astra"
+					]
+				},
+				{
+					"value": "gpt-6-astra-batch",
+					"properties": [
+						"openai.gpt-6-astra-batch"
+					]
+				},
+				{
+					"value": "gpt-6-astra-pro",
+					"properties": [
+						"openai.gpt-6-astra-pro"
+					]
+				},
+				{
+					"value": "gpt-6-astra-pro-batch",
+					"properties": [
+						"openai.gpt-6-astra-pro-batch"
+					]
+				},
+				{
+					"value": "gpt-oss-120b-batch",
+					"properties": [
+						"openai.gpt-oss-120b-batch"
+					]
+				},
+				{
+					"value": "gpt-oss-20b-batch",
+					"properties": [
+						"openai.gpt-oss-20b-batch"
+					]
+				},
+				{
+					"value": "o3-batch",
+					"properties": [
+						"openai.o3-batch"
+					]
+				},
+				{
+					"value": "o3-mini-batch",
+					"properties": [
+						"openai.o3-mini-batch"
+					]
+				},
+				{
+					"value": "o4-mini-batch",
+					"properties": [
+						"openai.o4-mini-batch"
+					]
 				}
 			]
 		},
@@ -1226,6 +1823,258 @@
 		},
 		"openai.o4-mini-high": {
 			"object": "o4-mini-high",
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
+		},
+		"openai.gpt-3-5-turbo-batch": {
+			"object": "gpt-3-5-turbo-batch",
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
+		},
+		"openai.gpt-4-1-batch": {
+			"object": "gpt-4-1-batch",
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
+		},
+		"openai.gpt-4-1-mini-batch": {
+			"object": "gpt-4-1-mini-batch",
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
+		},
+		"openai.gpt-4-1-nano-batch": {
+			"object": "gpt-4-1-nano-batch",
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
+		},
+		"openai.gpt-4-turbo-batch": {
+			"object": "gpt-4-turbo-batch",
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
+		},
+		"openai.gpt-4o-batch": {
+			"object": "gpt-4o-batch",
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
+		},
+		"openai.gpt-4o-mini-batch": {
+			"object": "gpt-4o-mini-batch",
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
+		},
+		"openai.gpt-5-1-batch": {
+			"object": "gpt-5-1-batch",
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
+		},
+		"openai.gpt-5-2-batch": {
+			"object": "gpt-5-2-batch",
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
+		},
+		"openai.gpt-5-2-chat": {
+			"object": "gpt-5-2-chat",
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
+		},
+		"openai.gpt-5-2-pro-batch": {
+			"object": "gpt-5-2-pro-batch",
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
+		},
+		"openai.gpt-5-4-batch": {
+			"object": "gpt-5-4-batch",
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
+		},
+		"openai.gpt-5-4-mini-batch": {
+			"object": "gpt-5-4-mini-batch",
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
+		},
+		"openai.gpt-5-4-nano-batch": {
+			"object": "gpt-5-4-nano-batch",
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
+		},
+		"openai.gpt-5-4-pro-batch": {
+			"object": "gpt-5-4-pro-batch",
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
+		},
+		"openai.gpt-5-5-batch": {
+			"object": "gpt-5-5-batch",
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
+		},
+		"openai.gpt-5-5-pro-batch": {
+			"object": "gpt-5-5-pro-batch",
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
+		},
+		"openai.gpt-5-6-luna-batch": {
+			"object": "gpt-5-6-luna-batch",
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
+		},
+		"openai.gpt-5-6-luna-pro-batch": {
+			"object": "gpt-5-6-luna-pro-batch",
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
+		},
+		"openai.gpt-5-6-sol-batch": {
+			"object": "gpt-5-6-sol-batch",
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
+		},
+		"openai.gpt-5-6-sol-pro-batch": {
+			"object": "gpt-5-6-sol-pro-batch",
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
+		},
+		"openai.gpt-5-6-terra-batch": {
+			"object": "gpt-5-6-terra-batch",
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
+		},
+		"openai.gpt-5-6-terra-pro-batch": {
+			"object": "gpt-5-6-terra-pro-batch",
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
+		},
+		"openai.gpt-5-batch": {
+			"object": "gpt-5-batch",
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
+		},
+		"openai.gpt-5-mini-batch": {
+			"object": "gpt-5-mini-batch",
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
+		},
+		"openai.gpt-5-nano-batch": {
+			"object": "gpt-5-nano-batch",
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
+		},
+		"openai.gpt-5-pro-batch": {
+			"object": "gpt-5-pro-batch",
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
+		},
+		"openai.gpt-6-astra": {
+			"object": "gpt-6-astra",
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
+		},
+		"openai.gpt-6-astra-batch": {
+			"object": "gpt-6-astra-batch",
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
+		},
+		"openai.gpt-6-astra-pro": {
+			"object": "gpt-6-astra-pro",
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
+		},
+		"openai.gpt-6-astra-pro-batch": {
+			"object": "gpt-6-astra-pro-batch",
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
+		},
+		"openai.gpt-oss-120b-batch": {
+			"object": "gpt-oss-120b-batch",
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
+		},
+		"openai.gpt-oss-20b-batch": {
+			"object": "gpt-oss-20b-batch",
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
+		},
+		"openai.o3-batch": {
+			"object": "o3-batch",
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
+		},
+		"openai.o3-mini-batch": {
+			"object": "o3-mini-batch",
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
+		},
+		"openai.o4-mini-batch": {
+			"object": "o4-mini-batch",
 			"properties": [
 				"llm.cloud.apikey",
 				"llm.cloud.modelSource"
