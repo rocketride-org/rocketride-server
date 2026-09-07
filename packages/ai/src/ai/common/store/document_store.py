@@ -35,7 +35,7 @@ class DocumentStoreBase(ABC):
         """
 
     @abstractmethod
-    def _createCollection() -> bool:
+    def _createCollection() -> bool | None:
         """
         Create the collection.
 
@@ -43,6 +43,10 @@ class DocumentStoreBase(ABC):
         must either raise on failure or explicitly return False; the caller
         (createCollection) treats a return value of exactly False as failure and
         aborts before indexing any documents.
+
+        The return is annotated bool | None because None is a legitimate success
+        value here: store_weaviate, store_postgres and rocketride_vector create
+        the collection and return nothing. Only an explicit False means failure.
         """
 
     @abstractmethod

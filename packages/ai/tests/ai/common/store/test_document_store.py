@@ -75,7 +75,12 @@ def _make_docs():
 def test_create_collection_raises_when_driver_returns_false():
     store = _FakeStore(create_result=False)
 
-    with pytest.raises(Exception):
+    # The whole point of #1495 is that the failure is *named*: the old behaviour
+    # surfaced as a cryptic AttributeError from deep inside addChunks (e.g.
+    # Chroma's "'NoneType' object has no attribute 'delete'"), far from the
+    # driver that actually failed. Assert the message identifies the store, not
+    # merely that something was raised.
+    with pytest.raises(Exception, match='_FakeStore failed to create the vector collection'):
         store.createCollection(_make_docs())
 
     store.addChunks.assert_not_called()
@@ -88,10 +93,50 @@ def test_create_collection_succeeds_when_driver_returns_true():
     store.addChunks.assert_called_once()
 
 
+def test_create_collection_treats_none_as_success():
+    # The check is deliberately `is False`, not falsy: store_weaviate,
+    # store_postgres and rocketride_vector return nothing on success, and
+    # treating their None as failure would break every one of them.
+    store = _FakeStore(create_result=None)
+
+    assert store.createCollection(_make_docs()) is True
+    store.addChunks.assert_called_once()
+
+
 def test_create_collection_propagates_driver_exception():
     store = _FakeStore(create_result=RuntimeError('boom'))
 
     with pytest.raises(RuntimeError, match='boom'):
+        store.createCollection(_make_docs())
+
+    store.addChunks.assert_not_called()
+
+
+class _SwallowingStore(_FakeStore):
+    """
+    A driver shaped like store_astra: it catches every exception from the
+    provider client, warns, and reports failure by returning False.
+
+    nodes/src/nodes/store_astra/astra_db.py does exactly this, so the real
+    provider error never reaches the base at all -- `is False` is the only
+    signal left that anything went wrong.
+    """
+
+    def __init__(self):
+        super().__init__(create_result=None)
+
+    def _createCollection(self, vectorSize):
+        try:
+            raise RuntimeError('provider rejected the collection definition')
+        except Exception:
+            # Swallowed and downgraded to a bool, exactly as the driver does.
+            return False
+
+
+def test_create_collection_catches_a_driver_that_swallows_its_own_error():
+    store = _SwallowingStore()
+
+    with pytest.raises(Exception, match='_SwallowingStore failed to create the vector collection'):
         store.createCollection(_make_docs())
 
     store.addChunks.assert_not_called()
