@@ -11,6 +11,7 @@
 		"name": "Event Monitor",
 		"description": "Real-time event stream viewer with JSON inspection and export",
 		"icon": "./src/icon.svg",
+		"readme": "../../docs/modules/events-ui/README.md",
 		"categories": [
 			"tools"
 		],
