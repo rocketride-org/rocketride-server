@@ -4,10 +4,10 @@
  * See LICENSE file for details.
  */
 // =============================================================================
-// PROFILER-UI — Module Federation Remote (cProfile Profiler app)
+// {{TITLE}}
 // =============================================================================
 // Builds remoteEntry.js + AppDescriptor chunk only.
-// NOT a standalone app. Run shell:dev for development.
+// NOT a standalone app. Run {{DEVHINT}} for development.
 // =============================================================================
 
 import fs from 'node:fs';
@@ -81,8 +81,8 @@ export default defineConfig(() => {
 				},
 			},
 		},
-		server: { port: 3021, cors: { origin: '*' } },
-		source: {
+		server: { port: {{PORT}}, cors: { origin: '*' } },
+{{DEVBLOCK}}		source: {
 			entry: {
 				index: './src/index.ts',
 			},

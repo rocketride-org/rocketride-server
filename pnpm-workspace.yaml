@@ -57,12 +57,14 @@ overrides:
   adm-zip: '>=0.6.0 <1'
   body-parser: '>=1.20.6 <2'
   brace-expansion: '>=5.0.7 <6'
-  # minimatch 3.x (eslint's config-array, glob@7) does a CJS default-import of
-  # brace-expansion; v5's commonjs build exports named {expand} only, so the
-  # global floor crashes every minimatch@3 consumer ("expand is not a
-  # function"). Scope those parents to the v1 line — 1.1.12 carries the same
-  # ReDoS fix the floor exists for.
-  'minimatch@3>brace-expansion': '>=1.1.12 <2'
+  # minimatch@3 (glob@7, older eslint) does a CJS default-import of
+  # brace-expansion; v5's commonjs build exports named {expand} only, so
+  # a v5 global crashes minimatch@3 consumers ("expand is not a function").
+  # Similarly, minimatch@9 declares ^2.0.2 and cannot semantically accept
+  # v5. Scope each parent to the major it actually asked for; 1.1.18 and
+  # 2.1.4 carry the same fixes the global floor exists for.
+  'minimatch@3>brace-expansion': '>=1.1.18 <2'
+  'minimatch@9>brace-expansion': '>=2.1.4 <3'
   'diff@7': '>=8.0.3 <9'
   dompurify: '>=3.4.13 <3.5.0'
   fast-uri: '>=3.1.5 <4'
@@ -71,6 +73,8 @@ overrides:
   joi: '>=18.2.1 <19'
   js-yaml: '>=4.3.1 <5'
   lodash: '>=4.18.1 <5'
+  nanoid: '>=3.3.17'
+  postcss: '>=8.5.23'
   prismjs: '>=1.30.0 <2'
   '@docusaurus/core>react-router': '5.3.4'
   'react-router-config>react-router': '5.3.4'

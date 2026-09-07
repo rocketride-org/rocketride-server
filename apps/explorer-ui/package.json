@@ -20,6 +20,7 @@
 	},
 	"scripts": {
 		"build": "rsbuild build",
+		"build:prod": "rsbuild build --env-mode production",
 		"dev": "rsbuild dev",
 		"typecheck": "tsc --noEmit"
 	},

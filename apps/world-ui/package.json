@@ -23,6 +23,12 @@
 		"dev": "rsbuild dev",
 		"typecheck": "tsc --noEmit"
 	},
+	"browserslist": [
+		"chrome >= 81",
+		"edge >= 83",
+		"firefox >= 76",
+		"safari >= 13"
+	],
 	"dependencies": {
 		"@module-federation/rsbuild-plugin": "^2.5.1",
 		"react": "^18.2.0",
