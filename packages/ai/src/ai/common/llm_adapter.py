@@ -9,6 +9,7 @@ ChatBase consumes Adapters and never touches provider-native content shapes.
 Design: repo discussion #1679 (RFC — virtualized provider Adapter).
 """
 
+import re
 import threading
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -227,6 +228,73 @@ def flatten_content(content: Any) -> str:
     return flatten_content_parts(content)[0]
 
 
+# Word-boundary match so "stopped" / "nonstop" / "stop_reason" do not trip the heuristic.
+# Anthropic names the parameter stop_sequences; `_` is a word char so `\bstop\b` misses it.
+_STOP_WORD_RE = re.compile(r'\bstop(?:_sequences)?\b', re.IGNORECASE)
+
+
+def is_stop_rejection(e: Exception, stop_sent: bool) -> bool:
+    """Return True when ``e`` indicates the provider rejected a ``stop`` parameter.
+
+    Prefers structured API error fields (``status_code`` / ``code`` / ``param``),
+    including OpenAI's nested ``body['error']`` shape. Falls back to a
+    word-boundary string match of ``stop`` / ``stop_sequences`` only when those
+    structured fields are absent. If structured fields are present and clearly
+    point at something else, the string heuristic is not consulted.
+
+    A match of ``stop_sequences`` is enough on its own (Anthropic extra-field
+    400s look like ``stop_sequences: Extra inputs are not permitted``). A match
+    of ``stop`` still requires ``unsupported`` or ``invalid`` in the message.
+
+    Callers that retry without ``stop`` accept that the model may emit past the
+    stop sequence; agent-level truncation (``truncate_at_stop_words``) is the
+    backstop.
+    """
+    if not stop_sent:
+        return False
+
+    status = getattr(e, 'status_code', None)
+    code = getattr(e, 'code', None)
+    param = getattr(e, 'param', None)
+    nested_message = None
+
+    body = getattr(e, 'body', None)
+    if isinstance(body, dict):
+        # OpenAI: {"error": {"message":…, "type":…, "param":…, "code":…}}
+        # Anthropic: {"type": "error", "error": {"type":…, "message":…}} (often no code/param)
+        nested = body.get('error')
+        err = nested if isinstance(nested, dict) else body
+        code = code or err.get('code')
+        param = param or err.get('param')
+        msg = err.get('message')
+        if isinstance(msg, str):
+            nested_message = msg
+
+    if status == 400 and (code == 'unsupported_parameter' or param in ('stop', 'stop_sequences')):
+        return True
+
+    # Structured fields present and non-matching: do not fall through to substrings.
+    if param is not None and param not in ('stop', 'stop_sequences'):
+        return False
+    if status is not None and status != 400:
+        return False
+    if code is not None and code != 'unsupported_parameter':
+        return False
+
+    haystack = str(e)
+    if nested_message:
+        haystack = f'{haystack} {nested_message}'
+    err_str = haystack.lower()
+    matched = _STOP_WORD_RE.search(err_str)
+    if not matched:
+        return False
+    # Anthropic extra-field 400s are "stop_sequences: Extra inputs are not permitted"
+    # with neither "unsupported" nor "invalid" in the message.
+    if matched.group(0).lower() == 'stop_sequences':
+        return True
+    return 'unsupported' in err_str or 'invalid' in err_str
+
+
 def is_usage_flag_rejection(e: Exception) -> bool:
     """True when an endpoint refused the request itself, so one retry without the flag pays off.
 
@@ -374,6 +442,12 @@ class LangChainAdapter:
         self.reasoning: str = ''
 
     def stream(self, user_text: str) -> Iterator[Event]:
+        """Stream Events; retry once without ``stop`` if the provider rejects it at create time.
+
+        Fallback applies only to stream creation / first chunk — never after output has
+        already been yielded. On retry the model may emit past the stop sequence;
+        agent-level truncation is the backstop.
+        """
         self.history.append({'role': 'user', 'content': user_text})
         parse = _make_stream_content_parser(True)
         parts: list[str] = []
@@ -405,25 +479,36 @@ class LangChainAdapter:
         except StopIteration:
             gen, piece = None, None
         except Exception as e:
-            # Retry without the usage flag ONLY for the failure it causes: a client error
-            # rejecting stream_options.include_usage (an old vLLM/strict proxy — 400 from the
-            # openai SDK, 422 from a FastAPI-based server). Re-raise everything else — a
-            # 401/429 surfaces without a second round trip, and a transient connection/timeout
-            # (no status_code) is not mistaken for a flag rejection and silently retried
-            # unmetered.
-            if not ask_usage or not is_usage_flag_rejection(e):
-                raise
-            from rocketlib import warning
+            # Retry without stop and/or stream_usage, at most once each, and only before
+            # any chunk has been yielded. Same first-chunk gate as include_usage.
+            dropped_stop = dropped_usage = False
+            while True:
+                if not dropped_stop and is_stop_rejection(e, 'stop' in skw):
+                    # Local import avoids a rocketlib <-> ai.common cycle at module load.
+                    from rocketlib import warning
 
-            warning(
-                f'LangChain stream rejected stream_usage ({type(e).__name__}); '
-                'retrying without include_usage (this call is unmetered).'
-            )
-            skw.pop('stream_usage', None)
-            try:
-                gen, piece = _open(skw)
-            except StopIteration:
-                gen, piece = None, None
+                    warning(f"LLM rejected 'stop' parameter: {e}. Retrying stream without stop.")
+                    skw.pop('stop', None)
+                    dropped_stop = True
+                elif not dropped_usage and ask_usage and skw.get('stream_usage') and is_usage_flag_rejection(e):
+                    from rocketlib import warning
+
+                    warning(
+                        f'LangChain stream rejected stream_usage ({type(e).__name__}); '
+                        'retrying without include_usage (this call is unmetered).'
+                    )
+                    skw.pop('stream_usage', None)
+                    dropped_usage = True
+                else:
+                    raise
+                try:
+                    gen, piece = _open(skw)
+                    break
+                except StopIteration:
+                    gen, piece = None, None
+                    break
+                except Exception as retry_err:
+                    e = retry_err
 
         # try/finally so a mid-stream raise still records the usage the chunks already
         # carried, matching the two native adapters.
@@ -475,13 +560,28 @@ class LangChainAdapter:
     def collect(self, user_text: str) -> tuple[str, list[Any]]:
         """Non-streaming drain: invoke() + shared normalization. A genuinely different
         mechanism from stream(), so it can still recover when streaming fails.
+
+        Retries once without ``stop`` if the provider rejects it. On retry the model may
+        emit past the stop sequence; agent-level truncation is the backstop.
         """
         had_history = bool(self.history)
         self.history.append({'role': 'user', 'content': user_text})
         # Single-turn callers keep the historical contract: the backend is handed the
         # prompt string it was given, not a one-element message list.
         payload = self.history if had_history else user_text
-        result = self.llm.invoke(payload, **self.stream_kwargs)
+        kwargs = dict(self.stream_kwargs)
+        try:
+            result = self.llm.invoke(payload, **kwargs)
+        except Exception as e:
+            if is_stop_rejection(e, 'stop' in kwargs):
+                # Local import avoids a rocketlib <-> ai.common cycle at module load.
+                from rocketlib import warning
+
+                warning(f"LLM rejected 'stop' parameter: {e}. Retrying without stop.")
+                kwargs.pop('stop', None)
+                result = self.llm.invoke(payload, **kwargs)
+            else:
+                raise
         report_usage_metadata(getattr(result, 'usage_metadata', None), self.llm)
         text, self.reasoning = flatten_content_parts(getattr(result, 'content', ''))
         assistant = {'role': 'assistant', 'content': text}

@@ -60,6 +60,10 @@ overrides:
   adm-zip: '>=0.6.0 <1'
   body-parser: '>=1.20.6 <2'
   brace-expansion: '>=5.0.7 <6'
+  # browserslist: DoS via untrusted browserslist-stats.json (GHSA-73wf-gq98-2v4g)
+  # and unbounded cache growth (GHSA-c83g-rgw3-j3cx). Transitive-only, so
+  # Dependabot can't open a PR for it.
+  browserslist: '>=4.28.7 <5'
   # minimatch 3.x (eslint's config-array, glob@7) does a CJS default-import of
   # brace-expansion; v5's commonjs build exports named {expand} only, so the
   # global floor crashes every minimatch@3 consumer ("expand is not a
@@ -68,13 +72,26 @@ overrides:
   'minimatch@3>brace-expansion': '>=1.1.12 <2'
   'diff@7': '>=8.0.3 <9'
   dompurify: '>=3.4.13 <3.5.0'
-  fast-uri: '>=3.1.5 <4'
+  # fast-uri host-confusion / SSRF set (GHSA-jqff-g426-hqxp, GHSA-f65p-4m7j-42xc,
+  # GHSA-fph4-wmhf-6fwf, GHSA-5jgf-p345-68v8). Fixed in 3.1.6; floor to 3.1.7 to
+  # match the resolved version and keep future resolution off 3.1.6.
+  fast-uri: '>=3.1.7 <4'
+  # fflate infinite loop on malformed ZIP64 (GHSA-px8p-9vwx-vf98); stay on 0.4.x.
+  fflate: '>=0.4.9 <0.5'
   glob: '>=11.1.0'
   immutable: '>=5.1.8 <6'
   joi: '>=18.2.1 <19'
   js-yaml: '>=4.3.1 <5'
   lodash: '>=4.18.1 <5'
+  # postcss-selector-parser: DoS via uncontrolled AST recursion
+  # (GHSA-w9m9-85wc-3x92). 6.x and 7.x both resolve in the tree, so floor
+  # each major line to its patched release.
+  'postcss-selector-parser@6': '>=6.1.3 <7'
+  'postcss-selector-parser@7': '>=7.1.3 <8'
   prismjs: '>=1.30.0 <2'
+  # qs DoS via isBuffer + array-limit bypass (GHSA-4mjr-xmp4-gh2g,
+  # GHSA-x5fp-wj9c-mxmx); single 6.x instance, floor to the 6.16.0 fix.
+  qs: '>=6.16.0 <7'
   '@docusaurus/core>react-router': '5.3.4'
   'react-router-config>react-router': '5.3.4'
   'react-router-dom@5>react-router': '5.3.4'

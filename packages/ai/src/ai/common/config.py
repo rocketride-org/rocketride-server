@@ -200,14 +200,52 @@ class Config:
             for key, userValue in userConfig.items():
                 defaultValue = defaultConfig.get(key)
 
-                if isinstance(defaultValue, dict) or isinstance(defaultValue, IJson):
-                    # Recursively merge nested dictionaries
+                if isinstance(defaultValue, (dict, IJson)) and isinstance(userValue, (dict, IJson)):
+                    # Recursively merge nested dictionaries. Both sides must be
+                    # dict-like: a scalar written over an object-valued default
+                    # (e.g. schema_validate's "category_metric_map" given a JSON
+                    # string) otherwise reaches .items() and raises AttributeError.
                     merged[key] = merge(userValue, defaultValue)
                 elif userValue is not None:
                     # Override with user value if it's not None
                     merged[key] = userValue
 
             return merged
+
+        def overlay_top_level(nested_key: str) -> Dict[str, Any]:
+            """
+            Combine connConfig[nested_key] with connConfig's own top-level keys,
+            with real (non-None) top-level values winning over the nested block.
+            Some UIs nest a node's fields under a sub-object named after the
+            profile (e.g. connConfig["claude-sonnet-4-6"] = {"apikey": "..."})
+            instead of writing them at the top level; without this, whichever
+            shape a given branch didn't check for was silently dropped. Shared
+            by both branches below so they agree on where configuration can
+            live, regardless of whether "profile" was set explicitly.
+            """
+            # Normalize before inspecting. rocketlib's IJson is a *subclass* of
+            # the engLib IJson the engine actually constructs, so
+            # isinstance(value, IJson) is False for every real engine value --
+            # type-testing here silently dropped the whole nested block (and with
+            # it a node's credentials). IJson.toDict tests against the correct
+            # base class and is a no-op on already-native values.
+            source = IJson.toDict(connConfig)
+            if not isinstance(source, dict):
+                return {}
+
+            nested = source.get(nested_key)
+            combined = dict(nested) if isinstance(nested, dict) else {}
+
+            for key, value in source.items():
+                # "profile" is the branch selector, not a node field, and must
+                # never leak into the resolved config; a None placeholder must
+                # not clobber a populated nested value.
+                if key in (nested_key, 'profile'):
+                    continue
+                if value is not None:
+                    combined[key] = value
+
+            return combined
 
         # Output the requested configuration
         service = getServiceDefinition(logicalType)
@@ -243,30 +281,6 @@ class Config:
 
             defaultConfig = profileConfig
 
-            # Use the connConfig directly as it is not using profiles
-            userConfig = connConfig
-
-            # Some UIs nest a node's fields under a sub-object named after the default
-            # profile (e.g. connConfig["default"] = {"instructions": [...]}) instead of at
-            # the top level. That nesting is otherwise invisible here — merge() below never
-            # descends into it — so agent nodes silently lose their instructions. Overlay the
-            # nested object's keys as a lower-priority layer, with real top-level keys still
-            # winning, so both shapes resolve. No-op unless such a sub-object exists.
-            nested = connConfig.get(profile)
-            if isinstance(nested, (dict, IJson)):
-                combined = dict(IJson.toDict(nested) if isinstance(nested, IJson) else nested)
-                for key, value in connConfig.items():
-                    # Only real (non-None) top-level values override the nested block; a
-                    # None placeholder must not clobber a populated nested value.
-                    if key != profile and value is not None:
-                        combined[key] = value
-                userConfig = combined
-
-            Config._warnMisnamedKeys(logicalType, service, userConfig)
-
-            # Merge it
-            config = merge(userConfig, defaultConfig)
-
         else:
             # Make sure it is a valid profile
             if profile not in preconfig['profiles']:
@@ -283,20 +297,24 @@ class Config:
             # Get the default from the profile
             defaultConfig = profileConfig
 
-            # Get the user specified profile
-            userConfig = connConfig.get(profile, {})
+        # Overlay the nested (profile-named) block under real top-level keys,
+        # then merge the profile defaults underneath the result. Identical for
+        # both branches, so a key a caller wrote at the top level is honoured
+        # whether or not "profile" was set explicitly.
+        userConfig = overlay_top_level(profile)
 
-            # If it is none, then set to empty
-            if not userConfig:
-                userConfig = {}
+        Config._warnMisnamedKeys(logicalType, service, userConfig)
 
-            Config._warnMisnamedKeys(logicalType, service, userConfig)
+        config = merge(userConfig, defaultConfig)
 
-            # Merge defaultConfig into userConfig
-            config = merge(userConfig, defaultConfig)
-
-        # Output the computed configuration
-        return config
+        # Output the computed configuration. Array/object values arrive from
+        # the engine as IJson, not list/dict (see #1839 defect 2), so a node
+        # that does isinstance(value, list) on its own declared field falls
+        # through to its default and silently ignores what was configured.
+        # IJson.toDict recursively normalizes to native list/dict and is a
+        # no-op on values that are already native, so this is safe to apply
+        # unconditionally rather than pushing the conversion onto every node.
+        return IJson.toDict(config)
 
     @staticmethod
     def resolve_node_param(conn: Dict, node_cfg: Dict, prefix: str, key: str, default=None):

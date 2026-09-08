@@ -27,6 +27,7 @@ from typing import List, Optional
 from rocketlib import IInstanceBase, Entry, debug
 from ai.common.schema import Doc
 from .IGlobal import IGlobal
+from .scale import extract_markdown_tables
 
 
 class IInstance(IInstanceBase):
@@ -375,31 +376,10 @@ class IInstance(IInstanceBase):
         try:
             debug('LlamaParse Instance: Extracting tables from text')
 
-            # Simple table detection - look for markdown table patterns
-            lines = text.split('\n')
-            tables = []
-            current_table = []
-            in_table = False
-
-            for line in lines:
-                line = line.strip()
-
-                # Check if line looks like a table row (contains |)
-                if '|' in line and len(line.split('|')) > 2:
-                    if not in_table:
-                        in_table = True
-                        current_table = []
-                    current_table.append(line)
-                elif in_table:
-                    # End of table
-                    if current_table:
-                        tables.append('\n'.join(current_table))
-                    current_table = []
-                    in_table = False
-
-            # Don't forget the last table
-            if in_table and current_table:
-                tables.append('\n'.join(current_table))
+            # Simple table detection - look for markdown table patterns.
+            # Shared with the scale-header preservation logic so there is a
+            # single table heuristic (see scale.extract_markdown_tables).
+            tables = extract_markdown_tables(text)
 
             debug(f'LlamaParse Instance: Found {len(tables)} potential tables')
 

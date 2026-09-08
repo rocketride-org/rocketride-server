@@ -55,7 +55,9 @@ Usage:
         print(f"Event: {event['event']}")
 """
 
-from typing import Any, Callable, Awaitable, NotRequired, TypedDict, Literal, Optional, Union
+from typing import Any, Callable, Awaitable, TypedDict, Literal, Optional, Union
+
+from typing_extensions import NotRequired
 
 
 class TraceInfo(TypedDict):
