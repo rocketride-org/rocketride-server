@@ -43,19 +43,19 @@ _RESOURCES: List[Dict[str, str]] = [
         'uri': URI_PIPELINES,
         'name': 'Pipeline List',
         'description': 'List of all available pipelines on the connected RocketRide server',
-        'mimeType': 'application/json',
+        'mime_type': 'application/json',
     },
     {
         'uri': URI_STATUS,
         'name': 'Server Status',
         'description': 'Current RocketRide server status and loaded pipelines',
-        'mimeType': 'application/json',
+        'mime_type': 'application/json',
     },
     {
         'uri': URI_NODES,
         'name': 'Node Registry',
         'description': 'Available pipeline node types and their schemas',
-        'mimeType': 'application/json',
+        'mime_type': 'application/json',
     },
 ]
 
@@ -75,7 +75,7 @@ async def list_resources(client: RocketRideClient | None) -> list[types.Resource
                 uri=entry['uri'],
                 name=entry['name'],
                 description=entry.get('description'),
-                mimeType=entry.get('mimeType'),
+                mime_type=entry.get('mime_type'),
             )
         )
     return resources

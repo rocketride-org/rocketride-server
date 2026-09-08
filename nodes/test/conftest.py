@@ -51,10 +51,11 @@ except ImportError:
 
 
 # The sys.modules isolation guard (see #1640) lives in _sys_modules_guard so it is
-# unit-testable in isolation. conftest is imported before pytest puts its own dir
-# on sys.path, so add it here; importing the hooks registers them with pytest.
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _sys_modules_guard import (  # noqa: E402,F401
+# unit-testable in isolation; importing the hooks registers them with pytest.
+# Imported package-relative on purpose: putting this directory on sys.path would let
+# its node-named subpackages (text_output/, response/, telegram/, ...) shadow the real
+# node packages under src/nodes (see #1687).
+from ._sys_modules_guard import (  # noqa: E402,F401
     pytest_collectreport,
     pytest_collectstart,
     pytest_sessionfinish,
@@ -322,6 +323,9 @@ def pytest_generate_tests(metafunc):
             # Require live third-party API credentials (no live calls in default CI):
             'tool_xtrace_memory',
             'tool_mem0',
+            # Hits data.sec.gov from the services.json test block; opt in via
+            # ROCKETRIDE_INCLUDE_SKIP=authoritative_overlay.
+            'authoritative_overlay',
         }
         include_skip = {n.strip() for n in os.environ.get('ROCKETRIDE_INCLUDE_SKIP', '').split(',') if n.strip()}
 

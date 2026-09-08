@@ -66,4 +66,8 @@ void deinit() noexcept {
     ::WSACleanup();
 }
 
+// Nothing to recover: the dump is written in-process from the exception filter
+// and the callback fires there, while the process is still alive.
+void minidumpSweep() noexcept {}
+
 }  // namespace ap::plat

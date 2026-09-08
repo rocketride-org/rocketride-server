@@ -35,13 +35,13 @@
 
 import React, { useCallback, useMemo, useRef, useEffect, useState } from 'react';
 import type { CSSProperties } from 'react';
-import type { ShellAppProps } from 'shell-ui';
-import type { IVirtualFileSystem } from 'shared/modules/explorer/types';
-import { commonStyles } from 'shared/themes/styles';
-import { useShellConnection, useAuthUser, useWorkspace, DocTabs, DocSplitLayout } from 'shell-ui';
-import type { Documents } from 'shell-ui';
-import { ChatView, useChatMessages } from 'shared';
-import type { ChatMessage } from 'shared';
+import type { ShellAppProps } from 'shell';
+import type { IVirtualFileSystem } from 'shell';
+import { commonStyles } from 'shell';
+import { useShellConnection, useAuthUser, useWorkspace, DocTabs, DocSplitLayout, AppLayout } from 'shell';
+import type { Documents } from 'shell';
+import { ChatView, useChatMessages } from 'shell';
+import type { ChatMessage } from 'shell';
 import { createDocs, destroyDocs, getDocs } from './docs';
 import { loadChat, saveChat, listChatDir, renameChat, deleteChat } from './chatStore';
 import pipeline from './aparavi.pipe';
@@ -185,8 +185,18 @@ const AparaviApp: React.FC<ShellAppProps> = () => {
 			});
 	}, [isConnected, client, identity]);
 
-	if (!ready) return <div style={styles.welcome}>Initialising...</div>;
-	return <AparaviAppReady docs={getDocs()!} pipelineToken={pipelineToken} />;
+	// Sidebar node keyed on readiness: the docs subscription binds on mount,
+	// so remount the sidebar when Documents appears.
+	const sidebar = useMemo(() => <AparaviSidebar key={ready ? 'docs' : 'init'} />, [ready]);
+
+	// Two-column app: the chat-file Explorer sidebar mounts once Documents is
+	// ready (it shares the singleton with the editor surface).
+	if (!ready) return <AppLayout sidebar={sidebar} showStatus><div style={styles.welcome}>Initialising...</div></AppLayout>;
+	return (
+		<AppLayout sidebar={sidebar} showStatus>
+			<AparaviAppReady docs={getDocs()!} pipelineToken={pipelineToken} />
+		</AppLayout>
+	);
 };
 
 // =============================================================================
@@ -227,10 +237,6 @@ const AparaviAppReady: React.FC<{
 
 	return (
 		<div style={styles.container}>
-			{/* Register the chat-file Explorer into the shell sidebar frame.
-			    Renders null; mounted here so it shares the ready Documents
-			    singleton (active-file highlight, file actions). */}
-			<AparaviSidebar />
 			<DocSplitLayout
 				docs={docs}
 				renderPane={(groupId: string) => {

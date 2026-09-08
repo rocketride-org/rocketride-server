@@ -60,10 +60,10 @@ The shell mounts two components from your app:
 
 ## Getting Started
 
-There are two ways to build a shell-ui app:
+There are two ways to build a shell app:
 
-1. **Standalone**: your own repo, `npm install rocketride`, deploy to any shell-ui host
-2. **Monorepo**: inside the `saas` workspace, using `shell-ui` and `shared` directly
+1. **Standalone**: your own repo, `npm install rocketride`, deploy to any shell host
+2. **Monorepo**: inside the `saas` workspace, using `shell` and `shared` directly
 
 Both produce the same output: a Module Federation remote with an `AppDescriptor` export. The app code is identical, only the project setup differs.
 
@@ -229,9 +229,9 @@ Deploy the contents of `./dist/` to your hosting provider. The shell loads your 
 
 | | Standalone | Monorepo |
 |---|---|---|
-| **Import types from** | `rocketride/app-sdk` | `shell-ui` |
-| **Install** | `npm install rocketride` | `shell-ui: workspace:~` |
-| **MF shared** | `rocketride/app-sdk` | `shell-ui` + `shared` |
+| **Import types from** | `rocketride/app-sdk` | `shell` (surface) + `rocketride` (SDK) |
+| **Install** | `npm install rocketride` | workspace link (`shell` override) + `rocketride: workspace:*` |
+| **MF shared** | `rocketride/app-sdk` | `shell` + `rocketride` |
 | **Build** | `npx rsbuild build` | `./builder my-app:build` |
 | **Deploy** | Upload `dist/` to CDN | Builder copies to server static |
 
@@ -271,19 +271,27 @@ apps/my-app/
     "categories": ["tools"]
   },
   "dependencies": {
-    "@module-federation/rsbuild-plugin": "^0.9.0",
-    "shell-ui": "workspace:~",
+    "@module-federation/rsbuild-plugin": "^2.5.1",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
-    "shared": "workspace:~"
+    "rocketride": "workspace:*",
+    "shell": "file:../../.rocketride/shell/shell.tgz"
   }
 }
 ```
 
-#### 3. AppDescriptor: import from `shell-ui`
+The `shell` spec stays in the portable `file:` form so the app can be lifted
+into its own repo unchanged; inside the monorepo, the workspace root's
+`overrides: { shell: 'workspace:*' }` resolves it to the in-tree platform
+package instead — a plain link, so fresh clones and CI install without any
+prebuilt artifact. `rocketride` is the SDK door: import protocol classes,
+enums, constants, and API types from it. Client *instances* still come only
+from `useShellConnection()` — the shell owns the connection.
+
+#### 3. AppDescriptor: import from `shell`
 
 ```typescript
-import type { AppDescriptor } from 'shell-ui';
+import type { AppDescriptor } from 'shell';
 import MyApp from './MyApp';
 import MySidebar from './MySidebar';
 
@@ -303,8 +311,8 @@ export default MY_APP;
 #### 4. App and Sidebar: same as standalone
 
 ```typescript
-// MyApp.tsx — import from 'shell-ui' instead of 'rocketride/app-sdk'
-import type { ShellAppProps } from 'shell-ui';
+// MyApp.tsx — import from 'shell' instead of 'rocketride/app-sdk'
+import type { ShellAppProps } from 'shell';
 ```
 
 #### 5. Add to workspace and build
@@ -351,7 +359,7 @@ module.exports = {
 
 #### Monorepo-only: rsbuild.config.ts
 
-The monorepo version adds `shared` to the MF config and uses path aliases:
+The monorepo version consumes `shell` and `rocketride` as host-provided MF singletons (`import: false` — nothing bundled; the `shared` library is static and needs no share entry):
 
 ```typescript
 import fs from 'node:fs';
@@ -374,17 +382,13 @@ export default defineConfig(() => ({
       shared: {
         react:       { singleton: true, eager: true, requiredVersion: '^18.2.0' },
         'react-dom': { singleton: true, eager: true, requiredVersion: '^18.2.0' },
-        'shell-ui':  { singleton: true, requiredVersion: false },
-        'shared':    { singleton: true, requiredVersion: false },
+        // import: false — the host always provides these at runtime, so no
+        // fallback copy is bundled into the remote.
+        'shell':      { singleton: true, requiredVersion: false, import: false },
+        'rocketride': { singleton: true, requiredVersion: false, import: false },
       },
     }),
   ],
-  resolve: {
-    alias: {
-      shared: path.resolve(__dirname, '../../rocketride-server/packages/shared-ui/src'),
-      'shell-ui': path.resolve(__dirname, '../../rocketride-server/apps/shell-ui/src/index.ts'),
-    },
-  },
   server: { port: 3014 },
   source: { entry: { index: './src/index.ts' } },
   output: {
@@ -506,7 +510,7 @@ interface ShellBrandingConfig {
 3. Manifest `icon` URL (from `package.json`)
 4. 2-letter monogram fallback
 
-Pre-built theme-aware SVGs are available in `shared-ui/assets/rocketride/`:
+Pre-built theme-aware SVGs are available in `shared/assets/rocketride/`:
 - `rocketride-dark.svg`: light body (`#E0DDF0`) for dark backgrounds
 - `rocketride-light.svg`: dark body (`#1E1A34`) for light backgrounds
 - `rocketride.svg`: `currentColor` body, CSS-controlled
@@ -555,10 +559,10 @@ If your app omits `components.Sidebar`, the sidebar zone is hidden entirely, you
 
 ## Shell Hooks & APIs
 
-Import everything from `'shell-ui'`:
+Import everything from `'shell'`:
 
 ```typescript
-import { useShellConnection, useShellApiConfig, useWorkspace, connectionManager } from 'shell-ui';
+import { useShellConnection, useShellApiConfig, useWorkspace, connectionManager } from 'shell';
 ```
 
 ### Connection
@@ -636,7 +640,7 @@ A typed, module-level event bus singleton. Works from React components, hooks, p
 ### Basic usage
 
 ```typescript
-import { connectionManager } from 'shell-ui';
+import { connectionManager } from 'shell';
 
 // Emit an event
 connectionManager.emit('shell:loginRequest', { appId: 'rocketride.myApp' });
@@ -688,7 +692,7 @@ useEffect(() => {
 Add custom events via TypeScript module augmentation:
 
 ```typescript
-declare module 'shell-ui' {
+declare module 'shell' {
   interface ShellEventMap {
     'myapp:dataUpdated': { recordId: string; timestamp: number };
     'myapp:exportComplete': { fileUrl: string };
@@ -704,7 +708,7 @@ connectionManager.emit('myapp:dataUpdated', { recordId: '123', timestamp: Date.n
 All events are automatically captured in a circular buffer (500 entries) visible in the Debug Panel (ALT+D).
 
 ```typescript
-import { getDebugLog, clearDebugLog, onAny } from 'shell-ui';
+import { getDebugLog, clearDebugLog, onAny } from 'shell';
 
 // Get all captured events
 const log = getDebugLog(); // DebugLogEntry[]
@@ -737,8 +741,8 @@ Create a `Documents` instance in your App component, passing an `IVirtualFileSys
 
 ```typescript
 // src/docs.ts — shared instance for your app
-import { Documents } from 'shell-ui';  // or 'rocketride/app-sdk'
-import type { IVirtualFileSystem } from 'shell-ui';
+import { Documents } from 'shell';  // or 'rocketride/app-sdk'
+import type { IVirtualFileSystem } from 'shell';
 
 let _docs: Documents | null = null;
 
@@ -936,8 +940,8 @@ A generic file tree panel (like VS Code's EXPLORER). Renders a hierarchical file
 - Keyboard navigation
 
 ```typescript
-import { DocExplorer } from 'shell-ui';
-import type { DocExplorerConfig, DocEntry, IVirtualFileSystem } from 'shell-ui';
+import { DocExplorer } from 'shell';
+import type { DocExplorerConfig, DocEntry, IVirtualFileSystem } from 'shell';
 
 const config: DocExplorerConfig = {
   title: 'My Files',
@@ -977,7 +981,7 @@ const config: DocExplorerConfig = {
 A tab bar UI for a single editor group. Takes a `Documents` instance as a prop.
 
 ```typescript
-import { DocTabs } from 'shell-ui';
+import { DocTabs } from 'shell';
 import { getDocs } from './docs';
 
 <DocTabs
@@ -1036,7 +1040,7 @@ When the shell loads your AppDescriptor, all components referenced in `component
 Use `useAppComponent()`, it lazy-loads the target app's descriptor if needed and returns the component once available:
 
 ```typescript
-import { useAppComponent } from 'shell-ui';  // or 'rocketride/app-sdk'
+import { useAppComponent } from 'shell';  // or 'rocketride/app-sdk'
 
 const MyComponent: React.FC = () => {
   const Chart = useAppComponent('rocketride.otherApp', 'SpecialChart');
@@ -1096,14 +1100,14 @@ See the [Getting Started](#getting-started) section for complete `rsbuild.config
 Key points:
 - The MF container `name` is derived automatically from `appManifest.id` in `package.json`
 - Always expose `./AppDescriptor` as the single MF entry point
-- Standalone apps share `rocketride/app-sdk`; monorepo apps share `shell-ui` + `shared`
+- Standalone apps share `rocketride/app-sdk`; monorepo apps share `shell` + `rocketride`
 - React and react-dom must be shared singletons to avoid duplicate instances
 
 ---
 
 ## Reference: Complete API Surface
 
-**Monorepo apps** import from `'shell-ui'`. **Standalone apps** import from `'rocketride/app-sdk'`.
+**Monorepo apps** import from `'shell'`. **Standalone apps** import from `'rocketride/app-sdk'`.
 The API surface is identical: same types, same hooks, same functions.
 
 ### Types

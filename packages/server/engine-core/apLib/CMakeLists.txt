@@ -51,11 +51,12 @@ if(ROCKETRIDE_PLAT_LIN)
     # Build libbacktrace from source (the libbacktrace vcpkg doesn't work on Linux)
     include(../cmake/AddLibBacktrace.cmake)
     target_link_libraries(apLib PUBLIC LibBacktraceTarget)
+endif()
 
-    find_package(unofficial-breakpad CONFIG REQUIRED)
-    target_link_libraries(apLib PRIVATE
-        unofficial::breakpad::libbreakpad
-        unofficial::breakpad::libbreakpad_client)
+if(ROCKETRIDE_PLAT_LIN OR ROCKETRIDE_PLAT_MAC)
+    # Link the prebuilt static Crashpad from vcpkg (no Crashpad source built in-tree).
+    find_package(crashpad CONFIG REQUIRED)
+    target_link_libraries(apLib PRIVATE crashpad::crashpad)
 endif()
 
 if(ROCKETRIDE_PLAT_MAC)
@@ -76,6 +77,9 @@ target_include_directories(apLib PUBLIC "${CMAKE_CURRENT_LIST_DIR}/../")
 if(NOT TARGET apLib.lib)
     # Process its precompiled headers (only if engLib is not prebuilt)
     rocketride_pch(apLib
-        UNITY_EXCLUDES "${CMAKE_CURRENT_LIST_DIR}/compress/FastPFor.cpp"
+        # Amalgamated sources that leak preprocessor macros (jsonCpp: snprintf).
+        UNITY_EXCLUDES
+            "${CMAKE_CURRENT_LIST_DIR}/compress/FastPFor.cpp"
+            "${CMAKE_CURRENT_LIST_DIR}/json/jsonCpp.cpp"
         PCH "${CMAKE_CURRENT_LIST_DIR}/headers.h")
 endif()

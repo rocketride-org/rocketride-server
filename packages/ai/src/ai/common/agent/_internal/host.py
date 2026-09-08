@@ -13,11 +13,21 @@ plan in plans/elegant-cooking-finch.md for the architectural rationale.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 from rocketlib import ToolDescriptor
 from rocketlib.types import IInvokeOp, IInvokeTool, IInvokeMemory
+
+
+class ToolNotFoundError(ValueError):
+    """The agent asked for a tool that is not in the catalog, even after the
+    owning tool node was re-queried.
+
+    A ``ValueError`` subclass so existing ``except ValueError`` handling still
+    applies, but distinguishable so drivers and guards can treat "this tool does
+    not exist" differently from a tool that exists and failed (issue #1402).
+    """
 
 
 class AgentHostServices:
@@ -62,7 +72,11 @@ class AgentHostServices:
 
             Discovers all tools on every connected tool node once at
             construction.  Drivers read the prepared catalog as
-            ``self.list`` (a flat ``List[ToolDescriptor]``).
+            ``self.list`` (a flat ``List[ToolDescriptor]``).  A lookup for a
+            tool the catalog does not know re-queries the owning node once
+            (the node may have grown the tool since discovery — see
+            ``_lookup``), so a stale catalog does not silently become a
+            "not found" the model narrates around.
             """
             self._invoker = invoker
             self._tool_list: Dict[str, Any] = {}
@@ -70,38 +84,78 @@ class AgentHostServices:
 
             # For every tool node
             for tool_node in self._tool_nodes:
-                # Get this nodes tool list
-                param = IInvokeTool.Query()
-                try:
-                    self._invoker.instance.invoke(param, component_id=tool_node)
-                except Exception:
-                    # We expect this to throw because no node will
-                    # return success — but param.tools should be populated with the tool descriptors from this node
-                    pass
-
-                # Add the tools, namespaced by node id so that two nodes
-                # exposing the same tool name (e.g. two postgres instances)
-                # never collide.
-                for tool in param.tools:
-                    # Get the actual tool name id
-                    tool_id = tool.get('name')
-
-                    # Create a unique identifier for it
-                    namespaced = f'{tool_node}.{tool_id}'
-
-                    # Build a descriptor for the tool, namespaced by node id
-                    descriptor = {**tool, 'name': namespaced}
-
-                    # And save it to the tool list
-                    self._tool_list[namespaced] = {
-                        'node_id': tool_node,
-                        'tool_id': tool_id,
-                        'tool': descriptor,
-                    }
+                self._tool_list.update(self._discover(tool_node))
 
             # Prepared flat descriptor list, ready for direct reference
             # via `context.tools.list` from any driver.
             self.list: List[ToolDescriptor] = [entry['tool'] for entry in self._tool_list.values()]
+
+        def _discover(self, tool_node: str) -> Dict[str, Any]:
+            """Query one tool node and return its catalog entries, namespaced by node id."""
+            # Get this nodes tool list
+            param = IInvokeTool.Query()
+            try:
+                self._invoker.instance.invoke(param, component_id=tool_node)
+            except Exception:
+                # We expect this to throw because no node will
+                # return success — but param.tools should be populated with the tool descriptors from this node
+                pass
+
+            # Add the tools, namespaced by node id so that two nodes
+            # exposing the same tool name (e.g. two postgres instances)
+            # never collide.
+            entries: Dict[str, Any] = {}
+            for tool in param.tools:
+                # Get the actual tool name id
+                tool_id = tool.get('name')
+
+                # Create a unique identifier for it
+                namespaced = f'{tool_node}.{tool_id}'
+
+                # Build a descriptor for the tool, namespaced by node id
+                descriptor = {**tool, 'name': namespaced}
+
+                # And save it to the tool list
+                entries[namespaced] = {
+                    'node_id': tool_node,
+                    'tool_id': tool_id,
+                    'tool': descriptor,
+                }
+            return entries
+
+        def _refresh_node(self, tool_node: str) -> None:
+            """Re-discover one node and swap its entries into the catalog atomically."""
+            fresh = self._discover(tool_node)
+            merged = {name: entry for name, entry in self._tool_list.items() if entry['node_id'] != tool_node}
+            merged.update(fresh)
+            # Plain attribute assignment so a concurrent reader iterating the
+            # previous dict/list never sees a half-updated catalog.
+            self._tool_list = merged
+            self.list = [entry['tool'] for entry in merged.values()]
+
+        def _lookup(self, tool_name: str) -> Dict[str, Any]:
+            """Resolve a namespaced tool name to its catalog entry.
+
+            On a miss, the owning node (the ``<node_id>.`` prefix) is
+            re-queried once; if the tool is still unknown, raise
+            ``ToolNotFoundError`` rather than a bare ``ValueError``.
+            """
+            entry = self._tool_list.get(tool_name)
+            if entry is not None:
+                return entry
+            # Node ids may themselves contain dots, so the owning node is the
+            # longest known id the name is prefixed by — not the first segment.
+            node_id = max(
+                (node for node in self._tool_nodes if tool_name.startswith(f'{node}.')),
+                key=len,
+                default=None,
+            )
+            if node_id is not None:
+                self._refresh_node(node_id)
+                entry = self._tool_list.get(tool_name)
+                if entry is not None:
+                    return entry
+            raise ToolNotFoundError(f'Tool {tool_name} not found in tool catalog (owning node re-queried)')
 
         def get(self, tool_name: str) -> Any:
             """
@@ -110,12 +164,8 @@ class AgentHostServices:
             Returns:
                 A specification of the given tool
             """
-            # Make sure this is a valid tool
-            if tool_name not in self._tool_list:
-                raise ValueError(f'Tool {tool_name} not found in tool catalog')
-
-            # Return the specific tool
-            return self._tool_list[tool_name]['tool']
+            # Make sure this is a valid tool (re-queries the owning node on a miss)
+            return self._lookup(tool_name)['tool']
 
         def query(self) -> Any:
             """
@@ -145,13 +195,11 @@ class AgentHostServices:
                 tool_name: Tool name as published by discovery.
                 input: Tool input payload.
             """
-            # Make sure this is a valid tool
-            if tool_name not in self._tool_list:
-                raise ValueError(f'Tool {tool_name} not found in tool catalog')
+            # Make sure this is a valid tool (re-queries the owning node on a miss)
+            entry = self._lookup(tool_name)
 
             # Build the invoke using the original (un-prefixed) name so the
             # provider's _owns_tool() match works.
-            entry = self._tool_list[tool_name]
             param = IInvokeTool.Validate(tool_name=entry['tool_id'], input=input)
 
             # Call the tool to validate - throws on error
@@ -170,13 +218,11 @@ class AgentHostServices:
             Returns:
                 The tool output (extracted from ``param.output``).
             """
-            # Make sure this is a valid tool
-            if tool_name not in self._tool_list:
-                raise ValueError(f'Tool {tool_name} not found in tool catalog')
+            # Make sure this is a valid tool (re-queries the owning node on a miss)
+            entry = self._lookup(tool_name)
 
             # Build the invoke using the original (un-prefixed) name so the
             # provider's _owns_tool() match works.
-            entry = self._tool_list[tool_name]
             param = IInvokeTool.Invoke(tool_name=entry['tool_id'], input=args)
 
             # Invoke it
@@ -270,6 +316,17 @@ class AgentContext:
             ``'langchain'``, ``'wave'``).  Stamped from ``self.FRAMEWORK``
             at construction time.
         started_at: ISO-8601 timestamp of when the run started.
+        invoked_tools: Names of every host tool invoked through
+            ``AgentBase.call_tool`` during this run.  The list is the ONE
+            mutable field on this otherwise-frozen context (frozen forbids
+            reassigning the attribute, but the list contents may change);
+            ``call_tool`` appends to it and ``run_agent`` reads its length to
+            enforce the optional ``require_tool_call`` guard.  Appending is
+            thread-safe under the GIL, which matters because some drivers
+            (e.g. the wave executor) invoke tools from parallel threads.
+            Sub-agent drivers that build their own ``AgentContext`` (crewai
+            manager, deepagent) pass the parent's list here so delegated tool
+            calls count toward the parent run's guard.
     """
 
     invoker: Any
@@ -284,3 +341,9 @@ class AgentContext:
     pipe_id: int
     framework: str
     started_at: str
+
+    # Mutable run-scoped tally of tool invocations (see docstring).  Trailing
+    # defaulted field so all existing keyword constructions stay valid;
+    # compare=False keeps it out of the generated __eq__/__hash__ so the frozen
+    # context stays hashable (a mutable list would otherwise make __hash__ raise).
+    invoked_tools: List[str] = field(default_factory=list, compare=False)

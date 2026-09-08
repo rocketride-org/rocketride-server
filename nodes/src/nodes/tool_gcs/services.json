@@ -1,0 +1,72 @@
+{
+	"title": "Google Cloud Storage",
+	"protocol": "tool_gcs://",
+	"classType": ["tool"],
+	"capabilities": ["noremote", "invoke"],
+	"register": "filter",
+	"node": "python",
+	"path": "nodes.tool_gcs",
+	"prefix": "gcs",
+	"description": ["A tool component that interacts with Google Cloud Storage buckets."],
+	"icon": "tool_gcs.svg",
+	"documentation": "https://docs.rocketride.org",
+	"invoke": {},
+	"lanes": {},
+	"preconfig": {
+		"default": "default",
+		"profiles": {
+			"default": {
+				"maxDownloadBytes": 52428800
+			}
+		}
+	},
+	"fields": {
+		"gcs.bucketName": {
+			"type": "string",
+			"title": "Bucket Name",
+			"description": "The Google Cloud Storage bucket name."
+		},
+		"gcs.prefix": {
+			"type": "string",
+			"title": "Path Prefix",
+			"description": "Optional path prefix inside the bucket."
+		},
+		"gcs.maxDownloadBytes": {
+			"type": "integer",
+			"title": "Max Download Bytes",
+			"default": 52428800,
+			"minimum": 1,
+			"description": "Reject downloads larger than this many bytes (default 50 MiB). Protects server disk from oversized objects."
+		},
+		"gcs.default": {
+			"object": "default",
+			"properties": [
+				"gcp.authType",
+				"gcp.serviceAccountKey",
+				"gcp.projectId",
+				"gcs.bucketName",
+				"gcs.prefix",
+				"gcs.maxDownloadBytes"
+			]
+		},
+		"gcs.profile": {
+			"hidden": true,
+			"type": "string",
+			"default": "default",
+			"enum": [["default", "Default"]],
+			"conditional": [
+				{
+					"value": "default",
+					"properties": ["gcs.default"]
+				}
+			]
+		}
+	},
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Google Cloud Storage",
+			"properties": ["gcs.profile"]
+		}
+	]
+}

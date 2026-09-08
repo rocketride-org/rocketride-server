@@ -1,0 +1,163 @@
+{
+	//
+	// Required:
+	//		The displayable name of this node
+	//
+	"title": "Normalize Facts",
+	//
+	// Required:
+	//		The protocol is the endpoint protocol
+	//
+	"protocol": "normalize_facts://",
+	//
+	// Required:
+	//		Class type of the node - what it does
+	//
+	"classType": ["text"],
+	//
+	// Required:
+	//		Capabilities are flags that change the behavior of the underlying
+	//		engine. "experimental" marks this node as not yet production-ready.
+	//
+	"capabilities": ["experimental"],
+	//
+	// Optional:
+	//		Register is either filter, endpoint or ignored if not specified
+	//
+	"register": "filter",
+	//
+	// Optional:
+	//		The node is the actual physical node to instantiate
+	//
+	"node": "python",
+	//
+	// Optional:
+	//		The path is the executable/script code
+	//
+	"path": "nodes.normalize_facts",
+	//
+	// Required:
+	//		The prefix map when added/removed when converting URLs <=> paths
+	//
+	"prefix": "normalize_facts",
+	//
+	// Optional:
+	//		Description of this driver
+	//
+	"description": ["A deterministic fact normalizer for the audit-grade financial extraction suite. ", "Reads facts on the <code>answers</code> lane and cleans them with pure Python (no LLM): ", "it parses numbers and signs (parentheses, trailing/unicode minus, thousands separators), ", "detects and <b>tags</b> currency and scale (never converting, never multiplying the value), ", "maps free-text labels to standard metric names, and de-duplicates identical facts.</br>", "</br>", "The normalization is <b>non-destructive</b>: the raw label and value are kept, a ", "<code>normalized</code> block is added, and a <code>provenance</code> entry records how each ", "field was derived. Currency is tagged, not converted — conversion is the separate ", "<code>currency_convert_explicit</code> node. Records that are not fact objects pass through unchanged."],
+	//
+	// Optional:
+	//		The icon is the icon to display in the UI for this node
+	//
+	"icon": "util-text.svg",
+	"documentation": "https://docs.rocketride.org",
+	//
+	//	Optional:
+	//		As a pipe component, define what this pipe component takes
+	//		and what it produces
+	//
+	"lanes": {
+		"answers": ["answers"]
+	},
+	//
+	//	Note: no "test" block. The dynamic node-test harness injects lane input
+	//	via data_conn, which builds answers with `Answer.model_validate_json`.
+	//	The Answer schema's field validator forbids populating `answer` at
+	//	construction, so a webhook-injected `answers` input is always empty —
+	//	an engine-level dynamic test for an answers-consuming node cannot deliver
+	//	a populated fact. Normalization logic is covered by the unit tests in
+	//	nodes/test/test_normalize_facts.py and the contract suite.
+	//
+	//	Optional:
+	//		Profile section - configuration defaults used by the driver.
+	//		A single "default" profile supplies the base values; individual
+	//		fields below override them from the UI.
+	//
+	"preconfig": {
+		"default": "default",
+		"profiles": {
+			"default": {
+				"title": "Deterministic financial fact normalization",
+				"label_field": "label",
+				"value_field": "value",
+				"default_currency": "",
+				"decimal_format": "auto",
+				"label_to_metric": {}
+			}
+		}
+	},
+	//
+	// Optional:
+	//		Local field definitions
+	//
+	"fields": {
+		"normalize_facts.label_field": {
+			"type": "string",
+			"title": "Label field",
+			"description": "The fact field holding the free-text metric label (mapped to a standard metric name).",
+			"default": "label",
+			"minLength": 1,
+			"maxLength": 128
+		},
+		"normalize_facts.value_field": {
+			"type": "string",
+			"title": "Value field",
+			"description": "The fact field holding the raw numeric value to parse.",
+			"default": "value",
+			"minLength": 1,
+			"maxLength": 128
+		},
+		"normalize_facts.default_currency": {
+			"type": "string",
+			"title": "Default currency",
+			"description": "3-letter ISO code to tag when none is detected in the label or value (anything else is ignored with a warning). Leave empty to keep facts untagged.",
+			"default": "",
+			"maxLength": 16
+		},
+		"normalize_facts.decimal_format": {
+			"type": "string",
+			"title": "Decimal format",
+			"description": "Number format. 'auto'/'us': comma = thousands separator, dot = decimal point. 'eu': dot = thousands separator, comma = decimal point.",
+			"default": "auto",
+			"enum": [
+				["auto", "Auto (US / plain)"],
+				["us", "US (1,234.56)"],
+				["eu", "EU (1.234,56)"]
+			]
+		},
+		"normalize_facts.label_to_metric": {
+			"type": "object",
+			"title": "Label→metric overrides",
+			"description": "JSON map of {synonym: metric} merged over the built-in mapping (user entries win). Case-insensitive.",
+			"default": {}
+		},
+		"normalize_facts.default": {
+			"object": "default",
+			"properties": ["normalize_facts.label_field", "normalize_facts.value_field", "normalize_facts.default_currency", "normalize_facts.decimal_format", "normalize_facts.label_to_metric"]
+		},
+		"normalize_facts.profile": {
+			"title": "Normalization",
+			"description": "Deterministic fact normalization configuration",
+			"type": "string",
+			"default": "default",
+			"enum": ["*>preconfig.profiles.*.title"],
+			"conditional": [
+				{
+					"value": "default",
+					"properties": ["normalize_facts.default"]
+				}
+			]
+		}
+	},
+	//
+	// Required:
+	//		Defines the fields (shape) of the service
+	//
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Normalize Facts",
+			"properties": ["normalize_facts.profile"]
+		}
+	]
+}

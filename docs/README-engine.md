@@ -228,7 +228,7 @@ Set with `--monitor TYPE`.
 ## Directory Structure
 
 ```text
-apps/engine/
+packages/engine/
 ├── src/
 │   ├── main.cpp                    # Entry point
 │   ├── CMakeLists.txt              # Build config
@@ -287,7 +287,7 @@ When extending the engine with Python (custom nodes, filter callbacks), Pydantic
 - **OpenSSL** -- cryptography
 - **Python 3.10** -- optional, for Python integration
 - **Java** -- optional, for Tika document processing
-- **vcpkg packages** -- replxx, tinyxml2, breakpad, etc.
+- **vcpkg packages** -- replxx, tinyxml2, crashpad, etc.
 
 ### Tika Media Parsing: External Tool Requirements
 
@@ -322,6 +322,59 @@ The external parsers shell out via the Unix `env` shim; if `env` or a required t
   </parsers>
 </properties>
 ```
+
+---
+
+## Debugging crash dumps
+
+The engine uses Crashpad; a crash writes a `.dmp` minidump (swept into the
+crash-dump location). To turn one into a stack trace:
+
+- **LLDB** (reads the minidump directly, auto-relocates the PIE):
+  ```
+  DEBUGINFOD_URLS= lldb --batch \
+    -o "settings set symbols.enable-external-lookup false" \
+    -o "target create <binary> --core crash.dmp" \
+    -o bt -o quit
+  ```
+  Clear `DEBUGINFOD_URLS` and disable external lookup, or LLDB blocks on a
+  network symbol fetch per module (Ubuntu sets it by default) and looks hung.
+  The target binary's own DWARF is inline, so its frames still symbolize.
+- **GDB** (needs `minidump-2-core` + the module base, since minidumps carry no auxv):
+  ```
+  minidump-2-core crash.dmp > crash.core
+  gdb --core crash.core -ex "add-symbol-file <binary> -o <base>" -ex "bt 7"
+  ```
+- **No binary, just the shipped symbols**: `minidump-stackwalk --human --symbols-path dist/server/symbols crash.dmp`
+
+### Worked example (`aptest`)
+
+`./builder test server` sweeps each crash dump into the crash-dump location as
+`aptest.<version>.<host>.<UTC-timestamp>.<pid>.dmp`. Point LLDB at the test binary
+and that dump:
+
+```
+DEBUGINFOD_URLS= lldb --batch \
+  -o "settings set symbols.enable-external-lookup false" \
+  -o "target create dist/server/aptest --core /tmp/aptest.3.3.0.9999.tiger.20260729T163801Z.1642339.dmp" \
+  -o bt -o quit
+```
+
+```
+Core file '/tmp/aptest.3.3.0.9999.tiger.20260729T163801Z.1642339.dmp' (x86_64) was loaded.
+* thread #1, stop reason = signal SIGSEGV
+  * frame #0: 0x00006116339340be aptest`ap::application::TestMain() at testMain.ipp:106:16
+    frame #1: 0x000061163393364a aptest`main [inlined] ap::application::Main() at main.cpp:31:27
+    ...
+    frame #9: 0x00006116334b7715 aptest`_start + 37
+```
+
+Frame #0 lands on the deliberate null-deref the crash-child test performs, which
+confirms the full loop end to end: `crashpad_handler` wrote the dump, the next run
+swept it into place, and LLDB symbolized it back to the exact source line.
+
+Full details (reading the base, symbol stores, Windows/WinDbg) are in
+[crash-reporting.md](../packages/server/docs/crash-reporting.md).
 
 ---
 

@@ -2,12 +2,13 @@
 Clients module for serving downloadable client packages.
 
 This module provides HTTP endpoints to download client SDKs (Python, TypeScript, and VSCode)
-from the build/Engine/clients directory.
+from the build/Engine/clients directory, and the installable shell platform package from
+the static clients directory.
 """
 
 from typing import Any, Dict
 from ai.web import WebServer
-from .clients import client_python_file, client_typescript, client_vscode
+from .clients import client_python_file, client_shell, client_typescript, client_vscode
 
 
 def initModule(server: WebServer, config: Dict[str, Any]):
@@ -28,6 +29,7 @@ def initModule(server: WebServer, config: Dict[str, Any]):
         - GET /client/python/{filename}: Serves Python wheel file (use "latest" for latest version)
         - GET /client/typescript: Serves latest TypeScript tarball
         - GET /client/vscode: Serves latest VSCode extension file
+        - GET /client/shell: Serves the installable shell platform package (shell.tgz)
 
     Note:
         These routes are marked as public since they serve downloadable packages
@@ -53,6 +55,14 @@ def initModule(server: WebServer, config: Dict[str, Any]):
     server.add_route(
         path='/client/vscode',
         routeHandler=client_vscode,
+        methods=['GET'],
+        public=True,
+    )
+
+    # Register the shell platform package route handler
+    server.add_route(
+        path='/client/shell',
+        routeHandler=client_shell,
         methods=['GET'],
         public=True,
     )

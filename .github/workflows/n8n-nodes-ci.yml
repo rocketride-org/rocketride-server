@@ -1,0 +1,101 @@
+# CI for the standalone n8n community node package (packages/n8n-nodes).
+# This package is intentionally NOT part of the pnpm workspace: it ships as an
+# independently-versioned, npm-published, n8n-VERIFIED community node, whose
+# toolchain (@n8n/node-cli) and eslint/prettier config must stay self-contained
+# and byte-identical to the verified defaults. So it builds/lints/tests with its
+# own npm toolchain here, separate from the monorepo's pnpm pipeline.
+name: n8n-nodes CI
+
+on:
+  pull_request:
+    paths:
+      - 'packages/n8n-nodes/**'
+      - '.github/workflows/n8n-nodes-ci.yml'
+      - '.github/workflows/n8n-nodes-release.yml'
+      - '.gitignore'
+      - '.prettierignore'
+      - 'eslint.config.mjs'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+  push:
+    branches: [develop, main]
+    paths:
+      - 'packages/n8n-nodes/**'
+      - '.github/workflows/n8n-nodes-ci.yml'
+      - '.github/workflows/n8n-nodes-release.yml'
+      - '.gitignore'
+      - '.prettierignore'
+      - 'eslint.config.mjs'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-lint-test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: packages/n8n-nodes
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+
+      - name: Install (npm ci against the committed lockfile — isolated from the pnpm workspace)
+        run: |
+          npm install -g npm@11.19.0
+          npm ci --no-audit --no-fund
+
+      - name: Build
+        run: npm run build
+
+      - name: Lint (n8n verified ruleset)
+        run: npm run lint
+
+      - name: Test
+        run: npm test
+
+      - name: Enforce verified-node invariants
+        run: |
+          node -e '
+            const assert = require("node:assert/strict");
+            const fs = require("node:fs");
+            const codexFiles = [
+              "nodes/RocketRide/RocketRide.node.json",
+              "nodes/RocketRideInboundTrigger/RocketRideInboundTrigger.node.json",
+            ];
+            for (const sourcePath of codexFiles) {
+              const source = JSON.parse(fs.readFileSync(sourcePath, "utf8"));
+              const built = JSON.parse(fs.readFileSync("dist/" + sourcePath, "utf8"));
+              assert.deepStrictEqual(built, source, "Built codex differs from " + sourcePath);
+            }
+            console.log("Built codex metadata matches source ✓");
+          '
+          DEPS=$(node -p "Object.keys(require('./package.json').dependencies || {}).length")
+          if [ "$DEPS" != "0" ]; then
+            echo "::error::Verified n8n nodes must have ZERO runtime dependencies (found $DEPS)."
+            exit 1
+          fi
+          echo "Zero runtime dependencies ✓"
+          # Enforce the packlist: only dist/**, README.md, LICENSE, package.json may ship.
+          npm pack --dry-run --json > /tmp/n8n-pack.json
+          node -e '
+            const files = require("/tmp/n8n-pack.json")[0].files.map((f) => f.path);
+            const ok = (p) => p.startsWith("dist/") || ["README.md", "LICENSE", "package.json"].includes(p);
+            const extra = files.filter((p) => !ok(p));
+            if (extra.length) {
+              console.error("::error::Unexpected files in tarball: " + extra.join(", "));
+              process.exit(1);
+            }
+            console.log("Tarball OK (" + files.length + " files): dist + README + LICENSE only");
+          '

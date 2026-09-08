@@ -838,6 +838,16 @@ def processArguments(args: List[str]) -> None:
     """Process engine command-line arguments."""
     ...
 
+def getTask() -> Optional[Dict[str, Any]]:
+    """Return the complete task-file JSON of the task currently executing
+    in this process, or None when no task is running.
+
+    Trusted point-to-point task data (identity, storage anchor) for
+    subprocess python — published by the engine around the task's
+    begin/end window, never sourced from the environment.
+    """
+    ...
+
 def outputEndpointParameters(endpoint: IEndpointBase) -> None:
     """Log all configuration parameters of the given endpoint (debug helper)."""
     ...

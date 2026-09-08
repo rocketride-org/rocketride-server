@@ -48,15 +48,44 @@ import os
 import time
 from typing import TYPE_CHECKING, Dict, Any, List, Tuple
 from rocketride import EVENT_TYPE
-from rocketlib import getServiceDefinitions, getServiceDefinition, validatePipeline
+from rocketlib import getServiceDefinition, validatePipeline
+from ai.common.config import Config
 from ai.common.dap import DAPConn, TransportBase
 from ai.common.list_rows import paginate_rows
 from ai.account.models import resolve_task_permissions
 from ..pipeline import resolve_implied_source, resolve_pipeline_env
+from .. import services_catalog
+from .cmd_monitor import owner_key
 
 # Only import for type checking to avoid circular import errors
 if TYPE_CHECKING:
     from ..task_server import TaskServer
+
+
+# Component-level keys that are not node configuration. The engine validates and
+# consumes these itself, so a profile does not discard them and an author must not be
+# told to move them inside one.
+_STRUCTURAL_CONFIG_KEYS = frozenset({'profile', 'parameters', 'secureParameters', 'name'})
+
+
+def _service_profile_names(provider: str) -> frozenset:
+    """Return every profile name the service declares, or an empty set.
+
+    A config saved by an editor carries one sub-object per profile, so an unselected
+    profile's own block would otherwise read as a key the resolver threw away.
+
+    Args:
+        provider: Component provider, e.g. 'llm_openai'.
+
+    Returns:
+        The declared profile names. Empty when the service or its preconfig is
+        unavailable, which leaves the caller reporting the key rather than hiding it.
+    """
+    try:
+        service = getServiceDefinition(provider)
+        return frozenset((service or {}).get('preconfig', {}).get('profiles', {}) or {})
+    except Exception:
+        return frozenset()
 
 
 class MiscCommands(DAPConn):
@@ -103,9 +132,12 @@ class MiscCommands(DAPConn):
         """
         Handle DAP 'rrext_services' command to retrieve service definitions.
 
-        This method provides access to connector service definitions including
-        schemas, UI schemas, and other metadata. It can return either a single
-        service definition by name or all available service definitions.
+        Serves the cached service catalog (see ``services_catalog``): the
+        bulk call returns each service's SUMMARY — display fields plus the
+        deduplicated ``icons`` table (each summary's ``icon`` field is an
+        id into it) — which is everything a client needs to render the
+        canvas. The single-service call returns the FULL entry with the
+        configuration schema, fetched by the configure panel on demand.
 
         Args:
             request (Dict[str, Any]): DAP request containing:
@@ -114,16 +146,16 @@ class MiscCommands(DAPConn):
 
         Returns:
             Dict[str, Any]: DAP response containing:
-                - body: Service definition(s) as JSON object
-                    - If service specified: single service definition
-                    - If no service specified: all service definitions
+                - body: If service specified, that service's full entry
+                  (config schema included); otherwise
+                  ``{'services': {name: summary}, 'icons': {id: svg}, 'version': N}``.
 
         Raises:
             Exception: If the specified service is not found
 
         Usage Examples:
-        - Get all services: { "command": "rrext_services" }
-        - Get specific service: { "command": "rrext_services", "arguments": { "service": "ocr" } }
+        - Get all summaries: { "command": "rrext_services" }
+        - Get one full entry: { "command": "rrext_services", "arguments": { "service": "ocr" } }
         """
         try:
             # Extract optional service name from request arguments
@@ -131,15 +163,15 @@ class MiscCommands(DAPConn):
             service = args.get('service', None)
 
             if service:
-                # Retrieve specific service definition by name
-                schema = getServiceDefinition(service)
+                # Retrieve the full cached entry (config schema included)
+                schema = await services_catalog.get_service(service)
 
                 # Validate the service exists
                 if not schema:
                     raise ValueError(f"Service '{service}' not found. Please check the service name and try again.")
             else:
-                # Retrieve all available service definitions
-                schema = getServiceDefinitions()
+                # The cached summary view: display fields + inline icons
+                schema = await services_catalog.get_summary()
 
             # Return successful response with service definition(s)
             return self.build_response(request, body=schema)
@@ -155,8 +187,7 @@ class MiscCommands(DAPConn):
         """
         Handle DAP 'rrext_validate' command to validate a pipeline configuration.
 
-        Validates pipeline structure, component compatibility, and connection
-        integrity using rocketlib's validatePipeline function.
+        Validates pipeline structure using rocketlib's validatePipeline function.
 
         Before validation, ``${ROCKETRIDE_*}`` environment variable references
         are resolved using the same merged environment as pipeline execution,
@@ -231,6 +262,81 @@ class MiscCommands(DAPConn):
 
         except Exception as e:
             self.debug_message(f'Pipeline validation failed: {str(e)}')
+            raise
+
+    async def on_rrext_resolve_config(self, request: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Handle DAP 'rrext_resolve_config' to resolve a component config as a node sees it.
+
+        Runs the config through the same ``Config.getNodeConfig`` a node calls at
+        load, so an author can see what the node actually receives rather than
+        what the .pipe appears to say. This has to happen engine-side: the
+        service catalog does not carry ``preconfig``, so profile resolution
+        cannot be reproduced from ``rrext_services``.
+
+        Args:
+            request (Dict[str, Any]): DAP request containing:
+                - arguments (Dict[str, Any]):
+                    - provider (str): Component provider, e.g. 'llm_openai'.
+                    - config (Dict[str, Any], optional): The component's config block.
+
+        Returns:
+            Dict[str, Any]: DAP response whose body carries:
+                - provider (str): The provider that was resolved.
+                - profile (str): The profile that applied, named or default.
+                - resolved (Dict[str, Any]): What the node receives.
+                - dropped (List[str]): Top-level config keys the resolver discarded.
+
+        Raises:
+            ValueError: If provider is missing or config is not an object.
+            Exception: If the service is unknown or has no preconfig section.
+        """
+        try:
+            args = request.get('arguments', {})
+            provider = args.get('provider')
+            if not provider:
+                raise ValueError('provider is required')
+
+            # Default only a genuinely absent config: `or {}` would coerce a
+            # falsy non-object such as [] and skip the type check below.
+            config = args.get('config')
+            if config is None:
+                config = {}
+            if not isinstance(config, dict):
+                raise ValueError('config must be an object')
+
+            resolved = Config.getNodeConfig(provider, config)
+            profile = config.get('profile')
+
+            # Report the keys the resolver discarded rather than leaving the author
+            # to infer it from an absence. With a profile set, getNodeConfig reads
+            # the user layer only from the sub-object named after that profile, so
+            # sibling top-level keys never reach the node (#1839).
+            dropped = []
+            if profile:
+                # Every sibling of the selected profile is discarded, so the value is
+                # not worth comparing: one that happens to match the profile's own is
+                # still a line the resolver never read.
+                #
+                # Two kinds of sibling are not user config and must not be reported.
+                # The structural keys below belong to the component, not the node, and
+                # the engine consumes them on its own path (pipeline_config.cpp Rule 5
+                # and Rule 6); telling an author to move them inside the profile would
+                # break the component. An unselected profile's own sub-object is the
+                # other: an editor-saved config keeps one per profile.
+                profiles = _service_profile_names(provider)
+                dropped = [k for k in config if k != profile and k not in _STRUCTURAL_CONFIG_KEYS and k not in profiles]
+
+            body = {
+                'provider': provider,
+                'profile': profile or 'default',
+                'resolved': resolved,
+                'dropped': dropped,
+            }
+            return self.build_response(request, body=body)
+
+        except Exception as e:
+            self.debug_message(f'Config resolution failed for {request.get("arguments", {}).get("provider")}: {str(e)}')
             raise
 
     async def on_rrext_dashboard(self, request: Dict[str, Any]) -> Dict[str, Any]:
@@ -481,12 +587,14 @@ class MiscCommands(DAPConn):
                 self.debug_message(f'Error reading task status for connection map "{control.id}": {e}')
                 continue
             task_name = getattr(status, 'name', None) or control.source
+            # Monitor keys are owner-scoped — build from the control's owner
+            # (once per control; they do not vary per connection).
+            project_key = owner_key(control.owner_id, control.project_id, control.source)
+            project_wildcard_key = f'p.{control.owner_id}.{control.project_id}.*'
+            pipe_prefix = f'{project_key}.'
             for cid, conn in conn_items:
                 if not hasattr(conn, '_monitors'):
                     continue
-                project_key = f'p.{control.project_id}.{control.source}'
-                project_wildcard_key = f'p.{control.project_id}.*'
-                pipe_prefix = f'{project_key}.'
                 if (
                     project_key in conn._monitors
                     or project_wildcard_key in conn._monitors
@@ -603,6 +711,9 @@ class MiscCommands(DAPConn):
                         'name': getattr(task_status, 'name', control.source),
                         'projectId': control.project_id,
                         'source': control.source,
+                        # Run classification stamp: dashboards and sidebars
+                        # filter deploy runs out of dev views by this field.
+                        'runKind': control.run_kind,
                         'provider': control.provider,
                         'launchType': control.launch_type.value,
                         'startTime': start,
@@ -662,18 +773,21 @@ class MiscCommands(DAPConn):
         if not key.startswith('p.'):
             return 'Task monitor'
 
-        # Strip the 'p.' prefix and split: projectId, source, [pipeId]
-        parts = key[2:].split('.', 2)
-        project_id = parts[0]
+        # Strip the 'p.' prefix and split: ownerId, projectId, source, [pipeId]
+        # (keys are owner-scoped: p.{teamId|userId}.{projectId}.{source})
+        parts = key[2:].split('.', 3)
+        if len(parts) < 2:
+            return 'Task monitor'
+        project_id = parts[1]
         project_label = project_names.get(project_id, project_id[:8])
 
-        if len(parts) == 1 or (len(parts) == 2 and parts[1] == '*'):
+        if len(parts) == 2 or (len(parts) == 3 and parts[2] == '*'):
             return f'{project_label}.*'
 
-        source = parts[1]
+        source = parts[2]
         source_label = source_names.get(f'{project_id}.{source}', source)
 
-        if len(parts) == 3:
-            return f'{project_label}.{source_label}.pipe{parts[2]}'
+        if len(parts) == 4:
+            return f'{project_label}.{source_label}.pipe{parts[3]}'
 
         return f'{project_label}.{source_label}'

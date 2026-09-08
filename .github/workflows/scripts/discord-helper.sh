@@ -150,21 +150,53 @@ discord_applied_tags() {
     | .[0:5]'
 }
 
-# ── Forum thread archiving ───────────────────────────────────────────────
-# discord_archive_thread <thread_id> <true|false> — archive/unarchive a forum
-# thread so its Discord state mirrors the GitHub issue/PR/discussion (closed →
-# archived, reopened → unarchived). Forum threads can only be (un)archived with
-# a BOT token that has Manage Threads — webhooks cannot do it — so this is a
-# no-op (returns 0) unless DISCORD_GITHUB_BOT_TOKEN is set and a thread id is known.
-# Best-effort: archiving is cosmetic (the embed already reflects state), so a
-# transient failure must never abort the calling workflow.
-discord_archive_thread() {
-  local thread_id="$1" archived="$2"
+# ── Forum thread sync (archive state + tags in one PATCH) ────────────────
+# discord_sync_thread <thread_id> <archived:true|false> <applied_tags_json>
+# — mirror the GitHub state onto the forum thread: set the archived flag AND
+# re-apply applied_tags so tags track state/labels (open→closed→merged, label
+# adds). Both are set in a SINGLE PATCH on purpose: Discord rejects an
+# applied_tags edit on an already-archived thread (400), so setting tags and
+# then (un)archiving in separate calls fails on reopen or on threads Discord
+# auto-archived by inactivity. Combining them works from any state.
+#
+# Forum threads can only be edited with a BOT token that has Manage Threads/
+# Posts — webhooks cannot — so this is a no-op unless DISCORD_GITHUB_BOT_TOKEN
+# and a thread id are set. If <applied_tags_json> is empty ("" or "[]") only the
+# archived flag is sent (an empty list means the channel has no tag config, so
+# never clobber it to untagged). Best-effort: a transient failure never aborts
+# the calling workflow (the embed already reflects state).
+discord_sync_thread() {
+  local thread_id="$1" archived="$2" tags="$3" body
   [ -z "${DISCORD_GITHUB_BOT_TOKEN:-}" ] && return 0
   [ -z "$thread_id" ] && return 0
-  curl -sS -o /dev/null --connect-timeout 10 --max-time 30 -X PATCH \
+  if [ -z "$tags" ] || [ "$tags" = "[]" ]; then
+    # Omitting the key (never sending applied_tags:[]) is deliberate: an empty
+    # resolve can mean "no tag config for this channel" OR "config present but
+    # nothing matched" (e.g. a state/label name missing from the ids map).
+    # Either way, leaving existing tags untouched is safer than clobbering them
+    # to empty on a config typo — but warn so a real misconfiguration is visible.
+    body="{\"archived\": ${archived}}"
+    echo "::warning::Discord thread sync: no tags resolved for thread ${thread_id} — leaving existing tags untouched (check discord-forum-tags.json if this is unexpected)" >&2
+  else
+    body="{\"archived\": ${archived}, \"applied_tags\": ${tags}}"
+  fi
+  # Route through discord_curl (not a hand-rolled curl call) so this PATCH gets
+  # the same 429/5xx retry as the create path. Safe here because the PATCH sets
+  # an absolute target state (archived + full applied_tags replace), so it's
+  # idempotent and retry-safe — unlike the create POST, this must NOT pass
+  # --no-retry-5xx.
+  local status
+  discord_curl -X PATCH \
     -H "Authorization: Bot ${DISCORD_GITHUB_BOT_TOKEN}" \
     -H "Content-Type: application/json" \
-    -d "{\"archived\": ${archived}}" \
-    "https://discord.com/api/v10/channels/${thread_id}" || true
+    -d "$body" \
+    "https://discord.com/api/v10/channels/${thread_id}" >/dev/null 2>&1 || true
+  status=$(cat "$DISCORD_STATUS_FILE" 2>/dev/null || echo "")
+  # Best-effort: never fail the job, but surface non-2xx (e.g. missing Manage
+  # Threads → 403, bad payload → 400) so it's diagnosable in the run log.
+  case "$status" in
+    2??) : ;;
+    *) echo "::warning::Discord thread sync returned '${status:-no response}' for thread ${thread_id} (archive/tags not applied)" >&2 ;;
+  esac
+  return 0
 }

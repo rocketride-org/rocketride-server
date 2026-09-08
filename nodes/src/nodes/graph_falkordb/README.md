@@ -33,13 +33,38 @@ agent's context.
 
 ## Configuration
 
+The node connects in one of two ways, picked with the **Connection** selector — the same choice
+the FalkorDB Browser offers between *Manual Configuration* and *FalkorDB URL*:
+
+- **Manual configuration (host and port)** — profile `default`. Fill in `host`, `port`,
+  `username`, `password` and `tls` yourself.
+- **FalkorDB URL (connection string)** — profile `url`. Paste the connection string from the
+  FalkorDB Cloud console, e.g.
+  `falkor://falkordb@r-6jissuruar.instance-ytljliglb.us-east-1.aws.cloud:53939`. Schemes
+  accepted: `falkor://`, `falkors://` (TLS), `redis://`, `rediss://`, `unix://`. The password may
+  be embedded (`falkor://user:password@host:port`) or left out of the URL and typed into
+  `password`, which keeps the secret in the node's encrypted field instead of in the URL. When
+  `password` is filled in it is the one used: any password the URL embeds is stripped before the
+  connection is opened, so the two can never silently disagree.
+
+Every other setting below is available in both profiles. Pipelines saved before the URL profile
+existed keep working unchanged: they already use the `default` profile.
+
+### Connection fields
+
+| Field | Profile | Type | Description |
+|---|---|---|---|
+| `host` | manual | string | Default `localhost`. FalkorDB host, e.g. `localhost` or `your-instance.falkordb.cloud`. |
+| `port` | manual | integer | Default 6379 (1–65535). FalkorDB port (Redis protocol). |
+| `username` | manual | string | Default empty. Username, e.g. `default` for FalkorDB Cloud. Leave empty for no auth. |
+| `tls` | manual | boolean | Default false. Connect with TLS (for FalkorDB Cloud TLS endpoints). |
+| `url` | url | string | Connection string, e.g. `falkor://user@host:6379`. Required in this profile. |
+| `password` | both | string | Default empty. Stored encrypted. When set it replaces any password embedded in the URL. Leave empty for no auth, or to use the one the URL carries. |
+
+### Shared fields
+
 | Field | Type | Description |
 |---|---|---|
-| `host` | string | Default `localhost`. FalkorDB host, e.g. `localhost` or `your-instance.falkordb.cloud`. |
-| `port` | integer | Default 6379 (1–65535). FalkorDB port (Redis protocol). |
-| `username` | string | Default empty. Username, e.g. `default` for FalkorDB Cloud. Leave empty for no auth. |
-| `password` | string | Default empty. Password for the FalkorDB instance. Leave empty for no auth. |
-| `tls` | boolean | Default false. Connect with TLS (for FalkorDB Cloud TLS endpoints). |
 | `graph` | string | Default `agent`. Graph queried when the agent does not pass one explicitly. |
 | `db_description` | string | Default empty. What this graph holds, in your own words. Given to the LLM so it writes better Cypher. |
 | `allow_writes` | boolean | Default false. Permit `CREATE`/`MERGE`/`SET`/`DELETE` in `query`. When off, queries run via `GRAPH.RO_QUERY` and the server rejects write clauses. |
@@ -109,8 +134,8 @@ read-only path.
 docker run -p 6379:6379 -it --rm falkordb/falkordb:latest
 ```
 
-Point the node at `localhost:6379` and ask the agent to `MATCH` away, or to `CREATE` with
-**Allow Writes** turned on.
+Point the node at `localhost:6379` (manual profile) or at `falkor://localhost:6379` (URL
+profile) and ask the agent to `MATCH` away, or to `CREATE` with **Allow Writes** turned on.
 
 ---
 
@@ -130,15 +155,21 @@ pytest nodes/test/test_graph_falkordb.py -v
 
 | Field | Type | Description | Default |
 |---|---|---|---|
-| `tool_falkordb.allow_writes` | `boolean` | **Allow Writes**<br/>Permit CREATE/MERGE/SET/DELETE. When off, queries run via GRAPH.RO_QUERY and the server rejects write clauses. | `false` |
-| `tool_falkordb.graph` | `string` | **Default Graph**<br/>Graph queried when the agent does not pass one explicitly. | `"agent"` |
-| `tool_falkordb.host` | `string` | **Host**<br/>FalkorDB host, e.g. localhost or your-instance.falkordb.cloud. | `"localhost"` |
-| `tool_falkordb.max_rows` | `integer` | **Max Rows**<br/>Upper cap on rows returned to the agent per query. | `250` |
-| `tool_falkordb.password` | `string` | **Password**<br/>Password for the FalkorDB instance. Leave empty for no auth. | `""` |
-| `tool_falkordb.port` | `integer` | **Port**<br/>FalkorDB port (Redis protocol). | `6379` |
-| `tool_falkordb.query_timeout_ms` | `integer` | **Query Timeout (ms)**<br/>Server-side timeout for a single query. | `30000` |
-| `tool_falkordb.tls` | `boolean` | **TLS**<br/>Connect with TLS (FalkorDB Cloud TLS endpoints). | `false` |
-| `tool_falkordb.username` | `string` | **Username**<br/>Username, e.g. "default" for FalkorDB Cloud. Leave empty for no auth. | `""` |
+| `graph_falkordb.allow_execute` | `boolean` | **Allow Execute**<br/>Enable the execute tool, which runs raw Cypher with no LLM translation and no read-only gate. Leave OFF unless a trusted application explicitly needs to issue Cypher directly. | `false` |
+| `graph_falkordb.allow_writes` | `boolean` | **Allow Writes**<br/>Permit CREATE/MERGE/SET/DELETE in the query tool. When off, queries run via GRAPH.RO_QUERY and the server itself rejects write clauses. | `false` |
+| `graph_falkordb.db_description` | `string` | **Graph Description**<br/>What is this graph used for? Describe its content and domain, this helps the LLM generate more accurate Cypher queries. | `""` |
+| `graph_falkordb.graph` | `string` | **Default Graph**<br/>A FalkorDB server hosts many graphs. This is the one queried when the caller does not name another. | `"agent"` |
+| `graph_falkordb.host` | `string` | **Host**<br/>FalkorDB host, e.g. localhost or your-instance.falkordb.cloud. | `"localhost"` |
+| `graph_falkordb.max_attempts` | `integer` | **Max Validation Attempts**<br/>Maximum number of times to re-ask the LLM if EXPLAIN rejects the generated Cypher query. | `5` |
+| `graph_falkordb.max_execute_rows` | `integer` | **Max Execute Rows**<br/>Upper cap on rows returned by the execute tool. The query fails if exceeded, so one statement cannot exhaust worker memory. | `25000` |
+| `graph_falkordb.max_rows` | `integer` | **Max Rows**<br/>Upper cap on rows returned per query. Results beyond it are cut and flagged as truncated. | `250` |
+| `graph_falkordb.password` | `string` | **Password**<br/>Password for the FalkorDB instance. Stored encrypted. When set it is the one used, replacing any password embedded in the FalkorDB URL. Leave empty for no auth, or to use the one the URL already carries. | `""` |
+| `graph_falkordb.port` | `integer` | **Port**<br/>FalkorDB port (Redis protocol). FalkorDB Cloud assigns a per-instance port. | `6379` |
+| `graph_falkordb.profile` | `string` | **Connection**<br/>How this node connects to FalkorDB | `"default"` |
+| `graph_falkordb.query_timeout_ms` | `integer` | **Query Timeout (ms)**<br/>Server-side timeout for a single query. | `30000` |
+| `graph_falkordb.tls` | `boolean` | **TLS**<br/>Connect with TLS. Required by FalkorDB Cloud TLS endpoints. | `false` |
+| `graph_falkordb.url` | `string` | **FalkorDB URL**<br/>Connection string as shown in the FalkorDB Cloud console, e.g. falkor://falkordb@r-xxxx.instance-yyyy.cloud:53939. Use falkors:// for TLS. The URL may carry credentials, so it is stored encrypted; the password can also be left out of it and typed in the Password field below, which then replaces whatever the URL embeds. | `""` |
+| `graph_falkordb.username` | `string` | **Username**<br/>Username, e.g. "default" for FalkorDB Cloud. Leave empty for no auth. | `""` |
 
 ## Dependencies
 
@@ -147,5 +178,5 @@ pytest nodes/test/test_graph_falkordb.py -v
 
 ## Source
 
-[<svg viewBox="0 0 16 16" width="15" height="15" fill="currentColor" aria-hidden="true" style="vertical-align:-0.15em;margin-right:0.35em"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg> View source](https://github.com/rocketride-org/rocketride-server/tree/develop/nodes/src/nodes/tool_falkordb)
+[<svg viewBox="0 0 16 16" width="15" height="15" fill="currentColor" aria-hidden="true" style="vertical-align:-0.15em;margin-right:0.35em"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg> View source](https://github.com/rocketride-org/rocketride-server/tree/develop/nodes/src/nodes/graph_falkordb)
 <!-- ROCKETRIDE:GENERATED:PARAMS END -->

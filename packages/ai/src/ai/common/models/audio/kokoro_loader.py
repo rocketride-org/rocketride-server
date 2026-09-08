@@ -59,6 +59,11 @@ class KokoroLoader(BaseLoader):
         major, minor = spacy.__version__.split('.')[:2]
         model_ver = f'{major}.{minor}.0'
         url = f'https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-{model_ver}/en_core_web_sm-{model_ver}-py3-none-any.whl'
+        # NOTE: this download runs in a pip subprocess, which validates TLS with
+        # pip's own bundled CA store — it is NOT covered by the ai.common.ssl
+        # OS-trust-store injection (that patches this process's `ssl` context
+        # only). Behind a TLS-intercepting proxy this fetch can still fail with
+        # a cert error even though in-process HTTPS downloads succeed.
         subprocess.run(
             [sys.executable, '-m', 'pip', 'install', url],
             check=True,

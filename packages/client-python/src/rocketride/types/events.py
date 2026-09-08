@@ -172,9 +172,10 @@ class EVENT_TYPE(Flag):
     SSE = 1 << 6  # Real-time node-to-UI messages emitted via monitorSSE() during pipeline execution
     DASHBOARD = 1 << 7  # Server-level events - connection added/removed, for admin dashboards
     BILLING = 1 << 8  # Billing ledger events - credit/debit updates, scoped by org
+    DEPLOY = 1 << 9  # Deployment change events - pointer/state/schedule/run mutations, scoped by org
 
     # Convenience combination - ALL events except NONE for comprehensive monitoring
-    ALL = DEBUGGER | DETAIL | SUMMARY | OUTPUT | FLOW | TASK | SSE | DASHBOARD | BILLING
+    ALL = DEBUGGER | DETAIL | SUMMARY | OUTPUT | FLOW | TASK | SSE | DASHBOARD | BILLING | DEPLOY
 
 
 class EVENT_STATUS(TypedDict, total=False):

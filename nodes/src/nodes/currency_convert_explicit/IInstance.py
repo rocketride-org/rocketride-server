@@ -49,13 +49,19 @@ class IInstance(IInstanceBase):
         (plain text, non-fact JSON, non-matching currencies) is forwarded
         unchanged. Records are never dropped.
 
+        Only JSON-lane answers (``isJson()`` — i.e. ``expectJson``) are treated
+        as facts. A plain-text answer whose text merely looks like JSON is left
+        on the text lane verbatim, preserving its ``expectJson=False`` flag.
+
         The payload is extracted here (not the ``Answer`` object) so nothing
         depends on the engine reusing the object after this call returns.
         """
-        try:
-            payload = answer.getJson() if answer is not None else None
-        except ValueError:
-            payload = None
+        payload = None
+        if answer is not None and answer.isJson():
+            try:
+                payload = answer.getJson()
+            except ValueError:
+                payload = None
 
         if isinstance(payload, (dict, list)):
             self.pending.append((True, convert_payload(payload, self.IGlobal.config)))

@@ -59,10 +59,8 @@ export interface ConnectionConfigProps {
 	cloudUserName: string;
 	onCloudSignIn: () => void;
 	onCloudSignOut: () => void;
-	onProbeCloudServer?: () => void;
-	onFetchTeams?: () => void;
+	onProbeCloudServer?: (cloudUrl: string) => void;
 	isSaas?: boolean;
-	teams: Array<{ id: string; name: string }>;
 	/** Whether the user has an active subscription. */
 	isSubscribed?: boolean;
 	/** Checkout callbacks for CloudPanel's embedded CheckoutModal. */
@@ -122,7 +120,7 @@ export interface ConnectionConfigProps {
 // =============================================================================
 
 export const ConnectionConfig: React.FC<ConnectionConfigProps> = (props) => {
-	const { simplified, idPrefix, group, authOnly, serverCapabilities, onConnectionModeChange, settings, onSettingsChange, cloudSignedIn, cloudUserName, onCloudSignIn, onCloudSignOut, teams, onClearCredentials, onTestConnection, testMessage, engineVersions, engineVersionsLoading } = props;
+	const { simplified, idPrefix, group, authOnly, serverCapabilities, onConnectionModeChange, settings, onSettingsChange, cloudSignedIn, cloudUserName, onCloudSignIn, onCloudSignOut, onClearCredentials, onTestConnection, testMessage, engineVersions, engineVersionsLoading } = props;
 
 	const groupSettings = settings[group];
 	const connectionMode = groupSettings.connectionMode;
@@ -188,7 +186,7 @@ export const ConnectionConfig: React.FC<ConnectionConfigProps> = (props) => {
 	if (authOnly) {
 		return (
 			<div style={S.modeConfigBox}>
-				{connectionMode === 'cloud' && <CloudPanel idPrefix={idPrefix} cloudSignedIn={cloudSignedIn} cloudUserName={cloudUserName} onCloudSignIn={onCloudSignIn} onCloudSignOut={onCloudSignOut} teams={[]} selectedTeamId="" onTeamChange={() => {}} simplified={true} />}
+				{connectionMode === 'cloud' && <CloudPanel idPrefix={idPrefix} cloudSignedIn={cloudSignedIn} cloudUserName={cloudUserName} onCloudSignIn={onCloudSignIn} onCloudSignOut={onCloudSignOut} simplified={true} />}
 
 				{(connectionMode === 'onprem' || connectionMode === 'docker' || connectionMode === 'service') && <OnPremPanel idPrefix={idPrefix} hostUrl={groupSettings.hostUrl} onHostUrlChange={(url) => changeGroup({ hostUrl: url })} apiKey={groupSettings.apiKey} onApiKeyChange={(key) => changeGroup({ apiKey: key, hasApiKey: key.trim().length > 0 })} onClearApiKey={onClearCredentials} simplified={true} />}
 			</div>
@@ -219,7 +217,7 @@ export const ConnectionConfig: React.FC<ConnectionConfigProps> = (props) => {
 
 			{/* Mode-specific panel — hidden when no mode selected or mode has a conflict */}
 			{connectionMode && !modeConflict && <div style={{ ...S.modeConfigBox, marginTop: 8 }}>
-				{connectionMode === 'cloud' && <CloudPanel idPrefix={idPrefix} cloudSignedIn={cloudSignedIn} cloudUserName={cloudUserName} onCloudSignIn={onCloudSignIn} onCloudSignOut={onCloudSignOut} teams={teams} selectedTeamId={groupSettings.teamId} onTeamChange={(id) => changeGroup({ teamId: id })} simplified={simplified} isSaas={props.isSaas} onProbeServer={props.onProbeCloudServer} onFetchTeams={props.onFetchTeams} isSubscribed={props.isSubscribed} onFetchPlans={props.onFetchPlans} onCreateCheckout={props.onCreateCheckout} onConfirmPending={props.onConfirmPending} onCheckoutSuccess={props.onCheckoutSuccess} />}
+				{connectionMode === 'cloud' && <CloudPanel idPrefix={idPrefix} cloudSignedIn={cloudSignedIn} cloudUserName={cloudUserName} onCloudSignIn={onCloudSignIn} onCloudSignOut={onCloudSignOut} simplified={simplified} isSaas={props.isSaas} onProbeServer={props.onProbeCloudServer} isSubscribed={props.isSubscribed} onFetchPlans={props.onFetchPlans} onCreateCheckout={props.onCreateCheckout} onConfirmPending={props.onConfirmPending} onCheckoutSuccess={props.onCheckoutSuccess} />}
 
 				{connectionMode === 'onprem' && <OnPremPanel idPrefix={idPrefix} hostUrl={groupSettings.hostUrl} onHostUrlChange={(url) => changeGroup({ hostUrl: url })} apiKey={groupSettings.apiKey} onApiKeyChange={(key) => changeGroup({ apiKey: key, hasApiKey: key.trim().length > 0 })} onClearApiKey={onClearCredentials} onTestConnection={(hostUrl, apiKey) => onTestConnection('onprem', { hostUrl, apiKey })} testMessage={testMessage} />}
 

@@ -1,7 +1,11 @@
 {
 	"compilerOptions": {
 		"target": "ES2022",
-		"lib": ["ES2022", "DOM", "DOM.Iterable"],
+		"lib": [
+			"ES2022",
+			"DOM",
+			"DOM.Iterable"
+		],
 		"module": "ESNext",
 		"moduleResolution": "bundler",
 		"jsx": "react-jsx",
@@ -14,8 +18,20 @@
 		"isolatedModules": true,
 		"noEmit": true,
 		"paths": {
-			"shared": ["../../packages/shared-ui/src/index.ts"]
+			"shared": [
+				"../shared/src/index.ts"
+			],
+			"shared/*": [
+				"../shared/src/*"
+			]
 		}
 	},
-	"include": ["src/providers/views/**/*.ts", "src/providers/views/**/*.tsx", "src/providers/components/**/*.ts", "src/providers/components/**/*.tsx", "src/shared/**/*.ts", "src/assets/**/*.d.ts"]
+	"include": [
+		"src/providers/views/**/*.ts",
+		"src/providers/views/**/*.tsx",
+		"src/providers/components/**/*.ts",
+		"src/providers/components/**/*.tsx",
+		"src/shared/**/*.ts",
+		"src/assets/**/*.d.ts"
+	]
 }

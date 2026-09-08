@@ -33,7 +33,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from ai.modules.task.task_engine import Task
+from ai.modules.task.task_engine import CONST_TRACE_PAYLOAD_CAP, CONST_TRACE_PREVIEW_BYTES, Task, cap_trace_payload
 
 
 # ---------------------------------------------------------------------------
@@ -62,6 +62,9 @@ def _task(*, source='src-id', task_name=None, pipeline=None, status=None):
     t = Task.__new__(Task)
     t.id = 'task-test'
     t.token = 'tk_test'
+    t.client_id = 'user-1'
+    t.team_id = 'team-1'
+    t.org_id = 'org-1'
     t.source = source
     # Real tasks always carry their project id; _forward_task_event stamps
     # it into every forwarded body (identity safety net).
@@ -70,6 +73,7 @@ def _task(*, source='src-id', task_name=None, pipeline=None, status=None):
     t._pipeline = pipeline if pipeline is not None else {}
     t._threads = 4
     t._pipelineTraceLevel = None
+    t._run_kind = 'dev'
     t._status = status if status is not None else SimpleNamespace(name='', state=0, exitMessage='')
     t._debugger = None
     t._debug_port = None
@@ -190,6 +194,53 @@ def test_build_task_returns_subprocess_config_shape(tmp_path, monkeypatch):
         'components': [{'id': 'src'}],
     }
     assert config['config']['keystore'] == 'kvsfile://data/keystore.json'
+    # Trusted identity travels IN THE TASK FILE (never the environment).
+    assert config['identity'] == {'userId': 'user-1', 'teamId': 'team-1', 'orgId': 'org-1'}
+    # Dev runs anchor node storage at the owner's whole tree.
+    assert config['storage'] == {'root': 'users/user-1/files'}
+
+
+def test_build_task_deploy_storage_anchor(monkeypatch, tmp_path):
+    """Deploy runs anchor node storage at a task-specific TEAM subtree —
+    no user dependency, and concurrent deployments never share storage.
+    """
+    monkeypatch.setattr(sys, 'executable', str(tmp_path / 'engine.exe'))
+    monkeypatch.setattr(os, 'makedirs', lambda p, exist_ok=False: None)
+
+    pipeline = {'source': 'src', 'components': []}
+    t = _task(pipeline=pipeline)
+    t._run_kind = 'deploy'
+    config = Task._build_task(t, pipeline)
+    assert config['storage'] == {'root': 'teams/team-1/files/tasks/proj-test'}
+
+
+def test_build_task_deploy_without_team_refuses(monkeypatch, tmp_path):
+    """A deploy run with no team has no valid anchor — fail loudly."""
+    monkeypatch.setattr(sys, 'executable', str(tmp_path / 'engine.exe'))
+    monkeypatch.setattr(os, 'makedirs', lambda p, exist_ok=False: None)
+
+    t = _task(pipeline={'components': []})
+    t._run_kind = 'deploy'
+    t.team_id = ''
+    with pytest.raises(ValueError, match='team_id'):
+        Task._build_task(t, {'components': []})
+
+
+def test_build_task_dev_without_client_gets_no_anchor(monkeypatch, tmp_path):
+    """An anonymous dev run (client_id='' — OSS/standalone launch) carries NO
+    anchor rather than failing the launch: identity.userId rides empty too,
+    so the subprocess's engine_file_store() yields None and the storage
+    tools disable themselves. The pin: the shared 'users//files' prefix must
+    never be composed as an anchor.
+    """
+    monkeypatch.setattr(sys, 'executable', str(tmp_path / 'engine.exe'))
+    monkeypatch.setattr(os, 'makedirs', lambda p, exist_ok=False: None)
+
+    pipeline = {'source': 'src', 'components': []}
+    t = _task(pipeline=pipeline)
+    t.client_id = ''
+    config = Task._build_task(t, pipeline)
+    assert config['storage'] == {'root': ''}
 
 
 def test_build_task_supplies_pipeline_version_default(monkeypatch, tmp_path):
@@ -686,6 +737,111 @@ async def test_forward_task_event_debugger_swallows_send_failure():
 
 
 # ---------------------------------------------------------------------------
+# _pipeline_uses_rocketride_db
+# ---------------------------------------------------------------------------
+
+
+def test_pipeline_uses_rocketride_db_detects_each_provider():
+    """Any of the three RocketRide cloud DB providers triggers DSN injection."""
+    for provider in ('rocketride_sql', 'rocketride_vector', 'rocketride_graph'):
+        t = _task(pipeline={'components': [{'id': 'a', 'provider': 'chat'}, {'id': 'b', 'provider': provider}]})
+        assert Task._pipeline_uses_rocketride_db(t), provider
+
+
+def test_pipeline_uses_rocketride_db_false_without_db_nodes():
+    """Ordinary pipelines never trigger provisioning."""
+    t = _task(pipeline={'components': [{'id': 'a', 'provider': 'chat'}, {'id': 'b', 'provider': 'db_postgres'}]})
+    assert not Task._pipeline_uses_rocketride_db(t)
+
+
+def test_pipeline_uses_rocketride_db_tolerates_malformed_components():
+    """Missing components / non-dict entries must not raise at task start."""
+    assert not Task._pipeline_uses_rocketride_db(_task(pipeline={}))
+    t = _task(pipeline={'components': ['not-a-dict', {'no-provider': True}]})
+    assert not Task._pipeline_uses_rocketride_db(t)
+
+
+# ---------------------------------------------------------------------------
+# _build_subprocess_env — RocketRide DB credential hygiene
+# ---------------------------------------------------------------------------
+
+_DB_PIPELINE = {'components': [{'id': 'db', 'provider': 'rocketride_sql'}]}
+
+
+def _env_task(pipeline=None):
+    t = _task(pipeline=pipeline if pipeline is not None else {})
+    t.client_id = 'client-env-test'
+    return t
+
+
+def _patch_resolve(monkeypatch, fake):
+    import ai.account
+
+    monkeypatch.setattr(ai.account.account, 'resolve_db_dsn', fake)
+
+
+@pytest.mark.asyncio
+async def test_subprocess_env_scrubs_broker_credentials(monkeypatch):
+    """The broker credential can mint ANY tenant's DSN — it must never reach
+    node subprocesses, and neither may a parent-level DSN or stale error.
+    """
+    monkeypatch.setenv('ROCKETRIDE_DB_BROKER_URL', 'https://broker.example')
+    monkeypatch.setenv('ROCKETRIDE_DB_BROKER_TOKEN', 'super-secret')
+    monkeypatch.setenv('ROCKETRIDE_DB_DSN', 'postgresql://stale@parent/db')
+    monkeypatch.setenv('ROCKETRIDE_DB_RESOLVE_ERROR', 'stale reason')
+
+    env = await Task._build_subprocess_env(_env_task())  # no DB nodes
+
+    assert 'ROCKETRIDE_DB_BROKER_URL' not in env
+    assert 'ROCKETRIDE_DB_BROKER_TOKEN' not in env
+    assert 'ROCKETRIDE_DB_DSN' not in env
+    assert 'ROCKETRIDE_DB_RESOLVE_ERROR' not in env
+    # Identity rides the task file (#1686), never the environment.
+    assert 'ROCKETRIDE_CLIENT_ID' not in env
+
+
+@pytest.mark.asyncio
+async def test_subprocess_env_injects_resolved_dsn(monkeypatch):
+    async def fake_resolve(client_id):
+        assert client_id == 'client-env-test'
+        return 'postgresql://tenant@pooler/db?sslmode=require'
+
+    _patch_resolve(monkeypatch, fake_resolve)
+    env = await Task._build_subprocess_env(_env_task(pipeline=_DB_PIPELINE))
+    assert env['ROCKETRIDE_DB_DSN'] == 'postgresql://tenant@pooler/db?sslmode=require'
+
+
+@pytest.mark.asyncio
+async def test_subprocess_env_stale_dsn_does_not_survive_broker_failure(monkeypatch):
+    """A parent-env DSN must not become the node's DSN when resolution fails —
+    it could point at another tenant. The failure reason is passed down instead.
+    """
+    monkeypatch.setenv('ROCKETRIDE_DB_DSN', 'postgresql://stale@parent/other-tenant')
+
+    async def fake_resolve(client_id):
+        raise RuntimeError('DB broker request failed: HTTP 503')
+
+    _patch_resolve(monkeypatch, fake_resolve)
+    t = _env_task(pipeline=_DB_PIPELINE)
+    env = await Task._build_subprocess_env(t)
+
+    assert 'ROCKETRIDE_DB_DSN' not in env
+    assert env['ROCKETRIDE_DB_RESOLVE_ERROR'] == 'DB broker request failed: HTTP 503'
+    t.debug_message.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_subprocess_env_unconfigured_account_is_nonfatal(monkeypatch):
+    async def fake_resolve(client_id):
+        raise NotImplementedError('sign in')
+
+    _patch_resolve(monkeypatch, fake_resolve)
+    env = await Task._build_subprocess_env(_env_task(pipeline=_DB_PIPELINE))
+    assert 'ROCKETRIDE_DB_DSN' not in env
+    assert 'ROCKETRIDE_DB_RESOLVE_ERROR' not in env
+
+
+# ---------------------------------------------------------------------------
 # _accumulate_analytics — run analytics in the status body
 # ---------------------------------------------------------------------------
 
@@ -881,3 +1037,76 @@ def test_analytics_idle_reset():
     assert t._status.idleLongestSeconds == 0.0
     assert t._status.idleLongestAt == 0.0
     assert t._an_idle_total == 0.0 and t._an_idle_since == 0.0
+
+
+# ---------------------------------------------------------------------------
+# cap_trace_payload — the 1MB trace/flow payload clamp
+# ---------------------------------------------------------------------------
+
+
+def test_task_rejects_unknown_run_classifications():
+    """run_kind/trigger are a CLOSED vocabulary, validated at construction.
+
+    Both gate storage anchors, run-log scoping, and token ownership — a
+    value outside the vocabulary must fail before it can pick a scope.
+    ('' trigger is the interactive-dev spelling and stays valid.)
+    """
+    from unittest.mock import MagicMock
+
+    common = dict(
+        server=MagicMock(), id='t-1', project_id='p-1', source='s-1', token='tk', public_auth='pk', pipeline={}
+    )
+    with pytest.raises(ValueError, match='run_kind'):
+        Task(**common, run_kind='prod')
+    with pytest.raises(ValueError, match='trigger'):
+        Task(**common, trigger='cron')
+
+
+def test_cap_trace_payload_passes_small_payloads_through():
+    """Payloads under the cap pass through IDENTICALLY (same object)."""
+    payload = {'op': 'x', 'data': 'y' * 1000}
+    assert cap_trace_payload(payload) is payload
+    # Falsy payloads are untouched too (no marker for nothing).
+    assert cap_trace_payload({}) == {}
+    assert cap_trace_payload(None) is None
+
+
+def test_cap_trace_payload_truncates_oversized_payloads():
+    """An over-cap payload becomes the honest marker with a bounded preview."""
+    blob = {'data': 'z' * (CONST_TRACE_PAYLOAD_CAP + 100)}
+    capped = cap_trace_payload(blob)
+    assert capped['truncated'] is True
+    assert capped['originalBytes'] > CONST_TRACE_PAYLOAD_CAP
+    assert len(capped['preview']) == CONST_TRACE_PREVIEW_BYTES
+    # The marker CLIPS to the cap — consumers still get (just under) the
+    # full megabyte, and the marker never exceeds the cap itself.
+    import json as _json
+
+    assert len(_json.dumps(capped)) <= CONST_TRACE_PAYLOAD_CAP
+
+
+def test_cap_trace_payload_bound_holds_for_escape_heavy_payloads():
+    """The cap must hold for the marker AS SERIALIZED, not the raw slice.
+
+    `preview` holds already-serialized JSON text; re-serializing escapes
+    every quote and backslash in it, so an object-heavy payload (unlike the
+    plain-'z' fixture above, which needs no escaping) inflates the marker.
+    The clamp must size the SERIALIZED marker under the cap.
+    """
+    import json as _json
+
+    # Thousands of tiny dicts full of quotes and backslashes — every one
+    # of the preview's structural characters re-escapes on serialization.
+    blob = {'data': [{'k': 'v"\\'}] * (CONST_TRACE_PAYLOAD_CAP // 12)}
+    assert len(_json.dumps(blob)) > CONST_TRACE_PAYLOAD_CAP
+    capped = cap_trace_payload(blob)
+    assert capped['truncated'] is True
+    assert len(_json.dumps(capped)) <= CONST_TRACE_PAYLOAD_CAP
+    # The trimmed preview still carries real content, not an empty husk.
+    assert len(capped['preview']) > CONST_TRACE_PAYLOAD_CAP // 4
+
+
+def test_cap_trace_payload_leaves_unserializable_payloads_alone():
+    """Unserializable payloads pass through — the transport owns that error."""
+    payload = {'bad': object()}
+    assert cap_trace_payload(payload) is payload

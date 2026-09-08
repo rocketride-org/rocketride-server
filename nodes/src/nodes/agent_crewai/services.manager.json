@@ -30,7 +30,9 @@
 				"instructions": [],
 				"advanced_mode": false,
 				"goal": "",
-				"backstory": ""
+				"backstory": "",
+				"planning": false,
+				"require_tool_call": false
 			}
 		}
 	},
@@ -54,6 +56,12 @@
 				"format": "textarea"
 			}
 		},
+		"require_tool_call": {
+			"type": "boolean",
+			"title": "Require tool call",
+			"default": false,
+			"description": "Require at least one tool call (including calls delegated to sub-agents) before answering. When on, a run that answers without any tool invocation fails with a guard error. Use for determinism-critical pipelines where an ungrounded or narrated answer must never be delivered. Off by default."
+		},
 		"advanced_mode": {
 			"type": "boolean",
 			"title": "Advanced Mode",
@@ -66,7 +74,7 @@
 			"conditional": [
 				{
 					"value": true,
-					"properties": ["goal", "backstory"]
+					"properties": ["goal", "backstory", "planning"]
 				}
 			]
 		},
@@ -81,13 +89,23 @@
 			"format": "textarea",
 			"title": "Manager Backstory",
 			"description": "Background context for the manager's persona. Maps to CrewAI Agent(backstory=...)."
+		},
+		"planning": {
+			"type": "boolean",
+			"title": "Crew Planning",
+			"description": "Run CrewAI's planner before the crew executes, adding a step-by-step plan to each task. Off by default: the planner requires the LLM to return JSON matching CrewAI's plan schema, and a model that answers in prose instead fails the whole run with <b>Failed to get the Planning output</b>. It also costs one extra LLM call per kickoff. Enable only with a model that reliably emits well-formed JSON.",
+			"default": false,
+			"enum": [
+				[false, "Off"],
+				[true, "On"]
+			]
 		}
 	},
 	"shape": [
 		{
 			"section": "Pipe",
 			"title": "CrewAI Manager",
-			"properties": ["agent_description", "instructions", "advanced_mode"]
+			"properties": ["agent_description", "instructions", "require_tool_call", "advanced_mode"]
 		}
 	]
 }

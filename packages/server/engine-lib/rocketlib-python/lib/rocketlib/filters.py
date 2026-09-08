@@ -23,8 +23,10 @@
 # =============================================================================
 
 from __future__ import annotations  # Enables forward references
-from typing import TYPE_CHECKING, Dict, Any, List, TypedDict, Callable, Protocol
-from .types import OPEN_MODE, ENDPOINT_MODE, SERVICE_MODE, Entry, IControl, IInvoke, IJson
+import functools
+import json
+from typing import TYPE_CHECKING, Dict, Any, List, Optional, TypedDict, Callable, Protocol
+from .types import AVI_ACTION, OPEN_MODE, ENDPOINT_MODE, SERVICE_MODE, Entry, IControl, IInvoke, IJson
 from .error import APERR, Ec
 
 if TYPE_CHECKING:
@@ -600,12 +602,213 @@ class IFilterInstance(IServiceFilterInstance, Protocol):
         ...
 
 
+# =========================================================================
+# Media lane normalization
+#
+# A media lane delivers BEGIN / WRITE... / END, and the call carries no stream
+# identifier — only the lane and the MIME type. A consumer therefore keeps one
+# slot of state per lane, and reads a fresh BEGIN as proof the previous stream
+# ended. When a single object emits several streams on one lane, that next
+# BEGIN can arrive while the previous stream's END is still outstanding even
+# though every byte has already been delivered, and the consumer throws away a
+# complete stream.
+#
+# The wrapper below closes that for every node at once. It counts the bytes a
+# stream receives, compares them against the size the stream's own BEGIN
+# declared, and calls the node's own END handler for a stream that got
+# everything it promised — before letting the next BEGIN through. Consumers see
+# whole streams and need no bookkeeping of their own.
+# =========================================================================
+
+#: Doc.type values marking a media BEGIN payload as a stream descriptor. Mirrors
+#: ai.common.avi.descriptor.STREAM_TYPES and testdata/contracts/descriptor_keys.json;
+#: kept as a literal because rocketlib must not import ai at runtime.
+_AVI_STREAM_TYPES = ('VideoStream', 'AudioStream', 'ImageStream')
+
+#: Media handlers wrapped on every subclass, mapped to the lane they serve.
+_AVI_MEDIA_METHODS = {'writeImage': 'image', 'writeAudio': 'audio', 'writeVideo': 'video'}
+
+
+def _avi_declared_size(payload: Any) -> Optional[int]:
+    """
+    Read the byte count a media BEGIN payload declares.
+
+    Only the size is wanted, so this deliberately accepts payloads that
+    ``ai.common.avi.descriptor.descriptor_from_payload`` rejects: that parser also
+    demands ``metadata.objectId``, which the C++ builder emits only when the entry
+    carries one. A stream can declare a perfectly usable size without it.
+
+    A ``type`` marker is required, though. With ``ROCKETRIDE_STREAM_DESCRIPTOR=0``
+    the engine forwards the producer's own enrichment unwrapped, and that carries a
+    ``size`` but never a ``type`` — reading it would make the kill switch quietly
+    change behaviour instead of disabling the feature.
+
+    Args:
+        payload (Any): The raw BEGIN byte slot.
+
+    Returns:
+        Optional[int]: The declared size, or None when the payload is not a stream
+        descriptor or declares no usable size.
+    """
+    if not payload:
+        return None
+    try:
+        data = json.loads(bytes(payload).decode('utf-8'))
+    except (UnicodeDecodeError, ValueError):
+        return None
+    if not isinstance(data, dict) or data.get('type') not in _AVI_STREAM_TYPES:
+        return None
+    metadata = data.get('metadata')
+    if not isinstance(metadata, dict):
+        return None
+    size = metadata.get('size')
+    if isinstance(size, bool) or not isinstance(size, int) or size < 0:
+        return None
+    return size
+
+
+def _avi_object_failed(obj: Any) -> bool:
+    """
+    Report whether an object is explicitly marked failed.
+
+    Compared with ``is True`` rather than tested for truth on purpose: test harnesses
+    build ``currentObject`` from a MagicMock, where every unset attribute is a truthy
+    Mock, and a plain truthiness test would read each of them as failed and disable
+    the settle everywhere while the tests still passed.
+
+    Args:
+        obj (Any): The object to inspect, never None here.
+
+    Returns:
+        bool: True only when the flag is genuinely set.
+    """
+    return getattr(obj, 'objectFailed', False) is True
+
+
+class _AviLane:
+    """One media lane's view of the stream currently travelling over it."""
+
+    __slots__ = ('open', 'mime', 'owner', 'declared', 'written', 'late')
+
+    def __init__(self):
+        self.reset()
+
+    def reset(self) -> None:
+        """Forget everything about this lane, including any outstanding END debt."""
+        self.open = False
+        self.mime = ''
+        self.owner = None
+        self.declared = None
+        self.written = 0
+        self.late = 0
+
+
+def _avi_media_wrapper(method: Callable, lane: str) -> Callable:
+    """
+    Wrap one media handler so the node sees whole streams.
+
+    Args:
+        method (Callable): The subclass's own handler.
+        lane (str): The lane it serves — 'image', 'audio' or 'video'.
+
+    Returns:
+        Callable: The wrapping handler, stamped so it is never wrapped twice.
+    """
+
+    @functools.wraps(method)
+    def wrapper(self, action, mimeType, buffer=b''):
+        # A sub-subclass calling super() reaches a second live wrapper; the inner one
+        # delegates so the bytes are counted once.
+        if getattr(self, '_avi_reentrant', False):
+            return method(self, action, mimeType, buffer)
+
+        self._avi_reentrant = True
+        try:
+            state = self._avi_lane(lane)
+
+            if action == AVI_ACTION.BEGIN:
+                if state.open:
+                    self._avi_settle(lane, state, method)
+                    # The displaced stream may still send its own END; owe one swallow.
+                    state.late += 1
+                state.open = True
+                state.mime = mimeType
+                state.owner = self._avi_owner()
+                state.declared = _avi_declared_size(buffer)
+                state.written = 0
+
+            elif action == AVI_ACTION.WRITE:
+                state.written += len(buffer) if buffer else 0
+
+            elif action == AVI_ACTION.END:
+                if state.open:
+                    state.open = False
+                elif state.late > 0:
+                    state.late -= 1
+                    return None
+
+            return method(self, action, mimeType, buffer)
+        finally:
+            self._avi_reentrant = False
+
+    wrapper.__avi_normalized__ = True
+    return wrapper
+
+
+def _avi_open_wrapper(method: Callable) -> Callable:
+    """Wrap open() so media state never crosses an object boundary.
+
+    Takes the node's arguments through untouched: nodes spell this parameter several
+    ways, and the wrapper has no interest in it.
+    """
+
+    @functools.wraps(method)
+    def wrapper(self, *args, **kwargs):
+        self._avi_reset_lanes()
+        return method(self, *args, **kwargs)
+
+    wrapper.__avi_normalized__ = True
+    return wrapper
+
+
+def _avi_close_wrapper(method: Callable) -> Callable:
+    """Wrap close() so a stream the producer never ended is still settled."""
+
+    @functools.wraps(method)
+    def wrapper(self, *args, **kwargs):
+        self._avi_settle_lanes()
+        return method(self, *args, **kwargs)
+
+    wrapper.__avi_normalized__ = True
+    return wrapper
+
+
 class IInstanceBase:
     """
     Base class for all IInstances.
 
     These calls may all be overridden in derived
     classes. The engine will call these functions.
+
+    Media lanes are normalized for every subclass (see the block above). A handler
+    for ``writeImage``/``writeAudio``/``writeVideo`` receives, per stream, exactly
+    one BEGIN, zero or more WRITEs, and at most one END. That END is either the
+    producer's own, forwarded exactly as it arrives, or one this base supplies in its
+    place — when the next stream begins on the lane, or as the object closes.
+
+    The base supplies one only for a stream that received every byte its BEGIN
+    declared, so the guarantee is this and no more: a stream displaced by the next
+    BEGIN, or still open when the object closes, is either ended or reported — never
+    dropped in silence. One case is deliberately left out of that: a stream that
+    neither promised bytes nor delivered any goes without an END and without a word,
+    having lost nothing. A producer's own END is never checked against the declared
+    size, so a handler that must know its bytes are whole still checks them itself.
+
+    A displaced stream that carried no bytes, fell short of what it declared, or
+    declared nothing at all gets no END; the handler learns of it from the next BEGIN
+    on that lane, or from ``open()``, and must release whatever it holds there. A
+    handler owning an external resource (a write handle, a decoder) should also sweep
+    in its own ``closing()``.
     """
 
     IEndpoint: IEndpointBase = None  #: Endpoint instance for communication.
@@ -616,6 +819,230 @@ class IInstanceBase:
     These are all the overrides to provide
     the driver funtionality.
     """
+
+    # ------------------------------------------------------------------
+    # Media lane normalization
+    #
+    # Wrapping every subclass, rather than offering a mixin or a hook to
+    # inherit from, is the point: a node that merely defines writeImage()
+    # would silently miss any scheme it had to remember to join, and that
+    # silence is the failure this exists to remove.
+    # ------------------------------------------------------------------
+
+    def __init_subclass__(cls, **kwargs):
+        """Wrap the subclass's media and per-object handlers with the AVI normalization."""
+        super().__init_subclass__(**kwargs)
+
+        for name, lane in _AVI_MEDIA_METHODS.items():
+            fn = cls.__dict__.get(name)
+            if callable(fn) and not getattr(fn, '__avi_normalized__', False):
+                setattr(cls, name, _avi_media_wrapper(fn, lane))
+
+        for name, wrap in (('open', _avi_open_wrapper), ('close', _avi_close_wrapper)):
+            fn = cls.__dict__.get(name)
+            if callable(fn) and not getattr(fn, '__avi_normalized__', False):
+                setattr(cls, name, wrap(fn))
+
+    def _avi_lane(self, lane: str) -> '_AviLane':
+        """
+        Return this lane's stream state, created on first use.
+
+        Built lazily because not every node calls ``super().__init__()`` — several
+        define no ``__init__`` at all — so there is no constructor to rely on.
+
+        Args:
+            lane (str): The media lane.
+
+        Returns:
+            _AviLane: The lane's state, owned by this instance alone.
+        """
+        lanes = getattr(self, '_avi_lanes', None)
+        if lanes is None:
+            lanes = {}
+            self._avi_lanes = lanes
+        state = lanes.get(lane)
+        if state is None:
+            state = lanes[lane] = _AviLane()
+        return state
+
+    def _avi_current_object(self) -> Any:
+        """
+        Return the object a stream should be attributed to, or None.
+
+        Both hops are genuinely nullable: ``instance`` defaults to None on this
+        class, and the engine clears ``currentEntry`` again when an object fails
+        to open.
+
+        Returns:
+            Any: The current object, or None when there is not one.
+        """
+        return getattr(getattr(self, 'instance', None), 'currentObject', None)
+
+    def _avi_owner(self) -> Optional[str]:
+        """
+        Return a label for the object owning a stream, for the log line.
+
+        Captured at BEGIN and kept on the lane, never read back later: by the time
+        ``open()`` reports a lost stream the current object has already advanced to
+        the next one, and naming that one would send a reader to the wrong input.
+
+        Returns:
+            Optional[str]: The object's name, else its id, else None.
+        """
+        obj = self._avi_current_object()
+        if obj is None:
+            return None
+        if getattr(obj, 'hasName', False):
+            name = getattr(obj, 'name', None)
+            if name:
+                return str(name)
+        objectId = getattr(obj, 'objectId', None)
+        return str(objectId) if objectId else None
+
+    def _avi_invoke(self, method: Callable, action: int, mimeType: str, buffer: bytes) -> None:
+        """
+        Call a media handler for a stream the engine is not waiting on.
+
+        Handlers commonly end in ``preventDefault()``, which raises; nothing is
+        waiting on a synthesized call, so that signal is swallowed. Every other
+        error propagates exactly as it would from a real END — a decoder reporting
+        a failure off its background thread still fails the object.
+
+        Args:
+            method (Callable): The subclass's own (unwrapped) handler.
+            action (int): The AVI action to deliver.
+            mimeType (str): The MIME type of the stream being closed out.
+            buffer (bytes): The payload slot, empty for a synthesized END.
+        """
+        # Held for the whole call: a node subclassing another node reaches the parent's
+        # wrapper through super(), and that wrapper must pass straight through rather
+        # than run the state machine a second time for an END this code already handled.
+        previous = getattr(self, '_avi_reentrant', False)
+        self._avi_reentrant = True
+        try:
+            method(self, action, mimeType, buffer)
+        except APERR as e:
+            if e.ec != Ec.PreventDefault:
+                raise
+        finally:
+            self._avi_reentrant = previous
+
+    def _avi_warn_lost(self, lane: str, state: '_AviLane', reason: str = 'it could not be settled') -> None:
+        """
+        Report a pending stream that was dropped.
+
+        Silent for a stream that promised nothing and delivered nothing: that is an
+        empty stream rather than a loss, and a line firing on ordinary traffic is
+        one nobody reads.
+
+        Args:
+            lane (str): The media lane.
+            state (_AviLane): The lane's state, still holding the lost stream.
+            reason (str): Why the stream went unsettled. Named rather than assumed:
+                a complete stream held back because its object failed reads as a
+                truncated one otherwise, and sends the reader hunting for a cut-off
+                that never happened.
+        """
+        if not state.written and not state.declared:
+            return
+
+        # Imported here: engine.py imports this module, so a module-level import
+        # would be circular.
+        from .engine import warning
+
+        warning(
+            f'media lane {lane}: dropped a stream, {reason} '
+            f'(object={state.owner}, mime={state.mime}, '
+            f'declared={state.declared}, written={state.written})'
+        )
+
+    def _avi_settle(self, lane: str, state: '_AviLane', method: Callable) -> None:
+        """
+        Close out a pending stream that received every byte it declared.
+
+        Delivers the END the producer never sent, so the commit path the stream
+        would have taken anyway is the one that runs. A stream that fell short,
+        carried no bytes, or declared no size gets no END and is reported instead:
+        the declared size is the only completeness signal available, so nothing is
+        committed on a guess.
+
+        Args:
+            lane (str): The media lane.
+            state (_AviLane): The lane's state.
+            method (Callable): The subclass's own (unwrapped) handler.
+        """
+        if state.declared is not None and state.written == state.declared and state.written > 0:
+            self._avi_invoke(method, AVI_ACTION.END, state.mime, b'')
+            return
+        self._avi_warn_lost(lane, state)
+
+    def _avi_handler(self, lane: str) -> Optional[Callable]:
+        """
+        Return the subclass's own handler for a lane, unwrapped.
+
+        Args:
+            lane (str): The media lane.
+
+        Returns:
+            Optional[Callable]: The underlying function, or None when this node does
+            not consume the lane.
+        """
+        for name, served in _AVI_MEDIA_METHODS.items():
+            if served != lane:
+                continue
+            fn = getattr(type(self), name, None)
+            return getattr(fn, '__wrapped__', fn)
+        return None
+
+    def _avi_settle_lanes(self) -> None:
+        """
+        Settle whatever is still open as the object closes.
+
+        ``close()`` is the last point at which ``currentObject`` is still the
+        stream's own object: ``open()`` has already advanced it and ``closing()``
+        runs after it is cleared, so this is the only per-object place a synthesized
+        END can be attributed correctly. A failed object settles nothing — it must
+        not publish output it would never otherwise have produced — and its pending
+        streams are reported with that as the stated reason.
+
+        Every open lane is marked closed here, whichever way it went, so ``open()``
+        does not report the same loss a second time.
+        """
+        lanes = getattr(self, '_avi_lanes', None)
+        if not lanes:
+            return
+
+        obj = self._avi_current_object()
+        reason = None
+        if obj is None:
+            reason = 'its object is no longer current'
+        elif _avi_object_failed(obj):
+            reason = 'its object failed'
+
+        for lane, state in lanes.items():
+            if not state.open:
+                continue
+            if reason is not None:
+                self._avi_warn_lost(lane, state, reason)
+            else:
+                method = self._avi_handler(lane)
+                if method is not None:
+                    self._avi_settle(lane, state, method)
+            state.open = False
+
+    def _avi_reset_lanes(self) -> None:
+        """
+        Report and clear whatever the finished object left pending.
+
+        Runs from ``open()``, which reports but never commits: the current object is
+        already the next one by then. The reset matters in its own right — an object
+        can end still owing trailing ENDs, and carrying that debt across the boundary
+        would swallow the next object's genuine ones.
+        """
+        for lane, state in (getattr(self, '_avi_lanes', None) or {}).items():
+            if state.open:
+                self._avi_warn_lost(lane, state)
+            state.reset()
 
     def preventDefault(self) -> None:
         """Prevent the default action from occurring."""
@@ -950,8 +1377,12 @@ class IInstanceBase:
         pass
 
     def open(self, obj: Entry) -> None:
-        """Open an object."""
-        pass
+        """Open an object.
+
+        A subclass defining its own ``open()`` gets the same sweep wrapped around it;
+        this body carries it for the nodes that define none.
+        """
+        self._avi_reset_lanes()
 
     def writeText(self, text: str) -> None:
         """Send a text string."""
@@ -1000,12 +1431,22 @@ class IInstanceBase:
         pass
 
     def closing(self) -> None:
-        """Perform any actions required before closing."""
+        """Perform any actions required before closing.
+
+        Nothing is settled here: this runs after the final ``close()``, when the
+        engine has already cleared the current object, so a stream committed from
+        here would have no object to belong to. A node holding an external resource
+        still sweeps it here — releasing a handle needs no object.
+        """
         pass
 
     def close(self) -> None:
-        """Close the instance."""
-        pass
+        """Close the instance.
+
+        A subclass defining its own ``close()`` gets the same settle wrapped around
+        it; this body carries it for the nodes that define none.
+        """
+        self._avi_settle_lanes()
 
 
 class ILoader(Protocol):

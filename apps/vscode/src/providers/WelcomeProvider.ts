@@ -182,7 +182,6 @@ export class WelcomeProvider {
 					hostUrl: config.development.hostUrl,
 					apiKey,
 					hasApiKey: this.configManager.hasApiKey(),
-					teamId: config.development.teamId,
 					local: {
 						engineVersion: config.development.local.engineVersion,
 					},
@@ -192,7 +191,6 @@ export class WelcomeProvider {
 					hostUrl: config.deployment.hostUrl,
 					hasApiKey: !!config.deployment.apiKey,
 					apiKey: config.deployment.apiKey || '',
-					teamId: config.deployment.teamId,
 					local: {
 						engineVersion: config.deployment.local.engineVersion,
 					},

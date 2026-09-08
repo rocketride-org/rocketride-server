@@ -1,0 +1,181 @@
+{
+	//
+	// Required:
+	//		The displayable name of this node
+	//
+	"title": "Schema Validate",
+	//
+	// Required:
+	//		The protocol is the endpoint protocol
+	//
+	"protocol": "schema_validate://",
+	//
+	// Required:
+	//		Class type of the node - what it does
+	//
+	"classType": ["text"],
+	//
+	// Required:
+	//		Capabilities are flags that change the behavior of the underlying
+	//		engine. "experimental" marks this node as not yet production-ready.
+	//
+	"capabilities": ["experimental"],
+	//
+	// Optional:
+	//		Register is either filter, endpoint or ignored if not specified
+	//
+	"register": "filter",
+	//
+	// Optional:
+	//		The node is the actual physical node to instantiate
+	//
+	"node": "python",
+	//
+	// Optional:
+	//		The path is the executable/script code
+	//
+	"path": "nodes.schema_validate",
+	//
+	// Required:
+	//		The prefix map when added/removed when converting URLs <=> paths
+	//
+	"prefix": "schema_validate",
+	//
+	// Optional:
+	//		Description of this driver
+	//
+	"description": ["A guard node for the audit-grade financial extraction suite. It flags ", "inconsistencies in structured facts — most notably a cost row stored as revenue ", "(and other metric/category mismatches, sign-convention violations, and missing ", "amounts/currency) — and makes sure provenance is never dropped. Reads and writes ", "the <code>answers</code> lane.</br>", "</br>", "Validation is <b>non-destructive</b>: original fields are kept, a <code>validation</code> ", "block (<code>valid</code>, <code>severity</code>, <code>flags</code>) is added, and a ", "<code>provenance</code> entry records that the fact was checked. Records that are not ", "fact objects pass through unchanged; nothing is ever dropped or fixed."],
+	//
+	// Optional:
+	//		The icon is the icon to display in the UI for this node
+	//
+	"icon": "util-text.svg",
+	"documentation": "https://docs.rocketride.org",
+	//
+	//	Optional:
+	//		As a pipe component, define what this pipe component takes
+	//		and what it produces
+	//
+	"lanes": {
+		"answers": ["answers"]
+	},
+	//
+	//	Note: no "test" block. The dynamic node-test harness injects lane input
+	//	via data_conn, which builds answers with `Answer.model_validate_json`.
+	//	The Answer schema's field validator forbids populating `answer` at
+	//	construction, so a webhook-injected `answers` input is always empty —
+	//	an engine-level dynamic test for an answers-consuming node cannot deliver
+	//	a populated fact. Validation logic is covered by the unit tests in
+	//	nodes/test/test_schema_validate.py and the contract suite.
+	//
+	//	Optional:
+	//		Profile section - configuration defaults used by the driver.
+	//		A single "default" profile supplies the base values; individual
+	//		fields below override them from the UI.
+	//
+	"preconfig": {
+		"default": "default",
+		"profiles": {
+			"default": {
+				"title": "Flag inconsistencies, preserve provenance",
+				"amount_field": "amount",
+				"currency_field": "currency",
+				"metric_field": "metric",
+				"category_field": "category",
+				"category_metric_map": {
+					"revenue": ["revenue", "revenues", "sales", "net sales", "turnover", "income", "net income", "gross profit", "operating income", "earnings", "proceeds", "bookings"],
+					"expense": ["cost", "costs", "expense", "expenses", "cogs", "cost of goods", "cost of revenue", "opex", "operating expense", "depreciation", "amortization", "impairment", "interest expense", "tax", "spend"],
+					"asset": ["asset", "assets", "cash", "receivable", "receivables", "inventory", "goodwill"],
+					"liability": ["liability", "liabilities", "payable", "payables", "debt", "loan", "borrowing"]
+				},
+				"sign": "warning",
+				"require_provenance": "error"
+			}
+		}
+	},
+	//
+	// Optional:
+	//		Local field definitions
+	//
+	"fields": {
+		"schema_validate.amount_field": {
+			"type": "string",
+			"title": "Amount field",
+			"description": "The fact field holding the numeric amount (presence and sign checks).",
+			"default": "amount",
+			"minLength": 1,
+			"maxLength": 128
+		},
+		"schema_validate.currency_field": {
+			"type": "string",
+			"title": "Currency field",
+			"description": "The fact field holding the currency code (presence check only).",
+			"default": "currency",
+			"minLength": 1,
+			"maxLength": 128
+		},
+		"schema_validate.metric_field": {
+			"type": "string",
+			"title": "Metric field",
+			"description": "The fact field naming the line item (e.g. 'Cost of goods sold') — the classifier input for the mismatch check.",
+			"default": "metric",
+			"minLength": 1,
+			"maxLength": 128
+		},
+		"schema_validate.category_field": {
+			"type": "string",
+			"title": "Category field",
+			"description": "The fact field holding the declared classification (e.g. revenue, expense) — checked against the metric.",
+			"default": "category",
+			"minLength": 1,
+			"maxLength": 128
+		},
+		"schema_validate.category_metric_map": {
+			"type": "object",
+			"title": "Category → metric keywords",
+			"description": "Map of canonical category to metric keyword substrings that imply it. Drives the cost-as-revenue check. Leave empty to skip the metric/category mismatch check."
+		},
+		"schema_validate.sign": {
+			"type": "string",
+			"title": "Sign check severity",
+			"description": "Severity for a sign-convention violation (e.g. an expense with a positive amount). Set to 'off' to disable the check.",
+			"default": "warning",
+			"enum": ["off", "warning", "error"]
+		},
+		"schema_validate.require_provenance": {
+			"type": "string",
+			"title": "Require provenance",
+			"description": "Severity for a fact that arrives with no usable provenance list (absent, empty, or not a list). Set to 'off' to disable the flag; a provenance entry is still appended.",
+			"default": "error",
+			"enum": ["off", "warning", "error"]
+		},
+		"schema_validate.default": {
+			"object": "default",
+			"properties": ["schema_validate.amount_field", "schema_validate.currency_field", "schema_validate.metric_field", "schema_validate.category_field", "schema_validate.category_metric_map", "schema_validate.sign", "schema_validate.require_provenance"]
+		},
+		"schema_validate.profile": {
+			"title": "Validation",
+			"description": "Schema validation configuration",
+			"type": "string",
+			"default": "default",
+			"enum": ["*>preconfig.profiles.*.title"],
+			"conditional": [
+				{
+					"value": "default",
+					"properties": ["schema_validate.default"]
+				}
+			]
+		}
+	},
+	//
+	// Required:
+	//		Defines the fields (shape) of the service
+	//
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Schema Validate",
+			"properties": ["schema_validate.profile"]
+		}
+	]
+}

@@ -126,6 +126,6 @@ Then wire `llm_1` to receive from `prompt_1` instead of `source_1`.
 
 ## Next steps
 
-- Add a [`qdrant`](/nodes/qdrant) store between source and LLM to build the full [RAG pipeline](/examples/rag-pipeline).
+- Add a [`qdrant`](/nodes/store_qdrant) store between source and LLM to build the full [RAG pipeline](/examples/rag-pipeline).
 - Replace `llm_openai` with [`llm_anthropic`](/nodes/llm_anthropic) or [`llm_ollama`](/nodes/llm_ollama) — the rest of the pipeline is unchanged.
 - See the [Anthropic integration guide](/integrations/anthropic) for model profile options.

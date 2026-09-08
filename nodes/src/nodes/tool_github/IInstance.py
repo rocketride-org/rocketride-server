@@ -40,6 +40,7 @@ from rocketlib import IInstanceBase, tool_function
 from ai.common.utils import normalize_tool_input, require_int, require_str
 
 from .github_client import (
+    GitHubAPIError,
     call,
     clean_commit,
     clean_file_entry,
@@ -202,16 +203,23 @@ class IInstance(IInstanceBase):
         description='Get the decoded content and metadata of a single file from a GitHub repository.',
     )
     def file_get(self, args):
+        """Get the decoded content and metadata of a single file from a GitHub repository."""
         args = normalize_tool_input(args, tool_name='tool_github')
         repo = self._repo(args)
         path = require_str(args, 'path', tool_name='file_get')
         params = {'ref': args['ref']} if args.get('ref') else None
-        data = call(self._token(), 'GET', f'/repos/{repo}/contents/{path.lstrip("/")}', params=params)
+        try:
+            data = call(self._token(), 'GET', f'/repos/{repo}/contents/{path.lstrip("/")}', params=params)
+        except GitHubAPIError as e:
+            if e.status_code == 404:
+                return {'found': False, 'message': str(e)}
+            raise
         if isinstance(data, list):
             raise ValueError(f'Path "{path}" is a directory — use file_list instead')
         content_b64 = data.get('content', '')
         content = base64.b64decode(content_b64).decode('utf-8', errors='replace')
         return {
+            'found': True,
             'path': data.get('path'),
             'name': data.get('name'),
             'sha': data.get('sha'),
@@ -233,6 +241,7 @@ class IInstance(IInstanceBase):
         description='List files and directories at a path in a GitHub repository.',
     )
     def file_list(self, args):
+        """List files and directories at a path in a GitHub repository."""
         args = normalize_tool_input(args, tool_name='tool_github')
         repo = self._repo(args)
         path = (args.get('path') or '').strip().lstrip('/')

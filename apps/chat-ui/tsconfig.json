@@ -1,18 +1,18 @@
 {
   "compilerOptions": {
     /* Language and Environment */
-    "target": "ES2020",
-    "lib": ["ES2020", "DOM", "DOM.Iterable"],
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "module": "ESNext",
 
-	/* Bundler mode */
+    /* Bundler mode */
     "moduleResolution": "bundler",
     "allowImportingTsExtensions": true,
     "resolveJsonModule": true,
     "isolatedModules": true,
     "noEmit": true,
     "jsx": "react-jsx",
-    
+
     /* Type Checking */
     "strict": true,
     "noUnusedLocals": true,
@@ -22,9 +22,8 @@
     "noImplicitReturns": true,
     "noImplicitOverride": true,
     "noUncheckedIndexedAccess": true,
-    
+
     /* Module Resolution */
-    "baseUrl": ".",
     "paths": {
       "@/*": ["./src/*"],
       "@components/*": ["./src/components/*"],
@@ -35,29 +34,20 @@
       "@services/*": ["./src/services/*"],
       "@assets/*": ["./src/assets/*"]
     },
-    
-    /* Emit */
-    "declaration": true,
-    "declarationMap": true,
-    "sourceMap": true,
-    "outDir": "./dist",
-    "removeComments": true,
-    "importHelpers": true,
-    
+
     /* Interop Constraints */
     "esModuleInterop": true,
     "allowSyntheticDefaultImports": true,
     "forceConsistentCasingInFileNames": true,
-    
+
     /* Skip Lib Check */
     "skipLibCheck": true,
-    
+
     /* Additional Options for React */
     "allowJs": true,
-    "checkJs": false,
-    
+    "checkJs": false
   },
-  
+
   "include": [
     "src/**/*",
     "src/**/*.ts",
@@ -69,7 +59,7 @@
     "*.ts",
     "*.tsx"
   ],
-  
+
   "exclude": [
     "node_modules",
     "dist",
@@ -79,12 +69,5 @@
     "**/*.test.tsx",
     "**/*.spec.ts",
     "**/*.spec.tsx"
-  ],
-  
-  "ts-node": {
-    "esm": true,
-    "compilerOptions": {
-      "module": "ESNext"
-    }
-  }
+  ]
 }

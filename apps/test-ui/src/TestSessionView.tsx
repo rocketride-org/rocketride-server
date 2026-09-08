@@ -32,7 +32,7 @@
 // =============================================================================
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { useShellConnection } from 'shell-ui';
+import { useShellConnection } from 'shell';
 import { createTestEngine } from './engine';
 import type { TestConfig, EngineState } from './types';
 import { styles } from './styles';
@@ -130,7 +130,12 @@ const TestSessionView: React.FC<TestSessionViewProps> = ({ connection, editorId,
 	useEffect(() => { ready.current = true; }, []);
 
 	// ── Cleanup ──
-	useEffect(() => () => cleanupEditor(editorId), [editorId]);
+	useEffect(() => () => {
+		// Closing the tab must stop in-flight runs — live WebSockets and
+		// timers would otherwise outlive the view.
+		engine.abort();
+		cleanupEditor(editorId);
+	}, [engine, editorId]);
 
 	// ── Engine subscription ──
 	useEffect(() => {
@@ -189,7 +194,7 @@ const TestSessionView: React.FC<TestSessionViewProps> = ({ connection, editorId,
 				<div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' as const, overflow: 'auto' }}>
 					<div style={styles.gridArea}>
 						<MetricsPanel
-							metrics={engine.metrics} apiResults={engine.apiResults}
+							metrics={engine.metrics}
 							worstPing={engine.worstPing} worstPingSnapshot={engine.worstPingSnapshot}
 							engineState={engineState}
 							onStart={handleStart} onAbort={handleAbort}

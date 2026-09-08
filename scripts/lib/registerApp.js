@@ -50,7 +50,7 @@ const DIST_APPS_JSON  = path.join(DIST_ROOT, 'server', 'static', 'apps.json');
 const APPS_BASE       = process.env.APPS_BASE_URL ?? 'apps';
 
 // Single source of truth for the shell contract version (freeze auto-writes it).
-const APIVER_TS = path.join(__dirname, '..', '..', 'apps', 'shell-ui', 'src', 'apiver.ts');
+const APIVER_TS = path.join(__dirname, '..', '..', 'packages', 'shell', 'src', 'apiver.ts');
 
 // Memoized across calls: apiver.ts is process-global and does not change during
 // a build run, so it is read and parsed once (including a memoized null). This
@@ -60,7 +60,7 @@ const APIVER_TS = path.join(__dirname, '..', '..', 'apps', 'shell-ui', 'src', 'a
 let _shellApiVersionCache;
 
 /**
- * Reads the current shell-api contract version from shell-ui's apiver.ts. Every
+ * Reads the current shell-api contract version from the shell's apiver.ts. Every
  * app is built against the current shell, so we stamp this onto its apps.json
  * entry — recording, across all registered apps, the lowest version still in use
  * so obsolete frozen versions can be pruned safely. The result is cached after

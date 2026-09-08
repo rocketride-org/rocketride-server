@@ -1,0 +1,47 @@
+{
+  "name": "@rocketride/sql-ui",
+  "version": "1.0.0",
+  "private": true,
+  "description": "SQL database workbench over pipeline database tool nodes",
+  "license": "MIT",
+  "appManifest": {
+    "id": "rocketride.sql",
+    "publisher": "Aparavi Software AG",
+    "name": "SQL Explorer",
+    "description": "Browse, query, design, and diagram SQL databases through pipeline database nodes",
+    "categories": [
+      "tools"
+    ],
+    "mode": "free",
+    "authenticated": true,
+    "showStatusBar": true
+  },
+  "scripts": {
+    "build": "rsbuild build",
+    "build:prod": "rsbuild build --env-mode production"
+  },
+  "browserslist": [
+    "chrome >= 81",
+    "edge >= 83",
+    "firefox >= 76",
+    "safari >= 13"
+  ],
+  "dependencies": {
+    "@module-federation/rsbuild-plugin": "^2.5.1",
+    "@monaco-editor/react": "^4.7.0",
+    "@xyflow/react": "~12.3.4",
+    "elkjs": "~0.9.3",
+    "monaco-editor": "^0.55.1",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "rocketride": "workspace:*",
+    "shell": "file:../../.rocketride/shell/shell.tgz"
+  },
+  "devDependencies": {
+    "@rsbuild/core": "~2.0.11",
+    "@rsbuild/plugin-react": "~2.0.1",
+    "typescript": "^5.3.0",
+    "@types/react": "~18.3.31",
+    "@types/react-dom": "~18.3.7"
+  }
+}

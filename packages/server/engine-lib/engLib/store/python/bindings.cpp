@@ -48,7 +48,12 @@
 //=============================================================================
 
 #include <engLib/eng.h>
+#include <mutex>
 #include <optional>
+#include <string>
+#include <string_view>
+#include <tuple>
+#include <unordered_set>
 
 //-----------------------------------------------------------------------------
 // These are generic definition helps that help in writing declarations.
@@ -262,6 +267,24 @@ PYBIND11_EMBEDDED_MODULE(engLib, engLib) {
     engLib.PYBIND_FUNCTION(processArguments, [](py::object &argv) {
         // Call the working function
         engine::python::executePythonArguments(argv);
+    });
+
+    //-------------------------------------------------------------
+    /// @details
+    ///		Returns the complete task-file JSON of the task currently
+    ///		executing in this process, or None when no task is
+    ///		running. This is how subprocess python reads trusted
+    ///		task-file data (identity, storage anchor) without
+    ///		per-endpoint plumbing — published around the task's
+    ///		begin/end window by ITask::execute.
+    ///------------------------------------------------------------
+    engLib.PYBIND_FUNCTION(getTask, []() -> py::object {
+        // Read the published task (a copy; null when none is running)
+        auto task = engine::task::ITask::currentTask();
+        if (task.isNull()) return py::none();
+
+        // Hand python its own dict representation
+        return pyjson::jsonToDict(task);
     });
 
     //-------------------------------------------------------------
@@ -487,7 +510,29 @@ PYBIND11_EMBEDDED_MODULE(engLib, engLib) {
     ///     .py file, not bindings.cpp
     ///------------------------------------------------------------
     auto getPythonCallerLocation =
-        []() -> std::optional<std::tuple<std::string, int, std::string>> {
+        []() -> std::optional<std::tuple<std::string_view, int, std::string_view>> {
+        // The names are interned for the life of the process, and the views handed out
+        // below point into that pool. ap::Location holds string_views and Error keeps a
+        // Location by value, so a location built over a caller-local std::string outlives
+        // its own storage the moment that scope ends - every later read of it, such as the
+        // completionError property, then lands in freed memory. A pipeline's distinct
+        // file/function names are bounded by its Python sources, so the pool stays small;
+        // it is never pruned, which is what makes the views permanently safe. unordered_set
+        // is node-based, so inserting never moves an element another view already points at.
+        //
+        // The pool and its lock are leaked on purpose rather than left as ordinary
+        // function-local statics. Those are destroyed in reverse order of construction, and
+        // engine::config::monitor() (config/global.hpp) is constructed first - so the pool
+        // would be gone while the monitor still holds Errors viewing into it, putting the
+        // same dangling read back at shutdown. Leaking is what makes "life of the process"
+        // exact; the memory is reclaimed by the OS when the process ends.
+        static auto &internLock = *new std::mutex();
+        static auto &internPool = *new std::unordered_set<std::string>();
+        const auto intern = [](std::string value) -> std::string_view {
+            const std::lock_guard<std::mutex> guard(internLock);
+            return *internPool.insert(std::move(value)).first;
+        };
+
         try {
             py::object frame = py::module_::import("sys").attr("_getframe")(0);
             py::str pathStr(frame.attr("f_code").attr("co_filename"));
@@ -497,7 +542,8 @@ PYBIND11_EMBEDDED_MODULE(engLib, engLib) {
             int line = py::cast<int>(frame.attr("f_lineno"));
             std::string func =
                 funcStr.attr("encode")("utf-8").cast<std::string>();
-            return std::make_tuple(std::move(path), line, std::move(func));
+            return std::make_tuple(intern(std::move(path)), line,
+                                   intern(std::move(func)));
         } catch (...) {
             return std::nullopt;
         }

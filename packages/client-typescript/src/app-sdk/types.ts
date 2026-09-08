@@ -24,10 +24,10 @@
 // APP SDK TYPES
 // =============================================================================
 //
-// Type definitions for the RocketRide shell-ui app plugin system.
+// Type definitions for the RocketRide shell app plugin system.
 //
-// These mirror shell-ui/src/workspace/types.ts so that third-party apps can
-// import them from `rocketride/app-sdk` without depending on the shell-ui
+// These mirror shell/src/workspace/types.ts so that third-party apps can
+// import them from `rocketride/app-sdk` without depending on the shell
 // monorepo package.  At runtime, Module Federation replaces stub implementations
 // with the real singletons from the shell host.
 // =============================================================================
@@ -49,17 +49,6 @@ export interface ShellAppProps {
 	isConnected: boolean;
 	/** Authenticated user identity, or null when not logged in. */
 	identity: ConnectResult | null;
-}
-
-/**
- * Props injected by the shell into the app's `<Sidebar />` component.
- *
- * The sidebar zone is collapsible; apps should hide or simplify their
- * sidebar content when `collapsed` is true.
- */
-export interface ShellSidebarProps {
-	/** True when the sidebar is in collapsed (icon-only) mode. */
-	collapsed: boolean;
 }
 
 /**
@@ -229,10 +218,6 @@ export interface ShellBrandingConfig {
  *
  * The shell stores one of these per app once the dynamic import triggered
  * by `AppManifestEntry.load()` resolves.
- *
- * The `components` object provides React components the shell mounts in
- * its screen zones.  `App` and `Sidebar` are well-known; any additional
- * keys are available for cross-app loading via `useAppComponent()`.
  */
 export interface AppDescriptor {
 	/** Unique stable identifier — must match the manifest id. */
@@ -244,16 +229,16 @@ export interface AppDescriptor {
 	/** Branding tokens (logo, welcome text) for the app. */
 	branding: ShellBrandingConfig;
 	/**
-	 * Component catalog.
-	 *
-	 * - `App`     — required, mounted in the client area.
-	 * - `Sidebar` — optional, mounted in the sidebar zone.
-	 *               If absent the sidebar zone is hidden.
-	 * - Any other keys — available for cross-app loading.
+	 * The app's ONE mount point, rendered raw in the client area. The app
+	 * composes its own layout inside with `<AppLayout>` (one column, sidebar,
+	 * status bar — declared as props from the app's single tree).
 	 */
-	components: {
-		App: React.ComponentType<ShellAppProps>;
-		Sidebar?: React.ComponentType<ShellSidebarProps>;
+	app: React.ComponentType<ShellAppProps>;
+	/**
+	 * Optional cross-app component catalog. Never mounted by the shell —
+	 * entries are loadable by other apps via `useAppComponent()`.
+	 */
+	components?: {
 		[key: string]: React.ComponentType<any> | undefined;
 	};
 }

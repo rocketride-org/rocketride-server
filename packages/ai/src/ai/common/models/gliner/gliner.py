@@ -36,11 +36,17 @@ class GLiNERLoader(BaseLoader):
 
     LOADER_TYPE: str = 'gliner'
     _REQUIREMENTS_FILE = os.path.join(os.path.dirname(__file__), 'requirements_gliner.txt')
-    _DEFAULTS: dict = {
-        'threshold': 0.5,
-        'flat_ner': True,
-        'multi_label': False,
-    }
+
+    # No identity defaults. `threshold`, `flat_ner` and `multi_label` are inference-time
+    # arguments applied per call in inference(), not load-time ones. Folding them in here
+    # made two GLiNER instances differing only in threshold load separate copies of
+    # identical weights.
+    #
+    # They are excluded from the identity hash for the same reason. load() absorbs and
+    # ignores them, so they cannot change the loaded weights — but an older client that
+    # still sends them in loader_options would otherwise hash to a different model_id
+    # and duplicate those weights for the length of a rolling upgrade.
+    _SERVER_PARAMS = BaseLoader._SERVER_PARAMS | {'threshold', 'flat_ner', 'multi_label'}
 
     @staticmethod
     def load(
@@ -48,6 +54,9 @@ class GLiNERLoader(BaseLoader):
         device: Optional[str] = None,
         allocate_gpu: Optional[callable] = None,
         exclude_gpus: Optional[List[int]] = None,
+        threshold: Optional[float] = None,
+        flat_ner: Optional[bool] = None,
+        multi_label: Optional[bool] = None,
         **kwargs,
     ) -> Tuple[Any, Dict[str, Any], int]:
         """
@@ -62,10 +71,19 @@ class GLiNERLoader(BaseLoader):
             device: Device for local mode ('cuda:0', 'cpu', etc.)
             allocate_gpu: Callback for server mode (memory_gb, exclude_gpus) -> (gpu_index, device_str)
             exclude_gpus: GPUs to exclude (server mode)
-            **kwargs: Additional arguments for GLiNER
+            threshold: Accepted and ignored. Inference-time only — see inference().
+            flat_ner: Accepted and ignored. Inference-time only — see inference().
+            multi_label: Accepted and ignored. Inference-time only — see inference().
+            **kwargs: Additional arguments forwarded to GLiNER.from_pretrained()
+                (e.g. `revision`)
 
         Returns:
             Tuple of (model_object, metadata_dict, gpu_index)
+
+        Note:
+            The three inference params are named explicitly so they are absorbed rather
+            than forwarded: an older client can still put them in `loader_options`, and
+            passing them through to `from_pretrained()` would raise.
         """
         GLiNERLoader._ensure_dependencies()
         GLiNERLoader._patch_mecab()
@@ -77,7 +95,7 @@ class GLiNERLoader(BaseLoader):
         if allocate_gpu:
             # === SERVER MODE: CPU-first for accurate memory measurement ===
             logger.info(f'Loading GLiNER {model_name} to CPU...')
-            model = GLiNERModel.from_pretrained(model_name)
+            model = GLiNERModel.from_pretrained(model_name, **kwargs)
             model.to('cpu')
             model.eval()
 
@@ -98,7 +116,7 @@ class GLiNERLoader(BaseLoader):
                 device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
 
             logger.info(f'Loading GLiNER {model_name} to {device}')
-            model = GLiNERModel.from_pretrained(model_name)
+            model = GLiNERModel.from_pretrained(model_name, **kwargs)
             model.to(device)
             model.eval()
 
@@ -324,10 +342,14 @@ class GLiNER:
         Args:
             model_name_or_path: Model name or path
             device: Device ('server', 'cuda', 'cpu', 'cuda:N', or None for auto)
-            threshold: Confidence threshold for entity detection
-            flat_ner: Whether to use flat NER (no nested entities)
-            multi_label: Whether to allow multiple labels per span
+            threshold: Default confidence threshold, applied per call
+            flat_ner: Default flat-NER setting, applied per call
+            multi_label: Default multi-label setting, applied per call
             **kwargs: Additional arguments for model loading
+
+        The three inference defaults above are applied at predict time and can be
+        overridden per call in predict_entities(). They are not part of model identity,
+        so instances differing only in these values share one copy on the model server.
         """
         self.model_name = model_name_or_path
         self.device = device
@@ -360,11 +382,14 @@ class GLiNER:
             )
 
     def _init_proxy(self) -> None:
-        """Initialize proxy connection and load model on server."""
+        """Initialize proxy connection and load model on server.
+
+        `threshold`, `flat_ner` and `multi_label` are deliberately not sent: they are
+        inference-time arguments, re-sent per request by _predict_remote(), and
+        generate_model_id() hashes loader options into model identity — so including
+        them would load a separate identical copy of the weights per distinct value.
+        """
         loader_options = {
-            'threshold': self.threshold,
-            'flat_ner': self.flat_ner,
-            'multi_label': self.multi_label,
             **self.kwargs,
         }
         self._client.load_model(

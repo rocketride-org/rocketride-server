@@ -25,13 +25,12 @@
 // =============================================================================
 
 import React from 'react';
-import type { AppDescriptor } from 'shell-ui';
-import { RocketRideMark } from 'shared';
+import type { AppDescriptor } from 'shell';
+import { RocketRideMark } from 'shell';
 import EventsApp from './EventsApp';
-import EventsSidebar from './EventsSidebar';
 
 /**
- * Event Monitor app descriptor. The frame-only EventsSidebar keeps the shell's
+ * Event Monitor app descriptor. EventsApp's root AppLayout keeps the shell's
  * branded Header/Footer sidebar frame present (empty middle); the app's run
  * controls live in the Capture card, not the sidebar.
  */
@@ -45,10 +44,9 @@ const EVENTS_APP: AppDescriptor = {
 		iconDark: React.createElement(RocketRideMark, { bodyColor: '#E0DDF0', style: { width: '100%', height: '100%' } }),
 		iconLight: React.createElement(RocketRideMark, { bodyColor: '#1E1A34', style: { width: '100%', height: '100%' } }),
 	},
-	components: {
-		App: EventsApp,
-		Sidebar: EventsSidebar,
-	},
+	// Frame-only app: EventsApp's root AppLayout keeps the branded sidebar
+	// frame (empty slot) and the status bar.
+	app: EventsApp,
 };
 
 export default EVENTS_APP;

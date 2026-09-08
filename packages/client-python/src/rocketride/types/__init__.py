@@ -156,8 +156,19 @@ from .account import (
     TeamMemberParams,
 )
 
-# Deploy types: deployment records.
-from .deploy import DeploymentRecord
+# Deploy types: teams-as-environments deployment records.
+from .deploy import (
+    DeployActor,
+    DeployArtifact,
+    DeployHistoryEntry,
+    DeployHistoryResult,
+    DeployListResult,
+    Deployment,
+    DeploymentSchedule,
+    DeployVersionsResult,
+    PublishResult,
+    SchedulePreview,
+)
 
 # Run-log types: the per-task event continuum (chapters, reads, deletes).
 from .log import (
@@ -287,7 +298,16 @@ __all__ = [
     'InviteMemberParams',
     'TeamMemberParams',
     # Deploy types
-    'DeploymentRecord',
+    'DeployActor',
+    'DeployArtifact',
+    'DeployHistoryEntry',
+    'DeployHistoryResult',
+    'DeployListResult',
+    'Deployment',
+    'DeploymentSchedule',
+    'DeployVersionsResult',
+    'PublishResult',
+    'SchedulePreview',
     # Run-log types
     'LogRunKind',
     'LogChapter',

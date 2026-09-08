@@ -41,7 +41,6 @@ import time
 import pytest
 
 import ai.modules.task.run_log as run_log
-from ai.account.file_store import FileStore
 from ai.account.store_providers.filesystem import FilesystemStore
 from rocketride import log_stream as rr_log_stream
 from rocketride._log_codec import normalize_stamps
@@ -54,6 +53,7 @@ from .test_run_log import (
     PROJECT,
     SOURCE,
     flow_op,
+    make_file_store,
     make_stamp,
     open_writer,
     output_event,
@@ -86,10 +86,10 @@ class _StubLogApi:
     def __init__(self, reader):
         self._reader = reader
 
-    async def chapters(self, project_id, source, run_kind):
+    async def chapters(self, project_id, source, *, team_id=''):
         return await self._reader.chapters()
 
-    async def segment(self, project_id, source, run_kind, segment, *, offset=0, max_bytes=None):
+    async def segment(self, project_id, source, segment, *, team_id='', offset=0, max_bytes=None):
         if max_bytes is None:
             return await self._reader.segment_raw(segment, offset=offset)
         return await self._reader.segment_raw(segment, offset=offset, max_bytes=max_bytes)
@@ -104,7 +104,7 @@ class _StubClient:
 
 def open_session(reader):
     """A session bound to the stub client over the standard test stream."""
-    return LogEventStream(_StubClient(reader), PROJECT, SOURCE, KIND)
+    return LogEventStream(_StubClient(reader), PROJECT, SOURCE)
 
 
 async def seed_rich(istore, spool_root, monkeypatch):
@@ -149,7 +149,14 @@ async def seed_rich(istore, spool_root, monkeypatch):
 
     await writer._drain_uploads()
     await writer.end_run('ok')
-    return run_log.RunLogReader(FileStore(istore, CLIENT), CLIENT, PROJECT, SOURCE, KIND, spool_root=spool_root)
+    return run_log.RunLogReader(
+        make_file_store(istore),
+        CLIENT,
+        PROJECT,
+        SOURCE,
+        KIND,
+        spool_root=spool_root,
+    )
 
 
 def sse_event(pid, message):
@@ -360,7 +367,14 @@ class TestSeededReads:
             )
         await writer._drain_uploads()
         await writer.end_run('ok')
-        reader = run_log.RunLogReader(FileStore(istore, CLIENT), CLIENT, PROJECT, SOURCE, KIND, spool_root=spool_root)
+        reader = run_log.RunLogReader(
+            make_file_store(istore),
+            CLIENT,
+            PROJECT,
+            SOURCE,
+            KIND,
+            spool_root=spool_root,
+        )
 
         golden = await read_golden(reader, from_seq=0)
         # Sanity: the scenario really spans multiple segments.
@@ -437,7 +451,14 @@ class TestSeededReads:
         writer = await open_writer(istore, spool_root, stamp, raise_floor)
         writer.append(stamp(flow_op('begin', pid=3, component='x')))
         writer.append(stamp(flow_op('end', pid=3, component='x')))
-        reader = run_log.RunLogReader(FileStore(istore, CLIENT), CLIENT, PROJECT, SOURCE, KIND, spool_root=spool_root)
+        reader = run_log.RunLogReader(
+            make_file_store(istore),
+            CLIENT,
+            PROJECT,
+            SOURCE,
+            KIND,
+            spool_root=spool_root,
+        )
 
         session = open_session(reader)
         # Cache the active segment NOW — it goes stale the moment more
@@ -473,7 +494,14 @@ class TestLiveIngest:
         stamp, raise_floor, state = make_stamp()
         writer = await open_writer(istore, spool_root, stamp, raise_floor)
         writer.append(stamp(output_event('boot')))
-        reader = run_log.RunLogReader(FileStore(istore, CLIENT), CLIENT, PROJECT, SOURCE, KIND, spool_root=spool_root)
+        reader = run_log.RunLogReader(
+            make_file_store(istore),
+            CLIENT,
+            PROJECT,
+            SOURCE,
+            KIND,
+            spool_root=spool_root,
+        )
 
         session = open_session(reader)
         delivered = []
@@ -511,7 +539,14 @@ class TestLiveIngest:
         stamp, raise_floor, state = make_stamp()
         writer = await open_writer(istore, spool_root, stamp, raise_floor)
         writer.append(stamp(output_event('boot')))
-        reader = run_log.RunLogReader(FileStore(istore, CLIENT), CLIENT, PROJECT, SOURCE, KIND, spool_root=spool_root)
+        reader = run_log.RunLogReader(
+            make_file_store(istore),
+            CLIENT,
+            PROJECT,
+            SOURCE,
+            KIND,
+            spool_root=spool_root,
+        )
 
         session = open_session(reader)
         delivered = []

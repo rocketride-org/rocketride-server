@@ -13,20 +13,35 @@ class ModuleRegistry {
 
 	/**
 	 * Discover all tasks.js files in the project
-	 * Searches for scripts/tasks.js in packages/, apps/, and nodes/
+	 * Searches for scripts/tasks.js in packages/, apps/, nodes/, shared/, ...
 	 */
 	async discover(rootDir) {
 		const { glob } = require('glob');
 		const parse = require('gitignore-globs');
 
 		const gitignorePath = path.join(rootDir, '.gitignore');
-		const gitignore = (await exists(gitignorePath)) ? parse(gitignorePath) : [];
+		// gitignore-globs keeps the \r of CRLF checkouts in its patterns,
+		// which makes every produced glob match nothing — strip it.
+		const gitignore = (await exists(gitignorePath)) ? parse(gitignorePath).map((g) => g.replace(/\r/g, '')) : [];
 
-		const taskFiles = await glob(['{packages,apps,nodes,examples,extension,tools}/**/scripts/tasks.{js,cjs}', 'scripts/tasks.{js,cjs}'], {
+		const taskFiles = await glob(['{packages,apps,nodes,examples,extension,tools,shared}/**/scripts/tasks.{js,cjs}', 'scripts/tasks.{js,cjs}'], {
 			cwd: rootDir,
-			ignore: gitignore,
+			// A tasks.js inside any node_modules is never a build module
+			// (installed/materialized packages ship their dev files), so it
+			// is excluded regardless of what the gitignore contributes.
+			ignore: ['**/node_modules/**', ...gitignore],
 			absolute: true,
 			nodir: true,
+		});
+
+		// Shallowest first: the root's own scripts/tasks.js loads before any
+		// nested repo's copy of it (e.g. the apps/stock submodule), so with
+		// first-wins registration below, shared module names (ui, builder)
+		// always resolve to THIS root's copy — the one whose lib/registry is
+		// the instance actually running the build.
+		taskFiles.sort((a, b) => {
+			const depth = (f) => path.relative(rootDir, f).split(path.sep).length;
+			return depth(a) - depth(b) || a.localeCompare(b);
 		});
 
 		for (const taskFile of taskFiles) {
@@ -55,6 +70,11 @@ class ModuleRegistry {
 					console.warn(`  Warning: ${filePath} entry missing 'name' property, skipping`);
 					continue;
 				}
+
+				// First registration wins — never re-register a module name.
+				// Combined with the shallowest-first load order, a nested
+				// repo's copy of a shared module can't shadow the root's.
+				if (this.modules.has(mod.name)) continue;
 
 				// Store the module's directory for context
 				mod._path = path.dirname(filePath);

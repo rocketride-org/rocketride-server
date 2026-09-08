@@ -105,3 +105,9 @@ class AppCommands(DAPConn):
     async def on_rrext_app_pricing(self, request: Dict[str, Any]) -> Dict[str, Any]:
         """Delegate ``rrext_app_pricing`` to the app handler."""
         return await account.handle_app(self, request)
+
+    # ── rrext_app_deploy ─────────────────────────────────────────────────────
+
+    async def on_rrext_app_deploy(self, request: Dict[str, Any]) -> Dict[str, Any]:
+        """Delegate ``rrext_app_deploy`` (the publish ladder) to the app handler."""
+        return await account.handle_app(self, request)

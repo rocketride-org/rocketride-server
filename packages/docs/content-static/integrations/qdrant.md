@@ -111,7 +111,7 @@ annotated `.pipe` file.
 
 ## Related
 
-- [`qdrant` node reference](/nodes/qdrant)
+- [`qdrant` node reference](/nodes/store_qdrant)
 - [RAG Pipeline example](/examples/rag-pipeline)
 - [Anthropic integration](/integrations/anthropic) — pairing with Anthropic Claude models
 - [Concepts: Performance](/concepts/performance) — batching and chunk size tuning

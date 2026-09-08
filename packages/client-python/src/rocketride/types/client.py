@@ -57,6 +57,8 @@ Usage:
 
 from typing import Any, Callable, Awaitable, TypedDict, Literal, Optional, Union
 
+from typing_extensions import NotRequired
+
 
 class TraceInfo(TypedDict):
     """
@@ -215,12 +217,16 @@ class OrgInfo(TypedDict):
     Attributes:
         id (str): Unique identifier for the organisation.
         name (str): Human-readable display name.
+        developerId (str | None): Public developer slug — the organisation's app
+            publisher identity ('<developerId>.<appName>'). None/absent until the
+            organisation registers as a marketplace developer (always absent on OSS).
         permissions (list[str]): Permission strings granted at the org level.
         teams (list[TeamInfo]): Teams within this organisation that the user is a member of.
     """
 
     id: str
     name: str
+    developerId: NotRequired[str | None]
     permissions: list[str]
     teams: list[TeamInfo]
 

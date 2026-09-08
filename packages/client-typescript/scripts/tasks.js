@@ -26,9 +26,12 @@
  * Build tasks for rocketride (TypeScript client)
  *
  * Commands:
- *   build - Compile TypeScript and create package
- *   clean - Remove build artifacts
- *   test  - Run tests
+ *   build  - Compile TypeScript and create package
+ *   clean  - Remove build artifacts
+ *   test   - Run tests
+ *   freeze - Mint/replace the contract floor for the current package version
+ *   check  - Verify the contract floors are current & unbroken (no writes)
+ *   regen  - Regenerate derived contract artifacts from the immutable floors
  */
 const path = require('path');
 const { glob } = require('glob');
@@ -210,6 +213,12 @@ function makeCreateNpmPackageAction() {
 				return;
 			}
 
+			// Contract gate: a surface that breaks any frozen floor must never be
+			// packaged. --floors compiles the conformance file only, so additive
+			// work-in-progress still packs; only removals/narrowings fail here.
+			task.output = 'Checking contract floors...';
+			await execCommand('node', [path.join(__dirname, 'freeze-client-api.js'), '--floors'], { task, cwd: PACKAGE_DIR });
+
 			await mkdir(PACKAGE_DIST);
 			await execCommand('npm', ['pack', '--pack-destination', PACKAGE_DIST], { task, cwd: PACKAGE_DIR });
 		},
@@ -318,6 +327,24 @@ function makeRunJestAction(options = {}) {
 	};
 }
 
+/**
+ * Action factory for the contract freeze script (scripts/freeze-client-api.js).
+ * One factory covers all modes — the flag selects freeze / --check / --regen.
+ *
+ * @param {string} [flag] - Optional script mode flag.
+ * @returns {Function} Action factory for the registry.
+ */
+function makeContractScriptAction(flag) {
+	return () => ({
+		run: async (ctx, task) => {
+			const script = path.join(__dirname, 'freeze-client-api.js');
+			const args = [script];
+			if (flag) args.push(flag);
+			await execCommand('node', args, { task, cwd: PACKAGE_DIR });
+		},
+	});
+}
+
 // ============================================================================
 // Module Export
 // ============================================================================
@@ -346,6 +373,9 @@ module.exports = {
 		{ name: 'client-typescript:run-jest', action: makeRunJestAction },
 		{ name: 'client-typescript:gen-pipeline-ref', action: makeGenPipelineRefAction },
 		{ name: 'client-typescript:docs-generate', action: () => ({ steps: ['client-typescript:gen-pipeline-ref'] }) },
+		{ name: 'client-typescript:freeze-run', action: makeContractScriptAction() },
+		{ name: 'client-typescript:check-run', action: makeContractScriptAction('--check') },
+		{ name: 'client-typescript:regen-run', action: makeContractScriptAction('--regen') },
 
 		// Public actions (have descriptions)
 		{
@@ -369,6 +399,39 @@ module.exports = {
 						steps: ['client-typescript:run-jest'],
 					}),
 				],
+			}),
+		},
+		{
+			// Mint (or re-mint) the contract floor for the CURRENT package
+			// version: bundles src/client/index.ts into contract/versions/
+			// v<MAJOR.MINOR>.d.ts and regenerates the derived artifacts. Older
+			// floors are immutable; only the in-progress minor is replaceable.
+			name: 'client-typescript:freeze',
+			action: () => ({
+				description: 'Freeze the client SDK contract floor for the current package version',
+				steps: ['client-typescript:freeze-run'],
+			}),
+		},
+		{
+			// CI/publish mode: verify the floors hold, that a floor exists for
+			// the current package version, and that the live surface has not
+			// drifted from it — without writing anything. Nonzero exit on drift.
+			name: 'client-typescript:check',
+			action: () => ({
+				description: 'Check the client SDK contract floors are current (no write)',
+				steps: ['client-typescript:check-run'],
+			}),
+		},
+		{
+			// Regenerate the DERIVED contract artifacts (barrels + conformance
+			// file) from the immutable frozen floors, then verify the floors
+			// hold. Must be a no-op on a clean tree — CI pairs this with
+			// `git diff --exit-code` so a hand-edited floor cannot launder a
+			// breaking change past the tsc floors.
+			name: 'client-typescript:regen',
+			action: () => ({
+				description: 'Regenerate derived client SDK contract artifacts from the immutable floors',
+				steps: ['client-typescript:regen-run'],
 			}),
 		},
 		{

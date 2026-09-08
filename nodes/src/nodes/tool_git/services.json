@@ -51,7 +51,7 @@
 	//
 	// Optional:
 	//		Icon shown in the canvas / palette. Resolved against
-	//		packages/shared-ui/src/assets/nodes/.
+	//		packages/shared/src/assets/nodes/.
 	//
 	"icon": "git.svg",
 	//

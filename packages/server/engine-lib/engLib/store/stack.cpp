@@ -653,8 +653,15 @@ Error IServiceEndpoint::generatePipelineStack() noexcept {
 
     // Walk through all the components and find those the have a control
     // (invoke) interface. If it does, and one of the from ids is included in
-    // the pipe stack, we need to add this to the stack as well
-    const auto walkControl = localfcn(const json::Value &components)->Error {
+    // the pipe stack — or IS the source itself — we need to add this to the
+    // stack as well. The source is the root of the data walk, never a stack
+    // member, so it needs its own spelling here exactly as it has in
+    // buildConnections (COMPONENT_SOURCE) and the fromIndex==-1 control
+    // binding: a tool wired to an invoke-capable source (the 'tools'
+    // endpoint) instantiates just like a tool wired to an agent.
+    const auto walkControl = localfcn(const std::string &sourceId,
+                                      const json::Value &components)
+                                 ->Error {
         bool bAdded = true;
 
         // While we have added components...
@@ -682,8 +689,10 @@ Error IServiceEndpoint::generatePipelineStack() noexcept {
                     auto classType = controlObject["classType"].asString();
                     auto invokeFrom = controlObject["from"].asString();
 
-                    // If this is not part of our pipe stack, skip it
-                    if (!isComponentLoaded(invokeFrom)) continue;
+                    // If this is not part of our pipe stack (and not the
+                    // source, which is the walk root rather than a stack
+                    // member), skip it
+                    if (invokeFrom != sourceId && !isComponentLoaded(invokeFrom)) continue;
 
                     // Add this component, someone is invoking it
                     if (auto ccode = addComponent(component)) return ccode;
@@ -711,7 +720,7 @@ Error IServiceEndpoint::generatePipelineStack() noexcept {
 
     // Walk the controls and add the components which are going to be
     // controlled (invoked)
-    if (ccode = walkControl(components)) return ccode;
+    if (ccode = walkControl(sourceId, components)) return ccode;
 
     // And done
     return {};

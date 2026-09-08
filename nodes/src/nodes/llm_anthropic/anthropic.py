@@ -33,15 +33,8 @@ from typing import Any, Dict
 from ai.common.chat import ChatBase
 from ai.common.config import Config
 from ai.common.llm_native_stream import build_anthropic_thinking_kwargs, gate_model_name
+from ai.common.utils import parse_bool
 from langchain_anthropic import ChatAnthropic
-
-
-# Interim: extended thinking is disabled at the node until the normalized provider adapter
-# lands (RFC #1679). With thinking on, Anthropic returns typed content blocks (thinking + text)
-# that the agent / expectJson path cannot consume (incident #1658; flatten defense-in-depth in
-# #1659). We gate activation here rather than flipping capabilities.reasoning, because that flag
-# is stamped by tools/sync_models and re-stamps to true on the next sync. Flip back to re-enable.
-_EXTENDED_THINKING_ENABLED = False
 
 
 def _estimate_token_ids(text: str) -> list:
@@ -78,23 +71,23 @@ class Chat(ChatBase):
         # Init the chat base
         super().__init__(provider, connConfig, bag)
 
-        # Get the LLM
-        kwargs: Dict[str, Any] = {
-            'model': model,
-            'api_key': apikey,
-            'max_tokens': self._modelOutputTokens,
-            'custom_get_token_ids': _estimate_token_ids,
-        }
-        if self._is_reasoning and _EXTENDED_THINKING_ENABLED:
-            kwargs.update(build_anthropic_thinking_kwargs(model_gate, self._modelOutputTokens))
-
-        self._extended_thinking = bool(kwargs.get('thinking'))
-        # Only route through the native handler when thinking is actually on;
-        # non-reasoning models stay on the default LangChain path.
+        # Extended thinking is opt-in per node (config extendedThinking, default off) and only
+        # for reasoning models. It is NOT baked into the client: the native streaming adapter adds
+        # it per call, so thinking activates on the interactive streaming path only — never on the
+        # agent / expectJson path (which has no streaming and stays on the plain LangChain client).
+        self._thinking_mode_kwargs: Dict[str, Any] = {}
+        if self._is_reasoning and parse_bool(config.get('extendedThinking')):
+            self._thinking_mode_kwargs = build_anthropic_thinking_kwargs(model_gate, self._modelOutputTokens)
+        self._extended_thinking = bool(self._thinking_mode_kwargs)
         if self._extended_thinking:
             self._native_stream_provider = 'anthropic'
 
-        self._llm = ChatAnthropic(**kwargs)
+        self._llm = ChatAnthropic(
+            model=model,
+            api_key=apikey,
+            max_tokens=self._modelOutputTokens,
+            custom_get_token_ids=_estimate_token_ids,
+        )
 
         # Save our chat class into the bag
         bag['chat'] = self

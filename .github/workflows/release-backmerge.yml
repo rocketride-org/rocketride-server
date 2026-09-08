@@ -1,0 +1,119 @@
+# =============================================================================
+# Release back-merge
+#
+# Version bumps land on `stage` and `main` and were never brought back to
+# `develop`. The result is silent drift: after v3.3.1 shipped, `develop` still
+# read 3.3.0 and the VS Code extension still read 1.2.0, so the nightly
+# prereleases published *below* the shipped stable line — `vscode-v1.2.0-prerelease`
+# appeared after stable `v1.3.0`. Every release made the gap worse.
+#
+# This opens a back-merge pull request as soon as a release finishes, so the
+# drift closes on the same day it is created rather than accumulating until
+# someone trips over it.
+#
+# It opens a PR rather than pushing: `develop` is protected and the merge can
+# conflict, and a conflicted back-merge is a thing a human should look at.
+# =============================================================================
+
+name: Release back-merge
+
+on:
+  workflow_run:
+    workflows: ['Release']
+    types: [completed]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  backmerge:
+    name: Open main → develop back-merge
+    # Only after a release that actually succeeded.
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          fetch-depth: 0
+
+      - name: Is develop already up to date?
+        id: check
+        run: |
+          set -euo pipefail
+          git fetch --quiet origin main develop
+          BEHIND=$(git rev-list --count origin/develop..origin/main)
+          echo "behind=$BEHIND" >> "$GITHUB_OUTPUT"
+          if [ "$BEHIND" -eq 0 ]; then
+            echo "develop already contains main — nothing to back-merge."
+          fi
+
+      - name: Create the back-merge branch
+        if: steps.check.outputs.behind != '0'
+        id: branch
+        run: |
+          set -euo pipefail
+          BRANCH="chore/backmerge-main-$(git rev-parse --short origin/main)"
+          echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
+
+          if git ls-remote --exit-code --heads origin "$BRANCH" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "Branch $BRANCH already exists — a back-merge is already in flight."
+            exit 0
+          fi
+          echo "exists=false" >> "$GITHUB_OUTPUT"
+
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$BRANCH" origin/develop
+
+          # A conflict here is expected and fine: past releases were squashed into
+          # main, so the branches share little history. Push the branch anyway and
+          # let the PR carry the conflict markers to a human.
+          if git merge --no-edit origin/main; then
+            echo "conflicts=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "conflicts=true" >> "$GITHUB_OUTPUT"
+            git merge --abort
+            git checkout -b "$BRANCH" origin/develop 2>/dev/null || true
+          fi
+
+          git push -u origin "$BRANCH"
+
+      - name: Open the pull request
+        if: steps.check.outputs.behind != '0' && steps.branch.outputs.exists == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: ${{ steps.branch.outputs.branch }}
+          BEHIND: ${{ steps.check.outputs.behind }}
+          CONFLICTS: ${{ steps.branch.outputs.conflicts }}
+        run: |
+          set -euo pipefail
+          {
+            echo "Brings the release commit on \`main\` back into \`develop\`."
+            echo
+            echo "\`develop\` is **$BEHIND commits** behind \`main\`."
+            echo
+            echo "Without this, \`develop\` keeps the pre-release version numbers while"
+            echo "\`main\` carries the released ones, and the nightly prereleases publish"
+            echo "*below* the shipped stable line. That is exactly how"
+            echo "\`vscode-v1.2.0-prerelease\` came out after stable \`v1.3.0\`."
+            if [ "$CONFLICTS" = "true" ]; then
+              echo
+              echo "> **The automatic merge conflicted**, so this branch is a plain copy of"
+              echo "> \`develop\`. Merge \`main\` into it by hand. Conflicts are expected:"
+              echo "> releases are squashed into \`main\`, so the branches share little history."
+            fi
+            echo
+            echo "_Opened automatically by \`release-backmerge\` after a successful release._"
+          } > /tmp/backmerge-body.md
+
+          gh pr create \
+            --base develop --head "$BRANCH" \
+            --title "chore: back-merge main into develop after release" \
+            --body-file /tmp/backmerge-body.md \
+            --label "release" || true

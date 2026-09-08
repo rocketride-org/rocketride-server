@@ -10,8 +10,8 @@
  * the extension host to the pure ServerMonitor component.
  */
 
-import 'shared/themes/rocketride-default.css';
-import 'shared/themes/rocketride-vscode.css';
+import 'shell/themes/rocketride-default.css';
+import '../../../themes/rocketride-vscode.css';
 import '../../styles/root.css';
 
 export { default as Monitor } from './MonitorWebview';

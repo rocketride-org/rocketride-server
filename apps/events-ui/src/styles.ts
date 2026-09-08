@@ -25,7 +25,7 @@
 // =============================================================================
 
 import type { CSSProperties } from 'react';
-import { commonStyles } from 'shared/themes/styles';
+import { commonStyles } from 'shell';
 
 export const styles = {
 	// ── View layout ──────────────────────────────────────────────────────────

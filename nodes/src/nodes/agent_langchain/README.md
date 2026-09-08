@@ -86,10 +86,22 @@ The tool's description automatically includes the configured `agent_description`
 Every run produces a payload with:
 
 - `content`: the final answer text (or the error message on failure)
-- `meta`: `framework` (`langchain`), `agent_id`, `run_id`, `started_at`, `ended_at`, and `task_id` when available
-- `stack`: a `RocketRide.agent.raw.v1` entry carrying the raw framework output, or a `RocketRide.agent.error.v1` entry on failure
+- `meta`: `framework` (`langchain`), `agent_id`, `run_id`, `started_at`, `ended_at`, `tool_calls` (number of tools invoked this run), and `task_id` when available
+- `stack`: a `RocketRide.agent.raw.v1` entry carrying the raw framework output, a `RocketRide.agent.guard.v1` entry when the `require_tool_call` guard trips, or a `RocketRide.agent.error.v1` entry on failure
 
 When the run is triggered from the `questions` lane, only `content` is written to the `answers` lane; the full payload is what `run_agent` callers receive.
+
+---
+
+## Fabrication guard
+
+Smaller or weaker planning models occasionally **narrate** a multi-step tool chain in
+prose instead of actually calling the tools, producing a plausible-looking but ungrounded
+answer. The optional **Require tool call** (`require_tool_call`) config field guards against
+this: when enabled, any run that produces an answer without invoking at least one tool fails
+with a `RocketRide.agent.guard.v1` error instead of delivering the ungrounded text. It is off by
+default; enable it for determinism-critical pipelines. The guard counts real tool invocations
+only — internal/local reads (for example the wave agent’s `memory.peek`) do not satisfy it.
 
 ---
 
@@ -103,6 +115,7 @@ When the run is triggered from the `questions` lane, only `content` is written t
 | `agent_description` | `string` | **Agent description**<br/>What does this agent do? Describe its purpose and capabilities, this helps parent agents select and invoke it correctly. | `""` |
 | `agent_langchain.profile` | `string` | **Profile** | `"default"` |
 | `instructions` | `array` | **Instructions**<br/>Additional instructions to guide the agent. |  |
+| `require_tool_call` | `boolean` | **Require tool call**<br/>Require the agent to invoke at least one tool before answering. When on, a run that answers without calling any tool fails with a guard error. Use for determinism-critical pipelines where an ungrounded or narrated answer must never be delivered. Off by default. | `false` |
 
 ## Dependencies
 

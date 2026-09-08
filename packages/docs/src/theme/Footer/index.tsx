@@ -85,7 +85,7 @@ const SOCIALS: SocialLink[] = [
 	},
 	{
 		label: 'Discord',
-		href: 'https://discord.gg/9hr3tdZmEG',
+		href: 'https://discord.gg/PMXrtenMsY',
 		icon: (
 			<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
 				<path

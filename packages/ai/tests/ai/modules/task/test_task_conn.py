@@ -340,6 +340,81 @@ def test_verify_permission_passes_when_present(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
+# verify_team_permission — real resolver, real org shapes
+# ---------------------------------------------------------------------------
+
+
+def _org(team_perms, *, team_id='team-1', org_perms=()):
+    """One-org/one-team organization dict in the AccountInfo session shape."""
+    return {
+        'id': 'org-1',
+        'permissions': list(org_perms),
+        'teams': [{'id': team_id, 'name': 'Team One', 'permissions': list(team_perms)}],
+    }
+
+
+def test_verify_team_permission_grants_on_that_team():
+    """The permission is resolved against the ADDRESSED team, not defaultTeam."""
+    account = _make_account_info(default_team='team-other')
+    account.organization = _org(['task.control'], team_id='team-1')
+    conn = _make_conn(account_info=account)
+    conn.verify_team_permission('team-1', 'task.control')  # must not raise
+
+
+def test_verify_team_permission_denies_missing_permission():
+    """Membership without the required permission is denied."""
+    account = _make_account_info()
+    account.organization = _org(['task.monitor'])
+    conn = _make_conn(account_info=account)
+    with pytest.raises(PermissionError, match="'task.control' denied"):
+        conn.verify_team_permission('team-1', 'task.control')
+
+
+def test_verify_team_permission_denies_foreign_team_uniformly():
+    """A team outside the caller's org denies exactly like a no-permission team
+    (no existence leak).
+    """
+    account = _make_account_info()
+    account.organization = _org(['task.control'])
+    conn = _make_conn(account_info=account)
+    with pytest.raises(PermissionError, match='no permissions for team'):
+        conn.verify_team_permission('team-foreign', 'task.control')
+
+
+def test_verify_team_permission_denies_without_org():
+    """A no-org session holds no team permissions at all."""
+    account = _make_account_info()
+    account.organization = None
+    conn = _make_conn(account_info=account)
+    with pytest.raises(PermissionError, match='no permissions for team'):
+        conn.verify_team_permission('team-1', 'task.control')
+
+
+def test_verify_team_permission_org_admin_expands():
+    """org.admin implies the full team permission set (resolver expansion)."""
+    account = _make_account_info()
+    account.organization = _org([], org_perms=['org.admin'])
+    conn = _make_conn(account_info=account)
+    conn.verify_team_permission('team-1', 'task.control')  # must not raise
+
+
+def test_verify_team_permission_sys_admin_bypasses():
+    """sys.admin bypasses team scoping entirely, even for foreign teams."""
+    account = _make_account_info()
+    account.organization = None
+    account.sysPermissions = ['sys.admin']
+    conn = _make_conn(account_info=account)
+    conn.verify_team_permission('team-anything', 'task.control')  # must not raise
+
+
+def test_verify_team_permission_requires_authentication():
+    """No account info -> PermissionError before any resolution."""
+    conn = _make_conn(authenticated=False, account_info=None)
+    with pytest.raises(PermissionError, match='Not authenticated'):
+        conn.verify_team_permission('team-1', 'task.control')
+
+
+# ---------------------------------------------------------------------------
 # require_zitadel_auth
 # ---------------------------------------------------------------------------
 

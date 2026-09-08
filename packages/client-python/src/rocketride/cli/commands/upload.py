@@ -144,8 +144,11 @@ class UploadCommand(BaseCommand):
         Args:
             connection_info: Optional connection details for logging
         """
-        # Subscribe to summary events for status updates
-        await self.client.set_events(token=self.args.token, event_types=['summary', 'output'])
+        # Subscribe to summary events for status updates. With --pipeline_path
+        # there is no token yet, and the upload progress display is driven by
+        # send_files' own events rather than by this subscription.
+        if self.args.token:
+            await self.client.set_events(token=self.args.token, event_types=['summary', 'output'])
 
     async def execute(self, client: 'RocketRideClient') -> int:
         """

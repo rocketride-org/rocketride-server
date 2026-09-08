@@ -25,7 +25,7 @@
 // =============================================================================
 //
 // Renders the shared MonitorView, sourcing the 3s dashboard snapshot and live
-// activity feed from the shared useDashboardData hook (shell-ui), and binding
+// activity feed from the shared useDashboardData hook (shell), and binding
 // the paged list fetchers to the shell client so the Connections and Tasks
 // grids run server-side (REMOTE mode). Pattern matches rocket-ui's
 // MonitorPage.tsx.
@@ -33,15 +33,19 @@
 
 import React, { useCallback, useRef } from 'react';
 import type { CSSProperties } from 'react';
-import type { ShellAppProps } from 'shell-ui';
-import { useShellConnection, useDashboardData, usePolling } from 'shell-ui';
-import { commonStyles } from 'shared/themes/styles';
-import { MonitorView } from 'shared';
-import type { DashboardConnection, DashboardTask, ListPageRequest, ListPageResponse } from 'shared';
+import type { ShellAppProps } from 'shell';
+import { useShellConnection, useDashboardData, usePolling, AppLayout } from 'shell';
+import { commonStyles } from 'shell';
+import { MonitorView } from 'shell';
+import type { DashboardConnection, DashboardTask, ListPageRequest, ListPageResponse } from 'shell';
 
 // =============================================================================
 // CONSTANTS
 // =============================================================================
+
+// Frame-only sidebar: an empty node keeps the shell's branded sidebar frame
+// (header + account footer) present with an empty middle slot.
+const SIDEBAR_FRAME_ONLY = <></>;
 
 /** Grid refresh cadence (ms) — matches the dashboard hook's 3s poll. */
 const GRID_POLL_INTERVAL_MS = 3000;
@@ -65,7 +69,7 @@ const styles = {
  * Server Monitor app — client area.
  *
  * Sources the dashboard snapshot and activity feed from the shared
- * useDashboardData hook (shell-ui), which polls `getDashboard()` every 3
+ * useDashboardData hook (shell), which polls `getDashboard()` every 3
  * seconds and subscribes to live server events through the shell client.
  * Renders the shared MonitorView with the latest data, plus the paged list
  * fetchers bound to the shell client: the Connections and Tasks grids page,
@@ -123,17 +127,19 @@ const MonitorApp: React.FC<ShellAppProps> = (_props) => {
 	// =========================================================================
 
 	return (
-		<div style={styles.container}>
-			<MonitorView
-				data={data}
-				events={events}
-				isConnected={isConnected}
-				onRefresh={refresh}
-				listConnections={listConnections}
-				listTasks={listTasks}
-				onRefetchReady={handleRefetchReady}
-			/>
-		</div>
+		<AppLayout sidebar={SIDEBAR_FRAME_ONLY} showStatus>
+			<div style={styles.container}>
+				<MonitorView
+					data={data}
+					events={events}
+					isConnected={isConnected}
+					onRefresh={refresh}
+					listConnections={listConnections}
+					listTasks={listTasks}
+					onRefetchReady={handleRefetchReady}
+				/>
+			</div>
+		</AppLayout>
 	);
 };
 

@@ -26,12 +26,15 @@ const EventStream: React.FC<Props> = ({ events, filter = 'all' }) => {
 		? events.filter((e) => e.type === 'fail')
 		: events;
 
-	// Auto-scroll to top when new events arrive (they're prepended)
+	// Auto-scroll to top when new events arrive (they're prepended). The feed
+	// is capped, so once full its length goes constant — the newest event's id
+	// is the real arrival signal.
+	const newestEventId = filtered[0]?.id;
 	useEffect(() => {
 		if (containerRef.current) {
 			containerRef.current.scrollTop = 0;
 		}
-	}, [filtered.length]);
+	}, [newestEventId, filtered.length]);
 
 	return (
 		<div ref={containerRef} style={styles.eventStream}>

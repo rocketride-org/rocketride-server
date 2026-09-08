@@ -490,7 +490,7 @@ Send data directly to a pipeline.
 
 **Important:** Use this method with pipelines that have `webhook` or `dropper` as the source component. For chat/Q&A systems, use `chat()` method instead with a `chat` source component.
 
-##### `sendFiles(files: FileObject[], token: string): Promise<UPLOAD_RESULT[]>`
+##### `sendFiles(files: FileObject[], token: string, maxConcurrent?: number): Promise<UPLOAD_RESULT[]>`
 
 Upload multiple files in parallel.
 

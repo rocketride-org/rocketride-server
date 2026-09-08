@@ -1,9 +1,9 @@
 {
 	"compilerOptions": {
 		/* Language and Environment */
-		"target": "ES2020",
+		"target": "ES2022",
 		"lib": [
-			"ES2020",
+			"ES2022",
 			"DOM",
 			"DOM.Iterable"
 		],
@@ -25,7 +25,6 @@
 		"noImplicitOverride": true,
 		"noUncheckedIndexedAccess": true,
 		/* Module Resolution */
-		"baseUrl": ".",
 		"paths": {
 			"@/*": [
 				"./src/*"
@@ -52,13 +51,6 @@
 				"./src/assets/*"
 			]
 		},
-		/* Emit */
-		"declaration": true,
-		"declarationMap": true,
-		"sourceMap": true,
-		"outDir": "./dist",
-		"removeComments": true,
-		"importHelpers": true,
 		/* Interop Constraints */
 		"esModuleInterop": true,
 		"allowSyntheticDefaultImports": true,
@@ -67,7 +59,7 @@
 		"skipLibCheck": true,
 		/* Additional Options for React */
 		"allowJs": true,
-		"checkJs": false,
+		"checkJs": false
 	},
 	"include": [
 		"src/**/*",
@@ -89,11 +81,5 @@
 		"**/*.test.tsx",
 		"**/*.spec.ts",
 		"**/*.spec.tsx"
-	],
-	"ts-node": {
-		"esm": true,
-		"compilerOptions": {
-			"module": "ESNext"
-		}
-	}
+	]
 }

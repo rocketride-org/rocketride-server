@@ -8,18 +8,18 @@
  *
  * Translates `env:*` postMessage events from EnvironmentProvider into pure
  * props for the host-agnostic EnvironmentView component. All rendering is
- * delegated to shared-ui; this file only manages messaging state.
+ * delegated to shared; this file only manages messaging state.
  *
  * Architecture:
  *   EnvironmentProvider (Node.js) <-> postMessage <-> EnvironmentWebview (browser)
- *     -> EnvironmentView (shared-ui)
+ *     -> EnvironmentView (shared)
  */
 
 import React, { useState, useCallback, useRef, useEffect } from 'react';
-import { EnvironmentView } from 'shared/modules/environment';
-import type { EnvironmentSlotConfig, EnvironmentScope } from 'shared/modules/environment';
+import { EnvironmentView } from 'shell';
+import type { EnvironmentSlotConfig, EnvironmentScope } from 'shell';
 import { useMessaging } from '../hooks/useMessaging';
-import type { EnvironmentHostToWebview, EnvironmentWebviewToHost, EnvironmentSlotState } from '../types';
+import type { EnvironmentHostToWebview, EnvironmentWebviewToHost, EnvironmentSlotState } from '../../types/environmentTypes';
 
 // =============================================================================
 // COMPONENT

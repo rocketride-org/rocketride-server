@@ -870,14 +870,14 @@ oauthlib==3.3.1
     # via requests-oauthlib
 obstore==0.8.2
     # via daytona
-onnxruntime==1.20.1
+onnxruntime==1.22.0
     # via
     #   -r nodes/src/nodes/anonymize/requirements.txt
     #   -r nodes/src/nodes/audio_transcribe/requirements.txt
     #   chromadb
     #   faster-whisper
     #   gliner
-onnxruntime-gpu==1.20.1 ; sys_platform != 'darwin'
+onnxruntime-gpu==1.22.0 ; sys_platform != 'darwin'
     # via
     #   -r nodes/src/nodes/anonymize/requirements.txt
     #   -r nodes/src/nodes/audio_transcribe/requirements.txt

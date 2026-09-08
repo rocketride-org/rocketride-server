@@ -128,6 +128,84 @@ def test_is_rate_limit_403_falls_back_for_unstructured_bodies():
     assert google_client._is_rate_limit_403(not_403) is False
 
 
+def test_is_rate_limit_403_matches_one_platform_screaming_snake_case():
+    """One Platform ErrorInfo reasons are SCREAMING_SNAKE_CASE ('RATE_LIMIT_EXCEEDED'),
+    not the legacy camelCase ('rateLimitExceeded') the reason set is written in.
+    """
+    rate = types.SimpleNamespace(
+        resp=types.SimpleNamespace(status=403),
+        reason='Forbidden',
+        content=json.dumps(
+            {
+                'error': {
+                    'status': 'RESOURCE_EXHAUSTED',
+                    'details': [
+                        {
+                            '@type': 'type.googleapis.com/google.rpc.ErrorInfo',
+                            'reason': 'RATE_LIMIT_EXCEEDED',
+                        }
+                    ],
+                }
+            }
+        ).encode(),
+    )
+    assert google_client._is_rate_limit_403(rate) is True
+
+
+def test_error_reason_code_parses_legacy_errors_array():
+    exc = types.SimpleNamespace(content=b'{"error": {"errors": [{"reason": "accessNotConfigured"}]}}')
+    assert google_client._error_reason_code(exc) == 'accessNotConfigured'
+
+
+def test_error_reason_code_parses_one_platform_error_info_details():
+    """Sheets/Docs (One Platform APIs) carry no errors[] array at all — the reason
+    lives in a google.rpc.ErrorInfo entry inside error.details[] instead. This is
+    the actual body Google returns for a disabled Sheets/Docs API (#1694).
+    """
+    body = {
+        'error': {
+            'code': 403,
+            'message': 'Google Sheets API has not been used in project 123456789 before or it is disabled.',
+            'status': 'PERMISSION_DENIED',
+            'details': [
+                {
+                    '@type': 'type.googleapis.com/google.rpc.ErrorInfo',
+                    'reason': 'SERVICE_DISABLED',
+                    'domain': 'googleapis.com',
+                }
+            ],
+        }
+    }
+    exc = types.SimpleNamespace(content=json.dumps(body).encode())
+    assert google_client._error_reason_code(exc) == 'SERVICE_DISABLED'
+
+
+def test_error_reason_code_ignores_non_error_info_details():
+    """A details[] entry that isn't a google.rpc.ErrorInfo (e.g. a Help or LocalizedMessage
+    detail with no 'reason' field) must not be mistaken for the reason-carrying entry.
+    """
+    body = {
+        'error': {
+            'status': 'PERMISSION_DENIED',
+            'details': [{'@type': 'type.googleapis.com/google.rpc.Help', 'links': []}],
+        }
+    }
+    exc = types.SimpleNamespace(content=json.dumps(body).encode())
+    assert google_client._error_reason_code(exc) == 'PERMISSION_DENIED'  # falls back to error.status
+
+
+def test_error_reason_code_falls_back_to_grpc_status_without_error_info():
+    body = {'error': {'code': 403, 'message': 'Permission denied.', 'status': 'PERMISSION_DENIED'}}
+    exc = types.SimpleNamespace(content=json.dumps(body).encode())
+    assert google_client._error_reason_code(exc) == 'PERMISSION_DENIED'
+
+
+def test_error_reason_code_returns_none_for_malformed_or_empty_bodies():
+    assert google_client._error_reason_code(types.SimpleNamespace(content=b'')) is None
+    assert google_client._error_reason_code(types.SimpleNamespace(content=b'not json')) is None
+    assert google_client._error_reason_code(types.SimpleNamespace()) is None
+
+
 def _broker_credentials(monkeypatch, service, urlopen, *, token_extra=None):
     pytest.importorskip('googleapiclient.discovery')
     pytest.importorskip('google.oauth2.credentials')
@@ -261,6 +339,7 @@ def test_broker_refresh_read_timeout_raises_refresh_error(monkeypatch, service):
 def test_broker_refresh_invalid_expiry_raises_and_keeps_credentials_unchanged(service, monkeypatch):
     pytest.importorskip('googleapiclient.discovery')
     pytest.importorskip('google.oauth2.credentials')
+    pytest.importorskip('google.auth.exceptions')
     from google.auth.exceptions import RefreshError
 
     class _Response:

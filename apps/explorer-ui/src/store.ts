@@ -35,7 +35,7 @@
 // =============================================================================
 
 import type { RocketRideClient } from 'rocketride';
-import type { IVirtualFileSystem } from 'shared/modules/explorer/types';
+import type { IVirtualFileSystem } from 'shell';
 import { getMediaInfo } from './mediaTypes';
 
 // =============================================================================

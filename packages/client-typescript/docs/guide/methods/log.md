@@ -1,7 +1,10 @@
 # Run Log
 
 Every task writes a **run log**: one continuous JSONL event stream per task
-identity (`projectId` + `source` + `runKind`). Individual runs are **chapters**
+identity (`projectId` + `source`, plus the scope: a `teamId` addresses that
+team's DEPLOY continuum — deploy runs log into the team's tree, readable by
+any teammate with monitor rights — while omitting it addresses your own dev
+stream; there is no run-kind argument). Individual runs are **chapters**
 (tracks) inside the stream — there are no per-run log files. The log survives
 disconnects and server restarts, powers replay of past runs through the same
 panels that render live monitoring, and is retained on a ring (last ~1 GB) plus
@@ -24,6 +27,11 @@ covered — no gap, no duplicate. Speed `0` delivers as fast as possible,
 `1` is real time, `10` is 10×. Playing from a past position auto-pins to
 live on catching the wall clock; live is just the position pinned to now
 (`seek('live')`), not a separate mode.
+
+The stream identity carries the scope: omit `teamId` to open your OWN
+development stream; pass `teamId` to open that team's DEPLOY continuum,
+which requires `task.monitor` membership on the TARGET team (see
+[API Endpoints](#api-endpoints)).
 
 ```typescript
 const session = client.log.openEventStream(stream);
@@ -48,7 +56,8 @@ session.closeEventStream();    // dispose
 ```
 
 ```python
-session = client.log.open_event_stream('proj-1', 'chat_1', 'dev')
+# Own dev stream; pass team_id='team-prod' for a team's deploy continuum.
+session = client.log.open_event_stream('proj-1', 'chat_1')
 
 await session.seek('live')
 status = await session.get_status()
@@ -78,7 +87,8 @@ date-time, starting sequence number and outcome, the activity spans for the
 timeline bar, the retained window, and the retention horizon.
 
 ```typescript
-const stream = { projectId: 'proj-1', source: 'chat_1', runKind: 'dev' as const };
+// Own dev stream; add teamId: 'team-prod' to read a team's deploy continuum.
+const stream = { projectId: 'proj-1', source: 'chat_1' };
 const timeline = await client.log.chapters(stream);
 for (const track of timeline.chapters) {
 	console.log(track.beginTime, track.endTime, track.outcome);
@@ -86,7 +96,7 @@ for (const track of timeline.chapters) {
 ```
 
 ```python
-timeline = await client.log.chapters('proj-1', 'chat_1', 'dev')
+timeline = await client.log.chapters('proj-1', 'chat_1')
 for track in timeline['chapters']:
     print(track['beginTime'], track.get('endTime'), track.get('outcome'))
 ```
@@ -120,7 +130,7 @@ do {
 ```python
 cursor = None
 while True:
-    page = await client.log.read('proj-1', 'chat_1', 'dev', from_seq=0, cursor=cursor, types=['output'])
+    page = await client.log.read('proj-1', 'chat_1', from_seq=0, cursor=cursor, types=['output'])
     for event in page['events']:
         print(event['body'].get('output', ''), end='')
     cursor = page.get('nextSeq')
@@ -162,7 +172,7 @@ for (;;) {
 ```python
 offset = 0
 while True:
-    chunk = await client.log.segment('proj-1', 'chat_1', 'dev', 0, offset=offset)
+    chunk = await client.log.segment('proj-1', 'chat_1', 0, offset=offset)
     for line in chunk['data'].splitlines():
         if line.strip():
             handle_event(json.loads(line))
@@ -187,8 +197,8 @@ await client.log.delete(stream, { all: true });
 ```
 
 ```python
-await client.log.delete('proj-1', 'chat_1', 'dev', before_time=time.time() - 86400)
-await client.log.delete('proj-1', 'chat_1', 'dev', all=True)
+await client.log.delete('proj-1', 'chat_1', before_time=time.time() - 86400)
+await client.log.delete('proj-1', 'chat_1', all=True)
 ```
 
 ## **API Endpoints**
@@ -203,8 +213,12 @@ the single `rrext_log` command, dispatched by a `subcommand` argument:
 | `segment()` | `rrext_log` | `segment` |
 | `delete()` | `rrext_log` | `delete` |
 
-Reads require `task.monitor`; `delete` requires `task.control`. All access is
-scoped to the authenticated user's own streams.
+Reads require `task.monitor`; `delete` requires `task.control`. The scope
+the request addresses picks whose streams those rights are resolved
+against: without `teamId` you access your OWN dev streams; with `teamId`
+you access that team's deploy continua, and the permission is checked
+against the TARGET team — membership is the read/write right (a foreign or
+unknown team reads the same as a permission miss).
 
 `openEventStream()` is client-side composition: the session it returns
 issues `chapters` and `segment` calls under the hood and reconstructs the

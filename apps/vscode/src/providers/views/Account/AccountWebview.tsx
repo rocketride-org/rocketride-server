@@ -16,11 +16,13 @@
 
 import React, { useState, useCallback, useRef, useEffect } from 'react';
 
-import { AccountView, CheckoutModal } from 'shared';
-import type { ApiKeyRecord, OrgDetail, MemberRecord, TeamRecord, TeamDetail, AccountSection, ProfileUpdate, CheckoutPlan, PromoRedemption, PromoValidation } from 'shared';
-import type { ConnectResult } from 'rocketride';
+import { AccountView } from 'shell';
+import { CheckoutModal } from 'shell';
+import type { ApiKeyRecord, OrgDetail, MemberRecord, TeamRecord, TeamDetail, AccountSection, ProfileUpdate } from 'shell';
+import type { CheckoutPlan, PromoRedemption, PromoValidation } from 'shell';
+import type { ConnectResult } from 'shell';
 import { useMessaging } from '../hooks/useMessaging';
-import type { AccountHostToWebview, AccountWebviewToHost } from '../types';
+import type { AccountHostToWebview, AccountWebviewToHost } from '../../types/accountTypes';
 
 // =============================================================================
 // COMPONENT
@@ -288,7 +290,7 @@ const AccountWebview: React.FC = () => {
 	 * Creates a new API key. Returns a promise that resolves when the host
 	 * posts `account:keyCreated` with the raw key string.
 	 */
-	const handleCreateKey = useCallback(async (params: { name: string; teamId: string; permissions: string[]; expiresAt?: string }): Promise<{ key: string }> => {
+	const handleCreateKey = useCallback(async (params: { name: string; teamId?: string; permissions: string[]; expiresAt?: string }): Promise<{ key: string }> => {
 		return new Promise<{ key: string }>((resolve) => {
 			// Step 1: stash the resolver so the message handler can fulfil it.
 			createKeyResolverRef.current = resolve;

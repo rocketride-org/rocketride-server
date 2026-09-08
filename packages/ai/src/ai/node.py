@@ -3,8 +3,8 @@ import sys
 import os
 import asyncio
 import threading
+import time
 from typing import Optional, Tuple, Any
-from ai.logo import LOGO
 
 # Remove auto-added script directory to avoid import conflicts with the ai package
 if sys.path and (sys.path[0].endswith('ai') or sys.path[0].endswith('ai\\') or sys.path[0].endswith('ai/')):
@@ -14,13 +14,18 @@ if sys.path and (sys.path[0].endswith('ai') or sys.path[0].endswith('ai\\') or s
 os.environ['PYDEVD_DISABLE_FILE_VALIDATION'] = '1'
 
 # Import directly from C++
-from engLib import debug
+from engLib import debug, warning
 
-# How long to wait for the shared WebServer's startup callback to fire
-# before giving up and proceeding to processArguments. The callback fires
-# when uvicorn enters its serve loop; the wait is the handshake that
-# guarantees the listener is up before EaaS gets a chance to connect.
+# Total budget for the shared WebServer to come up: the startup callback plus
+# the wait for a bound listener share this one deadline, so a slow start cannot
+# spend it twice. The callback marks uvicorn entering its serve loop, which
+# happens before the socket is bound — proof of a listener comes from
+# Server.started, which is polled separately.
 _SHARED_SERVER_STARTUP_TIMEOUT_SECONDS = 10.0
+
+# Gap between readiness polls. This runs on the subprocess's main thread while
+# uvicorn starts on another, so a spin would compete with the startup it waits on.
+_SHARED_SERVER_POLL_INTERVAL_SECONDS = 0.02
 
 # Bound for waiting on ``serve()`` after ``server.stop()`` — guards
 # against a stuck uvicorn hanging subprocess shutdown forever.
@@ -123,9 +128,8 @@ def _setup_shared_web_server() -> Tuple[Optional[Any], Optional[Any]]:
 
     from ai.web import WebServer
 
-    # Event the on_startup callback sets when the server is ready to
-    # accept connections. Main thread waits on this to guarantee EaaS
-    # never connects before the listener is bound.
+    # Set when uvicorn enters its serve loop — which happens before the socket
+    # is bound, so this is a liveness hint, not proof of a listener.
     startup_ready = threading.Event()
 
     async def _on_startup() -> None:
@@ -141,22 +145,54 @@ def _setup_shared_web_server() -> Tuple[Optional[Any], Optional[Any]]:
 
     future = asyncio.run_coroutine_threadsafe(server.serve(), server_loop)
 
-    # Block until the server's lifespan startup callback fires, with a
-    # safety-net timeout so a misbehaving uvicorn can't deadlock the
-    # subprocess. The timeout is generous in production (10s) and is
-    # dialled down by tests.
-    signalled = startup_ready.wait(timeout=_SHARED_SERVER_STARTUP_TIMEOUT_SECONDS)
+    # Read at call time: tests override the constant on the module.
+    timeout = _SHARED_SERVER_STARTUP_TIMEOUT_SECONDS
+    deadline = time.monotonic() + timeout
 
-    # Fail fast if `serve()` exited before signalling startup (e.g. bind
-    # error, permission denied, port already in use).
-    if future.done():
-        future.result()  # re-raises the exception from serve()
+    # In slices, so a serve() that dies before ever firing the callback is
+    # noticed now rather than at the deadline.
+    while not startup_ready.is_set():
+        if future.done():
+            future.result()
+            break
+
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+
+        startup_ready.wait(timeout=min(_SHARED_SERVER_POLL_INTERVAL_SECONDS, remaining))
+
+    signalled = startup_ready.is_set()
+
+    # Now wait for a listener to exist: uvicorn sets Server.started only after
+    # create_server() returns. future.done() goes first on every pass so a child
+    # that already died beats a stale readiness flag.
+    while True:
+        if future.done():
+            # Re-raises a bind error, permission denied or port-already-in-use.
+            future.result()
+
+            # It returned instead: serve() ended on its own, so /task/data would
+            # stay unreachable for the rest of this subprocess.
+            if not getattr(getattr(server, 'server', None), 'started', False):
+                warning(f'shared WebServer stopped before it began listening on {data_host}:{data_port}')
+            break
+
+        if getattr(getattr(server, 'server', None), 'started', False):
+            break
+
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            warning(
+                f'shared WebServer never began listening on {data_host}:{data_port} '
+                f'within {timeout}s; proceeding anyway'
+            )
+            break
+
+        time.sleep(min(_SHARED_SERVER_POLL_INTERVAL_SECONDS, remaining))
 
     if not signalled:
-        debug(
-            f'shared WebServer startup did not signal within '
-            f'{_SHARED_SERVER_STARTUP_TIMEOUT_SECONDS}s; proceeding anyway'
-        )
+        debug(f'shared WebServer startup did not signal within {timeout}s; proceeding anyway')
 
     return server, future
 
@@ -234,11 +270,6 @@ def run():
     """
     import os
 
-    # The RocketRide banner, first thing on stdout — the node's console IS
-    # the run log's console, so every recorded run opens with it (the same
-    # art the EaaS server prints at startup).
-    print(LOGO, flush=True)
-
     # Inject mock modules path if set (for testing)
     mock_path = os.environ.get('ROCKETRIDE_MOCK')
     if mock_path:
@@ -278,9 +309,11 @@ def run():
                 debugpy.wait_for_client()
 
         except Exception as e:
-            import logging
-
-            logging.getLogger(__name__).warning('Failed to initialize debugpy: %s', e)
+            # Non-fatal: debugging is optional. Named, though — a debug port in
+            # an OS exclusion range fails here and otherwise looks like
+            # "debugging is off". `warning`, not `debug`: engLib's debug() is
+            # gated on the DebugOut level, which is off by default.
+            warning(f'failed to initialize debugpy on {parsed_args.debug_host}:{parsed_args.debug_port}: {e}')
 
     # Start the global event loop for async operations
     _start_event_loop()

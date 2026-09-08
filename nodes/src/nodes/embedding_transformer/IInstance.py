@@ -51,6 +51,10 @@ class IInstance(IInstanceBase):
     def _flushDocuments(self):
         """
         Flush the documents to the instance.
+
+        Callers suppress the engine's default forward, not this helper: close()
+        flushes through here too, and preventing the default there would skip
+        Parent::close().
         """
         # If we have no documents, stop here
         if len(self.documents) == 0:
@@ -75,12 +79,14 @@ class IInstance(IInstanceBase):
         # Add this set of documents to the list
         self.documents.extend(documents)
 
-        # If we have less than the max documents, stop here
-        if len(self.documents) < self.maxDocuments:
-            return self.preventDefault()
+        # Flush once we have a full batch, otherwise keep buffering
+        if len(self.documents) >= self.maxDocuments:
+            self._flushDocuments()
 
-        # Flush the documents
-        self._flushDocuments()
+        # These documents are either still buffered or already went downstream with
+        # the flush above, so suppress the engine's default forward of them either
+        # way. preventDefault() raises, so it must stay last.
+        return self.preventDefault()
 
     def writeQuestions(self, question: Question):
         """

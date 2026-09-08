@@ -4,8 +4,8 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
-import Editor, { loader } from '@monaco-editor/react';
-import type { Documents } from 'shell-ui';
+import Editor from '@monaco-editor/react';
+import type { Documents } from 'shell';
 
 // -----------------------------------------------------------------------------
 // Extension → Monaco language ID mapping
@@ -111,7 +111,6 @@ const EXT_TO_LANGUAGE: Record<string, string> = {
 	'.pm': 'perl',
 	'.lua': 'lua',
 	'.r': 'r',
-	'.R': 'r',
 	'.dart': 'dart',
 	'.ex': 'elixir',
 	'.exs': 'elixir',

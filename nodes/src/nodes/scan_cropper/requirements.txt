@@ -1,0 +1,4 @@
+# opencv is handled by ai.common.opencv module
+# numpy is part of the python-node baseline (nodes/src/nodes/requirements.txt)
+# No Pillow: dimensions are passed explicitly to the emission helpers, so the one
+# Pillow call path in ai.common.avi.descriptor is never reached.

@@ -505,6 +505,11 @@ class IInstance(IInstanceBase):
             self.instance.writeTable(table)
             debug('LlamaParse Instance: Wrote table to table lane')
 
+        # As in writeDocuments below. Safe without a listener: the default forward
+        # would have nowhere to go.
+        debug('LlamaParse Instance: Preventing default table behavior')
+        return self.preventDefault()
+
     def writeDocuments(self, documents: List[Doc]):
         """Call from engLib, process document objects."""
         debug(f'LlamaParse Instance: Processing {len(documents)} document objects')

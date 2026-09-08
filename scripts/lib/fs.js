@@ -677,7 +677,7 @@ async function saveSourceHash(stateKey, hash) {
 /**
  * Compute a combined MD5 hash of multiple source directories and individual files.
  * Uses fingerprint() (mtime+size) for speed.  Produces a single cache key for
- * build actions that depend on several inputs (e.g. own src/ + shared-ui/src +
+ * build actions that depend on several inputs (e.g. own src/ + shared/src +
  * package.json).
  *
  * @param {string[]} dirs   - Directories to fingerprint.

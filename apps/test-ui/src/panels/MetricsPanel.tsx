@@ -4,7 +4,7 @@
 
 import React from 'react';
 import type { CSSProperties } from 'react';
-import type { TestMetrics, ApiTestResult, EngineState } from '../types';
+import type { TestMetrics, EngineState } from '../types';
 import { styles } from '../styles';
 
 function formatNumber(n: number): string {
@@ -88,7 +88,6 @@ const actionStyles = {
 
 interface Props {
 	metrics: TestMetrics;
-	apiResults: ApiTestResult[];
 	worstPing: number;
 	worstPingSnapshot: string;
 	engineState: EngineState;
@@ -100,11 +99,15 @@ interface Props {
 }
 
 const MetricsPanel: React.FC<Props> = ({
-	metrics, apiResults, worstPing, worstPingSnapshot,
+	metrics, worstPing, worstPingSnapshot,
 	engineState, onStart, onAbort, onPause, onResume, onClear,
 }) => {
 	const pct = metrics.targetOps > 0 ? Math.round((metrics.totalOps / metrics.targetOps) * 100) : 0;
 	const isRunning = engineState === 'running' || engineState === 'paused';
+	// Launch/Clear gate on ANY non-idle state: engine.start (and clear) are
+	// idle-only, so an aborting engine must not offer them. isRunning stays
+	// the gate for the Abort/Pause controls of a live run.
+	const isBusy = engineState !== 'idle';
 	const isPaused = engineState === 'paused';
 
 	// Ping heartbeat stats — worst ping and what was running at that moment
@@ -169,10 +172,10 @@ const MetricsPanel: React.FC<Props> = ({
 
 				{/* ── Action Buttons ─────────────────────────────────── */}
 				<div style={actionStyles.row}>
-					{!isRunning ? (
+					{!isBusy ? (
 						<button style={actionStyles.launchBtn} onClick={onStart}>Launch Tests</button>
 					) : (
-						<button style={actionStyles.runningBtn}>Running...</button>
+						<button style={actionStyles.runningBtn} disabled>Running...</button>
 					)}
 					{isRunning && (
 						<>
@@ -182,7 +185,7 @@ const MetricsPanel: React.FC<Props> = ({
 							</button>
 						</>
 					)}
-					{!isRunning && (
+					{!isBusy && (
 						<button style={actionStyles.actionBtn} onClick={onClear}>Clear</button>
 					)}
 				</div>

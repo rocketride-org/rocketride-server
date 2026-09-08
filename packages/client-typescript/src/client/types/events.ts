@@ -128,8 +128,11 @@ export enum EVENT_TYPE {
 	/** Billing ledger events - credit/debit updates, scoped by org */
 	BILLING = 1 << 8,
 
+	/** Deployment change events - pointer/state/schedule/run mutations, scoped by org */
+	DEPLOY = 1 << 9,
+
 	/** Convenience combination - ALL events except NONE for comprehensive monitoring */
-	ALL = DEBUGGER | DETAIL | SUMMARY | OUTPUT | FLOW | TASK | SSE | DASHBOARD | BILLING,
+	ALL = DEBUGGER | DETAIL | SUMMARY | OUTPUT | FLOW | TASK | SSE | DASHBOARD | BILLING | DEPLOY,
 }
 
 /**

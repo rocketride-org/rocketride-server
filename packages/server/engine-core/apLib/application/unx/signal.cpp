@@ -98,8 +98,8 @@ void processSignal(int signal) noexcept {
 // A thread which watches for a signal to be set, and calls the
 // signal handler api so that we can do things like malloc etc.
 void listener() noexcept {
-    // For the life of the listener keep the handler enabled
-    auto guard = util::Guard{enableHandler, disableHandler};
+    // Handlers are installed synchronously in init(); just disable on exit.
+    auto guard = util::Guard{disableHandler};
 
     while (!async::cancelled(false)) {
         auto guard = g_lock.acquire();
@@ -115,6 +115,11 @@ void deinit() noexcept;
 void init() noexcept {
     // Ignore SIGPIPE
     ::signal(SIGPIPE, SIG_IGN);
+
+    // Install synchronously (not on the listener thread) so any handler layered
+    // on later -- notably Crashpad in plat::init() -- reliably sits on top of
+    // ours and can chain back. Doing this on the thread raced with Crashpad.
+    enableHandler();
 
     ASSERTD_MSG(!g_listener, "Signals already initialized");
     g_listener.emplace(_location, "Signal Listener", listener);

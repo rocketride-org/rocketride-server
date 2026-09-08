@@ -2,7 +2,7 @@
 // HELLO-UI — Module Federation Remote (OSS landing page)
 // =============================================================================
 // Builds remoteEntry.js + AppDescriptor chunk only.
-// NOT a standalone app. Run shell-ui:dev for development.
+// NOT a standalone app. Run shell:dev for development.
 // =============================================================================
 
 import fs from 'node:fs';
@@ -27,7 +27,7 @@ export default defineConfig(() => {
 					'./AppDescriptor': './src/AppDescriptor.ts',
 				},
 				dts: false,
-				// runtime: false — the host (shell-ui) provides the MF runtime;
+				// runtime: false — the host (the shell) provides the MF runtime;
 				// remotes don't embed their own copy, keeping remoteEntry.js
 				// stable across app-code-only rebuilds.
 				runtime: false,
@@ -42,21 +42,23 @@ export default defineConfig(() => {
 					react: { singleton: true, eager: true, requiredVersion: '^18.2.0' },
 					'react-dom': { singleton: true, eager: true, requiredVersion: '^18.2.0' },
 					// import: false tells MF to NOT bundle a fallback copy —
-					// the host (shell-ui) always provides these at runtime.
-					// Without this, MF bundles the entire shared-ui tree
+					// the host (the shell) always provides these at runtime.
+					// Without this, MF bundles the entire shared tree
 					// (fonts, Chart.js, MUI) as a "just in case" fallback.
-					'shell-ui': { singleton: true, requiredVersion: false, import: false },
-					'shared':   { singleton: true, requiredVersion: false, import: false },
+					'shell': { singleton: true, requiredVersion: false, import: false },
 					'rocketride': { singleton: true, requiredVersion: false, import: false },
 				},
 			}),
 		],
-		// No resolve aliases — all shared modules (shell-ui, shared, react)
+		// No resolve aliases — all shared modules (shell, shared, react)
 		// resolve through node_modules (pnpm workspace link) and MF provides
 		// the host's singleton at runtime. This prevents bundling duplicate
-		// fonts/CSS from shared-ui into each remote app.
+		// fonts/CSS from shared into each remote app.
 		resolve: {},
-		server: { port: 3013 },
+		// CORS: explicitly allow any origin — the serving host isn't fixed, so no
+		// allowlist is possible; declaring it also stops the MF plugin injecting
+		// its own wildcard defaults (and warning about it).
+		server: { port: 3013, cors: { origin: '*' } },
 		source: {
 			entry: {
 				index: './src/index.ts',

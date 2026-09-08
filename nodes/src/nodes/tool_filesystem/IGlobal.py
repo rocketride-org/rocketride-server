@@ -24,9 +24,13 @@
 """
 File system tool node — global (shared) state.
 
-Resolves the account's ``client_id`` from the ``ROCKETRIDE_CLIENT_ID`` env var
-(injected by the task engine in ``task_engine.py``) and builds a single
-``FileStore`` scoped to ``users/<client_id>/files/``. The instance exposes
+Resolves the account identity and the storage anchor from the TASK FILE the
+engine published (``rocketlib.getTask()``: the ``identity`` and ``storage``
+blocks, see task_engine._build_task) and builds a single ``FileStore``
+rooted at that anchor — the owning user's tree
+(``users/<userId>/files/``) for development runs, a task-specific team
+subtree (``teams/<teamId>/files/tasks/<projectId>/``) for deployed runs —
+so node-level paths are identical in both modes. The instance exposes
 per-operation allow-flags and a path whitelist that IInstance enforces before
 every tool call.
 
@@ -37,12 +41,23 @@ Surfaces ``read_file``, ``write_file``, ``delete_file``, ``list_directory``,
 
 from __future__ import annotations
 
-import os
 import re
+from enum import IntEnum
 
-from ai.account.store import Store
 from ai.common.config import Config
 from rocketlib import IGlobalBase, OPEN_MODE, warning
+
+
+class OnConflict(IntEnum):
+    """What to do when the sink's target path is already taken.
+
+    Member names are the services.store.json enum values uppercased, so
+    :meth:`IGlobal._sink_config` resolves one to the other by name.
+    """
+
+    UNIQUE = 0
+    OVERWRITE = 1
+    SKIP = 2
 
 
 class IGlobal(IGlobalBase):
@@ -60,6 +75,7 @@ class IGlobal(IGlobalBase):
     target_dir: str = 'output/'
     emit_url: bool = False
     url_expires_in: int = 3600
+    on_conflict: OnConflict = OnConflict.UNIQUE
 
     def beginGlobal(self) -> None:
         if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
@@ -74,25 +90,38 @@ class IGlobal(IGlobalBase):
         self.allow_stat = bool(cfg.get('allowStat', True))
         self.allow_delete = bool(cfg.get('allowDelete', False))
         self.path_patterns = self._build_path_patterns(cfg)
-        self.target_dir, self.emit_url, self.url_expires_in = self._sink_config(cfg)
-
-        client_id = os.environ.get('ROCKETRIDE_CLIENT_ID', '').strip()
-        if not client_id:
-            warning(
-                'tool_filesystem: ROCKETRIDE_CLIENT_ID env var is missing; tool methods will be disabled. This usually means the node is running outside the task engine.'
-            )
-            self.client_id = None
-            self.file_store = None
-            return
+        (
+            self.target_dir,
+            self.emit_url,
+            self.url_expires_in,
+            self.on_conflict,
+        ) = self._sink_config(cfg)
 
         try:
-            store = Store.create()
-            self.file_store = store.get_file_store(client_id)
-            self.client_id = client_id
+            # Engine identity: this node runs INSIDE the engine subprocess
+            # with no account session, and its paths come from LLM tool
+            # calls — so it gets the most restricted context: plain paths
+            # only, every @/Team, @/Org and @/User path and reserved subtree
+            # (.logs, .deployments) rejected by the store. It must never
+            # hold an internal identity (that would let a pipeline address
+            # any team's storage unchecked). Identity and the storage anchor
+            # (the owner's tree for dev runs, a task-specific team subtree
+            # for deploy runs) come from the task file the engine published
+            # via rocketlib.getTask() — never the environment — and the
+            # store resolves them itself, so this node needs no plumbing.
+            from ai.account.store import Store
+
+            self.file_store = Store.engine_file_store()
+            self.client_id = getattr(self.file_store, '_client_id', None)
         except Exception as e:
             warning(f'tool_filesystem: failed to initialise FileStore: {e}')
             self.client_id = None
             self.file_store = None
+
+        if self.file_store is None:
+            warning(
+                'tool_filesystem: no running task with an identity (rocketlib.getTask); tool methods will be disabled. This usually means the node is running outside the task engine.'
+            )
 
     @staticmethod
     def _build_path_patterns(cfg: dict) -> list[re.Pattern]:
@@ -122,11 +151,13 @@ class IGlobal(IGlobalBase):
         return patterns
 
     @staticmethod
-    def _sink_config(cfg: dict) -> tuple[str, bool, int]:
-        """Parse the sink lane config into ``(target_dir, emit_url, url_expires_in)``.
+    def _sink_config(cfg: dict) -> tuple[str, bool, int, OnConflict]:
+        """Parse the sink lane config into ``(target_dir, emit_url, url_expires_in, on_conflict)``.
 
         ``url_expires_in`` is clamped to the FileStore range of 1..3600 seconds;
         non-positive or missing values fall back to the 3600-second default.
+        ``on_conflict`` falls back to :attr:`OnConflict.UNIQUE` on anything that does not
+        name a member, so a mistyped config degrades to the non-destructive outcome.
         """
         target_dir = str(cfg.get('targetDir', 'output/'))
         emit_url = bool(cfg.get('emitUrl', False))
@@ -135,7 +166,11 @@ class IGlobal(IGlobalBase):
         except (TypeError, ValueError):
             raw_expires = 3600
         url_expires_in = min(raw_expires, 3600) if raw_expires > 0 else 3600
-        return target_dir, emit_url, url_expires_in
+        try:
+            on_conflict = OnConflict[str(cfg.get('onConflict', '')).strip().upper()]
+        except KeyError:
+            on_conflict = OnConflict.UNIQUE
+        return target_dir, emit_url, url_expires_in, on_conflict
 
     def validateConfig(self) -> None:
         try:
@@ -151,3 +186,4 @@ class IGlobal(IGlobalBase):
         self.target_dir = 'output/'
         self.emit_url = False
         self.url_expires_in = 3600
+        self.on_conflict = OnConflict.UNIQUE

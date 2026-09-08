@@ -6,6 +6,6 @@
 import { Account } from './Account';
 import { mountComponent } from '../../../shared/util/mount';
 
-// Mount the Account view directly — it renders its own PageViewControl strip.
+// Mount the Account view directly — it renders its own TabControl strip.
 mountComponent(Account, 'Account');
 export default Account;

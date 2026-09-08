@@ -35,15 +35,7 @@
 
 import type { RocketRideClient } from './client.js';
 import { LogEventStream } from './log-stream.js';
-import type {
-	LogChaptersResult,
-	LogDeleteResult,
-	LogReadParams,
-	LogReadResult,
-	LogSegmentParams,
-	LogSegmentResult,
-	LogStreamRef,
-} from './types/log.js';
+import type { LogChaptersResult, LogDeleteResult, LogReadParams, LogReadResult, LogSegmentParams, LogSegmentResult, LogStreamRef } from './types/log.js';
 
 // =============================================================================
 // LOG API CLASS
@@ -72,7 +64,7 @@ export class LogApi {
 	 * (segments, keyframes, deltas) is invisible. Dispose with
 	 * {@link LogEventStream.closeEventStream} when done.
 	 *
-	 * @param stream - Identity tuple (projectId + source + runKind).
+	 * @param stream - Stream identity (projectId + source; teamId = a team deploy continuum).
 	 * @returns A new, unpositioned session (call `seek()` first).
 	 */
 	openEventStream(stream: LogStreamRef): LogEventStream {
@@ -86,7 +78,7 @@ export class LogApi {
 	 * times + starting seq + outcome, segment activity spans, the stream's
 	 * retained window, and the retention horizon.
 	 *
-	 * @param stream - Identity tuple (projectId + source + runKind).
+	 * @param stream - Stream identity (projectId + source; teamId = a team deploy continuum).
 	 * @returns Chapters, activity spans, and stream timeline metadata.
 	 */
 	async chapters(stream: LogStreamRef): Promise<LogChaptersResult> {
@@ -105,7 +97,7 @@ export class LogApi {
 	 * `truncatedAtSeq` flag means the request reached below the retention
 	 * horizon.
 	 *
-	 * @param stream - Identity tuple (projectId + source + runKind).
+	 * @param stream - Stream identity (projectId + source; teamId = a team deploy continuum).
 	 * @param params - Range, paging, and filter options.
 	 * @returns The page of events plus paging/truncation metadata.
 	 */
@@ -128,7 +120,7 @@ export class LogApi {
 	 * live subscription covers growth past that. The segment table (ids +
 	 * time extents) comes from {@link chapters}.
 	 *
-	 * @param stream - Identity tuple (projectId + source + runKind).
+	 * @param stream - Stream identity (projectId + source; teamId = a team deploy continuum).
 	 * @param segment - Segment id within the stream.
 	 * @param params - Byte offset to continue from + optional chunk ceiling.
 	 * @returns One raw chunk plus paging metadata.
@@ -149,14 +141,11 @@ export class LogApi {
 	 * (chapters trimmed, horizon advanced), or `all: true` to remove the
 	 * entire stream including its control file.
 	 *
-	 * @param stream - Identity tuple (projectId + source + runKind).
+	 * @param stream - Stream identity (projectId + source; teamId = a team deploy continuum).
 	 * @param options - Cutoff time and/or the delete-all flag.
 	 * @returns The number of segments deleted.
 	 */
-	async delete(
-		stream: LogStreamRef,
-		options: { beforeTime?: number; all?: boolean },
-	): Promise<LogDeleteResult> {
+	async delete(stream: LogStreamRef, options: { beforeTime?: number; all?: boolean }): Promise<LogDeleteResult> {
 		const { beforeTime, all } = options;
 		return this.client.call<LogDeleteResult>('rrext_log', {
 			subcommand: 'delete',

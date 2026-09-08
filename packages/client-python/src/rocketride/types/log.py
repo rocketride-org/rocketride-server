@@ -59,6 +59,9 @@ class LogChapter(TypedDict, total=False):
     endTime: Optional[float]
     # 'ok' | 'error' | 'cancelled'; None while the run is live.
     outcome: Optional[str]
+    # The run's trace level (None/'none' = tracing off; absent on chapters
+    # recorded before the stamp existed).
+    traceLevel: Optional[str]
 
 
 class LogActivitySpan(TypedDict, total=False):

@@ -59,6 +59,7 @@ from .mixins.services import ServicesMixin
 from .mixins.dashboard import DashboardMixin
 from .mixins.cprofile import CProfileMixin
 from .mixins.store import StoreMixin
+from .mixins.apps import AppsMixin
 from typing import Any, Callable, TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -85,6 +86,7 @@ class RocketRideClient(
     DashboardMixin,
     CProfileMixin,
     StoreMixin,
+    AppsMixin,
     DAPClient,
 ):
     """
@@ -389,7 +391,7 @@ class RocketRideClient(
     # TASK METHODS
     # =========================================================================
 
-    async def get_task_token(self, project_id: str, source: str) -> 'str | None':
+    async def get_task_token(self, project_id: str, source: str, *, team_id: str = '') -> 'str | None':
         """
         Resolve a running task's token from its project ID and source component.
 
@@ -397,14 +399,21 @@ class RocketRideClient(
         get_task_pipeline. Returns None if no task is currently running for
         the given project/source pair.
 
+        The scope IS the kind: pass ``team_id`` to resolve the team's
+        DEPLOYED run; omit it to resolve your own dev run.
+
         Args:
             project_id: The project identifier.
             source: The source component identifier.
+            team_id: Address the team's deploy run; empty for your own dev run.
 
         Returns:
             Task token string, or None if no matching task is running.
         """
-        body = await self.call('rrext_get_token', projectId=project_id, source=source)
+        args = {'projectId': project_id, 'source': source}
+        if team_id:
+            args['teamId'] = team_id
+        body = await self.call('rrext_get_token', **args)
         return body.get('token')
 
     async def get_task_pipeline(self, token: str) -> 'dict | None':

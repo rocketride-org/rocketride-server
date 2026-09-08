@@ -1,3 +1,9 @@
+/**
+ * MIT License
+ * Copyright (c) 2026 Aparavi Software AG
+ * See LICENSE file for details.
+ */
+
 import { createRequire } from 'node:module';
 import path from 'path';
 import { defineConfig } from '@rsbuild/core';
@@ -42,19 +48,10 @@ export default defineConfig(({ command }) => {
 				index: './src/index.tsx',
 			},
 			define: {
-				...(isDev
-					? {
-							'process.env.CONFIG': JSON.stringify({
-								...parsed,
-								devMode: true,
-							}),
-						}
-					: {
-							'process.env.CONFIG': JSON.stringify({
-								...parsed,
-								devMode: false,
-							}),
-						}),
+				'process.env.CONFIG': JSON.stringify({
+					...parsed,
+					devMode: isDev,
+				}),
 			},
 		},
 

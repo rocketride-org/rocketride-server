@@ -17,12 +17,126 @@
  *   stopServer({ server });
  */
 const path = require('path');
+const fs = require('fs');
+const net = require('net');
 const { spawn } = require('child_process');
 const { exists } = require('./fs');
 const { DIST_ROOT } = require('./paths');
 
 const SERVER_DIR = path.join(DIST_ROOT, 'server');
 const READY_MESSAGE = 'Application startup complete.';
+
+// How many trailing output lines to retain from the server process. The server's
+// output is otherwise only forwarded to the optional onOutput callback, which
+// callers typically stop consuming once startup completes - so when the process
+// dies mid-test-run its final output was previously lost. Bounded so a chatty
+// server can't grow this without limit over a long run.
+const OUTPUT_TAIL_LINES = 200;
+
+/**
+ * Snapshot whatever the OS will cheaply tell us about resource pressure.
+ *
+ * Only meaningful on Linux (and only there is it read); every read is guarded so
+ * this can never throw on Windows/macOS, where the paths simply don't exist.
+ * `memory.events` is the decisive one: its oom_kill counter is non-zero if the
+ * cgroup OOM killer fired, which is otherwise invisible (SIGKILL leaves no trace
+ * in the process's own output, and dmesg needs privileges we don't have in a
+ * container).
+ *
+ * @returns {string[]} Human-readable lines, empty when nothing could be read
+ */
+function readResourcePressure() {
+	if (process.platform !== 'linux') return [];
+
+	const lines = [];
+	const readFirst = (file, matcher) => {
+		try {
+			const content = fs.readFileSync(file, 'utf8');
+			for (const line of content.split('\n')) {
+				if (matcher.test(line)) lines.push(`${path.basename(file)}: ${line.trim()}`);
+			}
+		} catch {
+			// Not present (non-cgroup-v2 host, different kernel, macOS/Windows) - skip.
+		}
+	};
+
+	readFirst('/proc/meminfo', /^(MemTotal|MemAvailable|SwapFree):/);
+	readFirst('/sys/fs/cgroup/memory.events', /^oom(_kill)?\s/);
+	readFirst('/sys/fs/cgroup/memory.max', /./);
+	readFirst('/sys/fs/cgroup/memory.current', /./);
+
+	return lines;
+}
+
+/**
+ * Try a bare TCP connect to one address, so we learn what a client would see.
+ *
+ * @param {string} host
+ * @param {number} port
+ * @param {number} family 4 or 6
+ * @returns {Promise<string>} 'connected', or the failing errno (e.g. ECONNREFUSED)
+ */
+function probeAddress(host, port, family) {
+	return new Promise((resolve) => {
+		let settled = false;
+		const finish = (result) => {
+			if (settled) return;
+			settled = true;
+			socket.destroy();
+			resolve(result);
+		};
+		const socket = net.connect({ host, port, family });
+		socket.setTimeout(2000);
+		socket.once('connect', () => finish('connected'));
+		socket.once('timeout', () => finish('timeout'));
+		socket.once('error', (err) => finish(err.code || 'error'));
+	});
+}
+
+/**
+ * Verify the port the server just advertised is actually reachable the way a
+ * client will reach it, over both address families.
+ *
+ * The server binds whatever `--host` resolves to, and that default is the *name*
+ * `localhost` - so in an environment where localhost prefers IPv6 the listener
+ * can end up on ::1 while Node's client dials 127.0.0.1 and gets an instant
+ * ECONNREFUSED from a perfectly healthy server. That failure is otherwise
+ * indistinguishable from "the server died", so measure it rather than infer it.
+ *
+ * @param {number} port
+ * @returns {Promise<{ipv4: string, ipv6: string, reachable: boolean}>}
+ */
+async function probeReachability(port) {
+	const [ipv4, ipv6] = await Promise.all([probeAddress('127.0.0.1', port, 4), probeAddress('::1', port, 6)]);
+	return { ipv4, ipv6, reachable: ipv4 === 'connected' || ipv6 === 'connected' };
+}
+
+/**
+ * Describe how a process exited, in terms that distinguish the cases we care about.
+ *
+ * Node reports (code, signal); on Windows signal is always null and abnormal
+ * termination shows up as a large code instead, so both are reported raw and the
+ * interpretation is additive rather than assumed.
+ *
+ * @param {number|null} code
+ * @param {string|null} signal
+ * @returns {string}
+ */
+function describeExit(code, signal) {
+	const parts = [`code=${code === null ? 'null' : code}`, `signal=${signal || 'none'}`];
+
+	// SIGKILL is what the Linux/macOS OOM killer uses, and it's indistinguishable
+	// from a deliberate `kill -9` - so flag it as a hint, not a conclusion.
+	if (signal === 'SIGKILL' || code === 137) {
+		parts.push('(SIGKILL/137 - consistent with an OOM kill or an external kill -9)');
+	} else if (signal) {
+		parts.push(`(terminated by signal ${signal})`);
+	} else if (code !== 0 && code !== null) {
+		parts.push('(exited non-zero on its own)');
+	}
+
+	return parts.join(' ');
+}
 
 /**
  * Start a Python server using the engine executable
@@ -39,7 +153,11 @@ const READY_MESSAGE = 'Application startup complete.';
  * @param {string[]} [options.trace] - Trace categories to enable (passed as --trace=a,b,c)
  * @param {number} [options.basePort] - Base port for task allocation
  * @param {string[]} [options.args] - Additional arguments to pass to the script
- * @returns {Promise<{server: ChildProcess|null, port: number}>}
+ * @returns {Promise<{server: ChildProcess|null, port: number, diagnostics?: object}>}
+ *   `diagnostics` (also reachable as `server.rocketrideDiagnostics`) carries the
+ *   retained output tail and, once it exits, the exit code/signal. If the server
+ *   dies after reporting ready without stopServer being called, that is reported
+ *   to stderr at the moment of death.
  */
 async function startServer(options) {
 	const { script, port: existingPort, onOutput, trace, basePort, args = [], env = {} } = options;
@@ -91,6 +209,27 @@ async function startServer(options) {
 		let outputBuffer = '';
 		let actualPort = null;
 
+		// Diagnostics travel on the ChildProcess itself so stopServer (and any
+		// caller holding only `server`) can reach them without an API change.
+		const diagnostics = {
+			exited: false,
+			code: null,
+			signal: null,
+			/** Set by stopServer, so an exit during teardown isn't reported as a death. */
+			stopRequested: false,
+			outputTail: [],
+			port: null,
+		};
+		serverProcess.rocketrideDiagnostics = diagnostics;
+
+		const recordOutput = (text) => {
+			for (const line of text.split('\n')) {
+				if (!line.trim()) continue;
+				diagnostics.outputTail.push(line);
+				if (diagnostics.outputTail.length > OUTPUT_TAIL_LINES) diagnostics.outputTail.shift();
+			}
+		};
+
 		// Parse the actual bound port from Uvicorn's startup line, then wait
 		// for the full "Application startup complete." readiness message.
 		const portRegex = /Uvicorn running on https?:\/\/[\w.]+:(\d+)/;
@@ -98,6 +237,11 @@ async function startServer(options) {
 		const checkReady = (data) => {
 			const text = data.toString();
 			outputBuffer += text;
+
+			// Retain the tail unconditionally. Callers typically stop consuming
+			// onOutput once the server is ready, so this is the only thing that
+			// preserves the server's final output when it dies mid-run.
+			recordOutput(text);
 
 			// Always forward output if callback provided
 			if (onOutput) {
@@ -114,7 +258,25 @@ async function startServer(options) {
 
 			if (!resolved && actualPort && outputBuffer.includes(READY_MESSAGE)) {
 				resolved = true;
-				resolve({ server: serverProcess, port: actualPort });
+				diagnostics.port = actualPort;
+
+				// The server says it's listening; confirm it before handing the port
+				// to tests. "Ready but unreachable" otherwise shows up only as every
+				// client connection being refused, far from the cause.
+				probeReachability(actualPort).then((reach) => {
+					diagnostics.reachability = reach;
+
+					if (!reach.reachable) {
+						console.error(['', '='.repeat(78), `SERVER READY BUT UNREACHABLE on port ${actualPort} (${script})`, `  IPv4 127.0.0.1:${actualPort} -> ${reach.ipv4}`, `  IPv6      [::1]:${actualPort} -> ${reach.ipv6}`, '  The process is alive and reported startup, but nothing accepts', '  connections. Every client dial will fail with ECONNREFUSED.', `  Last ${Math.min(diagnostics.outputTail.length, 40)} line(s) of server output:`, ...diagnostics.outputTail.slice(-40).map((l) => `    ${l}`), '='.repeat(78), ''].join('\n'));
+					} else if (reach.ipv4 !== 'connected') {
+						// Reachable over IPv6 but NOT IPv4. Clients here dial 127.0.0.1,
+						// so this is the asymmetry that actually bites. IPv4-only is the
+						// normal healthy case and is deliberately silent.
+						console.error(`[server] WARNING: port ${actualPort} is reachable over IPv6 but NOT IPv4 (IPv4=${reach.ipv4}). Clients dialing 127.0.0.1 will get ECONNREFUSED.`);
+					}
+
+					resolve({ server: serverProcess, port: actualPort, diagnostics });
+				});
 			}
 		};
 
@@ -128,11 +290,41 @@ async function startServer(options) {
 			}
 		});
 
-		serverProcess.on('exit', (code) => {
+		serverProcess.on('exit', (code, signal) => {
+			diagnostics.exited = true;
+			diagnostics.code = code;
+			diagnostics.signal = signal;
+
 			if (!resolved) {
 				resolved = true;
-				reject(new Error(`Server exited unexpectedly with code ${code}. Script: ${script}`));
+				reject(new Error(`Server exited unexpectedly with ${describeExit(code, signal)}. Script: ${script}`));
+				return;
 			}
+
+			// Exited *after* it was reported ready. If we didn't ask it to stop,
+			// the server died under us - every subsequent client connection will
+			// fail with ECONNREFUSED, which is otherwise the only symptom visible
+			// in CI. Report it loudly and immediately, at the moment of death, so
+			// the cause is adjacent to the effect in the log.
+			if (diagnostics.stopRequested) return;
+
+			const detail = ['', '='.repeat(78), `SERVER DIED UNEXPECTEDLY after reporting ready (${script})`, `  ${describeExit(code, signal)}`, `  port=${diagnostics.port ?? 'unknown'} pid=${serverProcess.pid}`, '  All subsequent client connections will fail with ECONNREFUSED.'];
+
+			const pressure = readResourcePressure();
+			if (pressure.length) {
+				detail.push('  Resource pressure at time of death:');
+				for (const line of pressure) detail.push(`    ${line}`);
+			}
+
+			if (diagnostics.outputTail.length) {
+				detail.push(`  Last ${Math.min(diagnostics.outputTail.length, 40)} line(s) of server output:`);
+				for (const line of diagnostics.outputTail.slice(-40)) detail.push(`    ${line}`);
+			} else {
+				detail.push('  Server produced no output before dying.');
+			}
+
+			detail.push('='.repeat(78), '');
+			console.error(detail.join('\n'));
 		});
 	});
 }
@@ -156,9 +348,20 @@ async function stopServer(serverObj, timeout = 5000) {
 	if (!serverObj || !serverObj.server) return;
 
 	const serverProcess = serverObj.server;
+	const diagnostics = serverProcess.rocketrideDiagnostics;
 
-	// If already exited, nothing to do
-	if (serverProcess.killed || serverProcess.exitCode !== null) return;
+	// Mark before any exit can happen, so the 'exit' handler treats what follows
+	// as a requested shutdown rather than a death.
+	if (diagnostics) diagnostics.stopRequested = true;
+
+	// If already exited, nothing to do - but if it exited without us asking, say
+	// so here too: teardown is where a caller that missed the live report looks.
+	if (serverProcess.killed || serverProcess.exitCode !== null) {
+		if (diagnostics && diagnostics.exited && diagnostics.code !== 0) {
+			console.error(`[server] NOTE: server was already gone at teardown - ${describeExit(diagnostics.code, diagnostics.signal)}`);
+		}
+		return;
+	}
 
 	return new Promise((resolve) => {
 		let resolved = false;

@@ -35,7 +35,8 @@
 			"default": {
 				"agent_description": "",
 				"instructions": [],
-				"max_waves": 10
+				"max_waves": 10,
+				"require_tool_call": false
 			}
 		}
 	},
@@ -67,7 +68,13 @@
 			"minimum": 1,
 			"maximum": 50
 		},
-		"agent_rocketride.default": { "object": "default", "properties": ["agent_description", "instructions", "max_waves"] },
+		"require_tool_call": {
+			"type": "boolean",
+			"title": "Require tool call",
+			"default": false,
+			"description": "Require the agent to invoke at least one tool before answering. When on, a run that answers without calling any tool fails with a guard error. Use for determinism-critical pipelines where an ungrounded or narrated answer must never be delivered. Off by default."
+		},
+		"agent_rocketride.default": { "object": "default", "properties": ["agent_description", "instructions", "max_waves", "require_tool_call"] },
 		"agent_rocketride.profile": {
 			"title": "Profile",
 			"type": "string",
@@ -80,7 +87,7 @@
 		{
 			"section": "Pipe",
 			"title": "RocketRide Wave",
-			"properties": ["agent_description", "instructions", "max_waves"]
+			"properties": ["agent_description", "instructions", "max_waves", "require_tool_call"]
 		}
 	]
 }

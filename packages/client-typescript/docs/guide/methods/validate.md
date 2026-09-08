@@ -15,7 +15,7 @@ date: 2025-07-29
 
 ## **Overview**
 
-The `validate()` method checks a pipeline configuration for structural correctness before executing it. It verifies component compatibility, connection integrity, and resolves the execution chain. This is useful for catching configuration errors early, before starting a pipeline.
+The `validate()` method checks a pipeline configuration for structural correctness before executing it. It verifies required fields and component references. This is useful for catching configuration errors early, before starting a pipeline.
 
 Authentication is **not required** for validation: the endpoint is public.
 
@@ -51,7 +51,7 @@ If `source` is not provided, the server resolves it in this order:
 ## **Returns**
 
 - **Type**: `Dict[str, Any]` (Python) / `Record<string, unknown>` (TypeScript)
-- **Description**: Validation result containing errors, warnings, the resolved source component, and the execution chain
+- **Description**: Validation result containing errors, warnings, and the resolved source component
 
 ## **Usage Examples**
 
@@ -140,16 +140,17 @@ task = await client.use(pipeline=pipeline)
 
 ## **Response Format**
 
-The validation result contains information about the pipeline's structural validity, including any errors and warnings found, the resolved source component, and the execution chain.
+The validation result contains information about the pipeline's structural validity, including any errors and warnings found and the resolved source component.
 
 ```json
 {
   "errors": [],
   "warnings": [],
-  "resolved": { ... },
-  "chain": [ ... ]
+  "resolved": { ... }
 }
 ```
+
+Note: `validate()` only checks structure and component references — provider/lane compatibility and cycles are runtime concerns.
 
 If validation fails (e.g., missing components, invalid connections), the `errors` array will contain descriptive messages.
 
@@ -173,6 +174,8 @@ This method communicates via the RocketRide DAP protocol over WebSocket. The equ
 - **Method**: `POST /pipe/validate`
 - **Authentication**: Not required (public endpoint)
 - **Body**: `{ "pipeline": {...}, "source": "..." }`
+
+The endpoint also accepts `{ "component": {...} }` instead of `pipeline` — a different, runtime check: the server instantiates that node and calls its own `validateConfig()`, rather than just checking structure. The `validate()` method above only covers the `pipeline` form; for component-level validation, call `rrext_validate` directly with a `component` argument.
 
 ## **Related Methods**
 

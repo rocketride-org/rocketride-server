@@ -49,6 +49,7 @@ Usage:
     await client.set_events(token, ['apaevt_status_upload', 'apaevt_status_processing'])
 """
 
+import json
 import sys
 from typing import Callable, Dict, Any, Optional, List
 from ..core import DAPClient
@@ -380,9 +381,14 @@ class EventMixin(DAPClient):
         Add a monitor subscription. If the key already exists, the new types
         are merged via reference counting and the merged set is sent to the server.
 
+        The scope IS the kind: a ``"team_id"`` in the key addresses the
+        team's DEPLOYED run; without it the server binds the subscription to
+        the caller's own dev run — there is no run-kind argument.
+
         Args:
             key: Monitor key — ``{"token": "..."}`` for a running task,
-                 or ``{"project_id": "...", "source": "..."}`` (optionally with ``"pipe_id"``).
+                 or ``{"project_id": "...", "source": "..."}`` (optionally
+                 with ``"pipe_id"`` and/or ``"team_id"``).
             types: Event types to subscribe to (e.g. ``['summary', 'flow']``).
         """
         key_str = self._monitor_key_to_string(key)
@@ -484,6 +490,10 @@ class EventMixin(DAPClient):
             }
             if 'pipe_id' in key and key['pipe_id'] is not None:
                 args['pipeId'] = key['pipe_id']
+            # The scope IS the kind: teamId addresses the team's deploy run,
+            # absent addresses the caller's own dev run.
+            if key.get('team_id'):
+                args['teamId'] = key['team_id']
             await self.call('rrext_monitor', **args)
 
     async def _resubscribe_all_monitors(self) -> None:
@@ -503,13 +513,20 @@ class EventMixin(DAPClient):
 
     @staticmethod
     def _monitor_key_to_string(key: Dict[str, Any]) -> str:
-        """Convert a monitor key dict to a stable string for map lookup."""
+        """Convert a monitor key dict to a stable string for map lookup.
+
+        Project keys use a JSON-array encoding because the ids are free
+        text: a delimiter-joined string cannot round-trip a source that
+        contains the delimiter (a source like 'chat@legacy' would decode
+        as a team scope) — and reconnect round-trips EVERY key through
+        this pair, so a misparse silently rewrites the subscription. MUST
+        stay symmetric with :meth:`_monitor_string_to_key`. The string is
+        private registry state; it never travels on the wire.
+        """
         if 'token' in key:
             return f't:{key["token"]}'
-        s = f'p:{key["project_id"]}.{key["source"]}'
-        if 'pipe_id' in key and key['pipe_id'] is not None:
-            s += f'.{key["pipe_id"]}'
-        return s
+        payload = [key['project_id'], key['source'], key.get('pipe_id'), key.get('team_id') or '']
+        return f'p:{json.dumps(payload)}'
 
     @staticmethod
     def _monitor_string_to_key(key_str: str) -> Optional[Dict[str, Any]]:
@@ -517,14 +534,15 @@ class EventMixin(DAPClient):
         if key_str.startswith('t:'):
             return {'token': key_str[2:]}
         if key_str.startswith('p:'):
-            rest = key_str[2:]
-            dot_idx = rest.index('.') if '.' in rest else -1
-            if dot_idx == -1:
+            try:
+                project_id, source, pipe_id, team_id = json.loads(key_str[2:])
+            except (ValueError, TypeError):
+                # A malformed registry string has no valid key — skip it.
                 return None
-            project_id = rest[:dot_idx]
-            remaining = rest[dot_idx + 1 :]
-            parts = remaining.split('.')
-            if len(parts) == 2 and parts[1].isdigit():
-                return {'project_id': project_id, 'source': parts[0], 'pipe_id': int(parts[1])}
-            return {'project_id': project_id, 'source': remaining}
+            key: Dict[str, Any] = {'project_id': project_id, 'source': source}
+            if pipe_id is not None:
+                key['pipe_id'] = pipe_id
+            if team_id:
+                key['team_id'] = team_id
+            return key
         return None

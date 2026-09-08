@@ -225,3 +225,13 @@ downloads/maven-3.9.6.tar.gz
 # One of the python modules keeps installing this
 include/python3.12/greenlet/greenlet.h
 .rocketride/
+
+# MCP Apps widgets built by apps/mcp-widgets and synced by mcp-widgets:build
+# (already covered by the blanket dist/ rule above; listed explicitly since
+# this directory lives inside packages/ai/src, which is otherwise tracked).
+packages/ai/src/ai/modules/mcp/apps/dist/
+
+# The n8n community node package ships credential *type definitions* (schema only,
+# no secrets); they must be tracked despite the global credentials/ ignore above.
+!packages/n8n-nodes/credentials/
+!packages/n8n-nodes/credentials/**

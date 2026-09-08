@@ -33,8 +33,8 @@
 // =============================================================================
 
 import React, { useMemo, type CSSProperties } from 'react';
-import { getShellApi } from 'shell-ui';
-import type { ShellAppProps, AppManifestEntry } from 'shell-ui';
+import { getShellApi, AppLayout } from 'shell';
+import type { ShellAppProps, AppManifestEntry } from 'shell';
 import GitHubStars from './GitHubStars';
 
 // =============================================================================
@@ -43,7 +43,7 @@ import GitHubStars from './GitHubStars';
 //
 // Runtime shell access (hooks, client, connection manager) flows through the
 // single curated contract accessor rather than named value imports from
-// shell-ui. Types continue to come from shell-ui's type surface (the same
+// shell. Types continue to come from shell's type surface (the same
 // contract types the frozen shell-api snapshot conforms to).
 const { useWorkspace, ConnectionManager } = getShellApi();
 
@@ -51,7 +51,7 @@ const { useWorkspace, ConnectionManager } = getShellApi();
 // CONSTANTS
 // =============================================================================
 
-const DISCORD_URL = 'https://discord.gg/rocketride';
+const DISCORD_URL = 'https://discord.gg/PMXrtenMsY';
 
 /** Honor the OS "reduce motion" setting for card hover transitions. */
 const REDUCE_MOTION =
@@ -638,6 +638,8 @@ const HomeApp: React.FC<ShellAppProps> = ({ identity }) => {
 	const quote = identity ? QUOTES[quoteIndex] : null;
 
 	return (
+		// One-column app (no sidebar) with the status bar on.
+		<AppLayout showStatus>
 		<div style={styles.container}>
 			{/* Top bar */}
 			<div style={styles.topBar}>
@@ -709,12 +711,13 @@ const HomeApp: React.FC<ShellAppProps> = ({ identity }) => {
 						))}
 					</div>
 				) : (
-					<p style={styles.subtitle}>
+					<p style={styles.greetingSub}>
 						No apps installed. Build and deploy an app to see it here.
 					</p>
 				)}
 			</div>
 		</div>
+		</AppLayout>
 	);
 };
 

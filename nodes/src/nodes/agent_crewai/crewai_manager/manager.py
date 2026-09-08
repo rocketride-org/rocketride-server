@@ -226,6 +226,9 @@ class CrewManager(CrewBase):
                 pipe_id=context.pipe_id,
                 framework=context.framework,
                 started_at=context.started_at,
+                # Share the parent's tool tally so a host tool a sub-agent
+                # invokes counts toward the manager's require_tool_call guard.
+                invoked_tools=context.invoked_tools,
             )
 
             sub_tool_descs = sub_context.tools.list
@@ -261,6 +264,27 @@ class CrewManager(CrewBase):
                 context=[],
             )
 
+            # Keep the delegate's tools off the manager.
+            #
+            # CrewAI back-fills Task.tools from the task's agent (crewai/task.py
+            # check_tools), and crewai/crews/utils.py then resolves the executing
+            # agent's toolset as `task.tools or agent_to_use.tools` -- while
+            # Crew._get_agent_to_use (crewai/crew.py) returns the MANAGER for a
+            # hierarchical process. The manager therefore inherits whichever delegate's tools
+            # belong to the task it is running and can work the tools itself
+            # instead of delegating, which is exactly what a tool-split prompt
+            # forbids.
+            #
+            # This must happen after construction: passing `tools=[]` to Task()
+            # does not survive, because check_tools runs as an after-validator and
+            # reads the empty list as "unset". Task sets no validate_assignment, so
+            # assigning here is not re-validated and sticks.
+            #
+            # Delegation is unaffected: crewai/tools/agent_tools builds a fresh
+            # Task bound to the coworker, which back-fills from that agent's own
+            # tools.
+            task_obj.tools = []
+
             sub_agents.append(agent_obj)
             sub_tasks.append(task_obj)
 
@@ -288,13 +312,25 @@ class CrewManager(CrewBase):
         )
 
         # 5. Assemble and kick off the hierarchical Crew.
+        #
+        # Planning is opt-in and off by default. CrewAI's planner runs a task with
+        # output_pydantic=PlannerTaskPydanticOutput and drives it with our LLM
+        # wrapper, but the host channel is text-in / text-out and cannot promise
+        # JSON. When the plan text does not parse, crewai's converter dead-ends
+        # (utilities/converter.py:67 passes agent=None into a fallback that
+        # requires one) and planning_handler.py:78 then raises
+        # "Failed to get the Planning output" -- so a crew that would otherwise
+        # have run fine dies during planning. It also costs an extra LLM
+        # round-trip per kickoff. Operators whose model reliably emits JSON can
+        # turn it back on.
+        planning = bool(getattr(ig, 'planning', False))
         crew = Crew(
             agents=sub_agents,
             tasks=sub_tasks,
             process=Process.hierarchical,
             manager_agent=manager_agent,
-            planning=True,
-            planning_llm=manager_llm,
+            planning=planning,
+            planning_llm=manager_llm if planning else None,
             verbose=False,
         )
 

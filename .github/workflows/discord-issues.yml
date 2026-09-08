@@ -53,7 +53,7 @@ jobs:
           # automatically once this merges to the default branch.
           command -v discord_applied_tags   >/dev/null 2>&1 || discord_applied_tags()   { printf '[]'; }
           command -v extract_discord_thread >/dev/null 2>&1 || extract_discord_thread() { :; }
-          command -v discord_archive_thread >/dev/null 2>&1 || discord_archive_thread() { :; }
+          command -v discord_sync_thread    >/dev/null 2>&1 || discord_sync_thread()    { :; }
 
           NUMBER="${{ github.event.issue.number }}"
 
@@ -229,14 +229,17 @@ jobs:
             fi
           fi
 
-          # ── Mirror closed/open state onto the forum thread (archive) ─────
-          # No-op unless DISCORD_GITHUB_BOT_TOKEN is set. Prefer the stored thread id,
-          # then the race winner's, then a freshly created one.
+          # ── Sync forum thread: archive flag + live tags in ONE PATCH ─────
+          # No-op unless DISCORD_GITHUB_BOT_TOKEN is set. Prefer the stored thread
+          # id, then the race winner's, then a freshly created one. archived +
+          # applied_tags are set together so re-tagging also works on reopen and
+          # on threads Discord auto-archived by inactivity (an applied_tags edit
+          # on an already-archived thread is rejected with 400).
           FINAL_THREAD_ID="${DISCORD_THREAD_ID:-}"
           [ -z "$FINAL_THREAD_ID" ] && FINAL_THREAD_ID="${WINNER_THREAD_ID:-}"
           [ -z "$FINAL_THREAD_ID" ] && FINAL_THREAD_ID="${NEW_THREAD_ID:-}"
           if [ "$STATE" = "open" ]; then
-            discord_archive_thread "$FINAL_THREAD_ID" false
+            discord_sync_thread "$FINAL_THREAD_ID" false "$APPLIED_TAGS"
           else
-            discord_archive_thread "$FINAL_THREAD_ID" true
+            discord_sync_thread "$FINAL_THREAD_ID" true "$APPLIED_TAGS"
           fi

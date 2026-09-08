@@ -167,7 +167,7 @@ export class DeployManager extends ConnectionManager {
 		return this.isSharedMode() ? this.getDevManager().getWebSocketUrl() : super.getWebSocketUrl();
 	}
 
-	public override getCachedServices(): { services: Record<string, unknown>; servicesError?: string } {
+	public override getCachedServices(): { services: Record<string, unknown>; icons: Record<string, string>; servicesError?: string } {
 		return this.isSharedMode() ? this.getDevManager().getCachedServices() : super.getCachedServices();
 	}
 

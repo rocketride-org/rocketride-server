@@ -45,7 +45,13 @@
 
 import * as vscode from 'vscode';
 import { EventEmitter } from 'events';
-import { RocketRideClient, DAPMessage, TraceType, AuthenticationException } from 'rocketride';
+import {
+	RocketRideClient,
+	DAPMessage,
+	TraceType,
+	AuthenticationException,
+	LoginAttemptCancelledError,
+} from 'rocketride';
 import { ConfigManager, type ConnectionMode, type ConnectionGroup, type ConnectionGroupConfig } from '../config';
 import { EngineRegistry, EngineManager, type EngineStatusEvent } from '../engine';
 import { getUserConfigDir, getSystemInstallDir } from '../engine/config/config-migration';
@@ -56,6 +62,10 @@ import { connectionModeRequiresApiKey, connectionModeUsesOAuth } from '../shared
 import { mergeEnvText, resolveConnectionEnv } from '../shared/util/envFile';
 import { getIdeName } from '../shared/util/ide';
 import { CloudAuthProvider } from '../auth/CloudAuthProvider';
+import {
+	ConnectionGenerationController,
+	GenerationOwnedOperationSlot,
+} from './connection-generation';
 
 export class ConnectionManager extends EventEmitter {
 	private static instance: ConnectionManager;
@@ -82,15 +92,19 @@ export class ConnectionManager extends EventEmitter {
 	// Debounce timer for configuration changes
 	private configChangeTimeout?: NodeJS.Timeout;
 	private engineStatusHandler?: (event: EngineStatusEvent & { mode?: ConnectionMode }) => void;
+	private connectionGeneration = new ConnectionGenerationController();
 
 	// Resource cleanup tracking
 	protected disposables: vscode.Disposable[] = [];
 	protected isDisposing: boolean = false;
 
-	// Services list cache
+	// Services list cache (summaries + the deduplicated icon table that
+	// each summary's `icon` id points into — cached together because the
+	// ids are only meaningful within the response they arrived in)
 	private cachedServices: Record<string, unknown> | null = null;
+	private cachedIcons: Record<string, string> | null = null;
 	private cachedServicesError: string | null = null;
-	private servicesRefreshPromise: Promise<void> | null = null;
+	private servicesRefresh = new GenerationOwnedOperationSlot();
 
 	/** Which settings group this connection reads from. */
 	public readonly group: ConnectionGroup;
@@ -175,22 +189,28 @@ export class ConnectionManager extends EventEmitter {
 				// Ignore events from other modes (e.g., docker event while connected to local).
 				if (!this.connectedMode || event.mode !== this.connectedMode) return;
 
-				this.connectedMode = undefined;
-				this.engineUri = undefined;
-				if (this.client?.isConnected()) {
-					this.client.disconnect().catch(() => { /* best effort */ });
-				}
-				if (event.phase === 'error') {
-					this.updateConnectionStatus({
-						state: ConnectionState.DISCONNECTED,
-						lastError: event.error ?? event.message,
-						progressLogLine: undefined,
-					});
-				} else {
-					this.updateConnectionStatus({
-						state: ConnectionState.DISCONNECTED,
-						progressLogLine: undefined,
-					});
+				{
+					// Invalidate BEFORE tearing down so an in-flight connect attempt
+					// cannot publish through the connection this event just retired.
+					const generation = this.invalidateConnectionAttempts();
+					this.connectedMode = undefined;
+					this.engineUri = undefined;
+					this.client?.disconnect().catch(() => { /* best effort */ });
+					if (event.phase === 'error') {
+						this.updateConnectionStatus({
+							state: ConnectionState.DISCONNECTED,
+							lastError: event.error ?? event.message,
+							progressLogLine: undefined,
+						});
+					} else {
+						this.updateConnectionStatus({
+							state: ConnectionState.DISCONNECTED,
+							progressLogLine: undefined,
+						});
+					}
+					if (this.isCurrentConnectionGeneration(generation)) {
+						this.emit('shell:disconnected');
+					}
 				}
 				break;
 
@@ -209,9 +229,12 @@ export class ConnectionManager extends EventEmitter {
 				// Already connected to this URI — no-op
 				if (this.engineUri === event.uri && this.client?.isConnected()) return;
 
+				const generation = this.beginConnectionAttempt();
 				this.connectedMode = event.mode;
 				this.engineUri = event.uri;
-				this.connectToEngine(event.uri).catch((err) => {
+				this.connectToEngine(event.uri, generation).catch((err) => {
+					// A superseded/cancelled attempt must not publish its failure.
+					if (!this.isCurrentConnectionAttempt(generation) || err instanceof LoginAttemptCancelledError) return;
 					const msg = err instanceof Error ? err.message : String(err);
 					this.logger.output(`${icons.error} Failed to connect to engine: ${msg}`);
 					this.connectedMode = undefined;
@@ -236,33 +259,75 @@ export class ConnectionManager extends EventEmitter {
 	 * @param uri - The WebSocket URI to connect to (from EngineManager 'ready' event).
 	 * @throws If cloud mode and no token is available (user must sign in).
 	 */
-	private async connectToEngine(uri: string): Promise<void> {
+	private async connectToEngine(uri: string, generation = this.beginConnectionAttempt()): Promise<void> {
+		if (!this.isCurrentConnectionAttempt(generation)) return;
 		this.updateConnectionStatus({ state: ConnectionState.CONNECTING, progressMessage: 'Connecting...' });
 
-		const groupConfig = this.getGroupConfig();
-		const mode = groupConfig.connectionMode ?? 'local';
+		const mode = this.getGroupConfig().connectionMode ?? 'local';
+		const auth = await this.resolveAuthCredential();
+		// Credential resolution awaited — a newer attempt may have started since.
+		if (!this.isCurrentConnectionAttempt(generation)) return;
 
-		// Resolve auth credential — each mode has different auth requirements
-		let auth: string;
-		if (connectionModeUsesOAuth(mode)) {
-			const cloudAuth = CloudAuthProvider.getInstance();
-			const token = await cloudAuth.getToken();
-			if (!token) throw new Error('Please sign in to RocketRide Cloud to connect.');
-			auth = token;
-		} else if (connectionModeRequiresApiKey(mode) && groupConfig.apiKey) {
-			auth = groupConfig.apiKey;
-		} else {
-			// Local, service, docker: use default key
-			auth = groupConfig.apiKey || 'MYAPIKEY';
-		}
-
+		// Hand callback publication rights to this attempt immediately before
+		// the SDK call so stale onConnected/onDisconnected callbacks go silent.
+		if (!this.connectionGeneration.activateAttemptCallbacks(generation)) return;
 		await this.client.connect(auth, { uri });
+		if (!this.isCurrentConnectionAttempt(generation)) return;
 		// onConnected callback in createClient() handles state update
 
 		// Persist the resolved engine URI + key to the workspace .env so the
 		// RocketRide SDK/CLI can drive the same (self-hosted) engine. Best-effort:
 		// a failure here must never break an otherwise-successful connection.
-		await this.syncEnvFile(mode, auth);
+		await this.syncEnvFile(mode, auth, generation);
+	}
+
+	/** Start a new connection attempt generation (invalidates older attempts). */
+	private beginConnectionAttempt(): number {
+		return this.connectionGeneration.beginAttempt();
+	}
+
+	/** Invalidate ALL attempts (disconnect/dispose/config change paths). */
+	private invalidateConnectionAttempts(): number {
+		return this.connectionGeneration.invalidateAttempts();
+	}
+
+	/** True while `generation` is still the active connection attempt. */
+	private isCurrentConnectionAttempt(generation: number | undefined): boolean {
+		return this.connectionGeneration.isCurrentAttempt(generation)
+			&& !this.isDisposing;
+	}
+
+	/** True while `generation` is the newest lifecycle generation of any kind. */
+	private isCurrentConnectionGeneration(generation: number): boolean {
+		return this.connectionGeneration.isCurrentGeneration(generation) && !this.isDisposing;
+	}
+
+	/**
+	 * Resolves this connection's auth credential — the OAuth token for cloud
+	 * modes, the configured API key otherwise (default key for self-hosted).
+	 * This is the SAME credential connect() presents to the engine, so it
+	 * also serves as the session handoff for embedded previews: the App
+	 * Builder passes it into the preview shell so apps that require
+	 * authentication render with a real signed-in session + live connection.
+	 *
+	 * @throws If cloud mode and no token is available (user must sign in).
+	 */
+	public async resolveAuthCredential(): Promise<string> {
+		const groupConfig = this.getGroupConfig();
+		const mode = groupConfig.connectionMode ?? 'local';
+
+		// Resolve auth credential — each mode has different auth requirements
+		if (connectionModeUsesOAuth(mode)) {
+			const cloudAuth = CloudAuthProvider.getInstance();
+			const token = await cloudAuth.getToken();
+			if (!token) throw new Error('Please sign in to RocketRide Cloud to connect.');
+			return token;
+		}
+		if (connectionModeRequiresApiKey(mode) && groupConfig.apiKey) {
+			return groupConfig.apiKey;
+		}
+		// Local, service, docker: use default key
+		return groupConfig.apiKey || 'MYAPIKEY';
 	}
 
 	/**
@@ -276,40 +341,53 @@ export class ConnectionManager extends EventEmitter {
 	 * is open. Skips the write when the file already matches, so reconnects
 	 * don't churn `.env`.
 	 */
-	private async syncEnvFile(mode: ConnectionMode, apiKey: string): Promise<void> {
-		try {
-			const updates = resolveConnectionEnv({
-				group: this.group,
-				mode,
-				httpUrl: this.getHttpUrl(),
-				apiKey,
-			});
-			const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri;
-			if (!updates || !workspaceRoot) {
-				return;
-			}
-
-			const envUri = vscode.Uri.joinPath(workspaceRoot, '.env');
-			let existing = '';
+	private async syncEnvFile(
+		mode: ConnectionMode,
+		apiKey: string,
+		generation: number,
+	): Promise<void> {
+		// Serialized per generation: an older sync either observes lost
+		// ownership before writing, or finishes before a newer one begins —
+		// so two reconnects can never interleave .env reads and writes.
+		await this.connectionGeneration.serializeAttemptPublication(generation, async (isCurrent) => {
 			try {
-				existing = Buffer.from(await vscode.workspace.fs.readFile(envUri)).toString('utf8');
-			} catch (err) {
-				if (!(err instanceof vscode.FileSystemError && err.code === 'FileNotFound')) {
-					throw err;
+				if (!isCurrent()) return;
+				const updates = resolveConnectionEnv({
+					group: this.group,
+					mode,
+					httpUrl: this.getHttpUrl(),
+					apiKey,
+				});
+				const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri;
+				if (!updates || !workspaceRoot || !isCurrent()) {
+					return;
 				}
-				// .env doesn't exist yet — it will be created.
-			}
 
-			const merged = mergeEnvText(existing, updates);
-			if (merged === existing) {
-				return;
-			}
+				const envUri = vscode.Uri.joinPath(workspaceRoot, '.env');
+				let existing = '';
+				try {
+					existing = Buffer.from(await vscode.workspace.fs.readFile(envUri)).toString('utf8');
+				} catch (err) {
+					if (!(err instanceof vscode.FileSystemError && err.code === 'FileNotFound')) {
+						throw err;
+					}
+					// .env doesn't exist yet — it will be created.
+				}
+				if (!isCurrent()) return;
 
-			await vscode.workspace.fs.writeFile(envUri, Buffer.from(merged, 'utf8'));
-			this.logger.output(`${icons.success} Synced ROCKETRIDE_URI/ROCKETRIDE_APIKEY to .env`);
-		} catch (err) {
-			this.logger.error(`Failed to sync .env: ${err}`);
-		}
+				const merged = mergeEnvText(existing, updates);
+				if (merged === existing) {
+					return;
+				}
+
+				await vscode.workspace.fs.writeFile(envUri, Buffer.from(merged, 'utf8'));
+				if (isCurrent()) {
+					this.logger.output(`${icons.success} Synced ROCKETRIDE_URI/ROCKETRIDE_APIKEY to .env`);
+				}
+			} catch (err) {
+				if (isCurrent()) this.logger.error(`Failed to sync .env: ${err}`);
+			}
+		});
 	}
 
 	// =========================================================================
@@ -341,12 +419,17 @@ export class ConnectionManager extends EventEmitter {
 			return;
 		}
 
+		// A config change retires every older connection lifecycle first, so a
+		// half-finished connect can't publish into the reconfigured connection.
+		const generation = this.invalidateConnectionAttempts();
 		this.logger.output(`${icons.info} Configuration changed, reconnecting...`);
-		await this.updateCredentialsStatus();
+		await this.updateCredentialsStatus(generation);
+		if (!this.isCurrentConnectionGeneration(generation)) return;
 
 		// Full cycle: disconnect old manager → validate config → reconcile
-		await this.disconnect();
-		await this.initialize();
+		if (!await this.disconnectForGeneration(generation)) return;
+		await this.initializeForGeneration(generation);
+		if (!this.isCurrentConnectionGeneration(generation)) return;
 
 		// Ask the registry to reconcile — for config-only changes (e.g.,
 		// rotating credentials) the engine may already be 'ready' and will
@@ -406,9 +489,16 @@ export class ConnectionManager extends EventEmitter {
 	 * WebSocket when an engine emits 'ready'.
 	 */
 	public async initialize(): Promise<void> {
-		if (this.isDisposing) return;
+		await this.initializeForGeneration();
+	}
 
-		await this.updateCredentialsStatus();
+	/** initialize() body, skippable when a newer generation took over mid-await. */
+	private async initializeForGeneration(generation?: number): Promise<void> {
+		if (this.isDisposing) return;
+		if (generation !== undefined && !this.isCurrentConnectionGeneration(generation)) return;
+
+		await this.updateCredentialsStatus(generation);
+		if (generation !== undefined && !this.isCurrentConnectionGeneration(generation)) return;
 
 		const errors = this.configManager.validateGroupConfig(this.group);
 		if (errors.length > 0) {
@@ -445,6 +535,9 @@ export class ConnectionManager extends EventEmitter {
 				}
 			},
 			onEvent: async (message: DAPMessage) => {
+				const generation = this.connectionGeneration.callbackGeneration;
+				if (!this.connectionGeneration.isCurrentCallback(generation) || this.isDisposing) return;
+
 				// Server output events are NOT mirrored into an output channel:
 				// the task's Log pane (fed by the same events via shell:event)
 				// is the console now — a second copy in the Output panel was
@@ -464,6 +557,8 @@ export class ConnectionManager extends EventEmitter {
 				this.emit('shell:event', message);
 			},
 			onConnected: async () => {
+				const generation = this.connectionGeneration.callbackGeneration;
+				if (!this.connectionGeneration.isCurrentCallback(generation) || this.isDisposing) return;
 				this.updateConnectionStatus({
 					state: ConnectionState.CONNECTED,
 					lastConnected: new Date(),
@@ -476,11 +571,13 @@ export class ConnectionManager extends EventEmitter {
 				this.emit('shell:connected');
 
 				// Fetch and cache services list
-				this.refreshServices().catch((err) => {
+				this.refreshServices(generation).catch((err) => {
 					this.logger.error(`Failed to fetch services on connect: ${err}`);
 				});
 			},
 			onDisconnected: async (reason?: string, hasError?: boolean) => {
+				const generation = this.connectionGeneration.callbackGeneration;
+				if (!this.connectionGeneration.isCurrentCallback(generation) || this.isDisposing) return;
 				this.logger.output(`${icons.warning} WebSocket disconnected (reason: ${reason ?? 'unknown'}, error: ${hasError ?? false})`);
 				this.clearServicesCache();
 				// Don't overwrite AUTH_FAILED — the user needs to see the sign-in prompt,
@@ -491,6 +588,12 @@ export class ConnectionManager extends EventEmitter {
 				this.emit('shell:disconnected');
 			},
 			onConnectError: async (error: Error) => {
+				const generation = this.connectionGeneration.callbackGeneration;
+				if (
+					!this.connectionGeneration.isCurrentCallback(generation)
+					|| this.isDisposing
+					|| error instanceof LoginAttemptCancelledError
+				) return;
 				// Auth rejection: stop retrying, clear stale credentials, and
 				// open the auth page so the user can fix them.
 				if (error instanceof AuthenticationException) {
@@ -507,6 +610,7 @@ export class ConnectionManager extends EventEmitter {
 					// live in config, not SecretStorage.
 					if (connectionModeUsesOAuth(mode)) {
 						await CloudAuthProvider.getInstance().signOut();
+						if (!this.isCurrentConnectionAttempt(generation)) return;
 					}
 
 					this.updateConnectionStatus({
@@ -542,7 +646,15 @@ export class ConnectionManager extends EventEmitter {
 	 */
 	public async connect(): Promise<void> {
 		if (this.engineUri && !this.client?.isConnected()) {
-			await this.connectToEngine(this.engineUri);
+			const generation = this.beginConnectionAttempt();
+			try {
+				await this.connectToEngine(this.engineUri, generation);
+			} catch (error) {
+				// Swallow failures of a superseded/cancelled attempt — its
+				// replacement owns error reporting for the live connection.
+				if (!this.isCurrentConnectionAttempt(generation) || error instanceof LoginAttemptCancelledError) return;
+				throw error;
+			}
 		}
 	}
 
@@ -552,11 +664,25 @@ export class ConnectionManager extends EventEmitter {
 	 * so connect() or handleEngineStatus() can reconnect to it.
 	 */
 	public async disconnect(): Promise<void> {
+		const generation = this.invalidateConnectionAttempts();
+		await this.disconnectForGeneration(generation);
+	}
+
+	/**
+	 * disconnect() body bound to a generation: publishes the DISCONNECTED state
+	 * and event only while that generation is still the newest.
+	 *
+	 * @returns True when this generation still owned the lifecycle at the end.
+	 */
+	private async disconnectForGeneration(generation: number): Promise<boolean> {
 		this.logger.output(`${icons.warning} Disconnecting WebSocket...`);
 
-		if (this.client?.isConnected()) {
+		// Always disconnect (not just when isConnected()) so a mid-handshake
+		// SDK operation is cancelled rather than left to complete stale.
+		if (this.client) {
 			await this.client.disconnect();
 		}
+		if (!this.isCurrentConnectionGeneration(generation)) return false;
 
 		this.clearServicesCache();
 
@@ -565,6 +691,8 @@ export class ConnectionManager extends EventEmitter {
 			progressMessage: undefined,
 			progressLogLine: undefined,
 		});
+		this.emit('shell:disconnected');
+		return true;
 	}
 
 	// =========================================================================
@@ -678,51 +806,61 @@ export class ConnectionManager extends EventEmitter {
 	// SERVICES CACHE
 	// =========================================================================
 
-	public getCachedServices(): { services: Record<string, unknown>; servicesError?: string } {
+	public getCachedServices(): { services: Record<string, unknown>; icons: Record<string, string>; servicesError?: string } {
 		if (!this.isConnected()) {
-			return { services: {}, servicesError: 'Not connected' };
+			return { services: {}, icons: {}, servicesError: 'Not connected' };
 		}
 		if (this.cachedServicesError) {
-			return { services: this.cachedServices ?? {}, servicesError: this.cachedServicesError };
+			return { services: this.cachedServices ?? {}, icons: this.cachedIcons ?? {}, servicesError: this.cachedServicesError };
 		}
-		return { services: this.cachedServices ?? {} };
+		return { services: this.cachedServices ?? {}, icons: this.cachedIcons ?? {} };
 	}
 
-	public async refreshServices(): Promise<void> {
+	public async refreshServices(
+		generation = this.connectionGeneration.callbackGeneration,
+	): Promise<void> {
+		// Ownership: publish only while `generation` still owns callbacks and
+		// the connection is live — a stale refresh never touches the cache.
+		const ownsGeneration = () => this.connectionGeneration.isCurrentCallback(generation)
+			&& !this.isDisposing;
+		const isCurrent = () => ownsGeneration() && this.isConnected();
+		if (!ownsGeneration()) return;
 		if (!this.isConnected() || !this.client) {
 			this.clearServicesCache();
-			this.emit('shell:servicesUpdated', { services: {}, servicesError: 'Not connected' });
+			this.emit('shell:servicesUpdated', { services: {}, icons: {}, servicesError: 'Not connected' });
 			return;
 		}
 
-		if (this.servicesRefreshPromise) {
-			return this.servicesRefreshPromise;
-		}
-
-		this.servicesRefreshPromise = (async () => {
-			try {
-				const body = await this.client!.getServices();
-				const services: Record<string, unknown> = body.services ?? {};
-				this.cachedServices = services;
-				this.cachedServicesError = null;
-				this.emit('shell:servicesUpdated', { services, servicesError: undefined });
-			} catch (err: unknown) {
-				const msg = err instanceof Error ? err.message : String(err);
+		await this.servicesRefresh.run(
+			generation,
+			isCurrent,
+			() => this.client!.getServices(),
+			(outcome) => {
+				if (outcome.status === 'fulfilled') {
+					const services: Record<string, unknown> = outcome.value.services ?? {};
+					const icons: Record<string, string> = (outcome.value as { icons?: Record<string, string> }).icons ?? {};
+					this.cachedServices = services;
+					this.cachedIcons = icons;
+					this.cachedServicesError = null;
+					this.emit('shell:servicesUpdated', { services, icons, servicesError: undefined });
+					return;
+				}
+				const msg = outcome.reason instanceof Error
+					? outcome.reason.message
+					: String(outcome.reason);
 				this.cachedServices = null;
+				this.cachedIcons = null;
 				this.cachedServicesError = msg;
-				this.emit('shell:servicesUpdated', { services: {}, servicesError: msg });
-			} finally {
-				this.servicesRefreshPromise = null;
-			}
-		})();
-
-		return this.servicesRefreshPromise;
+				this.emit('shell:servicesUpdated', { services: {}, icons: {}, servicesError: msg });
+			},
+		);
 	}
 
 	protected clearServicesCache(): void {
 		this.cachedServices = null;
+		this.cachedIcons = null;
 		this.cachedServicesError = null;
-		this.servicesRefreshPromise = null;
+		this.servicesRefresh.clear();
 	}
 
 	// =========================================================================
@@ -742,10 +880,11 @@ export class ConnectionManager extends EventEmitter {
 		this.emit('shell:statusMessage', { message });
 	}
 
-	protected async updateCredentialsStatus(): Promise<void> {
+	protected async updateCredentialsStatus(generation?: number): Promise<void> {
 		if (this.isDisposing) {
 			return;
 		}
+		if (generation !== undefined && !this.isCurrentConnectionGeneration(generation)) return;
 		const gc = this.getGroupConfig();
 		const mode = gc.connectionMode ?? 'local';
 		let hasCredentials: boolean;
@@ -764,6 +903,8 @@ export class ConnectionManager extends EventEmitter {
 			hasCredentials = true;
 		}
 
+		// The awaits above can lose the lifecycle to a newer generation.
+		if (generation !== undefined && !this.isCurrentConnectionGeneration(generation)) return;
 		this.updateConnectionStatus({ hasCredentials });
 	}
 
@@ -773,6 +914,8 @@ export class ConnectionManager extends EventEmitter {
 
 	public async dispose(): Promise<void> {
 		this.isDisposing = true;
+		// Retire every in-flight lifecycle so late completions go silent.
+		const generation = this.invalidateConnectionAttempts();
 
 		if (this.configChangeTimeout) {
 			clearTimeout(this.configChangeTimeout);
@@ -784,8 +927,13 @@ export class ConnectionManager extends EventEmitter {
 			this.engineStatusHandler = undefined;
 		}
 
-		if (this.client?.isConnected()) {
+		// Always disconnect (not just when isConnected()) so a mid-handshake
+		// SDK operation is cancelled rather than left to complete stale.
+		if (this.client) {
 			await this.client.disconnect();
+		}
+		if (this.connectionGeneration.isCurrentGeneration(generation)) {
+			this.emit('shell:disconnected');
 		}
 		if (this.engineRegistry) {
 			await this.engineRegistry.disposeAll();

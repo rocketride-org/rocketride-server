@@ -5,7 +5,7 @@ sidebar_position: 4
 
 # Neo4j
 
-The `db_neo4j` node answers natural-language questions against a Neo4j graph
+The `graph_neo4j` node answers natural-language questions against a Neo4j graph
 database by translating them to Cypher with a connected LLM. It plays two roles:
 a **pipeline node** that takes questions on the `questions` lane and emits
 results downstream, and an **agent tool** that exposes graph retrieval directly
@@ -51,7 +51,7 @@ The node connects over the Bolt protocol with the official neo4j Python driver.
 ```json
 {
   "id": "graph_1",
-  "provider": "neo4jdb",
+  "provider": "graph_neo4j",
   "config": {
     "uri": "neo4j+s://your-instance.databases.neo4j.io",
     "auth_method": "userpass",
@@ -101,7 +101,8 @@ prompt so Cypher is generated against the real structure.
 ## Agent tools
 
 When connected to an agent, the node exposes three functions under the node's
-prefix (e.g. `neo4j.get_data`):
+ID as a prefix (`<node-id>.get_data` — e.g. `graph_1.get_data` for the sample
+config above):
 
 | Tool | What it does |
 | --- | --- |
@@ -122,6 +123,6 @@ fast rather than mid-pipeline.
 
 ## Related
 
-- [`db_neo4j` node reference](/nodes/db_neo4j)
+- [`graph_neo4j` node reference](/nodes/graph_neo4j)
 - [Qdrant integration](/integrations/qdrant) — vector retrieval for RAG
 - [Concepts: Agents & Tools](/concepts/agents-tools-skills)

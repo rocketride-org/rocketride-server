@@ -45,11 +45,22 @@
 					}
 				],
 				"priority": "default"
+			},
+			{
+				"viewType": "rocketride.appBuilder",
+				"displayName": "RocketRide App Builder",
+				"selector": [
+					{
+						"filenamePattern": "*.rrapp"
+					}
+				],
+				"priority": "default"
 			}
 		],
 		"configurationDefaults": {
 			"files.associations": {
-				"*.pipe": "json"
+				"*.pipe": "json",
+				"*.rrapp": "json"
 			}
 		},
 		"configuration": {
@@ -80,11 +91,6 @@
 					"description": "Host URL for development connection",
 					"format": "uri"
 				},
-				"rocketride.development.teamId": {
-					"type": "string",
-					"default": "",
-					"description": "Cloud team ID for the development connection"
-				},
 				"rocketride.development.local.engineVersion": {
 					"type": "string",
 					"default": "latest",
@@ -111,11 +117,6 @@
 					"default": "",
 					"description": "Host URL for deployment connection",
 					"format": "uri"
-				},
-				"rocketride.deployment.teamId": {
-					"type": "string",
-					"default": "",
-					"description": "Cloud team ID for the deployment connection"
 				},
 				"rocketride.deployment.local.engineVersion": {
 					"type": "string",
@@ -182,7 +183,7 @@
 						"summary",
 						"full"
 					],
-					"default": "summary",
+					"default": "full",
 					"description": "Controls tracing verbosity for pipeline execution."
 				},
 				"rocketride.taskArguments": {
@@ -240,11 +241,6 @@
 					"default": "",
 					"deprecationMessage": "Migrated to rocketride.development.hostUrl"
 				},
-				"rocketride.developmentTeamId": {
-					"type": "string",
-					"default": "",
-					"deprecationMessage": "Migrated to rocketride.development.teamId"
-				},
 				"rocketride.local.engineVersion": {
 					"type": "string",
 					"default": "latest",
@@ -263,15 +259,41 @@
 					"default": "",
 					"deprecationMessage": "Migrated to rocketride.deployment.hostUrl"
 				},
-				"rocketride.deployTargetTeamId": {
-					"type": "string",
-					"default": "",
-					"deprecationMessage": "Migrated to rocketride.deployment.teamId"
-				},
 				"rocketride.deploy.local.engineVersion": {
 					"type": "string",
 					"default": "latest",
 					"deprecationMessage": "Migrated to rocketride.deployment.local.engineVersion"
+				},
+				"rocketride.development.teamId": {
+					"type": "string",
+					"default": "",
+					"deprecationMessage": "Retired — the development team is assigned by your server profile"
+				},
+				"rocketride.deployment.teamId": {
+					"type": "string",
+					"default": "",
+					"deprecationMessage": "Retired — deployments are team-scoped on the server; no client-side team setting"
+				},
+				"rocketride.developmentTeamId": {
+					"type": "string",
+					"default": "",
+					"deprecationMessage": "Retired — the development team is assigned by your server profile"
+				},
+				"rocketride.deployTargetTeamId": {
+					"type": "string",
+					"default": "",
+					"deprecationMessage": "Retired — deployments are team-scoped on the server; no client-side team setting"
+				},
+				"rocketride.appdev.shellUrl": {
+					"type": "string",
+					"default": "",
+					"description": "App Builder: override the preview shell base URL (empty = the Development Mode engine). For monorepo developers running the shell dev server.",
+					"format": "uri"
+				},
+				"rocketride.appdev.autoWatch": {
+					"type": "boolean",
+					"default": true,
+					"description": "App Builder: start the app watch/rebuild session automatically when an App Builder screen opens."
 				}
 			}
 		},
@@ -385,6 +407,16 @@
 				"category": "RocketRide Pipeline"
 			},
 			{
+				"command": "rocketride.pipeline.new",
+				"title": "RocketRide Pipeline",
+				"category": "RocketRide Pipeline"
+			},
+			{
+				"command": "rocketride.pipeline.save",
+				"title": "Save Pipeline",
+				"category": "RocketRide Pipeline"
+			},
+			{
 				"command": "rocketride.sidebar.files.runPipeline",
 				"title": "Run",
 				"icon": "$(play)",
@@ -419,9 +451,38 @@
 				"command": "rocketride.agents.uninstall",
 				"title": "Remove Agent Documentation",
 				"category": "RocketRide"
+			},
+			{
+				"command": "rocketride.app.create",
+				"title": "New App",
+				"category": "RocketRide"
+			},
+			{
+				"command": "rocketride.app.open",
+				"title": "Open App Builder",
+				"category": "RocketRide"
+			},
+			{
+				"command": "rocketride.app.debug",
+				"title": "Debug App (external browser)",
+				"category": "RocketRide"
+			}
+		],
+		"keybindings": [
+			{
+				"command": "rocketride.pipeline.save",
+				"key": "ctrl+s",
+				"mac": "cmd+s",
+				"when": "activeCustomEditorId == 'rocketride.PageProject'"
 			}
 		],
 		"menus": {
+			"file/newFile": [
+				{
+					"command": "rocketride.pipeline.new",
+					"group": "file"
+				}
+			],
 			"commandPalette": [
 				{
 					"command": "rocketride.sidebar.files.openStatus",
@@ -480,6 +541,14 @@
 					"when": "false"
 				},
 				{
+					"command": "rocketride.pipeline.new",
+					"when": "false"
+				},
+				{
+					"command": "rocketride.pipeline.save",
+					"when": "false"
+				},
+				{
 					"command": "rocketride.page.deploy.open",
 					"when": "false"
 				},
@@ -489,6 +558,14 @@
 				},
 				{
 					"command": "rocketride.agents.uninstall",
+					"when": "false"
+				},
+				{
+					"command": "rocketride.app.open",
+					"when": "false"
+				},
+				{
+					"command": "rocketride.app.debug",
 					"when": "false"
 				}
 			],
@@ -544,8 +621,8 @@
 		"@types/mocha": "^10.0.10",
 		"@types/node": "20.x",
 		"@types/proper-lockfile": "^4.1.4",
-		"@types/react": "^18.0.0",
-		"@types/react-dom": "^18.0.0",
+		"@types/react": "^18.3.31",
+		"@types/react-dom": "^18.3.7",
 		"@types/vscode": "~1.99.0",
 		"@types/vscode-webview": "^1.57.5",
 		"@vscode/debugprotocol": "^1.68.0",
@@ -559,13 +636,14 @@
 	},
 	"dependencies": {
 		"@octokit/rest": "^22.0.1",
-		"adm-zip": "^0.5.17",
+		"adm-zip": "^0.6.0",
 		"chart.js": "^4.4.0",
 		"dockerode": "^4.0.12",
 		"proper-lockfile": "^4.1.2",
+		"shared": "file:../shared",
+		"tar": "^7.5.21",
 		"rocketride": "workspace:*",
-		"shared": "workspace:*",
-		"tar": "^7.5.15"
+		"shell": "file:../../.rocketride/shell/shell.tgz"
 	},
 	"files": [
 		"README.md",

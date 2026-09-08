@@ -142,14 +142,10 @@ class StartCommand(BaseCommand):
         """
         Handle successful server connection establishment.
 
-        Set up event subscriptions and prepare for pipeline execution
-        once the connection to the RocketRide server is established.
-
         Args:
             connection_info: Optional connection details for logging
         """
-        # Subscribe to summary events for status updates
-        await self.client.set_events(token=self.args.token, event_types=['summary', 'output'])
+        # No event subscription here: the task does not exist until execute() runs
 
     async def execute(self, client: 'RocketRideClient') -> int:
         """
@@ -217,6 +213,10 @@ class StartCommand(BaseCommand):
 
             # Extract task token from response
             token = response.get('token', None)
+
+            # The task exists now, so its events can be subscribed to
+            if token:
+                await self.client.set_events(token=token, event_types=['summary', 'output'])
 
             # Success phase - display results
             execution_lines = [

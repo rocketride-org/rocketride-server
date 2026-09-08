@@ -78,34 +78,34 @@ def test_resolve_monitor_label_unrecognised_key():
 
 
 def test_resolve_monitor_label_project_wildcard():
-    """A 'p.<id>.*' key uses the project label + '.*' suffix."""
+    """An owner-scoped 'p.<owner>.<id>.*' key uses the project label + '.*'."""
     project_names = {'proj-1': 'my-project'}
-    assert MiscCommands._resolve_monitor_label('p.proj-1.*', project_names, {}) == 'my-project.*'
+    assert MiscCommands._resolve_monitor_label('p.user-1.proj-1.*', project_names, {}) == 'my-project.*'
 
 
 def test_resolve_monitor_label_project_only():
-    """A bare 'p.<id>' key (no source) yields '<project>.*'."""
+    """A 'p.<owner>.<id>' key (no source) yields '<project>.*'."""
     project_names = {'proj-1': 'my-project'}
-    assert MiscCommands._resolve_monitor_label('p.proj-1', project_names, {}) == 'my-project.*'
+    assert MiscCommands._resolve_monitor_label('p.user-1.proj-1', project_names, {}) == 'my-project.*'
 
 
 def test_resolve_monitor_label_with_source():
-    """A 'p.<id>.<source>' key uses both the project and source friendly names."""
+    """A 'p.<owner>.<id>.<source>' key uses the project and source friendly names."""
     project_names = {'proj-1': 'my-project'}
     source_names = {'proj-1.src-1': 'reader'}
-    result = MiscCommands._resolve_monitor_label('p.proj-1.src-1', project_names, source_names)
+    result = MiscCommands._resolve_monitor_label('p.user-1.proj-1.src-1', project_names, source_names)
     assert result == 'my-project.reader'
 
 
 def test_resolve_monitor_label_with_pipe_suffix():
-    """A 4-part 'p.<id>.<source>.<pipe>' key appends a 'pipe<n>' suffix."""
-    result = MiscCommands._resolve_monitor_label('p.proj-1.src-1.42', {}, {})
+    """A 5-part 'p.<owner>.<id>.<source>.<pipe>' key appends a 'pipe<n>' suffix."""
+    result = MiscCommands._resolve_monitor_label('p.user-1.proj-1.src-1.42', {}, {})
     assert result == 'proj-1.src-1.pipe42'
 
 
 def test_resolve_monitor_label_truncates_project_id_when_no_friendly_name():
     """Unknown project ids are truncated to 8 characters."""
-    result = MiscCommands._resolve_monitor_label('p.proj-very-long-id-here.*', {}, {})
+    result = MiscCommands._resolve_monitor_label('p.user-1.proj-very-long-id-here.*', {}, {})
     assert result.startswith('proj-ver')
 
 
@@ -119,7 +119,7 @@ def test_build_monitors_list_resolves_keys_and_flag_names():
     from rocketride import EVENT_TYPE
 
     monitors = {
-        'p.proj-1.src-1': EVENT_TYPE.SUMMARY,
+        'p.user-1.proj-1.src-1': EVENT_TYPE.SUMMARY,
         '*': EVENT_TYPE.SUMMARY,
     }
     project_names = {'proj-1': 'my-project'}
@@ -142,9 +142,13 @@ def test_build_monitors_list_resolves_keys_and_flag_names():
 
 @pytest.mark.asyncio
 async def test_on_rrext_services_returns_specific_service(monkeypatch):
-    """When `arguments.service` is set, return that single definition."""
+    """When `arguments.service` is set, return that single full entry."""
     schema = {'name': 'ocr', 'fields': []}
-    monkeypatch.setattr(cmd_misc, 'getServiceDefinition', lambda name: schema if name == 'ocr' else None)
+
+    async def fake_get_service(name):
+        return schema if name == 'ocr' else None
+
+    monkeypatch.setattr(cmd_misc.services_catalog, 'get_service', fake_get_service)
 
     conn = _make_conn()
     result = await MiscCommands.on_rrext_services(conn, {'arguments': {'service': 'ocr'}})
@@ -155,7 +159,11 @@ async def test_on_rrext_services_returns_specific_service(monkeypatch):
 @pytest.mark.asyncio
 async def test_on_rrext_services_unknown_service_raises(monkeypatch):
     """An unknown service id raises ValueError (re-raised after debug log)."""
-    monkeypatch.setattr(cmd_misc, 'getServiceDefinition', lambda name: None)
+
+    async def fake_get_service(name):
+        return None
+
+    monkeypatch.setattr(cmd_misc.services_catalog, 'get_service', fake_get_service)
 
     conn = _make_conn()
     with pytest.raises(ValueError, match="Service 'unknown' not found"):
@@ -164,14 +172,18 @@ async def test_on_rrext_services_unknown_service_raises(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_on_rrext_services_no_service_returns_all(monkeypatch):
-    """Without a `service` arg, getServiceDefinitions() is returned."""
-    all_schemas = [{'name': 'a'}, {'name': 'b'}]
-    monkeypatch.setattr(cmd_misc, 'getServiceDefinitions', lambda: all_schemas)
+async def test_on_rrext_services_no_service_returns_summary(monkeypatch):
+    """Without a `service` arg, the cached summary body is returned."""
+    summary = {'services': {'a': {'title': 'A'}}, 'version': 7}
+
+    async def fake_get_summary():
+        return summary
+
+    monkeypatch.setattr(cmd_misc.services_catalog, 'get_summary', fake_get_summary)
 
     conn = _make_conn()
     result = await MiscCommands.on_rrext_services(conn, {})
-    assert result['body'] == all_schemas
+    assert result['body'] == summary
 
 
 # ---------------------------------------------------------------------------
@@ -318,6 +330,9 @@ async def test_on_rrext_dashboard_filters_to_caller_user_id(monkeypatch):
         token='tk_1',
         source='reader',
         project_id='proj-1',
+        run_kind='dev',
+        # Real controls always expose owner_id (dev run -> the user).
+        owner_id='user-1',
         provider='node-x',
         task=own_task,
         launch_type=SimpleNamespace(value='LAUNCH'),
@@ -329,6 +344,8 @@ async def test_on_rrext_dashboard_filters_to_caller_user_id(monkeypatch):
         token='tk_2',
         source='other-source',
         project_id='proj-2',
+        run_kind='dev',
+        owner_id='other-user',
         provider='node-y',
         task=MagicMock(),
         launch_type=SimpleNamespace(value='EXECUTE'),
@@ -374,6 +391,9 @@ async def test_on_rrext_dashboard_tk_auth_locks_to_owning_task(monkeypatch):
             token=token,
             source='s',
             project_id='p',
+            run_kind='dev',
+            # Real controls always expose owner_id (dev run -> the user).
+            owner_id='user-1',
             provider='node-x',
             task=SimpleNamespace(
                 get_status=lambda: SimpleNamespace(
@@ -461,6 +481,7 @@ def _list_control(task_id, *, name=None, start=900.0, provider='node-x', team_id
         token=f'tk_{task_id}',
         source='reader',
         project_id='proj-1',
+        run_kind='dev',
         provider=provider,
         task=SimpleNamespace(
             get_status=lambda: status,
@@ -817,3 +838,170 @@ def test_misc_commands_init_is_noop():
     """The mixin's __init__ accepts the standard arguments without setting state."""
     instance = MiscCommands.__new__(MiscCommands)
     MiscCommands.__init__(instance, connection_id=1, server=None, transport=None)
+
+
+# ---------------------------------------------------------------------------
+# on_rrext_resolve_config
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_on_rrext_resolve_config_returns_what_the_node_receives(monkeypatch):
+    """Resolution runs through the engine's own getNodeConfig, not a reimplementation."""
+    monkeypatch.setattr(cmd_misc.Config, 'getNodeConfig', staticmethod(lambda p, c: {'model': 'gpt-4o', 'temp': 0}))
+
+    conn = _make_conn()
+    request = {'arguments': {'provider': 'llm_openai', 'config': {'model': 'gpt-4o'}}}
+    result = await MiscCommands.on_rrext_resolve_config(conn, request)
+
+    body = result['body']
+    assert body['provider'] == 'llm_openai'
+    assert body['profile'] == 'default'
+    assert body['resolved'] == {'model': 'gpt-4o', 'temp': 0}
+    assert body['dropped'] == []
+
+
+@pytest.mark.asyncio
+async def test_on_rrext_resolve_config_reports_keys_a_profile_discards(monkeypatch):
+    """
+    The #1839 shape: with a profile set, sibling top-level keys never reach the node.
+
+    Reporting them is the point of the tool. Inferring it from an absence is what
+    cost the issue author a day.
+    """
+    monkeypatch.setattr(cmd_misc.Config, 'getNodeConfig', staticmethod(lambda p, c: {'host': 'localhost'}))
+
+    conn = _make_conn()
+    request = {
+        'arguments': {
+            'provider': 'store_chroma',
+            'config': {'profile': 'local', 'apikey': 'sk-x', 'local': {'host': 'localhost'}},
+        },
+    }
+    result = await MiscCommands.on_rrext_resolve_config(conn, request)
+
+    body = result['body']
+    assert body['profile'] == 'local'
+    assert body['dropped'] == ['apikey'], 'the profile sub-object itself is not a dropped key'
+
+
+@pytest.mark.asyncio
+async def test_on_rrext_resolve_config_reports_a_key_the_profile_overwrote(monkeypatch):
+    """The discard that hides itself: the profile defines the key, so it stays present.
+
+    Reporting only absent keys misses this, which is the common shape in the
+    catalog: nearly every profile declares apikey, so an apikey written beside
+    'profile' is silently replaced rather than dropped from the result.
+    """
+    monkeypatch.setattr(cmd_misc.Config, 'getNodeConfig', staticmethod(lambda p, c: {'apikey': '', 'model': 'gpt-5'}))
+
+    conn = _make_conn()
+    request = {
+        'arguments': {
+            'provider': 'llm_openai',
+            'config': {'profile': 'openai-5-4', 'apikey': 'sk-authors-key'},
+        },
+    }
+    result = await MiscCommands.on_rrext_resolve_config(conn, request)
+
+    body = result['body']
+    assert body['resolved']['apikey'] == '', 'the profile value wins, which is the bug being surfaced'
+    assert body['dropped'] == ['apikey'], 'present-but-overwritten still means the author key never lands'
+
+
+@pytest.mark.asyncio
+async def test_on_rrext_resolve_config_reports_a_sibling_that_matches_the_profile(monkeypatch):
+    """A sibling whose value coincides with the profile's is still never read.
+
+    Comparing values would stay quiet here and leave the author believing the
+    line is in effect, when the same key inside the profile is what applied.
+    """
+    monkeypatch.setattr(cmd_misc.Config, 'getNodeConfig', staticmethod(lambda p, c: {'model': 'gpt-5.4'}))
+
+    conn = _make_conn()
+    request = {
+        'arguments': {
+            'provider': 'llm_openai',
+            'config': {'profile': 'openai-5-4', 'model': 'gpt-5.4'},
+        },
+    }
+    result = await MiscCommands.on_rrext_resolve_config(conn, request)
+
+    assert result['body']['dropped'] == ['model']
+
+
+@pytest.mark.asyncio
+async def test_on_rrext_resolve_config_reports_nothing_without_a_profile(monkeypatch):
+    """Without a profile the user layer is read from the top level, so nothing is lost."""
+    monkeypatch.setattr(cmd_misc.Config, 'getNodeConfig', staticmethod(lambda p, c: {'model': 'gpt-5.4'}))
+
+    conn = _make_conn()
+    request = {'arguments': {'provider': 'llm_openai', 'config': {'model': 'gpt-5.4'}}}
+    result = await MiscCommands.on_rrext_resolve_config(conn, request)
+
+    assert result['body']['dropped'] == []
+
+
+@pytest.mark.asyncio
+async def test_on_rrext_resolve_config_ignores_structural_and_unselected_profiles(monkeypatch):
+    """A config shaped like a real .pipe, not a hand-written fixture.
+
+    Every component in the repo's own pipelines that selects a profile also carries
+    `parameters`, and an editor-saved config keeps a sub-object per profile. Neither
+    is user configuration the resolver threw away, and telling an author to move
+    `parameters` inside the profile would break the component.
+    """
+    monkeypatch.setattr(cmd_misc.Config, 'getNodeConfig', staticmethod(lambda p, c: {'model': 'claude-sonnet-4-6'}))
+    monkeypatch.setattr(
+        cmd_misc,
+        '_service_profile_names',
+        lambda provider: frozenset({'claude-sonnet-4-6', 'claude-opus-4-1'}),
+    )
+
+    conn = _make_conn()
+    request = {
+        'arguments': {
+            'provider': 'llm_anthropic',
+            'config': {
+                'profile': 'claude-sonnet-4-6',
+                'claude-sonnet-4-6': {'apikey': '${ROCKETRIDE_ANTHROPIC_KEY}'},
+                'claude-opus-4-1': {'apikey': ''},
+                'name': 'Anthropic',
+                'parameters': {'temperature': 0.2},
+                'apikey': 'sk-written-beside-the-profile',
+            },
+        },
+    }
+    result = await MiscCommands.on_rrext_resolve_config(conn, request)
+
+    assert result['body']['dropped'] == ['apikey'], 'only the key an author actually lost'
+
+
+@pytest.mark.asyncio
+async def test_on_rrext_resolve_config_requires_a_provider():
+    conn = _make_conn()
+
+    with pytest.raises(ValueError):
+        await MiscCommands.on_rrext_resolve_config(conn, {'arguments': {}})
+
+
+@pytest.mark.asyncio
+async def test_on_rrext_resolve_config_rejects_a_non_object_config():
+    conn = _make_conn()
+
+    with pytest.raises(ValueError):
+        await MiscCommands.on_rrext_resolve_config(conn, {'arguments': {'provider': 'ocr', 'config': []}})
+
+
+@pytest.mark.asyncio
+async def test_on_rrext_resolve_config_propagates_an_unknown_service(monkeypatch):
+    """An unknown service raises out of getNodeConfig; the caller should see that, not a blank."""
+
+    def _raise(provider, config):
+        raise Exception(f'The service {provider} was not found')
+
+    monkeypatch.setattr(cmd_misc.Config, 'getNodeConfig', staticmethod(_raise))
+
+    conn = _make_conn()
+    with pytest.raises(Exception, match='was not found'):
+        await MiscCommands.on_rrext_resolve_config(conn, {'arguments': {'provider': 'nope'}})

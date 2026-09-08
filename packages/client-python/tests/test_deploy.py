@@ -21,70 +21,59 @@
 # SOFTWARE.
 
 """
-Integration tests for the deploy client API.
+Integration tests for the deploy client API (teams-as-environments).
 
-These tests connect to a live server and exercise the full CRUD lifecycle
-(add, list, status, update, remove). They predate the TaskScheduler and
-remain valid without modification for the following reasons:
+These tests connect to a live server and exercise the published contract:
+publish (immutable registry versions), deploy (pointing a team at a
+version — promotion and rollback alike), the standard list envelopes on
+list/versions/history, pause/resume, soft remove with a surviving audit
+trail, per-source schedules, and the single cron evaluator.
 
-- Tests that use the default schedule ('manual') are completely unaffected:
-  manual deployments are never dispatched by the scheduler.
-- Tests that supply a cron schedule (e.g. '*/15 * * * *') remove the
-  deployment before the scheduler could ever fire — the minimum cron
-  granularity is 60 s and all tests clean up in the 'finally' block.
-- 'remove' now also calls scheduler.unschedule() server-side, but the
-  observable client behaviour (status raises after remove) is unchanged.
-
-These tests therefore cover the client API contract only. Scheduler
-registration and execution are covered separately — see:
-  packages/ai/tests/ai/modules/task/test_task_scheduler.py
+Against the OSS test server the one team is 'local'. Every test uses a
+fresh project id (the registry is immutable — versions accumulate forever
+by design) and soft-removes its deployment in ``finally`` so scheduled
+work can never leak across tests. Scheduler dispatch itself is covered
+server-side (test_task_scheduler.py), not here.
 """
 
 import os
+
 import pytest
+
 from rocketride import RocketRideClient
 
 SERVER_URI = os.environ.get('ROCKETRIDE_URI', 'http://localhost:5565')
 
-PROJECT_ID = f'test-project-{os.urandom(8).hex()}'
+# The one team on the OSS test server.
+TEAM = 'local'
 
-PIPELINE = {
-    'project_id': PROJECT_ID,
-    'components': [
-        {
-            'id': 'webhook_1',
-            'provider': 'webhook',
-            'name': 'Test webhook',
-            'config': {'hideForm': True, 'mode': 'Source', 'type': 'webhook'},
-        },
-        {
-            'id': 'response_1',
-            'provider': 'response',
-            'config': {'lanes': []},
-            'input': [{'lane': 'text', 'from': 'webhook_1'}],
-        },
-    ],
-    'source': 'webhook_1',
-}
 
-PIPELINE_V2 = {
-    'project_id': PROJECT_ID,
-    'components': [
-        {
-            'id': 'chat_1',
-            'provider': 'chat',
-            'name': 'Test chat',
-            'config': {'hideForm': True, 'mode': 'Source', 'type': 'chat'},
-        },
-        {
-            'id': 'response_1',
-            'provider': 'response',
-            'config': {'lanes': []},
-            'input': [{'lane': 'questions', 'from': 'chat_1'}],
-        },
-    ],
-    'source': 'chat_1',
-}
+def make_pipeline(project_id: str) -> dict:
+    """A minimal valid pipeline for one throwaway project id."""
+    return {
+        'project_id': project_id,
+        'name': 'SDK deploy test',
+        'components': [
+            {
+                'id': 'webhook_1',
+                'provider': 'webhook',
+                'name': 'Test webhook',
+                'config': {'hideForm': True, 'mode': 'Source', 'type': 'webhook'},
+            },
+            {
+                'id': 'response_1',
+                'provider': 'response',
+                'config': {'lanes': []},
+                'input': [{'lane': 'text', 'from': 'webhook_1'}],
+            },
+        ],
+        'source': 'webhook_1',
+    }
+
+
+def fresh_project() -> str:
+    """A unique project id per test — registry versions accumulate forever."""
+    return f'sdk-deploy-{os.urandom(6).hex()}'
 
 
 class TestDeploy:
@@ -95,130 +84,239 @@ class TestDeploy:
         yield
         await self.client.disconnect()
 
-    # ── add ──────────────────────────────────────────────────────────────────
-
-    @pytest.mark.asyncio
-    async def test_add_returns_full_record(self):
-        rec = await self.client.deploy.add(PIPELINE)
+    async def _cleanup(self, project_id: str) -> None:
+        """Soft-remove the test deployment; tolerate never-deployed projects."""
         try:
-            assert rec['pipeline']['project_id'] == PROJECT_ID
-            assert rec['pipeline'] == PIPELINE
-            assert rec['schedule'] == 'manual'
-            assert rec['state'] == 'active'
-            assert rec['userId']
-            # The stored user credential must never be echoed back to clients.
-            assert 'userToken' not in rec
-            assert rec['createdAt'] > 0
-            assert rec['updatedAt'] > 0
-        finally:
-            await self.client.deploy.remove(rec['pipeline']['project_id'])
+            await self.client.deploy.remove(project_id, TEAM)
+        except RuntimeError:
+            pass
+
+    # ── publish ──────────────────────────────────────────────────────────────
 
     @pytest.mark.asyncio
-    async def test_add_with_cron_schedule(self):
-        rec = await self.client.deploy.add(PIPELINE, schedule='*/15 * * * *')
-        try:
-            assert rec['schedule'] == '*/15 * * * *'
-        finally:
-            await self.client.deploy.remove(rec['pipeline']['project_id'])
+    async def test_publish_returns_immutable_artifact(self):
+        project = fresh_project()
+        result = await self.client.deploy.publish(make_pipeline(project), comment='first cut')
+        artifact = result['artifact']
+        assert artifact['version'] == 1
+        assert artifact['sha256'] and artifact['bytes'] > 0
+        assert artifact['comment'] == 'first cut'
+        assert artifact['publishedBy']['userId']
+        # Publishing alone puts nothing live.
+        assert 'deployment' not in result
+
+        # A second publish allocates the NEXT version; v1 is untouched.
+        result2 = await self.client.deploy.publish(make_pipeline(project))
+        assert result2['artifact']['version'] == 2
+        versions = await self.client.deploy.versions(project)
+        assert [v['version'] for v in versions['rows']] == [2, 1]
 
     @pytest.mark.asyncio
-    async def test_add_invalid_schedule_raises(self):
+    async def test_artifact_returns_the_published_pipeline(self):
+        project = fresh_project()
+        pipeline = make_pipeline(project)
+        await self.client.deploy.publish(pipeline)
+        fetched = await self.client.deploy.artifact(project, 1)
+        # Byte-for-byte the published definition (sha-verified server-side).
+        assert fetched == pipeline
         with pytest.raises(RuntimeError):
-            await self.client.deploy.add(PIPELINE, schedule='not-a-cron')
+            await self.client.deploy.artifact(project, 9)
 
     @pytest.mark.asyncio
-    async def test_add_duplicate_raises(self):
-        rec = await self.client.deploy.add(PIPELINE)
+    async def test_publish_with_deploy_to_is_one_step(self):
+        project = fresh_project()
         try:
+            result = await self.client.deploy.publish(make_pipeline(project), deploy_to=TEAM)
+            dep = result['deployment']
+            assert dep['teamId'] == TEAM
+            assert dep['projectId'] == project
+            assert dep['version'] == 1
+            assert dep['state'] == 'enabled'
+        finally:
+            await self._cleanup(project)
+
+    # ── deploy: promotion and rollback are the same pointer move ─────────────
+
+    @pytest.mark.asyncio
+    async def test_deploy_and_rollback_move_the_pointer(self):
+        project = fresh_project()
+        try:
+            await self.client.deploy.publish(make_pipeline(project))
+            await self.client.deploy.publish(make_pipeline(project))
+
+            dep = await self.client.deploy.deploy(project, 2, TEAM)
+            assert dep['version'] == 2
+
+            # Rollback = the same call aimed at the older version.
+            dep = await self.client.deploy.deploy(project, 1, TEAM)
+            assert dep['version'] == 1
+
+            # The audit trail labels the downgrade honestly, newest first.
+            history = await self.client.deploy.history(project, team_id=TEAM)
+            actions = [h['action'] for h in history['rows']]
+            assert actions[0] == 'rollback'
+            # seq is the stable append-order identity: strictly descending.
+            seqs = [h['seq'] for h in history['rows']]
+            assert seqs == sorted(seqs, reverse=True)
+        finally:
+            await self._cleanup(project)
+
+    @pytest.mark.asyncio
+    async def test_deploy_unpublished_version_raises(self):
+        project = fresh_project()
+        await self.client.deploy.publish(make_pipeline(project))
+        with pytest.raises(RuntimeError):
+            await self.client.deploy.deploy(project, 7, TEAM)
+
+    @pytest.mark.asyncio
+    async def test_run_now_dispatches_and_is_stoppable(self):
+        project = fresh_project()
+        try:
+            await self.client.deploy.publish(make_pipeline(project), deploy_to=TEAM)
+            result = await self.client.deploy.run(project, 'webhook_1', TEAM)
+            assert result['token']
+            # The UI's stop path: resolve the live task and terminate it.
+            # team_id addresses the TEAM's deploy run — an unscoped lookup
+            # resolves the caller's own dev run and finds nothing here.
+            token = await self.client.get_task_token(project_id=project, source='webhook_1', team_id=TEAM)
+            assert token == result['token']
+            await self.client.terminate(token)
+        finally:
+            await self._cleanup(project)
+
+    @pytest.mark.asyncio
+    async def test_run_now_refuses_disabled(self):
+        project = fresh_project()
+        try:
+            await self.client.deploy.publish(make_pipeline(project), deploy_to=TEAM)
+            await self.client.deploy.disable(project, TEAM)
             with pytest.raises(RuntimeError):
-                await self.client.deploy.add(PIPELINE)
+                await self.client.deploy.run(project, 'webhook_1', TEAM)
         finally:
-            await self.client.deploy.remove(rec['pipeline']['project_id'])
+            await self._cleanup(project)
 
-    # ── list ─────────────────────────────────────────────────────────────────
+    # ── reads: standard list envelopes ───────────────────────────────────────
 
     @pytest.mark.asyncio
-    async def test_list_includes_created_deployment(self):
-        rec = await self.client.deploy.add(PIPELINE)
+    async def test_list_returns_the_standard_envelope(self):
+        project = fresh_project()
         try:
-            deployments = await self.client.deploy.list()
-            ids = [d['pipeline']['project_id'] for d in deployments]
-            assert rec['pipeline']['project_id'] in ids
+            await self.client.deploy.publish(make_pipeline(project), deploy_to=TEAM)
+
+            body = await self.client.deploy.list()
+            assert set(body) == {'rows', 'total', 'page', 'pageSize'}
+            assert any(d['projectId'] == project for d in body['rows'])
+
+            # Team scope + paging args travel through.
+            page = await self.client.deploy.list(team_id=TEAM, page_size=1)
+            assert page['pageSize'] == 1 and len(page['rows']) <= 1
         finally:
-            await self.client.deploy.remove(rec['pipeline']['project_id'])
+            await self._cleanup(project)
 
     @pytest.mark.asyncio
-    async def test_list_returns_list(self):
-        deployments = await self.client.deploy.list()
-        assert isinstance(deployments, list)
-
-    # ── status ───────────────────────────────────────────────────────────────
-
-    @pytest.mark.asyncio
-    async def test_status_returns_deployment(self):
-        rec = await self.client.deploy.add(PIPELINE)
+    async def test_get_returns_joined_record(self):
+        project = fresh_project()
         try:
-            status = await self.client.deploy.status(rec['pipeline']['project_id'])
-            assert status['pipeline']['project_id'] == rec['pipeline']['project_id']
-            assert status['state'] == 'active'
+            await self.client.deploy.publish(make_pipeline(project), deploy_to=TEAM)
+            dep = await self.client.deploy.get(project, TEAM)
+            assert dep['projectId'] == project
+            assert dep['sha256']
+            assert dep['schedules'] == {}
         finally:
-            await self.client.deploy.remove(rec['pipeline']['project_id'])
+            await self._cleanup(project)
 
     @pytest.mark.asyncio
-    async def test_status_unknown_id_raises(self):
+    async def test_get_unknown_project_raises(self):
         with pytest.raises(RuntimeError):
-            await self.client.deploy.status('nonexistent-deployment-id')
+            await self.client.deploy.get('nonexistent-project', TEAM)
 
-    # ── update ───────────────────────────────────────────────────────────────
+    # ── state: enable / disable / soft remove ────────────────────────────────
 
     @pytest.mark.asyncio
-    async def test_update_schedule(self):
-        rec = await self.client.deploy.add(PIPELINE)
+    async def test_disable_enable(self):
+        project = fresh_project()
         try:
-            await self.client.deploy.update(rec['pipeline']['project_id'], schedule='0 * * * *')
-            status = await self.client.deploy.status(rec['pipeline']['project_id'])
-            assert status['schedule'] == '0 * * * *'
+            await self.client.deploy.publish(make_pipeline(project), deploy_to=TEAM)
+            dep = await self.client.deploy.disable(project, TEAM)
+            assert dep['state'] == 'disabled'
+            dep = await self.client.deploy.enable(project, TEAM)
+            assert dep['state'] == 'enabled'
         finally:
-            await self.client.deploy.remove(rec['pipeline']['project_id'])
+            await self._cleanup(project)
 
     @pytest.mark.asyncio
-    async def test_update_pipeline(self):
-        rec = await self.client.deploy.add(PIPELINE)
+    async def test_remove_is_soft_and_history_survives(self):
+        project = fresh_project()
+        await self.client.deploy.publish(make_pipeline(project), deploy_to=TEAM)
+        dep = await self.client.deploy.remove(project, TEAM)
+        assert dep['state'] == 'removed'
+
+        # Hidden from listings...
+        body = await self.client.deploy.list()
+        assert not any(d['projectId'] == project for d in body['rows'])
+        # ...but the audit trail keeps everything, including the removal.
+        history = await self.client.deploy.history(project)
+        assert 'remove' in [h['action'] for h in history['rows']]
+
+    # ── schedules + the single evaluator ─────────────────────────────────────
+
+    @pytest.mark.asyncio
+    async def test_set_schedule_and_clear(self):
+        project = fresh_project()
         try:
-            await self.client.deploy.update(rec['pipeline']['project_id'], pipeline=PIPELINE_V2)
-            status = await self.client.deploy.status(rec['pipeline']['project_id'])
-            assert status['pipeline'] == PIPELINE_V2
+            await self.client.deploy.publish(make_pipeline(project), deploy_to=TEAM)
+
+            dep = await self.client.deploy.set_schedule(project, 'webhook_1', '0 * * * *', TEAM)
+            assert dep['schedules']['webhook_1']['cron'] == '0 * * * *'
+            assert dep['schedules']['webhook_1']['paused'] is False
+
+            # None clears the schedule row entirely.
+            dep = await self.client.deploy.set_schedule(project, 'webhook_1', None, TEAM)
+            assert 'webhook_1' not in dep['schedules']
         finally:
-            await self.client.deploy.remove(rec['pipeline']['project_id'])
+            await self._cleanup(project)
 
     @pytest.mark.asyncio
-    async def test_update_bumps_updated_at(self):
-        rec = await self.client.deploy.add(PIPELINE)
+    async def test_pause_and_resume_one_schedule(self):
+        project = fresh_project()
         try:
-            await self.client.deploy.update(rec['pipeline']['project_id'], schedule='@hourly')
-            status = await self.client.deploy.status(rec['pipeline']['project_id'])
-            assert status['updatedAt'] >= rec['updatedAt']
+            await self.client.deploy.publish(make_pipeline(project), deploy_to=TEAM)
+            await self.client.deploy.set_schedule(project, 'webhook_1', '0 * * * *', TEAM, ttl=600)
+
+            # Pause keeps cron/ttl; a cron edit must not unpause it.
+            dep = await self.client.deploy.pause_schedule(project, 'webhook_1', TEAM)
+            assert dep['schedules']['webhook_1']['paused'] is True
+            assert dep['schedules']['webhook_1']['cron'] == '0 * * * *'
+            assert dep['schedules']['webhook_1']['ttl'] == 600
+            dep = await self.client.deploy.set_schedule(project, 'webhook_1', '30 * * * *', TEAM)
+            assert dep['schedules']['webhook_1']['paused'] is True
+
+            dep = await self.client.deploy.resume_schedule(project, 'webhook_1', TEAM)
+            assert dep['schedules']['webhook_1']['paused'] is False
+
+            # Pausing a source with no schedule is an explicit error.
+            with pytest.raises(RuntimeError):
+                await self.client.deploy.pause_schedule(project, 'ghost_1', TEAM)
         finally:
-            await self.client.deploy.remove(rec['pipeline']['project_id'])
-
-    # ── remove ───────────────────────────────────────────────────────────────
+            await self._cleanup(project)
 
     @pytest.mark.asyncio
-    async def test_remove_deletes_deployment(self):
-        rec = await self.client.deploy.add(PIPELINE)
-        project_id = rec['pipeline']['project_id']
-        await self.client.deploy.remove(project_id)
-        with pytest.raises(RuntimeError):
-            await self.client.deploy.status(project_id)
+    async def test_set_schedule_invalid_cron_raises(self):
+        project = fresh_project()
+        try:
+            await self.client.deploy.publish(make_pipeline(project), deploy_to=TEAM)
+            with pytest.raises(RuntimeError):
+                await self.client.deploy.set_schedule(project, 'webhook_1', 'not-a-cron', TEAM)
+        finally:
+            await self._cleanup(project)
 
     @pytest.mark.asyncio
-    async def test_remove_unknown_id_raises(self):
-        with pytest.raises(RuntimeError):
-            await self.client.deploy.remove('nonexistent-deployment-id')
+    async def test_preview_is_the_single_evaluator(self):
+        ok = await self.client.deploy.preview('*/15 * * * *', count=3)
+        assert ok['valid'] is True
+        assert len(ok['next']) == 3
+        assert ok['next'][0] < ok['next'][1] < ok['next'][2]
 
-    # ── update errors ─────────────────────────────────────────────────────────
-
-    @pytest.mark.asyncio
-    async def test_update_nonexistent_raises(self):
-        with pytest.raises(RuntimeError):
-            await self.client.deploy.update('nonexistent-deployment-id', schedule='manual')
+        bad = await self.client.deploy.preview('not-a-cron')
+        assert bad['valid'] is False
+        assert bad['error']

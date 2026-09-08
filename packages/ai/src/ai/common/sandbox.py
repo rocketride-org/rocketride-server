@@ -49,6 +49,7 @@ import operator
 import sys
 import threading
 import traceback
+import warnings
 from typing import Any, Dict, Set
 
 from RestrictedPython import compile_restricted, safe_builtins, PrintCollector
@@ -158,6 +159,13 @@ def _guarded_getitem(obj: Any, key: Any) -> Any:
     return obj[key]
 
 
+# warnings.catch_warnings() swaps the interpreter-GLOBAL filter list, so two
+# concurrent compiles would race on it (one thread's restore can clobber the
+# other's filter mid-compile). The compile step is fast — one lock serializes
+# it without meaningfully gating sandbox throughput.
+_COMPILE_LOCK = threading.Lock()
+
+
 def execute_sandboxed(
     code: str,
     *,
@@ -175,11 +183,22 @@ def execute_sandboxed(
     """
     # ── 0. Compile with RestrictedPython ───────────────────────────────
     try:
-        compiled = compile_restricted(
-            code,
-            filename='<agent_script>',
-            mode='exec',
-        )
+        # compile_restricted emits a SyntaxWarning ("Prints, but never reads
+        # 'printed' variable") for ANY code that prints without reading the
+        # collector variable. Stdout is collected via PrintCollector below,
+        # so the hint is meaningless noise for every sandboxed script —
+        # suppress exactly that message around the compile; any OTHER
+        # SyntaxWarning a script provokes still surfaces. The lock makes
+        # the global-filter swap safe under concurrent executions.
+        with _COMPILE_LOCK, warnings.catch_warnings():
+            warnings.filterwarnings(
+                'ignore', category=SyntaxWarning, message=r".*Prints, but never reads 'printed' variable"
+            )
+            compiled = compile_restricted(
+                code,
+                filename='<agent_script>',
+                mode='exec',
+            )
     except SyntaxError as exc:
         return {
             'stdout': '',

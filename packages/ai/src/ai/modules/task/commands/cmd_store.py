@@ -33,10 +33,21 @@ task lifecycle.
 """
 
 from typing import TYPE_CHECKING, Dict, Any
+from ai.account.file_store import SYSTEM_TREES, normalize_path
 from ai.common.dap import DAPConn, TransportBase
 
 if TYPE_CHECKING:
     from ..task_server import TaskServer
+
+
+class _CapExceeded(ValueError):
+    """fs_read_many total-payload cap violation — fails the whole request.
+
+    Distinct from ValueError so per-path validation errors (traversal,
+    reserved segments, malformed ids) stay per-entry data instead of
+    aborting the batch; subclassing ValueError keeps upstream DAP error
+    conversion unchanged.
+    """
 
 
 # =============================================================================
@@ -74,6 +85,7 @@ class StoreCommands(DAPConn):
             'fs_stat': self._store_fs_stat,
             'fs_rename': self._store_fs_rename,
             'fs_geturl': self._store_fs_geturl,
+            'fs_read_many': self._store_fs_read_many,
         }
 
     # =========================================================================
@@ -93,8 +105,12 @@ class StoreCommands(DAPConn):
             DAP response (format depends on subcommand).
         """
         try:
-            # Require store permission (once for all subcommands)
-            self.verify_permission('task.store')
+            # NO permission check here: the STORE is the security boundary.
+            # Every path resolution inside the identity-bound FileStore
+            # enforces the policy-required permission for the addressed scope
+            # (plain paths behave like the old defaultTeam task.store hoist;
+            # @/Team/@/Org paths check the addressed team/org; reserved
+            # subtrees like .logs apply their own rules).
 
             # Extract subcommand
             args = request.get('arguments', {})
@@ -119,15 +135,16 @@ class StoreCommands(DAPConn):
 
     def _get_file_store(self):
         """
-        Get a FileStore scoped to the authenticated user.
+        Get a FileStore bound to the authenticated session's identity.
 
         Returns:
-            FileStore instance that isolates all paths under the current
-            user's storage namespace.
+            FileStore whose every path resolution authorizes against THIS
+            session (plain paths under the user's namespace as before; the
+            @/Team|@/Org grammar against the addressed scope's permissions).
         """
-        # Scope the file store to the calling user so users cannot access each
-        # other's files through the store API.
-        return self._server.store.get_file_store(self._account_info.userId)
+        from ai.account import Store
+
+        return Store.file_store(self.request_context())
 
     # =========================================================================
     # FS SUBCOMMAND HANDLERS
@@ -150,11 +167,11 @@ class StoreCommands(DAPConn):
 
         if mode == 'w':
             # Create a write handle tied to this connection for cleanup on disconnect
-            handle_id = await fs.open_write(path, self._connection_id)
+            handle_id = await fs.open_write(path)
             return self.build_response(request, body={'handle': handle_id})
         else:
             # Open for reading; returns handle ID plus file metadata
-            result = await fs.open_read(path, self._connection_id)
+            result = await fs.open_read(path)
             return self.build_response(request, body=result)
 
     async def _store_fs_read(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
@@ -182,11 +199,100 @@ class StoreCommands(DAPConn):
         length = min(length, 4_194_304)
 
         # Read the chunk
-        data = await fs.read_chunk(handle, offset, length, connection_id=self._connection_id)
+        data = await fs.read_chunk(handle, offset, length)
 
         # body carries byte count; arguments carries raw data separately
         response = self.build_response(request, body={'size': len(data)})
         response['arguments'] = {'data': data}
+        return response
+
+    async def _store_fs_read_many(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Batch-read many small files in one round trip.
+
+        Motivation: the web App Builder lazily reads many small files (the
+        lockfile-resolved node_modules view, type manifests); per-file
+        open/read/close over DAP is too chatty for that access pattern.
+
+        Args:
+            request: Original DAP request.
+            args:    Must contain ``paths`` (list of store paths). Caps:
+                     256 paths per call, 32 MiB total payload.
+
+        Returns:
+            DAP response whose body carries ``entries`` — one
+            ``{path, size, ok, error?}`` per requested path IN ORDER — and
+            whose ``arguments.data`` carries the binary frame: each blob
+            prefixed with a 4-byte big-endian length, concatenated in the
+            same order (failed entries contribute a zero-length blob).
+            Missing/unreadable files are per-entry errors, never a request
+            failure; exceeding a cap IS a request failure.
+        """
+        fs = self._get_file_store()
+        paths = args.get('paths')
+        if not isinstance(paths, list) or not paths:
+            raise ValueError('paths (non-empty list) is required')
+        if len(paths) > 256:
+            raise ValueError(f'fs_read_many caps at 256 paths per call (got {len(paths)})')
+
+        # Total-payload budget: exceeding it fails the request rather than
+        # silently truncating — the caller re-batches with fewer paths.
+        budget = 32 * 1024 * 1024
+
+        entries: list = []
+        blobs: list = []
+        total = 0
+        for path in paths:
+            # Reject malformed elements up front, without echoing the raw
+            # value into the store layer or the response body.
+            if not isinstance(path, str) or not path:
+                blobs.append(b'')
+                entries.append({'path': str(path), 'size': 0, 'ok': False, 'error': 'path must be a non-empty string'})
+                continue
+            # Each entry succeeds or fails alone (missing files are data,
+            # not errors); authorization runs inside every open_read.
+            try:
+                info = await fs.open_read(path)
+                handle = info['handle']
+                try:
+                    # Whole-file read in chunk-sized steps
+                    size = int(info.get('size', 0))
+                    # Budget check BEFORE buffering: never allocate a file
+                    # the cap cannot admit ('while offset < size' bounds the
+                    # read, so the opened size is the allocation bound).
+                    if total + size > budget:
+                        raise _CapExceeded('fs_read_many caps at 32 MiB total payload — re-batch with fewer paths')
+                    buf = bytearray()
+                    offset = 0
+                    while offset < size:
+                        chunk = await fs.read_chunk(handle, offset, 4_194_304)
+                        if not chunk:
+                            break
+                        buf.extend(chunk)
+                        offset += len(chunk)
+                finally:
+                    await fs.close_read(handle)
+
+                total += len(buf)
+                if total > budget:
+                    raise _CapExceeded('fs_read_many caps at 32 MiB total payload — re-batch with fewer paths')
+                blobs.append(bytes(buf))
+                entries.append({'path': path, 'size': len(buf), 'ok': True})
+            except _CapExceeded:
+                # Cap violations abort the whole request (see docstring)
+                raise
+            except Exception as exc:
+                blobs.append(b'')
+                entries.append({'path': path, 'size': 0, 'ok': False, 'error': str(exc)})
+
+        # Binary frame: 4-byte BE length prefix per blob, concatenated in order
+        frame = bytearray()
+        for blob in blobs:
+            frame.extend(len(blob).to_bytes(4, 'big'))
+            frame.extend(blob)
+
+        response = self.build_response(request, body={'entries': entries})
+        response['arguments'] = {'data': bytes(frame)}
         return response
 
     async def _store_fs_write(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
@@ -208,7 +314,7 @@ class StoreCommands(DAPConn):
         if isinstance(data, str):
             data = data.encode('utf-8')
 
-        written = await fs.write_chunk(handle, data, connection_id=self._connection_id)
+        written = await fs.write_chunk(handle, data)
         return self.build_response(request, body={'bytesWritten': written})
 
     async def _store_fs_close(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
@@ -227,9 +333,9 @@ class StoreCommands(DAPConn):
         mode = args.get('mode', 'r')
 
         if mode == 'w':
-            await fs.close_write(handle, connection_id=self._connection_id)
+            await fs.close_write(handle)
         else:
-            await fs.close_read(handle, connection_id=self._connection_id)
+            await fs.close_read(handle)
         return self.build_response(request)
 
     async def _store_fs_delete(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
@@ -246,9 +352,73 @@ class StoreCommands(DAPConn):
         await self._get_file_store().delete(args.get('path'))
         return self.build_response(request)
 
+    def _virtual_scope_mounts(self) -> list:
+        """The '@' listing: the joined filesystem's scope mounts.
+
+        `User/` and `Team/` always appear; `Org/` only for org.admin (or
+        sys.admin) holders — org storage is admin-only, a dead entry would
+        just confuse. Entry names compose by ordinary path joining
+        ('@' + '/' + 'Team' -> '@/Team'). Entries are VIRTUAL — synthesized
+        from the session, never from a physical listing (which would leak
+        other orgs' scopes).
+        """
+        org = getattr(self._account_info, 'organization', None) or {}
+        sys_perms = getattr(self._account_info, 'sysPermissions', None) or []
+        entries = [
+            {'name': 'User', 'type': 'dir', 'virtual': True},
+            {'name': 'Team', 'type': 'dir', 'virtual': True},
+        ]
+        if 'org.admin' in (org.get('permissions') or []) or 'sys.admin' in sys_perms:
+            entries.append({'name': 'Org', 'type': 'dir', 'virtual': True})
+        return entries
+
+    def _list_scope_mount(self, mount: str) -> Dict[str, Any]:
+        """Directory listing for the virtual mounts ('@' and '@/Team').
+
+        '@' lists the scope mounts themselves; '@/Team' lists the caller's
+        teams by DISPLAY NAME with the id in the entry body, so the file
+        browser can show names while scripts address ids. ('@/User' and
+        '@/Org' are REAL trees — the store lists them.)
+        """
+        if mount == '@':
+            entries = self._virtual_scope_mounts()
+            return {'entries': entries, 'count': len(entries)}
+        org = getattr(self._account_info, 'organization', None) or {}
+        entries = [
+            {'name': row.get('name') or row['id'], 'type': 'dir', 'id': row['id'], 'virtual': True}
+            for row in (org.get('teams') or [])
+            if row.get('id')
+        ]
+        return {'entries': entries, 'count': len(entries)}
+
+    @staticmethod
+    def _is_scope_root(path: str) -> bool:
+        """True when ``path`` lists the TOP of a user/team/org tree.
+
+        Scope roots are where the system trees live and where reserved
+        names get filtered: '' and '@/User' (own root), '@/Org' (own org
+        root), '@/Team/<ref>' (a team root), and the cross-boundary
+        '@/User/=<uid>' / '@/Org/=<oid>' spellings.
+        """
+        if not path:
+            return True
+        segments = path.split('/')
+        if segments[0] != '@' or len(segments) < 2:
+            return False
+        if segments[1] in ('User', 'Org'):
+            return len(segments) == 2 or (len(segments) == 3 and segments[2].startswith('='))
+        return segments[1] == 'Team' and len(segments) == 3
+
     async def _store_fs_list_dir(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
         """
-        List directory contents.
+        List directory contents of the joined filesystem.
+
+        Plain paths list the caller's own tree (simple mode). '@' lists the
+        scope mounts and '@/Team' the caller's memberships — both virtual.
+        Everything else ('@/User/...', '@/Team/<ref>/...', '@/Org/...') is
+        a real store listing. Scope-root listings hide the system trees
+        from non-sys.admin callers and drop reserved '@'/'='-prefixed
+        physical names (unaddressable legacy artifacts).
 
         Args:
             request: Original DAP request.
@@ -257,7 +427,33 @@ class StoreCommands(DAPConn):
         Returns:
             DAP response with directory listing.
         """
-        result = await self._get_file_store().list_dir(args.get('path', ''))
+        # ONE normalization (the store's own) drives BOTH the scope-root
+        # filter decision and the store resolution below — deciding on a raw
+        # spelling while resolving the normalized one would let '@//User'-
+        # style paths reach the user root with the system trees unfiltered.
+        path = normalize_path(args.get('path', '') or '')
+
+        # The virtual mounts list from the session, not storage.
+        if path in ('@', '@/Team'):
+            return self.build_response(request, body=self._list_scope_mount(path))
+
+        result = await self._get_file_store().list_dir(path)
+
+        if self._is_scope_root(path):
+            entries = result['entries']
+            # SYSTEM TREES (.logs, .deployments) are invisible at scope
+            # roots for everyone except sys.admin: they are engine-written,
+            # served by their own domain APIs, and may hold data the user
+            # must not see raw.
+            sys_perms = getattr(self._account_info, 'sysPermissions', None) or []
+            if 'sys.admin' not in sys_perms:
+                entries = [e for e in entries if e['name'] not in SYSTEM_TREES]
+            # Reserved sigils: physical '@*' / '=*' names at a scope root
+            # predate the grammar, cannot be created or addressed anymore —
+            # drop them rather than show dead entries.
+            entries = [e for e in entries if not e['name'].startswith(('@', '='))]
+            result = {'entries': entries, 'count': len(entries)}
+
         return self.build_response(request, body=result)
 
     async def _store_fs_mkdir(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
@@ -308,7 +504,18 @@ class StoreCommands(DAPConn):
         Returns:
             DAP response with metadata (size, modified time, type, etc.).
         """
-        result = await self._get_file_store().stat(args.get('path'))
+        # The scope mounts stat as directories: '@' and '@/Team' have no
+        # physical existence at all, and '@/User'/'@/Org' roots always
+        # exist conceptually (access control applies on ENTRY, not on the
+        # mount). Same rule as _store_fs_list_dir: ONE normalization (the
+        # store's own) drives BOTH the mount decision and the store
+        # resolution below — and it rejects traversal outright instead of
+        # letting a raw spelling slide through to the resolver.
+        path = normalize_path(args.get('path') or '')
+        if path in ('@', '@/User', '@/Team', '@/Org'):
+            return self.build_response(request, body={'exists': True, 'type': 'dir', 'virtual': True})
+
+        result = await self._get_file_store().stat(path)
         return self.build_response(request, body=result)
 
     async def _store_fs_rename(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
