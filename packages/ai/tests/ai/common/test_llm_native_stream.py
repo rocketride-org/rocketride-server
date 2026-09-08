@@ -20,8 +20,8 @@ Covers:
   legacy budget arithmetic, and the Claude 3/3.5 Haiku exclusion (Haiku 4.5
   supports thinking, legacy shape only).
 - Group invariants over the ``llm_anthropic`` node's ``services.json`` profile
-  enum: every enum model must have a declared expected shape here, so adding a
-  profile without deciding its thinking shape fails the suite.
+  enum: an enum model may go undeclared here only while it falls through to the
+  adaptive shape, so a profile that lands on the removed shape fails the suite.
 """
 
 from pathlib import Path
@@ -298,9 +298,13 @@ def test_adaptive_shape_ignores_output_window():
 # ---------------------------------------------------------------------------
 
 # Expected thinking shape per model id: 'adaptive' | 'enabled' | None (no thinking).
-# test_enum_models_all_declared forces every NEW enum entry to add a row here —
-# deciding its shape explicitly instead of inheriting a default, which is
-# exactly how the Claude 5 bug shipped.
+# A row is REQUIRED only for a model that must not get the adaptive default —
+# legacy 'enabled' + budget_tokens, or no thinking at all. Models that take
+# adaptive may be listed for documentation, but need not be: new ids arrive by
+# robot (tools/sync_models writes services.json), and demanding a hand-written
+# row per id turned every sync PR red without adding safety. What the suite
+# still enforces is the direction of the default —
+# test_enum_models_undeclared_default_to_adaptive below.
 EXPECTED_THINKING_SHAPE = {
     'claude-3-haiku': None,
     'claude-fable-5': 'adaptive',
@@ -342,13 +346,27 @@ def test_services_json_exists():
     assert _SERVICES_JSON.is_file(), f'missing {_SERVICES_JSON}'
 
 
-def test_enum_models_all_declared():
-    """Every profile in the enum must have a declared expected thinking shape."""
-    missing = [m for m in _enum_models() if m not in EXPECTED_THINKING_SHAPE]
-    assert not missing, (
-        f'services.json profiles without a declared thinking shape: {missing}. '
-        'Add each to EXPECTED_THINKING_SHAPE — decide whether the model takes '
-        "adaptive thinking, legacy 'enabled' + budget_tokens, or none."
+def test_enum_models_undeclared_default_to_adaptive():
+    """An undeclared profile must fall through to adaptive, never to a legacy shape.
+
+    services.json is machine-written, so requiring a hand-declared row per model
+    only made routine sync PRs red. The invariant that actually protects the API
+    call is the direction of the default: an undeclared model may inherit
+    adaptive — the shape Claude 4.7+ accepts — but must never inherit the removed
+    'enabled' + budget_tokens shape, nor be silently dropped to no thinking.
+    """
+    offenders = {}
+    for model in _enum_models():
+        if model in EXPECTED_THINKING_SHAPE:
+            continue
+        kwargs = build_anthropic_thinking_kwargs(gate_model_name(model), _OUT)
+        if kwargs != {'thinking': _ADAPTIVE}:
+            offenders[model] = kwargs
+    assert not offenders, (
+        f'undeclared services.json profiles that do not default to adaptive: {offenders}. '
+        'Either the model genuinely needs a non-adaptive shape — add it to '
+        "EXPECTED_THINKING_SHAPE as 'enabled' or None — or a gate in "
+        'build_anthropic_thinking_kwargs is now catching ids it should not.'
     )
 
 
