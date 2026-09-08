@@ -55,20 +55,35 @@ CYRILLIC_PIPELINE = 'резервация.pipe'
 ENCODING_FAILURE_MARKERS = ('UnicodeEncodeError', "codec can't encode", 'codec can not encode')
 
 
-def run_cli(argv, encoding, tmp_path):
-    """Run the CLI in a subprocess whose stdio uses the given encoding."""
+def run_cli(argv, encoding, tmp_path, pipeline=None):
+    """Run the CLI in a subprocess whose stdio uses the given encoding.
+
+    The pipeline file goes through the ROCKETRIDE_PIPELINE env default, not
+    the --pipeline flag: when sys.executable is the engine's embedded
+    interpreter (how CI runs this suite), the wrapper parses argv before
+    Python does and consumes --pipeline (and --args) as its own options,
+    leaving the value behind as a stray positional. Both spellings feed the
+    same argparse dest, so the CLI path under test is identical.
+    """
     env = dict(os.environ)
-    env['PYTHONPATH'] = os.pathsep.join([str(SRC_DIR), str(COMMON_SRC_DIR)])
     env['PYTHONIOENCODING'] = encoding
 
     # Argparse defaults come from the environment; keep the ambient
     # configuration of whoever runs the suite out of the subprocess
     for name in ('ROCKETRIDE_URI', 'ROCKETRIDE_APIKEY', 'ROCKETRIDE_TOKEN', 'ROCKETRIDE_PIPELINE'):
         env.pop(name, None)
+    if pipeline is not None:
+        env['ROCKETRIDE_PIPELINE'] = pipeline
 
     # Invoked the way the installed console script is, so the process starts
-    # in the same state a user's shell would put it in
-    entry = 'import sys; from rocketride.cli.main import main; sys.exit(main())'
+    # in the same state a user's shell would put it in. The source paths are
+    # injected INSIDE the bootstrap, not via PYTHONPATH: in CI sys.executable
+    # is the engine's embedded interpreter, which runs in isolated mode and
+    # ignores PYTHONPATH entirely — an env-var path never reaches it.
+    entry = (
+        f'import sys; sys.path[:0] = [{str(SRC_DIR)!r}, {str(COMMON_SRC_DIR)!r}]; '
+        'from rocketride.cli.main import main; sys.exit(main())'
+    )
 
     return subprocess.run(
         [sys.executable, '-c', entry, *argv],
@@ -91,7 +106,7 @@ def test_status_screen_renders_on_any_console_encoding(encoding, tmp_path):
     without touching the network, which is the shortest path to the box-
     drawing characters that used to abort the command.
     """
-    result = run_cli(['start', '--pipeline', 'no-such.pipe', '--apikey', 'k'], encoding, tmp_path)
+    result = run_cli(['start', '--apikey', 'k'], encoding, tmp_path, pipeline='no-such.pipe')
 
     combined = result.stdout + result.stderr
     for marker in ENCODING_FAILURE_MARKERS:
@@ -119,7 +134,7 @@ def test_non_ascii_filename_does_not_abort_the_command(encoding, tmp_path):
     The name reaches the screen through the error path, so an unencodable
     character in it used to end the run with a traceback instead of a message.
     """
-    result = run_cli(['start', '--pipeline', CYRILLIC_PIPELINE, '--apikey', 'k'], encoding, tmp_path)
+    result = run_cli(['start', '--apikey', 'k'], encoding, tmp_path, pipeline=CYRILLIC_PIPELINE)
 
     combined = result.stdout + result.stderr
     for marker in ENCODING_FAILURE_MARKERS:
