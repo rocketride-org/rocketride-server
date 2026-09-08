@@ -24,7 +24,7 @@
 // FROZEN rocketride SDK contract — floor v1.3 — never edit by hand
 // =============================================================================
 // Floor key:     1.3 (MAJOR.MINOR of packages/client-typescript/package.json)
-// Source commit: 1f2091d93e3bba827d7f884119f4c5ef02c7837d
+// Source commit: a8a0457d95ea28eda0a0411b3b8ee10345c71466
 // Generator:     dts-bundle-generator@9.5.1
 // Produced by:   ./builder client-typescript:freeze
 //
@@ -68,6 +68,21 @@ import { Options, Sequelize } from 'sequelize';
  */
 export declare class DAPException extends Error {
     readonly dapResult: Record<string, unknown>;
+    /**
+     * Machine-readable error code sent by the server, when the failure has one.
+     *
+     * Task failures carry one (`TASK_NOT_REGISTERED`, `TASK_AMBIGUOUS`,
+     * `TASK_COMPLETED`, `TASK_STOPPED`); classify on it rather than on the
+     * message text, which is written for people and may be reworded.
+     */
+    readonly code?: string;
+    /**
+     * Troubleshooting text the SDK attached for a developer, when there is any.
+     *
+     * Kept out of `message` so an application can show the message to an end
+     * user without the developer checklist.
+     */
+    readonly hint?: string;
     constructor(dapResult: Record<string, unknown>);
 }
 /**
@@ -3966,7 +3981,8 @@ export declare class DatabaseApi {
         sequelizeOptions?: import("sequelize").Options;
     }): import("sequelize").Sequelize;
 }
-interface AppVerifyCheck {
+/** One verification check's outcome. */
+export interface AppVerifyCheck {
     /** Stable check id (e.g. 'manifest', 'id', 'include', 'pack-size'). */
     id: string;
     /** Whether the check passed. */
@@ -3974,7 +3990,8 @@ interface AppVerifyCheck {
     /** Human-readable outcome, actionable on failure. */
     note: string;
 }
-interface AppVerifyReport {
+/** The result of {@link verifyAppSource}. */
+export interface AppVerifyReport {
     /** True when every check passed. */
     ok: boolean;
     /** Every check that ran, in order. */
@@ -3984,7 +4001,8 @@ interface AppVerifyReport {
     /** Uncompressed bytes the pack would carry. */
     uncompressedBytes: number;
 }
-interface CreatedApp {
+/** The result of {@link createAppWorkspace}. */
+export interface CreatedApp {
     /** The full app id (`<developerId>.<slug>`). */
     appId: string;
     /** Workspace-relative POSIX path of the created folder. */

@@ -42,7 +42,7 @@
  * through the stock discard confirm before reverting to the baseline.
  */
 
-import React, { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
+import React, { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Banner } from 'shell';
 import { Button } from 'shell';
 import { Card } from 'shell';
@@ -443,6 +443,10 @@ export const PackageView: React.FC<IPackageViewProps> = ({ host, app }) => {
 	// README does not read as the loading sentinel and hang the modal.
 	const [readmeText, setReadmeText] = useState<string | null>(null);
 	const [readmeLoading, setReadmeLoading] = useState(false);
+	// Ownership token for the in-flight README read: closing the modal (or
+	// starting a newer read) bumps it, so a stale completion may neither
+	// reopen the modal nor overwrite a newer read's content.
+	const readmeRequest = useRef(0);
 
 	/** Load the icon preview for a manifest-relative icon path (null on any
 	 *  failure — the preview slot then shows its 'none' glyph).
@@ -555,20 +559,32 @@ export const PackageView: React.FC<IPackageViewProps> = ({ host, app }) => {
 	);
 
 	/** Open the README viewer with the file's rendered markdown — relative
-	 * images resolved against the README's OWN directory and inlined. */
+	 * images resolved against the README's OWN directory and inlined. Only
+	 * the request that still owns the token may touch the modal state. */
 	const onViewReadme = useCallback(async (): Promise<void> => {
 		if (!draft?.readme || !host.readAppTextFile) return;
+		const requestId = ++readmeRequest.current;
 		setReadmeText('');
 		setReadmeLoading(true);
 		try {
 			const raw = await host.readAppTextFile(draft.readme);
-			setReadmeText(host.readAppImageDataUri ? await inlineReadmeImages(raw, draft.readme, host.readAppImageDataUri) : raw);
+			const text = host.readAppImageDataUri ? await inlineReadmeImages(raw, draft.readme, host.readAppImageDataUri) : raw;
+			if (readmeRequest.current === requestId) setReadmeText(text);
 		} catch (e) {
-			setReadmeText(`Could not read ${draft.readme}: ${e instanceof Error ? e.message : String(e)}`);
+			if (readmeRequest.current === requestId) {
+				setReadmeText(`Could not read ${draft.readme}: ${e instanceof Error ? e.message : String(e)}`);
+			}
 		} finally {
-			setReadmeLoading(false);
+			if (readmeRequest.current === requestId) setReadmeLoading(false);
 		}
 	}, [draft, host]);
+
+	/** Close the README viewer and orphan any read still in flight. */
+	const onCloseReadme = useCallback((): void => {
+		readmeRequest.current += 1;
+		setReadmeLoading(false);
+		setReadmeText(null);
+	}, []);
 
 	// ── Readiness: the package tier narrated ─────────────────────────────
 	const packageChecks = useMemo(() => checks.filter((c) => (c.tier ?? 'package') === 'package'), [checks]);
@@ -750,9 +766,9 @@ export const PackageView: React.FC<IPackageViewProps> = ({ host, app }) => {
 				<Modal
 					title={`${draft?.readme ?? 'README'}`}
 					width={Math.floor(window.innerWidth * 0.7)}
-					onClose={() => setReadmeText(null)}
+					onClose={onCloseReadme}
 					footer={
-						<Button variant="secondary" onClick={() => setReadmeText(null)}>Close</Button>
+						<Button variant="secondary" onClick={onCloseReadme}>Close</Button>
 					}
 				>
 					<div style={styles.readmeBody}>

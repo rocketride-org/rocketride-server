@@ -59,6 +59,10 @@ export type ProgressSink = (line: string) => void;
 /**
  * Normalize a connect URI to an http(s) base URL for /client/* downloads.
  *
+ * The SDK carries its own copy of this transform (client-typescript
+ * src/client/deploy.ts, createApp) because the vendored client package is
+ * self-contained and cannot import this library — keep the two in sync.
+ *
  * @param uri - The DAP connect URI (ws/wss/http/https).
  * @returns The http(s) origin with path noise stripped.
  */

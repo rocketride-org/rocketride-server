@@ -211,7 +211,10 @@ export class DeployApi {
 	async createApp(slug: string, options: { workspaceRoot?: string; template?: 'Blank' | 'Dashboard'; displayName?: string; developerId?: string; sidebar?: boolean; statusFooter?: boolean; docTabs?: boolean; install?: boolean; serverBaseUrl?: string; onProgress?: (line: string) => void } = {}): Promise<CreatedApp> {
 		const pack = await this.loadAppPack();
 		// Vendor from the server THIS client talks to unless overridden —
-		// ws(s) URIs map onto the http(s) origin serving /client/*.
+		// ws(s) URIs map onto the http(s) origin serving /client/*. This is
+		// the twin of client-common's toHttpBase(): the vendored client
+		// package is self-contained and cannot import that library, so the
+		// transform is duplicated here — keep the two in sync.
 		let serverBaseUrl = options.serverBaseUrl;
 		if (!serverBaseUrl) {
 			const uri = this.client.getConnectionInfo().uri;

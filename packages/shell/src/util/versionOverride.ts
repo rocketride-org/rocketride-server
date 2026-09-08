@@ -102,7 +102,7 @@ export interface AppVersionOverride {
  * clear before reloading, and a mirror that masked the surviving storage row
  * would turn a bounded reload into a loop.
  */
-let memoryOverrides: Record<string, AppVersionOverride> = {};
+const memoryOverrides: Record<string, AppVersionOverride> = {};
 
 /**
  * Writes the override map to sessionStorage.

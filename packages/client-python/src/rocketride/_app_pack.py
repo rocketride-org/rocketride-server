@@ -383,11 +383,16 @@ def verify_app_source(workspace_root: str, app_root: str) -> AppVerifyReport:
     manifest: Optional[dict] = None
     try:
         with open(os.path.join(app_abs, 'package.json'), 'r', encoding='utf-8') as f:
-            # A non-object appManifest (list, string, ...) is as good as
-            # absent: this is a report, so it must not raise downstream
-            block = (json.load(f) or {}).get('appManifest')
+            root = json.load(f)
+        # A non-object root or appManifest (list, string, ...) is as good as
+        # absent: this is a report, so it must not raise downstream — a bare
+        # .get() on a truthy non-dict root would escape as AttributeError
+        if isinstance(root, dict):
+            block = root.get('appManifest')
             manifest = block if isinstance(block, dict) else None
-        add('package-json', True, 'package.json parses')
+            add('package-json', True, 'package.json parses')
+        else:
+            add('package-json', False, 'package.json must contain a JSON object')
     except (OSError, ValueError) as err:
         add('package-json', False, f'package.json unreadable: {err}')
 
