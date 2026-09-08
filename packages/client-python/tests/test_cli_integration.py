@@ -296,7 +296,10 @@ class TestCliList:
 
             assert code == 0, output
 
-            tasks = json.loads(output)
+            # The unified CLI's --json payload is an envelope object, not a
+            # bare array: list emits {'tasks': [...]} (see run_list's
+            # out.result call).
+            tasks = json.loads(output)['tasks']
             assert self.PIPELINE_TOKEN in [task.get('token') for task in tasks]
         finally:
             await ensure_clean_pipeline(client, self.PIPELINE_TOKEN)
@@ -433,7 +436,11 @@ class TestCliDispatch:
 
     @pytest.mark.asyncio
     async def test_should_require_a_store_subcommand(self):
-        code, output = await run_cli('store', *server_args())
+        # Bare `store`, no connection args: the unified CLI attaches
+        # --uri/--apikey to each store SUBcommand, so passing them to the
+        # bare group is an argparse error (exit 2) that would mask the
+        # missing-subcommand path this test is about.
+        code, output = await run_cli('store')
 
         assert code == 1
         assert 'Store subcommand is required' in output
