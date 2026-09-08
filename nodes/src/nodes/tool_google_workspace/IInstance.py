@@ -82,23 +82,48 @@ class GoogleToolInstanceBase(IInstanceBase):
         """Diagnostics: service present, optional live probe, scope coverage.
 
         ``probe``: a cheap real API call taking the service handle; when it
-        raises, connection_ok flips false and the error is reported. A
-        malformed user token likewise reports connection_ok=False rather than
-        being swallowed — this tool exists precisely for the broken cases.
+        raises, connection_ok flips false and the error (plus, when Google
+        supplies one, the structured reason code — accessNotConfigured,
+        forbidden, rateLimitExceeded, ...) is reported. A malformed user
+        token likewise reports connection_ok=False rather than being
+        swallowed — this tool exists precisely for the broken cases.
+
+        Without a probe, nothing here ever calls Google, so a client that
+        constructs fine and a token whose claimed scopes look right can both
+        be true while every real call 403s (e.g. the API is disabled on the
+        project behind the credential). That state is reported as
+        connection_ok='unknown', not True — a green light nobody verified is
+        worse than no light, because it sends debugging effort everywhere
+        except the actual cause.
         """
         access = self._access()
+        service = self._svc()
+        checked = ['client']
+        if service is None:
+            connection_ok: bool | str = False
+        elif probe is None:
+            connection_ok = 'unknown'
+        else:
+            connection_ok = True
         out: dict = {
-            'connection_ok': self._svc() is not None,
+            'connection_ok': connection_ok,
             'access': getattr(access, 'tier', None),
             'requiredScopes': list(getattr(access, 'scopes', []) or []),
         }
-        service = self._svc()
         if probe is not None and service is not None:
+            checked.append('probe')
             try:
                 probe(service)
             except Exception as exc:
                 out['connection_ok'] = False
-                out['error'] = str(exc)[:200]
+                # Generous cap: the actionable guidance (scope/sharing/accessNotConfigured
+                # hints) trails the raw Google message, and errorReason below is the
+                # machine-readable fallback, but a human reading just `error` should still
+                # see the clause that names the fix rather than have it cut mid-sentence.
+                out['error'] = str(exc)[:500]
+                reason_code = getattr(exc, 'reason_code', None)
+                if reason_code:
+                    out['errorReason'] = reason_code
         try:
             cfg = Config.getNodeConfig(self.IGlobal.glb.logicalType, self.IGlobal.glb.connConfig)
             auth_type = (cfg.get('authType') or 'service').strip()
@@ -106,14 +131,19 @@ class GoogleToolInstanceBase(IInstanceBase):
             if auth_type == 'user':
                 token_str = str(cfg.get('userToken') or '').strip()
                 if token_str:
+                    checked.append('scopes')
                     try:
                         _granted, covered, missing = token_scope_report(self.SERVICE, cfg, out['requiredScopes'])
-                        out['connection_ok'] = out['connection_ok'] and covered
                         if not covered:
+                            out['connection_ok'] = False
                             out['missingScopes'] = missing
                     except Exception as exc:
                         out['connection_ok'] = False
-                        out['error'] = f'invalid user token data: {str(exc)[:160]}'
+                        # A separate key: 'error' may already hold the probe's failure
+                        # (checked above the scope check), and overwriting it here would
+                        # lose that message.
+                        out['scopeError'] = f'invalid user token data: {str(exc)[:160]}'
         except Exception:
             pass  # config lookup diagnostics must never raise
+        out['checked'] = checked
         return out

@@ -70,7 +70,7 @@ The Deployment Type field selects a connection profile:
 | `vector.cloud.port`     | number, `9243`/`443` | Cloud port (9243 for cloud-hosted, 443 for cloud-serverless)                                       |
 | `vector.apikey`         | string, empty        | Elastic Cloud API key (cloud profiles)                                                             |
 | `vector.index`          | string, `rocketride` | Elasticsearch index name (lowercase)                                                               |
-| `elasticsearch.mode`    | boolean, `true`      | `true` = vector store (semantic search); `false` = index (BM25)                                    |
+| `elasticsearch.store_mode` | boolean, `true`   | `true` = vector store (semantic search); `false` = index (BM25)                                    |
 | `vector.score`          | number, `0.5`        | Minimum similarity threshold in vector store mode (0.0-1.0)                                        |
 
 ### OpenSearch variant
@@ -139,7 +139,7 @@ Basic auth (username and password). When basic auth is enabled, an `http://` hos
 | `elasticsearch.index` | `string` | **Index Name / Collection Name**<br/>Enter the name of the Elasticsearch index | `"rocketride"` |
 | `elasticsearch.index_label` | `object` | **Index Mode** |  |
 | `elasticsearch.matchOperator` | `string` | **Match Operator**<br/>Controls how multiple query terms are matched: 'or' (default) matches documents containing ANY of the query terms, 'and' matches documents containing ALL of the query terms, 'exact' requires the exact phrase to appear in order (phrase matching). | `"or"` |
-| `elasticsearch.mode` | `boolean` | **Store Mode**<br/>Toggle between index (text search) and vector store (semantic search). | `true` |
+| `elasticsearch.store_mode` | `boolean` | **Store Mode**<br/>Toggle between index (text search) and vector store (semantic search). | `true` |
 | `elasticsearch.profile` | `string` | **Deployment Type**<br/>Connect to... | `"self-managed"` |
 | `elasticsearch.provider` | `string` |  | const: `"elasticsearch"` |
 | `elasticsearch.search` | `boolean` | **Customize Indexing Search Behavior**<br/>Customize the search behavior of the index. This option does not affect the ingestion and creation of the index. You can switch between behaviors when searching between pipeline runs. | `false` |

@@ -8,7 +8,7 @@ Receives an audio or video stream, extracts the audio track as 16 kHz mono PCM, 
 
 Uses `ai.common.models.Whisper`: transcription routes to the model server when the engine is started with `--modelserver`, otherwise it runs locally via `faster-whisper`. No API key is required either way. Decoding and VAD are configurable per request — see `beam_size` and the `vad_*` fields below; the defaults reproduce the behaviour this node had before they were exposed. Transcription calls are serialized through a global lock so a single loaded model is shared safely across instances.
 
-Models are downloaded from HuggingFace on first use. GPU is used automatically when available (`compute_type` defaults to `float16`).
+Models are downloaded from HuggingFace on first use. GPU is used automatically when available; `compute_type` picks the precision of the loaded weights and defaults to `float16`, which CTranslate2 downgrades to `int8` on CPU.
 
 ---
 
@@ -27,7 +27,10 @@ When a `documents` listener is attached, the node also emits one document per me
 
 | Field | Type | Description |
 |---|---|---|
-| `model` | string | Default "base". The Whisper model to use for transcription |
+| `profile` | string | Default "default". The model preset this node runs. Every other field below is stored per profile |
+| `model` | string | Defaults to the selected profile's model. Overrides it when set |
+| `language` | string | Default "en". ISO 639-1 code of the spoken language |
+| `compute_type` | string | Default "float16". CTranslate2 weight precision: `float16`, `int8`, `int8_float16` or `float32`. `float16` needs a GPU and falls back to `int8` on CPU |
 | `chunk_duration` | number | Default 60. Seconds of audio to buffer before sending a chunk to Whisper |
 | `beam_size` | number | Default 5. Beam size for decoding. 1 is greedy (fastest); higher is slower and usually more accurate |
 | `vad_filter` | boolean | Default true. Use Whisper's built-in Silero VAD to drop non-speech before transcribing |
@@ -35,7 +38,6 @@ When a `documents` listener is attached, the node also emits one document per me
 | `vad_min_silence_duration_ms` | number | Default 500. Silence this long ends a speech chunk |
 | `vad_speech_pad_ms` | number | Default 400. Padding added to each side of a detected speech chunk |
 | `vad_max_speech_duration_s` | number | Default 0. Split speech chunks longer than this. 0 means no limit |
-| `profile` | string | Default "default".  |
 
 The five `vad_*` fields map onto faster-whisper's `VadOptions`. They are merged over the
 node's defaults rather than replacing them, so setting one leaves the others alone. Note
@@ -76,7 +78,21 @@ that would change transcripts for anyone who had set them.
 
 The node ships one profile per model size (`tiny`, `base`, `small`, `medium`, `large-v3`) plus `default`, which is an alias for `base`. Only the model and `language: en` differ; everything else comes from the field defaults.
 
-Before #1809 the profiles set `mode`, but the node reads `model` — so every profile silently loaded `base`, whichever one you picked. Selecting a profile now actually selects that model.
+Pick one with the **Model Profile** selector. Each profile owns a full copy of the fields above, stored under its own key, so editing `beam_size` on `medium` leaves `tiny`'s settings untouched:
+
+```json
+{
+  "profile": "medium",
+  "medium": { "beam_size": 1, "language": "de" }
+}
+```
+
+A config with no `profile` key keeps working: it resolves against `default`, whether its values sit at the top level or inside a `"default": { … }` object.
+
+Two bugs are worth knowing about because their shape explains the current design:
+
+- Before #1809 the profiles set `mode`, but the node reads `model` — so every profile silently loaded `base`, whichever one you picked.
+- Before #2067 the selector was hidden and listed only `default`, so five of the six profiles were unreachable from the UI. The `model` field is declared once **per profile**, each defaulted to that profile's own model. A single shared field defaulted to `base` would be written into the selected profile's object on the first save and win the merge — silently downgrading `medium` to `base` with nothing logged.
 
 ---
 
@@ -93,11 +109,17 @@ Defaults to English (`en`). Change the `language` config value to transcribe oth
 
 | Field | Type | Description | Default |
 |---|---|---|---|
+| `transcribe.base.model` | `string` | **Model**<br/>The Whisper model to use for transcription. Defaults to the model this profile selects | `"base"` |
 | `transcribe.beam_size` | `number` | **Beam Size**<br/>Beam size for decoding. 1 is greedy (fastest); higher is slower and usually more accurate | `5` |
 | `transcribe.chunk_duration` | `number` | **Chunk Duration (s)**<br/>Seconds of audio to buffer before sending a chunk to Whisper | `60` |
+| `transcribe.compute_type` | `string` | **Compute Type**<br/>CTranslate2 weight precision. float16 needs a GPU and falls back to int8 on CPU; float32 is the most precise and the slowest | `"float16"` |
+| `transcribe.default.model` | `string` | **Model**<br/>The Whisper model to use for transcription. Defaults to the model this profile selects | `"base"` |
 | `transcribe.language` | `string` | **Language**<br/>ISO 639-1 code of the spoken language (e.g. en, ru, de). Must match the audio; a mismatch produces garbled half-translated text | `"en"` |
-| `transcribe.model` | `string` | **Model**<br/>The Whisper model to use for transcription | `"base"` |
-| `transcribe.profile` | `string` |  | `"default"` |
+| `transcribe.large-v3.model` | `string` | **Model**<br/>The Whisper model to use for transcription. Defaults to the model this profile selects | `"large-v3"` |
+| `transcribe.medium.model` | `string` | **Model**<br/>The Whisper model to use for transcription. Defaults to the model this profile selects | `"medium"` |
+| `transcribe.profile` | `string` | **Model Profile**<br/>Whisper model preset. Each profile keeps its own copy of the settings below, so switching profiles does not disturb another profile's overrides | `"default"` |
+| `transcribe.small.model` | `string` | **Model**<br/>The Whisper model to use for transcription. Defaults to the model this profile selects | `"small"` |
+| `transcribe.tiny.model` | `string` | **Model**<br/>The Whisper model to use for transcription. Defaults to the model this profile selects | `"tiny"` |
 | `transcribe.vad_filter` | `boolean` | **VAD Filter**<br/>Use Whisper's built-in Silero VAD to drop non-speech before transcribing | `true` |
 | `transcribe.vad_max_speech_duration_s` | `number` | **VAD Maximum Speech (s)**<br/>Split speech chunks longer than this. 0 means no limit | `0` |
 | `transcribe.vad_min_silence_duration_ms` | `number` | **VAD Minimum Silence (ms)**<br/>Silence this long ends a speech chunk | `500` |

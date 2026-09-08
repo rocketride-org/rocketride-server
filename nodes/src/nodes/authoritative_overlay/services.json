@@ -1,0 +1,116 @@
+{
+	"title": "Authoritative Overlay",
+	"protocol": "authoritative-overlay://",
+	"classType": [
+		"guard"
+	],
+	"capabilities": [
+		"experimental"
+	],
+	"register": "filter",
+	"node": "python",
+	"path": "nodes.authoritative_overlay",
+	"prefix": "authoritative_overlay",
+	"description": [
+		"Cross-checks extracted financial numbers against the US SEC EDGAR ",
+		"company-concept API for a configured CIK, scoped to a filing period ",
+		"(form / fy / fp / end). Abstains (drops) the answer if there is no match."
+	],
+	"icon": "util-guard.svg",
+	"lanes": {
+		"text": [
+			"answers"
+		],
+		"answers": [
+			"answers"
+		]
+	},
+	"preconfig": {
+		"default": "basic",
+		"profiles": {
+			"basic": {
+				"title": "Basic: US SEC (EDGAR)",
+				"regulator_type": "sec",
+				"cik": "320193"
+			}
+		}
+	},
+	"fields": {
+		"authoritative_overlay.basic": {
+			"object": "basic",
+			"properties": [
+				"authoritative_overlay.regulator_type",
+				"authoritative_overlay.cik"
+			]
+		},
+		"authoritative_overlay.profile": {
+			"title": "Profile",
+			"description": "Overlay profile",
+			"type": "string",
+			"default": "basic",
+			"enum": [
+				"*>preconfig.profiles.*.title"
+			],
+			"conditional": [
+				{
+					"value": "basic",
+					"properties": [
+						"authoritative_overlay.basic"
+					]
+				}
+			]
+		},
+		"authoritative_overlay.regulator_type": {
+			"type": "string",
+			"title": "Regulator Source",
+			"description": "Which regulator database to cross-check against",
+			"default": "sec",
+			"enum": [
+				[
+					"sec",
+					"US SEC (EDGAR)"
+				]
+			]
+		},
+		"authoritative_overlay.cik": {
+			"type": "string",
+			"title": "Company CIK",
+			"description": "The SEC Central Index Key for the company.",
+			"default": "320193"
+		}
+	},
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Authoritative Overlay",
+			"properties": [
+				"authoritative_overlay.profile"
+			]
+		}
+	],
+	"test": [
+		{
+			"profiles": [
+				"basic"
+			],
+			"cases": [
+				{
+					"text": "{\"concept\": \"AccountsPayableCurrent\", \"value\": \"$69,860,000,000\", \"form\": \"10-K\", \"fy\": 2025}",
+					"expect": {
+						"answers": {
+							"notEmpty": true
+						}
+					}
+				},
+				{
+					"text": "{\"concept\": \"AccountsPayableCurrent\", \"value\": \"$999,000\", \"form\": \"10-K\", \"fy\": 2025}",
+					"expect": {
+						"answers": {
+							"notEmpty": false
+						}
+					}
+				}
+			]
+		}
+	]
+}

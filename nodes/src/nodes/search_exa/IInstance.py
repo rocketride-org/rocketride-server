@@ -34,3 +34,7 @@ class IInstance(IInstanceBase):
             self.instance.writeText(answer.getText())
         if self.instance.hasListener('questions'):
             self.instance.writeQuestions(question)
+
+        # The passthrough above is on this handler's own lane. Safe without a
+        # questions listener: the default forward would have nowhere to deliver.
+        return self.preventDefault()

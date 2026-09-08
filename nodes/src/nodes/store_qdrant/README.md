@@ -71,7 +71,7 @@ Requires an embedding provider bound to the node (the embedding sub-block in the
 
 Add or update documents in the collection.
 
-Each item in the `documents` array requires `content` and `object_id` (used for deduplication) and may include `metadata`, plus optional pre-computed `embedding` and `embedding_model` to skip automatic embedding. Without a pre-computed vector the node's bound embedding provider is used; if none is configured the call fails. Returns `{"success": true, "count": n, "skipped": n}`.
+Each item in the `documents` array requires `content` and `object_id` (used for deduplication) and may include `metadata` (keys `nodeId`/`parent`/`chunkId` are stored; defaults `"vectordb_tool"`, `"/"`, `0`), plus optional pre-computed `embedding` and `embedding_model` to skip automatic embedding. Without a pre-computed vector the node's bound embedding provider is used; if none is configured the call fails. Returns `{"success": true, "count": n, "skipped": n}`.
 
 ### `delete`
 

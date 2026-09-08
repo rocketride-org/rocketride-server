@@ -123,11 +123,18 @@ export default defineConfig(({ command }) => {
 				// self-target window.location.origin in dev exactly as it does in
 				// every deployment (no address is baked into any bundle). The
 				// engine listens on 5565; /task and /api carry WebSockets.
+				// Root-level SEO files are FastAPI routes on the backend (they embed
+				// request-derived absolute URLs, so they can't be static assets here).
+				// Without this proxy, the dev server's SPA html fallback would answer
+				// them with index.html. Prod has a single origin, so no proxy needed.
 				proxy: {
 					'/task': { target: 'http://localhost:5565', ws: true },
 					'/auth': { target: 'http://localhost:5565' },
 					'/api': { target: 'http://localhost:5565', ws: true },
 					'/marketplace': { target: 'http://localhost:5565' },
+					'/sitemap.xml': { target: 'http://localhost:5565' },
+					'/robots.txt': { target: 'http://localhost:5565' },
+					'/llms.txt': { target: 'http://localhost:5565' },
 				},
 			}),
 		},

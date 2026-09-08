@@ -453,6 +453,15 @@ def main() -> None:
     Loads the workspace ``.env`` (real environment wins), parses the
     command line, dispatches, and exits with the command's code.
     """
+    # Tolerate Unicode output on non-Unicode consoles, which would otherwise
+    # abort the command with UnicodeEncodeError.
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(errors='replace')
+        except (AttributeError, ValueError, OSError):
+            # Stream is not a reconfigurable text wrapper; nothing to relax
+            pass
+
     # The workspace .env must be in os.environ BEFORE the parser is
     # built — argparse defaults read it at construction time
     load_dot_env()

@@ -175,7 +175,7 @@
 		},
 		"vector.local.port": {
 			"type": ["number", "string"],
-			"default": "8330",
+			"default": "8000",
 			"description": "Port number. Enter a plain integer such as 8000, or an env-var placeholder like ${ROCKETRIDE_CHROMA_PORT}. Placeholders resolve to a string at run time, so this field accepts both a number and a string; the node coerces the value to an integer before connecting, so either form works."
 		},
 		//
@@ -203,7 +203,7 @@
 			"title": "Type of chroma host",
 			"description": "Connect to...",
 			"type": "string",
-			"default": "cloud",
+			"default": "local",
 			"enum": ["*>preconfig.profiles.*.title"],
 			"conditional": [
 				{

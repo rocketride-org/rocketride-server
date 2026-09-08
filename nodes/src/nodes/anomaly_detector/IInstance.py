@@ -48,11 +48,14 @@ class IInstance(IInstanceBase):
         Attempts to parse numeric values from text, runs anomaly detection,
         and annotates the output with detection results.
         """
+        # Both branches forward on this lane, so both must suppress the engine's own
+        # forward. preventDefault() raises, so it goes after the forward it guards.
         if self.IGlobal.detector is None:
             self.instance.writeText(text)
-            return
+            return self.preventDefault()
         result = self.IGlobal.detector.evaluate_text(text)
         self.instance.writeText(result)
+        return self.preventDefault()
 
     def writeDocuments(self, documents: List[Doc]):
         """
@@ -61,9 +64,10 @@ class IInstance(IInstanceBase):
         Reads the configured metric field from each document's metadata,
         runs anomaly detection, and adds results to document metadata.
         """
+        # As in writeText, or downstream also receives the un-enriched originals.
         if self.IGlobal.detector is None:
             self.instance.writeDocuments(documents)
-            return
+            return self.preventDefault()
 
         enriched_docs = []
 
@@ -85,6 +89,7 @@ class IInstance(IInstanceBase):
             enriched_docs.append(enriched_doc)
 
         self.instance.writeDocuments(enriched_docs)
+        return self.preventDefault()
 
     def closing(self):
         """Finalize any pending operations before close."""

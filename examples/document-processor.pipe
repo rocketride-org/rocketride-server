@@ -32,7 +32,7 @@
 		},
 		{
 			"id": "anonymize_1",
-			"provider": "anonymize",
+			"provider": "anonymize_text",
 			"config": {},
 			"input": [{ "lane": "text", "from": "ner_1" }],
 			"ui": { "position": { "x": 900, "y": 200 }, "measured": { "width": 150, "height": 66 }, "nodeType": "default", "formDataValid": true }

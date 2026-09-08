@@ -78,28 +78,37 @@
 		// Defines profiles used with the "profile": key
 		// "model", not "mode": IGlobal reads config.get('model'), so every profile
 		// silently loaded base regardless of its name (#1809).
+		// "title" is what the profile selector displays — transcribe.profile
+		// enumerates this section with "*>preconfig.profiles.*.title", so a profile
+		// without one lists as a blank entry (#2067).
 		"profiles": {
 			"default": {
+				"title": "Default (Base)",
 				"model": "base",
 				"language": "en"
 			},
 			"tiny": {
+				"title": "Tiny",
 				"model": "tiny",
 				"language": "en"
 			},
 			"base": {
+				"title": "Base",
 				"model": "base",
 				"language": "en"
 			},
 			"small": {
+				"title": "Small",
 				"model": "small",
 				"language": "en"
 			},
 			"medium": {
+				"title": "Medium",
 				"model": "medium",
 				"language": "en"
 			},
 			"large-v3": {
+				"title": "Large v3",
 				"model": "large-v3",
 				"language": "en"
 			}
@@ -155,10 +164,25 @@
 	//		in the shape
 	//
 	"fields": {
-		"transcribe.model": {
+		// One model field per profile, not one shared field (#2067).
+		//
+		// A profile's editable overrides live in connConfig[<profile>], and
+		// Config.getNodeConfig merges that object OVER preconfig.profiles[<profile>] —
+		// the user object wins. The UI materialises every declared default into that
+		// object, so a single shared "transcribe.model" carrying default "base" would
+		// write model=base into connConfig["medium"] and quietly downgrade the medium
+		// profile to base on the first save. Giving each profile its own copy, defaulted
+		// to the model that profile declares, makes materialising the default a no-op
+		// while an explicit change stays a real override.
+		//
+		// The schema property name is the last dotted segment, so every one of these
+		// resolves to the "model" key IGlobal reads. Same shape as
+		// preprocessor_langchain's langchain.splitter.<profile>.splitter fields, which
+		// the node reads back as "splitter".
+		"transcribe.default.model": {
 			"type": "string",
 			"title": "Model",
-			"description": "The Whisper model to use for transcription",
+			"description": "The Whisper model to use for transcription. Defaults to the model this profile selects",
 			"enum": [
 				["tiny", "Tiny - Faster, least acccurate"],
 				["base", "Base - Fast, low accuracy"],
@@ -168,6 +192,71 @@
 			],
 			"default": "base"
 		},
+		"transcribe.tiny.model": {
+			"type": "string",
+			"title": "Model",
+			"description": "The Whisper model to use for transcription. Defaults to the model this profile selects",
+			"enum": [
+				["tiny", "Tiny - Faster, least acccurate"],
+				["base", "Base - Fast, low accuracy"],
+				["small", "Small - Medium, medium accuracy"],
+				["medium", "Medium - Slower, high accuracy"],
+				["large-v3", "Large v3 - Slowest, Highest accuracy"]
+			],
+			"default": "tiny"
+		},
+		"transcribe.base.model": {
+			"type": "string",
+			"title": "Model",
+			"description": "The Whisper model to use for transcription. Defaults to the model this profile selects",
+			"enum": [
+				["tiny", "Tiny - Faster, least acccurate"],
+				["base", "Base - Fast, low accuracy"],
+				["small", "Small - Medium, medium accuracy"],
+				["medium", "Medium - Slower, high accuracy"],
+				["large-v3", "Large v3 - Slowest, Highest accuracy"]
+			],
+			"default": "base"
+		},
+		"transcribe.small.model": {
+			"type": "string",
+			"title": "Model",
+			"description": "The Whisper model to use for transcription. Defaults to the model this profile selects",
+			"enum": [
+				["tiny", "Tiny - Faster, least acccurate"],
+				["base", "Base - Fast, low accuracy"],
+				["small", "Small - Medium, medium accuracy"],
+				["medium", "Medium - Slower, high accuracy"],
+				["large-v3", "Large v3 - Slowest, Highest accuracy"]
+			],
+			"default": "small"
+		},
+		"transcribe.medium.model": {
+			"type": "string",
+			"title": "Model",
+			"description": "The Whisper model to use for transcription. Defaults to the model this profile selects",
+			"enum": [
+				["tiny", "Tiny - Faster, least acccurate"],
+				["base", "Base - Fast, low accuracy"],
+				["small", "Small - Medium, medium accuracy"],
+				["medium", "Medium - Slower, high accuracy"],
+				["large-v3", "Large v3 - Slowest, Highest accuracy"]
+			],
+			"default": "medium"
+		},
+		"transcribe.large-v3.model": {
+			"type": "string",
+			"title": "Model",
+			"description": "The Whisper model to use for transcription. Defaults to the model this profile selects",
+			"enum": [
+				["tiny", "Tiny - Faster, least acccurate"],
+				["base", "Base - Fast, low accuracy"],
+				["small", "Small - Medium, medium accuracy"],
+				["medium", "Medium - Slower, high accuracy"],
+				["large-v3", "Large v3 - Slowest, Highest accuracy"]
+			],
+			"default": "large-v3"
+		},
 		// Read by IGlobal since the initial commit, but never declared here, so the
 		// UI could not set it and every profile silently pinned English.
 		"transcribe.language": {
@@ -175,6 +264,21 @@
 			"title": "Language",
 			"description": "ISO 639-1 code of the spoken language (e.g. en, ru, de). Must match the audio; a mismatch produces garbled half-translated text",
 			"default": "en"
+		},
+		// Read by IGlobal since the initial commit and honoured by ai.common.models.Whisper
+		// (it is part of the model identity, local and on the model server), but never
+		// declared here, so the UI could not reach it (#2067).
+		"transcribe.compute_type": {
+			"type": "string",
+			"title": "Compute Type",
+			"description": "CTranslate2 weight precision. float16 needs a GPU and falls back to int8 on CPU; float32 is the most precise and the slowest",
+			"enum": [
+				["float16", "Float16 - GPU default, int8 on CPU"],
+				["int8", "Int8 - Fastest, smallest"],
+				["int8_float16", "Int8/Float16 - Mixed precision, GPU"],
+				["float32", "Float32 - Most precise, slowest"]
+			],
+			"default": "float16"
 		},
 		// Buffering, passed to Transcribe(). Defaults are its own constants, which ran
 		// unconditionally before — min_seconds/max_seconds never reached it (#1809).
@@ -222,19 +326,68 @@
 			"description": "Split speech chunks longer than this. 0 means no limit",
 			"default": 0
 		},
+		// One object group per profile. The group name is the key its values are stored
+		// under in the node config (connConfig[<profile>]), which is exactly where
+		// Config.getNodeConfig looks for a selected profile's overrides. Every profile
+		// carries the full editable set, so switching profiles never hides a knob.
 		"transcribe.default": {
 			"object": "default",
-			"properties": ["transcribe.model", "transcribe.language", "transcribe.chunk_duration", "transcribe.beam_size", "transcribe.vad_filter", "transcribe.vad_threshold", "transcribe.vad_min_silence_duration_ms", "transcribe.vad_speech_pad_ms", "transcribe.vad_max_speech_duration_s"]
+			"properties": ["transcribe.default.model", "transcribe.language", "transcribe.compute_type", "transcribe.chunk_duration", "transcribe.beam_size", "transcribe.vad_filter", "transcribe.vad_threshold", "transcribe.vad_min_silence_duration_ms", "transcribe.vad_speech_pad_ms", "transcribe.vad_max_speech_duration_s"]
 		},
+		"transcribe.tiny": {
+			"object": "tiny",
+			"properties": ["transcribe.tiny.model", "transcribe.language", "transcribe.compute_type", "transcribe.chunk_duration", "transcribe.beam_size", "transcribe.vad_filter", "transcribe.vad_threshold", "transcribe.vad_min_silence_duration_ms", "transcribe.vad_speech_pad_ms", "transcribe.vad_max_speech_duration_s"]
+		},
+		"transcribe.base": {
+			"object": "base",
+			"properties": ["transcribe.base.model", "transcribe.language", "transcribe.compute_type", "transcribe.chunk_duration", "transcribe.beam_size", "transcribe.vad_filter", "transcribe.vad_threshold", "transcribe.vad_min_silence_duration_ms", "transcribe.vad_speech_pad_ms", "transcribe.vad_max_speech_duration_s"]
+		},
+		"transcribe.small": {
+			"object": "small",
+			"properties": ["transcribe.small.model", "transcribe.language", "transcribe.compute_type", "transcribe.chunk_duration", "transcribe.beam_size", "transcribe.vad_filter", "transcribe.vad_threshold", "transcribe.vad_min_silence_duration_ms", "transcribe.vad_speech_pad_ms", "transcribe.vad_max_speech_duration_s"]
+		},
+		"transcribe.medium": {
+			"object": "medium",
+			"properties": ["transcribe.medium.model", "transcribe.language", "transcribe.compute_type", "transcribe.chunk_duration", "transcribe.beam_size", "transcribe.vad_filter", "transcribe.vad_threshold", "transcribe.vad_min_silence_duration_ms", "transcribe.vad_speech_pad_ms", "transcribe.vad_max_speech_duration_s"]
+		},
+		"transcribe.large-v3": {
+			"object": "large-v3",
+			"properties": ["transcribe.large-v3.model", "transcribe.language", "transcribe.compute_type", "transcribe.chunk_duration", "transcribe.beam_size", "transcribe.vad_filter", "transcribe.vad_threshold", "transcribe.vad_min_silence_duration_ms", "transcribe.vad_speech_pad_ms", "transcribe.vad_max_speech_duration_s"]
+		},
+		// Visible since #2067: it was hidden and enumerated only "default", so five of
+		// the six declared profiles could not be picked from the UI at all. The enum is
+		// generated from preconfig.profiles so a new profile cannot be left out of the
+		// list; the conditional still needs its own entry to attach that profile's group.
 		"transcribe.profile": {
-			"hidden": true,
 			"type": "string",
+			"title": "Model Profile",
+			"description": "Whisper model preset. Each profile keeps its own copy of the settings below, so switching profiles does not disturb another profile's overrides",
 			"default": "default",
-			"enum": [["default", "Default"]],
+			"enum": ["*>preconfig.profiles.*.title"],
 			"conditional": [
 				{
 					"value": "default",
 					"properties": ["transcribe.default"]
+				},
+				{
+					"value": "tiny",
+					"properties": ["transcribe.tiny"]
+				},
+				{
+					"value": "base",
+					"properties": ["transcribe.base"]
+				},
+				{
+					"value": "small",
+					"properties": ["transcribe.small"]
+				},
+				{
+					"value": "medium",
+					"properties": ["transcribe.medium"]
+				},
+				{
+					"value": "large-v3",
+					"properties": ["transcribe.large-v3"]
 				}
 			]
 		}

@@ -323,6 +323,11 @@ jobs:
             packages/client-typescript/src/contract-check.generated.ts \
             packages/client-typescript/contract/index.ts \
             packages/client-typescript/contract/latest.ts
+      - name: credentials catalog is current — no unmapped or stale entries
+        # Equivalent to `./builder nodes:credentials-check`. Fails if a node's
+        # services*.json has a credential-shaped field with no catalog entry,
+        # or an existing catalog entry has gone stale. Never writes.
+        run: node nodes/scripts/gen-credentials.mjs --check
 
   # ---------------------------------------------------------------------------
   #  Gatekeeper — the ONLY job to mark as "Required" in branch protection.

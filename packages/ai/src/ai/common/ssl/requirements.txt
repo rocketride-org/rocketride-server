@@ -1,0 +1,7 @@
+# Requires Python 3.10+ (truststore's floor); the engine ships 3.11+.
+truststore
+
+# Fallback path in ensure(): when truststore cannot be installed or injected,
+# OpenSSL is pointed at certifi's bundle instead. Declared here so that
+# fallback is actually installed rather than relying on a transitive copy.
+certifi

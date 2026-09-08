@@ -48,6 +48,8 @@
  * which `rocketride init` writes.
  */
 
+import process from 'node:process';
+
 import { Command } from 'commander';
 import { loadDotEnv } from './env';
 import { registerAuthCommands } from './commands/auth';

@@ -31,6 +31,11 @@
 			"types": "./dist/types/app-pack/index.d.ts",
 			"import": "./dist/esm/app-pack/index.js",
 			"require": "./dist/cjs/app-pack/index.js"
+		},
+		"./analytics": {
+			"types": "./dist/types/client/analytics/index.d.ts",
+			"import": "./dist/esm/client/analytics/index.js",
+			"require": "./dist/cjs/client/analytics/index.js"
 		}
 	},
 	"files": [

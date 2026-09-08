@@ -183,16 +183,17 @@ class DataMixin(DAPClient):
             response = await self._client.request(request)
 
             if self._client.did_fail(response):
-                msg = response.get('message') or 'Failed to open a data pipe.'
-                msg = (
-                    f'{msg}\n\n'
+                # The server's message stays the message: an application may show
+                # it to an end user. The developer checklist rides along as `hint`
+                # (PipeException.hint), and `code` classifies the failure.
+                response = dict(response)
+                response['message'] = response.get('message') or 'Failed to open a data pipe.'
+                response['hint'] = (
                     'Common causes:\n'
                     "- Pipeline isn't running (wrong token or task terminated)\n"
                     '- Pipeline source must be chat, webhook, or dropper\n'
-                    '- MIME type doesn\'t match the source lane (try `mimetype="text/plain"`)\n'
+                    '- MIME type doesn\'t match the source lane (try `mime_type="text/plain"`)\n'
                 )
-                response = dict(response)
-                response['message'] = msg
                 raise PipeException(response)
 
             self._pipe_id = response.get('body', {}).get('pipe_id')
