@@ -357,9 +357,12 @@ def test_enum_models_undeclared_default_to_adaptive():
     """
     offenders = {}
     for model in _enum_models():
-        if model in EXPECTED_THINKING_SHAPE:
+        # Look the declaration up under the same normalization the builder gates on, so a
+        # vendor-prefixed or mixed-case profile id still matches its declared row.
+        model_gate = gate_model_name(model)
+        if model_gate in EXPECTED_THINKING_SHAPE:
             continue
-        kwargs = build_anthropic_thinking_kwargs(gate_model_name(model), _OUT)
+        kwargs = build_anthropic_thinking_kwargs(model_gate, _OUT)
         if kwargs != {'thinking': _ADAPTIVE}:
             offenders[model] = kwargs
     assert not offenders, (
