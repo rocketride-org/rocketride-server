@@ -146,7 +146,13 @@ jobs:
       # the lockfile silently stopped tracking its inputs while CI stayed green
       # on pull requests. Same action and pin already used by sync-models.yml.
       - name: Open a PR with the regenerated lockfile (develop / weekly / manual)
+        id: pr
         if: ${{ steps.check.outputs.changed == 'true' && github.event_name != 'pull_request' }}
+        # Opening the PR needs a permission the token may not carry, and that is
+        # not a reason to fail the run: the branch push above already succeeded,
+        # so the regenerated lockfile is preserved either way. The step below
+        # turns a refused creation into a warning that says how to finish it.
+        continue-on-error: true
         uses: peter-evans/create-pull-request@22a9089034f40e5a961c8808d113e2c98fb63676 # v7
         with:
           token: ${{ steps.app-token.outputs.token || github.token }}
@@ -167,6 +173,32 @@ jobs:
           labels: |
             automated
             dependencies
+
+      # A refused PR creation leaves the work done and unreachable, which is worse
+      # than either succeeding or failing loudly: the branch carries the lockfile
+      # and nobody knows. Say so, and say what unblocks it.
+      - name: Report a refused PR creation
+        if: ${{ steps.pr.outcome == 'failure' }}
+        env:
+          BRANCH: chore/refresh-node-constraints-lock
+          SERVER: ${{ github.server_url }}
+          REPO: ${{ github.repository }}
+          BASE: ${{ github.ref_name }}
+        run: |
+          echo "::warning::the regenerated lockfile was pushed to ${BRANCH} but the pull request could not be opened - the token lacks pull-requests: write. Open it by hand, or grant the RELEASE_BOT app that permission."
+          {
+            echo "### Lockfile refreshed, PR not opened"
+            echo ""
+            echo "The compile succeeded and \`${BRANCH}\` holds the regenerated lockfile."
+            echo "Creating the pull request was refused with \`Resource not accessible by integration\`,"
+            echo "which means the token used here has no \`pull-requests: write\`."
+            echo ""
+            echo "To finish it now: [open the PR](${SERVER}/${REPO}/compare/${BASE}...${BRANCH}?expand=1)"
+            echo ""
+            echo "To stop it recurring: grant the \`RELEASE_BOT\` GitHub App **Pull requests: read and write**"
+            echo "(and **Issues: read and write**, which \`create-pull-request\` uses for labels), then accept"
+            echo "the permission request on the installation."
+          } >> "${GITHUB_STEP_SUMMARY}"
 
       - name: Note drift on PRs (non-blocking)
         if: ${{ steps.check.outputs.changed == 'true' && github.event_name == 'pull_request' }}
