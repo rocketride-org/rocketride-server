@@ -35,14 +35,17 @@ export interface IViewMenuBadgeProps {
 // =============================================================================
 
 const styles = {
-	// Base pill — sizing and typography shared by both treatments.
+	// Base pill — sizing and typography shared by both treatments. Kept compact
+	// so it reads as a quiet count chip beside a tab label and never crowds the
+	// active tab's 2px underline (the strip gives it the vertical gap).
 	badge: {
-		minWidth: 20,
+		minWidth: 16,
 		textAlign: 'center',
-		padding: '2px 6px',
-		borderRadius: 10,
-		fontSize: 10.5,
+		padding: '1px 5px',
+		borderRadius: 8,
+		fontSize: 10,
 		fontWeight: 700,
+		lineHeight: 1.2,
 	} as CSSProperties,
 
 	// Neutral treatment — a quiet count chip. The 1px --rr-border outline keeps

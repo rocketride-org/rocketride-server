@@ -50,6 +50,10 @@ from slack_sdk.webhook import WebhookClient
 # Hard caps enforced regardless of what the caller requests.
 MAX_CHANNELS = 1000
 MAX_HISTORY_MESSAGES = 200
+# Slack chat.postMessage / incoming-webhook `text` hard maximum (characters).
+# Refuse above this so a single call stays one atomic message and the returned
+# `ts` identifies what the caller sent (see #1831).
+MAX_MESSAGE_TEXT_CHARS = 40_000
 
 # Per-request page size for cursor pagination (Slack recommends <= 200).
 _PAGE_SIZE = 200
@@ -309,12 +313,17 @@ class SlackClient:
             that channel/thread arguments were ignored.
 
         Raises:
-            ValueError: On missing/empty ``text`` or missing ``channel`` in
-                token mode.
+            ValueError: On missing/empty ``text``, ``text`` longer than
+                ``MAX_MESSAGE_TEXT_CHARS``, or missing ``channel`` in token mode.
             SlackError: Typed error on API failure.
         """
         if not isinstance(text, str) or not text.strip():
             raise ValueError('text must not be empty')
+        if len(text) > MAX_MESSAGE_TEXT_CHARS:
+            raise ValueError(
+                f'text exceeds Slack limit of {MAX_MESSAGE_TEXT_CHARS} characters '
+                f'({len(text)} given); shorten the message so it posts atomically'
+            )
 
         if self._webhook is not None:
             return self._post_via_webhook(text)

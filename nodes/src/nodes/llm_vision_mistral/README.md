@@ -23,7 +23,7 @@ All requests are sent with **temperature 0.0** for deterministic output. Transie
 
 On the `image` lane, incoming image bytes are buffered across chunks, base64-encoded with the source MIME type, and sent to the model together with the configured analysis prompt. The answer is written downstream as text.
 
-On the `documents` lane, only documents of type `Image` are processed. Documents with a different type, or an `Image` document with empty content, are skipped with a warning. The document's `page_content` is expected to be base64-encoded PNG (the frame grabber always outputs PNG). Each answer is emitted as a `Text` document that preserves the original metadata (`chunkId`, `time_stamp`, etc.). If inference fails for a chunk, a warning is logged and processing continues with the next document.
+On the `documents` lane, only documents of type `Image` are processed. Documents with a different type, or an `Image` document with empty content, are skipped with a warning. The document's `page_content` is expected to be base64-encoded PNG (the frame grabber always outputs PNG). Each answer is emitted as a `Text` document that preserves the original metadata (`chunkId`, `time_stamp`, etc.). The original `Image` documents do not flow downstream. If inference fails for a chunk, a warning is logged and processing continues with the next document.
 
 ### Fields
 

@@ -126,7 +126,7 @@
 			"title": "Model",
 			"description": "Perplexity AI model",
 			"type": "string",
-			"default": "sonar-pro",
+			"default": "sonar",
 			"enum": [
 				"*>preconfig.profiles.*.title"
 			],

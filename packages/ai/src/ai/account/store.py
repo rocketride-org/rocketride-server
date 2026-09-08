@@ -242,6 +242,25 @@ class IStore(ABC):
         content = await self.read_file(filename)
         return content.encode('latin-1')
 
+    async def move_file(self, src: str, dst: str) -> None:
+        """
+        Move a file onto ``dst``, replacing it if it exists.
+
+        Backends override this with a native primitive that leaves the destination alone
+        until the new content is in place and never routes the bytes through this process.
+        This fallback has neither property — it exists for backends without one.
+
+        Args:
+            src: Relative path to move from
+            dst: Relative path to move onto
+
+        Raises:
+            StorageError: If the source is missing or the move fails
+        """
+        data = await self.read_bytes(src)
+        await self.write_bytes(dst, data)
+        await self.delete_file(src)
+
     # =========================================================================
     # Handle-Based I/O — open / read / write / close
     # =========================================================================

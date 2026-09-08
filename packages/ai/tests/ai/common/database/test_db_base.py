@@ -35,6 +35,8 @@ from sqlalchemy import (
 
 from ai.common.database.db_global_base import DatabaseGlobalBase
 from ai.common.database.db_instance_base import DatabaseInstanceBase
+from ai.common.schema import Question
+from ai.common.utils import parse_bool
 
 
 # ---------------------------------------------------------------------------
@@ -216,6 +218,210 @@ def test_sanitize_row_list_input():
 def test_sanitize_row_scalar_input():
     """A scalar value is sanitized directly (not wrapped in a list)."""
     assert DatabaseInstanceBase._sanitize_row(42) == 42
+
+
+# ---------------------------------------------------------------------------
+# _buildSQLQuery (EXPLAIN exhaustion + isValid parsing) — regression for #1601
+# ---------------------------------------------------------------------------
+
+
+class _TestableInstance(DatabaseInstanceBase):
+    """Concrete DatabaseInstanceBase that satisfies the two abstract methods."""
+
+    def _db_display_name(self):
+        """Human-readable name used in tool descriptions."""
+        return 'TestDB'
+
+    def _db_dialect(self):
+        """Machine-readable dialect identifier."""
+        return 'testdb'
+
+
+class _FakeGlobal:
+    """Stub IGlobal: every EXPLAIN attempt rejects the query."""
+
+    def __init__(self, max_attempts=2, explain_error='syntax error near FROM'):
+        self.max_validation_attempts = max_attempts
+        self._explain_error = explain_error
+
+    def _validateQuery(self, sql):
+        return False, self._explain_error
+
+
+def _sql_instance(fake_global):
+    inst = _TestableInstance.__new__(_TestableInstance)
+    inst.IGlobal = fake_global
+    return inst
+
+
+def test_build_sql_query_marks_invalid_after_explain_exhaustion():
+    """Every EXPLAIN attempt failing must flip isValid to False, not leave the LLM's 'true'.
+
+    Before the fix, exhaustion returned the last LLM response unchanged, so
+    get_sql/get_data/writeQuestions executed a statement the database had
+    already refused on every attempt.
+    """
+    inst = _sql_instance(_FakeGlobal())
+    inst._buildSQLQueryOnce = lambda question_text, *, limit, previous_sql, error: {
+        'isValid': 'true',
+        'query': 'SELECT * FROM users',
+    }
+
+    result = inst._buildSQLQuery('all users')
+
+    assert parse_bool(result.get('isValid')) is False
+    assert result.get('error')  # the EXPLAIN error is carried for the caller
+
+
+def test_build_sql_query_accepts_real_json_bool_isvalid():
+    """A real JSON bool from the LLM must not crash isValid parsing.
+
+    Before the fix, `result.get('isValid', '').lower()` raised AttributeError
+    the moment the LLM returned a real bool instead of the string 'true'.
+    """
+    fake_global = _FakeGlobal()
+    fake_global._validateQuery = lambda sql: (True, None)
+    inst = _sql_instance(fake_global)
+    inst._buildSQLQueryOnce = lambda question_text, *, limit, previous_sql, error: {
+        'isValid': True,  # real bool, not the string 'true'
+        'query': 'SELECT 1',
+    }
+
+    result = inst._buildSQLQuery('anything')  # must not raise AttributeError
+
+    assert parse_bool(result.get('isValid')) is True
+
+
+def test_get_sql_surfaces_explain_error_not_rejected_sql():
+    """get_sql() must return the EXPLAIN error, not the rejected SQL as prose.
+
+    Before this fix, the invalid branch always returned {'answer': sql_query,
+    'valid': False}, so a caller could not tell an EXPLAIN rejection (rejected
+    SQL text) apart from a genuinely off-topic question (LLM prose answer).
+    """
+    fake_global = _FakeGlobal(explain_error='column "userz" does not exist')
+    inst = _sql_instance(fake_global)
+    inst._buildSQLQueryOnce = lambda question_text, *, limit, previous_sql, error: {
+        'isValid': 'true',
+        'query': 'SELECT * FROM userz',
+    }
+
+    result = inst.get_sql({'question': 'all users'})
+
+    assert result == {'error': 'column "userz" does not exist', 'valid': False}
+
+
+class _FakeInstance:
+    """Minimal stand-in for IFilterInstance: records what each lane receives."""
+
+    def __init__(self, lanes):
+        self._lanes = lanes
+        self.text_written = None
+        self.table_written = None
+        self.answer_written = None
+
+    def getListeners(self):
+        return list(self._lanes)
+
+    def writeText(self, text):
+        self.text_written = text
+
+    def writeTable(self, markdown):
+        self.table_written = markdown
+
+    def writeAnswers(self, answer):
+        self.answer_written = answer
+
+
+@pytest.mark.parametrize('is_valid_value', [True, 'true'])
+def test_write_questions_surfaces_explain_error_not_rejected_sql(is_valid_value):
+    """writeQuestions() must report the EXPLAIN error on text/answer lanes, not the rejected SQL.
+
+    Mirrors the get_sql() fix: writeQuestions() has its own separate fallback
+    path (db_instance_base.py) that must not regress to emitting the rejected
+    SQL as if it were the LLM's prose answer. Parametrized over a real JSON
+    boolean and the string 'true' so a regression in isValid parsing inside
+    this specific caller would also be caught.
+    """
+    fake_global = _FakeGlobal(explain_error='syntax error near FROM')
+    inst = _sql_instance(fake_global)
+    inst._buildSQLQueryOnce = lambda question_text, *, limit, previous_sql, error: {
+        'isValid': is_valid_value,
+        'query': 'SELECT * FROM',
+    }
+    fake_instance = _FakeInstance(lanes=['text', 'answers'])
+    inst.instance = fake_instance
+
+    question = Question()
+    question.addQuestion('all users')
+
+    inst.writeQuestions(question)
+
+    assert fake_instance.text_written == 'syntax error near FROM'
+    assert fake_instance.answer_written.getJson() == {'error': 'syntax error near FROM'}
+
+
+@pytest.mark.parametrize('is_valid_value', [True, 'true'])
+def test_write_questions_executes_query_when_valid(is_valid_value):
+    """writeQuestions() must execute and emit results when EXPLAIN accepts the
+    query on the first attempt, for both a real JSON boolean and the string
+    'true'.
+
+    The EXPLAIN-exhaustion test above always ends with isValid forced to
+    False by _buildSQLQuery, so it can't distinguish True from 'true' -- both
+    parametrized cases hit the same overwritten value. This test exercises
+    the success path instead, where EXPLAIN accepts the query immediately and
+    the LLM's isValid value passes through _buildSQLQuery unchanged.
+    """
+    fake_global = _FakeGlobal()
+    fake_global._validateQuery = lambda sql: (True, None)  # EXPLAIN accepts it first try
+    inst = _sql_instance(fake_global)
+    inst._buildSQLQueryOnce = lambda question_text, *, limit, previous_sql, error: {
+        'isValid': is_valid_value,
+        'query': 'SELECT 1',
+    }
+    inst._executeSQLQuery = lambda sql: [{'answer': 42}]
+    fake_instance = _FakeInstance(lanes=['text'])
+    inst.instance = fake_instance
+
+    question = Question()
+    question.addQuestion('the answer')
+
+    inst.writeQuestions(question)
+
+    assert fake_instance.text_written == str([{'answer': 42}])
+
+
+def test_write_questions_emits_error_for_unsafe_sql_not_as_data():
+    """writeQuestions() must emit unsafe SQL as an error, not as formatted table/answer data.
+
+    Regression for the partial mirror caught in review: is_valid_query alone
+    doesn't mean the query ran. When the LLM claims isValid=true but the SQL
+    fails the safety gate, the old code still let the rejected SQL fall
+    through to _formatResultAsMarkdown on the table/answers lanes -- keyed off
+    is_valid_query rather than whether anything was actually executed -- so
+    the rejected SQL went out dressed up as a one-cell table of "data". Also
+    asserts the table lane stayed silent -- the test name promises that, but
+    _FakeInstance.writeTable() previously discarded its argument instead of
+    recording it, so a regression here would have passed unnoticed.
+    """
+    fake_global = _FakeGlobal()
+    inst = _sql_instance(fake_global)
+    inst._buildSQLQueryOnce = lambda question_text, *, limit, previous_sql, error: {
+        'isValid': 'true',
+        'query': 'DELETE FROM users',
+    }
+    fake_instance = _FakeInstance(lanes=['text', 'table', 'answers'])
+    inst.instance = fake_instance
+
+    question = Question()
+    question.addQuestion('delete all users')
+
+    inst.writeQuestions(question)
+
+    assert fake_instance.text_written == 'Generated query contains unsafe SQL'
+    assert fake_instance.answer_written.getJson() == {'error': 'Generated query contains unsafe SQL'}
+    assert fake_instance.table_written is None
 
 
 # ---------------------------------------------------------------------------

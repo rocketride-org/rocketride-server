@@ -37,6 +37,7 @@ import { LogApi } from './log.js';
 import {
 	AuthenticationException,
 	ConnectionException,
+	DAPException,
 	LoginAttemptCancelledError,
 	type LoginAttemptCancellationReason,
 	PipeException,
@@ -147,9 +148,11 @@ export class DataPipe {
 		const response = await this._client.request(request);
 
 		if (this._client.didFail(response)) {
-			const base = response.message || 'Failed to open a data pipe.';
-			const msg = `${base}\n\n` + 'Common causes:\n' + "- Pipeline isn't running (wrong token or task terminated)\n" + '- Pipeline source must be chat, webhook, or dropper\n' + "- MIME type doesn't match the source lane (try mimeType='text/plain')\n";
-			throw new PipeException({ ...response, message: msg });
+			// The server's message stays the message: an application may show it to
+			// an end user. The developer checklist rides along as `hint`
+			// (PipeException.hint), and `code` classifies the failure.
+			const hint = 'Common causes:\n' + "- Pipeline isn't running (wrong token or task terminated)\n" + '- Pipeline source must be chat, webhook, or dropper\n' + "- MIME type doesn't match the source lane (try mimeType='text/plain')\n";
+			throw new PipeException({ ...response, message: response.message || 'Failed to open a data pipe.', hint });
 		}
 
 		this._pipeId = response.body?.pipe_id as number | undefined;
@@ -1951,7 +1954,10 @@ export class RocketRideClient extends DAPClient {
 				}
 			}
 		} catch (error) {
-			// Return error response in standard format
+			// A typed SDK exception carries `code` and `hint` a caller can act on;
+			// rewrapping it as a plain Error would throw that away. Anything else
+			// is normalised to an Error as before.
+			if (error instanceof DAPException) throw error;
 			throw new Error(error instanceof Error ? error.message : String(error));
 		}
 	}

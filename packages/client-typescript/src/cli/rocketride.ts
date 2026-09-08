@@ -70,7 +70,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as glob from 'glob';
-import * as process from 'process';
+import process from 'node:process';
 import { Command } from 'commander';
 import { RocketRideClient } from '../client/client';
 import { DAPMessage, PipelineConfig, UPLOAD_RESULT } from '../client/types';
@@ -894,6 +894,7 @@ export class RocketRideCLI {
 					...options,
 					pipeline: options.pipeline,
 					threads: parseInt(options.threads),
+					pipeline_args: options.args,
 				};
 				this.uri = options.uri;
 
@@ -1305,7 +1306,7 @@ export class RocketRideCLI {
 			this.monitor.setCommandStatus(['Connected to server', 'Starting pipeline execution...']);
 			this.monitor.draw();
 
-			const taskToken = await this.client!.use({
+			const { token: taskToken } = await this.client!.use({
 				pipeline: pipelineData,
 				threads: this.args.threads,
 				token: this.args.token,

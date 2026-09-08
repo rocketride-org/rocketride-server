@@ -18,7 +18,7 @@ import { LANE_RENDERERS } from './render_final';
 import { isAudio } from './render_audio';
 import { isVideo } from './render_video';
 import { isImage } from './render_image';
-import { JsonTree } from '../JsonTree';
+import { JsonTree } from '../../json-tree';
 
 type Lane = 'image' | 'audio' | 'video';
 const LANES: Lane[] = ['image', 'audio', 'video'];

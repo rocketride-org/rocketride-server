@@ -89,6 +89,15 @@ class BaseLoader:
         This is only needed for local mode; remote mode never imports
         the actual ML libraries.
         """
+        # Patch the default SSL context to use the OS trust store before any
+        # HTTPS weight download. Idempotent and process-global, so it runs on
+        # every local-mode load() regardless of this loader's requirements, and
+        # before the per-class guard below. Remote-mode dispatch never reaches
+        # here, so it no longer pays for an injection it doesn't use.
+        from ai.common.ssl import ensure as _ensure_ssl
+
+        _ensure_ssl()
+
         if cls._dependencies_loaded or not cls._REQUIREMENTS_FILE:
             return
 

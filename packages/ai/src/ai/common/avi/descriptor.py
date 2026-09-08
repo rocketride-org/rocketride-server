@@ -320,6 +320,47 @@ def inherited_or_derived_name(descriptor: Optional[Doc], *, ext: str) -> Optiona
     return inherited or derived_name(descriptor, ext=ext)
 
 
+def _media_begin_payload(
+    descriptor: Optional[Doc],
+    *,
+    size: Optional[int],
+    origin: str,
+    name: Optional[str],
+    **detail: Any,
+) -> bytes:
+    """Assemble a media ``BEGIN`` enrichment payload — the shape shared by all three lanes.
+
+    Top level describes the stream being emitted, the input's provenance is projected and
+    nested under ``source`` (so an existing chain nests to any depth), and ``name`` labels
+    this hop's output. Absent fields are omitted, which is what keeps the C++ merge clean:
+    it fills only keys the producer did not supply.
+
+    Args:
+        descriptor: The input stream descriptor to project as ``source``, or None.
+        size: The emitted stream's byte length. Omitted when None — a producer that streams
+            its bytes cannot know the total before the first one goes out.
+        origin: How the stream entered this hop.
+        name: The output's name (omitted when None).
+        **detail: Lane-specific media fields (``duration``, ``fps``, ``channels``, ...).
+            None values are skipped.
+
+    Returns:
+        bytes: UTF-8 JSON enrichment for the media ``BEGIN``.
+    """
+    payload: dict = {'origin': origin}
+    if size is not None:
+        payload['size'] = size
+    for key, value in detail.items():
+        if value is not None:
+            payload[key] = value
+    source = source_media_detail(descriptor)
+    if source:
+        payload['source'] = source
+    if name:
+        payload['name'] = name
+    return json.dumps(payload).encode('utf-8')
+
+
 def image_begin_payload(
     descriptor: Optional[Doc],
     *,
@@ -351,17 +392,7 @@ def image_begin_payload(
     Returns:
         bytes: UTF-8 JSON enrichment for the image ``BEGIN``.
     """
-    payload = {'origin': origin, 'size': size}
-    if width is not None:
-        payload['width'] = width
-    if height is not None:
-        payload['height'] = height
-    detail = source_media_detail(descriptor)
-    if detail:
-        payload['source'] = detail
-    if name:
-        payload['name'] = name
-    return json.dumps(payload).encode('utf-8')
+    return _media_begin_payload(descriptor, size=size, origin=origin, name=name, width=width, height=height)
 
 
 def forward_enriched_image(
@@ -399,6 +430,195 @@ def forward_enriched_image(
     instance.writeImage(AVI_ACTION.BEGIN, mime, payload)
     instance.writeImage(AVI_ACTION.WRITE, mime, image_bytes)
     instance.writeImage(AVI_ACTION.END, mime)
+
+
+# ---------------------------------------------------------------------------
+# Audio / video producers
+#
+# The image lane has declared its stream size since frame_grabber shipped; the
+# other two never had a helper, so their producers send a bare BEGIN and the C++
+# fills `size` in from the *source object's* Entry.size. For a synthesized stream
+# — text-to-speech, a composed video — that number describes the input, not the
+# output, and a consumer comparing bytes against it concludes the stream was
+# truncated. These give those producers the same way to state what they are
+# about to send.
+#
+# `size` is optional here, unlike on the image lane: a producer that streams its
+# bytes from a provider cannot know the total before the first one goes out, and
+# omitting the key is honest where guessing is not. `origin` defaults to
+# 'generated' rather than 'extracted' — these producers synthesize or ingest,
+# they do not extract from a container.
+# ---------------------------------------------------------------------------
+
+
+def audio_begin_payload(
+    descriptor: Optional[Doc],
+    *,
+    size: Optional[int] = None,
+    duration: Optional[float] = None,
+    sample_rate: Optional[int] = None,
+    channels: Optional[int] = None,
+    format: Optional[str] = None,
+    name: Optional[str] = None,
+    origin: str = 'generated',
+) -> bytes:
+    """Build the AudioStream ``BEGIN`` enrichment for an audio stream this node produces.
+
+    Args:
+        descriptor: The input stream descriptor to project as ``source``, or None.
+        size: The emitted clip's byte length; omit when the bytes are still streaming.
+        duration: Playing time in seconds (omitted when None).
+        sample_rate: Samples per second (omitted when None).
+        channels: Channel count (omitted when None).
+        format: Container/codec short name, e.g. ``'wav'`` (omitted when None).
+        name: The output's name (omitted when None).
+        origin: How the audio entered this hop; defaults to ``'generated'``.
+
+    Returns:
+        bytes: UTF-8 JSON enrichment for the audio ``BEGIN``.
+    """
+    return _media_begin_payload(
+        descriptor,
+        size=size,
+        origin=origin,
+        name=name,
+        duration=duration,
+        sample_rate=sample_rate,
+        channels=channels,
+        format=format,
+    )
+
+
+def video_begin_payload(
+    descriptor: Optional[Doc],
+    *,
+    size: Optional[int] = None,
+    duration: Optional[float] = None,
+    fps: Optional[float] = None,
+    width: Optional[int] = None,
+    height: Optional[int] = None,
+    name: Optional[str] = None,
+    origin: str = 'generated',
+) -> bytes:
+    """Build the VideoStream ``BEGIN`` enrichment for a video stream this node produces.
+
+    Args:
+        descriptor: The input stream descriptor to project as ``source``, or None.
+        size: The emitted video's byte length; omit when the bytes are still streaming.
+        duration: Playing time in seconds (omitted when None).
+        fps: Frames per second (omitted when None).
+        width: Frame width in pixels (omitted when None).
+        height: Frame height in pixels (omitted when None).
+        name: The output's name (omitted when None).
+        origin: How the video entered this hop; defaults to ``'generated'``.
+
+    Returns:
+        bytes: UTF-8 JSON enrichment for the video ``BEGIN``.
+    """
+    return _media_begin_payload(
+        descriptor,
+        size=size,
+        origin=origin,
+        name=name,
+        duration=duration,
+        fps=fps,
+        width=width,
+        height=height,
+    )
+
+
+def forward_enriched_audio(
+    instance: Any,
+    descriptor: Optional[Doc],
+    mime: str,
+    audio_bytes: bytes,
+    *,
+    duration: Optional[float] = None,
+    sample_rate: Optional[int] = None,
+    channels: Optional[int] = None,
+    format: Optional[str] = None,
+    name: Optional[str] = None,
+    origin: str = 'generated',
+) -> None:
+    """Emit a whole audio clip as one enriched stream.
+
+    For a producer holding the complete clip in memory, which is every audio producer
+    today. One that writes in chunks builds the payload with :func:`audio_begin_payload`
+    and drives the triplet itself.
+
+    Unlike the image equivalent this derives no ``name``: these producers have no inbound
+    stream descriptor to derive one from, so a caller that wants a name passes it.
+
+    Args:
+        instance: Anything exposing ``writeAudio`` — a node's ``self.instance``, or a pipe.
+        descriptor: The input stream descriptor to nest as ``source``, or None.
+        mime: The audio MIME type, e.g. ``'audio/wav'``.
+        audio_bytes: The complete encoded clip.
+        duration: Playing time in seconds.
+        sample_rate: Samples per second.
+        channels: Channel count.
+        format: Container/codec short name.
+        name: The output's name.
+        origin: How the audio entered this hop; defaults to ``'generated'``.
+    """
+    payload = audio_begin_payload(
+        descriptor,
+        size=len(audio_bytes),
+        duration=duration,
+        sample_rate=sample_rate,
+        channels=channels,
+        format=format,
+        name=name,
+        origin=origin,
+    )
+    instance.writeAudio(AVI_ACTION.BEGIN, mime, payload)
+    instance.writeAudio(AVI_ACTION.WRITE, mime, audio_bytes)
+    instance.writeAudio(AVI_ACTION.END, mime)
+
+
+def forward_enriched_video(
+    instance: Any,
+    descriptor: Optional[Doc],
+    mime: str,
+    video_bytes: bytes,
+    *,
+    duration: Optional[float] = None,
+    fps: Optional[float] = None,
+    width: Optional[int] = None,
+    height: Optional[int] = None,
+    name: Optional[str] = None,
+    origin: str = 'generated',
+) -> None:
+    """Emit a whole video as one enriched stream.
+
+    The counterpart to :func:`forward_enriched_audio`; a producer that writes the video in
+    chunks uses :func:`video_begin_payload` and drives the triplet itself.
+
+    Args:
+        instance: Anything exposing ``writeVideo`` — a node's ``self.instance``, or a pipe.
+        descriptor: The input stream descriptor to nest as ``source``, or None.
+        mime: The video MIME type, e.g. ``'video/mp4'``.
+        video_bytes: The complete encoded video.
+        duration: Playing time in seconds.
+        fps: Frames per second.
+        width: Frame width in pixels.
+        height: Frame height in pixels.
+        name: The output's name.
+        origin: How the video entered this hop; defaults to ``'generated'``.
+    """
+    payload = video_begin_payload(
+        descriptor,
+        size=len(video_bytes),
+        duration=duration,
+        fps=fps,
+        width=width,
+        height=height,
+        name=name,
+        origin=origin,
+    )
+    instance.writeVideo(AVI_ACTION.BEGIN, mime, payload)
+    instance.writeVideo(AVI_ACTION.WRITE, mime, video_bytes)
+    instance.writeVideo(AVI_ACTION.END, mime)
 
 
 def attach_source(metadata: DocMetadata, descriptor: Optional[Doc]) -> DocMetadata:

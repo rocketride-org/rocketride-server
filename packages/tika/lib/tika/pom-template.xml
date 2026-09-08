@@ -79,6 +79,28 @@
 			<artifactId>commons-lang3</artifactId>
 			<version>3.19.0</version>
 		</dependency>
+		<!-- 7-Zip-JBinding: replaces Tika's junrar-based RarParser with a
+			RAR4+RAR5 capable parser. The all-platforms artifact bundles the
+			win/linux/mac native libraries inside the jar; SevenZip extracts
+			and loads the right one at runtime.
+
+			Security note: 16.02-2.01 is the last published release (2016) and
+			wraps a frozen 7-Zip 16.02 native core that parses untrusted input
+			via JNI, so it will not receive upstream CVE patches. This is the
+			same accept-and-document posture the module already takes for its
+			other native dependencies (bundled JPEG2000, native SQLite, the JNI
+			engine bridge); RAR support is gated behind Tika's media-type
+			detection and runs in the sandboxed Tika worker. -->
+		<dependency>
+			<groupId>net.sf.sevenzipjbinding</groupId>
+			<artifactId>sevenzipjbinding</artifactId>
+			<version>16.02-2.01</version>
+		</dependency>
+		<dependency>
+			<groupId>net.sf.sevenzipjbinding</groupId>
+			<artifactId>sevenzipjbinding-all-platforms</artifactId>
+			<version>16.02-2.01</version>
+		</dependency>
 		<!-- log4j jar's are excluded by tika-parser/pom.xml; include 
 			them here (see tika-app/pom.xml for log4j dependencies and tika-parent/pom.xml for versions) -->
 		<dependency>

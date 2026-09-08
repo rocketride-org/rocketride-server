@@ -320,6 +320,15 @@ const contractActions = [
 			}),
 		},
 		{
+			name: 'shell:regen-derived-run',
+			action: () => ({
+				run: async (ctx, task) => {
+					const script = path.join(APP_ROOT, 'scripts', 'freeze-shell-api.js');
+					await execCommand('node', [script, '--regen-derived'], { task, cwd: APP_ROOT });
+				},
+			}),
+		},
+		{
 			// Freeze the shell-api contract: bundle src/api.ts into the next
 			// packages/shell/contract/versions/vN and regenerate the conformance file.
 			name: 'shell:freeze',
@@ -341,14 +350,26 @@ const contractActions = [
 		{
 			// RESET to a fresh v0: drops every frozen version and re-mints v0
 			// from the CURRENT live surface (pre-1.0 policy — intentional
-			// breaking changes collapse the contract history). CI pairs this
-			// with `git diff --exit-code` on the generated files: a committed
-			// contract that disagrees with the live surface — including a
-			// hand-edited floor or version file — fails the diff.
+			// breaking changes collapse the contract history). A deliberate,
+			// local-only action; CI's tamper guard runs shell:regen-derived,
+			// which never drops a frozen version.
 			name: 'shell:regen',
 			action: () => ({
 				description: 'Recreate the v0 shell-api freeze from the live surface (contract reset)',
 				steps: ['client-typescript:build', 'shell:regen-run'],
+			}),
+		},
+		{
+			// Rebuild the derived files (contract barrels, conformance floors,
+			// apiver) from the immutable versions/*.d.ts. On a clean tree this
+			// is a byte-level no-op, so CI pairs it with `git diff --exit-code`
+			// to prove the committed derived files were not hand-edited. No
+			// `client-typescript:build` prerequisite: derived regeneration only
+			// parses the frozen snapshots — no tsc, nothing from the live surface.
+			name: 'shell:regen-derived',
+			action: () => ({
+				description: 'Rebuild derived contract files from the frozen versions (no reset)',
+				steps: ['shell:regen-derived-run'],
 			}),
 		},
 ];

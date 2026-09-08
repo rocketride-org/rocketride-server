@@ -8,6 +8,8 @@ Reads text and uses a connected LLM to extract a dictionary of domain-specific t
 
 Both plain text and table content are handled the same way: each incoming chunk is sent to the LLM with a structured prompt (`expectJson: true`), the LLM returns a single JSON array of definitions, and the node writes one output document per definition. Output documents are stamped with an incrementing `chunkId` (reset for each input object) and marked as non-table content (`isTable: false`, `tableId: 0`).
 
+If the LLM response is valid JSON but is not an array, the node raises a descriptive `ValueError` before emitting any documents. Invalid JSON continues to surface the response parsing error.
+
 The node has no Python package requirements of its own: it relies entirely on the separately installed AI module.
 
 ---

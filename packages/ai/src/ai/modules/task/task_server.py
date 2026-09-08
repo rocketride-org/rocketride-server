@@ -66,12 +66,15 @@ Central orchestration server managing:
 """
 
 import time
+import errno
+import socket
+import sys
 import asyncio
 import uuid
 from typing import List
 from fastapi import WebSocket
 from dataclasses import dataclass
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Set
 from ai.constants import (
     CONST_CLEANUP_DELAY_TIME,
     CONST_CLEANUP_SLEEP_TIME,
@@ -87,7 +90,7 @@ from ai.account.models import AccountInfo, resolve_task_permissions
 from ai.account.store import Store
 from .task_conn import TaskConn
 from .task_engine import Task
-from .types import LAUNCH_TYPE
+from .types import LAUNCH_TYPE, TaskError
 from .pipeline import resolve_implied_source
 from .commands.cmd_monitor import owner_key
 
@@ -154,6 +157,34 @@ class TASK_CONTROL:
         value — never by the attribution teamId of a dev run.
         """
         return self.teamId if self.run_kind == 'deploy' else self.userId
+
+
+def _apply_source_defaults(pipeline: Dict[str, Any], source: str) -> Dict[str, Any]:
+    """
+    Fill in the fields a launch stamps on a pipeline, so two copies compare equal.
+
+    ``start_task`` writes the resolved source onto the pipeline and gives the
+    source component an empty config when it has none. A pipeline stored without
+    those looks different from the same pipeline after a launch, which turns a
+    useExisting comparison into a false "differs".
+
+    Args:
+        pipeline: The pipeline to normalise, mutated in place.
+        source: The resolved source component id.
+
+    Returns:
+        The same pipeline.
+
+    Raises:
+        ValueError: If the source component is not in the components list.
+    """
+    pipeline['source'] = source
+    for component in pipeline.get('components', []):
+        if component.get('id') == source:
+            if 'config' not in component:
+                component['config'] = {}
+            return pipeline
+    raise ValueError(f'Pipeline source component "{source}" not found in components list')
 
 
 class TaskServer(DAPBase):
@@ -228,6 +259,12 @@ class TaskServer(DAPBase):
 
         # Global port allocation tracking
         self._allocated_ports: List[int] = []
+
+        # Ports the operating system refuses to bind — Windows exclusion ranges,
+        # POSIX privileged ports. Re-probing them cannot change the answer while
+        # this process lives, so the verdict is kept. Ports merely held by
+        # another socket are deliberately not remembered: that owner can exit.
+        self._reserved_ports: Set[int] = set()
 
         # Shared store instance (lazy-loaded via property)
 
@@ -581,7 +618,9 @@ class TaskServer(DAPBase):
             authorization (str): Authentication key
 
         Raises:
-            ValueError: If task doesn't exist
+            TaskError: Code TASK_NOT_REGISTERED if the key names no live task.
+                Subclasses RuntimeError; these two branches raised ValueError
+                before task errors carried codes.
         """
         if authorization.startswith('pk_'):
             for control in self._task_control.values():
@@ -591,7 +630,7 @@ class TaskServer(DAPBase):
                         control,
                         ['task.data'],
                     )
-            raise ValueError('Your pipeline is not running')
+            raise TaskError(TaskError.NOT_REGISTERED, 'Your pipeline is not running')
 
         if authorization.startswith('tk_'):
             control = self._task_control.get(authorization)
@@ -601,7 +640,7 @@ class TaskServer(DAPBase):
                     control,
                     ['task.control', 'task.data', 'task.monitor', 'task.debug', 'task.store'],
                 )
-            raise ValueError('Your pipeline is not running')
+            raise TaskError(TaskError.NOT_REGISTERED, 'Your pipeline is not running')
 
         # Not a task key — delegate to account layer
         return None
@@ -664,7 +703,7 @@ class TaskServer(DAPBase):
                     and control.source == source
                 ):
                     return _verify(control)
-            raise RuntimeError('Your pipeline is not running')
+            raise TaskError(TaskError.NOT_REGISTERED, 'Your pipeline is not running')
 
         # Dev scope: the caller's own run — unique per user by construction.
         if account_info is not None:
@@ -676,7 +715,7 @@ class TaskServer(DAPBase):
                     and control.source == source
                 ):
                     return _verify(control)
-            raise RuntimeError('Your pipeline is not running')
+            raise TaskError(TaskError.NOT_REGISTERED, 'Your pipeline is not running')
 
         # Legacy unscoped scan (OSS single-user / HTTP fallback): tolerate a
         # unique match; refuse to guess between several runs.
@@ -688,8 +727,8 @@ class TaskServer(DAPBase):
         if len(matches) == 1:
             return matches[0]
         if matches:
-            raise RuntimeError('Multiple pipelines are running for this project; specify a scope')
-        raise RuntimeError('Your pipeline is not running')
+            raise TaskError(TaskError.AMBIGUOUS, 'Multiple pipelines are running for this project; specify a scope')
+        raise TaskError(TaskError.NOT_REGISTERED, 'Your pipeline is not running')
 
     def get_task_control_by_public_key(self, public_auth: str) -> TASK_CONTROL:
         """
@@ -702,7 +741,7 @@ class TaskServer(DAPBase):
             TASK_CONTROL: Complete task control structure with metadata and references
 
         Raises:
-            ValueError: If task doesn't exist
+            TaskError: Code TASK_NOT_REGISTERED if the key names no live task
         """
         # Look for it
         for control in self._task_control.values():
@@ -710,7 +749,7 @@ class TaskServer(DAPBase):
                 return control
 
         # Couldn't find it
-        raise RuntimeError('Your pipeline is not running')
+        raise TaskError(TaskError.NOT_REGISTERED, 'Your pipeline is not running')
 
     def get_task_control(
         self,
@@ -734,7 +773,7 @@ class TaskServer(DAPBase):
 
         control = self._task_control.get(token, None)
         if not control:
-            raise RuntimeError('Your pipeline is not running')
+            raise TaskError(TaskError.NOT_REGISTERED, 'Your pipeline is not running')
 
         # Resolve against the TASK'S team (the old resolve_team_permissions
         # call raised on foreign teams instead of denying uniformly).
@@ -764,7 +803,8 @@ class TaskServer(DAPBase):
             Task: The authenticated task instance ready for operations
 
         Raises:
-            ValueError: If task doesn't exist
+            ValueError: If token is not specified
+            TaskError: Code TASK_NOT_REGISTERED if the token names no live task
 
         Usage:
         This method is the primary way to access task instances throughout
@@ -779,22 +819,109 @@ class TaskServer(DAPBase):
 
     def assign_port(self) -> int:
         """
-        Allocate available port from managed pool.
+        Allocate an available port from the managed pool.
+
+        Returns the first port in the window that is neither already handed out
+        nor rejected by a bind probe, so the child that receives the number on
+        its command line can actually listen on it. OS-forbidden ports are
+        cached; ports merely held by another socket are re-probed every call.
+
+        Two consequences of probing without SO_REUSEADDR: on POSIX a port still
+        in TIME_WAIT reads as in-use even though the child could bind it, so a
+        just-released port is not handed straight back; and the sweep runs
+        synchronously on the event loop, one socket()/bind()/close() per
+        candidate. Both are acceptable at this window size.
 
         Returns:
-            Available port number (base_port to base_port+9999 range)
+            int: An available port number inside the configured window.
 
         Raises:
-            RuntimeError: If no ports available
+            RuntimeError: If no port in the window can be bound. The message
+                names whichever cause accounts for most of the window.
         """
         base_port = self._config.get('base_port', 20000)
-        # Search for available port
-        for port in range(base_port, base_port + 10000):
-            if port not in self._allocated_ports:
-                self._allocated_ports.append(port)
-                return port
 
-        raise RuntimeError(f'No available ports in the range {base_port}-{base_port + 9999}')
+        # Port 0 means "any ephemeral port" to bind(), so it always probes free.
+        # Above 65535 bind() raises OverflowError, not OSError.
+        first_port = max(base_port, 1)
+        last_port = min(base_port + 9999, 65535)
+
+        # Windows exclusion ranges come and go with Hyper-V, WSL and Docker, so
+        # a cached verdict can outlive the reservation. Without a retry the
+        # usable window could only ever shrink. One retry, never more.
+        for attempt in range(2):
+            num_allocated = num_occupied = num_reserved = num_unexpected = 0
+            unexpected_errno = None
+
+            # Skipped on a cached verdict rather than a live probe: only these
+            # can be stale, so only these justify a retry.
+            trusted_cache = 0
+
+            # Snapshot: the list stays authoritative for release_port, but a
+            # linear scan per candidate would make a full window quadratic.
+            already_allocated = set(self._allocated_ports)
+
+            for port in range(first_port, last_port + 1):
+                if port in already_allocated:
+                    num_allocated += 1
+                    continue
+
+                if port in self._reserved_ports:
+                    num_reserved += 1
+                    trusted_cache += 1
+                    continue
+
+                failure = self._probe_port(port)
+
+                if failure is None:
+                    self._allocated_ports.append(port)
+                    if num_occupied or num_reserved or num_unexpected:
+                        self.debug_message(
+                            f'Assigned port {port}, having skipped {num_occupied} in use, '
+                            f'{num_reserved} reserved and {num_unexpected} unexpected'
+                        )
+                    return port
+
+                if failure == errno.EACCES:
+                    self._reserved_ports.add(port)
+                    num_reserved += 1
+                elif failure == errno.EADDRINUSE:
+                    num_occupied += 1
+                else:
+                    num_unexpected += 1
+                    unexpected_errno = failure
+
+            # A window exhausted by live probes has nothing stale to forget.
+            if attempt or not trusted_cache:
+                break
+
+            self.debug_message(
+                f'No port free in {first_port}-{last_port}; dropping {len(self._reserved_ports)} '
+                f'cached OS reservations and probing again'
+            )
+            self._reserved_ports.clear()
+
+        # Every failure was ours, not the pool's — an fd ceiling, say. Nothing
+        # was learned about these ports, and the child has its own fd table, so
+        # degrade to the old behaviour rather than refuse to launch.
+        if num_unexpected and not num_occupied and not num_reserved:
+            name = errno.errorcode.get(unexpected_errno, str(unexpected_errno))
+            for port in range(first_port, last_port + 1):
+                if port not in already_allocated:
+                    self._allocated_ports.append(port)
+                    self.debug_message(
+                        f'Could not probe any port in {first_port}-{last_port} (errno '
+                        f'{unexpected_errno} / {name}); assigning {port} unverified'
+                    )
+                    return port
+
+        tallies = {
+            'allocated': num_allocated,
+            'occupied': num_occupied,
+            'reserved': num_reserved,
+            'unexpected': num_unexpected,
+        }
+        raise RuntimeError(self._no_ports_message(base_port, first_port, last_port, tallies, unexpected_errno))
 
     def release_port(self, port: int) -> None:
         """
@@ -940,7 +1067,8 @@ class TaskServer(DAPBase):
                         performance metrics, and completion information
 
         Raises:
-            ValueError: If task doesn't exist or API key validation fails
+            ValueError: If token is not specified
+            TaskError: Code TASK_NOT_REGISTERED if the token names no live task
         """
         # Perform secure task lookup with authentication
         task = self.get_task(token)
@@ -963,7 +1091,7 @@ class TaskServer(DAPBase):
             TASK_CONTROL: The removed task control structure for caller cleanup
 
         Raises:
-            ValueError: If task doesn't exist or API key validation fails
+            TaskError: Code TASK_NOT_REGISTERED if the token names no live task
 
         Cleanup Process:
         1. Validate task ownership and existence
@@ -974,11 +1102,13 @@ class TaskServer(DAPBase):
         6. Return control structure for additional caller-specific cleanup
         """
         # Remove task from central registry
-        control = self._task_control.pop(token)
+        # pop with a default: without one an unknown token raises KeyError and the
+        # TaskError below never runs, so the failure reaches the caller unclassified.
+        control = self._task_control.pop(token, None)
 
         # If not there, it wasn't running
         if not control:
-            raise RuntimeError('Your pipeline is not running')
+            raise TaskError(TaskError.NOT_REGISTERED, 'Your pipeline is not running')
 
         # Ensure task is properly stopped and resources are cleaned up
         await control.task.stop_task()
@@ -1071,7 +1201,7 @@ class TaskServer(DAPBase):
                 of the task controls its life cycle
         """
 
-        def _return_results(control: TASK_CONTROL) -> str:
+        def _return_results(control: TASK_CONTROL, reused: bool = False) -> str:
             """
             Return task token for the task.
 
@@ -1079,6 +1209,11 @@ class TaskServer(DAPBase):
 
             Args:
                 control (TASK_CONTROL): The existing task control structure
+                reused (bool): True when this is a live instance returned under
+                    useExisting rather than a task launched from the submitted
+                    pipeline. Without it the two are indistinguishable to the
+                    caller, and a run against stale configuration reads as a
+                    successful run of the configuration just sent.
             """
             return {
                 'id': control.id,
@@ -1087,6 +1222,7 @@ class TaskServer(DAPBase):
                 'projectId': control.project_id,
                 'source': control.source,
                 'provider': control.provider,
+                'reused': reused,
             }
 
         # Initialize task control structure for new task
@@ -1123,20 +1259,10 @@ class TaskServer(DAPBase):
                 raise ValueError('Pipeline does not have a source component defined')
 
         # Find the actual source component
-        source_component = None
-        for component in control.pipeline.get('components', []):
-            if component.get('id') == control.source:
-                source_component = component
-                break
-
-        # Update the source on the pipeline
-        control.pipeline['source'] = control.source
-
-        if source_component is None:
-            raise ValueError(f'Pipeline source component "{control.source}" not found in components list')
-
-        if 'config' not in source_component:
-            source_component['config'] = {}
+        # Stamp the resolved source and give the source component a config if it has
+        # none. Shared with restart_task so a restarted pipeline is stored in the same
+        # shape a launched one is, and the two compare equal.
+        _apply_source_defaults(control.pipeline, control.source)
 
         # Project identity is project_id on the flat project.
         control.project_id = control.pipeline.get('project_id', None)
@@ -1230,9 +1356,18 @@ class TaskServer(DAPBase):
                 # make sure the user actually specified the task to use. If so,
                 # then all is ok, just use the existing task
                 if use_existing_task:
+                    # The submitted pipeline is not applied to a running instance.
+                    # Say so when it differs from what is actually running, otherwise
+                    # an edit-and-rerun loop silently measures the old configuration.
+                    if control.pipeline != existing_control.pipeline:
+                        self.debug_message(
+                            f'Task "{existing_control.id}" is already running: reusing it and ignoring the '
+                            'submitted pipeline, which differs from the running one. Restart the task to '
+                            'apply it.'
+                        )
                     if wait_for_running:
                         await existing_control.task.wait_for_running()
-                    return _return_results(existing_control)
+                    return _return_results(existing_control, reused=True)
 
                 # We are absolutely supposed to create a task or the user did
                 # not specify the token (which means a random collision)
@@ -1345,8 +1480,9 @@ class TaskServer(DAPBase):
                 - provider: Provider name (may be updated)
 
         Raises:
-            ValueError: If task doesn't exist, pipeline invalid, source not found,
+            ValueError: If pipeline invalid, source not found,
                     project_id/source don't match existing values, or token not provided
+            TaskError: Code TASK_NOT_REGISTERED if the token names no live task
             RuntimeError: If pipeline configuration missing, debugger attached,
                         apikey mismatch, or connection is not the launch owner
 
@@ -1412,6 +1548,23 @@ class TaskServer(DAPBase):
             if type(components) is not list:
                 raise ValueError('Invalid components in pipeline')
 
+            # The source is part of the task's identity and a restart cannot change
+            # it. _apply_source_defaults stamps control.source onto the pipeline, so
+            # a different explicit source would be overwritten without a word —
+            # refuse it instead, which is what the docstring above promises.
+            requested_source = pipeline.get('source')
+            if requested_source and requested_source != control.source:
+                raise ValueError(
+                    f'Cannot change the source on restart: task "{control.id}" runs '
+                    f'"{control.source}", the request asks for "{requested_source}"'
+                )
+
+            # Normalise BEFORE anything is stopped. This is also the validation: it
+            # raises when the source component is missing, and doing that after the
+            # restart would leave the task stopped, the new pipeline already stored
+            # by Task.restart_task, and control.pipeline still naming the old one.
+            pipeline = _apply_source_defaults(pipeline, control.source)
+
             # Call the Task's restart method to restart the engine process
             # This preserves all statistics and monitoring while restarting the subprocess
             await control.task.restart_task(
@@ -1420,6 +1573,11 @@ class TaskServer(DAPBase):
                 source=control.source,
                 provider=control.provider,
             )
+
+            # The control now describes the pipeline that is running: without this the
+            # record still holds whatever was launched originally, so a later
+            # useExisting compares against a configuration that was replaced here.
+            control.pipeline = pipeline
 
             # Wait for running state if requested
             if wait_for_running:
@@ -1497,7 +1655,8 @@ class TaskServer(DAPBase):
             Pipeline configuration information for the attached task
 
         Raises:
-            ValueError: If task doesn't exist or API key validation fails
+            ValueError: If token is not specified
+            TaskError: Code TASK_NOT_REGISTERED if the token names no live task
 
         Attachment Process:
         1. Validate task existence and ownership
@@ -1664,3 +1823,124 @@ class TaskServer(DAPBase):
         finally:
             # Ensure cleanup occurs regardless of how connection ends
             await self._dapbase_on_disconnected(conn)
+
+    @staticmethod
+    def _probe_port(port: int) -> Optional[int]:
+        """
+        Test whether a TCP port can be bound right now.
+
+        IPv4 loopback is what both consumers bind: the data WebServer on
+        '127.0.0.1', and pydevd's AF_INET listener on the given '--debug_host'.
+
+        No socket options, deliberately: on Windows SO_REUSEADDR turns a busy
+        port's EADDRINUSE into EACCES, which assign_port caches for the life of
+        the process — the allocator would blacklist ports that are merely busy.
+        Adding options here means revisiting that cache.
+
+        Args:
+            port (int): TCP port number to test.
+
+        Returns:
+            Optional[int]: None when the port binds, otherwise the failure's
+                errno — EACCES when the OS forbids the port, EADDRINUSE when
+                another socket holds it. Never None for a failure.
+        """
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+                sock.bind(('127.0.0.1', port))
+        except OSError as e:
+            # None is the success sentinel and an OSError may carry no errno,
+            # so fail closed.
+            return e.errno or errno.EADDRINUSE
+
+        return None
+
+    @staticmethod
+    def _no_ports_message(
+        base_port: int,
+        first_port: int,
+        last_port: int,
+        tallies: Dict[str, int],
+        unexpected_errno: Optional[int],
+    ) -> str:
+        """
+        Build the error message for an exhausted port window.
+
+        Names whichever cause accounts for most of the window, so nobody hunts
+        a foreign process for ports this server holds. Only the two outward
+        causes carry a platform command.
+
+        Args:
+            base_port (int): The configured base port, before clamping.
+            first_port (int): First port the scan considered.
+            last_port (int): Last port the scan considered.
+            tallies (Dict[str, int]): Counts keyed 'allocated', 'occupied',
+                'reserved' and 'unexpected'.
+            unexpected_errno (Optional[int]): Last errno that was neither
+                EACCES nor EADDRINUSE, if one occurred.
+
+        Returns:
+            str: A message beginning 'No available ports'.
+        """
+        if first_port > last_port:
+            return f'No available ports: configured base_port {base_port} leaves no ports at or below 65535.'
+
+        # On a tie, dict order would silently always pick the same cause.
+        highest = max(tallies.values())
+        leaders = [name for name, count in tallies.items() if count == highest]
+        kind = leaders[0]
+
+        if kind == 'allocated':
+            cause = 'most of the range is already allocated by this server'
+            hint = (
+                'This server holds that many task ports; look for tasks that never released one, or widen its window.'
+            )
+        elif kind == 'unexpected':
+            name = errno.errorcode.get(unexpected_errno, str(unexpected_errno))
+            cause = f'most probes failed unexpectedly, last with errno {unexpected_errno} ({name})'
+            hint = (
+                'That is this process running out of resources rather than a port conflict; check its open descriptors.'
+            )
+        elif kind == 'reserved':
+            cause = 'most of the range is reserved by the operating system'
+            if sys.platform == 'win32':
+                hint = (
+                    'List the exclusions with `netsh int ipv4 show excludedportrange protocol=tcp` '
+                    '(and the ipv6 equivalent) and move base_port outside them.'
+                )
+            else:
+                hint = 'Ports below 1024 need elevated privileges; move base_port higher.'
+        else:
+            cause = 'most of the range is in use by other processes'
+            if sys.platform == 'win32':
+                hint = 'List current listeners with `netstat -ano`.'
+            elif sys.platform == 'darwin':
+                hint = 'List current listeners with `lsof -nP -iTCP -sTCP:LISTEN`.'
+            else:
+                hint = 'List current listeners with `ss -ltn`.'
+
+        # The hint can only speak for one cause, so name the other.
+        if len(leaders) > 1:
+            labels = {
+                'allocated': 'ports this server holds',
+                'occupied': 'ports other processes hold',
+                'reserved': 'ports the operating system reserves',
+                'unexpected': 'probes that failed unexpectedly',
+            }
+            also = ', '.join(labels[name] for name in leaders[1:])
+            cause += f' — tied with {also}, so this hint covers only one of them'
+
+        # Otherwise "widen its window" is advice that cannot be followed upward.
+        clamped = ''
+        if last_port < base_port + 9999:
+            clamped = (
+                f' The window is {last_port - first_port + 1} ports, not 10000: base_port {base_port} '
+                f'would run past 65535, so it was clamped.'
+            )
+
+        return (
+            f'No available ports in the range {first_port}-{last_port}: {cause} '
+            f'({tallies["allocated"]} allocated by this server, {tallies["occupied"]} in use by other processes, '
+            f'{tallies["reserved"]} reserved by the operating system, '
+            f'{tallies["unexpected"]} unexpected probe failures). {hint}{clamped}'
+        )

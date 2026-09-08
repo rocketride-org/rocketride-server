@@ -10,7 +10,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 import mcp.types as types
-from mcp.types import ListResourcesRequest, ReadResourceRequest, ListPromptsRequest, GetPromptRequest
 
 from rocketride_mcp import resources as resources_mod
 from rocketride_mcp import prompts as prompts_mod
@@ -54,7 +53,7 @@ async def test_list_resources_contains_nodes_uri() -> None:
 async def test_list_resources_all_have_json_mimetype() -> None:
     result = await resources_mod.list_resources(None)
     for r in result:
-        assert r.mimeType == 'application/json'
+        assert r.mime_type == 'application/json'
 
 
 async def test_list_resources_all_have_name_and_description() -> None:
@@ -356,8 +355,8 @@ async def test_server_registers_list_resources_handler(env_rocketride: None) -> 
     assert server_instance is not None, 'Server was not instantiated'
     assert mock_stdio.called, 'stdio_server was never called — handler registration failed'
     # Verify handlers were registered on the actual Server instance
-    assert ListResourcesRequest in server_instance.request_handlers, 'list_resources handler not registered on server'
-    assert ReadResourceRequest in server_instance.request_handlers, 'read_resource handler not registered on server'
+    assert server_instance.get_request_handler('resources/list') is not None, 'list_resources handler not registered'
+    assert server_instance.get_request_handler('resources/read') is not None, 'read_resource handler not registered'
 
 
 async def test_server_registers_list_prompts_handler(env_rocketride: None) -> None:
@@ -389,8 +388,8 @@ async def test_server_registers_list_prompts_handler(env_rocketride: None) -> No
     assert server_instance is not None, 'Server was not instantiated'
     assert mock_stdio.called, 'stdio_server was never called — handler registration failed'
     # Verify handlers were registered on the actual Server instance
-    assert ListPromptsRequest in server_instance.request_handlers, 'list_prompts handler not registered on server'
-    assert GetPromptRequest in server_instance.request_handlers, 'get_prompt handler not registered on server'
+    assert server_instance.get_request_handler('prompts/list') is not None, 'list_prompts handler not registered'
+    assert server_instance.get_request_handler('prompts/get') is not None, 'get_prompt handler not registered'
 
 
 # =============================================================================

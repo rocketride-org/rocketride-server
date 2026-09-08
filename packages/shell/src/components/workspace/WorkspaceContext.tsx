@@ -78,7 +78,11 @@ let _suppressPush = false;
 function pushAppHistory(appId: string): void {
 	if (_suppressPush) return;
 	try {
-		window.history.pushState({ appId }, '', window.location.pathname + window.location.search);
+		// `history.state` is SHARED with the home-ui remote, which keeps its own
+		// navigation snapshot under an `rrHome` key. Always MERGE — replacing the
+		// state object wholesale drops `rrHome` and desyncs the URL from the page
+		// the remote renders on back/forward.
+		window.history.pushState({ ...(window.history.state ?? {}), appId }, '', window.location.pathname + window.location.search);
 	} catch { /* sandboxed iframe or similar */ }
 }
 
@@ -539,7 +543,11 @@ export const WorkspaceProvider: React.FC<IWorkspaceProviderProps> = ({ apps, wor
 		/** Replace the current history entry with the initial app so back works
 		 *  correctly from the very first app switch. */
 		try {
-			window.history.replaceState({ appId: activeAppId }, '', window.location.pathname + window.location.search);
+			// MERGE, never replace: `history.state` is shared with the home-ui
+			// remote, which stores its navigation snapshot under `rrHome`. This
+			// effect re-runs after boot (its deps are unstable), so overwriting
+			// here would wipe `rrHome` off an entry the remote already owns.
+			window.history.replaceState({ ...(window.history.state ?? {}), appId: activeAppId }, '', window.location.pathname + window.location.search);
 		} catch { /* ignore */ }
 
 		/** Handle browser back/forward by switching to the app stored in state. */

@@ -15,6 +15,7 @@
 
 import type { ShellApiShape } from './api';
 import type { ShellApiV0 } from '../contract/versions/v0';
+import type { ShellApiV1 } from '../contract/versions/v1';
 import type { DAPException as Frozen_DAPException } from '../contract/versions/v0';
 import type { DAPException as Current_DAPException } from './api';
 import type { RocketRideException as Frozen_RocketRideException } from '../contract/versions/v0';
@@ -587,10 +588,16 @@ import type { ITaskStatus as Frozen_ITaskStatus } from '../contract/versions/v0'
 import type { ITaskStatus as Current_ITaskStatus } from './api';
 import type { IFlowData as Frozen_IFlowData } from '../contract/versions/v0';
 import type { IFlowData as Current_IFlowData } from './api';
+import type { ISaveFileType as Frozen_ISaveFileType } from '../contract/versions/v1';
+import type { ISaveFileType as Current_ISaveFileType } from './api';
+import type { ISaveFileDialogProps as Frozen_ISaveFileDialogProps } from '../contract/versions/v1';
+import type { ISaveFileDialogProps as Current_ISaveFileDialogProps } from './api';
 
 // VALUE floors — the live surface must still satisfy every frozen version.
 const _floor_v0: ShellApiV0 = {} as ShellApiShape;
 void _floor_v0;
+const _floor_v1: ShellApiV1 = {} as ShellApiShape;
+void _floor_v1;
 
 // TYPE floors — each frozen exported type must still be satisfied.
 // Generic floors are emitted APPLIED (<any, …> at the frozen arity):
@@ -1167,3 +1174,7 @@ const _t_ITaskStatus: Frozen_ITaskStatus = {} as Current_ITaskStatus;
 void _t_ITaskStatus;
 const _t_IFlowData: Frozen_IFlowData = {} as Current_IFlowData;
 void _t_IFlowData;
+const _t_ISaveFileType: Frozen_ISaveFileType = {} as Current_ISaveFileType;
+void _t_ISaveFileType;
+const _t_ISaveFileDialogProps: Frozen_ISaveFileDialogProps = {} as Current_ISaveFileDialogProps;
+void _t_ISaveFileDialogProps;

@@ -11,7 +11,7 @@
  * DetailPanel today, the Analyze page tomorrow).
  */
 import React, { useState, useMemo, useCallback, useEffect, CSSProperties } from 'react';
-import { JsonTree } from './JsonTree';
+import { JsonTree } from '../json-tree';
 import { renderTraceInput, renderTraceOutput, summaryTraceInput, renderTraceData } from './renderers';
 import { traceDataEqual } from './renderers/utils';
 import { renderFinalSections, resultFieldCount } from './renderers/render_final';

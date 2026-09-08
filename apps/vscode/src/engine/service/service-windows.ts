@@ -427,31 +427,45 @@ export class WindowsServiceManager extends ServiceManager {
 			}
 		}
 
-		// Verify ZIP integrity before extraction
-		const zipBuffer = fs.readFileSync(zipPath);
-		const zipHash = crypto.createHash('sha256').update(zipBuffer).digest('hex');
-		if (zipHash !== NSSM_SHA256) {
+		let tempDir: string | undefined;
+		try {
+			// Verify ZIP integrity before extraction
+			const zipBuffer = fs.readFileSync(zipPath);
+			const zipHash = crypto.createHash('sha256').update(zipBuffer).digest('hex');
+			if (zipHash !== NSSM_SHA256) {
+				throw new Error('NSSM integrity check failed, expected ' + NSSM_SHA256 + ', got ' + zipHash);
+			}
+
+			const AdmZip = require('adm-zip');
+			const zip = new AdmZip(zipPath);
+			const entries = zip.getEntries();
+
+			const nssmEntry = entries.find((e: { entryName: string }) =>
+				e.entryName.includes('win64/nssm.exe') || e.entryName.includes('win64\\nssm.exe')
+			);
+
+			if (!nssmEntry) {
+				throw new Error('Could not find nssm.exe in downloaded archive');
+			}
+
+			const nssmData = zip.readFile(nssmEntry);
+			if (!nssmData) {
+				throw new Error('Could not read nssm.exe from downloaded archive');
+			}
+
+			tempDir = fs.mkdtempSync(path.join(NSSM_DIR, '.nssm-'));
+			const tempPath = path.join(tempDir, 'nssm.exe');
+			fs.writeFileSync(tempPath, nssmData);
+			fs.renameSync(tempPath, NSSM_PATH);
+		} finally {
+			if (tempDir) {
+				try { fs.rmSync(tempDir, { recursive: true, force: true }); } catch { /* ignore */ }
+			}
 			try { fs.unlinkSync(zipPath); } catch { /* ignore */ }
-			throw new Error('NSSM integrity check failed — expected ' + NSSM_SHA256 + ', got ' + zipHash);
 		}
-
-		const AdmZip = require('adm-zip');
-		const zip = new AdmZip(zipPath);
-		const entries = zip.getEntries();
-
-		const nssmEntry = entries.find((e: { entryName: string }) =>
-			e.entryName.includes('win64/nssm.exe') || e.entryName.includes('win64\\nssm.exe')
-		);
-
-		if (!nssmEntry) {
-			throw new Error('Could not find nssm.exe in downloaded archive');
-		}
-
-		zip.extractEntryTo(nssmEntry, NSSM_DIR, false, true);
-		try { fs.unlinkSync(zipPath); } catch { /* ignore */ }
 
 		if (!fs.existsSync(NSSM_PATH)) {
-			throw new Error(`NSSM extraction failed — expected at ${NSSM_PATH}`);
+			throw new Error(`NSSM extraction failed, expected at ${NSSM_PATH}`);
 		}
 
 		this.logger.output(`${icons.success} NSSM downloaded to ${NSSM_PATH}`);

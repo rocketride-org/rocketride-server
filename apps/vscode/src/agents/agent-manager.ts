@@ -27,7 +27,7 @@
  * Coordinates installing RocketRide documentation and agent stubs into
  * user workspaces. Handles:
  *   1. Copying docs from extension bundle → .rocketride/docs/
- *   2. Ensuring .rocketride/ is in .gitignore
+ *   2. Ensuring .rocketride/ and .env are in .gitignore
  *   3. Detecting which coding agents are present
  *   4. Delegating to per-agent installers
  */
@@ -44,9 +44,18 @@ import { WindsurfInstaller } from './windsurf-installer';
 import { CopilotInstaller } from './copilot-installer';
 import { ClaudeMdInstaller } from './claude-md-installer';
 import { AgentsMdInstaller } from './agents-md-installer';
+import { appendGitignoreEntries } from '../shared/util/gitignoreEntries';
 
 const DOCS_DIR = '.rocketride/docs';
-const GITIGNORE_ENTRY = '.rocketride/';
+/**
+ * Entries the extension keeps in the workspace `.gitignore`.
+ *
+ * `.env` is here because connecting to a self-hosted engine writes a real
+ * `ROCKETRIDE_APIKEY` into it (see `Connection.syncEnvFile`), so a fresh
+ * project would otherwise be one `git add .` away from committing a live key.
+ * The pattern is the exact name, so a committed `.env.example` is unaffected.
+ */
+const GITIGNORE_ENTRIES = ['.rocketride/', '.env'] as const;
 
 /** Doc files shipped in the extension's docs/ directory. */
 const DOC_FILES = ['ROCKETRIDE_README.md', 'ROCKETRIDE_QUICKSTART.md', 'ROCKETRIDE_PIPELINE_RULES.md', 'ROCKETRIDE_COMPONENT_REFERENCE.md', 'ROCKETRIDE_COMMON_MISTAKES.md', 'ROCKETRIDE_python_API.md', 'ROCKETRIDE_typescript_API.md', 'ROCKETRIDE_OBSERVABILITY.md'];
@@ -306,8 +315,9 @@ export class AgentManager {
 	}
 
 	/**
-	 * Ensure .rocketride/ is listed in .gitignore.
-	 * Creates .gitignore if it doesn't exist. Appends if entry is missing.
+	 * Ensure every entry in GITIGNORE_ENTRIES is listed in .gitignore.
+	 * Creates .gitignore if it doesn't exist. Appends only the missing entries,
+	 * so an entry the user already covers is never duplicated.
 	 */
 	async ensureGitignore(workspaceRoot: vscode.Uri): Promise<void> {
 		const gitignoreUri = vscode.Uri.joinPath(workspaceRoot, '.gitignore');
@@ -320,13 +330,11 @@ export class AgentManager {
 			// .gitignore doesn't exist — will create
 		}
 
-		// Check if already present (exact line match)
-		const lines = content.split('\n');
-		if (lines.some((line) => line.trim() === GITIGNORE_ENTRY)) {
+		const newContent = appendGitignoreEntries(content, GITIGNORE_ENTRIES);
+		if (newContent === null) {
 			return;
 		}
 
-		const newContent = content.trimEnd() + (content ? '\n' : '') + GITIGNORE_ENTRY + '\n';
 		await vscode.workspace.fs.writeFile(gitignoreUri, Buffer.from(newContent, 'utf8'));
 	}
 

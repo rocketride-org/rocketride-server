@@ -94,6 +94,10 @@ jobs:
       # Strict sync: only providers whose API key is configured. Native API
       # discovers and smoke-tests new models. No OpenRouter pollution.
       - name: Sync providers WITH key (strict, native API)
+        id: sync_with_key
+        # The catalogue gate exits non-zero on findings. Keep going so the sync PR is
+        # still opened with those findings in its body; the job is failed at the end.
+        continue-on-error: true
         if: steps.partition.outputs.with_key != ''
         shell: bash
         run: |
@@ -116,6 +120,8 @@ jobs:
       # (no client). Output may include OpenRouter routing aliases — review
       # the PR body before merging.
       - name: Sync providers WITHOUT key (fallback discovery)
+        id: sync_without_key
+        continue-on-error: true
         if: steps.partition.outputs.without_key != ''
         shell: bash
         run: |
@@ -124,6 +130,7 @@ jobs:
       # Combine the two PR bodies and write a single SYNC_OUTPUT to GITHUB_ENV.
       # This overrides whatever each --pr-body step appended individually.
       - name: Compose combined PR body
+        if: always()
         shell: bash
         run: |
           {
@@ -145,6 +152,7 @@ jobs:
           } >> "$GITHUB_ENV"
 
       - name: Create Pull Request
+        if: always()
         uses: peter-evans/create-pull-request@22a9089034f40e5a961c8808d113e2c98fb63676 # v7
         with:
           title: 'chore(models): sync LLM model lists'
@@ -156,3 +164,12 @@ jobs:
           labels: |
             automated
             models
+
+      # The PR is opened first (above) so findings reach a human even on a bad run;
+      # the job is failed here so the run is visibly red rather than silently green.
+      - name: Fail if a sync step reported findings
+        if: always() && (steps.sync_with_key.outcome == 'failure' || steps.sync_without_key.outcome == 'failure')
+        shell: bash
+        run: |
+          echo "::error::A sync step exited non-zero — a provider failed to sync, or the catalogue gate found a profile sending its context window as max_tokens. See the step logs and the PR body."
+          exit 1

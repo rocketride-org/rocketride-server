@@ -45,9 +45,7 @@ class Transcribe(AudioReader):
     SAMPLE_RATE = 16000  # Required input sample rate for Whisper
     CHANNELS = 1  # Mono audio
     CHUNK_DURATION = 60  # Send audio to Whisper every 60 seconds
-    MAX_CHUNK_DURATION = 120  # Maximum chunk duration before forcing transcription
     CHUNK_SAMPLES = SAMPLE_RATE * CHUNK_DURATION
-    MAX_CHUNK_SAMPLES = SAMPLE_RATE * MAX_CHUNK_DURATION
 
     def __init__(
         self,
@@ -60,7 +58,6 @@ class Transcribe(AudioReader):
         """
         # Get the optional parameters from kwargs
         chunk_duration: int = kwargs.get('chunk_duration', self.CHUNK_DURATION)
-        max_chunk_duration: int = kwargs.get('max_chunk_duration', self.MAX_CHUNK_DURATION)
 
         # The whisper model is passed to us
         self._transcribe = transcribe
@@ -70,7 +67,6 @@ class Transcribe(AudioReader):
 
         # Buffering parameters
         self._chunk_samples = chunk_duration * self.SAMPLE_RATE
-        self._max_chunk_samples = max_chunk_duration * self.SAMPLE_RATE
 
         # Audio extractor that calls onData on each decoded PCM chunk
         super().__init__(
@@ -166,11 +162,12 @@ class Transcribe(AudioReader):
         self._audio_chunks.append(chunk)
         self._total_samples += len(chunk) // 2  # 2 bytes per int16 sample
 
-        # Check if we should flush
-        # Flush every 60 seconds, or force flush at 120 seconds max
+        # One threshold, cut unconditionally. There used to be a second, higher one
+        # guarded by `elif`, which could never fire — reaching it meant already passing
+        # this one. A second threshold only means something with a "cut here, it is
+        # quiet" test between the two, and this class has no silence detection: pause
+        # handling is delegated to Whisper's built-in VAD, per the class docstring.
         if self._total_samples >= self._chunk_samples:
-            self._flush_audio()
-        elif self._total_samples >= self._max_chunk_samples:
             self._flush_audio()
 
     def outputText(self, text: str):

@@ -27,6 +27,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **llm**: virtualize provider interface behind a normalized Adapter (#1683)
 - **n8n-nodes**: add n8n-nodes-rocketride community node package (#1255)
 - **nodes**: add answer_documents node to bridge answers into documents (#1506)
+- **nodes**: add authoritative_overlay SEC period-scoped cross-check guard (#1430)
 - **nodes**: add cognee node (#1501)
 - **nodes**: add currency_convert_explicit node (#1497)
 - **nodes**: add extract_facts node — document-context + cell-by-cell reader + validator (#1426) (#1545)
@@ -37,10 +38,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **nodes**: tool_google_workspace — shared Google client + gmail, sheets, docs, calendar, drive services (#1570)
 - **nodes**: add Guild.ai tool node (#1689)
 - **nodes**: add tool_pipedrive CRM tool node (#1687)
+- **nodes**: add db_firestore — Google Cloud Firestore Native-mode document get/set (#1511, #1515)
+- **nodes**: add tool_gcs — Google Cloud Storage list and download tool (#1512, #1515)
+- **nodes**: add tool_vertex_search — Vertex AI Vector Search nearest-neighbor tool (#1513, #1515)
 - **nodes**: add LaserData memory tool node (tool_laserdata_memory) (#1760)
 - **nodes**: add a FalkorDB URL connection profile to graph_falkordb (#1786)
 - **nodes**: add schema_validate node (#1520)
 - **nodes**: add normalize_facts node (#1518)
+- **nodes**: add tool_notion — Notion agent-tool node (search, read pages/database rows, create/update content) (#2141)
 - **nodes, ai**: add graph base class; make FalkorDB a real graph node (#1584)
 - **nodes, server**: migrate neo4j onto the graph base class (#1611)
 - **nodes,ai**: RocketRide cloud DB nodes — sql, vector, graph (#1713)
@@ -417,6 +422,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`tool_gohighlevel` node**: exposes the GoHighLevel (LeadConnector) v2 REST API to agents as 101 tools across 18 groups (contacts, notes, tasks, opportunities, pipelines, conversations, messages, message sending, calendars, appointments, custom fields, custom values, tags, businesses, locations, users), plus a generic `request` escape hatch. Authenticates with a sub-account Private Integration Token, publishes a 71-tool default group set that keeps outbound message sending opt-in, and can hide every write tool in read-only mode (#1676)
 - **`tool_pipedrive` node**: exposes the Pipedrive CRM REST API v1 to agents — deals, persons, organizations, activities, pipelines, stages, notes, leads, products, fields, files, users, roles, permission sets, teams, goals, filters, webhooks, subscriptions, mail threads, call logs and projects. 256 tools across 24 resource groups, plus a generic `request` tool that reaches any remaining v1 endpoint through the same auth, rate-limit and read-only layer. Because the full surface is larger than an LLM can choose between reliably, `pipedrive.toolGroups` controls which groups are published (default: the eight core CRM groups, 108 tools; `all` publishes everything). Supports personal API tokens and OAuth bearer tokens, company-domain base URLs, offset and cursor pagination, custom fields via an `extra` passthrough, and read-only mode (#1675)
 
 ## [3.3.0] - 2026-06-08
