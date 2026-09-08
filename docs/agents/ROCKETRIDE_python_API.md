@@ -856,10 +856,10 @@ preview = await client.deploy.preview('0 8 * * 1,3,5', count=3)
 # 4. Schedule: fire 08:00 Mon(1)/Wed(3)/Fri(5); bound each run to 7h (ends by 15:00)
 await client.deploy.set_schedule(
     'my-project-guid',
-    'webhook_1',            # the source the schedule fires
+    'webhook_1',  # the source the schedule fires
     '0 8 * * 1,3,5',
     'team-prod',
-    ttl=25200,              # 7 hours * 3600 s = the 08:00-15:00 run window
+    ttl=25200,  # 7 hours * 3600 s = the 08:00-15:00 run window
 )
 ```
 
@@ -1229,8 +1229,8 @@ that pipeline's subprocess, or omitted to profile the server process.
 await client.cprofile_start(target=token, session='slow-parse-hunt')
 # ... exercise the pipeline ...
 await client.cprofile_stop(target=token)
-report = await client.cprofile_report(target=token)      # full pstats text
-tree = await client.cprofile_report_tree(target=token)   # call tree
+report = await client.cprofile_report(target=token)  # full pstats text
+tree = await client.cprofile_report_tree(target=token)  # call tree
 ```
 
 - `cprofile_start(target=None, session=None)` — begin a session; returns
