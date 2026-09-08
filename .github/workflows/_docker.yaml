@@ -143,18 +143,23 @@ jobs:
               fail "Container exited before serving — the crash-on-start class."
             fi
             code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 http://127.0.0.1:5565/version 2>/dev/null || echo 000)
-            if [ "$code" != "000" ]; then
-              echo "Engine answered /version with HTTP $code"
+            if [ "$code" = "200" ]; then
+              echo "Engine answered /version with HTTP 200 — healthy."
               docker rm -f rr-smoke >/dev/null 2>&1 || true
               exit 0
             fi
+            # A non-200 is not success: 000 = unreachable (still starting), and
+            # a 4xx/5xx from a half-started engine is exactly the broken-image
+            # case this gate must CATCH, not wave through. Keep polling for a
+            # real 200 until the deadline below.
+            [ "$code" != "000" ] && echo "  /version returned HTTP $code — not ready yet"
             sleep 5
           done
 
           # Alive but never served. Not one of the known three, but a wedged
           # engine reads as healthy to a TCP probe (saas #461), so fail rather
           # than assume it is merely slow.
-          fail "Running but never answered /version within 180s."
+          fail "Running but never returned 200 from /version within ~180s (last code: $code)."
 
       # Cosign keyless signing via GitHub OIDC. Signs the image manifest by
       # digest, which covers every tag pointing at it. Verification:
