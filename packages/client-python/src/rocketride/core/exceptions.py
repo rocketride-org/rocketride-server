@@ -271,3 +271,39 @@ class ValidationException(RocketRideException):
     """
 
     pass
+
+
+class NotSupportedException(RocketRideException, RuntimeError):
+    """
+    Exception raised when an operation is not available on the connected engine.
+
+    Raised when the SDK exposes an API surface that the connected engine does
+    not implement, so the call is rejected client-side instead of failing with
+    an opaque server error.
+
+    Note:
+        Also inherits from :class:`RuntimeError` so that callers catching
+        ``RuntimeError`` continue to work.
+
+    Common scenarios:
+    - Deployment operations attempted against RocketRide Cloud
+    - An engine edition that does not serve the requested command
+
+    Example:
+        try:
+            await client.deploy.publish(pipeline)
+        except NotSupportedException as e:
+            print(f"Operation not available here: {e}")
+    """
+
+    def __init__(self, message: str):
+        """
+        Initialize with a plain message.
+
+        This exception is raised client-side, before any request is sent, so
+        there is no server response to wrap.
+
+        Args:
+            message: Human-readable description of what is unavailable.
+        """
+        super().__init__({'message': message})

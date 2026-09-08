@@ -43,6 +43,7 @@ Components:
     PipeException: Raised for data pipe operation errors
     ExecutionException: Raised for pipeline execution errors
     ValidationException: Raised for input validation failures
+    NotSupportedException: Raised when an operation is unavailable on the connected engine
 
 Usage:
     # These are typically used internally, but can be imported for advanced use cases
@@ -71,6 +72,7 @@ from .exceptions import (
     PipeException,
     ExecutionException,
     ValidationException,
+    NotSupportedException,
 )
 
 __all__ = [
@@ -88,6 +90,7 @@ __all__ = [
     'PipeException',
     'ExecutionException',
     'ValidationException',
+    'NotSupportedException',
     'DAPBase',
     'DAPClient',
     'DAPException',
