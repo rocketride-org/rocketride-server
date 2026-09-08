@@ -199,16 +199,20 @@ def _clean_message(msg: Dict[str, Any]) -> Dict[str, Any]:
     The allowlist keeps the fields that carry the message (``ts``/``user``/
     ``text``, plus ``thread_ts``) and the two that CLASSIFY it:
 
-    - ``subtype`` marks system events. A ``channel_join`` entry carries a ts, a
-      user, and a text of "<@U0123ABCD> has joined the channel", so without the
+    - ``subtype`` classifies the entry. A ``channel_join`` carries a ts, a user,
+      and a text of "<@U0123ABCD> has joined the channel", so without the
       subtype it is byte-for-byte the shape of a real message and cannot be
-      filtered out downstream.
+      filtered out downstream. It is a classifier, not a noise flag -- see
+      ``SlackClient.channel_history`` for the consumer contract, which is
+      stated there once rather than repeated at each layer.
     - ``bot_id`` marks a post made by a bot. ``check_connection`` already
       returns the caller's own bot_id, so without this there is a value to
       compare against and nothing to compare it to -- and an agent reading a
-      channel it also posts to sees its own output as new input.
+      channel it also posts to sees its own output as new input. It is also the
+      only reliable bot discriminator: an app posting under its own bot identity
+      gets a ``bot_id`` and no ``bot_message`` subtype.
 
-    Both are absent on ordinary user messages, so the shape is unchanged for
+    Both fields are set only when Slack sets them, so the shape is unchanged for
     existing callers.
     """
     cleaned = {'ts': msg.get('ts'), 'user': msg.get('user'), 'text': msg.get('text')}
@@ -441,10 +445,18 @@ class SlackClient:
 
         Returns:
             List of dicts with ``ts``/``user``/``text``, plus ``thread_ts`` for
-            threaded messages, ``subtype`` for system events (``channel_join``,
-            ``channel_topic``, …) and ``bot_id`` for messages posted by a bot.
-            The last two are absent on ordinary user messages — use them to
-            filter join/leave noise and to skip your own posts.
+            threaded messages, ``subtype`` whenever Slack classifies the entry
+            and ``bot_id`` whenever a bot posted it.
+
+            ``subtype`` is a classifier, not a noise flag: ``file_share``,
+            ``thread_broadcast`` and ``me_message`` are ordinary user messages,
+            while ``channel_join``/``channel_leave``/``channel_topic``,
+            ``tombstone``, ``pinned_item`` and ``reminder_add`` are system
+            entries. That system list is open-ended, so drop entries by naming
+            the subtypes you do not want rather than by presence. Match
+            ``bot_id`` against the one ``check_connection`` reports to skip
+            your own posts -- not the ``bot_message`` subtype, which is absent
+            when an app posts under its own bot identity.
 
         Raises:
             ValueError: On a missing/empty ``channel`` or a non-numeric or
