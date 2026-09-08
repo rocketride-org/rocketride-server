@@ -11,6 +11,7 @@
 		"name": "File Explorer",
 		"description": "Browse, view, and edit files stored on the RocketRide server",
 		"icon": "./src/icon.svg",
+		"readme": "../../docs/modules/explorer-ui/README.md",
 		"categories": [
 			"tools"
 		],
@@ -20,6 +21,7 @@
 	},
 	"scripts": {
 		"build": "rsbuild build",
+		"build:prod": "rsbuild build --env-mode production",
 		"dev": "rsbuild dev",
 		"typecheck": "tsc --noEmit"
 	},
@@ -46,6 +48,7 @@
 		"@rsbuild/plugin-react": "~2.0.1",
 		"typescript": "^5.3.0",
 		"@types/react": "~18.3.31",
-		"@types/react-dom": "~18.3.7"
+		"@types/react-dom": "~18.3.7",
+		"tsx": "~4.23.1"
 	}
 }

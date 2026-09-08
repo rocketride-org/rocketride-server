@@ -417,7 +417,8 @@ async def test_job_builds_end_to_end(monkeypatch, build_store, toolchain):
 @pytest.mark.asyncio
 async def test_job_typecheck_failure_is_terminal_with_tsc_errors(monkeypatch, build_store, toolchain):
     """A tsc failure ends 'failed' (state untouched — redeploy-to-fix) with
-    the diagnostics as bounded error rows; no dist/ is written.
+    the diagnostics in build.log's failure tail — the DB blob carries NO
+    error text; no dist/ is written.
     """
     rail = _FakeRail(_app_source_zip(), {'status': 'queued', 'attempt': 0})
     rail.install(monkeypatch)
@@ -432,10 +433,40 @@ async def test_job_typecheck_failure_is_terminal_with_tsc_errors(monkeypatch, bu
     assert requeue is False
     final = rail.stamps[-1]
     assert (final['status'], final['phase']) == ('failed', 'typecheck')
-    assert 'error TS2322' in final['errors'][0]['message']
+    assert 'errors' not in final  # error text lives ONLY in build.log
     home = build_store / 'orgs' / 'org1' / 'files' / '.deployments' / 'acme.brandy' / 'v000001-abcdef12'
     assert not (home / 'dist').exists()
-    assert (home / 'build.log').is_file()  # the log survives failure
+    log_text = (home / 'build.log').read_text(encoding='utf-8')  # the log survives failure
+    assert 'error TS2322' in log_text  # the diagnostics land in the failure tail
+    assert 'app-build-' not in log_text  # the scratch dir is scrubbed to <build>
+
+
+@pytest.mark.asyncio
+async def test_job_typecheck_waiver_skips_the_verify_phase(monkeypatch, build_store, toolchain):
+    """appManifest.typecheck: false (the PACKAGE tab's waiver) skips the
+    verify phase entirely: the build succeeds despite a tsc that WOULD
+    have failed, no tsc runs, and the waiver is recorded in build.log —
+    visible, never silent.
+    """
+    rail = _FakeRail(_app_source_zip(), {'status': 'queued', 'attempt': 0})
+    rail.entry['metadata']['manifest']['typecheck'] = False
+    rail.install(monkeypatch)
+    await _seed_zip(rail.zip_bytes)
+    fake = _FakeExec()
+    fake.typecheck_exit = 2
+    fake.typecheck_out = 'src/App.tsx(1,1): error TS9999: would have failed the build'
+    monkeypatch.setattr(app_build, '_exec', fake)
+
+    worker = AppBuildWorker(server=None)
+    assert await worker._run_job('org1', 'acme.brandy', 1) is False
+    final = rail.stamps[-1]
+    assert final['status'] == 'ok'
+    # The verify phase never reached the exec seam.
+    assert not any('--noEmit' in ' '.join(c['argv']) for c in fake.calls)
+    home = build_store / 'orgs' / 'org1' / 'files' / '.deployments' / 'acme.brandy' / 'v000001-abcdef12'
+    log_text = (home / 'build.log').read_text(encoding='utf-8')
+    assert 'skipped by appManifest.typecheck: false' in log_text
+    assert (home / 'dist' / 'remoteEntry.js').is_file()
 
 
 @pytest.mark.asyncio
@@ -467,7 +498,9 @@ async def test_job_drift_fails_reasoned(monkeypatch, build_store, toolchain):
     await worker._run_job('org1', 'acme.brandy', 1)
     final = rail.stamps[-1]
     assert (final['status'], final['phase']) == ('failed', 'install')
-    assert any('react 18.2.0 -> 18.3.1' in row['message'] for row in final['errors'])
+    assert 'errors' not in final
+    home = build_store / 'orgs' / 'org1' / 'files' / '.deployments' / 'acme.brandy' / 'v000001-abcdef12'
+    assert 'react 18.2.0 -> 18.3.1' in (home / 'build.log').read_text(encoding='utf-8')
 
 
 @pytest.mark.asyncio
@@ -494,7 +527,9 @@ async def test_job_infra_failure_requeues_then_exhausts(monkeypatch, build_store
     assert await worker._run_job('org1', 'acme.brandy', 1) is False  # exhausted
     final = rail.stamps[-1]
     assert final['status'] == 'failed'
-    assert 'registry unreachable' in final['errors'][0]['message']
+    assert 'errors' not in final
+    home = build_store / 'orgs' / 'org1' / 'files' / '.deployments' / 'acme.brandy' / 'v000001-abcdef12'
+    assert 'registry unreachable' in (home / 'build.log').read_text(encoding='utf-8')
 
 
 @pytest.mark.asyncio
@@ -520,7 +555,9 @@ async def test_job_unexpected_exception_never_strands_building(monkeypatch, buil
     assert await worker._run_job('org1', 'acme.brandy', 1) is False  # exhausted
     final = rail.stamps[-1]
     assert final['status'] == 'failed'
-    assert 'unexpected OS quirk' in final['errors'][0]['message']
+    assert 'errors' not in final
+    home = build_store / 'orgs' / 'org1' / 'files' / '.deployments' / 'acme.brandy' / 'v000001-abcdef12'
+    assert 'unexpected OS quirk' in (home / 'build.log').read_text(encoding='utf-8')
 
 
 @pytest.mark.asyncio
@@ -545,9 +582,92 @@ async def test_job_rejects_unsafe_zip_entry_at_materialize(monkeypatch, build_st
     assert await worker._run_job('org1', 'acme.brandy', 1) is False  # user-flavored: no requeue
     final = rail.stamps[-1]
     assert (final['status'], final['phase']) == ('failed', 'materialize')
-    assert 'unsafe path' in final['errors'][0]['message']
+    assert 'errors' not in final
+    home = build_store / 'orgs' / 'org1' / 'files' / '.deployments' / 'acme.brandy' / 'v000001-abcdef12'
+    assert 'unsafe path' in (home / 'build.log').read_text(encoding='utf-8')
     # Nothing escaped: no evil.txt anywhere under the scratch root.
     assert not list(toolchain['scratch'].rglob('evil.txt'))
+
+
+def test_rmtree_clears_trees_past_windows_max_path(tmp_path):
+    """The scratch cleaner must delete trees whose entries cross Windows'
+    260-char MAX_PATH — measured at ~290 in real scratch dirs (pnpm .pnpm
+    names + module-federation dist depth, NO include roots needed). A plain
+    rmtree(ignore_errors=True) silently LEAKED them, and the aged startup
+    sweep used the same call, so nothing ever reclaimed them.
+    """
+    from pathlib import Path
+
+    segment = 'component-directory-with-a-real-world-name'
+    deep = tmp_path / 'job'
+    target = deep
+    while len(str(target)) < 300:
+        target = target / segment
+    assert len(str(target)) > 260
+    # Setup needs the extended spelling too — plain mkdir hits the same
+    # ceiling the cleaner must overcome.
+    make = Path(f'\\\\?\\{target}') if os.name == 'nt' else target
+    make.mkdir(parents=True)
+    (make / 'ContainerEntryModule.js.map').write_text('x', encoding='utf-8')
+
+    app_build._rmtree(str(deep))
+    assert not deep.exists()
+
+
+def test_rmtree_never_follows_links(tmp_path):
+    """Links are removed as LINKS — their targets survive untouched. pnpm
+    materializes node_modules through junctions/links into its global
+    store, so a cleaner that walked through one would destroy the store.
+    Covers both shapes: a link INSIDE the tree, and the root BEING a link.
+    """
+    import subprocess
+
+    # The protected target, outside the tree, with a sentinel inside.
+    store = tmp_path / 'store' / 'protected-package'
+    store.mkdir(parents=True)
+    sentinel = store / 'sentinel.txt'
+    sentinel.write_text('must survive', encoding='utf-8')
+
+    def make_dir_link(link: str, target: str) -> None:
+        if os.name == 'nt':
+            # Junctions need no privilege (symlinks may) — pnpm's own shape.
+            subprocess.run(['cmd', '/c', 'mklink', '/J', link, target], check=True, capture_output=True)
+        else:
+            os.symlink(target, link)
+
+    # Shape 1: a link inside the tree being cleaned.
+    job = tmp_path / 'job'
+    (job / 'node_modules').mkdir(parents=True)
+    make_dir_link(str(job / 'node_modules' / 'protected-package'), str(store))
+    app_build._rmtree(str(job))
+    assert not job.exists()
+    assert sentinel.read_text(encoding='utf-8') == 'must survive'
+
+    # Shape 2: the root itself is a link — unlinked in place, never entered.
+    root_link = tmp_path / 'root-link'
+    make_dir_link(str(root_link), str(store))
+    app_build._rmtree(str(root_link))
+    assert not root_link.exists()
+    assert sentinel.read_text(encoding='utf-8') == 'must survive'
+
+
+def test_scrub_paths_strips_build_root_and_user_home():
+    """The log sanitizer: the scratch root collapses to <build> in BOTH
+    separator spellings, and any surviving user-home prefix collapses to
+    <home> — no host layout or user name reaches the served log.
+    """
+    root = 'C:\\Users\\SomeUser\\AppData\\Local\\Temp\\app-build-123-acme.brandy-v1-abc'
+    text = (
+        f'{root}\\ws\\apps\\brandy-ui: ERR_PNPM_LINKED_PKG_DIR_NOT_FOUND\n'
+        f'Could not install from "{root.replace(chr(92), "/")}/ws/apps/shared"\n'
+        'D:\\Users\\other\\secret\\place also leaks'
+    )
+    scrubbed = app_build._scrub_paths(text, [root])
+    assert root not in scrubbed
+    assert 'SomeUser' not in scrubbed
+    assert '<build>\\ws\\apps\\brandy-ui' in scrubbed
+    assert '<build>/ws/apps/shared' in scrubbed
+    assert 'other' not in scrubbed and '<home>\\secret\\place' in scrubbed
 
 
 @pytest.mark.asyncio

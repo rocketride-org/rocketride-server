@@ -43,6 +43,9 @@
 
 import type { RocketRideClient } from './client.js';
 import type { DeployHistoryEntry, DeployListEnvelope, DeployListParams, Deployment, DeployArtifact, PipelineConfig, PublishResult, SchedulePreview } from './types/deploy.js';
+import { getRegisteredAppPack } from './app-pack-registry.js';
+import type { AppPackModule } from './app-pack-registry.js';
+import type { AppVerifyReport, CreatedApp } from '../app-pack/index.js';
 
 // =============================================================================
 // HELPERS
@@ -132,6 +135,114 @@ export class DeployApi {
 		});
 	}
 
+	/**
+	 * Loads the Node-only app packer: the registry when a host armed it (a
+	 * bundled host side-effect-imports `rocketride/app-pack`), else a
+	 * runtime dynamic self-import that keeps the fs/zip machinery out of
+	 * browser bundles (same pattern as `use({ filepath })`).
+	 */
+	private async loadAppPack(): Promise<AppPackModule> {
+		if (typeof window !== 'undefined') {
+			throw new Error('App packing requires Node.js - pack and deploy from a script or CI, not the browser.');
+		}
+		const registered = getRegisteredAppPack();
+		if (registered) {
+			return registered;
+		}
+		const dynamicImport = new Function('specifier', 'return import(specifier);') as (specifier: string) => Promise<AppPackModule>;
+		return dynamicImport('rocketride/app-pack');
+	}
+
+	/**
+	 * Packs an app folder's source and deploys it as the next immutable
+	 * registry version — the ONE call behind the App Builder's Deploy
+	 * button, the CLI's `app deploy`, and CI scripts (Node.js only).
+	 *
+	 * Verify → pack → send: the pack applies the canonical rules
+	 * (workspace-rooted zip layout, `appManifest.include` honored,
+	 * hierarchical gitignore filtering with the hard baseline
+	 * node_modules/dist/.git, symlink containment, 50MB zipped / 512MB
+	 * uncompressed caps) and every step can narrate through `onProgress`.
+	 * Deploying never activates anything — bind an audience with
+	 * `publishApp` afterwards. Run `verifyApp` first for a no-side-effect
+	 * precheck of the same rules.
+	 *
+	 * @param appRoot - The app folder: absolute, or relative to
+	 *   `options.workspaceRoot`.
+	 * @param options.workspaceRoot - The workspace the zip is rooted at and
+	 *   that `appManifest.include` entries resolve against
+	 *   (default: `process.cwd()`).
+	 * @param options.comment - "What changed" note kept in the registry.
+	 * @param options.metadata - Extra metadata merged over the packed
+	 *   defaults (e.g. projectId provenance); `appRoot` is always set from
+	 *   the pack.
+	 * @param options.onProgress - Receives one line per pack step (include
+	 *   checks, per-file adds, totals) for hosts that surface progress.
+	 * @returns The artifact entry for the new version.
+	 */
+	async addApp(appRoot: string, options: { workspaceRoot?: string; comment?: string; metadata?: Record<string, unknown>; onProgress?: (line: string) => void } = {}): Promise<PublishResult> {
+		const pack = await this.loadAppPack();
+		const packed = pack.packAppSource(options.workspaceRoot ?? process.cwd(), appRoot, options.onProgress);
+		return this.add({
+			kind: 'app',
+			data: packed.data,
+			metadata: { ...options.metadata, ...(packed.appRoot ? { appRoot: packed.appRoot } : {}) },
+			...(options.comment !== undefined && { comment: options.comment }),
+		});
+	}
+
+	/**
+	 * Scaffolds a new app in the workspace — the programmatic twin of the
+	 * App Builder's New App wizard, rendering the identical templates
+	 * (Node.js only). Writes `./apps/<slug>`, ensures the pnpm workspace
+	 * file and ignore hygiene, vendors the connected server's shell +
+	 * client packages, and runs the workspace install. Scaffolding only —
+	 * nothing is deployed; the normal lifecycle (edit → `verifyApp` →
+	 * `addApp` → `publishApp`) follows.
+	 *
+	 * @param slug - The app-name slug (lowercase; digits/-/_ after the
+	 *   first character). The id becomes `<developerId>.<slug>`.
+	 * @param options - Template, display name, developer id (default
+	 *   'local'), frame options, install toggle, `onProgress`, and
+	 *   `workspaceRoot` (default `process.cwd()`). The server base URL for
+	 *   vendoring defaults to this client's own connection.
+	 * @returns The created app's identity and a report of what ran.
+	 */
+	async createApp(slug: string, options: { workspaceRoot?: string; template?: 'Blank' | 'Dashboard'; displayName?: string; developerId?: string; sidebar?: boolean; statusFooter?: boolean; docTabs?: boolean; install?: boolean; serverBaseUrl?: string; onProgress?: (line: string) => void } = {}): Promise<CreatedApp> {
+		const pack = await this.loadAppPack();
+		// Vendor from the server THIS client talks to unless overridden —
+		// ws(s) URIs map onto the http(s) origin serving /client/*.
+		let serverBaseUrl = options.serverBaseUrl;
+		if (!serverBaseUrl) {
+			const uri = this.client.getConnectionInfo().uri;
+			if (uri) {
+				serverBaseUrl = uri.replace(/^ws:/i, 'http:').replace(/^wss:/i, 'https:').replace(/\/task\/service\/?$/i, '').replace(/\/+$/, '');
+			}
+		}
+		const { workspaceRoot, onProgress, ...rest } = options;
+		return pack.createAppWorkspace(workspaceRoot ?? process.cwd(), slug, { ...rest, serverBaseUrl, onProgress });
+	}
+
+	/**
+	 * Pre-checks everything `addApp` needs, WITHOUT deploying (Node.js
+	 * only, purely local — no server call). Verifies the manifest shape and
+	 * id grammar, declared icon/README assets, `appManifest.include`
+	 * entries, and a pack dry run against the size caps. Server-side
+	 * concerns (the build, store review) are out of scope — the Package
+	 * tab's readiness and the review ladder cover those.
+	 *
+	 * @param appRoot - The app folder: absolute, or relative to
+	 *   `options.workspaceRoot`.
+	 * @param options.workspaceRoot - The workspace the pack would be rooted
+	 *   at (default: `process.cwd()`).
+	 * @returns The structured report — `ok` plus every check with an
+	 *   actionable note.
+	 */
+	async verifyApp(appRoot: string, options: { workspaceRoot?: string } = {}): Promise<AppVerifyReport> {
+		const pack = await this.loadAppPack();
+		return pack.verifyAppSource(options.workspaceRoot ?? process.cwd(), appRoot);
+	}
+
 	// =========================================================================
 	// DEPLOY — point a team at a version (promotion and rollback alike)
 	// =========================================================================
@@ -165,8 +276,9 @@ export class DeployApi {
 	 * Deployments visible to the caller, as the standard list envelope.
 	 *
 	 * @param params - Optional team scope + list-API params.
-	 * @param params.teamId - Restrict to one team; omitted = every team the
-	 *   caller can monitor.
+	 * @param params.teamId - Restrict to one team; omitted = the visibility
+	 *   model: the caller's member teams plus their own personal space, and
+	 *   the whole org for an org admin.
 	 * @returns `{rows, total, page, pageSize}` of {@link Deployment} rows.
 	 */
 	async list(params: DeployListParams & { teamId?: string } = {}): Promise<DeployListEnvelope<Deployment>> {

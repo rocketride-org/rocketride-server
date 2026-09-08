@@ -101,6 +101,7 @@ class TestAllowedModules:
             'clients',
             'data',
             'dropper',
+            'mcp',
             'pipe',
             'remote',
             'services',

@@ -59,7 +59,7 @@ import { getLogger, safeJSONStringify } from '../shared/util/output';
 import { icons } from '../shared/util/icons';
 import { ConnectionStatus, ConnectionState } from '../shared/types';
 import { connectionModeRequiresApiKey, connectionModeUsesOAuth } from '../shared/util/connectionModeAuth';
-import { mergeEnvText, resolveConnectionEnv } from '../shared/util/envFile';
+import { applyManagedComments, envKeysForGroup, mergeEnvText, resolveConnectionEnv } from '../shared/util/envFile';
 import { getIdeName } from '../shared/util/ide';
 import { CloudAuthProvider } from '../auth/CloudAuthProvider';
 import {
@@ -105,6 +105,9 @@ export class ConnectionManager extends EventEmitter {
 	// engine event, success); auth failures stop and open the settings page.
 	private retryTimer?: NodeJS.Timeout;
 	private retryDelayMs = RETRY_BASE_DELAY_MS;
+	// True once the saturated-backoff notice has been written for this retry
+	// regime, so the steady-state cycle logs once instead of every round.
+	private retrySaturatedLogged = false;
 
 	// Debounce timer for configuration changes
 	private configChangeTimeout?: NodeJS.Timeout;
@@ -144,9 +147,55 @@ export class ConnectionManager extends EventEmitter {
 		const cloudAuth = CloudAuthProvider.getInstance();
 		const handler = () => {
 			this.updateCredentialsStatus().catch(() => { /* best effort */ });
+			void this.blankEnvOnSignOut();
 		};
 		cloudAuth.onDidChange.on('changed', handler);
 		this.disposables.push({ dispose: () => cloudAuth.onDidChange.removeListener('changed', handler) });
+	}
+
+	/**
+	 * Blanks this group's `.env` credential when its cloud session ends — a
+	 * dead-but-plausible token on disk is an agent trap, while an empty value
+	 * fails honestly. The URI line stays (it still names the intended server),
+	 * and groups whose mode does not use OAuth are untouched.
+	 *
+	 * @param modeOverride - The mode to judge OAuth-ness by; defaults to this
+	 *                       group's own resolved mode (the shared-mode deploy
+	 *                       manager passes the DEV mode, since its pair mirrors
+	 *                       the dev session).
+	 */
+	protected async blankEnvOnSignOut(modeOverride?: ConnectionMode): Promise<void> {
+		try {
+			const mode = modeOverride ?? this.getResolvedConnectionMode();
+			if (!connectionModeUsesOAuth(mode)) return;
+			if (await CloudAuthProvider.getInstance().getToken()) return;
+
+			const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri;
+			if (!workspaceRoot) return;
+			await ConnectionManager.runExclusiveEnvWrite(async () => {
+				const envUri = vscode.Uri.joinPath(workspaceRoot, '.env');
+				let existing = '';
+				try {
+					existing = Buffer.from(await vscode.workspace.fs.readFile(envUri)).toString('utf8');
+				} catch {
+					return; // no .env — nothing to blank
+				}
+
+				const { apiKeyKey } = envKeysForGroup(this.group);
+				const merged = mergeEnvText(existing, { [apiKeyKey]: '' });
+				if (merged !== existing) {
+					await vscode.workspace.fs.writeFile(envUri, Buffer.from(merged, 'utf8'));
+					this.logger.output(`${icons.info} Cleared ${apiKeyKey} in .env (signed out)`);
+				}
+			});
+		} catch {
+			// Best-effort — sign-out handling must never throw.
+		}
+	}
+
+	/** This group's resolved connection mode ('local' when unset/shared). */
+	public getResolvedConnectionMode(): ConnectionMode {
+		return this.getGroupConfig().connectionMode ?? 'local';
 	}
 
 	public static getInstance(): ConnectionManager {
@@ -334,8 +383,19 @@ export class ConnectionManager extends EventEmitter {
 		if (this.isDisposing) return;
 		this.cancelConnectRetry();
 		const delay = this.retryDelayMs;
+		const saturated = delay >= RETRY_MAX_DELAY_MS;
 		this.retryDelayMs = Math.min(this.retryDelayMs * 2, RETRY_MAX_DELAY_MS);
-		this.logger.output(`${icons.info} Retrying connection in ${Math.round(delay / 1000)}s...`);
+		// Retrying indefinitely is deliberate: an engine started AFTER the
+		// extension must be picked up without the user reconnecting by hand.
+		// The log line is what needs bounding — once the backoff saturates,
+		// say so once rather than writing the same line every 30 seconds for
+		// as long as the window stays open.
+		if (!saturated) {
+			this.logger.output(`${icons.info} Retrying connection in ${Math.round(delay / 1000)}s...`);
+		} else if (!this.retrySaturatedLogged) {
+			this.retrySaturatedLogged = true;
+			this.logger.output(`${icons.info} Still retrying every ${Math.round(delay / 1000)}s — this continues until the server answers.`);
+		}
 		this.retryTimer = setTimeout(() => {
 			this.retryTimer = undefined;
 			if (this.isDisposing || !this.isCurrentConnectionGeneration(generation)) return;
@@ -354,7 +414,7 @@ export class ConnectionManager extends EventEmitter {
 	}
 
 	/** Start a new connection attempt generation (invalidates older attempts). */
-	private beginConnectionAttempt(): number {
+	protected beginConnectionAttempt(): number {
 		return this.connectionGeneration.beginAttempt();
 	}
 
@@ -403,62 +463,88 @@ export class ConnectionManager extends EventEmitter {
 	}
 
 	/**
-	 * Writes ROCKETRIDE_URI / ROCKETRIDE_APIKEY into the workspace `.env` for
-	 * self-hosted engine connections (local/docker/service/onprem) on the
-	 * development group, preserving any existing comments and user variables.
+	 * Writes this group's `.env` pair — ROCKETRIDE_URI/ROCKETRIDE_APIKEY for
+	 * the development connection, ROCKETRIDE_DEPLOY_URI/ROCKETRIDE_DEPLOY_APIKEY
+	 * for the deployment target — preserving existing comments and user
+	 * variables, and maintaining the managed doctrine comment above each pair.
 	 *
-	 * Uses the resolved engine URI (getHttpUrl() — the real, possibly dynamic
-	 * local port) rather than a hardcoded default. No-op for cloud (OAuth token
-	 * is not a usable SDK key), for the deployment group, or when no workspace
-	 * is open. Skips the write when the file already matches, so reconnects
-	 * don't churn `.env`.
+	 * Every mode writes, cloud included: the cloud credential is the same
+	 * persistent rr_* key this connection just authenticated with, so the
+	 * SDK/CLI can drive the same server. Uses the resolved engine URI
+	 * (getHttpUrl() — the real, possibly dynamic local port) unless
+	 * `httpUrlOverride` is given (shared-mode deploy mirroring). No-op when no
+	 * workspace is open; skips the write when the file already matches, so
+	 * reconnects don't churn `.env`.
 	 */
-	private async syncEnvFile(
+	protected async syncEnvFile(
 		mode: ConnectionMode,
 		apiKey: string,
 		generation: number,
+		httpUrlOverride?: string,
 	): Promise<void> {
-		// Serialized per generation: an older sync either observes lost
-		// ownership before writing, or finishes before a newer one begins —
-		// so two reconnects can never interleave .env reads and writes.
+		const updates = resolveConnectionEnv({
+			group: this.group,
+			mode,
+			httpUrl: httpUrlOverride ?? this.getHttpUrl(),
+			apiKey,
+		});
+		if (!updates) return;
+		await this.writeEnvUpdates(updates, generation);
+	}
+
+	/**
+	 * Serializes EVERY `.env` read-merge-write across ALL connection manager
+	 * instances. The dev manager and the deploy manager are separate
+	 * singletons syncing the same file around the same connection moments —
+	 * without one shared lock, one manager's write can be based on a stale
+	 * read and silently drop the other's freshly written pair.
+	 */
+	private static envWriteChain: Promise<unknown> = Promise.resolve();
+	private static runExclusiveEnvWrite<T>(fn: () => Promise<T>): Promise<T> {
+		const run = ConnectionManager.envWriteChain.then(fn, fn);
+		ConnectionManager.envWriteChain = run.catch(() => undefined);
+		return run;
+	}
+
+	/**
+	 * The one writer for this instance's `.env` updates: per-generation
+	 * serialization (an older sync never overwrites a newer attempt's view)
+	 * wrapped in the cross-instance lock above, preserving user comments and
+	 * unrelated variables, and maintaining the managed doctrine comments.
+	 */
+	protected async writeEnvUpdates(updates: Record<string, string>, generation: number): Promise<void> {
 		await this.connectionGeneration.serializeAttemptPublication(generation, async (isCurrent) => {
-			try {
-				if (!isCurrent()) return;
-				const updates = resolveConnectionEnv({
-					group: this.group,
-					mode,
-					httpUrl: this.getHttpUrl(),
-					apiKey,
-				});
-				const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri;
-				if (!updates || !workspaceRoot || !isCurrent()) {
-					return;
-				}
-
-				const envUri = vscode.Uri.joinPath(workspaceRoot, '.env');
-				let existing = '';
+			await ConnectionManager.runExclusiveEnvWrite(async () => {
 				try {
-					existing = Buffer.from(await vscode.workspace.fs.readFile(envUri)).toString('utf8');
-				} catch (err) {
-					if (!(err instanceof vscode.FileSystemError && err.code === 'FileNotFound')) {
-						throw err;
+					if (!isCurrent()) return;
+					const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri;
+					if (!workspaceRoot) return;
+
+					const envUri = vscode.Uri.joinPath(workspaceRoot, '.env');
+					let existing = '';
+					try {
+						existing = Buffer.from(await vscode.workspace.fs.readFile(envUri)).toString('utf8');
+					} catch (err) {
+						if (!(err instanceof vscode.FileSystemError && err.code === 'FileNotFound')) {
+							throw err;
+						}
+						// .env doesn't exist yet — it will be created.
 					}
-					// .env doesn't exist yet — it will be created.
-				}
-				if (!isCurrent()) return;
+					if (!isCurrent()) return;
 
-				const merged = mergeEnvText(existing, updates);
-				if (merged === existing) {
-					return;
-				}
+					const merged = applyManagedComments(mergeEnvText(existing, updates));
+					if (merged === existing) {
+						return;
+					}
 
-				await vscode.workspace.fs.writeFile(envUri, Buffer.from(merged, 'utf8'));
-				if (isCurrent()) {
-					this.logger.output(`${icons.success} Synced ROCKETRIDE_URI/ROCKETRIDE_APIKEY to .env`);
+					await vscode.workspace.fs.writeFile(envUri, Buffer.from(merged, 'utf8'));
+					if (isCurrent()) {
+						this.logger.output(`${icons.success} Synced ${Object.keys(updates).join('/')} to .env`);
+					}
+				} catch (err) {
+					if (isCurrent()) this.logger.error(`Failed to sync .env: ${err}`);
 				}
-			} catch (err) {
-				if (isCurrent()) this.logger.error(`Failed to sync .env: ${err}`);
-			}
+			});
 		});
 	}
 
@@ -496,6 +582,7 @@ export class ConnectionManager extends EventEmitter {
 		const generation = this.invalidateConnectionAttempts();
 		this.cancelConnectRetry();
 		this.retryDelayMs = RETRY_BASE_DELAY_MS;
+		this.retrySaturatedLogged = false;
 		this.logger.output(`${icons.info} Configuration changed, reconnecting...`);
 		await this.updateCredentialsStatus(generation);
 		if (!this.isCurrentConnectionGeneration(generation)) return;
@@ -653,6 +740,7 @@ export class ConnectionManager extends EventEmitter {
 				// Success ends the retry regime and re-arms the backoff.
 				this.cancelConnectRetry();
 				this.retryDelayMs = RETRY_BASE_DELAY_MS;
+		this.retrySaturatedLogged = false;
 				this.updateConnectionStatus({
 					state: ConnectionState.CONNECTED,
 					lastConnected: new Date(),

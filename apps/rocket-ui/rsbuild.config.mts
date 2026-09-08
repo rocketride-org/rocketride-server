@@ -1,8 +1,13 @@
+/**
+ * MIT License
+ * Copyright (c) 2026 Aparavi Software AG
+ * See LICENSE file for details.
+ */
 // =============================================================================
 // ROCKET-UI — Module Federation Remote
 // =============================================================================
 // Builds remoteEntry.js + AppDescriptor chunk only.
-// NOT a standalone app. Run apps/cloud for development.
+// NOT a standalone app. Run shell:dev for development.
 // =============================================================================
 
 import fs from 'node:fs';
@@ -20,7 +25,16 @@ import { pluginModuleFederation } from '@module-federation/rsbuild-plugin';
 import { pluginRocketrideIcons } from '../shared/scripts/rsbuild-plugin-icons.mjs';
 
 const pkg = JSON.parse(fs.readFileSync(path.resolve(__dirname, 'package.json'), 'utf-8'));
-const moduleId = (pkg.appManifest?.id ?? 'unknown').replace(/[^a-zA-Z0-9_$]/g, '_');
+// The app id is the SERVED identity: the builder keys the build output dir,
+// the served static dir, and the apps.json URL on it, so the rsbuild distPath
+// MUST match (build/apps/<appId>). moduleId is the MF container name.
+const appId = pkg.appManifest?.id;
+if (typeof appId !== 'string' || appId.length === 0) {
+	// A fallback id would publish a malformed app under build/apps/unknown
+	// and break the remote delivery contract — fail the build instead.
+	throw new Error('package.json must define a non-empty appManifest.id');
+}
+const moduleId = appId.replace(/[^a-zA-Z0-9_$]/g, '_');
 
 // Load build-time config (.config defaults -> repo-root .env overrides) via
 // the repo's shared helper so env layering matches the shell host.
@@ -130,7 +144,7 @@ export default defineConfig(() => {
 			// Honor the builder's overlay build root (saas mode) so the bundle
 			// lands where the copy step reads it; standalone falls back to the
 			// repo-relative build dir.
-			distPath: { root: path.join(process.env.ROCKETRIDE_BUILD_ROOT ?? '../../build', 'apps', pkg.appManifest.id) },
+			distPath: { root: path.join(process.env.ROCKETRIDE_BUILD_ROOT ?? '../../build', 'apps', appId) },
 			// 'auto' derives the public path from remoteEntry.js's load URL at runtime,
 			// so chunks resolve correctly regardless of which server/path hosts the remote.
 			assetPrefix: 'auto',

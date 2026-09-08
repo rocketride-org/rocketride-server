@@ -135,10 +135,33 @@ def _team_ids_of(conn: Any) -> Dict[str, str]:
     return out
 
 
+def _enrich_audience(conn: Any, audience: Dict[str, str]) -> Dict[str, str]:
+    """Stamps display facts onto a resolved audience dict.
+
+    deployment_history rows are rendered without a second lookup, so the
+    audience that reaches the backends — and is stored verbatim into each
+    row's data — carries the dereferenced display name and wire handle
+    beside the raw id. The id stays the storage key (audience keys ignore
+    the extra fields); the display keys are additive payload, resolved
+    HERE because only the session holds the team-name map.
+    """
+    out = dict(audience)
+    out['handle'] = _audience_handle(conn, audience)
+    if audience['type'] == 'user':
+        out['name'] = _actor_of(conn)['display']
+    elif audience['type'] == 'team':
+        tid = audience.get('id', '')
+        out['name'] = next((ref for ref, t in _team_ids_of(conn).items() if t == tid and ref != tid), tid)
+    else:
+        out['name'] = ''
+    return out
+
+
 def _resolve_target(conn: Any, target: str) -> Dict[str, str]:
     """
     Resolves a wire target ('@me' | '@team/<name-or-id>' | '@public') to
-    an audience dict ({'type', 'id'}). '@user' is a legacy alias for '@me',
+    an audience dict ({'type', 'id'} plus the 'name'/'handle' display facts
+    every history row must carry). '@user' is a legacy alias for '@me',
     accepted on input, never displayed.
 
     The org rung does not exist: org = the governance container; "org-wide"
@@ -151,7 +174,7 @@ def _resolve_target(conn: Any, target: str) -> Dict[str, str]:
     """
     user_id = conn._account_info.userId
     if target in ('@user', '@me'):
-        return {'type': 'user', 'id': user_id}
+        return _enrich_audience(conn, {'type': 'user', 'id': user_id})
     if target == '@public':
         org = getattr(conn._account_info, 'organization', None)
         developer_id = (
@@ -159,7 +182,7 @@ def _resolve_target(conn: Any, target: str) -> Dict[str, str]:
         )
         if not developer_id:
             raise ValueError('Public publishing requires the organization to be registered as a developer')
-        return {'type': 'public', 'id': ''}
+        return _enrich_audience(conn, {'type': 'public', 'id': ''})
     if target == '@org':
         raise ValueError(
             'The org audience does not exist — publish to a team instead '
@@ -170,7 +193,7 @@ def _resolve_target(conn: Any, target: str) -> Dict[str, str]:
         teams = _team_ids_of(conn)
         if ref not in teams:
             raise ValueError(f'Unknown team: {ref!r} (you are not a member, or it does not exist)')
-        return {'type': 'team', 'id': teams[ref]}
+        return _enrich_audience(conn, {'type': 'team', 'id': teams[ref]})
     raise ValueError(f'Unknown publish target: {target!r} (use @me, @team/<name>, or @public)')
 
 
@@ -329,6 +352,17 @@ async def handle_app_add(conn: Any, request: Dict[str, Any]) -> Dict[str, Any]:
         data = bytes(data)
     elif not isinstance(data, bytes):
         return conn.build_error(request, 'data must be a binary zip frame (bytes), not text')
+    # The upload cap, measured on the ZIPPED byte count and refused before
+    # any parsing or decompression — a legitimate source pack is far smaller
+    # (dist/, node_modules, and .git never pack). The unpacked-size and
+    # file-count guards below still apply: a small zip can inflate large.
+    if len(data) > _ZIP_MAX_ZIPPED:
+        return conn.build_error(
+            request,
+            f'app source zip is {len(data) // (1024 * 1024)} MB — the upload cap is '
+            f'{_ZIP_MAX_ZIPPED // (1024 * 1024)} MB zipped; narrow appManifest.include '
+            '(a shared source root, a build output, or large assets) and redeploy',
+        )
 
     # ── Parse the zip in memory: manifest first, files after allocation ───
     import io
@@ -416,8 +450,11 @@ async def handle_app_add(conn: Any, request: Dict[str, Any]) -> Dict[str, Any]:
             raise ValueError(f'registry entry carries no usable artifactPath ({content_root!r})')
         home = f'@/Org/={org_id}/{content_root[len(org_prefix) :]}'
         path = f'{home}/bundle/{app_id}-v{version:06d}.zip'
-        await fs.write(path, bytes(data))
+        # Record BEFORE the write (same rule as the source loop below): a
+        # bundle write that fails partway still leaves bytes on disk, and
+        # the compensation loop only deletes recorded paths.
         written.append(path)
+        await fs.write(path, bytes(data))
         for item in archive.infolist():
             if item.is_dir():
                 continue
@@ -481,6 +518,18 @@ async def handle_app_add(conn: Any, request: Dict[str, Any]) -> Dict[str, Any]:
             debug(f'[app_deploy] could not withdraw {app_id} v{row_version}: {exc}')
 
     # ── Hand the version to the build worker ─────────────────────────────
+    # First card-ticker word: the zip is on the server (the client's own
+    # 'uploading' state hands over here); the worker ticks the rest. Sent
+    # BEFORE the enqueue — the worker loop can resume on the next await, and
+    # its 'preparing' tick must not reach the card ahead of 'uploaded'.
+    server = getattr(conn, '_server', None)
+    if server is not None:
+        try:
+            from ai.modules.task.deploy_events import broadcast_build_status
+
+            await broadcast_build_status(server, org_id, app_id, version, 'uploaded')
+        except Exception as exc:
+            debug(f'[app_deploy] uploaded status broadcast failed: {exc}')
     # Deploy is THE build trigger (there is no developer-side manual kick):
     # the worker compiles source/ into dist/ asynchronously and stamps
     # metadata.build as it goes. Best-effort — a worker that is not running
@@ -492,16 +541,6 @@ async def handle_app_add(conn: Any, request: Dict[str, Any]) -> Dict[str, Any]:
         enqueue_build(getattr(conn, '_server', None), org_id, app_id, version)
     except Exception as exc:
         debug(f'[app_deploy] could not enqueue build for {app_id} v{version}: {exc}')
-    # First card-ticker word: the zip is on the server (the client's own
-    # 'uploading' state hands over here); the worker ticks the rest.
-    server = getattr(conn, '_server', None)
-    if server is not None:
-        try:
-            from ai.modules.task.deploy_events import broadcast_build_status
-
-            await broadcast_build_status(server, org_id, app_id, version, 'uploaded')
-        except Exception as exc:
-            debug(f'[app_deploy] uploaded status broadcast failed: {exc}')
 
     debug(f'[app_deploy] deployed {app_id} v{artifact["appVersion"]} as registry v{version} (private, build queued)')
     # One generic response shape for every kind: rrext_deploy add -> {artifact}
@@ -554,6 +593,7 @@ def _manifest_of_zip(archive: Any, app_root: str = '') -> 'tuple[Dict[str, Any],
 
 # Zip guards: transport caps that stop hostile archives before extraction.
 _ZIP_MAX_FILES = 2000
+_ZIP_MAX_ZIPPED = 50 * 1024 * 1024  # 50 MB zipped — the upload cap, checked before parsing
 _ZIP_MAX_UNPACKED = 100 * 1024 * 1024  # 100 MB unpacked
 _ZIP_MAX_MANIFEST = 1 * 1024 * 1024  # 1 MB — package.json read before the guard runs
 
@@ -597,14 +637,24 @@ def _zip_guard(archive: Any) -> str:
     return ''
 
 
+# Review-thread messages are chat lines, not documents — cap the payload so
+# a runaway client cannot balloon the history stream.
+_REPLY_MAX_CHARS = 4000
+
+# Response cap for the build_log verb — long logs serve their TAIL (the
+# failure always lands at the end; the full file stays in the store).
+_BUILD_LOG_MAX_CHARS = 256 * 1024
+
+
 async def handle_deploy_app(conn: Any, request: Dict[str, Any]) -> Dict[str, Any]:
     """
     Handle the ``rrext_deploy_app`` command for both platform flavours.
 
     App-specific publish control: publish / versions / where / entry /
-    disable / remove. Uploading is NOT here — the generic ``rrext_deploy
-    add`` verb is the one rail door for every kind. Requires an
-    authenticated connection; org scoping comes from the session.
+    submit / withdraw / reply / build_log / disable / remove. Uploading is
+    NOT here — the generic ``rrext_deploy add`` verb is the one rail door
+    for every kind. Requires an authenticated connection; org scoping
+    comes from the session.
 
     CROSS-ORG: every subcommand first resolves the app's HOME org — the
     caller's own org when its rail carries the app (the developer case),
@@ -855,6 +905,80 @@ async def handle_deploy_app(conn: Any, request: Dict[str, Any]) -> Dict[str, Any
                 debug(f'[app_deploy] withdraw status push failed: {exc}')
         return conn.build_response(request, body={'artifact': _rail_entry(updated, artifact)})
 
+    # ── reply — append a developer message to the review thread ───────────
+    # The developer half of the review conversation: the message rides the
+    # app's deployment_history as a 'reply' row (side 'developer'), the same
+    # stream the admin verbs write to. A 'reply' liveness ping follows so
+    # reviewer surfaces update without polling.
+    if sub == 'reply':
+        message = str(args.get('message') or '').strip()
+        if not message:
+            return conn.build_error(request, 'message is required')
+        if len(message) > _REPLY_MAX_CHARS:
+            return conn.build_error(request, f'message exceeds the {_REPLY_MAX_CHARS}-character limit')
+        version = args.get('version')
+        if version is not None and not isinstance(version, int):
+            return conn.build_error(request, 'version must be a registry version integer when given')
+        if not developer:
+            return conn.build_error(
+                request, f'Only the developer organization can reply on the review thread of {app_id}'
+            )
+        try:
+            _assert_owns_namespace(conn, app_id)
+        except ValueError as exc:
+            return conn.build_error(request, str(exc))
+        await account.deployments_history_append(
+            home,
+            app_id,
+            'reply',
+            _actor_of(conn),
+            version=version,
+            data={'side': 'developer', 'message': message},
+        )
+        # Reply liveness: the same walk the verdict pushes use, with status
+        # 'reply' — cross-org reviewer surfaces (queue badges, the Feedback
+        # thread list) re-pull on it; consumers toast only on explicit
+        # 'ready'/'rejected'. Best-effort, never fails the reply.
+        server = getattr(conn, '_server', None)
+        if server is not None:
+            try:
+                from ai.modules.task.deploy_events import broadcast_review_state
+
+                await broadcast_review_state(server, home, app_id, version, 'reply')
+            except Exception as exc:
+                debug(f'[app_deploy] reply status push failed: {exc}')
+        return conn.build_response(request, body={'replied': True, 'appId': app_id})
+
+    # ── build_log — one version's durable server build log ────────────────
+    # The full output the build worker writes beside the version's artifacts
+    # (metadata.build carries no error text) — the Deploy card's "failed"
+    # badge opens this. Developer-org only: the log describes the org's own
+    # source build.
+    if sub == 'build_log':
+        version = args.get('version')
+        if not isinstance(version, int):
+            return conn.build_error(request, 'version (registry version number) is required')
+        if not developer:
+            return conn.build_error(request, f'Only the developer organization can read the build log of {app_id}')
+        entry = await _registry_entry_of(account, home, app_id, version)
+        if entry is None:
+            return conn.build_error(request, f'{app_id} has no registry version {version}')
+        content_root = artifact_content_dir(str(entry.get('artifactPath') or ''))
+        if not content_root:
+            return conn.build_error(request, f'v{version} of {app_id} has no content home on the server')
+        from ai.account.store import Store
+
+        try:
+            data = await Store.instance()._store.read_bytes(f'{content_root}/build.log')
+        except Exception:
+            # No log (legacy build, or the worker never ran) — an empty log
+            # is a normal answer, not an error.
+            return conn.build_response(request, body={'appId': app_id, 'version': version, 'log': ''})
+        text = data.decode('utf-8', errors='replace')
+        if len(text) > _BUILD_LOG_MAX_CHARS:
+            text = f'... (showing the last {_BUILD_LOG_MAX_CHARS} characters)\n{text[-_BUILD_LOG_MAX_CHARS:]}'
+        return conn.build_response(request, body={'appId': app_id, 'version': version, 'log': text})
+
     # ── where — the reverse index (audience → served version) ─────────────
     if sub == 'where':
         return conn.build_response(
@@ -900,9 +1024,10 @@ def _rail_entry(entry: Dict[str, Any], artifact: Optional[Dict[str, Any]]) -> Di
         'author': who.get('display') or who.get('email') or who.get('userId') or '',
         'message': entry.get('comment', ''),
         # The build lifecycle (metadata.build) — the DEPLOY view's chips.
+        # No error text rides the rail: detail lives in build.log, served
+        # on demand by the build_log verb.
         'buildStatus': str(build.get('status') or ''),
         'buildPhase': str(build.get('phase') or ''),
-        'buildErrors': build.get('errors') or [],
         'buildEndedAt': build.get('endedAt'),
     }
 

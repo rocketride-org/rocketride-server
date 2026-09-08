@@ -54,7 +54,7 @@ SaaS. Consumers:
 """
 
 import time
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from rocketlib import debug
 
@@ -87,7 +87,15 @@ _overlay: Dict[str, Dict[str, Dict[Any, Dict[str, Any]]]] = {}
 # =============================================================================
 
 
-def register(user_id: str, connection_id: Any, module_id: str, url: str, app_id: str, session: str = '') -> None:
+def register(
+    user_id: str,
+    connection_id: Any,
+    module_id: str,
+    url: str,
+    app_id: str,
+    session: str = '',
+    meta: Optional[Dict[str, str]] = None,
+) -> None:
     """
     Insert or refresh THIS connection's dev overlay entry for one module.
 
@@ -102,6 +110,11 @@ def register(user_id: str, connection_id: Any, module_id: str, url: str, app_id:
         app_id:        App id the module belongs to.
         session:       The registering editor's session nonce ('' when the
                        client predates session routing).
+        meta:          Display basics from the app's local manifest
+                       ('name'/'description'/'appVersion'/'icon' data URI) —
+                       consumed by the SYNTHETIC tile of a never-published
+                       app so it renders like a store tile; a matched
+                       published app keeps its manifest values.
     """
     module_bucket = _overlay.setdefault(user_id, {}).setdefault(module_id, {})
     module_bucket[connection_id] = {
@@ -110,6 +123,7 @@ def register(user_id: str, connection_id: Any, module_id: str, url: str, app_id:
         'app_id': app_id,
         'connection_id': connection_id,
         'session': session,
+        'meta': dict(meta) if meta else {},
         'registered_at': time.time(),
         'expires_at': time.time() + _IDLE_TTL_SECONDS,
     }
@@ -291,17 +305,24 @@ def apply_overlay(user_id: str, apps: List[Dict[str, Any]]) -> List[Dict[str, An
             matched.add(group[0]['module_id'])
         out.append(app)
 
-    # Append synthetic entries for overlay modules with no published app
+    # Append synthetic entries for overlay modules with no published app.
+    # The registering editor supplies the app's local manifest basics
+    # (register_dev meta) so the tile renders like a store tile — name,
+    # description, icon, semver — instead of a bare id; the fallbacks
+    # serve registrations from clients that predate the meta fields.
     for module_id, group in by_module.items():
         if module_id in matched:
             continue
         newest = group[0]
+        meta = newest.get('meta') or {}
         out.append(
             {
                 'id': newest['app_id'],
                 'moduleId': module_id,
-                'name': newest['app_id'],
-                'description': 'Local development app',
+                'name': meta.get('name') or newest['app_id'],
+                'description': meta.get('description') or 'Local development app',
+                'icon': meta.get('icon') or '',
+                'version': meta.get('appVersion') or '',
                 'entry': newest['url'],
                 'dev': True,
                 'devEntries': wire_entries(group),
@@ -387,6 +408,26 @@ async def push_refresh(server: Any, user_id: str, source: str) -> None:
 # DAP HANDLER — rrext_deploy_app.register_dev
 # =============================================================================
 
+# Display-metadata caps. Oversize or malformed values are DROPPED, never
+# fatal — the metadata is cosmetic (the synthetic tile's face) and a stale
+# or hand-rolled client must still be able to register its dev server.
+_META_TEXT_CAPS = {'name': 200, 'description': 2000, 'appVersion': 100}
+# 256 KiB icon file, base64-inflated (4/3) plus the data: header.
+_META_ICON_MAX_CHARS = 400_000
+
+
+def _sanitize_meta(args: Dict[str, Any]) -> Dict[str, str]:
+    """The registration's display metadata — capped, typed, best-effort."""
+    meta: Dict[str, str] = {}
+    for key, cap in _META_TEXT_CAPS.items():
+        value = args.get(key)
+        if isinstance(value, str) and value.strip() and len(value) <= cap:
+            meta[key] = value.strip()
+    icon = args.get('icon')
+    if isinstance(icon, str) and icon.startswith('data:image/') and len(icon) <= _META_ICON_MAX_CHARS:
+        meta['icon'] = icon
+    return meta
+
 
 async def handle_register_dev(conn: Any, request: Dict[str, Any]) -> Dict[str, Any]:
     """
@@ -398,12 +439,18 @@ async def handle_register_dev(conn: Any, request: Dict[str, Any]) -> Dict[str, A
     local app development works without SaaS.
 
     Args (DAP ``arguments``):
-        moduleId:   MF container name to override (required).
-        url:        Dev remoteEntry.js URL (required unless unregistering).
-        appId:      Owning app id (defaults to moduleId).
-        session:    The editor's session nonce (routes previews launched
-                    from that editor to ITS registration; optional).
-        unregister: True to remove THIS connection's override instead.
+        moduleId:    MF container name to override (required).
+        url:         Dev remoteEntry.js URL (required unless unregistering).
+        appId:       Owning app id (defaults to moduleId).
+        session:     The editor's session nonce (routes previews launched
+                     from that editor to ITS registration; optional).
+        name:        Display name from the app's local manifest (optional).
+        description: Manifest description (optional).
+        appVersion:  Manifest semver for the tile's version line (optional).
+        icon:        Manifest icon as a data:image/ URI, ≤ 400k chars
+                     (optional). All four feed the SYNTHETIC tile of a
+                     never-published app; invalid values are dropped.
+        unregister:  True to remove THIS connection's override instead.
 
     Returns:
         DAP response with ``{registered}`` or ``{unregistered}``.
@@ -443,6 +490,7 @@ async def handle_register_dev(conn: Any, request: Dict[str, Any]) -> Dict[str, A
         url,
         args.get('appId', module_id),
         session=str(args.get('session', '') or ''),
+        meta=_sanitize_meta(args),
     )
     await push_refresh(conn._server, user_id, source='dev-overlay')
     return conn.build_response(request, body={'registered': module_id})

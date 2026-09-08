@@ -138,6 +138,21 @@ export type SettingsIncomingMessage =
 	| {
 			type: 'subscriptionStatus';
 			isSubscribed: boolean;
+	  }
+	// Declared, not cast: WelcomeWebview carries the identical variant, and
+	// the two surfaces read ONE host payload — a typed shape is what keeps
+	// them from drifting apart field by field.
+	| {
+			type: 'cloud:status';
+			signedIn: boolean;
+			userName: string;
+			signedInUrl?: string;
+			waitlisted?: boolean;
+			waitlistedName?: string;
+			pendingSignIn?: boolean;
+			pendingSignOut?: boolean;
+			pendingUserName?: string;
+			pendingUrl?: string;
 	  };
 
 /** Messages this webview sends **to** the extension host. */
@@ -574,15 +589,15 @@ export const Settings: React.FC = () => {
 					setEngineVersionsLoading(false);
 					break;
 
-				case 'cloud:status' as any: {
-					setCloudSignedIn((message as any).signedIn);
-					setCloudUserName((message as any).userName || '');
-					setCloudSignedInUrl((message as any).signedInUrl || '');
-					setCloudWaitlisted(Boolean((message as any).waitlisted));
-					setCloudWaitlistedName((message as any).waitlistedName || '');
-					const pendingSignIn = Boolean((message as any).pendingSignIn);
-					const pendingSignOut = Boolean((message as any).pendingSignOut);
-					setCloudPending({ signIn: pendingSignIn, signOut: pendingSignOut, userName: (message as any).pendingUserName || '', url: (message as any).pendingUrl || '' });
+				case 'cloud:status': {
+					setCloudSignedIn(message.signedIn);
+					setCloudUserName(message.userName || '');
+					setCloudSignedInUrl(message.signedInUrl || '');
+					setCloudWaitlisted(Boolean(message.waitlisted));
+					setCloudWaitlistedName(message.waitlistedName || '');
+					const pendingSignIn = Boolean(message.pendingSignIn);
+					const pendingSignOut = Boolean(message.pendingSignOut);
+					setCloudPending({ signIn: pendingSignIn, signOut: pendingSignOut, userName: message.pendingUserName || '', url: message.pendingUrl || '' });
 					// A staged auth change is an unsaved edit — surface the
 					// Save/Cancel footer so the user can commit or revert it.
 					if (pendingSignIn || pendingSignOut) setDirty(true);
@@ -1090,7 +1105,7 @@ export const Settings: React.FC = () => {
 				),
 			},
 		}),
-		[settings, message, testMessage, engineVersions, engineVersionsLoading, devProbe, deployProbe, cloudSignedIn, cloudUserName, cloudSignedInUrl, cloudWaitlisted, cloudWaitlistedName, cloudPending, dockerStatus, dockerProgress, dockerError, dockerBusy, dockerAction, dockerVersionOptions, dockerSelectedVersion, serviceStatus, serviceProgress, serviceError, serviceBusy, serviceAction, serviceVersionOptions, serviceSelectedVersion, sudoPromptVisible, sudoPasswordInput]
+		[settings, message, testMessage, engineVersions, engineVersionsLoading, devProbe, deployProbe, cloudSignedIn, cloudUserName, cloudSignedInUrl, cloudWaitlisted, cloudWaitlistedName, cloudPending, subscribed, dockerStatus, dockerProgress, dockerError, dockerBusy, dockerAction, dockerVersionOptions, dockerSelectedVersion, serviceStatus, serviceProgress, serviceError, serviceBusy, serviceAction, serviceVersionOptions, serviceSelectedVersion, sudoPromptVisible, sudoPasswordInput]
 	);
 
 	return (

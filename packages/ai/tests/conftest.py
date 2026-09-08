@@ -21,7 +21,18 @@ def _reset_store_singleton():
     would pin whatever env was live at that moment for the REST of the
     session, making any singleton-reaching test order-dependent and stateful.
     """
-    from ai.account.store import Store
+    try:
+        from ai.account.store import Store
+    except ImportError as exc:
+        # ai.account needs engine-env modules (rocketlib). In a plain venv
+        # (e.g. running the mcp module tests directly) the import fails —
+        # and nothing could have built the singleton there, so there is
+        # nothing to reset. Any OTHER import failure is a real breakage and
+        # must not be silenced into order-dependent tests.
+        if (exc.name or '').split('.')[0] != 'rocketlib':
+            raise
+        yield
+        return
 
     Store.reset()
     yield

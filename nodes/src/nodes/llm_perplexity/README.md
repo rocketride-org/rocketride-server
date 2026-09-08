@@ -84,7 +84,7 @@ To obtain an API key, visit [https://www.perplexity.ai/settings/api](https://www
 |---|---|---|---|
 | `model` | `string` | **Model**<br/>Perplexity AI model |  |
 | `modelTotalTokens` | `number` | **Tokens**<br/>Total Tokens |  |
-| `perplexity.profile` | `string` | **Model**<br/>Perplexity AI model | `"sonar-pro"` |
+| `perplexity.profile` | `string` | **Model**<br/>Perplexity AI model | `"sonar"` |
 
 ## Dependencies
 

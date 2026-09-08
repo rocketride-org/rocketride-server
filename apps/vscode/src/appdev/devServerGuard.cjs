@@ -107,9 +107,11 @@ function enumerateDescendants(rootPid, callback) {
 	);
 	let out = '';
 	let done = false;
+	let timer;
 	const finish = () => {
 		if (done) return;
 		done = true;
+		clearTimeout(timer);
 		const children = new Map();
 		for (const line of out.split(/\r?\n/)) {
 			const parts = line.trim().split(/\s+/);
@@ -131,9 +133,14 @@ function enumerateDescendants(rootPid, callback) {
 		callback(ordered);
 	};
 	ps.stdout.on('data', (chunk) => { out += chunk; });
-	ps.on('exit', finish);
+	// 'close', not 'exit': exit fires at termination, BEFORE stdout is
+	// guaranteed drained, so the process table could be truncated — and a
+	// truncated table drops descendants, leaving the rsbuild holding the
+	// dev-server port that this file exists to free. spawnInstallOnce in
+	// watchManager settles on close for the same reason.
+	ps.on('close', finish);
 	ps.on('error', finish);
-	setTimeout(finish, 2000);
+	timer = setTimeout(finish, 2000);
 }
 
 /**
@@ -158,6 +165,13 @@ function die() {
 		// direct kill cannot reach. Enumerate from the CHILD (the powershell
 		// helper is OUR child, never inside that subtree), kill leaf-first
 		// via direct syscalls, re-enumerate for stragglers, then exit.
+		//
+		// The enumeration stays AFTER the kill deliberately. Snapshotting
+		// first would put a PowerShell CIM query (hundreds of ms) in front of
+		// the one syscall that has to land in microseconds, and it would not
+		// remove the pid-reuse concern it aims at: this process still holds
+		// the child's process handle, and Windows does not recycle a pid
+		// while an open handle to it exists.
 		const killAll = (pids) => {
 			for (const pid of pids) {
 				try { process.kill(pid); } catch { /* already dead */ }

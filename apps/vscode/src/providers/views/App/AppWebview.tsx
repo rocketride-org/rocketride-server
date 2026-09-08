@@ -26,7 +26,7 @@ import '../../../themes/rocketride-vscode.css';
 import '../../styles/root.css';
 import React, { useCallback, useMemo, useRef, useState } from 'react';
 import { AppBuilderScreen } from 'shared/modules/appdev';
-import type { AppBuilderStage, AppErrorRow, AppEventRow, AppSummary, AppVersionInfo, BuildStatusTick, ConsoleRow, IAppBuilderHost, ListingDraft, PreflightCheck, WatchStatus } from 'shared/modules/appdev';
+import type { AppBuilderStage, AppErrorRow, AppEventRow, AppHistoryEntry, AppSummary, AppVersionInfo, BuildStatusTick, ConsoleRow, IAppBuilderHost, ListingDraft, PreflightCheck, WatchStatus } from 'shared/modules/appdev';
 import { useMessaging } from '../hooks/useMessaging';
 
 // =============================================================================
@@ -65,6 +65,7 @@ interface WireRailEntry {
 	message: string;
 	rungs?: string[];
 	state?: string;
+	buildStatus?: string;
 }
 interface WirePin {
 	rung: string;
@@ -74,6 +75,59 @@ interface WirePin {
 	state: string;
 	deployedAt?: number;
 }
+interface WireHistoryRow {
+	seq: number;
+	at: number;
+	action: string;
+	teamId?: string | null;
+	version?: number | null;
+	actor?: { userId?: string; display?: string; email?: string } | null;
+	data?: {
+		side?: string;
+		message?: string;
+		audience?: { type?: string; id?: string; name?: string; handle?: string };
+		previousVersion?: number;
+		comment?: string;
+		from?: string;
+		to?: string;
+	} | null;
+}
+
+// =============================================================================
+// HISTORY PROJECTIONS — one 'history' RPC, two view shapes
+// =============================================================================
+
+/**
+ * Normalizes raw history rows (oldest-first from the bridge) into the shared
+ * AppHistoryEntry shape — SQL nulls become absent fields so the views only
+ * deal in one vocabulary.
+ *
+ * @param rows - Raw bridge rows, oldest first.
+ * @returns The Dashboard's history entries, oldest first.
+ */
+function toHistoryEntries(rows: WireHistoryRow[]): AppHistoryEntry[] {
+	return rows.map((r) => ({
+		seq: r.seq,
+		at: r.at,
+		action: r.action,
+		version: r.version ?? undefined,
+		actor: r.actor ?? undefined,
+		data: r.data
+			? {
+					side: r.data.side === 'admin' || r.data.side === 'developer' ? r.data.side : undefined,
+					message: r.data.message,
+					// The audience marker is what separates a PUBLISH row (bind
+					// to a rung) from the bare registry-write DEPLOY row.
+					audience: r.data.audience,
+					previousVersion: r.data.previousVersion,
+					comment: r.data.comment,
+					from: r.data.from,
+					to: r.data.to,
+				}
+			: undefined,
+	}));
+}
+
 
 // Bridge RPC bound — generous because publish builds are the slowest
 // legitimate call; a host that never answers must not pend forever.
@@ -394,7 +448,7 @@ const AppWebview: React.FC = () => {
 	const [app, setApp] = useState<AppSummary | null>(null);
 	const [previewUrl, setPreviewUrl] = useState('');
 	const [capabilities, setCapabilities] = useState({ hasCodePane: false, hasNativeFiles: true, canDebug: true });
-	const [initialStage, setInitialStage] = useState<AppBuilderStage>('develop');
+	const [initialStage, setInitialStage] = useState<AppBuilderStage>('dashboard');
 	const [reloadSeq, setReloadSeq] = useState(0);
 	const [devEntry, setDevEntry] = useState('');
 	// Latest watch status — drives the Initializing pane's phase line and,
@@ -566,6 +620,11 @@ const AppWebview: React.FC = () => {
 					// The connection's identity changed (org switch reconnect or a
 					// server account push) — re-mint the host so org-scoped data
 					// re-fetches.
+					// Retained build words belong to the OLD rail and are keyed by
+					// registry version alone, so the same number means something
+					// else under the new identity: drop them rather than let a
+					// late-mounted DEPLOY view replay a foreign account's word.
+					buildTicks.current.clear();
 					setAccountSeq((n) => n + 1);
 					break;
 				case 'appdev:result': {
@@ -735,6 +794,7 @@ const AppWebview: React.FC = () => {
 					message: v.message,
 					rungs: (v.rungs ?? []).filter((r): r is 'personal' | 'team' | 'public' => r === 'personal' || r === 'team' || r === 'public'),
 					state: (v.state || undefined) as AppVersionInfo['state'],
+					buildStatus: v.buildStatus,
 				}));
 			},
 			deploy: async (message) => {
@@ -747,6 +807,9 @@ const AppWebview: React.FC = () => {
 				await rpc('unpublish', [target]);
 			},
 			listTeams: async () => await rpc<Array<{ id: string; name: string }>>('teams'),
+			// One version's server build log ('' = none) — the Deploy card's
+			// "failed" badge opens it in the log modal.
+			loadBuildLog: async (version) => await rpc<string>('buildLog', [version]),
 			submitForReview: async (version) => {
 				await rpc('submit', [version]);
 			},
@@ -787,13 +850,27 @@ const AppWebview: React.FC = () => {
 			},
 			// Store: the listing lives in the app's package.json appManifest —
 			// load/save round-trip through the extension host (files are truth;
-			// every deploy packs the manifest as the listing record). Only the
-			// review-history loader still awaits the marketplace backend.
+			// every deploy packs the manifest as the listing record).
 			loadListing: async () => await rpc<ListingDraft | null>('loadListing'),
 			saveListing: async (draft) => {
 				await rpc<null>('saveListing', [draft]);
 			},
 			runPreflight: async () => await rpc<PreflightCheck[]>('preflight'),
+			// Package assets: native pick (app-folder-relative result) + text
+			// read for the icon/README previews.
+			pickAppFile: async (kind) => await rpc<string | null>('pickFile', [kind]),
+			pickIncludePath: async () => await rpc<string | null>('pickIncludePath'),
+			readAppTextFile: async (relPath) => await rpc<string>('readFile', [relPath]),
+			readAppImageDataUri: async (relPath) => await rpc<string | null>('readImage', [relPath]),
+
+			// ── Dashboard + review thread ───────────────────────────────────
+			// The bridge walks the server's 100-row pages and returns the
+			// whole stream oldest-first; the Dashboard's conversation renders
+			// it (the Store tab's review-history card retired into it).
+			loadHistory: async () => toHistoryEntries(await rpc<WireHistoryRow[]>('history')),
+			sendReply: async (message, version) => {
+				await rpc('reply', version === undefined ? [message] : [message, version]);
+			},
 		};
 	}, [capabilities, previewUrl, sendMessage, rpc, accountSeq, subscribeEvents, subscribeConsole, subscribeErrors, subscribeWatch, subscribeBuildStatus]);
 

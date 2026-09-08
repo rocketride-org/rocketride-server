@@ -26,7 +26,7 @@ import assert from 'node:assert/strict';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { collectPackedFiles } from '../appdev/packFilter';
+import { collectPackedFiles } from 'rocketride/app-pack';
 
 /**
  * Materializes a file tree in a fresh temp workspace and returns its root.

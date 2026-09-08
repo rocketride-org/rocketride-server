@@ -50,7 +50,7 @@ import type { DeployArtifact } from 'shell';
 import { useDeployments } from '../hooks/useDeployments';
 import { PrefsProvider } from 'shell';
 import type { TaskEventMessage, TaskEventSession, TaskStatus, TaskTimeline, TraceLevel, ViewState } from 'shared/modules/project';
-import { saveProject, deleteProject, displayName as projectDisplayName } from '../utils/projectStore';
+import { saveProject, displayName as projectDisplayName } from '../utils/projectStore';
 import { createProjectVfs } from '../utils/projectVfs';
 import { downloadJson } from '../utils/downloadFile';
 import DeploymentProvider from './DeploymentProvider';
@@ -209,14 +209,17 @@ const ProjectProvider: React.FC<ProjectPageProps> = ({ uri, pipeline, isDirty, i
 		const cached = manager.getCachedServices();
 		if (!cached.servicesError && Object.keys(cached.services).length > 0) {
 			// The summary carries the deduplicated icon table — (re)build the
-			// icon registry with the same lifecycle as the services list itself.
-			registerServiceIcons({ services: cached.services, icons: cached.icons ?? {} });
+			// icon registry with the same lifecycle as the services list
+			// itself. The shell types service entries loosely (Record<string,
+			// unknown>); the registry reads only the `icon` id off each entry,
+			// so the hand-off narrows to that shape.
+			registerServiceIcons({ services: cached.services as Record<string, { icon?: string }>, icons: cached.icons ?? {} });
 			setServicesJson(cached.services);
 		}
 		return manager.on('shell:servicesUpdated', ({ services, icons, servicesError }) => {
 			// A failed refresh keeps the last good catalog on the canvas.
 			if (servicesError) return;
-			registerServiceIcons({ services, icons: icons ?? {} });
+			registerServiceIcons({ services: services as Record<string, { icon?: string }>, icons: icons ?? {} });
 			setServicesJson(services);
 		});
 	}, [isConnected]);
@@ -267,7 +270,9 @@ const ProjectProvider: React.FC<ProjectPageProps> = ({ uri, pipeline, isDirty, i
 			// deploy run) is the shared classification — deploy events ride
 			// this connection whenever a team-scoped subscription is open and
 			// must never enter the dev feed.
-			const msg = event as TaskEventMessage;
+			// Wire-boundary reinterpret: the generic DAP envelope narrows to
+			// the task-event shape only after the membership check below.
+			const msg = event as unknown as TaskEventMessage;
 			if (!isDevLiveEvent(msg, pid)) return;
 			setLiveLogEvents((prev) => {
 				const next = [...prev, msg];
@@ -391,14 +396,17 @@ const ProjectProvider: React.FC<ProjectPageProps> = ({ uri, pipeline, isDirty, i
 			} else if (action === 'stop') {
 				client
 					.getTaskToken({ projectId: pid, source })
-					.then((token: string | undefined) => {
-						if (token) return client.terminate(token);
-					})
+					.then((token: string | undefined) => (token ? client.terminate(token) : undefined))
 					.catch((err: unknown) => setPipelineError(err instanceof Error ? err.message : String(err)));
 			} else if (action === 'restart') {
 				client
 					.getTaskToken({ projectId: pid, source })
-					.then((token: string | undefined) => client.restart({ token, projectId: pid, source, pipeline }))
+					// No token = no running task to restart; the server rejects a
+					// tokenless restart outright, so skip it exactly as stop does.
+					// The SDK types restart's pipeline as a loose record (no typed
+					// pipeline shape on that verb yet); PipelineConfig carries no
+					// index signature, so the hand-off needs the cast.
+					.then((token: string | undefined) => (token ? client.restart({ token, projectId: pid, source, pipeline: pipeline as unknown as Record<string, unknown> }) : undefined))
 					.catch((err: unknown) => setPipelineError(err instanceof Error ? err.message : String(err)));
 			}
 		},
@@ -489,7 +497,9 @@ const ProjectProvider: React.FC<ProjectPageProps> = ({ uri, pipeline, isDirty, i
 				return;
 			}
 			if (isDirty) {
-				setPendingRun({ action, source });
+				// exactOptionalPropertyTypes: omit `source` entirely when absent
+				// rather than storing an explicit undefined.
+				setPendingRun(source !== undefined ? { action, source } : { action });
 				return;
 			}
 			executePipelineAction(action, source);

@@ -366,8 +366,10 @@ export interface ConnectResult {
 	locale: string;
 
 	/**
-	 * ID of the team that should be used by default for operations that do not
-	 * explicitly specify a team context.
+	 * ID of the user's development team. It carries NO authorization meaning:
+	 * it is the billing and environment-layer context for dev runs and for
+	 * `@me` publishes. Team-scoped operations always name their team
+	 * explicitly — there is no default-team fallback.
 	 */
 	devTeam: string;
 
@@ -529,8 +531,8 @@ export interface StripePriceEntry {
  * Server metadata returned by the pre-auth info probe.
  *
  * Obtained via {@link RocketRideClient.getServerInfo} which sends an
- * `auth` request with `infoOnly: true`. The server responds without
- * requiring credentials.
+ * `rrext_public_probe` command on a public connection. The server
+ * responds without requiring credentials.
  */
 export interface ServerInfoResult {
 	/** Server engine version string. */

@@ -442,9 +442,10 @@ class DeployPipeCommands(_DeployBase):
 
         # The deployment must exist and be runnable — a disabled or errored
         # deployment must not run "just this once" through the back door.
-        dep = await account.deployments_get(org_id, team_id, project_id)
-        if dep is None or dep.get('state') == 'removed':
-            raise ValueError(f'No deployment of {project_id} for team {team_id}')
+        # Same artifact-membership guard as schedule_set/source_config: a
+        # sourceId the deployed version does not contain must fail HERE as a
+        # validation error, not at launch with an engine-level message.
+        dep = await self._require_source_in_artifact(org_id, team_id, project_id, source_id)
         if dep.get('state') != 'enabled':
             raise ValueError(f'Deployment is {dep.get("state")} — enable it first')
 

@@ -79,7 +79,11 @@ let _suppressPush = false;
 function pushAppHistory(appId: string): void {
 	if (_suppressPush) return;
 	try {
-		window.history.pushState({ appId }, '', window.location.pathname + window.location.search);
+		// `history.state` is SHARED with the home-ui remote, which keeps its own
+		// navigation snapshot under an `rrHome` key. Always MERGE — replacing the
+		// state object wholesale drops `rrHome` and desyncs the URL from the page
+		// the remote renders on back/forward.
+		window.history.pushState({ ...(window.history.state ?? {}), appId }, '', window.location.pathname + window.location.search);
 	} catch { /* sandboxed iframe or similar */ }
 }
 
@@ -428,15 +432,23 @@ export const WorkspaceProvider: React.FC<IWorkspaceProviderProps> = ({ apps, wor
 			// ONCE — boot then resolves the manifest default; with no override
 			// left, a second failure cannot loop. Dev-owned containers are
 			// exempt (overrides never apply to them).
-			if (!isDevRemote(entry.moduleId) && getAppVersionOverride(appId)) {
-				const dropped = getAppVersionOverride(appId);
+			const dropped = isDevRemote(entry.moduleId) ? null : getAppVersionOverride(appId);
+			if (dropped) {
 				clearAppVersionOverride(appId);
-				try {
-					sessionStorage.setItem('rr:droppedOverride', `${appId} v${dropped?.version ?? '?'}`);
-				} catch { /* storage unavailable — the reload still restores the default */ }
-				console.warn(`[shell] reloading: dropped failing version override for ${appId} (v${dropped?.version ?? '?'}) — rebooting onto the default resolution`);
-				window.location.reload();
-				return false;
+				// The clear swallows storage errors: a write that fails while
+				// reads still succeed leaves the override in place, so the next
+				// boot fails the same way and reloads again — unbounded. Reload
+				// ONLY once the override reads back as gone; otherwise fall
+				// through to the normal failure path (error + Retry).
+				if (getAppVersionOverride(appId) === null) {
+					try {
+						sessionStorage.setItem('rr:droppedOverride', `${appId} v${dropped.version}`);
+					} catch { /* storage unavailable — the reload still restores the default */ }
+					console.warn(`[shell] reloading: dropped failing version override for ${appId} (v${dropped.version}) — rebooting onto the default resolution`);
+					window.location.reload();
+					return false;
+				}
+				console.error(`[shell] could not clear the failing version override for ${appId} (v${dropped.version}) — not reloading; surfacing the load failure instead`);
 			}
 			failedSetRef.current.add(appId);
 			setAppLoadErrors((prev) => ({ ...prev, [appId]: (e instanceof Error ? e.message : String(e)) || `App "${appId}" failed to load.` }));
@@ -557,7 +569,11 @@ export const WorkspaceProvider: React.FC<IWorkspaceProviderProps> = ({ apps, wor
 		/** Replace the current history entry with the initial app so back works
 		 *  correctly from the very first app switch. */
 		try {
-			window.history.replaceState({ appId: activeAppId }, '', window.location.pathname + window.location.search);
+			// MERGE, never replace: `history.state` is shared with the home-ui
+			// remote, which stores its navigation snapshot under `rrHome`. This
+			// effect re-runs after boot (its deps are unstable), so overwriting
+			// here would wipe `rrHome` off an entry the remote already owns.
+			window.history.replaceState({ ...(window.history.state ?? {}), appId: activeAppId }, '', window.location.pathname + window.location.search);
 		} catch { /* ignore */ }
 
 		/** Handle browser back/forward by switching to the app stored in state. */

@@ -125,6 +125,37 @@ def _actor_record(actor: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def audience_display(audience: Dict[str, str]) -> Dict[str, str]:
+    """The self-describing audience payload for a history row.
+
+    History rows are rendered without a second lookup — every id they carry
+    must ride with its dereferenced display form (the same denormalization
+    rule as the actor identity above). Command-layer callers resolve the
+    real display facts before the write (team names live in their session);
+    this fallback composes the handle from the audience type alone so a
+    bare ``{'type','id'}`` dict — the seeder, a legacy caller — still
+    yields a readable row instead of a raw id.
+
+    Args:
+        audience: ``{'type','id'}`` plus optional ``name``/``handle``
+                  display keys stamped by the resolver.
+
+    Returns:
+        A copy with ``handle`` guaranteed present ('@me' | '@public' |
+        '@team/<name-or-id>'); resolver-stamped keys pass through verbatim.
+    """
+    out = dict(audience)
+    if not out.get('handle'):
+        kind = out.get('type')
+        if kind == 'user':
+            out['handle'] = '@me'
+        elif kind == 'public':
+            out['handle'] = '@public'
+        else:
+            out['handle'] = f'@team/{out.get("name") or out.get("id", "")}'
+    return out
+
+
 # The app review lifecycle on the DEPLOYMENT (deployment_artifacts.state).
 # 'private' is the internal-eligible default; 'submit' enters the public
 # review queue; the admin approves ('ready') or rejects ('rejected').
@@ -325,9 +356,20 @@ class FileDeploymentBackend:
             # a committed one.
             await self._store.write_file(entry['artifactPath'], data)
             meta['versions'].append(entry)
-            meta['history'].append(
-                {'at': entry['publishedAt'], 'action': 'publish', 'teamId': '', 'version': version, 'actor': who}
-            )
+            # The DEPLOY row (registry write — no audience). The comment is
+            # the developer's "what changed" note; riding it on the history
+            # row keeps the event stream self-describing (the viewer never
+            # joins back to the registry entry).
+            history_row: Dict[str, Any] = {
+                'at': entry['publishedAt'],
+                'action': 'publish',
+                'teamId': '',
+                'version': version,
+                'actor': who,
+            }
+            if entry['comment']:
+                history_row['data'] = {'comment': entry['comment']}
+            meta['history'].append(history_row)
             return entry
 
         return await self._mutate_meta(org_id, project_id, mutate)
@@ -716,6 +758,20 @@ class FileDeploymentBackend:
                 return v
         return {}
 
+    @staticmethod
+    def _review_state_of(ver: Dict[str, Any]) -> str:
+        """One registry row's review state — legacy rows default 'private'.
+
+        A row that predates review states carries none; every reader must
+        treat that as DEFAULT_REVIEW_STATE, never expose '' as an
+        artifactState. '' remains ONLY for a MISSING row ({} from
+        _artifact_entry_of): a binding at a deleted version must not read
+        as publishable.
+        """
+        if not ver:
+            return ''
+        return str(ver.get('state') or DEFAULT_REVIEW_STATE)
+
     def _publishes_of(self, meta: Dict[str, Any]) -> Dict[str, Any]:
         """The meta's publishes dict (container-tolerant on old files)."""
         publishes = meta.get('publishes')
@@ -763,6 +819,14 @@ class FileDeploymentBackend:
                 'publishedAt': now,
             }
             publishes[key] = row
+            # The PUBLISH row (audience bind). The audience is stored in its
+            # self-describing form, and a repoint records the version it
+            # moved OFF of — "published to @public (was v2)" reads whole
+            # from this one row.
+            data: Dict[str, Any] = {'audience': audience_display(audience)}
+            prev_version = int(existing.get('version') or 0)
+            if prev_version and prev_version != version:
+                data['previousVersion'] = prev_version
             meta['history'].append(
                 {
                     'at': now,
@@ -770,7 +834,7 @@ class FileDeploymentBackend:
                     'teamId': '',
                     'version': version,
                     'actor': who,
-                    'data': {'audience': audience},
+                    'data': data,
                 }
             )
             ver = self._artifact_entry_of(meta, version)
@@ -779,7 +843,7 @@ class FileDeploymentBackend:
                 row,
                 org_id,
                 app_id,
-                str(ver.get('state') or ''),
+                self._review_state_of(ver),
                 str(ver.get('artifactPath') or ''),
                 self._build_status_of(ver),
             )
@@ -807,7 +871,7 @@ class FileDeploymentBackend:
             row,
             org_id,
             app_id,
-            str(ver.get('state') or ''),
+            self._review_state_of(ver),
             str(ver.get('artifactPath') or ''),
             self._build_status_of(ver),
         )
@@ -832,7 +896,7 @@ class FileDeploymentBackend:
                     row,
                     org_id,
                     app_id,
-                    str(ver.get('state') or ''),
+                    self._review_state_of(ver),
                     str(ver.get('artifactPath') or ''),
                     self._build_status_of(ver),
                 )
@@ -864,7 +928,7 @@ class FileDeploymentBackend:
                             row,
                             org_id,
                             project_id,
-                            str(ver.get('state') or ''),
+                            self._review_state_of(ver),
                             str(ver.get('artifactPath') or ''),
                             self._build_status_of(ver),
                         )
@@ -901,7 +965,7 @@ class FileDeploymentBackend:
                     'teamId': '',
                     'version': row.get('version'),
                     'actor': who,
-                    'data': {'audience': audience},
+                    'data': {'audience': audience_display(audience)},
                 }
             )
             ver = self._artifact_entry_of(meta, row.get('version', 0))
@@ -910,7 +974,7 @@ class FileDeploymentBackend:
                 row,
                 org_id,
                 app_id,
-                str(ver.get('state') or ''),
+                self._review_state_of(ver),
                 str(ver.get('artifactPath') or ''),
                 self._build_status_of(ver),
             )
@@ -943,7 +1007,8 @@ class FileDeploymentBackend:
             entry = next((v for v in meta['versions'] if int(v.get('version', 0)) == version), None)
             if entry is None:
                 raise StorageError(f'{project_id} v{version}: not in the registry')
-            _assert_review_transition(str(entry.get('state') or DEFAULT_REVIEW_STATE), new_state)
+            old_state = str(entry.get('state') or DEFAULT_REVIEW_STATE)
+            _assert_review_transition(old_state, new_state)
             entry['state'] = new_state
             meta['history'].append(
                 {
@@ -952,6 +1017,9 @@ class FileDeploymentBackend:
                     'teamId': '',
                     'version': version,
                     'actor': who,
+                    # Both endpoints of the transition, so the row reads
+                    # whole even out of sequence.
+                    'data': {'from': old_state, 'to': new_state},
                 }
             )
             return dict(entry)

@@ -172,7 +172,7 @@ class TestPublishes:
         repoints it in place; artifactState joins the deployment's review state.
         """
         v1 = await backend.publish('org-1', 'acme.brandy', APP, ACTOR)  # 'private'
-        v2 = await backend.publish('org-1', 'acme.brandy', APP, ACTOR)
+        v2 = await backend.publish('org-1', 'acme.brandy', APP, ACTOR, comment='swapped the icon')
 
         row = await backend.publish_set(
             'org-1', 'app', 'acme.brandy', AUD_TEAM, v1['version'], {'name': 'Brandy', 'mode': 'free'}, ACTOR
@@ -188,6 +188,28 @@ class TestPublishes:
         assert row['version'] == 2
         rows = await backend.publish_of_app('org-1', 'app', 'acme.brandy')
         assert len(rows) == 1 and rows[0]['snapshot']['name'] == 'Brandy v2'
+
+        # History rows are self-describing: the audience rides with a display
+        # handle (composed from the type when the caller passed a bare dict),
+        # and a repoint records the version it moved OFF of.
+        binds = [
+            r
+            for r in (await backend.history('org-1', 'acme.brandy'))['rows']
+            if r['action'] == 'publish' and (r.get('data') or {}).get('audience')
+        ]
+        assert [b['data']['audience']['handle'] for b in binds] == ['@team/team-1', '@team/team-1']
+        assert binds[0]['data']['previousVersion'] == 1  # newest first: the repoint
+        assert 'previousVersion' not in binds[1]['data']  # the first bind moved off nothing
+
+        # The DEPLOY rows (no audience) ride the developer's comment when
+        # one was given, and stay bare when not.
+        deploys = [
+            r
+            for r in (await backend.history('org-1', 'acme.brandy'))['rows']
+            if r['action'] == 'publish' and not (r.get('data') or {}).get('audience')
+        ]
+        assert deploys[0]['data'] == {'comment': 'swapped the icon'}  # newest first: v2
+        assert not (deploys[1].get('data') or {})  # v1 had no comment
 
     @pytest.mark.asyncio
     async def test_publish_set_requires_a_registry_version(self, backend):
@@ -217,6 +239,12 @@ class TestPublishes:
         with pytest.raises(ValueError):
             await backend.publish_set_state('org-1', 'app', 'acme.brandy', AUD_PUBLIC, 'ready', ACTOR)
 
+        # Unbind rows say WHICH rung was touched — "v1 removed" alone would
+        # read as the version vanishing from the registry.
+        by_action = {r['action']: r for r in (await backend.history('org-1', 'acme.brandy'))['rows']}
+        assert by_action['disabled']['data']['audience']['handle'] == '@public'
+        assert by_action['removed']['data']['audience']['handle'] == '@me'
+
     @pytest.mark.asyncio
     async def test_set_artifact_state_review_lifecycle(self, backend):
         """The review lifecycle lives on the deployment: private -> submit ->
@@ -241,11 +269,13 @@ class TestPublishes:
         with pytest.raises(ValueError):
             await backend.publish('org-1', 'acme.brandy', APP, ACTOR, state='enabled')
 
-        # The review events land on the one history stream (newest first)
+        # The review events land on the one history stream (newest first),
+        # each carrying both endpoints of its transition.
         envelope = await backend.history('org-1', 'acme.brandy')
-        actions = [row['action'] for row in envelope['rows']]
-        review = [a for a in actions if a in ('request', 'approved', 'rejected')]
-        assert review == ['approved', 'request']
+        review = {r['action']: r for r in envelope['rows'] if r['action'] in ('request', 'approved', 'rejected')}
+        assert list(review) == ['approved', 'request']
+        assert review['request']['data'] == {'from': 'private', 'to': 'submit'}
+        assert review['approved']['data'] == {'from': 'submit', 'to': 'ready'}
 
 
 # ============================================================================

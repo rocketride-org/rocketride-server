@@ -59,8 +59,8 @@ Input lane: `video`. Output lanes:
 | Lane out    | Description                                                                                                                                       |
 |-------------|---------------------------------------------------------------------------------------------------------------------------------------------------|
 | `image`     | Each extracted frame streamed as a raw `image/png` payload.                                                                                       |
-| `table`     | One markdown table per video, written when the video closes: columns `Frame`, `Seconds`, `Time Stamp` (formatted as `HH:MM:SS.ss`).               |
-| `documents` | One document per frame: `type: "Image"`, base64-encoded PNG as content, with `chunkId` set to the frame number, `time_stamp` (seconds), and a `source` object carrying the originating video's media detail (see Source provenance below) in the metadata. |
+| `table`     | One markdown table per object, written as the object closes: columns `Frame`, `Seconds`, `Time Stamp` (formatted as `HH:MM:SS.ss`). `Frame` counts the object's frames, so an object carrying several videos yields one table numbered straight through. |
+| `documents` | One document per frame: `type: "Image"`, base64-encoded PNG as content, with `chunkId` counting the object's frames, `frame_number` (the frame's position in its own video), `time_stamp` (seconds), and a `source` object carrying the originating video's media detail (see Source provenance below) in the metadata. |
 
 ### Fields
 
@@ -102,7 +102,7 @@ Every extracted frame carries a backlink to the video it came from. The frame's 
 
 `stream_index` distinguishes frames from different videos embedded in one source (e.g. two clips in one presentation). The block is omitted entirely when the incoming video carried no stream descriptor.
 
-Each frame document is also given a human-readable `metadata.name` of the form `<video-stem>.frame<N>.png` (e.g. `BBC - Tear down this wall.frame0.png`), where `<video-stem>` is the source video's file name without extension and `N` is the frame index — so frames are individually identifiable downstream. Omitted when the source has no name.
+Each frame document is also given a human-readable `metadata.name` of the form `<video-stem>.frame<N>.png` (e.g. `BBC - Tear down this wall.frame0.png`), where `<video-stem>` is the source video's file name without extension and `N` counts the object's frames — the same number as `chunkId`, so an object carrying several videos is numbered straight through and no two frames share a name. Omitted when the source has no name.
 
 ---
 

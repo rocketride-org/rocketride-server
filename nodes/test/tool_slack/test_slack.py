@@ -295,6 +295,28 @@ class TestMessagePost:
             client.message_post(channel='C-1', text='   ')
         web.chat_postMessage.assert_not_called()
 
+    def test_text_over_limit_raises_token_mode(self):
+        client, web = _make_token_client()
+        too_long = 'x' * (slack_client.MAX_MESSAGE_TEXT_CHARS + 1)
+        with pytest.raises(ValueError, match='exceeds Slack limit'):
+            client.message_post(channel='C-1', text=too_long)
+        web.chat_postMessage.assert_not_called()
+
+    def test_text_at_limit_posts_token_mode(self):
+        client, web = _make_token_client()
+        web.chat_postMessage.return_value = {'ok': True, 'channel': 'C-1', 'ts': '1.2', 'message': {}}
+        text = 'y' * slack_client.MAX_MESSAGE_TEXT_CHARS
+        result = client.message_post(channel='C-1', text=text)
+        web.chat_postMessage.assert_called_once()
+        assert result['ok'] is True
+
+    def test_text_over_limit_raises_webhook_mode(self):
+        client, hook = _make_webhook_client()
+        too_long = 'z' * (slack_client.MAX_MESSAGE_TEXT_CHARS + 1)
+        with pytest.raises(ValueError, match='exceeds Slack limit'):
+            client.message_post(text=too_long)
+        hook.send.assert_not_called()
+
     def test_missing_channel_in_token_mode_raises(self):
         client, web = _make_token_client()
         with pytest.raises(ValueError, match='channel is required'):

@@ -30,6 +30,7 @@ import pytest
 
 from ai.modules.task import task_server as task_server_module
 from ai.modules.task.task_server import TaskServer
+from ai.modules.task.types import TaskError
 
 
 def _make_server(*, config=None, web_server=None):
@@ -488,6 +489,23 @@ def test_get_task_control_unknown_token_raises_runtime():
         ts.get_task_control('tk_unknown')
 
 
+def test_get_task_control_unknown_token_carries_a_code():
+    """The failure is classifiable without matching the English message (#2097)."""
+    ts = _make_server()
+    with pytest.raises(TaskError) as excinfo:
+        ts.get_task_control('tk_unknown')
+    assert excinfo.value.code == TaskError.NOT_REGISTERED
+    assert isinstance(excinfo.value, RuntimeError)  # existing handlers still catch it
+
+
+def test_get_task_control_by_public_key_unknown_carries_a_code():
+    """A public key naming no live task reports TASK_NOT_REGISTERED."""
+    ts = _make_server()
+    with pytest.raises(TaskError) as excinfo:
+        ts.get_task_control_by_public_key('pk_unknown')
+    assert excinfo.value.code == TaskError.NOT_REGISTERED
+
+
 def test_get_task_control_with_require_denies_without_membership(monkeypatch):
     """No permissions on the task's team -> uniform access-denied error."""
     from ai.modules.task import task_server as ts_mod
@@ -855,6 +873,19 @@ async def test_monitor_ttl_skips_task_with_zero_ttl(monkeypatch):
 # ---------------------------------------------------------------------------
 # remove_task
 # ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_remove_task_unknown_token_carries_a_code():
+    """An unknown token reaches the TaskError guard, not a bare KeyError.
+
+    The registry pop had no default, so the guard below it was unreachable
+    for the one case it was written for.
+    """
+    ts = _make_server()
+    with pytest.raises(TaskError) as excinfo:
+        await ts.remove_task('tk_unknown')
+    assert excinfo.value.code == TaskError.NOT_REGISTERED
 
 
 @pytest.mark.asyncio

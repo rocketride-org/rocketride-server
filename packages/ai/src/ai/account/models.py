@@ -344,6 +344,21 @@ def resolve_run_permissions(account_info: AccountInfo, control: Any) -> list[str
         Effective permission list, or empty list if the caller may not
         reach the run.
     """
+    # Task-scoped credentials (pk_/tk_) NEVER inherit owner identity: their
+    # synthetic AccountInfo copies the owner's userId for attribution, so the
+    # owner-private branch below would hand a pk_ public key the full owner
+    # permission set on a user-owned run. The key's grant is its capability
+    # set on exactly the run it was minted for — any other run resolves
+    # nothing, including other runs billed to the same team.
+    auth = getattr(account_info, 'auth', '') or ''
+    if auth.startswith(('pk_', 'tk_')):
+        if auth in (
+            getattr(control, 'public_auth', '') or None,
+            getattr(control, 'token', '') or None,
+        ):
+            return resolve_task_permissions(account_info, getattr(control, 'teamId', ''))
+        return []
+
     # Owner scope: explicit stamp wins; fall back to the run_kind default
     # for controls built before owner_kind existed.
     owner_kind = getattr(control, 'owner_kind', '') or (

@@ -154,6 +154,13 @@ export async function scanWorkspaceApps(): Promise<ScannedApp[]> {
  */
 const MAX_ICON_BYTES = 256 * 1024;
 
+/**
+ * Size ceiling for README-inlined images. Screenshots and GIFs are
+ * legitimately far larger than icons, so the README preview gets its own
+ * budget; anything above it keeps its original (broken) reference.
+ */
+export const MAX_README_IMAGE_BYTES = 10 * 1024 * 1024;
+
 /** Media type per icon file extension the app store accepts. */
 const ICON_MEDIA_TYPES: Record<string, string> = {
 	'.svg': 'image/svg+xml',
@@ -170,9 +177,11 @@ const ICON_MEDIA_TYPES: Record<string, string> = {
  * widening localResourceRoots to workspace folders just to serve one image.
  *
  * @param iconPath - Absolute icon file path from {@link ScannedApp.icon}.
+ * @param maxBytes - Size ceiling for the conversion; larger files return
+ *                   undefined. Defaults to the icon budget.
  * @returns The data: URI, or undefined when absent/unreadable/unknown type.
  */
-export async function appIconDataUri(iconPath: string | undefined): Promise<string | undefined> {
+export async function appIconDataUri(iconPath: string | undefined, maxBytes: number = MAX_ICON_BYTES): Promise<string | undefined> {
 	if (!iconPath) return undefined;
 	try {
 		// Media type from the extension; unknown types get the generic glyph.
@@ -184,7 +193,7 @@ export async function appIconDataUri(iconPath: string | undefined): Promise<stri
 		// file, and only this size gate keeps the data: URI bounded.
 		const uri = vscode.Uri.file(iconPath);
 		const stat = await vscode.workspace.fs.stat(uri);
-		if (stat.size > MAX_ICON_BYTES) return undefined;
+		if (stat.size > maxBytes) return undefined;
 
 		// Read + base64-encode the file (bounded by the gate above).
 		const bytes = await vscode.workspace.fs.readFile(uri);

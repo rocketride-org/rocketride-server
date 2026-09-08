@@ -322,6 +322,6 @@ export async function scaffoldApp(params: ScaffoldParams): Promise<string> {
 	const watchManager = getWatchManager();
 	watchManager?.invalidateInstall();
 	void watchManager?.ensureInstalled(appId);
-	vscode.window.showInformationMessage(`Created ${appName} (${appId}).`);
+	// No toast: the App Builder opens on the new app — that IS the feedback.
 	return appId;
 }

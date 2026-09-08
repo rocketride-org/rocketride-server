@@ -162,10 +162,16 @@ export class ConnectionMessageHandler {
 				]);
 				return true;
 
-			case 'probeServerInfo':
-				this.cachedServerInfo.delete(message.hostUrl as string); // force re-probe
-				await this.probeServerInfo(webview, message.hostUrl as string);
+			case 'probeServerInfo': {
+				// Untrusted webview input, same as cloudUrl above: the cast is
+				// erased at runtime, so a truthy non-string would clear the
+				// wrong cache key and reach getServerInfo, which needs a string.
+				const hostUrl = typeof message.hostUrl === 'string' ? message.hostUrl.trim() : '';
+				if (!hostUrl) return true;
+				this.cachedServerInfo.delete(hostUrl); // force re-probe
+				await this.probeServerInfo(webview, hostUrl);
 				return true;
+			}
 
 			case 'sudoPassword':
 				if (this.pendingSudoPassword) {

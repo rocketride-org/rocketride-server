@@ -15,93 +15,24 @@
  * lib) — pack at theirs. Because the zip mirrors the workspace tree,
  * relative references between the packed roots resolve after the server
  * unpacks, with nothing rewritten. Filtering follows the workspace's
- * .gitignore plus a hardcoded baseline (see packFilter). The zip rides
+ * .gitignore plus a hardcoded baseline (see rocketride/app-pack — the
+ * canonical pack rules, shared with deploy.addApp). The zip rides
  * the generic `rrext_deploy add` rail door; the server retains it and
  * unpacks at receipt; deploying never activates anything — the Deploy
  * view publishes rungs.
  */
 
-import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
-import AdmZip from 'adm-zip';
+// Side-effect import: arms the SDK's app-pack registry so deploy.addApp()
+// finds the Node-only packer inside the bundled extension (a runtime
+// package-specifier import cannot resolve from a bundle).
+import 'rocketride/app-pack';
 import { ConnectionManager } from '../connection/connection';
 import { scanWorkspaceApps } from './appScan';
-import { ensureProjectId } from './appMarker';
-import { collectPackedFiles } from './packFilter';
+import { ensureProjectId, readAppListing } from './appMarker';
+import type { AppListing } from './appMarker';
 import { getLogger } from '../shared/util/output';
-
-// =============================================================================
-// LIMITS
-// =============================================================================
-
-/**
- * Ceiling on the UNCOMPRESSED source the deploy zip may carry. The archive is
- * built entirely in the extension host's memory (AdmZip buffers + toBuffer +
- * a Uint8Array copy), so an unbounded tree OOMs the host and kills every
- * RocketRide surface. A deploy packs source only — a few hundred MB is far
- * beyond any legitimate app plus its declared includes.
- */
-const MAX_PACK_BYTES = 512 * 1024 * 1024;
-
-// =============================================================================
-// INCLUDE VALIDATION
-// =============================================================================
-
-/**
- * Reads and validates the app's `appManifest.include` list.
- *
- * Entries are WORKSPACE-RELATIVE POSIX paths (files or directories),
- * packed verbatim at those paths — no resolution against the app folder,
- * no `..` walking: the zip packs exactly what the user wrote. Every
- * entry must exist; a typo fails the deploy loudly rather than shipping
- * a zip the server build cannot compile.
- *
- * @param appFolder - The app's bound folder (absolute path).
- * @param workspaceRoot - The workspace folder the zip is rooted at.
- * @returns Normalized include entries ([] when none are declared).
- * @throws Error on a malformed or missing entry.
- */
-function readIncludeEntries(appFolder: string, workspaceRoot: string): string[] {
-	const logger = getLogger();
-	// step: read the CURRENT package.json — the include list must reflect
-	// what is on disk at deploy time, not a cached scan
-	let pkg: { appManifest?: { include?: unknown } };
-	try {
-		pkg = JSON.parse(fs.readFileSync(path.join(appFolder, 'package.json'), 'utf8'));
-	} catch (err) {
-		throw new Error(`Could not read the app's package.json: ${err instanceof Error ? err.message : String(err)}`);
-	}
-	const raw = pkg.appManifest?.include;
-	if (raw === undefined) return [];
-	if (!Array.isArray(raw) || raw.some((e) => typeof e !== 'string')) {
-		throw new Error('appManifest.include must be an array of workspace-relative path strings.');
-	}
-
-	const entries: string[] = [];
-	for (const item of raw as string[]) {
-		// step: normalize separators, strip a trailing slash
-		const entry = item.replace(/\\/g, '/').replace(/\/+$/, '');
-		if (!entry) {
-			logger.output('[appdev:pack]   check include "" — FAILED: empty entry');
-			throw new Error('appManifest.include contains an empty entry.');
-		}
-		// step: workspace-relative means RELATIVE — no absolute paths, no
-		// drive letters, and no `..` escapes
-		if (entry.startsWith('/') || entry.includes(':') || entry.split('/').includes('..') || entry.split('/').includes('.')) {
-			logger.output(`[appdev:pack]   check include "${item}" — FAILED: not a plain workspace-relative path`);
-			throw new Error(`appManifest.include entry "${item}" must be a plain workspace-relative path (no absolute paths, drive letters, "." or "..").`);
-		}
-		const abs = path.join(workspaceRoot, entry);
-		if (!fs.existsSync(abs)) {
-			logger.output(`[appdev:pack]   check include "${entry}" — FAILED: does not exist in the workspace`);
-			throw new Error(`appManifest.include entry "${entry}" does not exist in the workspace.`);
-		}
-		logger.output(`[appdev:pack]   check include "${entry}" — OK (${fs.statSync(abs).isDirectory() ? 'directory' : 'file'})`);
-		entries.push(entry);
-	}
-	return entries;
-}
 
 // =============================================================================
 // PUBLISH
@@ -149,14 +80,24 @@ export async function deployApp(appId: string, message: string): Promise<Record<
 	logger.output(`[appdev:pack]   check workspace anchoring — OK (root ${workspaceRoot})`);
 	logger.output(`[appdev:pack]   check appRoot — OK (${appRoot || '(workspace root — legacy layout)'})`);
 
-	// ── Include entries: extra workspace paths the server build needs ────
-	// appRoot === '' is the app-folder-as-workspace case: there is no
-	// surrounding workspace to include from, and the zip keeps the legacy
-	// app-at-root layout (no appRoot metadata).
-	const include = readIncludeEntries(app.folder, workspaceRoot);
-	if (appRoot === '' && include.length > 0) {
-		logger.output('[appdev:pack]   check include layout — FAILED: include declared but the workspace folder IS the app folder');
-		throw new Error('appManifest.include needs the app inside a larger workspace — the workspace folder IS the app folder here.');
+	// ── Include layout rule: appRoot === '' is the app-folder-as-workspace
+	// case — there is no surrounding workspace to include from. Checked
+	// here (not left to the packer) so the failure names the VS Code
+	// workspace situation precisely.
+	if (appRoot === '') {
+		// readAppListing owns the read, the parse, and the include
+		// normalization — re-implementing them here would be a second copy
+		// to keep in step with the manifest shape.
+		let listing: AppListing;
+		try {
+			listing = await readAppListing(app.folder);
+		} catch (err) {
+			throw new Error(`Could not read the app's package.json: ${err instanceof Error ? err.message : String(err)}`);
+		}
+		if ((listing.include?.length ?? 0) > 0) {
+			logger.output('[appdev:pack]   check include layout — FAILED: include declared but the workspace folder IS the app folder');
+			throw new Error('appManifest.include needs the app inside a larger workspace — the workspace folder IS the app folder here.');
+		}
 	}
 
 	// ── Working-copy provenance: the appManifest projectId ───────────────
@@ -165,52 +106,24 @@ export async function deployApp(appId: string, message: string): Promise<Record<
 	const projectId = await ensureProjectId(app.folder);
 	logger.output(`[appdev:pack]   check projectId — OK (${projectId})`);
 
-	// ── Pack the workspace-relative tree ─────────────────────────────────
-	// The app folder (package.json carrying the FULL appManifest — the
-	// server reads it as metadata.manifest, the listing truth — src/,
-	// rsbuild config, icon, README, assets, the .rrapp trigger) plus every
-	// include entry, filtered by .gitignore + the baseline excludes
-	// (node_modules, dist, .git — the server injects the platform deps
-	// for its own build; client output is never uploaded).
-	logger.output(`[appdev] packing source: ${appId} (appRoot=${appRoot || '.'}${include.length ? `, include=${include.join(',')}` : ''})`);
-	const files = collectPackedFiles(workspaceRoot, [appRoot, ...include]);
-	logger.output(`[appdev:pack] files to pack (${files.length}):`);
-	const zip = new AdmZip();
-	let totalBytes = 0;
-	for (const file of files) {
-		const bytes = fs.readFileSync(file.absPath);
-		totalBytes += bytes.length;
-		// Bound the pack BEFORE building the archive: AdmZip retains every
-		// buffer, zip.toBuffer() materializes the archive, and Uint8Array
-		// copies it again (~2-3x peak RSS). An over-broad appManifest.include
-		// (a shared source root, a stray build tree) would OOM the extension
-		// host and take down every RocketRide surface with no actionable
-		// error, so fail loudly on the source total instead.
-		if (totalBytes > MAX_PACK_BYTES) {
-			logger.output(`[appdev:pack] pack ABORTED — source exceeds ${Math.round(MAX_PACK_BYTES / (1024 * 1024))} MB`);
-			throw new Error(`Deploy package source exceeds ${Math.round(MAX_PACK_BYTES / (1024 * 1024))} MB — check appManifest.include for an over-broad entry (a shared source root, a build output, or a dependency tree) and narrow it.`);
-		}
-		zip.addFile(file.zipPath, bytes);
-		logger.output(`[appdev:pack]   + ${file.zipPath} (${bytes.length} bytes)`);
-	}
-	const data = new Uint8Array(zip.toBuffer());
-	logger.output(`[appdev:pack] pack complete — all checks passed; ${files.length} files, ${totalBytes} bytes source, ${data.byteLength} bytes zipped`);
-	logger.output(`[appdev] packed ${files.length} files (${data.byteLength} bytes)`);
-
-	// ── The ONE rail door (deploy = copy code to the server) ─────────────
-	const body = await client.deploy.add({
-		kind: 'app',
-		data,
-		metadata: { projectId, ...(appRoot ? { appRoot } : {}) },
+	// ── Verify + pack + send: the ONE SDK call (deploy = copy code to the
+	// server). Packing rules — workspace-rooted layout, include entries,
+	// gitignore + baseline filtering, both size caps — are the SDK's
+	// canonical implementation; every step narrates into the output
+	// channel through onProgress.
+	const body = await client.deploy.addApp(appRoot || '.', {
+		workspaceRoot,
 		comment: message,
+		metadata: { projectId },
+		onProgress: (line) => logger.output(`[appdev:pack] ${line}`),
 	});
 	const entry = (body as Record<string, unknown>)?.artifact as Record<string, unknown> | undefined;
 	if (!entry) throw new Error(`Deploy returned no artifact entry for ${appId}.`);
 	// The registry's answer is the truth about what was deployed — report
-	// the SAME version in the log and the toast (the manifest's app.version
-	// is only the fallback).
+	// the SAME version in the log (the manifest's app.version is only the
+	// fallback). No toast: the deploy runs FROM the App Builder, whose
+	// Deploy rail and dashboard already show the new version live.
 	const deployedVersion = (entry.appVersion as string) ?? app.version;
 	logger.output(`[appdev] deployed ${appId} v${deployedVersion} (registry v${entry.registryVersion})`);
-	vscode.window.showInformationMessage(`Deployed ${app.name} v${deployedVersion} — publish it from the Deploy view to make it live.`);
 	return entry;
 }

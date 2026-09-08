@@ -311,13 +311,13 @@ Typed wrappers over `rrext_deploy_app` — the publish ladder for RocketRide app
 **Deploy** copies code to the server as the next immutable registry version
 (`client.deploy.add`); a deployment carries the review lifecycle in its own `state`
 (`private` → `submit` → `ready` | `rejected`). **Publish** binds a deployment to
-an audience — `@user`, `@team/<name>`, or `@public` — as a pure pointer;
+an audience — `@me`, `@team/<name>`, or `@public` — as a pure pointer (`@user` is a legacy input alias for `@me`, never displayed);
 repointing it covers first publish, update, promote, and rollback alike.
 
 The review state lives on the **deployment**, not the binding: an app deploys
 `private`, the developer `submit`s it, an admin approves (`ready`) or rejects
 (`rejected`). A `@public` binding may only point at a `ready` deployment;
-`@user`/`@team` accept any non-`failed` deployment.
+`@me`/`@team` accept any non-`failed` deployment.
 
 App ids are partitioned by the caller org's **developer id**: every app is
 `<developerId>.<name>` (globally unique), so an org can only deploy/publish
@@ -327,9 +327,14 @@ publishing an app requires the org to have claimed a developer id.
 | Method | Signature | Description |
 | ------ | --------- | ----------- |
 | `deploy.add` | `async def add(self, pipeline=None, *, kind='pipe', data=None, metadata=None, comment=None, deploy_to=None) -> PublishResult` | The ONE rail door (on the `client.deploy` namespace): deploy any kind of object as the next immutable registry version. `kind='pipe'` (default) takes a `pipeline` dict; `kind='app'` takes ONE `data` zip of the built bundle — retained and unpacked at receipt, born deployment-state `private`. The app id must be inside your developer namespace. |
+| `deploy.add_app` | `async def add_app(self, app_root, *, workspace_root=None, comment=None, metadata=None, on_progress=None) -> PublishResult` | Pack an app folder's source and deploy it as the next registry version — the one call behind the App Builder's Deploy button and CI scripts. Packs by the App Builder rules (workspace-rooted zip, `appManifest.include`, hierarchical gitignore + the hard node_modules/dist/.git baseline, symlink containment, 50MB zipped / 512MB uncompressed caps); `on_progress` narrates one line per step. Deploying activates nothing — bind an audience with `publish_app` afterwards. |
+| `deploy.verify_app` | `async def verify_app(self, app_root, *, workspace_root=None) -> AppVerifyReport` | The no-side-effect precheck for `add_app` — purely local, no server call: manifest shape and id grammar, declared icon/README assets, `appManifest.include` entries, and a pack dry run against the size caps. Server-side concerns (the build, store review) are out of scope. |
 | `list_deployments` | `async def list_deployments(self, app_id) -> list[dict]` | The version rail, newest first — the developer org sees its FULL rail (published or not), other callers only their visible versions. Each entry carries its deployment `state`, its `buildStatus` ('ok' = servable), and the `rungs` naming the audiences bound to it. |
 | `submit_app` | `async def submit_app(self, app_id, registry_version) -> dict` | Submit a deployed version for review — flips the deployment `private` → `submit`. |
-| `publish_app` | `async def publish_app(self, app_id, registry_version, target) -> dict` | Bind a deployment to '@user', '@team/<name>', or '@public'. The binding is a pure pointer born 'enabled'. '@public' requires the deployment be `ready`; '@user'/'@team' accept any non-`failed` deployment. Pinning ANOTHER org's public app to '@user'/'@team' is the version selector; publishing your own app requires the id to be in your namespace. |
+| `withdraw_app` | `async def withdraw_app(self, app_id, registry_version) -> dict` | Withdraw a pending review — the developer's own cancel: flips the deployment `submit` → `private`, the version leaves the admin queue and history records `withdrawn`. Only a version in `submit` withdraws. Developer-org + namespace gated, like submit. |
+| `reply_app` | `async def reply_app(self, app_id, message, registry_version=None) -> dict` | Append a developer message to the app's review thread — rides `deployment_history` as a `reply` row (side `'developer'`), the same stream `deploy.history()` reads. Developer-org + namespace gated, like submit. |
+| `build_log` | `async def build_log(self, app_id, registry_version) -> dict` | One version's durable server build log — the full phase-by-phase output stored beside the version's artifacts (no error text rides the rail rows). Long logs serve their tail; empty `log` = none. Developer-org gated. |
+| `publish_app` | `async def publish_app(self, app_id, registry_version, target) -> dict` | Bind a deployment to '@me', '@team/<name>', or '@public' ('@user' = legacy input alias). The binding is a pure pointer born 'enabled'. '@public' requires the deployment be `ready`; '@me'/'@team' accept any non-`failed` deployment. Pinning ANOTHER org's public app to '@me'/'@team' is the version selector; publishing your own app requires the id to be in your namespace. |
 | `where_app` | `async def where_app(self, app_id) -> list[dict]` | The reverse index: `{rung, handle, version, appVersion, state, deployedAt}` per audience — `state` is the bound deployment's review state. |
 
 Serving needs no verb: a version's bundle loads from the stable
@@ -365,7 +370,7 @@ Grouped families (the `developer_*`/`submit`/`register_dev` rows are on
 three-step flow: `submit` (deployment → `submit`, enters the admin queue) →
 `admin_approve` (→ `ready`) → `publish_app @public` (point the public binding at
 the `ready` version). A reject flips the deployment `rejected`; the developer
-fixes and deploys a NEW version. `@user`/`@team` bindings need no approval.
+fixes and deploys a NEW version. `@me`/`@team` bindings need no approval.
 
 ### Events
 
@@ -403,6 +408,8 @@ history.
 | Method                | Signature                                                                                                       | Returns                | Description                                                                                                       |
 | --------------------- | ---------------------------------------------------------------------------------------------------------------- | ---------------------- | ------------------------------------------------------------------------------------------------------------------ |
 | `deploy.add`          | `async def add(self, pipeline=None, *, kind='pipe', data=None, metadata=None, comment=None, deploy_to=None) -> PublishResult` | `PublishResult`        | The ONE rail door — deploys any kind as the next registry version (`kind='pipe'` default takes `pipeline`; `kind='app'` takes a `data` zip). `deploy_to` also points that team at it (one-step, pipes only). Pipe control (`deploy`/`list`/`get`/`enable`/…/`run`) targets `rrext_deploy_pipe`. |
+| `deploy.add_app`      | `async def add_app(self, app_root, *, workspace_root=None, comment=None, metadata=None, on_progress=None) -> PublishResult` | `PublishResult`        | Packs an app folder's source by the App Builder rules and deploys it as the next registry version; `on_progress` narrates each pack step. Bind an audience afterwards with `publish_app`. |
+| `deploy.verify_app`   | `async def verify_app(self, app_root, *, workspace_root=None) -> AppVerifyReport`                                | `AppVerifyReport`      | Local, no-side-effect precheck for `add_app`: manifest, id grammar, declared assets, `include` entries, and a pack dry run against the size caps. |
 | `deploy.deploy`       | `async def deploy(self, project_id, version, team_id) -> Deployment`                                             | `Deployment`           | Points the team at a published version — promotion and rollback alike.                                              |
 | `deploy.list`         | `async def list(self, *, team_id=None, page=None, page_size=None, search=None, filters=None, sort=None)`         | `DeployListResult`     | Deployments visible to the caller, standard `{rows, total, page, pageSize}` envelope.                              |
 | `deploy.get`          | `async def get(self, project_id, team_id) -> Deployment`                                                         | `Deployment`           | One team's deployment, registry-joined.                                                                             |
@@ -534,7 +541,27 @@ DAPException                    # Base DAP protocol error (has dap_result dict)
     └── ValidationException     # Invalid input/config
 ```
 
-All exceptions expose a `dap_result` dict with detailed server error context.
+All exceptions expose a `dap_result` dict with detailed server error context,
+plus `code` and `hint`:
+
+- `code` is the server's machine-readable classification, or `None`. Task
+  failures carry one: `TASK_NOT_REGISTERED` (the token names no live task —
+  never started, terminated, replaced, or the engine restarted),
+  `TASK_AMBIGUOUS`, `TASK_COMPLETED`, `TASK_STOPPED`. **Classify on `code`, not
+  on the message text**, which is written for people and may be reworded.
+- `hint` is troubleshooting text the SDK attached for a developer, or `None`.
+  It is kept out of `str(e)` so an application can show the message to an end
+  user without the developer checklist.
+
+```python
+except PipeException as e:
+    if e.code == 'TASK_NOT_REGISTERED':
+        await restart_pipeline()      # the task is gone; start a new one
+    else:
+        print(e)                      # safe to show
+        if e.hint:
+            log.debug(e.hint)         # developer detail
+```
 
 `AuthenticationException` is thrown on DAP auth failure. In persist mode the client catches it, calls `on_connect_error`, and does not retry so the app can fix credentials and call `connect()` again.
 

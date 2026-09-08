@@ -67,7 +67,7 @@ from rocketride import (
 from .dbg_debugpy import DbgDebugpy
 from .dbg_stdio import DbgStdio
 from .pipeline import resolve_pipeline_env
-from .types import LAUNCH_TYPE
+from .types import LAUNCH_TYPE, TaskError
 from .task_conn import TaskConn
 from .task_metrics import TaskMetrics
 
@@ -427,6 +427,12 @@ class Task(DAPBase):
             raise ValueError(f'invalid run_kind: {run_kind!r}')
         if trigger not in ('', 'manual', 'schedule'):
             raise ValueError(f'invalid trigger: {trigger!r}')
+        # owner_kind picks the storage/run-log tree exactly like run_kind picks
+        # the continuum: any value outside the closed vocabulary ('Team',
+        # 'teams', ...) would silently take the user branch and write a
+        # team-owned deploy's files into the dispatcher's user tree.
+        if owner_kind not in ('', 'user', 'team'):
+            raise ValueError(f'invalid owner_kind: {owner_kind!r}')
         self._run_log: Optional[RunLogWriter] = None
         self._run_kind: str = run_kind
         # Owner scope: 'user' (interactive .use OR a personal @me deploy) vs
@@ -1688,11 +1694,11 @@ class Task(DAPBase):
 
             # We completed it, so raise an error -- this is about being read to accept data
             if current_state == TASK_STATE.COMPLETED.value:
-                raise RuntimeError('Task has already completed')
+                raise TaskError(TaskError.COMPLETED, 'Task has already completed')
 
             # If we were cancelled, throw an error
             if current_state == TASK_STATE.CANCELLED.value:
-                raise RuntimeError(self._status.exitMessage)
+                raise TaskError(TaskError.STOPPED, self._status.exitMessage or 'Task was stopped')
 
             # Calculate timeouts
             time_since_last_event = time.time() - self._last_event_time

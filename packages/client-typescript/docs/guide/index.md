@@ -302,13 +302,13 @@ Typed wrappers over `rrext_deploy_app` — the publish ladder for RocketRide app
 **Deploy** copies code to the server as the next immutable registry version
 (`deploy.add`); a deployment carries the review lifecycle in its own `state`
 (`private` → `submit` → `ready` | `rejected`). **Publish** binds a deployment
-to an audience — `@user`, `@team/<name>`, or `@public` — as a pure pointer;
+to an audience — `@me`, `@team/<name>`, or `@public` — as a pure pointer (`@user` is a legacy input alias for `@me`, never displayed);
 repointing it covers first publish, update, promote, and rollback alike.
 
 The review state lives on the **deployment**, not the binding: an app deploys
 `private` (internal-eligible), the developer `submit`s it for review, an admin
 approves (`ready`) or rejects (`rejected`). A `@public` binding may only point
-at a `ready` deployment; `@user`/`@team` bindings accept any internal-eligible
+at a `ready` deployment; `@me`/`@team` bindings accept any internal-eligible
 (not `failed`) deployment. So there is no separate "publish-and-wait" — public
 listing is: submit → approve → repoint the public pointer.
 
@@ -323,7 +323,9 @@ publishing an app requires the org to have claimed a developer id.
 | `listDeployments` | `listDeployments(appId): Promise<RailEntry[]>` | The version rail, newest first — the developer org sees its FULL rail (published or not), other callers only their visible versions. Each entry carries its deployment `state`, its `buildStatus` ('ok' = servable), and the `rungs` naming the audiences bound to it. |
 | `submitApp` | `submitApp(appId, registryVersion): Promise<{artifact}>` | Submit a deployed version for store review — flips the deployment `private` → `submit` (it enters the admin queue). Developer-org + namespace gated. |
 | `withdrawApp` | `withdrawApp(appId, registryVersion): Promise<{artifact}>` | Withdraw a pending review — the developer's own cancel: flips the deployment `submit` → `private` (leaves the admin queue, back to draft; history records `withdrawn`). Only a version in `submit` withdraws. Developer-org + namespace gated. |
-| `publishApp` | `publishApp(appId, registryVersion, target): Promise<{publish}>` | Bind a deployment to '@user', '@team/<name>', or '@public'. The binding is a pure pointer born 'enabled'. `@public` requires the deployment be `ready` (approved); `@user`/`@team` accept any non-`failed` deployment. Pinning ANOTHER org's public app to '@user'/'@team' is the version selector and is allowed; publishing your own app requires the id to be in your namespace. |
+| `replyApp` | `replyApp(appId, message, registryVersion?): Promise<{replied, appId}>` | Append a developer message to the app's review thread — the developer half of the reviewer conversation. Rides `deployment_history` as a `reply` row (side `'developer'`), the same stream `deploy.history()` reads. Developer-org + namespace gated. |
+| `buildLog` | `buildLog(appId, registryVersion): Promise<{appId, version, log}>` | One version's durable server build log — the full phase-by-phase output the build worker stores beside the version's artifacts (no error text rides the rail rows). Long logs serve their tail; `''` = no log. Developer-org gated. |
+| `publishApp` | `publishApp(appId, registryVersion, target): Promise<{publish}>` | Bind a deployment to '@me', '@team/<name>', or '@public' ('@user' = legacy input alias). The binding is a pure pointer born 'enabled'. `@public` requires the deployment be `ready` (approved); `@me`/`@team` accept any non-`failed` deployment. Pinning ANOTHER org's public app to '@me'/'@team' is the version selector and is allowed; publishing your own app requires the id to be in your namespace. |
 | `whereApp` | `whereApp(appId): Promise<Pin[]>` | The reverse index: `{rung, handle, version, appVersion, state, deployedAt}` per audience — `state` is the bound DEPLOYMENT's review state. |
 
 Serving needs no verb: a version's bundle loads from the stable
@@ -349,14 +351,14 @@ Grouped families (the `developer_*`/`submit`/`register_dev` rows are on
 | Subcommand family | Subcommands | Guard | Purpose |
 | ----------------- | ----------- | ----- | ------- |
 | developer_* | `developer_register` · `developer_stripe` · `developer_dashboard` · `developer_status` | org.admin (register) | Claim the org's developer id slug + Stripe Connect onboarding. |
-| submit | `submit` | developer org + namespace | Submit a deployed version for review — flips the DEPLOYMENT `private` → `submit` (sugar over `submitApp`). |
+| submit | `submit` · `withdraw` · `reply` | developer org + namespace | Submit a deployed version for review (flips the DEPLOYMENT `private` → `submit`), cancel a pending review, or append a developer message to the review thread (sugar over `submitApp`/`withdrawApp`/`replyApp`). |
 | register_dev | `register_dev` | self | Per-user live dev overlay (App Builder hot-reload); OSS-capable. |
 | catalog | `list` · `get` · `list_mine` · `desktop_add` · `desktop_remove` | authenticated | Browse reachable apps, the developer's own rail view, and desktop membership. |
 | admin_* | `admin_queue` · `admin_approve` · `admin_reject` · `admin_reply` · `admin_reseed` | sys.admin | Store review over the DEPLOYMENTS: the queue is deployments in `submit`; `admin_approve(appId, version)` flips it `ready`, `admin_reject(appId, version)` flips it `rejected`. |
 | pricing_* | `pricing_list` · `pricing_create` · `pricing_delete` | developer org (owns the app_products row) | Manage Stripe price tiers for a monetized app. |
 
 **Review model.** The review state lives on the DEPLOYMENT (`deployment_artifacts.state`).
-`@user`/`@team` bindings need no approval — they serve any non-`failed`
+`@me`/`@team` bindings need no approval — they serve any non-`failed`
 deployment at once. Going public is a three-step flow: `submit` (deployment →
 `submit`, enters the admin queue) → `admin_approve` (→ `ready`) → `publishApp
 @public` (point the public binding at the now-`ready` version). A reject flips
@@ -473,6 +475,30 @@ Used to parse chat response content. The client does not attach an `Answer` inst
 ---
 
 ## Exceptions
+
+DAP-backed exceptions extend `DAPException` (`LoginAttemptCancelledError`
+extends `Error` directly, see below), which exposes `dapResult` plus two
+optional fields:
+
+- `code` — the server's machine-readable classification, absent when the failure
+  has none. Task failures carry one: `TASK_NOT_REGISTERED` (the token names no
+  live task — never started, terminated, replaced, or the engine restarted),
+  `TASK_AMBIGUOUS`, `TASK_COMPLETED`, `TASK_STOPPED`. **Classify on `code`, not
+  on `message`**, which is written for people and may be reworded.
+- `hint` — troubleshooting text the SDK attached for a developer, absent when
+  there is none. Kept out of `message` so an application can show the message
+  to an end user without the developer checklist.
+
+```ts
+try {
+	await pipe.open();
+} catch (err) {
+	if (err instanceof PipeException) {
+		if (err.code === 'TASK_NOT_REGISTERED') await restartPipeline();
+		else console.error(err.message, err.hint);
+	}
+}
+```
 
 `AuthenticationException` extends `ConnectionException`; thrown on DAP auth failure. In persist mode the client calls `onConnectError` and does not retry authentication so the app can fix credentials and call `login()` or `connect()` again.
 

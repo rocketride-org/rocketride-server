@@ -24,7 +24,7 @@
 // FROZEN rocketride SDK contract — floor v1.3 — never edit by hand
 // =============================================================================
 // Floor key:     1.3 (MAJOR.MINOR of packages/client-typescript/package.json)
-// Source commit: 8c90aa2ebe93c48e1fd646f00799f9d9d186af43
+// Source commit: 1f2091d93e3bba827d7f884119f4c5ef02c7837d
 // Generator:     dts-bundle-generator@9.5.1
 // Produced by:   ./builder client-typescript:freeze
 //
@@ -1199,12 +1199,39 @@ export interface DeployHistoryEntry {
     /** Unix timestamp (seconds). */
     at?: number;
     /** `pause`/`resume` appear only on rows written before the
-        enable/disable vocabulary (the trail is immutable). */
+        enable/disable vocabulary (the trail is immutable). NOTE: app rails
+        additionally carry the review vocabulary (`request`/`approved`/
+        `rejected`/`withdrawn`/`failed`) and the human `reply` row at runtime —
+        the union names the pipe-rail actions only and stays as the frozen
+        v1.3 floor wrote it (widening a returned union would break floor
+        assignability); compare raw strings for the app-rail extras. */
     action?: "publish" | "deploy" | "rollback" | "enable" | "disable" | "pause" | "resume" | "errored" | "remove";
     /** `''` on org-wide rows (publish); the team id on pointer changes. */
     teamId?: string;
     version?: number;
     actor?: DeployActor;
+    /** Row payload — self-describing by contract (rows render without a
+        second lookup). `reply` rows carry the review-thread message and its
+        side. App audience rows (publish binds, removed/disabled/enabled)
+        carry the audience WITH its server-dereferenced display facts
+        (`name`, `handle`), plus `previousVersion` when a publish repointed
+        an existing binding. A `publish` row without an audience is the
+        registry write (the DEPLOY) and rides the deploy `comment`; review
+        transitions carry both endpoints (`from`/`to`). */
+    data?: {
+        side?: "admin" | "developer";
+        message?: string;
+        audience?: {
+            type?: string;
+            id?: string;
+            name?: string;
+            handle?: string;
+        };
+        previousVersion?: number;
+        comment?: string;
+        from?: string;
+        to?: string;
+    } | null;
 }
 /** Body of `deploy.add()` — the generic rail door. */
 export interface PublishResult {
@@ -1731,8 +1758,10 @@ export interface ConnectResult {
     /** BCP-47 locale tag (e.g. "en-US") representing the user's preferred locale */
     locale: string;
     /**
-     * ID of the team that should be used by default for operations that do not
-     * explicitly specify a team context.
+     * ID of the user's development team. It carries NO authorization meaning:
+     * it is the billing and environment-layer context for dev runs and for
+     * `@me` publishes. Team-scoped operations always name their team
+     * explicitly — there is no default-team fallback.
      */
     devTeam: string;
     /**
@@ -1857,8 +1886,8 @@ export interface StripePriceEntry {
  * Server metadata returned by the pre-auth info probe.
  *
  * Obtained via {@link RocketRideClient.getServerInfo} which sends an
- * `auth` request with `infoOnly: true`. The server responds without
- * requiring credentials.
+ * `rrext_public_probe` command on a public connection. The server
+ * responds without requiring credentials.
  */
 export interface ServerInfoResult {
     /** Server engine version string. */
@@ -3937,6 +3966,39 @@ export declare class DatabaseApi {
         sequelizeOptions?: import("sequelize").Options;
     }): import("sequelize").Sequelize;
 }
+interface AppVerifyCheck {
+    /** Stable check id (e.g. 'manifest', 'id', 'include', 'pack-size'). */
+    id: string;
+    /** Whether the check passed. */
+    ok: boolean;
+    /** Human-readable outcome, actionable on failure. */
+    note: string;
+}
+interface AppVerifyReport {
+    /** True when every check passed. */
+    ok: boolean;
+    /** Every check that ran, in order. */
+    checks: AppVerifyCheck[];
+    /** Files the pack would carry (0 when selection failed). */
+    fileCount: number;
+    /** Uncompressed bytes the pack would carry. */
+    uncompressedBytes: number;
+}
+interface CreatedApp {
+    /** The full app id (`<developerId>.<slug>`). */
+    appId: string;
+    /** Workspace-relative POSIX path of the created folder. */
+    folder: string;
+    /** Project-relative paths of the files written. */
+    files: string[];
+    /** Which server-matched packages were vendored this pass. */
+    vendored: {
+        shell: boolean;
+        client: boolean;
+    };
+    /** Whether the workspace `pnpm install` ran and succeeded. */
+    installed: boolean;
+}
 declare class DeployApi {
     /** @param client - The parent RocketRideClient that owns this namespace. */
     constructor(client: RocketRideClient);
@@ -3983,6 +4045,86 @@ declare class DeployApi {
         deployTo?: string;
     }): Promise<PublishResult>;
     /**
+     * Packs an app folder's source and deploys it as the next immutable
+     * registry version — the ONE call behind the App Builder's Deploy
+     * button, the CLI's `app deploy`, and CI scripts (Node.js only).
+     *
+     * Verify → pack → send: the pack applies the canonical rules
+     * (workspace-rooted zip layout, `appManifest.include` honored,
+     * hierarchical gitignore filtering with the hard baseline
+     * node_modules/dist/.git, symlink containment, 50MB zipped / 512MB
+     * uncompressed caps) and every step can narrate through `onProgress`.
+     * Deploying never activates anything — bind an audience with
+     * `publishApp` afterwards. Run `verifyApp` first for a no-side-effect
+     * precheck of the same rules.
+     *
+     * @param appRoot - The app folder: absolute, or relative to
+     *   `options.workspaceRoot`.
+     * @param options.workspaceRoot - The workspace the zip is rooted at and
+     *   that `appManifest.include` entries resolve against
+     *   (default: `process.cwd()`).
+     * @param options.comment - "What changed" note kept in the registry.
+     * @param options.metadata - Extra metadata merged over the packed
+     *   defaults (e.g. projectId provenance); `appRoot` is always set from
+     *   the pack.
+     * @param options.onProgress - Receives one line per pack step (include
+     *   checks, per-file adds, totals) for hosts that surface progress.
+     * @returns The artifact entry for the new version.
+     */
+    addApp(appRoot: string, options?: {
+        workspaceRoot?: string;
+        comment?: string;
+        metadata?: Record<string, unknown>;
+        onProgress?: (line: string) => void;
+    }): Promise<PublishResult>;
+    /**
+     * Scaffolds a new app in the workspace — the programmatic twin of the
+     * App Builder's New App wizard, rendering the identical templates
+     * (Node.js only). Writes `./apps/<slug>`, ensures the pnpm workspace
+     * file and ignore hygiene, vendors the connected server's shell +
+     * client packages, and runs the workspace install. Scaffolding only —
+     * nothing is deployed; the normal lifecycle (edit → `verifyApp` →
+     * `addApp` → `publishApp`) follows.
+     *
+     * @param slug - The app-name slug (lowercase; digits/-/_ after the
+     *   first character). The id becomes `<developerId>.<slug>`.
+     * @param options - Template, display name, developer id (default
+     *   'local'), frame options, install toggle, `onProgress`, and
+     *   `workspaceRoot` (default `process.cwd()`). The server base URL for
+     *   vendoring defaults to this client's own connection.
+     * @returns The created app's identity and a report of what ran.
+     */
+    createApp(slug: string, options?: {
+        workspaceRoot?: string;
+        template?: "Blank" | "Dashboard";
+        displayName?: string;
+        developerId?: string;
+        sidebar?: boolean;
+        statusFooter?: boolean;
+        docTabs?: boolean;
+        install?: boolean;
+        serverBaseUrl?: string;
+        onProgress?: (line: string) => void;
+    }): Promise<CreatedApp>;
+    /**
+     * Pre-checks everything `addApp` needs, WITHOUT deploying (Node.js
+     * only, purely local — no server call). Verifies the manifest shape and
+     * id grammar, declared icon/README assets, `appManifest.include`
+     * entries, and a pack dry run against the size caps. Server-side
+     * concerns (the build, store review) are out of scope — the Package
+     * tab's readiness and the review ladder cover those.
+     *
+     * @param appRoot - The app folder: absolute, or relative to
+     *   `options.workspaceRoot`.
+     * @param options.workspaceRoot - The workspace the pack would be rooted
+     *   at (default: `process.cwd()`).
+     * @returns The structured report — `ok` plus every check with an
+     *   actionable note.
+     */
+    verifyApp(appRoot: string, options?: {
+        workspaceRoot?: string;
+    }): Promise<AppVerifyReport>;
+    /**
      * Points a team at a published version.
      *
      * Promotion (Staging → Production) and rollback (v3 → v2) are both this
@@ -3999,8 +4141,9 @@ declare class DeployApi {
      * Deployments visible to the caller, as the standard list envelope.
      *
      * @param params - Optional team scope + list-API params.
-     * @param params.teamId - Restrict to one team; omitted = every team the
-     *   caller can monitor.
+     * @param params.teamId - Restrict to one team; omitted = the visibility
+     *   model: the caller's member teams plus their own personal space, and
+     *   the whole org for an org admin.
      * @returns `{rows, total, page, pageSize}` of {@link Deployment} rows.
      */
     list(params?: DeployListParams & {
@@ -4702,10 +4845,13 @@ export declare class RocketRideClient extends DAPClient {
      *   pipeline: { components: [...], project_id: '123' },
      *   source: 'webhook_1'
      * });
-     * if (result.errors?.length) {
+     * if (result.errors.length) {
      *   console.log('Validation errors:', result.errors);
      * }
      * ```
+     *
+     * `errors` and `warnings` are ALWAYS arrays — a clean pipeline returns
+     * them empty, never absent.
      */
     validate(options: {
         pipeline: PipelineConfig | Record<string, unknown>;
@@ -4775,6 +4921,17 @@ export declare class RocketRideClient extends DAPClient {
      * Terminate a running pipeline.
      */
     terminate(token: string): Promise<void>;
+    /**
+     * List the caller's active tasks.
+     *
+     * Returns the tasks visible to the authenticated user (running and
+     * recently completed pipeline executions), as reported by the server.
+     * Each row includes the task token plus display fields such as name,
+     * state, and timing; the exact field set is server-defined.
+     *
+     * Mirrors the Python SDK's `get_tasks`.
+     */
+    getTasks(): Promise<Array<Record<string, unknown>>>;
     /**
      * Restart a running pipeline with a new configuration.
      *
@@ -5197,9 +5354,11 @@ export declare class RocketRideClient extends DAPClient {
      *
      * Answered by role: the developer org sees its FULL rail (published or
      * not); other callers see only the versions serving on rows visible to
-     * them. Each entry carries its deployment `state`, its `buildStatus`
-     * ('ok' = servable bytes exist), and the `rungs` naming the audiences
-     * serving it.
+     * them. Each entry carries its deployment `state`, its build lifecycle
+     * (`buildStatus` — 'ok' = servable bytes exist — plus the `buildPhase`
+     * it reached and `buildEndedAt`), and the `rungs` naming the audiences
+     * serving it. No error text rides the rail: build detail is served on
+     * demand by the build-log verb.
      *
      * @param appId - App id
      * @returns Rail entries, newest first
@@ -5213,6 +5372,8 @@ export declare class RocketRideClient extends DAPClient {
         message: string;
         state: string;
         buildStatus: string;
+        buildPhase: string;
+        buildEndedAt?: number | null;
         rungs: string[];
     }>>;
     /**
@@ -5242,6 +5403,37 @@ export declare class RocketRideClient extends DAPClient {
         artifact: Record<string, unknown>;
     }>;
     /**
+     * Append a developer message to the app's review thread — the developer
+     * half of the reviewer conversation. The message rides the app's
+     * deployment history as a 'reply' row (side 'developer'), the same
+     * stream `deploy.history()` reads and the store reviewer writes to.
+     * Developer-org and developer-namespace gated, like submit.
+     *
+     * @param appId - App id
+     * @param message - The message text (server caps the length)
+     * @param registryVersion - Optional registry version the message refers to
+     * @returns `{replied: true, appId}`
+     */
+    replyApp(appId: string, message: string, registryVersion?: number): Promise<{
+        replied: boolean;
+        appId: string;
+    }>;
+    /**
+     * Read one version's durable server build log — the full phase-by-phase
+     * output the build worker writes beside the version's artifacts (no
+     * error text rides the rail rows or the DB). Long logs serve their tail;
+     * '' means no log exists for the version. Developer-org gated.
+     *
+     * @param appId - App id
+     * @param registryVersion - Registry version number from the rail
+     * @returns `{appId, version, log}`
+     */
+    buildLog(appId: string, registryVersion: number): Promise<{
+        appId: string;
+        version: number;
+        log: string;
+    }>;
+    /**
      * Bind a deployment to an audience — first publish, update, promote, and
      * rollback are all this one verb ("repoint, never rebuild"). The binding
      * is a pure pointer; '@public' requires the deployment be 'ready'
@@ -5265,6 +5457,19 @@ export declare class RocketRideClient extends DAPClient {
      * @returns The final binding row (state 'removed')
      */
     removeAppPublish(appId: string, target: string): Promise<{
+        publish: Record<string, unknown>;
+    }>;
+    /**
+     * Disable an audience binding — serving stops, but the row STAYS in the
+     * where-live listing marked disabled (a visible off switch), unlike
+     * remove which hides it. Publishing any version to the rung re-enables
+     * the binding.
+     *
+     * @param appId - App id
+     * @param target - '@me', '@team/<name-or-id>', or '@public' ('@user' = legacy alias)
+     * @returns The binding row (state 'disabled')
+     */
+    disableAppPublish(appId: string, target: string): Promise<{
         publish: Record<string, unknown>;
     }>;
     /**

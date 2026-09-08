@@ -48,6 +48,7 @@ import pytest
 from ai.account import account as account_singleton
 from ai.account import dev_overlay
 from ai.account.app_deploy import (
+    _REPLY_MAX_CHARS,
     entitled_version_dirs,
     handle_app_add,
     handle_deploy_app,
@@ -104,6 +105,8 @@ class _FakeRegistry:
         # Call records for assertions
         self.publish_calls = []
         self.set_calls = []
+        # Appended history rows (the review-thread writer's capture)
+        self.history = []
 
     def add_version(
         self, version, app_version, publisher_id='dev1', kind='app', state='ready', manifest=None, build='ok'
@@ -228,7 +231,10 @@ class _FakeRegistry:
             row = {
                 'orgId': org_id,
                 'appId': app_id,
-                'audience': dict(audience),
+                # The real backends key by {type,id} and DECODE the audience
+                # from the key on the way out — the resolver's display keys
+                # (name/handle) land in history data, never on publish rows.
+                'audience': {'type': audience['type'], 'id': audience.get('id', '')},
                 'version': version,
                 'state': 'enabled',
                 'artifactState': _art_state(version),
@@ -282,6 +288,18 @@ class _FakeRegistry:
             row['state'] = state
             return _with_state(row)
 
+        async def deployments_history_append(org_id, project_id, action, actor, version=None, data=None):
+            self.history.append(
+                {
+                    'orgId': org_id,
+                    'projectId': project_id,
+                    'action': action,
+                    'actor': actor,
+                    'version': version,
+                    'data': data,
+                }
+            )
+
         for name, fn in (
             ('deployments_versions', deployments_versions),
             ('deployments_artifact', deployments_artifact),
@@ -292,6 +310,7 @@ class _FakeRegistry:
             ('publish_of_app', publish_of_app),
             ('publish_list', publish_list),
             ('publish_set_state', publish_set_state),
+            ('deployments_history_append', deployments_history_append),
         ):
             monkeypatch.setattr(account_singleton, name, fn, raising=False)
 
@@ -527,6 +546,22 @@ async def test_add_requires_a_developer_id(registry):
 
 
 @pytest.mark.asyncio
+async def test_add_rejects_oversized_zip_upload(registry, content_store, monkeypatch):
+    """The upload cap is measured on the ZIPPED byte count and refused
+    before ANY parsing — an over-cap payload never reaches the zip parser,
+    the manifest read, the registry, or the store (the payload here is not
+    even a valid archive, proving the cap runs first).
+    """
+    monkeypatch.setattr('ai.account.app_deploy._ZIP_MAX_ZIPPED', 1024)
+    conn = _FakeConn()
+    result = await handle_app_add(conn, _add_request(data=b'\0' * 4096))
+    assert result['success'] is False
+    assert 'upload cap' in result['message']
+    assert registry.publish_calls == []
+    assert _written(content_store) == {}
+
+
+@pytest.mark.asyncio
 async def test_add_rejects_zip_bomb_on_actual_size(registry, content_store, monkeypatch):
     """The unpacked cap is measured on REAL decompressed bytes, not the
     attacker-controlled declared size — a highly-compressible entry over the
@@ -758,6 +793,10 @@ async def test_publish_user_allowed_for_deployer(registry, quiet_push):
     assert (row['audience'], row['state']) == (AUD_USER, 'enabled')
     # The manifest snapshot rode along from the entry's metadata
     assert registry.set_calls[0]['snapshot']['name'] == 'Brandy'
+    # The audience the backend received is self-describing: the resolver
+    # stamped the display facts the history row will store verbatim.
+    sent = registry.set_calls[0]['audience']
+    assert (sent['handle'], sent['name']) == ('@me', 'User One')
     # The acting user's manifest is refreshed (data + signal)
     assert quiet_push == [{'user_id': 'u1', 'source': 'app-publish'}]
 
@@ -776,6 +815,10 @@ async def test_publish_team_needs_membership_only(registry, quiet_push):
 
     assert result['success'] is True
     assert result['body']['publish']['state'] == 'enabled'
+    # The team NAME was dereferenced at resolution — the history row never
+    # needs a second lookup to say which team.
+    sent = registry.set_calls[0]['audience']
+    assert (sent['handle'], sent['name'], sent['id']) == ('@team/Development', 'Development', 't1')
 
 
 @pytest.mark.asyncio
@@ -856,6 +899,121 @@ async def test_withdraw_cancels_a_pending_review(registry, quiet_push):
     outsider = _FakeConn(teams=_TEAMS, developer_id='evil')
     blocked = await handle_deploy_app(outsider, _request('withdraw', version=1))
     assert blocked['success'] is False
+
+
+@pytest.mark.asyncio
+async def test_reply_appends_a_developer_thread_row(registry):
+    """The developer half of the review conversation: reply writes ONE
+    'reply' history row under the home org with side 'developer', version
+    unstamped unless given. No state moves, no broadcast.
+    """
+    registry.add_version(1, '1.0.0', publisher_id='u1', state='submit')
+    dev = _FakeConn(teams=_TEAMS, developer_id='acme')
+
+    result = await handle_deploy_app(dev, _request('reply', message='On it - fix coming'))
+    assert result['success'] is True
+    assert result['body'] == {'replied': True, 'appId': 'acme.brandy'}
+    assert len(registry.history) == 1
+    row = registry.history[0]
+    assert row['orgId'] == 'org1'
+    assert row['projectId'] == 'acme.brandy'
+    assert row['action'] == 'reply'
+    assert row['version'] is None
+    assert row['data'] == {'side': 'developer', 'message': 'On it - fix coming'}
+    assert row['actor']['userId'] == 'u1'
+    assert registry.versions[0]['state'] == 'submit'  # nothing moved
+
+    # The version-stamped variant records the registry int on the row.
+    versioned = await handle_deploy_app(dev, _request('reply', message='About v1', version=1))
+    assert versioned['success'] is True
+    assert registry.history[1]['version'] == 1
+
+
+@pytest.mark.asyncio
+async def test_reply_works_before_any_deploy(registry):
+    """An empty rail still accepts a reply — the developer may open the
+    conversation before the first submission (home-org resolution falls
+    back to the caller org); only the namespace gate applies.
+    """
+    dev = _FakeConn(teams=_TEAMS, developer_id='acme')
+
+    result = await handle_deploy_app(dev, _request('reply', message='Question before I submit'))
+    assert result['success'] is True
+    assert len(registry.history) == 1
+    assert registry.history[0]['data']['side'] == 'developer'
+
+
+@pytest.mark.asyncio
+async def test_reply_validates_message_and_gates(registry):
+    """Refusals: empty/whitespace message, over-cap message, non-int
+    version, foreign namespace, unregistered developer — and the history
+    stream stays EMPTY on every refusal.
+    """
+    registry.add_version(1, '1.0.0', publisher_id='u1', state='submit')
+    dev = _FakeConn(teams=_TEAMS, developer_id='acme')
+
+    empty = await handle_deploy_app(dev, _request('reply', message='   '))
+    assert empty['success'] is False
+    assert 'message is required' in empty['message']
+
+    over = await handle_deploy_app(dev, _request('reply', message='x' * (_REPLY_MAX_CHARS + 1)))
+    assert over['success'] is False
+    assert str(_REPLY_MAX_CHARS) in over['message']
+
+    badver = await handle_deploy_app(dev, _request('reply', message='hi', version='1'))
+    assert badver['success'] is False
+    assert 'registry version' in badver['message']
+
+    # Outside the caller org's developer namespace.
+    outsider = _FakeConn(teams=_TEAMS, developer_id='evil')
+    foreign = await handle_deploy_app(outsider, _request('reply', message='hi'))
+    assert foreign['success'] is False
+    assert 'namespace' in foreign['message']
+
+    # No developer id registered at all.
+    unregistered = _FakeConn(teams=_TEAMS, developer_id=None)
+    blocked = await handle_deploy_app(unregistered, _request('reply', message='hi'))
+    assert blocked['success'] is False
+    assert 'developer id' in blocked['message']
+
+    assert registry.history == []
+
+
+@pytest.mark.asyncio
+async def test_build_log_serves_the_stored_log(registry, content_store):
+    """build_log reads the durable build.log beside the version's artifacts
+    (developer-org only); a version with no log answers '' — a normal
+    answer, not an error — and an unknown version is refused.
+    """
+    registry.add_version(1, '1.0.0', publisher_id='u1', state='private', build='failed')
+    dev = _FakeConn(teams=_TEAMS, developer_id='acme')
+
+    # Seed the log where the worker writes it: the artifactPath minus .json.
+    content_root = 'orgs/org1/files/.deployments/acme.brandy/v000001-fakesha1'
+    await Store.instance()._store.write_bytes(
+        f'{content_root}/build.log', b'== install ==\n$ pnpm install\n\n== failed (install) ==\n[install] exit 1'
+    )
+
+    result = await handle_deploy_app(dev, _request('build_log', version=1))
+    assert result['success'] is True
+    assert result['body']['appId'] == 'acme.brandy'
+    assert result['body']['version'] == 1
+    assert '== failed (install) ==' in result['body']['log']
+
+    # Missing log file = empty log, not an error.
+    registry.add_version(2, '1.1.0', publisher_id='u1', state='private')
+    empty = await handle_deploy_app(dev, _request('build_log', version=2))
+    assert empty['success'] is True
+    assert empty['body']['log'] == ''
+
+    # Unknown version is refused by name.
+    missing = await handle_deploy_app(dev, _request('build_log', version=9))
+    assert missing['success'] is False
+    assert 'no registry version 9' in missing['message']
+
+    # Version must be an int.
+    badver = await handle_deploy_app(dev, _request('build_log', version='1'))
+    assert badver['success'] is False
 
 
 @pytest.mark.asyncio

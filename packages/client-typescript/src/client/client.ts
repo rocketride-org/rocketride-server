@@ -34,7 +34,7 @@ import { BillingApi } from './billing.js';
 import { DatabaseApi } from './database.js';
 import { DeployApi } from './deploy.js';
 import { LogApi } from './log.js';
-import { AuthenticationException, ConnectionException, LoginAttemptCancelledError, type LoginAttemptCancellationReason, PipeException } from './exceptions/index.js';
+import { AuthenticationException, ConnectionException, DAPException, LoginAttemptCancelledError, type LoginAttemptCancellationReason, PipeException } from './exceptions/index.js';
 
 // Global counter for generating unique client IDs
 let clientId = 0;
@@ -141,9 +141,11 @@ export class DataPipe {
 		const response = await this._client.request(request);
 
 		if (this._client.didFail(response)) {
-			const base = response.message || 'Failed to open a data pipe.';
-			const msg = `${base}\n\n` + 'Common causes:\n' + "- Pipeline isn't running (wrong token or task terminated)\n" + '- Pipeline source must be chat, webhook, or dropper\n' + "- MIME type doesn't match the source lane (try mimeType='text/plain')\n";
-			throw new PipeException({ ...response, message: msg });
+			// The server's message stays the message: an application may show it to
+			// an end user. The developer checklist rides along as `hint`
+			// (PipeException.hint), and `code` classifies the failure.
+			const hint = 'Common causes:\n' + "- Pipeline isn't running (wrong token or task terminated)\n" + '- Pipeline source must be chat, webhook, or dropper\n' + "- MIME type doesn't match the source lane (try mimeType='text/plain')\n";
+			throw new PipeException({ ...response, message: response.message || 'Failed to open a data pipe.', hint });
 		}
 
 		this._pipeId = response.body?.pipe_id as number | undefined;
@@ -1311,10 +1313,13 @@ export class RocketRideClient extends DAPClient {
 	 *   pipeline: { components: [...], project_id: '123' },
 	 *   source: 'webhook_1'
 	 * });
-	 * if (result.errors?.length) {
+	 * if (result.errors.length) {
 	 *   console.log('Validation errors:', result.errors);
 	 * }
 	 * ```
+	 *
+	 * `errors` and `warnings` are ALWAYS arrays — a clean pipeline returns
+	 * them empty, never absent.
 	 */
 	async validate(options: { pipeline: PipelineConfig | Record<string, unknown>; source?: string }): Promise<ValidationResult> {
 		const { pipeline, source } = options;
@@ -1323,7 +1328,11 @@ export class RocketRideClient extends DAPClient {
 			args.source = source;
 		}
 		try {
-			return await this.call<ValidationResult>('rrext_validate', args);
+			const result = await this.call<ValidationResult>('rrext_validate', args);
+			// The server omits the keys entirely when a pipeline is clean —
+			// normalize so `.errors`/`.warnings` are ALWAYS arrays and callers
+			// never need null guards on a passing validation.
+			return { ...result, errors: result?.errors ?? [], warnings: result?.warnings ?? [] };
 		} catch (err) {
 			throw new Error(`Pipeline validation failed: ${err instanceof Error ? err.message : err}`);
 		}
@@ -1500,6 +1509,21 @@ export class RocketRideClient extends DAPClient {
 			this.debugMessage(`Pipeline termination failed: ${errorMsg}`);
 			throw new Error(errorMsg);
 		}
+	}
+
+	/**
+	 * List the caller's active tasks.
+	 *
+	 * Returns the tasks visible to the authenticated user (running and
+	 * recently completed pipeline executions), as reported by the server.
+	 * Each row includes the task token plus display fields such as name,
+	 * state, and timing; the exact field set is server-defined.
+	 *
+	 * Mirrors the Python SDK's `get_tasks`.
+	 */
+	async getTasks(): Promise<Array<Record<string, unknown>>> {
+		const body = await this.call<{ tasks?: Array<Record<string, unknown>> }>('rrext_get_tasks');
+		return body?.tasks || [];
 	}
 
 	/**
@@ -1869,7 +1893,10 @@ export class RocketRideClient extends DAPClient {
 				}
 			}
 		} catch (error) {
-			// Return error response in standard format
+			// A typed SDK exception carries `code` and `hint` a caller can act on;
+			// rewrapping it as a plain Error would throw that away. Anything else
+			// is normalised to an Error as before.
+			if (error instanceof DAPException) throw error;
 			throw new Error(error instanceof Error ? error.message : String(error));
 		}
 	}
@@ -2700,14 +2727,16 @@ export class RocketRideClient extends DAPClient {
 	 *
 	 * Answered by role: the developer org sees its FULL rail (published or
 	 * not); other callers see only the versions serving on rows visible to
-	 * them. Each entry carries its deployment `state`, its `buildStatus`
-	 * ('ok' = servable bytes exist), and the `rungs` naming the audiences
-	 * serving it.
+	 * them. Each entry carries its deployment `state`, its build lifecycle
+	 * (`buildStatus` — 'ok' = servable bytes exist — plus the `buildPhase`
+	 * it reached and `buildEndedAt`), and the `rungs` naming the audiences
+	 * serving it. No error text rides the rail: build detail is served on
+	 * demand by the build-log verb.
 	 *
 	 * @param appId - App id
 	 * @returns Rail entries, newest first
 	 */
-	async listDeployments(appId: string): Promise<Array<{ registryVersion: number; appVersion: string; sha256: string; publishedAt: number; author: string; message: string; state: string; buildStatus: string; rungs: string[] }>> {
+	async listDeployments(appId: string): Promise<Array<{ registryVersion: number; appVersion: string; sha256: string; publishedAt: number; author: string; message: string; state: string; buildStatus: string; buildPhase: string; buildEndedAt?: number | null; rungs: string[] }>> {
 		const body = await this.call('rrext_deploy_app', { subcommand: 'versions', appId });
 		return (body as any)?.versions ?? [];
 	}
@@ -2741,6 +2770,36 @@ export class RocketRideClient extends DAPClient {
 	}
 
 	/**
+	 * Append a developer message to the app's review thread — the developer
+	 * half of the reviewer conversation. The message rides the app's
+	 * deployment history as a 'reply' row (side 'developer'), the same
+	 * stream `deploy.history()` reads and the store reviewer writes to.
+	 * Developer-org and developer-namespace gated, like submit.
+	 *
+	 * @param appId - App id
+	 * @param message - The message text (server caps the length)
+	 * @param registryVersion - Optional registry version the message refers to
+	 * @returns `{replied: true, appId}`
+	 */
+	async replyApp(appId: string, message: string, registryVersion?: number): Promise<{ replied: boolean; appId: string }> {
+		return (await this.call('rrext_deploy_app', { subcommand: 'reply', appId, message, ...(registryVersion !== undefined && { version: registryVersion }) })) as any;
+	}
+
+	/**
+	 * Read one version's durable server build log — the full phase-by-phase
+	 * output the build worker writes beside the version's artifacts (no
+	 * error text rides the rail rows or the DB). Long logs serve their tail;
+	 * '' means no log exists for the version. Developer-org gated.
+	 *
+	 * @param appId - App id
+	 * @param registryVersion - Registry version number from the rail
+	 * @returns `{appId, version, log}`
+	 */
+	async buildLog(appId: string, registryVersion: number): Promise<{ appId: string; version: number; log: string }> {
+		return (await this.call('rrext_deploy_app', { subcommand: 'build_log', appId, version: registryVersion })) as any;
+	}
+
+	/**
 	 * Bind a deployment to an audience — first publish, update, promote, and
 	 * rollback are all this one verb ("repoint, never rebuild"). The binding
 	 * is a pure pointer; '@public' requires the deployment be 'ready'
@@ -2766,6 +2825,20 @@ export class RocketRideClient extends DAPClient {
 	 */
 	async removeAppPublish(appId: string, target: string): Promise<{ publish: Record<string, unknown> }> {
 		return (await this.call('rrext_deploy_app', { subcommand: 'remove', appId, target })) as any;
+	}
+
+	/**
+	 * Disable an audience binding — serving stops, but the row STAYS in the
+	 * where-live listing marked disabled (a visible off switch), unlike
+	 * remove which hides it. Publishing any version to the rung re-enables
+	 * the binding.
+	 *
+	 * @param appId - App id
+	 * @param target - '@me', '@team/<name-or-id>', or '@public' ('@user' = legacy alias)
+	 * @returns The binding row (state 'disabled')
+	 */
+	async disableAppPublish(appId: string, target: string): Promise<{ publish: Record<string, unknown> }> {
+		return (await this.call('rrext_deploy_app', { subcommand: 'disable', appId, target })) as any;
 	}
 
 	/**

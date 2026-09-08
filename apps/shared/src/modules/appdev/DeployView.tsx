@@ -25,19 +25,19 @@
 // =============================================================================
 
 /**
- * The DEPLOY view (the centerpiece): Publish snapshots an immutable version
- * (author, time, sha, commit-style message); Deploy pins a rung to one —
+ * The DEPLOY view (the centerpiece): Deploy snapshots an immutable version
+ * (author, time, sha, commit-style message); Publish pins a rung to one —
  * the single verb covering first publish, update, promote, and rollback
  * ("repoint, never rebuild").
  *
  * Layout per the v3 mockup: a horizontal rail of version cards headed by a
- * dashed "+ Publish" card, then the "Where this app is live" reverse index
+ * dashed "+ Deploy" card, then the "Where this app is live" reverse index
  * (rung → pinned version → state → audience → time). Data arrives through
  * the host adapter; hosts that have not wired deploy yet get teaching empty
  * states instead of dead chrome.
  */
 
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Button, ConfirmDialog, EmptyState, InputField, Modal, StatusBadge } from 'shell';
 import type { AppSummary, AppVersionInfo, BuildStatusTick, IAppBuilderHost, RungPin } from './types';
 
@@ -107,6 +107,28 @@ const styles: Record<string, React.CSSProperties> = {
 		color: 'var(--rr-text-secondary)',
 		marginLeft: 6,
 		whiteSpace: 'nowrap',
+	},
+	// The failed badge is a DOOR (click opens the build log) — cursor and
+	// title carry the affordance; the badge itself stays the stock chip.
+	failedBadgeWrap: {
+		cursor: 'pointer',
+		display: 'inline-flex',
+	},
+	// The build-log viewer body (inside the stock Modal).
+	logPre: {
+		fontFamily: 'var(--rr-font-mono, Consolas, monospace)',
+		fontSize: 11.5,
+		lineHeight: 1.5,
+		whiteSpace: 'pre-wrap',
+		wordBreak: 'break-word',
+		background: 'var(--rr-bg-surface-alt)',
+		border: '1px solid var(--rr-border)',
+		borderRadius: 6,
+		padding: '10px 12px',
+		maxHeight: '55vh',
+		overflowY: 'auto',
+		color: 'var(--rr-text-primary)',
+		margin: 0,
 	},
 	rail: {
 		display: 'flex',
@@ -425,6 +447,23 @@ const STATE_BADGE: Record<NonNullable<AppVersionInfo['state']>, { variant: 'mute
 	failed: { variant: 'error', label: 'failed' },
 };
 
+/**
+ * The version's effective server-build word: the live ticker wins while the
+ * session holds one; otherwise the rail row's persisted buildStatus — so a
+ * failed build stays visible across panel reloads, not just while the tick
+ * that announced it is remembered. '' = servable ('ok' and legacy '' both).
+ *
+ * @param v - The rail entry.
+ * @param ticks - The live ticker words by registry version.
+ * @returns '' when servable, 'failed', or the in-flight lifecycle word.
+ */
+function buildWordOf(v: AppVersionInfo, ticks: Record<number, string>): string {
+	const live = ticks[v.registryVersion];
+	if (live !== undefined) return live;
+	const word = v.buildStatus ?? '';
+	return word === 'ok' ? '' : word;
+}
+
 /** Renders a unix-seconds timestamp as a compact local date/time. */
 function formatWhen(unixSeconds?: number): string {
 	if (!unixSeconds) return '';
@@ -485,6 +524,13 @@ export const DeployView: React.FC<IDeployViewProps> = ({ host, app, readOnly }) 
 	// ('uploaded' → 'preparing' → 'installing' → …); '' from the server
 	// clears the entry (success — nothing left to say).
 	const [buildTicks, setBuildTicks] = useState<Record<number, string>>({});
+	// The build-log viewer: which version's log is open (null = closed) and
+	// its text (null = loading).
+	const [logFor, setLogFor] = useState<AppVersionInfo | null>(null);
+	const [logText, setLogText] = useState<string | null>(null);
+	// The registry version whose log fetch may still write text. A fetch that
+	// resolves after the viewer moved on (or closed) is dropped.
+	const logRequestRef = useRef<number | null>(null);
 
 	/**
 	 * Load versions + pins. The two queries run INDEPENDENTLY so the versions
@@ -598,6 +644,38 @@ export const DeployView: React.FC<IDeployViewProps> = ({ host, app, readOnly }) 
 			setDeployBusy(false);
 		}
 	}, [host, deployMessage, refresh]);
+
+	/** Open the build-log viewer for one version and fetch its log — the
+	 * "failed" badge's click-through (the log is the ONLY home of build
+	 * error detail; nothing rides the rail rows). */
+	const openBuildLog = useCallback(
+		(v: AppVersionInfo): void => {
+			setLogFor(v);
+			setLogText(null);
+			// Stamp the request: a close/reopen while the first fetch is in
+			// flight must not paint the previous version's log over the new one.
+			logRequestRef.current = v.registryVersion;
+			if (!host.loadBuildLog) {
+				setLogText('Build-log reading is not wired up on this host.');
+				return;
+			}
+			/** Write log text only while this version's request is still the open one. */
+			const write = (text: string): void => {
+				if (logRequestRef.current === v.registryVersion) setLogText(text);
+			};
+			void host
+				.loadBuildLog(v.registryVersion)
+				.then((text) => write(text || 'No build log exists for this version.'))
+				.catch((e) => write(`Could not load the build log: ${e instanceof Error ? e.message : String(e)}`));
+		},
+		[host]
+	);
+
+	/** Close the build-log viewer and retire the in-flight request stamp. */
+	const closeBuildLog = useCallback((): void => {
+		logRequestRef.current = null;
+		setLogFor(null);
+	}, []);
 
 	/** Open the "Publish v<N> to…" audience dialog (the pipe deploy dialog's
 	 * picker pattern) and lazily load the team roster for its rows. */
@@ -713,7 +791,7 @@ export const DeployView: React.FC<IDeployViewProps> = ({ host, app, readOnly }) 
 				</div>
 			) : (
 				<>
-					{host.registerDeveloper && developerId === '' && (
+					{host.registerDeveloper && !readOnly && developerId === '' && (
 						<div style={styles.devBanner}>
 							<div style={styles.devBannerText}>
 								<strong>Register as a developer to deploy apps.</strong> Every app id is <code>&lt;developerId&gt;.&lt;name&gt;</code> — claim your organization&rsquo;s developer id (letters and underscores only) to publish under your own namespace.
@@ -743,70 +821,99 @@ export const DeployView: React.FC<IDeployViewProps> = ({ host, app, readOnly }) 
 								<span style={styles.publishHint}>{deployBusy ? 'uploading…' : 'snapshot the current build to the server'}</span>
 							</div>
 						)}
-						{(versions ?? []).map((v) => (
-							<div key={v.registryVersion} style={styles.card}>
-								{/* Registry int IS the version identity; the package.json
-								    semver rides beside it in a pill — the same format the
-								    where-live rows render. */}
-								<div style={styles.cardVersion}>
-									v{v.registryVersion}
-									{v.version ? <span style={styles.versionPill}>{v.version}</span> : null}
-								</div>
-								<div style={styles.cardWho}>{v.author}</div>
-								<div style={styles.cardWhen}>
-									{formatWhen(v.publishedAt)}
-									{v.sha ? ` · ${v.sha.slice(0, 8)}…` : ''}
-								</div>
-								{v.message ? <div style={styles.cardMsg}>&ldquo;{v.message}&rdquo;</div> : null}
-								<div style={styles.chips}>
-									{v.state && v.state in STATE_BADGE ? (
-										<StatusBadge variant={STATE_BADGE[v.state].variant}>{STATE_BADGE[v.state].label}</StatusBadge>
-									) : v.state ? (
-										// STATE_BADGE is total over the typed union, but a state the
-										// server adds later would be absent at runtime — render its raw
-										// name as a muted chip rather than crash the row on undefined.
-										<StatusBadge variant="muted">{v.state}</StatusBadge>
-									) : null}
-									{/* The server build ticker: the live lifecycle word beside
-									    the badge ('uploaded' → 'installing' → …) — the server
-									    clears it ('' tick) once the version is servable. */}
-									{buildTicks[v.registryVersion] ? <span style={styles.buildTick}>{buildTicks[v.registryVersion]}</span> : null}
-									{/* Audience chips NAME who serves this version (the pipe
-									    card's pattern) — derived from the where-live pins. */}
-									{(pins ?? [])
-										.filter((p) => p.registryVersion === v.registryVersion)
-										.map((p) => (
-											<StatusBadge key={p.rung + p.handle} variant={p.rung === 'public' ? 'info' : 'success'}>
-												{chipLabelOf(p)}
-											</StatusBadge>
-										))}
-								</div>
-								{(host.publish || host.submitForReview) && !readOnly && (
-									<div style={styles.cardAction}>
-										{/* One primary action, like the pipe card's "Deploy to…" —
-										    only legal moves render: internal publishing is open to
-										    any non-'failed' version, and Submit exists solely on
-										    'private' (the private→submit edge; rejected/failed are
-										    terminal). */}
-										{host.publish && v.state !== 'failed' && (
-											<button style={styles.miniBtn} onClick={() => openPublish(v)}>
-												Publish to…
-											</button>
-										)}
-										{host.submitForReview && v.state === 'private' && v.registryVersion === newestSubmittable && (
-											<button style={styles.miniBtn} onClick={() => void onSubmit(v.registryVersion)}>
-												Submit for review
-											</button>
-										)}
-										{host.withdrawReview && v.state === 'submit' && (
-											<button style={styles.miniBtn} onClick={() => void onWithdraw(v.registryVersion)}>
-												Withdraw
-											</button>
-										)}
+						{(versions ?? []).map((v) => {
+							// The BUILD axis of this version — separate from the review
+							// state: a 'private' draft whose server build failed can
+							// never serve, must say so, and gets no action buttons.
+							const buildWord = buildWordOf(v, buildTicks);
+							const buildFailed = buildWord === 'failed';
+							const servable = buildWord === '';
+							return (
+								<div key={v.registryVersion} style={styles.card}>
+									{/* Registry int IS the version identity; the package.json
+									    semver rides beside it in a pill — the same format the
+									    where-live rows render. */}
+									<div style={styles.cardVersion}>
+										v{v.registryVersion}
+										{v.version ? <span style={styles.versionPill}>{v.version}</span> : null}
 									</div>
-								)}
-							</div>
-						))}
+									<div style={styles.cardWho}>{v.author}</div>
+									<div style={styles.cardWhen}>
+										{formatWhen(v.publishedAt)}
+										{v.sha ? ` · ${v.sha.slice(0, 8)}…` : ''}
+									</div>
+									{v.message ? <div style={styles.cardMsg}>&ldquo;{v.message}&rdquo;</div> : null}
+									<div style={styles.chips}>
+										{buildFailed ? (
+											// The failure outranks the review state on the badge:
+											// "draft" on an unservable version reads as healthy.
+											// Clicking the badge opens the build log — the why.
+											<span
+												style={styles.failedBadgeWrap}
+												role="button"
+												tabIndex={0}
+												title="Show the build log"
+												onClick={() => openBuildLog(v)}
+												onKeyDown={(e) => {
+													if (e.key === 'Enter' || e.key === ' ') {
+														e.preventDefault();
+														openBuildLog(v);
+													}
+												}}
+											>
+												<StatusBadge variant="error">failed</StatusBadge>
+											</span>
+										) : v.state && v.state in STATE_BADGE ? (
+											<StatusBadge variant={STATE_BADGE[v.state].variant}>{STATE_BADGE[v.state].label}</StatusBadge>
+										) : v.state ? (
+											// STATE_BADGE is total over the typed union, but a state the
+											// server adds later would be absent at runtime — render its raw
+											// name as a muted chip rather than crash the row on undefined.
+											<StatusBadge variant="muted">{v.state}</StatusBadge>
+										) : null}
+										{/* The server build lifecycle word beside the badge
+										    ('uploaded' → 'installing' → …) — live ticks win, the
+										    rail's persisted word covers reopened panels, and ''
+										    (servable) renders nothing. Failure is the badge above. */}
+										{!servable && !buildFailed ? <span style={styles.buildTick}>{buildWord}</span> : null}
+										{/* Audience chips NAME who serves this version (the pipe
+										    card's pattern) — derived from the where-live pins. */}
+										{(pins ?? [])
+											.filter((p) => p.registryVersion === v.registryVersion)
+											.map((p) => (
+												<StatusBadge key={p.rung + p.handle} variant={p.rung === 'public' ? 'info' : 'success'}>
+													{chipLabelOf(p)}
+												</StatusBadge>
+											))}
+									</div>
+									{(host.publish || host.submitForReview) && !readOnly && (
+										<div style={styles.cardAction}>
+											{/* One primary action, like the pipe card's "Deploy to…" —
+											    only legal moves render: publishing and review both
+											    require a SERVABLE build (the server refuses otherwise),
+											    internal publishing is open to any non-'failed' version,
+											    and Submit exists solely on 'private' (the private→submit
+											    edge; rejected/failed are terminal). */}
+											{host.publish && servable && v.state !== 'failed' && (
+												<button style={styles.miniBtn} onClick={() => openPublish(v)}>
+													Publish to…
+												</button>
+											)}
+											{host.submitForReview && servable && v.state === 'private' && v.registryVersion === newestSubmittable && (
+												<button style={styles.miniBtn} onClick={() => void onSubmit(v.registryVersion)}>
+													Submit for review
+												</button>
+											)}
+											{host.withdrawReview && v.state === 'submit' && (
+												<button style={styles.miniBtn} onClick={() => void onWithdraw(v.registryVersion)}>
+													Withdraw
+												</button>
+											)}
+										</div>
+									)}
+								</div>
+							);
+						})}
 					</div>
 
 					{/* Where this app is live — the reverse index */}
@@ -866,6 +973,25 @@ export const DeployView: React.FC<IDeployViewProps> = ({ host, app, readOnly }) 
 					<div style={styles.dialogHint}>Packs the app source and ships it to the server as the next immutable version. Binds nothing — publish it to an audience afterwards.</div>
 					<InputField placeholder="What changed? (optional comment)" value={deployMessage} onChange={(e) => setDeployMessage(e.target.value)} disabled={deployBusy} />
 					{deployError ? <div style={styles.devError}>{deployError}</div> : null}
+				</Modal>
+			)}
+
+			{/* ── Build-log viewer — the failed badge's click-through ────── */}
+			{logFor && (
+				<Modal
+					title={`v${logFor.registryVersion}${logFor.version ? ` (${logFor.version})` : ''} build log`}
+					// 80% of the pane: build-log lines are long — the stock 440px
+					// box wraps them into porridge.
+					width={Math.floor(window.innerWidth * 0.8)}
+					onClose={closeBuildLog}
+					footer={
+						<Button variant="secondary" onClick={closeBuildLog}>
+							Close
+						</Button>
+					}
+				>
+					<div style={styles.dialogHint}>The server&rsquo;s full build output for this version, phase by phase — the failure reason is at the end.</div>
+					<pre style={styles.logPre}>{logText === null ? 'Loading build log…' : logText}</pre>
 				</Modal>
 			)}
 

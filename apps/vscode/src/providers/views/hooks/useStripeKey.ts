@@ -122,20 +122,20 @@ export function useStripeKey(enabled = true): StripeKeyState {
 				return;
 			}
 
-			// A connection landing is the strongest re-request signal. It
-			// covers BOTH the pre-connect mount (key==='' for the panel's
-			// whole life otherwise) AND a server SWITCH: Stripe keys are
-			// server-specific, so a new connection invalidates any key we
-			// already settled on. Clear the settled state and the stale key
-			// and re-ask, rather than keeping the previous server's key.
-			if (message.type === 'shell:connectionChange' && message.isConnected) {
+			// EVERY connection change invalidates what we know: Stripe keys
+			// are server-specific, so a disconnect must drop the settled key
+			// (or the modal opens with the dead server's key) and orphan any
+			// in-flight request (bumping requestId drops its late reply). A
+			// connection landing additionally re-asks — it covers both the
+			// pre-connect mount and a server switch.
+			if (message.type === 'shell:connectionChange') {
 				settled = false;
 				attempt = 0;
+				requestId += 1;
 				if (retryTimer) clearTimeout(retryTimer);
-				// A new server means both the key AND the reason are unknown
-				// again — clear them together and re-ask.
+				// The key AND the reason are unknown again — clear together.
 				setState({ key: '' });
-				request();
+				if (message.isConnected) request();
 			}
 		};
 		window.addEventListener('message', onHostMessage);

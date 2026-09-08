@@ -56,7 +56,7 @@ Each ingested chunk is stored with these properties alongside its vector: `conte
 | Weaviate cloud server      | `cloud` | _(your Weaviate Cloud endpoint)_ | `443`  |
 | Your own Weaviate server   | `local` | `localhost`                      | `8080` |
 
-The preconfig default profile is `cloud`. The cloud profile exposes host, API key, score, and collection; the local profile exposes host, port, gRPC port, score, and collection.
+The default profile is `local`, both for a config that names no profile and for a node dropped in the editor. The cloud profile exposes host, API key, score, and collection; the local profile exposes host, port, gRPC port, score, and collection.
 
 ---
 
@@ -67,7 +67,7 @@ When wired to an agent, the node exposes three tools via `VectorStoreToolMixin`.
 | Tool     | Key inputs                                                                                                                            | Description                                                                                                              |
 | -------- | ------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
 | `search` | `query` (required); `top_k` (default 10, max 100); `filter` (optional dict, keys `objectId`/`nodeId`/`parent` are honored)           | Semantic search over stored documents; returns content, metadata, and score per result. Falls back to keyword search if semantic search fails. |
-| `upsert` | `documents` array, each with `content` and `object_id`; optional `metadata`, `embedding`, and `embedding_model`                      | Add or update documents. Embeddings are computed automatically via the bound embedding provider, or pre-computed vectors can be supplied. |
+| `upsert` | `documents` array, each with `content` and `object_id`; optional `metadata` (keys `nodeId`/`parent`/`chunkId` are stored; defaults `"vectordb_tool"`, `"/"`, `0`), `embedding`, and `embedding_model`                      | Add or update documents. Embeddings are computed automatically via the bound embedding provider, or pre-computed vectors can be supplied. |
 | `delete` | `object_ids` (non-empty string array)                                                                                                 | Hard-delete documents by object ID. Returns `deleted_count`.                                                             |
 
 Tool calls run on the control plane and do not flow through the pipeline's embedding lanes. Semantic search in the `search` tool and automatic embedding in `upsert` require an embedding provider bound to the node (the `all.embedding` block in its parameters). Without one, those calls return `{"success": false, "error": ...}`.

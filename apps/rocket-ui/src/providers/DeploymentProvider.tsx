@@ -43,6 +43,7 @@ import { DeploymentRecordPanel, TeamDeploymentRecordPanel } from 'shared/compone
 import type { DeployHistoryRow, DeployScheduleRow, DeployVersionCard, DeploymentInfo } from 'shared/components/deploy-panel';
 import { foldDeployRunState } from 'shared/modules/sidebar/taskFold';
 import { isTeamLiveEvent } from 'shared/modules/project';
+import { registerServiceIcons } from 'shared/components/canvas/util/Icon';
 import type { TaskEventMessage } from 'shared/modules/project';
 import type { Deployment, DeployHistoryEntry, DeployArtifact } from 'shell';
 import { useDeployments } from '../hooks/useDeployments';
@@ -247,13 +248,16 @@ const DeploymentProvider: React.FC<IDeploymentProviderProps> = ({ teamId: rawTea
 		const manager = ConnectionManager.getInstance();
 		const cached = manager.getCachedServices();
 		if (!cached.servicesError && Object.keys(cached.services).length > 0) {
-			registerServiceIcons({ services: cached.services, icons: cached.icons ?? {} });
+			// The shell's summary cache types service entries loosely
+			// (Record<string, unknown>); the registry reads only the `icon`
+			// id off each entry, so the hand-off narrows to that shape.
+			registerServiceIcons({ services: cached.services as Record<string, { icon?: string }>, icons: cached.icons ?? {} });
 			setServicesJson(cached.services);
 		}
 		return manager.on('shell:servicesUpdated', ({ services, icons, servicesError }) => {
 			// A failed refresh keeps the last good catalog on the canvas.
 			if (servicesError) return;
-			registerServiceIcons({ services, icons: icons ?? {} });
+			registerServiceIcons({ services: services as Record<string, { icon?: string }>, icons: icons ?? {} });
 			setServicesJson(services);
 		});
 	}, [isConnected]);
@@ -341,7 +345,10 @@ const DeploymentProvider: React.FC<IDeploymentProviderProps> = ({ teamId: rawTea
 				// openEventStream returns before connect).
 				return {
 					seek: async () => {},
-					getStatus: async () => null,
+					// Explicit return type: the stand-in feeds openSession's inferred
+					// return union, and an unannotated null here makes TS flag the
+					// whole chain as implicitly-any (TS7023).
+					getStatus: async (): Promise<null> => null,
 					play: async () => {},
 					getTrace: async () => ({ events: [] }),
 					pause: () => {},

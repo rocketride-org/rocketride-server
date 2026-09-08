@@ -34,12 +34,14 @@ npx prettier --check <path>      # TS/JS format check
 
 The co-located per-package docs (assembled into the docs site by `builder docs:build`) are the **source of truth** (see the co-located documentation rule below). The agent integration docs at `docs/agents/` are the assistant-facing integration reference within it: **read them first before writing any RocketRide integration code.**
 
-1. `ROCKETRIDE_QUICKSTART.md`: start here, copy working examples
-2. `ROCKETRIDE_README.md`: setup checklist
-3. `ROCKETRIDE_python_API.md` or `ROCKETRIDE_typescript_API.md`: client methods
-4. `ROCKETRIDE_PIPELINE_RULES.md`: pipeline rules
-5. `ROCKETRIDE_COMPONENT_REFERENCE.md`: component catalog
-6. `ROCKETRIDE_COMMON_MISTAKES.md`: troubleshooting
+1. `ROCKETRIDE_README.md`: the platform map, setup, task router — start here
+2. `ROCKETRIDE_CONCEPTS.md`: workspace, connection, deploy/publish lifecycle
+3. `ROCKETRIDE_PIPELINES.md`: `.pipe` format, lanes, patterns, pitfalls
+4. `ROCKETRIDE_COMPONENT_REFERENCE.md`: pipeline component catalog + schemas
+5. `ROCKETRIDE_APPS.md` + `ROCKETRIDE_UI_COMPONENTS.md`: app building + shell UI
+6. `ROCKETRIDE_python_API.md` or `ROCKETRIDE_typescript_API.md`: client methods
+7. `ROCKETRIDE_INTEGRATIONS.md`: MCP, n8n, webhooks, Telegram, CI
+8. `ROCKETRIDE_OBSERVABILITY.md`: runtime events, logs, monitoring
 
 ## Conventions
 

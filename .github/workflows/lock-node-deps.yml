@@ -78,7 +78,7 @@ jobs:
           permission-issues: write
 
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           token: ${{ steps.app-token.outputs.token || github.token }}
           # actions/checkout writes `token` into .git/config by default. The

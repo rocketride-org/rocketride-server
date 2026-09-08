@@ -103,12 +103,16 @@ function writeParams(next: URLSearchParams): void {
  * server enforces entitlement on every request, so constructing a URL the
  * caller is not entitled to yields a 404 at load, never a leak.
  *
+ * The id is encoded as ONE path segment: this function is reachable from app
+ * code through shellApi, and an id carrying '/', '..', '?' or '#' would
+ * otherwise re-aim the path at a different same-origin script.
+ *
  * @param appId - The app id.
  * @param version - The registry version number (ints only).
  * @returns The versioned remoteEntry URL.
  */
 export function versionedEntryUrl(appId: string, version: number): string {
-	return `/apps/${appId}/v${version}/remoteEntry.js`;
+	return `/apps/${encodeURIComponent(appId)}/v${version}/remoteEntry.js`;
 }
 
 /**

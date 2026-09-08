@@ -103,6 +103,83 @@ def test_apply_overlay_appends_synthetic_entry_for_unknown_module():
     assert synthetic['appStatus'] == 'dev'
 
 
+def test_synthetic_entry_renders_registered_manifest_basics():
+    """register_dev meta (name/description/icon/appVersion) feeds the
+    synthetic tile so a never-published app renders like a store tile; a
+    registration without meta keeps the bare fallbacks (older clients).
+    """
+    _reset_overlay()
+    dev_overlay.register(
+        'alice',
+        1,
+        'acme_new',
+        'http://localhost:3013/remoteEntry.js',
+        'acme.new',
+        meta={
+            'name': 'Hello World',
+            'description': 'A simple Hello World demo application',
+            'icon': 'data:image/svg+xml;base64,AAAA',
+            'appVersion': '1.2.0',
+        },
+    )
+    dev_overlay.register('alice', 2, 'acme_bare', 'http://localhost:3014/remoteEntry.js', 'acme.bare')
+
+    out = {e['id']: e for e in dev_overlay.apply_overlay('alice', [])}
+
+    rich = out['acme.new']
+    assert rich['name'] == 'Hello World'
+    assert rich['description'] == 'A simple Hello World demo application'
+    assert rich['icon'] == 'data:image/svg+xml;base64,AAAA'
+    assert rich['version'] == '1.2.0'
+    bare = out['acme.bare']
+    assert bare['name'] == 'acme.bare'
+    assert bare['description'] == 'Local development app'
+    assert bare['icon'] == ''
+    assert bare['version'] == ''
+
+
+def test_matched_app_keeps_manifest_values_over_registration_meta():
+    """Meta decorates only SYNTHETIC entries — a published app's manifest
+    name/description/icon are the truth; the overlay swaps entry + dev only.
+    """
+    _reset_overlay()
+    dev_overlay.register(
+        'alice',
+        1,
+        'acme_brandy',
+        'http://localhost:3011/remoteEntry.js',
+        'acme.brandy',
+        meta={'name': 'LOCAL NAME', 'description': 'LOCAL DESC'},
+    )
+    apps = [
+        {'id': 'acme.brandy', 'moduleId': 'acme_brandy', 'entry': '/x.js', 'name': 'Brandy', 'description': 'Published'}
+    ]
+
+    out = dev_overlay.apply_overlay('alice', apps)
+
+    assert out[0]['name'] == 'Brandy'
+    assert out[0]['description'] == 'Published'
+    assert out[0]['entry'] == 'http://localhost:3011/remoteEntry.js'
+    assert out[0]['dev'] is True
+
+
+def test_sanitize_meta_drops_oversize_and_malformed_values():
+    """Caps are DROP-not-fail: oversize text, non-string values, and icons
+    that are not data:image/ URIs (or exceed the char cap) all vanish while
+    valid siblings survive — registration itself must never break on
+    cosmetic input.
+    """
+    args = {
+        'name': 'Fine',
+        'description': 'x' * 2001,
+        'appVersion': 7,
+        'icon': 'https://evil.example/icon.png',
+    }
+    assert dev_overlay._sanitize_meta(args) == {'name': 'Fine'}
+    assert dev_overlay._sanitize_meta({'icon': 'data:image/png;base64,' + 'A' * 400_001}) == {}
+    assert dev_overlay._sanitize_meta({'icon': 'data:image/png;base64,AA'}) == {'icon': 'data:image/png;base64,AA'}
+
+
 def test_apply_overlay_is_identity_for_other_users():
     """Another user's assembled list passes through untouched."""
     _reset_overlay()

@@ -29,10 +29,10 @@ and rollback), and read the reverse index (where). Serving needs no verb:
 versions load from stable ``/apps/<appId>/v<N>/`` URLs constructed from the
 version number, entitlement enforced per request by the serve route.
 Uploading is the generic rail door — see :meth:`DeployApi.add` (``client.deploy.add``).
-Mirrors the TypeScript client's listDeployments / publishApp / whereApp.
+Mirrors the TypeScript client's listDeployments / publishApp / whereApp / replyApp.
 """
 
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from ..core import DAPClient
 
@@ -104,6 +104,53 @@ class AppsMixin(DAPClient):
             version=registry_version,
         )
 
+    async def reply_app(self, app_id: str, message: str, registry_version: Optional[int] = None) -> Dict[str, Any]:
+        """
+        Append a developer message to the app's review thread.
+
+        The developer half of the reviewer conversation: the message rides
+        the app's deployment history as a 'reply' row (side 'developer'),
+        the same stream ``deploy.history()`` reads and the store reviewer
+        writes to. Developer-org and developer-namespace gated, like submit.
+        Mirrors the TypeScript client's ``replyApp``.
+
+        Args:
+            app_id:           App id.
+            message:          The message text (server caps the length).
+            registry_version: Optional registry version the message refers to.
+
+        Returns:
+            Dict ``{'replied': True, 'appId': app_id}``.
+        """
+        kwargs: Dict[str, Any] = {'subcommand': 'reply', 'appId': app_id, 'message': message}
+        if registry_version is not None:
+            kwargs['version'] = registry_version
+        return await self.call('rrext_deploy_app', **kwargs)
+
+    async def build_log(self, app_id: str, registry_version: int) -> Dict[str, Any]:
+        """
+        Read one version's durable server build log.
+
+        The full phase-by-phase output the build worker writes beside the
+        version's artifacts (no error text rides the rail rows or the DB).
+        Long logs serve their tail; an empty ``log`` means no log exists for
+        the version. Developer-org gated. Mirrors the TypeScript client's
+        ``buildLog``.
+
+        Args:
+            app_id:           App id.
+            registry_version: Registry version number from the rail.
+
+        Returns:
+            Dict ``{'appId', 'version', 'log'}``.
+        """
+        return await self.call(
+            'rrext_deploy_app',
+            subcommand='build_log',
+            appId=app_id,
+            version=registry_version,
+        )
+
     async def publish_app(self, app_id: str, registry_version: int, target: str) -> Dict[str, Any]:
         """
         Bind a deployment to an audience (first publish / promote / rollback).
@@ -145,6 +192,27 @@ class AppsMixin(DAPClient):
         return await self.call(
             'rrext_deploy_app',
             subcommand='remove',
+            appId=app_id,
+            target=target,
+        )
+
+    async def disable_app_publish(self, app_id: str, target: str) -> Dict[str, Any]:
+        """
+        Disable an audience binding — serving stops, but the row STAYS in the
+        where-live listing marked disabled (a visible off switch), unlike
+        remove which hides it. Publishing any version to the rung re-enables
+        the binding.
+
+        Args:
+            app_id: App id.
+            target: '@me', '@team/<name-or-id>', or '@public' ('@user' = legacy alias).
+
+        Returns:
+            Dict with the ``publish`` binding row (state 'disabled').
+        """
+        return await self.call(
+            'rrext_deploy_app',
+            subcommand='disable',
             appId=app_id,
             target=target,
         )

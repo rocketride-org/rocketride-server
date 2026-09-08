@@ -577,8 +577,15 @@ function sessionNonce(): string {
  * session override or the manifest's resolved default. Session version
  * overrides (desktop version selector / `?version=` deep link) substitute
  * the default SYNCHRONOUSLY at registration time — the boot path can then
- * never race a load with an async repoint. Dev entries are exempt from
- * overrides: the live build wins.
+ * never race a load with an async repoint.
+ *
+ * Precedence: App Builder preview session (nonce) > explicit version
+ * override > dev overlay > published default. An explicit override
+ * outranks the dev overlay on purpose — the user picked a SERVER version
+ * from the desktop selector, so the tile serves (and presents as) that
+ * version even while an editor keeps a live registration. The App Builder
+ * preview is unaffected: its session nonce always wins, so the editor's
+ * own preview never loses its live build.
  *
  * @param a - The server app entry.
  * @returns The load URL, or null when nothing resolves (no built UI yet).
@@ -587,43 +594,60 @@ export function resolveServerEntry(a: ServerAppEntry): string | null {
 	const nonce = sessionNonce();
 	const sessionDev = nonce && a.devEntries?.length ? a.devEntries.find((d) => d.session === nonce)?.url : undefined;
 	if (sessionDev) return sessionDev;
-	if (a.dev) return a.entry ?? null;
 	const o = getAppVersionOverrides()[a.id];
 	if (o) return versionedEntryUrl(a.id, o.version);
+	if (a.dev) return a.entry ?? null;
 	return typeof a.registryVersion === 'number' ? versionedEntryUrl(a.id, a.registryVersion) : null;
 }
 
 export function registerAndMapApps(serverApps: ServerAppEntry[]): AppManifestEntry[] {
 	const overrides = getAppVersionOverrides();
+	const nonce = sessionNonce();
+	// An explicit override applies to dev-flagged entries too — it outranks
+	// the dev overlay (see resolveServerEntry's precedence), so the mapped
+	// entry's version chip must reflect the overridden server version. The
+	// session-affine dev entry, however, outranks the override THERE too, so
+	// it must silence the chip's override here — otherwise the tile names a
+	// server version while the dev build is what actually loads.
 	const overrideOf = (a: ServerAppEntry): { version: number; appVersion?: string } | null => {
-		const o = overrides[a.id];
-		return o && !a.dev ? o : null;
+		if (nonce && a.devEntries?.some((d) => d.session === nonce)) return null;
+		return overrides[a.id] ?? null;
 	};
-	const resolvedEntry = resolveServerEntry;
 
-	// Drop entries that resolve to no load URL — the server may include
-	// apps that have no built UI yet (e.g. server-only nodes). Without this
-	// guard, MF's normalizeRemote crashes on undefined.
-	const validApps = serverApps.filter((a) => resolvedEntry(a) !== null);
+	// Resolve ONCE per entry, then reuse: resolveServerEntry reads
+	// sessionStorage and JSON.parses the override map on every call, and this
+	// runs for every manifest registration during boot.
+	//
+	// Entries that resolve to no load URL are dropped here — the server may
+	// include apps that have no built UI yet (e.g. server-only nodes).
+	// Without that guard, MF's normalizeRemote crashes on undefined.
+	const resolved: Array<{ app: ServerAppEntry; url: string }> = [];
+	for (const a of serverApps) {
+		const url = resolveServerEntry(a);
+		if (url !== null) resolved.push({ app: a, url });
+	}
 
 	// Register all MF remotes so loadRemote() can resolve them.
 	// force: true overwrites any previously registered remotes (e.g. from
 	// the pre-auth probe) with the post-auth set. Dev-owned containers are
 	// NEVER (re)registered from the manifest — the dev entry stays live.
-	const registrable = validApps.filter((a) => !devRemoteModules.has(a.moduleId));
+	const registrable = resolved.filter(({ app }) => !devRemoteModules.has(app.moduleId));
 	registerRemotes(
-		registrable.map((a) => ({ name: a.moduleId, entry: resolvedEntry(a) as string })),
+		registrable.map(({ app, url }) => ({ name: app.moduleId, entry: url })),
 		{ force: true },
 	);
 
 	// Record the registered URLs so resetRemote() can rebuild a container.
-	for (const a of registrable) registeredEntries.set(a.moduleId, resolvedEntry(a) as string);
+	for (const { app, url } of registrable) registeredEntries.set(app.moduleId, url);
 
 	// Which apps a pin is holding BEHIND — see StalePin. Rebuilt on every
 	// mapping (the post-auth set replaces the probe's), so clearing a pin and
 	// re-registering clears the notice with it.
 	stalePins.clear();
-	for (const a of validApps) {
+	// `resolved` is what `validApps` was before this merge: the server entries
+	// whose load URL resolved. Same filter, restructured to carry the URL with
+	// the entry — a pin cannot hold back an app that was never registered.
+	for (const { app: a } of resolved) {
 		const pin = overrideOf(a);
 		if (!pin || typeof a.registryVersion !== 'number') continue;
 		if (pin.version >= a.registryVersion) continue;
@@ -635,7 +659,7 @@ export function registerAndMapApps(serverApps: ServerAppEntry[]): AppManifestEnt
 	}
 
 	// Map server entries to runtime AppManifestEntry objects with lazy loaders
-	return validApps.map((a) => ({
+	return resolved.map(({ app: a }) => ({
 		id:            a.id,
 		moduleId:      a.moduleId,
 		name:          a.name,

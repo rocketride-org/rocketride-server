@@ -104,7 +104,8 @@
 						],
 						"description": [
 							"500 tokens/month included",
-							"$0.03/token overage"
+							"$0.03/token overage",
+							"Token rollover"
 						],
 						"credits": {
 							"recurring": {
@@ -129,7 +130,8 @@
 						],
 						"description": [
 							"500 tokens/month included",
-							"$0.03/token overage"
+							"$0.03/token overage",
+							"Token rollover"
 						],
 						"credits": {
 							"recurring": {
@@ -154,7 +156,8 @@
 						],
 						"description": [
 							"2,500 tokens/month included",
-							"$0.03/token overage"
+							"$0.03/token overage",
+							"Token rollover"
 						],
 						"credits": {
 							"recurring": {
@@ -180,6 +183,7 @@
 						"description": [
 							"2,500 tokens/month included",
 							"$0.03/token overage",
+							"Token rollover",
 							"1 month free",
 							"+2,500 welcome bonus"
 						],
@@ -211,6 +215,7 @@
 						"description": [
 							"15,000 tokens/month included",
 							"$0.03/token overage",
+							"Token rollover",
 							"Priority support"
 						],
 						"credits": {
@@ -238,6 +243,7 @@
 						"description": [
 							"15,000 tokens/month included",
 							"$0.03/token overage",
+							"Token rollover",
 							"Priority support",
 							"1 month free",
 							"+15,000 welcome bonus"
@@ -270,6 +276,7 @@
 						"description": [
 							"30,000 tokens/month included",
 							"$0.03/token overage",
+							"Token rollover",
 							"Priority support",
 							"5 seats"
 						],
@@ -298,6 +305,7 @@
 						"description": [
 							"30,000 tokens/month included",
 							"$0.03/token overage",
+							"Token rollover",
 							"Priority support",
 							"5 seats",
 							"1 month free",
@@ -325,6 +333,7 @@
 						"order": 500,
 						"description": [
 							"Negotiated token pricing",
+							"Token rollover",
 							"Priority support + SLA",
 							"Dedicated infrastructure",
 							"Custom integrations"
@@ -427,7 +436,11 @@
 					}
 				}
 			]
-		}
+		},
+		"typecheck": false,
+		"include": [
+			"apps/shared"
+		]
 	},
 	"scripts": {
 		"build": "rsbuild build",
@@ -458,8 +471,8 @@
 		"clsx": "~2.1.1",
 		"i18next": "~23.11.3",
 		"immer": "~9.0.6",
-		"lodash": "~4.17.21",
-		"lucide-react": "~0.460.0",
+		"lodash": "~4.18.1",
+		"lucide-react": "^0.577.0",
 		"markdown-to-jsx": "~7.7.16",
 		"moment": "~2.30.1",
 		"posthog-js": "~1.274.1",

@@ -164,8 +164,11 @@ export class CloudAuthProvider implements IAuthProvider {
 			return null;
 		}
 
-		// Strip the ?code= from the URL so refreshes don't re-exchange
-		window.history.replaceState({}, '', window.location.pathname);
+		// Strip the ?code= from the URL so refreshes don't re-exchange. Carry the
+		// existing history state forward — passing {} wipes whatever the app
+		// stored on this entry (e.g. the home-ui nav snapshot), so a later Back
+		// would restore an entry with no state at all.
+		window.history.replaceState({ ...(window.history.state ?? {}) }, '', window.location.pathname);
 
 		return {
 			code,

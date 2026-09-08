@@ -418,9 +418,6 @@ class TaskCommands(DAPConn):
                     - pipeline: Full pipeline configuration dict
         """
         try:
-            # Require monitor permission to list tasks
-            self.verify_permission('task.monitor')
-
             tasks = []
 
             # Iterate all tasks the caller may see: user-owned runs (dev and
@@ -428,8 +425,11 @@ class TaskCommands(DAPConn):
             # visible across an org switch (identity, not team, is the key)
             # and a teammate's personal runs never appear; team-owned deploy
             # runs list for anyone with permissions on the run's team.
+            # Authorization is PER RUN — a global verify_permission here
+            # would evaluate the caller's current dev-team context and hide
+            # their own private runs after an org or dev-team switch.
             for control in self._server._task_control.values():
-                if not resolve_run_permissions(self._account_info, control):
+                if 'task.monitor' not in resolve_run_permissions(self._account_info, control):
                     continue
 
                 # Get current status for name and status string
@@ -465,6 +465,12 @@ class TaskCommands(DAPConn):
                             # clients must not infer deploy-ness from teamId
                             # (dev runs carry an attribution team too).
                             'runKind': control.run_kind,
+                            # Trusted owner scope: a personal (@me) deploy's
+                            # teamId is only billing attribution — clients
+                            # match personal deployments by ownerKind='user'
+                            # + ownerId, never by the billing team.
+                            'ownerKind': control.owner_kind or ('team' if control.run_kind == 'deploy' else 'user'),
+                            'ownerId': control.owner_id,
                             'pipeline': control.pipeline,
                         }
                     )

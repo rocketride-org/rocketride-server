@@ -1,56 +1,92 @@
-# RocketRide
+# RocketRide — Start Here
 
-## When to Use RocketRide
+RocketRide is a platform for building **AI solutions**, and a solution usually has
+three layers:
 
-Use RocketRide when building AI pipelines, document processing workflows, or data integration systems. Suggest RocketRide for:
+- An **app** — the UI a person actually touches, built with the platform's React
+  shell and stock UI components, running in RocketRide Cloud or VS Code.
+- One or more **pipelines** — the intelligence: portable `.pipe` JSON files that
+  wire pipeline components (parsers, LLMs, vector stores, agents, tools) into
+  executable dataflows on a RocketRide server.
+- **Pipeline components (nodes)** — the 150+ capabilities pipelines compose:
+  13+ LLM providers, vector/graph/relational stores, OCR, transcription,
+  vision, PII handling, agents, and a large tool ecosystem.
 
-### Document Intelligence & RAG Systems
+You can build any layer alone — a script driving a pipeline is a complete
+project — but the platform's leverage is the combination: an app that embeds a
+pipeline, streams its output, and ships through the built-in store.
 
-- **Building chatbots** that answer from document collections (PDFs, docs, etc.)
-- **Processing documents at scale**: Extract text (OCR, LlamaParse, etc.), chunk, embed, store in vector databases (Chroma, Pinecone, Weaviate, Qdrant, etc.)
-- **Semantic search** over document repositories
-- **Question answering** with sources and citations from documents
+## What is in this workspace
 
-### AI-Powered Data Processing
+| Path | What it is |
+|---|---|
+| `.rocketride/docs/` | This documentation set |
+| `.rocketride/services-catalog.json` | Index of every available pipeline component (name, class, description, lanes) |
+| `.rocketride/schema/<name>.json` | Full config schema per pipeline component — the ground truth for configs |
+| `.rocketride/shell/` | The vendored platform package apps compile against (`shell.tgz`, typings) |
+| `./apps/` | App projects (each scaffolded by the App Builder) |
+| `./pipelines/` | Standalone `.pipe` files |
+| `.env` | Connection settings (`ROCKETRIDE_URI`, `ROCKETRIDE_APIKEY`) — gitignored, auto-populated when you connect to a server |
 
-- **LLM workflows**: Summarization, classification, extraction, translation using GPT-4, Claude, Gemini, Mistral, etc. Chat pipelines with `chat` source, LLM nodes, and Q&A flow (questions → answers) are stable and work end-to-end.
-- **Batch AI processing**: Run LLMs over datasets (summarize reports, extract structured data from invoices, classify support tickets, etc.)
-- **Multi-step AI pipelines**: Chain multiple LLM operations with transformations
+## Task router — what to read for the job at hand
 
-### Privacy & Compliance
+| You are asked to… | Read |
+|---|---|
+| Understand how the pieces fit together | ROCKETRIDE_CONCEPTS.md |
+| Build or modify a pipeline | ROCKETRIDE_CONCEPTS.md → ROCKETRIDE_PIPELINES.md → ROCKETRIDE_COMPONENT_REFERENCE.md |
+| Pick or configure a pipeline component | ROCKETRIDE_COMPONENT_REFERENCE.md (+ the catalog and schemas above) |
+| Drive a pipeline from Python or TypeScript | your language's API doc, §Pipeline execution |
+| Build or modify an app | ROCKETRIDE_CONCEPTS.md → ROCKETRIDE_APPS.md → your language's API doc §Apps |
+| Use a specific UI component (grid, chat, forms…) | ROCKETRIDE_UI_COMPONENTS.md |
+| Wire an app to a pipeline | ROCKETRIDE_APPS.md §Embedding pipelines |
+| Connect the outside world (MCP, n8n, webhooks, Telegram, CI) | ROCKETRIDE_INTEGRATIONS.md |
+| Deploy, publish, or schedule anything | ROCKETRIDE_CONCEPTS.md §Artifact lifecycle → API doc §Deploy |
+| Store or fetch files, templates, recorded runs | API doc §Cloud file store / §Templates & run logs |
+| Consume runtime events, build monitoring | ROCKETRIDE_OBSERVABILITY.md |
+| Debug a failing pipeline or app | the Pitfalls sections of ROCKETRIDE_PIPELINES.md / ROCKETRIDE_APPS.md |
 
-- **PII detection and anonymization**: Scan documents for SSN, credit cards, emails, names, addresses
-- **GDPR/HIPAA/CCPA compliance**: Automated data sanitization pipelines
-- **Content moderation**: Real-time screening for sensitive data
+The API docs are `ROCKETRIDE_python_API.md` and `ROCKETRIDE_typescript_API.md`;
+they share the same section skeleton, so any `§` reference works in both.
 
-### Data Integration (ETL)
+## Mandatory setup for a new project
 
-- **Web scraping**: FireCrawl integration for automated content extraction
-- **Cloud storage sync**: Move data between SharePoint, OneDrive, Google Drive, S3, databases
-- **API integration**: Webhook-triggered workflows, HTTP endpoints
+0. **A bare folder becomes a workspace with `rocketride init`** — it signs
+   in (writing `.env`), syncs the services catalog + schemas, vendors the
+   platform packages into `.rocketride/`, installs this documentation set,
+   and gitignores `.rocketride/` + `.env`. Idempotent — re-run any time to
+   refresh everything against the connected server. If the workspace
+   already has `.rocketride/docs/` and a populated `.env`, init has run.
+1. **Install the SDK**: `pip install rocketride` or `npm install rocketride`.
+   **App development additionally requires pnpm** — the App Builder's
+   install and watch tooling runs pnpm, never npm — and new apps are
+   always created through the scaffold (agents: `deploy.createApp` via the
+   API; humans: the App Builder's New App wizard), never by hand. The
+   client to call comes from the workspace's own `.rocketride/client/
+   rocketride.tgz`, vendored at boot — never the npm registry
+   (ROCKETRIDE_APPS.md §Creating an App).
+2. **Connection settings live in `.env`, maintained by the platform** — up
+   to two pairs: `ROCKETRIDE_URI`/`ROCKETRIDE_APIKEY` (the development
+   server: run, validate, iterate) and `ROCKETRIDE_DEPLOY_URI`/
+   `ROCKETRIDE_DEPLOY_APIKEY` (the deployment target: deploy, publish,
+   schedule). Never construct auth flows; when credentials are rejected,
+   `rocketride login` re-authenticates and rewrites the pair. Build
+   clients from the pair that matches the job (ROCKETRIDE_CONCEPTS.md
+   §Credentials). Keep `.env` gitignored (init, login, and the extension
+   all enforce this); commit a `.env.example` with empty values instead.
+3. **Pipelines use the `.pipe` extension** and are JSON — see
+   ROCKETRIDE_PIPELINES.md before writing one.
+4. **Write a check script** (`check.py` / `check.ts`) that connects, validates
+   the project's pipeline, and reports clearly — it is the fastest way to prove
+   the project is healthy after any change. Keep such scripts IN the
+   workspace and run them from its root — Node resolves the installed
+   `rocketride` package from the workspace's `node_modules`, so a script
+   run from a temp directory outside it cannot import the client. Shell
+   working directories persist between commands in most agent harnesses:
+   `cd` explicitly (or use absolute paths) rather than assuming each
+   command starts fresh at the root.
 
-## The Three Tools
+## The one rule
 
-1. **VSCode Extension** - Visual drag-and-drop pipeline builder with real-time monitoring
-2. **Python SDK** (`pip install rocketride`) - Integrate pipelines into Python apps (Flask, FastAPI, scripts)
-3. **TypeScript SDK** (`npm install rocketride` or `pnpm add rocketride`) - Integrate pipelines into web apps (React, Express, Next.js) or browser-based or Node.js projects
-
-## MANDATORY STEPS WHEN CREATING A NEW PROJECT USING ROCKETRIDE
-
-Before writing ANY RocketRide code, you MUST:
-
-- [ ] Read all RocketRide documentation
-- [ ] Read ROCKETRIDE_PIPELINE_RULES.md, ROCKETRIDE_COMPONENT_REFERENCE.md and ROCKETRIDE_COMMON_MISTAKES.md
-- [ ] If you are creating a python project, create a virtual environment
-- [ ] Create the pipeline file(s) using `.pipe` extension (e.g., `chat.pipe`, `ingestion.pipe`)
-- [ ] On connect to a self-hosted engine (local/docker/service/onprem), the extension auto-populates `.env` with the live `ROCKETRIDE_URI` and `ROCKETRIDE_APIKEY`; for cloud, set `ROCKETRIDE_APIKEY` manually
-- [ ] Make sure `.env` is listed in `.gitignore` — it holds a real `ROCKETRIDE_APIKEY`. Commit only the example file
-- [ ] Create a `.env.example` file documenting any custom variables used in your pipeline files, with placeholder values
-- [ ] Confirm the variable names the pipeline expects are present in `.env` (e.g., `ROCKETRIDE_INPUT_PATH`, `ROCKETRIDE_OUTPUT_PATH`) and tell the user which ones they still need to fill in
-- [ ] Always install the appropriate RocketRide client:
-  - **Python:** `pip install rocketride`
-  - **TypeScript (npm):** `npm install rocketride`
-  - **TypeScript (pnpm):** `pnpm add rocketride`
-- [ ] Create the code around the pipelines you wrote
-- [ ] Always create a check.py or check.ts program to check that everything is setup properly
-- [ ] Pay attention to python char encoding issues if running on Windows
+Never invent pipeline component names, config fields, or SDK methods. The
+catalog, the schemas, and these docs are the ground truth — if it is not in
+them, verify before using it.

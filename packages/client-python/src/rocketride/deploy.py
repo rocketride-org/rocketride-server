@@ -49,9 +49,12 @@ Usage:
 
 from __future__ import annotations
 
+import asyncio
+import os
 from typing import TYPE_CHECKING, Any
 
 from .types.deploy import (
+    AppVerifyReport,
     Deployment,
     DeployHistoryResult,
     DeployListResult,
@@ -172,6 +175,171 @@ class DeployApi:
             kwargs['deployTo'] = deploy_to
         return await self._client.call('rrext_deploy', **kwargs)
 
+    async def add_app(
+        self,
+        app_root: str,
+        *,
+        workspace_root: str | None = None,
+        comment: str | None = None,
+        metadata: dict[str, Any] | None = None,
+        on_progress: Any = None,
+    ) -> PublishResult:
+        """
+        Pack an app folder's source and deploy it as the next immutable
+        registry version — the ONE call behind the App Builder's Deploy
+        button and CI scripts.
+
+        Packing follows the exact App Builder rules (workspace-rooted zip
+        layout, ``appManifest.include`` honored, hierarchical gitignore
+        filtering with the hard baseline node_modules/dist/.git, symlink
+        containment, 50MB zipped / 512MB uncompressed caps); every step can
+        narrate through ``on_progress``. Deploying never activates anything
+        — bind an audience with
+        :meth:`~rocketride.mixins.apps.AppsMixin.publish_app` afterwards.
+        Run :meth:`verify_app` first for a no-side-effect precheck.
+
+        Args:
+            app_root: The app folder — absolute, or relative to
+                ``workspace_root``.
+            workspace_root: The workspace the zip is rooted at and that
+                ``appManifest.include`` entries resolve against
+                (default: the current working directory).
+            comment: Optional "what changed" note kept in the registry.
+            metadata: Extra metadata merged over the packed defaults
+                (``appRoot`` is always set from the pack).
+            on_progress: Optional ``callable(line: str)`` receiving one
+                line per pack step.
+
+        Returns:
+            The artifact entry for the new version.
+        """
+        # step: pack with the shared rules (raises ValueError on a missing
+        # folder, a bad include entry, or a breached size cap)
+        from ._app_pack import pack_app_source
+
+        packed = pack_app_source(workspace_root or os.getcwd(), app_root, on_progress)
+        merged: dict[str, Any] = dict(metadata or {})
+        if packed.app_root:
+            merged['appRoot'] = packed.app_root
+        return await self.add(
+            kind='app',
+            data=packed.data,
+            metadata=merged,
+            comment=comment,
+        )
+
+    async def create_app(
+        self,
+        slug: str,
+        *,
+        workspace_root: str | None = None,
+        template: str = 'Blank',
+        display_name: str | None = None,
+        developer_id: str | None = None,
+        sidebar: bool = False,
+        status_footer: bool = True,
+        doc_tabs: bool = False,
+        install: bool = True,
+        server_base_url: str | None = None,
+        on_progress: Any = None,
+    ) -> dict:
+        """
+        Scaffold a new app in the workspace — the programmatic twin of the
+        App Builder's New App wizard, rendering the identical templates.
+        Writes ``./apps/<slug>``, ensures the pnpm workspace file and ignore
+        hygiene, vendors the connected server's shell + client packages, and
+        runs the workspace install. Scaffolding only — nothing is deployed;
+        the normal lifecycle (edit -> :meth:`verify_app` -> :meth:`add_app`
+        -> publish) follows. Mirrors the TypeScript
+        ``client.deploy.createApp``.
+
+        Args:
+            slug: The app-name slug (lowercase; digits/-/_ after the first
+                character). The id becomes ``<developerId>.<slug>``.
+            workspace_root: The workspace folder that owns ./apps
+                (default: the current working directory).
+            template: 'Blank' (default) or 'Dashboard'.
+            display_name: Display name (default: the slug, title-cased).
+            developer_id: Developer id for the app-id namespace (default
+                'local' — publishable beyond the workspace only after a
+                real developer id is registered).
+            sidebar: Two-column frame with a navigation sidebar.
+            status_footer: Status bar across the bottom of the app.
+            doc_tabs: Document tab strip across the content area.
+            install: Run ``pnpm install`` at the workspace root
+                (default True; failure is non-fatal).
+            server_base_url: HTTP(S) base for vendoring the server-matched
+                shell + client packages; defaults to this client's own
+                connection.
+            on_progress: Optional ``callable(line: str)`` receiving one
+                line per step. Invoked on the worker thread the scaffold
+                runs on, not on the caller's event loop.
+
+        Returns:
+            The created app's identity and a report of what ran
+            (``appId``, ``folder``, ``files``, ``vendored``,
+            ``installed``).
+
+        Raises:
+            ValueError: On an invalid slug/developer id/template or an
+                existing folder.
+        """
+        # step: scaffold with the shared templates (lazy imports mirror
+        # add_app's _app_pack pattern; rocketride_common stays out of the
+        # SDK's module-level import graph)
+        from rocketride_common.provision import to_http_base
+
+        from ._app_scaffold import create_app_workspace
+
+        # step: vendor from the server THIS client talks to unless
+        # overridden — ws(s) URIs map onto the http(s) origin serving
+        # /client/*, by the one shared normalization rule
+        base = server_base_url
+        if not base:
+            uri = self._client.get_connection_info().get('uri') or ''
+            if uri:
+                base = to_http_base(uri)
+
+        # step: the scaffold blocks for minutes (two artifact downloads
+        # plus `pnpm install`), so it runs on a worker thread instead of
+        # stalling the event loop that services this client's socket
+        return await asyncio.to_thread(
+            create_app_workspace,
+            workspace_root or os.getcwd(),
+            slug,
+            template=template,
+            display_name=display_name,
+            developer_id=developer_id,
+            sidebar=sidebar,
+            status_footer=status_footer,
+            doc_tabs=doc_tabs,
+            install=install,
+            server_base_url=base,
+            on_progress=on_progress,
+        )
+
+    async def verify_app(self, app_root: str, *, workspace_root: str | None = None) -> AppVerifyReport:
+        """
+        Pre-check everything :meth:`add_app` needs, WITHOUT deploying —
+        purely local, no server call. Verifies the manifest shape and id
+        grammar, declared icon/README assets, ``appManifest.include``
+        entries, and a pack dry run against the size caps. Server-side
+        concerns (the build, store review) are out of scope.
+
+        Args:
+            app_root: The app folder — absolute, or relative to
+                ``workspace_root``.
+            workspace_root: The workspace the pack would be rooted at
+                (default: the current working directory).
+
+        Returns:
+            :class:`~rocketride.types.AppVerifyReport` — ``ok`` plus every
+            check with an actionable note.
+        """
+        from ._app_pack import verify_app_source
+
+        return verify_app_source(workspace_root or os.getcwd(), app_root)
+
     # =========================================================================
     # DEPLOY — point a team at a version (promotion and rollback alike)
     # =========================================================================
@@ -214,8 +382,9 @@ class DeployApi:
         Deployments visible to the caller, as the standard list envelope.
 
         Args:
-            team_id: Restrict to one team; omitted = every team the caller
-                can monitor.
+            team_id: Restrict to one team; omitted = the visibility model:
+                the caller's member teams plus their own personal space, and
+                the whole org for an org admin.
             page: 1-based page number.
             page_size: Rows per page (server-clamped).
             search: Free-text search over projectId/pipelineName/teamId.

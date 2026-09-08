@@ -23,8 +23,8 @@
 // =============================================================================
 // FROZEN shell-api contract — ShellApiV0 — never edit by hand
 // =============================================================================
-// Generated:     2026-08-17T05:10:41.218Z
-// Source commit: 8c90aa2ebe93c48e1fd646f00799f9d9d186af43
+// Generated:     2026-08-18T15:03:58.414Z
+// Source commit: 733316f33fb2590af88ca4e96507548b68a06a43
 // Generator:     dts-bundle-generator@9.5.1
 // Produced by:   ./builder shell:freeze
 // =============================================================================
@@ -1226,12 +1226,39 @@ export interface DeployHistoryEntry {
     /** Unix timestamp (seconds). */
     at?: number;
     /** `pause`/`resume` appear only on rows written before the
-        enable/disable vocabulary (the trail is immutable). */
+        enable/disable vocabulary (the trail is immutable). NOTE: app rails
+        additionally carry the review vocabulary (`request`/`approved`/
+        `rejected`/`withdrawn`/`failed`) and the human `reply` row at runtime —
+        the union names the pipe-rail actions only and stays as the frozen
+        v1.3 floor wrote it (widening a returned union would break floor
+        assignability); compare raw strings for the app-rail extras. */
     action?: "publish" | "deploy" | "rollback" | "enable" | "disable" | "pause" | "resume" | "errored" | "remove";
     /** `''` on org-wide rows (publish); the team id on pointer changes. */
     teamId?: string;
     version?: number;
     actor?: DeployActor;
+    /** Row payload — self-describing by contract (rows render without a
+        second lookup). `reply` rows carry the review-thread message and its
+        side. App audience rows (publish binds, removed/disabled/enabled)
+        carry the audience WITH its server-dereferenced display facts
+        (`name`, `handle`), plus `previousVersion` when a publish repointed
+        an existing binding. A `publish` row without an audience is the
+        registry write (the DEPLOY) and rides the deploy `comment`; review
+        transitions carry both endpoints (`from`/`to`). */
+    data?: {
+        side?: "admin" | "developer";
+        message?: string;
+        audience?: {
+            type?: string;
+            id?: string;
+            name?: string;
+            handle?: string;
+        };
+        previousVersion?: number;
+        comment?: string;
+        from?: string;
+        to?: string;
+    } | null;
 }
 /** Body of `deploy.add()` — the generic rail door. */
 export interface PublishResult {
@@ -5251,8 +5278,14 @@ export declare class RocketRideClient extends DAPClient {
     /**
      * List an app's deployed versions, newest first (the version rail).
      *
+     * Answered by role: the developer org sees its FULL rail (published or
+     * not); other callers see only the versions serving on rows visible to
+     * them. Each entry carries its deployment `state`, its `buildStatus`
+     * ('ok' = servable bytes exist), and the `rungs` naming the audiences
+     * serving it.
+     *
      * @param appId - App id
-     * @returns Rail entries; each carries its deployment `state` and the `rungs` naming the audiences serving it
+     * @returns Rail entries, newest first
      */
     listDeployments(appId: string): Promise<Array<{
         registryVersion: number;
@@ -5262,6 +5295,7 @@ export declare class RocketRideClient extends DAPClient {
         author: string;
         message: string;
         state: string;
+        buildStatus: string;
         rungs: string[];
     }>>;
     /**
@@ -5289,6 +5323,37 @@ export declare class RocketRideClient extends DAPClient {
      */
     withdrawApp(appId: string, registryVersion: number): Promise<{
         artifact: Record<string, unknown>;
+    }>;
+    /**
+     * Append a developer message to the app's review thread — the developer
+     * half of the reviewer conversation. The message rides the app's
+     * deployment history as a 'reply' row (side 'developer'), the same
+     * stream `deploy.history()` reads and the store reviewer writes to.
+     * Developer-org and developer-namespace gated, like submit.
+     *
+     * @param appId - App id
+     * @param message - The message text (server caps the length)
+     * @param registryVersion - Optional registry version the message refers to
+     * @returns `{replied: true, appId}`
+     */
+    replyApp(appId: string, message: string, registryVersion?: number): Promise<{
+        replied: boolean;
+        appId: string;
+    }>;
+    /**
+     * Read one version's durable server build log — the full phase-by-phase
+     * output the build worker writes beside the version's artifacts (no
+     * error text rides the rail rows or the DB). Long logs serve their tail;
+     * '' means no log exists for the version. Developer-org gated.
+     *
+     * @param appId - App id
+     * @param registryVersion - Registry version number from the rail
+     * @returns `{appId, version, log}`
+     */
+    buildLog(appId: string, registryVersion: number): Promise<{
+        appId: string;
+        version: number;
+        log: string;
     }>;
     /**
      * Bind a deployment to an audience — first publish, update, promote, and
@@ -6477,13 +6542,18 @@ interface ShellConnectionEventMap {
         source: string;
     };
     /**
-     * An app's marketplace review status changed (submitted, approved,
-     * rejected). Pushed to the developer org's connections so App Builder
-     * surfaces update badges and show the decision toast. Optional `notes`
+     * An app's marketplace review status changed (submitted, withdrawn,
+     * approved, rejected). Pushed to the developer org's connections (so App
+     * Builder surfaces update badges and show the decision toast) and to
+     * reviewer connections holding sys.app/sys.admin (so the admin queue
+     * tracks the server live). `status` is the deployment's review state
+     * ('submit' | 'private' | 'ready' | 'rejected' | 'failed'); optional
+     * `version` is the registry version that transitioned; optional `notes`
      * carries reviewer notes on rejection.
      */
     "app:statusChanged": {
         appId: string;
+        version?: number;
         status: string;
         notes?: string;
     };

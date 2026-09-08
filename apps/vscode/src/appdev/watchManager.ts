@@ -28,6 +28,7 @@ import { ConnectionManager } from '../connection/connection';
 import { extractInstallCause, isTransientLockError, setWorkspaceInstallDelegate } from './appTypes';
 import { getLogger } from '../shared/util/output';
 import { DEV_SESSION_NONCE } from './devSession';
+import { appIconDataUri } from './appScan';
 import type { ScannedApp } from './appScan';
 import type { AppScreenProvider, AppWatchStatus } from '../providers/AppScreenProvider';
 
@@ -69,6 +70,10 @@ interface WatchSession {
 	    fresh start) never inherits it, so an already-expired linger can never
 	    tear down a session the user just reopened. */
 	lingerToken?: number;
+	/** The app's manifest icon as a data: URI, resolved ONCE per session
+	    ('' when absent/unreadable) — registerOverlay re-fires on every
+	    rebuild and must not re-read a 256 KiB file each time. */
+	iconUri?: string;
 }
 
 // =============================================================================
@@ -278,8 +283,12 @@ export class WatchManager {
 			// LINGER REVIVE: the panel closed and reopened inside the grace
 			// window — the server never stopped, so reopening is instant:
 			// cancel the deferred teardown and re-announce the live server.
-			if (existing.lingerTimer) {
-				clearTimeout(existing.lingerTimer);
+			// Gate on the TOKEN as well as the timer: the timer callback
+			// clears lingerTimer and then ENQUEUES its teardown, so a start
+			// queued behind it sees lingerTimer undefined while the expiry
+			// (which captured the token) is still pending on the chain.
+			if (existing.lingerTimer || existing.lingerToken !== undefined) {
+				if (existing.lingerTimer) clearTimeout(existing.lingerTimer);
 				existing.lingerTimer = undefined;
 				// Drop the token so an already-fired linger's queued teardown
 				// (which captured the old token) no longer matches this session.
@@ -571,6 +580,10 @@ export class WatchManager {
 
 	/** Stops every session (extension deactivation) — no linger on exit. */
 	public dispose(): void {
+		// Withdraw the install authority FIRST: it is module-level state that
+		// outlives this manager, so a vendor pass reaching it after disposal
+		// would install through a stopped manager.
+		setWorkspaceInstallDelegate(null);
 		this.connectionManager.off('shell:statusChange', this.onStatusChange);
 		for (const appId of [...this.sessions.keys()]) void this.stop(appId, { immediate: true });
 	}
@@ -815,8 +828,10 @@ export class WatchManager {
 		if (lines.length === 0) return;
 		const text = lines.join('\n');
 
-		// Mirror the raw rsbuild output into the panel Console pane
-		this.consoleLines(session.app.id, 'log', text);
+		// Mirror the raw rsbuild output into the panel Console pane — stderr
+		// keeps its severity so the pane renders one stream consistently
+		// with the exit-time flush (which writes carried partials as warn).
+		this.consoleLines(session.app.id, stream === 'stderr' ? 'warn' : 'log', text);
 
 		// Dev origin: "  ➜ Local:    http://localhost:3013/" (rsbuild banner)
 		if (!session.devOrigin) {
@@ -886,6 +901,12 @@ export class WatchManager {
 		try {
 			const client = this.connectionManager.getClient();
 			if (!client || !this.connectionManager.isConnected()) return;
+			// Manifest basics ride along so a never-published app's desktop
+			// tile renders like a store tile (real name/icon/description)
+			// instead of a bare app id.
+			if (session.iconUri === undefined) {
+				session.iconUri = (await appIconDataUri(session.app.icon)) ?? '';
+			}
 			await client.call('rrext_deploy_app', {
 				subcommand: 'register_dev',
 				moduleId: session.app.moduleId,
@@ -895,6 +916,10 @@ export class WatchManager {
 				// previews launched from THIS editor resolve THIS dev server
 				// even when another editor serves the same app.
 				session: DEV_SESSION_NONCE,
+				name: session.app.name,
+				description: session.app.description ?? '',
+				appVersion: session.app.version ?? '',
+				icon: session.iconUri,
 			});
 		} catch (err) {
 			this.logger.output(`[appdev] register_dev failed for ${session.app.id}: ${err}`);

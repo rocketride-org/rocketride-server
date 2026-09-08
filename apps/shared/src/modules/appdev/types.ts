@@ -27,9 +27,9 @@
 /**
  * Types for the App Builder view layer (`shared/modules/appdev`).
  *
- * The module owns the App Builder's ENTIRE view surface — DEVELOP | DEPLOY |
- * STORE views, their pane state, forms, and lists. A host integrates it in
- * exactly one of two ways:
+ * The module owns the App Builder's ENTIRE view surface — DASHBOARD |
+ * DESIGN | STORE | DEPLOY views, their pane state, forms, and lists. A host
+ * integrates it in exactly one of two ways:
  *
  *  1. DIRECT MOUNT — rocket-ui renders `<AppBuilderScreen host={adapter}>`
  *     where the adapter wraps the live client (useShellConnection).
@@ -101,6 +101,12 @@ export interface AppVersionInfo {
 	 * publishable), submit (in review), ready (approved for the store),
 	 * rejected, or failed. */
 	state?: 'private' | 'submit' | 'ready' | 'rejected' | 'failed';
+	/** SERVER build status of the version — a separate axis from the review
+	 * state: '' or 'ok' = servable bytes exist, 'failed' = the build broke
+	 * (the version can never serve), anything else is an in-flight ticker
+	 * word ('queued', 'building', ...). A 'private' review state says
+	 * nothing about servability — this does. */
+	buildStatus?: string;
 }
 
 /** One row of the "Where this app is live" reverse index. */
@@ -153,9 +159,11 @@ export interface BillingPlan {
 }
 
 /**
- * The editable Store listing draft — a direct projection of the app's
- * `package.json` appManifest (mode, name, description, billing.plans).
- * package.json is the storage: loading reads it, saving writes it back.
+ * The editable app-manifest draft — a direct projection of the app's
+ * `package.json` appManifest. package.json is the storage: loading reads
+ * it, saving writes it back. The PACKAGE tab edits the identity/packaging
+ * fields (name, description, icon, readme, include); the STORE tab edits
+ * the commerce fields (mode, billing.plans) — one draft, disjoint editors.
  */
 export interface ListingDraft {
 	/** App id — read-only projection. */
@@ -168,32 +176,77 @@ export interface ListingDraft {
 	description: string;
 	/** Pricing plans (appManifest.billing.plans; empty for free mode). */
 	plans: BillingPlan[];
+	/** App-folder-relative icon path (appManifest.icon), '' = undeclared. */
+	icon?: string;
+	/** App-folder-relative README path (appManifest.readme), '' = undeclared. */
+	readme?: string;
+	/** Extra WORKSPACE-relative roots packed with the app and installed by
+	 * the server build (appManifest.include) — the directories the app's
+	 * imports need beyond its own folder. */
+	include?: string[];
+	/** Whether the server build verifies the app with its own tsconfig
+	 * before bundling (appManifest.typecheck; absent = true). Off = the
+	 * app deploys even with type errors — a visible waiver, not a default. */
+	typecheck?: boolean;
 }
 
-/** One pre-flight submission check row. */
+/** One pre-flight readiness check row. */
 export interface PreflightCheck {
-	/** Stable id ("bundle", "contract", "listing", "screenshots", "stripe"). */
+	/** Stable id ("manifest", "appid", "name", "icon", "readme", "include", "desc", "pricing"). */
 	id: string;
 	/** Check outcome. */
 	state: 'pass' | 'warn' | 'fail';
 	/** Row label. */
 	label: string;
-	/** Supporting note ("./AppDescriptor exposed · 2.4 MB of 10 MB"). */
+	/** Supporting note ("2 include paths resolve"). */
 	note?: string;
+	/** Which bar the check belongs to: 'package' = complete/buildable app
+	 * (the personal-publish bar, PACKAGE tab); 'store' = additional store
+	 * submission requirements (STORE tab). Absent = 'package'. */
+	tier?: 'package' | 'store';
 }
 
-/** One review-history timeline item (per-version review model). */
-export interface ReviewTimelineItem {
-	/** Rendered timestamp line ("Jul 7 · 11:20"). */
-	when: string;
-	/** Bold event line ("v0.4.0 approved"). */
-	title: string;
-	/** Supporting note under the title. */
-	note?: string;
-	/** Node state — pending renders the amber dot. */
-	state: 'done' | 'pending' | 'rejected';
-	/** Reviewer notes blockquote (rejected items). */
-	rejectionNotes?: string;
+
+// =============================================================================
+// DASHBOARD — history stream + review thread
+// =============================================================================
+
+/**
+ * One row of the app's deployment history — the audit stream and the review
+ * thread in one. Machine rows (deploy, publish, review verdicts) and human
+ * 'reply' rows ride the same append-only stream; the Dashboard paints replies
+ * as chat bubbles and review transitions as system lines, so this type keeps
+ * the SEMANTIC fields (action, side) rather than pre-rendered strings — the
+ * one deliberate departure from the {@link ReviewTimelineItem} idiom.
+ */
+export interface AppHistoryEntry {
+	/** Stable append-order key — the row identity (oldest first as loaded). */
+	seq: number;
+	/** Unix timestamp (seconds). */
+	at: number;
+	/** Machine action ('publish', 'deploy', 'request', 'approved', ...) or the human row 'reply'. */
+	action: string;
+	/** Registry version the row refers to (absent on thread-only rows). */
+	version?: number;
+	/** Denormalized actor record. */
+	actor?: { userId?: string; display?: string; email?: string };
+	/** Row payload — self-describing by contract (the stream renders without
+	 * a second lookup). Human 'reply' rows carry {side, message}. Audience
+	 * rows (publish binds, removed/disabled/enabled) carry {audience} with
+	 * the server-dereferenced display facts (name, handle); a repoint adds
+	 * previousVersion (the version it moved OFF of). A 'publish' row WITHOUT
+	 * an audience is the registry write — the DEPLOY, per the settled
+	 * vocabulary — and rides the developer's deploy comment. Review
+	 * transitions carry both endpoints {from, to}. */
+	data?: {
+		side?: 'admin' | 'developer';
+		message?: string;
+		audience?: { type?: string; id?: string; name?: string; handle?: string };
+		previousVersion?: number;
+		comment?: string;
+		from?: string;
+		to?: string;
+	};
 }
 
 // =============================================================================
@@ -344,12 +397,26 @@ export interface IAppBuilderHost {
 	listTeams?: () => Promise<Array<{ id: string; name: string }>>;
 	/** The reverse index for the Where-live panel. */
 	getWhereLive?: () => Promise<RungPin[]>;
+	/** One version's durable server build log — the full phase output the
+	 * build worker stores beside the version's artifacts ('' = no log).
+	 * The Deploy card's "failed" badge opens it. */
+	loadBuildLog?: (version: number) => Promise<string>;
 	/** The org's registered developer id ('' = not a developer yet). An app can
 	 * only deploy inside a claimed developer namespace (`<developerId>.<name>`). */
 	getDeveloperId?: () => Promise<string>;
 	/** Claim the org's developer id slug (org.admin, self-service — letters and
 	 * underscore only). Returns the assigned slug. */
 	registerDeveloper?: (developerId: string) => Promise<string>;
+
+	// ── Dashboard ────────────────────────────────────────────────────────
+	/** Load the app's full deployment history, oldest first — the ONE fetch
+	 * feeding the Dashboard's thread + activity feed AND the Store review
+	 * timeline (hosts project the same rows both ways). */
+	loadHistory?: () => Promise<AppHistoryEntry[]>;
+	/** Append a developer message to the review thread. Server-gated to the
+	 * developer org + namespace; the reply lands in the same history stream
+	 * the reviewer's App Admin surface reads. */
+	sendReply?: (message: string, version?: number) => Promise<void>;
 
 	// ── Store ────────────────────────────────────────────────────────────
 	/** Load the current listing draft (null = no server record yet). */
@@ -358,22 +425,38 @@ export interface IAppBuilderHost {
 	saveListing?: (draft: ListingDraft) => Promise<void>;
 	/** Run the pre-flight checks for the current build. */
 	runPreflight?: () => Promise<PreflightCheck[]>;
+	/** Native file picker for a manifest asset. Returns the picked file's
+	 * APP-FOLDER-relative './'-prefixed POSIX path, or null on cancel. The
+	 * host enforces containment: assets must live inside the app folder
+	 * (the server's harvest only copies app-root-relative paths). */
+	pickAppFile?: (kind: 'icon' | 'readme') => Promise<string | null>;
+	/** Native picker for an include path — a workspace FOLDER or FILE.
+	 * Returns the picked entry's WORKSPACE-relative POSIX path (no './'
+	 * prefix — include entries are workspace-relative, unlike app assets),
+	 * or null on cancel. The host enforces containment: the pick must live
+	 * inside the workspace. */
+	pickIncludePath?: () => Promise<string | null>;
+	/** Read one app-folder-relative text file (icon SVG, README markdown)
+	 * for preview. The host guards traversal and caps the size. */
+	readAppTextFile?: (relPath: string) => Promise<string>;
+	/** Read one app-folder-relative IMAGE as a data: URI (README images are
+	 * often binary — png/jpg — so text reads would corrupt them). null =
+	 * unreadable, unsupported type, or over the host's size cap. */
+	readAppImageDataUri?: (relPath: string) => Promise<string | null>;
 	/** Submit the given version for public review (addressed by the registry
 	 * version int, like publish). */
 	submitForReview?: (version: number) => Promise<void>;
 	/** Withdraw a pending review (submit -> private) — the developer's own
 	 * cancel; the version returns to draft. */
 	withdrawReview?: (version: number) => Promise<void>;
-	/** Load the per-version review history, newest first. */
-	loadReviewHistory?: () => Promise<ReviewTimelineItem[]>;
 }
 
 // =============================================================================
 // VIEW VOCABULARY
 // =============================================================================
 
-/** The three activity views. */
-export type AppBuilderStage = 'develop' | 'deploy' | 'store';
+/** The five activity views. */
+export type AppBuilderStage = 'dashboard' | 'design' | 'package' | 'store' | 'deploy';
 
-/** The DEVELOP pill panes (Code is web-only). */
-export type DevelopPane = 'preview' | 'code' | 'components' | 'events' | 'console' | 'errors';
+/** The DESIGN pill panes (Code is web-only). */
+export type DesignPane = 'preview' | 'code' | 'components' | 'events' | 'console' | 'errors';

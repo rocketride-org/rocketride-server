@@ -406,14 +406,16 @@ async def test_on_rrext_get_tasks_filters_to_caller_and_running_only():
         """Build a TASK_CONTROL stub with the given team_id + status."""
         task = MagicMock()
         task.get_status = MagicMock(return_value=status)
-        # owner_id mirrors TASK_CONTROL.owner_id: the team owns a deploy run,
-        # the user owns a dev run.
+        # owner_kind/owner_id mirror TASK_CONTROL: the team owns a deploy
+        # run, the user owns a dev run.
+        owner_kind = 'team' if run_kind == 'deploy' else 'user'
         owner_id = team_id if run_kind == 'deploy' else 'user-1'
         return SimpleNamespace(
             token=token,
             userId='user-1',
             teamId=team_id,
             run_kind=run_kind,
+            owner_kind=owner_kind,
             owner_id=owner_id,
             source='src',
             pipeline={'name': 'my-pipeline', 'description': 'desc'},
@@ -459,6 +461,7 @@ async def test_on_rrext_get_tasks_falls_back_to_source_name():
         userId='user-1',
         teamId='team-1',
         run_kind='dev',
+        owner_kind='user',
         owner_id='user-1',
         source='my-source',
         pipeline=None,

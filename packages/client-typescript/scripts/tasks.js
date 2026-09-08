@@ -382,7 +382,7 @@ module.exports = {
 			name: 'client-typescript:build',
 			action: () => ({
 				description: 'Build client-typescript',
-				steps: ['client-typescript:sync-version', 'client-typescript:copy-readme', parallel(['client-typescript:compile-cjs', 'client-typescript:compile-esm', 'client-typescript:generate-types'], 'Compile sources'), 'client-typescript:compile-cli', 'client-typescript:post-build', 'client-typescript:create-package', 'client-typescript:sync', 'client-typescript:docs-generate'],
+				steps: ['client-docs:agent', 'client-common:stamp', 'client-typescript:sync-version', 'client-typescript:copy-readme', parallel(['client-typescript:compile-cjs', 'client-typescript:compile-esm', 'client-typescript:generate-types'], 'Compile sources'), 'client-typescript:compile-cli', 'client-typescript:post-build', 'client-typescript:create-package', 'client-typescript:sync', 'client-typescript:docs-generate'],
 			}),
 		},
 		{

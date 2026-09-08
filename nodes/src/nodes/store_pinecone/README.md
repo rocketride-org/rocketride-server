@@ -68,13 +68,13 @@ When an agent node is wired to this node, the following tools become callable, n
 
 | Tool              | Description                                                                                                                                    |
 | ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
-| `pinecone.search` | Semantic similarity search. Takes `query` text, optional `top_k` (default 10), and an optional metadata `filter` object. Returns matching documents with content, metadata, and score. |
+| `pinecone.search` | Semantic similarity search. Takes `query` text, optional `top_k` (default 10), and an optional metadata `filter` object (keys `objectId`/`nodeId`/`parent` are honored). Returns matching documents with content, metadata, and score. |
 
 ### Write
 
 | Tool              | Description                                                                                                                                                                             |
 | ----------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `pinecone.upsert` | Add or update documents. Each document requires `content` and an `object_id` (used for deduplication). Accepts optional `metadata`, or a pre-computed `embedding` plus `embedding_model` pair to skip automatic embedding computation. |
+| `pinecone.upsert` | Add or update documents. Each document requires `content` and an `object_id` (used for deduplication). Accepts optional `metadata` (keys `nodeId`/`parent`/`chunkId` are stored; defaults `"vectordb_tool"`, `"/"`, `0`), or a pre-computed `embedding` plus `embedding_model` pair to skip automatic embedding computation. |
 
 ### Delete
 

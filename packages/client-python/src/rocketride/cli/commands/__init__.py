@@ -21,35 +21,34 @@
 # SOFTWARE.
 
 """
-CLI Command Implementations.
+CLI command implementations.
 
-This module exports all available CLI command classes for the RocketRide command-line interface.
-Each command provides a specific operation for interacting with RocketRide pipelines and services.
+Each module exposes async ``run_*`` entry points dispatched from
+``cli.main``; all of them route their output through the shared
+``Output`` channel so human and ``--json`` modes behave identically.
 
-Available Commands:
-    StartCommand: Start and run a pipeline from configuration
-    UploadCommand: Upload files for pipeline processing
-    StatusCommand: Query pipeline status and execution metrics
-    StopCommand: Terminate running pipeline tasks
-    EventsCommand: Monitor real-time pipeline events
-    ListCommand: List all active tasks
-    StoreCommand: Project and template storage operations
+Modules:
+    auth: ``login`` and ``init``
+    tasks: ``start``, ``stop``, ``upload``, ``list``
+    store: ``store`` subcommands
+    app: ``app`` subcommands
+    deploy: ``deploy`` subcommands
 """
 
-from .start import StartCommand
-from .upload import UploadCommand
-from .status import StatusCommand
-from .stop import StopCommand
-from .events import EventsCommand
-from .list import ListCommand
-from .store import StoreCommand
+from .app import run_app
+from .auth import run_init, run_login
+from .deploy import run_deploy
+from .store import run_store
+from .tasks import run_list, run_start, run_stop, run_upload
 
 __all__ = [
-    'StartCommand',
-    'UploadCommand',
-    'StatusCommand',
-    'StopCommand',
-    'EventsCommand',
-    'ListCommand',
-    'StoreCommand',
+    'run_app',
+    'run_deploy',
+    'run_init',
+    'run_list',
+    'run_login',
+    'run_start',
+    'run_stop',
+    'run_store',
+    'run_upload',
 ]

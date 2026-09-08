@@ -327,6 +327,30 @@ class ExecutionMixin(DAPClient):
         # Send termination request
         await self.call('terminate', token=token)
 
+    async def get_tasks(self) -> List[Dict[str, Any]]:
+        """
+        List the caller's active tasks.
+
+        Returns the tasks visible to the authenticated user (running and
+        recently completed pipeline executions), as reported by the server.
+
+        Returns:
+            List of task descriptor dictionaries. Each row includes the
+            task token plus display fields such as name, state, and
+            timing; the exact field set is server-defined.
+
+        Raises:
+            RuntimeError: If the server signals failure.
+
+        Example:
+            tasks = await client.get_tasks()
+            for task in tasks:
+                print(task.get('token'), task.get('name'))
+        """
+        # Fetch the task list and unwrap the rows
+        body = await self.call('rrext_get_tasks')
+        return body.get('tasks', [])
+
     async def restart(
         self,
         *,

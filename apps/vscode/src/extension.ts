@@ -58,6 +58,7 @@ import { syncServiceCatalog } from './agents/services';
 import { CloudAuthProvider } from './auth/CloudAuthProvider';
 import { AppScreenProvider } from './providers/AppScreenProvider';
 import { initWatchManager } from './appdev/watchManager';
+import { ensureShell, refreshVendoredPlatform } from './appdev/appTypes';
 import { debugApp } from './appdev/debug';
 
 // Extension context — set once in activate(), available via getExtensionContext()
@@ -399,14 +400,23 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 				}
 
 				//-------------------------------------
-				// Auto-install agent documentation (non-blocking)
+				// Auto-install agent documentation (non-blocking). Docs come
+				// from the connected server (/client/docs); with no
+				// connection yet, existing workspace docs are kept and the
+				// sync re-runs on shell:connected.
 				//-------------------------------------
 				const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
 				if (workspaceFolder) {
 					const agentMgr = new AgentManager();
-					agentMgr.autoInstall(context.extensionPath, workspaceFolder.uri).catch((error) => {
+					agentMgr.autoInstall(workspaceFolder.uri).catch((error) => {
 						logger.output(`${icons.warning} Auto agent integration failed: ${error}`);
 					});
+
+					// Vendor the platform packages (shell + client SDK tgzs)
+					// into .rocketride/ at BOOT — offline fallbacks included —
+					// so agents and scripts always find them at the well-known
+					// locations without waiting for an App Builder open.
+					void ensureShell(context);
 				}
 
 				//-------------------------------------
@@ -485,7 +495,12 @@ function registerUtilityCommands(context: vscode.ExtensionContext): void {
 			}
 		}),
 		vscode.commands.registerCommand('rocketride.sidebar.connection.disconnect', async () => {
-			await connectionManager?.disconnect();
+			try {
+				await connectionManager?.disconnect();
+			} catch (error) {
+				const msg = error instanceof Error ? error.message : String(error);
+				vscode.window.showErrorMessage(`RocketRide: failed to disconnect: ${msg}`);
+			}
 		}),
 		vscode.commands.registerCommand('rocketride.sidebar.connection.reconnect', async () => {
 			try {
@@ -517,7 +532,7 @@ function registerUtilityCommands(context: vscode.ExtensionContext): void {
 				return;
 			}
 			try {
-				await agentManager.installAll(context.extensionPath, workspaceFolder.uri);
+				await agentManager.installAll(workspaceFolder.uri);
 				vscode.window.showInformationMessage('RocketRide agent documentation installed successfully.');
 			} catch (err) {
 				vscode.window.showErrorMessage(`Failed to install agent documentation: ${err}`);
@@ -591,11 +606,24 @@ function registerUtilityCommands(context: vscode.ExtensionContext): void {
 
 		vscode.commands.registerCommand('rocketride.cloud.logout', async () => {
 			const cloudAuth = CloudAuthProvider.getInstance();
-			await cloudAuth.signOut();
+			try {
+				await cloudAuth.signOut();
+			} catch (error) {
+				// Naming the step matters here: the credential may still be
+				// stored, so the user has to know the session did NOT end.
+				const msg = error instanceof Error ? error.message : String(error);
+				vscode.window.showErrorMessage(`RocketRide: failed to sign out of the cloud: ${msg}`);
+				return;
+			}
 			// A direct sign-out applies immediately — take the live cloud
 			// connection down with the credential so no surface keeps showing
 			// a connected session that storage no longer backs.
-			await disconnectCloudConnections();
+			try {
+				await disconnectCloudConnections();
+			} catch (error) {
+				const msg = error instanceof Error ? error.message : String(error);
+				vscode.window.showErrorMessage(`RocketRide: signed out, but the cloud connection did not close: ${msg}`);
+			}
 		}),
 
 		// Stub commands — run/stop/open are handled via webview messages now,
@@ -615,6 +643,25 @@ function registerUtilityCommands(context: vscode.ExtensionContext): void {
  */
 function setupConnectionEventHandlers(): void {
 	// Pipeline data changes are now handled by SidebarProvider's event listeners
+
+	// Re-vendor the platform packages against the freshly connected server
+	// — the boot pass may have used the offline fallbacks (or a previous
+	// server's packages), and the session memo would otherwise keep them.
+	connectionManager?.on('shell:connected', () => {
+		const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+		if (!workspaceFolder || !extensionContext) return;
+		void refreshVendoredPlatform(extensionContext);
+
+		// Sync agent docs + stubs against the freshly connected server —
+		// the boot pass may have run before any connection existed (docs
+		// come from GET /client/docs, never from the vsix). Hash-stamped,
+		// so an unchanged bundle is a no-op.
+		const agentMgr = new AgentManager();
+		agentMgr.autoInstall(workspaceFolder.uri).catch((error) => {
+			const logger = getLogger();
+			logger.output(`${icons.warning} Agent docs sync on connect failed: ${error}`);
+		});
+	});
 
 	// Sync service catalog + schemas to .rocketride/ when services are fetched
 	connectionManager?.on('shell:servicesUpdated', (payload: { services: Record<string, unknown>; servicesError?: string }) => {

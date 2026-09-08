@@ -506,6 +506,11 @@ class IInstance(IInstanceBase):
 
     # -- lane handlers -------------------------------------------------
 
+    def _media_abort_all(self) -> None:
+        """Release every stream still in flight, whatever it has written so far."""
+        for kind in list(getattr(self, '_media_streams', None) or {}):
+            self._media_abort(kind)
+
     def open(self, object: Entry):
         """Per-object reset: stale media streams are dropped.
 
@@ -513,8 +518,16 @@ class IInstance(IInstanceBase):
         otherwise keep its write handle and half-written file alive, and the
         next object's chunks would land in it.
         """
-        for kind in list(getattr(self, '_media_streams', None) or {}):
-            self._media_abort(kind)
+        self._media_abort_all()
+
+    def closing(self):
+        """Last chance to drop a stream: no further object will open to sweep it.
+
+        Without this a run whose final object is cut off leaves its partial file in the
+        store for good — a truncated file under ``unique``/``skip``, an orphaned
+        ``.part-*`` under ``overwrite``.
+        """
+        self._media_abort_all()
 
     def writeDocuments(self, documents):
         """Documents lane: ``page_content`` is parsed text, so it always stores .txt.
@@ -609,6 +622,24 @@ class IInstance(IInstanceBase):
             )
             return path
 
+    def _media_commit(self, st: dict) -> None:
+        """Finish a completed stream: close it, swap it in if staged, emit its reference.
+
+        Args:
+            st: The stream state; must carry an open ``handle``.
+        """
+        try:
+            _run_on_stream_loop(self.IGlobal.file_store.close_write(st['handle']))
+            if st['write_path'] != st['path']:
+                # Staged: the destination is replaced only now, and only by a whole file.
+                _run_on_stream_loop(self.IGlobal.file_store.rename(st['write_path'], st['path'], overwrite=True))
+        except Exception:
+            # A failed commit leaves an incomplete file: remove it before
+            # propagating, so downstream never sees a truncated object.
+            self._discard_partial(st)
+            raise
+        self._sink_emit([self._sink_ref(st['path'], st['mime'])])
+
     def _discard_partial(self, st: dict) -> None:
         """Remove what a half-written stream produced.
 
@@ -668,6 +699,9 @@ class IInstance(IInstanceBase):
             streams = self._media_streams = {}
 
         if aviAction == AVI_ACTION.BEGIN:
+            # A stream still open here is one the engine declined to settle: cut off, or
+            # carrying no declared size to check against. Releasing it is this node's job —
+            # only it knows about the open handle and the .part-* sibling.
             self._media_abort(kind)
             # BEGIN carries the stream descriptor, which is the only place the stream's
             # own name appears; keep it for _stream_filename.
@@ -704,19 +738,10 @@ class IInstance(IInstanceBase):
                 raise
         elif aviAction == AVI_ACTION.END:
             st = streams.pop(kind, None)
+            # An empty stream never opened a handle, so there is nothing to commit.
             if st is None or st['handle'] is None:
                 return
-            try:
-                _run_on_stream_loop(self.IGlobal.file_store.close_write(st['handle']))
-                if st['write_path'] != st['path']:
-                    # Staged: the destination is replaced only now, and only by a whole file.
-                    _run_on_stream_loop(self.IGlobal.file_store.rename(st['write_path'], st['path'], overwrite=True))
-            except Exception:
-                # A failed commit leaves an incomplete file: remove it before
-                # propagating, so downstream never sees a truncated object.
-                self._discard_partial(st)
-                raise
-            self._sink_emit([self._sink_ref(st['path'], st['mime'])])
+            self._media_commit(st)
 
     def writeImage(self, aviAction, mimeType: str, buffer: bytes):
         """Image lane: stream to store, emit a reference on END."""

@@ -21,35 +21,24 @@
 # SOFTWARE.
 
 """
-Command Line Interface for RocketRide Client.
+Command Line Interface for the RocketRide client.
 
-This package provides a comprehensive CLI for interacting with RocketRide services
-from the command line. The CLI offers commands for pipeline execution, file uploads,
-status monitoring, and event tracking with rich terminal UI.
+Plain, line-oriented CLI kept in exact command parity with the
+TypeScript client's ``rocketride`` executable. Every command also
+accepts ``--json`` / ``--json=<file>`` for a machine-readable result.
 
 Commands:
-    start: Start and execute RocketRide pipelines
-    upload: Upload files to running pipelines
-    status: Monitor pipeline execution status
-    stop: Terminate running pipelines
-    events: Stream real-time events from pipelines
-
-The CLI provides a user-friendly terminal interface with:
-    - Progress bars for uploads
-    - Real-time status updates
-    - Color-coded output
-    - Interactive monitoring
-    - Error reporting with context
-
-Usage:
-    # From command line
-    rocketride start --pipeline my_pipeline.json --apikey YOUR_KEY
-    rocketride upload --files *.pdf --token PIPELINE_TOKEN
-    rocketride status --token PIPELINE_TOKEN
+    init: Initialize a workspace (login + provisioning)
+    login: (Re-)authenticate and save .env credentials
+    list / start / stop / upload: Task lifecycle
+    store dir/type/write/rm/mkdir/stat: File store operations
+    app create/deploy/verify: App lifecycle
+    deploy add/list/get/versions/history/publish/run/artifact/
+        enable/disable/remove/log/schedule: Deploy lifecycle
 
 For detailed help:
     rocketride --help
-    rocketride start --help
+    rocketride <command> --help
 """
 
 from .main import main
