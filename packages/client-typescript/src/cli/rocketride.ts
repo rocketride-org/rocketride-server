@@ -55,6 +55,7 @@ import { loadDotEnv } from './env';
 import { registerAuthCommands } from './commands/auth';
 import { registerTaskCommands } from './commands/tasks';
 import { registerStoreCommands } from './commands/store';
+import { registerValidateCommands } from './commands/validate';
 import { registerAppCommands } from './commands/app';
 import { registerDeployCommands } from './commands/deploy';
 import { disconnectAll } from './common';
@@ -102,6 +103,7 @@ function createProgram(): Command {
 	program.name('rocketride').description('RocketRide Unified Pipeline and File Management CLI').version('1.3.0');
 	registerAuthCommands(program);
 	registerTaskCommands(program);
+	registerValidateCommands(program);
 	registerStoreCommands(program);
 	registerAppCommands(program);
 	registerDeployCommands(program);

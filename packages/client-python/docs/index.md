@@ -774,14 +774,17 @@ asyncio.run(main())
 The `rocketride` command is installed automatically with the package.
 
 ```bash
+rocketride validate ./pipelines/*.pipe       # Validate .pipe files without running them
 rocketride start pipeline.json              # Start a pipeline
 rocketride upload *.pdf --token <token>      # Upload files to a running pipeline
 rocketride status --token <token>            # Monitor task progress
 rocketride stop --token <token>              # Terminate a running task
 rocketride list                              # List all active tasks
 rocketride events ALL --token <token>        # Stream task events
-rocketride rrext_store get_all_projects      # List stored projects
+rocketride store dir /                       # List the root of the file store
 ```
+
+The `store` command's sub-commands are `dir`, `type`, `write`, `rm`, `mkdir`, and `stat` — run `rocketride store --help` for details.
 
 All commands accept `--uri` and `--apikey` flags, or read from environment variables.
 

@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import json
 import hashlib
+import re
 import time
 from typing import Any, Dict, List, Tuple
 
@@ -69,6 +70,10 @@ _WRITE_VERBS = frozenset(
     }
 )
 
+#: Identifiers safe to interpolate into a generated information_schema query.
+#: Mirrors the client's path-segment rule: no quotes, so no way out of a literal.
+_SAFE_IDENTIFIER = re.compile(r'^[A-Za-z0-9_][A-Za-z0-9_$-]{0,127}$')
+
 #: Poll interval bounds while waiting on an async query run, seconds.
 _POLL_BASE_S = 0.5
 _POLL_MAX_S = 5.0
@@ -89,6 +94,11 @@ _LOAD_MODES = frozenset({'append', 'replace', 'upsert', 'update', 'delete'})
 #: told to "delete the bad rows" simply routes around the SQL guard via replace.
 _DESTRUCTIVE_MODES = frozenset({'replace', 'update', 'delete'})
 _KEYED_MODES = frozenset({'upsert', 'update', 'delete'})
+
+#: How many times to re-read the table's columns and re-project a refused append.
+#: More than one because a concurrent producer can widen the table between the
+#: read and the retry; bounded because each attempt costs an upload.
+_WIDEN_ATTEMPTS = 3
 
 #: Index types. bm25 is full text, vector is semantic, sorted speeds range scans.
 _INDEX_TYPES = frozenset({'bm25', 'vector', 'sorted'})
@@ -184,6 +194,121 @@ def _to_ndjson(rows: List[Any]) -> bytes:
     return ('\n'.join(lines) + '\n').encode('utf-8')
 
 
+def _is_missing_column(error: Exception) -> bool:
+    """Is this the server refusing a write that omits a column the table has?
+
+    Matched on the message because the code is a generic ``BAD_REQUEST``; the
+    status is checked too so an unrelated 500 mentioning columns cannot trigger a
+    silent second write.
+    """
+    if getattr(error, 'status_code', None) != 400:
+        return False
+    return 'missing column' in str(error).lower()
+
+
+def _is_type_conflict(error: Exception) -> bool:
+    """Is this the server refusing to re-type an existing column?
+
+    Raised when a column is null in every row of a batch: nothing is there to
+    infer from, the loader calls it text, and the column already holds numbers.
+    """
+    if getattr(error, 'status_code', None) != 409:
+        return False
+    return "can't change type" in str(error).lower()
+
+
+def _json_from_text(text: str) -> Any:
+    """Best-effort JSON out of model prose.
+
+    Agents emit their final answer as free text, so JSON that is meant to become
+    a row routinely arrives inside a ``` fence, or with a sentence in front of it.
+
+    Yields every candidate value it can decode, in preference order: the whole
+    string, the contents of the first fence, then each balanced value found
+    scanning left to right. The caller keeps the first that actually yields rows,
+    because the first decodable value is often not the row - "Scores: [1, 2, 3].
+    Row: {"id": 1}" decodes the scores first and the row is what was wanted.
+    """
+    seen: List[Any] = []
+
+    def offer(value: Any) -> None:
+        seen.append(value)
+
+    stripped = text.strip()
+    if stripped:
+        try:
+            offer(json.loads(stripped))
+        except (ValueError, TypeError):
+            pass
+
+    fence = text.find('```')
+    if fence != -1:
+        body = text[fence + 3 :]
+        # Skip the language tag on the opening fence ("```json"). Only when the
+        # first line looks like a bare tag - a line that starts the JSON itself
+        # must not be eaten.
+        newline = body.find('\n')
+        if newline != -1:
+            first_line = body[:newline].strip()
+            if first_line and ' ' not in first_line and first_line[0] not in '{[':
+                body = body[newline + 1 :]
+        close = body.find('```')
+        candidate = (body if close == -1 else body[:close]).strip()
+        if candidate:
+            try:
+                offer(json.loads(candidate))
+            except (ValueError, TypeError):
+                pass
+
+    decoder = json.JSONDecoder()
+    for index, char in enumerate(text):
+        if char in '{[':
+            try:
+                value, _end = decoder.raw_decode(text[index:])
+            except ValueError:
+                continue
+            offer(value)
+    return seen
+
+
+#: The one reserved envelope key unwrapped into N rows. Deliberately just this
+#: one: ``items``, ``data`` and ``results`` are all plausible business column
+#: names, and unwrapping ``{"items": [{...}, {...}]}`` would turn one legitimate
+#: record with a nested list into several rows and drop the column. Guessing
+#: wrong in that direction loses data silently, while guessing wrong the other
+#: way produces one row with a visible nested value.
+_ROW_WRAPPER_KEY = 'rows'
+
+
+def _rows_from_payload(payload: Any) -> List[Dict[str, Any]]:
+    """Normalize a decoded answer into the rows to load, or [] if it holds none.
+
+    A bare object is one row. A list of objects is many. An object whose only key
+    is the reserved ``rows`` envelope, holding a list of objects, is that list -
+    models produce that shape constantly, and loading it as a single row would
+    flatten every record into one unusable cell. No other key is unwrapped: see
+    ``_ROW_WRAPPER_KEY``.
+
+    A list holding anything that is not an object is rejected rather than
+    filtered: dropping the bad entries would load a subset and report success.
+    """
+    if isinstance(payload, dict):
+        if len(payload) == 1:
+            key, only = next(iter(payload.items()))
+            if str(key).lower() == _ROW_WRAPPER_KEY and isinstance(only, list):
+                if all(isinstance(item, dict) for item in only):
+                    return only
+                raise ValueError(f'db_hotdata: "{key}" must hold objects, not scalars or lists')
+        return [payload] if payload else []
+    if isinstance(payload, list):
+        if not payload:
+            return []
+        if not all(isinstance(item, dict) for item in payload):
+            raise ValueError('db_hotdata: every row must be an object; the list contains something else')
+        return payload
+    return []
+
+
 def _cell(value: Any) -> str:
     """Render one table cell: pipes and newlines both break the row otherwise."""
     return str(value).replace('|', '\\|').replace('\r\n', ' ').replace('\n', ' ').replace('\r', ' ')
@@ -237,16 +362,30 @@ class IInstance(IInstanceBase):
         if not database_id:
             raise RuntimeError('db_hotdata: database was created without an id')
 
+        # Deliberately no "table not found -> clear the load cache" recovery here.
+        # Agents fan out tool calls, so a query can race a load that is still in
+        # flight and see the table missing for a moment. Clearing the cache on
+        # that signal would let the agent's follow-up load run a second time and
+        # duplicate every row, which is precisely what the cache prevents. The
+        # fingerprint is scoped to the database id, so a genuinely new database
+        # already gets a fresh load without this.
         response = glb.client.query(
             sql=sql,
             database_id=database_id,
             async_after_ms=glb.async_after_ms,
         )
 
+        # result_id names the WHOLE server-side result, while `rows` is only the
+        # first `limit` of it. Surfacing the id next to a truncated window would
+        # let an agent read 10 rows, pass the id to load_data and materialise
+        # 25,000 - so the id is only offered when the caller has seen all of it.
         run_id = response.get('query_run_id') or response.get('id')
         if response.get('rows') is not None and not response.get('truncated'):
             rows = response.get('rows') or []
-            return {'rows': rows[:limit], 'row_count': len(rows[:limit]), 'sql': sql}
+            result = {'rows': rows[:limit], 'row_count': len(rows[:limit]), 'sql': sql}
+            if response.get('result_id') and len(rows) <= limit:
+                result['result_id'] = response['result_id']
+            return result
 
         if run_id and response.get('result_id') is None:
             response = self._await_run(run_id)
@@ -255,10 +394,68 @@ class IInstance(IInstanceBase):
         if result_id:
             payload = glb.client.get_result(result_id, offset=0, limit=limit)
             rows = payload.get('rows') or payload.get('data') or []
-            return {'rows': rows[:limit], 'row_count': len(rows[:limit]), 'sql': sql}
+            result = {'rows': rows[:limit], 'row_count': len(rows[:limit]), 'sql': sql}
+            # get_result is explicitly a window; a full page back means there may
+            # be more behind it, and the id would then name more than was seen.
+            if len(rows) < limit:
+                result['result_id'] = result_id
+            return result
 
         rows = response.get('rows') or []
         return {'rows': rows[:limit], 'row_count': len(rows[:limit]), 'sql': sql}
+
+    def _schema_via_sql(self) -> List[Dict[str, Any]]:
+        """Read and reshape information_schema rows when no connection id is available."""
+        sql = """SELECT table_schema, table_name, column_name, data_type
+FROM information_schema.columns
+WHERE table_schema NOT IN ('information_schema')
+ORDER BY table_schema, table_name, ordinal_position"""
+        rows = self._run_sql(sql, self.IGlobal.max_execute_rows).get('rows') or []
+        grouped: Dict[Tuple[Any, Any], Dict[str, Any]] = {}
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            key = (row.get('table_schema'), row.get('table_name'))
+            table = grouped.setdefault(
+                key,
+                {'schema': key[0], 'table': key[1], 'columns': []},
+            )
+            table['columns'].append({'name': row.get('column_name'), 'data_type': row.get('data_type')})
+        return list(grouped.values())
+
+    def _table_columns(self, schema: str, table: str) -> List[str]:
+        """Live column names for one table, in ordinal order, or [] if unknown.
+
+        Read over SQL rather than the REST introspection endpoint so it works on
+        an attached database too, where no connection id is available.
+
+        The names are interpolated into the query, so they are re-validated here
+        rather than trusted: they reach this point from agent-supplied tool input,
+        and the client's own path-segment check is a different code path.
+        """
+        if not (_SAFE_IDENTIFIER.match(table) and _SAFE_IDENTIFIER.match(schema)):
+            return []
+        try:
+            sql = (
+                'SELECT column_name FROM information_schema.columns '
+                f"WHERE table_name = '{table}' AND table_schema = '{schema}' "
+                'ORDER BY ordinal_position'
+            )
+            rows = self._run_sql(sql, self.IGlobal.max_execute_rows).get('rows') or []
+        except Exception as e:  # noqa: BLE001
+            warning(f'db_hotdata: could not read the columns of {schema}.{table}: {e}')
+            return []
+        names: List[str] = []
+        for row in rows:
+            if isinstance(row, dict):
+                value = row.get('column_name')
+            elif isinstance(row, (list, tuple)) and row:
+                value = row[0]
+            else:
+                continue
+            if value:
+                names.append(str(value))
+        return names
 
     def _await_run(self, run_id: str) -> Dict[str, Any]:
         """Poll a query run to a terminal state under a monotonic deadline."""
@@ -310,19 +507,24 @@ class IInstance(IInstanceBase):
         database = glb.get_database()
         database_id = database.get('id')
         connection_id = database.get('default_connection_id')
-        if not connection_id:
-            raise RuntimeError('db_hotdata: database has no default_connection_id; cannot read the schema')
 
         schema = str(args.get('schema') or '').strip()
         table = str(args.get('table') or '').strip()
 
-        payload = glb.client.information_schema(
-            connection_id=connection_id,
-            schema=schema,
-            table=table,
-            include_columns=True,
-        )
-        tables = payload.get('tables') or payload.get('data') or []
+        if connection_id:
+            payload = glb.client.information_schema(
+                connection_id=connection_id,
+                schema=schema,
+                table=table,
+                include_columns=True,
+            )
+            tables = payload.get('tables') or payload.get('data') or []
+        else:
+            tables = self._schema_via_sql()
+            if schema:
+                tables = [item for item in tables if item.get('schema') == schema]
+            if table:
+                tables = [item for item in tables if item.get('table') == table]
         # Small models reliably miscount columns when made to walk the nested
         # JSON (observed: a 4-column table reported as "note and product").
         # A flat one-line-per-table rendering removes the parsing step.
@@ -342,6 +544,10 @@ class IInstance(IInstanceBase):
             'properties': {
                 'rows': {'type': 'array', 'description': 'Result rows.'},
                 'row_count': {'type': 'integer', 'description': 'Number of rows returned.'},
+                'result_id': {
+                    'type': 'string',
+                    'description': 'Query result ID accepted by load_data.',
+                },
             },
         },
         description=(
@@ -351,7 +557,9 @@ class IInstance(IInstanceBase):
             'and all DDL are rejected. Exactly one statement per call, no semicolon-separated batches. '
             'Unquoted identifiers fold to lowercase, so double-quote any name with uppercase or spaces. '
             'JSON operators and pg_catalog functions do not exist here. '
-            'Use get_schema first if you are unsure of column names.'
+            'Use get_schema first if you are unsure of column names. '
+            'The returned result_id can be passed to load_data to materialise these rows into a table '
+            'without re-uploading them.'
         ),
     )
     def execute(self, args: Any) -> Dict[str, Any]:
@@ -423,15 +631,18 @@ class IInstance(IInstanceBase):
         Note this does NOT generate INSERT statements the way the SQL database
         nodes do - Hotdata rejects INSERT and CREATE TABLE outright. Rows are
         serialized, uploaded, and loaded through the REST load API instead.
-        """
-        items = answer.getJson()
-        if not items:
-            debug('db_hotdata: no items to load')
-            return
-        if isinstance(items, dict):
-            items = [items]
 
+        This lane is how a pipeline publishes *structurally*: wiring an agent's
+        answers here writes the row because the graph says so. Telling the agent
+        to call ``load_data`` on a shared database instead is a coin flip -
+        measured at roughly one in four across two model families, the agent
+        reasons correctly, reports the right answer and never makes the call.
+        """
         try:
+            items = self._rows_from_answer(answer)
+            if not items:
+                debug('db_hotdata: no items to load')
+                return
             self.load_data({'table': self.IGlobal.table, 'rows': items, 'mode': 'append'})
         except Exception as e:
             # Re-raise rather than only logging. The answers lane has no output
@@ -440,6 +651,55 @@ class IInstance(IInstanceBase):
             # client already retries transient failures before we get here.
             error(f'db_hotdata: error in writeAnswers: {e}')
             raise
+
+    def _rows_from_answer(self, answer: Answer) -> List[Dict[str, Any]]:
+        """Rows to load from whatever an upstream node put on the lane.
+
+        ``Answer.getJson`` is a bare ``json.loads``, and it raises rather than
+        returning None when the text is not JSON. Upstream agents write their
+        final answer as free text, so a fenced or prose-prefixed object is the
+        common case, not the exception - failing it would make structural
+        publishing no more reliable than asking the agent to call load_data.
+        Anything that genuinely carries no rows raises with the text quoted, so
+        the pipeline author can see what actually arrived rather than an
+        unexplained empty table.
+        """
+        try:
+            payload = answer.getJson()
+        except (ValueError, TypeError):
+            payload = None
+
+        if payload is not None:
+            rows = _rows_from_payload(payload)
+            if not rows and payload not in (None, [], {}, ''):
+                raise ValueError(
+                    f'db_hotdata: the answers lane needs an object or a list of objects, got {type(payload).__name__}'
+                )
+            return rows
+
+        text = str(answer.getText() if hasattr(answer, 'getText') else '')
+        if not text.strip():
+            return []
+
+        # Keep the first candidate that actually yields rows. The first decodable
+        # value in the text is often not the row: "Scores: [1, 2, 3]. Row: {...}"
+        # decodes the scores first, and taking that would discard the answer.
+        last_error: Exception | None = None
+        for candidate in _json_from_text(text):
+            try:
+                rows = _rows_from_payload(candidate)
+            except ValueError as e:
+                last_error = e
+                continue
+            if rows:
+                return rows
+        if last_error is not None:
+            raise last_error
+        raise ValueError(
+            'db_hotdata: the answers lane loads rows and needs JSON - an object, or a list of '
+            f'objects - but got text: {text[:200]!r}. Instruct the upstream node to reply '
+            'with only the row(s) as JSON.'
+        )
 
     def _emitError(self, message: str, lanes) -> None:
         """Emit a failure to the wired lanes, structurally distinguishable from prose."""
@@ -463,11 +723,15 @@ class IInstance(IInstanceBase):
         """
         try:
             database = self.IGlobal.get_database()
-            payload = self.IGlobal.client.information_schema(
-                connection_id=database.get('default_connection_id'),
-                include_columns=True,
-            )
-            tables = payload.get('tables') or payload.get('data') or []
+            connection_id = database.get('default_connection_id')
+            if connection_id:
+                payload = self.IGlobal.client.information_schema(
+                    connection_id=connection_id,
+                    include_columns=True,
+                )
+                tables = payload.get('tables') or payload.get('data') or []
+            else:
+                tables = self._schema_via_sql()
             return format_schema_for_prompt(tables)
         except Exception as e:
             warning(f'db_hotdata: could not read schema for the prompt: {e}')
@@ -608,13 +872,19 @@ class IInstance(IInstanceBase):
                 'rows': {'type': 'array', 'description': 'Result rows.'},
                 'sql': {'type': 'string', 'description': 'The SQL that produced them.'},
                 'row_count': {'type': 'integer', 'description': 'Number of rows returned.'},
+                'result_id': {
+                    'type': 'string',
+                    'description': 'Query result ID accepted by load_data.',
+                },
             },
         },
         description=(
             "Answer a plain-language question about the data in this run's Hotdata database. "
             'The connected LLM writes the SQL, it runs, and the rows come back. '
             'Load data with load_data first - a fresh database is empty. '
-            'If a generated query fails it is retried with the error fed back in.'
+            'If a generated query fails it is retried with the error fed back in. '
+            'The returned result_id can be passed to load_data to materialise these rows into a table '
+            'without re-uploading them.'
         ),
     )
     def get_data(self, args: Any) -> Dict[str, Any]:
@@ -722,10 +992,13 @@ class IInstance(IInstanceBase):
                 key=key or None,
             )
         except Exception as e:
-            # 409 means the table is already declared, which is success here.
-            # Branch on the status rather than the message: a load failure whose
-            # body happened to mention 'exists' would otherwise be swallowed.
-            if getattr(e, 'status_code', None) == 409:
+            # 409 CONFLICT means the table is already declared, which is success
+            # here. Branch on the API's error code, not the bare status: 409 also
+            # carries RESOURCE_LOCKED, which means a concurrent creator held the
+            # lock for the whole retry budget. Treating that as "already exists"
+            # would send us on to load into a table that may not be there, and
+            # report a confusing "table not found" instead of the real contention.
+            if getattr(e, 'status_code', None) == 409 and getattr(e, 'error_code', '') != 'RESOURCE_LOCKED':
                 return
             raise
 
@@ -759,7 +1032,8 @@ class IInstance(IInstanceBase):
             'INSERT does not work. Use mode=append to add, replace to overwrite, or upsert with key columns. '
             'Do not call this twice for the same data: append adds rows again rather than replacing them. '
             'An identical append repeated within one run is skipped and returns deduplicated=true. '
-            'Data lives only for this pipeline run.'
+            'In the default ephemeral mode the data lives only for this pipeline run; when the node '
+            'is attached to an existing database the data outlives the run.'
         ),
     )
     def load_data(self, args: Any) -> Dict[str, Any]:
@@ -802,9 +1076,37 @@ class IInstance(IInstanceBase):
 
         upload_id = ''
         data_format = ''
-        # Bound on every path: the failure handler below releases it, and the
-        # result_id path never sets one.
+        # Bound on every path: the failure handler below releases it.
         fingerprint = None
+        if result_id and mode == 'append':
+            # The same reasoning as the rows path below. Appending a query result
+            # is no more idempotent than appending rows, and this path is now
+            # advertised to agents on execute and get_data ("the returned
+            # result_id can be passed to load_data"), so a routine retry would
+            # double the rows with nothing to stop it. The result id names a fixed
+            # server-side result, which makes it the natural fingerprint.
+            fingerprint = hashlib.sha256(
+                f'{database_id}|{schema}.{table}|result:{result_id}'.encode('utf-8')
+            ).hexdigest()
+            prior = glb.seen_load(fingerprint)
+            if prior is not None:
+                out = {'table': table, 'schema': schema, 'mode': mode, 'result_id': result_id}
+                if prior == 'pending':
+                    out['in_progress'] = True
+                    out['note'] = (
+                        'A load of this same query result into this table is already running in this '
+                        'pipeline. It was NOT sent again, because append is not idempotent. Query the '
+                        'table to confirm what landed.'
+                    )
+                    warning(f'db_hotdata: identical result load into {schema}.{table} is already in flight')
+                    return out
+                out['deduplicated'] = True
+                out['note'] = (
+                    'This query result was already appended to this table during this run, so it was '
+                    'not loaded again. The table already contains these rows.'
+                )
+                warning(f'db_hotdata: identical result load into {schema}.{table} already ran; skipping')
+                return out
         if not result_id:
             if not rows:
                 return {'table': table, 'row_count': 0, 'schema': schema}
@@ -820,7 +1122,10 @@ class IInstance(IInstanceBase):
             # appends within a single pipeline run and say so in the result
             # rather than duplicating business data.
             if mode == 'append':
-                fingerprint = hashlib.sha256(f'{schema}.{table}|'.encode('utf-8') + payload).hexdigest()
+                # Scoped to the database: a payload loaded into a previous database
+                # says nothing about this one, and skipping the load would leave the
+                # table missing entirely.
+                fingerprint = hashlib.sha256(f'{database_id}|{schema}.{table}|'.encode('utf-8') + payload).hexdigest()
                 prior = glb.seen_load(fingerprint)
                 if prior is not None:
                     out = {'table': table, 'schema': schema, 'mode': mode}
@@ -869,18 +1174,101 @@ class IInstance(IInstanceBase):
         # fails, release it: otherwise the agent's retry is skipped as a
         # duplicate and the rows are silently never loaded.
         try:
-            result = self._perform_load(
-                glb,
-                database_id=database_id,
-                schema=schema,
-                table=table,
-                mode=mode,
-                upload_id=upload_id,
-                result_id=result_id,
-                data_format=data_format,
-                key=key,
-                rows=rows,
-            )
+            try:
+                result = self._perform_load(
+                    glb,
+                    database_id=database_id,
+                    schema=schema,
+                    table=table,
+                    mode=mode,
+                    upload_id=upload_id,
+                    result_id=result_id,
+                    data_format=data_format,
+                    key=key,
+                    rows=rows,
+                )
+            except Exception as e:
+                # Append only. Filling a column with null is additive for an
+                # append and destructive for anything else: an upsert of
+                # {"id": 7, "note": "x"} widened to {"id": 7, "balance": null,
+                # "note": "x"} would wipe the stored balance. Those modes have to
+                # fail and let the caller send a complete row.
+                if not (upload_id and mode == 'append' and _is_missing_column(e)):
+                    raise
+                # Hotdata requires every write to carry the table's full column
+                # set: a column left out of an append would be dropped from the
+                # table, so it refuses rather than destroying it. Rows written by
+                # different producers into one table therefore diverge in shape
+                # and fail from the second producer on - which is exactly the
+                # shared-evidence and telemetry pattern. Project onto the live
+                # schema, filling the absent columns with null, and load again.
+                # Done on failure rather than always so a well-shaped load pays
+                # nothing for it.
+                #
+                # Safe to replay: the check is against the schema of the whole
+                # uploaded file, not per record, and it runs before any of it is
+                # ingested. Verified live - a 3-record upload whose third record
+                # omits a column SUCCEEDS (the column is present in the batch),
+                # and a load the server does refuse this way leaves the table's
+                # row count unchanged. So there is no partial-commit state for
+                # the retry to duplicate.
+                # Re-read and re-project in a bounded loop rather than once. The
+                # shape that makes this necessary is concurrent: another producer
+                # can add a column between our schema read and our retry, so the
+                # widened payload is stale on arrival and refused for a different
+                # missing column. One attempt would surface that as a failure the
+                # caller cannot act on.
+                result = None
+                for _attempt in range(_WIDEN_ATTEMPTS):
+                    columns = self._table_columns(schema, table)
+                    if not columns:
+                        raise
+                    projected = [{**{c: None for c in columns}, **row} for row in rows]
+                    if projected == rows:
+                        raise
+                    # For the message: columns the caller never supplied at all.
+                    missing = [c for c in columns if not any(c in row for row in rows)]
+                    debug(f'db_hotdata: widening {len(rows)} row(s) to the {len(columns)} columns of {schema}.{table}')
+                    # A fresh upload: the failed load has already consumed the old one.
+                    upload_id = glb.client.upload_bytes(
+                        _to_ndjson(projected),
+                        filename=f'{table}.ndjson',
+                        content_type='application/x-ndjson',
+                    )
+                    try:
+                        result = self._perform_load(
+                            glb,
+                            database_id=database_id,
+                            schema=schema,
+                            table=table,
+                            mode=mode,
+                            upload_id=upload_id,
+                            result_id=result_id,
+                            data_format=data_format,
+                            key=key,
+                            rows=projected,
+                        )
+                        break
+                    except Exception as widen_error:
+                        if _is_missing_column(widen_error) and _attempt < _WIDEN_ATTEMPTS - 1:
+                            # The table grew underneath us; read it again.
+                            continue
+                        if not _is_type_conflict(widen_error):
+                            raise
+                        # Filling a column with null works only while the column is
+                        # textual. A numeric or temporal column that is null in every
+                        # row of the batch is inferred as a string, and the server
+                        # refuses to change the column's type. There is no payload
+                        # that satisfies both rules, so say what the actual fix is
+                        # instead of surfacing a bare CONFLICT.
+                        raise ValueError(
+                            f'db_hotdata: rows of this shape cannot be appended to {schema}.{table}. '
+                            f'The table already has columns these rows do not set ({", ".join(missing)}), '
+                            'and filling them with null re-types them as text, which the server rejects. '
+                            'One table needs one row shape: give each kind of record its own table, or '
+                            'have every producer emit every column. '
+                            f'Server said: {widen_error}'
+                        ) from widen_error
             if fingerprint:
                 glb.record_load(fingerprint, 'partial' if result.get('partial') else 'complete')
             # A partial append deliberately KEEPS its reservation. Append is not
@@ -994,6 +1382,16 @@ class IInstance(IInstanceBase):
         database = glb.get_database()
         connection_id = database.get('default_connection_id')
         if not connection_id:
+            # Two different causes, and guessing at the wrong one sends the caller
+            # looking in the wrong place. Only an attached run is *expected* to
+            # lack the id; a database we created ourselves and still has none is
+            # an unexpected create response.
+            if glb.attached:
+                raise ValueError(
+                    "db_hotdata: index creation needs the database's connection id, which a Database "
+                    'API Token cannot read back for an attached database; build indexes in the run '
+                    'that created the database'
+                )
             raise RuntimeError('db_hotdata: database has no default_connection_id; cannot create an index')
         schema = str(args.get('schema') or '').strip() or database.get('default_schema') or 'main'
         index_name = str(args.get('index_name') or '').strip() or f'{table}_{column}_{index_type}'

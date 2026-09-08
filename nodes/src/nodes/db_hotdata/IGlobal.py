@@ -81,6 +81,8 @@ class IGlobal(IGlobalBase):
 
     apikey: str = ''
     workspace_id: str = ''
+    database_id: str = ''
+    attached: bool = False
     ttl: str = '24h'
     table: str = 'pipeline_data'
     db_description: str = ''
@@ -97,6 +99,8 @@ class IGlobal(IGlobalBase):
 
         self._db_lock = threading.Lock()
         self._loaded = {}
+        # A reopened global must not inherit the previous run's database handle.
+        self.database = None
 
         cfg = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
 
@@ -105,6 +109,10 @@ class IGlobal(IGlobalBase):
         self.workspace_id = (
             str(cfg.get('workspace_id') or '').strip() or os.environ.get('HOTDATA_WORKSPACE', '').strip()
         )
+        self.database_id = (
+            str(cfg.get('database_id') or '').strip() or os.environ.get('HOTDATA_DATABASE_ID', '').strip()
+        )
+        self.attached = False
 
         if not self.apikey:
             raise Exception('db_hotdata: apikey is required')
@@ -139,9 +147,18 @@ class IGlobal(IGlobalBase):
         if database is None:
             with self._db_lock:
                 if self.database is None:
-                    name = f'rocketride-{uuid.uuid4().hex[:12]}'
-                    self.database = self.client.create_database(name=name, expires_at=self.ttl)
-                    debug(f'db_hotdata: created database {self.database.get("id", "?")} (ttl {self.ttl})')
+                    if self.database_id:
+                        self.database = {
+                            'id': self.database_id,
+                            'default_schema': 'main',
+                            'attached': True,
+                        }
+                        self.attached = True
+                        debug(f'db_hotdata: attached to database {self.database_id}')
+                    else:
+                        name = f'rocketride-{uuid.uuid4().hex[:12]}'
+                        self.database = self.client.create_database(name=name, expires_at=self.ttl)
+                        debug(f'db_hotdata: created database {self.database.get("id", "?")} (ttl {self.ttl})')
                 database = self.database
         return database
 
@@ -186,6 +203,8 @@ class IGlobal(IGlobalBase):
         Expiry is best-effort but it does fire; dropping the stale handle lets
         the next get_database() create a fresh one instead of failing forever.
         """
+        if self.attached:
+            return
         with self._db_lock:
             if self.database is database:
                 self.database = None
@@ -208,16 +227,23 @@ class IGlobal(IGlobalBase):
     def endGlobal(self) -> None:
         if self.database is not None and self.client is not None:
             database_id = self.database.get('id')
-            try:
-                if database_id:
-                    self.client.delete_database(database_id)
-                    debug(f'db_hotdata: deleted database {database_id}')
-            except Exception as e:
-                # Teardown must never fail a pipeline. The TTL still bounds the
-                # cost, it just takes longer than an explicit delete.
-                warning(f'db_hotdata: database delete failed: {e}')
-            finally:
-                self.database = None
+            if self.attached:
+                debug(f'db_hotdata: attached database {database_id or "?"} left in place')
+            else:
+                try:
+                    if database_id:
+                        self.client.delete_database(database_id)
+                        debug(f'db_hotdata: deleted database {database_id}')
+                except Exception as e:
+                    # Teardown must never fail a pipeline. The TTL still bounds the
+                    # cost, it just takes longer than an explicit delete.
+                    warning(f'db_hotdata: database delete failed: {e}')
+        # Cleared on BOTH paths. Only the remote delete is conditional: keeping an
+        # attached handle past teardown would let a second beginGlobal on the same
+        # object - which resets `attached` to False - inherit a database it does
+        # not own and delete it at the next teardown.
+        self.database = None
+        self.attached = False
         self.client = None
         self.apikey = ''
         self.workspace_id = ''

@@ -68,6 +68,7 @@ You build your `.pipe` - and you run it against the fastest AI runtime available
 - **File upload** - `sendFiles()` with progress; streaming with `pipe()`
 - **Connection lifecycle** - Optional persist mode, reconnection, and callbacks (`onConnected`, `onDisconnected`, `onConnectError`)
 - **Full TypeScript support** - Complete type definitions
+- **CLI included** - Manage pipelines from the command line
 
 ---
 
@@ -475,6 +476,84 @@ const res = await client.request(req, 5000);
 if (client.didFail(res)) throw new Error(res.message);
 await client.disconnect();
 ```
+
+---
+
+## CLI
+
+The `rocketride` command is installed automatically with the package.
+
+```bash
+rocketride start --pipeline pipeline.pipe   # Start a pipeline
+rocketride upload *.pdf --token <token>     # Upload files to a running pipeline
+rocketride status --token <token>           # Monitor task progress
+rocketride stop --token <token>             # Terminate a running task
+rocketride validate examples/*.pipe         # Validate pipelines without running them
+rocketride store dir /                      # File store operations
+```
+
+All commands accept `--uri` and `--apikey` flags, or read from the `ROCKETRIDE_URI` and `ROCKETRIDE_APIKEY` environment variables.
+
+### validate
+
+Validates one or more `.pipe` files against the server without starting them. Glob patterns are expanded by the CLI itself, so wildcards work the same on shells that do not expand them (e.g. Windows). Files must contain a JSON object — either the pipeline config itself or the `{ "pipeline": { ... } }` wrapper that `.pipe` files use; a file that cannot be read or parsed is reported as invalid.
+
+```bash
+rocketride validate <files...> [--source <id>] [--json]
+```
+
+| Flag / argument | Description                                                                  |
+| --------------- | ---------------------------------------------------------------------------- |
+| `files...`      | One or more `.pipe` file paths or glob patterns (e.g. `examples/*.pipe`).    |
+| `--source <id>` | Override the source component ID used for validation.                        |
+| `--json`        | Print a machine-readable JSON report to stdout instead of human output.      |
+
+Exit codes make `validate` suitable for CI:
+
+| Code | Meaning                                                                                                                        |
+| ---- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `0`  | All files are valid.                                                                                                           |
+| `1`  | At least one file failed validation (a file that cannot be read or parsed counts as invalid when other files were validated).  |
+| `2`  | Usage error, connection failure, or no file could be processed at all — i.e. no file received a server validation verdict (e.g. every file was missing or not valid JSON). |
+
+**Example:**
+
+```bash
+rocketride validate examples/rag-pipeline.pipe
+```
+
+```text
+✓ examples/rag-pipeline.pipe: valid
+
+Summary: 1 file(s), 1 valid, 0 invalid
+```
+
+**Example - JSON output:**
+
+```bash
+rocketride validate examples/rag-pipeline.pipe --json
+```
+
+```json
+{
+  "files": [
+    {
+      "file": "examples/rag-pipeline.pipe",
+      "valid": true,
+      "errors": [],
+      "warnings": []
+    }
+  ],
+  "summary": {
+    "total": 1,
+    "valid": 1,
+    "invalid": 0
+  }
+}
+```
+
+To validate `.pipe` files automatically on every pull request, use the ready-made GitHub Action at [`.github/actions/validate-pipes`](https://github.com/rocketride-org/rocketride-server/tree/develop/.github/actions/validate-pipes).
+It starts an engine container and runs `rocketride validate` on your repository's pipeline files.
 
 ---
 
