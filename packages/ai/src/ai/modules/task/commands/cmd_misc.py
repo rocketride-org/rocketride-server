@@ -690,7 +690,10 @@ class MiscCommands(DAPConn):
         tasks = []
         for control in task_controls:
             try:
-                task_status = control.task.get_status()
+                # The CONTROL's status, folded across every replica behind the
+                # token: counters are per-engine and inputs round-robin, so
+                # the primary alone under-reports a replicated pipeline.
+                task_status = control.get_status()
                 start = getattr(task_status, 'startTime', 0) or 0
                 end = getattr(task_status, 'endTime', 0) or 0
                 completed = getattr(task_status, 'completed', False)
@@ -724,8 +727,13 @@ class MiscCommands(DAPConn):
                         'endTime': end if completed else None,
                         'connections': control.task.get_connection_count(),
                         'state': getattr(task_status, 'state', 0),
-                        'idleTime': getattr(control.task, '_idle_time', 0),
+                        # The busiest replica's idle time — the group is only
+                        # as idle as its most recently active engine, which
+                        # is also what the TTL monitor enforces on.
+                        'idleTime': control.idle_time,
                         'ttl': getattr(control.task, '_ttl', 0),
+                        # How many engines serve this token (1 = unreplicated).
+                        'replicas': control.replicas,
                         'metrics': metrics_dict,
                         'totalCount': getattr(task_status, 'totalCount', 0),
                         'completedCount': getattr(task_status, 'completedCount', 0),

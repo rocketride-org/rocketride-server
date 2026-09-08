@@ -228,7 +228,9 @@ async def test_send_updates_summary_with_running_control():
     status.model_dump = MagicMock(return_value=status_dict)
     task = MagicMock()
     task.get_status = MagicMock(return_value=status)
-    control = SimpleNamespace(id='task-1', task=task)
+    # Status reads go through the CONTROL now (it folds replicas); an
+    # unreplicated control just hands back its one engine's status.
+    control = SimpleNamespace(id='task-1', task=task, tasks=[task], get_status=task.get_status)
 
     conn = _make_conn()
     await MonitorCommands._send_updates(conn, control, EVENT_TYPE.NONE, EVENT_TYPE.SUMMARY)

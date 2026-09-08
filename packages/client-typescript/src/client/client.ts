@@ -1428,7 +1428,9 @@ export class RocketRideClient extends DAPClient {
 	 * @param options.filepath - Path to a `.pipe` or JSON file containing pipeline configuration (Node.js only)
 	 * @param options.pipeline - Flat PipelineConfig object (alternative to filepath)
 	 * @param options.source - Override pipeline source
-	 * @param options.threads - Number of threads for execution (default: 1)
+	 * @param options.threads - Admission width per connection (default: 64, server decides); does not parallelize inference — use `replicas`
+	 * @param options.replicas - Engine subprocesses (tasks) launched behind one token, for concurrent inference (default: 1, max: 32)
+	 * @param options.torchThreads - Per-replica BLAS/OMP thread count (default: auto = cores / replicas when replicas > 1, else unset)
 	 * @param options.useExisting - Use existing pipeline instance
 	 * @param options.args - Command line arguments to pass to pipeline
 	 * @param options.ttl - Time-to-live in seconds for idle pipelines (optional, server default if not provided; use 0 for no timeout)
@@ -1458,6 +1460,10 @@ export class RocketRideClient extends DAPClient {
 			pipeline?: PipelineConfig;
 			source?: string;
 			threads?: number;
+			/** Engine subprocesses (tasks) behind one token, for concurrent inference (default: 1, max: 32). */
+			replicas?: number;
+			/** Per-replica BLAS/OMP thread count (default: auto = cores / replicas). */
+			torchThreads?: number;
 			useExisting?: boolean;
 			args?: string[];
 			ttl?: number;
@@ -1469,7 +1475,7 @@ export class RocketRideClient extends DAPClient {
 			env?: Record<string, string>;
 		} = {}
 	): Promise<Record<string, unknown> & { token: string }> {
-		const { token, filepath, pipeline, source, threads, useExisting, args, ttl, pipelineTraceLevel, name, env } = options;
+		const { token, filepath, pipeline, source, threads, replicas, torchThreads, useExisting, args, ttl, pipelineTraceLevel, name, env } = options;
 
 		// Validate required parameters
 		if (!pipeline && !filepath) {
@@ -1520,6 +1526,12 @@ export class RocketRideClient extends DAPClient {
 		}
 		if (threads !== undefined) {
 			arguments_.threads = threads;
+		}
+		if (replicas !== undefined) {
+			arguments_.replicas = replicas;
+		}
+		if (torchThreads !== undefined) {
+			arguments_.torchThreads = torchThreads;
 		}
 		if (useExisting !== undefined) {
 			arguments_.useExisting = useExisting;

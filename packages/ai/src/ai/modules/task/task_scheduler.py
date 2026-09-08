@@ -302,7 +302,10 @@ class TaskScheduler:
         if token == _DISPATCHING:
             return True
         ctrl = self._server._task_control.get(token)
-        return bool(ctrl and not ctrl.task.is_task_complete())
+        # ANY live replica means the run is still going: the overlap guard
+        # must not fire a second run while some engines of the first are
+        # still processing.
+        return bool(ctrl and any(not task.is_task_complete() for task in ctrl.tasks))
 
     async def _start_run(self, entry: ScheduledRun) -> None:
         """Fire one (team, project, source) occurrence via trusted dispatch."""

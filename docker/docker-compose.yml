@@ -25,6 +25,11 @@ services:
       - MILVUS_PORT=19530
       - CHROMA_HOST=chroma
       - CHROMA_PORT=8000
+      # Server-wide throughput defaults, applied when a client's `use()` call
+      # omits `replicas` / `torchThreads`. See docs/README-throughput.md. Keep
+      # ROCKETRIDE_TASK_REPLICAS * ROCKETRIDE_TORCH_THREADS <= ENGINE_CPU_LIMIT.
+      # - ROCKETRIDE_TASK_REPLICAS=1
+      # - ROCKETRIDE_TORCH_THREADS=4
     depends_on:
       postgres:
         condition: service_healthy

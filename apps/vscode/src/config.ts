@@ -76,6 +76,12 @@ export interface ConfigManagerInfo {
 
 	/** Enable full debug output for pipeline tasks (--trace=debugOut via `.use` args). */
 	pipelineDebugOutput: boolean;
+
+	/** Default replica count (engine subprocesses behind one token) for runs without a per-pipeline override. 0 = server default. */
+	pipelineReplicas: number;
+
+	/** Default per-replica BLAS/OMP thread count; 0 = auto (server decides). */
+	pipelineTorchThreads: number;
 }
 
 /** Per-group settings sent from the Settings UI on save. */
@@ -142,6 +148,8 @@ export class ConfigManager {
 		pipelineTraceLevel: 'full',
 		taskArguments: '',
 		pipelineDebugOutput: false,
+		pipelineReplicas: 0,
+		pipelineTorchThreads: 0,
 	};
 
 	private constructor() {}
@@ -236,6 +244,8 @@ export class ConfigManager {
 			pipelineTraceLevel: config.get('pipelineTraceLevel', 'full'),
 			taskArguments: config.get('taskArguments', ''),
 			pipelineDebugOutput: config.get('pipelineDebugOutput', false),
+			pipelineReplicas: config.get('pipelineReplicas', 0),
+			pipelineTorchThreads: config.get('pipelineTorchThreads', 0),
 		};
 	}
 
@@ -272,6 +282,8 @@ export class ConfigManager {
 			pipelineTraceLevel: this.config.pipelineTraceLevel,
 			taskArguments: this.config.taskArguments,
 			pipelineDebugOutput: this.config.pipelineDebugOutput,
+			pipelineReplicas: this.config.pipelineReplicas,
+			pipelineTorchThreads: this.config.pipelineTorchThreads,
 		};
 	}
 

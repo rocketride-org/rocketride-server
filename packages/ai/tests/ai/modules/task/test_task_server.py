@@ -62,7 +62,7 @@ def _make_server(*, config=None, web_server=None):
     return ts
 
 
-def _make_control(*, token='tk_1', user_id='user-1', team_id='team-1', public_auth=None, task=None):
+def _make_control(*, token='tk_1', user_id='user-1', team_id='team-1', public_auth=None, task=None, replica_tasks=None):
     """
     Build a TASK_CONTROL-shaped stand-in carrying the attributes
     TaskServer.get_task_control / get_task / get_task_control_by_public_key
@@ -74,17 +74,29 @@ def _make_control(*, token='tk_1', user_id='user-1', team_id='team-1', public_au
         team_id: owning team id (used by permission resolution).
         public_auth: pk_-style public auth key, if any.
         task: the underlying Task stand-in (defaults to a MagicMock).
+        replica_tasks: additional engines behind the same token, if any.
 
     Returns:
         SimpleNamespace: control structure stand-in.
     """
+    primary = task or MagicMock()
+    replicas = list(replica_tasks or [])
     return SimpleNamespace(
         id='task-name',
         token=token,
         userId=user_id,
         teamId=team_id,
         public_auth=public_auth,
-        task=task or MagicMock(),
+        task=primary,
+        replica_tasks=replicas,
+        # The real TASK_CONTROL exposes this as a property; a namespace
+        # cannot, so the list is materialised here. Lifecycle code
+        # (cleanup / ttl / remove / stop) iterates it.
+        tasks=[primary, *replicas],
+        # Unreplicated by default here (no test using this stand-in exercises
+        # multi-replica lifecycle folding) — matches the real method's own
+        # single-engine short-circuit.
+        should_forward_event=lambda event: True,
     )
 
 
@@ -905,6 +917,8 @@ async def test_remove_task_calls_stop_and_broadcasts():
         # Monitor-key cleanup builds the owner-scoped key from the control.
         owner_id='u1',
         task=task,
+        replica_tasks=[],
+        tasks=[task],
         project_id='proj-1',
         source='src-1',
         apikey='ak_x',

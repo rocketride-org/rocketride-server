@@ -126,14 +126,29 @@ class DataCommands(DAPConn):
                       reach running state, or data processing operation fails
 
         Note:
+        - When the token runs several replicas, a request that OPENS a pipe
+          (or names none) is round-robined, and every later request naming
+          that pipe follows its id back to the engine that minted it — the
+          open/write/close sequence never straddles two engines. Pipe ids on
+          the wire are replica-qualified for exactly that reason; see
+          ``TASK_CONTROL.route_data_request`` and the codec in ``types.py``
+        - Events from all replicas broadcast under the one token, stamped
+          with `replica`
         - This method blocks until the target task is in running state
         - The actual data processing logic is implemented by the task instance
         - Error details are logged for debugging but original exceptions are re-raised
         - Response format is determined by the individual task's processing logic
         """
         try:
-            # Locate the target task instance using authentication and token
-            task = self.get_task(request, 'task.data')
+            # Locate the target ENGINE using authentication and token. This is
+            # the ingress that `replicas` exists for: a request that opens a
+            # pipe is round-robined across the running replicas, so N inputs
+            # to one token occupy N model copies instead of queueing behind
+            # one lock — while a request naming an existing pipe goes back to
+            # the engine that owns it. `outbound` is `request` itself unless a
+            # replica-qualified pipe id had to be rewritten to the engine's
+            # local one.
+            task, outbound = self.get_data_route(request, 'task.data')
 
             # Ensure the task is ready to process data (blocks until running)
             # This is critical as tasks may be in startup, initialization, or other states
@@ -141,7 +156,7 @@ class DataCommands(DAPConn):
 
             # Forward the data processing request to the task instance and get
             # the raw response from the subprocess.
-            subprocess_response = await task._send_data(request)
+            subprocess_response = await task._send_data(outbound)
 
             # Rebuild the response envelope keyed off the INBOUND request so the
             # inbound DAPConn can correlate it back to the originating chat client.
@@ -152,9 +167,20 @@ class DataCommands(DAPConn):
             # request so request_seq matches what the chat client sent.  Mirrors
             # the same pattern task_conn.request uses for the debug channel.
 
+            # Any pipe id LEAVING the server must be replica-qualified, or the
+            # client's next request cannot be routed back to the engine that
+            # minted it (and `open` on replica 0 and replica 1 both answer
+            # "1"). A no-op for an unreplicated task, so the single-engine
+            # response is byte-identical to before.
+            body = subprocess_response.get('body')
+            if isinstance(body, dict) and 'pipe_id' in body:
+                qualified = task.encode_pipe_id(body['pipe_id'])
+                if qualified != body['pipe_id']:
+                    body = {**body, 'pipe_id': qualified}
+
             return self.build_response(
                 request,
-                body=subprocess_response.get('body'),
+                body=body,
             )
 
         except Exception as e:

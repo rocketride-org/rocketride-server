@@ -449,7 +449,9 @@ Start a RocketRide pipeline for processing data. Automatically performs environm
 - `filepath` (str, optional): Path to a `.pipe` or JSON file containing pipeline configuration.
 - `token` (str, optional): Custom token for the pipeline (auto-generated if not provided)
 - `source` (str, optional): Override pipeline source
-- `threads` (int, optional): Number of threads for execution (default: None, the server decides)
+- `threads` (int, optional): Admission width per connection -- the engine's component thread pool / data-admission semaphore size (server default: 64). This is not inference parallelism; a single task still runs one inference at a time. Use `replicas` to run more inferences concurrently.
+- `replicas` (int, optional): Number of task replicas (engine subprocesses) to launch behind one token for this pipeline (default: 1, max 32). Inputs are round-robined across replicas; each replica is a full model copy. See [README-throughput.md](../README-throughput.md).
+- `torch_threads` (int, optional): Per-replica BLAS/OMP thread count, forwarded to the server as `torchThreads`. When unset and `replicas > 1`, the server defaults to `cores // replicas`; when unset and `replicas == 1`, nothing is injected.
 - `use_existing` (bool, optional): Use existing pipeline instance
 - `args` (List[str], optional): Command line arguments to pass to pipeline
 - `ttl` (int, optional): Time-to-live in seconds for idle pipelines (server default if not provided; use 0 for no timeout)

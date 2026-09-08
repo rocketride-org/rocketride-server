@@ -113,6 +113,7 @@ For information on writing and running node-level tests, see [README-node-testin
 
 - [Build System](../README-builder.md) -- declarative build system reference
 - [Engine Reference](../README-engine.md) -- C++ engine architecture, CLI options, task types
+- [Throughput](README-throughput.md) -- replicas, per-task thread tuning, and scaling inference
 - [Pipeline Nodes](../README-nodes.md) -- writing and extending pipeline nodes
 - [VS Code Extension](../README-vscode.md) -- extension development
 - [Pre-commit Hooks](../README-pre-commit-hooks.md) -- code quality automation

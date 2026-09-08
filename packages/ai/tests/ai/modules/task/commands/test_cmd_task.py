@@ -334,18 +334,20 @@ async def test_on_restart_authorizes_against_the_tasks_team():
 
 @pytest.mark.asyncio
 async def test_on_rrext_get_task_status_returns_task_status_dict():
-    """Retrieves task via get_task and returns its model_dump()."""
+    """Retrieves the task control (not just the primary replica) via
+    get_task_control and returns its merged status model_dump().
+    """
     status = MagicMock()
     status.model_dump = MagicMock(return_value={'name': 'task-1', 'state': 3})
 
-    task = MagicMock()
-    task.get_status.return_value = status
+    control = MagicMock()
+    control.get_status.return_value = status
 
     conn = _make_conn(account_info=_account_info())
-    conn.get_task = MagicMock(return_value=task)
+    conn.get_task_control = MagicMock(return_value=control)
 
     response = await TaskCommands.on_rrext_get_task_status(conn, {'arguments': {'token': 'tk_x'}})
-    conn.get_task.assert_called_once()
+    conn.get_task_control.assert_called_once()
     assert response == {'type': 'response', 'body': {'name': 'task-1', 'state': 3}}
 
 
@@ -411,6 +413,9 @@ async def test_on_rrext_get_tasks_filters_to_caller_and_running_only():
             source='src',
             pipeline={'name': 'my-pipeline', 'description': 'desc'},
             task=task,
+            tasks=[task],
+            # Status now comes from the CONTROL (it folds replicas).
+            get_status=task.get_status,
         )
 
     server = MagicMock()
@@ -453,6 +458,8 @@ async def test_on_rrext_get_tasks_falls_back_to_source_name():
         source='my-source',
         pipeline=None,
         task=task,
+        tasks=[task],
+        get_status=task.get_status,
     )
 
     server = MagicMock()
