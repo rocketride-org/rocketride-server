@@ -85,7 +85,7 @@ jobs:
             vcpkg_cmd: ./build/vcpkg/vcpkg
     steps:
       - name: Check out repository
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           ref: ${{ inputs.ref }}
           submodules: recursive
@@ -123,7 +123,7 @@ jobs:
 
       - name: Initialize CodeQL
         if: inputs.codeql && matrix.platform == 'ubuntu'
-        uses: github/codeql-action/init@c4dd10e44af883a891fe31ced449bcb4a6728b9b # v3
+        uses: github/codeql-action/init@6f5948dfacef28e207b48d0905cf90c03365536d # v3
         with:
           languages: cpp
           build-mode: manual
@@ -291,7 +291,7 @@ jobs:
 
       - name: Perform CodeQL Analysis
         if: inputs.codeql && matrix.platform == 'ubuntu'
-        uses: github/codeql-action/analyze@c4dd10e44af883a891fe31ced449bcb4a6728b9b # v3
+        uses: github/codeql-action/analyze@6f5948dfacef28e207b48d0905cf90c03365536d # v3
         with:
           category: /language:cpp
 
