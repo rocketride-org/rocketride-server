@@ -31,6 +31,10 @@
  * method. Kept in exact parity with the Python CLI's
  * `cli/commands/validate.py`.
  *
+ * The helpers are exported individually: they are the unit-tested seams
+ * (tests/validate.test.ts) and their contracts — message skeletons, report
+ * shape, exit codes — are shared with the Python CLI.
+ *
  * Exit codes (the `validate-pipes` GitHub Action depends on these):
  *   0: all files valid
  *   1: at least one file failed validation
@@ -44,101 +48,209 @@ import { Command } from 'commander';
 import { addConnectionOptions, connectClient, runCliCommand } from '../common';
 import { Output } from '../output';
 
-/** One file's validation outcome, as reported in the JSON payload. */
-interface FileValidationEntry {
+/** One file's validation outcome. `processed` = the server returned a verdict. */
+export interface FileValidationResult {
 	file: string;
 	valid: boolean;
 	errors: unknown[];
 	warnings: unknown[];
+	processed: boolean;
+}
+
+/** One file's load outcome: a parsed config, or the per-file error text. */
+export interface ValidateFileLoad {
+	file: string;
+	config?: Record<string, unknown>;
+	error?: string;
+}
+
+/** The machine-readable report emitted under `--json`. */
+export interface ValidateReport {
+	files: Array<Omit<FileValidationResult, 'processed'>>;
+	summary: { total: number; valid: number; invalid: number };
 }
 
 /**
  * Expand file arguments into a deduplicated, ordered list of paths.
  *
- * Literal paths are kept as-is; anything else is treated as a glob pattern.
- * Patterns that match nothing are kept verbatim so they can be reported as
- * unreadable files.
+ * Literal paths and patterns that match nothing are kept verbatim so they
+ * can be reported as unreadable files.
  *
  * @param patterns - File paths and/or glob patterns from the command line.
  * @returns Expanded file paths, deduplicated, preserving order.
  */
-function expandFiles(patterns: string[]): string[] {
-	const expanded: string[] = [];
+export function expandFilePatterns(patterns: string[]): string[] {
+	const files: string[] = [];
+
 	for (const pattern of patterns) {
-		if (fs.existsSync(pattern) && fs.statSync(pattern).isFile()) {
-			expanded.push(pattern);
-			continue;
-		}
-		// Not a literal file — try shell-style glob expansion
-		const matches = glob
-			.globSync(pattern)
-			.filter((p) => fs.existsSync(p) && fs.statSync(p).isFile())
-			.sort();
+		const matches = glob.sync(pattern, { nodir: true, windowsPathsNoEscape: process.platform === 'win32' }).sort();
 		if (matches.length > 0) {
-			expanded.push(...matches);
+			files.push(...matches);
 		} else {
-			// Keep the unmatched pattern so it is reported per-file below
-			expanded.push(pattern);
+			files.push(pattern);
 		}
 	}
-	// step: dedupe while preserving order
-	return [...new Set(expanded)];
+
+	return [...new Set(files)];
 }
 
 /**
  * Load and parse a pipeline configuration file as strict JSON.
  *
- * `.pipe` files may wrap the configuration in `{"pipeline": {...}}`; the
- * inner object is extracted when present. Error messages are kept identical
- * to the Python CLI's, since they land verbatim in the JSON report.
+ * Mirror of the Python CLI's loader: a path that is not an existing regular
+ * file is reported as not found, and `.pipe` files may wrap the config in
+ * `{"pipeline": {...}}` — the inner object is extracted when present. The
+ * message skeletons match across both CLIs; they land verbatim in reports.
  *
- * @param filePath - Path to the pipeline configuration file.
- * @returns The parsed pipeline configuration.
- * @throws Error when the file is missing, unreadable, or not a JSON object.
+ * @param file - Path to the pipeline configuration file.
+ * @returns The parsed config, or the per-file error text.
  */
-function loadPipeline(filePath: string): Record<string, unknown> {
-	if (!fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) {
-		throw new Error(`File not found: ${filePath}`);
+export function loadPipelineFile(file: string): ValidateFileLoad {
+	if (!fs.existsSync(file) || !fs.statSync(file).isFile()) {
+		return { file, error: `File not found: ${file}` };
 	}
+
 	let content: string;
 	try {
-		content = fs.readFileSync(filePath, 'utf-8');
-	} catch (err) {
-		throw new Error(`Cannot read ${filePath}: ${err instanceof Error ? err.message : err}`);
+		content = fs.readFileSync(file, 'utf-8');
+	} catch (error) {
+		return { file, error: `Cannot read ${file}: ${error instanceof Error ? error.message : error}` };
 	}
+
 	let parsed: unknown;
 	try {
 		parsed = JSON.parse(content);
-	} catch (err) {
-		throw new Error(`Invalid JSON in ${filePath}: ${err instanceof Error ? err.message : err}`);
+	} catch (error) {
+		return { file, error: `Invalid JSON in ${file}: ${error instanceof Error ? error.message : error}` };
 	}
-	if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
-		throw new Error(`Invalid pipeline format in ${filePath}: expected a JSON object`);
+
+	if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+		return { file, error: `Invalid pipeline format in ${file}: expected a JSON object` };
 	}
+
 	// .pipe files wrap the config in { "pipeline": { ... } } — unwrap if present
-	const inner = (parsed as Record<string, unknown>).pipeline;
-	return typeof inner === 'object' && inner !== null && !Array.isArray(inner) ? (inner as Record<string, unknown>) : (parsed as Record<string, unknown>);
+	const record = parsed as Record<string, unknown>;
+	const inner = record.pipeline;
+	const config = inner && typeof inner === 'object' && !Array.isArray(inner) ? (inner as Record<string, unknown>) : record;
+	return { file, config };
 }
 
 /**
- * Emit one file's verdict with its errors and warnings.
+ * Render one validation error/warning as a display line.
  *
- * @param entry - Per-file result.
- * @param out - The command's output channel.
+ * @param issue - A server-reported issue: string, `{ message, id? }`, or
+ *   anything else (stringified).
+ * @returns The formatted line, with the component id appended when present.
  */
-function entryLines(entry: FileValidationEntry, out: Output): void {
-	out.line(`${entry.file}: ${entry.valid ? 'valid' : 'invalid'}`);
-	for (const [kind, items] of [
-		['error', entry.errors],
-		['warning', entry.warnings],
-	] as const) {
-		for (const item of items) {
-			const record = typeof item === 'object' && item !== null ? (item as Record<string, unknown>) : undefined;
-			const message = record && 'message' in record ? String(record.message) : String(item);
-			const suffix = record && record.id ? ` (${record.id})` : '';
-			out.line(`    ${kind}: ${message}${suffix}`);
+export function formatValidationIssue(issue: unknown): string {
+	if (typeof issue === 'string') {
+		return issue;
+	}
+	if (issue && typeof issue === 'object') {
+		const record = issue as Record<string, unknown>;
+		const message = typeof record.message === 'string' ? record.message : JSON.stringify(issue);
+		return record.id ? `${message} (${record.id})` : message;
+	}
+	return String(issue);
+}
+
+/**
+ * Build the machine-readable report: per-file entries (without the internal
+ * `processed` flag) plus the aggregate summary.
+ *
+ * @param results - Per-file validation results.
+ * @returns The `--json` report payload.
+ */
+export function buildValidateReport(results: FileValidationResult[]): ValidateReport {
+	const validCount = results.filter((r) => r.valid).length;
+	return {
+		files: results.map((r) => ({ file: r.file, valid: r.valid, errors: r.errors, warnings: r.warnings })),
+		summary: { total: results.length, valid: validCount, invalid: results.length - validCount },
+	};
+}
+
+/**
+ * Compute the CI exit code from the aggregate results.
+ *
+ * @param results - Per-file validation results.
+ * @returns 0 all valid / 1 any invalid / 2 when no file was processed.
+ */
+export function validateExitCode(results: FileValidationResult[]): number {
+	if (results.length === 0 || !results.some((r) => r.processed)) {
+		return 2;
+	}
+	return results.every((r) => r.valid) ? 0 : 1;
+}
+
+/**
+ * The validate command's core: expand, load, connect, validate, report.
+ *
+ * Factored out of the commander action so tests can drive it directly with
+ * a mocked connectClient and a chosen Output mode.
+ *
+ * @param files - File paths and/or glob patterns to validate.
+ * @param options - Parsed commander options (uri, apikey, source, json).
+ * @param out - The command's output channel.
+ * @returns Exit code per the CI contract.
+ */
+export async function executeValidate(
+	files: string[],
+	options: { uri?: string; apikey?: string; source?: string; json?: boolean | string },
+	out: Output,
+): Promise<number> {
+	// step: expand globs and load every file up front; load failures are
+	// per-file errors
+	const loads = expandFilePatterns(files).map(loadPipelineFile);
+
+	// step: connect only if at least one file parsed. A connection failure is
+	// exit code 2 by contract, so it is handled HERE — the shared runner's
+	// catch-all would turn it into a 1.
+	let client;
+	if (loads.some((entry) => entry.config !== undefined)) {
+		try {
+			client = await connectClient(options);
+		} catch (err) {
+			console.error(`Error: Failed to connect to ${options.uri ?? 'server'}: ${err instanceof Error ? err.message : err}`);
+			return 2;
 		}
 	}
+
+	// step: validate each file in order, collecting per-file results
+	const results: FileValidationResult[] = [];
+	for (const entry of loads) {
+		if (entry.config === undefined) {
+			results.push({ file: entry.file, valid: false, errors: [{ message: entry.error }], warnings: [], processed: false });
+			continue;
+		}
+		try {
+			const result = await client!.validate({ pipeline: entry.config, source: options.source });
+			const errors = Array.isArray(result.errors) ? result.errors : [];
+			const warnings = Array.isArray(result.warnings) ? result.warnings : [];
+			results.push({ file: entry.file, valid: errors.length === 0, errors, warnings, processed: true });
+		} catch (err) {
+			// The server rejected the request for this file — reported
+			// per-file, but it does NOT count as processed.
+			results.push({ file: entry.file, valid: false, errors: [{ message: err instanceof Error ? err.message : String(err) }], warnings: [], processed: false });
+		}
+	}
+
+	// step: report (out.line is human-only; the JSON payload matches the
+	// Python CLI's shape exactly)
+	const report = buildValidateReport(results);
+	for (const entry of results) {
+		out.line(`${entry.file}: ${entry.valid ? 'valid' : 'invalid'}`);
+		for (const issue of entry.errors) {
+			out.line(`    error: ${formatValidationIssue(issue)}`);
+		}
+		for (const issue of entry.warnings) {
+			out.line(`    warning: ${formatValidationIssue(issue)}`);
+		}
+	}
+	out.line('');
+	out.line(`Summary: ${report.summary.total} file(s), ${report.summary.valid} valid, ${report.summary.invalid} invalid`);
+	out.result(report);
+
+	return validateExitCode(results);
 }
 
 /**
@@ -161,74 +273,7 @@ export function registerValidateCommands(program: Command): void {
 				'     (no file received a server validation verdict)',
 		)
 		.action(async (files: string[], options) => {
-			await runCliCommand(options, async (out) => {
-				// step: expand globs and literal paths into the working file list
-				const expanded = expandFiles(files);
-
-				// step: parse every file up front; parse failures are per-file errors
-				const pipelines = new Map<string, Record<string, unknown> | undefined>();
-				const parseErrors = new Map<string, string>();
-				for (const file of expanded) {
-					try {
-						pipelines.set(file, loadPipeline(file));
-					} catch (err) {
-						pipelines.set(file, undefined);
-						parseErrors.set(file, err instanceof Error ? err.message : String(err));
-					}
-				}
-
-				// step: connect only if at least one file parsed. A connection
-				// failure is exit code 2 by contract, so it is handled HERE —
-				// the shared runner's catch-all would turn it into a 1.
-				let client;
-				if ([...pipelines.values()].some((config) => config !== undefined)) {
-					try {
-						client = await connectClient(options);
-					} catch (err) {
-						console.error(`Error: Unable to connect to server: ${err instanceof Error ? err.message : err}`);
-						return 2;
-					}
-				}
-
-				// step: validate each file in order, collecting per-file results
-				const results: FileValidationEntry[] = [];
-				let processed = 0;
-				for (const file of expanded) {
-					const config = pipelines.get(file);
-					if (config === undefined) {
-						results.push({ file, valid: false, errors: [{ message: parseErrors.get(file) }], warnings: [] });
-						continue;
-					}
-					try {
-						const result = await client!.validate({ pipeline: config, source: options.source });
-						const errors = Array.isArray(result.errors) ? result.errors : [];
-						const warnings = Array.isArray(result.warnings) ? result.warnings : [];
-						results.push({ file, valid: errors.length === 0, errors, warnings });
-						processed += 1;
-					} catch (err) {
-						// The server rejected the request for this file — reported
-						// per-file, but it does NOT count as processed.
-						results.push({ file, valid: false, errors: [{ message: err instanceof Error ? err.message : String(err) }], warnings: [] });
-					}
-				}
-
-				// step: aggregate summary + report (out.line is human-only; the
-				// JSON payload matches the Python CLI's shape exactly)
-				const validCount = results.filter((entry) => entry.valid).length;
-				const summary = { total: results.length, valid: validCount, invalid: results.length - validCount };
-				for (const entry of results) {
-					entryLines(entry, out);
-				}
-				out.line('');
-				out.line(`Summary: ${summary.total} file(s), ${summary.valid} valid, ${summary.invalid} invalid`);
-				out.result({ files: results, summary });
-
-				// step: exit code per the CI contract
-				if (processed === 0) {
-					return 2;
-				}
-				return summary.invalid === 0 ? 0 : 1;
-			});
+			await runCliCommand(options, (out) => executeValidate(files, options, out));
 		});
 
 	// Usage errors (e.g. missing <files...>) must exit with code 2 — commander's

@@ -33,8 +33,10 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { describe, it, expect, beforeAll, afterAll, jest } from '@jest/globals';
-import { RocketRideCLI, expandFilePatterns, loadPipelineFile, buildValidateReport, validateExitCode, formatValidationIssue, FileValidationResult } from '../src/cli/rocketride';
+import { describe, it, expect, beforeAll, afterAll, afterEach, jest } from '@jest/globals';
+import { executeValidate, expandFilePatterns, loadPipelineFile, buildValidateReport, validateExitCode, formatValidationIssue, FileValidationResult } from '../src/cli/commands/validate';
+import * as common from '../src/cli/common';
+import { Output } from '../src/cli/output';
 
 const PIPELINE = {
 	project_id: 'test-project',
@@ -204,36 +206,25 @@ describe('formatValidationIssue', () => {
 	});
 });
 
-// ── cmdValidate wiring (mocked client) ───────────────────────────────────────
+// ── executeValidate wiring (mocked client) ──────────────────────────────────
 
 interface MockValidateResponse {
 	errors?: unknown[];
 	warnings?: unknown[];
 }
 
-// Instantiate without running the constructor: it registers process signal
-// handlers, which jest's sandboxed `process` module does not support.
-function bareCLI(): RocketRideCLI {
-	return Object.create(RocketRideCLI.prototype) as RocketRideCLI;
-}
+type ConnectedClient = Awaited<ReturnType<typeof common.connectClient>>;
 
-function makeCLI(args: Record<string, unknown>, validateImpl: (options: { pipeline: Record<string, unknown>; source?: string }) => Promise<MockValidateResponse>) {
-	const cli = bareCLI();
+// The command binds connectClient at call time through the module object, so
+// a spy on the common module intercepts it — the same seam the Python twin
+// patches (commands.validate.connect_client).
+function mockClient(validateImpl: (options: { pipeline: Record<string, unknown>; source?: string }) => Promise<MockValidateResponse>) {
 	const fakeClient = {
 		validate: jest.fn(validateImpl),
 		disconnect: jest.fn(async () => {}),
 	};
-
-	/* eslint-disable @typescript-eslint/no-explicit-any */
-	(cli as any).args = { command: 'validate', ...args };
-	(cli as any).uri = 'ws://localhost:5565';
-	(cli as any).createAndConnectClient = jest.fn(async () => {
-		(cli as any).client = fakeClient;
-		return fakeClient;
-	});
-	/* eslint-enable @typescript-eslint/no-explicit-any */
-
-	return { cli, fakeClient };
+	const connectSpy = jest.spyOn(common, 'connectClient').mockImplementation(async () => fakeClient as unknown as ConnectedClient);
+	return { fakeClient, connectSpy };
 }
 
 function captureConsole(): { logs: string[]; errors: string[]; restore: () => void } {
@@ -255,17 +246,28 @@ function captureConsole(): { logs: string[]; errors: string[]; restore: () => vo
 	};
 }
 
-describe('cmdValidate', () => {
+// Run in bare-json mode and flush, so the captured stdout is exactly the report.
+async function runJson(files: string[], options: Record<string, unknown>, output: ReturnType<typeof captureConsole>): Promise<number> {
+	const out = new Output(true);
+	try {
+		return await executeValidate(files, { ...options, json: true }, out);
+	} finally {
+		out.finish();
+		output.restore();
+	}
+}
+
+describe('executeValidate', () => {
+	afterEach(() => {
+		jest.restoreAllMocks();
+	});
+
 	it('returns 0 and prints the JSON report when all files are valid', async () => {
-		const { cli, fakeClient } = makeCLI({ files: [validFile], json: true }, async () => ({ errors: [], warnings: [] }));
+		const { fakeClient } = mockClient(async () => ({ errors: [], warnings: [] }));
 		const output = captureConsole();
 
-		try {
-			const exitCode = await cli.cmdValidate();
-			expect(exitCode).toBe(0);
-		} finally {
-			output.restore();
-		}
+		const exitCode = await runJson([validFile], {}, output);
+		expect(exitCode).toBe(0);
 
 		const report = JSON.parse(output.logs.join('\n'));
 		expect(report.summary).toEqual({ total: 1, valid: 1, invalid: 0 });
@@ -275,29 +277,21 @@ describe('cmdValidate', () => {
 	});
 
 	it('passes --source through to the client validate call', async () => {
-		const { cli, fakeClient } = makeCLI({ files: [validFile], json: true, source: 'chat_1' }, async () => ({ errors: [], warnings: [] }));
+		const { fakeClient } = mockClient(async () => ({ errors: [], warnings: [] }));
 		const output = captureConsole();
 
-		try {
-			const exitCode = await cli.cmdValidate();
-			expect(exitCode).toBe(0);
-		} finally {
-			output.restore();
-		}
+		const exitCode = await runJson([validFile], { source: 'chat_1' }, output);
+		expect(exitCode).toBe(0);
 
 		expect(fakeClient.validate).toHaveBeenCalledWith({ pipeline: PIPELINE, source: 'chat_1' });
 	});
 
 	it('returns 1 when the server reports validation errors', async () => {
-		const { cli } = makeCLI({ files: [validFile], json: true }, async () => ({ errors: [{ message: 'unknown provider', id: 'x_1' }], warnings: [] }));
+		mockClient(async () => ({ errors: [{ message: 'unknown provider', id: 'x_1' }], warnings: [] }));
 		const output = captureConsole();
 
-		try {
-			const exitCode = await cli.cmdValidate();
-			expect(exitCode).toBe(1);
-		} finally {
-			output.restore();
-		}
+		const exitCode = await runJson([validFile], {}, output);
+		expect(exitCode).toBe(1);
 
 		const report = JSON.parse(output.logs.join('\n'));
 		expect(report.summary).toEqual({ total: 1, valid: 0, invalid: 1 });
@@ -306,15 +300,11 @@ describe('cmdValidate', () => {
 	});
 
 	it('returns 1 when one file is unparseable but another validates', async () => {
-		const { cli, fakeClient } = makeCLI({ files: [badJsonFile, validFile], json: true }, async () => ({ errors: [], warnings: [] }));
+		const { fakeClient } = mockClient(async () => ({ errors: [], warnings: [] }));
 		const output = captureConsole();
 
-		try {
-			const exitCode = await cli.cmdValidate();
-			expect(exitCode).toBe(1);
-		} finally {
-			output.restore();
-		}
+		const exitCode = await runJson([badJsonFile, validFile], {}, output);
+		expect(exitCode).toBe(1);
 
 		const report = JSON.parse(output.logs.join('\n'));
 		expect(report.summary).toEqual({ total: 2, valid: 1, invalid: 1 });
@@ -323,55 +313,42 @@ describe('cmdValidate', () => {
 	});
 
 	it('returns 2 without connecting when no file can be parsed', async () => {
-		const { cli, fakeClient } = makeCLI({ files: [badJsonFile], json: true }, async () => ({ errors: [], warnings: [] }));
+		const { fakeClient, connectSpy } = mockClient(async () => ({ errors: [], warnings: [] }));
 		const output = captureConsole();
 
-		try {
-			const exitCode = await cli.cmdValidate();
-			expect(exitCode).toBe(2);
-		} finally {
-			output.restore();
-		}
+		const exitCode = await runJson([badJsonFile], {}, output);
+		expect(exitCode).toBe(2);
 
 		const report = JSON.parse(output.logs.join('\n'));
 		expect(report.summary).toEqual({ total: 1, valid: 0, invalid: 1 });
 		expect(fakeClient.validate).not.toHaveBeenCalled();
-		// eslint-disable-next-line @typescript-eslint/no-explicit-any
-		expect((cli as any).createAndConnectClient).not.toHaveBeenCalled();
+		expect(connectSpy).not.toHaveBeenCalled();
 	});
 
 	it('returns 2 on connection failure', async () => {
-		const cli = bareCLI();
-		// eslint-disable-next-line @typescript-eslint/no-explicit-any
-		(cli as any).args = { command: 'validate', files: [validFile], json: true };
-		// eslint-disable-next-line @typescript-eslint/no-explicit-any
-		(cli as any).uri = 'ws://localhost:5565';
-		// eslint-disable-next-line @typescript-eslint/no-explicit-any
-		(cli as any).createAndConnectClient = jest.fn(async () => {
+		jest.spyOn(common, 'connectClient').mockImplementation(async () => {
 			throw new Error('connection refused');
 		});
 		const output = captureConsole();
 
-		try {
-			const exitCode = await cli.cmdValidate();
-			expect(exitCode).toBe(2);
-		} finally {
-			output.restore();
-		}
+		const exitCode = await runJson([validFile], { uri: 'ws://localhost:5565' }, output);
+		expect(exitCode).toBe(2);
 
 		expect(output.errors.join('\n')).toContain('Failed to connect');
 	});
 
 	it('prints per-file lines and a summary in human-readable mode', async () => {
-		const { cli } = makeCLI({ files: [validFile, badJsonFile] }, async () => ({ errors: [], warnings: [{ message: 'heads up' }] }));
+		mockClient(async () => ({ errors: [], warnings: [{ message: 'heads up' }] }));
 		const output = captureConsole();
 
+		const out = new Output(undefined);
+		let exitCode = -1;
 		try {
-			const exitCode = await cli.cmdValidate();
-			expect(exitCode).toBe(1);
+			exitCode = await executeValidate([validFile, badJsonFile], {}, out);
 		} finally {
 			output.restore();
 		}
+		expect(exitCode).toBe(1);
 
 		const text = output.logs.join('\n');
 		expect(text).toContain(`${validFile}: valid`);
