@@ -1,0 +1,140 @@
+{
+	//
+	// Required:
+	//		The displayable name of this node
+	//
+	"title": "Azure Boards",
+	//
+	// Required:
+	//		The protocol is the endpoint protocol
+	//
+	"protocol": "azure_boards://",
+	//
+	// Required:
+	//		Class type of the node - what it does
+	//
+	"classType": ["source"],
+	//
+	// Required:
+	//		Capabilities are flags that change the behavior of the underlying
+	//		engine
+	//
+	"capabilities": ["noinclude"],
+	//
+	// Optional:
+	//		Register is either filter, endpoint or ignored if not specified. If the
+	//		type is specified, a factory is registered of that given type
+	//
+	"register": "endpoint",
+	//
+	// Optional:
+	//		The node is the actual physical node to instantiate - if
+	//		not specified, the protocol will be used
+	//
+	"node": "python",
+	//
+	// Optional:
+	//		The path is the executable/script code - it is node dependent
+	//		and is optional for most nodes
+	//
+	"path": "nodes.azure_boards",
+	//
+	// Required:
+	//		The prefix map when added/removed when converting URLs <=> paths
+	//
+	"prefix": "azure_boards",
+	//
+	// Optional:
+	//	Description to of this driver
+	//
+	"description": ["An Azure Boards source node that runs a WIQL query against an Azure DevOps project ", "and pulls the matching work items. Each work item is emitted as a document record with a ", "readable text summary (title, type, state, assignee, description) and its structured fields as metadata."],
+	//
+	// Optional:
+	//	  The icon is the icon to display in the UI for this node
+	//
+	"icon": "azure_boards.svg",
+	"documentation": "https://docs.rocketride.org",
+	//
+	// Optional:
+	//	 The tile is the displayable name of this node
+	//
+	"tile": ["Project: ${parameters.azure_boards.project}"],
+	//
+	//	Optional:
+	//		As a pipe component, define what this pipe component takes
+	//		and what it produces
+	//
+	"lanes": {
+		"_source": ["documents"]
+	},
+	//
+	//	Optional:
+	//		Profile section are configuration options used by the driver itself
+	//
+	"preconfig": {
+		"default": "default",
+		"profiles": {
+			"default": {}
+		}
+	},
+	//
+	// Optional:
+	//		Local field definitions - these define fields only for the
+	//		current service.
+	//
+	"fields": {
+		"azure_boards.organization": {
+			"type": "string",
+			"title": "Organization",
+			"description": "Your Azure DevOps organization name, e.g. https://dev.azure.com/<organization>",
+			"optional": false
+		},
+		"azure_boards.project": {
+			"type": "string",
+			"title": "Project",
+			"description": "The Azure DevOps project to query work items from",
+			"optional": false
+		},
+		"azure_boards.personalAccessToken": {
+			"type": "string",
+			"title": "Personal Access Token",
+			"description": "Azure DevOps PAT with Work Items (Read) scope, generated from your user settings",
+			"optional": false,
+			"secure": true,
+			"ui": {
+				"ui:widget": "ApiKeyWidget"
+			}
+		},
+		"azure_boards.wiql": {
+			"type": "string",
+			"title": "WIQL Query",
+			"description": "Work Item Query Language query selecting which work items to pull. Must select at least [System.Id].",
+			"default": "SELECT [System.Id] FROM WorkItems WHERE [System.TeamProject] = @project ORDER BY [System.ChangedDate] DESC",
+			"format": "textarea",
+			"optional": false
+		},
+		"azure_boards.maxRecords": {
+			"type": "number",
+			"title": "Max Records",
+			"description": "Hard cap on the total number of work items pulled in one run, regardless of how many the query matches.",
+			"default": 200,
+			"optional": true
+		},
+		"Pipe.source.parameters": {
+			"section": "parameters",
+			"title": "Azure Boards Configuration",
+			"properties": ["azure_boards.organization", "azure_boards.project", "azure_boards.personalAccessToken", "azure_boards.wiql", "azure_boards.maxRecords"]
+		}
+	},
+	//
+	// Required:
+	//		Defines the fields (shape) of the service.
+	//
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Azure Boards",
+			"properties": ["type", "Pipe.source.parameters"]
+		}
+	]
+}
