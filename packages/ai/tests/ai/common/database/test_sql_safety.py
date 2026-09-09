@@ -164,3 +164,160 @@ def test_into_inside_string_does_not_false_positive():
     # Plain SELECT with 'into' as data, not as a clause keyword.
     sql = "SELECT 'shipped into market' AS phrase"
     assert is_sql_safe(sql) is True
+
+
+# ---------------------------------------------------------------------------
+# SELECT ... INTO <table>
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    'sql',
+    [
+        'SELECT * INTO stolen_users FROM users',
+        'select id, email into exfil from users where 1=1',
+        'SELECT a INTO other_schema.copy FROM t',
+        'EXPLAIN SELECT * INTO copy FROM t',
+    ],
+)
+def test_select_into_table_is_blocked(sql):
+    """``SELECT ... INTO <table>`` creates a table on PostgreSQL and SQL Server.
+
+    Same family as the ``INTO OUTFILE`` guard above and the same class of
+    problem this check exists to catch — a statement whose shape writes,
+    despite the leading SELECT.
+    """
+    assert is_sql_safe(sql) is False
+
+
+@pytest.mark.parametrize(
+    'sql',
+    [
+        "SELECT 'shipped into market' AS phrase",
+        "SELECT 'into' AS w, 'outfile' AS x FROM t",
+        'SELECT into_count FROM t',
+        'SELECT point_into FROM t',
+        'SELECT "into" FROM t',
+        "SELECT id FROM t WHERE note = 'moved into storage'",
+    ],
+)
+def test_into_as_data_or_identifier_is_not_blocked(sql):
+    """The word must be a clause, not a value or part of a name.
+
+    String literals are blanked before the INTO checks run, so ordinary rows
+    that happen to contain the word stay queryable.
+    """
+    assert is_sql_safe(sql) is True
+
+
+def test_shape_check_does_not_claim_to_be_read_only():
+    """Statements with side effects still pass — by design, documented as such.
+
+    ``is_sql_safe`` is a shape check. These are all genuinely dangerous and
+    all shaped like reads; the read-only guarantee comes from
+    ``DatabaseGlobalBase.read_only_connection``, not from this function. The
+    test exists so nobody re-reads this gate as a security boundary.
+    """
+    side_effecting = [
+        'SELECT pg_terminate_backend(pid) FROM pg_stat_activity',
+        'SELECT pg_sleep(3600)',
+        'SELECT pg_read_file(:path)',
+        'SELECT nextval(:seq)',
+        'SELECT * FROM users FOR UPDATE',
+        'SELECT SLEEP(3600)',
+    ]
+    assert all(is_sql_safe(sql) for sql in side_effecting)
+
+
+# ---------------------------------------------------------------------------
+# Lexing: literals, quoted identifiers and comments in one pass
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    'sql',
+    [
+        "SELECT '--x' INTO OUTFILE '/tmp/export'",
+        "SELECT '--' INTO DUMPFILE '/tmp/export'",
+        "SELECT '/*' INTO OUTFILE '/tmp/export'",
+        "SELECT '#x' INTO OUTFILE '/tmp/export'",
+    ],
+)
+def test_comment_marker_inside_a_literal_cannot_hide_a_write(sql):
+    """A literal containing a comment marker must not swallow the clause after it.
+
+    Stripping comments before masking literals turned
+    ``SELECT '--x' INTO OUTFILE '/tmp/f'`` into ``SELECT '`` — an ordinary
+    read as far as the gate was concerned, taking a file-writing statement
+    straight through. Both are now masked in a single left-to-right pass.
+    """
+    assert is_sql_safe(sql) is False
+
+
+@pytest.mark.parametrize(
+    'sql',
+    [
+        'SELECT `into` FROM t',
+        'SELECT `into`, id FROM `orders`',
+        'SELECT `select` FROM `from`',
+    ],
+)
+def test_backtick_identifiers_are_not_read_as_clauses(sql):
+    """MySQL quotes identifiers with backticks; a column named `into` is valid SQL."""
+    assert is_sql_safe(sql) is True
+
+
+def test_semicolon_inside_a_literal_does_not_split_the_statement():
+    """Statement splitting runs on masked text, so data cannot fake a chain."""
+    assert is_sql_safe("SELECT 'a;DROP TABLE t' FROM x") is True
+
+
+def test_quote_inside_a_comment_does_not_open_a_literal():
+    """The reverse ordering bug: a comment's apostrophe must not eat later SQL."""
+    assert is_sql_safe("SELECT 1 -- it's fine\n") is True
+
+
+def test_backslash_is_not_treated_as_an_escape():
+    """A backslash must not hide a clause, even though MySQL escapes with it.
+
+    MySQL treats a backslash-quote pair as an escaped quote; PostgreSQL, under
+    the default ``standard_conforming_strings``, does not. Honouring the escape
+    would mask the ``INTO OUTFILE`` that follows and let a PostgreSQL write
+    through. Ignoring it can only end a literal early and expose more text to
+    the checks — a false rejection at worst, never a bypass.
+    """
+    backslash = chr(92)
+    sql = "SELECT 'it" + backslash + "' INTO OUTFILE '/tmp/f'"
+
+    # Guard the fixture itself: an earlier version of this test lost its
+    # backslash to escaping and passed without exercising anything.
+    assert backslash in sql
+
+    assert is_sql_safe(sql) is False
+
+
+@pytest.mark.parametrize(
+    'terminator',
+    [chr(10), chr(13), chr(13) + chr(10)],
+)
+def test_line_comment_ends_at_cr_as_well_as_lf(terminator):
+    """A lone CR ends a line comment for the server, so it must end one here.
+
+    Masking through a CR hides whatever follows it on the same physical line.
+    ``SELECT 1 -- x<CR>; DROP TABLE t`` then looks like a bare SELECT while the
+    server sees a chained DROP.
+    """
+    sql = 'SELECT 1 -- x' + terminator + '; DROP TABLE t'
+
+    assert is_sql_safe(sql) is False
+
+
+@pytest.mark.parametrize(
+    'terminator',
+    [chr(10), chr(13), chr(13) + chr(10)],
+)
+def test_comment_still_hides_its_own_content_up_to_any_terminator(terminator):
+    """Ending at CR must not stop comments from doing their job."""
+    sql = '-- DROP TABLE t' + terminator + 'SELECT 1'
+
+    assert is_sql_safe(sql) is True

@@ -535,3 +535,202 @@ def test_testable_global_satisfies_abc_contract():
     """The two abstract methods are implemented in the test subclass."""
     # If the ABC wasn't satisfied, instantiating would raise TypeError.
     _TestableGlobal.__new__(_TestableGlobal)
+
+
+# ---------------------------------------------------------------------------
+# read_only_connection
+# ---------------------------------------------------------------------------
+
+
+class _RecordingConnection:
+    """Stands in for a SQLAlchemy Connection, recording what was run on it."""
+
+    def __init__(self, fail_rollback: bool = False) -> None:
+        self.driver_sql: list[str] = []
+        self.rolled_back = False
+        self.closed = False
+        self.committed = False
+        self._fail_rollback = fail_rollback
+
+    def exec_driver_sql(self, statement):
+        self.driver_sql.append(statement)
+
+    def rollback(self):
+        if self._fail_rollback:
+            raise RuntimeError('rollback exploded')
+        self.rolled_back = True
+
+    def commit(self):  # pragma: no cover - must never be reached
+        self.committed = True
+
+    def close(self):
+        self.closed = True
+
+
+def _global_with_dialect(dialect: str, conn: _RecordingConnection, timeout: int = 30):
+    instance = _TestableGlobal.__new__(_TestableGlobal)
+    instance.query_timeout = timeout
+    instance.engine = SimpleNamespace(
+        dialect=SimpleNamespace(name=dialect),
+        connect=lambda: conn,
+    )
+    return instance
+
+
+@pytest.mark.parametrize(
+    'dialect, expected_fragments',
+    [
+        ('postgresql', ['BEGIN READ ONLY', 'statement_timeout', 'idle_in_transaction_session_timeout']),
+        ('mysql', ['max_execution_time', 'START TRANSACTION READ ONLY']),
+        # MariaDB's own knob, in seconds — the MySQL spelling is an unknown
+        # variable there and would fail the connection outright.
+        ('mariadb', ['max_statement_time', 'START TRANSACTION READ ONLY']),
+        ('clickhouse', ['readonly = 1', 'max_execution_time']),
+    ],
+)
+def test_read_only_connection_opens_a_read_only_transaction(dialect, expected_fragments):
+    """Each supported dialect gets a server-side read-only transaction plus a timeout.
+
+    This is where the actual guarantee lives: ``is_sql_safe`` checks statement
+    shape and cannot tell whether a SELECT has side effects, so the database
+    is asked to refuse writes itself.
+    """
+    conn = _RecordingConnection()
+    with _global_with_dialect(dialect, conn).read_only_connection() as yielded:
+        assert yielded is conn
+
+    issued = ' | '.join(conn.driver_sql)
+    for fragment in expected_fragments:
+        assert fragment in issued, f'{dialect}: missing {fragment!r} in {issued!r}'
+
+
+def test_read_only_connection_carries_the_configured_timeout():
+    """The configured budget reaches the server, in the units it expects."""
+    conn = _RecordingConnection()
+    with _global_with_dialect('postgresql', conn, timeout=45).read_only_connection():
+        pass
+
+    assert 'SET LOCAL statement_timeout = 45000' in conn.driver_sql
+
+
+def test_read_only_connection_never_commits_and_always_closes():
+    """A read path rolls back and closes, on the success path too."""
+    conn = _RecordingConnection()
+    with _global_with_dialect('postgresql', conn).read_only_connection():
+        pass
+
+    assert conn.rolled_back is True
+    assert conn.closed is True
+    assert conn.committed is False
+
+
+def test_read_only_connection_closes_when_the_body_raises():
+    """An exploding query still rolls back and releases the connection."""
+    conn = _RecordingConnection()
+    with pytest.raises(ValueError):
+        with _global_with_dialect('postgresql', conn).read_only_connection():
+            raise ValueError('query blew up')
+
+    assert conn.rolled_back is True
+    assert conn.closed is True
+
+
+def test_read_only_connection_closes_even_if_rollback_fails():
+    """A failed rollback must not leak the connection."""
+    conn = _RecordingConnection(fail_rollback=True)
+    with _global_with_dialect('postgresql', conn).read_only_connection():
+        pass
+
+    assert conn.closed is True
+
+
+def test_unknown_dialect_yields_a_plain_connection():
+    """An unrecognised backend runs as before rather than failing closed.
+
+    This is defence in depth behind ``is_sql_safe``; refusing to run on a
+    dialect we do not have statements for would break working deployments
+    for a guarantee they never had.
+    """
+    conn = _RecordingConnection()
+    with _global_with_dialect('firebird', conn).read_only_connection() as yielded:
+        assert yielded is conn
+
+    assert conn.driver_sql == []
+    assert conn.closed is True
+
+
+def test_read_only_connection_requires_an_engine():
+    """No engine is a programming error, not a silent no-op."""
+    instance = _TestableGlobal.__new__(_TestableGlobal)
+    instance.engine = None
+    instance.query_timeout = 30
+
+    with pytest.raises(RuntimeError, match='not initialized'):
+        with instance.read_only_connection():
+            pass  # pragma: no cover
+
+
+def test_execute_sql_query_runs_inside_the_read_only_connection():
+    """The generated-query path takes its guarantee from the database.
+
+    Regression test for the read path using a plain ``engine.connect()``:
+    the statement has only passed a shape check by that point, so it must run
+    inside the read-only transaction rather than an ordinary one.
+    """
+    from contextlib import contextmanager
+
+    used = {'read_only': False, 'plain_connect': False}
+
+    class _Result:
+        def fetchall(self):
+            return [(1, 'a')]
+
+        def keys(self):
+            return ['id', 'name']
+
+    class _Conn:
+        def execute(self, _clause):
+            return _Result()
+
+    class _Global:
+        @contextmanager
+        def read_only_connection(self):
+            used['read_only'] = True
+            yield _Conn()
+
+        class engine:  # noqa: N801 - stands in for the SQLAlchemy Engine
+            @staticmethod
+            def connect():
+                used['plain_connect'] = True
+                raise AssertionError('read path must not open a plain connection')
+
+    inst = _sql_instance(_Global())
+    rows = inst._executeSQLQuery('SELECT id, name FROM t')
+
+    assert rows == [{'id': 1, 'name': 'a'}]
+    assert used['read_only'] is True
+    assert used['plain_connect'] is False
+
+
+def test_mariadb_uses_its_own_timeout_variable_in_seconds():
+    """MariaDB has no max_execution_time; its knob is max_statement_time, in seconds.
+
+    Sending the MySQL spelling raises "unknown system variable" and takes the
+    connection down, so every query on a MariaDB deployment would fail.
+    """
+    conn = _RecordingConnection()
+    with _global_with_dialect('mariadb', conn, timeout=45).read_only_connection():
+        pass
+
+    issued = ' | '.join(conn.driver_sql)
+    assert 'SET SESSION max_statement_time = 45' in issued
+    assert 'max_execution_time' not in issued
+
+
+def test_mysql_keeps_milliseconds():
+    """MySQL's max_execution_time is milliseconds — the two must not be swapped."""
+    conn = _RecordingConnection()
+    with _global_with_dialect('mysql', conn, timeout=45).read_only_connection():
+        pass
+
+    assert 'SET SESSION max_execution_time = 45000' in conn.driver_sql

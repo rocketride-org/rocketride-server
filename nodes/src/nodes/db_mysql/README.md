@@ -8,7 +8,7 @@ The node operates in two roles. As a pipeline node, it receives natural-language
 
 Connects via SQLAlchemy with the pymysql driver (`mysql+pymysql://` DSN; user, password, and database name are URL-encoded so reserved characters don't break the connection string). The connection pool allows up to 30 concurrent connections (`pool_size=10`, `max_overflow=20`). The full database schema (tables, columns, types, primary keys, and foreign keys) is reflected once at startup and supplied to the LLM as context for every query.
 
-Only `SELECT` statements are permitted for queries; all generated SQL passes a whitelist safety check before execution. Inserts go through the `answers` lane, not through SQL. Saving the node config probes the server with `SELECT 1` (5-second connect timeout) and surfaces the driver error verbatim if the connection fails.
+Generated queries run inside a server-side read-only transaction with a statement timeout, and only `SELECT`-shaped statements pass the whitelist safety check before execution. Inserts go through the `answers` lane, not through SQL. Saving the node config probes the server with `SELECT 1` (5-second connect timeout) and surfaces the driver error verbatim if the connection fails.
 
 ---
 
@@ -92,6 +92,11 @@ Generated SQL goes through two gates before execution:
 2. **`EXPLAIN` validation**: the query is validated by running `EXPLAIN` against the live database without executing it. If `EXPLAIN` rejects the query, the rejected SQL and the database error are fed back to the LLM for a corrected attempt. This repeats up to `max_attempts` times (default 5) before the last result is returned as-is.
 
 If the LLM decides the question is not a database query at all, it answers in plain text instead, and that text is returned on the `text` and `answers` lanes (or in the tool result's `answer` field).
+
+
+**What enforces read-only.** Both gates above are checks on the statement — its _shape_ and its plan. Neither can tell whether a `SELECT` has side effects, because the difference lives in what the called functions do: `pg_terminate_backend` kills sessions, `pg_read_file`/`LOAD_FILE` read files off the database host, `dblink` opens outbound connections, `nextval` advances a sequence, `FOR UPDATE` takes locks, `pg_sleep` burns the server. The guarantee therefore comes from the database itself: every generated query runs inside a server-side **read-only transaction** with a **statement timeout** (30s by default). The two gates remain as cheap passes in front of it.
+
+**Grant this node a read-only role.** A read-only transaction stops writes, but it cannot stop a privileged connection from reading server-side files or signalling other backends. Point the node at a role with `SELECT` on exactly the tables it needs and nothing else — that is the control that covers those cases.
 
 ---
 
