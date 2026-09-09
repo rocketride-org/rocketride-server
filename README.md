@@ -188,11 +188,11 @@ ROCKETRIDE_URI=ws://localhost:5565
 
 5. Deploy your pipelines - pick the path that fits:
 
-   - **Docker** - Download the RocketRide server image and create a container. Requires [Docker](https://docs.docker.com/get-docker/) to be installed.
+   - **Docker** - Download the RocketRide server image and run the container. Requires [Docker](https://docs.docker.com/get-docker/) to be installed.
 
      ```bash
      docker pull ghcr.io/rocketride-org/rocketride-engine:latest
-     docker create --name rocketride-engine -p 5565:5565 ghcr.io/rocketride-org/rocketride-engine:latest
+     docker run -d --name rocketride-engine -p 5565:5565 ghcr.io/rocketride-org/rocketride-engine:latest
      ```
 
    - **Local Deployment** - Download your preferred runtime as a standalone process from the **Deploy** page in the `Connection Manager`.
