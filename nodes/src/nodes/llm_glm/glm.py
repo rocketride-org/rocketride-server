@@ -25,24 +25,20 @@
 Zhipu AI GLM binding for the ChatLLM.
 """
 
-import re
 from typing import Any, Dict
 from ai.common.chat import ChatBase
 from ai.common.config import Config
 from langchain_openai import ChatOpenAI
 
-# GLM reasoning models (GLM-4.5 and later hybrid-thinking models) can return
-# chain-of-thought wrapped in <think>...</think> inside the `content` field on
-# the OpenAI-compatible endpoint. The block is stripped here so downstream
-# pipeline nodes only see the final answer. The closing tag is optional: a
-# generation truncated at max_tokens mid-reasoning has no </think>, and the
-# partial reasoning must not leak downstream either.
-_THINK_BLOCK_RE = re.compile(r'<think>.*?(?:</think>|$)\s*', re.DOTALL | re.IGNORECASE)
-
 
 class Chat(ChatBase):
     """
     Creates a Zhipu AI GLM chat bot.
+
+    No local <think>-block handling is needed: ChatBase._chat returns text
+    through the shared LangChainAdapter, whose think-tag splitter already
+    strips reasoning blocks (unterminated ones included) and routes them to
+    the thinking lane. Do not re-add a local strip here.
     """
 
     _llm: ChatOpenAI
@@ -87,7 +83,3 @@ class Chat(ChatBase):
 
         # Save our chat class into the bag
         bag['chat'] = self
-
-    def _chat(self, prompt: str) -> str:
-        """Invoke the LLM and strip any <think>...</think> reasoning block from the response."""
-        return _THINK_BLOCK_RE.sub('', super()._chat(prompt))

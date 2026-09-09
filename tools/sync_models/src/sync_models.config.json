@@ -547,7 +547,7 @@
 				"exclude_prefixes": [],
 				// <digit>v catches every vision generation (4v, 4.1v, 4.5v, ...) —
 				// substring matching has no regex, so the set is enumerated.
-				"exclude_patterns": ["0v", "1v", "2v", "3v", "4v", "5v", "6v", "7v", "8v", "9v", "vision", "embed", "rerank", "audio", "asr", "tts", "voice", "speech", "realtime", "image", "video", "ocr", "reward", "char", "emohaa"]
+				"exclude_patterns": ["0v", "1v", "2v", "3v", "4v", "5v", "6v", "7v", "8v", "9v", "vision", "embed", "rerank", "audio", "asr", "tts", "voice", "speech", "realtime", "image", "video", "ocr", "reward", "charglm", "emohaa"]
 			},
 			// Protect the seeded cloud set so the keyless OpenRouter fallback can
 			// never wrongly retire it.

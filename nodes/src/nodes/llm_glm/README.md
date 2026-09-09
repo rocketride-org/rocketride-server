@@ -31,11 +31,12 @@ The vision variants (GLM-4V / GLM-4.5V), embedding, CogView (image), CogVideoX
 
 ## Reasoning output
 
-GLM-4.5+ models are reasoning models. When the OpenAI-compatible endpoint
-returns chain-of-thought wrapped in `<think>...</think>` inside `content`, the
-node strips it so downstream nodes only see the final answer (the
-`llm_minimax` pattern). Budget generous output tokens for reasoning-heavy
-prompts.
+GLM-4.5+ models are reasoning models. The Z.ai cloud returns reasoning in a
+separate `reasoning_content` field, and for endpoints that inline
+`<think>...</think>` blocks in `content` the engine's shared LangChain
+adapter strips them and routes the reasoning to the thinking lane — the node
+needs no stripping of its own. Budget generous output tokens for
+reasoning-heavy prompts.
 
 ## Self-hosting
 

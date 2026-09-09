@@ -317,11 +317,7 @@ def test_baidu_qianfan_profiles_exist_in_api():
 
 @requires_glm
 def test_glm_profiles_exist_in_api():
-    """Every non-deprecated llm_glm profile model ID must be in the live API.
-
-    Local vLLM/SGLang profiles reuse the cloud model IDs, so they resolve
-    against the live Z.ai API as well.
-    """
+    """Every non-deprecated llm_glm profile model ID must be in the live API."""
     api_key = os.environ['ROCKETRIDE_GLM_KEY']
     profiles = _load_profiles('llm_glm')
     live_ids = _fetch_openai_model_ids(
