@@ -26,7 +26,7 @@ read with a strict JSON parser.
 | `title`         |    ✓     | Display name shown on the canvas tile.                                   |
 | `protocol`      |    ✓     | Endpoint protocol, e.g. `llm_openai://`.                                 |
 | `classType`     |    ✓     | What the node is, e.g. `["llm"]`, `["tool"]`, `["store"]`. Drives catalog grouping and behavior. |
-| `capabilities`  |    ✓     | Engine behavior flags, e.g. `["invoke"]`.                               |
+| `capabilities`  |    ✓     | Engine behavior flags, e.g. `["invoke"]`, `["noinclude"]` (sources). See [Source node contract](README-nodes.md#source-node-contract). |
 | `register`      |          | `filter`, `endpoint`, or omitted. Registers a factory of that type.      |
 | `node` / `path` |          | Runtime (`python`) and module path (`nodes.llm_openai`).                |
 | `prefix`        |    ✓     | Prefix added/removed when converting URLs ⇄ paths.                       |
