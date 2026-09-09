@@ -162,7 +162,7 @@ component's entry and exit with its lane data and any error.
 
 ```ts
 {
-  id: number,                              // pipe index within the pipeline
+  id: number,                              // reusable pipe slot, not an event or trace identifier
   op: "begin" | "enter" | "leave" | "end",
   pipes: string[],                         // current component stack for this pipe
   component?: string,                      // component this op refers to (on "leave", the leaving one) — pair enter/leave by identity, not stack position
@@ -172,6 +172,11 @@ component's entry and exit with its lane data and any error.
   source: string
 }
 ```
+
+`body.id` is reused across requests, so keying traces by it causes collisions.
+Use the `op: "begin"` event's `body.logSeq` (the continuum sequence) as the trace
+identity within the task's log stream; this is the `beginSeq` carried by chat
+completions and the key accepted by `getTrace` (`get_trace` in Python).
 
 `trace` is free-form and varies by node and trace level, store it as JSON, don't
 flatten it.
