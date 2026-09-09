@@ -47,7 +47,7 @@
 	// Optional:
 	//		Description to of this driver
 	//
-	"description": ["A component that connects to NVIDIA's Nemotron large language models for ", "advanced natural language processing. The Nemotron 3 family are open-weight ", "hybrid Mamba-Transformer MoE reasoning models with configurable thinking ", "budgets and up to a 1M-token context window: Ultra for frontier multi-agent ", "reasoning, Super for the best efficiency/accuracy balance, and Nano for ", "fast sub-agent workloads. Models are served through NVIDIA's OpenAI-compatible ", "cloud API (build.nvidia.com) or self-hosted via NIM containers, vLLM, or ", "SGLang using the same model IDs."],
+	"description": ["A component that connects to NVIDIA's Nemotron large language models for ", "advanced natural language processing. The Nemotron 3 family are open-weight ", "hybrid Mamba-Transformer MoE reasoning models with configurable thinking ", "budgets and up to a 1M-token context window: Ultra for frontier multi-agent ", "reasoning, Super for the best efficiency/accuracy balance, and Nano for ", "fast sub-agent workloads. Models are served through NVIDIA's OpenAI-compatible ", "cloud API (build.nvidia.com) or self-hosted via NIM containers, vLLM, or SGLang."],
 	//
 	// Optional:
 	//	  The icon is the icon to display in the UI for this node
@@ -123,30 +123,6 @@
 				"capabilities": {
 					"reasoning": true
 				}
-			},
-			// Self-hosted NIM containers serve the same model IDs as the hosted
-			// NVIDIA API, so local profiles reuse the cloud model strings.
-			"nemotron-3-super-local": {
-				"title": "Nemotron 3 Super 120B (Local)",
-				"model": "nvidia/nemotron-3-super-120b-a12b",
-				"modelSource": "provider",
-				"modelTotalTokens": 1000000, // manual
-				"modelOutputTokens": 32768, // manual
-				"serverbase": "http://localhost:8000/v1",
-				"capabilities": {
-					"reasoning": true
-				}
-			},
-			"nemotron-3-5-lightning-local": {
-				"title": "Nemotron 3.5 Lightning 30B (Local)",
-				"model": "nvidia/nemotron-3.5-lightning-30b-a3b",
-				"modelSource": "provider",
-				"modelTotalTokens": 262144, // manual
-				"modelOutputTokens": 32768, // manual
-				"serverbase": "http://localhost:8000/v1",
-				"capabilities": {
-					"reasoning": true
-				}
 			}
 		}
 	},
@@ -204,18 +180,6 @@
 				"llm.cloud.modelSource"
 			]
 		},
-		"nemotron.nemotron-3-super-local": {
-			"object": "nemotron-3-super-local",
-			"properties": [
-				"llm.local.serverbase"
-			]
-		},
-		"nemotron.nemotron-3-5-lightning-local": {
-			"object": "nemotron-3-5-lightning-local",
-			"properties": [
-				"llm.local.serverbase"
-			]
-		},
 		"nemotron.profile": {
 			"title": "Model",
 			"description": "NVIDIA Nemotron LLM model",
@@ -247,18 +211,6 @@
 					"value": "nemotron-3-5-lightning",
 					"properties": [
 						"nemotron.nemotron-3-5-lightning"
-					]
-				},
-				{
-					"value": "nemotron-3-super-local",
-					"properties": [
-						"nemotron.nemotron-3-super-local"
-					]
-				},
-				{
-					"value": "nemotron-3-5-lightning-local",
-					"properties": [
-						"nemotron.nemotron-3-5-lightning-local"
 					]
 				}
 			]

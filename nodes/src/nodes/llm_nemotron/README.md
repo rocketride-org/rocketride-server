@@ -7,7 +7,6 @@ containers, vLLM, or SGLang.
 
 - **Lane:** `questions → answers`
 - **Endpoint (cloud):** `https://integrate.api.nvidia.com/v1`
-- **Endpoint (local, default):** `http://localhost:8000/v1`
 
 ## Models
 
@@ -18,46 +17,37 @@ with configurable thinking budgets.
 | --- | --- | --- | --- |
 | Nemotron 3 Super 120B *(default)* | `nvidia/nemotron-3-super-120b-a12b` | 1M | Best efficiency/accuracy balance |
 | Nemotron 3 Ultra 550B | `nvidia/nemotron-3-ultra-550b-a55b` | 1M | Frontier reasoning, 55B active params |
-| Nemotron 3.5 Lightning 30B | `nvidia/nemotron-3.5-lightning-30b-a3b` | 256K | Fast sub-agent tier, 3B active params |
+| Nemotron 3.5 Lightning 30B | `nvidia/nemotron-3.5-lightning-30b-a3b` | 256K | Fast tier, 3B active params |
 | Custom Model | (user-defined) | (user-defined) | Any model on an OpenAI-compatible endpoint |
 
-The multimodal variants (Nano Omni, Nano VL) and the Retriever / Parse /
+The multimodal variants (Nano Omni, VL), and the Retriever / Parse /
 Speech / Safety lines are out of scope for this chat node.
 
 ## Reasoning output
 
-Nemotron 3 models are reasoning models. When the OpenAI-compatible endpoint
-returns chain-of-thought wrapped in `<think>...</think>` inside `content`, the
-node strips it so downstream nodes only see the final answer (the
-`llm_minimax` pattern). Budget generous output tokens for reasoning-heavy
-prompts.
+Nemotron models are reasoning models. The NVIDIA cloud returns reasoning in
+a separate `reasoning_content` field, and for endpoints that inline
+`<think>...</think>` blocks in `content` the engine's shared LangChain
+adapter strips them and routes the reasoning to the thinking lane — the node
+needs no stripping of its own. Budget generous output tokens for
+reasoning-heavy prompts.
 
-## Local deploy
+## Self-hosting
 
-Self-hosted **NIM containers serve the same model IDs as the hosted API**, so
-the "(Local)" profiles reuse the cloud model strings against
-`http://localhost:8000/v1`:
-
-```sh
-docker run --gpus all -p 8000:8000 nvcr.io/nim/nvidia/nemotron-3.5-lightning-30b-a3b:latest
-```
-
-vLLM / SGLang users can serve the open weights from HuggingFace instead; set
-`--served-model-name` to the profile's model ID (or use a Custom profile with
-your own name). Nemotron 3 weights, training data, and recipes are openly
-published; Nano runs on a single high-memory GPU, Super and Ultra need
-multi-GPU servers.
+Nemotron weights, training data, and recipes are openly published, and NIM
+containers, vLLM, and SGLang all expose OpenAI-compatible endpoints. To use
+a self-hosted deployment, select the **Custom Model** profile and point its
+server base URL at your endpoint; the API key may be left empty (the node
+passes a dummy token — local servers accept any).
 
 ## Authentication
 
 Cloud profiles require an NVIDIA API key (`nvapi-...`, from
-[build.nvidia.com](https://build.nvidia.com)) in `apikey`. The key requirement
-is enforced by base-URL match: if `serverbase` contains `api.nvidia.com` and
-no key is set, the node raises `NVIDIA API key is required for cloud
-profiles.` at startup. Key format is not validated beyond presence.
-
-Local profiles have no `apikey` field; local OpenAI-compatible servers accept
-any token, so the node passes a dummy key (`sk-local-dummy-key`).
+[build.nvidia.com](https://build.nvidia.com)) in `apikey`. The key
+requirement is enforced by base-URL match: if `serverbase` contains
+`api.nvidia.com` and no key is set, the node raises `NVIDIA API key is
+required for cloud profiles.` at startup. Key format is not validated
+beyond presence.
 
 ## Model sync
 
