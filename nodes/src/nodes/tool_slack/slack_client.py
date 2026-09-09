@@ -50,6 +50,10 @@ from slack_sdk.webhook import WebhookClient
 # Hard caps enforced regardless of what the caller requests.
 MAX_CHANNELS = 1000
 MAX_HISTORY_MESSAGES = 200
+# Slack chat.postMessage / incoming-webhook `text` hard maximum (characters).
+# Refuse above this so a single call stays one atomic message and the returned
+# `ts` identifies what the caller sent (see #1831).
+MAX_MESSAGE_TEXT_CHARS = 40_000
 
 # Per-request page size for cursor pagination (Slack recommends <= 200).
 _PAGE_SIZE = 200
@@ -194,10 +198,34 @@ def _clean_channel(ch: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _clean_message(msg: Dict[str, Any]) -> Dict[str, Any]:
-    """Strip a conversations.history entry down to ts/user/text (+ thread_ts)."""
+    """Strip a conversations.history entry down to its content and classifiers.
+
+    The allowlist keeps the fields that carry the message (``ts``/``user``/
+    ``text``, plus ``thread_ts``) and the two that CLASSIFY it:
+
+    - ``subtype`` classifies the entry. A ``channel_join`` carries a ts, a user,
+      and a text of "<@U0123ABCD> has joined the channel", so without the
+      subtype it is byte-for-byte the shape of a real message and cannot be
+      filtered out downstream. It is a classifier, not a noise flag -- see
+      ``SlackClient.channel_history`` for the consumer contract, which is
+      stated there once rather than repeated at each layer.
+    - ``bot_id`` marks a post made by a bot. ``check_connection`` already
+      returns the caller's own bot_id, so without this there is a value to
+      compare against and nothing to compare it to -- and an agent reading a
+      channel it also posts to sees its own output as new input. It is also the
+      only reliable bot discriminator: an app posting under its own bot identity
+      gets a ``bot_id`` and no ``bot_message`` subtype.
+
+    Both fields are set only when Slack sets them, so the shape is unchanged for
+    existing callers.
+    """
     cleaned = {'ts': msg.get('ts'), 'user': msg.get('user'), 'text': msg.get('text')}
     if msg.get('thread_ts'):
         cleaned['thread_ts'] = msg['thread_ts']
+    if msg.get('subtype'):
+        cleaned['subtype'] = msg['subtype']
+    if msg.get('bot_id'):
+        cleaned['bot_id'] = msg['bot_id']
     return cleaned
 
 
@@ -309,12 +337,17 @@ class SlackClient:
             that channel/thread arguments were ignored.
 
         Raises:
-            ValueError: On missing/empty ``text`` or missing ``channel`` in
-                token mode.
+            ValueError: On missing/empty ``text``, ``text`` longer than
+                ``MAX_MESSAGE_TEXT_CHARS``, or missing ``channel`` in token mode.
             SlackError: Typed error on API failure.
         """
         if not isinstance(text, str) or not text.strip():
             raise ValueError('text must not be empty')
+        if len(text) > MAX_MESSAGE_TEXT_CHARS:
+            raise ValueError(
+                f'text exceeds Slack limit of {MAX_MESSAGE_TEXT_CHARS} characters '
+                f'({len(text)} given); shorten the message so it posts atomically'
+            )
 
         if self._webhook is not None:
             return self._post_via_webhook(text)
@@ -420,8 +453,19 @@ class SlackClient:
             latest: Only include messages before this Slack timestamp.
 
         Returns:
-            List of dicts with ``ts``/``user``/``text`` (plus ``thread_ts``
-            for threaded messages).
+            List of dicts with ``ts``/``user``/``text``, plus ``thread_ts`` for
+            threaded messages, ``subtype`` whenever Slack classifies the entry
+            and ``bot_id`` whenever a bot posted it.
+
+            ``subtype`` is a classifier, not a noise flag: ``file_share``,
+            ``thread_broadcast`` and ``me_message`` are ordinary user messages,
+            while ``channel_join``/``channel_leave``/``channel_topic``,
+            ``tombstone``, ``pinned_item`` and ``reminder_add`` are system
+            entries. That system list is open-ended, so drop entries by naming
+            the subtypes you do not want rather than by presence. Match
+            ``bot_id`` against the one ``check_connection`` reports to skip
+            your own posts -- not the ``bot_message`` subtype, which is absent
+            when an app posts under its own bot identity.
 
         Raises:
             ValueError: On a missing/empty ``channel`` or a non-numeric or

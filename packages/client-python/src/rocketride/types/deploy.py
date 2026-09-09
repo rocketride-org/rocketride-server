@@ -34,14 +34,22 @@ Types:
     DeploymentSchedule: Per-source cron schedule on a team deployment.
     Deployment:         One team's deployment of a project (registry-joined).
     DeployHistoryEntry: One immutable audit-trail row.
-    PublishResult:      publish() body: the artifact (+ deployment when
+    PublishResult:      add() body: the artifact (+ deployment when
                         deploy_to was given).
     DeployListResult:   Standard list envelope of Deployment rows.
     DeployVersionsResult: Standard list envelope of DeployArtifact rows.
     DeployHistoryResult:  Standard list envelope of DeployHistoryEntry rows.
     SchedulePreview:    preview() body: validity + next occurrences.
+    AppVerifyCheck:     One check's outcome in an app pre-deploy report.
+    AppVerifyReport:    verify_app() body: the whole local pre-check.
+
+The app-verify pair are dataclasses, not TypedDicts, because they are
+CONSTRUCTED by the client rather than received from the server. They live
+here, in the public types module, so callers can annotate a
+``client.deploy.verify_app`` result without reaching into a private module.
 """
 
+from dataclasses import dataclass, field
 from typing import Literal, TypedDict
 
 
@@ -130,10 +138,10 @@ class DeployHistoryEntry(TypedDict, total=False):
 
 
 class PublishResult(TypedDict, total=False):
-    """Body of ``deploy.publish``."""
+    """Body of ``deploy.add``."""
 
     artifact: DeployArtifact
-    # Present only when deploy_to was given (one-step publish+deploy).
+    # Present only when deploy_to was given (one-step add+deploy).
     deployment: Deployment
 
 
@@ -172,3 +180,22 @@ class SchedulePreview(TypedDict, total=False):
     error: str
     # Unix timestamps (seconds) of the next occurrences.
     next: list[float]
+
+
+@dataclass
+class AppVerifyCheck:
+    """One verification check's outcome."""
+
+    id: str
+    ok: bool
+    note: str
+
+
+@dataclass
+class AppVerifyReport:
+    """The result of an app's local pre-deploy verification."""
+
+    ok: bool
+    checks: list[AppVerifyCheck] = field(default_factory=list)
+    file_count: int = 0
+    uncompressed_bytes: int = 0

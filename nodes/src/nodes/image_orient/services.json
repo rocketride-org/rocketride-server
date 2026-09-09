@@ -1,0 +1,237 @@
+{
+	//
+	// Required:
+	//		The displayable name of this node
+	//
+	"title": "Image Orientation Fixer",
+	//
+	// Required:
+	//		The protocol is the endpoint protocol
+	//
+	"protocol": "image_orient://",
+	//
+	// Required:
+	//		Class type of the node - what it does. Also decides the docs-site
+	//		category ("image" -> Vision & Image) and the canvas palette group.
+	//
+	"classType": ["image"],
+	//
+	// Required:
+	//		Capabilities are flags that change the behavior of the underlying
+	//		engine. Marked experimental like face_detection, the closest
+	//		comparable node: this is a model-backed heuristic that has not been
+	//		proven across varied collections. It also fetches its model on first
+	//		use, so unlike scan_cropper it does touch the network.
+	//
+	"capabilities": ["experimental"],
+	//
+	// Optional:
+	//		Register is either filter, endpoint or ignored if not specified. If the
+	//		type is specified, a factory is registered of that given type
+	//
+	"register": "filter",
+	//
+	// Optional:
+	//		The node is the actual physical node to instantiate - if
+	//		not specified, the protocol will be used
+	//
+	"node": "python",
+	//
+	// Optional:
+	//		The path is the executable/script code - it is node dependent
+	// 		and is optional for most node
+	//
+	"path": "nodes.image_orient",
+	//
+	// Required:
+	//		The prefix map when added/removed when convertting URLs <=> paths
+	//
+	"prefix": "image_orient",
+	//
+	// Optional:
+	//		Description to of this driver
+	//
+	"description": ["Turns scanned photographs the right way up. Finds faces at each of the four right-angle", "rotations and keeps the one they agree on, so a print scanned sideways or upside down comes out", "upright. It only acts when the evidence is clear: anything it is unsure about is passed through", "untouched and listed on the text lane, because a photo turned the wrong way is worse than one", "left alone."],
+	//
+	// Optional:
+	//	  The icon is the icon to display in the UI for this node
+	//
+	"icon": "image_orient.svg",
+	"documentation": "https://docs.rocketride.org",
+	//
+	// Optional:
+	//		Summary line shown on the node's tile on the canvas
+	//
+	"tile": ["Confidence: ${parameters.image_orient.margin}x"],
+	//
+	//
+	//	Optional:
+	//		As a pipe component, define what this pipe component takes
+	//		and what it produces
+	//
+	"lanes": {
+		"image": ["image", "text"]
+	},
+	//
+	// Optional:
+	//		Prose for each input lane and the outputs it produces
+	//
+	"input": [
+		{
+			"lane": "image",
+			"description": "A photograph that may have been scanned at the wrong orientation.",
+			"output": [
+				{
+					"lane": "image",
+					"description": "The same photograph, turned upright when the node is confident and passed through byte-for-byte when it is not. The stream keeps its original name and format."
+				},
+				{
+					"lane": "text",
+					"description": "JSON decision record: {decoded, rotation, confident, scores, faces, ratio, reason}. 'rotation' is the correction applied in degrees clockwise, and 'reason' names why an image was left alone, so the skipped set is reviewable without re-running."
+				}
+			]
+		}
+	],
+	//
+	//	Optional:
+	//		Profile section are configuration optoins used by the driver
+	//		itself.
+	//
+	//		One profile only: unlike scan_cropper there is no "what did you
+	//		scan" choice to make here, so the fields stay flat and the
+	//		getNodeConfig profile-nesting rule never comes into play.
+	//
+	"preconfig": {
+		// Define the values that will be merged into any profile configuration
+		// specified, unless the profile is 'absolute'
+		"default": "default",
+		// Defines profiles used with the "profile": key
+		"profiles": {
+			"default": {
+				"title": "Default"
+			}
+		}
+	},
+	//
+	// Optional:
+	//		Local fields definitions - these define fields only for the
+	//		current service.
+	//
+	//		NOTE: the "image_orient." prefix is UI-schema only. The config dict
+	//		the node receives is keyed on the bare name ("margin", not
+	//		"image_orient.margin").
+	//
+	//		The defaults below are measured, not guessed. Over 98 real album
+	//		photographs the node corrects 37 and gets none wrong, because two
+	//		independent readings of the detections must agree before it acts
+	//		(see vote.decide). Without that agreement rule the same coverage
+	//		cost 2 wrong rotations.
+	//
+	"fields": {
+		"image_orient.margin": {
+			"type": "number",
+			"title": "How sure before rotating",
+			"description": "How clearly the winning orientation must beat the next best one. Measured over 98 real album photographs, 'Balanced' corrected 37 and got none wrong. Move up if a photo ever comes out the wrong way round; move down only if you would rather fix more and check the results yourself.",
+			"default": 1.1,
+			"enum": [
+				[1.0, "Fix as many as possible - least cautious"],
+				[1.1, "Balanced - recommended"],
+				[1.5, "Cautious"],
+				[2.0, "Only when certain"],
+				[3.0, "Very rarely - near-certain only"]
+			]
+		},
+		"image_orient.minFaces": {
+			"type": "integer",
+			"title": "Faces needed to decide",
+			"description": "How many faces must agree before the photo is turned. One face is thin evidence and was behind most of the mistakes in testing, so two is the default. Lower to 1 for portraits and single-subject photos, where there is only ever one face to find.",
+			"default": 2,
+			"minimum": 1,
+			"maximum": 10
+		},
+		"image_orient.confidenceWeight": {
+			"type": "number",
+			"title": "Face clarity vs face size",
+			"description": "When one rotation shows a bigger face but another shows a clearer one, this decides which wins. 'Balanced' is the safe default: measured over 98 album photographs it corrected 37 and got none wrong. Raising it rescues photos where an upside-down face is detected with a larger box than the upright one - but it acts on thinner evidence, and at the highest setting with 'Faces needed to decide' at 1 it corrected 39 and got 3 wrong. Raise it only if upside-down photos are being missed, and check the results.",
+			"default": 1.0,
+			"enum": [
+				[1.0, "Balanced - recommended"],
+				[4.0, "Favour the clearer face"],
+				[8.0, "Strongly favour the clearer face"]
+			]
+		},
+		"image_orient.minConfidence": {
+			"type": "number",
+			"title": "Minimum face score",
+			"description": "How certain the detector must be that something is a face before it gets a say. Raising it ignores doubtful faces; lowering it lets more in, including things that are not faces at all.",
+			"default": 0.6,
+			"minimum": 0.1,
+			"maximum": 0.99
+		},
+		"image_orient.detectSize": {
+			"type": "integer",
+			"title": "Detection size (px)",
+			"description": "How big a copy of the photo the face search runs on. Your image is never scaled - this only affects the search. Raise it if faces in group photos are being missed; the cost grows with the square, so 1600 is about four times the work of 800.",
+			"default": 800,
+			"minimum": 320,
+			"maximum": 4000
+		},
+		"image_orient.quality": {
+			"type": "string",
+			"title": "JPEG quality",
+			"description": "Type 'auto' to save at the same quality the photo already had, or a number from 1 to 100. Leave it on 'auto': the image has been through JPEG once already, so saving higher only makes the file bigger without recovering anything. Ignored for PNG, which is lossless. Photos that are not rotated are never re-saved at all.",
+			"default": "auto"
+		}
+	},
+	//
+	// Required:
+	//		Defines the fields (shape) of the service.
+	//
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Image Orient",
+			"properties": ["image_orient.margin", "image_orient.minFaces", "image_orient.confidenceWeight", "image_orient.minConfidence", "image_orient.detectSize", "image_orient.quality"]
+		}
+	],
+	//
+	// Optional:
+	//		Declarative test. The fixtures are rotations of a portrait the face
+	//		detector is known to find - face_detection's own test block uses the
+	//		same image. minFaces is 1 because there is only one face in it.
+	//
+	//		Assertions are on the text lane: the harness can only check an image
+	//		for notEmpty, so the record is the only place the decision is
+	//		visible.
+	//
+	"test": {
+		"outputs": ["image", "text"],
+		"timeout": 120,
+		"config": {
+			"minFaces": 1
+		},
+		"cases": [
+			{
+				"name": "A portrait rotated 90 clockwise is turned back",
+				"image": "images/einstein_rot90.jpg",
+				"expect": {
+					"image": {
+						"notEmpty": true
+					},
+					"text": {
+						"contains": "\"rotation\": 270"
+					}
+				}
+			},
+			{
+				"name": "An upright portrait is left alone",
+				"image": "images/einstein_rot0.jpg",
+				"expect": {
+					"text": {
+						"contains": "\"rotation\": 0"
+					}
+				}
+			}
+		]
+	}
+}

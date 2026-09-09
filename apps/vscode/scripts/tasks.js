@@ -28,15 +28,13 @@
  */
 const path = require('path');
 const { glob } = require('glob');
-const { execCommand, removeDirs, removeMatching, PROJECT_ROOT, BUILD_ROOT, DIST_ROOT, hasSourceChanged, saveSourceHash, setState, exists, copyFile, mkdir, rm, readFile, writeFile, syncDir } = require('../../../scripts/lib');
+const { execCommand, removeDirs, removeDirAndParents, removeMatching, PROJECT_ROOT, BUILD_ROOT, DIST_ROOT, hasSourceChanged, saveSourceHash, setState, exists, copyFile, mkdir, rm, readFile, writeFile, syncDir, formatSyncStats, stat } = require('../../../scripts/lib');
 
 // Paths
 const APP_ROOT = path.join(__dirname, '..');
 const SRC_DIR = path.join(APP_ROOT, 'src');
 const SHARED_UI_SRC = path.join(PROJECT_ROOT, 'shared', 'src');
 const DOCS_DIR = path.join(PROJECT_ROOT, 'docs');
-const AGENT_DOCS_DIR = path.join(DOCS_DIR, 'agents');
-const STUBS_DIR = path.join(DOCS_DIR, 'stubs');
 const README_SRC = path.join(DOCS_DIR, 'README-vscode.md');
 const README_DEST = path.join(APP_ROOT, 'README.md');
 
@@ -55,6 +53,9 @@ const BUILD_WEBVIEW_DIR = path.join(BUILD_DIR, 'webview');
 
 // .vsix output directory
 const VSCODE_DIST_DIR = path.join(DIST_ROOT, 'vscode');
+// Serve-side copy of the vsix: the engine's GET /client/vscode reads the
+// static clients directory beside the binary, like the other client SDKs.
+const SERVER_STATIC_DIR = path.join(DIST_ROOT, 'server', 'static', 'clients', 'vscode');
 
 // =============================================================================
 // Helpers: change detection (vscode src + shared, which webview bundles)
@@ -167,7 +168,7 @@ function makeStageFilesAction() {
 			const pkg = JSON.parse(await readFile(pkgPath));
 			pkg.main = './rocketride.js';
 			pkg.icon = 'rocketride-dark-icon.png';
-			pkg.files = ['rocketride.js', 'rocketride.js.map', 'webview/**', 'docs/**', 'shell.tgz', 'rocketride-dark-icon.png', 'rocketride-light-icon.png', 'docker.svg', 'onprem.svg', 'package.json', 'LICENSE', 'README.md'];
+			pkg.files = ['rocketride.js', 'rocketride.js.map', 'webview/**', 'shell.tgz', 'rocketride-client.tgz', 'devServerGuard.cjs', 'rocketride-dark-icon.png', 'rocketride-light-icon.png', 'docker.svg', 'onprem.svg', 'package.json', 'LICENSE', 'README.md'];
 			const stagedPkg = JSON.stringify(pkg, null, 2);
 			const manifestChanged = !buildHasManifest || String(await readFile(stagedPkgPath)) !== stagedPkg;
 
@@ -181,6 +182,25 @@ function makeStageFilesAction() {
 			if (await exists(shellTgzSrc)) {
 				await mkdir(BUILD_DIR);
 				await copyFile(shellTgzSrc, path.join(BUILD_DIR, 'shell.tgz'));
+			}
+
+			// The client SDK package: the OFFLINE fallback for the same
+			// vendoring pass (server -> .rocketride/client/rocketride.tgz).
+			// Newest packed tarball wins; staged under a stable name so the
+			// extension can locate it without knowing the version.
+			const clientTgzDir = path.join(DIST_ROOT, 'clients', 'typescript');
+			if (await exists(clientTgzDir)) {
+				// Newest by mtime, not name: a lexicographic sort ranks
+				// rocketride-1.9.0.tgz above rocketride-1.10.0.tgz, silently
+				// shipping a stale offline fallback across digit boundaries.
+				const clientTgzs = await glob('rocketride-*.tgz', { cwd: clientTgzDir, nodir: true, absolute: true });
+				const stamped = await Promise.all(clientTgzs.map(async (file) => ({ file, mtime: (await stat(file)).mtimeMs })));
+				stamped.sort((a, b) => a.mtime - b.mtime);
+				const newest = stamped.length > 0 ? stamped[stamped.length - 1].file : undefined;
+				if (newest) {
+					await mkdir(BUILD_DIR);
+					await copyFile(newest, path.join(BUILD_DIR, 'rocketride-client.tgz'));
+				}
 			}
 
 			if (!changed && !manifestChanged) {
@@ -202,6 +222,17 @@ function makeStageFilesAction() {
 			if (await exists(iconLight)) {
 				await copyFile(iconLight, path.join(BUILD_DIR, 'rocketride-light-icon.png'));
 			}
+			// The dev-server guard wrapper — spawned as a real file by the
+			// watch manager (it cannot live inside the esbuild bundle), so it
+			// ships beside the bundle. Sourced under src/ so the source-hash
+			// change detection restages it on edit. FUNCTIONAL, unlike the
+			// cosmetic icons around it: a missing guard fails every dev-server
+			// start with ENOENT at runtime — fail the STAGE instead.
+			const guardSrc = path.join(SRC_DIR, 'appdev', 'devServerGuard.cjs');
+			if (!(await exists(guardSrc))) {
+				throw new Error(`devServerGuard.cjs missing at ${guardSrc} — the dev-server tether cannot ship`);
+			}
+			await copyFile(guardSrc, path.join(BUILD_DIR, 'devServerGuard.cjs'));
 			const dockerSvg = path.join(APP_ROOT, 'docker.svg');
 			const onpremSvg = path.join(APP_ROOT, 'onprem.svg');
 			if (await exists(dockerSvg)) {
@@ -215,24 +246,12 @@ function makeStageFilesAction() {
 				await copyFile(README_DEST, path.join(BUILD_DIR, 'README.md'));
 			}
 
-			// Copy agent documentation and stubs into build/vscode/docs/
-			const buildDocsDir = path.join(BUILD_DIR, 'docs');
-			const buildStubsDir = path.join(BUILD_DIR, 'docs', 'stubs');
-			await mkdir(buildDocsDir);
-			await mkdir(buildStubsDir);
-
-			if (await exists(AGENT_DOCS_DIR)) {
-				const agentDocs = await glob('*.md', { cwd: AGENT_DOCS_DIR, nodir: true, absolute: true });
-				for (const doc of agentDocs) {
-					await copyFile(doc, path.join(buildDocsDir, path.basename(doc)));
-				}
-			}
-
-			if (await exists(STUBS_DIR)) {
-				const stubs = await glob('*', { cwd: STUBS_DIR, nodir: true, absolute: true });
-				for (const stub of stubs) {
-					await copyFile(stub, path.join(buildStubsDir, path.basename(stub)));
-				}
+			// A stale docs/ staging from a pre-/client/docs build must not
+			// ride into future packs — agent docs are served by the engine
+			// (docs:agent bundle), never shipped in the vsix.
+			const legacyDocsDir = path.join(BUILD_DIR, 'docs');
+			if (await exists(legacyDocsDir)) {
+				await rm(legacyDocsDir);
 			}
 
 			await saveVscodeAndSharedUiHashes(srcHash, sharedUiHash);
@@ -250,6 +269,9 @@ function makePackageVsixAction() {
 			const vsixFiles = (await exists(VSCODE_DIST_DIR)) ? await glob('*.vsix', { cwd: VSCODE_DIST_DIR, nodir: true, absolute: true }) : [];
 
 			if (!changed && vsixFiles.length > 0) {
+				// Packaging is skipped, but the served copy still heals — the
+				// server static tree cleans independently of dist/vscode.
+				await syncDir(VSCODE_DIST_DIR, SERVER_STATIC_DIR, { pattern: '*.vsix', package: true });
 				task.output = 'No changes detected';
 				return;
 			}
@@ -258,7 +280,9 @@ function makePackageVsixAction() {
 			const vsceOut = path.relative(BUILD_DIR, VSCODE_DIST_DIR);
 			await execCommand('npx', ['vsce', 'package', '--no-dependencies', '-o', vsceOut], { task, cwd: BUILD_DIR });
 
-			task.output = `Package created in ${VSCODE_DIST_DIR}`;
+			// Stage the vsix where GET /client/vscode serves from.
+			const stats = await syncDir(VSCODE_DIST_DIR, SERVER_STATIC_DIR, { pattern: '*.vsix', package: true });
+			task.output = `Package created in ${VSCODE_DIST_DIR} (${formatSyncStats(stats)})`;
 		},
 	};
 }
@@ -330,7 +354,7 @@ module.exports = {
 				// Builds gate on drift CHECKS only (silent unless they fail);
 				// unit tests (shared:test) run under test targets, never as
 				// build steps — a normal build must not stream test output.
-				steps: ['shell:build', 'shared:check-gallery-tokens', 'vscode:copy-readme', 'vscode:build-webview', 'vscode:compile-typescript', 'vscode:bundle-extension', 'vscode:stage-files', 'vscode:package-vsix'],
+				steps: ['shell:build', 'client-docs:agent', 'shared:check-gallery-tokens', 'vscode:copy-readme', 'vscode:build-webview', 'vscode:compile-typescript', 'vscode:bundle-extension', 'vscode:stage-files', 'vscode:package-vsix'],
 			}),
 		},
 		{
@@ -339,6 +363,7 @@ module.exports = {
 				description: 'Clean vscode',
 				run: async (ctx, task) => {
 					await removeDirs([BUILD_DIR, path.join(APP_ROOT, 'dist'), path.join(APP_ROOT, 'out'), VSCODE_DIST_DIR]);
+					await removeDirAndParents(PROJECT_ROOT, [SERVER_STATIC_DIR]);
 					await removeMatching(APP_ROOT, '.vsix');
 					await setState(SRC_HASH_KEY, null);
 					await setState(BUNDLE_HASH_KEY, null);

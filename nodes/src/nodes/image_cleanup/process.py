@@ -27,23 +27,23 @@ from .morphology import morph_image
 from .png import ensure_png
 
 
-def process_image(mimeType: str, input_bytes: bytes) -> bytes:
+def process_image(mimeType: str, input_bytes: bytes) -> tuple[str, bytes]:
     """
-    Accept raw bytes of a an image, preprocesses for OCR using three stages.
+    Accept raw image bytes and preprocess them for OCR using three stages.
 
     1. Grayscale conversion and binarization
     2. Deskewing to correct text alignment
     3. Morphological cleanup to enhance OCR clarity
 
     Returns:
-        bytes: Preprocessed JPEG image in bytes, ready for OCR.
+        tuple[str, bytes]: The PNG MIME type and preprocessed PNG bytes, ready for OCR.
     """
     image = input_bytes
 
-    # Step 1: Convert to png if needed
+    # Step 1: Convert to PNG if needed
     mimeType, image = ensure_png(mimeType, input_bytes)
 
-    # Step 2: Convert image to binary grayscale png
+    # Step 2: Convert image to binary grayscale PNG
     image = binary_image(image)
 
     # Step 3: Deskew the binary image to align text

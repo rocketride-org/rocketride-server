@@ -55,6 +55,36 @@ export type ShellVendorResult =
 let ensureShellPromise: Promise<ShellVendorResult> | null = null;
 
 /**
+ * The workspace-install AUTHORITY — the WatchManager's generation-chained
+ * single-flight, registered at its construction.
+ *
+ * While registered, every install this module needs routes through it, so
+ * two pnpm processes can never touch the shared node_modules at once:
+ * the vendor pass spawning its OWN pnpm beside the watch/scaffold install
+ * raced it on fresh workspaces, and concurrent pnpm runs on one root fail
+ * with ERR_PNPM_EEXIST during symlinkAllModules (a half-linked virtual
+ * store). An injected seam rather than an import: watchManager already
+ * imports from this module, so importing it back would be a cycle.
+ */
+let workspaceInstallDelegate: (() => Promise<boolean>) | null = null;
+
+/**
+ * Registers the single-flight workspace-install authority.
+ *
+ * The delegate must run a FRESH install when invoked (the caller has just
+ * changed the vendored tarball): bump the install generation, then chain
+ * the run behind any in-flight install.
+ *
+ * @param run - Resolves true when the workspace install succeeded, or null
+ *              to UNREGISTER (the registering manager was disposed — module
+ *              state outlives it, and a vendor pass during deactivation
+ *              would otherwise install through a dead manager).
+ */
+export function setWorkspaceInstallDelegate(run: (() => Promise<boolean>) | null): void {
+	workspaceInstallDelegate = run;
+}
+
+/**
  * Ensures the workspace's shell package is vendored — ONCE.
  *
  * Every consumer that needs the shell tarball (panel open, scaffold, the
@@ -68,7 +98,7 @@ export function ensureShell(context: vscode.ExtensionContext): Promise<ShellVend
 	if (ensureShellPromise) return ensureShellPromise;
 	const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
 	if (!workspaceRoot) return Promise.resolve({ ok: false, reason: 'No workspace folder is open — the platform package lives under the workspace root.' });
-	ensureShellPromise = vendorShellPackage(workspaceRoot, path.join(context.extensionPath, 'shell.tgz')).then((result) => {
+	ensureShellPromise = vendorShellPackage(workspaceRoot, path.join(context.extensionPath, 'shell.tgz'), path.join(context.extensionPath, 'rocketride-client.tgz')).then((result) => {
 		// vendorShellPackage never throws (non-fatal by design); a failure
 		// clears the memo so a later open retries with a (possibly)
 		// reachable server instead of caching the failure for the session.
@@ -76,6 +106,30 @@ export function ensureShell(context: vscode.ExtensionContext): Promise<ShellVend
 		return result;
 	});
 	return ensureShellPromise;
+}
+
+/**
+ * Re-vendors the platform packages against the CURRENT server — used on
+ * (re)connect, where the session memo would otherwise keep serving the
+ * packages of a previous server (or the offline fallbacks) for the rest
+ * of the session.
+ *
+ * @param context - Extension context (locates the packaged fallbacks).
+ * @returns The vendor result — path on success, the reason on failure.
+ */
+export function refreshVendoredPlatform(context: vscode.ExtensionContext): Promise<ShellVendorResult> {
+	// Chain behind any in-flight pass instead of dropping the memo: a
+	// reconnect burst (org switch, network blip) fires this repeatedly, and
+	// two concurrent passes write the same canonical tarball paths — the
+	// read/compare/write sequence is not atomic, so an overlap can leave a
+	// half-written tgz for the workspace install to read.
+	const prior: Promise<unknown> = ensureShellPromise ?? Promise.resolve();
+	const refreshed = prior.catch(() => null).then(() => {
+		ensureShellPromise = null;
+		return ensureShell(context);
+	});
+	ensureShellPromise = refreshed;
+	return refreshed;
 }
 
 /**
@@ -117,8 +171,9 @@ export async function vendorAppTypes(context: vscode.ExtensionContext, appFolder
 	let rewired = false;
 	try {
 		rewired = ensureShellDependency(appFolder, path.join(workspaceRoot, '.rocketride', 'shell', 'shell.tgz'));
+		rewired = ensureClientDependency(appFolder, path.join(workspaceRoot, '.rocketride', 'client', 'rocketride.tgz')) || rewired;
 	} catch (err) {
-		const reason = `Could not wire the shell dependency into ${appFolder}: ${err instanceof Error ? err.message : String(err)}`;
+		const reason = `Could not wire the platform dependencies into ${appFolder}: ${err instanceof Error ? err.message : String(err)}`;
 		logger.output(`[appdev] ${reason}`);
 		return { ok: false, reason };
 	}
@@ -230,6 +285,32 @@ function ensureWorkspaceFile(workspaceRoot: string): void {
  *          the app has no package.json).
  */
 function ensureShellDependency(appFolder: string, pkgTgz: string): boolean {
+	return ensureTgzDependency(appFolder, 'shell', pkgTgz);
+}
+
+/**
+ * Ensures the app's package.json depends on the workspace's vendored
+ * CLIENT tarball (`file:<rel>/.rocketride/client/rocketride.tgz`). The
+ * npm registry's `rocketride` can lag the connected server badly (no app
+ * surface at all), so apps pin the server-matched package the same way
+ * they pin the shell.
+ *
+ * @param appFolder - The app's root folder (owns the package.json).
+ * @param pkgTgz - Absolute path of the client package tarball.
+ * @returns True when a new spec was written; false when already correct.
+ */
+function ensureClientDependency(appFolder: string, pkgTgz: string): boolean {
+	return ensureTgzDependency(appFolder, 'rocketride', pkgTgz);
+}
+
+/**
+ * Shared rewiring for tarball-pinned dependencies: writes
+ * `dependencies[depName] = file:<app-relative posix path>` only when
+ * missing or different, so repeated App Builder opens never rewrite the
+ * file. The target need not exist yet — the spec is the platform's
+ * well-known workspace location, and pnpm links it once it appears.
+ */
+function ensureTgzDependency(appFolder: string, depName: string, pkgTgz: string): boolean {
 	const logger = getLogger();
 	const pkgJsonPath = path.join(appFolder, 'package.json');
 	if (!fs.existsSync(pkgJsonPath)) return false;
@@ -238,10 +319,10 @@ function ensureShellDependency(appFolder: string, pkgTgz: string): boolean {
 	const spec = `file:${rel}`;
 	// step: rewrite only when missing or different
 	const pkg = JSON.parse(fs.readFileSync(pkgJsonPath, 'utf8'));
-	if (pkg.dependencies?.shell === spec) return false;
-	pkg.dependencies = { ...(pkg.dependencies ?? {}), shell: spec };
+	if (pkg.dependencies?.[depName] === spec) return false;
+	pkg.dependencies = { ...(pkg.dependencies ?? {}), [depName]: spec };
 	fs.writeFileSync(pkgJsonPath, `${JSON.stringify(pkg, null, 2)}\n`);
-	logger.output(`[appdev] package.json: "shell": "${spec}"`);
+	logger.output(`[appdev] package.json: "${depName}": "${spec}"`);
 	return true;
 }
 
@@ -322,6 +403,71 @@ export function extractInstallCause(output: string, code: number | null): string
 }
 
 /**
+ * True when pnpm install output carries a TRANSIENT Windows file-lock
+ * signature rather than a genuine dependency or build failure.
+ *
+ * On Windows another process routinely holds a short-lived handle on a file
+ * under `node_modules/.pnpm` — antivirus scanning a just-written file, the
+ * Search indexer, or an editor watching the tree — so pnpm's atomic
+ * rename/unlink step fails with EPERM/EBUSY/ENOTEMPTY even though the
+ * dependency graph is sound. The handle is released moments later and a fresh
+ * install succeeds, so the caller may safely retry ONLY this class of error.
+ * A resolution error, a missing package, or a build failure never matches and
+ * so is never retried.
+ *
+ * @param output - Combined stdout+stderr of the failed pnpm run.
+ * @returns True when the failure is a retriable transient lock.
+ */
+export function isTransientLockError(output: string): boolean {
+	// Both halves must hold ON THE SAME LINE: the errno AND a filesystem op it
+	// aborted. pnpm mentions "rename" in ordinary progress, so an EPERM sitting
+	// on an unrelated line must not pair with it — a genuine transient lock
+	// prints the errno and the aborted op together on one line.
+	//
+	// EEXIST pairs ONLY with symlink: pnpm's symlinkAllModules hits it when a
+	// previous install died (or raced) mid-link and left the virtual store
+	// half-written — a rerun reconciles the store and succeeds, so it earns a
+	// retry; EEXIST anywhere else stays a genuine failure.
+	const errno = /\b(EPERM|EBUSY|ENOTEMPTY|EEXIST)\b/;
+	const fsOp = /(rename|unlink|symlink|operation not permitted|resource busy|directory not empty)/i;
+	return output.split(/\r?\n/).some((line) => {
+		if (!errno.test(line) || !fsOp.test(line)) return false;
+		return !/\bEEXIST\b/.test(line) || /symlink/i.test(line);
+	});
+}
+
+/** Largest vendored tarball the extension will accept from a server. */
+const MAX_VENDORED_TGZ_BYTES = 64 * 1024 * 1024;
+
+/**
+ * Reads a fetch response body into a Buffer, refusing anything oversized.
+ *
+ * The request timeout bounds how LONG a download may take, not how BIG it
+ * may be: materializing the whole body and comparing it against the
+ * existing tarball keeps two full copies resident, so a misconfigured or
+ * hostile endpoint could drive the extension host out of memory. The
+ * declared Content-Length is refused up front; a response that declares no
+ * length is read chunk by chunk and abandoned the moment it crosses.
+ *
+ * @param res - The response whose body to drain.
+ * @param limit - Maximum bytes to accept.
+ * @returns The body bytes, or null when the response is over the limit.
+ */
+async function readBoundedBody(res: Response, limit: number): Promise<Buffer | null> {
+	const declared = Number(res.headers.get('content-length'));
+	if (Number.isFinite(declared) && declared > limit) return null;
+	if (!res.body) return Buffer.alloc(0);
+	const chunks: Buffer[] = [];
+	let total = 0;
+	for await (const chunk of res.body as unknown as AsyncIterable<Uint8Array>) {
+		total += chunk.byteLength;
+		if (total > limit) return null;
+		chunks.push(Buffer.from(chunk));
+	}
+	return Buffer.concat(chunks);
+}
+
+/**
  * Downloads the connected server's shell.tgz to the workspace's canonical
  * .rocketride/shell/shell.tgz and installs it at the workspace root.
  *
@@ -338,62 +484,118 @@ export function extractInstallCause(output: string, code: number | null): string
  * @param fallbackTgz - Extension-packaged shell.tgz for offline use.
  * @returns The vendor result — path on success, the reason on failure.
  */
-export async function vendorShellPackage(workspaceRoot: string, fallbackTgz?: string): Promise<ShellVendorResult> {
+export async function vendorShellPackage(workspaceRoot: string, fallbackTgz?: string, clientFallbackTgz?: string): Promise<ShellVendorResult> {
 	const logger = getLogger();
 	const baseUrl = ConnectionManager.getInstance().getHttpUrl?.() || '';
-	try {
-		// step: fetch the stable-named tarball from the connected server
-		// (the public /client/shell route, beside the SDK downloads),
-		// falling back to the extension-packaged copy when offline. Track
-		// WHY the download path failed — that reason IS the user's error.
+
+	/**
+	 * Fetches one server-vendored tarball, falling back to the
+	 * extension-packaged copy when offline. Bounded — a hung response must
+	 * fail the pass (reasoned fallback) instead of wedging the
+	 * single-flight ensureShell memo forever. Tracks WHY the download path
+	 * failed — that reason IS the user's error.
+	 */
+	const fetchTgz = async (route: string, label: string, fallback?: string): Promise<{ tgz: Buffer | null; source: string; failure: string }> => {
 		let tgz: Buffer | null = null;
 		let source = '';
-		let downloadFailure = '';
+		let failure = '';
 		if (!baseUrl) {
-			downloadFailure = 'Not connected to a RocketRide server — the platform package (shell.tgz) is served by the connected server.';
+			failure = `Not connected to a RocketRide server — the ${label} is served by the connected server.`;
 		} else {
 			const base = baseUrl.endsWith('/') ? baseUrl : `${baseUrl}/`;
 			try {
-				// Bounded — a hung response must fail the pass (reasoned
-				// fallback) instead of wedging the single-flight ensureShell
-				// memo forever.
-				const res = await fetch(new URL('client/shell', base), { signal: AbortSignal.timeout(30_000) });
+				const res = await fetch(new URL(route, base), { signal: AbortSignal.timeout(30_000) });
 				if (res.ok) {
-					tgz = Buffer.from(await res.arrayBuffer());
-					source = `${baseUrl}/client/shell`;
+					const body = await readBoundedBody(res, MAX_VENDORED_TGZ_BYTES);
+					if (body) {
+						tgz = body;
+						source = `${baseUrl}/${route}`;
+					} else {
+						failure = `The ${label} served by ${baseUrl} is larger than the ${MAX_VENDORED_TGZ_BYTES / (1024 * 1024)} MB limit — refusing the download.`;
+					}
 				} else {
-					downloadFailure = `${baseUrl} does not serve the shell package (HTTP ${res.status}).`;
+					failure = `${baseUrl} does not serve the ${label} (HTTP ${res.status}).`;
 				}
 			} catch (err) {
-				downloadFailure = `Cannot reach ${baseUrl} — is the server running? (${err instanceof Error ? err.message : String(err)})`;
+				failure = `Cannot reach ${baseUrl} — is the server running? (${err instanceof Error ? err.message : String(err)})`;
 			}
 		}
-		if (!tgz && fallbackTgz && fs.existsSync(fallbackTgz)) {
-			tgz = fs.readFileSync(fallbackTgz);
+		if (!tgz && fallback && fs.existsSync(fallback)) {
+			tgz = fs.readFileSync(fallback);
 			source = 'extension-packaged copy';
-			logger.output(`[appdev] ${downloadFailure} Using the ${source}.`);
+			logger.output(`[appdev] ${failure} Using the ${source} of the ${label}.`);
 		}
-		if (!tgz) {
-			return { ok: false, reason: `${downloadFailure} No packaged fallback copy is available — connect to a server and reopen this app.` };
-		}
+		return { tgz, source, failure };
+	};
 
-		const shellDir = path.join(workspaceRoot, '.rocketride', 'shell');
-		const tgzPath = path.join(shellDir, 'shell.tgz');
-
-		// step: unchanged package — the workspace is already linked to it
+	/** Writes one canonical tarball; returns true when the bytes changed. */
+	const writeIfChanged = (dir: string, fileName: string, tgz: Buffer, source: string, label: string): boolean => {
+		const tgzPath = path.join(dir, fileName);
 		if (fs.existsSync(tgzPath) && tgz.equals(fs.readFileSync(tgzPath))) {
-			logger.output(`[appdev] shell package unchanged (${source}) — keeping ${tgzPath}`);
+			logger.output(`[appdev] ${label} unchanged (${source}) — keeping ${tgzPath}`);
+			return false;
+		}
+		fs.mkdirSync(dir, { recursive: true });
+		fs.writeFileSync(tgzPath, tgz);
+		logger.output(`[appdev] vendored ${label} from ${source} -> ${tgzPath} (${(tgz.length / 1024).toFixed(0)} KB)`);
+		return true;
+	};
+
+	try {
+		// step: fetch BOTH server-matched packages — the shell (the platform
+		// package apps compile against) and the client SDK (the npm
+		// registry's `rocketride` can lag the server badly, so apps pin the
+		// server's own build the same way they pin the shell).
+		const [shell, client] = await Promise.all([
+			fetchTgz('client/shell', 'platform package (shell.tgz)', fallbackTgz),
+			fetchTgz('client/typescript', 'client SDK package (rocketride.tgz)', clientFallbackTgz),
+		]);
+		if (!shell.tgz) {
+			return { ok: false, reason: `${shell.failure} No packaged fallback copy is available — connect to a server and reopen this app.` };
+		}
+
+		const tgzPath = path.join(workspaceRoot, '.rocketride', 'shell', 'shell.tgz');
+		let changed = writeIfChanged(path.join(workspaceRoot, '.rocketride', 'shell'), 'shell.tgz', shell.tgz, shell.source, 'shell package');
+		if (client.tgz) {
+			// Stable filename regardless of the versioned name the endpoint
+			// serves — the file: spec in app package.json must never churn.
+			changed = writeIfChanged(path.join(workspaceRoot, '.rocketride', 'client'), 'rocketride.tgz', client.tgz, client.source, 'client SDK package') || changed;
+		} else {
+			// Non-fatal: the shell alone still serves app work (the runtime
+			// client is shell-shared); the client pin links on the next
+			// connected open, exactly like an offline shell scaffold.
+			logger.output(`[appdev] client SDK package unavailable (non-fatal): ${client.failure}`);
+		}
+
+		// step: unchanged packages — the workspace is already linked to them
+		if (!changed) {
 			return { ok: true, tgzPath };
 		}
 
-		// step: write the canonical tarball
-		fs.mkdirSync(shellDir, { recursive: true });
-		fs.writeFileSync(tgzPath, tgz);
-		logger.output(`[appdev] vendored shell package from ${source} -> ${tgzPath} (${(tgz.length / 1024).toFixed(0)} KB)`);
+		// step: nothing to link into yet — a bare workspace (no root
+		// manifest, no pnpm workspace file) gets the TARBALLS only, which is
+		// the boot-time deliverable: agents and the scaffold find them at
+		// the well-known .rocketride/ locations, and the first real install
+		// (scaffold, pnpm add) links them.
+		if (!fs.existsSync(path.join(workspaceRoot, 'package.json')) && !fs.existsSync(path.join(workspaceRoot, 'pnpm-workspace.yaml'))) {
+			logger.output('[appdev] platform packages vendored (no workspace manifest yet — install will link them when one exists)');
+			return { ok: true, tgzPath };
+		}
 
 		// step: install at the workspace root — links the new tarball into
-		// every app that depends on it
-		await runRootInstall(workspaceRoot);
+		// every app that depends on it. Routed through the WatchManager's
+		// single-flight whenever it is registered: a private pnpm spawn here
+		// ran BESIDE the watch/scaffold install on fresh workspaces, and two
+		// pnpm processes on one node_modules corrupt the virtual store
+		// (ERR_PNPM_EEXIST in symlinkAllModules). The direct spawn survives
+		// only as the fallback for delegate-less contexts.
+		if (workspaceInstallDelegate) {
+			if (!(await workspaceInstallDelegate())) {
+				return { ok: false, reason: 'Workspace pnpm install failed — the app Console carries the pnpm output.' };
+			}
+		} else {
+			await runRootInstall(workspaceRoot);
+		}
 		logger.output(`[appdev] workspace install complete — apps are linked to the new shell package`);
 		return { ok: true, tgzPath };
 	} catch (err) {

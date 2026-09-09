@@ -1,0 +1,7 @@
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
+<!-- preserve-colors -->
+  <path
+    d="M256 48L448 152V360L256 464L64 360V152L256 48ZM256 96L112 176V336L256 416L400 336V176L256 96ZM256 176L336 220V300L256 344L176 300V220L256 176Z"
+    fill="#5B4636"
+  />
+</svg>

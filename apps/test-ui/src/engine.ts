@@ -1060,7 +1060,7 @@ export function createTestEngine(): TestEngine {
 			}
 			case 'account.updateProfile':
 				return;
-			case 'account.setDefaultTeam':
+			case 'account.setDevTeam':
 			case 'account.setDefaultOrg':
 				return;
 			case 'account.getOrg': {

@@ -26,7 +26,7 @@
 //
 // Owns the full lifecycle for a project document view:
 //   - Documents library integration (useDocuments for save/dirty)
-//   - Save logic (dirty state, SaveDialog, Ctrl+S via tab:save event)
+//   - Save logic (dirty state, save dialog, Ctrl+S via tab:save event)
 //   - Pipeline run/stop/restart (via RocketRide client)
 //   - Server event handling: status updates for the canvas, plus the raw
 //     stamped live-event feed + run-log bindings (client.log) that power the
@@ -37,7 +37,7 @@
 
 import React, { useEffect, useCallback, useMemo, useRef, useState, CSSProperties } from 'react';
 import { commonStyles } from 'shell';
-import { getClient, useShellConnection, useWorkspace, useSubscriptions, ConnectionManager, ConfirmDialog } from 'shell';
+import { getClient, useShellConnection, useWorkspace, useSubscriptions, ConnectionManager, ConfirmDialog, SaveFileDialog } from 'shell';
 import { getDocs } from '../docs';
 import type { PipelineConfig } from 'shell';
 // Project module is imported via subpath (not the 'shared' barrel) so the
@@ -48,12 +48,11 @@ import { foldProjectDeployRuns } from 'shared/modules/sidebar/taskFold';
 import type { DeploySnapshot, TeamDeployment } from 'shared/components/deploy-panel';
 import type { DeployArtifact } from 'shell';
 import { useDeployments } from '../hooks/useDeployments';
-import { usePipelineTree } from '../hooks/usePipelineTree';
 import { PrefsProvider } from 'shell';
 import type { TaskEventMessage, TaskEventSession, TaskStatus, TaskTimeline, TraceLevel, ViewState } from 'shared/modules/project';
-import { saveProject, deleteProject, displayName as projectDisplayName } from '../utils/projectStore';
+import { saveProject, displayName as projectDisplayName } from '../utils/projectStore';
+import { createProjectVfs } from '../utils/projectVfs';
 import { downloadJson } from '../utils/downloadFile';
-import SaveDialog from '../components/layout/SaveDialog';
 import DeploymentProvider from './DeploymentProvider';
 
 // =============================================================================
@@ -195,10 +194,9 @@ const ProjectProvider: React.FC<ProjectPageProps> = ({ uri, pipeline, isDirty, i
 	const projectId = pipeline?.project_id ?? '';
 	const filename = uri;
 
-	// Existing pipeline paths (with extension) for the SaveDialog's overwrite
-	// guard — the hook refreshes itself on connect and on project:saved.
-	const { flat: pipelineFlat } = usePipelineTree(client, isConnected);
-	const existingPaths = useMemo(() => pipelineFlat.map((entry) => entry.path), [pipelineFlat]);
+	// Project-store VFS for the stock SaveFileDialog — the dialog loads its own
+	// folder tree and drives its own overwrite confirm through this adapter.
+	const projectVfs = useMemo(() => createProjectVfs(client), [client]);
 
 	// --- Services from the shell's cached catalog -----------------------------
 
@@ -211,14 +209,17 @@ const ProjectProvider: React.FC<ProjectPageProps> = ({ uri, pipeline, isDirty, i
 		const cached = manager.getCachedServices();
 		if (!cached.servicesError && Object.keys(cached.services).length > 0) {
 			// The summary carries the deduplicated icon table — (re)build the
-			// icon registry with the same lifecycle as the services list itself.
-			registerServiceIcons({ services: cached.services, icons: cached.icons ?? {} });
+			// icon registry with the same lifecycle as the services list
+			// itself. The shell types service entries loosely (Record<string,
+			// unknown>); the registry reads only the `icon` id off each entry,
+			// so the hand-off narrows to that shape.
+			registerServiceIcons({ services: cached.services as Record<string, { icon?: string }>, icons: cached.icons ?? {} });
 			setServicesJson(cached.services);
 		}
 		return manager.on('shell:servicesUpdated', ({ services, icons, servicesError }) => {
 			// A failed refresh keeps the last good catalog on the canvas.
 			if (servicesError) return;
-			registerServiceIcons({ services, icons: icons ?? {} });
+			registerServiceIcons({ services: services as Record<string, { icon?: string }>, icons: icons ?? {} });
 			setServicesJson(services);
 		});
 	}, [isConnected]);
@@ -269,7 +270,9 @@ const ProjectProvider: React.FC<ProjectPageProps> = ({ uri, pipeline, isDirty, i
 			// deploy run) is the shared classification — deploy events ride
 			// this connection whenever a team-scoped subscription is open and
 			// must never enter the dev feed.
-			const msg = event as TaskEventMessage;
+			// Wire-boundary reinterpret: the generic DAP envelope narrows to
+			// the task-event shape only after the membership check below.
+			const msg = event as unknown as TaskEventMessage;
 			if (!isDevLiveEvent(msg, pid)) return;
 			setLiveLogEvents((prev) => {
 				const next = [...prev, msg];
@@ -305,9 +308,16 @@ const ProjectProvider: React.FC<ProjectPageProps> = ({ uri, pipeline, isDirty, i
 	 *
 	 * @param saveFilename - The file path to save to.
 	 * @param project      - The pipeline configuration to save.
+	 * @param opts         - When `rethrow` is set, a save failure re-throws
+	 *   after surfacing the error. The save-and-publish path relies on this:
+	 *   DeployPanel awaits the save before publishing, so a swallowed failure
+	 *   would let a failed local save still publish the in-memory pipeline and
+	 *   report success. Re-throwing rejects the awaited promise and aborts the
+	 *   publish. The plain save path leaves it unset (fire-and-forget callers
+	 *   must not see an unhandled rejection).
 	 */
 	const performSave = useCallback(
-		async (saveFilename: string, project: PipelineConfig) => {
+		async (saveFilename: string, project: PipelineConfig, opts?: { rethrow?: boolean }) => {
 			if (!client || !isConnected) return;
 			try {
 				await saveProject(client, saveFilename, project);
@@ -319,6 +329,9 @@ const ProjectProvider: React.FC<ProjectPageProps> = ({ uri, pipeline, isDirty, i
 				// Surface the failure — a silent catch leaves the user believing
 				// the document was saved.
 				setPipelineError(`Save failed: ${err instanceof Error ? err.message : String(err)}`);
+				// The publish path must abort when the save fails: re-throw so
+				// the awaiting caller's promise rejects instead of resolving.
+				if (opts?.rethrow) throw err;
 			}
 		},
 		[client, isConnected, projectId, uri]
@@ -383,14 +396,17 @@ const ProjectProvider: React.FC<ProjectPageProps> = ({ uri, pipeline, isDirty, i
 			} else if (action === 'stop') {
 				client
 					.getTaskToken({ projectId: pid, source })
-					.then((token: string | undefined) => {
-						if (token) return client.terminate(token);
-					})
+					.then((token: string | undefined) => (token ? client.terminate(token) : undefined))
 					.catch((err: unknown) => setPipelineError(err instanceof Error ? err.message : String(err)));
 			} else if (action === 'restart') {
 				client
 					.getTaskToken({ projectId: pid, source })
-					.then((token: string | undefined) => client.restart({ token, projectId: pid, source, pipeline }))
+					// No token = no running task to restart; the server rejects a
+					// tokenless restart outright, so skip it exactly as stop does.
+					// The SDK types restart's pipeline as a loose record (no typed
+					// pipeline shape on that verb yet); PipelineConfig carries no
+					// index signature, so the hand-off needs the cast.
+					.then((token: string | undefined) => (token ? client.restart({ token, projectId: pid, source, pipeline: pipeline as unknown as Record<string, unknown> }) : undefined))
 					.catch((err: unknown) => setPipelineError(err instanceof Error ? err.message : String(err)));
 			}
 		},
@@ -398,7 +414,7 @@ const ProjectProvider: React.FC<ProjectPageProps> = ({ uri, pipeline, isDirty, i
 	);
 
 	/**
-	 * Initiates save — opens SaveDialog for new documents, or saves directly.
+	 * Initiates save — opens the save dialog for new documents, or saves directly.
 	 */
 	const handleSave = useCallback(() => {
 		if (!pipeline) return;
@@ -419,7 +435,7 @@ const ProjectProvider: React.FC<ProjectPageProps> = ({ uri, pipeline, isDirty, i
 	}, [filename, pipeline]);
 
 	/**
-	 * Handles SaveDialog confirmation with a new file path.
+	 * Handles save-dialog confirmation with a new file path.
 	 *
 	 * @param fileRelPath - The chosen file path from the dialog.
 	 */
@@ -481,7 +497,9 @@ const ProjectProvider: React.FC<ProjectPageProps> = ({ uri, pipeline, isDirty, i
 				return;
 			}
 			if (isDirty) {
-				setPendingRun({ action, source });
+				// exactOptionalPropertyTypes: omit `source` entirely when absent
+				// rather than storing an explicit undefined.
+				setPendingRun(source !== undefined ? { action, source } : { action });
 				return;
 			}
 			executePipelineAction(action, source);
@@ -764,7 +782,8 @@ const ProjectProvider: React.FC<ProjectPageProps> = ({ uri, pipeline, isDirty, i
 			// The spread builds publish()'s required-name shape statically —
 			// a truthiness check alone would not narrow the property type.
 			const snapshot = { ...pipeline, name: pipeline.name || documentName };
-			await client.deploy.publish(snapshot, {
+			await client.deploy.add({
+				pipeline: snapshot,
 				...(comment ? { comment } : {}),
 				...(deployTo ? { deployTo } : {}),
 			});
@@ -773,46 +792,67 @@ const ProjectProvider: React.FC<ProjectPageProps> = ({ uri, pipeline, isDirty, i
 		[client, pipeline, filename, refreshDeployments]
 	);
 
+	/** Own 'user~{uid}' rows are addressed as '@me' on the wire — the server
+	    never accepts raw owner keys, and only the caller's own space is
+	    addressable at all. */
+	const wireOwnTeam = useCallback(
+		(teamId: string): string => {
+			const uid = client?.getAccountInfo?.()?.userId ?? '';
+			return uid && teamId === `user~${uid}` ? '@me' : teamId;
+		},
+		[client]
+	);
+
 	/** Point a team at a version (promotion and rollback alike). */
 	const handleDeployVersion = useCallback(
 		async (version: number, teamId: string): Promise<void> => {
 			if (!client) throw new Error('Not connected');
-			await client.deploy.deploy(projectId, version, teamId);
+			await client.deploy.deploy(projectId, version, wireOwnTeam(teamId));
 			refreshDeployments();
 		},
-		[client, projectId, refreshDeployments]
+		[client, projectId, refreshDeployments, wireOwnTeam]
 	);
 
 	/** Toggle one team deployment's kill switch (where-live state dot). */
 	const handleDeploySetDisabled = useCallback(
 		async (teamId: string, disabled: boolean): Promise<void> => {
 			if (!client) throw new Error('Not connected');
-			if (disabled) await client.deploy.disable(projectId, teamId);
-			else await client.deploy.enable(projectId, teamId);
+			if (disabled) await client.deploy.disable(projectId, wireOwnTeam(teamId));
+			else await client.deploy.enable(projectId, wireOwnTeam(teamId));
 			refreshDeployments();
 		},
-		[client, projectId, refreshDeployments]
+		[client, projectId, refreshDeployments, wireOwnTeam]
+	);
+
+	/** Soft-remove one team's deployment (where-live header verb). */
+	const handleDeployRemove = useCallback(
+		async (teamId: string): Promise<void> => {
+			if (!client) throw new Error('Not connected');
+			await client.deploy.remove(projectId, wireOwnTeam(teamId));
+			refreshDeployments();
+		},
+		[client, projectId, refreshDeployments, wireOwnTeam]
 	);
 
 	/** Set/clear one source's schedule from the where-live pill editor. */
 	const handleDeploySetSchedule = useCallback(
 		async (teamId: string, sourceId: string, cron: string | null, ttl: number | null): Promise<void> => {
 			if (!client) throw new Error('Not connected');
-			await client.deploy.setSchedule(projectId, sourceId, cron, teamId, { ...(ttl !== null ? { ttl } : {}) });
+			await client.deploy.setSchedule(projectId, sourceId, cron, wireOwnTeam(teamId), { ...(ttl !== null ? { ttl } : {}) });
 			refreshDeployments();
 		},
-		[client, projectId, refreshDeployments]
+		[client, projectId, refreshDeployments, wireOwnTeam]
 	);
 
 	/** Pause/resume one source's schedule (the editor's footer verb). */
 	const handleDeploySetSchedulePaused = useCallback(
 		async (teamId: string, sourceId: string, paused: boolean): Promise<void> => {
 			if (!client) throw new Error('Not connected');
-			if (paused) await client.deploy.pauseSchedule(projectId, sourceId, teamId);
-			else await client.deploy.resumeSchedule(projectId, sourceId, teamId);
+			if (paused) await client.deploy.pauseSchedule(projectId, sourceId, wireOwnTeam(teamId));
+			else await client.deploy.resumeSchedule(projectId, sourceId, wireOwnTeam(teamId));
 			refreshDeployments();
 		},
-		[client, projectId, refreshDeployments]
+		[client, projectId, refreshDeployments, wireOwnTeam]
 	);
 
 	/** Fetch one immutable artifact (the version cards' record drawer). */
@@ -867,7 +907,7 @@ const ProjectProvider: React.FC<ProjectPageProps> = ({ uri, pipeline, isDirty, i
 						const docState = getDocs()?.getState();
 						return (docState ? Object.values(docState.editors).find((editor) => editor.documentUri === uri)?.label : undefined) || projectDisplayName(filename);
 					})()}
-					{...(isReadonly ? {} : { fetchDeployLifecycle, teamDeployments, deployTeams, onDeployPublish: handleDeployPublish, onDeployVersion: handleDeployVersion, onOpenDeployment: handleOpenDeployment, onDeploySetDisabled: handleDeploySetDisabled, onDeploySetSchedule: handleDeploySetSchedule, onDeploySetSchedulePaused: handleDeploySetSchedulePaused, onDeployPreviewSchedule: handleDeployPreviewSchedule, fetchDeployArtifact: handleDeployFetchArtifact, onSaveDocument: () => performSave(filename, pipeline) })}
+					{...(isReadonly ? {} : { fetchDeployLifecycle, teamDeployments, deployTeams, onDeployPublish: handleDeployPublish, onDeployVersion: handleDeployVersion, onOpenDeployment: handleOpenDeployment, onDeploySetDisabled: handleDeploySetDisabled, onDeployRemove: handleDeployRemove, onDeploySetSchedule: handleDeploySetSchedule, onDeploySetSchedulePaused: handleDeploySetSchedulePaused, onDeployPreviewSchedule: handleDeployPreviewSchedule, fetchDeployArtifact: handleDeployFetchArtifact, onSaveDocument: () => performSave(filename, pipeline, { rethrow: true }) })}
 					servicesJson={servicesJson}
 					isConnected={isConnected}
 					isSubscribed={isSubscribed}
@@ -898,7 +938,9 @@ const ProjectProvider: React.FC<ProjectPageProps> = ({ uri, pipeline, isDirty, i
 				    workspace prefs. */}
 				{openDeployment && <DeploymentProvider key={`${openDeployment.teamId}:${openDeployment.sourceId ?? ''}:${projectId}`} teamId={openDeployment.teamId} {...(openDeployment.sourceId ? { sourceId: openDeployment.sourceId } : {})} projectId={projectId} onClose={() => setOpenDeployment(null)} onOpenSource={(sourceId: string) => setOpenDeployment({ teamId: openDeployment.teamId, sourceId })} />}
 			</PrefsProvider>
-			{saveDialogOpen && <SaveDialog client={client} isConnected={isConnected} existingPaths={existingPaths} onConfirm={handleSaveDialogConfirm} onCancel={() => setSaveDialogOpen(false)} />}
+			{/* Preselect the document's own folder/name (an untitled doc has no
+			    folder, so it opens at root with its "Untitled-N" placeholder). */}
+			{saveDialogOpen && <SaveFileDialog title="Save Pipeline As" vfs={projectVfs} fileTypes={[{ label: 'RocketRide Pipeline', extension: '.pipe' }]} defaultDir={filename.includes('/') ? filename.slice(0, filename.lastIndexOf('/')) : ''} initialName={projectDisplayName(filename)} onConfirm={handleSaveDialogConfirm} onCancel={() => setSaveDialogOpen(false)} />}
 			{pendingRun && <ConfirmDialog title="Unsaved Changes" message="The pipeline has unsaved changes. Save before running?" confirmLabel="Save & Run" cancelLabel="Cancel" onConfirm={handleSaveAndRun} onCancel={() => setPendingRun(null)} />}
 			{pipelineError && <ConfirmDialog title="Pipeline Error" message={pipelineError} confirmLabel="OK" onConfirm={() => setPipelineError(null)} onCancel={() => setPipelineError(null)} />}
 		</div>

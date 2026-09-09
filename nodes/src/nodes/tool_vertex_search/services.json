@@ -1,0 +1,69 @@
+{
+	"title": "Vertex AI Vector Search",
+	"protocol": "tool_vertex_search://",
+	"classType": ["tool"],
+	"capabilities": ["noremote", "invoke"],
+	"register": "filter",
+	"node": "python",
+	"path": "nodes.tool_vertex_search",
+	"prefix": "vertex",
+	"description": ["A processing component that interacts with Google Vertex AI Vector Search."],
+	"icon": "vertex.svg",
+	"documentation": "https://docs.rocketride.org",
+	"invoke": {},
+	"lanes": {},
+	"preconfig": {
+		"default": "default",
+		"profiles": {
+			"default": {}
+		}
+	},
+	"fields": {
+		"vertex.location": {
+			"type": "string",
+			"title": "Location",
+			"default": "us-central1",
+			"description": "The Google Cloud region, e.g. us-central1."
+		},
+		"vertex.indexEndpointId": {
+			"type": "string",
+			"title": "Index Endpoint ID",
+			"description": "The ID of the Vector Search Index Endpoint."
+		},
+		"vertex.deployedIndexId": {
+			"type": "string",
+			"title": "Deployed Index ID",
+			"description": "The ID of the deployed index."
+		},
+		"vertex.default": {
+			"object": "default",
+			"properties": [
+				"gcp.authType",
+				"gcp.serviceAccountKey",
+				"gcp.projectId",
+				"vertex.location",
+				"vertex.indexEndpointId",
+				"vertex.deployedIndexId"
+			]
+		},
+		"vertex.profile": {
+			"hidden": true,
+			"type": "string",
+			"default": "default",
+			"enum": [["default", "Default"]],
+			"conditional": [
+				{
+					"value": "default",
+					"properties": ["vertex.default"]
+				}
+			]
+		}
+	},
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Vertex Vector Search",
+			"properties": ["vertex.profile"]
+		}
+	]
+}

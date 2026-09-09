@@ -34,6 +34,7 @@ from __future__ import annotations
 import asyncio
 import sys
 import threading
+import time
 from unittest.mock import MagicMock
 
 import pytest
@@ -62,6 +63,20 @@ def _fire_startup_callback_async(on_startup) -> None:
             loop.close()
 
     threading.Thread(target=fire, daemon=True).start()
+
+
+def _fire_startup_callback_now(on_startup) -> None:
+    """Invoke an ``on_startup`` async callback and return once it has run.
+
+    Unlike :pyfunc:`_fire_startup_callback_async`, the event is set before this
+    returns. Tests that need ``signalled`` to be true use this so they cannot
+    race the wait's own timeout on a loaded machine.
+    """
+    loop = asyncio.new_event_loop()
+    try:
+        loop.run_until_complete(on_startup())
+    finally:
+        loop.close()
 
 
 # ---------------------------------------------------------------------------
@@ -243,8 +258,13 @@ def test_setup_blocks_until_on_startup_fires(monkeypatch):
         # Note: do NOT fire on_startup here — the test controls timing.
         return MagicMock()
 
+    # A real serve() future is pending while the server runs, and the wait polls
+    # it: a bare MagicMock would report done() truthy and end the wait at once.
+    pending_future = MagicMock(name='future')
+    pending_future.done.return_value = False
+
     monkeypatch.setattr('ai.web.WebServer', fake_web_server)
-    monkeypatch.setattr('asyncio.run_coroutine_threadsafe', lambda coro, loop: MagicMock())
+    monkeypatch.setattr('asyncio.run_coroutine_threadsafe', lambda coro, loop: pending_future)
 
     # Use a sub-thread so we can observe whether _setup is still blocked.
     def call_setup():
@@ -278,11 +298,18 @@ def test_setup_returns_even_when_startup_callback_never_fires(monkeypatch):
         # Never fire on_startup.
         return MagicMock()
 
+    # A live serve() future is pending. A bare MagicMock reports done() truthy,
+    # which would end both waits on their first pass and leave the 0.05s budget
+    # unspent — the timeout path this test exists for would never be reached.
+    pending_future = MagicMock(name='future')
+    pending_future.done.return_value = False
+
     monkeypatch.setattr('ai.web.WebServer', fake_web_server)
-    monkeypatch.setattr('asyncio.run_coroutine_threadsafe', lambda coro, loop: MagicMock())
+    monkeypatch.setattr('asyncio.run_coroutine_threadsafe', lambda coro, loop: pending_future)
 
     debug_messages = []
     monkeypatch.setattr(node, 'debug', lambda msg, *a, **kw: debug_messages.append(str(msg)))
+    monkeypatch.setattr(node, 'warning', lambda msg, *a, **kw: None)
 
     server, future = node._setup_shared_web_server()
 
@@ -319,6 +346,141 @@ def test_setup_reraises_when_serve_future_already_failed(monkeypatch):
 
     with pytest.raises(RuntimeError, match='bind failed'):
         node._setup_shared_web_server()
+
+
+def test_setup_reraises_without_waiting_out_the_timeout(monkeypatch):
+    """A ``serve()`` that dies before the callback fires is reported at once.
+
+    Nothing will ever set the event, so waiting out the full budget before
+    looking at the future would delay the diagnosis by exactly that long.
+    """
+    monkeypatch.setattr(sys, 'argv', ['node.py', '--data_port=12345'])
+    # Generous on purpose: the point of the test is that it is not spent.
+    monkeypatch.setattr(node, '_SHARED_SERVER_STARTUP_TIMEOUT_SECONDS', 30.0)
+
+    future = MagicMock(name='future')
+    future.done.return_value = True
+    future.result.side_effect = RuntimeError('lifespan startup failed')
+
+    def fake_web_server(config=None, on_startup=None, **kwargs):
+        # Never fire on_startup: the failure precedes it.
+        return MagicMock(name='WebServer-instance')
+
+    monkeypatch.setattr('ai.web.WebServer', fake_web_server)
+    monkeypatch.setattr('asyncio.run_coroutine_threadsafe', lambda coro, loop: future)
+
+    started_at = time.monotonic()
+    with pytest.raises(RuntimeError, match='lifespan startup failed'):
+        node._setup_shared_web_server()
+    elapsed = time.monotonic() - started_at
+
+    assert elapsed < 5.0, f'should not have waited out the 30s budget; took {elapsed:.1f}s'
+
+
+def test_setup_reports_a_server_that_stopped_before_listening(monkeypatch):
+    """``serve()`` ending cleanly during startup must not return in silence.
+
+    It raises nothing, so the fail-fast branch has nothing to re-raise — but the
+    listener never came up either, and the caller is about to publish a
+    ``shared_web_server`` whose ``/task/data`` stays unreachable for the rest of
+    the subprocess's life. That is the one path that can hand back a dead server.
+    """
+    monkeypatch.setattr(sys, 'argv', ['node.py', '--data_host=127.0.0.1', '--data_port=12345'])
+
+    server_instance = MagicMock(name='WebServer-instance')
+    server_instance.server.started = False
+
+    # Completed, and completed cleanly: result() returns rather than raising.
+    future = MagicMock(name='future')
+    future.done.return_value = True
+    future.result.return_value = None
+
+    def fake_web_server(config=None, on_startup=None, **kwargs):
+        _fire_startup_callback_now(on_startup)
+        return server_instance
+
+    monkeypatch.setattr('ai.web.WebServer', fake_web_server)
+    monkeypatch.setattr('asyncio.run_coroutine_threadsafe', lambda coro, loop: future)
+
+    warnings = []
+    monkeypatch.setattr(node, 'warning', lambda msg, *a, **kw: warnings.append(str(msg)))
+    monkeypatch.setattr(node, 'debug', lambda msg, *a, **kw: None)
+
+    node._setup_shared_web_server()
+
+    assert any('stopped before it began listening on 127.0.0.1:12345' in m for m in warnings), (
+        f'a cleanly-stopped server must be named, not returned silently; got {warnings!r}'
+    )
+
+
+def test_setup_reports_when_the_listener_never_comes_up(monkeypatch):
+    """Startup signalled but no socket bound is its own diagnosis.
+
+    A different fault from "the callback never fired", and the one a reserved or
+    occupied port produces, so it must name the endpoint and stay quiet about
+    the callback.
+    """
+    monkeypatch.setattr(sys, 'argv', ['node.py', '--data_host=127.0.0.1', '--data_port=12345'])
+    monkeypatch.setattr(node, '_SHARED_SERVER_STARTUP_TIMEOUT_SECONDS', 0.05)
+
+    # A bare MagicMock reports done() truthy and started truthy, which would
+    # leave the poll at the future branch and never reach the deadline.
+    server_instance = MagicMock(name='WebServer-instance')
+    server_instance.server.started = False
+    future = MagicMock(name='future')
+    future.done.return_value = False
+
+    def fake_web_server(config=None, on_startup=None, **kwargs):
+        _fire_startup_callback_now(on_startup)
+        return server_instance
+
+    monkeypatch.setattr('ai.web.WebServer', fake_web_server)
+    monkeypatch.setattr('asyncio.run_coroutine_threadsafe', lambda coro, loop: future)
+
+    warnings = []
+    debugs = []
+    monkeypatch.setattr(node, 'warning', lambda msg, *a, **kw: warnings.append(str(msg)))
+    monkeypatch.setattr(node, 'debug', lambda msg, *a, **kw: debugs.append(str(msg)))
+
+    server, returned_future = node._setup_shared_web_server()
+
+    assert server is not None
+    assert returned_future is not None
+    # A warning, not a debug: engLib's debug() is gated on the DebugOut level,
+    # which is off by default, so a failure routed through it would be invisible
+    # exactly when it matters.
+    assert any('never began listening on 127.0.0.1:12345' in m for m in warnings), (
+        f'expected the listener case named as a warning; got {warnings!r}'
+    )
+    assert not any('did not signal' in m for m in debugs), (
+        f'callback did fire, so the not-signalled line must stay quiet; got {debugs!r}'
+    )
+
+
+def test_setup_is_quiet_when_the_listener_comes_up(monkeypatch):
+    """A healthy startup logs nothing — the control for the test above."""
+    monkeypatch.setattr(sys, 'argv', ['node.py', '--data_host=127.0.0.1', '--data_port=12345'])
+    monkeypatch.setattr(node, '_SHARED_SERVER_STARTUP_TIMEOUT_SECONDS', 0.5)
+
+    server_instance = MagicMock(name='WebServer-instance')
+    server_instance.server.started = True
+    future = MagicMock(name='future')
+    future.done.return_value = False
+
+    def fake_web_server(config=None, on_startup=None, **kwargs):
+        _fire_startup_callback_now(on_startup)
+        return server_instance
+
+    monkeypatch.setattr('ai.web.WebServer', fake_web_server)
+    monkeypatch.setattr('asyncio.run_coroutine_threadsafe', lambda coro, loop: future)
+
+    messages = []
+    monkeypatch.setattr(node, 'debug', lambda msg, *a, **kw: messages.append(str(msg)))
+    monkeypatch.setattr(node, 'warning', lambda msg, *a, **kw: messages.append(str(msg)))
+
+    node._setup_shared_web_server()
+
+    assert messages == [], f'a healthy startup should be silent; got {messages!r}'
 
 
 # ---------------------------------------------------------------------------

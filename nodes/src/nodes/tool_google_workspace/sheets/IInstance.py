@@ -63,6 +63,21 @@ _VALUE_INPUT_OPTIONS = ('USER_ENTERED', 'RAW')
 _VALUE_RENDER_OPTIONS = ('FORMATTED_VALUE', 'UNFORMATTED_VALUE', 'FORMULA')
 _MAJOR_DIMENSIONS = ('ROWS', 'COLUMNS')
 
+# The Sheets API has no list/about-style endpoint to probe cheaply, so check_connection asks
+# for a spreadsheet that can't exist. Google's front-end enforces API-enablement before it
+# resolves the resource, so a 404 here still proves the API itself is reachable; anything
+# else (esp. a 403 accessNotConfigured) is a real connectivity problem and must propagate.
+_CONNECTION_PROBE_SPREADSHEET_ID = 'rocketride-connection-probe-0000000000000000'
+
+
+def _probe_connection(svc) -> None:
+    try:
+        execute(svc.spreadsheets().get(spreadsheetId=_CONNECTION_PROBE_SPREADSHEET_ID, fields='spreadsheetId'))
+    except ValueError as exc:
+        if getattr(exc, 'status', None) == 404:
+            return
+        raise
+
 
 class IInstance(GoogleToolInstanceBase):
     IGlobal: IGlobal
@@ -86,15 +101,17 @@ class IInstance(GoogleToolInstanceBase):
 
     @tool_function(
         description=(
-            'Check the Google Sheets connection and verify that the granted OAuth scopes cover the '
-            "node's configured access tier. Call this when a Sheets operation fails with a scope or "
-            'permission error. Returns connection_ok: true when the required scopes are present.'
+            'Check the Google Sheets connection: makes a live probe call against the Sheets API and '
+            "verifies that the granted OAuth scopes cover the node's configured access tier. Call "
+            'this when a Sheets operation fails with a scope or permission error. Returns '
+            'connection_ok: true only when the live probe succeeds and the required scopes are '
+            'present.'
         ),
         input_schema={'type': 'object', 'properties': {}, 'required': []},
     )
     def check_connection(self, args: dict) -> dict:
-        """Check Sheets connection status and whether granted OAuth scopes cover the access tier. Read-only."""
-        return self._check_connection_impl()
+        """Check Sheets connection status: live API probe plus granted-scope coverage. Read-only."""
+        return self._check_connection_impl(probe=_probe_connection)
 
     # =======================================================================
     # VALUES — read

@@ -48,17 +48,44 @@ import os
 import time
 from typing import TYPE_CHECKING, Dict, Any, List, Tuple
 from rocketride import EVENT_TYPE
-from rocketlib import validatePipeline
+from rocketlib import getServiceDefinition, validatePipeline
+from ai.common.config import Config
 from ai.common.dap import DAPConn, TransportBase
 from ai.common.list_rows import paginate_rows
-from ai.account.models import resolve_task_permissions
+from ai.account.models import resolve_run_permissions
 from ..pipeline import resolve_implied_source, resolve_pipeline_env
 from .. import services_catalog
-from .cmd_monitor import owner_key
+from .cmd_monitor import owner_key, owner_wildcard_key
 
 # Only import for type checking to avoid circular import errors
 if TYPE_CHECKING:
     from ..task_server import TaskServer
+
+
+# Component-level keys that are not node configuration. The engine validates and
+# consumes these itself, so a profile does not discard them and an author must not be
+# told to move them inside one.
+_STRUCTURAL_CONFIG_KEYS = frozenset({'profile', 'parameters', 'secureParameters', 'name'})
+
+
+def _service_profile_names(provider: str) -> frozenset:
+    """Return every profile name the service declares, or an empty set.
+
+    A config saved by an editor carries one sub-object per profile, so an unselected
+    profile's own block would otherwise read as a key the resolver threw away.
+
+    Args:
+        provider: Component provider, e.g. 'llm_openai'.
+
+    Returns:
+        The declared profile names. Empty when the service or its preconfig is
+        unavailable, which leaves the caller reporting the key rather than hiding it.
+    """
+    try:
+        service = getServiceDefinition(provider)
+        return frozenset((service or {}).get('preconfig', {}).get('profiles', {}) or {})
+    except Exception:
+        return frozenset()
 
 
 class MiscCommands(DAPConn):
@@ -171,10 +198,15 @@ class MiscCommands(DAPConn):
         2. ``source`` field inside the pipeline config
         3. Implied source: the single component whose config.mode == 'Source'
 
+        The ``pipeline`` argument may be flat (the shape the SDK documents) or
+        already wrapped in the ``{'pipeline': {...}}`` envelope; either way the
+        engine receives exactly one envelope.
+
         Args:
             request (Dict[str, Any]): DAP request containing:
                 - arguments (Dict[str, Any]):
-                    - pipeline (Dict[str, Any]): Pipeline configuration to validate
+                    - pipeline (Dict[str, Any]): Pipeline configuration to validate,
+                      flat or already enveloped
                     - source (str, optional): Override source component ID
 
         Returns:
@@ -190,13 +222,27 @@ class MiscCommands(DAPConn):
 
             args = request.get('arguments', {})
             pipeline = args.get('pipeline', {})
+            # Accept the wrapped .pipe file form too — the config is
+            # whatever sits under its 'pipeline' key; everything below
+            # (env resolution, source inference) walks the flat config.
+            if isinstance(pipeline.get('pipeline'), dict):
+                pipeline = pipeline['pipeline']
+
+            # Callers that already send the {'pipeline': ...} envelope must not be
+            # double-wrapped: the MCP validate_pipeline tool (modules/mcp/tools/
+            # introspection.py, #2082) pre-wraps client-side as a workaround for
+            # the very bug this handler now fixes. Unwrap first, wrap once below.
+            if isinstance(pipeline.get('pipeline'), dict):
+                pipeline = pipeline['pipeline']
 
             # Build merged environment for variable resolution (same as execute)
             merged_env: Dict[str, str] = {}
             if hasattr(self, '_account_info') and self._account_info:
                 # Determine org and team IDs from account info
                 org_id = ''
-                team_id = getattr(self._account_info, 'defaultTeam', '') or ''
+                # The dev team's environment layer — one of devTeam's two
+                # legitimate jobs (billing being the other).
+                team_id = getattr(self._account_info, 'devTeam', '') or ''
                 org = getattr(self._account_info, 'organization', None)
                 if org:
                     org_id = org.get('id', '') if isinstance(org, dict) else getattr(org, 'id', '')
@@ -222,19 +268,100 @@ class MiscCommands(DAPConn):
             if not source:
                 source = resolve_implied_source(pipeline)
 
-            # Build the C++ payload with resolved source and default version
+            # Build the C++ payload with resolved source and default version.
+            # The engine's config loader requires the FILE-form root
+            # ({'pipeline': <config>}) — handing it the flat config rejects
+            # every wire-correct client with "'pipeline' is missing or
+            # invalid". Clients send the flat config per the DAP contract
+            # above; the wrap happens HERE.
             inner = {**pipeline, 'version': pipeline.get('version', 1)}
             if source:
                 inner['source'] = source
 
-            # Validate it
-            data = validatePipeline(inner)
+            # Same envelope pipe_Validate (modules/pipe) builds — the version
+            # rides INSIDE the wrapped config (see the FILE-form note above).
+            data = validatePipeline({'pipeline': inner})
 
             # Return the results
             return self.build_response(request, body=data)
 
         except Exception as e:
             self.debug_message(f'Pipeline validation failed: {str(e)}')
+            raise
+
+    async def on_rrext_resolve_config(self, request: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Handle DAP 'rrext_resolve_config' to resolve a component config as a node sees it.
+
+        Runs the config through the same ``Config.getNodeConfig`` a node calls at
+        load, so an author can see what the node actually receives rather than
+        what the .pipe appears to say. This has to happen engine-side: the
+        service catalog does not carry ``preconfig``, so profile resolution
+        cannot be reproduced from ``rrext_services``.
+
+        Args:
+            request (Dict[str, Any]): DAP request containing:
+                - arguments (Dict[str, Any]):
+                    - provider (str): Component provider, e.g. 'llm_openai'.
+                    - config (Dict[str, Any], optional): The component's config block.
+
+        Returns:
+            Dict[str, Any]: DAP response whose body carries:
+                - provider (str): The provider that was resolved.
+                - profile (str): The profile that applied, named or default.
+                - resolved (Dict[str, Any]): What the node receives.
+                - dropped (List[str]): Top-level config keys the resolver discarded.
+
+        Raises:
+            ValueError: If provider is missing or config is not an object.
+            Exception: If the service is unknown or has no preconfig section.
+        """
+        try:
+            args = request.get('arguments', {})
+            provider = args.get('provider')
+            if not provider:
+                raise ValueError('provider is required')
+
+            # Default only a genuinely absent config: `or {}` would coerce a
+            # falsy non-object such as [] and skip the type check below.
+            config = args.get('config')
+            if config is None:
+                config = {}
+            if not isinstance(config, dict):
+                raise ValueError('config must be an object')
+
+            resolved = Config.getNodeConfig(provider, config)
+            profile = config.get('profile')
+
+            # Report the keys the resolver discarded rather than leaving the author
+            # to infer it from an absence. With a profile set, getNodeConfig reads
+            # the user layer only from the sub-object named after that profile, so
+            # sibling top-level keys never reach the node (#1839).
+            dropped = []
+            if profile:
+                # Every sibling of the selected profile is discarded, so the value is
+                # not worth comparing: one that happens to match the profile's own is
+                # still a line the resolver never read.
+                #
+                # Two kinds of sibling are not user config and must not be reported.
+                # The structural keys below belong to the component, not the node, and
+                # the engine consumes them on its own path (pipeline_config.cpp Rule 5
+                # and Rule 6); telling an author to move them inside the profile would
+                # break the component. An unselected profile's own sub-object is the
+                # other: an editor-saved config keeps one per profile.
+                profiles = _service_profile_names(provider)
+                dropped = [k for k in config if k != profile and k not in _STRUCTURAL_CONFIG_KEYS and k not in profiles]
+
+            body = {
+                'provider': provider,
+                'profile': profile or 'default',
+                'resolved': resolved,
+                'dropped': dropped,
+            }
+            return self.build_response(request, body=body)
+
+        except Exception as e:
+            self.debug_message(f'Config resolution failed for {request.get("arguments", {}).get("provider")}: {str(e)}')
             raise
 
     async def on_rrext_dashboard(self, request: Dict[str, Any]) -> Dict[str, Any]:
@@ -426,10 +553,9 @@ class MiscCommands(DAPConn):
         server = self._server
         caller_user_id = self._account_info.userId
 
-        # Snapshot tasks the caller has access to (own, teammate, org admin)
-        task_controls = [
-            c for c in server._task_control.values() if resolve_task_permissions(self._account_info, c.teamId)
-        ]
+        # Snapshot tasks the caller may see (run-scoped: user-owned runs are
+        # owner-only; team-owned runs need permissions on the run's team)
+        task_controls = [c for c in server._task_control.values() if resolve_run_permissions(self._account_info, c)]
         # Connections are user-scoped (not task-scoped), so filter by userId
         conn_items = [
             (cid, conn)
@@ -487,8 +613,8 @@ class MiscCommands(DAPConn):
             task_name = getattr(status, 'name', None) or control.source
             # Monitor keys are owner-scoped — build from the control's owner
             # (once per control; they do not vary per connection).
-            project_key = owner_key(control.owner_id, control.project_id, control.source)
-            project_wildcard_key = f'p.{control.owner_id}.{control.project_id}.*'
+            project_key = owner_key(control.run_kind, control.owner_id, control.project_id, control.source)
+            project_wildcard_key = owner_wildcard_key(control.run_kind, control.owner_id, control.project_id)
             pipe_prefix = f'{project_key}.'
             for cid, conn in conn_items:
                 if not hasattr(conn, '_monitors'):
@@ -671,21 +797,19 @@ class MiscCommands(DAPConn):
         if not key.startswith('p.'):
             return 'Task monitor'
 
-        # Strip the 'p.' prefix and split: ownerId, projectId, source, [pipeId]
-        # (keys are owner-scoped: p.{teamId|userId}.{projectId}.{source})
+        # Strip the 'p.' prefix and split the owner-scoped key layout
+        # p.{runKind}.{ownerId}.{projectId}.{source} — the leading runKind
+        # segment (added with @me run identity) shifts every field right by
+        # one, so projectId is parts[2] and source parts[3], NOT parts[1]/[2].
         parts = key[2:].split('.', 3)
-        if len(parts) < 2:
+        if len(parts) < 3:
             return 'Task monitor'
-        project_id = parts[1]
+        project_id = parts[2]
         project_label = project_names.get(project_id, project_id[:8])
 
-        if len(parts) == 2 or (len(parts) == 3 and parts[2] == '*'):
+        if len(parts) == 3 or parts[3] == '*':
             return f'{project_label}.*'
 
-        source = parts[2]
+        source = parts[3]
         source_label = source_names.get(f'{project_id}.{source}', source)
-
-        if len(parts) == 4:
-            return f'{project_label}.{source_label}.pipe{parts[3]}'
-
         return f'{project_label}.{source_label}'

@@ -247,6 +247,7 @@ import { PanelTabBody } from './components/detail-panel/PanelTabBody';
 import { TabControl } from './components/tab-control/TabControl';
 import { TabPanel } from './components/tab-panel/TabPanel';
 import { Modal, CLOSE_GLYPH } from './components/modal/Modal';
+import { SaveFileDialog } from './components/save-file-dialog/SaveFileDialog';
 import { SidebarMenu } from './components/sidebar-menu/SidebarMenu';
 import { SidebarCollapsedProvider, SidebarCollapsedGate, useSidebarCollapsed } from './components/sidebar-menu/SidebarCollapsedContext';
 import { SidebarFooter } from './components/sidebar-footer/SidebarFooter';
@@ -274,12 +275,15 @@ import { applyTheme } from './themes';
 import { isInVSCode } from './themes/vscode';
 import { OAUTH_ROOT_URL } from './auth/oauth';
 import { ITaskState, IServiceCapabilities, DEFAULT_TOOLCHAIN_STATE } from './types/project';
+import { getAppVersionOverride, applyAppVersionOverride, versionedEntryUrl } from './util/versionOverride';
+export type { AppVersionOverride } from './util/versionOverride';
 
 export {
 	Button, StatusBadge, StatusDot, EmptyState, Banner, InputField,
 	ToggleGroup, Chip, ChipAdd, DropZone, Card, MiniCard, MiniContainer,
 	Section, LabelValue, ContentHeader, RocketRideMark,
 	DetailPanel, PanelTabBody, TabControl, TabPanel, Modal, CLOSE_GLYPH,
+	SaveFileDialog,
 	SidebarMenu, SidebarCollapsedProvider, SidebarCollapsedGate,
 	useSidebarCollapsed, SidebarFooter,
 	DataGrid, CardDataGrid, FilterStrip, createActionsColumn, autoFormatter,
@@ -319,6 +323,7 @@ export type { ITabControlProps } from './components/tab-control/TabControl';
 export type { ITabPanelProps, ITabPanelPanel } from './components/tab-panel/TabPanel';
 export type { IModalProps } from './components/modal/Modal';
 export type { IConfirmDialogProps } from './components/modal/ConfirmDialog';
+export type { ISaveFileDialogProps, ISaveFileType } from './components/save-file-dialog/SaveFileDialog';
 export type { ISidebarMenuProps } from './components/sidebar-menu/SidebarMenu';
 export type { ISidebarCollapsedProviderProps, ISidebarCollapsedGateProps } from './components/sidebar-menu/SidebarCollapsedContext';
 export type { SidebarFooterProps, SidebarFooterMenuItem } from './components/sidebar-footer/SidebarFooter';
@@ -423,6 +428,7 @@ export const shellApi = {
 	get TabPanel() { return TabPanel; },
 	get Modal() { return Modal; },
 	get CLOSE_GLYPH() { return CLOSE_GLYPH; },
+	get SaveFileDialog() { return SaveFileDialog; },
 	get SidebarMenu() { return SidebarMenu; },
 	get SidebarCollapsedProvider() { return SidebarCollapsedProvider; },
 	get SidebarCollapsedGate() { return SidebarCollapsedGate; },
@@ -506,6 +512,12 @@ export const shellApi = {
 	get BxChevronRight() { return BxChevronRight; },
 	get BxFolderOpen() { return BxFolderOpen; },
 	get AppLayout() { return AppLayout; },
+	// Desktop version selector — session override read + apply/clear
+	get getAppVersionOverride() { return getAppVersionOverride; },
+	get applyAppVersionOverride() { return applyAppVersionOverride; },
+	// Stable versioned entry URL (constructed, never minted — the server
+	// enforces entitlement per request on the /apps/<id>/v<N>/ route)
+	get versionedEntryUrl() { return versionedEntryUrl; },
 } as const;
 
 // =============================================================================
@@ -546,6 +558,8 @@ export {
 	BxLockOpen, BxPurchaseTag, BxChevronRight, BxFolderOpen,
 	// The one app-root layout
 	AppLayout,
+	// Desktop version selector — session override read + apply/clear
+	getAppVersionOverride, applyAppVersionOverride, versionedEntryUrl,
 };
 
 /**

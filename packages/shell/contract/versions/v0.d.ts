@@ -23,8 +23,8 @@
 // =============================================================================
 // FROZEN shell-api contract — ShellApiV0 — never edit by hand
 // =============================================================================
-// Generated:     2026-08-07T07:09:39.400Z
-// Source commit: 02eb2375d7963391ae0f6cb8426226affdb0adff
+// Generated:     2026-08-18T15:03:58.414Z
+// Source commit: 733316f33fb2590af88ca4e96507548b68a06a43
 // Generator:     dts-bundle-generator@9.5.1
 // Produced by:   ./builder shell:freeze
 // =============================================================================
@@ -1226,17 +1226,44 @@ export interface DeployHistoryEntry {
     /** Unix timestamp (seconds). */
     at?: number;
     /** `pause`/`resume` appear only on rows written before the
-        enable/disable vocabulary (the trail is immutable). */
+        enable/disable vocabulary (the trail is immutable). NOTE: app rails
+        additionally carry the review vocabulary (`request`/`approved`/
+        `rejected`/`withdrawn`/`failed`) and the human `reply` row at runtime —
+        the union names the pipe-rail actions only and stays as the frozen
+        v1.3 floor wrote it (widening a returned union would break floor
+        assignability); compare raw strings for the app-rail extras. */
     action?: "publish" | "deploy" | "rollback" | "enable" | "disable" | "pause" | "resume" | "errored" | "remove";
     /** `''` on org-wide rows (publish); the team id on pointer changes. */
     teamId?: string;
     version?: number;
     actor?: DeployActor;
+    /** Row payload — self-describing by contract (rows render without a
+        second lookup). `reply` rows carry the review-thread message and its
+        side. App audience rows (publish binds, removed/disabled/enabled)
+        carry the audience WITH its server-dereferenced display facts
+        (`name`, `handle`), plus `previousVersion` when a publish repointed
+        an existing binding. A `publish` row without an audience is the
+        registry write (the DEPLOY) and rides the deploy `comment`; review
+        transitions carry both endpoints (`from`/`to`). */
+    data?: {
+        side?: "admin" | "developer";
+        message?: string;
+        audience?: {
+            type?: string;
+            id?: string;
+            name?: string;
+            handle?: string;
+        };
+        previousVersion?: number;
+        comment?: string;
+        from?: string;
+        to?: string;
+    } | null;
 }
-/** Body of `deploy.publish()`. */
+/** Body of `deploy.add()` — the generic rail door. */
 export interface PublishResult {
     artifact?: DeployArtifact;
-    /** Present only when `deployTo` was given (one-step publish+deploy). */
+    /** Present only when `deployTo` was given (one-step add+deploy; pipes only). */
     deployment?: Deployment;
 }
 /** The standard list-API request arguments (page/search/filter/sort). */
@@ -1299,14 +1326,16 @@ export interface SchedulePreview {
  * A task's run log is ONE continuous JSONL event stream per identity;
  * individual runs are chapters (tracks) inside it. Streams are addressed by
  * the plain identity pair (`projectId` + `source`) plus the SCOPE — never by
- * token. THE SCOPE IS THE KIND: `teamId` present addresses that team's
- * DEPLOY continuum (deploy runs execute as the team and log into its tree —
- * teammates with monitor rights can watch/replay); absent addresses the
- * caller's own DEV stream. There is no run-kind wire argument.
+ * token. `teamId` present addresses that team's DEPLOY continuum (deploy
+ * runs execute as the team and log into its tree — teammates with monitor
+ * rights can watch/replay). Absent, the optional `runKind` selects the
+ * caller's OWN continuum: the dev stream (default) or the caller's PERSONAL
+ * (@me) deploy stream — deploy-kind but user-owned, the one case
+ * teamId-presence cannot express.
  */
 /**
- * The two run kinds. Not part of stream addressing (the scope decides) —
- * still stamped on event bodies for client-side filtering.
+ * The two run kinds. Stamped on event bodies for client-side filtering,
+ * and usable as the teamless-scope selector on LogStreamRef (the @me case).
  */
 export type LogRunKind = "dev" | "deploy";
 /** Identity addressing one run-log stream. */
@@ -1315,9 +1344,15 @@ export interface LogStreamRef {
     source: string;
     /**
      * A team id addresses that team's deploy continuum; omitted = the
-     * caller's own dev stream.
+     * caller's own stream (see runKind).
      */
     teamId?: string;
+    /**
+     * Teamless-scope selector: omitted/'dev' = the caller's dev stream;
+     * 'deploy' = the caller's personal (@me) deploy stream. Ignored when
+     * teamId is set (a team scope is always the deploy continuum).
+     */
+    runKind?: LogRunKind;
 }
 /** One chapter (track) — a run inside the continuum. */
 export interface LogChapter {
@@ -1755,7 +1790,7 @@ export interface ConnectResult {
      * ID of the team that should be used by default for operations that do not
      * explicitly specify a team context.
      */
-    defaultTeam: string;
+    devTeam: string;
     /**
      * The organisation the authenticated user belongs to, with its own
      * permission set and nested team memberships.  Null when the user
@@ -1817,8 +1852,15 @@ interface AppManifestEntry {
     categories?: string[];
     /** App-specific setting definitions. */
     settings?: unknown[];
-    /** URL to the app's Module Federation remote entry file. */
-    entry: string;
+    /**
+     * URL to the app's Module Federation remote entry file — present ONLY
+     * for dev-overlay entries (a localhost dev server is not constructible
+     * from a number). Published versions carry `registryVersion` instead and
+     * clients construct `/apps/<appId>/v<N>/remoteEntry.js` themselves.
+     */
+    entry?: string;
+    /** Registry version number the entry resolves to (the scope-walk winner). */
+    registryVersion?: number;
     /** App version string (semver). */
     version?: string;
     /** Visibility scope: "public", "org", "team", or "user". */
@@ -1882,6 +1924,31 @@ export interface ServerInfoResult {
      * public apps (e.g. landing page) before login.
      */
     apps?: AppManifestEntry[];
+    /**
+     * Stripe publishable key (`pk_*`) configured on this server.
+     *
+     * Lets clients initialise Stripe Elements with the key matching the
+     * server's Stripe account (test vs live) instead of a build-time value.
+     * Absent on servers without billing (OSS).
+     */
+    stripePublishableKey?: string;
+    /**
+     * The server's public addresses, RESOLVED to absolute URLs.
+     *
+     * `getServerInfo` substitutes the server's `'origin'` sentinel ("the
+     * address you probed me at") with the probed URI before returning, and
+     * manufactures the block when probing a pre-endpoints server — so
+     * consumers ALWAYS receive both keys as absolute URLs and never branch
+     * on presence. `api` is where clients open the WebSocket; `ui` is the
+     * environment's public web address (browser links, OAuth returns).
+     * They differ only on split deployments (e.g. CDN-served UI).
+     */
+    endpoints: {
+        /** Absolute URL clients connect the DAP WebSocket to. */
+        api: string;
+        /** Absolute URL of the environment's web UI. */
+        ui: string;
+    };
 }
 /**
  * MIT License
@@ -3353,11 +3420,11 @@ declare class AccountApi {
      */
     updateProfile(fields: ProfileUpdate): Promise<void>;
     /**
-     * Sets the user's preferred default team.
+     * Sets the user's DEV team — the team dev-mode runs bill to and whose environment layer applies.
      *
      * @param teamId - The team ID to set as default.
      */
-    setDefaultTeam(teamId: string): Promise<void>;
+    setDevTeam(teamId: string): Promise<void>;
     /**
      * Switches the user's active organization.
      *
@@ -3957,26 +4024,44 @@ declare class DeployApi {
     /** @param client - The parent RocketRideClient that owns this namespace. */
     constructor(client: RocketRideClient);
     /**
-     * Publishes a pipeline as the next immutable registry version.
+     * Deploys an object to the server as the next immutable registry version.
      *
-     * The artifact is sha256-locked: what was published is provably what
-     * runs. Publishing alone puts nothing live — point a team at the version
-     * with {@link deploy} (or pass `deployTo` to do both in one step, the
-     * small-team convenience).
+     * The ONE generic rail door for every kind — DEPLOY in the settled
+     * vocabulary means "copy code to the server"; binding it to an audience
+     * is the separate publish step ({@link deploy} for pipe teams; the app
+     * publish verbs for apps). The artifact is sha256-locked: what was
+     * deployed is provably what runs.
      *
-     * @param pipeline - The full pipeline definition to snapshot. `name` is
-     *   REQUIRED here (narrowed at compile time, enforced by the server):
-     *   artifacts are immutable and pipelineName renders on every deploy
-     *   surface — a nameless publish would show as a project GUID forever.
-     * @param options - Optional publish options.
+     * Kind dispatch:
+     * - `kind: 'pipe'` (default) — pass `pipeline` (the full definition;
+     *   `name` REQUIRED: it renders on every deploy surface forever).
+     * - `kind: 'app'` — pass `data` (ONE zip of the app's SOURCE — the server
+     *   owns the build and never trusts client-produced binaries). Two
+     *   layouts: package.json + src at the zip root (legacy), or
+     *   workspace-relative with `metadata.appRoot` naming the app folder so
+     *   `appManifest.include` extras ride at their real workspace paths. The
+     *   server retains the zip and unpacks it at receipt; the app deployment
+     *   is born state 'private' (internally publishable — an @me/@team binding
+     *   may serve it; the developer submits it for review to reach the public
+     *   store).
+     *
+     * @param options.kind - 'pipe' (default) | 'app'.
+     * @param options.pipeline - The pipeline definition (kind 'pipe').
+     * @param options.data - The source zip bytes (kind 'app').
+     * @param options.metadata - Optional metadata blob (e.g. projectId
+     *   provenance, appRoot for workspace-relative app zips).
      * @param options.comment - "What changed" note kept in the registry.
      * @param options.deployTo - Team id to deploy the new version to
-     *   immediately (one-step publish+deploy).
+     *   immediately (one-step add+deploy; pipes only).
      * @returns The artifact entry, plus the deployment when `deployTo` was given.
      */
-    publish(pipeline: PipelineConfig & {
-        name: string;
-    }, options?: {
+    add(options: {
+        kind?: "pipe" | "app" | "node";
+        pipeline?: PipelineConfig & {
+            name: string;
+        };
+        data?: Uint8Array;
+        metadata?: Record<string, unknown>;
         comment?: string;
         deployTo?: string;
     }): Promise<PublishResult>;
@@ -4453,9 +4538,13 @@ export declare class DataPipe {
  * - `{ projectId, source }` — monitors the CALLER's own dev run of the
  *   project/source (the server binds the connection's user identity).
  * - `{ teamId, projectId, source }` — monitors the team's DEPLOYED run.
+ * - `{ runKind: 'deploy', projectId, source }` — monitors the CALLER's own
+ *   PERSONAL (@me) deploy run: deploy-kind but user-owned, the one case
+ *   teamId-presence cannot express.
  *
- * The scope IS the kind: teamId present addresses the deploy continuum,
- * absent addresses your dev run — there is no run-kind argument.
+ * teamId present always addresses the team's deploy continuum (runKind is
+ * ignored there); absent, the optional runKind selects between your dev
+ * run (default) and your personal deploy run.
  */
 export type MonitorKey = {
     token: string;
@@ -4464,6 +4553,7 @@ export type MonitorKey = {
     projectId: string;
     source: string;
     pipeId?: number;
+    runKind?: "dev" | "deploy";
 };
 export declare class RocketRideClient extends DAPClient {
     /** Maps pipe_id → SSE callback for pipe-scoped real-time event dispatch. */
@@ -4545,6 +4635,21 @@ export declare class RocketRideClient extends DAPClient {
      * ```
      */
     static getServerInfo(uri: string, timeout?: number): Promise<ServerInfoResult>;
+    /**
+     * Resolve a probe's `endpoints` block against the URI that was probed.
+     *
+     * The wire value for each key is an absolute URL or the literal
+     * `'origin'` — the server's way of saying "wherever you reached me"
+     * (a server behind a proxy cannot know its public name). Absent keys
+     * and a missing block (pre-endpoints servers) mean `'origin'` too, so
+     * the ONE conditional in the whole scheme lives here and callers get a
+     * complete `{ api, ui }` of absolute URLs unconditionally.
+     *
+     * @param endpoints - The raw `endpoints` value from the probe body, if any.
+     * @param probedUri - The URI `getServerInfo` attached to.
+     * @returns Both keys resolved to absolute URLs.
+     */
+    static resolveEndpoints(endpoints: Partial<ServerInfoResult["endpoints"]> | undefined, probedUri: string): ServerInfoResult["endpoints"];
     /**
      * Attach to a RocketRide server (open WebSocket, no auth).
      *
@@ -4857,7 +4962,7 @@ export declare class RocketRideClient extends DAPClient {
         file: File;
         objinfo?: Record<string, unknown>;
         mimetype?: string;
-    }>, token: string): Promise<UPLOAD_RESULT[]>;
+    }>, token: string, maxConcurrent?: number): Promise<UPLOAD_RESULT[]>;
     /**
      * Ask a question to RocketRide's AI and get an intelligent response.
      */
@@ -5171,69 +5276,118 @@ export declare class RocketRideClient extends DAPClient {
         error?: string;
     }>>;
     /**
-     * Publish an immutable app version to the org registry.
+     * List an app's deployed versions, newest first (the version rail).
      *
-     * Publishing never activates anything — pin a rung with {@link appDeploy}
-     * to make the version live somewhere.
-     *
-     * @param options.appId - App id (appManifest.id, e.g. 'acme.brandy')
-     * @param options.version - Semver label (e.g. '0.5.0')
-     * @param options.bundle - The built remoteEntry.js bytes (single-file v1)
-     * @param options.message - Commit-style "what changed" note (version card)
-     * @param options.moduleId - MF container name (derived when omitted)
-     * @param options.name - Display name (defaults to appId)
-     * @returns The version-rail entry (registryVersion, appVersion, sha256, ...)
-     */
-    appPublish(options: {
-        appId: string;
-        version: string;
-        bundle: Uint8Array;
-        message?: string;
-        moduleId?: string;
-        name?: string;
-    }): Promise<{
-        registryVersion: number;
-        appVersion: string;
-        sha256: string;
-        publishedAt: number;
-        author: string;
-        message: string;
-    }>;
-    /**
-     * List an app's published versions, newest first (the version rail).
+     * Answered by role: the developer org sees its FULL rail (published or
+     * not); other callers see only the versions serving on rows visible to
+     * them. Each entry carries its deployment `state`, its `buildStatus`
+     * ('ok' = servable bytes exist), and the `rungs` naming the audiences
+     * serving it.
      *
      * @param appId - App id
-     * @returns Rail entries; each carries `rungs` naming the rungs pinned to it
+     * @returns Rail entries, newest first
      */
-    appVersions(appId: string): Promise<Array<{
+    listDeployments(appId: string): Promise<Array<{
         registryVersion: number;
         appVersion: string;
         sha256: string;
         publishedAt: number;
         author: string;
         message: string;
+        state: string;
+        buildStatus: string;
         rungs: string[];
     }>>;
     /**
-     * Pin a rung to a published version — deploy, promote, and rollback are
-     * all this one verb ("repoint, never rebuild").
+     * Submit a deployed version for store review — flips the DEPLOYMENT's own
+     * state 'private' -> 'submit' (it enters the sys.admin review queue). The
+     * review state lives on the deployment, not a binding. Developer-org and
+     * developer-namespace gated.
      *
      * @param appId - App id
      * @param registryVersion - Registry version number from the rail
-     * @param target - '@user', '@team/<name-or-id>', or '@org'
-     * @returns The updated deployment record and the rung word
+     * @returns The refreshed rail entry ({registryVersion, state, ...})
      */
-    appDeploy(appId: string, registryVersion: number, target: string): Promise<{
-        deployment: Record<string, unknown>;
-        rung: string;
+    submitApp(appId: string, registryVersion: number): Promise<{
+        artifact: Record<string, unknown>;
     }>;
     /**
-     * The reverse index: which rungs run which version of an app.
+     * Withdraw a pending review — the developer's own cancel: flips the
+     * DEPLOYMENT 'submit' -> 'private' (leaves the admin queue, back to
+     * draft; history records 'withdrawn'). Only a version in 'submit'
+     * withdraws. Developer-org and developer-namespace gated, like submit.
+     *
+     * @param appId - App id
+     * @param registryVersion - Registry version number from the rail
+     * @returns The refreshed rail entry ({registryVersion, state, ...})
+     */
+    withdrawApp(appId: string, registryVersion: number): Promise<{
+        artifact: Record<string, unknown>;
+    }>;
+    /**
+     * Append a developer message to the app's review thread — the developer
+     * half of the reviewer conversation. The message rides the app's
+     * deployment history as a 'reply' row (side 'developer'), the same
+     * stream `deploy.history()` reads and the store reviewer writes to.
+     * Developer-org and developer-namespace gated, like submit.
+     *
+     * @param appId - App id
+     * @param message - The message text (server caps the length)
+     * @param registryVersion - Optional registry version the message refers to
+     * @returns `{replied: true, appId}`
+     */
+    replyApp(appId: string, message: string, registryVersion?: number): Promise<{
+        replied: boolean;
+        appId: string;
+    }>;
+    /**
+     * Read one version's durable server build log — the full phase-by-phase
+     * output the build worker writes beside the version's artifacts (no
+     * error text rides the rail rows or the DB). Long logs serve their tail;
+     * '' means no log exists for the version. Developer-org gated.
+     *
+     * @param appId - App id
+     * @param registryVersion - Registry version number from the rail
+     * @returns `{appId, version, log}`
+     */
+    buildLog(appId: string, registryVersion: number): Promise<{
+        appId: string;
+        version: number;
+        log: string;
+    }>;
+    /**
+     * Bind a deployment to an audience — first publish, update, promote, and
+     * rollback are all this one verb ("repoint, never rebuild"). The binding
+     * is a pure pointer; '@public' requires the deployment be 'ready'
+     * (approved), '@me'/'@team' accept any non-'failed' deployment.
+     *
+     * @param appId - App id
+     * @param registryVersion - Registry version number from the rail
+     * @param target - '@me', '@team/<name-or-id>', or '@public' ('@user' = legacy alias)
+     * @returns The binding row ({audience, version, state, artifactState, ...})
+     */
+    publishApp(appId: string, registryVersion: number, target: string): Promise<{
+        publish: Record<string, unknown>;
+    }>;
+    /**
+     * Remove an audience binding — the app stops serving to that audience.
+     * SOFT: the registry versions and the audit history survive; publishing
+     * to the audience again revives it.
+     *
+     * @param appId - App id
+     * @param target - '@me', '@team/<name-or-id>', or '@public' ('@user' = legacy alias)
+     * @returns The final binding row (state 'removed')
+     */
+    removeAppPublish(appId: string, target: string): Promise<{
+        publish: Record<string, unknown>;
+    }>;
+    /**
+     * The reverse index: which audiences serve which version of an app.
      *
      * @param appId - App id
      * @returns Pin rows ({rung, handle, version, appVersion, state, deployedAt})
      */
-    appWhere(appId: string): Promise<Array<{
+    whereApp(appId: string): Promise<Array<{
         rung: string;
         handle: string;
         version: number;
@@ -5434,13 +5588,13 @@ export declare class RocketRideClient extends DAPClient {
     /**
      * Lazily-initialised deploy API namespace (teams-as-environments).
      *
-     * Publish immutable pipeline versions to the org registry, point teams
-     * at them (promotion and rollback alike), schedule sources, and read
-     * the audit history.
+     * Deploy immutable versions of any kind onto the org registry (the one
+     * rail door), point teams at them (promotion and rollback alike),
+     * schedule sources, and read the audit history.
      *
      * @example
      * ```typescript
-     * const { artifact } = await client.deploy.publish(pipeline, { comment: 'v2' });
+     * const { artifact } = await client.deploy.add({ pipeline, comment: 'v2' });
      * await client.deploy.deploy('proj-1', artifact.version!, 'team-staging');
      * ```
      */
@@ -5722,6 +5876,14 @@ interface AppManifestEntry$1 {
      */
     configuration?: AppConfiguration;
     /**
+     * Resolved app version (semver) for the desktop tile version chip —
+     * a built-in's package version, a marketplace app's active version, or
+     * a deployed pin's appVersion. Absent when the server sent none.
+     */
+    version?: string;
+    /** True when the entry is a dev-overlay override (live watch build). */
+    dev?: boolean;
+    /**
      * When false, the app can run without authentication (e.g. home/landing page).
      * Defaults to true — most apps require the user to be logged in.
      */
@@ -5868,6 +6030,13 @@ export interface ShellConfig {
     apps: AppManifestEntry$1[];
     /** Server capability tags: ['oss'] for open-source, ['saas'] for cloud. */
     capabilities?: string[];
+    /**
+     * The server's resolved API address from the pre-auth probe
+     * (endpoints.api). Empty/absent = window.location.origin. Differs from
+     * the page origin only on split deployments where the probe redirects
+     * live traffic off the serving host (e.g. CDN-served UI, direct API).
+     */
+    serverUri?: string;
     /** All RR_* runtime config — passed through to remote apps via useShellApiConfig(). */
     apiConfig: ShellApiConfig;
     /** Branding shown on the loading screen before any app is mounted. */
@@ -6248,6 +6417,17 @@ interface ShellConnectionEventMap {
      */
     "shell:accountUpdate": ConnectResult;
     /**
+     * The user's default organization changed. A pure NOTIFICATION — the
+     * server never swaps a live connection's identity or dictates a
+     * response; each client reacts its own way (the browser shell reloads,
+     * VS Code reloads its window, an app webview with its own connection
+     * does whatever suits it). Re-authenticating resolves the new default
+     * org. Triggered by the `apaext_org_changed` DAP event.
+     */
+    "shell:orgChanged": {
+        orgId: string;
+    };
+    /**
      * Emitted when the service catalog is fetched or refreshed.
      *
      * Contains the full services map, the summary's deduplicated icon
@@ -6362,13 +6542,18 @@ interface ShellConnectionEventMap {
         source: string;
     };
     /**
-     * An app's marketplace review status changed (submitted, approved,
-     * rejected). Pushed to the developer org's connections so App Builder
-     * surfaces update badges and show the decision toast. Optional `notes`
+     * An app's marketplace review status changed (submitted, withdrawn,
+     * approved, rejected). Pushed to the developer org's connections (so App
+     * Builder surfaces update badges and show the decision toast) and to
+     * reviewer connections holding sys.app/sys.admin (so the admin queue
+     * tracks the server live). `status` is the deployment's review state
+     * ('submit' | 'private' | 'ready' | 'rejected' | 'failed'); optional
+     * `version` is the registry version that transitioned; optional `notes`
      * carries reviewer notes on rejection.
      */
     "app:statusChanged": {
         appId: string;
+        version?: number;
         status: string;
         notes?: string;
     };
@@ -6498,6 +6683,14 @@ on(event: 'shell:event', handler: (payload: ShellConnectionEventMap['shell:event
  * @returns An unsubscribe function — call it to remove the handler.
  */
 on(event: 'shell:accountUpdate', handler: (payload: ShellConnectionEventMap['shell:accountUpdate']) => void): () => void;
+/**
+ * Registers a handler for a typed shell event.
+ *
+ * @param event   - The event name from `ShellConnectionEventMap`.
+ * @param handler - Callback invoked when the event fires.
+ * @returns An unsubscribe function — call it to remove the handler.
+ */
+on(event: 'shell:orgChanged', handler: (payload: ShellConnectionEventMap['shell:orgChanged']) => void): () => void;
 /**
  * Registers a handler for a typed shell event.
  *
@@ -6713,6 +6906,16 @@ emit(event: 'shell:event', payload: ShellConnectionEventMap['shell:event']): voi
  * @param payload - The payload matching the event's type.
  */
 emit(event: 'shell:accountUpdate', payload: ShellConnectionEventMap['shell:accountUpdate']): void;
+/**
+ * Emits a typed shell event, dispatching to all registered handlers.
+ *
+ * Public so that any code (sidebar, home app, plugins) can fire UI
+ * coordination events through the connection manager.
+ *
+ * @param event   - The event name from `ShellConnectionEventMap`.
+ * @param payload - The payload matching the event's type.
+ */
+emit(event: 'shell:orgChanged', payload: ShellConnectionEventMap['shell:orgChanged']): void;
 /**
  * Emits a typed shell event, dispatching to all registered handlers.
  *
@@ -6973,7 +7176,7 @@ export interface IWorkspaceContext {
     }) => void;
     /** Emit a named event to all subscribers. Does NOT mutate workspace state. */
     /** Emit a named event to all subscribers. Does NOT mutate workspace state. */
-emit: ((event: 'shell:connected', payload: ShellConnectionEventMap['shell:connected']) => void) & ((event: 'shell:disconnected', payload: ShellConnectionEventMap['shell:disconnected']) => void) & ((event: 'shell:statusMessage', payload: ShellConnectionEventMap['shell:statusMessage']) => void) & ((event: 'shell:statusChange', payload: ShellConnectionEventMap['shell:statusChange']) => void) & ((event: 'shell:error', payload: ShellConnectionEventMap['shell:error']) => void) & ((event: 'shell:event', payload: ShellConnectionEventMap['shell:event']) => void) & ((event: 'shell:accountUpdate', payload: ShellConnectionEventMap['shell:accountUpdate']) => void) & ((event: 'shell:servicesUpdated', payload: ShellConnectionEventMap['shell:servicesUpdated']) => void) & ((event: 'shell:appsUpdated', payload: ShellConnectionEventMap['shell:appsUpdated']) => void) & ((event: 'shell:login', payload: ShellConnectionEventMap['shell:login']) => void) & ((event: 'shell:logout', payload: ShellConnectionEventMap['shell:logout']) => void) & ((event: 'shell:loginRequest', payload: ShellConnectionEventMap['shell:loginRequest']) => void) & ((event: 'shell:logoutRequest', payload: ShellConnectionEventMap['shell:logoutRequest']) => void) & ((event: 'shell:switchApp', payload: ShellConnectionEventMap['shell:switchApp']) => void) & ((event: 'shell:subscribe', payload: ShellConnectionEventMap['shell:subscribe']) => void) & ((event: 'shell:unsubscribe', payload: ShellConnectionEventMap['shell:unsubscribe']) => void) & ((event: 'shell:myApps', payload: ShellConnectionEventMap['shell:myApps']) => void) & ((event: 'shell:openOverlay', payload: ShellConnectionEventMap['shell:openOverlay']) => void) & ((event: 'shell:sidebarCollapsing', payload: ShellConnectionEventMap['shell:sidebarCollapsing']) => void) & ((event: 'shell:themeChange', payload: ShellConnectionEventMap['shell:themeChange']) => void) & ((event: 'shell:viewActivated', payload: ShellConnectionEventMap['shell:viewActivated']) => void) & ((event: 'shell:manifestRefresh', payload: ShellConnectionEventMap['shell:manifestRefresh']) => void) & ((event: 'app:statusChanged', payload: ShellConnectionEventMap['app:statusChanged']) => void) & ((event: 'store:changed', payload: ShellConnectionEventMap['store:changed']) => void);
+emit: ((event: 'shell:connected', payload: ShellConnectionEventMap['shell:connected']) => void) & ((event: 'shell:disconnected', payload: ShellConnectionEventMap['shell:disconnected']) => void) & ((event: 'shell:statusMessage', payload: ShellConnectionEventMap['shell:statusMessage']) => void) & ((event: 'shell:statusChange', payload: ShellConnectionEventMap['shell:statusChange']) => void) & ((event: 'shell:error', payload: ShellConnectionEventMap['shell:error']) => void) & ((event: 'shell:event', payload: ShellConnectionEventMap['shell:event']) => void) & ((event: 'shell:accountUpdate', payload: ShellConnectionEventMap['shell:accountUpdate']) => void) & ((event: 'shell:orgChanged', payload: ShellConnectionEventMap['shell:orgChanged']) => void) & ((event: 'shell:servicesUpdated', payload: ShellConnectionEventMap['shell:servicesUpdated']) => void) & ((event: 'shell:appsUpdated', payload: ShellConnectionEventMap['shell:appsUpdated']) => void) & ((event: 'shell:login', payload: ShellConnectionEventMap['shell:login']) => void) & ((event: 'shell:logout', payload: ShellConnectionEventMap['shell:logout']) => void) & ((event: 'shell:loginRequest', payload: ShellConnectionEventMap['shell:loginRequest']) => void) & ((event: 'shell:logoutRequest', payload: ShellConnectionEventMap['shell:logoutRequest']) => void) & ((event: 'shell:switchApp', payload: ShellConnectionEventMap['shell:switchApp']) => void) & ((event: 'shell:subscribe', payload: ShellConnectionEventMap['shell:subscribe']) => void) & ((event: 'shell:unsubscribe', payload: ShellConnectionEventMap['shell:unsubscribe']) => void) & ((event: 'shell:myApps', payload: ShellConnectionEventMap['shell:myApps']) => void) & ((event: 'shell:openOverlay', payload: ShellConnectionEventMap['shell:openOverlay']) => void) & ((event: 'shell:sidebarCollapsing', payload: ShellConnectionEventMap['shell:sidebarCollapsing']) => void) & ((event: 'shell:themeChange', payload: ShellConnectionEventMap['shell:themeChange']) => void) & ((event: 'shell:viewActivated', payload: ShellConnectionEventMap['shell:viewActivated']) => void) & ((event: 'shell:manifestRefresh', payload: ShellConnectionEventMap['shell:manifestRefresh']) => void) & ((event: 'app:statusChanged', payload: ShellConnectionEventMap['app:statusChanged']) => void) & ((event: 'store:changed', payload: ShellConnectionEventMap['store:changed']) => void);
     /** Subscribe to a named event. Returns an unsubscribe function. */
     /** Subscribe to a named event. Returns an unsubscribe function. */
 on(event: 'shell:connected', handler: (payload: ShellConnectionEventMap['shell:connected']) => void): () => void;
@@ -6989,6 +7192,8 @@ on(event: 'shell:error', handler: (payload: ShellConnectionEventMap['shell:error
 on(event: 'shell:event', handler: (payload: ShellConnectionEventMap['shell:event']) => void): () => void;
 /** Subscribe to a named event. Returns an unsubscribe function. */
 on(event: 'shell:accountUpdate', handler: (payload: ShellConnectionEventMap['shell:accountUpdate']) => void): () => void;
+/** Subscribe to a named event. Returns an unsubscribe function. */
+on(event: 'shell:orgChanged', handler: (payload: ShellConnectionEventMap['shell:orgChanged']) => void): () => void;
 /** Subscribe to a named event. Returns an unsubscribe function. */
 on(event: 'shell:servicesUpdated', handler: (payload: ShellConnectionEventMap['shell:servicesUpdated']) => void): () => void;
 /** Subscribe to a named event. Returns an unsubscribe function. */
@@ -7566,6 +7771,14 @@ emit(event: 'shell:accountUpdate', payload: ShellConnectionEventMap['shell:accou
  * @param event   - The event name from ShellConnectionEventMap.
  * @param payload - The payload matching the event's type.
  */
+emit(event: 'shell:orgChanged', payload: ShellConnectionEventMap['shell:orgChanged']): void;
+/**
+ * Emit a typed shell event, dispatching to all registered handlers.
+ * Also pushes to the debug log for the ALT+D panel.
+ *
+ * @param event   - The event name from ShellConnectionEventMap.
+ * @param payload - The payload matching the event's type.
+ */
 emit(event: 'shell:servicesUpdated', payload: ShellConnectionEventMap['shell:servicesUpdated']): void;
 /**
  * Emit a typed shell event, dispatching to all registered handlers.
@@ -7758,6 +7971,14 @@ on(event: 'shell:event', handler: (payload: ShellConnectionEventMap['shell:event
  * @returns An unsubscribe function.
  */
 on(event: 'shell:accountUpdate', handler: (payload: ShellConnectionEventMap['shell:accountUpdate']) => void): () => void;
+/**
+ * Register a typed handler for a shell event.
+ *
+ * @param event   - The event name from ShellConnectionEventMap.
+ * @param handler - Callback invoked when the event fires.
+ * @returns An unsubscribe function.
+ */
+on(event: 'shell:orgChanged', handler: (payload: ShellConnectionEventMap['shell:orgChanged']) => void): () => void;
 /**
  * Register a typed handler for a shell event.
  *
@@ -9532,6 +9753,51 @@ export interface IModalProps {
  * @returns The modal element.
  */
 export declare function Modal({ title, onClose, children, footer, showClose, closeOnEscape, width, noBodyPadding, ariaLabel, }: IModalProps): React$1.ReactElement;
+/** One selectable file type — the OS Save-dialog "Save as type" vocabulary. */
+export interface ISaveFileType {
+    /** Human-readable type label, e.g. "RocketRide Pipeline". */
+    label: string;
+    /** Extension appended to the typed name, WITH the leading dot, e.g. ".pipe". */
+    extension: string;
+}
+/** Props for the {@link SaveFileDialog} component. */
+export interface ISaveFileDialogProps {
+    /** Dialog title, e.g. "Save Pipeline As". */
+    title: string;
+    /** File system the dialog browses — only `list` and `mkdir` are called. */
+    vfs: IVirtualFileSystem;
+    /**
+     * Selectable file types. The FIRST entry is the initial selection; a
+     * single-entry list hides the type picker (the extension still shows as the
+     * name input's suffix).
+     */
+    fileTypes: ISaveFileType[];
+    /** Label rendered for the tree root row. Default "$/". */
+    rootLabel?: string;
+    /**
+     * Directory preselected on open — relative to the VFS root, '/'-separated.
+     * Rendered as a dimmed ghost row when it does not exist yet; the missing
+     * segments are created on save.
+     */
+    defaultDir?: string;
+    /** Initial value of the name input (no extension). */
+    initialName?: string;
+    /**
+     * Called with the chosen path (relative to the VFS root, extension
+     * included) AFTER any missing directories were created. The caller
+     * performs the actual write.
+     */
+    onConfirm: (path: string) => void;
+    /** Called when the dialog is dismissed (Cancel or Escape). */
+    onCancel: () => void;
+}
+/**
+ * Renders the stock Save-As dialog over a virtual file system.
+ *
+ * @param props - {@link ISaveFileDialogProps}.
+ * @returns The dialog element.
+ */
+export declare function SaveFileDialog({ title, vfs, fileTypes, rootLabel, defaultDir, initialName, onConfirm, onCancel }: ISaveFileDialogProps): React$1.ReactElement;
 /** Props for the {@link SidebarMenu} component. */
 export interface ISidebarMenuProps {
     /** The declared menu whose entries render as the vertical list. */
@@ -10843,6 +11109,65 @@ export interface IToolchainState {
     isDragging: boolean;
 }
 export declare const DEFAULT_TOOLCHAIN_STATE: IToolchainState;
+/**
+ * The stable serving URL of one registry version's entry.
+ *
+ * Relative — the shell document is served from the same origin, exactly
+ * like the manifest's own entries. Immutable bytes live behind it; the
+ * server enforces entitlement on every request, so constructing a URL the
+ * caller is not entitled to yields a 404 at load, never a leak.
+ *
+ * @param appId - The app id.
+ * @param version - The registry version number (ints only).
+ * @returns The versioned remoteEntry URL.
+ */
+export declare function versionedEntryUrl(appId: string, version: number): string;
+/**
+ * One app's session version override.
+ *
+ * `version` is the registry version number (a `?version=` semver deep link
+ * is resolved to its registry int before it lands here). The record holds
+ * NUMBERS only — the load URL is constructed from `version` at use
+ * (versionedEntryUrl), exactly as manifest defaults are constructed from
+ * `registryVersion`; no URL strings are ever stored.
+ */
+export interface AppVersionOverride {
+    /** Registry version number — THE wire version identity (ints only). */
+    version: number;
+    /** The resolved artifact semver — for chip display. */
+    appVersion?: string;
+}
+/**
+ * Reads one app's session version override.
+ *
+ * @param appId - The app id.
+ * @returns The override, or null when the app has none.
+ */
+export declare function getAppVersionOverride(appId: string): AppVersionOverride | null;
+/**
+ * Applies (or clears, with null) a version override to a live shell.
+ *
+ * The caller passes version NUMBERS only; the load URL is constructed
+ * here (versionedEntryUrl). This function handles the MF mechanics:
+ *
+ * - Container never loaded this session → force re-register at the
+ *   constructed URL + evict the cached descriptor. The next launch loads
+ *   the chosen version. Returns 'ready' — the caller may switch
+ *   immediately.
+ * - Container already loaded (or clearing an applied override) → a loaded
+ *   MF container can never be repointed (identity is the NAME; forcing it
+ *   corrupts the shared getters). Returns 'reload-required' — the caller
+ *   reloads the page; boot then registers the override's version (or the
+ *   default, after a clear) before anything loads.
+ *
+ * Dev-owned containers are never touched — the live dev build always wins.
+ *
+ * @param appId - The app id.
+ * @param moduleId - The app's MF container name.
+ * @param override - The override record, or null to reset to default.
+ * @returns 'ready' when the switch can proceed in-place, else 'reload-required'.
+ */
+export declare function applyAppVersionOverride(appId: string, moduleId: string, override: AppVersionOverride | null): "ready" | "reload-required";
 interface IOverviewGridProps {
     /** Full dashboard snapshot, or null while it has not loaded yet. */
     data: DashboardResponse | null;
@@ -11059,8 +11384,8 @@ interface IAccountViewProps {
     onActiveTeamIdChange: (id: string | null) => void;
     /** Persists updated profile fields. */
     onSaveProfile: (fields: ProfileUpdate) => Promise<void>;
-    /** Sets the user's preferred default team. */
-    onSetDefaultTeam: (teamId: string) => Promise<void>;
+    /** Sets the user's dev team (dev-run billing + env layer). */
+    onSetDevTeam: (teamId: string) => Promise<void>;
     /** Switches the user's active organization. */
     onSetDefaultOrg: (orgId: string) => Promise<void>;
     /**
@@ -11308,6 +11633,7 @@ export declare const shellApi: {
     readonly TabPanel: typeof TabPanel;
     readonly Modal: typeof Modal;
     readonly CLOSE_GLYPH: string;
+    readonly SaveFileDialog: typeof SaveFileDialog;
     readonly SidebarMenu: typeof SidebarMenu;
     readonly SidebarCollapsedProvider: import("react").FC<ISidebarCollapsedProviderProps>;
     readonly SidebarCollapsedGate: import("react").FC<ISidebarCollapsedGateProps>;
@@ -11454,6 +11780,9 @@ export declare const shellApi: {
     readonly BxChevronRight: IconComponent;
     readonly BxFolderOpen: IconComponent;
     readonly AppLayout: import("react").FC<AppLayoutProps>;
+    readonly getAppVersionOverride: typeof getAppVersionOverride;
+    readonly applyAppVersionOverride: typeof applyAppVersionOverride;
+    readonly versionedEntryUrl: typeof versionedEntryUrl;
     readonly BxPlusSquare: IconComponent;
     readonly BxPlusSquareSolid: IconComponent;
     readonly BxLock: IconComponent;

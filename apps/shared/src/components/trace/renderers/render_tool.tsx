@@ -14,7 +14,7 @@
 
 import { ReactElement } from 'react';
 import { RS } from './styles';
-import { JsonTree } from '../JsonTree';
+import { JsonTree } from '../../json-tree';
 
 // =============================================================================
 // TYPES

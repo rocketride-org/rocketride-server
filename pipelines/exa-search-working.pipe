@@ -43,9 +43,9 @@
       "provider": "search_exa",
       "name": "Exa search",
       "config": {
-        "apikey": "${ROCKETRIDE_EXA_KEY}",
         "profile": "default",
         "default": {
+          "apikey": "${ROCKETRIDE_EXA_KEY}",
           "highlightChars": 600,
           "includeHighlights": true,
           "numResults": 5,

@@ -1,0 +1,89 @@
+{
+	"title": "File Store",
+	"protocol": "filestore://",
+	"classType": ["store"],
+	"capabilities": [],
+	"register": "filter",
+	"node": "python",
+	"path": "nodes.tool_filesystem",
+	"prefix": "fs",
+	"icon": "file-system.svg",
+	"documentation": "https://docs.rocketride.org",
+	"description": ["File Store pipeline sink. Persists incoming lane data (documents, text, tables, and streamed image/audio/video) to the account-scoped RocketRide file store (the same store exposed via the client SDK's fs_* methods).", "All writes are scoped to the task's storage anchor (the owning user's file tree for development runs, the task's team subtree for deployed runs), resolved automatically from the running task.", "For each persisted file a JSON reference {path, url?} is emitted on the json lane; the signed url is included when 'Emit download URL' is enabled."],
+	"lanes": {
+		"documents": ["json"],
+		"text": ["json"],
+		"table": ["json"],
+		"image": ["json"],
+		"audio": ["json"],
+		"video": ["json"]
+	},
+	"preconfig": {
+		"default": "default",
+		"profiles": {
+			"default": {
+				"title": "Default"
+			}
+		}
+	},
+	"fields": {
+		"filesystem.targetDir": {
+			"type": "string",
+			"title": "Target directory",
+			"description": "Base directory (relative to the account file store root) that lane-written files are placed under.",
+			"default": "output/"
+		},
+		"filesystem.onConflict": {
+			"type": "string",
+			"title": "When the file already exists",
+			"description": "What the sink does when the target path is already taken. 'Replace' is destructive in a way that is easy to miss: names come from the source object's BASENAME, so two inputs from different folders that share a filename resolve to the same target and the second silently replaces the first. Leave it on 'Write under a new name' unless you are deliberately re-running into the same directory.",
+			"default": "unique",
+			"enum": [
+				["unique", "Write under a new name (file_1, file_2, ...)"],
+				["overwrite", "Replace the existing file"],
+				["skip", "Leave the existing file alone"]
+			]
+		},
+		"filesystem.emitUrl": {
+			"type": "boolean",
+			"title": "Emit download URL",
+			"description": "Also include a time-limited signed download URL in the emitted JSON reference.",
+			"default": false,
+			"enum": [
+				[true, "Yes"],
+				[false, "No"]
+			]
+		},
+		"filesystem.urlExpiresIn": {
+			"type": "integer",
+			"title": "URL expiry (seconds)",
+			"description": "TTL for the signed URL when 'Emit download URL' is on. Max 3600.",
+			"default": 3600,
+			"minimum": 1,
+			"maximum": 3600
+		},
+		"filesystem.whitelistPattern": {
+			"type": "string",
+			"title": "Path Pattern (regex)",
+			"default": ""
+		},
+		"filesystem.pathWhitelist": {
+			"title": "Path Whitelist",
+			"description": "Regex patterns applied to the relative path of every write using re.search semantics: a partial match anywhere in the path is enough, so a pattern like 'secret' will also match 'notsecret/file.txt'. Anchor with ^ and $ if you need a full-path match (e.g. '^docs/.*$'). If non-empty, a path must match at least one pattern. If empty, all paths under the task's storage anchor are allowed.",
+			"type": "array",
+			"optional": true,
+			"minItems": 0,
+			"items": {
+				"type": "object",
+				"properties": ["filesystem.whitelistPattern"]
+			}
+		}
+	},
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "File Store",
+			"properties": ["type", "filesystem.targetDir", "filesystem.onConflict", "filesystem.emitUrl", "filesystem.urlExpiresIn", "filesystem.pathWhitelist"]
+		}
+	]
+}

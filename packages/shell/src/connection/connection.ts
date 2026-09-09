@@ -162,6 +162,18 @@ function isConnectResult(body: unknown): body is ConnectResult {
 	);
 }
 
+function isVersionResponse(body: unknown): boolean {
+	// The reachability probe only proves THIS backend is up if the page origin
+	// answers with the server's own /version contract ({ status: 'OK', with a
+	// data.version string). A bare 200 from an unrelated origin must not qualify.
+	return (
+		typeof body === 'object' &&
+		body !== null &&
+		(body as Record<string, unknown>).status === 'OK' &&
+		typeof (body as { data?: Record<string, unknown> }).data?.version === 'string'
+	);
+}
+
 /**
  * Normalizes caller-supplied env metadata to the string map the SDK expects.
  *
@@ -363,6 +375,12 @@ export class ConnectionManager implements IConnectionManager {
 					this.emit('store:changed', (message.body ?? {}) as ShellConnectionEventMap['store:changed']);
 					return;
 				}
+				// The user's default org changed — a pure notification; each
+				// client decides how to react (the shell reloads).
+				if (message.event === 'apaext_org_changed') {
+					this.emit('shell:orgChanged', (message.body ?? { orgId: '' }) as ShellConnectionEventMap['shell:orgChanged']);
+					return;
+				}
 				// The service catalog changed server-side: re-fetch the summary
 				// cache after a random delay — the push is a broadcast, and the
 				// jitter keeps the whole fleet from refetching in the same
@@ -462,6 +480,7 @@ export class ConnectionManager implements IConnectionManager {
 							lastError: undefined,
 							progressMessage: undefined,
 						});
+						console.warn('[shell] reloading: session token cleared by another same-origin context (storage event)');
 						window.location.reload();
 						return;
 					}
@@ -472,6 +491,7 @@ export class ConnectionManager implements IConnectionManager {
 						currentUserToken: this.accountInfo?.userToken,
 						hasAccountInfo: Boolean(this.accountInfo),
 					})) {
+						console.warn('[shell] reloading: session token replaced by another same-origin context (storage event)');
 						window.location.reload();
 					}
 				} catch {
@@ -628,7 +648,9 @@ export class ConnectionManager implements IConnectionManager {
 
 		if (errorDescription) {
 			if (this.connectionGeneration !== bootstrapGeneration) return null;
-			window.history.replaceState({}, '', window.location.pathname);
+			// Strip the query string but keep any existing history state (e.g. the
+			// rrHome snapshot / appId) so an OAuth failure does not lose navigation.
+			window.history.replaceState({ ...(window.history.state ?? {}) }, '', window.location.pathname);
 			this.updateConnectionStatus({
 				state: ConnectionState.AUTH_FAILED,
 				lastError: errorDescription,
@@ -646,8 +668,11 @@ export class ConnectionManager implements IConnectionManager {
 		if (code) {
 			const verifier = getStoredVerifier();
 			clearStoredVerifier();
-			// Strip the ?code= from the URL so refreshes don't re-exchange
-			window.history.replaceState({}, '', window.location.pathname);
+			// Strip the ?code= from the URL so refreshes don't re-exchange.
+			// Carry the existing `history.state` across — it is shared with the
+			// home-ui remote (which keeps its snapshot under `rrHome`), so it must
+			// be merged, never replaced; only the query string is being dropped.
+			window.history.replaceState({ ...(window.history.state ?? {}) }, '', window.location.pathname);
 
 			if (!verifier) {
 				// Missing verifier — can't exchange this code. This is the
@@ -1085,6 +1110,52 @@ export class ConnectionManager implements IConnectionManager {
 				errorKind: isAuthFailure ? 'session' : undefined,
 			},
 		});
+		// A CORS-blocked or proxy-dropped request and a dead server both surface
+		// as the same opaque network TypeError, but only one means the server is
+		// down. Disambiguate with a same-origin probe, which every topology
+		// serves: single-host deployments answer /version on the page origin and
+		// CDN-split ones proxy it through the edge. When the probe answers, the
+		// server is reachable and the stored token simply couldn't be validated,
+		// so recovery is sign-in, not retry; re-latch as a session failure so the
+		// signed-out landing gets the sign-in banner instead of a false outage.
+		if (isNetworkFailure) {
+			const generation = this.connectionGeneration;
+			// Capture the exact failure object this probe is disambiguating.
+			// updateConnectionStatus latches a fresh object per failure, so a
+			// newer network failure — even one in this same generation — replaces
+			// the reference. Identity, not kind, is what proves the latch is still
+			// the one this probe was launched for.
+			const latchedFailure = this.connectionStatus.lastFailure;
+			void fetch('/version', { cache: 'no-store' })
+				.then((res) => (res.ok ? res.json() : Promise.reject(new Error('probe not ok'))))
+				.then((body) => {
+					// A bare 200 does not prove THIS backend is reachable: a
+					// cross-origin serverUri (initialize({ uri })) can point at a
+					// backend that is down while the page origin still answers
+					// /version. Require the server's own /version contract, so an
+					// unrelated origin's 200 can't turn a real outage into a false
+					// session-expiry.
+					if (!isVersionResponse(body)) return;
+					if (this.connectionGeneration !== generation) return;
+					// Only downgrade the specific failure this probe latched. A newer
+					// failure (including another network one) or a reconnect that
+					// cleared the latch swaps the reference, and must not be
+					// overwritten with a session downgrade.
+					if (this.connectionStatus.lastFailure !== latchedFailure) return;
+					const message = 'Your session has expired — please sign in again.';
+					this.updateConnectionStatus({
+						state: ConnectionState.AUTH_FAILED,
+						lastError: message,
+						progressMessage: undefined,
+						errorKind: 'session',
+						lastFailure: { kind: 'auth', lastError: message, errorKind: 'session' },
+					});
+				})
+				.catch(() => {
+					// Probe failed, or the origin did not answer with this backend's
+					// own /version contract: genuinely unreachable, keep the banner.
+				});
+		}
 		return isAuthFailure;
 	}
 
@@ -1179,6 +1250,30 @@ export class ConnectionManager implements IConnectionManager {
 		try { localStorage.setItem(LS_TOKEN, token); } catch (e) {
 			console.error('[ConnectionManager] Failed to save token:', e);
 		}
+		this.primeAppsCookie(token);
+	}
+
+	/**
+	 * Stow the user token in the ``/apps``-scoped cookie so the browser
+	 * attaches it to MF bundle fetches — SaaS gates each bundle by per-app
+	 * permission (see the server's ``/apps/session`` + ``apps_static``).
+	 *
+	 * Same-origin relative POST (the shell is served from the app origin, so
+	 * the cookie lands on the right host), fire-and-forget: the bundle route
+	 * re-validates on every serve, so a lost prime is self-correcting. Harmless
+	 * in OSS — the endpoint mints a cookie the OSS serve path ignores.
+	 *
+	 * @param token - The authenticated user token to cookie.
+	 */
+	private primeAppsCookie(token: string): void {
+		if (!token) return;
+		try {
+			void fetch('/apps/session', {
+				method: 'POST',
+				headers: { Authorization: `Bearer ${token}` },
+				credentials: 'same-origin',
+			}).catch(() => { /* best-effort */ });
+		} catch { /* best-effort — the bundle route re-checks anyway */ }
 	}
 
 	/** Load token from localStorage. Migrates the old sessionStorage value once. */

@@ -27,8 +27,7 @@ import asyncio
 import json
 from typing import Any, Dict, List
 
-from mcp.server.lowlevel import Server, NotificationOptions
-from mcp.server.models import InitializationOptions
+from mcp.server.lowlevel import Server
 import mcp.server.stdio
 import mcp.types as types
 
@@ -101,10 +100,7 @@ async def run_server() -> None:
     except Exception as e:
         raise RuntimeError(f'Failed to connect to RocketRide: {e}') from e
 
-    server = Server('rocketride-mcp')
-
-    @server.list_tools()  # type: ignore[untyped-decorator,no-untyped-call]
-    async def list_tools() -> list[types.Tool]:
+    async def on_list_tools(ctx: Any, params: types.PaginatedRequestParams | None) -> types.ListToolsResult:
         """Return MCP tool descriptors for all running RocketRide pipelines."""
         entries = await _dynamic_tools()
         tools: list[types.Tool] = []
@@ -113,57 +109,57 @@ async def run_server() -> None:
                 types.Tool(
                     name=entry['name'],
                     description=entry.get('description', ''),
-                    inputSchema=entry.get('inputSchema', {'type': 'object'}),
+                    input_schema=entry.get('inputSchema', {'type': 'object'}),
                 )
             )
-        return tools
+        return types.ListToolsResult(tools=tools)
 
-    @server.call_tool()  # type: ignore[untyped-decorator]
-    async def call_tool(name: str, arguments: dict[str, Any] | None) -> list[types.TextContent]:
+    async def on_call_tool(ctx: Any, params: types.CallToolRequestParams) -> types.CallToolResult:
         """Execute a pipeline tool by name with the given arguments."""
-        resp = await _handle_call(name, arguments or {})
-        if resp.get('isError'):
-            raise RuntimeError(resp['content'][0]['text'])
-        return [types.TextContent(type='text', text=resp['content'][0]['text'])]
+        resp = await _handle_call(params.name, dict(params.arguments or {}))
+        return types.CallToolResult(
+            content=[types.TextContent(type='text', text=resp['content'][0]['text'])],
+            structured_content=resp.get('structuredContent'),
+            is_error=bool(resp.get('isError')),
+        )
 
     # --- Resources -----------------------------------------------------------
 
-    @server.list_resources()  # type: ignore[untyped-decorator,no-untyped-call]
-    async def handle_list_resources() -> list[types.Resource]:
+    async def on_list_resources(ctx: Any, params: types.PaginatedRequestParams | None) -> types.ListResourcesResult:
         """Return the catalogue of available RocketRide MCP resources."""
-        return await list_resources(_client)
+        return types.ListResourcesResult(resources=await list_resources(_client))
 
-    @server.read_resource()  # type: ignore[untyped-decorator]
-    async def handle_read_resource(uri: Any) -> str:
+    async def on_read_resource(ctx: Any, params: types.ReadResourceRequestParams) -> types.ReadResourceResult:
         """Fetch the JSON payload for the requested resource URI."""
-        return await read_resource(_client, str(uri))
+        text = await read_resource(_client, str(params.uri))
+        return types.ReadResourceResult(
+            contents=[types.TextResourceContents(uri=params.uri, mime_type='application/json', text=text)]
+        )
 
     # --- Prompts -------------------------------------------------------------
 
-    @server.list_prompts()  # type: ignore[untyped-decorator,no-untyped-call]
-    async def handle_list_prompts() -> list[types.Prompt]:
+    async def on_list_prompts(ctx: Any, params: types.PaginatedRequestParams | None) -> types.ListPromptsResult:
         """Return all available MCP prompt templates."""
-        return list_prompts()
+        return types.ListPromptsResult(prompts=list_prompts())
 
-    @server.get_prompt()  # type: ignore[untyped-decorator]
-    async def handle_get_prompt(name: str, arguments: dict[str, str] | None) -> types.GetPromptResult:
+    async def on_get_prompt(ctx: Any, params: types.GetPromptRequestParams) -> types.GetPromptResult:
         """Render a prompt template with the supplied arguments."""
-        return get_prompt(name, arguments)
+        return get_prompt(params.name, dict(params.arguments or {}))
+
+    server = Server(
+        'rocketride-mcp',
+        version='0.1.0',
+        on_list_tools=on_list_tools,
+        on_call_tool=on_call_tool,
+        on_list_resources=on_list_resources,
+        on_read_resource=on_read_resource,
+        on_list_prompts=on_list_prompts,
+        on_get_prompt=on_get_prompt,
+    )
 
     try:
         async with mcp.server.stdio.stdio_server() as (read_stream, write_stream):
-            await server.run(
-                read_stream,
-                write_stream,
-                InitializationOptions(
-                    server_name='rocketride-mcp',
-                    server_version='0.1.0',
-                    capabilities=server.get_capabilities(
-                        notification_options=NotificationOptions(),
-                        experimental_capabilities={},
-                    ),
-                ),
-            )
+            await server.run(read_stream, write_stream, server.create_initialization_options())
     finally:
         # Disconnect client on shutdown
         if _client:

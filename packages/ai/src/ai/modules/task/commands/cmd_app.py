@@ -21,25 +21,26 @@
 # SOFTWARE.
 
 # =============================================================================
-# CMD APP — thin DAP router for all rrext_app_* commands
+# CMD APP — thin DAP router for the app command family
 #
-# Every on_rrext_app_* method is a one-liner that delegates to
-# account.handle_app(conn, request). The SaaS implementation of handle_app
-# (in account/saas/app_handler.py) contains the real marketplace logic;
-# the OSS base raises NotImplementedError since the marketplace requires SaaS.
+# One namespaced command (rrext_app, grouped subcommands) plus the shared
+# rrext_deploy_app publish control. Each on_* method is a one-liner that
+# delegates to account.handle_app(conn, request). The SaaS implementation
+# of handle_app (extension/saas/app_handler.py) contains the marketplace
+# logic; the OSS base serves the shared subset (dev overlay + publish
+# control) and raises NotImplementedError for the rest.
 # =============================================================================
 
 """
-AppCommands: thin DAP router for all ``rrext_app_*`` commands.
+AppCommands: thin DAP router for the app command family.
 
-Exposes five command groups to the DAP dispatcher; each is a one-liner
-delegating to ``account.handle_app(conn, request)``:
+Exposes two commands to the DAP dispatcher; each is a one-liner delegating
+to ``account.handle_app(conn, request)``:
 
-  - ``rrext_app_developer``  — developer registration + Stripe Connect
-  - ``rrext_app_submission`` — app draft + bundle publish
-  - ``rrext_app_catalog``    — marketplace listing + search
-  - ``rrext_app_admin``      — platform admin approve/reject
-  - ``rrext_app_pricing``    — pricing tier management
+  - ``rrext_app``        — the consolidated app namespace (developer_*,
+                           submit/register_dev, list/get/list_mine,
+                           desktop_*, admin_*, pricing_*)
+  - ``rrext_deploy_app`` — app publish control on the deployments registry
 """
 
 from typing import TYPE_CHECKING, Dict, Any
@@ -58,8 +59,8 @@ if TYPE_CHECKING:
 
 class AppCommands(DAPConn):
     """
-    Thin DAP router that dispatches all ``rrext_app_*`` commands to the
-    account singleton's ``handle_app`` method.
+    Thin DAP router that dispatches the app command family to the account
+    singleton's ``handle_app`` method.
 
     The ``conn`` (``TaskConn`` instance) is passed through so SaaS handlers
     have full access to ``_account_info``, ``build_response()``,
@@ -76,38 +77,14 @@ class AppCommands(DAPConn):
         """No-op — all state lives on TaskConn via the other mixins."""
         pass
 
-    # ── rrext_app_developer ──────────────────────────────────────────────────
+    # ── rrext_app ────────────────────────────────────────────────────────────
 
-    async def on_rrext_app_developer(self, request: Dict[str, Any]) -> Dict[str, Any]:
-        """Delegate ``rrext_app_developer`` to the app handler."""
+    async def on_rrext_app(self, request: Dict[str, Any]) -> Dict[str, Any]:
+        """Delegate the consolidated ``rrext_app`` namespace to the app handler."""
         return await account.handle_app(self, request)
 
-    # ── rrext_app_submission ─────────────────────────────────────────────────
+    # ── rrext_deploy_app ─────────────────────────────────────────────────────
 
-    async def on_rrext_app_submission(self, request: Dict[str, Any]) -> Dict[str, Any]:
-        """Delegate ``rrext_app_submission`` to the app handler."""
-        return await account.handle_app(self, request)
-
-    # ── rrext_app_catalog ────────────────────────────────────────────────────
-
-    async def on_rrext_app_catalog(self, request: Dict[str, Any]) -> Dict[str, Any]:
-        """Delegate ``rrext_app_catalog`` to the app handler."""
-        return await account.handle_app(self, request)
-
-    # ── rrext_app_admin ──────────────────────────────────────────────────────
-
-    async def on_rrext_app_admin(self, request: Dict[str, Any]) -> Dict[str, Any]:
-        """Delegate ``rrext_app_admin`` to the app handler."""
-        return await account.handle_app(self, request)
-
-    # ── rrext_app_pricing ────────────────────────────────────────────────────
-
-    async def on_rrext_app_pricing(self, request: Dict[str, Any]) -> Dict[str, Any]:
-        """Delegate ``rrext_app_pricing`` to the app handler."""
-        return await account.handle_app(self, request)
-
-    # ── rrext_app_deploy ─────────────────────────────────────────────────────
-
-    async def on_rrext_app_deploy(self, request: Dict[str, Any]) -> Dict[str, Any]:
-        """Delegate ``rrext_app_deploy`` (the publish ladder) to the app handler."""
+    async def on_rrext_deploy_app(self, request: Dict[str, Any]) -> Dict[str, Any]:
+        """Delegate ``rrext_deploy_app`` (app publish control) to the app handler."""
         return await account.handle_app(self, request)

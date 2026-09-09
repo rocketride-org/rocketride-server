@@ -71,22 +71,29 @@ async def start_server_task_as_team(
     ttl: Optional[int] = None,
     trace_level: Optional[str] = None,
     debug_out: bool = False,
+    owner_kind: str = 'team',
+    owner_user_id: str = '',
 ) -> str:
-    """Execute ``pipeline`` as a TEAM deployment run — no stored credential.
+    """Execute ``pipeline`` as a DEPLOYMENT run — no stored credential.
 
     The trusted dispatch path for scheduled/deployed runs: instead of
     replaying a user token, the connection's identity is CONSTRUCTED
-    server-side as the team — a synthetic AccountInfo whose only grant is
-    the task permission set on ``team_id``. Consequences, all deliberate:
+    server-side — a synthetic AccountInfo whose only grant is the task
+    permission set on ``team_id``. Two owner modes:
 
-      - The env merge uses org+team layers only (no user layer) — a deploy
-        run's configuration never depends on which human deployed it.
-      - The run carries NO human identity at all: the team owns it. Billing
-        debits attribute to org+team; who deployed or fired the run lives
+      - ``owner_kind='team'`` (default): the TEAM owns the run. It carries
+        NO human identity; the env merge uses org+team layers only (a
+        deployment's configuration never depends on which human deployed
+        it); billing attributes to org+team; who deployed or fired lives
         exclusively in the audit log and deployment history.
-      - ``run_kind='deploy'`` and ``trigger`` travel as TRUSTED connection
-        attributes read by on_execute — never as DAP arguments, so remote
-        clients cannot spoof a deploy run.
+      - ``owner_kind='user'``: a PERSONAL (@me) deployment run. The run is
+        OWNED by ``owner_user_id`` — private visibility, user-tree storage
+        and logs, the owner's user secret layer applies, and billing
+        attributes to the owner (``team_id`` is the deployment's ABSOLUTE
+        billing stamp, written at pointer time and read by the caller).
+      - ``run_kind='deploy'``, the owner scope, and ``trigger`` travel as
+        TRUSTED connection attributes read by on_execute — never as DAP
+        arguments, so remote clients cannot spoof a deploy run.
 
     Raises:
         RuntimeError: Execute request did not succeed.
@@ -94,16 +101,28 @@ async def start_server_task_as_team(
     from ai.account import account
     from ai.account.models import AccountInfo
 
+    # Trusted entry point, but still validate the owner pair: owner_kind='user'
+    # with an empty owner_user_id would build an identity with userId='' — a
+    # user-owned run with no owner. Downstream that yields no storage anchor
+    # (Task._storage_root) and an empty run-log anchor (raises), so the run
+    # executes with storage tools disabled and no log, both SILENTLY. Fail loud.
+    if owner_kind == 'user' and not owner_user_id:
+        raise ValueError("owner_kind='user' requires a non-empty owner_user_id")
+
     conn = _InProcessConn(server)
 
     # Server-constructed team identity: full task permissions on the ONE
     # team, nothing else. No userToken — deploy runs hold no credential,
     # and no user identity: the team is the owner.
     conn._account_info = AccountInfo(
-        userId='',
+        # A @team deploy carries NO human identity (the team owns it). A @me
+        # deploy is owned by a specific user, so it carries that user's id —
+        # billing attributes to the owner and the owner's user secret layer
+        # resolves. The billing team still rides devTeam below either way.
+        userId=owner_user_id if owner_kind == 'user' else '',
         displayName='',
         email='',
-        defaultTeam=team_id,
+        devTeam=team_id,
         organization={
             'id': org_id,
             'name': '',
@@ -122,6 +141,7 @@ async def start_server_task_as_team(
 
     # The trusted, non-wire channel for run classification.
     conn._trusted_run_kind = 'deploy'
+    conn._trusted_owner_kind = owner_kind
     conn._trusted_trigger = trigger
 
     # The schedule's run window rides the execute arguments: start_task

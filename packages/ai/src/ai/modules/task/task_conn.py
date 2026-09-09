@@ -59,7 +59,6 @@ This design provides a single connection point while maintaining separation
 of concerns through specialized command handler classes.
 """
 
-import logging
 import time
 from typing import TYPE_CHECKING, Dict, Any, Union, Optional
 from rocketride import EVENT_TYPE
@@ -75,9 +74,16 @@ from .commands.cmd_account import AccountCommands
 from .commands.cmd_app import AppCommands
 from .commands.cmd_public import PublicCommands
 from .commands.cmd_deploy import DeployCommands
+from .commands.cmd_pipe import DeployPipeCommands
 from .commands.cmd_log import LogCommands
 from .commands.cmd_store import StoreCommands
-from ai.account.models import AccountInfo, RequestContext, resolve_task_permissions, resolve_team_permissions
+from ai.account.models import (
+    AccountInfo,
+    RequestContext,
+    resolve_run_permissions,
+    resolve_task_permissions,
+    resolve_team_permissions,
+)
 from ai.common.account import AccountPipelineValidation
 
 # Only import for type checking to avoid circular import errors
@@ -106,6 +112,7 @@ class TaskConn(
     AppCommands,
     PublicCommands,
     DeployCommands,
+    DeployPipeCommands,
     LogCommands,
     StoreCommands,
     DAPConn,
@@ -197,6 +204,7 @@ class TaskConn(
         AccountCommands.__init__(self, connection_id, server, transport, **kwargs)
         AppCommands.__init__(self, connection_id, server, transport, **kwargs)
         DeployCommands.__init__(self, connection_id, server, transport, **kwargs)
+        DeployPipeCommands.__init__(self, connection_id, server, transport, **kwargs)
         LogCommands.__init__(self, connection_id, server, transport, **kwargs)
         StoreCommands.__init__(self, connection_id, server, transport, **kwargs)
 
@@ -377,38 +385,42 @@ class TaskConn(
         return self.build_response(request, body={})
 
     def has_permission(self, perm: Union[list, str]) -> bool:
-        """Check if the authenticated user has the given permission for their default team."""
+        """Check if the user holds the permission on ANY of their membership teams.
+
+        The visibility model: what a session may see/do ambiently is the
+        UNION of its team memberships — the resolver expands org.admin, and
+        the sys.admin/internal superusers pass outright (they may hold no
+        membership rows at all). The session's devTeam carries NO
+        authorization meaning: it exists for dev-run billing and
+        environment layering only. Commands that target a SPECIFIC object
+        use verify_team_permission against the addressed team instead.
+
+        Task-scoped synthetic identities are unchanged by the union: their
+        organization carries exactly the run's one team.
+        """
         if not self._account_info:
-            return False
-        try:
-            perms = resolve_team_permissions(self._account_info, self._account_info.defaultTeam)
-        except PermissionError as exc:
-            # The session's defaultTeam is not resolvable inside account_info.organization
-            # (AccountInfo carries a single org). Deny — but never silently: without this
-            # line the caller sees a bare "Permission 'x' denied" and the real cause, an
-            # unresolvable default team, is invisible in the logs.
-            #
-            # stdlib logging, not rocketlib.debug()/warning(). Two reasons, both checked
-            # against the running cloud ALB rather than assumed:
-            #   * debug() is gated on the engine trace level, and prod runs without one
-            #     (`./engine ./ai/eaas.py --saas --host=0.0.0.0 --port=5565 ...`).
-            #   * rocketlib output goes to the engine job log, which is delivered to the
-            #     connected client — not to container stdout. The prod ALB's log is
-            #     uvicorn access lines and nothing else, so neither call would have been
-            #     visible to us. Denying a client and then reporting the reason only to
-            #     that same client is not observability.
-            # uvicorn configures root logging, so this lands on stdout and reaches
-            # CloudWatch. Volume is bounded by actual denials, and a flood of these is
-            # itself the signal — that is exactly the shape #373 had.
-            logging.getLogger(__name__).warning(
-                f'[auth] has_permission: cannot resolve defaultTeam '
-                f'{self._account_info.defaultTeam!r} for user {self._account_info.userId!r} '
-                f'-> denying {perm!r} ({exc})'
-            )
             return False
         if isinstance(perm, str):
             perm = [perm]
-        return any(p in perms for p in perm)
+        # Superusers hold everything regardless of memberships (mirrors
+        # resolve_team_permissions' rule, which the loop below can never
+        # reach when the membership list is empty).
+        sys_perms = getattr(self._account_info, 'sysPermissions', []) or []
+        if 'sys.admin' in sys_perms or 'internal' in sys_perms:
+            return True
+        org = getattr(self._account_info, 'organization', None) or {}
+        teams = org.get('teams') if isinstance(org, dict) else getattr(org, 'teams', None)
+        for team in teams or []:
+            team_id = team.get('id') if isinstance(team, dict) else getattr(team, 'id', None)
+            if not team_id:
+                continue
+            try:
+                perms = resolve_team_permissions(self._account_info, team_id)
+            except PermissionError:
+                continue
+            if any(p in perms for p in perm):
+                return True
+        return False
 
     def verify_permission(self, perm: str) -> None:
         """Raise PermissionError if the authenticated user lacks the given permission."""
@@ -433,8 +445,8 @@ class TaskConn(
     def verify_team_permission(self, team_id: str, perm: str) -> None:
         """Raise PermissionError unless the user holds ``perm`` on the GIVEN team.
 
-        The counterpart to verify_permission (which resolves only against the
-        caller's defaultTeam): use this whenever a command targets an object
+        The counterpart to verify_permission (which resolves the UNION of
+        the caller's memberships): use this whenever a command targets an object
         that belongs to a SPECIFIC team — executing onto a team, touching a
         team's deployment, reading a team's logs. ``sys.admin`` bypasses, the
         same as the get_task path. A team outside the caller's org resolves to
@@ -591,7 +603,13 @@ class TaskConn(
         # sys.admin bypasses all team permission checks.
         if self._account_info and not self._account_info.auth.startswith(('pk_', 'tk_')):
             if 'sys.admin' not in (self._account_info.sysPermissions or []):
-                perms = resolve_task_permissions(self._account_info, control.teamId)
+                # Run-scoped resolution: a USER-owned run (dev or @me deploy)
+                # is private — full access for its owner (surviving an org
+                # switch: the owner is unchanged even when the run's team is
+                # now foreign), none for anyone else, and the billing teamId
+                # never grants a teammate access. Team-owned runs resolve
+                # through team membership.
+                perms = resolve_run_permissions(self._account_info, control)
                 if not perms:
                     raise PermissionError('Access denied: no permissions for this task')
                 if permissions and permissions not in perms:

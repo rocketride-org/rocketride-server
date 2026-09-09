@@ -60,8 +60,8 @@ const status = await client.getTaskStatus(token);
 | `completedSize` | `int` | Bytes processed successfully |
 | `rateCount` | `int` | Current processing rate (items/sec) |
 | `rateSize` | `int` | Current processing rate (bytes/sec) |
-| `errors` | `list[str]` | Recent error messages (max 50) |
-| `warnings` | `list[str]` | Recent warning messages (max 50) |
+| `errors` | `list[str]` | Recent error messages (max 1000) |
+| `warnings` | `list[str]` | Recent warning messages (max 1000) |
 | `status` | `str` | Current status message |
 | `currentObject` | `str` | Item currently being processed |
 | `exitCode` | `int` | Process exit code (0 = success) |

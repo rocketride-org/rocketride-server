@@ -29,7 +29,7 @@
 const path = require('path');
 const os = require('os');
 const { glob } = require('glob');
-const { getState, setState, updateState, removeDirs, syncDir, syncFile, removeFiles, formatSyncStats, execCommand, runPytest, PROJECT_ROOT, BUILD_ROOT, DIST_ROOT, isWindows, isMac, isLinux, exists, readFile, readJson, writeJson, mkdir, copyFile, removeFile, loadPackageJson, downloadGitHubFile, createArchive, extractArchive, parallel, whenNot, fingerprint, contentHash, taskDebug, STATE_FILE } = require('../../../scripts/lib');
+const { getState, setState, updateState, removeDirs, syncDir, syncFile, removeFiles, formatSyncStats, execCommand, runPytest, PROJECT_ROOT, BUILD_ROOT, DIST_ROOT, isWindows, isMac, isLinux, exists, readFile, readJson, writeJson, mkdir, copyFile, removeFile, loadPackageJson, downloadGitHubFile, createArchive, extractArchive, parallel, sequence, whenNot, fingerprint, contentHash, taskDebug, STATE_FILE } = require('../../../scripts/lib');
 const { runCompilerSetup } = require('../../../scripts/compiler');
 
 // Paths
@@ -1120,9 +1120,27 @@ function makeBuildAction() {
 			// The shell platform ships WITH the server (static/shell bundle,
 			// /client/shell tgz, the materialized .rocketride/shell package),
 			// so the server build carries it. The TS SDK builds first —
-			// pack-shell vendors its dist inside the shell package.
+			// pack-shell vendors its dist inside the shell package (and its
+			// build chains client-docs:agent, which stages the /client/docs bundle).
 			'client-typescript:build',
 			'shell:build',
+			// The workspace bootstrap shim also ships with the server
+			// (/client/typescript-init).
+			'client-init:build',
+			// The Python wheel ships with the server too — /client/python is
+			// an OSS route, so a server build that stages the TS package but
+			// not the wheel leaves that route serving nothing.
+			//
+			// Its own client-python:build is NOT usable here: that action
+			// starts with server:build (the wheel is built with the engine's
+			// pip), so calling it would close a cycle. The staging steps run
+			// directly instead — by this point server:setup-pip has run, so
+			// the interpreter the wheel build needs already exists.
+			// sync-source ran above, in the parallel Sync modules group.
+			'client-python:wheel-source',
+			'client-python:copy-readme',
+			'client-python:wheel-build',
+			'client-python:sync',
 		],
 	};
 }
@@ -1156,8 +1174,10 @@ function makeBuildAllAction() {
 		description: 'Build server (all modules)',
 		steps: [
 			'server:build',
-			// Build external modules
-			parallel(['nodes:build', 'ai:build', 'client-python:build'], 'Build modules'),
+			// Build external modules. mcp-widgets:build must complete before ai:build —
+			// it writes the widget bundle into packages/ai/src/ai/modules/mcp/apps/dist,
+			// and ai:build's sync step is what carries it into dist/server.
+			parallel(['nodes:build', sequence(['mcp-widgets:build', 'ai:build'], 'ai (with widgets)'), 'client-python:build'], 'Build modules'),
 		],
 	};
 }
@@ -1193,8 +1213,9 @@ function makeTestAction() {
 				// still skips the test-compile block across step boundaries.
 				condition: async (ctx) => ctx.serverDownloaded || Boolean(await getState('server.downloadHash')),
 				then: [
-					// Build modules needed for tests
-					parallel(['nodes:build', 'ai:build', 'client-python:build'], 'Build modules'),
+					// Build modules needed for tests. mcp-widgets:build must complete before
+					// ai:build — see makeBuildAllAction for the full rationale.
+					parallel(['nodes:build', sequence(['mcp-widgets:build', 'ai:build'], 'ai (with widgets)'), 'client-python:build'], 'Build modules'),
 					'server:compile-tests',
 					'server:copy-test-data',
 					parallel(['tika:submodule-test', 'server:run-aptest', 'server:run-engtest', 'server:run-rocketlib-test'], 'Run tests'),

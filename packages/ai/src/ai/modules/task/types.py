@@ -91,3 +91,31 @@ class LAUNCH_TYPE(Enum):
     LAUNCH = 'launch'  # Create new task with full debugging capabilities
     ATTACH = 'attach'  # Connect to existing task instance for debugging
     EXECUTE = 'execute'  # Create new task optimized for batch processing
+
+
+class TaskError(RuntimeError):
+    """
+    A task lookup or readiness failure that carries a machine-readable code.
+
+    ``DAPBase.build_exception`` copies ``code`` onto the DAP error packet next to
+    the human-readable ``message``, so a client classifies the failure on the
+    code instead of matching the English text. Subclasses ``RuntimeError`` so
+    existing ``except RuntimeError`` handling is unchanged.
+
+    Codes:
+    - TASK_NOT_REGISTERED: the token, public key or project/source names no live
+      task — never started, terminated, replaced, or the engine restarted and
+      rebuilt its in-memory registry
+    - TASK_AMBIGUOUS: an unscoped lookup matched several running tasks
+    - TASK_COMPLETED: the task finished before the request could be served
+    - TASK_STOPPED: the task was stopped or cancelled before the request
+    """
+
+    NOT_REGISTERED = 'TASK_NOT_REGISTERED'
+    AMBIGUOUS = 'TASK_AMBIGUOUS'
+    COMPLETED = 'TASK_COMPLETED'
+    STOPPED = 'TASK_STOPPED'
+
+    def __init__(self, code: str, message: str):
+        super().__init__(message)
+        self.code = code

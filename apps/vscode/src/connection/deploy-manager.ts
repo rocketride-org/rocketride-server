@@ -50,6 +50,7 @@
  */
 
 import { ConnectionManager } from './connection';
+import { resolveConnectionEnv } from '../shared/util/envFile';
 import type { ConnectionStatus } from '../shared/types';
 import type { RocketRideClient } from 'rocketride';
 
@@ -114,10 +115,64 @@ export class DeployManager extends ConnectionManager {
 
 		const dev = this.getDevManager();
 		for (const eventName of DeployManager.FORWARDED_EVENTS) {
-			const handler = (...args: unknown[]) => this.emit(eventName, ...args);
+			const handler = (...args: unknown[]) => {
+				this.emit(eventName, ...args);
+				// Shared mode: a (re)connected dev session is also the deploy
+				// target coming up — mirror its credentials into the deploy pair.
+				if (eventName === 'shell:connected') {
+					void this.syncSharedDeployEnv();
+				}
+			};
 			this.forwardHandlers.set(eventName, handler);
 			dev.on(eventName, handler);
 		}
+		// The dev connection may already be up when forwarding starts.
+		if (dev.isConnected()) {
+			void this.syncSharedDeployEnv();
+		}
+	}
+
+	/**
+	 * Shared mode: the deploy target IS the dev connection, but automation
+	 * still needs the ROCKETRIDE_DEPLOY_* pair in `.env` — its presence is
+	 * the signal that a deploy target exists at all. Write BOTH pairs from
+	 * the dev connection's resolved URL and credential: they are one source
+	 * of truth here, and writing them together also heals a dev-side sync
+	 * that a superseded connection attempt skipped. Best-effort: an
+	 * unresolved credential (cloud, signed out) simply skips the mirror.
+	 */
+	private async syncSharedDeployEnv(): Promise<void> {
+		try {
+			if (!this.isSharedMode()) return;
+			const dev = this.getDevManager();
+			const httpUrl = dev.getHttpUrl();
+			// Cheap early-out before resolving a credential: with no dev URL
+			// there is nothing to mirror, and the resolve can reach the cloud.
+			if (!httpUrl) return;
+			const credential = await dev.resolveAuthCredential();
+			const mode = dev.getResolvedConnectionMode();
+			// Compose the two groups through the resolver rather than naming
+			// the four keys here: envFile owns both the group-to-key mapping
+			// and the URL/credential validation, and a second copy of either
+			// is one that can silently drift out of step.
+			const devPair = resolveConnectionEnv({ group: 'development', mode, httpUrl, apiKey: credential });
+			const deployPair = resolveConnectionEnv({ group: 'deployment', mode, httpUrl, apiKey: credential });
+			if (!devPair || !deployPair) return;
+			await this.writeEnvUpdates({ ...devPair, ...deployPair }, this.beginConnectionAttempt());
+		} catch {
+			// No usable dev credential right now — nothing to mirror.
+		}
+	}
+
+	/**
+	 * Shared mode judges OAuth-ness by the DEV connection's mode — the deploy
+	 * pair mirrors the dev session, so it must blank when THAT session ends.
+	 */
+	protected override async blankEnvOnSignOut(): Promise<void> {
+		if (this.isSharedMode()) {
+			return super.blankEnvOnSignOut(this.getDevManager().getResolvedConnectionMode());
+		}
+		return super.blankEnvOnSignOut();
 	}
 
 	/** Removes all forwarding listeners from the dev connection. */

@@ -86,10 +86,10 @@ class _StubLogApi:
     def __init__(self, reader):
         self._reader = reader
 
-    async def chapters(self, project_id, source, *, team_id=''):
+    async def chapters(self, project_id, source, *, team_id='', run_kind=''):
         return await self._reader.chapters()
 
-    async def segment(self, project_id, source, segment, *, team_id='', offset=0, max_bytes=None):
+    async def segment(self, project_id, source, segment, *, team_id='', run_kind='', offset=0, max_bytes=None):
         if max_bytes is None:
             return await self._reader.segment_raw(segment, offset=offset)
         return await self._reader.segment_raw(segment, offset=offset, max_bytes=max_bytes)

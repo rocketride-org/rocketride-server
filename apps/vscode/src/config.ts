@@ -38,8 +38,17 @@ export interface ConnectionGroupConfig {
 	/** Connection mode (null only valid for deployment = shared with dev) */
 	connectionMode: ConnectionMode | null;
 
-	/** Server host URL */
+	/** Server host URL. In cloud mode this is the RESOLVED target (the
+	 * custom server when opted in, else the default cloud) — consumers
+	 * never re-derive it. */
 	hostUrl: string;
+
+	/** Cloud mode: connect to `cloudUrl` instead of the default cloud. */
+	useCustomServer: boolean;
+
+	/** Cloud mode: the custom server address (raw setting value, for the
+	 * Settings UI — `hostUrl` carries the resolved target). */
+	cloudUrl: string;
 
 	/** API key for authentication (from secure storage) */
 	apiKey: string;
@@ -82,6 +91,8 @@ export interface ConfigManagerInfo {
 export interface ConnectionGroupSnapshot {
 	connectionMode: ConnectionMode | null;
 	hostUrl: string;
+	useCustomServer: boolean;
+	cloudUrl: string;
 	apiKey: string;
 	local: {
 		engineVersion: string;
@@ -128,6 +139,8 @@ export class ConfigManager {
 	private static readonly DEFAULT_GROUP: ConnectionGroupConfig = {
 		connectionMode: 'local',
 		hostUrl: '',
+		useCustomServer: false,
+		cloudUrl: '',
 		apiKey: '',
 		local: { engineVersion: 'latest' },
 	};
@@ -195,7 +208,8 @@ export class ConfigManager {
 	 * Refreshes a single group's config from VS Code settings + secure storage.
 	 * Applies identical fallback logic for both groups:
 	 *   - docker/service → localhost + default API key
-	 *   - cloud → build-time ROCKETRIDE_URI fallback
+	 *   - cloud → the cloudUrl setting's DEFAULT, or the custom server when
+	 *     the user opted in via useCustomServer
 	 */
 	private async refreshGroupConfig(group: ConnectionGroup): Promise<ConnectionGroupConfig> {
 		const gc = vscode.workspace.getConfiguration(`${this.configSection}.${group}`);
@@ -203,15 +217,24 @@ export class ConfigManager {
 		const connectionMode = gc.get<ConnectionMode | null>('connectionMode', defaultMode);
 		let hostUrl = gc.get<string>('hostUrl', '');
 		let apiKey = await this.getApiKeyFromStorage(group);
+		const useCustomServer = gc.get<boolean>('useCustomServer', false);
+		const cloudUrl = gc.get<string>('cloudUrl', '');
 
-		// Cloud: build-time URI — ignore any stale hostUrl from other modes
+		// Cloud: resolve the target from SETTINGS — nothing is baked into the
+		// extension. Unchecked = the cloudUrl setting's package.json default
+		// (the production cloud), so an edited-but-unchecked value or a stale
+		// hostUrl from another mode can never leak in; checked = the user's
+		// explicit custom server (staging, localhost, a preview env).
 		if (connectionMode === 'cloud') {
-			hostUrl = process.env.ROCKETRIDE_URI || 'https://api.rocketride.ai';
+			const defaultCloudUrl = gc.inspect<string>('cloudUrl')?.defaultValue ?? cloudUrl;
+			hostUrl = useCustomServer && cloudUrl ? cloudUrl : defaultCloudUrl;
 		}
 
 		return {
 			connectionMode,
 			hostUrl,
+			useCustomServer,
+			cloudUrl,
 			apiKey,
 			local: {
 				engineVersion: gc.get<string>('local.engineVersion', 'latest'),
@@ -338,6 +361,25 @@ export class ConfigManager {
 	}
 
 	/**
+	 * The cloud server the extension currently operates against (SYNC).
+	 *
+	 * Sign-in (the OAuth code exchange) and other group-less cloud actions
+	 * need ONE answer: the resolved hostUrl of whichever group is in cloud
+	 * mode — development preferred (it is the interactive session),
+	 * deployment otherwise. When no group is in cloud mode, the deployment
+	 * cloudUrl setting's DEFAULT (nothing is baked into the extension).
+	 *
+	 * @returns The resolved cloud server URL.
+	 */
+	public getEffectiveCloudUrl(): string {
+		const cfg = this.getConfig();
+		if (cfg.development.connectionMode === 'cloud') return cfg.development.hostUrl;
+		if (cfg.deployment.connectionMode === 'cloud') return cfg.deployment.hostUrl;
+		const gc = vscode.workspace.getConfiguration(`${this.configSection}.deployment`);
+		return gc.inspect<string>('cloudUrl')?.defaultValue ?? gc.get<string>('cloudUrl', '');
+	}
+
+	/**
 	 * Validates a group's configuration (SYNC).
 	 * @returns Array of validation error messages, empty if valid
 	 */
@@ -448,11 +490,15 @@ export class ConfigManager {
 			// --- Development group ---
 			await wc.update('development.connectionMode', s.development.connectionMode, vscode.ConfigurationTarget.Global);
 			await wc.update('development.hostUrl', s.development.hostUrl, vscode.ConfigurationTarget.Global);
+			await wc.update('development.useCustomServer', s.development.useCustomServer, vscode.ConfigurationTarget.Global);
+			await wc.update('development.cloudUrl', s.development.cloudUrl, vscode.ConfigurationTarget.Global);
 			await wc.update('development.local.engineVersion', s.development.local.engineVersion, vscode.ConfigurationTarget.Global);
 
 			// --- Deployment group ---
 			await wc.update('deployment.connectionMode', s.deployment.connectionMode, vscode.ConfigurationTarget.Global);
 			await wc.update('deployment.hostUrl', s.deployment.hostUrl, vscode.ConfigurationTarget.Global);
+			await wc.update('deployment.useCustomServer', s.deployment.useCustomServer, vscode.ConfigurationTarget.Global);
+			await wc.update('deployment.cloudUrl', s.deployment.cloudUrl, vscode.ConfigurationTarget.Global);
 			await wc.update('deployment.local.engineVersion', s.deployment.local.engineVersion, vscode.ConfigurationTarget.Global);
 
 			// --- Global settings ---

@@ -71,7 +71,7 @@ class Chat(ChatBase):
             self._llm = ChatOpenAI(
                 model=self._model,
                 api_key=apikey,
-                temperature=0,
+                temperature=config['temperature'] if 'temperature' in config else 0,
                 max_tokens=self._modelOutputTokens,
             )
 

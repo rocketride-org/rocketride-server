@@ -74,6 +74,7 @@ from .client import (
     ConnectResult,
     ServerInfoResult,
     AppManifestEntry,
+    DevEntry,
 )
 
 # Pipeline types: the structures that describe a pipeline's topology — its
@@ -214,6 +215,10 @@ from .service import (
     PROTOCOL_CAPS,
 )
 
+# App pre-deploy verification report — the shapes client.deploy.verify_app
+# returns, exported so callers never annotate against a private module.
+from .deploy import AppVerifyCheck, AppVerifyReport
+
 __all__ = [
     # Client types
     'RocketRideClientConfig',
@@ -230,6 +235,7 @@ __all__ = [
     'ConnectResult',
     'ServerInfoResult',
     'AppManifestEntry',
+    'DevEntry',
     # Pipeline types
     'PipelineInputConnection',
     'PipelineControlConnection',
@@ -298,6 +304,8 @@ __all__ = [
     'InviteMemberParams',
     'TeamMemberParams',
     # Deploy types
+    'AppVerifyCheck',
+    'AppVerifyReport',
     'DeployActor',
     'DeployArtifact',
     'DeployHistoryEntry',

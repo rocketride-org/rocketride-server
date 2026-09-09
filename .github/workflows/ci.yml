@@ -46,8 +46,8 @@ jobs:
     outputs:
       code: ${{ steps.filter.outputs.code }}
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-      - uses: dorny/paths-filter@d1c1ffe0248fe513906c8e24db8ea791d46f8590 # v3
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dorny/paths-filter@0e4a8c6effa4802afeda77dc8d303f8176d7dfad # v3
         id: filter
         with:
           filters: |
@@ -74,8 +74,8 @@ jobs:
     outputs:
       helm: ${{ steps.filter.outputs.helm }}
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-      - uses: dorny/paths-filter@d1c1ffe0248fe513906c8e24db8ea791d46f8590 # v3
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dorny/paths-filter@0e4a8c6effa4802afeda77dc8d303f8176d7dfad # v3
         id: filter
         with:
           filters: |
@@ -90,7 +90,7 @@ jobs:
     if: needs.helm-changes.outputs.helm == 'true'
     steps:
       - name: Checkout
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Install Helm
         uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4
@@ -176,7 +176,7 @@ jobs:
           - Dockerfile.engine
     steps:
       - name: Checkout
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Install Trivy
         run: |
@@ -195,7 +195,7 @@ jobs:
             --ignore-unfixed
 
       - name: Upload Trivy SARIF
-        uses: github/codeql-action/upload-sarif@4187e74d05793876e9989daffde9c3e66b4acd07 # v3
+        uses: github/codeql-action/upload-sarif@6f5948dfacef28e207b48d0905cf90c03365536d # v3
         if: always()
         with:
           sarif_file: 'trivy-${{ matrix.dockerfile }}.sarif'
@@ -210,8 +210,14 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: astral-sh/ruff-action@4919ec5cf1f49eff0871dbcea0da843445b837e6 # v3
+        # The SHA above pins only the action, not the ruff version it installs
+        # (resolves to `latest` otherwise). Pin the version here so an upstream
+        # ruff release can't turn develop red on untouched files; bump
+        # deliberately, run the formatter, review the diff (#1876).
+        with:
+          version: "0.16.5"
       - run: ruff check
       - run: ruff format --check
 
@@ -225,7 +231,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
       - name: Install gitleaks
@@ -265,7 +271,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
       - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4
@@ -280,17 +286,32 @@ jobs:
         # contract check. Nonzero exit fails the PR.
         run: node scripts/build.js shell:check
       - name: shell contract floors are un-tampered — regen must be a no-op
-        # Regenerate the barrels + per-version floors from the immutable frozen
-        # versions, then fail on any diff. A nonzero diff means the committed
-        # contract-check.generated.ts (or a contract barrel) was hand-edited —
-        # e.g. a `_floor_vN` line dropped so a removed export slips past tsc. The
-        # SDK/tsc prereqs are already warm from the step above.
+        # Regenerate the barrels + per-version floors + apiver from the immutable
+        # frozen versions, then fail on any diff. A nonzero diff means a committed
+        # derived file was hand-edited — e.g. a `_floor_vN` line dropped so a
+        # removed export slips past tsc. shell:regen-derived reads ONLY the frozen
+        # versions/*.d.ts (never the live surface, never a reset), so legitimate
+        # freezes of new versions pass here untouched.
         run: |
-          node scripts/build.js shell:regen
+          node scripts/build.js shell:regen-derived
           git diff --exit-code -- \
             packages/shell/src/contract-check.generated.ts \
             packages/shell/contract/index.ts \
-            packages/shell/contract/latest.ts
+            packages/shell/contract/latest.ts \
+            packages/shell/src/apiver.ts
+          # `git diff` sees tracked changes only: a derived file DELETED from
+          # the commit is recreated by the regen as untracked and would sail
+          # through the diff above.
+          untracked=$(git ls-files --others --exclude-standard -- \
+            packages/shell/src/contract-check.generated.ts \
+            packages/shell/contract/index.ts \
+            packages/shell/contract/latest.ts \
+            packages/shell/src/apiver.ts)
+          if [ -n "$untracked" ]; then
+            echo "Derived contract file(s) missing from the commit (recreated by regen):"
+            echo "$untracked"
+            exit 1
+          fi
       - name: client SDK contract floors are un-tampered — regen must be a no-op
         # Same guarantee for the rocketride TypeScript SDK: regenerate its
         # contract barrels + conformance file from the immutable frozen floors
@@ -308,6 +329,11 @@ jobs:
             packages/client-typescript/src/contract-check.generated.ts \
             packages/client-typescript/contract/index.ts \
             packages/client-typescript/contract/latest.ts
+      - name: credentials catalog is current — no unmapped or stale entries
+        # Equivalent to `./builder nodes:credentials-check`. Fails if a node's
+        # services*.json has a credential-shaped field with no catalog entry,
+        # or an existing catalog entry has gone stale. Never writes.
+        run: node nodes/scripts/gen-credentials.mjs --check
 
   # ---------------------------------------------------------------------------
   #  Gatekeeper — the ONLY job to mark as "Required" in branch protection.

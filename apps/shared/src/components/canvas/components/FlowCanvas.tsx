@@ -411,7 +411,7 @@ export default function Canvas(): ReactElement {
 			{onSave && !isLocked && (
 				<>
 					<ToolbarDivider />
-					<ToolbarButton title={isNew ? 'Save As…' : 'Save'} onClick={onSave} disabled={!isDirty && !isNew} forceColor={isDirty ? 'var(--rr-brand)' : undefined}>
+					<ToolbarButton title={isNew ? 'Save As…' : 'Save'} onClick={onSave} disabled={!isDirty && !isNew} forceColor={isDirty || isNew ? 'var(--rr-brand)' : undefined}>
 						<BxIcon d={BX_SAVE} size={16} />
 					</ToolbarButton>
 				</>
