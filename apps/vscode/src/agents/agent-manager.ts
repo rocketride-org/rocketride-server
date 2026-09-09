@@ -37,6 +37,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { getLogger } from '../shared/util/output';
 import { icons } from '../shared/util/icons';
+import { CONSENT_CHOICES, CONSENT_PROMPT_DETAIL, ConsentChoice, RecordedConsent, decideAutoInstallConsent } from '../shared/util/autoInstallConsent';
 import { BaseAgentInstaller } from './base-installer';
 import { CursorInstaller } from './cursor-installer';
 import { ClaudeCodeInstaller } from './claude-code-installer';
@@ -56,6 +57,7 @@ const DOCS_DIR = '.rocketride/docs';
  * The pattern is the exact name, so a committed `.env.example` is unaffected.
  */
 const GITIGNORE_ENTRIES = ['.rocketride/', '.env'] as const;
+const AUTO_INSTALL_CONSENT_KEY = 'agentIntegrationAutoInstallConsent';
 
 /** Doc files shipped in the extension's docs/ directory. */
 const DOC_FILES = ['ROCKETRIDE_README.md', 'ROCKETRIDE_QUICKSTART.md', 'ROCKETRIDE_PIPELINE_RULES.md', 'ROCKETRIDE_COMPONENT_REFERENCE.md', 'ROCKETRIDE_COMMON_MISTAKES.md', 'ROCKETRIDE_python_API.md', 'ROCKETRIDE_typescript_API.md', 'ROCKETRIDE_OBSERVABILITY.md'];
@@ -82,7 +84,7 @@ export class AgentManager {
 	 * Pass 2 (manual settings): For each individual integration checkbox that
 	 *   is checked, install that stub if it wasn't already covered by Pass 1.
 	 */
-	async autoInstall(extensionPath: string, workspaceRoot: vscode.Uri): Promise<void> {
+	async autoInstall(context: vscode.ExtensionContext, extensionPath: string, workspaceRoot: vscode.Uri): Promise<void> {
 		const logger = getLogger();
 		const workspaceConfig = vscode.workspace.getConfiguration('rocketride');
 		const autoDetect = workspaceConfig.get<boolean>('integrations.autoAgentIntegration', true);
@@ -99,10 +101,12 @@ export class AgentManager {
 			workspacePrepared = true;
 		};
 
-		// Pass 1: auto-detect
+		// Pass 1: auto-detect — requires explicit user consent before writing anything,
+		// since detection alone (e.g. Claude Code CLI present for unrelated work) isn't
+		// permission to modify every workspace the user opens.
 		if (autoDetect) {
 			const detected = await this.detectEnvironment();
-			if (detected.length > 0) {
+			if (detected.length > 0 && (await this.getAutoInstallConsent(context, detected))) {
 				await prepareWorkspace();
 				for (const installer of detected) {
 					const ok = await this.runInstaller(installer, extensionPath, workspaceRoot);
@@ -129,6 +133,36 @@ export class AgentManager {
 	}
 
 	/**
+	 * Ask the user for one-time consent before auto-detected integration writes anything
+	 * into the workspace. The choice is remembered globally so the user is only asked once
+	 * across all workspaces:
+	 *   - 'Install': proceed now and remember to never ask again.
+	 *   - 'Not now': skip this activation, ask again next time.
+	 *   - "Don't ask again": remember to never ask (or auto-install) again.
+	 *
+	 * The decision itself lives in `decideAutoInstallConsent` so it can be tested
+	 * without the `vscode` module; this method is the I/O around it.
+	 */
+	private async getAutoInstallConsent(context: vscode.ExtensionContext, detected: BaseAgentInstaller[]): Promise<boolean> {
+		const recorded = context.globalState.get<RecordedConsent>(AUTO_INSTALL_CONSENT_KEY);
+
+		// Skip the prompt entirely on an answer we already hold, so a recorded
+		// user never sees the dialog again.
+		if (recorded !== undefined) {
+			return decideAutoInstallConsent(recorded, undefined).grant;
+		}
+
+		const names = detected.map((installer) => installer.name).join(', ');
+		const choice = (await vscode.window.showInformationMessage(`RocketRide detected ${names} in this project. ${CONSENT_PROMPT_DETAIL}`, ...CONSENT_CHOICES)) as ConsentChoice | undefined;
+
+		const decision = decideAutoInstallConsent(recorded, choice);
+		if (decision.persist !== undefined) {
+			await context.globalState.update(AUTO_INSTALL_CONSENT_KEY, decision.persist);
+		}
+		return decision.grant;
+	}
+
+	/**
 	 * Detect which coding agents are running based on the IDE environment.
 	 */
 	async detectEnvironment(): Promise<BaseAgentInstaller[]> {
@@ -146,8 +180,9 @@ export class AgentManager {
 			detected.push(byName('Windsurf'));
 		}
 
-		// Standard VS Code → install Copilot (the built-in agent)
-		if (appName.includes('visual studio code') || appName === 'code') {
+		// GitHub Copilot: only if the Copilot extension is actually installed
+		const copilotExtension = vscode.extensions.getExtension('GitHub.copilot') ?? vscode.extensions.getExtension('GitHub.copilot-chat');
+		if (copilotExtension) {
 			detected.push(byName('Copilot'));
 		}
 
