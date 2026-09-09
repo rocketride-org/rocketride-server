@@ -20,11 +20,11 @@ Default: **Sonar** (`sonar`).
 
 | Profile | Model | Context tokens | Output tokens | Model source |
 | ------- | ----- | -------------- | ------------- | ------------ |
-| `sonar` **(default)** | `sonar` | 127,072 | 4,096 | manual |
+| `sonar` **(default)** | `sonar` | 127,072 | 114,364 | manual |
 | `sonar-pro` | `sonar-pro` | 200,000 | 8,000 | manual |
-| `sonar-reasoning-pro` | `sonar-reasoning-pro` | 128,000 | 4,096 | manual |
+| `sonar-reasoning-pro` | `sonar-reasoning-pro` | 128,000 | 115,200 | manual |
 | `sonar-reasoning` | `sonar-reasoning` | 128,000 | 4,096 | manual |
-| `sonar-deep-research` | `sonar-deep-research` | 128,000 | 4,096 | manual |
+| `sonar-deep-research` | `sonar-deep-research` | 128,000 | 115,200 | manual |
 | `sonar-pro-search` | `sonar-pro-search` | 200,000 | 8,000 | OpenRouter |
 
 All profiles except `sonar-pro-search` use manually configured model metadata. The `sonar-pro-search` profile pulls token limits from OpenRouter.

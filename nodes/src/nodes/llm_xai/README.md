@@ -23,12 +23,12 @@ Default: **Grok 3** (`grok-3`).
 | Profile | Model | Context | Output |
 | ------- | ----- | ------- | ------ |
 | `grok-3` **(default)** | `grok-3` | 131,072 | 131,072 |
-| `grok-4-5` | `grok-4.5` | 500,000 | 500,000 |
-| `grok-4-20` | `grok-4.20` | 2,000,000 | 4,096 |
-| `grok-4-20-multi-agent` | `grok-4.20-multi-agent` | 2,000,000 | 4,096 |
+| `grok-4-5` | `grok-4.5` | 500,000 | 450,000 |
+| `grok-4-20` | `grok-4.20` | 2,000,000 | 1,800,000 |
+| `grok-4-20-multi-agent` | `grok-4.20-multi-agent` | 2,000,000 | 1,800,000 |
 
 <details>
-<summary><strong>View 15 more models</strong></summary>
+<summary><strong>View 17 more models</strong></summary>
 
 | Profile | Model | Context | Output |
 | ------- | ----- | ------- | ------ |
@@ -44,9 +44,11 @@ Default: **Grok 3** (`grok-3`).
 | `grok-3-mini-beta` **(deprecated)** | `grok-3-mini-beta` | 131,072 | 131,072 |
 | `grok-4-1-fast` **(deprecated)** | `grok-4.1-fast` | 2,000,000 | 30,000 |
 | `grok-4-fast` **(deprecated)** | `grok-4-fast` | 2,000,000 | 30,000 |
-| `grok-4-3` | `grok-4.3` | 1,000,000 | 1,000,000 |
-| `grok-build-0-1` | `grok-build-0.1` | 256,000 | 4,096 |
-| `grok-latest` | `grok-latest` | 500,000 | 4,096 |
+| `grok-4-3` | `grok-4.3` | 1,000,000 | 900,000 |
+| `grok-build-0-1` | `grok-build-0.1` | 256,000 | 230,400 |
+| `grok-latest` | `grok-latest` | 500,000 | 450,000 |
+| `grok-4-3-batch` | `grok-4.3:batch` | 1,000,000 | 900,000 |
+| `grok-4-6` | `grok-4.6` | 500,000 | 450,000 |
 
 </details>
 

@@ -30,18 +30,55 @@ The visible `(latest)` stable aliases always resolve to DashScope's current snap
 | `qwen-turbo` | `qwen-turbo` | 131,072 | 8,192 |
 
 <details>
-<summary><strong>View 8 more models</strong></summary>
+<summary><strong>View 45 more models</strong></summary>
 
 | Profile | Model | Context | Output |
 | ------- | ----- | ------- | ------ |
-| `qwen3-7-max` | `qwen3.7-max` | 1,000,000 | 65,536 |
-| `qwen3-7-plus` | `qwen3.7-plus` | 1,000,000 | 65,536 |
+| `qwen3-7-max` | `qwen3.7-max` | 1,000,000 | 131,072 |
+| `qwen3-7-plus` | `qwen3.7-plus` | 1,000,000 | 131,072 |
 | `qwen3-6-flash` | `qwen3.6-flash` | 1,000,000 | 65,536 |
 | `qwen-plus-2025-07-28` | `qwen-plus-2025-07-28` | 1,000,000 | 32,768 |
 | `qwen-2-5-72b-instruct` | `qwen-2.5-72b-instruct` | 32,768 | 16,384 |
-| `qwen-2-5-7b-instruct` | `qwen-2.5-7b-instruct` | 32,768 | 32,768 |
-| `qwen-2-5-coder-32b-instruct` | `qwen-2.5-coder-32b-instruct` | 32,768 | 32,768 |
+| `qwen-2-5-7b-instruct` | `qwen-2.5-7b-instruct` | 32,768 | 29,491 |
+| `qwen-2-5-coder-32b-instruct` | `qwen-2.5-coder-32b-instruct` | 32,768 | 29,491 |
 | `qwen-plus-2025-07-28-thinking` | `qwen-plus-2025-07-28:thinking` | 1,000,000 | 32,768 |
+| `qwen3-14b` | `qwen3-14b` | 131,072 | 16,384 |
+| `qwen3-235b-a22b` | `qwen3-235b-a22b` | 131,072 | 8,192 |
+| `qwen3-235b-a22b-2507` | `qwen3-235b-a22b-2507` | 262,144 | 16,384 |
+| `qwen3-235b-a22b-thinking-2507` | `qwen3-235b-a22b-thinking-2507` | 131,072 | 117,964 |
+| `qwen3-30b-a3b` | `qwen3-30b-a3b` | 131,072 | 16,384 |
+| `qwen3-30b-a3b-instruct-2507` | `qwen3-30b-a3b-instruct-2507` | 262,144 | 32,000 |
+| `qwen3-30b-a3b-thinking-2507` | `qwen3-30b-a3b-thinking-2507` | 81,920 | 32,768 |
+| `qwen3-32b` | `qwen3-32b` | 131,072 | 16,384 |
+| `qwen3-5-122b-a10b` | `qwen3.5-122b-a10b` | 262,144 | 81,920 |
+| `qwen3-5-27b` | `qwen3.5-27b` | 262,144 | 65,536 |
+| `qwen3-5-35b-a3b` | `qwen3.5-35b-a3b` | 262,144 | 16,384 |
+| `qwen3-5-397b-a17b` | `qwen3.5-397b-a17b` | 262,144 | 65,536 |
+| `qwen3-5-9b` | `qwen3.5-9b` | 262,144 | 235,929 |
+| `qwen3-5-9b-batch` | `qwen3.5-9b:batch` | 262,144 | 235,929 |
+| `qwen3-5-flash-02-23` | `qwen3.5-flash-02-23` | 1,000,000 | 65,536 |
+| `qwen3-5-plus-02-15` | `qwen3.5-plus-02-15` | 1,000,000 | 65,536 |
+| `qwen3-5-plus-20260420` | `qwen3.5-plus-20260420` | 1,000,000 | 65,536 |
+| `qwen3-6-27b` | `qwen3.6-27b` | 262,144 | 65,536 |
+| `qwen3-6-35b-a3b` | `qwen3.6-35b-a3b` | 262,144 | 235,929 |
+| `qwen3-6-max-preview` | `qwen3.6-max-preview` | 262,144 | 65,536 |
+| `qwen3-6-plus` | `qwen3.6-plus` | 1,000,000 | 65,536 |
+| `qwen3-7-flash` | `qwen3.7-flash` | 1,000,000 | 65,536 |
+| `qwen3-8-2-4t-a95b` | `qwen3.8-2.4t-a95b` | 1,048,576 | 262,144 |
+| `qwen3-8-2-4t-a95b-batch` | `qwen3.8-2.4t-a95b:batch` | 1,010,000 | 909,000 |
+| `qwen3-8-27b` | `qwen3.8-27b` | 1,000,000 | 131,072 |
+| `qwen3-8-flash` | `qwen3.8-flash` | 1,000,000 | 131,072 |
+| `qwen3-8-max-0902` | `qwen3.8-max-0902` | 1,000,000 | 131,072 |
+| `qwen3-8b` | `qwen3-8b` | 131,072 | 8,192 |
+| `qwen3-coder` | `qwen3-coder` | 262,144 | 65,536 |
+| `qwen3-coder-30b-a3b-instruct` | `qwen3-coder-30b-a3b-instruct` | 262,144 | 235,929 |
+| `qwen3-coder-flash` | `qwen3-coder-flash` | 1,000,000 | 65,536 |
+| `qwen3-coder-next` | `qwen3-coder-next` | 262,144 | 235,929 |
+| `qwen3-coder-plus` | `qwen3-coder-plus` | 1,000,000 | 65,536 |
+| `qwen3-max` | `qwen3-max` | 262,144 | 65,536 |
+| `qwen3-max-thinking` | `qwen3-max-thinking` | 262,144 | 65,536 |
+| `qwen3-next-80b-a3b-instruct` | `qwen3-next-80b-a3b-instruct` | 262,144 | 235,929 |
+| `qwen3-next-80b-a3b-thinking` | `qwen3-next-80b-a3b-thinking` | 262,144 | 235,929 |
 
 </details>
 

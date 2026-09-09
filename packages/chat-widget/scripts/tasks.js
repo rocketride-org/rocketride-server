@@ -41,7 +41,7 @@ const COVERAGE_DIR = path.join(PACKAGE_DIR, 'coverage');
 // the README has to be copied here (npm cannot include files from outside the
 // package). Same convention as client-typescript/client-python/client-mcp/
 // vscode: the copy is gitignored, so the two files cannot drift.
-const README_SRC = path.join(PROJECT_ROOT, 'docs', 'README-chat-widget.md');
+const README_SRC = path.join(PROJECT_ROOT, 'docs', 'public', 'chat-widget', 'README.md');
 const README_DEST = path.join(PACKAGE_DIR, 'README.md');
 
 // ============================================================================
