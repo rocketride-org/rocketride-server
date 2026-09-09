@@ -275,7 +275,7 @@ class UploadCommand(BaseCommand):
 
             # Upload the files
             start_time = time.time()
-            results = await self.client.send_files(valid_files, task_token)
+            results = await self.client.send_files(valid_files, task_token, self.args.max_concurrent)
             end_time = time.time()
 
             # Display final results

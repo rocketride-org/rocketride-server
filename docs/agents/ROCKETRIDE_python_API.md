@@ -159,11 +159,11 @@ rocketride start my-pipeline.pipe --apikey YOUR_KEY
 rocketride upload files/*.csv --pipeline ./pipeline.pipe --apikey YOUR_KEY
 # or with existing task token
 rocketride upload files/*.csv --token TASK_TOKEN --apikey YOUR_KEY
-# with custom thread count (default is 4)
-rocketride upload files/*.csv --token TASK_TOKEN --threads 10 --apikey YOUR_KEY
+# with more files in flight at once (default is 5)
+rocketride upload files/*.csv --token TASK_TOKEN --max-concurrent 10 --apikey YOUR_KEY
 ```
 
-Upload command supports parallel file uploads. Use `--threads` to control concurrency.
+Upload command supports parallel file uploads. Use `--max-concurrent` to control how many files are uploaded at once; `--threads` only sets the pipeline's thread count when the command starts one.
 
 **Monitor pipeline status:**
 
@@ -333,7 +333,7 @@ client = RocketRideClient(auth='your-api-key', on_event=handle_events)
 
 await client.connect()
 
-# Simple file list (all files uploaded concurrently)
+# Simple file list (5 uploaded at a time by default)
 files = ['doc1.pdf', 'data.csv', 'report.docx']
 results = await client.send_files(files, token)
 
@@ -527,16 +527,17 @@ Send data directly to a pipeline.
 
 **Important:** Use this method with pipelines that have `webhook` or `dropper` as the source component. For chat/Q&A systems, use `chat()` method instead with a `chat` source component.
 
-##### `async send_files(files: List, token: str) -> List[Dict[str, Any]]`
+##### `async send_files(files: List, token: str, max_concurrent: int = 5) -> List[Dict[str, Any]]`
 
-Upload multiple files in parallel.
+Upload multiple files in parallel, with a bounded number of uploads in flight at a time.
 
 **Parameters:**
 
 - `files` (list): List of file paths or tuples `(filepath, objinfo)` or `(filepath, objinfo, mimetype)`
 - `token` (str): Task token of the pipeline
+- `max_concurrent` (int, optional): Maximum files uploaded at the same time. Must be a positive integer; raises `ValueError` otherwise (default: 5)
 
-**Returns:** List of upload result dictionaries
+**Returns:** List of upload result dictionaries, in the same order as `files`
 
 **Important:** Use this method with pipelines that have `webhook` or `dropper` as the source component for document processing. For chat/Q&A systems, use `chat()` method with a `chat` source component instead.
 
@@ -1109,8 +1110,8 @@ Both import paths work; the top-level form is convenient when you also import `R
 
 ## Performance Considerations
 
-- File uploads are parallelized (all files uploaded concurrently)
-- The server handles queuing and rate limiting automatically
+- File uploads run concurrently, capped by `send_files`' `max_concurrent` (default 5)
+- Raise `max_concurrent` for many small files, lower it for large ones
 - Use pipes for streaming large datasets to avoid memory issues
 - Event system provides real-time feedback without polling overhead
 - Connection persistence reduces reconnection overhead in long-running applications

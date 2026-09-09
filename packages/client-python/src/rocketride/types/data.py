@@ -166,7 +166,7 @@ class UPLOAD_RESULT(TypedDict, total=False):
     filepath: str  # REQUIRED - Original filename as provided during upload
     bytes_sent: int  # REQUIRED - Number of bytes successfully transmitted to the server
     file_size: int  # REQUIRED - Total size of the uploaded file in bytes
-    upload_time: float  # REQUIRED - Time taken for the upload operation in seconds
+    upload_time: float  # REQUIRED - Seconds spent uploading this file, excluding any wait for a free slot
 
     result: Optional[PIPELINE_RESULT]  # Processing result after successful upload (present when action='complete')
     error: Optional[str]  # Error message if upload or processing failed (present when action='error')
