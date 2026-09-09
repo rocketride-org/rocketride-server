@@ -27,6 +27,8 @@
 
 import * as vscode from 'vscode';
 import { RocketRideClient } from 'rocketride';
+import { isShadowedByAnyScope, isUnchanged } from './shared/util/workspaceOverride';
+import { createSerialQueue, SerialQueue } from './shared/util/serialQueue';
 
 export type ConnectionMode = 'cloud' | 'docker' | 'service' | 'onprem' | 'local';
 
@@ -123,6 +125,8 @@ export class ConfigManager {
 	private disposables: vscode.Disposable[] = [];
 	/** While true, config-change listeners are suppressed (inside applyAllSettings). */
 	private isBatchApplying: boolean = false;
+	/** Serializes applyAllSettings() so overlapping saves cannot interleave. */
+	private readonly applyQueue: SerialQueue = createSerialQueue();
 
 	/** Default per-group config. */
 	private static readonly DEFAULT_GROUP: ConnectionGroupConfig = {
@@ -426,17 +430,44 @@ export class ConfigManager {
 	// =========================================================================
 
 	/**
-	 * Writes every setting from the Settings UI in one transaction.
+	 * Writes every setting from the Settings UI as one batch.
 	 *
 	 * 1. Suppresses all intermediate config-change listeners so no
 	 *    connection manager reacts to half-written state.
 	 * 2. Persists VS Code settings and secure-storage keys.
 	 * 3. Refreshes the in-memory cache once from the final state.
 	 *
+	 * "Batch" means the writes are isolated from listeners, not that they roll
+	 * back: VS Code persists each `update()` as it completes, so a failure part
+	 * way through leaves the earlier keys written. The cache is refreshed on that
+	 * path too, so callers still observe the true persisted state.
+	 *
+	 * Calls are serialized — a second save waits for the first to finish rather
+	 * than clearing the batch flag out from under it.
+	 *
 	 * The caller is responsible for explicitly driving connection transitions
 	 * after this method returns (the normal debounced handlers are suppressed).
+	 *
+	 * Keys whose submitted value already matches the effective one are skipped
+	 * entirely: the UI round-trips every key on save, and writing an untouched
+	 * one would persist a workspace-pinned value into the user's Global settings.
+	 *
+	 * @returns `shadowedKeys` — the keys whose Global write is masked by a
+	 *   conflicting workspace or workspace-folder value, so the change will not
+	 *   take effect in this window. The masking value lives in the workspace's
+	 *   `.code-workspace` file or in a folder's `.vscode/settings.json`,
+	 *   depending on which scope set it. The caller surfaces this to the user
+	 *   instead of a misleading "saved" confirmation.
 	 */
-	public async applyAllSettings(s: SettingsSnapshot): Promise<void> {
+	public async applyAllSettings(s: SettingsSnapshot): Promise<{ shadowedKeys: string[] }> {
+		// `isBatchApplying` is a single flag, so two overlapping saves — the
+		// Settings page and the Welcome page both call this — would let whichever
+		// finishes first un-suppress the listeners while the other is still
+		// writing, which is exactly the half-written state the flag exists to hide.
+		return this.applyQueue(() => this.applyAllSettingsBatch(s));
+	}
+
+	private async applyAllSettingsBatch(s: SettingsSnapshot): Promise<{ shadowedKeys: string[] }> {
 		if (!this.context) {
 			throw new Error('ConfigManager not initialized with context');
 		}
@@ -444,35 +475,65 @@ export class ConfigManager {
 		this.isBatchApplying = true;
 		try {
 			const wc = vscode.workspace.getConfiguration(this.configSection);
+			const shadowedKeys: string[] = [];
+
+			// An unscoped getConfiguration() cannot resolve folder-level settings,
+			// so inspect each workspace folder as well — otherwise a `.vscode/`
+			// override in a multi-root workspace masks the write unreported.
+			const folders = vscode.workspace.workspaceFolders ?? [];
+			const inspectAllScopes = (key: string) => [wc.inspect(key), ...folders.map((folder) => vscode.workspace.getConfiguration(this.configSection, folder.uri).inspect(key))];
+
+			const write = async (key: string, value: unknown): Promise<void> => {
+				// A key the caller never supplied (the Welcome page renders a subset
+				// of the Settings page) arrives as undefined, and `update(key,
+				// undefined)` *removes* the user's value. Never let a form erase a
+				// setting it does not show. `null` is a real value here — a null
+				// deployment.connectionMode means "share the development one".
+				if (value === undefined) {
+					return;
+				}
+				// The Settings UI is populated with effective values, so untouched
+				// keys round-trip back here unchanged. Writing them would copy a
+				// workspace-pinned value into the user's Global settings and change
+				// it for every other window — the divergence this feature prevents.
+				if (isUnchanged(wc.get(key), value)) {
+					return;
+				}
+				// Record when a conflicting workspace-level value masks the write.
+				if (isShadowedByAnyScope(inspectAllScopes(key), value)) {
+					shadowedKeys.push(`${this.configSection}.${key}`);
+				}
+				await wc.update(key, value, vscode.ConfigurationTarget.Global);
+			};
 
 			// --- Development group ---
-			await wc.update('development.connectionMode', s.development.connectionMode, vscode.ConfigurationTarget.Global);
-			await wc.update('development.hostUrl', s.development.hostUrl, vscode.ConfigurationTarget.Global);
-			await wc.update('development.local.engineVersion', s.development.local.engineVersion, vscode.ConfigurationTarget.Global);
+			await write('development.connectionMode', s.development.connectionMode);
+			await write('development.hostUrl', s.development.hostUrl);
+			await write('development.local.engineVersion', s.development.local.engineVersion);
 
 			// --- Deployment group ---
-			await wc.update('deployment.connectionMode', s.deployment.connectionMode, vscode.ConfigurationTarget.Global);
-			await wc.update('deployment.hostUrl', s.deployment.hostUrl, vscode.ConfigurationTarget.Global);
-			await wc.update('deployment.local.engineVersion', s.deployment.local.engineVersion, vscode.ConfigurationTarget.Global);
+			await write('deployment.connectionMode', s.deployment.connectionMode);
+			await write('deployment.hostUrl', s.deployment.hostUrl);
+			await write('deployment.local.engineVersion', s.deployment.local.engineVersion);
 
 			// --- Global settings ---
-			await wc.update('defaultPipelinePath', s.defaultPipelinePath, vscode.ConfigurationTarget.Global);
-			await wc.update('pipelineRestartBehavior', s.pipelineRestartBehavior, vscode.ConfigurationTarget.Global);
+			await write('defaultPipelinePath', s.defaultPipelinePath);
+			await write('pipelineRestartBehavior', s.pipelineRestartBehavior);
 
 			// --- Pipeline execution defaults ---
-			await wc.update('pipelineTTL', s.pipelineTtl, vscode.ConfigurationTarget.Global);
-			await wc.update('pipelineTraceLevel', s.pipelineTraceLevel, vscode.ConfigurationTarget.Global);
-			await wc.update('taskArguments', s.taskArguments, vscode.ConfigurationTarget.Global);
-			await wc.update('pipelineDebugOutput', s.pipelineDebugOutput, vscode.ConfigurationTarget.Global);
+			await write('pipelineTTL', s.pipelineTtl);
+			await write('pipelineTraceLevel', s.pipelineTraceLevel);
+			await write('taskArguments', s.taskArguments);
+			await write('pipelineDebugOutput', s.pipelineDebugOutput);
 
 			// --- Integration settings ---
-			await wc.update('integrations.autoAgentIntegration', s.autoAgentIntegration, vscode.ConfigurationTarget.Global);
-			await wc.update('integrations.copilot', s.integrationCopilot, vscode.ConfigurationTarget.Global);
-			await wc.update('integrations.claudeCode', s.integrationClaudeCode, vscode.ConfigurationTarget.Global);
-			await wc.update('integrations.cursor', s.integrationCursor, vscode.ConfigurationTarget.Global);
-			await wc.update('integrations.windsurf', s.integrationWindsurf, vscode.ConfigurationTarget.Global);
-			await wc.update('integrations.claudeMd', s.integrationClaudeMd, vscode.ConfigurationTarget.Global);
-			await wc.update('integrations.agentsMd', s.integrationAgentsMd, vscode.ConfigurationTarget.Global);
+			await write('integrations.autoAgentIntegration', s.autoAgentIntegration);
+			await write('integrations.copilot', s.integrationCopilot);
+			await write('integrations.claudeCode', s.integrationClaudeCode);
+			await write('integrations.cursor', s.integrationCursor);
+			await write('integrations.windsurf', s.integrationWindsurf);
+			await write('integrations.claudeMd', s.integrationClaudeMd);
+			await write('integrations.agentsMd', s.integrationAgentsMd);
 
 			// --- Secure storage (per-group API keys) ---
 			await this.setApiKey('development', s.development.apiKey);
@@ -480,6 +541,8 @@ export class ConfigManager {
 
 			// --- Single cache refresh from final state ---
 			await this.refreshConfig();
+
+			return { shadowedKeys };
 		} catch (error) {
 			// Refresh cache even on failure so subsequent reads see persisted writes
 			await this.refreshConfig();

@@ -40,6 +40,8 @@ import { AgentManager } from '../agents/agent-manager';
 import { DeployManager } from '../connection/deploy-manager';
 import { ConnectionMessageHandler } from './shared/connection-message-handler';
 import { isSubscribed } from '../shared/util/subscriptionGate';
+import { isValidHostUrl, HOST_URL_EXAMPLES } from '../shared/util/hostUrl';
+import { WORKSPACE_SETTINGS_LOCATIONS } from '../shared/util/workspaceOverride';
 import { PIPE_BUILDER_APP_ID } from '../shared/types';
 
 export class SettingsProvider {
@@ -323,10 +325,10 @@ export class SettingsProvider {
 	}
 
 	/**
-	 * Saves all settings atomically, then reconciles engines.
+	 * Saves all settings in one batch, then reconciles engines.
 	 *
 	 * Flow:
-	 *   1. ConfigManager.applyAllSettings() — writes everything atomically.
+	 *   1. ConfigManager.applyAllSettings() — writes everything in one batch.
 	 *   2. Cancel debounced config-change handlers on CMs (prevents race).
 	 *   3. Reconcile engines — checksums detect config changes, restarts
 	 *      affected engines, CMs reconnect with fresh credentials.
@@ -338,16 +340,34 @@ export class SettingsProvider {
 			// Cast to the typed snapshot (webview sends the full SettingsData shape)
 			const snapshot = settings as unknown as SettingsSnapshot;
 
-			// Step 1: Write everything atomically — ConfigManager suppresses all
+			// Validate: Direct Connect (on-prem) mode requires a usable Host URL
+			if (snapshot.development.connectionMode === 'onprem' && !isValidHostUrl(snapshot.development.hostUrl)) {
+				this.showMessage(webview, 'error', `Enter a valid Host URL for the development Direct Connect connection — for example ${HOST_URL_EXAMPLES}.`);
+				return;
+			}
+			if (snapshot.deployment.connectionMode === 'onprem' && !isValidHostUrl(snapshot.deployment.hostUrl)) {
+				this.showMessage(webview, 'error', `Enter a valid Host URL for the deployment Direct Connect connection — for example ${HOST_URL_EXAMPLES}.`);
+				return;
+			}
+
+			// Step 1: Write everything in one batch — ConfigManager suppresses all
 			// intermediate config-change listeners during the batch so no CM reacts
 			// to half-written state (e.g., new API key without new host URL).
-			await this.configManager.applyAllSettings(snapshot);
+			const { shadowedKeys } = await this.configManager.applyAllSettings(snapshot);
 
 			// Mark welcome as dismissed — user has configured settings
 			await vscode.workspace.getConfiguration('rocketride').update('welcomeDismissed', true, vscode.ConfigurationTarget.Global);
 
-			// Step 2: Confirm save to the user immediately — don't wait for engine ops
-			this.showMessage(webview, 'success', 'Settings saved successfully!', 'save');
+			// Step 2: Confirm save to the user immediately — don't wait for engine ops.
+			// If any saved key is masked by a conflicting workspace or workspace-folder
+			// value, the Global write won't take effect here, so warn instead of
+			// reporting a misleading success (RR-1257).
+			if (shadowedKeys.length > 0) {
+				const isOne = shadowedKeys.length === 1;
+				this.showMessage(webview, 'warning', `Saved to your user settings, but ${shadowedKeys.join(', ')} ${isOne ? 'is' : 'are'} overridden by workspace settings and won't take effect here. Change ${isOne ? 'it' : 'them'} where this workspace sets ${isOne ? 'it' : 'them'} — ${WORKSPACE_SETTINGS_LOCATIONS}.`, 'save');
+			} else {
+				this.showMessage(webview, 'success', 'Settings saved successfully!', 'save');
+			}
 			for (const w of this.activeWebviews) {
 				await this.loadAllSettings(w);
 			}

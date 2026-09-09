@@ -35,9 +35,11 @@
  */
 
 import * as vscode from 'vscode';
-import { ConfigManager } from '../config';
+import { ConfigManager, SettingsSnapshot } from '../config';
 import { getConnectionManager, getEngineRegistry } from '../extension';
 import { ConnectionMessageHandler } from './shared/connection-message-handler';
+import { isValidHostUrl, HOST_URL_EXAMPLES } from '../shared/util/hostUrl';
+import { WORKSPACE_SETTINGS_LOCATIONS } from '../shared/util/workspaceOverride';
 
 const DISMISSED_KEY = 'welcomeDismissed';
 
@@ -212,6 +214,7 @@ export class WelcomeProvider {
 	 * Persist the user's welcome-page settings and kick off the first connection.
 	 *
 	 * Sequence mirrors SettingsProvider.saveAllSettings():
+	 *   0. Validate Direct Connect host URLs (same rules as the Settings page)
 	 *   1. Atomic config write (listeners suppressed)
 	 *   2. Mark welcome as dismissed so it won't re-open
 	 *   3. Cancel stale debounced handlers that would race with reconcile
@@ -223,8 +226,30 @@ export class WelcomeProvider {
 	 */
 	private async saveAndConnect(settings: Record<string, unknown>): Promise<void> {
 		try {
-			// Step 1: Atomic write — suppresses config-change listeners during the batch
-			await this.configManager.applyAllSettings(settings as any);
+			const snapshot = settings as unknown as SettingsSnapshot;
+
+			// Step 0: Same Direct Connect validation as the Settings page — this
+			// path must not be a way to save a connection the other path rejects.
+			for (const group of ['development', 'deployment'] as const) {
+				if (snapshot[group]?.connectionMode === 'onprem' && !isValidHostUrl(snapshot[group]?.hostUrl)) {
+					this.panel?.webview.postMessage({
+						type: 'showMessage',
+						level: 'error',
+						message: `Enter a valid Host URL for the ${group} Direct Connect connection — for example ${HOST_URL_EXAMPLES}.`,
+					});
+					return;
+				}
+			}
+
+			// Step 1: Batched write — suppresses config-change listeners while writing
+			const { shadowedKeys } = await this.configManager.applyAllSettings(snapshot);
+
+			// The panel closes at the end of this method, so a webview banner would
+			// vanish with it — report shadowed keys as a window notification instead.
+			if (shadowedKeys.length > 0) {
+				const isOne = shadowedKeys.length === 1;
+				void vscode.window.showWarningMessage(`Saved to your user settings, but ${shadowedKeys.join(', ')} ${isOne ? 'is' : 'are'} overridden by workspace settings and won't take effect here. Change ${isOne ? 'it' : 'them'} in ${WORKSPACE_SETTINGS_LOCATIONS}.`);
+			}
 
 			// Step 2: Persist dismissal so the welcome page doesn't re-open on next activation
 			await vscode.workspace.getConfiguration('rocketride').update(DISMISSED_KEY, true, vscode.ConfigurationTarget.Global);

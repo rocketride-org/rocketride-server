@@ -23,14 +23,31 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { connectionModeRequiresApiKey } from '../shared/util/connectionModeAuth';
+import { connectionModeRequiresApiKey, connectionModeUsesOAuth, connectionModeHasFixedUrl } from '../shared/util/connectionModeAuth';
 
-test('cloud mode requires an API key', () => {
-	assert.equal(connectionModeRequiresApiKey('cloud'), true);
+// Auth per mode was reworked in #678: cloud moved to OAuth2 browser sign-in and
+// on-prem became the only mode where the user supplies a key by hand. These two
+// cases asserted the pre-#678 semantics and had drifted ever since.
+test('cloud mode does not require a manually entered API key — it uses OAuth', () => {
+	assert.equal(connectionModeRequiresApiKey('cloud'), false);
+	assert.equal(connectionModeUsesOAuth('cloud'), true);
 });
 
-test('onprem mode does not require an API key', () => {
-	assert.equal(connectionModeRequiresApiKey('onprem'), false);
+test('onprem mode requires a manually entered API key', () => {
+	assert.equal(connectionModeRequiresApiKey('onprem'), true);
+	assert.equal(connectionModeUsesOAuth('onprem'), false);
+});
+
+test('docker and service derive their key from the environment', () => {
+	assert.equal(connectionModeRequiresApiKey('docker'), false);
+	assert.equal(connectionModeRequiresApiKey('service'), false);
+});
+
+test('only onprem lets the user choose the URL', () => {
+	assert.equal(connectionModeHasFixedUrl('onprem'), false);
+	for (const mode of ['cloud', 'docker', 'service', 'local']) {
+		assert.equal(connectionModeHasFixedUrl(mode), true, `${mode} should have a fixed URL`);
+	}
 });
 
 test('local mode does not require an API key', () => {
