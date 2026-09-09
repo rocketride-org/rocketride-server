@@ -29,6 +29,7 @@ Command surface (kept in exact parity with the TypeScript client's CLI):
     login                      (Re-)authenticate and save .env credentials
     list                       List active tasks
     start / stop / upload      Task lifecycle
+    validate <files...>        Validate pipeline files (CI-friendly exit codes)
     store dir/type/write/...   File store operations
     app create/deploy/verify   App lifecycle
     deploy add/list/publish/.. Deploy lifecycle (deployment target)
@@ -216,6 +217,20 @@ def setup_parser() -> argparse.ArgumentParser:
     upload_parser.add_argument(
         '--args', dest='pipeline_args', nargs=argparse.REMAINDER, help='Additional pipeline arguments'
     )
+
+    # ── validate ─────────────────────────────────────────────────────────
+    validate_parser = subparsers.add_parser(
+        'validate',
+        help='Validate pipeline files without executing them',
+        epilog=(
+            'Exit codes: 0 = all files valid; 1 = at least one file failed validation; '
+            '2 = usage error, connection failure, or no file could be processed at all '
+            '(no file received a server validation verdict).'
+        ),
+    )
+    _add_connection_args(validate_parser)
+    validate_parser.add_argument('files', nargs='+', help='Pipeline .pipe files or glob patterns to validate')
+    validate_parser.add_argument('--source', default=None, help='Override source component ID for validation')
 
     # ── store ────────────────────────────────────────────────────────────
     store_parser = subparsers.add_parser('store', help='File store operations')
@@ -408,6 +423,7 @@ async def _dispatch(args) -> int:
     from .commands.deploy import run_deploy
     from .commands.store import run_store
     from .commands.tasks import run_list, run_start, run_stop, run_upload
+    from .commands.validate import run_validate
 
     if args.command == 'init':
         return await run_init(args)
@@ -421,6 +437,8 @@ async def _dispatch(args) -> int:
         return await run_stop(args)
     if args.command == 'upload':
         return await run_upload(args)
+    if args.command == 'validate':
+        return await run_validate(args)
     if args.command == 'store':
         if not getattr(args, 'store_subcommand', None):
             print('Error: Store subcommand is required (dir, type, write, rm, mkdir, stat)', file=sys.stderr)

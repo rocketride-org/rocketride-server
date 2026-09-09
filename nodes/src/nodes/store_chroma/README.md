@@ -38,7 +38,7 @@ Documents must pass through an embedding node before reaching this node; chunks 
 | Profile | Description                                                                                            |
 | ------- | ------------------------------------------------------------------------------------------------------ |
 | `local` | Your own ChromaDB server. Connects with plain `HttpClient(host, port)`, no authentication.             |
-| `cloud` | ChromaDB Cloud. Requires `host` and `apikey`; authenticates using ChromaDB's `TokenAuthClientProvider`. |
+| `cloud` | ChromaDB Cloud or any TLS-protected remote server. Connects over TLS and sends the `apikey` in the `x-chroma-token` header; ChromaDB Cloud additionally requires `tenant` and `database`. |
 
 ---
 
@@ -82,7 +82,13 @@ No authentication is required. The node connects with `chromadb.HttpClient(host,
 
 ### Cloud profile
 
-Set `profile` to `cloud`, provide the ChromaDB Cloud `host` and your `apikey`. The node authenticates using `chromadb.auth.token_authn.TokenAuthClientProvider` configured via ChromaDB's `Settings` object.
+Set the profile to `cloud` and provide:
+
+- `host`: the server hostname (`api.trychroma.com` for ChromaDB Cloud)
+- `apikey`: sent with every request in the `x-chroma-token` header
+- `tenant` and `database`: required by ChromaDB Cloud accounts, optional for self-hosted multi-tenant servers
+
+The connection always uses TLS; ChromaDB Cloud only serves HTTPS, and a plain HTTP request against the TLS port hangs or is rejected with "illegal request line". Every HTTP session the chromadb client creates is given a 30s connect / 120s request timeout, so an unresponsive connection surfaces as an error instead of hanging the pipeline (the client library itself defaults to no timeout).
 
 ---
 
@@ -99,13 +105,16 @@ The `port` field accepts either a number or a string. Enter a plain integer such
 
 | Field | Type | Description | Default |
 |---|---|---|---|
-| `chroma.profile` | `string` | **Type of chroma host**<br/>Connect to... | `"cloud"` |
+| `chroma.database` | `string` | **Database**<br/>Chroma Cloud database name (required for Chroma Cloud, optional for self-hosted multi-tenant servers) | `""` |
+| `chroma.profile` | `string` | **Type of chroma host**<br/>Connect to... | `"local"` |
 | `chroma.provider` | `string` |  | const: `"chroma"` |
 | `chroma.serverName` | `string` | **Tool Server Name**<br/>Namespace for agent-facing tool names, e.g. 'chroma' exposes tools as chroma.search / chroma.upsert / chroma.delete. Change this when running multiple Chroma nodes in the same pipeline so their tool names do not collide. | `"chroma"` |
+| `chroma.ssl` | `boolean` | **Use TLS**<br/>Connect over HTTPS. Required for Chroma Cloud, which serves HTTPS only. Turn it off for a self-hosted server reached over plain HTTP. | `true` |
+| `chroma.tenant` | `string` | **Tenant**<br/>Chroma Cloud tenant id (required for Chroma Cloud, optional for self-hosted multi-tenant servers) | `""` |
 | `vector.cloud.host` |  | Enter the server IP address e.g. <your-instance-url> |  |
 | `vector.cloud.port` | `number,string` | Port number. Enter a plain integer such as 443, or an env-var placeholder like ${ROCKETRIDE_CHROMA_PORT}. Placeholders resolve to a string at run time, so this field accepts both a number and a string; the node coerces the value to an integer before connecting, so either form works. | `"443"` |
 | `vector.local.host` |  |  | `"localhost"` |
-| `vector.local.port` | `number,string` | Port number. Enter a plain integer such as 8000, or an env-var placeholder like ${ROCKETRIDE_CHROMA_PORT}. Placeholders resolve to a string at run time, so this field accepts both a number and a string; the node coerces the value to an integer before connecting, so either form works. | `"8330"` |
+| `vector.local.port` | `number,string` | Port number. Enter a plain integer such as 8000, or an env-var placeholder like ${ROCKETRIDE_CHROMA_PORT}. Placeholders resolve to a string at run time, so this field accepts both a number and a string; the node coerces the value to an integer before connecting, so either form works. | `"8000"` |
 
 ## Dependencies
 

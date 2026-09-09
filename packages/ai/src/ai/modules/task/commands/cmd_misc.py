@@ -198,10 +198,15 @@ class MiscCommands(DAPConn):
         2. ``source`` field inside the pipeline config
         3. Implied source: the single component whose config.mode == 'Source'
 
+        The ``pipeline`` argument may be flat (the shape the SDK documents) or
+        already wrapped in the ``{'pipeline': {...}}`` envelope; either way the
+        engine receives exactly one envelope.
+
         Args:
             request (Dict[str, Any]): DAP request containing:
                 - arguments (Dict[str, Any]):
-                    - pipeline (Dict[str, Any]): Pipeline configuration to validate
+                    - pipeline (Dict[str, Any]): Pipeline configuration to validate,
+                      flat or already enveloped
                     - source (str, optional): Override source component ID
 
         Returns:
@@ -220,6 +225,13 @@ class MiscCommands(DAPConn):
             # Accept the wrapped .pipe file form too — the config is
             # whatever sits under its 'pipeline' key; everything below
             # (env resolution, source inference) walks the flat config.
+            if isinstance(pipeline.get('pipeline'), dict):
+                pipeline = pipeline['pipeline']
+
+            # Callers that already send the {'pipeline': ...} envelope must not be
+            # double-wrapped: the MCP validate_pipeline tool (modules/mcp/tools/
+            # introspection.py, #2082) pre-wraps client-side as a workaround for
+            # the very bug this handler now fixes. Unwrap first, wrap once below.
             if isinstance(pipeline.get('pipeline'), dict):
                 pipeline = pipeline['pipeline']
 
@@ -266,8 +278,9 @@ class MiscCommands(DAPConn):
             if source:
                 inner['source'] = source
 
-            # Validate it
-            data = validatePipeline({'pipeline': inner, 'version': inner['version']})
+            # Same envelope pipe_Validate (modules/pipe) builds — the version
+            # rides INSIDE the wrapped config (see the FILE-form note above).
+            data = validatePipeline({'pipeline': inner})
 
             # Return the results
             return self.build_response(request, body=data)

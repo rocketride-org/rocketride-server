@@ -33,6 +33,7 @@ Modules:
     store: ``store`` subcommands
     app: ``app`` subcommands
     deploy: ``deploy`` subcommands
+    validate: ``validate`` (pipeline files, CI-friendly exit codes)
 """
 
 from .app import run_app
@@ -40,6 +41,7 @@ from .auth import run_init, run_login
 from .deploy import run_deploy
 from .store import run_store
 from .tasks import run_list, run_start, run_stop, run_upload
+from .validate import run_validate
 
 __all__ = [
     'run_app',
@@ -51,4 +53,5 @@ __all__ = [
     'run_stop',
     'run_store',
     'run_upload',
+    'run_validate',
 ]

@@ -222,11 +222,10 @@ async def test_on_rrext_validate_uses_explicit_source(monkeypatch):
     }
     result = await MiscCommands.on_rrext_validate(conn, request)
 
-    # The engine's config loader requires the FILE-form root: the resolved
-    # source rides inside payload['pipeline'], with the version mirrored at
-    # the root (see the wrap in on_rrext_validate).
+    # The resolved source and the default version both ride inside
+    # payload['pipeline'] — the same envelope pipe_Validate builds.
     assert captured['payload']['pipeline']['source'] == 'explicit-source'
-    assert captured['payload']['version'] == 1  # default
+    assert captured['payload']['pipeline']['version'] == 1  # default
     assert result == {'type': 'response', 'body': {'ok': True}}
 
 
@@ -259,7 +258,7 @@ async def test_on_rrext_validate_falls_back_to_implied_source(monkeypatch):
 
     conn = _make_conn()
     await MiscCommands.on_rrext_validate(conn, {'arguments': {'pipeline': {}}})
-    assert captured['pipeline']['source'] == 'implied'
+    assert captured['pipeline'].get('source') == 'implied'
 
 
 @pytest.mark.asyncio
@@ -278,6 +277,57 @@ async def test_on_rrext_validate_no_source_anywhere_omits_field(monkeypatch):
     # The wrapped payload's inner config is where a source would land — the
     # top level never carries one, so assert on the inner shape.
     assert 'source' not in captured['pipeline']
+
+
+@pytest.mark.asyncio
+async def test_on_rrext_validate_wraps_config_in_pipeline_envelope(monkeypatch):
+    """The C++ payload is {'pipeline': <config>} — the same envelope pipe_Validate
+    (modules/pipe) builds. Regression test: passing the config flat makes
+    validatePipeline reject every pipeline with "'pipeline' is missing or invalid".
+    """
+    captured = {}
+    monkeypatch.setattr(cmd_misc, 'resolve_implied_source', lambda p: None)
+    monkeypatch.setattr(
+        cmd_misc,
+        'validatePipeline',
+        lambda payload: captured.update(payload) or {'ok': True},
+    )
+
+    conn = _make_conn()
+    config = {'components': [{'id': 'webhook_1'}], 'project_id': 'p1'}
+    await MiscCommands.on_rrext_validate(conn, {'arguments': {'pipeline': config}})
+
+    assert set(captured.keys()) == {'pipeline'}
+    assert captured['pipeline']['components'] == [{'id': 'webhook_1'}]
+    assert captured['pipeline']['project_id'] == 'p1'
+    assert captured['pipeline']['version'] == 1
+
+
+@pytest.mark.asyncio
+async def test_on_rrext_validate_does_not_double_wrap_enveloped_config(monkeypatch):
+    """An already-enveloped config is wrapped exactly once.
+
+    The MCP ``validate_pipeline`` tool (modules/mcp/tools/introspection.py, #2082)
+    pre-wraps the config client-side as a workaround for the missing envelope.
+    Double-wrapping it would make every MCP validation fail with
+    "'pipeline.components' must be an array".
+    """
+    captured = {}
+    monkeypatch.setattr(cmd_misc, 'resolve_implied_source', lambda p: None)
+    monkeypatch.setattr(
+        cmd_misc,
+        'validatePipeline',
+        lambda payload: captured.update(payload) or {'ok': True},
+    )
+
+    conn = _make_conn()
+    enveloped = {'pipeline': {'components': [{'id': 'webhook_1'}], 'version': 1}}
+    await MiscCommands.on_rrext_validate(conn, {'arguments': {'pipeline': enveloped}})
+
+    assert set(captured.keys()) == {'pipeline'}
+    assert 'pipeline' not in captured['pipeline']
+    assert captured['pipeline']['components'] == [{'id': 'webhook_1'}]
+    assert captured['pipeline']['version'] == 1
 
 
 @pytest.mark.asyncio

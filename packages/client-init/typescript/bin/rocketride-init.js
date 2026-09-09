@@ -53,6 +53,7 @@
 'use strict';
 
 const fs = require('fs');
+const net = require('net');
 const path = require('path');
 const { spawnSync } = require('child_process');
 
@@ -142,7 +143,10 @@ function installSourceServer() {
  */
 function isLoopbackHost(hostname) {
 	const host = String(hostname).toLowerCase();
-	return host === 'localhost' || host.endsWith('.localhost') || /^127\./.test(host) || host === '[::1]' || host === '::1';
+	// The 127. prefix counts only for a literal IPv4 address: a DNS name
+	// such as 127.evil.example must not ride the loopback exemption into
+	// a plain-http bootstrap that installs and runs a remote package.
+	return host === 'localhost' || host.endsWith('.localhost') || (net.isIP(host) === 4 && host.startsWith('127.')) || host === '[::1]' || host === '::1';
 }
 
 /**

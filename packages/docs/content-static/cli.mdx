@@ -13,10 +13,10 @@ and manages the engine's file store — the same operations the
 installing either package puts `rocketride` on your path.
 
 > **Python vs TypeScript CLI:** Both packages ship a `rocketride` command. The
-> core commands (`start`, `upload`, `status`, `stop`, `store`) are available in
-> both, but flag names differ in a few places and the Python CLI includes two
-> additional commands (`events`, `list`) not present in TypeScript. Differences
-> are called out inline below.
+> core commands (`start`, `upload`, `status`, `stop`, `validate`, `store`) are
+> available in both, but flag names differ in a few places and the Python CLI
+> includes two additional commands (`events`, `list`) not present in
+> TypeScript. Differences are called out inline below.
 
 ## Install
 
@@ -138,6 +138,7 @@ connection is encrypted.
 | `upload` | Send files through a pipeline (by `--pipeline` or an existing task token). |
 | `status` | Monitor a running task's status continuously.                              |
 | `stop`   | Stop a running task.                                                       |
+| `validate` | Validate `.pipe` files against the engine without executing them.        |
 | `events` | Stream all raw events from a running task. Python CLI only.                |
 | `list`   | List all active tasks. Python CLI only.                                    |
 | `store`  | File-store operations: `dir`, `type`, `write`, `rm`, `mkdir`, `stat`.     |
@@ -222,6 +223,49 @@ rocketride stop --token <task-token>
 
 The token is printed by `start` and `upload` at the beginning of the run, and
 by `status`. Save it if you need to stop a long-running pipeline later.
+
+### validate
+
+Use `validate` to check one or more `.pipe` files against the engine without
+executing them — before deploying a pipeline, or as a CI gate on every pull
+request. Glob patterns are expanded by the CLI itself, so wildcards behave the
+same on Windows shells. Files must contain a JSON object — either the pipeline
+config itself or the `{ "pipeline": { ... } }` wrapper that `.pipe` files use;
+a file that cannot be read or parsed is reported as invalid.
+
+The engine checks structure and component references only — duplicate ids,
+unknown `input`/`control` lanes, dangling `from` references, a `source` that
+names no component. Provider availability and lane compatibility are runtime
+concerns and are not reported here.
+
+```bash
+# Validate a single pipeline
+rocketride validate ./rag.pipe
+
+# Validate every pipeline in a directory
+rocketride validate ./pipelines/*.pipe
+
+# Machine-readable report for CI
+rocketride validate ./pipelines/*.pipe --json
+```
+
+Key flags:
+
+| Flag | Description |
+| --- | --- |
+| `<files...>` | One or more `.pipe` files or glob patterns. |
+| `--source <id>` | Override the source component ID used for validation. |
+| `--json` | Print a machine-readable JSON report (`files` + `summary`) to stdout. |
+
+Exit codes: `0` — all files valid; `1` — at least one file failed validation
+(a file that cannot be read or parsed counts as invalid); `2` — usage error,
+connection failure, or no file could be processed at all (no file received a
+server validation verdict).
+
+> Runs in CI too: the
+> [validate-pipes GitHub Action](https://github.com/rocketride-org/rocketride-server/tree/develop/.github/actions/validate-pipes)
+> starts an engine container and runs `rocketride validate` on your
+> repository's `.pipe` files.
 
 ### events
 
