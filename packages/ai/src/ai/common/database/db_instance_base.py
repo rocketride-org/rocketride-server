@@ -261,12 +261,17 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
                 'sql': {'type': 'string', 'description': 'Raw SQL statement to execute.'},
                 'session_id': {'type': 'string', 'description': 'Optional transaction session id from begin.'},
                 'params': {'type': 'array', 'description': 'Optional positional bind values for $1..$n.'},
+                'row_mode': {
+                    'type': 'string',
+                    'enum': ['object', 'array'],
+                    'description': "Row shape: 'object' (default) returns dict rows; 'array' returns positional lists (column order preserved, duplicate names kept).",
+                },
             },
         },
         output_schema={
             'type': 'object',
             'properties': {
-                'rows': {'type': 'array', 'items': {'type': 'object'}},
+                'rows': {'type': 'array', 'items': {'type': ['object', 'array']}},
                 'affected_rows': {'type': 'integer'},
             },
         },
@@ -288,23 +293,21 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
 
         session_id = args.get('session_id')
         params = args.get('params')
+        row_mode = args.get('row_mode', 'object')
+        if row_mode not in ('object', 'array'):
+            raise ValueError("\"row_mode\" must be 'object' or 'array'")
         if session_id:
             try:
-                result = self.IGlobal.tx_registry.execute(session_id, sql.strip(), params)
+                result = self.IGlobal.tx_registry.execute(session_id, sql.strip(), params, row_mode)
             except KeyError:
                 raise ValueError(f'unknown or expired transaction session: {session_id}')
-            except Exception:
-                # A failed session-bound execute (e.g. max_execute_rows overflow)
-                # would otherwise leave the connection pinned until idle-reaping,
-                # with the aborted statement still committable; roll the session
-                # back to release it and discard the statement, then re-raise.
-                try:
-                    self.IGlobal.tx_registry.rollback(session_id)
-                except KeyError:
-                    pass
-                raise
+            # A failed statement leaves the session OPEN: Postgres marks the
+            # transaction aborted (commit degrades to rollback), MySQL leaves it
+            # usable. The client owns recovery — `rollback`, or `rollback to
+            # savepoint` for nested transactions — and the idle reaper is the
+            # backstop for abandoned sessions.
         else:
-            result = self._executeRawQuery(sql.strip(), params)
+            result = self._executeRawQuery(sql.strip(), params, row_mode)
             if result is None:
                 raise RuntimeError('SQL execution failed (check server logs for details)')
 
@@ -388,6 +391,11 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
         """Convert a single database value to a JSON-serializable type."""
         if val is None or isinstance(val, (str, int, float, bool)):
             return val
+        if isinstance(val, (dict, list, tuple)):
+            # psycopg2 parses json/jsonb into dict/list (and composites into
+            # tuples); repr() is not JSON and silently corrupts ORM clients
+            # that JSON.parse driver values.
+            return json.dumps(val, default=str)
         if hasattr(val, '__float__'):
             return float(val)
         if hasattr(val, 'isoformat'):
@@ -573,7 +581,7 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
             error(f'Error executing SQL query: {e}')
             return None
 
-    def _executeRawQuery(self, query: str, params: list | None = None) -> dict | None:
+    def _executeRawQuery(self, query: str, params: list | None = None, row_mode: str = 'object') -> dict | None:
         """Execute a raw SQL statement (read or write) without LLM or safety gating.
 
         Uses ``engine.begin()`` so writes auto-commit. Returns
@@ -592,7 +600,7 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
             with self.IGlobal.engine.begin() as conn:
                 clause, binds = to_sqlalchemy_text(query, params)
                 result = conn.execute(clause, binds)
-                shaped = shape_execute_result(result, self.IGlobal.max_execute_rows)
+                shaped = shape_execute_result(result, self.IGlobal.max_execute_rows, row_mode)
                 if shaped is None:
                     # Raise inside the transaction so it rolls back; returning
                     # None here would let an overflowing write commit anyway.

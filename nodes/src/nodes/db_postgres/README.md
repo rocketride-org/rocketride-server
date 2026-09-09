@@ -82,7 +82,7 @@ Three additional tool functions support explicit database transactions. All thre
 | `commit`   | `{"session_id": "<id>"}` | `{"ok": true}`             | Commits all statements made on the given session, releases the held connection back to the pool, and removes the session entry. |
 | `rollback` | `{"session_id": "<id>"}` | `{"ok": true}`             | Discards all statements made on the given session, releases the held connection, and removes the session entry. |
 
-To run a statement inside an open transaction, pass the `session_id` returned by `begin` as the `session_id` field of an `execute` tool call. Statements without a `session_id` run on a fresh auto-commit connection and are not part of any transaction.
+To run a statement inside an open transaction, pass the `session_id` returned by `begin` as the `session_id` field of an `execute` tool call. Statements without a `session_id` run on a fresh auto-commit connection and are not part of any transaction. The `execute` tool also accepts an optional `row_mode` field: `'object'` (default) returns rows as objects keyed by column name; `'array'` returns rows as positional arrays (column order preserved, duplicate column names kept) — the shape ORM drivers such as Drizzle require.
 
 Sessions are server-scoped: the `session_id` is only valid on the node instance that issued it. Idle sessions are reaped automatically after a configurable timeout; the engine also closes all sessions when the pipeline is torn down.
 

@@ -186,11 +186,13 @@ def test_stateless_execute_overflow_rolls_back_write(instance_with_sqlite_regist
     assert out['rows'] == []
 
 
-def test_session_execute_overflow_releases_session(instance_with_sqlite_registry):
-    """A session-bound execute that overflows rolls back and releases the session.
+def test_session_execute_overflow_keeps_session_alive(instance_with_sqlite_registry):
+    """A session-bound execute that overflows leaves the session open.
 
-    Otherwise the held connection stays pinned until idle-reaping and the aborted
-    statement remains committable.
+    The failed statement does not auto-destroy the session: the client owns
+    recovery via an explicit rollback (or `rollback to savepoint`), so the
+    connection stays pinned until the client releases it or the idle reaper
+    reclaims it.
     """
     inst = instance_with_sqlite_registry
     # 0-row cap so a session RETURNING overflows.
@@ -198,9 +200,18 @@ def test_session_execute_overflow_releases_session(instance_with_sqlite_registry
     sid = inst.begin({})['session_id']
     with pytest.raises(RuntimeError, match='max_rows'):
         inst.execute({'sql': "INSERT INTO t (v) VALUES ('x') RETURNING v", 'session_id': sid})
-    # The session was rolled back and released: reusing it now errors.
-    with pytest.raises(ValueError, match='unknown or expired'):
-        inst.commit({'session_id': sid})
+    # The session survives the failed statement: an explicit rollback succeeds.
+    assert inst.rollback({'session_id': sid}) == {'ok': True}
+
+
+def test_failed_statement_keeps_session_alive(instance_with_sqlite_registry):
+    """A syntactically invalid statement leaves the session open for recovery."""
+    inst = instance_with_sqlite_registry
+    sid = inst.begin({})['session_id']
+    with pytest.raises(Exception):
+        inst.execute({'sql': 'select broken', 'session_id': sid})
+    # Session must still exist: rollback succeeds instead of ValueError.
+    assert inst.rollback({'session_id': sid}) == {'ok': True}
 
 
 # ---------------------------------------------------------------------------
@@ -221,3 +232,68 @@ def test_commit_unknown_session_id_raises_value_error(instance_with_sqlite_regis
 def test_rollback_unknown_session_id_raises_value_error(instance_with_sqlite_registry):
     with pytest.raises(ValueError, match='unknown or expired transaction session'):
         instance_with_sqlite_registry.rollback({'session_id': 'no-such-session'})
+
+
+# ---------------------------------------------------------------------------
+# (e) row_mode='array' — positional rows for ORM clients (Drizzle)
+# ---------------------------------------------------------------------------
+
+
+def test_execute_tool_array_row_mode(instance_with_sqlite_registry):
+    inst = instance_with_sqlite_registry
+    inst.execute({'sql': "INSERT INTO t (id, v) VALUES (1, 'x')"})
+    inst.execute({'sql': "INSERT INTO t (id, v) VALUES (2, 'y')"})
+    result = inst.execute({'sql': 'SELECT id, v FROM t ORDER BY id', 'row_mode': 'array'})
+    assert result['rows'] == [[1, 'x'], [2, 'y']]
+    assert all(isinstance(r, list) for r in result['rows'])
+
+
+def test_execute_tool_session_array_row_mode(instance_with_sqlite_registry):
+    inst = instance_with_sqlite_registry
+    sid = inst.begin({})['session_id']
+    inst.execute({'sql': "INSERT INTO t (id, v) VALUES (1, 'x')", 'session_id': sid})
+    result = inst.execute({'sql': 'SELECT id, v FROM t ORDER BY id', 'session_id': sid, 'row_mode': 'array'})
+    inst.rollback({'session_id': sid})
+    assert result['rows'] == [[1, 'x']]
+
+
+def test_execute_tool_rejects_bad_row_mode(instance_with_sqlite_registry):
+    with pytest.raises(ValueError, match='row_mode'):
+        instance_with_sqlite_registry.execute({'sql': 'SELECT 1', 'row_mode': 'csv'})
+
+
+def test_execute_tool_rejects_falsy_row_mode(instance_with_sqlite_registry):
+    # '' violates the declared enum; only an ABSENT field defaults to 'object'.
+    with pytest.raises(ValueError, match='row_mode'):
+        instance_with_sqlite_registry.execute({'sql': 'SELECT 1', 'row_mode': ''})
+
+
+# ---------------------------------------------------------------------------
+# (f) _sanitize_value JSON-encodes dicts and lists (psycopg2 json/jsonb parse)
+# ---------------------------------------------------------------------------
+
+
+def test_sanitize_value_json_encodes_dicts():
+    """Dict values must be JSON-encoded, not Python repr'd."""
+    result = DatabaseInstanceBase._sanitize_value({'a': 1})
+    assert result == '{"a": 1}'
+
+
+def test_sanitize_value_json_encodes_lists():
+    """List values must be JSON-encoded, not Python repr'd."""
+    result = DatabaseInstanceBase._sanitize_value([1, 'x'])
+    assert result == '[1, "x"]'
+
+
+def test_sanitize_value_json_encodes_nested_with_fallback():
+    """Nested non-JSON types fall back to str via default=str."""
+    import datetime
+
+    result = DatabaseInstanceBase._sanitize_value({'t': datetime.date(2026, 1, 1)})
+    assert '"2026-01-01"' in result
+
+
+def test_sanitize_value_json_encodes_tuples():
+    """Tuple values (psycopg2 composite types) must be JSON-encoded."""
+    result = DatabaseInstanceBase._sanitize_value((1, 'x'))
+    assert result == '[1, "x"]'

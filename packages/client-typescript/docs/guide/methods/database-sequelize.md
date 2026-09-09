@@ -3,6 +3,11 @@ title: 'database.sequelize()'
 date: 2026-07-01
 ---
 
+> **Deprecated.** Prefer the Drizzle driver — see [`drizzle()`](database-drizzle.md). It has
+> no Node built-in requirements (no bundler polyfills) and ships in its own package export.
+> `database.sequelize()` and `createSequelize` remain available because they are part of the
+> frozen SDK contract; they will only be removed in a coordinated major release.
+
 - [Overview](#overview)
 - [Method Signature](#method-signature)
 - [Parameters](#parameters)
