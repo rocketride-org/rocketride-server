@@ -16,8 +16,22 @@
 
 1. Install the **RocketRide** extension from the VS Code Marketplace
 2. Click the **RocketRide** icon in the Activity Bar
-3. Create a `.pipe` file - it opens automatically in the visual canvas builder
+3. Open a folder in VS Code, then create a `.pipe` file - it opens automatically in the visual canvas builder
 4. Wire up nodes by connecting input and output lanes, then hit **Play** to run
+
+### Your first pipeline
+
+Every pipeline starts with a source node and ends with a return node. The return
+node is what sends results back to the caller - without it the pipeline runs, but
+nothing comes back.
+
+A minimal chat pipeline is three nodes:
+
+    Chat (source)  ->  Ollama (LLM)  ->  Return Answers
+
+Wire `Chat.Questions` to the LLM's `Questions` input, then the LLM's `Answers`
+output to `Return Answers`. If the return node is missing, the pipeline starts
+without an error but the chat replies *"I don't see any answers in there..."*
 
 <img src="https://raw.githubusercontent.com/rocketride-org/rocketride-server/develop/docs/images/canvas.png" alt="RocketRide visual canvas builder" width="800">
 
