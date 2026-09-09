@@ -45,6 +45,26 @@ _ENGINES = {
 }
 
 
+#: Vendor cap on the text of ONE request, in characters. The vendor answers a
+#: 400 when it is exceeded, and the body does not survive raise_for_status, so
+#: the caller would otherwise get a bare "400 Client Error" with nothing to act
+#: on. None means the vendor documents no cap.
+#:
+#: Rime's is per-model and four to five times lower than the others, which is
+#: how a pipeline that worked on OpenAI breaks by switching vendor.
+_INPUT_LIMITS = {
+    'openai': {None: 4096},
+    'elevenlabs': {None: 5000},
+    'rime': {'arcana': None, None: 1000},
+}
+
+
+def _input_limit(engine: str, model: str) -> Any:
+    """The character cap for this vendor/model pair, or None when uncapped."""
+    limits = _INPUT_LIMITS.get(engine) or {}
+    return limits[model] if model in limits else limits.get(None)
+
+
 def _resolve_engine(logical_type: Any) -> str:
     """Pick the vendor whose id appears in the node logicalType.
 
@@ -99,11 +119,25 @@ class IGlobal(IGlobalBase):
         The cloud vendors return the whole clip in one response, so the bytes are
         handed straight to the caller — no temp file round-trip.
         """
+        label = _ENGINES[self._engine]['label']
+        limit = _input_limit(self._engine, self._model)
+        if limit is not None and len(text) > limit:
+            # Caught here rather than at the vendor: the 400 that comes back
+            # says nothing about length, and on Rime the cap depends on the
+            # model, so name the way out too.
+            detail = ''
+            if self._engine == 'rime':
+                detail = ' The arcana model has no cap.'
+            raise Exception(
+                f'{label} accepts {limit} characters per request and this record has {len(text)}. '
+                f'Split the text upstream (a chunker node) before this one.{detail}'
+            )
+
         synth = _ENGINES[self._engine]['synthesize']
         audio = synth(text, self._model, self._voice, self._api_key)
         if not audio:
             # A 200 with an empty body would otherwise become a zero-byte clip.
-            raise Exception(f'{_ENGINES[self._engine]["label"]} returned no audio for the request')
+            raise Exception(f'{label} returned no audio for the request')
         return audio, _MP3_MIME
 
     def endGlobal(self):
