@@ -33,7 +33,6 @@ class IInstance(IInstanceBase):
     def __init__(self):
         """Initialize the prompt node instance state."""
         super().__init__()
-        self.collected_inputs = []
         self.has_output = False
         self._reset()
 
@@ -131,10 +130,14 @@ class IInstance(IInstanceBase):
             self.has_output = True
 
         except Exception as e:
+            # NOTHING IS EMITTED ON THE WAY OUT. What stood here recovered from
+            # `self.collected_inputs`, a list nothing in the repo ever appended
+            # to — it was written once in `__init__` and read here, so the
+            # recovery could never fire and read as a safety net that was not
+            # one. A half-built question is worse than none: downstream an agent
+            # answers whatever is emitted, and an answer to a question the
+            # person did not ask is recorded as what they wanted.
             debug(f'Error in prompt node: {e}')
-            # If there's an error, output the first collected input
-            if self.collected_inputs:
-                self.instance.writeQuestions(self.collected_inputs[0][0])
         finally:
             # Belt and braces with `open`: the next turn starts clean even if this
             # one raised on its way out, and even if the node is driven to close

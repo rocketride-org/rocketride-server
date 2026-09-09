@@ -41,13 +41,21 @@ is 09:00 tomorrow, not 08:00 because the clocks moved.
 from __future__ import annotations
 
 import calendar
+import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 try:  # pragma: no cover - exercised by whichever branch the platform takes
-    from zoneinfo import ZoneInfo
+    from zoneinfo import ZoneInfo, available_timezones
 except ImportError:  # pragma: no cover
     ZoneInfo = None  # type: ignore[assignment]
+    available_timezones = None  # type: ignore[assignment]
+
+_log = logging.getLogger(__name__)
+
+#: Said once per process rather than once per call: an absent database fails
+#: every name, and one line is a diagnosis where thousands are noise.
+_tzdb_reported = False
 
 #: Where an unusable zone lands. Never an exception: a mistyped zone should
 #: cost the caller a UTC answer it can see and correct, not a failed turn.
@@ -67,6 +75,28 @@ WEEKDAYS = ('monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 
 BOUNDARY_UNITS = ('day', 'week', 'month', 'quarter', 'year')
 
 
+def _tzdb_missing() -> bool:
+    """
+    Whether the IANA database is absent, rather than the name being wrong.
+
+    ``zoneinfo`` ships no data of its own — it reads the system database, or the
+    ``tzdata`` wheel this node declares in its requirements. With neither, every
+    name raises and every answer silently becomes UTC: the wrong-by-an-offset
+    bug this node exists to remove, back again with nothing on screen to say so.
+    A mistyped zone and an absent database raise the same exception here, and
+    only one of them is the caller's fault.
+
+    Returns:
+        True when no zone can be resolved at all.
+    """
+    if available_timezones is None:  # pragma: no cover - Python without zoneinfo
+        return True
+    try:
+        return not available_timezones()
+    except Exception:  # noqa: BLE001 — a database that cannot be listed is not there
+        return True
+
+
 def resolve_zone(name: Optional[str]) -> tuple[Any, str]:
     """
     A timezone object and the name it actually resolved to.
@@ -78,12 +108,21 @@ def resolve_zone(name: Optional[str]) -> tuple[Any, str]:
         The tzinfo and the name to report, which is ``UTC`` whenever the
         requested one could not be used.
     """
+    global _tzdb_reported
+
     wanted = (name or '').strip()
     if not wanted or wanted.upper() == 'UTC' or ZoneInfo is None:
         return timezone.utc, DEFAULT_ZONE
     try:
         return ZoneInfo(wanted), wanted
     except Exception:  # noqa: BLE001 — a bad zone is an answer, not a failure
+        if not _tzdb_reported and _tzdb_missing():
+            _tzdb_reported = True
+            _log.warning(
+                'tool_datetime: no IANA timezone database — %r, and every other zone, '
+                'will be answered in UTC. Install the "tzdata" package.',
+                wanted,
+            )
         return timezone.utc, DEFAULT_ZONE
 
 
@@ -145,6 +184,36 @@ def _clamped(year: int, month: int, day: int) -> tuple[int, int, int]:
     return year, month, min(day, calendar.monthrange(year, month)[1])
 
 
+def _anchored(local: datetime, tz: Any, zone: Optional[str]) -> dict[str, Any]:
+    """
+    A wall time rendered in its own zone, saying whether the clock moved under it.
+
+    A CALENDAR STEP CAN LAND ON A TIME THAT DOES NOT EXIST. Arithmetic on a local
+    datetime produces a wall clock reading, and on the morning clocks go forward
+    an hour of readings names no instant at all — 02:30, or midnight itself in
+    Chile, Cuba and Lebanon, which change at 24:00. ``timestamp()`` resolves such
+    a reading to a real instant an hour away and says nothing.
+
+    ``at()`` already reports this as ``adjusted``; this is the same comparison,
+    so a boundary or a shift that absorbed an hour says so too rather than
+    handing back an epoch that is quietly wrong for whoever schedules on it.
+
+    Args:
+        local: The wall time wanted, tz-aware or naive — only its clock reading
+            is used.
+        tz: The zone to re-anchor it in.
+        zone: The name to render with.
+
+    Returns:
+        The rendering, plus ``adjusted``: True when the hour asked for does not
+        exist and a different one came back.
+    """
+    wall = local.replace(tzinfo=None)
+    answer = render(wall.replace(tzinfo=tz).timestamp(), zone)
+    answer['adjusted'] = answer['time'] != wall.strftime('%H:%M')
+    return answer
+
+
 def shift(epoch: float, amount: int, unit: str, zone: Optional[str] = None) -> dict[str, Any]:
     """
     An instant moved by a whole number of units.
@@ -156,7 +225,10 @@ def shift(epoch: float, amount: int, unit: str, zone: Optional[str] = None) -> d
         zone: The calendar to move within, for calendar units.
 
     Returns:
-        The new instant, rendered.
+        The new instant, rendered, plus ``adjusted`` — True when the wall time
+        the step landed on does not exist and the nearest real one was used
+        instead. A duration step always reports False: it moves the instant, so
+        there is no wall time to be missing.
 
     Raises:
         ValueError: On an unknown unit, which is a caller bug rather than a
@@ -167,7 +239,12 @@ def shift(epoch: float, amount: int, unit: str, zone: Optional[str] = None) -> d
 
     if unit in DURATION_UNITS:
         seconds = {'second': 1, 'minute': 60, 'hour': 3600}[unit]
-        return render(float(epoch) + amount * seconds, zone)
+        answer = render(float(epoch) + amount * seconds, zone)
+        # A duration lands on an instant by construction, so there is no wall
+        # time that could have been missing. Said explicitly so every answer
+        # from this function carries the same keys.
+        answer['adjusted'] = False
+        return answer
 
     tz, _ = resolve_zone(zone)
     local = datetime.fromtimestamp(float(epoch), tz)
@@ -184,7 +261,7 @@ def shift(epoch: float, amount: int, unit: str, zone: Optional[str] = None) -> d
     # Re-anchored in the zone rather than trusting the arithmetic's tzinfo: a
     # date built across a DST change carries the offset it started with, and
     # `timestamp()` on that is an hour out.
-    return render(moved.replace(tzinfo=None).replace(tzinfo=tz).timestamp(), zone)
+    return _anchored(moved, tz, zone)
 
 
 def next_weekday(
@@ -235,6 +312,12 @@ def boundary(epoch: float, unit: str, edge: str, zone: Optional[str] = None) -> 
     an end-of-month date reads as the 31st rather than the 1st, which is what
     somebody asking for "end of the month" means and what a CRM wants stored.
 
+    A START IS THE FIRST INSTANT OF THE PERIOD, WHICH IS NOT ALWAYS MIDNIGHT.
+    Chile, Cuba and Lebanon move their clocks at 24:00, so on those dates 00:00
+    is a reading that names no instant and the first real one is 01:00. The
+    answer carries ``adjusted`` when that happened, rather than reporting a
+    midnight the day did not have.
+
     Args:
         epoch: Unix seconds inside the period.
         unit: One of `BOUNDARY_UNITS`.
@@ -242,7 +325,8 @@ def boundary(epoch: float, unit: str, edge: str, zone: Optional[str] = None) -> 
         zone: The calendar the period belongs to.
 
     Returns:
-        The boundary instant, rendered.
+        The boundary instant, rendered, plus ``adjusted`` — True when the
+        period's edge fell in a gap and the nearest real instant was used.
 
     Raises:
         ValueError: On an unknown unit or edge.
@@ -284,7 +368,7 @@ def boundary(epoch: float, unit: str, edge: str, zone: Optional[str] = None) -> 
         }[unit]
         moment = step(first) - timedelta(seconds=1)
 
-    return render(moment.replace(tzinfo=None).replace(tzinfo=tz).timestamp(), zone)
+    return _anchored(moment, tz, zone)
 
 
 def difference(start: float, end: float, unit: str, zone: Optional[str] = None) -> dict[str, Any]:

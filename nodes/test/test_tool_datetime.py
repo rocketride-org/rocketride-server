@@ -56,6 +56,11 @@ _spec.loader.exec_module(dtm)
 LA = 'America/Los_Angeles'
 
 
+def _raising_zoneinfo(name):
+    """`ZoneInfo` with no database behind it: every name is a lookup failure."""
+    raise KeyError(f'No time zone found with key {name}')
+
+
 def at(year, month, day, hour=12, minute=0, zone=None):
     """A unix timestamp, written the way a person would say the moment."""
     tz = timezone.utc if zone is None else ZoneInfo(zone)
@@ -178,7 +183,60 @@ def test_a_week_starts_on_monday():
 
 
 def test_start_of_a_period_is_midnight():
-    assert dtm.boundary(at(2026, 9, 3), 'month', 'start')['time'] == '00:00'
+    answer = dtm.boundary(at(2026, 9, 3), 'month', 'start')
+    assert answer['time'] == '00:00'
+    assert answer['adjusted'] is False
+
+
+#: Santiago moves its clocks at 24:00, so on this date 00:00 is a wall-clock
+#: reading that names no instant and the day begins at 01:00. Zones that do this
+#: — Chile, Cuba, Lebanon, historically Brazil — are the reason a start is
+#: defined as the first EXISTING instant rather than as midnight.
+SANTIAGO = 'America/Santiago'
+
+
+def test_a_day_that_starts_at_one_says_it_was_adjusted():
+    """
+    The assertion above holds only in zones that change their clocks at a
+    civilised hour. Where midnight itself is skipped, the date is still right
+    and the time is not midnight, and the answer has to say so: an `epoch` taken
+    from this boundary is an hour out for anyone scheduling on it.
+    """
+    answer = dtm.boundary(at(2026, 9, 6, 12, 0, SANTIAGO), 'day', 'start', SANTIAGO)
+
+    assert answer['date'] == '2026-09-06'
+    assert answer['time'] == '01:00'
+    assert answer['adjusted'] is True
+
+
+def test_an_ordinary_boundary_is_not_adjusted():
+    """The flag is about a missing hour, not about crossing a DST date at all."""
+    # 2026-03-08 is the LA spring-forward date, and its midnight exists.
+    answer = dtm.boundary(at(2026, 3, 8, 12, 0, LA), 'day', 'start', LA)
+
+    assert answer['time'] == '00:00'
+    assert answer['adjusted'] is False
+
+
+def test_a_calendar_step_onto_a_missing_hour_says_it_moved():
+    """
+    02:30 on the 7th, plus a day, is 02:30 on the 8th — an hour LA does not
+    have. `at()` already reports this for a wall time it was handed; a shift
+    that lands on one reports it the same way rather than absorbing it.
+    """
+    answer = dtm.shift(at(2026, 3, 7, 2, 30, LA), 1, 'day', LA)
+
+    assert answer['date'] == '2026-03-08'
+    assert answer['time'] == '03:30'
+    assert answer['adjusted'] is True
+
+
+def test_a_duration_step_is_never_adjusted():
+    """A duration moves the instant, so there is no wall time to be missing."""
+    answer = dtm.shift(at(2026, 3, 7, 2, 30, LA), 60, 'minute', LA)
+
+    assert answer['time'] == '03:30'
+    assert answer['adjusted'] is False
 
 
 # ---------------------------------------------------------------------------
@@ -236,6 +294,39 @@ def test_an_unusable_zone_answers_in_utc_and_says_so():
     """
     for bad in ('Mars/Olympus', 'not a zone', '', None):
         assert dtm.render(at(2026, 9, 3), bad)['timezone'] == 'UTC'
+
+
+def test_a_missing_timezone_database_is_named_rather_than_silently_utc(monkeypatch, caplog):
+    """
+    THE FALLBACK THAT WOULD RESTORE THE BUG. `zoneinfo` ships no data: it reads
+    the system database, or the `tzdata` wheel this node now declares. With
+    neither, EVERY name raises and every answer becomes UTC — so a 12:30
+    Pacific booking is written as 12:30 UTC, which is the 05:30 failure this
+    node exists to remove, back again with nothing on screen.
+
+    A mistyped zone and an absent database raise the same exception, so the two
+    are told apart by asking whether any zone at all can be listed.
+    """
+    monkeypatch.setattr(dtm, 'available_timezones', lambda: set())
+    monkeypatch.setattr(dtm, '_tzdb_reported', False)
+    monkeypatch.setattr(dtm, 'ZoneInfo', _raising_zoneinfo)
+
+    with caplog.at_level('WARNING'):
+        answer = dtm.render(at(2026, 9, 3), LA)
+
+    assert answer['timezone'] == 'UTC'
+    assert 'no IANA timezone database' in caplog.text
+    assert 'tzdata' in caplog.text
+
+
+def test_a_mistyped_zone_is_not_blamed_on_the_database(monkeypatch, caplog):
+    """The other half: a real database and a bad name warns about nothing."""
+    monkeypatch.setattr(dtm, '_tzdb_reported', False)
+
+    with caplog.at_level('WARNING'):
+        assert dtm.render(at(2026, 9, 3), 'Mars/Olympus')['timezone'] == 'UTC'
+
+    assert caplog.text == ''
 
 
 def test_every_answer_names_the_zone_it_used():

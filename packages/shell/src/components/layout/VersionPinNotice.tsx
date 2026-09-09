@@ -23,12 +23,13 @@
 // =============================================================================
 // "YOU ARE LOOKING AT AN OLD VERSION" — said where it cannot be missed
 // =============================================================================
-// Version pins live in sessionStorage and outlive every reload; a version
-// picked once from a store tile keeps serving that snapshot for the life of the
-// tab. Bytes are immutable per version, so the pinned app works perfectly — it
-// is simply the app as it was, and no error, no failed request and no rebuild
-// says otherwise. Days of "my change is not showing" come from this, and the
-// only cure is telling the person, on screen, which version they are running.
+// A version pin lives in the ADDRESS BAR: it survives a reload and leaves when
+// you navigate away. A version picked once from a store tile keeps serving that
+// snapshot until then. Bytes are immutable per version, so the pinned app works
+// perfectly — it is simply the app as it was, and no error, no failed request
+// and no rebuild says otherwise. Days of "my change is not showing" come from
+// this, and the only cure is telling the person, on screen, which version they
+// are running.
 //
 // A chip rather than a banner: it must survive alongside whatever the app draws
 // (the bar in the bottom bar exists only when an app declares one), stay out of
@@ -38,7 +39,7 @@
 import React, { CSSProperties } from 'react';
 
 import { getStalePin } from '../../util/appLoader';
-import { clearAppVersionOverride } from '../../util/versionOverride';
+import { clearAppVersionOverride, getAppVersionOverride } from '../../util/versionOverride';
 
 const styles = {
 	chip: {
@@ -90,6 +91,16 @@ const VersionPinNotice: React.FC<{ appId: string | null }> = ({ appId }) => {
 	// whose chip this is has by definition loaded.
 	const useLatest = () => {
 		clearAppVersionOverride(pin.appId);
+		// VERIFY BEFORE RELOADING. The clear writes through `writeParams`, which
+		// swallows a refused `replaceState` — a SecurityError in a sandboxed frame
+		// without allow-same-origin, or Safari's rate limit after repeated calls.
+		// Reloading onto a pin that never left comes back on the same version and
+		// redraws this chip, so the button appears to do nothing, with no error and
+		// no log. Same shape as WorkspaceContext's dropped-override path.
+		if (getAppVersionOverride(pin.appId) !== null) {
+			console.error(`[shell] could not clear the pin on ${pin.appId} (v${pin.pinned}) — not reloading`);
+			return;
+		}
 		window.location.reload();
 	};
 

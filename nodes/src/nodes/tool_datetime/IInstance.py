@@ -84,7 +84,11 @@ _INSTANT_RESULT = {
         'rather than formatting or converting an instant yourself: use date/time '
         'for a field stored in local time, and utc_date/utc_time for a field '
         'the CRM reads as UTC. Check which the field wants; getting it wrong '
-        'stores a real-looking time that is hours out.'
+        'stores a real-looking time that is hours out. Answers that move a wall '
+        'clock also carry adjusted: true when the time asked for does not exist '
+        '(the morning clocks go forward, or midnight itself in zones that change '
+        'at 24:00) and the nearest real one was used — say so rather than '
+        'reporting the time that was requested.'
     ),
 }
 

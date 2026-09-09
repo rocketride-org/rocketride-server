@@ -174,12 +174,19 @@ function latestSnapshot(appId) {
  *
  * @param {string} appId - The app id, as the store names its deployment dir.
  * @param {string} distAppsDir - The served `apps` directory under dist.
- * @returns {boolean} True when a seed would publish nothing new.
+ * @returns {boolean} True when a seed would publish nothing new. False when
+ *   nothing is built under this id: absent an artifact there is nothing a skip
+ *   could be justified by.
  */
 function publishedCarriesBuild(appId, distAppsDir) {
 	const built = path.join(distAppsDir, appId, 'remoteEntry.js');
-	// Nothing built under this id — not something a seed would change either way.
-	if (!fs.existsSync(built)) return true;
+	// Nothing built under this id: a seed cannot be SKIPPED on the strength of an
+	// artifact that is not there. A wrong `distAppsDir`, or a `:copy` that never
+	// ran, would otherwise read as "already published" and skip the deploy — the
+	// silent no-op deploy this helper and `:verify` exist to catch.
+	// `makeVerifyAction` throws on the same condition; a boolean caller gets the
+	// same answer as "not published".
+	if (!fs.existsSync(built)) return false;
 	const snap = latestSnapshot(appId);
 	// Never published at all: it has to be seeded.
 	if (!snap) return false;

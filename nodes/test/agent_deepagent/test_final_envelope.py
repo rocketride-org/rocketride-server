@@ -172,6 +172,46 @@ def test_the_sentinel_wins_over_a_json_object_after_it(dp):
     assert msg.content == answer
 
 
+def test_a_tool_call_that_quotes_the_sentinel_is_still_a_tool_call(dp):
+    """
+    THE MIRROR OF THE TEST ABOVE, and the one an unanchored `find` fails.
+
+    Protocol text travels: a delegation carrying instructions, a note whose body
+    quotes the format, a transcript replayed into a prompt. Matching the
+    sentinel anywhere in the output turns a well-formed tool call that merely
+    MENTIONS it into a final answer — the tool never runs, and the person reads
+    a fragment of JSON. The sentinel the prompt asks for opens a line; one
+    buried mid-line inside a single-line envelope is quoted text.
+    """
+    raw = (
+        '{"type":"tool_call","name":"crm.note_create",'
+        '"args":{"content":"Reply with FINAL>>> when the booking is confirmed"}}'
+    )
+
+    msg = dp._parse_tool_call_envelope(raw)
+
+    assert msg.tool_calls, 'the tool call was swallowed by the sentinel'
+    assert msg.tool_calls[0]['name'] == 'crm.note_create'
+    assert 'FINAL>>>' in msg.tool_calls[0]['args']['content']
+
+
+def test_a_sentinel_after_leading_prose_still_opens_its_own_line(dp):
+    """Anchoring is to a line, not to the start of the output."""
+    msg = dp._parse_tool_call_envelope('Thinking out loud first.\n\nFINAL>>> Here it is.')
+
+    assert msg.content == 'Here it is.'
+
+
+def test_an_empty_sentinel_answer_is_not_an_answer(dp):
+    """
+    A model that writes the marker and stops has said nothing. Returning it
+    would hand `_generate` an empty success and end the turn silently; None
+    sends it back through the retry loop instead.
+    """
+    assert dp._parse_tool_call_envelope(dp.FINAL_SENTINEL) is None
+    assert dp._parse_tool_call_envelope(dp.FINAL_SENTINEL + '   \n  ') is None
+
+
 def test_the_protocol_prompt_asks_for_the_sentinel_not_json(dp):
     """The prompt is the only place the model learns the shape."""
     prompt = dp._tool_call_protocol_prompt([])

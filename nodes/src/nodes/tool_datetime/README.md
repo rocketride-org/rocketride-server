@@ -1,12 +1,6 @@
----
-title: Date & Time
-date: 2026-09-03
-sidebar_position: 1
----
+# tool_datetime
 
-<head>
-  <title>Date & Time - RocketRide Documentation</title>
-</head>
+A RocketRide tool node that gives an agent a clock and a calendar.
 
 ## What it does
 
@@ -117,8 +111,24 @@ that has to be booked is better booked at a stated wrong-by-an-hour time than no
 booked at all — and both flags travel with the answer, so say so when either is
 true.
 
+**A period boundary is the first EXISTING instant, which is not always
+midnight.** Chile, Cuba and Lebanon change their clocks at 24:00, so on those
+dates 00:00 names no instant and the day begins at 01:00. `boundary` and `shift`
+carry `adjusted` for the same reason `at` does: the date is still right, the
+time is not the one asked for, and an `epoch` taken from it is an hour off for
+whoever schedules on it.
+
 **A malformed date IS refused.** Unlike a bad zone, there is no honest fallback:
 every instant `"9 sept"` could mean is a guess.
+
+## Requirements
+
+`tzdata`, declared in this node's `requirements.txt`. `zoneinfo` ships no
+timezone data of its own: it reads the system IANA database, which is absent on
+Windows and in slim containers. Without it EVERY zone name fails to resolve and
+every answer falls back to UTC — silently, since a missing database and a
+mistyped zone raise the same exception. The node tells the two apart and logs a
+warning once when the database is the one missing, but the fix is the package.
 
 ## Configuration
 

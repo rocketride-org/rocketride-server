@@ -675,6 +675,12 @@ def _parse_tool_call_envelope(raw: str) -> Any:
     cannot be malformed because there is nothing in it to escape; a JSON envelope;
     and last, an unparseable JSON envelope that still says plainly it is a final
     answer, whose content is recovered rather than printed at the person.
+
+    The sentinel is matched at the START OF A LINE only. Protocol text travels
+    — a delegation carrying instructions, a note quoting the format, a
+    transcript replayed into a prompt — and an unanchored match would read a
+    tool call that merely mentions ``FINAL>>>`` as a final answer, dropping the
+    call.
     """
     try:
         from langchain_core.messages import AIMessage
@@ -683,10 +689,23 @@ def _parse_tool_call_envelope(raw: str) -> Any:
 
     # The sentinel, before any JSON is attempted: everything after it is the
     # answer, including a `{` that would otherwise look like an envelope.
+    #
+    # ANCHORED TO A LINE, because an unanchored match lets the literal text
+    # inside a tool call swallow the call. A note whose body says "reply with
+    # FINAL>>> when the booking is confirmed" is a well-formed
+    # `{"type":"tool_call"}` envelope, and finding the sentinel anywhere in it
+    # turns the work the crew meant to do into a fragment of JSON printed at the
+    # person. The prompt asks for the sentinel at the start of what the model
+    # writes; one buried mid-line in a single-line envelope is quoted text.
     if isinstance(raw, str):
-        marker = raw.find(FINAL_SENTINEL)
-        if marker >= 0:
-            return AIMessage(content=safe_str(raw[marker + len(FINAL_SENTINEL) :]).strip())
+        marker = re.search(rf'(?m)^[ 	]*{re.escape(FINAL_SENTINEL)}', raw)
+        if marker:
+            answer = safe_str(raw[marker.end() :]).strip()
+            # A sentinel with nothing after it is not an answer. Returning it
+            # would hand `_generate` an empty success and end the turn silently;
+            # None sends the model back through the retry loop instead.
+            if answer:
+                return AIMessage(content=answer)
 
     obj = _extract_first_json_object(raw)
     if not isinstance(obj, dict):
