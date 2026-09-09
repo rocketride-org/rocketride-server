@@ -596,16 +596,13 @@
 				"exclude_prefixes": [],
 				"exclude_patterns": ["vl", "vision", "omni", "safety", "guard", "parse", "ocr", "embed", "rerank", "retriever", "asr", "tts", "speech", "audio", "reward"]
 			},
-			// Local NIM profiles reuse the cloud model IDs, so they resolve against
-			// the live API too — protect them (and the seeded cloud set) so the
-			// keyless OpenRouter fallback can never wrongly retire them.
+			// Protect the seeded cloud set so the keyless OpenRouter fallback can
+			// never wrongly retire it.
 			"protected_profiles": [
 				["custom", "2126-04-09"],
 				["nemotron-3-super", "2027-02-01"],
 				["nemotron-3-ultra", "2027-02-01"],
-				["nemotron-3-5-lightning", "2027-02-01"],
-				["nemotron-3-super-local", "2027-02-01"],
-				["nemotron-3-5-lightning-local", "2027-02-01"]
+				["nemotron-3-5-lightning", "2027-02-01"]
 			],
 			// NVIDIA's /v1/models omits context_window; lock the seeded models at
 			// their model-card values.
