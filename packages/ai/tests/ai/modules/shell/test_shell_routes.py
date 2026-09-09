@@ -303,3 +303,33 @@ def test_add_route_registry_unchanged_when_router_rejects(web_server, monkeypatc
 
     monkeypatch.undo()
     web_server.add_route('/rejected', _handler, ['GET'])
+
+
+# ---------------------------------------------------------------------------
+# Missing /shell/static/* assets 404 (do not fall through to index.html)
+# ---------------------------------------------------------------------------
+
+
+def test_missing_shell_static_asset_404s(shell_root):
+    """A missing /shell/static/* asset must 404, not the index.html SPA fallback.
+
+    Behind the staging CloudFront the /shell/static/* behavior is edge-cached +
+    immutable; a 200 index.html served under a .js/.css URL gets cached as
+    HTML-under-a-JS-URL and poisons every viewer, breaking app boot. Regression
+    guard: content-hashed asset misses must be a real 404.
+    """
+    app = FastAPI()
+    app.get('/shell/{file_path:path}')(shell_static)
+    client = TestClient(app)
+    r = client.get('/shell/static/js/does-not-exist.deadbeef.js')
+    assert r.status_code == 404
+
+
+def test_shell_navigation_route_still_serves_index(shell_root):
+    """A non-static /shell/* route still gets the SPA index.html fallback."""
+    app = FastAPI()
+    app.get('/shell/{file_path:path}')(shell_static)
+    client = TestClient(app)
+    r = client.get('/shell/some/client/route')
+    assert r.status_code == 200
+    assert '<title>shell</title>' in r.text
