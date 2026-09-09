@@ -40,6 +40,7 @@ The `--models` flag forwards arguments directly to `sync_models.py`.
 | `--enable-discovery`         | Allow new model profiles to be added to `services.json`. Default off, without this flag, the sync only enriches existing profiles' token data and deprecation status. Never adds or removes profile keys.                                                                                                                                      |
 | `--allow-fallback-discovery` | Permit `openrouter`/`litellm` to act as discovery sources for providers whose API key is missing. Requires `--enable-discovery`. Default off, strict mode skips discovery for providers without keys (existing profiles still enriched). Use only when you intentionally want to introduce model IDs the native runtime SDK may not recognise. |
 | `--no-config-overrides`      | Ignore `token_limit_overrides` and `model_output_tokens.overrides` from the config file, token limits come entirely from live data sources                                                                                                                                                                                                     |
+| `--verify-existing`          | Call every model already in the catalogue, not just new ones, and deprecate those the provider reports as gone. Requires the provider API key. One request per profile, so noticeably slower.                                                                                                                                                  |
 | `--pr-body`                  | Print a GitHub PR body (markdown). Also writes to `GITHUB_ENV` for CI                                                                                                                                                                                                                                                                           |
 
 Validation: `--model-source` may not list duplicate values. `--allow-fallback-discovery` requires `--enable-discovery`.
@@ -106,10 +107,27 @@ Pick primary source  →  fetch model list  →  discovery gate  →  smoke test
 2. **Fetch model list**: call the source's API or read its database.
 3. **Discovery gate**: if `--enable-discovery` is off, drop new models from the list (only existing profiles get enriched). If discovery is on but no source qualifies for discovery (because the provider key is missing and `--allow-fallback-discovery` is off), drop new models too and flag the provider as `discovery_skipped` in the report.
 4. **Smoke test**: only when (a) discovery is on, (b) the discovery source is `provider`, (c) the API key is set. New models are smoke-tested via the native API. Discovery from `openrouter` or `litellm` skips smoke testing, there is no client to invoke.
+
+   With `--verify-existing`, profiles already in the catalogue are called too. The smoke gate otherwise validates **additions only**, so a model that entered correctly and was retired months later is never called again and stays in the catalogue indefinitely. A listing endpoint does not answer this: providers keep returning models they have retired, and only the call itself does. A profile is deprecated on this evidence regardless of its `modelSource` — a refusal to run the model is stronger than absence from a listing, and an OpenRouter-discovered profile is just as unusable once the underlying provider has retired it.
+
+   A failed call is classified from the typed SDK exception, into three answers rather than two, because a 404 does not settle the question on its own:
+
+   | outcome | what it means | effect |
+   | --- | --- | --- |
+   | `retired` | the provider said the model is gone — *"no longer available"*, *"has been retired"* | deprecated, with the replacement it named |
+   | `missing` | a bare 404. Could be retired, could be a model this key cannot reach: OpenAI answers *"does not exist or you do not have access to it"* for both, and Anthropic returns `not_found_error` for org-restricted models | reported for a human, never acted on |
+   | `error` / `skip` | transient, or an auth/permission failure | ignored |
+
+   So a CI key without a tier cannot deprecate a live-but-gated model: it gets `missing`.
+
+   One more guard sits above all of it: if **more than half** of a provider's verified models come back `retired`, the run deprecates nothing and warns instead. A retirement message is per-model evidence, but a break one level up — a retired API version, say — produces that same message for every model at once. Providers do not retire most of a catalogue in one go, so a majority verdict says more about the API than about the models, and a real mass retirement is then applied deliberately rather than swept in.
+
+   **A mark made by a call records `deprecatedBy: "provider-call"`, and only a call that passes can lift it.** The listing path must not: the premise of a call-verified retirement is that the provider *still lists the model*, so a scheduled run — which does not pass `--verify-existing` — would otherwise see it listed and resurrect it, deleting the provider's replacement note along the way.
 5. **Merge**: smart merge into `preconfig.profiles`:
    - New model, smoke passed → add profile
    - Existing model → update token limits if authoritative data differs; preserve title and other manual fields
-   - Model no longer in API → mark `"deprecated": true` (only by sources authoritative for the profile's `modelSource`)
+   - Model no longer in API → mark `"deprecated": true` (only by sources authoritative for the profile's `modelSource`) and record `"deprecatedBy"` with the source that marked it. The same ownership applies to an OpenRouter `expiration_date`: it is evidence about the models OpenRouter serves, not about one the native provider still supports
+   - Model back in the API → lift the mark, **but only a mark this sync made**: a profile deprecated by hand carries no `deprecatedBy` and is left alone. A provider that keeps listing a model it has retired is exactly why someone marks one by hand, so its reappearance is not evidence to the contrary. Any source with authority over the profile may lift it, not only the one that applied it — the OpenRouter expiration path can stamp a `provider` profile, and requiring a match would strand it. A mark left standing is reported as "listed again but still deprecated" rather than passing silently
    - Model in `protected_profiles` → never deprecated (e.g. `"custom"`)
 
 ### Token limit resolution (priority order)
@@ -120,6 +138,12 @@ Pick primary source  →  fetch model list  →  discovery gate  →  smoke test
 4. `16384`, global last resort (flagged as `?` estimated in output).
 
 The same priority applies to output tokens: `model_output_tokens.overrides` → first source in `--model-source` order with data → `model_output_tokens.defaults.chat` (or `defaults.embedding` for embedding providers).
+
+**Swapped-value guard** (providers with `output_limit_below_context` only): LiteLLM and OpenRouter report max output tokens as the context window for some models. On a provider that caps completions below its window, a candidate equal to its own source's context window is discarded and the next source is tried. If no source has a usable value, the default applies to new profiles only — it never overwrites a limit already in `services.json`.
+
+The equality is only a defect where the provider enforces a separate completion limit. OpenAI rejects an oversized `max_tokens` with _"This model supports at most N completion tokens"_, and litellm swaps the fields for Anthropic; both set `output_limit_below_context`. Mistral and xAI accept `max_tokens` up to the context window and publish no separate limit, so **every** source reports the two values as equal there and it is correct data — do not set the flag for them.
+
+After the run the sync reports every profile with `modelOutputTokens == modelTotalTokens`, and exits 1 for those that are also (a) on a provider with `output_limit_below_context`, (b) `modelSource: provider` — a routed OpenRouter or LiteLLM alias is served elsewhere and is not bound by this provider's limit — and (c) not `deprecated`. Fix a failing profile with `model_output_tokens.overrides`; adding a model there also marks the value as confirmed and silences the warning.
 
 ### Discovery vs enrichment
 
@@ -178,6 +202,7 @@ The sync has two distinct modes:
     "default_context_window": 128000,  // fallback for new models when API + litellm have no data
     "protected_profiles": ["custom"],  // these keys are never deprecated (merged with default_protected_profiles)
     "exclude_dated_snapshots": true,   // drop -2024-04-09 and -0613 date suffixes
+    "output_limit_below_context": true, // provider caps completions below its window (see above)
     "model_filter": {
         "include_prefixes": ["gpt-", "o1"],  // only these prefixes; empty = allow all
         "exclude_prefixes": [],

@@ -36,6 +36,15 @@ engine:
     port: 5565
     # -- Target port on the container
     targetPort: 5565
+    # -- Session affinity: None (default) or ClientIP. A shared object store is
+    # the right fix for multi-replica deployments; ClientIP only pins a given
+    # client to one pod, which does not make state shared and does not survive
+    # a pod restart or rescheduling. Use it as a stopgap, not a substitute.
+    sessionAffinity: None
+    # -- Tunables for sessionAffinity: ClientIP (ignored when affinity is None)
+    sessionAffinityConfig: {}
+    #  clientIP:
+    #    timeoutSeconds: 10800
 
   # -- Resource requests and limits for engine pods
   # For GPU workloads, add nvidia.com/gpu to limits and set appropriate
@@ -105,6 +114,21 @@ engine:
     LOG_LEVEL: 'info'
     # -- Number of worker threads
     WORKER_THREADS: '4'
+    # -- Account file store backend. REQUIRED for any multi-replica deployment:
+    # left unset, the engine keeps files on a container-local filesystem path,
+    # so each pod gets its own private copy and the chart refuses to render
+    # more than one replica. Supported schemes:
+    #   s3://bucket/prefix          (credentials in engine.secrets.RR_STORE_SECRET_KEY)
+    #   azureblob://container/prefix   (azure://container/prefix is an accepted alias)
+    #   filesystem://path           (single replica only; lost on pod restart)
+    # RR_STORE_URL: 's3://my-bucket/rocketride'
+
+  # -- Acknowledge that RR_STORE_URL is supplied outside this chart's view
+  # (e.g. through engine.existingSecret). The chart can read engine.env but not
+  # the contents of an external Secret, so set this to true to allow a
+  # multi-replica deployment it cannot otherwise verify. Leave false when
+  # RR_STORE_URL is set in engine.env above.
+  sharedStoreConfigured: false
 
   # -- Name of an existing Secret to use instead of creating one
   # If set, the chart will not create a Secret resource
@@ -120,6 +144,18 @@ engine:
     # OPENAI_API_KEY: ""
     # ANTHROPIC_API_KEY: ""
     # HUGGINGFACE_TOKEN: ""
+    #
+    # Credentials for the RR_STORE_URL backend (s3:// / azureblob://), as the
+    # JSON blob the store provider expects:
+    # RR_STORE_SECRET_KEY: '{"access_key_id": "...", "secret_access_key": "..."}'
+    #
+    # Signing secret for /task/fetch download URLs. Only read on the
+    # filesystem backend — cloud backends presign natively and ignore it.
+    # Set it explicitly there: with it unset the engine mints an ephemeral
+    # per-process key, so every previously issued download URL stops
+    # verifying the moment the pod restarts.
+    # Generate with: python -c "import secrets; print(secrets.token_urlsafe(32))"
+    # RR_SIGNING_KEY: ""
 
   # -- Additional volume mounts for the engine container
   volumeMounts: []

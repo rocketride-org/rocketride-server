@@ -4,7 +4,7 @@ title: Client Libraries
 
 # RocketRide Client Libraries
 
-Official client libraries for the RocketRide Engine. The TypeScript and Python clients communicate with the server over DAP (Debug Adapter Protocol) on WebSocket and offer the same capabilities. The MCP client provides AI assistant integration via the Model Context Protocol.
+Official client libraries for the RocketRide Engine. The TypeScript and Python clients communicate with the server over DAP (Debug Adapter Protocol) on WebSocket and offer the same capabilities. The MCP client provides AI assistant integration via the Model Context Protocol. The chat widget embeds a brandable pipeline chat UI in any web page.
 
 ---
 
@@ -51,28 +51,36 @@ pip install rocketride
 pip install rocketride-mcp
 ```
 
+The chat widget is **not on a public registry yet**; build it from this repository and self-host the bundle:
+
+```bash
+./builder chat-widget:build   # -> packages/chat-widget/dist/rocketride-chat.js
+```
+
+See the [chat widget README](https://github.com/rocketride-org/rocketride-server/blob/develop/docs/public/chat-widget/README.md#getting-the-bundle) for the embed snippets and for what changes once `rocketride-chat-widget` is published.
+
 ### From the Engine (self-hosted download)
 
 The engine serves the latest client packages via HTTP endpoints. Once the server is running, download them directly:
 
-| Endpoint                 | Package                | Response                                |
-| ------------------------ | ---------------------- | --------------------------------------- |
-| `GET /client/python/{filename}` | Python SDK wheel | `rocketlib_client_python-{version}-py3-none-any.whl` |
-| `GET /client/typescript` | TypeScript SDK tarball | `rocketlib-client-typescript-{version}.tgz`          |
-| `GET /client/vscode`     | VSCode extension       | `rocketlib-{version}.vsix`                           |
+| Endpoint                        | Package                | Response                                |
+| ------------------------------- | ---------------------- | --------------------------------------- |
+| `GET /client/python/{filename}` | Python SDK wheel       | `rocketride-{version}-py3-none-any.whl` |
+| `GET /client/typescript`        | TypeScript SDK tarball | `rocketride-{version}.tgz`              |
+| `GET /client/vscode`            | VSCode extension       | `rocketride-{version}.vsix`             |
 
 ```bash
 # Download and install Python client (use "latest" as filename for newest version)
-curl -o rocketlib_client_python-latest.whl http://localhost:5565/client/python/latest
-pip install rocketlib_client_python-latest.whl
+curl -o rocketride-latest.whl http://localhost:5565/client/python/latest
+pip install rocketride-latest.whl
 
 # Download and install TypeScript client
 curl -O http://localhost:5565/client/typescript
-npm install rocketlib-client-typescript-*.tgz
+npm install rocketride-*.tgz
 
 # Download and install VSCode extension
 curl -O http://localhost:5565/client/vscode
-code --install-extension rocketlib-*.vsix
+code --install-extension rocketride-*.vsix
 ```
 
 These endpoints are public (no authentication required) and automatically serve the latest version. Returns 404 with a JSON error if packages are not found.

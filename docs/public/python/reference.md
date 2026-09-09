@@ -35,7 +35,7 @@ Context manager: `async with RocketRideClient(...) as client:` — entering call
 
 | Method | Signature | Returns | Description |
 | --- | --- | --- | --- |
-| `use` | `async def use(self, *, token: str = None, filepath: str = None, pipeline: PipelineConfig = None, source: str = None, threads: int = None, use_existing: bool = None, args: List[str] = None, ttl: int = None, pipelineTraceLevel: str = None, name: str = None, env: Dict[str, str] = None) -> dict` | `dict` | Starts a pipeline. Requires `filepath` or `pipeline`. `pipelineTraceLevel` sets run-log trace verbosity, `name` a task display name, `env` per-run variable overrides. Returns a dict with at least `'token'`. |
+| `use` | `async def use(self, *, token: str = None, filepath: str = None, pipeline: PipelineConfig = None, source: str = None, threads: int = None, use_existing: bool = None, args: List[str] = None, ttl: int = None, pipelineTraceLevel: str = None, name: str = None, env: Dict[str, str] = None) -> dict` | `dict` | Starts a pipeline. Requires `filepath` or `pipeline`. `pipelineTraceLevel` sets run-log trace verbosity, `name` a task display name, `env` per-run variable overrides. Returns a dict with at least `'token'`, plus `'reused': True` when `use_existing` handed back an already-running instance instead of starting this pipeline. |
 | `terminate` | `async def terminate(self, token: str) -> None` | - | Stops the pipeline and frees server resources. |
 | `get_task_status` | `async def get_task_status(self, token: str) -> dict` | `dict` | Current task status (`completedCount`, `totalCount`, `completed`, `state`, `exitCode`, …). |
 

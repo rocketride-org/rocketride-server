@@ -51,6 +51,7 @@ import StatusBar from './StatusBar';
 import LoadingScreen from './LoadingScreen';
 import DebugPanel from './DebugPanel';
 import { ConnectionErrorBanner } from './ConnectionErrorBanner';
+import { getPrerenderedCapture } from '../../util/prerenderFallback';
 import type { ShellConfig } from '../workspace/types';
 import { commonStyles } from '../../themes/styles';
 
@@ -316,6 +317,9 @@ export const ShellLayout: React.FC<ShellLayoutProps> = ({
 	// never flips back (later app SWITCHES keep the chrome and show the
 	// in-pane rocket, as before).
 	const firstContentRef = useRef(false);
+	// Latches true once real app UI has mounted, so a later app-switch/reconnect
+	// dip (hasAppUi false) never re-shows the one-shot prerendered capture.
+	const hadAppUiRef = useRef(false);
 
 	// --- Debug panel state (ALT+D toggle) ------------------------------------
 	const [debugOpen, setDebugOpen] = useState(false);
@@ -417,6 +421,17 @@ export const ShellLayout: React.FC<ShellLayoutProps> = ({
 	// Workspace still hydrating: hold the SAME phase-anchored rocket as the
 	// boot LoadingScreen — returning null here put a blank frame between two
 	// otherwise-continuous loading screens.
+	// Prerendered capture (SEO): until real app UI exists, re-render the captured
+	// content into #root instead of the boot rocket or the connection-error
+	// surface — so a JS-rendering crawler that can't open the WebSocket keeps the
+	// good content (not a Soft 404). `display:contents` keeps the captured nodes
+	// in #root's layout context. Real, non-prerendered loads have no capture and
+	// fall through unchanged. Once app UI mounts, React replaces this.
+	if (hasAppUi) hadAppUiRef.current = true;
+	if (!hadAppUiRef.current) {
+		const captured = getPrerenderedCapture();
+		if (captured) return <div style={{ display: 'contents' }} dangerouslySetInnerHTML={{ __html: captured }} />;
+	}
 	if (!loaded && !seeded) return <LoadingScreen />;
 
 	// First boot: stay full-screen on the rocket until the first activation

@@ -36,6 +36,8 @@ The configured tool-server name defaults to `postgres`.
 
 `search` requires a bound embedding provider for semantic similarity search. The three functions return a failure object when their required input or an embedding cannot be obtained.
 
+`search` accepts an optional `filter` object honoring only `objectId`, `nodeId` and `parent`; any other key is rejected. `upsert` accepts an optional `metadata` object storing `nodeId`, `parent` and `chunkId`, defaulting to `"vectordb_tool"`, `"/"` and `0` respectively.
+
 ## Configuration
 
 Enter the PostgreSQL connection details and choose the table that will hold the chunks. The local profile supplies the initial values, including a retrieval score of `0.5` and `cosine` similarity. Start by confirming that these credentials reach a database where the `vector` type is available; the save-time probe opens a short-lived connection, runs `SELECT 1`, and tests that type before this node is used in a pipeline.

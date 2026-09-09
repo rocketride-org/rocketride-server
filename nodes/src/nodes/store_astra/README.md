@@ -35,6 +35,8 @@ The configured tool server name is the namespace for the functions below; it def
 
 `search` and an `upsert` without a supplied embedding use the node's bound embedding provider. These calls are on the agent tool channel, not the document lanes. Give each Astra node a distinct tool server name when an agent can reach more than one of them.
 
+`search` accepts an optional `filter` object honoring only `objectId`, `nodeId` and `parent`; any other key is rejected. `upsert` accepts an optional `metadata` object storing `nodeId`, `parent` and `chunkId`, defaulting to `"vectordb_tool"`, `"/"` and `0` respectively.
+
 ## Profiles
 
 Default: **Astra DB cloud server** (`cloud`).

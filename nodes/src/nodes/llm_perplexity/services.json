@@ -30,7 +30,7 @@
 				"model": "sonar",
 				"modelSource": "manual",
 				"modelTotalTokens": 127072, // openrouter
-				"modelOutputTokens": 4096, // default
+				"modelOutputTokens": 114364, // openrouter
 				"apikey": ""
 			},
 			"sonar-reasoning-pro": {
@@ -38,7 +38,7 @@
 				"model": "sonar-reasoning-pro",
 				"modelSource": "manual",
 				"modelTotalTokens": 128000, // openrouter
-				"modelOutputTokens": 4096, // default
+				"modelOutputTokens": 115200, // openrouter
 				"apikey": "",
 				"capabilities": {
 					"reasoning": true
@@ -57,7 +57,7 @@
 				"model": "sonar-deep-research",
 				"modelSource": "manual",
 				"modelTotalTokens": 128000, // openrouter
-				"modelOutputTokens": 4096, // default
+				"modelOutputTokens": 115200, // openrouter
 				"apikey": "",
 				"capabilities": {
 					"reasoning": true

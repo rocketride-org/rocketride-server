@@ -1,0 +1,32 @@
+{
+	"fields": {
+		"gcp.authType": {
+			"type": "string",
+			"title": "Authentication Type",
+			"default": "adc",
+			"enum": ["adc", "service_account"],
+			"enumNames": ["Application Default Credentials", "Service Account JSON"],
+			"description": "Choose how to authenticate to Google Cloud Platform.",
+			"conditional": [
+				{
+					"value": "service_account",
+					"properties": ["gcp.serviceAccountKey"]
+				}
+			]
+		},
+		"gcp.serviceAccountKey": {
+			"type": "string",
+			"format": "data-url",
+			"title": "Service Account Key JSON",
+			"description": "Upload the JSON key file for your Google Cloud service account.",
+			"ui:options:accept": ".json",
+			"secure": true
+		},
+		"gcp.projectId": {
+			"type": "string",
+			"title": "Project ID",
+			"description": "Optional: Specify the Google Cloud Project ID explicitly. Leave blank to infer from credentials.",
+			"optional": true
+		}
+	}
+}

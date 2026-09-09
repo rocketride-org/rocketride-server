@@ -33,6 +33,8 @@ The configured tool server name is the namespace for the functions below; it def
 
 `search` and an `upsert` without a supplied embedding use the node's bound embedding provider. These calls are separate from the data lanes, so a pipeline embedding upstream does not by itself provide vectors to a tool call. Use different server names when an agent has access to multiple Chroma nodes.
 
+`search` accepts an optional `filter` object honoring only `objectId`, `nodeId` and `parent`; any other key is rejected. `upsert` accepts an optional `metadata` object storing `nodeId`, `parent` and `chunkId`, defaulting to `"vectordb_tool"`, `"/"` and `0` respectively.
+
 ## Profiles
 
 Default: **Your own ChromaDB server** (`local`).
@@ -48,7 +50,7 @@ Start with the local or cloud profile, then provide the host, port, collection, 
 
 ### Connection profile and port
 
-The local profile creates a plain HTTP client; the cloud profile creates an HTTP client with token authentication. Use the cloud profile only when you have the token that Chroma expects; the local profile deliberately supplies no credentials. The implementation removes an `http://` or `https://` prefix and trailing slash from the configured host before connecting, so enter the host once rather than trying to encode a path in it.
+The local profile creates a plain HTTP client; the cloud profile connects over TLS and sends the API key in the `x-chroma-token` header, which suits ChromaDB Cloud or any TLS-protected remote server. ChromaDB Cloud additionally requires `tenant` and `database`; its host is `api.trychroma.com`. Use the cloud profile only when you have the token that Chroma expects; the local profile deliberately supplies no credentials. The implementation removes an `http://` or `https://` prefix and trailing slash from the configured host before connecting, so enter the host once rather than trying to encode a path in it.
 
 Ports may be literal integers, numeric strings, or interpolated environment values. A whole-number value in the TCP range is used; a boolean, fractional value, unresolved placeholder, non-numeric value, or out-of-range value silently falls back to `8000`. This is useful for an environment placeholder, but it can also send a cloud connection to the wrong port: if a connection unexpectedly targets `8000`, check the resolved value first.
 

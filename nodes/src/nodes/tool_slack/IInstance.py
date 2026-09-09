@@ -158,7 +158,17 @@ class IInstance(IInstanceBase):
         },
         description=(
             'Read recent messages from a Slack channel (newest first, at most 200). '
-            'Returns ts, user, and text per message. Requires a bot token.'
+            'Returns ts, user and text per message, plus thread_ts on threaded replies. '
+            'Also returns subtype whenever Slack classifies the entry, and bot_id whenever '
+            'a bot posted it. subtype is a classifier, not a noise flag: file_share, '
+            'thread_broadcast and me_message are ordinary user messages, while channel_join, '
+            'channel_leave, channel_topic, tombstone, pinned_item and reminder_add are system '
+            'entries. That system list is open-ended, so drop entries by naming the subtypes '
+            'you do not want rather than by treating any subtype as noise. '
+            'To skip your own posts, match bot_id against the '
+            'bot_id that check_connection reports -- do not filter on the bot_message '
+            'subtype, which is absent when an app posts under its own bot identity. '
+            'Requires a bot token.'
         ),
     )
     def channel_history(self, args):

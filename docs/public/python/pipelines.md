@@ -26,6 +26,14 @@ Beyond `filepath`/`pipeline`, `use()` accepts `source`, `threads`, `use_existing
 to the server, which resolves `${ROCKETRIDE_*}` variables from its merged
 environment.
 
+**Check `reused` before trusting the result.** `use_existing` returns the
+instance that is already running under that token rather than starting the one
+you submitted, and the result's `reused` flag is `True` when that happened. A
+reused instance keeps the configuration it was created with — the pipeline in
+this call is ignored, edits included — along with whatever state it has
+accumulated. Benchmarks and A/B comparisons are where an unnoticed reuse costs
+the most. Call `restart()` to apply new configuration to a live token.
+
 **Why a token:** the server runs each pipeline as a separate task. The token targets
 `send()`, `send_files()`, `pipe()`, `chat()`, `get_task_status()`, and `terminate()`
 at the correct pipeline.

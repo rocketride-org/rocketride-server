@@ -73,6 +73,17 @@ MAX_RETRY_AFTER_S = 120.0
 _IDEMPOTENT_METHODS = ('GET', 'DELETE')
 
 _HTTP_TOO_MANY_REQUESTS = 429
+_HTTP_CONFLICT = 409
+
+#: Body error code for "another operation is already running for this table".
+#: Distinct from a plain CONFLICT (table already exists, upload already consumed),
+#: which must NOT be retried.
+_RESOURCE_LOCKED = 'RESOURCE_LOCKED'
+
+
+def _creates_a_database(method: str, path: str) -> bool:
+    """Is this the one request whose replay could orphan a billable resource?"""
+    return method == 'POST' and path.rstrip('/') == '/v1/databases'
 
 
 #: Identifiers that get interpolated into request paths. Agent-supplied table and
@@ -97,12 +108,16 @@ class HotdataError(RuntimeError):
     """Any non-retryable failure talking to the Hotdata API.
 
     Carries ``status_code`` when the failure came from an HTTP response, so
-    callers can branch on the status instead of pattern-matching the message.
+    callers can branch on the status instead of pattern-matching the message,
+    and ``error_code`` (the API's own ``error.code``) because one status covers
+    several conditions: 409 is both "this table already exists", which callers
+    treat as success, and "this table is busy", which they must not.
     """
 
-    def __init__(self, message: str, status_code: Optional[int] = None) -> None:
+    def __init__(self, message: str, status_code: Optional[int] = None, error_code: str = '') -> None:
         super().__init__(message)
         self.status_code = status_code
+        self.error_code = error_code
 
 
 class HotdataOverloadedError(HotdataError):
@@ -246,12 +261,39 @@ class HotdataClient:
                 raise HotdataError(
                     f'hotdata: {method} {path} failed with HTTP {status}: {_body_snippet(response)}',
                     status_code=status,
+                    error_code=_error_code(response),
+                )
+
+            error_code = _error_code(response) if status >= 400 else ''
+
+            # Writes to one table are serialized server-side. A second writer is
+            # refused outright with RESOURCE_LOCKED and "retry shortly" - the
+            # operation is rejected before it runs, so replaying it cannot
+            # double-execute and this is safe on POST. Without it, every parallel
+            # agent publishing into one shared table loses a coin flip: measured
+            # 7 of 8 concurrent appends rejected against the live API.
+            #
+            # Excluding database creation, which is the one request whose replay
+            # is not provably harmless: it mints a new billable resource and
+            # returns the only copy of its id. A replay after the server had in
+            # fact created one would orphan that database until its TTL fired,
+            # and nothing on our side would know it existed.
+            if status == _HTTP_CONFLICT and error_code == _RESOURCE_LOCKED and not _creates_a_database(method, path):
+                retry_after = _parse_retry_after(getattr(response, 'headers', None))
+                if self._sleep_before_retry(retry_after, attempt, deadline):
+                    continue
+                raise HotdataError(
+                    f'hotdata: {method} {path} still locked by another writer after '
+                    f'{self.retry_budget_s:g}s (HTTP 409 RESOURCE_LOCKED)',
+                    status_code=status,
+                    error_code=_RESOURCE_LOCKED,
                 )
 
             if status >= 400:
                 raise HotdataError(
                     f'hotdata: {method} {path} failed with HTTP {status}: {_body_snippet(response)}',
                     status_code=status,
+                    error_code=error_code,
                 )
 
             return _parse_json(response)
@@ -601,6 +643,25 @@ def _parse_json(response: Any) -> Dict[str, Any]:
     if not isinstance(body, dict):
         return {'data': body}
     return body
+
+
+def _error_code(response: Any) -> str:
+    """The ``error.code`` string from an API error body, or '' if there isn't one.
+
+    Branching on the code rather than the message: 409 covers both "this table is
+    busy, retry" and "this upload was already consumed", and only the first may be
+    replayed.
+    """
+    try:
+        body = response.json()
+    except Exception:
+        return ''
+    if not isinstance(body, dict):
+        return ''
+    error = body.get('error')
+    if isinstance(error, dict):
+        return str(error.get('code') or '')
+    return str(body.get('code') or '')
 
 
 def _body_snippet(response: Any, limit: int = 500) -> str:

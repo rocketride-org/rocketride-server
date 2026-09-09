@@ -159,6 +159,34 @@ class TASK_CONTROL:
         return self.teamId if self.run_kind == 'deploy' else self.userId
 
 
+def _apply_source_defaults(pipeline: Dict[str, Any], source: str) -> Dict[str, Any]:
+    """
+    Fill in the fields a launch stamps on a pipeline, so two copies compare equal.
+
+    ``start_task`` writes the resolved source onto the pipeline and gives the
+    source component an empty config when it has none. A pipeline stored without
+    those looks different from the same pipeline after a launch, which turns a
+    useExisting comparison into a false "differs".
+
+    Args:
+        pipeline: The pipeline to normalise, mutated in place.
+        source: The resolved source component id.
+
+    Returns:
+        The same pipeline.
+
+    Raises:
+        ValueError: If the source component is not in the components list.
+    """
+    pipeline['source'] = source
+    for component in pipeline.get('components', []):
+        if component.get('id') == source:
+            if 'config' not in component:
+                component['config'] = {}
+            return pipeline
+    raise ValueError(f'Pipeline source component "{source}" not found in components list')
+
+
 class TaskServer(DAPBase):
     """
     Central task management server orchestrating computational task lifecycles.
@@ -1173,7 +1201,7 @@ class TaskServer(DAPBase):
                 of the task controls its life cycle
         """
 
-        def _return_results(control: TASK_CONTROL) -> str:
+        def _return_results(control: TASK_CONTROL, reused: bool = False) -> str:
             """
             Return task token for the task.
 
@@ -1181,6 +1209,11 @@ class TaskServer(DAPBase):
 
             Args:
                 control (TASK_CONTROL): The existing task control structure
+                reused (bool): True when this is a live instance returned under
+                    useExisting rather than a task launched from the submitted
+                    pipeline. Without it the two are indistinguishable to the
+                    caller, and a run against stale configuration reads as a
+                    successful run of the configuration just sent.
             """
             return {
                 'id': control.id,
@@ -1189,6 +1222,7 @@ class TaskServer(DAPBase):
                 'projectId': control.project_id,
                 'source': control.source,
                 'provider': control.provider,
+                'reused': reused,
             }
 
         # Initialize task control structure for new task
@@ -1225,20 +1259,10 @@ class TaskServer(DAPBase):
                 raise ValueError('Pipeline does not have a source component defined')
 
         # Find the actual source component
-        source_component = None
-        for component in control.pipeline.get('components', []):
-            if component.get('id') == control.source:
-                source_component = component
-                break
-
-        # Update the source on the pipeline
-        control.pipeline['source'] = control.source
-
-        if source_component is None:
-            raise ValueError(f'Pipeline source component "{control.source}" not found in components list')
-
-        if 'config' not in source_component:
-            source_component['config'] = {}
+        # Stamp the resolved source and give the source component a config if it has
+        # none. Shared with restart_task so a restarted pipeline is stored in the same
+        # shape a launched one is, and the two compare equal.
+        _apply_source_defaults(control.pipeline, control.source)
 
         # Project identity is project_id on the flat project.
         control.project_id = control.pipeline.get('project_id', None)
@@ -1332,9 +1356,18 @@ class TaskServer(DAPBase):
                 # make sure the user actually specified the task to use. If so,
                 # then all is ok, just use the existing task
                 if use_existing_task:
+                    # The submitted pipeline is not applied to a running instance.
+                    # Say so when it differs from what is actually running, otherwise
+                    # an edit-and-rerun loop silently measures the old configuration.
+                    if control.pipeline != existing_control.pipeline:
+                        self.debug_message(
+                            f'Task "{existing_control.id}" is already running: reusing it and ignoring the '
+                            'submitted pipeline, which differs from the running one. Restart the task to '
+                            'apply it.'
+                        )
                     if wait_for_running:
                         await existing_control.task.wait_for_running()
-                    return _return_results(existing_control)
+                    return _return_results(existing_control, reused=True)
 
                 # We are absolutely supposed to create a task or the user did
                 # not specify the token (which means a random collision)
@@ -1515,6 +1548,23 @@ class TaskServer(DAPBase):
             if type(components) is not list:
                 raise ValueError('Invalid components in pipeline')
 
+            # The source is part of the task's identity and a restart cannot change
+            # it. _apply_source_defaults stamps control.source onto the pipeline, so
+            # a different explicit source would be overwritten without a word —
+            # refuse it instead, which is what the docstring above promises.
+            requested_source = pipeline.get('source')
+            if requested_source and requested_source != control.source:
+                raise ValueError(
+                    f'Cannot change the source on restart: task "{control.id}" runs '
+                    f'"{control.source}", the request asks for "{requested_source}"'
+                )
+
+            # Normalise BEFORE anything is stopped. This is also the validation: it
+            # raises when the source component is missing, and doing that after the
+            # restart would leave the task stopped, the new pipeline already stored
+            # by Task.restart_task, and control.pipeline still naming the old one.
+            pipeline = _apply_source_defaults(pipeline, control.source)
+
             # Call the Task's restart method to restart the engine process
             # This preserves all statistics and monitoring while restarting the subprocess
             await control.task.restart_task(
@@ -1523,6 +1573,11 @@ class TaskServer(DAPBase):
                 source=control.source,
                 provider=control.provider,
             )
+
+            # The control now describes the pipeline that is running: without this the
+            # record still holds whatever was launched originally, so a later
+            # useExisting compares against a configuration that was replaced here.
+            control.pipeline = pipeline
 
             # Wait for running state if requested
             if wait_for_running:
