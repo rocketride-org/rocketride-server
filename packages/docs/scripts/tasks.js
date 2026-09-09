@@ -222,7 +222,7 @@ module.exports = {
 			name: 'docs:dev',
 			action: () => ({
 				description: 'Start docs dev server',
-				steps: ['docs:gather-dev', 'docs:dev-start'],
+				steps: ['docs:gather-dev', 'docs:release-notes', 'docs:dev-start'],
 			}),
 		},
 		{
