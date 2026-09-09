@@ -273,6 +273,8 @@ Set these environment variables (required; no config file is used):
 - [Discord](https://discord.gg/PMXrtenMsY)
 - [Contributing](https://github.com/rocketride-org/rocketride-server/blob/develop/CONTRIBUTING.md)
 
+<!-- mcp-name: io.github.rocketride-org/rocketride-mcp -->
+
 ## License
 
 MIT - see [LICENSE](https://github.com/rocketride-org/rocketride-server/blob/develop/LICENSE).
