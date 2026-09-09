@@ -18,7 +18,7 @@ with configurable thinking budgets.
 | --- | --- | --- | --- |
 | Nemotron 3 Super 120B *(default)* | `nvidia/nemotron-3-super-120b-a12b` | 1M | Best efficiency/accuracy balance |
 | Nemotron 3 Ultra 550B | `nvidia/nemotron-3-ultra-550b-a55b` | 1M | Frontier reasoning, 55B active params |
-| Nemotron 3 Nano 30B | `nvidia/nemotron-3-nano-30b-a3b` | 256K | Fast sub-agent tier, 3B active params |
+| Nemotron 3.5 Lightning 30B | `nvidia/nemotron-3.5-lightning-30b-a3b` | 256K | Fast sub-agent tier, 3B active params |
 | Custom Model | (user-defined) | (user-defined) | Any model on an OpenAI-compatible endpoint |
 
 The multimodal variants (Nano Omni, Nano VL) and the Retriever / Parse /
@@ -39,7 +39,7 @@ the "(Local)" profiles reuse the cloud model strings against
 `http://localhost:8000/v1`:
 
 ```sh
-docker run --gpus all -p 8000:8000 nvcr.io/nim/nvidia/nemotron-3-nano-30b-a3b:latest
+docker run --gpus all -p 8000:8000 nvcr.io/nim/nvidia/nemotron-3.5-lightning-30b-a3b:latest
 ```
 
 vLLM / SGLang users can serve the open weights from HuggingFace instead; set
