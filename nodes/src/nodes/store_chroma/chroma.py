@@ -78,6 +78,12 @@ class Store(DocumentStoreBase):
     client: chromadb.HttpClient
     collectionObj: chromadb.Collection | None = None
 
+    # Upper bound for the configured top_k. Generous enough for reranker
+    # fan-in (40x the data-lane default of 25, 10x the chroma.search tool's
+    # own cap of 100) while keeping a fat-fingered value from turning a query
+    # into a full-collection scan.
+    MAX_TOP_K: int = 1000
+
     @staticmethod
     def _coerceBool(value: Any) -> bool:
         """Read a boolean that may arrive as a string from an env-var placeholder."""
@@ -243,19 +249,28 @@ class Store(DocumentStoreBase):
 
         Accepts int or float (whole numbers only), rejecting bool. Returns
         None for an unset/blank value so retrieval falls back to the incoming
-        DocFilter limit.
+        DocFilter limit. Values outside 1..``MAX_TOP_K`` are rejected.
+
+        Note: this deliberately does not reuse ``ai.common.utils.config_int``.
+        That helper always returns an int (never None, so "unset" could not
+        fall back to ``docFilter.limit``), treats ``<= 0`` as "unspecified",
+        and silently clamps out-of-range values instead of raising. Here an
+        out-of-range top_k is a pipeline misconfiguration worth failing on at
+        startup rather than quietly retrieving a different number of documents
+        than the author asked for. Do not "simplify" this to ``config_int``
+        without changing those semantics on purpose.
         """
         if value is None or value == '':
             return None
         # bool is an int subclass; reject it explicitly.
         if isinstance(value, bool) or not isinstance(value, (int, float)):
-            raise ValueError(f'top_k must be an integer >= 1, got {value!r}')
+            raise ValueError(f'top_k must be an integer 1..{Store.MAX_TOP_K}, got {value!r}')
         if isinstance(value, float):
             if not value.is_integer():
-                raise ValueError(f'top_k must be an integer >= 1, got {value!r}')
+                raise ValueError(f'top_k must be an integer 1..{Store.MAX_TOP_K}, got {value!r}')
             value = int(value)
-        if value < 1:
-            raise ValueError(f'top_k must be an integer >= 1, got {value!r}')
+        if not 1 <= value <= Store.MAX_TOP_K:
+            raise ValueError(f'top_k must be an integer 1..{Store.MAX_TOP_K}, got {value!r}')
         return value
 
     def _effectiveLimit(self, docFilter: DocFilter) -> int | None:

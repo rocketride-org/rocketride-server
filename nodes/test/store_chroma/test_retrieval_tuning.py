@@ -262,7 +262,10 @@ def test_get_ignores_top_k_and_uses_docfilter_limit():
 # --- _coerceTopK validation ---------------------------------------------------
 
 
-@pytest.mark.parametrize('value,expected', [(None, None), ('', None), (5, 5), (5.0, 5), (1, 1)])
+@pytest.mark.parametrize(
+    'value,expected',
+    [(None, None), ('', None), (5, 5), (5.0, 5), (1, 1), (Store.MAX_TOP_K, Store.MAX_TOP_K)],
+)
 def test_coerce_top_k_valid(value, expected):
     assert Store._coerceTopK(value) == expected
 
@@ -271,3 +274,24 @@ def test_coerce_top_k_valid(value, expected):
 def test_coerce_top_k_invalid(value):
     with pytest.raises(ValueError):
         Store._coerceTopK(value)
+
+
+@pytest.mark.parametrize('value', [1001, 10_000_000, 1001.0])
+def test_coerce_top_k_rejects_above_max(value):
+    """A fat-fingered top_k must fail at config time, not become a huge n_results."""
+    with pytest.raises(ValueError) as excinfo:
+        Store._coerceTopK(value)
+    # The message names the bound so the pipeline author can see the valid range.
+    assert str(Store.MAX_TOP_K) in str(excinfo.value)
+
+
+def test_coerce_top_k_rejects_rather_than_clamps():
+    """Contrast with ai.common.utils.config_int, which clamps silently.
+
+    Out-of-range here is a misconfiguration: retrieving a different number of
+    documents than the author asked for would be a silent behavior change.
+    """
+    with pytest.raises(ValueError):
+        Store._coerceTopK(Store.MAX_TOP_K + 1)
+    with pytest.raises(ValueError):
+        Store._coerceTopK(0)

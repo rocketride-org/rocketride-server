@@ -116,7 +116,7 @@
 						"notEmpty": true,
 						"contains": "Paris",
 						"property": [
-							{ "path": "[0].score", "greaterThan": 0.49 },
+							{ "path": "[0].score", "greaterThan": 0.499, "lessThan": 0.501 },
 							{ "path": "[0].metadata.objectId", "equals": "test-doc-1" }
 						]
 					}

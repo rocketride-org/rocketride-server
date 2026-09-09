@@ -30,7 +30,7 @@ Documents must pass through an embedding node before reaching this node; chunks 
 | `serverName` | string | Default "chroma". Namespace for agent-facing tool names, e.g. 'chroma' exposes tools as chroma.search / chroma.upsert / chroma.delete. Change this when running multiple Chroma nodes in the same pipeline so their tool names do not collide. |
 | `profile` | string | Default "cloud". Connect to... |
 | `provider` | string |  |
-| `top_k` | integer | **Top K** — maximum candidate documents fetched from Chroma before score filtering. Unset ⇒ the caller's limit (25 on the data lane). Raise it to widen recall for a reranker. |
+| `top_k` | integer | **Top K** — maximum candidate documents fetched from Chroma before score filtering, 1–1000. Unset ⇒ the caller's limit (25 on the data lane). Raise it to widen recall for a reranker. |
 
 ---
 
@@ -69,6 +69,8 @@ Tool calls run on the control plane and do not flow through the pipeline's embed
 ## Retrieval tuning
 
 **Top K** (`top_k`) controls how many candidate chunks Chroma fetches before score filtering. Raise it (for example, to `20`) to widen the candidate pool for a reranker or for hard, specific queries. When unset, the caller's request limit is used (25 on the data lane; the `chroma.search` tool sets its own `top_k`). It applies to semantic and keyword search only, not to whole-object fetches.
+
+Valid values are `1`–`1000`; anything outside that range (or a non-integer) is rejected when the node starts, rather than silently clamped, so a mistyped value surfaces immediately instead of quietly changing how many documents you retrieve. On the tool path, this widens the candidate pool that `chroma.search` then trims back to its own `top_k` (default 10, max 100).
 
 For the strongest results on precise questions, **retrieve generously and rerank down**: set a higher `Top K` here, then place a [Cohere Rerank](../rerank_cohere/README.md) node after this one to reorder the candidates and keep a small, high-relevance set. A complete example is at [`examples/rag-rerank-pipeline.pipe`](../../../../examples/rag-rerank-pipeline.pipe).
 
