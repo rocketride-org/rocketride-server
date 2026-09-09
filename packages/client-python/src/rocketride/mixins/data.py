@@ -488,12 +488,15 @@ class DataMixin(DAPClient):
             ]
         ],
         token: str,
-    ) -> UPLOAD_RESULT:
+        max_concurrent: int = 5,
+    ) -> List[UPLOAD_RESULT]:
         """
         Upload multiple files to a pipeline with progress tracking.
 
         Efficiently uploads files using parallel transfers with automatic
-        progress events. Files are processed concurrently for better performance.
+        progress events. At most `max_concurrent` files are in flight at any
+        moment; the rest wait their turn. Results are returned in the same order
+        as the input list regardless of the order the uploads finish in.
 
         Each file can be specified as:
         - Just a file path: "/path/to/file.pdf"
@@ -503,13 +506,14 @@ class DataMixin(DAPClient):
         Args:
             files: List of files to upload (see formats above)
             token: Pipeline token to upload files to
+            max_concurrent: Maximum number of concurrent uploads (default: 5)
 
         Returns:
             List[Dict]: Upload results for each file with status, timing, and processing results
 
         Raises:
-            ValueError: If files list is empty, file paths invalid, or token missing
-            FileNotFoundError: If any specified file doesn't exist
+            ValueError: If files list is empty, a file path is invalid or does not
+                exist, token missing, or max_concurrent is not a positive integer
             RuntimeError: If API key is not configured
 
         Example:
@@ -534,6 +538,9 @@ class DataMixin(DAPClient):
             ]
             results = await client.send_files(files, token)
 
+            # Upload a large set five at a time (the default), or ten at a time
+            results = await client.send_files(files, token, max_concurrent=10)
+
         Progress Events:
             If you've configured event handling, you'll receive progress events:
             - 'open': File upload starting
@@ -546,10 +553,17 @@ class DataMixin(DAPClient):
             - Use specific MIME types for better processing
             - Add descriptive metadata to help with organization
             - Monitor progress events for user feedback
-            - Server handles queuing automatically - all files uploaded in parallel
+            - Raise max_concurrent for small files on a fast link; lower it if the
+              server or the client is running short of connections
         """
         # Fixed chunk size for optimal performance
         chunk_size = 1024 * 1024  # 1MB
+
+        # Validate the concurrency bound before anything is opened. `bool` is a subclass
+        # of `int`, so `send_files(files, token, True)` would otherwise be accepted and
+        # silently mean 1.
+        if isinstance(max_concurrent, bool) or not isinstance(max_concurrent, int) or max_concurrent < 1:
+            raise ValueError('max_concurrent must be a positive integer')
 
         # Validate inputs
         if not files:
@@ -618,7 +632,7 @@ class DataMixin(DAPClient):
         async def upload_file(index: int, filepath: str, objinfo: Dict[str, Any], mimetype: str) -> None:
             """
             Upload a single file - straightforward linear process:
-            1. Wait for pipe to become available (server handles queuing)
+            1. Open a pipe (the caller's worker pool decides when this runs)
             2. Transfer data
             3. Close pipe
             4. Send status update
@@ -714,16 +728,59 @@ class DataMixin(DAPClient):
             else:
                 self.debug_message(f'Upload completed: {filepath} ({bytes_sent} bytes, {upload_time:.2f}s)')
 
-        # Create a coroutine for every file - let server handle queuing
-        self.debug_message(f'Starting upload of {len(normalized_files)} files (token={token})')
+        self.debug_message(
+            f'Starting upload of {len(normalized_files)} files, {max_concurrent} at a time (token={token})'
+        )
 
-        upload_tasks = [
-            upload_file(index, filepath, objinfo, mimetype)
-            for index, (filepath, objinfo, mimetype) in enumerate(normalized_files)
-        ]
+        # Bounded fan-out. A fixed pool of workers pulls from a shared cursor, so at most
+        # `max_concurrent` uploads are in flight however long the file list is -- and an
+        # upload in flight holds an open pipe AND an open file handle, so this bounds both.
+        # Reading and advancing `next_index` happens with no await in between, which is what
+        # makes it safe to share on the event loop.
+        next_index = 0
+
+        async def upload_worker() -> None:
+            nonlocal next_index
+
+            while next_index < len(normalized_files):
+                index = next_index
+                next_index += 1
+                filepath, objinfo, mimetype = normalized_files[index]
+
+                try:
+                    await upload_file(index, filepath, objinfo, mimetype)
+                except Exception as e:
+                    # upload_file already handles per-file failures; this is the belt to
+                    # its braces. A worker that died here would strand every file still
+                    # queued behind it, which is the one failure the old one-task-per-file
+                    # shape could not have.
+                    self.debug_message(f'Upload worker failed for {filepath}: {e}')
+                    results[index] = {
+                        'action': 'error',
+                        'filepath': filepath,
+                        'bytes_sent': 0,
+                        'file_size': 0,
+                        'upload_time': 0.0,
+                        'result': None,
+                        'error': str(e),
+                    }
+
+        worker_count = min(max_concurrent, len(normalized_files))
 
         # Wait for all uploads to complete
-        await asyncio.gather(*upload_tasks, return_exceptions=True)
+        outcomes = await asyncio.gather(
+            *(upload_worker() for _ in range(worker_count)), return_exceptions=True
+        )
+
+        # A worker cancelled on its own -- not through this call, which gather() already
+        # propagates -- takes the file it had claimed AND every file still on the cursor
+        # with it, because no other worker is created to drain them. Returning here would
+        # hand back a list with holes in it where `List[UPLOAD_RESULT]` was promised, so
+        # anything the worker's `except Exception` deliberately does not catch is re-raised
+        # instead. `return_exceptions=True` is what makes these values rather than throws.
+        for outcome in outcomes:
+            if isinstance(outcome, BaseException) and not isinstance(outcome, Exception):
+                raise outcome
 
         # Log summary
         successful_uploads = sum(1 for r in results if r and r.get('action') == 'complete')
