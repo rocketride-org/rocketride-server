@@ -112,9 +112,9 @@
 					"reasoning": true
 				}
 			},
-			"nemotron-3-nano": {
-				"title": "Nemotron 3 Nano 30B",
-				"model": "nvidia/nemotron-3-nano-30b-a3b",
+			"nemotron-3-5-lightning": {
+				"title": "Nemotron 3.5 Lightning 30B",
+				"model": "nvidia/nemotron-3.5-lightning-30b-a3b",
 				"modelSource": "provider",
 				"modelTotalTokens": 262144, // manual - NVIDIA model card
 				"modelOutputTokens": 32768, // manual
@@ -137,9 +137,9 @@
 					"reasoning": true
 				}
 			},
-			"nemotron-3-nano-local": {
-				"title": "Nemotron 3 Nano 30B (Local)",
-				"model": "nvidia/nemotron-3-nano-30b-a3b",
+			"nemotron-3-5-lightning-local": {
+				"title": "Nemotron 3.5 Lightning 30B (Local)",
+				"model": "nvidia/nemotron-3.5-lightning-30b-a3b",
 				"modelSource": "provider",
 				"modelTotalTokens": 262144, // manual
 				"modelOutputTokens": 32768, // manual
@@ -197,8 +197,8 @@
 				"llm.cloud.modelSource"
 			]
 		},
-		"nemotron.nemotron-3-nano": {
-			"object": "nemotron-3-nano",
+		"nemotron.nemotron-3-5-lightning": {
+			"object": "nemotron-3-5-lightning",
 			"properties": [
 				"llm.cloud.apikey",
 				"llm.cloud.modelSource"
@@ -210,8 +210,8 @@
 				"llm.local.serverbase"
 			]
 		},
-		"nemotron.nemotron-3-nano-local": {
-			"object": "nemotron-3-nano-local",
+		"nemotron.nemotron-3-5-lightning-local": {
+			"object": "nemotron-3-5-lightning-local",
 			"properties": [
 				"llm.local.serverbase"
 			]
@@ -244,9 +244,9 @@
 					]
 				},
 				{
-					"value": "nemotron-3-nano",
+					"value": "nemotron-3-5-lightning",
 					"properties": [
-						"nemotron.nemotron-3-nano"
+						"nemotron.nemotron-3-5-lightning"
 					]
 				},
 				{
@@ -256,9 +256,9 @@
 					]
 				},
 				{
-					"value": "nemotron-3-nano-local",
+					"value": "nemotron-3-5-lightning-local",
 					"properties": [
-						"nemotron.nemotron-3-nano-local"
+						"nemotron.nemotron-3-5-lightning-local"
 					]
 				}
 			]
