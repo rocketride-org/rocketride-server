@@ -15,6 +15,7 @@
 
 import type { ShellApiShape } from './api';
 import type { ShellApiV0 } from '../contract/versions/v0';
+import type { ShellApiV1 } from '../contract/versions/v1';
 import type { DAPException as Frozen_DAPException } from '../contract/versions/v0';
 import type { DAPException as Current_DAPException } from './api';
 import type { RocketRideException as Frozen_RocketRideException } from '../contract/versions/v0';
@@ -593,10 +594,18 @@ import type { ITaskStatus as Frozen_ITaskStatus } from '../contract/versions/v0'
 import type { ITaskStatus as Current_ITaskStatus } from './api';
 import type { IFlowData as Frozen_IFlowData } from '../contract/versions/v0';
 import type { IFlowData as Current_IFlowData } from './api';
+import type { AppVerifyCheck as Frozen_AppVerifyCheck } from '../contract/versions/v1';
+import type { AppVerifyCheck as Current_AppVerifyCheck } from './api';
+import type { AppVerifyReport as Frozen_AppVerifyReport } from '../contract/versions/v1';
+import type { AppVerifyReport as Current_AppVerifyReport } from './api';
+import type { CreatedApp as Frozen_CreatedApp } from '../contract/versions/v1';
+import type { CreatedApp as Current_CreatedApp } from './api';
 
 // VALUE floors — the live surface must still satisfy every frozen version.
 const _floor_v0: ShellApiV0 = {} as ShellApiShape;
 void _floor_v0;
+const _floor_v1: ShellApiV1 = {} as ShellApiShape;
+void _floor_v1;
 
 // TYPE floors — each frozen exported type must still be satisfied.
 // Generic floors are emitted APPLIED (<any, …> at the frozen arity):
@@ -1179,3 +1188,9 @@ const _t_ITaskStatus: Frozen_ITaskStatus = {} as Current_ITaskStatus;
 void _t_ITaskStatus;
 const _t_IFlowData: Frozen_IFlowData = {} as Current_IFlowData;
 void _t_IFlowData;
+const _t_AppVerifyCheck: Frozen_AppVerifyCheck = {} as Current_AppVerifyCheck;
+void _t_AppVerifyCheck;
+const _t_AppVerifyReport: Frozen_AppVerifyReport = {} as Current_AppVerifyReport;
+void _t_AppVerifyReport;
+const _t_CreatedApp: Frozen_CreatedApp = {} as Current_CreatedApp;
+void _t_CreatedApp;
