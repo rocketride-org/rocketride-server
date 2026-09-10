@@ -69,9 +69,13 @@
 		"eslint": "9.29.0",
 		"prettier": "3.6.2",
 		"typescript": "5.9.2",
-		"vitest": "^4.1.8"
+		"vitest": "^4.1.11"
 	},
 	"peerDependencies": {
 		"n8n-workflow": "*"
+	},
+	"overrides": {
+		"js-yaml": ">=4.3.2 <5",
+		"@vitest/mocker": ">=4.1.11 <5"
 	}
 }
