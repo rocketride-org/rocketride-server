@@ -63,11 +63,12 @@
 			]
 		},
 		"vector.top_k": {
-			"type": "integer",
+			"type": ["integer", "string"],
 			"title": "Top K",
+			"optional": true,
 			"minimum": 1,
 			"maximum": 1000,
-			"description": "Maximum number of candidate documents to retrieve before score filtering. Leave unset to use the pipeline default (25). Raise it to improve recall for precise, number-dense queries, or to widen the candidate pool for a reranker. Capped at 1000."
+			"description": "Chroma only: overrides the caller's retrieval limit in either direction (raising or lowering it) for semantic and keyword search; an integer or integer string from 1 to 1000, and when left unset the caller's own limit applies."
 		},
 		"vector.apikey": {
 			"type": "string",

@@ -72,7 +72,7 @@
 					"host": "${ROCKETRIDE_CHROMA_HOST}",
 					"port": 8000,
 					"collection": "${ROCKETRIDE_COLLECTION_NAME}",
-					"top_k": 20
+					"top_k": 50
 				},
 				"parameters": {}
 			},

@@ -264,7 +264,23 @@ def test_get_ignores_top_k_and_uses_docfilter_limit():
 
 @pytest.mark.parametrize(
     'value,expected',
-    [(None, None), ('', None), (5, 5), (5.0, 5), (1, 1), (Store.MAX_TOP_K, Store.MAX_TOP_K)],
+    [
+        (None, None),
+        ('', None),
+        (5, 5),
+        (5.0, 5),
+        (1, 1),
+        (Store.MAX_TOP_K, Store.MAX_TOP_K),
+        # Env-var interpolation always yields a string, so the schema (and this
+        # coercer) accept the integer string form -- same as the port field.
+        ('5', 5),
+        (' 5 ', 5),
+        ('1', 1),
+        (str(Store.MAX_TOP_K), Store.MAX_TOP_K),
+        # Blank/whitespace is "unset", not a malformed value.
+        ('   ', None),
+        ('\t\n', None),
+    ],
 )
 def test_coerce_top_k_valid(value, expected):
     assert Store._coerceTopK(value) == expected
@@ -274,6 +290,49 @@ def test_coerce_top_k_valid(value, expected):
 def test_coerce_top_k_invalid(value):
     with pytest.raises(ValueError):
         Store._coerceTopK(value)
+
+
+@pytest.mark.parametrize('value', ['abc', '5.0', '1e2', '5,0', '0x10', '${TOP_K', '${A}${B}', '5 items'])
+def test_coerce_top_k_rejects_malformed_strings(value):
+    """An explicit-but-malformed string is a misconfiguration, not an "unset".
+
+    Only a *fully* unresolved '${...}' placeholder gets the silent fallback;
+    everything else (including float-looking and scientific-notation strings,
+    which the schema's integer type also forbids) must fail loudly at startup.
+    """
+    with pytest.raises(ValueError):
+        Store._coerceTopK(value)
+
+
+@pytest.mark.parametrize('value', ['1001', '0', '-1', '10000000'])
+def test_coerce_top_k_rejects_out_of_range_strings(value):
+    """Range enforcement applies after string parsing, and still raises rather than clamps."""
+    with pytest.raises(ValueError) as excinfo:
+        Store._coerceTopK(value)
+    assert str(Store.MAX_TOP_K) in str(excinfo.value)
+
+
+@pytest.mark.parametrize('value', ['${ROCKETRIDE_TOP_K}', '  ${ROCKETRIDE_TOP_K}  ', '${SOME_OTHER_VAR}'])
+def test_coerce_top_k_unresolved_placeholder_falls_back_to_caller_limit(value, monkeypatch):
+    """An unresolved placeholder yields None (no override), not a hardcoded number.
+
+    None is the right fallback precisely because "unset" already means "use the
+    caller's DocFilter.limit" -- substituting 25 here would hardcode the data
+    lane's default and silently override any other caller.
+    """
+    messages: list[str] = []
+    monkeypatch.setattr(_CHROMA, 'debug', lambda message, *a, **k: messages.append(str(message)))
+
+    assert Store._coerceTopK(value) is None
+
+    assert messages, 'an unresolved placeholder should be reported via debug()'
+    assert 'unresolved env var' in messages[0]
+
+
+def test_unresolved_placeholder_leaves_caller_limit_in_effect():
+    """End-to-end of the fallback: retrieval still uses the incoming DocFilter limit."""
+    store = _make_store(top_k=Store._coerceTopK('${ROCKETRIDE_TOP_K}'))
+    assert store._effectiveLimit(_docfilter(limit=25)) == 25
 
 
 @pytest.mark.parametrize('value', [1001, 10_000_000, 1001.0])

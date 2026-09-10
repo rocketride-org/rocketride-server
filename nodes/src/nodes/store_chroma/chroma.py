@@ -245,11 +245,23 @@ class Store(DocumentStoreBase):
     @staticmethod
     def _coerceTopK(value: Any) -> int | None:
         """
-        Validate the configured top_k and coerce it to a positive int.
+        Validate the configured top_k and coerce it to a positive int, or None.
 
-        Accepts int or float (whole numbers only), rejecting bool. Returns
-        None for an unset/blank value so retrieval falls back to the incoming
-        DocFilter limit. Values outside 1..``MAX_TOP_K`` are rejected.
+        Accepts an int, a whole-number float, or an integer string, rejecting
+        bool. Like the port field, the schema accepts both a number and a
+        string because env-var interpolation always yields a string (e.g.
+        '${ROCKETRIDE_TOP_K}').
+
+        Returns None -- meaning "no override", so retrieval falls back to the
+        incoming DocFilter limit -- for an unset/blank value and for a still
+        unresolved '${...}' placeholder. Falling back to the *absence of an
+        override* is the correct answer here rather than a hardcoded 25: the
+        whole design is that an unset top_k means "use the caller's limit".
+
+        An explicit but malformed value still raises: a fractional number, a
+        non-integer string, or anything outside 1..``MAX_TOP_K`` is a pipeline
+        misconfiguration this node deliberately rejects instead of quietly
+        retrieving a different number of documents than the author asked for.
 
         Note: this deliberately does not reuse ``ai.common.utils.config_int``.
         That helper always returns an int (never None, so "unset" could not
@@ -260,18 +272,39 @@ class Store(DocumentStoreBase):
         than the author asked for. Do not "simplify" this to ``config_int``
         without changing those semantics on purpose.
         """
-        if value is None or value == '':
+        if value is None:
             return None
+        invalid = f'top_k must be an integer 1..{Store.MAX_TOP_K}, got {value!r}'
         # bool is an int subclass; reject it explicitly.
-        if isinstance(value, bool) or not isinstance(value, (int, float)):
-            raise ValueError(f'top_k must be an integer 1..{Store.MAX_TOP_K}, got {value!r}')
-        if isinstance(value, float):
+        if isinstance(value, bool):
+            raise ValueError(invalid)
+        if isinstance(value, int):
+            parsed = value
+        elif isinstance(value, float):
+            # A JSON 'number' may arrive as a float (e.g. 50.0). Accept
+            # whole-number floats; a fractional top_k is meaningless.
             if not value.is_integer():
-                raise ValueError(f'top_k must be an integer 1..{Store.MAX_TOP_K}, got {value!r}')
-            value = int(value)
-        if not 1 <= value <= Store.MAX_TOP_K:
-            raise ValueError(f'top_k must be an integer 1..{Store.MAX_TOP_K}, got {value!r}')
-        return value
+                raise ValueError(invalid)
+            parsed = int(value)
+        elif isinstance(value, str):
+            text = value.strip()
+            if not text:
+                return None
+            # An unresolved '${...}' placeholder is not a limit the author
+            # chose, so it falls back to the caller's limit rather than
+            # failing the node -- the same fallback _coercePort makes.
+            if re.fullmatch(r'\$\{[^{}]+\}', text):
+                debug("chroma: top_k contains an unresolved env var; using the caller's DocFilter.limit")
+                return None
+            try:
+                parsed = int(text)
+            except ValueError:
+                raise ValueError(invalid) from None
+        else:
+            raise ValueError(invalid)
+        if not 1 <= parsed <= Store.MAX_TOP_K:
+            raise ValueError(invalid)
+        return parsed
 
     def _effectiveLimit(self, docFilter: DocFilter) -> int | None:
         """

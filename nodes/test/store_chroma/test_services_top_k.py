@@ -100,9 +100,36 @@ def _runtime_max_top_k() -> int:
     raise AssertionError('Store.MAX_TOP_K not found in chroma.py')
 
 
-def test_top_k_declared_as_integer():
-    """A fractional top_k must be rejected by the editor, not by _coerceTopK at startup."""
-    assert _top_k_schema()['type'] == 'integer'
+def test_top_k_declared_as_integer_or_string():
+    """The type must permit *both* integer and string.
+
+    integer: a fractional top_k should be rejected by the editor, not by
+    _coerceTopK at node startup.
+    string: env-var interpolation always resolves to a string, so a configured
+    '${ROCKETRIDE_TOP_K}' would fail validation under an integer-only type --
+    exactly as `vector.cloud.port` / `vector.local.port` are declared
+    ["number", "string"] in store_chroma/services.json for the same reason.
+    """
+    declared = _top_k_schema()['type']
+    assert isinstance(declared, list), f'vector.top_k type must allow integer and string, got {declared!r}'
+    assert set(declared) == {'integer', 'string'}, (
+        f'vector.top_k type must be exactly integer + string, got {declared!r}'
+    )
+
+
+def test_top_k_is_optional():
+    """`optional: true` is required or the field becomes mandatory for every user.
+
+    The engine schema compiler treats an unspecified `optional` as REQUIRED
+    (packages/server/engine-lib/engLib/store/services/services.cpp:480) and
+    appends such fields to the JSON Schema `required` array. `vector.top_k`
+    carries no `default`, so without this flag it would be a required field
+    with nothing to fill it -- every Chroma node config would fail validation
+    until the user typed a number. Regression guard: do not drop this key.
+    """
+    assert _top_k_schema().get('optional') is True, (
+        'vector.top_k must declare "optional": true; the engine makes unflagged fields required.'
+    )
 
 
 def test_top_k_schema_bounds_match_runtime_bounds():
