@@ -163,28 +163,21 @@ let localAppsListener: (() => void) | null = null;
 // (older) published bundle mid-session — the dev preview then loads THAT
 // and dies on platform mismatch (RUNTIME-012).
 //
-// Ownership is PERSISTED per tab (sessionStorage) and loaded at module init:
-// the probe registers manifest remotes at boot, BEFORE any dev injection can
-// arrive — and force-overriding an already-initialized container corrupts
-// its consume-shared getters (MF's "overriding may cause unexpected errors"
-// → "getter for the shared module is not a function"). With persisted
-// ownership, every boot after the first skips the manifest registration
-// entirely and the dev entry is the container's ONLY registration.
-const DEV_OWNED_KEY = 'rr:devOwnedModules';
-const devRemoteModules = new Set<string>(((): string[] => {
-	try {
-		return JSON.parse(sessionStorage.getItem(DEV_OWNED_KEY) ?? '[]') as string[];
-	} catch {
-		return [];
-	}
-})());
+// PAGE-LIFETIME ONLY, never persisted. Ownership used to be persisted in
+// sessionStorage on a per-browser-tab assumption, but a VS Code window is
+// ONE browsing context: every App Builder preview iframe against the same
+// engine origin shares a single sessionStorage (which also survives
+// workspace switches), so ownership accumulated across every app ever
+// designed and stranded them all as mapped-but-unregistered (RUNTIME-004
+// on launch). The boot-time "keep the container clean for the dev entry"
+// job is DERIVED instead: a dev-preview page skips the manifest
+// registration of its session-locked app (see registerAndMapApps), so the
+// injection is the container's first registration without any stored state.
+const devRemoteModules = new Set<string>();
 
-/** Persists the current dev-owned module set for this tab. */
-function persistDevOwned(): void {
-	try {
-		sessionStorage.setItem(DEV_OWNED_KEY, JSON.stringify([...devRemoteModules]));
-	} catch { /* storage unavailable — ownership lasts this page only */ }
-}
+// One-time migration: drop the legacy persisted ownership set so windows
+// poisoned by the old accumulate-forever behavior heal on their next boot.
+try { sessionStorage.removeItem('rr:devOwnedModules'); } catch { /* storage unavailable */ }
 
 /**
  * Whether an MF container is currently dev-owned (see devRemoteModules).
@@ -290,10 +283,7 @@ export function registerLocalApp(id: string, load: () => Promise<AppDescriptor>,
 export function unregisterLocalApp(id: string): void {
 	const hadOverride = localOverrides.delete(id);
 	const meta = localAppMetas.get(id);
-	if (meta) {
-		devRemoteModules.delete(meta.moduleId);
-		persistDevOwned();
-	}
+	if (meta) devRemoteModules.delete(meta.moduleId);
 	if (localAppMetas.delete(id)) localAppsListener?.();
 	if (hadOverride) {
 		console.log(`[appLoader] Local override removed for "${id}"`);
@@ -314,21 +304,36 @@ export function unregisterLocalApp(id: string): void {
  * @param entry - The dev server's remoteEntry.js URL.
  */
 export function registerDevRemote(appId: string, moduleId: string, name: string, entry: string): void {
-	// First takeover of a module the MANIFEST already registered this boot:
-	// the container may be half-initialized and force-overriding it corrupts
-	// its shared getters. Persist ownership and reboot — the next boot skips
-	// the manifest registration, making the dev entry the FIRST and ONLY
-	// registration this container ever sees.
-	if (registeredEntries.has(moduleId) && !devRemoteModules.has(moduleId)) {
-		devRemoteModules.add(moduleId);
-		persistDevOwned();
-		console.log(`[appLoader] taking dev ownership of manifest-registered "${moduleId}" — rebooting for a clean container`);
-		window.location.reload();
-		return;
+	// Injection for a container the manifest registered AND that has already
+	// LOADED this document: a loaded container is committed to its version
+	// (repointing it corrupts its consume-shared getters), so only a reboot
+	// can hand the dev entry a clean container. Normally unreachable — the
+	// dev-preview boot skips the locked app's manifest registration, so the
+	// injection lands first — this covers a lock/injection mismatch. The
+	// reboot is time-bounded per module: without persisted ownership the
+	// next boot may register the module from the manifest again, and an
+	// unbounded reload here would loop. A recurrence inside the guard
+	// window degrades to the force-registration below instead.
+	if (registeredEntries.has(moduleId) && !devRemoteModules.has(moduleId) && loadedModules.has(moduleId)) {
+		const TAKEOVER_GUARD_MS = 60_000;
+		let reboot = false;
+		try {
+			const key = `rr:devTakeoverAt:${moduleId}`;
+			const last = Number(sessionStorage.getItem(key) ?? 0);
+			if (Date.now() - last > TAKEOVER_GUARD_MS) {
+				sessionStorage.setItem(key, String(Date.now()));
+				reboot = true;
+			}
+		} catch { /* storage unavailable — cannot bound a reload loop, so never reload */ }
+		if (reboot) {
+			console.log(`[appLoader] dev registration for loaded container "${moduleId}" — rebooting once for a clean container`);
+			window.location.reload();
+			return;
+		}
+		console.error(`[appLoader] dev takeover of loaded container "${moduleId}" recurred within the guard window — force-registering in place; its shared getters may be stale`);
 	}
 
 	devRemoteModules.add(moduleId);
-	persistDevOwned();
 	registerRemotes([{ name: moduleId, entry }], { force: true });
 	registeredEntries.set(moduleId, entry);
 	registerLocalApp(
@@ -361,6 +366,32 @@ export function registerDevRemote(appId: string, moduleId: string, name: string,
 const devRegisteredApps = new Set<string>();
 /** Pending load releases per app id, resolved by registerDevRemote. */
 const devRemoteWaiters = new Map<string, Array<() => void>>();
+/**
+ * Manifest entries the dev-preview boot skipped for the session-locked app
+ * (appId → container + URL), stashed so the dev-remote wait can fall back
+ * to the published bundle when no injection ever arrives.
+ */
+const skippedManifestEntries = new Map<string, { moduleId: string; url: string }>();
+
+/**
+ * Last-resort registration of a dev-skipped app from its stashed manifest
+ * entry. The boot skip assumes the embedder's injection will arrive; when
+ * it never does (dev server dead, lock mismatch), registering the published
+ * bundle beats a permanently dead app. No-op once a real dev registration
+ * has arrived, or when nothing was skipped.
+ *
+ * @param appId - The preview-locked app id whose dev-remote wait timed out.
+ * @returns True when the manifest fallback was registered.
+ */
+export function fallbackSkippedRemote(appId: string): boolean {
+	if (devRegisteredApps.has(appId)) return false;
+	const stash = skippedManifestEntries.get(appId);
+	if (!stash) return false;
+	registerRemotes([{ name: stash.moduleId, entry: stash.url }], { force: true });
+	registeredEntries.set(stash.moduleId, stash.url);
+	console.warn(`[appLoader] dev remote for "${appId}" never registered — falling back to the published bundle at ${stash.url}`);
+	return true;
+}
 
 /**
  * Whether this page is an embedded dev preview (`rrdev=1`, or the session
@@ -585,7 +616,21 @@ export function registerAndMapApps(serverApps: ServerAppEntry[]): AppManifestEnt
 	// force: true overwrites any previously registered remotes (e.g. from
 	// the pre-auth probe) with the post-auth set. Dev-owned containers are
 	// NEVER (re)registered from the manifest — the dev entry stays live.
-	const registrable = resolved.filter(({ app }) => !devRemoteModules.has(app.moduleId));
+	//
+	// A dev-preview page additionally skips its SESSION-LOCKED app: the
+	// embedder's injection must be that container's FIRST registration
+	// (force-overriding an initialized container corrupts its consume-shared
+	// getters). Derived fresh per call from the URL/session lock — never
+	// persisted — so the skip cannot leak to other apps or outlive the
+	// preview. The skipped entry is stashed for the dev-remote wait's
+	// manifest fallback (fallbackSkippedRemote).
+	const lockedAppId = isDevPreviewPage() ? previewLockedAppId() : '';
+	const registrable = resolved.filter(({ app }) => !devRemoteModules.has(app.moduleId) && app.id !== lockedAppId);
+	for (const { app, url } of resolved) {
+		if (app.id === lockedAppId && !devRemoteModules.has(app.moduleId)) {
+			skippedManifestEntries.set(app.id, { moduleId: app.moduleId, url });
+		}
+	}
 	registerRemotes(
 		registrable.map(({ app, url }) => ({ name: app.moduleId, entry: url })),
 		{ force: true },
