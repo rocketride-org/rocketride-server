@@ -6,9 +6,11 @@
   "license": "MIT",
   "appManifest": {
     "id": "rocketride.world",
+    "projectId": "c13662ab-13a9-4375-a43d-2529e189c0e6",
     "publisher": "Aparavi Software AG",
     "name": "Hello World",
     "description": "A simple Hello World demo application",
+    "icon": "./src/icon.svg",
     "categories": [
       "demo"
     ],
@@ -17,14 +19,22 @@
   },
   "scripts": {
     "build": "rsbuild build",
-    "build:prod": "rsbuild build --env-mode production"
+    "build:prod": "rsbuild build --env-mode production",
+    "dev": "rsbuild dev",
+    "typecheck": "tsc --noEmit"
   },
+  "browserslist": [
+    "chrome >= 81",
+    "edge >= 83",
+    "firefox >= 76",
+    "safari >= 13"
+  ],
   "dependencies": {
     "@module-federation/rsbuild-plugin": "^2.5.1",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
-    "rocketride": "workspace:*",
-    "shell": "file:../../.rocketride/shell/shell.tgz"
+    "rocketride": "file:../../../.rocketride/client/rocketride.tgz",
+    "shell": "file:../../../.rocketride/shell/shell.tgz"
   },
   "devDependencies": {
     "@rsbuild/core": "~2.0.11",

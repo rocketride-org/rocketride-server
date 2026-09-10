@@ -30,9 +30,19 @@ Open VS Code settings (`Ctrl+,` / `Cmd+,`) and search for `rocketride` to config
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| `rocketride.development.connectionMode` | `local` | Connection mode: `local`, `docker`, `service`, `onprem`, or `cloud` |
-| `rocketride.development.hostUrl` | `""` | RocketRide server URL (empty = derived from the connection mode) |
-| `rocketride.deployment.hostUrl` | `""` | Deployment server URL (empty = mode-derived / shared with development). In cloud mode the URL is fixed at build time (effective fallback `https://api.rocketride.ai`) and any user-set value is ignored. |
+| `rocketride.development.connectionMode` | `local` | Development connection mode: `cloud`, `docker`, `service`, `onprem`, or `local` |
+| `rocketride.development.hostUrl` | - | Host URL for the development connection (onprem/docker/service modes) |
+| `rocketride.development.useCustomServer` | `false` | Cloud mode: connect to `cloudUrl` instead of RocketRide Cloud |
+| `rocketride.development.cloudUrl` | `https://api.rocketride.ai` | Cloud mode: the server targeted when `useCustomServer` is enabled |
+| `rocketride.deployment.connectionMode` | `null` | Deployment connection mode (`null` = share the development connection) |
+| `rocketride.deployment.hostUrl` | - | Host URL for the deployment connection (onprem/docker/service modes) |
+| `rocketride.deployment.useCustomServer` | `false` | Cloud mode: deploy to `cloudUrl` instead of RocketRide Cloud |
+| `rocketride.deployment.cloudUrl` | `https://api.rocketride.ai` | Cloud mode: the server targeted when `useCustomServer` is enabled |
+
+In cloud mode nothing is baked into the extension: unchecked, the connection
+targets the `cloudUrl` setting's default; checked, it targets the address you
+enter (e.g. a staging server or `http://localhost:5565`). Sign-in exchanges
+its OAuth code against the same effective server.
 
 > Credentials are not a settings key. Enter your API key with the **Settings** page command `rocketride.page.settings.setupCredentials` (update or clear it via `rocketride.page.settings.updateApiKey` / `rocketride.page.settings.clearApiKey`). It is held in VS Code SecretStorage, not in `settings.json`.
 
@@ -49,16 +59,11 @@ Open VS Code settings (`Ctrl+,` / `Cmd+,`) and search for `rocketride` to config
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| `rocketride.development.local.engineVersion` | `latest` | Engine version: `latest`, `prerelease`, or a specific tag |
+| `rocketride.local.engineVersion` | `latest` | Engine version: `latest`, `prerelease`, or a specific tag |
 
 ### Integrations
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| `rocketride.integrations.autoAgentIntegration` | `true` | Auto-detect and install RocketRide documentation for coding agents (Copilot, Claude Code, Cursor, Windsurf) on startup |
 | `rocketride.integrations.copilot` | - | Enable GitHub Copilot integration for pipeline development |
-| `rocketride.integrations.claudeCode` | - | Enable Claude Code integration |
 | `rocketride.integrations.cursor` | - | Enable Cursor IDE integration |
-| `rocketride.integrations.windsurf` | - | Enable Windsurf IDE integration |
-| `rocketride.integrations.claudeMd` | - | Install RocketRide instructions to `CLAUDE.md` at the repo root |
-| `rocketride.integrations.agentsMd` | - | Install RocketRide instructions to `AGENTS.md` at the repo root |

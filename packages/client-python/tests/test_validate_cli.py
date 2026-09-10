@@ -23,17 +23,15 @@
 """
 Unit tests for the `rocketride validate` CLI command.
 
-These tests exercise the ValidateCommand through the full CLI entry point
-(RocketRideCLI.run) with a fake client, so no live server or network is
-required. They cover glob expansion, per-file validation results, JSON
-output shape, --source passthrough, and the exit code contract:
-0 = all valid, 1 = at least one invalid, 2 = nothing processable or
-connection failure.
+These tests exercise run_validate through the CLI's parse + dispatch path
+with a fake client, so no live server or network is required. They cover
+glob expansion, per-file validation results, JSON output shape, --source
+passthrough, and the exit code contract: 0 = all valid, 1 = at least one
+invalid, 2 = nothing processable or connection failure.
 """
 
 import importlib
 import json
-import sys
 from typing import Any, Dict, List, Optional
 
 import pytest
@@ -42,6 +40,10 @@ import pytest
 # package re-exports the `main()` function under the same name, which would
 # shadow the module on attribute-style imports.
 cli_main = importlib.import_module('rocketride.cli.main')
+cli_common = importlib.import_module('rocketride.cli.utils.common')
+# validate binds connect_client into its own namespace at import time, so
+# the patch must land there, not on utils.common.
+cli_validate = importlib.import_module('rocketride.cli.commands.validate')
 
 VALID_PIPELINE = {
     'project_id': 'test-project',
@@ -109,11 +111,20 @@ class FakeClient:
 
 
 async def run_cli(monkeypatch, fake_client: FakeClient, argv: List[str]) -> int:
-    """Run the CLI end-to-end with a fake client and return its exit code."""
-    monkeypatch.setattr(cli_main, 'RocketRideClient', lambda **kwargs: fake_client)
-    monkeypatch.setattr(sys, 'argv', ['rocketride', 'validate', *argv])
-    cli = cli_main.RocketRideCLI()
-    return await cli.run()
+    """Run the CLI's parse + dispatch path with a fake client, returning its exit code."""
+
+    async def fake_connect_client(uri, apikey='', on_event=None):
+        # Mirror the real connect_client contract: register for the runner's
+        # disconnect_all cleanup, connect (raising any configured error),
+        # hand back the connected client.
+        cli_common._active_clients.append(fake_client)
+        await fake_client.connect()
+        return fake_client
+
+    monkeypatch.setattr(cli_validate, 'connect_client', fake_connect_client)
+    parser = cli_main.setup_parser()
+    args = parser.parse_args(['validate', *argv])
+    return await cli_main._dispatch(args)
 
 
 @pytest.fixture

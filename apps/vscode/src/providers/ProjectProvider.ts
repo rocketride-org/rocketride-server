@@ -28,9 +28,11 @@ import { isSubscribed } from '../shared/util/subscriptionGate';
 import { isDeployRunBody } from '../shared/util/runClassification';
 import { handleMissingEnvVars } from '../shared/util/envVarCheck';
 import { savePipelineDocument } from '../shared/util/pipelineSave';
-import { resolveDeployTeams, mapVersionCards, mapHistoryRows, mapTeamDeploymentRows, mapScheduleRows, teamNameOf, mapDeploymentInfo } from '../shared/util/deployMapping';
+import { resolveDeployTeams, mapVersionCards, mapHistoryRows, mapTeamDeploymentRows, mapScheduleRows, teamNameOf, mapDeploymentInfo, wireTeamIdOf } from '../shared/util/deployMapping';
 import type { DeploymentWebviewToHost, DeploymentLoadPayload } from './types/deployTypes';
 import type { LogSessionWebviewToHost } from './types/logTypes';
+import { getStripePublishableKey } from './shared/stripe-key';
+import type { StripeKeyUnavailableReason } from './types/checkoutTypes';
 
 // =============================================================================
 // CONSTANTS
@@ -563,9 +565,11 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 						statuses: editorState.cachedStatuses,
 						serverHost: this.connectionManager.getHttpUrl(),
 						// The OAuth broker only allows https://*.rocketride.ai redirect URLs,
-						// so tokens bounce off this hosted page, which forwards them to the
-						// `<uriScheme>://rocketride.rocketride/auth/google` deep link.
-						oauthReturnUrl: `https://api.rocketride.ai/auth/vscode/google?scheme=${vscode.env.uriScheme}`,
+						// so tokens bounce off the CLOUD SERVER's hosted page, which forwards
+						// them to the `<uriScheme>://rocketride.rocketride/auth/google` deep
+						// link. The bounce host is the effective cloud target (a setting,
+						// never a bake) — a custom server hosts its own bounce endpoint.
+						oauthReturnUrl: `${ConfigManager.getInstance().getEffectiveCloudUrl()}/auth/vscode/google?scheme=${vscode.env.uriScheme}`,
 						envKeys,
 					});
 					webview.postMessage({ type: 'project:dirtyState', isDirty: document.isDirty, isNew: document.isUntitled });
@@ -685,6 +689,7 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 							break;
 						}
 						const uriKey = document.uri.toString();
+						let savedKey: string | undefined;
 						this.savesForRun.add(uriKey);
 						try {
 							// Capture the text up front: the untitled save flow below
@@ -705,6 +710,11 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 								await this.saveDocument(document, text);
 							}
 							if (runTarget) {
+								// The untitled save reopens the file under a NEW URI —
+								// the save-for-run suppression must follow it, or the
+								// saved document's own change events escape the guard.
+								savedKey = runTarget.toString();
+								this.savesForRun.add(savedKey);
 								const parsed = JSON.parse(text);
 								const pipeName = path.basename(runTarget.fsPath, '.pipe');
 								await this.runPipeline({ pipeline: { ...parsed, source: source ?? parsed.source } }, pipeName);
@@ -713,7 +723,10 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 							const message = error instanceof Error ? error.message : String(error);
 							vscode.window.showErrorMessage(`Failed to run pipeline: ${message}`);
 						}
-						setTimeout(() => this.savesForRun.delete(uriKey), 2000);
+						setTimeout(() => {
+							this.savesForRun.delete(uriKey);
+							if (savedKey) this.savesForRun.delete(savedKey);
+						}, 2000);
 					} else if (action === 'stop') {
 						if (source) {
 							await this.stopPipeline(source, document);
@@ -817,6 +830,19 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 				}
 
 				// Checkout flow — bridge billing SDK calls for the CheckoutModal
+				case 'checkout:getStripeKey': {
+					// Server-supplied publishable key (cached per URI) so the
+					// CheckoutModal mounts Stripe for THIS server's account. An
+					// empty key carries a reason (no connection, failed probe,
+					// or a server without billing) so the webview can explain
+					// the gap.
+					const client = this.connectionManager.getClient();
+					const { key, probed } = await getStripePublishableKey(client);
+					const reason: StripeKeyUnavailableReason | undefined = key ? undefined : !client ? 'no-connection' : probed ? 'no-billing' : 'probe-failed';
+					webview.postMessage({ type: 'checkout:stripeKey', key, requestId: data.requestId, ...(reason ? { reason } : {}) });
+					break;
+				}
+
 				case 'checkout:fetchPlans': {
 					try {
 						const billingClient = this.connectionManager.getClient();
@@ -914,7 +940,7 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 									?.replace(/\.pipe(?:\.json)?$/, '') ||
 								document.uri.path,
 						};
-						await deployClient.deploy.publish(pipeline, { ...(data.comment ? { comment: data.comment as string } : {}), ...(data.deployTo ? { deployTo: data.deployTo as string } : {}) });
+						await deployClient.deploy.add({ pipeline, ...(data.comment ? { comment: data.comment as string } : {}), ...(data.deployTo ? { deployTo: data.deployTo as string } : {}) });
 						webview.postMessage({ type: 'deploy:actionResult', requestId: data.requestId });
 						// Re-push the lifecycle so the strip/history show the new truth.
 						await this.sendDeployData(webview, editorState);
@@ -1101,7 +1127,11 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 	 */
 	private async handleDeploymentMessage(webview: vscode.Webview, editorState: EditorState, message: DeploymentWebviewToHost): Promise<void> {
 		const projectId = editorState.projectId ?? '';
-		const teamId = message.teamId;
+		// Personal rows arrive with their raw 'user~{uid}' owner key — the
+		// server only accepts '@me' for the caller's own space, so translate
+		// ONCE here and every fetch/action below addresses it correctly.
+		const ownUid = this.connectionManager.getClient()?.getAccountInfo?.()?.userId ?? '';
+		const teamId = wireTeamIdOf(message.teamId, ownUid);
 
 		switch (message.type) {
 			// -- Snapshot (drawer open, push-triggered and post-mutation refresh) --
@@ -1110,7 +1140,10 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 				// team-scoped task monitor's events trigger the webview's
 				// re-fetches instead of an interval.
 				await this.ensureDeployTaskMonitor(teamId, projectId);
-				await this.fetchAndPushDeployment(webview, teamId, projectId, message.sourceId);
+				// Echo message.teamId (the RAW row id the drawer opened with) on the
+				// pushes so its stale-record guard matches — teamId here is the
+				// translated wire id used only for the fetch.
+				await this.fetchAndPushDeployment(webview, teamId, projectId, message.sourceId, message.teamId);
 				break;
 			}
 
@@ -1256,11 +1289,21 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 	 * versions → preview of the FOCUSED source's schedule → running scan.
 	 *
 	 * @param webview - The project panel's webview.
-	 * @param teamId - The deployment's team.
+	 * @param teamId - The WIRE team id the API calls address ('@me' for the
+	 *                 caller's own space).
 	 * @param projectId - The deployed project.
 	 * @param sourceId - The focused source (the record identity).
+	 * @param echoTeamId - The RAW id the webview opened the drawer with
+	 *                     (mapTeamDeploymentRows emits `dep.teamId`, e.g.
+	 *                     `user~{uid}`); stamped on the pushes so the drawer's
+	 *                     stale-record guard matches. Defaults to `teamId`.
 	 */
-	private async fetchAndPushDeployment(webview: vscode.Webview, teamId: string, projectId: string, sourceId?: string): Promise<void> {
+	private async fetchAndPushDeployment(webview: vscode.Webview, teamId: string, projectId: string, sourceId?: string, echoTeamId?: string): Promise<void> {
+		// The API calls address the WIRE id, but every push must carry the exact
+		// value the webview opened with: a personal deployment opens keyed on the
+		// raw 'user~{uid}' row id while the wire id is '@me', so stamping the wire
+		// id would make the drawer reject its own load and spin forever.
+		const recordTeamId = echoTeamId ?? teamId;
 		try {
 			const client = this.requireDeployClient();
 
@@ -1310,11 +1353,33 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 			}
 
 			// Step 5: which sources have a LIVE run right now — server task
-			// registry, attributed to THIS team via the descriptor's teamId.
-			const tasks = (await client.call('rrext_get_tasks')) as { tasks?: Array<{ source?: string; teamId?: string; pipeline?: { project_id?: string } }> };
+			// registry. A TEAM deployment matches on the descriptor's teamId;
+			// a PERSONAL (@me) deployment cannot — its row carries the billing
+			// team, never the wire '@me' — so it matches on the trusted owner
+			// scope instead (ownerKind/ownerId from rrext_get_tasks), with the
+			// uid taken from the record's own 'user~{uid}' key.
+			const tasks = (await client.call('rrext_get_tasks')) as {
+				tasks?: Array<{
+					source?: string;
+					teamId?: string;
+					runKind?: string;
+					ownerKind?: string;
+					ownerId?: string;
+					pipeline?: { project_id?: string };
+				}>;
+			};
+			const personalUid = recordTeamId.startsWith('user~') ? recordTeamId.slice('user~'.length) : undefined;
 			const runningSources: Record<string, boolean> = {};
 			for (const t of tasks.tasks ?? []) {
-				if (t.teamId === teamId && t.pipeline?.project_id === projectId && t.source) runningSources[t.source] = true;
+				if (t.pipeline?.project_id !== projectId || !t.source) continue;
+				// runKind on BOTH branches: without it a team's ordinary
+				// pipeline run on the same project/source would mark the
+				// source as deploy-running, exactly as the personal branch
+				// already guards against.
+				const matches = personalUid
+					? t.ownerKind === 'user' && t.ownerId === personalUid && t.runKind === 'deploy'
+					: t.teamId === teamId && t.runKind === 'deploy';
+				if (matches) runningSources[t.source] = true;
 			}
 
 			// Step 6: resolve teams (names + control) and map into view models.
@@ -1341,18 +1406,18 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 				schedules: mapScheduleRows(pipeline, dep),
 				...(Object.keys(nextRuns).length > 0 ? { nextRuns } : {}),
 				versions: mapVersionCards(versions.rows ?? []),
-				history: mapHistoryRows(history.rows ?? [], teams),
+				history: mapHistoryRows(history.rows ?? [], teams, client.getAccountInfo?.()?.userId ?? ''),
 				...(nextRun ? { nextRun } : {}),
 				runningSources,
 				canControl: teams.find((t) => t.id === teamId)?.canControl ?? false,
 				isConnected: this.connectionManager.isConnected(),
 			};
-			webview.postMessage({ type: 'deployment:load', teamId, ...payload });
+			webview.postMessage({ type: 'deployment:load', teamId: recordTeamId, ...payload });
 		} catch (error) {
 			const msg = error instanceof Error ? error.message : String(error);
 			// Stamp the addressed record (team + optional source) so the
 			// webview can drop errors from a stale fetch after switching.
-			webview.postMessage({ type: 'deployment:error', teamId, ...(sourceId ? { sourceId } : {}), error: msg });
+			webview.postMessage({ type: 'deployment:error', teamId: recordTeamId, ...(sourceId ? { sourceId } : {}), error: msg });
 		}
 	}
 
@@ -1397,7 +1462,7 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 			webview.postMessage({
 				type: 'deploy:data',
 				versions: mapVersionCards(versions.rows ?? []),
-				deployments: mapTeamDeploymentRows(deploymentRows, projectId, teams),
+				deployments: mapTeamDeploymentRows(deploymentRows, projectId, teams, client.getAccountInfo?.()?.userId ?? ''),
 				teams,
 			});
 		} catch (error) {

@@ -72,5 +72,10 @@ export function buildAuthUrl(zitadelUrl: string, clientId: string, redirectUri: 
 		code_challenge_method: 'S256',
 	});
 
+	// Always land on Zitadel's login page (prompt=login): it forces the login UI
+	// so Zitadel never silently reuses the system browser's SSO session, keeping
+	// account switching possible. Mirrors the shell's PKCE flow (shell/src/util/pkce.ts).
+	params.set('prompt', 'login');
+
 	return `${zitadelUrl.replace(/\/$/, '')}/oauth/v2/authorize?${params}`;
 }

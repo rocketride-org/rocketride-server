@@ -34,23 +34,19 @@ const { getenv } = require('../../scripts/lib/getenv');
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const env = getenv();
-// The publishable key only enables the embedded checkout — every consumer
-// gates on it being non-empty, so a key-less build is functional with the
-// checkout panels disabled. Warn instead of failing: standalone repos have
-// no .config defaults; marketplace builds supply the key via .env.
-if (!env.RR_STRIPE_PUBLISHABLE_KEY) {
-	console.warn('[vscode:build-webview] RR_STRIPE_PUBLISHABLE_KEY not set - building with the embedded checkout disabled');
-}
 
 export default defineConfig({
 	plugins: [pluginReact(), pluginRocketrideIcons()],
 
 	source: {
 		// Inject public build-time config values into webview bundles.
-		// SECURITY: never add server-side secrets here — only publishable keys.
+		// SECURITY: never add server-side secrets here — only public values.
+		// The Stripe publishable key is NOT baked: it is server-specific
+		// (test vs live) and arrives at runtime from the server probe
+		// (ServerInfoResult.stripePublishableKey) via the host providers.
 		define: {
-			'process.env.RR_STRIPE_PUBLISHABLE_KEY': JSON.stringify(env.RR_STRIPE_PUBLISHABLE_KEY || ''),
-			'process.env.ROCKETRIDE_URI': JSON.stringify(env.ROCKETRIDE_URI || 'https://api.rocketride.ai'),
+			// No server address is baked into any webview bundle — the cloud
+			// target is a SETTING, delivered by the host (defaultCloudUrl).
 			// OAuth broker base URL for the social-login buttons (shared OAUTH_ROOT_URL).
 			'process.env.REACT_APP_OAUTH_ROOT_URL': JSON.stringify(env.REACT_APP_OAUTH_ROOT_URL || ''),
 		},

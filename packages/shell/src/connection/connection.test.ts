@@ -100,7 +100,7 @@ const authenticatedResult: ConnectResult = {
 	phoneNumber: '',
 	phoneNumberVerified: false,
 	locale: 'en-US',
-	defaultTeam: '',
+	devTeam: '',
 	organization: null,
 	apps: [],
 	capabilities: [],

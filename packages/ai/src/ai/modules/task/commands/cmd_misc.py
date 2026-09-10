@@ -52,10 +52,10 @@ from rocketlib import getServiceDefinition, validatePipeline
 from ai.common.config import Config
 from ai.common.dap import DAPConn, TransportBase
 from ai.common.list_rows import paginate_rows
-from ai.account.models import resolve_task_permissions
+from ai.account.models import resolve_run_permissions
 from ..pipeline import resolve_implied_source, resolve_pipeline_env
 from .. import services_catalog
-from .cmd_monitor import owner_key
+from .cmd_monitor import owner_key, owner_wildcard_key
 
 # Only import for type checking to avoid circular import errors
 if TYPE_CHECKING:
@@ -222,6 +222,11 @@ class MiscCommands(DAPConn):
 
             args = request.get('arguments', {})
             pipeline = args.get('pipeline', {})
+            # Accept the wrapped .pipe file form too — the config is
+            # whatever sits under its 'pipeline' key; everything below
+            # (env resolution, source inference) walks the flat config.
+            if isinstance(pipeline.get('pipeline'), dict):
+                pipeline = pipeline['pipeline']
 
             # Callers that already send the {'pipeline': ...} envelope must not be
             # double-wrapped: the MCP validate_pipeline tool (modules/mcp/tools/
@@ -235,7 +240,9 @@ class MiscCommands(DAPConn):
             if hasattr(self, '_account_info') and self._account_info:
                 # Determine org and team IDs from account info
                 org_id = ''
-                team_id = getattr(self._account_info, 'defaultTeam', '') or ''
+                # The dev team's environment layer — one of devTeam's two
+                # legitimate jobs (billing being the other).
+                team_id = getattr(self._account_info, 'devTeam', '') or ''
                 org = getattr(self._account_info, 'organization', None)
                 if org:
                     org_id = org.get('id', '') if isinstance(org, dict) else getattr(org, 'id', '')
@@ -261,14 +268,18 @@ class MiscCommands(DAPConn):
             if not source:
                 source = resolve_implied_source(pipeline)
 
-            # Build the C++ payload with resolved source and default version
+            # Build the C++ payload with resolved source and default version.
+            # The engine's config loader requires the FILE-form root
+            # ({'pipeline': <config>}) — handing it the flat config rejects
+            # every wire-correct client with "'pipeline' is missing or
+            # invalid". Clients send the flat config per the DAP contract
+            # above; the wrap happens HERE.
             inner = {**pipeline, 'version': pipeline.get('version', 1)}
             if source:
                 inner['source'] = source
 
-            # validatePipeline expects the config under a top-level 'pipeline'
-            # key — same envelope pipe_Validate (modules/pipe) builds; without
-            # it every config fails with "'pipeline' is missing or invalid"
+            # Same envelope pipe_Validate (modules/pipe) builds — the version
+            # rides INSIDE the wrapped config (see the FILE-form note above).
             data = validatePipeline({'pipeline': inner})
 
             # Return the results
@@ -542,10 +553,9 @@ class MiscCommands(DAPConn):
         server = self._server
         caller_user_id = self._account_info.userId
 
-        # Snapshot tasks the caller has access to (own, teammate, org admin)
-        task_controls = [
-            c for c in server._task_control.values() if resolve_task_permissions(self._account_info, c.teamId)
-        ]
+        # Snapshot tasks the caller may see (run-scoped: user-owned runs are
+        # owner-only; team-owned runs need permissions on the run's team)
+        task_controls = [c for c in server._task_control.values() if resolve_run_permissions(self._account_info, c)]
         # Connections are user-scoped (not task-scoped), so filter by userId
         conn_items = [
             (cid, conn)
@@ -603,8 +613,8 @@ class MiscCommands(DAPConn):
             task_name = getattr(status, 'name', None) or control.source
             # Monitor keys are owner-scoped — build from the control's owner
             # (once per control; they do not vary per connection).
-            project_key = owner_key(control.owner_id, control.project_id, control.source)
-            project_wildcard_key = f'p.{control.owner_id}.{control.project_id}.*'
+            project_key = owner_key(control.run_kind, control.owner_id, control.project_id, control.source)
+            project_wildcard_key = owner_wildcard_key(control.run_kind, control.owner_id, control.project_id)
             pipe_prefix = f'{project_key}.'
             for cid, conn in conn_items:
                 if not hasattr(conn, '_monitors'):
@@ -787,21 +797,19 @@ class MiscCommands(DAPConn):
         if not key.startswith('p.'):
             return 'Task monitor'
 
-        # Strip the 'p.' prefix and split: ownerId, projectId, source, [pipeId]
-        # (keys are owner-scoped: p.{teamId|userId}.{projectId}.{source})
+        # Strip the 'p.' prefix and split the owner-scoped key layout
+        # p.{runKind}.{ownerId}.{projectId}.{source} — the leading runKind
+        # segment (added with @me run identity) shifts every field right by
+        # one, so projectId is parts[2] and source parts[3], NOT parts[1]/[2].
         parts = key[2:].split('.', 3)
-        if len(parts) < 2:
+        if len(parts) < 3:
             return 'Task monitor'
-        project_id = parts[1]
+        project_id = parts[2]
         project_label = project_names.get(project_id, project_id[:8])
 
-        if len(parts) == 2 or (len(parts) == 3 and parts[2] == '*'):
+        if len(parts) == 3 or parts[3] == '*':
             return f'{project_label}.*'
 
-        source = parts[2]
+        source = parts[3]
         source_label = source_names.get(f'{project_id}.{source}', source)
-
-        if len(parts) == 4:
-            return f'{project_label}.{source_label}.pipe{parts[3]}'
-
         return f'{project_label}.{source_label}'

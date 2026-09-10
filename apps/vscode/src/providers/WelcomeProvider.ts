@@ -37,6 +37,8 @@
 import * as vscode from 'vscode';
 import { ConfigManager } from '../config';
 import { getConnectionManager, getEngineRegistry } from '../extension';
+import { commitStagedCloudCredentials } from '../connection/connection';
+import { CloudAuthProvider } from '../auth/CloudAuthProvider';
 import { ConnectionMessageHandler } from './shared/connection-message-handler';
 
 const DISMISSED_KEY = 'welcomeDismissed';
@@ -46,6 +48,9 @@ export class WelcomeProvider {
 	private configManager: ConfigManager;
 	private connHandler: ConnectionMessageHandler;
 	private panel: vscode.WebviewPanel | undefined;
+	/** True while the provider itself is being disposed (host shutdown) — a
+	 * panel closed by shutdown is NOT a user dismissal. */
+	private isShuttingDown = false;
 
 	constructor(
 		private readonly context: vscode.ExtensionContext,
@@ -143,6 +148,20 @@ export class WelcomeProvider {
 
 		this.panel.onDidDispose(() => {
 			cleanupCloudAuth();
+			// Closing without Save & Connect discards any staged sign-in/out.
+			// (After a successful save the staged state is already committed,
+			// so this is a no-op on the normal path.)
+			CloudAuthProvider.getInstance().clearPendingChanges();
+			// Closing the welcome page — by ANY user exit (the tab's X,
+			// Advanced Settings, Save & Connect) — counts as dismissal, so it
+			// never nags again on the next activation. Host shutdown is not a
+			// user exit. Best-effort: a write failure must not throw here.
+			if (!this.isShuttingDown) {
+				vscode.workspace
+					.getConfiguration('rocketride')
+					.update(DISMISSED_KEY, true, vscode.ConfigurationTarget.Global)
+					.then(undefined, () => { /* best effort */ });
+			}
 			this.connHandler.stopStatusPolling();
 			this.panel = undefined;
 			const index = this.disposables.indexOf(messageDisposable);
@@ -171,7 +190,16 @@ export class WelcomeProvider {
 		const logoDarkUri = this.panel.webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, 'rocketride-dark-icon.png'));
 		const logoLightUri = this.panel.webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, 'rocketride-light-icon.png'));
 
-		// Send nested structure matching the webview SettingsData type
+		// The cloudUrl settings' package.json defaults — CloudPanel probes the
+		// effective target and can't render its sign-in UI without them.
+		const devDefaultCloudUrl = vscode.workspace.getConfiguration('rocketride.development').inspect<string>('cloudUrl')?.defaultValue ?? '';
+		const depDefaultCloudUrl = vscode.workspace.getConfiguration('rocketride.deployment').inspect<string>('cloudUrl')?.defaultValue ?? '';
+
+		// Send nested structure matching the webview SettingsData type. Every
+		// SettingsData field must be present: the webview replaces its whole
+		// settings object with this payload and sends it back verbatim on
+		// Save & Connect — a missing field would be written as `undefined`,
+		// silently resetting that setting to its default.
 		this.panel.webview.postMessage({
 			type: 'settingsLoaded',
 			logoDarkUri: logoDarkUri.toString(),
@@ -180,6 +208,9 @@ export class WelcomeProvider {
 				development: {
 					connectionMode: config.development.connectionMode,
 					hostUrl: config.development.hostUrl,
+					useCustomServer: config.development.useCustomServer,
+					cloudUrl: config.development.cloudUrl,
+					defaultCloudUrl: devDefaultCloudUrl,
 					apiKey,
 					hasApiKey: this.configManager.hasApiKey(),
 					local: {
@@ -189,6 +220,9 @@ export class WelcomeProvider {
 				deployment: {
 					connectionMode: config.deployment.connectionMode,
 					hostUrl: config.deployment.hostUrl,
+					useCustomServer: config.deployment.useCustomServer,
+					cloudUrl: config.deployment.cloudUrl,
+					defaultCloudUrl: depDefaultCloudUrl,
 					hasApiKey: !!config.deployment.apiKey,
 					apiKey: config.deployment.apiKey || '',
 					local: {
@@ -197,6 +231,10 @@ export class WelcomeProvider {
 				},
 				defaultPipelinePath: config.defaultPipelinePath,
 				pipelineRestartBehavior: config.pipelineRestartBehavior,
+				pipelineTtl: config.pipelineTtl,
+				pipelineTraceLevel: config.pipelineTraceLevel,
+				taskArguments: config.taskArguments,
+				pipelineDebugOutput: config.pipelineDebugOutput,
 				autoAgentIntegration: workspaceConfig.get('integrations.autoAgentIntegration', true),
 				integrationCopilot: workspaceConfig.get('integrations.copilot', false),
 				integrationClaudeCode: workspaceConfig.get('integrations.claudeCode', false),
@@ -225,6 +263,10 @@ export class WelcomeProvider {
 		try {
 			// Step 1: Atomic write — suppresses config-change listeners during the batch
 			await this.configManager.applyAllSettings(settings as any);
+
+			// Step 1b: Commit any staged cloud sign-in/sign-out together with the
+			// form it belongs to (the welcome flow is transactional like Settings).
+			await commitStagedCloudCredentials();
 
 			// Step 2: Persist dismissal so the welcome page doesn't re-open on next activation
 			await vscode.workspace.getConfiguration('rocketride').update(DISMISSED_KEY, true, vscode.ConfigurationTarget.Global);
@@ -290,6 +332,7 @@ export class WelcomeProvider {
 	}
 
 	public dispose(): void {
+		this.isShuttingDown = true;
 		this.connHandler.dispose();
 		this.panel?.dispose();
 		this.disposables.forEach((d) => d.dispose());

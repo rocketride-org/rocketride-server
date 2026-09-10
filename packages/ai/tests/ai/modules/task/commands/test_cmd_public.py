@@ -81,6 +81,90 @@ async def test_on_rrext_public_probe_returns_server_info_without_authenticating(
     account.get_public_apps.assert_awaited_once()
 
 
+@pytest.mark.asyncio
+async def test_on_rrext_public_probe_includes_stripe_key_when_configured(monkeypatch):
+    """
+    A configured RR_STRIPE_PUBLISHABLE_KEY is advertised on the probe so
+    clients can initialise Stripe with the key matching this server's
+    Stripe account instead of a value baked into their bundles.
+    """
+    monkeypatch.setattr(cmd_public, 'getVersion', lambda: '9.9.9')
+    monkeypatch.setenv('RR_STRIPE_PUBLISHABLE_KEY', 'pk_test_probe')
+
+    account = SimpleNamespace(capabilities=[], get_public_apps=AsyncMock(return_value=[]))
+    server = MagicMock()
+    server._server = SimpleNamespace(account=account)
+
+    conn = _make_conn(server=server)
+    result = await PublicCommands.on_rrext_public_probe(conn, {'command': 'rrext_public_probe'})
+
+    assert result['body']['stripePublishableKey'] == 'pk_test_probe'
+
+
+@pytest.mark.asyncio
+async def test_on_rrext_public_probe_omits_stripe_key_when_unset(monkeypatch):
+    """
+    Servers without billing (OSS, unset env) omit the field entirely rather
+    than sending an empty string.
+    """
+    monkeypatch.setattr(cmd_public, 'getVersion', lambda: '9.9.9')
+    monkeypatch.delenv('RR_STRIPE_PUBLISHABLE_KEY', raising=False)
+
+    account = SimpleNamespace(capabilities=[], get_public_apps=AsyncMock(return_value=[]))
+    server = MagicMock()
+    server._server = SimpleNamespace(account=account)
+
+    conn = _make_conn(server=server)
+    result = await PublicCommands.on_rrext_public_probe(conn, {'command': 'rrext_public_probe'})
+
+    assert 'stripePublishableKey' not in result['body']
+
+
+@pytest.mark.asyncio
+async def test_on_rrext_public_probe_endpoints_default_to_origin(monkeypatch):
+    """
+    The endpoints block is ALWAYS present with BOTH keys — clients never
+    branch on absence. With neither RR_*_ORIGIN variable set, both values
+    are the literal 'origin' ("the address you probed me at").
+    """
+    monkeypatch.setattr(cmd_public, 'getVersion', lambda: '9.9.9')
+    monkeypatch.delenv('RR_BACKEND_ORIGIN', raising=False)
+    monkeypatch.delenv('RR_FRONTEND_ORIGIN', raising=False)
+
+    account = SimpleNamespace(capabilities=[], get_public_apps=AsyncMock(return_value=[]))
+    server = MagicMock()
+    server._server = SimpleNamespace(account=account)
+
+    conn = _make_conn(server=server)
+    result = await PublicCommands.on_rrext_public_probe(conn, {'command': 'rrext_public_probe'})
+
+    assert result['body']['endpoints'] == {'api': 'origin', 'ui': 'origin'}
+
+
+@pytest.mark.asyncio
+async def test_on_rrext_public_probe_endpoints_carry_configured_origins(monkeypatch):
+    """
+    Configured RR_BACKEND_ORIGIN / RR_FRONTEND_ORIGIN pass through as
+    absolute URLs — the CDN-split shape where the API lives somewhere other
+    than the address the UI is served from.
+    """
+    monkeypatch.setattr(cmd_public, 'getVersion', lambda: '9.9.9')
+    monkeypatch.setenv('RR_BACKEND_ORIGIN', 'https://api.example.test')
+    monkeypatch.setenv('RR_FRONTEND_ORIGIN', 'https://app.example.test')
+
+    account = SimpleNamespace(capabilities=[], get_public_apps=AsyncMock(return_value=[]))
+    server = MagicMock()
+    server._server = SimpleNamespace(account=account)
+
+    conn = _make_conn(server=server)
+    result = await PublicCommands.on_rrext_public_probe(conn, {'command': 'rrext_public_probe'})
+
+    assert result['body']['endpoints'] == {
+        'api': 'https://api.example.test',
+        'ui': 'https://app.example.test',
+    }
+
+
 # ---------------------------------------------------------------------------
 # Constructor (no-op)
 # ---------------------------------------------------------------------------

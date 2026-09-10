@@ -63,7 +63,7 @@ const styles = {
 /**
  * Build the colored event-name cell: the DAP name in its chart-token color at
  * semibold weight. A token-referenced inline color (never raw hex) keeps the
- * nine-way coloring legible across every theme, mirroring the stock cell
+ * per-kind coloring legible across every theme, mirroring the stock cell
  * factories' token approach for a dimension the five semantic badges can't cover.
  *
  * @param name - The DAP event name.

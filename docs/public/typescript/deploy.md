@@ -11,15 +11,15 @@ Persist pipelines server-side and run them on a schedule. Accessed via
 
 ## Teams as environments
 
-`deploy.publish` snapshots a pipeline as an **immutable, sha256-locked artifact
+`deploy.add` snapshots a pipeline as an **immutable, sha256-locked artifact
 version** in the org registry; `deploy.deploy` points a **team** (the environment —
 Staging, Production, …) at a version. Promotion and rollback are the same pointer
 move. Deploy targets are always explicit — there is no default-team fallback. Every
-publish and pointer change lands in an immutable audit history (`deploy.history`,
+registry add and pointer change lands in an immutable audit history (`deploy.history`,
 rows carry `seq` as the stable append-order identity).
 
 ```typescript
-const result = await client.deploy.publish(myPipeline, { comment: 'v2 prompt fix' });
+const result = await client.deploy.add({ pipeline: myPipeline, comment: 'v2 prompt fix' });
 await client.deploy.deploy('proj-1', result.artifact.version, 'team-staging');
 await client.deploy.setSchedule('proj-1', 'webhook_1', '*/15 * * * *', 'team-staging');
 
@@ -32,7 +32,7 @@ for (const dep of live.rows) {
 }
 ```
 
-`publish(pipeline, { deployTo })` collapses publish + deploy into one step.
+`add({ pipeline, deployTo })` collapses add + deploy into one step.
 Listings (`deploy.list`, `deploy.versions`, `deploy.history`) return the standard
 `{ rows, total, page, pageSize }` envelope, server-paged.
 `deploy.artifact(projectId, version)` fetches one immutable version's pipeline
@@ -65,16 +65,43 @@ the scheduler uses — returning `{ token, version }`, and
 
 ## App publish ladder
 
-Shell apps have their own registry surface — typed wrappers over `rrext_app_deploy`.
-**Publish** snapshots an immutable app version (never activates anything);
-**Deploy** pins a rung (`@user`, `@team/<name-or-id>`, `@org`) to a version — first
-publish, update, promote, and rollback are all this one verb.
+Typed wrappers over `rrext_deploy_app` — the publish ladder for RocketRide apps.
+**Deploy** copies code to the server as the next immutable registry version
+(`deploy.add`); a deployment carries the review lifecycle in its own `state`
+(`private` → `submit` → `ready` | `rejected`). **Publish** binds a deployment
+to an audience — `@me`, `@team/<name>`, or `@public` — as a pure pointer (`@user` is a legacy input alias for `@me`, never displayed);
+repointing it covers first publish, update, promote, and rollback alike.
+
+The review state lives on the **deployment**, not the binding: an app deploys
+`private` (internal-eligible), the developer `submit`s it for review, an admin
+approves (`ready`) or rejects (`rejected`). A `@public` binding may only point
+at a `ready` deployment; `@me`/`@team` bindings accept any internal-eligible
+(not `failed`) deployment. So there is no separate "publish-and-wait" — public
+listing is: submit → approve → repoint the public pointer.
+
+App ids are partitioned by the caller org's **developer id**: every app is
+`<developerId>.<name>` (globally unique), so an org can only deploy/publish
+ids inside its own namespace — the platform holds `rocketride`. Deploying or
+publishing an app requires the org to have claimed a developer id.
 
 | Method | Description |
 | --- | --- |
-| `appPublish({ appId, version, bundle, message?, moduleId?, name? })` | Publish an immutable version to the org registry (single-file `remoteEntry.js` bundle; commit-style `message` shows on the version card). |
-| `appVersions(appId)` | The version rail, newest first; each entry carries `rungs` naming the rungs currently pinned to it. |
-| `appDeploy(appId, registryVersion, target)` | Pin a rung to a version. Personal deploys resolve into your own manifest immediately. |
-| `appWhere(appId)` | The reverse index: `{rung, handle, version, appVersion, state, deployedAt}` per rung. |
+| `deploy.add` | The ONE rail door: deploy any kind of object as the next immutable registry version. `kind:'pipe'` (default) takes a `pipeline` dict; `kind:'app'` takes ONE `data` zip of the app's SOURCE — the server performs the build (client-produced binaries are never trusted); the zip is retained and unpacked at receipt, born deployment-state `private`. The app id must be inside your developer namespace. |
+| `deploy.addApp` | Pack an app folder's source and deploy it as the next registry version — the one call behind the App Builder's Deploy button and CI scripts. Packs by the App Builder rules (workspace-rooted zip, `appManifest.include`, hierarchical gitignore + the hard node_modules/dist/.git baseline, symlink containment, 50MB zipped / 512MB uncompressed caps); `onProgress` receives one line per step. Deploying activates nothing — bind an audience with `publishApp` afterwards. |
+| `deploy.verifyApp` | The no-side-effect precheck for `addApp` — purely local, no server call: manifest shape and id grammar, declared icon/README assets, `appManifest.include` entries, and a pack dry run against the size caps. Server-side concerns (the build, store review) are out of scope. |
+| `listDeployments` | The version rail, newest first — the developer org sees its FULL rail (published or not), other callers only their visible versions. Each entry carries its deployment `state`, its `buildStatus` ('ok' = servable), and the `rungs` naming the audiences bound to it. |
+| `submitApp` | Submit a deployed version for store review — flips the deployment `private` → `submit` (it enters the admin queue). Developer-org + namespace gated. |
+| `withdrawApp` | Withdraw a pending review — the developer's own cancel: flips the deployment `submit` → `private` (leaves the admin queue, back to draft; history records `withdrawn`). Only a version in `submit` withdraws. Developer-org + namespace gated. |
+| `replyApp` | Append a developer message to the app's review thread — the developer half of the reviewer conversation. Rides `deployment_history` as a `reply` row (side `'developer'`), the same stream `deploy.history()` reads. Developer-org + namespace gated. |
+| `buildLog` | One version's durable server build log — the full phase-by-phase output the build worker stores beside the version's artifacts (no error text rides the rail rows). Long logs serve their tail; `''` = no log. Developer-org gated. |
+| `publishApp` | Bind a deployment to '@me', '@team/<name>', or '@public' ('@user' = legacy input alias). The binding is a pure pointer born 'enabled'. `@public` requires the deployment be `ready` (approved); `@me`/`@team` accept any non-`failed` deployment. Pinning ANOTHER org's public app to '@me'/'@team' is the version selector and is allowed; publishing your own app requires the id to be in your namespace. |
+| `whereApp` | The reverse index: `{rung, handle, version, appVersion, state, deployedAt}` per audience — `state` is the bound DEPLOYMENT's review state. |
+
+Serving needs no verb: a version's bundle loads from the stable
+`/apps/<appId>/v<N>/remoteEntry.js` URL constructed from its registry
+version number, with entitlement enforced by the serve route on every
+request (registry ints ONLY — semver is display).
+
+Full signatures: [API reference](/clients/typescript/reference#app-publish-ladder).
 
 See the [Shell Apps guide](/guides/apps) for the app model itself.

@@ -25,22 +25,27 @@
 /**
  * Deploy API namespace for the RocketRide TypeScript SDK.
  *
- * Teams-as-environments deployments via the `rrext_deploy` DAP command
- * (dispatched by `subcommand`) over the existing WebSocket connection:
+ * Teams-as-environments deployments over two DAP commands (dispatched by
+ * `subcommand`) on the existing WebSocket connection:
  *
- * - `publish` snapshots a pipeline as an IMMUTABLE, sha256-locked artifact
- *   version in the org registry.
- * - `deploy` points a TEAM at a published version. Teams ARE the
- *   environments (Staging, Production, ...): promotion and rollback are this
- *   same pointer move aimed at a different version or team. Deploy targets
- *   are always explicit — there is deliberately no default-team fallback.
- * - Every publish and pointer change lands in an immutable audit history.
+ * - `rrext_deploy` — the GENERIC, kind-agnostic rail door: `add` deploys any
+ *   kind (pipe|app|node) as an IMMUTABLE, sha256-locked registry version;
+ *   `versions`/`artifact`/`history` read the rail.
+ * - `rrext_deploy_pipe` — PIPE-specific control: `deploy` points a TEAM at a
+ *   published version (teams ARE the environments — Staging, Production, ...;
+ *   promotion and rollback are the same pointer move; targets are always
+ *   explicit, no default-team fallback), plus its lifecycle, scheduling
+ *   (`schedule_*`), and run-now dispatch (`run`).
+ * - Every deploy and pointer change lands in an immutable audit history.
  * - `list`/`versions`/`history` return the standard list envelope
  *   (`{rows, total, page, pageSize}`) with page/search/filter/sort params.
  */
 
 import type { RocketRideClient } from './client.js';
 import type { DeployHistoryEntry, DeployListEnvelope, DeployListParams, Deployment, DeployArtifact, PipelineConfig, PublishResult, SchedulePreview } from './types/deploy.js';
+import { getRegisteredAppPack } from './app-pack-registry.js';
+import type { AppPackModule } from './app-pack-registry.js';
+import type { AppVerifyReport, CreatedApp } from '../app-pack/index.js';
 
 // =============================================================================
 // HELPERS
@@ -71,7 +76,8 @@ function listArgs(params: DeployListParams): Record<string, unknown> {
 // =============================================================================
 
 /**
- * Typed wrapper around the `rrext_deploy` DAP command and its subcommands.
+ * Typed wrapper around the `rrext_deploy` (generic rail door) and
+ * `rrext_deploy_pipe` (pipe deploy control) DAP commands and their subcommands.
  *
  * Accessed via `client.deploy` — not instantiated directly. All methods
  * delegate to {@link RocketRideClient.call} which handles envelope
@@ -82,34 +88,162 @@ export class DeployApi {
 	constructor(private client: RocketRideClient) {}
 
 	// =========================================================================
-	// PUBLISH — immutable artifact into the org registry
+	// ADD — deploy any kind of object into the org registry (the ONE rail door)
 	// =========================================================================
 
 	/**
-	 * Publishes a pipeline as the next immutable registry version.
+	 * Deploys an object to the server as the next immutable registry version.
 	 *
-	 * The artifact is sha256-locked: what was published is provably what
-	 * runs. Publishing alone puts nothing live — point a team at the version
-	 * with {@link deploy} (or pass `deployTo` to do both in one step, the
-	 * small-team convenience).
+	 * The ONE generic rail door for every kind — DEPLOY in the settled
+	 * vocabulary means "copy code to the server"; binding it to an audience
+	 * is the separate publish step ({@link deploy} for pipe teams; the app
+	 * publish verbs for apps). The artifact is sha256-locked: what was
+	 * deployed is provably what runs.
 	 *
-	 * @param pipeline - The full pipeline definition to snapshot. `name` is
-	 *   REQUIRED here (narrowed at compile time, enforced by the server):
-	 *   artifacts are immutable and pipelineName renders on every deploy
-	 *   surface — a nameless publish would show as a project GUID forever.
-	 * @param options - Optional publish options.
+	 * Kind dispatch:
+	 * - `kind: 'pipe'` (default) — pass `pipeline` (the full definition;
+	 *   `name` REQUIRED: it renders on every deploy surface forever).
+	 * - `kind: 'app'` — pass `data` (ONE zip of the app's SOURCE — the server
+	 *   owns the build and never trusts client-produced binaries). Two
+	 *   layouts: package.json + src at the zip root (legacy), or
+	 *   workspace-relative with `metadata.appRoot` naming the app folder so
+	 *   `appManifest.include` extras ride at their real workspace paths. The
+	 *   server retains the zip and unpacks it at receipt; the app deployment
+	 *   is born state 'private' (internally publishable — an @me/@team binding
+	 *   may serve it; the developer submits it for review to reach the public
+	 *   store).
+	 *
+	 * @param options.kind - 'pipe' (default) | 'app'.
+	 * @param options.pipeline - The pipeline definition (kind 'pipe').
+	 * @param options.data - The source zip bytes (kind 'app').
+	 * @param options.metadata - Optional metadata blob (e.g. projectId
+	 *   provenance, appRoot for workspace-relative app zips).
 	 * @param options.comment - "What changed" note kept in the registry.
 	 * @param options.deployTo - Team id to deploy the new version to
-	 *   immediately (one-step publish+deploy).
+	 *   immediately (one-step add+deploy; pipes only).
 	 * @returns The artifact entry, plus the deployment when `deployTo` was given.
 	 */
-	async publish(pipeline: PipelineConfig & { name: string }, options: { comment?: string; deployTo?: string } = {}): Promise<PublishResult> {
+	async add(options: { kind?: 'pipe' | 'app' | 'node'; pipeline?: PipelineConfig & { name: string }; data?: Uint8Array; metadata?: Record<string, unknown>; comment?: string; deployTo?: string }): Promise<PublishResult> {
 		return this.client.call<PublishResult>('rrext_deploy', {
-			subcommand: 'publish',
-			pipeline,
+			subcommand: 'add',
+			kind: options.kind ?? 'pipe',
+			...(options.pipeline !== undefined && { pipeline: options.pipeline }),
+			...(options.data !== undefined && { data: options.data }),
+			...(options.metadata !== undefined && { metadata: options.metadata }),
 			...(options.comment !== undefined && { comment: options.comment }),
 			...(options.deployTo !== undefined && { deployTo: options.deployTo }),
 		});
+	}
+
+	/**
+	 * Loads the Node-only app packer: the registry when a host armed it (a
+	 * bundled host side-effect-imports `rocketride/app-pack`), else a
+	 * runtime dynamic self-import that keeps the fs/zip machinery out of
+	 * browser bundles (same pattern as `use({ filepath })`).
+	 */
+	private async loadAppPack(): Promise<AppPackModule> {
+		if (typeof window !== 'undefined') {
+			throw new Error('App packing requires Node.js - pack and deploy from a script or CI, not the browser.');
+		}
+		const registered = getRegisteredAppPack();
+		if (registered) {
+			return registered;
+		}
+		const dynamicImport = new Function('specifier', 'return import(specifier);') as (specifier: string) => Promise<AppPackModule>;
+		return dynamicImport('rocketride/app-pack');
+	}
+
+	/**
+	 * Packs an app folder's source and deploys it as the next immutable
+	 * registry version — the ONE call behind the App Builder's Deploy
+	 * button, the CLI's `app deploy`, and CI scripts (Node.js only).
+	 *
+	 * Verify → pack → send: the pack applies the canonical rules
+	 * (workspace-rooted zip layout, `appManifest.include` honored,
+	 * hierarchical gitignore filtering with the hard baseline
+	 * node_modules/dist/.git, symlink containment, 50MB zipped / 512MB
+	 * uncompressed caps) and every step can narrate through `onProgress`.
+	 * Deploying never activates anything — bind an audience with
+	 * `publishApp` afterwards. Run `verifyApp` first for a no-side-effect
+	 * precheck of the same rules.
+	 *
+	 * @param appRoot - The app folder: absolute, or relative to
+	 *   `options.workspaceRoot`.
+	 * @param options.workspaceRoot - The workspace the zip is rooted at and
+	 *   that `appManifest.include` entries resolve against
+	 *   (default: `process.cwd()`).
+	 * @param options.comment - "What changed" note kept in the registry.
+	 * @param options.metadata - Extra metadata merged over the packed
+	 *   defaults (e.g. projectId provenance); `appRoot` is always set from
+	 *   the pack.
+	 * @param options.onProgress - Receives one line per pack step (include
+	 *   checks, per-file adds, totals) for hosts that surface progress.
+	 * @returns The artifact entry for the new version.
+	 */
+	async addApp(appRoot: string, options: { workspaceRoot?: string; comment?: string; metadata?: Record<string, unknown>; onProgress?: (line: string) => void } = {}): Promise<PublishResult> {
+		const pack = await this.loadAppPack();
+		const packed = pack.packAppSource(options.workspaceRoot ?? process.cwd(), appRoot, options.onProgress);
+		return this.add({
+			kind: 'app',
+			data: packed.data,
+			metadata: { ...options.metadata, ...(packed.appRoot ? { appRoot: packed.appRoot } : {}) },
+			...(options.comment !== undefined && { comment: options.comment }),
+		});
+	}
+
+	/**
+	 * Scaffolds a new app in the workspace — the programmatic twin of the
+	 * App Builder's New App wizard, rendering the identical templates
+	 * (Node.js only). Writes `./apps/<slug>`, ensures the pnpm workspace
+	 * file and ignore hygiene, vendors the connected server's shell +
+	 * client packages, and runs the workspace install. Scaffolding only —
+	 * nothing is deployed; the normal lifecycle (edit → `verifyApp` →
+	 * `addApp` → `publishApp`) follows.
+	 *
+	 * @param slug - The app-name slug (lowercase; digits/-/_ after the
+	 *   first character). The id becomes `<developerId>.<slug>`.
+	 * @param options - Template, display name, developer id (default
+	 *   'local'), frame options, install toggle, `onProgress`, and
+	 *   `workspaceRoot` (default `process.cwd()`). The server base URL for
+	 *   vendoring defaults to this client's own connection.
+	 * @returns The created app's identity and a report of what ran.
+	 */
+	async createApp(slug: string, options: { workspaceRoot?: string; template?: 'Blank' | 'Dashboard'; displayName?: string; developerId?: string; sidebar?: boolean; statusFooter?: boolean; docTabs?: boolean; install?: boolean; serverBaseUrl?: string; onProgress?: (line: string) => void } = {}): Promise<CreatedApp> {
+		const pack = await this.loadAppPack();
+		// Vendor from the server THIS client talks to unless overridden —
+		// ws(s) URIs map onto the http(s) origin serving /client/*. This is
+		// the twin of client-common's toHttpBase(): the vendored client
+		// package is self-contained and cannot import that library, so the
+		// transform is duplicated here — keep the two in sync.
+		let serverBaseUrl = options.serverBaseUrl;
+		if (!serverBaseUrl) {
+			const uri = this.client.getConnectionInfo().uri;
+			if (uri) {
+				serverBaseUrl = uri.replace(/^ws:/i, 'http:').replace(/^wss:/i, 'https:').replace(/\/task\/service\/?$/i, '').replace(/\/+$/, '');
+			}
+		}
+		const { workspaceRoot, onProgress, ...rest } = options;
+		return pack.createAppWorkspace(workspaceRoot ?? process.cwd(), slug, { ...rest, serverBaseUrl, onProgress });
+	}
+
+	/**
+	 * Pre-checks everything `addApp` needs, WITHOUT deploying (Node.js
+	 * only, purely local — no server call). Verifies the manifest shape and
+	 * id grammar, declared icon/README assets, `appManifest.include`
+	 * entries, and a pack dry run against the size caps. Server-side
+	 * concerns (the build, store review) are out of scope — the Package
+	 * tab's readiness and the review ladder cover those.
+	 *
+	 * @param appRoot - The app folder: absolute, or relative to
+	 *   `options.workspaceRoot`.
+	 * @param options.workspaceRoot - The workspace the pack would be rooted
+	 *   at (default: `process.cwd()`).
+	 * @returns The structured report — `ok` plus every check with an
+	 *   actionable note.
+	 */
+	async verifyApp(appRoot: string, options: { workspaceRoot?: string } = {}): Promise<AppVerifyReport> {
+		const pack = await this.loadAppPack();
+		return pack.verifyAppSource(options.workspaceRoot ?? process.cwd(), appRoot);
 	}
 
 	// =========================================================================
@@ -129,7 +263,7 @@ export class DeployApi {
 	 * @returns The updated deployment record, registry-joined.
 	 */
 	async deploy(projectId: string, version: number, teamId: string): Promise<Deployment> {
-		return this.client.call<Deployment>('rrext_deploy', {
+		return this.client.call<Deployment>('rrext_deploy_pipe', {
 			subcommand: 'deploy',
 			projectId,
 			version,
@@ -145,12 +279,13 @@ export class DeployApi {
 	 * Deployments visible to the caller, as the standard list envelope.
 	 *
 	 * @param params - Optional team scope + list-API params.
-	 * @param params.teamId - Restrict to one team; omitted = every team the
-	 *   caller can monitor.
+	 * @param params.teamId - Restrict to one team; omitted = the visibility
+	 *   model: the caller's member teams plus their own personal space, and
+	 *   the whole org for an org admin.
 	 * @returns `{rows, total, page, pageSize}` of {@link Deployment} rows.
 	 */
 	async list(params: DeployListParams & { teamId?: string } = {}): Promise<DeployListEnvelope<Deployment>> {
-		return this.client.call<DeployListEnvelope<Deployment>>('rrext_deploy', {
+		return this.client.call<DeployListEnvelope<Deployment>>('rrext_deploy_pipe', {
 			subcommand: 'list',
 			...(params.teamId !== undefined && { teamId: params.teamId }),
 			...listArgs(params),
@@ -165,7 +300,7 @@ export class DeployApi {
 	 * @returns The deployment record (version, state, schedules, actors).
 	 */
 	async get(projectId: string, teamId: string): Promise<Deployment> {
-		return this.client.call<Deployment>('rrext_deploy', {
+		return this.client.call<Deployment>('rrext_deploy_pipe', {
 			subcommand: 'get',
 			projectId,
 			teamId,
@@ -202,7 +337,7 @@ export class DeployApi {
 	 * @returns The started run's token and the version that ran.
 	 */
 	async run(projectId: string, sourceId: string, teamId: string): Promise<{ token?: string; version?: number }> {
-		return this.client.call<{ token?: string; version?: number }>('rrext_deploy', {
+		return this.client.call<{ token?: string; version?: number }>('rrext_deploy_pipe', {
 			subcommand: 'run',
 			projectId,
 			sourceId,
@@ -267,7 +402,7 @@ export class DeployApi {
 	 * @returns The updated deployment record.
 	 */
 	async disable(projectId: string, teamId: string): Promise<Deployment> {
-		return this.client.call<Deployment>('rrext_deploy', {
+		return this.client.call<Deployment>('rrext_deploy_pipe', {
 			subcommand: 'disable',
 			projectId,
 			teamId,
@@ -282,7 +417,7 @@ export class DeployApi {
 	 * @returns The updated deployment record.
 	 */
 	async enable(projectId: string, teamId: string): Promise<Deployment> {
-		return this.client.call<Deployment>('rrext_deploy', {
+		return this.client.call<Deployment>('rrext_deploy_pipe', {
 			subcommand: 'enable',
 			projectId,
 			teamId,
@@ -301,7 +436,7 @@ export class DeployApi {
 	 * @returns The final deployment record (state `removed`).
 	 */
 	async remove(projectId: string, teamId: string): Promise<Deployment> {
-		return this.client.call<Deployment>('rrext_deploy', {
+		return this.client.call<Deployment>('rrext_deploy_pipe', {
 			subcommand: 'remove',
 			projectId,
 			teamId,
@@ -330,7 +465,7 @@ export class DeployApi {
 	 * @returns The updated deployment record.
 	 */
 	async setSchedule(projectId: string, sourceId: string, schedule: string | null, teamId: string, options: { ttl?: number } = {}): Promise<Deployment> {
-		return this.client.call<Deployment>('rrext_deploy', {
+		return this.client.call<Deployment>('rrext_deploy_pipe', {
 			subcommand: 'schedule_set',
 			projectId,
 			sourceId,
@@ -357,7 +492,7 @@ export class DeployApi {
 	 * @returns The updated deployment record.
 	 */
 	async setSourceConfig(projectId: string, sourceId: string, teamId: string, options: { traceLevel?: 'none' | 'metadata' | 'summary' | 'full' | null; debugOut?: boolean } = {}): Promise<Deployment> {
-		return this.client.call<Deployment>('rrext_deploy', {
+		return this.client.call<Deployment>('rrext_deploy_pipe', {
 			subcommand: 'source_config',
 			projectId,
 			sourceId,
@@ -377,7 +512,7 @@ export class DeployApi {
 	 * @returns The updated deployment record.
 	 */
 	async pauseSchedule(projectId: string, sourceId: string, teamId: string): Promise<Deployment> {
-		return this.client.call<Deployment>('rrext_deploy', {
+		return this.client.call<Deployment>('rrext_deploy_pipe', {
 			subcommand: 'schedule_pause',
 			projectId,
 			sourceId,
@@ -394,7 +529,7 @@ export class DeployApi {
 	 * @returns The updated deployment record.
 	 */
 	async resumeSchedule(projectId: string, sourceId: string, teamId: string): Promise<Deployment> {
-		return this.client.call<Deployment>('rrext_deploy', {
+		return this.client.call<Deployment>('rrext_deploy_pipe', {
 			subcommand: 'schedule_resume',
 			projectId,
 			sourceId,
@@ -414,7 +549,7 @@ export class DeployApi {
 	 * @returns Validity plus the next occurrence timestamps.
 	 */
 	async preview(schedule: string, count?: number): Promise<SchedulePreview> {
-		return this.client.call<SchedulePreview>('rrext_deploy', {
+		return this.client.call<SchedulePreview>('rrext_deploy_pipe', {
 			subcommand: 'preview',
 			schedule,
 			...(count !== undefined && { count }),

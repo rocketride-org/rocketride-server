@@ -29,6 +29,24 @@ send so you can debug, trace, or build your own client.
 The default port is applied only when the URI omits one, point the client at a
 different host or port to reach a remote or self-hosted engine.
 
+### Pre-auth probe (`rrext_public_probe`)
+
+Before authenticating, a client may open a public connection and send
+`rrext_public_probe`. The response body carries `version`, `capabilities`,
+`platform`, the public `apps` list, `stripePublishableKey` (when billing is
+configured), and `endpoints` — the server's public addresses:
+
+```json
+{ "endpoints": { "api": "origin", "ui": "origin" } }
+```
+
+Each value is an absolute URL or the literal `origin`, meaning "the address
+you probed me at" (the SDKs substitute it client-side before returning, so
+callers always see absolute URLs). The server reads `RR_BACKEND_ORIGIN` /
+`RR_FRONTEND_ORIGIN` for the two values; unset means `origin`, correct for
+any single-host deployment. They differ only on split deployments — e.g. a
+CDN-served UI whose live traffic should connect directly to the API host.
+
 ## Message format
 
 The engine protocol is a DAP-style (Debug Adapter Protocol) message exchange.

@@ -6,6 +6,7 @@
   "license": "MIT",
   "appManifest": {
     "id": "rocketride.hello",
+    "projectId": "cbf738b8-95f1-4d41-8d4d-4179c3d4a380",
     "publisher": "Aparavi Software AG",
     "name": "RocketRide",
     "description": "Landing page and dashboard",
@@ -22,7 +23,9 @@
   },
   "scripts": {
     "build": "rsbuild build",
-    "build:prod": "rsbuild build --env-mode production"
+    "build:prod": "rsbuild build --env-mode production",
+    "dev": "rsbuild dev",
+    "typecheck": "tsc --noEmit"
   },
   "browserslist": [
     "chrome >= 81",
@@ -34,8 +37,8 @@
     "@module-federation/rsbuild-plugin": "^2.5.1",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
-    "rocketride": "workspace:*",
-    "shell": "file:../../.rocketride/shell/shell.tgz"
+    "rocketride": "file:../../../.rocketride/client/rocketride.tgz",
+    "shell": "file:../../../.rocketride/shell/shell.tgz"
   },
   "devDependencies": {
     "@rsbuild/core": "~2.0.11",

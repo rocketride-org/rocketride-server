@@ -146,6 +146,12 @@ function parseArgs(args) {
 			// shell:freeze --check: CI mode — verify the frozen shell-api
 			// contract is current without writing a new version.
 			options.check = true;
+		} else if (arg === '--reseed') {
+			// saas:seed --reseed: fleet bump — roll a NEW version of every
+			// platform app. Deliberately NOT the global --force flag: that
+			// one forces full rebuilds (C++ recompile included) of every
+			// step in the dependency chain.
+			options.reseed = true;
 		} else if (arg === '--rebuild-cache') {
 			// test-integrity: nuke <engine-cache>/{constraints.txt,requirements.hash}
 			// so depends.ensure_constraints() does a full uv pip compile.

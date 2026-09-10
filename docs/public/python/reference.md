@@ -114,7 +114,9 @@ See [Deployments](/clients/python/deploy) for the model.
 
 | Method | Signature | Returns |
 | --- | --- | --- |
-| `deploy.publish` | `async def publish(self, pipeline, *, comment=None, deploy_to=None) -> PublishResult` | `PublishResult` |
+| `deploy.add` | `async def add(self, pipeline=None, *, kind='pipe', data=None, metadata=None, comment=None, deploy_to=None) -> PublishResult` | `PublishResult` |
+| `deploy.add_app` | `async def add_app(self, app_root, *, workspace_root=None, comment=None, metadata=None, on_progress=None) -> PublishResult` | `PublishResult` |
+| `deploy.verify_app` | `async def verify_app(self, app_root, *, workspace_root=None) -> AppVerifyReport` | `AppVerifyReport` |
 | `deploy.deploy` | `async def deploy(self, project_id, version, team_id) -> Deployment` | `Deployment` |
 | `deploy.list` | `async def list(self, *, team_id=None, page=None, page_size=None, search=None, filters=None, sort=None) -> DeployListResult` | `DeployListResult` |
 | `deploy.get` | `async def get(self, project_id, team_id) -> Deployment` | `Deployment` |
@@ -133,12 +135,55 @@ See [Deployments](/clients/python/deploy) for the model.
 
 ### App publish ladder
 
-| Method | Signature |
-| --- | --- |
-| `app_publish` | `async def app_publish(self, app_id, version, bundle, message='', module_id=None, name=None) -> dict` |
-| `app_versions` | `async def app_versions(self, app_id) -> list[dict]` |
-| `app_deploy` | `async def app_deploy(self, app_id, registry_version, target) -> dict` |
-| `app_where` | `async def app_where(self, app_id) -> list[dict]` |
+See [Deployments](/clients/python/deploy#app-publish-ladder) for the model.
+
+| Method | Signature | Description |
+| ------ | --------- | ----------- |
+| `deploy.add` | `async def add(self, pipeline=None, *, kind='pipe', data=None, metadata=None, comment=None, deploy_to=None) -> PublishResult` | The ONE rail door (on the `client.deploy` namespace): deploy any kind of object as the next immutable registry version. `kind='pipe'` (default) takes a `pipeline` dict; `kind='app'` takes ONE `data` zip of the built bundle — retained and unpacked at receipt, born deployment-state `private`. The app id must be inside your developer namespace. |
+| `deploy.add_app` | `async def add_app(self, app_root, *, workspace_root=None, comment=None, metadata=None, on_progress=None) -> PublishResult` | Pack an app folder's source and deploy it as the next registry version — the one call behind the App Builder's Deploy button and CI scripts. Packs by the App Builder rules (workspace-rooted zip, `appManifest.include`, hierarchical gitignore + the hard node_modules/dist/.git baseline, symlink containment, 50MB zipped / 512MB uncompressed caps); `on_progress` narrates one line per step. Deploying activates nothing — bind an audience with `publish_app` afterwards. |
+| `deploy.verify_app` | `async def verify_app(self, app_root, *, workspace_root=None) -> AppVerifyReport` | The no-side-effect precheck for `add_app` — purely local, no server call: manifest shape and id grammar, declared icon/README assets, `appManifest.include` entries, and a pack dry run against the size caps. Server-side concerns (the build, store review) are out of scope. |
+| `list_deployments` | `async def list_deployments(self, app_id) -> list[dict]` | The version rail, newest first — the developer org sees its FULL rail (published or not), other callers only their visible versions. Each entry carries its deployment `state`, its `buildStatus` ('ok' = servable), and the `rungs` naming the audiences bound to it. |
+| `submit_app` | `async def submit_app(self, app_id, registry_version) -> dict` | Submit a deployed version for review — flips the deployment `private` → `submit`. |
+| `withdraw_app` | `async def withdraw_app(self, app_id, registry_version) -> dict` | Withdraw a pending review — the developer's own cancel: flips the deployment `submit` → `private`, the version leaves the admin queue and history records `withdrawn`. Only a version in `submit` withdraws. Developer-org + namespace gated, like submit. |
+| `reply_app` | `async def reply_app(self, app_id, message, registry_version=None) -> dict` | Append a developer message to the app's review thread — rides `deployment_history` as a `reply` row (side `'developer'`), the same stream `deploy.history()` reads. Developer-org + namespace gated, like submit. |
+| `build_log` | `async def build_log(self, app_id, registry_version) -> dict` | One version's durable server build log — the full phase-by-phase output stored beside the version's artifacts (no error text rides the rail rows). Long logs serve their tail; empty `log` = none. Developer-org gated. |
+| `publish_app` | `async def publish_app(self, app_id, registry_version, target) -> dict` | Bind a deployment to '@me', '@team/<name>', or '@public' ('@user' = legacy input alias). The binding is a pure pointer born 'enabled'. '@public' requires the deployment be `ready`; '@me'/'@team' accept any non-`failed` deployment. Pinning ANOTHER org's public app to '@me'/'@team' is the version selector; publishing your own app requires the id to be in your namespace. |
+| `where_app` | `async def where_app(self, app_id) -> list[dict]` | The reverse index: `{rung, handle, version, appVersion, state, deployedAt}` per audience — `state` is the bound deployment's review state. |
+
+Serving needs no verb: a version's bundle loads from the stable
+`/apps/<app_id>/v<N>/remoteEntry.js` URL constructed from its registry
+version number, with entitlement enforced by the serve route on every
+request (registry ints ONLY — semver is display).
+
+### App marketplace + developer verbs
+
+Two raw DAP commands carry this surface (call via
+`client.call("<command>", {"subcommand": ...})`):
+
+- **`rrext_deploy_app`** — the developer-account + review verbs (claiming a
+  developerId is a deploy PREREQUISITE, not a marketplace action): the
+  `developer_*` family, `submit`, and `register_dev`.
+- **`rrext_app`** — the pure marketplace: browse (`list`/`get`/`list_mine`),
+  install (`desktop_add`/`desktop_remove`), admin review (`admin_*`), and
+  pricing (`pricing_*`).
+
+Grouped families (the `developer_*`/`submit`/`register_dev` rows are on
+`rrext_deploy_app`; the rest on `rrext_app`):
+
+| Subcommand family | Subcommands | Guard | Purpose |
+| ----------------- | ----------- | ----- | ------- |
+| developer_* | `developer_register` · `developer_stripe` · `developer_dashboard` · `developer_status` | org.admin (register) | Claim the org's developer id slug + Stripe Connect onboarding. |
+| submit | `submit` | developer org + namespace | Submit a deployed version for review — flips the DEPLOYMENT `private` → `submit`. |
+| register_dev | `register_dev` | self | Per-user live dev overlay (App Builder hot-reload); OSS-capable. |
+| catalog | `list` · `get` · `list_mine` · `desktop_add` · `desktop_remove` | authenticated | Browse reachable apps, the developer's own rail view, and desktop membership. |
+| admin_* | `admin_queue` · `admin_approve` · `admin_reject` · `admin_reply` · `admin_reseed` | sys.admin | Store review over the DEPLOYMENTS: the queue is deployments in `submit`; `admin_approve(appId, version)` → `ready`, `admin_reject(appId, version)` → `rejected`. |
+| pricing_* | `pricing_list` · `pricing_create` · `pricing_delete` | developer org | Manage Stripe price tiers for a monetized app. |
+
+**Review model.** The review state lives on the DEPLOYMENT. Going public is a
+three-step flow: `submit` (deployment → `submit`, enters the admin queue) →
+`admin_approve` (→ `ready`) → `publish_app @public` (point the public binding at
+the `ready` version). A reject flips the deployment `rejected`; the developer
+fixes and deploys a NEW version. `@me`/`@team` bindings need no approval.
 
 ### Run logs (`client.log`)
 

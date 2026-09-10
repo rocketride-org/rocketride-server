@@ -26,11 +26,12 @@ The path component is a JMESPath expression and may itself contain colons
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextvars import copy_context
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import jmespath
 
@@ -49,7 +50,7 @@ _MAX_WORKERS = 8
 # API from blocking the entire wave indefinitely.
 _TOOL_TIMEOUT_S = 120
 
-# Indentation used by _describe() when rendering nested structures.
+# Indentation used when rendering nested structures.
 _INDENT = '  '
 
 # Maximum array items returned by a memory.peek tool call with a JMESPath path.
@@ -61,6 +62,33 @@ _PEEK_MAX_ARRAY_ITEMS = 50
 # 8000 characters is comfortably below typical LLM context constraints while
 # covering most single-record API responses in one read.
 _PEEK_DEFAULT_LENGTH = 8000
+
+# Nesting depth past which a summary stops descending: past a few levels it stops
+# informing the model, and the cap is also what keeps a cyclic result from recursing
+# until RecursionError and costing the tool its result.
+_SUMMARY_MAX_DEPTH = 6
+
+# Rows of a list-of-dicts always sampled in a structural summary, whatever they cost.
+_SUMMARY_MIN_ROWS = 2
+
+# Character budget for a whole summary. A dict splits its share between the fields
+# that hold containers, so a result with many lists cannot cost more than a result
+# with one. Narrow rows such as {id, name, mimeType} still fit in full, which is what
+# a find-by-name task needs to converge.
+_SUMMARY_BUDGET = 4000
+
+# Smallest share a field can be given. Without it a result with many fields would
+# hand each one too little to render a single row.
+_SUMMARY_MIN_SHARE = 300
+
+# Ceiling applied to the finished summary. The budget is divided rather than
+# multiplied on the way down, so this only catches the overshoot from always
+# rendering _SUMMARY_MIN_ROWS.
+_SUMMARY_HARD_CAP = 6000
+
+# Appended when the cap trims a summary, so the planner peeks instead of assuming
+# it saw everything.
+_SUMMARY_TRUNCATED = '\n... (truncated, peek the key for the rest)'
 
 # Compiled regex for {{memory.ref:key:format:path}} template tags.
 #
@@ -80,7 +108,7 @@ _REF_PATTERN = re.compile(r'\{\{memory\.ref:([^}:]+)(?::([^}:]+))?(?::([^}]+))?\
 # ---------------------------------------------------------------------------
 
 
-def _describe(value: Any, depth: int = 0) -> str:
+def _describe(value: Any) -> str:
     """Return a compact structural summary of *value* for LLM context.
 
     The summary is shown in the "Previous tool results" section of the prompt
@@ -88,15 +116,33 @@ def _describe(value: Any, depth: int = 0) -> str:
     It shows field names, array lengths, and sample values — enough for the
     LLM to formulate a correct JMESPath path for memory.peek.
 
+    Every planning wave resends every prior summary, so size here is paid
+    repeatedly. The result is bounded by _SUMMARY_HARD_CAP.
+    """
+    summary = _render(value, 0, _SUMMARY_BUDGET)
+    if len(summary) > _SUMMARY_HARD_CAP:
+        # The notice counts against the cap, so the returned string never exceeds it.
+        keep = _SUMMARY_HARD_CAP - len(_SUMMARY_TRUNCATED)
+        return f'{summary[:keep]}{_SUMMARY_TRUNCATED}'
+    return summary
+
+
+def _render(value: Any, depth: int, budget: int) -> str:
+    """Render *value* within *budget* characters.
+
     Design decisions:
     - Strings longer than 80 chars are truncated with a char count so the LLM
       knows it is a large value and should use chunked reading if needed.
-    - Lists of dicts show field names and the first two rows so the LLM can
-      see both the schema and representative data.
+    - Lists of dicts show field names, then as many rows as fit the budget,
+      so narrow rows are listed in full and a lookup can be answered from the
+      summary. The header reports how many rows were shown when some are
+      omitted, so the LLM knows the sample is partial.
     - Lists of primitives show a short sample (first 3 items).
     - Depth is tracked so nested structures are indented readably.
     """
-    pad = _INDENT * depth
+    if depth > _SUMMARY_MAX_DEPTH:
+        return '...'
+
     if value is None:
         return 'null'
     if isinstance(value, bool):
@@ -118,25 +164,61 @@ def _describe(value: Any, depth: int = 0) -> str:
             # Collect field names from up to 5 rows to handle sparse rows
             # where early rows may be missing fields that appear later.
             keys = list(dict.fromkeys(k for row in value[:5] if isinstance(row, dict) for k in row))
-            lines = [f'{n} items, fields: {keys}']
-            # Show first 2 rows as sample data so the LLM can see real values
-            for i, row in enumerate(value[:2]):
-                lines.append(f'{pad}{_INDENT}row[{i}]:\n{_describe_dict(row, depth + 1)}')
-            return '\n'.join(lines)
+            rows = _sample_rows(value, depth, budget)
+            header = f'{n} items, fields: {keys}'
+            if len(rows) < n:
+                # Say the sample is partial, so a lookup peeks the key instead of
+                # re-running the search that produced it.
+                header += f' (showing {len(rows)} of {n})'
+            return '\n'.join([header] + rows)
         # Non-dict list — show a short JSON sample
         sample = json.dumps(value[:3], ensure_ascii=False)
         return f'{n} items, sample: {sample}'
     if isinstance(value, dict):
-        return _describe_dict(value, depth)
+        return _describe_dict(value, depth, budget)
     return str(value)
 
 
-def _describe_dict(d: dict, depth: int) -> str:
-    """Render a dict as indented key: value lines using _describe for values."""
+def _sample_rows(value: list, depth: int, budget: int) -> List[str]:
+    """Render as many rows of *value* as *budget* allows.
+
+    Args:
+        value: The list of dicts being summarised.
+        depth: Current nesting depth.
+        budget: Characters this list may spend.
+
+    Returns:
+        The rendered rows, always at least _SUMMARY_MIN_ROWS where available.
+        The first _SUMMARY_MIN_ROWS count against the budget too, so wide rows
+        exhaust it and the sample stops at two.
+    """
     pad = _INDENT * depth
+    rows: List[str] = []
+    spent = 0
+    for i, row in enumerate(value):
+        # _render picks this branch from the first item alone, so a later row can
+        # be a scalar. Widening the window past two rows made that reachable.
+        body = _render(row, depth + 1, budget)
+        text = f'{pad}{_INDENT}row[{i}]:\n{body}'
+        if i >= _SUMMARY_MIN_ROWS and spent + len(text) > budget:
+            break
+        rows.append(text)
+        spent += len(text)
+    return rows
+
+
+def _describe_dict(d: dict, depth: int, budget: int) -> str:
+    """Render a dict as indented key: value lines using _render for values.
+
+    The budget is split between the fields holding containers rather than handed
+    to each in turn, so what a lookup can answer does not depend on key order.
+    """
+    pad = _INDENT * depth
+    containers = sum(1 for v in d.values() if isinstance(v, (list, dict)) and v)
+    share = max(_SUMMARY_MIN_SHARE, budget // containers) if containers else budget
     lines = []
     for k, v in d.items():
-        desc = _describe(v, depth + 1)
+        desc = _render(v, depth + 1, share)
         if '\n' in desc:
             # Multi-line value — put it on its own line below the key
             lines.append(f'{pad}{k}:\n{desc}')
@@ -322,11 +404,34 @@ def _auto_key(wave_name: str, idx: int) -> str:
     return f'{wave_name}.r{idx}'
 
 
+def _result_fingerprint(result: Any) -> Optional[str]:
+    """Fingerprint a tool result so an identical one can be recognised later.
+
+    Args:
+        result: The value a tool returned.
+
+    Returns:
+        A hex digest, or None if *result* cannot be encoded. default=str mirrors
+        planner._json_default, since results can carry Decimal and datetime from
+        database tools.
+    """
+    try:
+        encoded = json.dumps(result, sort_keys=True, ensure_ascii=False, default=str)
+    except (TypeError, ValueError, RecursionError):
+        # sort_keys raises TypeError on keys that cannot be ordered or encoded, and
+        # default= is consulted for values only, never keys. The result is stored and
+        # summarised by the time this runs. Dedup only advises the planner, so dropping
+        # the signal costs less than the result.
+        return None
+    return hashlib.sha256(encoded.encode('utf-8')).hexdigest()
+
+
 def _store_and_preview(
     tool: str,
     key: str,
     result: Any,
     context: AgentContext,
+    agent_base: AgentBase,
 ) -> Dict[str, Any]:
     """Store *result* in memory under *key* and return a compact summary dict.
 
@@ -339,6 +444,10 @@ def _store_and_preview(
     The full result is stored as a native Python object in memory so that
     memory.peek can later extract specific fields via JMESPath without
     re-parsing a JSON string.
+
+    A result identical to one already stored this run also carries `deduplicated`
+    and a `note` naming the earlier key. It signals, it never blocks: repeating a
+    call is often legitimate, so the call still ran and the result is still stored.
     """
     try:
         context.memory.put(key, result)
@@ -346,8 +455,30 @@ def _store_and_preview(
         error(f'rocketride wave memory.put key={key!r} failed: {exc}')
         raise
 
-    summary = _describe(result)
-    return {'tool': tool, 'key': key, 'summary': summary}
+    entry = {'tool': tool, 'key': key, 'summary': _describe(result)}
+
+    seen = getattr(agent_base, 'seen_results', None)
+    if seen is None:
+        return entry
+
+    fingerprint = _result_fingerprint(result)
+    if fingerprint is None:
+        return entry
+
+    # A wave runs its calls on a thread pool, so two identical results can both read
+    # an empty slot and neither would be flagged. setdefault is atomic and gives the
+    # first writer the slot, so exactly one entry stays unflagged.
+    prior_key = seen.setdefault(fingerprint, key)
+    if prior_key == key:
+        return entry
+
+    entry['deduplicated'] = True
+    entry['note'] = (
+        f'This result is identical to {prior_key}, which is already in memory, so this call '
+        f'produced no new information. Read {prior_key} with memory.peek, or change approach: '
+        f'repeating a call that returns the same data will not advance the task.'
+    )
+    return entry
 
 
 # ---------------------------------------------------------------------------
@@ -465,7 +596,7 @@ def _execute_wave_calls(
             # Store the result in memory and return a structural summary.
             # The summary is what gets injected into the next planning prompt;
             # the full result stays in memory for later memory.peek access.
-            return _store_and_preview(tool, key, result, context)
+            return _store_and_preview(tool, key, result, context, agent_base)
 
         except Exception as exc:
             err_msg = f'{type(exc).__name__}: {exc}'

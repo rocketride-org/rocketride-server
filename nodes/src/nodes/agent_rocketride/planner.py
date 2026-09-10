@@ -249,6 +249,9 @@ def _build_wave_question(
 
         Do NOT use memory.peek to inspect or validate bulk data before answering.
         If the structural summary tells you what you need, that is enough.
+        When a summary says it is showing fewer rows than the item count, what you
+        are looking for may be in the rows it did not show: peek that key rather
+        than repeating the call that produced it.
 
         - {{memory.ref:key:format}} (answer template)
         Use in the final answer to embed stored data. The system fetches, formats, and

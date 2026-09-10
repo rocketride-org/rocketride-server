@@ -26,9 +26,10 @@
 
 /**
  * The App Builder's entire view surface: a top TabControl strip switching
- * the three activity views — DEVELOP | DEPLOY | STORE — with the app's
- * `id · version` in the trailing slot (revised decision D1: activity names,
- * no coach bar, no artifact views).
+ * the five activity views — DASHBOARD | DESIGN | PACKAGE | STORE | DEPLOY —
+ * with the app's `id · version` in the trailing slot (revised decision D1:
+ * activity names, no coach bar, no artifact views). DASHBOARD is the
+ * landing view; PACKAGE is the complete-app bar, STORE is commerce only.
  *
  * Hosts mount this ONE component in exactly one of two ways (decision D7):
  * rocket-ui direct-mounts it with an adapter over the live client; the
@@ -37,11 +38,13 @@
  * code surfaces are the only host-rendered pieces, passed in as slots.
  */
 
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { TabControl } from 'shell';
 import type { ViewMenu } from 'shell';
-import { DevelopView } from './DevelopView';
+import { DashboardView } from './DashboardView';
+import { DesignView } from './DesignView';
 import { DeployView } from './DeployView';
+import { PackageView } from './PackageView';
 import { StoreView } from './StoreView';
 import type { AppBuilderStage, AppSummary, IAppBuilderHost } from './types';
 
@@ -59,7 +62,7 @@ export interface IAppBuilderScreenProps {
 	previewPane?: React.ReactNode;
 	/** Host-rendered Code surface (web: file tree + Monaco). */
 	codePane?: React.ReactNode;
-	/** Initial activity view (defaults to 'develop'). */
+	/** Initial activity view (defaults to 'dashboard'). */
 	initialStage?: AppBuilderStage;
 	/** Notified when the user switches views (hosts persist view state). */
 	onStageChange?: (stage: AppBuilderStage) => void;
@@ -91,6 +94,19 @@ const styles: Record<string, React.CSSProperties> = {
 		alignSelf: 'center',
 		paddingRight: 4,
 	},
+	// Namespace-mismatch banner above the STORE/DEPLOY views — the pages
+	// below it render read-only.
+	nsBanner: {
+		margin: '12px 26px 0',
+		padding: '10px 14px',
+		border: '1px solid var(--rr-color-warning)',
+		borderRadius: 8,
+		background: 'rgba(232,185,49,0.10)',
+		fontSize: 12.5,
+		color: 'var(--rr-text-primary)',
+		lineHeight: 1.5,
+		flexShrink: 0,
+	},
 };
 
 // =============================================================================
@@ -106,14 +122,29 @@ export const AppBuilderScreen: React.FC<IAppBuilderScreenProps> = ({
 	host, app, previewPane, codePane, initialStage, onStageChange,
 }) => {
 	// ── Stage — the active activity view ─────────────────────────────────
-	const [stage, setStage] = useState<AppBuilderStage>(initialStage ?? 'develop');
+	const [stage, setStage] = useState<AppBuilderStage>(initialStage ?? 'dashboard');
 
-	// The three activity views, per the settled UI model
+	// ── Namespace gate ───────────────────────────────────────────────────
+	// The app id's prefix must match the org's developerId to publish. On a
+	// mismatch STORE and DEPLOY render read-only (DEVELOP is untouched —
+	// local work is always allowed). null = unknown (signed out / no org):
+	// no gate, the server enforces ownership anyway.
+	const [developerId, setDeveloperId] = useState<string | null>(null);
+	useEffect(() => {
+		if (!host.getDeveloperId) { setDeveloperId(null); return; }
+		void host.getDeveloperId().then((id) => setDeveloperId(id || null)).catch(() => setDeveloperId(null));
+	}, [host]);
+	const namespaceMismatch = developerId !== null && app.id.split('.')[0] !== developerId;
+
+	// The five activity views, per the settled UI model — Dashboard lands
+	// first; Package is the complete-app bar, Store is commerce only.
 	const viewMenu: ViewMenu = useMemo(() => ({
 		entries: [
-			{ id: 'develop', label: 'Develop' },
-			{ id: 'deploy', label: 'Deploy' },
+			{ id: 'dashboard', label: 'Dashboard' },
+			{ id: 'design', label: 'Design' },
+			{ id: 'package', label: 'Package' },
 			{ id: 'store', label: 'Store' },
+			{ id: 'deploy', label: 'Deploy' },
 		],
 	}), []);
 
@@ -138,13 +169,30 @@ export const AppBuilderScreen: React.FC<IAppBuilderScreenProps> = ({
 				}
 			/>
 
+			{/* Namespace-mismatch banner — why the page below is read-only.
+			    STORE/DEPLOY only: DESIGN is local work (always allowed), and the
+			    DASHBOARD is read-only by nature — it disables just its reply box
+			    with an inline hint instead of opening the landing tab on a warning. */}
+			{namespaceMismatch && (stage === 'store' || stage === 'deploy') && (
+				<div style={styles.nsBanner}>
+					<strong>Read-only:</strong> this app&rsquo;s id <code>{app.id}</code> is outside your
+					organization&rsquo;s developer namespace <code>{developerId}</code>. Rename the app id
+					in package.json to <code>{developerId}.&lt;name&gt;</code> to publish it from this org.
+				</div>
+			)}
+
 			{/* Active view body */}
 			<div style={styles.body}>
-				{stage === 'develop' && (
-					<DevelopView host={host} previewPane={previewPane} codePane={codePane} />
+				{stage === 'dashboard' && (
+					<DashboardView host={host} app={app} readOnly={namespaceMismatch} onNavigate={selectStage} />
 				)}
-				{stage === 'deploy' && <DeployView host={host} app={app} />}
-				{stage === 'store' && <StoreView host={host} app={app} />}
+				{stage === 'design' && (
+					<DesignView host={host} previewPane={previewPane} codePane={codePane} />
+				)}
+				{/* Package edits LOCAL files (like DESIGN) — never namespace-gated. */}
+				{stage === 'package' && <PackageView host={host} app={app} />}
+				{stage === 'deploy' && <DeployView host={host} app={app} readOnly={namespaceMismatch} />}
+				{stage === 'store' && <StoreView host={host} app={app} readOnly={namespaceMismatch} onNavigate={selectStage} />}
 			</div>
 		</div>
 	);

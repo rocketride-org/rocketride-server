@@ -195,4 +195,4 @@ await client.connect();
 const result = await client.use({ filepath: 'rag-pipeline.pipe' });
 ```
 
-See the [Pipeline Rules](../docs/agents/ROCKETRIDE_PIPELINE_RULES.md) and [Component Reference](../docs/agents/ROCKETRIDE_COMPONENT_REFERENCE.md) for detailed documentation.
+See the [Pipelines guide](../docs/agents/ROCKETRIDE_PIPELINES.md) and [Component Reference](../docs/agents/ROCKETRIDE_COMPONENT_REFERENCE.md) for detailed documentation.

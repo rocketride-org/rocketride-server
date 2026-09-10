@@ -63,8 +63,19 @@ TEST_CONFIG = {
 # Package source, so the subprocess runs the CLI from this working tree
 SRC_DIR = Path(__file__).parent.parent / 'src'
 
-# Equivalent of the installed `rocketride` console script
-CLI_ENTRY = 'import sys; from rocketride.cli.main import main; main()'
+# rocketride_common ships INSIDE the rocketride wheel, but from source it is a
+# sibling package — the subprocess path must carry it explicitly (same reason
+# as the sys.path insert in conftest.py).
+COMMON_SRC_DIR = Path(__file__).parents[2] / 'client-common' / 'python' / 'src'
+
+# Equivalent of the installed `rocketride` console script. The source paths
+# are injected INSIDE the bootstrap, not via PYTHONPATH: in CI sys.executable
+# is the engine's embedded interpreter, which runs in isolated mode and
+# ignores PYTHONPATH entirely — an env-var path never reaches it.
+CLI_ENTRY = (
+    f'import sys; sys.path[:0] = [{str(SRC_DIR)!r}, {str(COMMON_SRC_DIR)!r}]; '
+    'from rocketride.cli.main import main; main()'
+)
 
 # Argparse reads these as option defaults, so the ambient configuration of
 # whoever runs the suite must not reach the subprocess
@@ -80,19 +91,24 @@ async def ensure_clean_pipeline(client: RocketRideClient, token: str) -> None:
         pass
 
 
-async def run_cli(*args: str, cwd: Optional[str] = None) -> Tuple[int, str]:
+async def run_cli(*args: str, cwd: Optional[str] = None, pipeline: Optional[str] = None) -> Tuple[int, str]:
     """
     Run the CLI as a separate process and collect its output.
 
     Args:
         *args: Command line arguments, without the program name
         cwd: Working directory for the process
+        pipeline: Pipeline file, delivered via the ROCKETRIDE_PIPELINE env
+            default rather than --pipeline. When sys.executable is the
+            engine's embedded interpreter (how CI runs this suite), the
+            wrapper parses argv before Python does and consumes --pipeline
+            (and --args) as its own options, leaving the value behind as a
+            stray positional. Both spellings feed the same argparse dest.
 
     Returns:
         Tuple of (exit code, combined stdout and stderr)
     """
     env = dict(os.environ)
-    env['PYTHONPATH'] = str(SRC_DIR)
 
     # These tests are about what the commands do, not about what the console
     # can render; console encoding is covered by test_cli_console_encoding.py
@@ -100,6 +116,8 @@ async def run_cli(*args: str, cwd: Optional[str] = None) -> Tuple[int, str]:
 
     for name in CLI_ENV_VARS:
         env.pop(name, None)
+    if pipeline is not None:
+        env['ROCKETRIDE_PIPELINE'] = pipeline
 
     process = await asyncio.create_subprocess_exec(
         sys.executable,
@@ -169,7 +187,7 @@ class TestCliStart:
             await ensure_clean_pipeline(client, self.PIPELINE_TOKEN)
 
             pipeline = write_pipeline(tmp_path, self.PROJECT_ID)
-            code, output = await run_cli('start', pipeline, '--token', self.PIPELINE_TOKEN, *server_args())
+            code, output = await run_cli('start', '--token', self.PIPELINE_TOKEN, *server_args(), pipeline=pipeline)
 
             assert code == 0, output
 
@@ -189,7 +207,7 @@ class TestCliStart:
             await ensure_clean_pipeline(client, self.PIPELINE_TOKEN)
 
             pipeline = write_pipeline(tmp_path, self.PROJECT_ID)
-            code, output = await run_cli('start', pipeline, '--token', self.PIPELINE_TOKEN, *server_args())
+            code, output = await run_cli('start', '--token', self.PIPELINE_TOKEN, *server_args(), pipeline=pipeline)
 
             assert code == 0, output
 
@@ -214,7 +232,7 @@ class TestCliStart:
             await client.connect()
 
             missing = str(tmp_path / 'no-such.pipe')
-            code, output = await run_cli('start', missing, '--token', self.PIPELINE_TOKEN, *server_args())
+            code, output = await run_cli('start', '--token', self.PIPELINE_TOKEN, *server_args(), pipeline=missing)
 
             assert code == 1, output
 
@@ -278,7 +296,10 @@ class TestCliList:
 
             assert code == 0, output
 
-            tasks = json.loads(output)
+            # The unified CLI's --json payload is an envelope object, not a
+            # bare array: list emits {'tasks': [...]} (see run_list's
+            # out.result call).
+            tasks = json.loads(output)['tasks']
             assert self.PIPELINE_TOKEN in [task.get('token') for task in tasks]
         finally:
             await ensure_clean_pipeline(client, self.PIPELINE_TOKEN)
@@ -355,7 +376,7 @@ class TestCliUpload:
             pipeline = write_pipeline(tmp_path, self.PROJECT_ID)
             files = self.write_files(tmp_path)
 
-            code, output = await run_cli('upload', *files, '--pipeline_path', pipeline, *server_args())
+            code, output = await run_cli('upload', *files, *server_args(), pipeline=pipeline)
 
             assert code == 0, output
             assert 'Upload Error' not in output
@@ -374,7 +395,7 @@ class TestCliUpload:
         code, output = await run_cli('upload', *files, *server_args())
 
         assert code == 1
-        assert '--pipeline_path or --token' in output
+        assert '--pipeline or --token' in output
 
     @pytest.mark.asyncio
     async def test_should_fail_when_no_file_matches(self, tmp_path):
@@ -415,7 +436,11 @@ class TestCliDispatch:
 
     @pytest.mark.asyncio
     async def test_should_require_a_store_subcommand(self):
-        code, output = await run_cli('store', *server_args())
+        # Bare `store`, no connection args: the unified CLI attaches
+        # --uri/--apikey to each store SUBcommand, so passing them to the
+        # bare group is an argparse error (exit 2) that would mask the
+        # missing-subcommand path this test is about.
+        code, output = await run_cli('store')
 
         assert code == 1
         assert 'Store subcommand is required' in output

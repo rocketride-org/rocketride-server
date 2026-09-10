@@ -275,6 +275,8 @@ import { applyTheme } from './themes';
 import { isInVSCode } from './themes/vscode';
 import { OAUTH_ROOT_URL } from './auth/oauth';
 import { ITaskState, IServiceCapabilities, DEFAULT_TOOLCHAIN_STATE } from './types/project';
+import { getAppVersionOverride, applyAppVersionOverride, versionedEntryUrl } from './util/versionOverride';
+export type { AppVersionOverride } from './util/versionOverride';
 
 export {
 	Button, StatusBadge, StatusDot, EmptyState, Banner, InputField,
@@ -510,6 +512,12 @@ export const shellApi = {
 	get BxChevronRight() { return BxChevronRight; },
 	get BxFolderOpen() { return BxFolderOpen; },
 	get AppLayout() { return AppLayout; },
+	// Desktop version selector — session override read + apply/clear
+	get getAppVersionOverride() { return getAppVersionOverride; },
+	get applyAppVersionOverride() { return applyAppVersionOverride; },
+	// Stable versioned entry URL (constructed, never minted — the server
+	// enforces entitlement per request on the /apps/<id>/v<N>/ route)
+	get versionedEntryUrl() { return versionedEntryUrl; },
 } as const;
 
 // =============================================================================
@@ -550,6 +558,8 @@ export {
 	BxLockOpen, BxPurchaseTag, BxChevronRight, BxFolderOpen,
 	// The one app-root layout
 	AppLayout,
+	// Desktop version selector — session override read + apply/clear
+	getAppVersionOverride, applyAppVersionOverride, versionedEntryUrl,
 };
 
 /**

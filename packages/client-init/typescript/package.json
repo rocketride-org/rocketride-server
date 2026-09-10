@@ -1,0 +1,29 @@
+{
+	"name": "rocketride-init",
+	"version": "0.1.0",
+	"description": "Bootstrap a RocketRide workspace: downloads the connected server's own client into .rocketride/ and runs its init.",
+	"license": "MIT",
+	"author": "RocketRide, Inc.",
+	"bin": {
+		"rocketride-init": "./bin/rocketride-init.js",
+		"typescript-init": "./bin/rocketride-init.js"
+	},
+	"files": [
+		"bin",
+		"README.md"
+	],
+	"engines": {
+		"node": ">=18"
+	},
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/rocketride-org/rocketride-server.git",
+		"directory": "packages/client-init/typescript"
+	},
+	"homepage": "https://rocketride.ai/",
+	"keywords": [
+		"rocketride",
+		"bootstrap",
+		"init"
+	]
+}

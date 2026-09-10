@@ -18,7 +18,7 @@ Read the doc for your task before writing code. Paths are repo-relative.
 
 | Task | Read |
 |---|---|
-| Use RocketRide / write integration code | `docs/agents/ROCKETRIDE_QUICKSTART.md` first, then the other `ROCKETRIDE_*` files there |
+| Use RocketRide / write integration code | `docs/agents/ROCKETRIDE_README.md` first, then the other `ROCKETRIDE_*` files there |
 | Build or edit a node | `docs/development/nodes/readme-schema.md` (README contract), `docs/development/nodes/services-schema.md` (services.json contract), `docs/development/nodes/index.md` (catalog) |
 | Test a node | `docs/development/nodes/testing.md` |
 | Client (SDK) docs | `docs/development/clients/readme-schema.md`; sources in `docs/public/<name>/` |

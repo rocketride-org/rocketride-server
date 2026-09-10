@@ -1,6 +1,6 @@
 # RocketRide Component Reference
 
-**Last Updated:** June 2026
+**Last Updated:** August 2026
 
 ---
 
@@ -21,12 +21,12 @@ When the RocketRide VS Code extension is installed, it populates a `.rocketride/
 
 **IMPORTANT:** Always read `.rocketride/services-catalog.json` for the current list of available components. The catalog is the single source of truth: it is generated from the connected server and may contain components not listed in this document.
 
-> **See also:** `ROCKETRIDE_PIPELINE_RULES.md`, exported next to this file, covers how
-> components connect — lane types, lane flow rules, and control (invoke) connections.
-> Online: <https://docs.rocketride.org/concepts/pipelines> contrasts data lanes with
-> invoke connections, <https://docs.rocketride.org/concepts/nodes> describes a node's
-> `provider`/`config`/`input` shape and its class types, and per-node reference lives
-> at <https://docs.rocketride.org/nodes>.
+> **See also:** the two files above are the working pair behind this
+> reference. `.rocketride/services-catalog.json` is the node catalog: every
+> node's class, lanes, and control-plane (`invoke`) requirements.
+> `.rocketride/schema/{component_name}.json` is that node's detailed config
+> model: profiles, required fields, and defaults. Both are explained in the
+> sections below.
 
 ### Reading the Catalog
 
@@ -51,7 +51,7 @@ Each entry in `services-catalog.json` has this structure:
 **Key fields:**
 
 - `name`: the `provider` value you use in pipeline files
-- `classType`: component category: source, data, text, image, audio, video, embedding, llm, store, database, graph, guard, rerank, search, tool, agent, memory, infrastructure, target, preprocessor
+- `classType`: component category: source, data, text, image, audio, video, embedding, llm, store, database, tool, agent, memory, infrastructure, target, preprocessor
 - `lanes`: the definitive reference for data flow. Each key is an input lane; its value array lists the output lanes produced. An empty array `[]` means the component consumes data with no lane output (e.g., storage, response). Source components use `_source` as the input lane key
 - `invoke`: (optional) defines what control-plane connections the component requires or accepts. Each key is a `classType` (e.g., `llm`, `tool`, `memory`) with `min`/`max` constraints and a description. Components with `invoke` need corresponding entries in the `control` array of the pipeline definition
 
@@ -308,15 +308,24 @@ This applies to agents, but also to non-agent components like `summarization`, `
 
 ### Memory Requirements by Agent Type
 
-| Agent              | LLM                  | Memory                   | Tools    |
-| ------------------ | -------------------- | ------------------------ | -------- |
-| `agent_rocketride` | Required (exactly 1) | **Required (exactly 1)** | Optional |
-| `agent_crewai`     | Required (min 1)     | Not supported            | Optional |
-| `agent_langchain`  | Required (min 1)     | Not supported            | Optional |
-| `agent_llamaindex` | Required (min 1)     | Not supported            | Optional |
-| `agent_deepagent`  | Required (min 1)     | Not supported            | Optional (plus an optional `deepagent` sub-agent port) |
+| Agent                      | LLM                  | Memory                   | Tools         | Sub-agents                             |
+| -------------------------- | -------------------- | ------------------------ | ------------- | -------------------------------------- |
+| `agent_rocketride`         | Required (exactly 1) | **Required (exactly 1)** | Optional      | -                                      |
+| `agent_crewai`             | Required (min 1)     | Not supported            | Optional      | -                                      |
+| `agent_crewai_manager`     | Required (min 1)     | Not supported            | Not supported | Required (min 1, classType `crewai`)   |
+| `agent_crewai_subagent`    | Required (min 1)     | Not supported            | Optional      | -                                      |
+| `agent_deepagent`          | Required (min 1)     | Not supported            | Optional      | Optional (min 0, classType `deepagent`) |
+| `agent_deepagent_subagent` | Required (min 1)     | Not supported            | Optional      | -                                      |
+| `agent_langchain`          | Required (min 1)     | Not supported            | Optional      | -                                      |
+| `agent_llamaindex`         | Required (min 1)     | Not supported            | Optional      | -                                      |
 
-Only `agent_rocketride` supports a `memory_internal` control connection. The other agents do not have a memory port, do not wire memory to them.
+Only `agent_rocketride` supports a `memory_internal` control connection. No other agent type has a memory port, do not wire memory to any of them.
+
+Framework-specific notes:
+
+- `agent_crewai_manager` has **no tool port**: tools attach to its sub-agents instead. Each `agent_crewai_subagent` joins the crew by declaring `control: [{ "classType": "crewai", "from": "<manager_id>" }]`, and at least one sub-agent is required.
+- `agent_deepagent` can optionally delegate to `agent_deepagent_subagent` nodes, which declare `control: [{ "classType": "deepagent", "from": "<agent_id>" }]`.
+- The sub-agent nodes (`agent_crewai_subagent`, `agent_deepagent_subagent`) have no data lanes: they live entirely on the control plane, with their own required LLM and optional tools declaring `control` entries that point at the sub-agent.
 
 ### Multi-Agent Pipelines
 
@@ -340,7 +349,7 @@ Agent_2 has no `input` lanes: it is invoked as a tool by Agent_1. LLM_2 and Memo
 
 ### Tool Components
 
-Most pure-tool components (classType `tool`) have empty `lanes` (`{}`) and are not connected via data lanes: they are invoked by agents at runtime. Exceptions exist: `tool_pipe` exposes sub-pipeline output lanes, and dual-class `data`+`tool` nodes (e.g. `tool_guild`, `tool_n8n`) carry data lanes. The tool declares which agent controls it via the `control` array with `"classType": "tool"`.
+Tool components (classType `tool`) have empty `lanes` (`{}`). They are not connected via data lanes: they are invoked by agents at runtime. The tool declares which agent controls it via the `control` array with `"classType": "tool"`.
 
 ---
 
@@ -533,11 +542,15 @@ Space each parallel agent 160px apart on the y-axis. The response node sits at t
 
 ### Choose a Source Component
 
-| Need             | Use       | Client Method                         |
-| ---------------- | --------- | ------------------------------------- |
-| Chat/Q&A system  | `chat`    | `client.chat()`                       |
-| Document uploads | `webhook` | `client.send()`, `client.sendFiles()` |
-| Drag & drop      | `dropper` | `client.sendFiles()`                  |
+| Need                                  | Use                | Client Method                                               |
+| ------------------------------------- | ------------------ | ----------------------------------------------------------- |
+| Chat/Q&A system                       | `chat`             | `client.chat()`                                             |
+| Document uploads                      | `webhook`          | `client.send()`, `client.sendFiles()`                       |
+| Drag & drop                           | `dropper`          | `client.sendFiles()`                                        |
+| Local file system ingestion           | `filesys`          | None: reads the server's file system when the pipeline runs |
+| Platform file-store ingestion         | `filestore_source` | None: reads the platform file store                         |
+| Telegram bot (text/image/audio/video) | `telegram`         | None: messages arrive via the Telegram Bot API              |
+| Host tools with no data flow          | `tools`            | None: transfers no data, exists only to host tool nodes     |
 
 ### Choose an LLM
 
