@@ -82,6 +82,39 @@ function formatAudience(audience: Record<string, unknown> | undefined): string {
 export function registerNodeCommands(program: Command): void {
 	const nodeCmd = program.command('node').description('Node distribution operations (deployment target)');
 
+	// ── node add ─────────────────────────────────────────────────────────
+	// Packs a node folder and deploys it. The packing rules live in the SDK,
+	// so the CLI and any UI produce byte-identical bundles.
+	const addCmd = nodeCmd
+		.command('add <folder>')
+		.description('Pack a node folder and deploy it as the next registry version')
+		.option('--comment <text>', 'What-changed note kept in the registry')
+		.option('--deploy-to <teamId>', 'Also point this team at the new version in the same call')
+		.option('--verbose', 'Narrate every pack step')
+		.action(async (folder, options) => {
+			await runCliCommand(options, async (out) => {
+				const client = await connectDeploy(options, out);
+				if (!client) return 1;
+				const body = await client.deploy.addNode(folder, {
+					comment: options.comment,
+					deployTo: options.deployTo,
+					onProgress: options.verbose ? (line: string) => out.line(line) : undefined,
+				});
+				const artifact = body.artifact as Record<string, unknown> | undefined;
+				out.line(`deployed v${String(artifact?.version ?? '?')}`);
+				// Publishing alone leaves the version inert, so say so rather than
+				// letting someone assume it is live.
+				if (body.audience) {
+					out.line(`reachable by ${formatAudience(body.audience as Record<string, unknown>)}`);
+				} else {
+					out.line('not reachable by anyone yet — pin it with `node deploy`');
+				}
+				out.result(body);
+				return 0;
+			});
+		});
+	addDeployConnectionOptions(addCmd);
+
 	// ── node versions ────────────────────────────────────────────────────
 	const versionsCmd = nodeCmd
 		.command('versions <nodeId>')

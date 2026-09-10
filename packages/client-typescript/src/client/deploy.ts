@@ -365,6 +365,38 @@ export class DeployApi {
 	}
 
 	/**
+	 * Packs a node directory and deploys it as the next registry version.
+	 *
+	 * The node counterpart of {@link addApp}, and the call a UI makes when
+	 * someone presses Deploy on a node. Packing rules live in
+	 * `rocketride/app-pack` and nowhere else: the node folder is the zip root,
+	 * so `services.json` lands at the top where the server reads identity
+	 * from, and the tree comes back out on another machine exactly as the
+	 * author had it.
+	 *
+	 * The id is decided by the manifest inside the zip, never by the caller.
+	 *
+	 * @param nodeRoot - Path to the node directory.
+	 * @param options.comment - "What changed" note kept in the registry.
+	 * @param options.deployTo - Team to point at the new version in the same
+	 *   call; publishing alone leaves the version inert.
+	 * @param options.metadata - Optional metadata blob.
+	 * @param options.onProgress - Narrates each pack step.
+	 * @returns The new registry entry, plus the audience when `deployTo` was given.
+	 */
+	async addNode(nodeRoot: string, options: { comment?: string; deployTo?: string; metadata?: Record<string, unknown>; onProgress?: (line: string) => void } = {}): Promise<PublishResult> {
+		const pack = await this.loadAppPack();
+		const packed = pack.packNodeSource(nodeRoot, options.onProgress);
+		return this.add({
+			kind: 'node',
+			data: packed.data,
+			...(options.metadata !== undefined && { metadata: options.metadata }),
+			...(options.comment !== undefined && { comment: options.comment }),
+			...(options.deployTo !== undefined && { deployTo: options.deployTo }),
+		});
+	}
+
+	/**
 	 * A published node's version rail, newest first.
 	 *
 	 * Uploading a node version is not here — it arrives on the generic rail as
