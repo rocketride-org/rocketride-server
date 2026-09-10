@@ -331,7 +331,19 @@ function registerApp(appRoot) {
 				categories:    appManifest.categories ?? [],
 				// Settings contribution (VSCode contributes.configuration shape)
 				...(configuration ? { configuration } : {}),
-				entry:         `/${APPS_BASE}/${servedName}/remoteEntry.js`,
+				// STAMPED, so a rebuilt remote cannot be served from cache.
+				//
+				// The URL is otherwise identical across builds, and the chunk names
+				// inside remoteEntry.js are content-hashed — so a browser holding
+				// yesterday's remoteEntry keeps asking for yesterday's chunks and the
+				// app looks unchanged however many times it is rebuilt. That cost an
+				// evening: four rounds of "the change is not showing" against code
+				// that was already correct on disk.
+				//
+				// Registration runs once per build, so the stamp changes exactly when
+				// the bytes do. The versioned SaaS path (`/apps/<id>/v<N>/…`) needs no
+				// such thing — its URL already carries the version.
+				entry:         `/${APPS_BASE}/${servedName}/remoteEntry.js?b=${Date.now().toString(36)}`,
 				// Shell contract version this app was built against (for prune analysis).
 				...(shellApiVersion !== null ? { shellApiVersion } : {}),
 				// App monetization mode

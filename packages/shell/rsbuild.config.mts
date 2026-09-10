@@ -135,6 +135,20 @@ export default defineConfig(({ command }) => {
 					'/sitemap.xml': { target: 'http://localhost:5565' },
 					'/robots.txt': { target: 'http://localhost:5565' },
 					'/llms.txt': { target: 'http://localhost:5565' },
+					// Versioned app bytes (/apps/<id>/v<N>/...) live in the
+					// engine's file store, not in build/ — a SaaS catalog entry
+					// carries a registryVersion and the client constructs that
+					// path, so serving /apps purely from disk here answered every
+					// one of them with index.html and Module Federation failed on
+					// the leading '<'. Only the versioned shape is relayed:
+					// bypass returns the URL for everything else, which falls
+					// through to the static build/ mount above and keeps the
+					// dev-overlay's unversioned /apps/<id>/remoteEntry.js local.
+					'/apps': {
+						target: 'http://localhost:5565',
+						bypass: (req: { url?: string }) =>
+							/^\/apps\/[^/]+\/v\d+\//.test(req.url ?? '') ? undefined : req.url,
+					},
 				},
 			}),
 		},
