@@ -33,11 +33,21 @@ _MOD_PATH = os.path.join(_HERE, '..', '..', 'src', 'nodes', 'llm_anthropic', 'an
 _MODEL = 'claude-sonnet-4-6'
 
 
+#: Every kwarg set the node handed to `ChatAnthropic`, newest last. The client is
+#: the only place the workspace header can be observed — it never reaches the
+#: node's own attributes.
+_CLIENT_KWARGS: list = []
+
+
 def _load_node_module():
     """Load anthropic.py standalone, stubbing the langchain_anthropic client."""
     saved = sys.modules.get('langchain_anthropic')
     stub = types.ModuleType('langchain_anthropic')
-    stub.ChatAnthropic = type('ChatAnthropic', (), {'__init__': lambda self, **kw: None})
+
+    def _record(self, **kw):
+        _CLIENT_KWARGS.append(kw)
+
+    stub.ChatAnthropic = type('ChatAnthropic', (), {'__init__': _record})
     sys.modules['langchain_anthropic'] = stub
     try:
         spec = importlib.util.spec_from_file_location('_llm_anthropic_node', _MOD_PATH)
@@ -51,7 +61,7 @@ def _load_node_module():
             sys.modules['langchain_anthropic'] = saved
 
 
-def _build_chat(monkeypatch, *, reasoning: bool, toggle=None):
+def _build_chat(monkeypatch, *, reasoning: bool, toggle=None, workspace=None):
     """Instantiate the node over a controlled config and return it."""
     config = {
         'model': _MODEL,
@@ -62,6 +72,10 @@ def _build_chat(monkeypatch, *, reasoning: bool, toggle=None):
     }
     if toggle is not None:
         config['extendedThinking'] = toggle
+    if workspace is not None:
+        config['workspaceId'] = workspace
+
+    _CLIENT_KWARGS.clear()
 
     # Both the node and ChatBase read their config through this one call.
     monkeypatch.setattr(Config, 'getNodeConfig', staticmethod(lambda *a, **k: dict(config)))
@@ -98,3 +112,51 @@ def test_string_false_from_the_form_stays_off(monkeypatch, falsy):
 
     assert chat._thinking_mode_kwargs == {}
     assert chat._native_stream_provider == ''
+
+
+# ---------------------------------------------------------------------------
+# The workspace an identity-linked key acts in
+# ---------------------------------------------------------------------------
+
+
+def test_no_workspace_sends_no_header(monkeypatch):
+    """
+    THE DEFAULT MUST STAY SILENT. A workspace-scoped key carries its own
+    workspace and is REJECTED if sent a header naming another, so an
+    unconfigured node has to reach the client with no `default_headers` at all
+    — not with an empty dict, and not with an empty id.
+    """
+    _build_chat(monkeypatch, reasoning=True)
+
+    assert 'default_headers' not in _CLIENT_KWARGS[-1]
+
+
+def test_a_workspace_id_becomes_the_header(monkeypatch):
+    """
+    An identity-linked key carries no workspace of its own, and the API refuses
+    the request outright without this header. Nothing about such a key looks
+    unusual, so the first sign of a dropped header is a 400 on the first turn.
+    """
+    _build_chat(monkeypatch, reasoning=True, workspace='wrkspc_01ABC')
+
+    assert _CLIENT_KWARGS[-1]['default_headers'] == {'anthropic-workspace-id': 'wrkspc_01ABC'}
+
+
+@pytest.mark.parametrize('unresolved', ['${ANTHROPIC_WORKSPACE_ID}', '${env.WORKSPACE}'])
+def test_an_unresolved_reference_counts_as_unset(monkeypatch, unresolved):
+    """
+    An engine that leaves `${...}` in place when nothing is set would otherwise
+    send the literal text as the workspace id, and the resulting error names a
+    workspace nobody has. Treated as absent instead.
+    """
+    _build_chat(monkeypatch, reasoning=True, workspace=unresolved)
+
+    assert 'default_headers' not in _CLIENT_KWARGS[-1]
+
+
+@pytest.mark.parametrize('blank', ['', '   ', None])
+def test_a_blank_workspace_sends_no_header(monkeypatch, blank):
+    """Whitespace is not a workspace id."""
+    _build_chat(monkeypatch, reasoning=True, workspace=blank)
+
+    assert 'default_headers' not in _CLIENT_KWARGS[-1]
