@@ -30,6 +30,7 @@ interface VSCodeTheme {
 
 export interface VSCodeContextType {
 	isVSCode: boolean;
+	isEmbeddedVSCode: boolean;
 	isReady: boolean;
 	theme: VSCodeTheme | null;
 }

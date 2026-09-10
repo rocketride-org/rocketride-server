@@ -105,7 +105,7 @@ export const ChatMessages: React.FC<ChatMessagesProps> = ({ messages, isTyping, 
 	}, [messages, statusMessage]);
 
 	return (
-		<div className="messages-container">
+		<div className="messages-container" data-chat-transcript>
 			<div className="messages-content">
 				{renderItems.map(item =>
 					item.kind === 'thinking-group'
