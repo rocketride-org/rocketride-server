@@ -137,7 +137,8 @@ class IGlobal(IGlobalBase):
 
         - If a numeric HTTP status/code is available, prefix it as "Error <status>:".
         - Then include provider error type and message when present.
-        - If no structured fields are available, return the fallback message as-is.
+        - If no type or message is available, the fallback message is included
+          (after the status prefix when a status is known).
         - Whitespace is normalized to a single line; content is not truncated.
         """
         parts: list[str] = []

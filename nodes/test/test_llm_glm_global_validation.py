@@ -233,3 +233,12 @@ def test_format_error_returns_fallback_without_structured_fields(monkeypatch):
     message = instance._format_error(None, None, None, 'raw provider message')
 
     assert message == 'raw provider message'
+
+
+def test_format_error_keeps_fallback_when_only_status_is_known(monkeypatch):
+    """A status with no type or message must still carry the provider text."""
+    instance, _requests, _warnings = _load_iglobal(monkeypatch)
+
+    message = instance._format_error(502, None, None, 'Bad Gateway')
+
+    assert message == 'Error 502: Bad Gateway'
