@@ -30,6 +30,7 @@ Documents must pass through an embedding node before reaching this node; chunks 
 | `serverName` | string | Default "chroma". Namespace for agent-facing tool names, e.g. 'chroma' exposes tools as chroma.search / chroma.upsert / chroma.delete. Change this when running multiple Chroma nodes in the same pipeline so their tool names do not collide. |
 | `profile` | string | Default "cloud". Connect to... |
 | `provider` | string |  |
+| `top_k` | integer or string | **Top K** — maximum candidate documents fetched from Chroma before score filtering, 1–1000. Overrides the caller's limit in either direction. Unset ⇒ the caller's limit (25 on the data lane). Accepts an integer or an integer string; an unresolved `${...}` placeholder falls back to the caller's limit. |
 
 ---
 
@@ -62,6 +63,18 @@ Tool calls run on the control plane and do not flow through the pipeline's embed
 - **Keyword search** uses ChromaDB's `$contains` document filter and supports offset/limit paging.
 - Raw distances are normalized to scores: cosine distances map to `(distance + 1) / 2`; `l2`/`ip` distances pass through a sigmoid. Results scoring below **0.20** are always dropped before they leave the node, regardless of the `score` threshold.
 - Filters on `nodeId`, `parent`, `objectId`, `tableId`, `chunkId` ranges, and permissions are translated to ChromaDB `where` clauses. Documents marked deleted are excluded with `$ne: true`, so records that never had an `isDeleted` key still match (they are treated as active).
+
+---
+
+## Retrieval tuning
+
+**Top K** (`top_k`) controls how many candidate chunks Chroma fetches before score filtering. It **overrides** the caller's request limit in both directions — it does not only widen. On the data lane the caller's limit is `25`, so a `top_k` of `50` doubles the candidate pool while a `top_k` of `20` shrinks it, and a `top_k` of `3` narrows a caller that asked for `100`. When unset, the caller's request limit is used as-is (25 on the data lane; the `chroma.search` tool sets its own `top_k`). It applies to semantic and keyword search only, not to whole-object fetches.
+
+To widen the pool for a reranker or for hard, specific queries, pick a value comfortably above the caller's limit — for example `50` on the data lane. To cap retrieval instead, pick one below it.
+
+Valid values are `1`–`1000`, written either as an integer (`50`) or as an integer string (`"50"`). The string form exists because env-var interpolation always resolves to a string, so a `${ROCKETRIDE_TOP_K}` placeholder validates; a placeholder that is still unresolved at run time falls back to the caller's limit rather than failing the node, the same way `port` falls back to its default. Any other non-integer value, or an integer outside `1`–`1000`, is rejected when the node starts rather than silently clamped, so a mistyped value surfaces immediately instead of quietly changing how many documents you retrieve. On the tool path, a `top_k` above the tool's own limit widens the candidate pool that `chroma.search` then trims back to its own `top_k` (default 10, max 100).
+
+For the strongest results on precise questions, **retrieve generously and rerank down**: set a `Top K` above the caller's limit here (for example `50`), then place a [Cohere Rerank](../rerank_cohere/README.md) node after this one to reorder the candidates and keep a small, high-relevance set. A complete example is at [`examples/rag-rerank-pipeline.pipe`](../../../../examples/rag-rerank-pipeline.pipe).
 
 ---
 
