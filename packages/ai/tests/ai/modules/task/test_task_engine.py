@@ -1211,11 +1211,7 @@ def _event_task(run_kind='dev'):
     ],
 )
 async def test_on_event_engine_event_resets_idle_timer_for_a_dev_task(event_type):
-    """Pipeline work is activity: a dev task mid-turn is not idle.
-
-    The timer moved only on inbound data before, so a model call or tool loop aged
-    the task toward its TTL while it was busy.
-    """
+    """Pipeline work is activity: a dev task mid-turn is not idle."""
     t = _event_task()
 
     await Task.on_event(t, {'event': event_type, 'body': {}})
@@ -1225,11 +1221,7 @@ async def test_on_event_engine_event_resets_idle_timer_for_a_dev_task(event_type
 
 @pytest.mark.asyncio
 async def test_on_event_stdout_does_not_reset_idle_timer():
-    """`output` carries any line a node printed, including from a background thread.
-
-    Letting it count would hold a finished task alive, which is what the timer
-    exists to prevent.
-    """
+    """Raw node output must not count as idle-timer activity."""
     t = _event_task()
 
     await Task.on_event(t, {'event': 'output', 'body': {'output': 'still here'}})
@@ -1250,12 +1242,7 @@ async def test_on_event_debugger_passthrough_does_not_reset_idle_timer():
 @pytest.mark.asyncio
 @pytest.mark.parametrize('event_type', ['apaevt_status_counts', 'apaevt_sse', 'apaevt_trace'])
 async def test_on_event_never_resets_idle_timer_for_a_deploy_run(event_type):
-    """A deploy run's ttl is a wall-clock window, not an idle timeout.
-
-    task_server_facade sends one for every scheduled run and the schedule UI sells
-    it as "run for up to N". A source-driven run never calls _send_data, so the
-    timer never resetting is exactly what caps the window.
-    """
+    """A deploy run's ttl is a wall-clock window, not an idle timeout."""
     t = _event_task(run_kind='deploy')
 
     await Task.on_event(t, {'event': event_type, 'body': {}})
@@ -1265,13 +1252,7 @@ async def test_on_event_never_resets_idle_timer_for_a_deploy_run(event_type):
 
 @pytest.mark.asyncio
 async def test_on_event_exit_reads_the_key_the_emitters_write():
-    """A clean exit must record code 0, not the fallback.
-
-    Every emitter in dap/transport_stdio.py writes 'exitCode'. Reading 'exit_code'
-    always missed, so a clean exit took the default 1 and _update_completion_status
-    recorded the run as cancelled instead of completed, and the dashboard was told
-    the task errored.
-    """
+    """A clean exit must record code 0, not the fallback."""
     t = _event_task()
     t._status.exitCode = None
     t._status.exitMessage = ''

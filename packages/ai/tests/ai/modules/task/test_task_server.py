@@ -1146,11 +1146,7 @@ def test_build_task_account_info_populates_organization():
 
 
 def _ttl_task(*, ttl, idle):
-    """A task stand-in whose ``_idle_time`` is a real int, not a MagicMock attribute.
-
-    The existing TTL tests assert only on ``stop_task``, so a mutation of the
-    counter passes silently. These assert the counter.
-    """
+    """A task stand-in whose ``_idle_time`` is a real int, not a MagicMock attribute."""
     task = MagicMock()
     task.is_task_complete = MagicMock(return_value=False)
     task._ttl = ttl
@@ -1205,11 +1201,7 @@ async def test_monitor_ttl_reaps_a_task_that_stayed_silent(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_monitor_ttl_spares_a_task_whose_timer_was_reset(monkeypatch):
-    """Work resets the counter, so a busy task survives a cycle it would have died in.
-
-    This is the whole point of the change: on_event zeroes ``_idle_time`` for a
-    working dev task, and the reaper then sees it as young.
-    """
+    """Work resets the counter, so a busy task survives a cycle it would have died in."""
     ts = _make_server()
     ts.stop_task = AsyncMock()
     task = _ttl_task(ttl=900, idle=860)

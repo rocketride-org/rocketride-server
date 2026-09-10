@@ -1489,10 +1489,7 @@ class Task(DAPBase):
         event_type = message.get('event', '')
         body = message.get('body', {})
 
-        # An engine event means the pipeline is working, so a long turn is not idle.
-        # A deploy run is excluded: its ttl is a run window, not an idle timeout, and
-        # nothing else enforces it. Raw 'output' is excluded so a node's background
-        # printing cannot hold a finished task alive.
+        # Pipeline events count as dev-task activity; deploy uses ttl as a run window.
         if self._run_kind == 'dev' and event_type.startswith('apaevt_'):
             self.reset_idle_timer()
 
