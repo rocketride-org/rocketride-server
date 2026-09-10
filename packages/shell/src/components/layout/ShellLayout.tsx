@@ -49,6 +49,7 @@ import { AppFrame } from './AppFrame';
 import RocketRideWordmark from '../../assets/icons/RocketRideWordmark';
 import Sidebar from './Sidebar';
 import StatusBar from './StatusBar';
+import VersionPinNotice from './VersionPinNotice';
 import LoadingScreen from './LoadingScreen';
 import DebugPanel from './DebugPanel';
 import { ConnectionErrorBanner } from './ConnectionErrorBanner';
@@ -721,6 +722,11 @@ export const ShellLayout: React.FC<ShellLayoutProps> = ({
 					<DebugPanel onClose={() => setDebugOpen(false)} />
 				)}
 			</div>
+
+			{/* Which version of the app on screen this is, when it is not the
+			    current one. See VersionPinNotice: a pin is silent, survives
+			    every reload, and is the reason a change "will not show". */}
+			<VersionPinNotice appId={activeAppId} />
 
 			{/* Status bar — presence is the app's AppLayout declaration */}
 			{considerStatusBar && (
