@@ -12,10 +12,10 @@ who can reach it.
 
 Two commands cover the whole surface:
 
-| Command                                                 | What it does                                             |
-| ------------------------------------------------------- | -------------------------------------------------------- |
-| `rrext_deploy` with `subcommand: "add"`, `kind: "node"` | Upload a node version (carries the zip)                  |
-| `rrext_deploy_node`                                     | Control what is published: `versions`, `deploy`, `where` |
+| Command                                                 | What it does                                                   |
+| ------------------------------------------------------- | -------------------------------------------------------------- |
+| `rrext_deploy` with `subcommand: "add"`, `kind: "node"` | Upload a node version (carries the zip)                        |
+| `rrext_deploy_node`                                     | Control it: `versions`, `deploy`, `where`, `disable`, `remove` |
 
 That split matches apps exactly: one generic door to put code on the server,
 one surface to control it afterwards.
@@ -131,6 +131,50 @@ is a team an org admin maintains.
 **First release, update and rollback are all this one verb** — pointing an
 audience at a different registry version is the whole operation. Rolling back
 is pinning the older number again.
+
+## Taking a node back
+
+```json
+{
+	"command": "rrext_deploy_node",
+	"arguments": {
+		"subcommand": "disable",
+		"nodeId": "my_node",
+		"target": "@me"
+	}
+}
+```
+
+`disable` stops serving one binding and is reversible — bind again and it is
+back. `remove` takes the row out of the listing.
+
+**Neither touches the version.** A published version is immutable and stays on
+the registry, which is exactly what keeps rollback possible: taking a node back
+from a team today does not stop you pinning that same version tomorrow. What is
+withdrawn is the pointer, never the artifact.
+
+## Who can expose a node, and how far
+
+The bar is the audience, and it applies the same whether you are putting
+something up or taking it down:
+
+| Target               | Requirement                                                             |
+| -------------------- | ----------------------------------------------------------------------- |
+| `@me`                | Nothing beyond an authenticated session                                 |
+| `@team/<name-or-id>` | You must be a member of that team                                       |
+| `@public`            | The org must be a registered developer **and** own the node's namespace |
+| `@org`               | Does not exist — use an org-admin-maintained "All members" team         |
+
+Private reach needs no namespace: the registry is partitioned by organisation,
+so two orgs can both hold a node called `csv_split` and never see each other's.
+Public reach is one shared space, so a node offered there must be named
+`<developerId>` or `<developerId>.<name>` — otherwise the first org to publish
+`csv_split` would own that name for everybody.
+
+Note this is **looser than apps on purpose**: an app id must sit in the
+developer namespace always, while nodes are named after their protocol
+(`store_chroma`, `llm_openai`). Requiring a namespace everywhere would break
+that convention to solve a problem that only exists in public.
 
 ## Finding where a node is pinned
 

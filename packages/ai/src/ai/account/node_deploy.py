@@ -40,7 +40,7 @@ from rocketlib import debug
 
 # The zip guards live with the app rail and are shared verbatim: the threat is
 # the archive, not what it carries, and one implementation is one place to fix.
-from ai.account.app_deploy import _ZIP_MAX_ZIPPED, _actor_of, _org_of, _zip_guard
+from ai.account.app_deploy import _ZIP_MAX_ZIPPED, _actor_of, _org_of, _resolve_target, _zip_guard
 from ai.account.deployment_backend import artifact_content_dir
 
 #: Node runtimes. 'python' is a source tree the engine imports as-is. 'native'
@@ -48,6 +48,10 @@ from ai.account.deployment_backend import artifact_content_dir
 #: and tied to the engine build it was compiled against.
 RUNTIME_PYTHON = 'python'
 RUNTIME_NATIVE = 'native'
+
+#: The registry kind these artifacts carry — the discriminator every
+#: publish_* call takes, so node bindings never mix with app ones.
+KIND_NODE = 'node'
 
 #: The manifest a node zip must carry at its root — the node's own declaration,
 #: read for the id and name rather than trusting what the caller says it sent.
@@ -163,7 +167,7 @@ async def handle_node_add(conn: Any, request: Dict[str, Any]) -> Dict[str, Any]:
 
     node_version = str(manifest.get('version') or '0.0.0')
     artifact = {
-        'kind': 'node',
+        'kind': KIND_NODE,
         'nodeId': node_id,
         'name': str(manifest.get('title') or node_id),
         'nodeVersion': node_version,
@@ -264,6 +268,44 @@ def _node_rail_entry(entry: Dict[str, Any], artifact: Dict[str, Any] | None) -> 
     }
 
 
+def _assert_may_expose(conn: Any, node_id: str, audience: Dict[str, Any]) -> None:
+    """Check the caller may expose this node at this reach.
+
+    Reach is what decides the bar, and ``_resolve_target`` has already applied
+    most of it: ``@me`` is your own id, ``@team/<x>`` refuses a team you do not
+    belong to, and ``@public`` refuses an org with no registered developer id.
+
+    What is added here is OWNERSHIP at the public rung. Private reach needs no
+    namespace: the registry is partitioned by org, so two orgs holding a node
+    called ``csv_split`` never see each other's. Public reach is one shared
+    space, so a node offered there must sit in the org's own developer
+    namespace — otherwise the first org to publish ``csv_split`` would own the
+    name for everyone.
+
+    Nodes are NOT namespaced like apps in general: they are named by their
+    protocol (``store_chroma``, ``llm_openai``), and requiring
+    ``<developerId>.<name>`` everywhere would break that convention for a
+    problem that only exists in public.
+
+    Raises:
+        ValueError: public reach for a node outside the org's namespace.
+    """
+    if audience.get('type') != 'public':
+        return
+    from ai.account.app_deploy import _developer_id_of
+
+    dev = _developer_id_of(conn)
+    if not dev:
+        # _resolve_target refuses this first; kept so the guard holds alone.
+        raise ValueError('Publishing a node publicly requires the organization to be registered as a developer')
+    if node_id != dev and not node_id.startswith(f'{dev}.'):
+        raise ValueError(
+            f'{node_id!r} is outside your developer namespace — a node offered publicly must be '
+            f'named {dev!r} or {dev}.<name>, so two organizations can never contend for the same '
+            'public node id. Private reach (@me, @team) has no such requirement.'
+        )
+
+
 async def handle_node_deploy(conn: Any, request: Dict[str, Any]) -> Dict[str, Any]:
     """Handle ``rrext_deploy_node`` — node publish control on the registry.
 
@@ -275,6 +317,12 @@ async def handle_node_deploy(conn: Any, request: Dict[str, Any]) -> Dict[str, An
       update, and rollback are all this one verb; pinning is what makes a
       published version reachable at all.
     - ``where``    — the reverse index: which audience holds which version.
+    - ``disable``  — stop serving one binding; reversible by binding again.
+    - ``remove``   — take the binding out of the listing.
+
+    Withdrawal acts on the BINDING, never on the version: a published version
+    is immutable and stays available to bind again, which is what keeps
+    rollback possible.
 
     Requires an authenticated connection; the org comes from the session.
     """
@@ -306,22 +354,70 @@ async def handle_node_deploy(conn: Any, request: Dict[str, Any]) -> Dict[str, An
         if not isinstance(version, int):
             return conn.build_error(request, 'version (the registry version number) is required')
         try:
-            from ai.account.app_deploy import _resolve_target
-
             audience = _resolve_target(conn, str(args.get('target') or '@me'))
         except ValueError as exc:
             return conn.build_error(request, str(exc))
-        record = await account.deployments_deploy(org_id, audience['id'], node_id, version, _actor_of(conn))
-        debug(f'[node_deploy] pinned {node_id} v{version} to {audience.get("type")}:{audience.get("id")}')
-        return conn.build_response(request, body={'deployment': record, 'audience': audience})
+        try:
+            _assert_may_expose(conn, node_id, audience)
+        except ValueError as exc:
+            return conn.build_error(request, str(exc))
+        entry = await _entry_of(account, org_id, node_id, version)
+        if not entry:
+            return conn.build_error(request, f'{node_id} has no registry version {version}')
+        artifact = await account.deployments_artifact(org_id, node_id, version)
+        if not isinstance(artifact, dict) or artifact.get('kind') != KIND_NODE:
+            return conn.build_error(request, f'Registry version {version} of {node_id} is not a node artifact')
+        # A pure pointer, born enabled — the same publish row shape apps bind.
+        row = await account.publish_set(
+            org_id, KIND_NODE, node_id, audience, version, _snapshot(entry, artifact), _actor_of(conn)
+        )
+        debug(f'[node_deploy] bound {node_id} v{version} to {audience.get("type")}:{audience.get("id")}')
+        return conn.build_response(request, body={'publish': row, 'audience': audience})
 
     if sub == 'where':
-        deployments = await account.deployments_list(org_id, '')
-        pins = [
-            {'audience': dep.get('teamId') or dep.get('team_id') or '', 'version': dep.get('version')}
-            for dep in deployments or []
-            if (dep.get('projectId') or dep.get('project_id')) == node_id
-        ]
-        return conn.build_response(request, body={'pins': pins})
+        rows = await account.publish_of_app(org_id, KIND_NODE, node_id)
+        return conn.build_response(request, body={'pins': rows or []})
+
+    # ── disable / remove — stop serving a binding ─────────────────────────
+    #
+    # A published VERSION is immutable and never disappears: what is withdrawn
+    # is the binding that points an audience at it. 'disable' is reversible by
+    # binding again; 'remove' takes the row out of the listing. Neither
+    # touches the artifact, so a rollback to that version stays possible.
+    if sub in ('disable', 'remove'):
+        try:
+            audience = _resolve_target(conn, str(args.get('target') or '@me'))
+        except ValueError as exc:
+            return conn.build_error(request, str(exc))
+        try:
+            _assert_may_expose(conn, node_id, audience)
+        except ValueError as exc:
+            return conn.build_error(request, str(exc))
+        state = 'disabled' if sub == 'disable' else 'removed'
+        try:
+            row = await account.publish_set_state(org_id, KIND_NODE, node_id, audience, state, _actor_of(conn))
+        except Exception as exc:
+            return conn.build_error(request, str(exc))
+        debug(f'[node_deploy] {state} {node_id} for {audience.get("type")}:{audience.get("id")}')
+        return conn.build_response(request, body={'publish': row, 'audience': audience})
 
     return conn.build_error(request, f'Unknown subcommand: {sub!r}')
+
+
+async def _entry_of(account: Any, org_id: str, node_id: str, version: int) -> Dict[str, Any] | None:
+    """One registry row of a node by version, or None."""
+    for entry in await account.deployments_versions(org_id, node_id) or []:
+        if int(entry.get('version', 0)) == version:
+            return entry
+    return None
+
+
+def _snapshot(entry: Dict[str, Any], artifact: Dict[str, Any]) -> Dict[str, Any]:
+    """The display facts a binding carries so a listing needs no second read."""
+    return {
+        'nodeId': artifact.get('nodeId', ''),
+        'name': artifact.get('name', ''),
+        'nodeVersion': artifact.get('nodeVersion', ''),
+        'runtime': artifact.get('runtime', RUNTIME_PYTHON),
+        'sha256': entry.get('sha256', ''),
+    }

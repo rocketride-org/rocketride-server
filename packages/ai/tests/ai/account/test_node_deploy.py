@@ -294,6 +294,7 @@ class _ControlRegistry:
         self.versions = {}
         self.artifacts = {}
         self.deployed = []
+        self.states = []
         self.listed = []
 
     def add_version(self, node_id, version, node_version, runtime='python'):
@@ -323,18 +324,24 @@ class _ControlRegistry:
         async def deployments_artifact(org_id, project_id, version):
             return self.artifacts.get((project_id, version))
 
-        async def deployments_deploy(org_id, team_id, project_id, version, actor):
-            record = {'projectId': project_id, 'teamId': team_id, 'version': version}
-            self.deployed.append(record)
-            return record
+        async def publish_set(org_id, kind, node_id, audience, version, snapshot, actor):
+            row = {'kind': kind, 'nodeId': node_id, 'audience': audience, 'version': version, 'state': 'enabled'}
+            self.deployed.append(row)
+            return row
 
-        async def deployments_list(org_id, team_id):
-            return self.listed
+        async def publish_of_app(org_id, kind, node_id):
+            return [r for r in self.listed if r.get('nodeId') == node_id]
+
+        async def publish_set_state(org_id, kind, node_id, audience, state, actor):
+            row = {'kind': kind, 'nodeId': node_id, 'audience': audience, 'state': state}
+            self.states.append(row)
+            return row
 
         monkeypatch.setattr(account, 'deployments_versions', deployments_versions)
         monkeypatch.setattr(account, 'deployments_artifact', deployments_artifact)
-        monkeypatch.setattr(account, 'deployments_deploy', deployments_deploy)
-        monkeypatch.setattr(account, 'deployments_list', deployments_list)
+        monkeypatch.setattr(account, 'publish_set', publish_set)
+        monkeypatch.setattr(account, 'publish_of_app', publish_of_app)
+        monkeypatch.setattr(account, 'publish_set_state', publish_set_state)
 
 
 @pytest.fixture
@@ -381,10 +388,17 @@ class TestDeploy:
 
     @pytest.mark.asyncio
     async def test_pinning_defaults_to_the_caller(self, control):
+        control.add_version('my_node', 1, '1.0.0')
         result = await node_deploy.handle_node_deploy(_FakeConn(), _control_request('deploy', version=1))
         assert result['success'] is True
         assert control.deployed[0]['version'] == 1
         assert result['body']['audience']['type'] == 'user'
+
+    @pytest.mark.asyncio
+    async def test_a_version_that_does_not_exist_is_refused(self, control):
+        result = await node_deploy.handle_node_deploy(_FakeConn(), _control_request('deploy', version=99))
+        assert result['success'] is False
+        assert not control.deployed
 
     @pytest.mark.asyncio
     async def test_the_registry_version_is_required_as_an_int(self, control):
@@ -405,6 +419,8 @@ class TestDeploy:
 
     @pytest.mark.asyncio
     async def test_rollback_is_the_same_verb(self, control):
+        control.add_version('my_node', 1, '1.0.0')
+        control.add_version('my_node', 2, '1.1.0')
         await node_deploy.handle_node_deploy(_FakeConn(), _control_request('deploy', version=2))
         await node_deploy.handle_node_deploy(_FakeConn(), _control_request('deploy', version=1))
         assert [d['version'] for d in control.deployed] == [2, 1]
@@ -416,11 +432,11 @@ class TestWhere:
     @pytest.mark.asyncio
     async def test_only_this_nodes_pins_are_returned(self, control):
         control.listed = [
-            {'projectId': 'my_node', 'teamId': 'u1', 'version': 3},
-            {'projectId': 'other_node', 'teamId': 'u1', 'version': 9},
+            {'nodeId': 'my_node', 'audience': {'type': 'user', 'id': 'u1'}, 'version': 3},
+            {'nodeId': 'other_node', 'audience': {'type': 'user', 'id': 'u1'}, 'version': 9},
         ]
         result = await node_deploy.handle_node_deploy(_FakeConn(), _control_request('where'))
-        assert result['body']['pins'] == [{'audience': 'u1', 'version': 3}]
+        assert [row['nodeId'] for row in result['body']['pins']] == ['my_node']
 
 
 class TestControlRefusals:
@@ -441,3 +457,96 @@ class TestControlRefusals:
         result = await node_deploy.handle_node_deploy(_FakeConn(), _control_request('teleport'))
         assert result['success'] is False
         assert 'teleport' in result['message']
+
+
+class TestWithdrawal:
+    """Stopping a binding — the version itself is immutable and stays put."""
+
+    @pytest.mark.asyncio
+    async def test_disable_stops_serving_one_binding(self, control):
+        result = await node_deploy.handle_node_deploy(_FakeConn(), _control_request('disable'))
+        assert result['success'] is True
+        assert control.states[0]['state'] == 'disabled'
+
+    @pytest.mark.asyncio
+    async def test_remove_takes_the_row_out(self, control):
+        result = await node_deploy.handle_node_deploy(_FakeConn(), _control_request('remove'))
+        assert result['success'] is True
+        assert control.states[0]['state'] == 'removed'
+
+    @pytest.mark.asyncio
+    async def test_withdrawal_names_the_audience_it_acted_on(self, control):
+        # Disabling for one team must not touch what another team sees.
+        result = await node_deploy.handle_node_deploy(_FakeConn(), _control_request('disable', target='@me'))
+        assert result['body']['audience']['type'] == 'user'
+
+    @pytest.mark.asyncio
+    async def test_the_version_survives_a_withdrawal(self, control):
+        # Nothing about the artifact is touched, which is what keeps a later
+        # rollback to that same version possible.
+        control.add_version('my_node', 1, '1.0.0')
+        await node_deploy.handle_node_deploy(_FakeConn(), _control_request('remove'))
+        result = await node_deploy.handle_node_deploy(_FakeConn(), _control_request('versions'))
+        assert [row['registryVersion'] for row in result['body']['versions']] == [1]
+
+
+class TestReachControls:
+    """What a caller may expose, and how far.
+
+    Most of the bar lives in the shared target resolver; what is checked here
+    is that the node surface applies it, plus the ownership rule the public
+    rung adds.
+    """
+
+    @pytest.mark.asyncio
+    async def test_a_team_you_do_not_belong_to_is_refused(self, control):
+        control.add_version('my_node', 1, '1.0.0')
+        result = await node_deploy.handle_node_deploy(
+            _FakeConn(), _control_request('deploy', version=1, target='@team/strangers')
+        )
+        assert result['success'] is False
+        assert not control.deployed
+
+    @pytest.mark.asyncio
+    async def test_the_org_target_is_refused_with_the_alternative(self, control):
+        control.add_version('my_node', 1, '1.0.0')
+        result = await node_deploy.handle_node_deploy(_FakeConn(), _control_request('deploy', version=1, target='@org'))
+        assert result['success'] is False
+        assert 'team' in result['message'], 'the error should point at the team that replaces it'
+
+    @pytest.mark.asyncio
+    async def test_public_reach_requires_the_node_to_be_in_your_namespace(self, control):
+        # Private reach is partitioned by org, so 'my_node' is fine there.
+        # Public reach is one shared space: first-come would own the name.
+        control.add_version('my_node', 1, '1.0.0')
+        result = await node_deploy.handle_node_deploy(
+            _FakeConn(), _control_request('deploy', version=1, target='@public')
+        )
+        assert result['success'] is False
+        assert 'namespace' in result['message']
+        assert not control.deployed
+
+    @pytest.mark.asyncio
+    async def test_a_namespaced_node_may_go_public(self, control):
+        control.add_version('acme.my_node', 1, '1.0.0')
+        request = {
+            'command': 'rrext_deploy_node',
+            'arguments': {'subcommand': 'deploy', 'nodeId': 'acme.my_node', 'version': 1, 'target': '@public'},
+        }
+        result = await node_deploy.handle_node_deploy(_FakeConn(), request)
+        assert result['success'] is True, result.get('message')
+        assert control.deployed[0]['audience']['type'] == 'public'
+
+    @pytest.mark.asyncio
+    async def test_private_reach_needs_no_namespace(self, control):
+        control.add_version('my_node', 1, '1.0.0')
+        result = await node_deploy.handle_node_deploy(_FakeConn(), _control_request('deploy', version=1, target='@me'))
+        assert result['success'] is True, result.get('message')
+
+    @pytest.mark.asyncio
+    async def test_withdrawing_publicly_is_gated_the_same_way(self, control):
+        # The reach check applies to taking something down, not only to
+        # putting it up: the bar is the audience, not the direction.
+        result = await node_deploy.handle_node_deploy(_FakeConn(), _control_request('disable', target='@public'))
+        assert result['success'] is False
+        assert not control.states
