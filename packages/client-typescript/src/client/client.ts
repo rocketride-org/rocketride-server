@@ -1365,7 +1365,7 @@ export class RocketRideClient extends DAPClient {
 	 * @param options.useExisting - Use existing pipeline instance
 	 * @param options.args - Command line arguments to pass to pipeline
 	 * @param options.ttl - Time-to-live in seconds for idle pipelines (optional, server default if not provided; use 0 for no timeout)
-	 * @param options.pipelineTraceLevel - Trace level: 'none' | 'metadata' | 'summary' | 'full'. When set, captures every lane write and invoke call in the response under '_trace'.
+	 * @param options.pipelineTraceLevel - Trace level: 'none' (the default if omitted) | 'metadata' | 'summary' | 'full'. Does NOT add a '_trace' field to this call's response (no such field exists). For any level other than 'none', every lane write and invoke call is captured server-side as an 'apaevt_flow' event and rolled up into run analytics on the task's status object -- `componentStats`, `slowestDocs`, `completionSeconds`, `idleSeconds`, `idleLongestSeconds`, `idleLongestAt` (see {@link TASK_STATUS}) -- retrieved via {@link RocketRideClient.getTaskStatus}. Passing 'none' explicitly does not leave these empty -- it only suppresses lane-write/invoke traces; tool-call traces are still captured and populate the same fields, so omit the parameter entirely for truly empty analytics. Retrieve trace data through a {@link LogEventStream} monitor session ({@link LogApi.openEventStream}): call `await session.seek('live')` (or another position) before `getTraces(n)` (open + the `n` most-recently-closed trace summaries, `n` must be <= 50) -- it reads state as of the session's position and returns nothing before a seek. `getTrace(traceId)` returns that trace's full event set, is position-independent, and needs no prior seek; `traceId` is the trace's begin-event continuum seq (its permanent identity), not the flow event's `body.id`, which is a reused pipe slot.
 	 *
 	 * @returns Promise resolving to an object containing the task token and other metadata
 	 * @throws Error if neither pipeline nor filepath is provided
@@ -1394,7 +1394,7 @@ export class RocketRideClient extends DAPClient {
 			useExisting?: boolean;
 			args?: string[];
 			ttl?: number;
-			/** Pipeline trace level. When set, captures every lane write and invoke call in the response under '_trace'. */
+			/** Pipeline trace level ('none' by default). Does not add a `_trace` field to this response -- see the `pipelineTraceLevel` @param doc on this method for what it actually does. */
 			pipelineTraceLevel?: 'none' | 'metadata' | 'summary' | 'full';
 			/** Optional display name for the task (e.g. shown in dashboard). */
 			name?: string;
