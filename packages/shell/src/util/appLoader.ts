@@ -105,6 +105,15 @@ const registeredEntries = new Map<string, string>();
 // consults this to decide repoint-in-place vs full reload.
 const loadedModules = new Set<string>();
 
+// MF containers with a descriptor load currently IN FLIGHT. A container is
+// committed to its entry from the moment its load STARTS, not when it
+// resolves: forced re-registration drops the runtime's cached promise but
+// does NOT cancel the running operation, so replacing the entry mid-load
+// races two initializations of one container name. The dev takeover treats
+// pending like loaded. A Set suffices — loadDescriptor dedups concurrent
+// loads per app, so at most one load per container is in flight.
+const pendingModules = new Set<string>();
+
 /**
  * Whether an MF container's remote has successfully loaded this document.
  *
@@ -304,33 +313,44 @@ export function unregisterLocalApp(id: string): void {
  * @param entry - The dev server's remoteEntry.js URL.
  */
 export function registerDevRemote(appId: string, moduleId: string, name: string, entry: string): void {
-	// Injection for a container the manifest registered AND that has already
-	// LOADED this document: a loaded container is committed to its version
-	// (repointing it corrupts its consume-shared getters), so only a reboot
-	// can hand the dev entry a clean container. Normally unreachable — the
+	// Injection for a container the manifest registered AND that is LOADED or
+	// mid-load this document: such a container is committed to its entry
+	// (repointing corrupts its consume-shared getters; a forced registration
+	// does not cancel an in-flight load, it races it), so only a reboot can
+	// hand the dev entry a clean container. Normally unreachable — the
 	// dev-preview boot skips the locked app's manifest registration, so the
-	// injection lands first — this covers a lock/injection mismatch. The
-	// reboot is time-bounded per module: without persisted ownership the
-	// next boot may register the module from the manifest again, and an
-	// unbounded reload here would loop. A recurrence inside the guard
-	// window degrades to the force-registration below instead.
-	if (registeredEntries.has(moduleId) && !devRemoteModules.has(moduleId) && loadedModules.has(moduleId)) {
-		const TAKEOVER_GUARD_MS = 60_000;
+	// injection lands first — this covers a lock/injection mismatch and the
+	// late-injection-after-fallback case. The reboot spends from a persisted
+	// per-module BUDGET, not a rate limit: a pure rate limit never bounds the
+	// count (a mismatch recurring once per interval reloads forever), while a
+	// permanent one-shot would strand the legitimate recurrence (an app
+	// fallback-loaded again long after its dev server revived). Budget
+	// exhausted → degrade to the force-registration below instead.
+	if (registeredEntries.has(moduleId) && !devRemoteModules.has(moduleId) && (loadedModules.has(moduleId) || pendingModules.has(moduleId))) {
+		const TAKEOVER_WINDOW_MS = 30 * 60_000;
+		const TAKEOVER_MAX_RELOADS = 2;
 		let reboot = false;
 		try {
-			const key = `rr:devTakeoverAt:${moduleId}`;
-			const last = Number(sessionStorage.getItem(key) ?? 0);
-			if (Date.now() - last > TAKEOVER_GUARD_MS) {
-				sessionStorage.setItem(key, String(Date.now()));
+			const key = `rr:devTakeover:${moduleId}`;
+			// Budget window anchors at the FIRST reload of a burst; it resets
+			// only once the window has fully elapsed since that first attempt.
+			let guard = { n: 0, at: Date.now() };
+			const raw = sessionStorage.getItem(key);
+			if (raw) {
+				const parsed = JSON.parse(raw) as { n: number; at: number };
+				if (Number.isFinite(parsed.n) && Number.isFinite(parsed.at) && Date.now() - parsed.at <= TAKEOVER_WINDOW_MS) guard = parsed;
+			}
+			if (guard.n < TAKEOVER_MAX_RELOADS) {
+				sessionStorage.setItem(key, JSON.stringify({ n: guard.n + 1, at: guard.at }));
 				reboot = true;
 			}
 		} catch { /* storage unavailable — cannot bound a reload loop, so never reload */ }
 		if (reboot) {
-			console.log(`[appLoader] dev registration for loaded container "${moduleId}" — rebooting once for a clean container`);
+			console.log(`[appLoader] dev registration for active container "${moduleId}" — rebooting for a clean container`);
 			window.location.reload();
 			return;
 		}
-		console.error(`[appLoader] dev takeover of loaded container "${moduleId}" recurred within the guard window — force-registering in place; its shared getters may be stale`);
+		console.error(`[appLoader] dev takeover of active container "${moduleId}" exhausted its reload budget — force-registering in place; its shared getters may be stale`);
 	}
 
 	devRemoteModules.add(moduleId);
@@ -663,13 +683,17 @@ export function registerAndMapApps(serverApps: ServerAppEntry[]): AppManifestEnt
 			// removal restores the remote) without re-mapping the manifest.
 			const local = localOverrides.get(a.id);
 			if (local) return local();
+			// Pending marks the container committed for the WHOLE load — the
+			// dev takeover must not force-register it mid-flight.
+			pendingModules.add(a.moduleId);
 			return (loadRemote(`${a.moduleId}/AppDescriptor`) as Promise<{ default: AppDescriptor }>)
 				.then((m) => {
 					// A resolved remote commits this container to its version
 					// for the document's lifetime (see isRemoteLoaded).
 					loadedModules.add(a.moduleId);
 					return m.default;
-				});
+				})
+				.finally(() => pendingModules.delete(a.moduleId));
 		},
 	}));
 }
