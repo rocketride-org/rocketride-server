@@ -215,6 +215,28 @@ developer namespace always, while nodes are named after their protocol
 (`store_chroma`, `llm_openai`). Requiring a namespace everywhere would break
 that convention to solve a problem that only exists in public.
 
+## Which nodes a caller has
+
+Bindings answer "who can reach this node". The reverse question — "which nodes
+can this caller use" — is one resolution over all of them, the same scope walk
+apps take:
+
+1. Walk `@public`, then each of the caller's teams, then the caller.
+2. On a node-id collision the **more specific rung wins**: user beats team
+   beats public. A same-rung tie breaks on the lowest org id, so a stray public
+   row can never displace a lower org's claim on a name.
+3. A binding serves only when it is `enabled` **and** its version is
+   serveable: public reach demands a `ready` version, internal reach accepts
+   anything that did not fail.
+
+Each resolved entry carries what a caller needs to decide before fetching
+anything — the registry version, the node's own version, its `runtime`, its
+declared `requirements` and the bundle digest.
+
+This is deliberately **one** answer rather than two. The picker offers what it
+returns and the run-time resolver fetches what it names; a designer offering a
+node the run then refuses would be worse than not offering it at all.
+
 ## Finding where a node is pinned
 
 ```json

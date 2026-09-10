@@ -41,7 +41,15 @@ from rocketlib import debug
 # Identity, audiences and the zip guards are shared verbatim with the app rail
 # through deploy_common — the threat is the archive, not what it carries, and
 # an audience means the same thing whichever kind is being published.
-from ai.account.deploy_common import ZIP_MAX_ZIPPED, actor_of, developer_id_of, org_of, resolve_target, zip_guard
+from ai.account.deploy_common import (
+    RUNG_RANK,
+    ZIP_MAX_ZIPPED,
+    actor_of,
+    developer_id_of,
+    org_of,
+    resolve_target,
+    zip_guard,
+)
 from ai.account.deployment_backend import artifact_content_dir
 
 #: Node runtimes. 'python' is a source tree the engine imports as-is. 'native'
@@ -512,3 +520,83 @@ def _snapshot(entry: Dict[str, Any], artifact: Dict[str, Any]) -> Dict[str, Any]
         'runtime': artifact.get('runtime', RUNTIME_PYTHON),
         'sha256': entry.get('sha256', ''),
     }
+
+
+# =============================================================================
+# AVAILABILITY — which nodes a caller has, and at which version
+# =============================================================================
+#
+# The scope walk apps take, over node bindings. This is the ONE answer to
+# "which nodes can this caller use": the picker offers what it returns, and the
+# run-time resolver fetches what it names. Two implementations would eventually
+# disagree, and a designer offering a node the run then refuses is worse than
+# not offering it at all.
+
+
+async def resolve_node_pins(org_id: str, user_id: str | None, team_ids: List[str]) -> List[Dict[str, Any]]:
+    """Every node the caller can use, newest binding per node id.
+
+    Walks public, then each team, then the user. On a node-id collision the
+    MORE SPECIFIC rung wins (user > team > public); a same-rung tie breaks on
+    the lowest org id, so a stray public row can never displace a lower org's
+    claim on a name.
+
+    A binding only serves when it is enabled AND its version is serveable:
+    public reach demands a 'ready' version, internal reach accepts anything
+    that did not fail. That gate matters more later than now — a Python node
+    is born ready, a compiled one will not be.
+    """
+    from ai.account import account
+
+    audiences: List[Dict[str, str]] = [{'type': 'public', 'id': ''}]
+    audiences += [{'type': 'team', 'id': tid} for tid in team_ids]
+    if user_id:
+        audiences.append({'type': 'user', 'id': user_id})
+    try:
+        rows = await account.publish_list(org_id, KIND_NODE, audiences)
+    except Exception as exc:
+        debug(f'[node_deploy] publish_list failed: {exc}')
+        return []
+
+    # Sort so the winner lands LAST and the dict write below keeps it: rung
+    # ascending, org id DESCENDING within a rung.
+    rows = sorted(rows or [], key=lambda r: str(r.get('orgId') or ''), reverse=True)
+    rows.sort(key=lambda r: RUNG_RANK.get((r.get('audience') or {}).get('type', ''), 0))
+
+    resolved: Dict[str, Dict[str, Any]] = {}
+    for row in rows:
+        if row.get('state') != 'enabled':
+            continue
+        audience_type = (row.get('audience') or {}).get('type', '')
+        artifact_state = row.get('artifactState') or ''
+        if audience_type == 'public':
+            if artifact_state != 'ready':
+                continue
+        elif artifact_state == 'failed':
+            continue
+        node_id = row.get('nodeId') or ''
+        version = row.get('version')
+        if not node_id or not isinstance(version, int):
+            continue
+        row_org = str(row.get('orgId') or org_id)
+        try:
+            artifact = await account.deployments_artifact(row_org, node_id, version)
+        except Exception:
+            continue
+        if not isinstance(artifact, dict) or artifact.get('kind') != KIND_NODE:
+            continue
+        snapshot = row.get('snapshot') or {}
+        resolved[node_id] = {
+            'id': node_id,
+            'name': snapshot.get('name') or artifact.get('name') or node_id,
+            'version': version,
+            'nodeVersion': artifact.get('nodeVersion', ''),
+            'runtime': artifact.get('runtime', RUNTIME_PYTHON),
+            # Carried so a caller can tell whether it can run this node before
+            # it fetches a single byte of it.
+            'requirements': artifact.get('requirements') or [],
+            'bundleSha256': artifact.get('bundleSha256', ''),
+            'orgId': row_org,
+            'rung': 'personal' if audience_type == 'user' else audience_type,
+        }
+    return list(resolved.values())

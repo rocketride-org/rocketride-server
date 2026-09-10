@@ -26,6 +26,7 @@
 
 from __future__ import annotations
 
+from ai.account.app_deploy import _RUNG_RANK as RUNG_RANK
 from ai.account.app_deploy import _actor_of as actor_of
 from ai.account.app_deploy import _developer_id_of as developer_id_of
 from ai.account.app_deploy import _org_of as org_of
@@ -34,6 +35,7 @@ from ai.account.app_deploy import _zip_guard as zip_guard
 from ai.account.app_deploy import _ZIP_MAX_ZIPPED as ZIP_MAX_ZIPPED
 
 __all__ = [
+    'RUNG_RANK',
     'ZIP_MAX_ZIPPED',
     'actor_of',
     'developer_id_of',

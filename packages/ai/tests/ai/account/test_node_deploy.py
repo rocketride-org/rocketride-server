@@ -675,3 +675,137 @@ class TestReachControls:
         result = await node_deploy.handle_node_deploy(_FakeConn(), _control_request('disable', target='@public'))
         assert result['success'] is False
         assert not control.states
+
+
+# =============================================================================
+# AVAILABILITY — the scope walk that answers "which nodes do I have"
+# =============================================================================
+
+
+class _PinRegistry:
+    """Binding rows plus the artifacts they point at."""
+
+    def __init__(self):
+        self.rows = []
+        self.artifacts = {}
+
+    def pin(
+        self,
+        node_id,
+        version,
+        audience_type,
+        audience_id='',
+        org_id='org1',
+        state='enabled',
+        artifact_state='ready',
+        name=None,
+    ):
+        self.rows.append(
+            {
+                'nodeId': node_id,
+                'version': version,
+                'audience': {'type': audience_type, 'id': audience_id},
+                'orgId': org_id,
+                'state': state,
+                'artifactState': artifact_state,
+                'snapshot': {'name': name} if name else {},
+            }
+        )
+        self.artifacts[(org_id, node_id, version)] = {
+            'kind': 'node',
+            'nodeId': node_id,
+            'name': name or node_id,
+            'nodeVersion': f'{version}.0.0',
+            'runtime': 'python',
+            'requirements': ['httpx'],
+            'bundleSha256': f'sha-{version}',
+        }
+
+    def install(self, monkeypatch):
+        from ai.account import account
+
+        async def publish_list(org_id, kind, audiences):
+            wanted = {(a['type'], a.get('id', '')) for a in audiences}
+            return [r for r in self.rows if (r['audience']['type'], r['audience']['id']) in wanted]
+
+        async def deployments_artifact(org_id, node_id, version):
+            return self.artifacts.get((org_id, node_id, version))
+
+        monkeypatch.setattr(account, 'publish_list', publish_list)
+        monkeypatch.setattr(account, 'deployments_artifact', deployments_artifact)
+
+
+@pytest.fixture
+def pins(monkeypatch):
+    reg = _PinRegistry()
+    reg.install(monkeypatch)
+    return reg
+
+
+class TestAvailability:
+    """resolve_node_pins — the one answer the picker and the resolver share."""
+
+    @pytest.mark.asyncio
+    async def test_a_personal_pin_is_available(self, pins):
+        pins.pin('my_node', 3, 'user', 'u1')
+        entries = await node_deploy.resolve_node_pins('org1', 'u1', [])
+        assert [(e['id'], e['version'], e['rung']) for e in entries] == [('my_node', 3, 'personal')]
+
+    @pytest.mark.asyncio
+    async def test_the_more_specific_rung_wins(self, pins):
+        # Same node pinned three ways; the user's own pin is what runs.
+        pins.pin('my_node', 1, 'public')
+        pins.pin('my_node', 2, 'team', 't1')
+        pins.pin('my_node', 3, 'user', 'u1')
+        entries = await node_deploy.resolve_node_pins('org1', 'u1', ['t1'])
+        assert len(entries) == 1
+        assert entries[0]['version'] == 3
+
+    @pytest.mark.asyncio
+    async def test_a_team_pin_beats_a_public_one(self, pins):
+        pins.pin('my_node', 1, 'public')
+        pins.pin('my_node', 2, 'team', 't1')
+        entries = await node_deploy.resolve_node_pins('org1', 'u1', ['t1'])
+        assert entries[0]['version'] == 2
+
+    @pytest.mark.asyncio
+    async def test_a_disabled_binding_never_serves(self, pins):
+        pins.pin('my_node', 3, 'user', 'u1', state='disabled')
+        assert await node_deploy.resolve_node_pins('org1', 'u1', []) == []
+
+    @pytest.mark.asyncio
+    async def test_a_failed_version_never_serves(self, pins):
+        pins.pin('my_node', 3, 'user', 'u1', artifact_state='failed')
+        assert await node_deploy.resolve_node_pins('org1', 'u1', []) == []
+
+    @pytest.mark.asyncio
+    async def test_public_reach_demands_a_ready_version(self, pins):
+        # Internal reach tolerates a version still settling; public does not.
+        pins.pin('my_node', 3, 'public', artifact_state='building')
+        assert await node_deploy.resolve_node_pins('org1', 'u1', []) == []
+
+    @pytest.mark.asyncio
+    async def test_requirements_ride_on_the_entry(self, pins):
+        # So a caller knows what the node needs before fetching it.
+        pins.pin('my_node', 3, 'user', 'u1')
+        entries = await node_deploy.resolve_node_pins('org1', 'u1', [])
+        assert entries[0]['requirements'] == ['httpx']
+        assert entries[0]['bundleSha256'] == 'sha-3'
+
+    @pytest.mark.asyncio
+    async def test_a_team_the_caller_is_not_in_is_not_walked(self, pins):
+        pins.pin('other_node', 1, 'team', 't9')
+        assert await node_deploy.resolve_node_pins('org1', 'u1', ['t1']) == []
+
+    @pytest.mark.asyncio
+    async def test_distinct_nodes_all_come_back(self, pins):
+        pins.pin('node_a', 1, 'user', 'u1')
+        pins.pin('node_b', 2, 'team', 't1')
+        entries = await node_deploy.resolve_node_pins('org1', 'u1', ['t1'])
+        assert sorted(e['id'] for e in entries) == ['node_a', 'node_b']
+
+    @pytest.mark.asyncio
+    async def test_a_binding_without_its_artifact_is_skipped(self, pins):
+        pins.pin('my_node', 3, 'user', 'u1')
+        pins.artifacts.clear()
+        assert await node_deploy.resolve_node_pins('org1', 'u1', []) == []
