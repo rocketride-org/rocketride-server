@@ -606,6 +606,46 @@ class TestWithdrawal:
         assert result['body']['audience']['type'] == 'user'
 
     @pytest.mark.asyncio
+    async def test_at_all_withdraws_every_binding(self, control):
+        # Unpublishing everywhere is one call, not one call per audience.
+        control.listed = [
+            {'nodeId': 'my_node', 'audience': {'type': 'user', 'id': 'u1'}, 'state': 'enabled'},
+            {'nodeId': 'my_node', 'audience': {'type': 'team', 'id': 't1'}, 'state': 'enabled'},
+        ]
+        conn = _FakeConn(teams=[{'id': 't1', 'name': 'Platform'}])
+        result = await node_deploy.handle_node_deploy(conn, _control_request('remove', target='@all'))
+        assert result['success'] is True
+        assert [row['audience']['id'] for row in control.states] == ['u1', 't1']
+
+    @pytest.mark.asyncio
+    async def test_at_all_checks_every_audience_before_touching_any(self, control):
+        # A team the caller is not in makes the WHOLE call fail: withdrawing
+        # half and stopping would leave the node reachable where it was meant
+        # to be gone.
+        control.listed = [
+            {'nodeId': 'my_node', 'audience': {'type': 'user', 'id': 'u1'}, 'state': 'enabled'},
+            {'nodeId': 'my_node', 'audience': {'type': 'team', 'id': 'strangers'}, 'state': 'enabled'},
+        ]
+        result = await node_deploy.handle_node_deploy(_FakeConn(), _control_request('remove', target='@all'))
+        assert result['success'] is False
+        assert not control.states
+
+    @pytest.mark.asyncio
+    async def test_at_all_skips_bindings_already_removed(self, control):
+        control.listed = [
+            {'nodeId': 'my_node', 'audience': {'type': 'user', 'id': 'u1'}, 'state': 'removed'},
+            {'nodeId': 'my_node', 'audience': {'type': 'user', 'id': 'u1'}, 'state': 'enabled'},
+        ]
+        await node_deploy.handle_node_deploy(_FakeConn(), _control_request('disable', target='@all'))
+        assert len(control.states) == 1
+
+    @pytest.mark.asyncio
+    async def test_at_all_on_a_node_with_no_bindings_is_not_an_error(self, control):
+        result = await node_deploy.handle_node_deploy(_FakeConn(), _control_request('remove', target='@all'))
+        assert result['success'] is True
+        assert result['body']['publish'] == []
+
+    @pytest.mark.asyncio
     async def test_the_version_survives_a_withdrawal(self, control):
         # Nothing about the artifact is touched, which is what keeps a later
         # rollback to that same version possible.

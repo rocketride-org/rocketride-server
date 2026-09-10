@@ -187,6 +187,20 @@ is pinning the older number again.
 `disable` stops serving one binding and is reversible — bind again and it is
 back. `remove` takes the row out of the listing.
 
+### Withdrawing everywhere
+
+`"target": "@all"` withdraws every binding the node currently has, in one
+call. It is the answer to "unpublish this", which otherwise means reading
+`where` and then issuing one call per audience.
+
+Every audience is checked **before any is touched**, so the call either
+withdraws all of them or none. Withdrawing half and stopping would leave the
+node reachable exactly where the caller wanted it gone.
+
+The bar is the same one that granting the binding needed: a team you are no
+longer a member of, or public reach outside your namespace, fails the whole
+call rather than being skipped.
+
 **Neither touches the version.** A published version is immutable and stays on
 the registry, which is exactly what keeps rollback possible: taking a node back
 from a team today does not stop you pinning that same version tomorrow. What is

@@ -31,6 +31,7 @@ from ai.account.app_deploy import _actor_of as actor_of
 from ai.account.app_deploy import _developer_id_of as developer_id_of
 from ai.account.app_deploy import _org_of as org_of
 from ai.account.app_deploy import _resolve_target as resolve_target
+from ai.account.app_deploy import _team_ids_of as team_ids_of
 from ai.account.app_deploy import _zip_guard as zip_guard
 from ai.account.app_deploy import _ZIP_MAX_ZIPPED as ZIP_MAX_ZIPPED
 
@@ -41,5 +42,6 @@ __all__ = [
     'developer_id_of',
     'org_of',
     'resolve_target',
+    'team_ids_of',
     'zip_guard',
 ]

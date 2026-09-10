@@ -48,6 +48,7 @@ from ai.account.deploy_common import (
     developer_id_of,
     org_of,
     resolve_target,
+    team_ids_of,
     zip_guard,
 )
 from ai.account.deployment_backend import artifact_content_dir
@@ -382,6 +383,27 @@ def _assert_may_expose(conn: Any, node_id: str, audience: Dict[str, Any]) -> Non
         )
 
 
+#: Withdraw from every audience at once, rather than one call per binding.
+TARGET_ALL = '@all'
+
+
+def _assert_may_withdraw(conn: Any, node_id: str, audience: Dict[str, Any]) -> None:
+    """Check the caller may withdraw a binding that already exists.
+
+    Same bar as granting it. The single-audience path gets this for free —
+    ``resolve_target`` refuses a team you are not in before an audience is even
+    built — but ``@all`` reads its audiences back from the registry, where they
+    arrive already resolved, so membership has to be re-checked here.
+
+    Raises:
+        ValueError: a team the caller is not in, or public reach they may not
+                    grant.
+    """
+    if audience.get('type') == 'team' and str(audience.get('id') or '') not in set(team_ids_of(conn).values()):
+        raise ValueError(f'{node_id} is bound to a team you are not a member of')
+    _assert_may_expose(conn, node_id, audience)
+
+
 def _deploy_target_of(raw: str) -> str:
     """The wire target behind ``deployTo``: a bare team name or id means a team.
 
@@ -484,15 +506,38 @@ async def handle_node_deploy(conn: Any, request: Dict[str, Any]) -> Dict[str, An
     # binding again; 'remove' takes the row out of the listing. Neither
     # touches the artifact, so a rollback to that version stays possible.
     if sub in ('disable', 'remove'):
+        state = 'disabled' if sub == 'disable' else 'removed'
+        target = str(args.get('target') or '@me')
+
+        if target == TARGET_ALL:
+            rows = await account.publish_of_app(org_id, KIND_NODE, node_id) or []
+            audiences = [row.get('audience') or {} for row in rows if row.get('state') != 'removed']
+            if not audiences:
+                return conn.build_response(request, body={'publish': [], 'audiences': []})
+            # EVERY audience is checked before ANY is touched. Withdrawing half
+            # of them and stopping would leave the node reachable exactly where
+            # the caller wanted it gone — the worst outcome available here.
+            try:
+                for audience in audiences:
+                    _assert_may_withdraw(conn, node_id, audience)
+            except ValueError as exc:
+                return conn.build_error(request, str(exc))
+            withdrawn: List[Dict[str, Any]] = []
+            for audience in audiences:
+                withdrawn.append(
+                    await account.publish_set_state(org_id, KIND_NODE, node_id, audience, state, actor_of(conn))
+                )
+            debug(f'[node_deploy] {state} {node_id} for all {len(withdrawn)} audience(s)')
+            return conn.build_response(request, body={'publish': withdrawn, 'audiences': audiences})
+
         try:
-            audience = resolve_target(conn, str(args.get('target') or '@me'))
+            audience = resolve_target(conn, target)
         except ValueError as exc:
             return conn.build_error(request, str(exc))
         try:
             _assert_may_expose(conn, node_id, audience)
         except ValueError as exc:
             return conn.build_error(request, str(exc))
-        state = 'disabled' if sub == 'disable' else 'removed'
         try:
             row = await account.publish_set_state(org_id, KIND_NODE, node_id, audience, state, actor_of(conn))
         except Exception as exc:
