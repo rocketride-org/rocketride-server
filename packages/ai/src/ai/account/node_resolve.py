@@ -31,7 +31,12 @@ from rocketlib import debug
 
 from ai.account.deploy_common import ZIP_MAX_ZIPPED, zip_guard
 from ai.account.deployment_backend import artifact_content_dir
-from ai.account.node_deploy import resolve_node_pins
+from ai.account.node_deploy import NODE_REQUIREMENTS, resolve_node_pins
+
+# The engine's own installer. It resolves AGAINST the constraints lock, which
+# is the whole reason a run may install at all: a conflict is refused rather
+# than settled by downgrading a package another node is relying on.
+from depends import depends as _install
 
 #: The package folder the engine imports external nodes from. Its __init__ is
 #: the PARENT of each node directory, so it never travels inside a bundle —
@@ -132,6 +137,10 @@ async def plan_for(
 
 class BundleMismatch(Exception):
     """Fetched bytes are not what the registry recorded for that version."""
+
+
+class DependencyFailure(Exception):
+    """A node's declared dependencies cannot be satisfied on this machine."""
 
 
 async def _bundle_of(org_id: str, node_id: str, version: int, actor: str) -> bytes:
@@ -272,6 +281,38 @@ def _place(slot: str, run_root: str, node_id: str) -> str:
     return destination
 
 
+async def _satisfy_requirements(placed: str, node_id: str) -> bool:
+    """Install what the node declares, if it declares anything.
+
+    The engine sweeps its own dependencies once at startup, from a glob a
+    node materialised for a run falls outside of — so a published node's
+    requirements would otherwise never be installed and its import would fail
+    for a reason that looks nothing like the cause.
+
+    Installing happens against the constraints lock, so a node that cannot fit
+    the environment is refused instead of quietly downgrading a package
+    another node in the same run depends on.
+
+    Returns:
+        True if the node declared requirements and they were installed.
+
+    Raises:
+        DependencyFailure: the node's requirements cannot be satisfied.
+    """
+    import asyncio
+
+    path = os.path.join(placed, NODE_REQUIREMENTS)
+    if not os.path.exists(path):
+        return False
+    try:
+        # Off the event loop: this can reach the network and take a while.
+        await asyncio.get_running_loop().run_in_executor(None, _install, path)
+    except Exception as exc:
+        raise DependencyFailure(f'{node_id} declares dependencies that cannot be satisfied here: {exc}') from exc
+    debug(f'[node_resolve] installed requirements for {node_id}')
+    return True
+
+
 async def materialise(plan: List[Dict[str, Any]], run_root: str, org_id: str, actor: str) -> List[str]:
     """Bring every planned node onto this machine, ready to import.
 
@@ -285,9 +326,12 @@ async def materialise(plan: List[Dict[str, Any]], run_root: str, org_id: str, ac
     """
     written: List[str] = []
     for entry in plan:
+        node_id = str(entry['id'])
         slot = await _ensure_cached(entry, org_id, actor)
-        written.append(_place(slot, run_root, str(entry['id'])))
-        debug(f'[node_resolve] materialised {entry["id"]} v{entry["version"]}')
+        placed = _place(slot, run_root, node_id)
+        await _satisfy_requirements(placed, node_id)
+        written.append(placed)
+        debug(f'[node_resolve] materialised {node_id} v{entry["version"]}')
     return written
 
 

@@ -312,3 +312,41 @@ class TestMaterialise:
         written = await node_resolve.materialise([entry], live.run_root, 'org1', 'u1')
         assert (Path(written[0]) / 'requirements.txt').read_text() == 'httpx\n'
         assert entry['requirements'] == ['httpx']
+
+
+class TestRequirements:
+    """A published node's dependencies, which the engine's startup sweep misses."""
+
+    @pytest.fixture
+    def installs(self, monkeypatch):
+        """Record what the engine installer was asked to install."""
+        calls = []
+        monkeypatch.setattr(node_resolve, '_install', lambda path: calls.append(path))
+        return calls
+
+    @pytest.mark.asyncio
+    async def test_declared_requirements_are_installed(self, live, installs):
+        entry = await live.publish(files={'requirements.txt': 'httpx\n'})
+        written = await node_resolve.materialise([entry], live.run_root, 'org1', 'u1')
+        # Installed from the materialised copy, so the path exists on disk.
+        assert installs == [str(Path(written[0]) / 'requirements.txt')]
+
+    @pytest.mark.asyncio
+    async def test_a_node_without_requirements_installs_nothing(self, live, installs):
+        entry = await live.publish()
+        await node_resolve.materialise([entry], live.run_root, 'org1', 'u1')
+        assert installs == []
+
+    @pytest.mark.asyncio
+    async def test_an_unsatisfiable_node_fails_the_run_by_name(self, live, monkeypatch):
+        # Against the constraints lock a conflict is refused rather than
+        # settled by downgrading someone else's package — so the run stops,
+        # and it says which node could not fit.
+        def boom(path):
+            raise RuntimeError('httpx==9.9 conflicts with the lock')
+
+        monkeypatch.setattr(node_resolve, '_install', boom)
+        entry = await live.publish(files={'requirements.txt': 'httpx==9.9\n'})
+        with pytest.raises(node_resolve.DependencyFailure) as caught:
+            await node_resolve.materialise([entry], live.run_root, 'org1', 'u1')
+        assert 'ticket_feed' in str(caught.value)
