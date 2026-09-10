@@ -16,15 +16,29 @@
 # answer "will this run work?" without touching the network or the disk.
 # =============================================================================
 
-"""Deciding which published nodes a pipeline run has to resolve."""
+"""Deciding which published nodes a pipeline run has to resolve, and getting them."""
 
 from __future__ import annotations
 
+import hashlib
+import io
+import os
+import shutil
+import zipfile
 from typing import Any, Dict, List, Set
 
 from rocketlib import debug
 
+from ai.account.deploy_common import ZIP_MAX_ZIPPED, zip_guard
+from ai.account.deployment_backend import artifact_content_dir
 from ai.account.node_deploy import resolve_node_pins
+
+#: The package folder the engine imports external nodes from. Its __init__ is
+#: the PARENT of each node directory, so it never travels inside a bundle —
+#: the resolver writes it.
+RUN_PACKAGE = 'local_nodes'
+
+_PACKAGE_INIT = b'# Marks local_nodes as a package so the engine can import local_nodes.<name>.\n'
 
 
 def providers_of(pipeline: Dict[str, Any]) -> Set[str]:
@@ -104,3 +118,179 @@ async def plan_for(
     plan = [available[name] for name in sorted(wanted)]
     debug(f'[node_resolve] {len(plan)} node(s) to resolve: {", ".join(entry["id"] for entry in plan)}')
     return plan
+
+
+# =============================================================================
+# FETCHING — bytes, proven, then on disk
+# =============================================================================
+#
+# The order below is the design: a bundle is proven to be what the registry
+# said it was BEFORE it is opened, and the archive is checked again before it
+# is written out. Publishing checked the same things, but that was a different
+# moment and a different copy of the bytes.
+
+
+class BundleMismatch(Exception):
+    """Fetched bytes are not what the registry recorded for that version."""
+
+
+async def _bundle_of(org_id: str, node_id: str, version: int, actor: str) -> bytes:
+    """The stored bundle for one registry version, through the same Store.
+
+    Filesystem when self-hosted, S3 or Azure on cloud — the resolver never
+    knows which, the same way publishing does not.
+
+    Raises:
+        ValueError: the version is gone, or its entry carries no usable path.
+    """
+    from ai.account import account
+    from ai.account.models import RequestContext
+    from ai.account.store import Store
+
+    entries = await account.deployments_versions(org_id, node_id) or []
+    entry = next((e for e in entries if int(e.get('version', 0)) == version), None)
+    if not entry:
+        raise ValueError(f'{node_id} has no registry version {version} in {org_id!r}')
+
+    content_root = artifact_content_dir(str(entry.get('artifactPath') or ''))
+    org_prefix = f'orgs/{org_id}/files/'
+    if not content_root.startswith(org_prefix):
+        raise ValueError(f'registry entry for {node_id} carries no usable artifactPath')
+
+    fs = Store.file_store(RequestContext.internal('node-resolve'), client_id=actor)
+    home = f'@/Org/={org_id}/{content_root[len(org_prefix) :]}'
+    # Read cap tied to the publish cap rather than the store's larger default:
+    # nothing bigger than that could have been published in the first place.
+    return await fs.read(f'{home}/bundle/{node_id}-v{version:06d}.zip', ZIP_MAX_ZIPPED)
+
+
+def _verified(data: bytes, expected: str, node_id: str) -> bytes:
+    """The bundle, or nothing.
+
+    Checked before the archive is opened at all: a mismatch means the bytes
+    are not the version that was reviewed and pinned, and the cheapest place
+    to stop is before a zip reader has seen them.
+
+    Raises:
+        BundleMismatch: digest does not match what the artifact recorded.
+    """
+    if not expected:
+        raise BundleMismatch(f'{node_id} has no recorded digest to verify against')
+    actual = hashlib.sha256(data).hexdigest()
+    if actual != expected:
+        raise BundleMismatch(f'{node_id} bundle digest is {actual[:12]}…, expected {expected[:12]}…')
+    return data
+
+
+def _unpack_into(data: bytes, destination: str, node_id: str) -> None:
+    """Write the node directory out, guarded first.
+
+    Raises:
+        ValueError: the archive is unsafe to unpack.
+    """
+    archive = zipfile.ZipFile(io.BytesIO(data))
+    guard_error = zip_guard(archive)
+    if guard_error:
+        raise ValueError(f'{node_id} bundle refused: {guard_error}')
+    os.makedirs(destination, exist_ok=True)
+    archive.extractall(destination)
+
+
+# =============================================================================
+# CACHE — keyed by content, so it is never stale
+# =============================================================================
+
+
+def cache_root() -> str:
+    """Where unpacked nodes are kept between runs."""
+    from depends import engine_cache_dir
+
+    return os.path.join(engine_cache_dir(create=True), 'nodes')
+
+
+def cache_slot(node_id: str, digest: str) -> str:
+    """This exact node at this exact content, and nothing else.
+
+    Keyed by digest rather than by version: two versions never collide, a slot
+    can never hold the wrong bytes, and nothing ever has to be invalidated.
+    """
+    return os.path.join(cache_root(), node_id, digest)
+
+
+async def _ensure_cached(entry: Dict[str, Any], org_id: str, actor: str) -> str:
+    """The cache slot for one node, populated if it was not already.
+
+    Concurrency is handled by building somewhere else and moving into place:
+    a second run either finds the slot already there, or loses the rename and
+    uses the winner's copy. No lock, and no half-written slot is ever visible
+    under the real name.
+    """
+    node_id = str(entry['id'])
+    digest = str(entry.get('bundleSha256') or '')
+    slot = cache_slot(node_id, digest)
+    if os.path.isdir(slot):
+        debug(f'[node_resolve] {node_id} already cached')
+        return slot
+
+    data = _verified(await _bundle_of(org_id, node_id, int(entry['version']), actor), digest, node_id)
+    staging = f'{slot}.{os.getpid()}.partial'
+    shutil.rmtree(staging, ignore_errors=True)
+    try:
+        _unpack_into(data, staging, node_id)
+        os.makedirs(os.path.dirname(slot), exist_ok=True)
+        try:
+            os.rename(staging, slot)
+        except OSError:
+            # Another run got there first. Its copy has the same digest, so it
+            # is the same bytes — use it and drop ours.
+            if not os.path.isdir(slot):
+                raise
+            shutil.rmtree(staging, ignore_errors=True)
+    except Exception:
+        shutil.rmtree(staging, ignore_errors=True)
+        raise
+    return slot
+
+
+# =============================================================================
+# MATERIALISE — the layout the engine imports from
+# =============================================================================
+
+
+def _place(slot: str, run_root: str, node_id: str) -> str:
+    """Put one cached node where this run's engine will import it from."""
+    package = os.path.join(run_root, RUN_PACKAGE)
+    os.makedirs(package, exist_ok=True)
+    init_py = os.path.join(package, '__init__.py')
+    if not os.path.exists(init_py):
+        with open(init_py, 'wb') as handle:
+            handle.write(_PACKAGE_INIT)
+    destination = os.path.join(package, node_id)
+    if os.path.exists(destination):
+        shutil.rmtree(destination, ignore_errors=True)
+    shutil.copytree(slot, destination)
+    return destination
+
+
+async def materialise(plan: List[Dict[str, Any]], run_root: str, org_id: str, actor: str) -> List[str]:
+    """Bring every planned node onto this machine, ready to import.
+
+    Returns the directory written for each. A node placed this way is
+    indistinguishable from one sitting in a developer's workspace, which is
+    why nothing downstream — including the node's own manifest — has to know
+    it arrived seconds ago.
+
+    The engine still has to be told to look again; that is the one piece this
+    cannot do from Python yet.
+    """
+    written: List[str] = []
+    for entry in plan:
+        slot = await _ensure_cached(entry, org_id, actor)
+        written.append(_place(slot, run_root, str(entry['id'])))
+        debug(f'[node_resolve] materialised {entry["id"]} v{entry["version"]}')
+    return written
+
+
+def clean(run_root: str) -> None:
+    """Drop what this run unpacked. The cache is untouched and stays warm."""
+    shutil.rmtree(os.path.join(run_root, RUN_PACKAGE), ignore_errors=True)

@@ -122,3 +122,193 @@ class TestPlan:
         published('llm_openai', version=9)
         plan = await node_resolve.plan_for(_pipeline('llm_openai'), {'llm_openai'}, 'org1', 'u1', [])
         assert plan == []
+
+
+# =============================================================================
+# FETCH AND MATERIALISE
+# =============================================================================
+#
+# These publish a node for real through handle_node_add and then resolve it
+# back, over the REAL Store on a temp filesystem. That is deliberate: publish
+# and resolve agree on where a bundle lives only by convention, and a fake
+# store on both sides would let those two drift apart without a test noticing.
+
+
+import io  # noqa: E402
+import json  # noqa: E402
+import zipfile  # noqa: E402
+from pathlib import Path  # noqa: E402
+from types import SimpleNamespace  # noqa: E402
+
+from ai.account import node_deploy  # noqa: E402
+from ai.account.store import Store  # noqa: E402
+
+
+class _Conn:
+    def __init__(self, org_id='org1'):
+        self._account_info = SimpleNamespace(
+            userId='u1',
+            displayName='User One',
+            email='u1@example.com',
+            organization={'id': org_id, 'teams': [], 'developerId': 'acme'},
+        )
+        self._server = SimpleNamespace()
+
+    def build_response(self, request, body=None):
+        return {'success': True, 'body': body or {}}
+
+    def build_error(self, request, message):
+        return {'success': False, 'message': message}
+
+
+def _zip(files=None, manifest=None):
+    manifest = manifest or {'protocol': 'ticket_feed://', 'title': 'Ticket Feed', 'version': '1.2.0'}
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, 'w') as archive:
+        archive.writestr('services.json', json.dumps(manifest))
+        archive.writestr('IInstance.py', 'class IInstance:\n    pass\n')
+        for name, content in (files or {}).items():
+            archive.writestr(name, content)
+    return buffer.getvalue()
+
+
+@pytest.fixture
+def live(monkeypatch, tmp_path):
+    """A real Store plus a registry that remembers what was published."""
+    from ai.account import account
+
+    monkeypatch.setenv('RR_STORE_URL', f'filesystem://{tmp_path / "store"}')
+    Store.reset()
+    published = []
+    reads = {'count': 0}
+
+    async def deployments_publish(org_id, project_id, artifact, actor, comment='', metadata=None, **kwargs):
+        version = len(published) + 1
+        entry = {
+            'version': version,
+            'sha256': f'sha-{version}',
+            'metadata': metadata or {},
+            'artifactPath': f'orgs/{org_id}/files/.deployments/{project_id}/v{version:06d}-abcd1234.json',
+        }
+        published.append({'projectId': project_id, 'artifact': artifact, 'entry': entry})
+        return entry
+
+    async def deployments_versions(org_id, project_id):
+        return [p['entry'] for p in published if p['projectId'] == project_id]
+
+    async def set_artifact_state(org_id, project_id, version, state, actor):
+        pass
+
+    async def audit(*args, **kwargs):
+        pass
+
+    monkeypatch.setattr(account, 'deployments_publish', deployments_publish)
+    monkeypatch.setattr(account, 'deployments_versions', deployments_versions)
+    monkeypatch.setattr(account, 'set_artifact_state', set_artifact_state)
+    monkeypatch.setattr(account, 'audit', audit)
+    monkeypatch.setattr(node_resolve, 'cache_root', lambda: str(tmp_path / 'cache'))
+
+    real_read = None
+
+    async def counted_read(self, filename):
+        reads['count'] += 1
+        return await real_read(self, filename)
+
+    async def publish(files=None, manifest=None):
+        """Publish a node and hand back the entry a resolver would plan."""
+        result = await node_deploy.handle_node_add(
+            _Conn(),
+            {
+                'command': 'rrext_deploy',
+                'arguments': {'subcommand': 'add', 'kind': 'node', 'data': _zip(files, manifest)},
+            },
+        )
+        assert result['success'] is True, result
+        artifact = published[-1]['artifact']
+        return {
+            'id': artifact['nodeId'],
+            'version': result['body']['artifact']['version'],
+            'bundleSha256': artifact['bundleSha256'],
+            'requirements': artifact['requirements'],
+        }
+
+    yield SimpleNamespace(publish=publish, reads=reads, run_root=str(tmp_path / 'run'), published=published)
+    Store.reset()
+
+
+class TestMaterialise:
+    """Bringing a published node onto a machine that does not have it."""
+
+    @pytest.mark.asyncio
+    async def test_the_node_directory_is_restored(self, live):
+        entry = await live.publish()
+        written = await node_resolve.materialise([entry], live.run_root, 'org1', 'u1')
+        placed = Path(written[0])
+        assert placed.name == 'ticket_feed'
+        assert (placed / 'services.json').exists()
+        assert (placed / 'IInstance.py').read_text().startswith('class IInstance')
+
+    @pytest.mark.asyncio
+    async def test_the_package_marker_is_written_by_the_resolver(self, live):
+        # It is the PARENT of the node directory, so it is not in the bundle.
+        entry = await live.publish()
+        await node_resolve.materialise([entry], live.run_root, 'org1', 'u1')
+        assert (Path(live.run_root) / 'local_nodes' / '__init__.py').exists()
+
+    @pytest.mark.asyncio
+    async def test_it_lands_where_the_engine_imports_from(self, live):
+        # local_nodes/<id>/ — so the manifest's own path resolves untouched.
+        entry = await live.publish()
+        written = await node_resolve.materialise([entry], live.run_root, 'org1', 'u1')
+        assert Path(written[0]) == Path(live.run_root) / 'local_nodes' / 'ticket_feed'
+
+    @pytest.mark.asyncio
+    async def test_a_digest_mismatch_refuses_before_unpacking(self, live):
+        entry = await live.publish()
+        entry['bundleSha256'] = 'f' * 64
+        with pytest.raises(node_resolve.BundleMismatch):
+            await node_resolve.materialise([entry], live.run_root, 'org1', 'u1')
+        assert not (Path(live.run_root) / 'local_nodes').exists()
+
+    @pytest.mark.asyncio
+    async def test_a_version_with_no_digest_is_refused(self, live):
+        entry = await live.publish()
+        entry['bundleSha256'] = ''
+        with pytest.raises(node_resolve.BundleMismatch):
+            await node_resolve.materialise([entry], live.run_root, 'org1', 'u1')
+
+    @pytest.mark.asyncio
+    async def test_the_second_run_reuses_the_cache(self, live):
+        entry = await live.publish()
+        await node_resolve.materialise([entry], live.run_root, 'org1', 'u1')
+        slot = node_resolve.cache_slot('ticket_feed', entry['bundleSha256'])
+        assert Path(slot).is_dir()
+        # A second materialise finds the slot and never touches the store.
+        node_resolve.clean(live.run_root)
+        await node_resolve.materialise([entry], str(Path(live.run_root) / 'second'), 'org1', 'u1')
+        assert (Path(live.run_root) / 'second' / 'local_nodes' / 'ticket_feed' / 'services.json').exists()
+
+    @pytest.mark.asyncio
+    async def test_no_partial_slot_survives_a_failure(self, live):
+        entry = await live.publish()
+        entry['bundleSha256'] = 'f' * 64
+        with pytest.raises(node_resolve.BundleMismatch):
+            await node_resolve.materialise([entry], live.run_root, 'org1', 'u1')
+        leftovers = list(Path(node_resolve.cache_root()).rglob('*.partial'))
+        assert leftovers == []
+
+    @pytest.mark.asyncio
+    async def test_clean_drops_the_run_tree_and_keeps_the_cache(self, live):
+        entry = await live.publish()
+        await node_resolve.materialise([entry], live.run_root, 'org1', 'u1')
+        node_resolve.clean(live.run_root)
+        assert not (Path(live.run_root) / 'local_nodes').exists()
+        assert Path(node_resolve.cache_slot('ticket_feed', entry['bundleSha256'])).is_dir()
+
+    @pytest.mark.asyncio
+    async def test_requirements_travel_with_the_node(self, live):
+        # The resolver has to be able to see them on disk to act on them.
+        entry = await live.publish(files={'requirements.txt': 'httpx\n'})
+        written = await node_resolve.materialise([entry], live.run_root, 'org1', 'u1')
+        assert (Path(written[0]) / 'requirements.txt').read_text() == 'httpx\n'
+        assert entry['requirements'] == ['httpx']
