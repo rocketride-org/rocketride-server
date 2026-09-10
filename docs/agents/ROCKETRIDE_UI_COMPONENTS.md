@@ -472,7 +472,9 @@ the message state and transport (via `useChatMessages`); ChatView only
 renders and collects input. The composer is disabled while `isConnected` is
 false. `MessageList` (the scrollable thread with scroll-locked autoscroll;
 props `{ messages, isTyping, emptyTitle?, emptyDescription? }`) is exported
-for custom layouts.
+for custom layouts, and so are its two parts: `MessageBubble` (one message,
+props `{ message: ChatMessage }`) and `TypingIndicator` (the assistant's
+three-dot bubble, props `{ label? }`).
 
 | Prop | Type | Dir | Note |
 | --- | --- | --- | --- |
