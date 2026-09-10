@@ -46,8 +46,10 @@ packages:
 # whole block). shell and rocketride resolve IN-TREE to their workspace
 # packages: app manifests keep the portable file: specs
 # ("file:../../.rocketride/shell/shell.tgz",
-# "file:../../../.rocketride/client/rocketride.tgz" — exactly right when an
-# app is lifted into its own repo, where the tgz is downloaded and vendored),
+# "file:../../.rocketride/client/rocketride.tgz" — two levels up to the
+# workspace root, exactly right wherever an app sits at
+# <workspace>/apps/<app>, including its own repo after lift-out, where the
+# tgz is downloaded and vendored),
 # and these overrides supersede them inside the monorepo — a workspace link
 # carries no tarball integrity pin, so fresh clones and frozen-lockfile CI
 # install without the gitignored artifacts existing.

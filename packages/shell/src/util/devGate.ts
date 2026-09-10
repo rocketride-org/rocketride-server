@@ -21,7 +21,7 @@
 // SOFTWARE.
 
 /**
- * The dev gate and the session-storage scope policy derived from it.
+ * The dev gate and the token-scope policy derived from it.
  *
  * A LEAF module (no shell imports): the ConnectionManager and the dev-mode
  * hooks both need these predicates, and devMode.ts already imports the
@@ -95,19 +95,40 @@ export function isEmbeddedDevShell(): boolean {
 // TOKEN STORAGE SCOPE
 // =============================================================================
 
+// Frame-local token slot for embedded dev previews. Deliberately NOT
+// sessionStorage: per WHATWG, same-origin sibling iframes inside one
+// top-level browsing context SHARE a session storage area, so two preview
+// panels on one page could still overwrite or clear each other's token
+// there. A module-level map is scoped to this frame's JS realm — the only
+// truly per-frame slot the platform offers — and needs no persistence:
+// the embedder re-answers `rrdev:auth` on every boot, so a reloaded frame
+// re-adopts its session instead of reading it back from storage.
+const frameTokenStore: Storage = (() => {
+	const data = new Map<string, string>();
+	return {
+		get length(): number { return data.size; },
+		clear: (): void => { data.clear(); },
+		getItem: (key: string): string | null => data.get(key) ?? null,
+		key: (index: number): string | null => Array.from(data.keys())[index] ?? null,
+		removeItem: (key: string): void => { data.delete(key); },
+		setItem: (key: string, value: string): void => { data.set(key, value); },
+	};
+})();
+
 /**
  * The storage backing this shell's session token.
  *
- * Embedded dev previews keep a PER-CONTEXT copy (sessionStorage): each
- * panel's embedder is the sole session authority, so panels must neither
- * share nor be able to clear the origin-wide token — two panels with
- * divergent auth states writing one shared slot cross-fire each other's
- * storage watchers and reload each other forever. Real tabs keep the shared
- * localStorage slot so a sign-in propagates across tabs and survives
- * restarts.
+ * Embedded dev previews keep a FRAME-LOCAL in-memory copy: each panel's
+ * embedder is the sole session authority, so panels must neither share nor
+ * be able to clear another context's token — two panels with divergent
+ * auth states writing one shared slot cross-fire each other's storage
+ * watchers and reload each other forever, and even sessionStorage is
+ * shared between same-origin sibling iframes in one top-level browsing
+ * context (see frameTokenStore). Real tabs keep the shared localStorage
+ * slot so a sign-in propagates across tabs and survives restarts.
  *
  * @returns The Storage object all token reads/writes must go through.
  */
 export function tokenStore(): Storage {
-	return isEmbeddedDevShell() ? sessionStorage : localStorage;
+	return isEmbeddedDevShell() ? frameTokenStore : localStorage;
 }

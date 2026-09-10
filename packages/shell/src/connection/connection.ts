@@ -1259,6 +1259,13 @@ export class ConnectionManager implements IConnectionManager {
 		try { tokenStore().setItem(LS_TOKEN, token); } catch (e) {
 			console.error('[ConnectionManager] Failed to save token:', e);
 		}
+		// An embedded preview must not stamp the HOST-WIDE /apps cookie: the
+		// cookie jar is shared by every same-origin frame, so a panel's
+		// injected dev session would swap the bundle credentials out from
+		// under the embedding user's real session and every sibling panel.
+		// The preview's own dev bundle is served by the dev overlay, not
+		// /apps, so the prime is not needed there either.
+		if (isEmbeddedDevShell()) return;
 		this.primeAppsCookie(token);
 	}
 
