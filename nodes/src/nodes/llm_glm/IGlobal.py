@@ -150,4 +150,6 @@ class IGlobal(IGlobalBase):
                 parts.append('-')
             parts.append(str(emsg))
         message = ' '.join(parts) if parts else fallback
+        if status is not None and not etype and not emsg and fallback:
+            message = f'{message} {fallback}'
         return re.sub(r'\s+', ' ', message).strip()
