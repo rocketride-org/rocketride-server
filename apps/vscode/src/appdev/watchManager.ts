@@ -347,10 +347,10 @@ export class WatchManager {
 		// package.json watcher: a dependency edit invalidates the shared
 		// install and restarts THIS session (other apps' dev servers survive
 		// a root install — pnpm only rewrites the changed project's links).
-		// The install/restart loop DOES write package.json (the App Builder
-		// open path rewires the shell spec via ensureShellDependency), but it
-		// terminates: the rewrite early-returns once the spec is correct, so
-		// the watcher fires at most one extra cycle. Disposed in stop() so
+		// The install/restart loop can write package.json once (the App
+		// Builder open path completes MISSING platform deps via
+		// ensureDependencyWiring), but it terminates: wiring never rewrites
+		// a present spec, so the watcher fires at most one extra cycle. Disposed in stop() so
 		// watcher lifetime tracks the session. Known edge: an edit landing
 		// while the install is mid-flight is swallowed by the starting guard —
 		// accepted (the debounce makes it rare, and the preview Reload button

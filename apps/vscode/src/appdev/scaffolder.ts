@@ -306,11 +306,11 @@ export async function scaffoldApp(params: ScaffoldParams): Promise<string> {
 	// Explorer hides the gitignored machine-generated trees.
 	ensureWorkspaceSettings(root.uri.fsPath);
 
-	// Install the platform package — ensures the root workspace file, wires
-	// "shell": "file:../../.rocketride/shell/shell.tgz" into the app's
-	// package.json (always, even offline), and downloads the canonical
-	// tarball. Fire-and-forget and non-fatal by design, so scaffolding
-	// never waits on it.
+	// Install the platform package — ensures the root workspace file,
+	// verifies the template's portable file: specs resolve (adding a
+	// workspace-yaml override when the layout needs one; the manifest is
+	// never rewritten), and downloads the canonical tarball. Fire-and-forget
+	// and non-fatal by design, so scaffolding never waits on it.
 	void vendorAppTypes(getExtensionContext(), target.fsPath);
 
 	// ── 4. Open the App Builder + link the new member ────────────────────
