@@ -68,6 +68,9 @@ overrides:
   # and unbounded cache growth (GHSA-c83g-rgw3-j3cx). Transitive-only, so
   # Dependabot can't open a PR for it.
   browserslist: '>=4.28.7 <5'
+  # Colord: slow rejection of oversized malformed color strings
+  # (GHSA-2wm5-q62r-hmrv, 2.9.4).
+  colord: '>=2.9.4 <3'
   # minimatch@3 (glob@7, older eslint) does a CJS default-import of
   # brace-expansion; v5's commonjs build exports named {expand} only, so
   # a v5 global crashes minimatch@3 consumers ("expand is not a function").
@@ -85,9 +88,19 @@ overrides:
   # fflate infinite loop on malformed ZIP64 (GHSA-px8p-9vwx-vf98); stay on 0.4.x.
   fflate: '>=0.4.9 <0.5'
   glob: '>=11.1.0'
+  # Hono: toSSG() incomplete fix for path-write-outside-root (GHSA-gqvv-2mrq-wpjv),
+  # unbounded dot-notation nesting in parseBody() causing memory exhaustion
+  # (GHSA-g6gw-c38x-mqfc), query parser reads parameters after URL fragment causing
+  # cache-key confusion (GHSA-crvj-82cr-hjcx). All fixed in 4.13.5.
+  hono: '>=4.13.5 <5'
   immutable: '>=5.1.8 <6'
-  joi: '>=18.2.1 <19'
-  js-yaml: '>=4.3.1 <5'
+  # joi: __proto__ prototype pollution in custom messages (GHSA-6w3j-5fw6-r9vr,
+  # 18.2.5) and rename() to a template target writing to the validated object
+  # prototype (GHSA-gg4h-3hg2-grpc, 18.2.4). Floor 18.2.5 covers both.
+  joi: '>=18.2.5 <19'
+  # js-yaml: maxTotalMergeKeys does not bound CPU on empty merge sources
+  # (GHSA-2883-xcg3-v3hh, 4.3.2).
+  js-yaml: '>=4.3.2 <5'
   lodash: '>=4.18.1 <5'
   nanoid: '>=3.3.17'
   postcss: '>=8.5.23'
@@ -105,8 +118,16 @@ overrides:
   'react-router-dom@5>react-router': '5.3.4'
   serialize-javascript: '>=7.0.5 <8'
   shell-quote: '>=1.9.0 <2'
+  # SVGO: removeScripts leaves executable links through namespace and control
+  # characters (GHSA-w27v-7q3p-w38r, high), and incompletely sanitizes executable
+  # HTML in SVG foreignObject (GHSA-4vpr-x523-8j87, medium). Both fixed in 3.3.5.
+  svgo: '>=3.3.5 <4'
   undici: '>=7.29.0 <8'
   uuid: '>=11.1.1 <12'
+  # Vitest and its @vitest/mocker: Path Traversal / Arbitrary File Read via
+  # Redirect Mock (GHSA-82fw-gwwq-j7x9, 4.1.11).
+  vitest: '>=4.1.11 <5'
+  '@vitest/mocker': '>=4.1.11 <5'
   webpack-dev-server: '>=5.2.6 <6'
   ws: '>=8.21.0 <9'
 
