@@ -277,6 +277,39 @@ artifacts are immutable, which makes an absent field expensive to add later.
 Python node is published — its source is what runs, so there is nothing to
 compile. The field exists for the same reason as `runtime`.
 
+## What happens when a pipeline uses one
+
+A published node is never installed. A run brings in only the nodes that run
+names, uses them, and drops them.
+
+**Deciding** comes first and touches nothing. Each component's `provider` is
+the node's id, so what a pipeline asks for needs no translating. Subtract what
+the engine already carries — for a pipeline of stock nodes that is the whole
+of it, one set difference and no lookup. Whatever is left is resolved against
+the caller's pins, and **a node with no pin stops the run before any bytes
+move**, naming every missing node at once and the org they were looked for in.
+
+**Getting** them follows, and the order is deliberate:
+
+1. The bundle's digest is checked against what the artifact recorded, before a
+   zip reader ever sees the bytes.
+2. The archive is guarded again — publishing checked the same things, but that
+   was a different moment and a different copy.
+3. It is unpacked into a cache keyed by **digest**, not by version, so two
+   versions never collide and nothing ever needs invalidating.
+4. Its declared `requirements.txt` is installed through the engine's own
+   installer, which resolves against the constraints lock — a node that cannot
+   fit the environment is refused rather than downgrading a package another
+   node in the same run depends on.
+5. The directory is placed where the engine imports external nodes from, which
+   is why the manifest's own `path` never has to be rewritten.
+
+Two runs resolving the same node do not collide: each unpacks into a staging
+directory and renames into place, so the second either finds the slot already
+there or loses the rename and uses the winner's identical copy.
+
+When the run ends its tree is dropped and the cache stays warm.
+
 ## Related
 
 - [WebSocket protocol](/protocols/websocket): the transport these commands ride.
