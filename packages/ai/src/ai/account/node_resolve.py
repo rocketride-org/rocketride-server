@@ -23,6 +23,7 @@ from __future__ import annotations
 import hashlib
 import io
 import os
+import re
 import shutil
 import zipfile
 from typing import Any, Dict, List, Set
@@ -44,6 +45,11 @@ from depends import depends as _install
 RUN_PACKAGE = 'local_nodes'
 
 _PACKAGE_INIT = b'# Marks local_nodes as a package so the engine can import local_nodes.<name>.\n'
+
+#: How long one node's dependency install may take before the run gives up.
+#: Generous, because a cold resolve can genuinely be slow; finite, because a
+#: stalled resolver would otherwise hang the run with nothing to show for it.
+INSTALL_TIMEOUT = 900.0
 
 
 def providers_of(pipeline: Dict[str, Any]) -> Set[str]:
@@ -217,12 +223,25 @@ def cache_root() -> str:
     return os.path.join(engine_cache_dir(create=True), 'nodes')
 
 
+#: A digest is a path segment in the cache, so it is validated as one. This
+#: also rejects anything that could climb out of the cache root.
+_DIGEST = re.compile(r'[0-9a-f]{64}')
+
+
 def cache_slot(node_id: str, digest: str) -> str:
     """This exact node at this exact content, and nothing else.
 
     Keyed by digest rather than by version: two versions never collide, a slot
     can never hold the wrong bytes, and nothing ever has to be invalidated.
+
+    Raises:
+        BundleMismatch: the digest is not a usable sha256. An empty one would
+                        otherwise resolve to the node's own directory — which
+                        on a warm cache exists, holding the digest slots, and
+                        would be copied out as though it were the node.
     """
+    if not _DIGEST.fullmatch(digest):
+        raise BundleMismatch(f'{node_id} carries no usable content digest ({digest!r})')
     return os.path.join(cache_root(), node_id, digest)
 
 
@@ -305,8 +324,19 @@ async def _satisfy_requirements(placed: str, node_id: str) -> bool:
     if not os.path.exists(path):
         return False
     try:
-        # Off the event loop: this can reach the network and take a while.
-        await asyncio.get_running_loop().run_in_executor(None, _install, path)
+        # Off the event loop: this reaches the network and takes a while.
+        await asyncio.wait_for(
+            asyncio.get_running_loop().run_in_executor(None, _install, path),
+            timeout=INSTALL_TIMEOUT,
+        )
+    except asyncio.TimeoutError as exc:
+        # The run stops with something a person can act on. The installer
+        # process itself is NOT killed here — `depends` drives uv through
+        # subprocess calls that take no timeout, so the deadline it needs is
+        # its own to add. Worth doing; it is not this module's to reach into.
+        raise DependencyFailure(
+            f'{node_id} dependency install exceeded {INSTALL_TIMEOUT:.0f}s and the run gave up'
+        ) from exc
     except Exception as exc:
         raise DependencyFailure(f'{node_id} declares dependencies that cannot be satisfied here: {exc}') from exc
     debug(f'[node_resolve] installed requirements for {node_id}')

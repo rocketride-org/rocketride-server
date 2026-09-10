@@ -84,7 +84,7 @@ never leaves a version with no bytes behind it:
 
 Only then is the version allocated, and only then does content land:
 
-```
+```text
 <artifact sibling>/bundle/<nodeId>-v<NNNNNN>.zip   the transport zip, kept for provenance
 <artifact sibling>/source/…                        the unpacked tree the engine reads
 ```
@@ -261,7 +261,7 @@ node the run then refuses would be worse than not offering it at all.
 ```
 
 ```json
-{ "pins": [{ "audience": "u1", "version": 3 }] }
+{ "pins": [{ "audience": { "type": "user", "id": "u1" }, "version": 3 }] }
 ```
 
 ## Fields worth knowing about
@@ -315,7 +315,7 @@ When the run ends its tree is dropped and the cache stays warm.
 The same surface, without hand-writing WebSocket frames. Publishing rides the
 generic rail; everything after it is the `node` group:
 
-```
+```bash
 rocketride deploy add ticket_feed.zip --kind node --deploy-to <teamId>
 
 rocketride node versions ticket_feed

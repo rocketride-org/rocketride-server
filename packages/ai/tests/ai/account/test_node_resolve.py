@@ -278,6 +278,29 @@ class TestMaterialise:
             await node_resolve.materialise([entry], live.run_root, 'org1', 'u1')
 
     @pytest.mark.asyncio
+    async def test_a_missing_digest_cannot_borrow_a_warm_cache(self, live):
+        # An empty digest would otherwise join to the node's OWN directory,
+        # which on a warm cache exists and holds the digest slots — copied
+        # out, that is a folder of hashes pretending to be a node, and it
+        # would happen before the digest check ever ran.
+        entry = await live.publish()
+        await node_resolve.materialise([entry], live.run_root, 'org1', 'u1')
+        assert Path(node_resolve.cache_root(), 'ticket_feed').is_dir()
+
+        second = dict(entry, bundleSha256='')
+        with pytest.raises(node_resolve.BundleMismatch):
+            await node_resolve.materialise([second], str(Path(live.run_root) / 'second'), 'org1', 'u1')
+        assert not (Path(live.run_root) / 'second' / 'local_nodes').exists()
+
+    @pytest.mark.asyncio
+    async def test_a_digest_that_is_not_a_digest_is_refused(self, live):
+        # Also closes the path it would otherwise be joined into.
+        entry = await live.publish()
+        for bad in ('../../etc', 'NOTHEX' * 10, 'abc'):
+            with pytest.raises(node_resolve.BundleMismatch):
+                await node_resolve.materialise([dict(entry, bundleSha256=bad)], live.run_root, 'org1', 'u1')
+
+    @pytest.mark.asyncio
     async def test_the_second_run_reuses_the_cache(self, live):
         entry = await live.publish()
         await node_resolve.materialise([entry], live.run_root, 'org1', 'u1')

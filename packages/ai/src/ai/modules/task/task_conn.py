@@ -208,7 +208,6 @@ class TaskConn(
         AppCommands.__init__(self, connection_id, server, transport, **kwargs)
         DeployCommands.__init__(self, connection_id, server, transport, **kwargs)
         DeployPipeCommands.__init__(self, connection_id, server, transport, **kwargs)
-        NodeCommands.__init__(self, connection_id, server, transport, **kwargs)
         LogCommands.__init__(self, connection_id, server, transport, **kwargs)
         StoreCommands.__init__(self, connection_id, server, transport, **kwargs)
 
