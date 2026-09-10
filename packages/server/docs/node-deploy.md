@@ -310,6 +310,28 @@ there or loses the rename and uses the winner's identical copy.
 
 When the run ends its tree is dropped and the cache stays warm.
 
+## From the command line
+
+The same surface, without hand-writing WebSocket frames. Publishing rides the
+generic rail; everything after it is the `node` group:
+
+```
+rocketride deploy add ticket_feed.zip --kind node --deploy-to <teamId>
+
+rocketride node versions ticket_feed
+rocketride node deploy ticket_feed 3 --target @team/Platform
+rocketride node where ticket_feed
+rocketride node disable ticket_feed --target @team/Platform
+rocketride node remove ticket_feed --target @all
+```
+
+These are deployment-target verbs: an absent `ROCKETRIDE_DEPLOY_*` pair stops
+the command rather than falling back to the development connection, so a node
+never lands somewhere it was not aimed at.
+
+The same calls are on the SDK as `client.deploy.nodeVersions`, `nodeDeploy`,
+`nodeWhere` and `nodeWithdraw` — that is what a UI talks to.
+
 ## Related
 
 - [WebSocket protocol](/protocols/websocket): the transport these commands ride.
