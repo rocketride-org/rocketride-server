@@ -47,7 +47,7 @@
 	// Optional:
 	//		Description to of this driver
 	//
-	"description": ["A component that connects to NVIDIA's Nemotron large language models for ", "advanced natural language processing. The Nemotron 3 family are open-weight ", "hybrid Mamba-Transformer MoE reasoning models with configurable thinking ", "budgets and up to a 1M-token context window: Ultra for frontier multi-agent ", "reasoning, Super for the best efficiency/accuracy balance, and Nano for ", "fast sub-agent workloads. Models are served through NVIDIA's OpenAI-compatible ", "cloud API (build.nvidia.com) or self-hosted via NIM containers, vLLM, or SGLang."],
+	"description": ["A component that connects to NVIDIA's Nemotron large language models for ", "advanced natural language processing. The Nemotron 3 family are open-weight ", "hybrid Mamba-Transformer MoE reasoning models with configurable thinking ", "budgets and up to a 1M-token context window: Ultra for frontier multi-agent ", "reasoning, Super for the best efficiency/accuracy balance, and 3.5 ", "Lightning for fast sub-agent workloads. Models are served through NVIDIA's OpenAI-compatible ", "cloud API (build.nvidia.com) or self-hosted via NIM containers, vLLM, or SGLang."],
 	//
 	// Optional:
 	//	  The icon is the icon to display in the UI for this node

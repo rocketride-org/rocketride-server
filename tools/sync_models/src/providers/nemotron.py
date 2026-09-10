@@ -2,7 +2,7 @@
 NVIDIA Nemotron provider handler (Handler A) — cloud models only.
 
 Fetches models from the NVIDIA /v1/models endpoint and syncs the cloud
-profiles (nemotron-3-super, nemotron-3-ultra, nemotron-3-nano) into
+profiles (nemotron-3-super, nemotron-3-ultra, nemotron-3-5-lightning) into
 nodes/src/nodes/llm_nemotron/services.json.
 
 The NVIDIA API (build.nvidia.com) is OpenAI-compatible, so the openai SDK can
@@ -46,6 +46,22 @@ class NemotronProvider(CloudProvider):
             api_key=api_key,
             base_url='https://integrate.api.nvidia.com/v1',
         )
+
+    def litellm_to_native_model_id(self, litellm_bare_id: str) -> str:
+        """
+        LiteLLM stores NVIDIA models bare (``"nemotron-3-super-120b-a12b"``),
+        but the NVIDIA API — and therefore services.json — uses the
+        vendor-prefixed ``"nvidia/nemotron-3-super-120b-a12b"`` form.
+
+        Args:
+            litellm_bare_id: Bare model ID from LiteLLM (provider prefix stripped)
+
+        Returns:
+            Native model ID with the ``"nvidia/"`` vendor prefix
+        """
+        if litellm_bare_id.startswith('nvidia/'):
+            return litellm_bare_id
+        return f'nvidia/{litellm_bare_id}'
 
     def fetch_models(self, client: object) -> List[Dict[str, Any]]:
         """
