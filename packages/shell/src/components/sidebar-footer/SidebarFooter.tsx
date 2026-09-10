@@ -33,6 +33,7 @@ import rehypeSanitize from 'rehype-sanitize';
 import { commonStyles } from '../../themes/styles';
 import { useFixedPopupPosition } from '../../hooks/useFixedPopupPosition';
 import { useAnnouncements } from '../../hooks/useAnnouncements';
+import { useWorkspace } from '../workspace/WorkspaceContext';
 import { PopupRow } from '../PopupRow';
 import { BxBookOpen, BxChevronRight, BxCheck, BxCog } from '../BoxIcon';
 import type { IconComponent } from '../BoxIcon';
@@ -146,6 +147,10 @@ const S = {
 		display: 'flex',
 		alignItems: 'center',
 		gap: 8,
+		// The row is a menu trigger, so it takes a target's height rather than
+		// its content's: it measured 40, and it is the last thing in the drawer
+		// a thumb goes for.
+		minHeight: 44,
 		padding: collapsed ? '4px 0' : '4px 10px',
 		justifyContent: collapsed ? 'center' : 'flex-start',
 		borderRadius: 8,
@@ -323,6 +328,14 @@ export const SidebarFooter: React.FC<SidebarFooterProps> = ({ collapsed, userNam
 	const topLevelItems = menuItems ?? [];
 
 	// ── Announcements ticker ────────────────────────────────────────────────
+	//
+	// The ticker is the PLATFORM's channel. An app carrying its own brand can
+	// ask for it to stay out of its sidebar, where it otherwise reads as the
+	// host talking over the product. Opting out is the app's choice to make;
+	// an app that says nothing keeps it, so this cannot turn the channel off
+	// for anyone who did not ask for that.
+	const { activeAppId, loadedApps } = useWorkspace();
+	const hideAnnouncements = !!loadedApps[activeAppId]?.branding?.hideAnnouncements;
 	const announcements = useAnnouncements();
 	const [tickerIndex, setTickerIndex] = useState(0);
 	const [tickerFade, setTickerFade] = useState(true);
@@ -344,7 +357,7 @@ export const SidebarFooter: React.FC<SidebarFooterProps> = ({ collapsed, userNam
 	return (
 		<div style={S.wrapper}>
 			{/* ── Announcements ticker (popup mode) ────────────────────── */}
-			{!collapsed && announcements.length > 0 && (() => {
+			{!collapsed && !hideAnnouncements && announcements.length > 0 && (() => {
 				const current = announcements[tickerIndex % announcements.length];
 				return (
 					<>
@@ -359,12 +372,12 @@ export const SidebarFooter: React.FC<SidebarFooterProps> = ({ collapsed, userNam
 								</div>
 								<div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
 									{current.link && /^https?:\/\//i.test(current.link) ? (
-										<a href={current.link} target="_blank" rel="noopener noreferrer" style={{ fontSize: 11, color: 'var(--rr-brand)', textDecoration: 'none', cursor: 'pointer' }}>Learn more &rarr;</a>
+										<a href={current.link} target="_blank" rel="noopener noreferrer" style={{ fontSize: 11, color: 'var(--rr-brand)', textDecoration: 'none', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', minHeight: 44, paddingRight: 8, marginTop: -14, marginBottom: -14 }}>Learn more &rarr;</a>
 									) : <span />}
 									{announcements.length > 1 && (
 										<div style={{ display: 'flex', gap: 2 }}>
-											<button type="button" aria-label="Previous announcement" onClick={() => { setTickerFade(false); setTimeout(() => { setTickerIndex((i) => (i - 1 + announcements.length) % announcements.length); setTickerFade(true); }, 150); }} style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', fontSize: 11, color: 'var(--rr-text-secondary)', lineHeight: 1 }}>&lsaquo;</button>
-											<button type="button" aria-label="Next announcement" onClick={() => { setTickerFade(false); setTimeout(() => { setTickerIndex((i) => (i + 1) % announcements.length); setTickerFade(true); }, 150); }} style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', fontSize: 11, color: 'var(--rr-text-secondary)', lineHeight: 1 }}>&rsaquo;</button>
+											<button type="button" aria-label="Previous announcement" onClick={() => { setTickerFade(false); setTimeout(() => { setTickerIndex((i) => (i - 1 + announcements.length) % announcements.length); setTickerFade(true); }, 150); }} style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', fontSize: 11, color: 'var(--rr-text-secondary)', lineHeight: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 44, height: 44, margin: '-14px -4px', flexShrink: 0 }}>&lsaquo;</button>
+											<button type="button" aria-label="Next announcement" onClick={() => { setTickerFade(false); setTimeout(() => { setTickerIndex((i) => (i + 1) % announcements.length); setTickerFade(true); }, 150); }} style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', fontSize: 11, color: 'var(--rr-text-secondary)', lineHeight: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 44, height: 44, margin: '-14px -4px', flexShrink: 0 }}>&rsaquo;</button>
 										</div>
 									)}
 								</div>
