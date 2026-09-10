@@ -54,6 +54,20 @@ landed in:
 **A published version is inert.** It is on the shelf and nobody can run it yet.
 Making it reachable is `deploy`, below.
 
+### Publishing and binding in one call
+
+`deployTo` on the same request publishes and then binds, which is what the CLI
+sends behind `--deploy-to`. A bare team name or id is read as that team; the
+`@` targets described under [deploy](#making-a-version-reachable) pass through
+unchanged. The response carries the `audience` that was bound alongside the
+artifact.
+
+It is a convenience, not a second door: the binding runs through the same rule
+`deploy` applies, so nothing becomes reachable here that the explicit verb
+would have refused. If the bind fails, **the version still stands** — the
+bytes landed and the version is real, so the error says so and the caller
+binds it afterwards rather than uploading again.
+
 ### What the server checks, in order
 
 Each of these refuses **before** a registry row exists, so a rejected upload
