@@ -536,6 +536,20 @@ export function packNodeSource(nodeRoot: string, onProgress?: PackProgress): Pac
 	if (files.length === 0) {
 		throw new Error(`Nothing to pack under "${nodeRoot}" — is the folder fully ignored?`);
 	}
+	// On disk is not enough: a .gitignore can exclude the manifest, and a
+	// bundle without one is refused by the server for a reason nobody would
+	// connect back to an ignore rule.
+	if (!files.some((file) => file.zipPath === 'services.json')) {
+		throw new Error(`services.json is excluded by an ignore rule in "${nodeRoot}" — the bundle would carry no manifest.`);
+	}
+	// Preflight the uncompressed total. The zip cap below only catches what
+	// compresses badly; a large, highly compressible node would sail past it
+	// while costing the memory anyway.
+	const sourceBytes = files.reduce((total, file) => total + fs.statSync(file.absPath).size, 0);
+	if (sourceBytes > MAX_PACK_BYTES) {
+		onProgress?.(`pack ABORTED — source exceeds ${Math.floor(MAX_PACK_BYTES / (1024 * 1024))} MB`);
+		throw new Error(`Pack exceeds ${Math.floor(MAX_PACK_BYTES / (1024 * 1024))}MB uncompressed — add ignores.`);
+	}
 
 	// Identity is read here only to report it back; the server reads the same
 	// file out of the zip and that copy is the one that decides.

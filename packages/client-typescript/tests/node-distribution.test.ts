@@ -122,6 +122,14 @@ describe('packNodeSource', () => {
 		expect(() => packNodeSource(dir)).toThrow(/not valid JSON/);
 	});
 
+	it('refuses when an ignore rule swallows the manifest', () => {
+		// On disk is not enough. Without this the bundle ships with no
+		// manifest and the server refuses it, for a reason nobody would trace
+		// back to a .gitignore line.
+		const dir = makeNode(tmp, { '.gitignore': 'services.json\n' });
+		expect(() => packNodeSource(dir)).toThrow(/excluded by an ignore rule/);
+	});
+
 	it('honours .gitignore inside the node', () => {
 		const dir = makeNode(tmp, { '.gitignore': 'secrets.env\n', 'secrets.env': 'TOKEN=1\n' });
 		expect(entriesOf(packNodeSource(dir).data)).not.toContain('secrets.env');
