@@ -28,6 +28,14 @@ On the `documents` lane, when **Store in metadata** is on (the default), each do
 - `entities_<type>`: one key per entity type, lowercased (e.g. `entities_per`, `entities_org`, `entities_loc`), holding a deduplicated, sorted list of entity texts
 - `entities_count`: total number of entities found in the document
 
+These are written onto the document's `DocMetadata` as attributes, so in-process consumers
+read them as `doc.metadata.entities_per` rather than by subscript. They are extra fields on
+the model, so they still appear in the serialized metadata from `toDict()`.
+
+A document that arrives without metadata is given a `DocMetadata` built from the object
+being processed, inheriting its `objectId`, `nodeId`, `parent`, `permissionId` and
+`signature` rather than a placeholder identity.
+
 The original documents are never mutated; enriched copies are written downstream.
 
 ### Fields

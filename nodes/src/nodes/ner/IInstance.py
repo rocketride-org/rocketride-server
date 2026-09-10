@@ -23,7 +23,7 @@
 
 from typing import List
 from rocketlib import Entry, IInstanceBase
-from ai.common.schema import Doc
+from ai.common.schema import Doc, DocMetadata
 from .IGlobal import IGlobal
 
 
@@ -86,9 +86,11 @@ class IInstance(IInstanceBase):
             # Store entities in metadata if configured
             if self.IGlobal.recognizer.store_in_metadata:
                 if enriched_doc.metadata is None:
-                    # Initialize with default metadata if missing
-                    from ai.common.schema import DocMetadata
-                    enriched_doc.metadata = DocMetadata(objectId='unknown', chunkId=0)
+                    # Build from the instance so objectId, nodeId, parent, permissionId
+                    # and signature are inherited from the object being processed. A
+                    # hardcoded placeholder would give every such document the same
+                    # identity and collide in stores keyed on objectId+chunkId.
+                    enriched_doc.metadata = DocMetadata(self, chunkId=0)
 
                 # Group entities by type
                 entities_by_type = {}
