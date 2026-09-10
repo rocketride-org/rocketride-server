@@ -219,6 +219,28 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 	// =========================================================================
 
 	private broadcastServicesToAllEditors(payload: { services: Record<string, unknown>; icons?: Record<string, string>; servicesError?: string }): void {
+		// SAY WHY THE PALETTE IS EMPTY.
+		//
+		// A catalogue that failed and a catalogue that is genuinely empty both
+		// render as an empty node palette, and the difference is the entire
+		// diagnosis: "Not connected", "authentication failed" and "the engine
+		// loaded zero services" are three different problems with three
+		// different fixes. This error was recorded on the way in and then read
+		// by nobody, so the one place a person looks for a reason said nothing
+		// at all.
+		if (payload.servicesError) {
+			this.logger.error(
+				`Node catalogue unavailable: ${payload.servicesError}. ` +
+					'The node palette will be empty until this is resolved.',
+			);
+		} else if (Object.keys(payload.services).length === 0) {
+			this.logger.output(
+				'Node catalogue is empty: the engine returned zero services. ' +
+					'One malformed node definition empties the whole catalogue — ' +
+					'restart the engine with --trace=Services to see which.',
+			);
+		}
+
 		for (const editorState of this.editorStates.values()) {
 			if (editorState.isReady && !editorState.isDisposed && editorState.webviewPanel.webview) {
 				editorState.webviewPanel.webview

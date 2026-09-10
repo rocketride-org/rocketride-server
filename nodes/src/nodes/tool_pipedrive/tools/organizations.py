@@ -48,6 +48,7 @@ from ._base import (
     PAGING,
     PAGING_V2,
     STR,
+    UTC_TIME_DESC,
     PipedriveToolsBase,
     args_of,
     body_from,
@@ -68,7 +69,7 @@ _ORG_WRITE_PROPS = {
     'address': STR('Postal address as a single line.'),
     'label': INT('Organization label id.'),
     'visible_to': ENUM('Visibility group id.', ['1', '3', '5', '7']),
-    'add_time': STR('Creation timestamp, YYYY-MM-DD HH:MM:SS. Use to backdate an imported record.'),
+    'add_time': STR(f'Creation timestamp, YYYY-MM-DD HH:MM:SS. Use to backdate an imported record. {UTC_TIME_DESC}'),
     'extra': EXTRA(),
 }
 
