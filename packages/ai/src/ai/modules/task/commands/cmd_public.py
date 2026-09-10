@@ -41,6 +41,7 @@ and server probing.
 """
 
 import os
+import re
 import sys
 from typing import TYPE_CHECKING, Dict, Any
 
@@ -50,6 +51,9 @@ from ai.account import account
 
 if TYPE_CHECKING:
     from ..task_server import TaskServer
+
+# Canonical 8-4-4-4-12 hex UUID — the shape of a Gravity advertiser ID.
+_UUID_RE = re.compile(r'[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}')
 
 
 # =============================================================================
@@ -89,6 +93,7 @@ class PublicCommands(DAPConn):
         design) when the server has one configured, so browser and
         extension clients receive the key matching THIS server's Stripe
         account instead of a value baked into their bundles at build time.
+        The Gravity ad-pixel advertiser ID travels the same way.
 
         Args:
             request: Raw DAP request dict.
@@ -125,6 +130,16 @@ class PublicCommands(DAPConn):
             info['stripePublishableKey'] = stripe_pk
         elif stripe_pk:
             debug('[public] RR_STRIPE_PUBLISHABLE_KEY is not a pk_ publishable key — omitting it from the public probe')
+        # Gravity ad-pixel advertiser ID — public by design, and per
+        # environment so staging never fires the production pixel. Omitted
+        # when unset (the shell then never loads the ad script). Same guard
+        # as the Stripe key: only a UUID is emitted, so the Gravity API key
+        # (a server secret) misconfigured into this var never reaches clients.
+        gravity_id = os.environ.get('RR_GRAVITY_ADVERTISER_ID', '').strip()
+        if _UUID_RE.fullmatch(gravity_id):
+            info['gravityAdvertiserId'] = gravity_id
+        elif gravity_id:
+            debug('[public] RR_GRAVITY_ADVERTISER_ID is not a UUID — omitting it from the public probe')
         return self.build_response(request, body=info)
 
     # ── rrext_public_catalog ────────────────────────────────────────────────

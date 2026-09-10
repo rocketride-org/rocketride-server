@@ -24,7 +24,7 @@
 // FROZEN rocketride SDK contract — floor v1.3 — never edit by hand
 // =============================================================================
 // Floor key:     1.3 (MAJOR.MINOR of packages/client-typescript/package.json)
-// Source commit: a8a0457d95ea28eda0a0411b3b8ee10345c71466
+// Source commit: bb766ae30de2189936b47704a59339dd6c7f9a53
 // Generator:     dts-bundle-generator@9.5.1
 // Produced by:   ./builder client-typescript:freeze
 //
@@ -1927,6 +1927,14 @@ export interface ServerInfoResult {
      */
     stripePublishableKey?: string;
     /**
+     * Gravity ad-pixel advertiser ID (a UUID) configured on this server.
+     *
+     * Per environment, like the Stripe key: the browser shell initialises the
+     * Gravity pixel only when the server it was served from advertises one,
+     * so staging never fires the production pixel. Absent when unset.
+     */
+    gravityAdvertiserId?: string;
+    /**
      * The server's public addresses, RESOLVED to absolute URLs.
      *
      * `getServerInfo` substitutes the server's `'origin'` sentinel ("the
@@ -2950,9 +2958,9 @@ export interface TASK_STATUS {
     debuggerAttached: boolean;
     /** Current status message describing task activity and progress */
     status: string;
-    /** Warning message history (limited to 50 recent entries) */
+    /** Warning message history (limited to 1000 recent entries) */
     warnings: string[];
-    /** Error message history (limited to 50 recent entries) */
+    /** Error message history (limited to 1000 recent entries) */
     errors: string[];
     /** Name/identifier of the item currently being processed */
     currentObject: string;
@@ -3395,6 +3403,20 @@ declare class AccountApi {
      * @param orgId - The org ID to switch to.
      */
     setDefaultOrg(orgId: string): Promise<void>;
+    /**
+     * Records (or clears) the user's ad-attribution context for a provider.
+     *
+     * Sent by the browser shell only after the user has granted marketing
+     * consent: `data` is the provider's opaque attribution blob (for Gravity,
+     * the result of `window.gravityPixel.getCAPIData()`), which the server
+     * attaches to server-side conversion events. Pass `null` when consent is
+     * withdrawn — the server deletes the stored context and stops reporting
+     * conversions for this user.
+     *
+     * @param provider - Attribution provider id (currently `'gravity'`).
+     * @param data - The provider's attribution blob, or `null` to clear it.
+     */
+    setAttribution(provider: string, data: Record<string, unknown> | null): Promise<void>;
     /**
      * Permanently deletes the current user's account.
      */

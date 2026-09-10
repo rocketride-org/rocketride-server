@@ -562,6 +562,15 @@ export interface ServerInfoResult {
 	stripePublishableKey?: string;
 
 	/**
+	 * Gravity ad-pixel advertiser ID (a UUID) configured on this server.
+	 *
+	 * Per environment, like the Stripe key: the browser shell initialises the
+	 * Gravity pixel only when the server it was served from advertises one,
+	 * so staging never fires the production pixel. Absent when unset.
+	 */
+	gravityAdvertiserId?: string;
+
+	/**
 	 * The server's public addresses, RESOLVED to absolute URLs.
 	 *
 	 * `getServerInfo` substitutes the server's `'origin'` sentinel ("the

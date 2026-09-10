@@ -94,6 +94,23 @@ export class AccountApi {
 	}
 
 	/**
+	 * Records (or clears) the user's ad-attribution context for a provider.
+	 *
+	 * Sent by the browser shell only after the user has granted marketing
+	 * consent: `data` is the provider's opaque attribution blob (for Gravity,
+	 * the result of `window.gravityPixel.getCAPIData()`), which the server
+	 * attaches to server-side conversion events. Pass `null` when consent is
+	 * withdrawn — the server deletes the stored context and stops reporting
+	 * conversions for this user.
+	 *
+	 * @param provider - Attribution provider id (currently `'gravity'`).
+	 * @param data - The provider's attribution blob, or `null` to clear it.
+	 */
+	async setAttribution(provider: string, data: Record<string, unknown> | null): Promise<void> {
+		await this.client.call('rrext_account_me', { subcommand: 'set_attribution', provider, data });
+	}
+
+	/**
 	 * Permanently deletes the current user's account.
 	 */
 	async deleteAccount(): Promise<void> {

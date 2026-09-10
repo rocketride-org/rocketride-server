@@ -121,6 +121,65 @@ async def test_on_rrext_public_probe_omits_stripe_key_when_unset(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_on_rrext_public_probe_includes_gravity_advertiser_id_when_configured(monkeypatch):
+    """
+    A configured RR_GRAVITY_ADVERTISER_ID (a public UUID) is advertised on the
+    probe so the shell initialises the ad pixel for THIS environment only —
+    the bundle carries no advertiser ID of its own.
+    """
+    monkeypatch.setattr(cmd_public, 'getVersion', lambda: '9.9.9')
+    monkeypatch.setenv('RR_GRAVITY_ADVERTISER_ID', '  0b3c9a52-7d0e-4f2a-9c11-5e6f7a8b9c0d  ')
+
+    account = SimpleNamespace(capabilities=[], get_public_apps=AsyncMock(return_value=[]))
+    server = MagicMock()
+    server._server = SimpleNamespace(account=account)
+
+    conn = _make_conn(server=server)
+    result = await PublicCommands.on_rrext_public_probe(conn, {'command': 'rrext_public_probe'})
+
+    assert result['body']['gravityAdvertiserId'] == '0b3c9a52-7d0e-4f2a-9c11-5e6f7a8b9c0d'
+
+
+@pytest.mark.asyncio
+async def test_on_rrext_public_probe_omits_gravity_advertiser_id_when_unset(monkeypatch):
+    """
+    Environments without the pixel (staging, OSS) omit the field entirely, so
+    the shell never loads the ad script there.
+    """
+    monkeypatch.setattr(cmd_public, 'getVersion', lambda: '9.9.9')
+    monkeypatch.delenv('RR_GRAVITY_ADVERTISER_ID', raising=False)
+
+    account = SimpleNamespace(capabilities=[], get_public_apps=AsyncMock(return_value=[]))
+    server = MagicMock()
+    server._server = SimpleNamespace(account=account)
+
+    conn = _make_conn(server=server)
+    result = await PublicCommands.on_rrext_public_probe(conn, {'command': 'rrext_public_probe'})
+
+    assert 'gravityAdvertiserId' not in result['body']
+
+
+@pytest.mark.asyncio
+async def test_on_rrext_public_probe_refuses_non_uuid_gravity_advertiser_id(monkeypatch):
+    """
+    The probe is unauthenticated, so anything it returns reaches every
+    visitor. The advertiser ID is a UUID; any other value (most likely the
+    Gravity API key misconfigured into the wrong variable) is withheld.
+    """
+    monkeypatch.setattr(cmd_public, 'getVersion', lambda: '9.9.9')
+    monkeypatch.setenv('RR_GRAVITY_ADVERTISER_ID', 'grv_live_secret_api_key_value')
+
+    account = SimpleNamespace(capabilities=[], get_public_apps=AsyncMock(return_value=[]))
+    server = MagicMock()
+    server._server = SimpleNamespace(account=account)
+
+    conn = _make_conn(server=server)
+    result = await PublicCommands.on_rrext_public_probe(conn, {'command': 'rrext_public_probe'})
+
+    assert 'gravityAdvertiserId' not in result['body']
+
+
+@pytest.mark.asyncio
 async def test_on_rrext_public_probe_endpoints_default_to_origin(monkeypatch):
     """
     The endpoints block is ALWAYS present with BOTH keys — clients never
