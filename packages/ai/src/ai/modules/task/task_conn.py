@@ -74,6 +74,7 @@ from .commands.cmd_account import AccountCommands
 from .commands.cmd_app import AppCommands
 from .commands.cmd_public import PublicCommands
 from .commands.cmd_deploy import DeployCommands
+from .commands.cmd_node import NodeCommands
 from .commands.cmd_pipe import DeployPipeCommands
 from .commands.cmd_log import LogCommands
 from .commands.cmd_store import StoreCommands
@@ -113,6 +114,7 @@ class TaskConn(
     PublicCommands,
     DeployCommands,
     DeployPipeCommands,
+    NodeCommands,
     LogCommands,
     StoreCommands,
     DAPConn,
@@ -149,6 +151,7 @@ class TaskConn(
     - CProfileCommands: cProfile process profiling (start, stop, status, report)
     - AccountCommands: Account management (profile, keys, organizations, teams, billing)
     - AppCommands: App marketplace (developer, submission, catalog, admin, pricing)
+    - NodeCommands: Node publish control (versions, deploy, where)
     - DAPConn: Base DAP protocol implementation and transport handling
 
     Attributes:
@@ -205,6 +208,7 @@ class TaskConn(
         AppCommands.__init__(self, connection_id, server, transport, **kwargs)
         DeployCommands.__init__(self, connection_id, server, transport, **kwargs)
         DeployPipeCommands.__init__(self, connection_id, server, transport, **kwargs)
+        NodeCommands.__init__(self, connection_id, server, transport, **kwargs)
         LogCommands.__init__(self, connection_id, server, transport, **kwargs)
         StoreCommands.__init__(self, connection_id, server, transport, **kwargs)
 

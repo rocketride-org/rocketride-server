@@ -236,3 +236,92 @@ async def handle_node_add(conn: Any, request: Dict[str, Any]) -> Dict[str, Any]:
         org_id=org_id,
     )
     return conn.build_response(request, body={'artifact': entry, 'orgId': org_id})
+
+
+# =============================================================================
+# CONTROL — the rail for a published node: see it, pin it, find it
+# =============================================================================
+#
+# Publishing leaves an inert version. These are the verbs that make one
+# reachable, and they mirror the app control surface: targets are '@me',
+# '@team/<name-or-id>' and '@public'. There is no org rung — org is the
+# governance container, and org-wide distribution is a team an org admin
+# maintains.
+
+
+def _node_rail_entry(entry: Dict[str, Any], artifact: Dict[str, Any] | None) -> Dict[str, Any]:
+    """One row of a node's version rail: registry facts plus the node's own version."""
+    who = entry.get('publishedBy') or {}
+    return {
+        'registryVersion': entry.get('version'),
+        'nodeVersion': (artifact or {}).get('nodeVersion') or '',
+        'runtime': (artifact or {}).get('runtime') or RUNTIME_PYTHON,
+        'state': entry.get('state') or '',
+        'sha256': entry.get('sha256', ''),
+        'publishedAt': entry.get('publishedAt'),
+        'author': who.get('display') or who.get('email') or who.get('userId') or '',
+        'message': entry.get('comment', ''),
+    }
+
+
+async def handle_node_deploy(conn: Any, request: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle ``rrext_deploy_node`` — node publish control on the registry.
+
+    Subcommands:
+
+    - ``versions`` — the version rail for one node, newest first, with the
+      audiences currently pinned to each.
+    - ``deploy``   — pin an audience to a registry version. First release,
+      update, and rollback are all this one verb; pinning is what makes a
+      published version reachable at all.
+    - ``where``    — the reverse index: which audience holds which version.
+
+    Requires an authenticated connection; the org comes from the session.
+    """
+    from ai.account import account
+
+    info = getattr(conn, '_account_info', None)
+    if not info or not getattr(info, 'userId', None):
+        return conn.build_error(request, 'rrext_deploy_node requires an authenticated connection')
+
+    args = request.get('arguments', {}) or {}
+    sub = str(args.get('subcommand') or '')
+    node_id = str(args.get('nodeId') or '')
+    if not node_id:
+        return conn.build_error(request, 'nodeId is required')
+    org_id = _org_of(conn)
+
+    if sub == 'versions':
+        entries = await account.deployments_versions(org_id, node_id)
+        rail: List[Dict[str, Any]] = []
+        for entry in sorted(entries or [], key=lambda e: -int(e.get('version', 0))):
+            artifact = await account.deployments_artifact(org_id, node_id, int(entry.get('version', 0)))
+            rail.append(_node_rail_entry(entry, artifact))
+        return conn.build_response(request, body={'versions': rail})
+
+    if sub == 'deploy':
+        version = args.get('version')
+        # The registry version, not the node's own semver: two published
+        # versions can carry the same nodeVersion, and only one is this row.
+        if not isinstance(version, int):
+            return conn.build_error(request, 'version (the registry version number) is required')
+        try:
+            from ai.account.app_deploy import _resolve_target
+
+            audience = _resolve_target(conn, str(args.get('target') or '@me'))
+        except ValueError as exc:
+            return conn.build_error(request, str(exc))
+        record = await account.deployments_deploy(org_id, audience['id'], node_id, version, _actor_of(conn))
+        debug(f'[node_deploy] pinned {node_id} v{version} to {audience.get("type")}:{audience.get("id")}')
+        return conn.build_response(request, body={'deployment': record, 'audience': audience})
+
+    if sub == 'where':
+        deployments = await account.deployments_list(org_id, '')
+        pins = [
+            {'audience': dep.get('teamId') or dep.get('team_id') or '', 'version': dep.get('version')}
+            for dep in deployments or []
+            if (dep.get('projectId') or dep.get('project_id')) == node_id
+        ]
+        return conn.build_response(request, body={'pins': pins})
+
+    return conn.build_error(request, f'Unknown subcommand: {sub!r}')

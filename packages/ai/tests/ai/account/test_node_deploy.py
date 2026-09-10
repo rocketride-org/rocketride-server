@@ -280,3 +280,164 @@ class TestRefusals:
         )
         assert result['success'] is False
         assert not registry.published
+
+
+# =============================================================================
+# CONTROL — publishing leaves a version inert; these verbs make it reachable
+# =============================================================================
+
+
+class _ControlRegistry:
+    """Registry stand-in for the control verbs (rail, pins)."""
+
+    def __init__(self):
+        self.versions = {}
+        self.artifacts = {}
+        self.deployed = []
+        self.listed = []
+
+    def add_version(self, node_id, version, node_version, runtime='python'):
+        self.versions.setdefault(node_id, []).append(
+            {
+                'version': version,
+                'sha256': f'sha-{version}',
+                'state': 'ready',
+                'publishedAt': 1000 + version,
+                'publishedBy': {'display': 'Dev'},
+                'comment': f'v{node_version}',
+            }
+        )
+        self.artifacts[(node_id, version)] = {
+            'kind': 'node',
+            'nodeId': node_id,
+            'nodeVersion': node_version,
+            'runtime': runtime,
+        }
+
+    def install(self, monkeypatch):
+        from ai.account import account
+
+        async def deployments_versions(org_id, project_id):
+            return self.versions.get(project_id, [])
+
+        async def deployments_artifact(org_id, project_id, version):
+            return self.artifacts.get((project_id, version))
+
+        async def deployments_deploy(org_id, team_id, project_id, version, actor):
+            record = {'projectId': project_id, 'teamId': team_id, 'version': version}
+            self.deployed.append(record)
+            return record
+
+        async def deployments_list(org_id, team_id):
+            return self.listed
+
+        monkeypatch.setattr(account, 'deployments_versions', deployments_versions)
+        monkeypatch.setattr(account, 'deployments_artifact', deployments_artifact)
+        monkeypatch.setattr(account, 'deployments_deploy', deployments_deploy)
+        monkeypatch.setattr(account, 'deployments_list', deployments_list)
+
+
+@pytest.fixture
+def control(monkeypatch):
+    reg = _ControlRegistry()
+    reg.install(monkeypatch)
+    return reg
+
+
+def _control_request(subcommand, **args):
+    return {
+        'command': 'rrext_deploy_node',
+        'arguments': {'subcommand': subcommand, 'nodeId': 'my_node', **args},
+    }
+
+
+class TestVersions:
+    """The rail: what has been published, newest first."""
+
+    @pytest.mark.asyncio
+    async def test_newest_version_comes_first(self, control):
+        control.add_version('my_node', 1, '1.0.0')
+        control.add_version('my_node', 2, '1.1.0')
+        result = await node_deploy.handle_node_deploy(_FakeConn(), _control_request('versions'))
+        rail = result['body']['versions']
+        assert [row['registryVersion'] for row in rail] == [2, 1]
+
+    @pytest.mark.asyncio
+    async def test_the_row_carries_the_nodes_own_version_and_runtime(self, control):
+        control.add_version('my_node', 1, '1.2.0')
+        result = await node_deploy.handle_node_deploy(_FakeConn(), _control_request('versions'))
+        row = result['body']['versions'][0]
+        assert row['nodeVersion'] == '1.2.0'
+        assert row['runtime'] == 'python'
+
+    @pytest.mark.asyncio
+    async def test_a_node_with_no_versions_is_an_empty_rail(self, control):
+        result = await node_deploy.handle_node_deploy(_FakeConn(), _control_request('versions'))
+        assert result['body']['versions'] == []
+
+
+class TestDeploy:
+    """Pinning: first release, update and rollback are all this one verb."""
+
+    @pytest.mark.asyncio
+    async def test_pinning_defaults_to_the_caller(self, control):
+        result = await node_deploy.handle_node_deploy(_FakeConn(), _control_request('deploy', version=1))
+        assert result['success'] is True
+        assert control.deployed[0]['version'] == 1
+        assert result['body']['audience']['type'] == 'user'
+
+    @pytest.mark.asyncio
+    async def test_the_registry_version_is_required_as_an_int(self, control):
+        # The node's own semver is not it: two versions can carry the same
+        # nodeVersion, and only one of them is this registry row.
+        result = await node_deploy.handle_node_deploy(_FakeConn(), _control_request('deploy', version='1.2.0'))
+        assert result['success'] is False
+        assert 'registry version' in result['message']
+        assert not control.deployed
+
+    @pytest.mark.asyncio
+    async def test_an_unknown_target_is_refused(self, control):
+        result = await node_deploy.handle_node_deploy(
+            _FakeConn(), _control_request('deploy', version=1, target='@nowhere')
+        )
+        assert result['success'] is False
+        assert not control.deployed
+
+    @pytest.mark.asyncio
+    async def test_rollback_is_the_same_verb(self, control):
+        await node_deploy.handle_node_deploy(_FakeConn(), _control_request('deploy', version=2))
+        await node_deploy.handle_node_deploy(_FakeConn(), _control_request('deploy', version=1))
+        assert [d['version'] for d in control.deployed] == [2, 1]
+
+
+class TestWhere:
+    """The reverse index — which audience holds which version."""
+
+    @pytest.mark.asyncio
+    async def test_only_this_nodes_pins_are_returned(self, control):
+        control.listed = [
+            {'projectId': 'my_node', 'teamId': 'u1', 'version': 3},
+            {'projectId': 'other_node', 'teamId': 'u1', 'version': 9},
+        ]
+        result = await node_deploy.handle_node_deploy(_FakeConn(), _control_request('where'))
+        assert result['body']['pins'] == [{'audience': 'u1', 'version': 3}]
+
+
+class TestControlRefusals:
+    @pytest.mark.asyncio
+    async def test_an_unauthenticated_connection_is_refused(self, control):
+        result = await node_deploy.handle_node_deploy(_FakeConn(authenticated=False), _control_request('versions'))
+        assert result['success'] is False
+
+    @pytest.mark.asyncio
+    async def test_a_missing_node_id_is_refused(self, control):
+        request = {'command': 'rrext_deploy_node', 'arguments': {'subcommand': 'versions'}}
+        result = await node_deploy.handle_node_deploy(_FakeConn(), request)
+        assert result['success'] is False
+        assert 'nodeId' in result['message']
+
+    @pytest.mark.asyncio
+    async def test_an_unknown_subcommand_is_named_in_the_error(self, control):
+        result = await node_deploy.handle_node_deploy(_FakeConn(), _control_request('teleport'))
+        assert result['success'] is False
+        assert 'teleport' in result['message']
