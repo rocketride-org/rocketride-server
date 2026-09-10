@@ -139,7 +139,9 @@ export interface AppVersionOverride {
  * second pinning scheme could be added here without touching them.
  *
  * REGISTRY INTS ONLY — a value with any trailing non-digit (`?version=7abc`)
- * is rejected outright rather than silently pinned to 7 by prefix parsing.
+ * is rejected outright rather than silently pinned to 7 by prefix parsing, and
+ * so is one past the safe-integer range, which would parse to a neighbouring
+ * number instead of the one written.
  *
  * @returns App id → pin; empty object when nothing is pinned.
  */
@@ -148,8 +150,8 @@ export function getAppVersionOverrides(): Record<string, AppVersionOverride> {
 	const appId = search.get('appId') || search.get(APP_PARAM) || '';
 	const raw = search.get(VERSION_PARAM) ?? '';
 	if (!appId || !/^\d+$/.test(raw)) return {};
-	const version = Number.parseInt(raw, 10);
-	if (!(version > 0)) return {};
+	const version = Number(raw);
+	if (!Number.isSafeInteger(version) || version <= 0) return {};
 	const appVersion = search.get(APPVER_PARAM) || undefined;
 	return { [appId]: appVersion ? { version, appVersion } : { version } };
 }

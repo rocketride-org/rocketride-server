@@ -228,6 +228,34 @@ def test_a_text_free_response_is_still_billed():
     assert _counters()['llm_output_tokens'] == 500
 
 
+def test_a_text_free_response_is_asked_once_not_retried():
+    """
+    A SAFETY BLOCK IS AN ANSWER, NOT AN OUTAGE.
+
+    ChatBase retries anything it does not recognise, so a refusal would be
+    re-sent — and re-billed — for the same verdict. The retry loop must see it
+    as terminal and stop after the first call.
+    """
+    calls = []
+    blocked = _Response(_Usage(prompt=30, candidates=0), text=None, candidates=[_Candidate(finish_reason='SAFETY')])
+
+    class _Models:
+        def generate_content(self, model: str, contents: str) -> _Response:
+            calls.append(contents)
+            return blocked
+
+    chat = _make_chat(blocked)
+    chat._client = type('_Client', (), {'models': _Models()})()
+
+    with pytest.raises(_node.GeminiNoTextError):
+        chat._chat_with_retries('q')
+
+    assert len(calls) == 1
+    assert chat.is_retryable_error(_node.GeminiNoTextError('x')) is False
+    # Everything else still goes through ChatBase's classification.
+    assert chat.is_retryable_error(TimeoutError('timed out')) is True
+
+
 def test_no_candidates_at_all_still_says_something():
     """The reason is unavailable, so the message says that rather than nothing."""
     chat = _make_chat(_Response(_Usage(prompt=5, candidates=0), text=None, candidates=[]))

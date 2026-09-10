@@ -126,7 +126,15 @@ def _build_deepagent_llm(agent_base: AgentBase, context: AgentContext) -> Any:
 
             # Out of attempts. Anything readable beats handing over the protocol.
             salvaged = _salvage_final_content(raw)
-            return ChatResult(generations=[ChatGeneration(message=AIMessage(content=salvaged or raw))])
+            if salvaged:
+                return ChatResult(generations=[ChatGeneration(message=AIMessage(content=salvaged))])
+            # A broken TOOL CALL is not readable — it is work that never ran, and
+            # delivering it as the answer would end the turn claiming otherwise.
+            # Fail the run instead. Prose that merely skipped the sentinel is
+            # still an answer, and still goes through.
+            if _looks_like_envelope(raw):
+                raise ValueError(f'No valid tool call or final answer after 3 attempts. {_parse_failure_hint(raw)}')
+            return ChatResult(generations=[ChatGeneration(message=AIMessage(content=raw))])
 
         async def _agenerate(self, messages: Any, stop: Any = None, run_manager: Any = None, **kwargs: Any) -> Any:
             # Async hook for LangGraph's async path.  Bridges the blocking engine
@@ -584,6 +592,27 @@ def _salvage_final_content(raw: str) -> Optional[str]:
     elif body.endswith('"'):
         body = body[:-1]
     return _unescape_json_string_body(body)
+
+
+#: The opening of a JSON envelope, optionally inside a markdown fence.
+_ENVELOPE_OPEN = re.compile(r'^\s*(?:```[A-Za-z]*\s*)?\{')
+
+
+def _looks_like_envelope(raw: str) -> bool:
+    """
+    Whether an unparsed output was an attempt at the JSON protocol.
+
+    Separates the two things a retry loop can run out on: a protocol object
+    that never parsed (a broken tool call — must not reach the person), and
+    prose from a model that ignored the sentinel (still an answer).
+
+    Args:
+        raw: The model's unparsed output.
+
+    Returns:
+        True when the output opens like a JSON object.
+    """
+    return isinstance(raw, str) and bool(_ENVELOPE_OPEN.match(raw))
 
 
 def _parse_failure_hint(raw: str) -> str:

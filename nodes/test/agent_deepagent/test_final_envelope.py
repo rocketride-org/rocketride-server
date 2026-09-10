@@ -307,6 +307,85 @@ def test_the_retry_hint_reports_valid_json_of_the_wrong_shape(dp):
 
 
 # ---------------------------------------------------------------------------
+# (d) Out of attempts
+# ---------------------------------------------------------------------------
+
+
+class _FakeChatGeneration:
+    def __init__(self, message):
+        self.message = message
+
+
+class _FakeChatResult:
+    def __init__(self, generations):
+        self.generations = generations
+
+
+@pytest.fixture
+def llm_answering(dp, monkeypatch):
+    """
+    Build the deepagent's chat model around a host LLM that always says `raw`.
+
+    Returns a builder yielding (model, prompts) — `prompts` records every call.
+    """
+    language_models = types.ModuleType('langchain_core.language_models')
+    language_models.BaseChatModel = type('BaseChatModel', (), {})
+    message_utils = types.ModuleType('langchain_core.messages.utils')
+    message_utils.count_tokens_approximately = lambda messages: 0
+    outputs = types.ModuleType('langchain_core.outputs')
+    outputs.ChatGeneration = _FakeChatGeneration
+    outputs.ChatResult = _FakeChatResult
+    monkeypatch.setitem(sys.modules, 'langchain_core.language_models', language_models)
+    monkeypatch.setitem(sys.modules, 'langchain_core.messages.utils', message_utils)
+    monkeypatch.setitem(sys.modules, 'langchain_core.outputs', outputs)
+    monkeypatch.setattr(sys.modules['langchain_core.messages'], 'HumanMessage', FakeAIMessage, raising=False)
+
+    def build(raw):
+        prompts = []
+
+        def call_llm(context, prompt, **kwargs):
+            prompts.append(prompt)
+            return raw
+
+        return dp._build_deepagent_llm(types.SimpleNamespace(call_llm=call_llm), None), prompts
+
+    return build
+
+
+def test_a_tool_call_that_never_parses_fails_the_run(llm_answering):
+    """
+    THE RETRY LOOP'S LAST LINE MUST NOT DELIVER THE PROTOCOL EITHER.
+
+    Salvage refuses a broken tool call; handing the raw string over after the
+    third failure would undo that refusal — the tool never runs, and the person
+    reads the JSON as if it were the answer. The run fails instead.
+    """
+    broken_call = '{"type":"tool_call","name":"pipedrive.create","args":{"name":"a "quoted" org"}}'
+    model, prompts = llm_answering(broken_call)
+
+    with pytest.raises(ValueError, match='No valid tool call or final answer'):
+        model._generate([])
+    assert len(prompts) == 3
+
+
+def test_prose_that_skipped_the_sentinel_is_still_the_answer(llm_answering):
+    """A model that answered in plain words without the marker said something readable."""
+    model, prompts = llm_answering('I could not find that organization.')
+
+    result = model._generate([])
+
+    assert result.generations[0].message.content == 'I could not find that organization.'
+    assert len(prompts) == 3
+
+
+def test_an_envelope_is_recognised_inside_a_markdown_fence(dp):
+    assert dp._looks_like_envelope('```json\n{"type":"tool_call"')
+    assert dp._looks_like_envelope('  {"type":"tool_calls"')
+    assert not dp._looks_like_envelope('I could not do that.')
+    assert not dp._looks_like_envelope('')
+
+
+# ---------------------------------------------------------------------------
 # The shapes that already worked must keep working.
 # ---------------------------------------------------------------------------
 

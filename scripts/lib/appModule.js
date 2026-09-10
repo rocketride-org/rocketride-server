@@ -147,15 +147,19 @@ function latestSnapshot(appId) {
 		const appDir = path.join(orgs, org, 'files', '.deployments', appId);
 		let entries = [];
 		try {
-			entries = fs.readdirSync(appDir);
+			entries = fs.readdirSync(appDir, { withFileTypes: true });
 		} catch {
 			continue;
 		}
 		for (const entry of entries) {
-			const match = /^v(\d+)-/.exec(entry);
+			// Each snapshot directory has a `v<N>-<sha>.json` record beside it.
+			// Picking the record hashes `<record>.json/dist/remoteEntry.js`, which
+			// is absent — an empty digest, and a false "not published".
+			if (!entry.isDirectory()) continue;
+			const match = /^v(\d+)-/.exec(entry.name);
 			if (!match) continue;
 			const version = Number.parseInt(match[1], 10);
-			if (!best || version > best.version) best = { version, dir: path.join(appDir, entry) };
+			if (!best || version > best.version) best = { version, dir: path.join(appDir, entry.name) };
 		}
 	}
 	return best;
@@ -286,6 +290,18 @@ function createAppModule({ name, description, appRoot, dev = false }) {
 				const built = path.join(buildDir, 'remoteEntry.js');
 				if (!fs.existsSync(built)) {
 					throw new Error(`${name}: nothing built yet — run ${name}:build first`);
+				}
+
+				// The seeder publishes the STAGED copy under dist/, not build/, and
+				// publishedCarriesBuild() judges by it. A stage behind the build
+				// means a "carries this build" here and a re-seed of the old bytes
+				// there — so the stage has to match before the snapshot is asked.
+				const staged = path.join(serverStaticDir, 'remoteEntry.js');
+				if (!fs.existsSync(staged)) {
+					throw new Error(`${name}: nothing staged yet — run ${name}:copy first`);
+				}
+				if (sha256(staged) !== sha256(built)) {
+					throw new Error(`${name}: the staged bundle in dist/ is not this build — run ${name}:copy before seeding`);
 				}
 
 				const snapshot = latestSnapshot(appId);

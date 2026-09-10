@@ -1428,9 +1428,13 @@ module.exports = {
 					// The timestamp rides along: a log whose lines cannot be placed in
 					// time does not settle "is this error still happening", which is
 					// the first question asked of one.
+					//
+					// An explicit PATH is resolved here, against the caller's directory:
+					// the engine runs with cwd set to dist/server, so a relative path
+					// passed through as-is would land there instead.
 					if (options.logfile) {
 						const logPath =
-							options.logfile === true ? path.join(DIST_DIR, 'engine.log') : options.logfile;
+							options.logfile === true ? path.join(DIST_DIR, 'engine.log') : path.resolve(options.logfile);
 						args.push(`--log.file=${logPath}`);
 						args.push('--log.includeDateTime');
 					}

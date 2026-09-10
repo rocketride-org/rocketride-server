@@ -640,10 +640,12 @@ export function registerAndMapApps(serverApps: ServerAppEntry[]): AppManifestEnt
 	// Record the registered URLs so resetRemote() can rebuild a container.
 	for (const { app, url } of registrable) registeredEntries.set(app.moduleId, url);
 
-	// Which apps a pin is holding BEHIND — see StalePin. Rebuilt on every
-	// mapping (the post-auth set replaces the probe's), so clearing a pin and
-	// re-registering clears the notice with it.
-	stalePins.clear();
+	// Which apps a pin is holding BEHIND — see StalePin. Refreshed for the apps
+	// in THIS call only, so clearing a pin and re-registering clears the notice
+	// with it. Not a rebuild: a registration can be partial — post-auth, Shell
+	// registers only the apps the probe did not list — and clearing everything
+	// would silently drop a probed app's notice.
+	for (const a of serverApps) stalePins.delete(a.id);
 	// `resolved` is what `validApps` was before this merge: the server entries
 	// whose load URL resolved. Same filter, restructured to carry the URL with
 	// the entry — a pin cannot hold back an app that was never registered.

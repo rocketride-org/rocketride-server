@@ -573,14 +573,16 @@ export function DetailPanel({ open, onClose, avatar, title, subtitle, tabs, acti
 	};
 
 	/** Reset to the default size: a stacked top resets so the ROOT lands on
-	    the default; a lone panel simply drops its dragged size. */
+	    the default; a lone panel returns to the default, clamped to the band. */
 	const resetSize = (): void => {
 		const { entries, stackedTop } = stackStateNow();
 		if (stackedTop) {
 			stackSharedSize[contained ? 'contained' : 'viewport'] = Math.max(minSize, defaultSize - STACK_OFFSET * (entries.length - 1));
 			notifyStack();
 		} else {
-			setDragSize(null);
+			// Clamped, not dropped: a null falls back to the raw default at render,
+			// which on a narrow host is the off-screen panel the open effect fixed.
+			setDragSize(clampSize(defaultSize));
 			// A keyed lone panel remembers the reset — reopen at the default, not
 			// the last dragged size.
 			persistSize(defaultSize);

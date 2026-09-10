@@ -51,12 +51,15 @@ class IInstance(IInstanceBase):
         request they made and that was answered turns ago is still sitting there
         in the imperative, indistinguishable from the one they just made. The
         agent reads it as live and does it again.
+
+        Only the question: `has_output` is the turn's RESULT, and `closing` runs
+        this on its way out, after setting it.
         """
-        self.has_output = False
         self.question = Question()
 
     def open(self, entry: Entry):
         # The turn starts here, so the question does too.
+        self.has_output = False
         self._reset()
 
     def writeQuestions(self, question: Question):
@@ -104,6 +107,8 @@ class IInstance(IInstanceBase):
         answers, and whatever the empty lane produced was recorded as what the
         person asked. A node that heard nothing has nothing to ask.
         """
+        # Decided by THIS close alone, even one driven without a matching open.
+        self.has_output = False
         try:
             if not self._received_input():
                 return

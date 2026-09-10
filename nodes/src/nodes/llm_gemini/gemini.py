@@ -56,6 +56,14 @@ def _report_gemini_usage(response: Any, model: str) -> None:
     report_llm_tokens(fresh_input, output, model=model, cache_read_tokens=cache_read)
 
 
+class GeminiNoTextError(Exception):
+    """A response that carried no text: blocked, out of budget, or non-text only.
+
+    Terminal, not transient. The API has answered — asking again sends the same
+    prompt for the same verdict, and every retry is billed.
+    """
+
+
 class Chat(ChatBase):
     """
     Google GenAI chat class supporting both Gemini Developer API and Vertex AI.
@@ -201,5 +209,17 @@ class Chat(ChatBase):
             detail = f'finish_reason={finish}'
             if block:
                 detail += f', block_reason={block}'
-            raise Exception(f'Gemini returned a response with no text ({detail})')
+            raise GeminiNoTextError(f'Gemini returned a response with no text ({detail})')
         return text
+
+    def is_retryable_error(self, error: Exception) -> bool:
+        """
+        Never retry a text-free response.
+
+        ChatBase treats an error it does not recognise as retryable, so without
+        this a safety block would be re-sent — and re-billed — up to
+        ``CONST_CHAT_MAX_RETRIES`` times for the same refusal.
+        """
+        if isinstance(error, GeminiNoTextError):
+            return False
+        return super().is_retryable_error(error)

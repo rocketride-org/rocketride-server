@@ -29,7 +29,7 @@
 //   Footer (SidebarFooter — shared component with popup menu)
 // =============================================================================
 
-import React, { useCallback, useContext, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import React, { useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { ShellIdentityContext } from '../../hooks/useAuthUser';
 import {
 	BxCog, BxLock, BxPalette, BxUser, BxExport, BxGridAlt, BxDockLeft, BxHome, BxX,
@@ -47,6 +47,7 @@ import { SidebarCollapsedProvider } from '../sidebar-menu/SidebarCollapsedContex
 import RocketRideWordmark from '../../assets/icons/RocketRideWordmark';
 import { useHostChromeState } from './HostChromeContext';
 import { useCompactNav } from './CompactNavContext';
+import { FOCUSABLE_SELECTOR, trapFocus } from '../modal/Modal';
 
 // =============================================================================
 // CONSTANTS
@@ -160,11 +161,17 @@ export interface SidebarProps {
  * a hamburger that opens an empty drawer is worse than no hamburger, and two
  * copies of this expression would eventually disagree.
  *
+ * Signed out counts as nothing to hold: `Sidebar` renders no frame without an
+ * identity, so a public app's sidebar content must not earn a hamburger that
+ * opens a drawer that is not there.
+ *
  * @returns Whether to show a sidebar, or a way to open one.
  */
 export function useHasSidebarContent(): boolean {
+	const identity = useContext(ShellIdentityContext);
 	const { activeAppId, loadedApps } = useWorkspace();
 	const { sidebarContent } = useHostChromeState();
+	if (!identity) return false;
 	return !!loadedApps[activeAppId]?.components?.Sidebar || sidebarContent != null;
 }
 
@@ -470,7 +477,14 @@ const Sidebar: React.FC<SidebarProps> = ({ themeConfig: _themeConfig, account, h
 	// An app can reach this on its own first render, which is earlier and more
 	// certain than its descriptor reaching the shell's `loadedApps` map — and it
 	// is the path that works when that map does not have what it wants.
-	useEffect(() => (
+	//
+	// A LAYOUT effect, because the event is not replayed. An app emitting from
+	// its own layout effect runs before every passive effect in the commit, so a
+	// passive subscription here would miss it on first mount — and on an app
+	// switch the stale listener, still bound to the previous app's id, would
+	// catch it and file the answer under the wrong app. The sidebar precedes the
+	// client area in the tree, so its layout effects run first.
+	useLayoutEffect(() => (
 		ConnectionManager.getInstance().on(
 			'shell:setSidebarCollapsed',
 			({ collapsed: next }: { collapsed: boolean }) => prefer(next),
@@ -518,6 +532,42 @@ const Sidebar: React.FC<SidebarProps> = ({ themeConfig: _themeConfig, account, h
 		if (control.hasAttribute('aria-haspopup') || control.hasAttribute('aria-expanded')) return;
 		requestClose();
 	}, [isCompact, drawerOpen, requestClose]);
+
+	// --- The drawer is a dialog: focus goes in, stays in, and comes back ------
+	//
+	// `aria-modal` tells assistive tech nothing behind the scrim is reachable.
+	// Without this Tab walks straight out of the drawer into the dimmed page,
+	// and closing it strands focus on a button that is no longer visible.
+	//
+	// The trap listens on the drawer, not the document: it acts only while focus
+	// is inside, so a dialog or DetailPanel opened from the drawer keeps its own
+	// Tab and Escape, and the shared overlay stack is left exactly as it was.
+	const frameRef = useRef<HTMLDivElement>(null);
+	useEffect(() => {
+		if (!isCompact || !drawerOpen) return undefined;
+		const drawer = frameRef.current;
+		if (!drawer) return undefined;
+		const opener = document.activeElement;
+		(drawer.querySelector<HTMLElement>(FOCUSABLE_SELECTOR) ?? drawer).focus();
+		const onKeyDown = (event: KeyboardEvent): void => {
+			if (event.key === 'Tab') trapFocus(event, drawer);
+		};
+		drawer.addEventListener('keydown', onKeyDown);
+		return () => {
+			drawer.removeEventListener('keydown', onKeyDown);
+			// Back to the hamburger — unless something the drawer opened (an
+			// overlay, a panel) has already taken focus somewhere else. Safari
+			// does not focus a tapped button, so the opener may be the body; the
+			// trigger is found by the drawer it controls.
+			const active = document.activeElement;
+			if (active && active !== document.body && !drawer.contains(active)) return;
+			const trigger =
+				opener instanceof HTMLElement && opener !== document.body && opener.isConnected
+					? opener
+					: document.querySelector<HTMLElement>('[aria-controls="rr-shell-sidebar"]');
+			trigger?.focus();
+		};
+	}, [isCompact, drawerOpen]);
 
 	// --- Resize handler ------------------------------------------------------
 
@@ -659,7 +709,12 @@ const Sidebar: React.FC<SidebarProps> = ({ themeConfig: _themeConfig, account, h
 			boxShadow: drawerOpen ? '0 0 40px rgba(0, 0, 0, 0.35)' : 'none',
 			overflow: 'hidden',
 			transform: drawerOpen ? 'translateX(0)' : 'translateX(-100%)',
-			transition: `transform ${DRAWER_TRANSITION_MS}ms ease, visibility ${DRAWER_TRANSITION_MS}ms`,
+			// Visible AT ONCE on the way in, so the focus move below lands on
+			// something focusable; held visible to the end on the way out, so
+			// the slide stays on screen.
+			transition: drawerOpen
+				? `transform ${DRAWER_TRANSITION_MS}ms ease`
+				: `transform ${DRAWER_TRANSITION_MS}ms ease, visibility ${DRAWER_TRANSITION_MS}ms`,
 			// Not just off-screen: a closed drawer must not be reachable by Tab,
 			// and `transform` alone leaves every button in it focusable.
 			visibility: drawerOpen ? 'visible' : 'hidden',
@@ -691,6 +746,8 @@ const Sidebar: React.FC<SidebarProps> = ({ themeConfig: _themeConfig, account, h
 		)}
 		<div
 			id="rr-shell-sidebar"
+			ref={frameRef}
+			tabIndex={isCompact ? -1 : undefined}
 			role={isCompact ? 'dialog' : undefined}
 			aria-modal={isCompact ? true : undefined}
 			aria-label={isCompact ? 'Navigation' : undefined}

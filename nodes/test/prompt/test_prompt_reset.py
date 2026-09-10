@@ -270,6 +270,21 @@ def test_an_emitted_turn_is_still_recorded_as_output(build):
     inst.closing()
 
     assert len(captured.questions) == 1
+    # The cleanup on the way out resets the question, not the turn's result.
+    assert inst.has_output is True
+
+
+def test_a_silent_turn_after_an_emitted_one_is_not_recorded_as_output(build):
+    """`has_output` answers for the latest close, not for any close so far."""
+    inst, captured = build()
+
+    _turn(inst, 'something')
+    assert inst.has_output is True
+
+    inst.closing()  # nothing written, and no open in between
+
+    assert inst.has_output is False
+    assert len(captured.questions) == 1
 
 
 def test_documents_and_questions_lanes_also_count_as_input(build):
