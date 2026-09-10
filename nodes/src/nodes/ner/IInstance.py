@@ -23,7 +23,7 @@
 
 from typing import List
 from rocketlib import Entry, IInstanceBase
-from ai.common.schema import Doc
+from ai.common.schema import Doc, DocMetadata
 from .IGlobal import IGlobal
 
 
@@ -80,13 +80,17 @@ class IInstance(IInstanceBase):
             # Extract entities from document content
             entities = self.IGlobal.recognizer.extract_entities(doc.page_content)
 
-            # Create a copy to avoid modifying the original
-            enriched_doc = doc.model_copy()
+            # Create a deep copy to avoid modifying the original
+            enriched_doc = doc.model_copy(deep=True)
 
             # Store entities in metadata if configured
             if self.IGlobal.recognizer.store_in_metadata:
                 if enriched_doc.metadata is None:
-                    enriched_doc.metadata = {}
+                    # Build from the instance so objectId, nodeId, parent, permissionId
+                    # and signature are inherited from the object being processed. A
+                    # hardcoded placeholder would give every such document the same
+                    # identity and collide in stores keyed on objectId+chunkId.
+                    enriched_doc.metadata = DocMetadata(self, chunkId=0)
 
                 # Group entities by type
                 entities_by_type = {}
@@ -99,10 +103,10 @@ class IInstance(IInstanceBase):
                 # Add to metadata (deduplicate and sort)
                 for entity_type, words in entities_by_type.items():
                     unique_words = sorted(list(set(words)))
-                    enriched_doc.metadata[f'entities_{entity_type.lower()}'] = unique_words
+                    setattr(enriched_doc.metadata, f'entities_{entity_type.lower()}', unique_words)
 
                 # Also store total count
-                enriched_doc.metadata['entities_count'] = len(entities)
+                enriched_doc.metadata.entities_count = len(entities)
 
             enriched_docs.append(enriched_doc)
 
