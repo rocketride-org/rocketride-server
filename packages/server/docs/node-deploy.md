@@ -92,6 +92,31 @@ Only then is the version allocated, and only then does content land:
 If a content write fails partway, what was written is removed and the version
 is flipped to `failed`.
 
+## Dependencies
+
+A node declares what it needs the way every in-tree node does: one
+`requirements.txt` at the root of its directory. That is the normal case — 116
+of the 139 nodes in the tree carry one.
+
+Publishing reads it and records the declared lines on the **artifact**, not
+only inside the bundle:
+
+```json
+{ "requirements": ["httpx", "pydantic"] }
+```
+
+Keeping it on the artifact is what lets anything resolving the node decide
+whether it can run it **before** downloading the bundle. Comments and blank
+lines are dropped; nothing else is interpreted, because pinning policy belongs
+to whoever installs.
+
+### What a node may not bring
+
+An `overrides.txt` is refused, and the version is never registered. Overrides
+do not add a dependency — they **replace what other packages declare**, and the
+engine sweeps them process-wide. One published node carrying one would rewrite
+dependency resolution for every other node running alongside it.
+
 ## Seeing what is published
 
 ```json

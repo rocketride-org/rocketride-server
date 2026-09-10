@@ -304,6 +304,51 @@ class TestRefusals:
 
 
 # =============================================================================
+# DEPENDENCIES — what the node needs, and what it may not bring
+# =============================================================================
+
+
+class TestRequirements:
+    """A node's own requirements.txt, and the file it may not carry."""
+
+    @pytest.mark.asyncio
+    async def test_requirements_ride_on_the_artifact(self, registry, content_store):
+        # On the artifact, not only inside the bundle: a resolver decides
+        # whether it can run the node before it downloads it.
+        zip_bytes = _node_zip(files={'requirements.txt': 'httpx\npydantic\n'})
+        await node_deploy.handle_node_add(_FakeConn(), _add_request(data=zip_bytes))
+        assert registry.published[0]['artifact']['requirements'] == ['httpx', 'pydantic']
+
+    @pytest.mark.asyncio
+    async def test_comments_and_blank_lines_are_dropped(self, registry, content_store):
+        zip_bytes = _node_zip(files={'requirements.txt': '# needed for the API\n\nhttpx\n\n# and this\nrich\n'})
+        await node_deploy.handle_node_add(_FakeConn(), _add_request(data=zip_bytes))
+        assert registry.published[0]['artifact']['requirements'] == ['httpx', 'rich']
+
+    @pytest.mark.asyncio
+    async def test_a_node_without_requirements_declares_none(self, registry, content_store):
+        await node_deploy.handle_node_add(_FakeConn(), _add_request(data=_node_zip()))
+        assert registry.published[0]['artifact']['requirements'] == []
+
+    @pytest.mark.asyncio
+    async def test_an_overrides_file_is_refused(self, registry, content_store):
+        # overrides.txt REPLACES what other packages declare, engine-wide.
+        zip_bytes = _node_zip(files={'overrides.txt': 'urllib3==1.0\n'})
+        result = await node_deploy.handle_node_add(_FakeConn(), _add_request(data=zip_bytes))
+        assert result['success'] is False
+        assert 'overrides.txt' in result['message']
+        assert not registry.published
+        assert not _written(content_store)
+
+    @pytest.mark.asyncio
+    async def test_an_oversized_requirements_file_is_refused(self, registry, content_store):
+        zip_bytes = _node_zip(files={'requirements.txt': 'x\n' * 40000})
+        result = await node_deploy.handle_node_add(_FakeConn(), _add_request(data=zip_bytes))
+        assert result['success'] is False
+        assert not registry.published
+
+
+# =============================================================================
 # ONE-STEP PUBLISH + BIND — the CLI's --deploy-to
 # =============================================================================
 

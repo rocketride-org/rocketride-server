@@ -61,6 +61,20 @@ NODE_MANIFEST = 'services.json'
 #: Cap on the manifest read before the archive guard has run.
 _MANIFEST_MAX = 512 * 1024
 
+#: A node declares its Python dependencies the way every in-tree node does —
+#: one requirements.txt at the root of its directory. 116 of the 139 nodes in
+#: the tree carry one, so a node WITH dependencies is the normal case.
+NODE_REQUIREMENTS = 'requirements.txt'
+
+#: An overrides.txt does not add a dependency, it REPLACES what packages
+#: themselves declare, and the engine sweeps it engine-wide. A published node
+#: carrying one would rewrite dependency resolution for everything else in the
+#: process, so it is refused rather than published.
+NODE_OVERRIDES = 'overrides.txt'
+
+#: Cap on the requirements read, same reasoning as the manifest cap.
+_REQUIREMENTS_MAX = 64 * 1024
+
 
 def _safe_node_id(value: str) -> str:
     """A node id is a path segment in the store, so it is validated like one."""
@@ -102,6 +116,31 @@ def _manifest_of_zip(archive: Any) -> Dict[str, Any]:
     if not isinstance(manifest, dict):
         raise ValueError(f'{NODE_MANIFEST} must be an object')
     return manifest
+
+
+def _requirements_of_zip(archive: Any) -> List[str]:
+    """The node's own ``requirements.txt`` at the zip root, as declared lines.
+
+    Recorded on the artifact so anything resolving the node knows what it needs
+    BEFORE fetching the bundle. Comments and blank lines are dropped; nothing
+    else is interpreted here — pinning policy belongs to whoever installs.
+    """
+    names = [n for n in archive.namelist() if n.replace('\\', '/') == NODE_REQUIREMENTS]
+    if not names:
+        return []
+    try:
+        with archive.open(names[0]) as handle:
+            raw = handle.read(_REQUIREMENTS_MAX + 1)
+    except Exception:
+        raise ValueError(f'{NODE_REQUIREMENTS} could not be read')
+    if len(raw) > _REQUIREMENTS_MAX:
+        raise ValueError(f'{NODE_REQUIREMENTS} exceeds the {_REQUIREMENTS_MAX}-byte cap')
+    lines: List[str] = []
+    for line in raw.decode('utf-8', 'replace').splitlines():
+        entry = line.strip()
+        if entry and not entry.startswith('#'):
+            lines.append(entry)
+    return lines
 
 
 async def handle_node_add(conn: Any, request: Dict[str, Any]) -> Dict[str, Any]:
@@ -157,8 +196,19 @@ async def handle_node_add(conn: Any, request: Dict[str, Any]) -> Dict[str, Any]:
     try:
         manifest = _manifest_of_zip(archive)
         node_id = _safe_node_id(manifest.get('protocol', '').replace('://', '') or manifest.get('id', ''))
+        requirements = _requirements_of_zip(archive)
     except ValueError as exc:
         return conn.build_error(request, str(exc))
+
+    # Refused before anything is registered: an overrides file replaces what
+    # other packages declare, engine-wide, so one published node could rewrite
+    # dependency resolution for every other node in the process.
+    if any(name.replace('\\', '/') == NODE_OVERRIDES for name in archive.namelist()):
+        return conn.build_error(
+            request,
+            f'a node may not publish a {NODE_OVERRIDES}: it would replace dependency '
+            f'resolution engine-wide. Declare what the node needs in {NODE_REQUIREMENTS}.',
+        )
 
     # Traversal and bombs are refused BEFORE a registry row exists, so a bad
     # archive never leaves a version behind.
@@ -177,6 +227,10 @@ async def handle_node_add(conn: Any, request: Dict[str, Any]) -> Dict[str, Any]:
         # it fetches it.
         'runtime': RUNTIME_PYTHON,
         'bundleSha256': hashlib.sha256(data).hexdigest(),
+        # What the node needs installed, from its own requirements.txt. On the
+        # artifact rather than only inside the bundle so a resolver can decide
+        # whether it can run this node before it downloads it.
+        'requirements': requirements,
     }
     caller_meta = args.get('metadata') if isinstance(args.get('metadata'), dict) else {}
     metadata = {
