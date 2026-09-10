@@ -38,9 +38,10 @@ from typing import Any, Dict, List, Tuple
 
 from rocketlib import debug
 
-# The zip guards live with the app rail and are shared verbatim: the threat is
-# the archive, not what it carries, and one implementation is one place to fix.
-from ai.account.app_deploy import _ZIP_MAX_ZIPPED, _actor_of, _org_of, _resolve_target, _zip_guard
+# Identity, audiences and the zip guards are shared verbatim with the app rail
+# through deploy_common — the threat is the archive, not what it carries, and
+# an audience means the same thing whichever kind is being published.
+from ai.account.deploy_common import ZIP_MAX_ZIPPED, actor_of, developer_id_of, org_of, resolve_target, zip_guard
 from ai.account.deployment_backend import artifact_content_dir
 
 #: Node runtimes. 'python' is a source tree the engine imports as-is. 'native'
@@ -123,7 +124,7 @@ async def handle_node_add(conn: Any, request: Dict[str, Any]) -> Dict[str, Any]:
         return conn.build_error(request, 'deploying a node requires an authenticated connection')
 
     args = request.get('arguments', {}) or {}
-    org_id = _org_of(conn)
+    org_id = org_of(conn)
     comment = str(args.get('comment', '') or '')
 
     data = args.get('data')
@@ -138,11 +139,11 @@ async def handle_node_add(conn: Any, request: Dict[str, Any]) -> Dict[str, Any]:
         return conn.build_error(request, 'data must be a binary zip frame (bytes), not text')
     # Measured on the zipped bytes and refused before any parsing: a node
     # directory is small, and the unpacked guard below still applies.
-    if len(data) > _ZIP_MAX_ZIPPED:
+    if len(data) > ZIP_MAX_ZIPPED:
         return conn.build_error(
             request,
             f'node zip is {len(data) // (1024 * 1024)} MB — the upload cap is '
-            f'{_ZIP_MAX_ZIPPED // (1024 * 1024)} MB zipped',
+            f'{ZIP_MAX_ZIPPED // (1024 * 1024)} MB zipped',
         )
 
     import io
@@ -161,7 +162,7 @@ async def handle_node_add(conn: Any, request: Dict[str, Any]) -> Dict[str, Any]:
 
     # Traversal and bombs are refused BEFORE a registry row exists, so a bad
     # archive never leaves a version behind.
-    guard_error = _zip_guard(archive)
+    guard_error = zip_guard(archive)
     if guard_error:
         return conn.build_error(request, guard_error)
 
@@ -187,7 +188,7 @@ async def handle_node_add(conn: Any, request: Dict[str, Any]) -> Dict[str, Any]:
     }
 
     entry = await account.deployments_publish(
-        org_id, node_id, artifact, _actor_of(conn), comment=comment, metadata=metadata
+        org_id, node_id, artifact, actor_of(conn), comment=comment, metadata=metadata
     )
     version = int(entry.get('version', 0))
 
@@ -226,7 +227,7 @@ async def handle_node_add(conn: Any, request: Dict[str, Any]) -> Dict[str, Any]:
             except Exception:
                 pass  # best-effort; the 'failed' state is what gates serving
         try:
-            await account.set_artifact_state(org_id, node_id, version, 'failed', _actor_of(conn))
+            await account.set_artifact_state(org_id, node_id, version, 'failed', actor_of(conn))
         except Exception:
             pass
         return conn.build_error(request, f'node content could not be stored: {exc}')
@@ -286,7 +287,7 @@ def _node_rail_entry(entry: Dict[str, Any], artifact: Dict[str, Any] | None) -> 
 def _assert_may_expose(conn: Any, node_id: str, audience: Dict[str, Any]) -> None:
     """Check the caller may expose this node at this reach.
 
-    Reach is what decides the bar, and ``_resolve_target`` has already applied
+    Reach is what decides the bar, and ``resolve_target`` has already applied
     most of it: ``@me`` is your own id, ``@team/<x>`` refuses a team you do not
     belong to, and ``@public`` refuses an org with no registered developer id.
 
@@ -307,11 +308,9 @@ def _assert_may_expose(conn: Any, node_id: str, audience: Dict[str, Any]) -> Non
     """
     if audience.get('type') != 'public':
         return
-    from ai.account.app_deploy import _developer_id_of
-
-    dev = _developer_id_of(conn)
+    dev = developer_id_of(conn)
     if not dev:
-        # _resolve_target refuses this first; kept so the guard holds alone.
+        # resolve_target refuses this first; kept so the guard holds alone.
         raise ValueError('Publishing a node publicly requires the organization to be registered as a developer')
     if node_id != dev and not node_id.startswith(f'{dev}.'):
         raise ValueError(
@@ -343,7 +342,7 @@ async def _bind(
         ValueError: unusable target, reach the caller may not grant, or a
                     version that is missing or is not a node artifact.
     """
-    audience = _resolve_target(conn, target)
+    audience = resolve_target(conn, target)
     _assert_may_expose(conn, node_id, audience)
     entry = await _entry_of(account, org_id, node_id, version)
     if not entry:
@@ -353,7 +352,7 @@ async def _bind(
         raise ValueError(f'Registry version {version} of {node_id} is not a node artifact')
     # A pure pointer, born enabled — the same publish row shape apps bind.
     row = await account.publish_set(
-        org_id, KIND_NODE, node_id, audience, version, _snapshot(entry, artifact), _actor_of(conn)
+        org_id, KIND_NODE, node_id, audience, version, _snapshot(entry, artifact), actor_of(conn)
     )
     debug(f'[node_deploy] bound {node_id} v{version} to {audience.get("type")}:{audience.get("id")}')
     return row, audience
@@ -390,7 +389,7 @@ async def handle_node_deploy(conn: Any, request: Dict[str, Any]) -> Dict[str, An
     node_id = str(args.get('nodeId') or '')
     if not node_id:
         return conn.build_error(request, 'nodeId is required')
-    org_id = _org_of(conn)
+    org_id = org_of(conn)
 
     if sub == 'versions':
         entries = await account.deployments_versions(org_id, node_id)
@@ -424,7 +423,7 @@ async def handle_node_deploy(conn: Any, request: Dict[str, Any]) -> Dict[str, An
     # touches the artifact, so a rollback to that version stays possible.
     if sub in ('disable', 'remove'):
         try:
-            audience = _resolve_target(conn, str(args.get('target') or '@me'))
+            audience = resolve_target(conn, str(args.get('target') or '@me'))
         except ValueError as exc:
             return conn.build_error(request, str(exc))
         try:
@@ -433,7 +432,7 @@ async def handle_node_deploy(conn: Any, request: Dict[str, Any]) -> Dict[str, An
             return conn.build_error(request, str(exc))
         state = 'disabled' if sub == 'disable' else 'removed'
         try:
-            row = await account.publish_set_state(org_id, KIND_NODE, node_id, audience, state, _actor_of(conn))
+            row = await account.publish_set_state(org_id, KIND_NODE, node_id, audience, state, actor_of(conn))
         except Exception as exc:
             return conn.build_error(request, str(exc))
         debug(f'[node_deploy] {state} {node_id} for {audience.get("type")}:{audience.get("id")}')
