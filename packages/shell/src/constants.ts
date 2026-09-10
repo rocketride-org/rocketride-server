@@ -28,7 +28,12 @@
 // STORAGE KEYS
 // =============================================================================
 
-/** localStorage: auth token — persists across tabs, windows, and browser restarts. */
+/**
+ * Auth token storage key. Real tabs keep it in localStorage (shared across
+ * tabs and windows, survives restarts); embedded dev previews keep a
+ * per-context copy under the same key in sessionStorage, because each
+ * preview's embedder is its sole session authority (see util/devGate).
+ */
 export const LS_TOKEN = 'rr:user_token';
 
 /**

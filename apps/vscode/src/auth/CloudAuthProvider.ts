@@ -29,6 +29,7 @@
 import * as vscode from 'vscode';
 import { RocketRideClient } from 'rocketride';
 import { generatePkce, buildAuthUrl } from './pkce';
+import { isSecureCloudTarget } from '../config';
 
 import { EventEmitter } from 'events';
 
@@ -161,6 +162,15 @@ export class CloudAuthProvider implements vscode.UriHandler, vscode.Disposable {
 		}
 		if (!cloudUrl) {
 			vscode.window.showErrorMessage('RocketRide Cloud sign-in failed: no cloud server is configured.');
+			return;
+		}
+		// Every caller funnels through here, so this is the one transport gate:
+		// sign-in ends with the API key inside the connection's auth request,
+		// and a cleartext scheme would put that credential on the wire (CWE-319).
+		if (!isSecureCloudTarget(cloudUrl)) {
+			vscode.window.showErrorMessage(
+				'RocketRide Cloud sign-in refused: custom cloud servers must use https (http is allowed only for localhost development targets).'
+			);
 			return;
 		}
 

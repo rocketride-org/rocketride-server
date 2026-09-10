@@ -36,6 +36,7 @@ import { RemoteManager } from './remote-manager';
 import { ApiKeyAuthProvider } from '../auth/ApiKeyAuthProvider';
 import { CloudAuthProvider } from '../auth/CloudAuthProvider';
 import { CONNECT_TIMEOUT_MS, LS_TOKEN } from '../constants';
+import { resetDevGateForTests } from '../util/devGate';
 
 type EmittedEvent = { event: string; payload: unknown };
 
@@ -341,7 +342,7 @@ test('handleStoredTokenFailure keeps the network latch when the probe answers 20
 	}
 });
 
-test('clearToken removes current and legacy stored tokens', () => {
+test('clearToken removes the stored token from localStorage only', () => {
 	const removedLocalKeys: string[] = [];
 	const removedSessionKeys: string[] = [];
 	const originalLocalStorage = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
@@ -358,7 +359,8 @@ test('clearToken removes current and legacy stored tokens', () => {
 	try {
 		createTestManager().manager.clearToken();
 		assert.deepEqual(removedLocalKeys, ['rr:user_token']);
-		assert.deepEqual(removedSessionKeys, ['rr:user_token']);
+		// The legacy sessionStorage slot is gone — clearing must not touch it.
+		assert.deepEqual(removedSessionKeys, []);
 	} finally {
 		if (originalLocalStorage) Object.defineProperty(globalThis, 'localStorage', originalLocalStorage);
 		else delete (globalThis as { localStorage?: Storage }).localStorage;
@@ -367,7 +369,7 @@ test('clearToken removes current and legacy stored tokens', () => {
 	}
 });
 
-test('auth providers sign out by removing current and legacy stored tokens', async () => {
+test('auth providers sign out by removing the stored token from localStorage only', async () => {
 	const originalLocalStorage = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
 	const originalSessionStorage = Object.getOwnPropertyDescriptor(globalThis, 'sessionStorage');
 
@@ -387,13 +389,117 @@ test('auth providers sign out by removing current and legacy stored tokens', asy
 			await provider.signOut();
 
 			assert.deepEqual(removedLocalKeys, [LS_TOKEN]);
-			assert.deepEqual(removedSessionKeys, [LS_TOKEN]);
+			// The legacy sessionStorage slot is gone — sign-out must not touch it.
+			assert.deepEqual(removedSessionKeys, []);
 		}
 	} finally {
 		if (originalLocalStorage) Object.defineProperty(globalThis, 'localStorage', originalLocalStorage);
 		else delete (globalThis as { localStorage?: Storage }).localStorage;
 		if (originalSessionStorage) Object.defineProperty(globalThis, 'sessionStorage', originalSessionStorage);
 		else delete (globalThis as { sessionStorage?: Storage }).sessionStorage;
+	}
+});
+
+test('token methods use per-context sessionStorage in embedded dev shells', () => {
+	const originalWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
+	const originalLocalStorage = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+	const originalSessionStorage = Object.getOwnPropertyDescriptor(globalThis, 'sessionStorage');
+	const localTouches: string[] = [];
+	const sessionData = new Map<string, string>();
+
+	// A framed window (self !== top) carrying rrdev=1 marks this shell as an
+	// embedded dev preview — its token must live per-context. The gate cache
+	// is reset so it recomputes from this staged environment (the test runner
+	// builds with NODE_ENV=production, so the URL flag is the live path).
+	Object.defineProperty(globalThis, 'window', {
+		configurable: true,
+		value: { self: {}, top: {}, location: { search: '?rrdev=1' } },
+	});
+	resetDevGateForTests();
+	Object.defineProperty(globalThis, 'localStorage', {
+		configurable: true,
+		value: {
+			setItem: (key: string) => localTouches.push(`set:${key}`),
+			getItem: (key: string) => { localTouches.push(`get:${key}`); return null; },
+			removeItem: (key: string) => localTouches.push(`remove:${key}`),
+		},
+	});
+	Object.defineProperty(globalThis, 'sessionStorage', {
+		configurable: true,
+		value: {
+			setItem: (key: string, value: string) => sessionData.set(key, value),
+			getItem: (key: string) => sessionData.get(key) ?? null,
+			removeItem: (key: string) => sessionData.delete(key),
+		},
+	});
+
+	try {
+		const { manager } = createTestManager();
+		// The helper stubs saveToken to a recorder; this test exercises the
+		// real storage path, so restore the prototype method.
+		manager.saveToken = ConnectionManager.prototype.saveToken;
+		manager.saveToken('rr_panel-token');
+		assert.equal(manager.loadToken(), 'rr_panel-token');
+		manager.clearToken();
+		assert.equal(manager.loadToken(), '');
+		// The shared origin slot was never touched: a preview can neither leak
+		// its token into it nor clear another context's session through it.
+		assert.deepEqual(localTouches, []);
+	} finally {
+		resetDevGateForTests();
+		if (originalWindow) Object.defineProperty(globalThis, 'window', originalWindow);
+		else delete (globalThis as { window?: Window }).window;
+		if (originalLocalStorage) Object.defineProperty(globalThis, 'localStorage', originalLocalStorage);
+		else delete (globalThis as { localStorage?: Storage }).localStorage;
+		if (originalSessionStorage) Object.defineProperty(globalThis, 'sessionStorage', originalSessionStorage);
+		else delete (globalThis as { sessionStorage?: Storage }).sessionStorage;
+	}
+});
+
+test('initialize ignores cross-context token churn in embedded dev shells', () => {
+	const originalWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
+	const originalAttach = RocketRideClient.prototype.attach;
+	const listeners = new Map<string, (event: StorageEvent) => void>();
+	const localStorage = {} as Storage;
+	let tokenCleared = false;
+	let reloaded = false;
+
+	// Framed + rrdev=1 → embedded dev preview: the embedder is the sole
+	// session authority, so the same removal event that signs out a real tab
+	// (see the localStorage-removals test below) must neither clear nor
+	// reload here. The gate cache is reset to recompute from this staging.
+	Object.defineProperty(globalThis, 'window', {
+		configurable: true,
+		value: {
+			self: {},
+			top: {},
+			location: { origin: 'https://shell.example.test', search: '?rrdev=1', reload: () => { reloaded = true; } },
+			localStorage,
+			addEventListener: (type: string, listener: (event: StorageEvent) => void) => listeners.set(type, listener),
+		},
+	});
+	resetDevGateForTests();
+	RocketRideClient.prototype.attach = async () => {};
+
+	try {
+		const { manager } = createTestManager();
+		manager.clearToken = () => { tokenCleared = true; };
+		manager.initialize();
+
+		listeners.get('storage')!({
+			key: LS_TOKEN,
+			oldValue: 'old-token',
+			newValue: null,
+			storageArea: localStorage,
+		} as StorageEvent);
+
+		assert.equal(tokenCleared, false);
+		assert.equal(reloaded, false);
+	} finally {
+		resetDevGateForTests();
+		RocketRideClient.prototype.attach = originalAttach;
+		if (originalWindow) Object.defineProperty(globalThis, 'window', originalWindow);
+		else delete (globalThis as { window?: Window }).window;
 	}
 });
 
