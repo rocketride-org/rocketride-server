@@ -36,13 +36,13 @@ from ai.account.store import Store
 class _FakeConn:
     """Minimal TaskConn stand-in: account info + response builders."""
 
-    def __init__(self, user_id='u1', org_id='org1', authenticated=True):
+    def __init__(self, user_id='u1', org_id='org1', authenticated=True, teams=None):
         self._account_info = (
             SimpleNamespace(
                 userId=user_id,
                 displayName='User One',
                 email='u1@example.com',
-                organization={'id': org_id, 'teams': [], 'developerId': 'acme'},
+                organization={'id': org_id, 'teams': teams or [], 'developerId': 'acme'},
             )
             if authenticated
             else None
@@ -63,6 +63,7 @@ class _FakeRegistry:
         self.published = []
         self.states = []
         self.audits = []
+        self.bound = []
         self.next_version = 1
 
     def install(self, monkeypatch):
@@ -88,9 +89,29 @@ class _FakeRegistry:
         async def audit(user_id, area, action, request_data=None, org_id=None):
             self.audits.append({'action': action, 'data': request_data})
 
+        # The bind side, reading back exactly what the publish above wrote —
+        # deployTo binds the version it just created, so a fake that invented
+        # its own rows would not be testing the seam that matters.
+        async def deployments_versions(org_id, project_id):
+            return [p['entry'] for p in self.published if p['projectId'] == project_id]
+
+        async def deployments_artifact(org_id, project_id, version):
+            for pub in self.published:
+                if pub['projectId'] == project_id and pub['entry']['version'] == version:
+                    return pub['artifact']
+            return None
+
+        async def publish_set(org_id, kind, node_id, audience, version, snapshot, actor):
+            row = {'kind': kind, 'nodeId': node_id, 'audience': audience, 'version': version, 'state': 'enabled'}
+            self.bound.append(row)
+            return row
+
         monkeypatch.setattr(account, 'deployments_publish', deployments_publish)
         monkeypatch.setattr(account, 'set_artifact_state', set_artifact_state)
         monkeypatch.setattr(account, 'audit', audit)
+        monkeypatch.setattr(account, 'deployments_versions', deployments_versions)
+        monkeypatch.setattr(account, 'deployments_artifact', deployments_artifact)
+        monkeypatch.setattr(account, 'publish_set', publish_set)
 
 
 @pytest.fixture
@@ -280,6 +301,65 @@ class TestRefusals:
         )
         assert result['success'] is False
         assert not registry.published
+
+
+# =============================================================================
+# ONE-STEP PUBLISH + BIND — the CLI's --deploy-to
+# =============================================================================
+
+
+class TestDeployTo:
+    """Publishing and binding in one call, the way the CLI already sends it."""
+
+    @staticmethod
+    def _member_of(team_id='t1', name='Platform'):
+        """A caller who belongs to one team, so @team targets can resolve."""
+        return _FakeConn(teams=[{'id': team_id, 'name': name}])
+
+    @pytest.mark.asyncio
+    async def test_a_bare_team_binds_in_one_step(self, registry, content_store):
+        # The CLI spells --deploy-to as a plain team, with no '@'.
+        result = await node_deploy.handle_node_add(
+            self._member_of(), _add_request(data=_node_zip(), deployTo='Platform')
+        )
+        assert result['success'] is True
+        assert registry.bound[0]['audience']['type'] == 'team'
+        assert registry.bound[0]['audience']['id'] == 't1'
+
+    @pytest.mark.asyncio
+    async def test_it_binds_the_version_it_just_published(self, registry, content_store):
+        await node_deploy.handle_node_add(self._member_of(), _add_request(data=_node_zip(), deployTo='Platform'))
+        await node_deploy.handle_node_add(self._member_of(), _add_request(data=_node_zip(), deployTo='Platform'))
+        # The second call pins v2, not the version that happened to be first.
+        assert [row['version'] for row in registry.bound] == [1, 2]
+
+    @pytest.mark.asyncio
+    async def test_an_at_target_passes_through(self, registry, content_store):
+        result = await node_deploy.handle_node_add(_FakeConn(), _add_request(data=_node_zip(), deployTo='@me'))
+        assert result['success'] is True
+        assert registry.bound[0]['audience']['type'] == 'user'
+
+    @pytest.mark.asyncio
+    async def test_without_deploy_to_the_version_stays_inert(self, registry, content_store):
+        result = await node_deploy.handle_node_add(_FakeConn(), _add_request(data=_node_zip()))
+        assert result['success'] is True
+        assert registry.published
+        assert not registry.bound
+
+    @pytest.mark.asyncio
+    async def test_a_team_the_caller_is_not_in_is_refused(self, registry, content_store):
+        result = await node_deploy.handle_node_add(_FakeConn(), _add_request(data=_node_zip(), deployTo='Strangers'))
+        assert result['success'] is False
+        assert not registry.bound
+
+    @pytest.mark.asyncio
+    async def test_a_failed_bind_leaves_the_version_published(self, registry, content_store):
+        # The bytes landed and the version is real — only the pointer failed,
+        # so the error says so and the caller can bind without re-uploading.
+        result = await node_deploy.handle_node_add(_FakeConn(), _add_request(data=_node_zip(), deployTo='Strangers'))
+        assert 'published' in result['message']
+        assert registry.published[0]['entry']['version'] == 1
+        assert registry.states == []
 
 
 # =============================================================================

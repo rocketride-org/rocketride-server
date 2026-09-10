@@ -34,7 +34,7 @@ from __future__ import annotations
 
 import hashlib
 import time
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Tuple
 
 from rocketlib import debug
 
@@ -239,7 +239,22 @@ async def handle_node_add(conn: Any, request: Dict[str, Any]) -> Dict[str, Any]:
         request_data={'nodeId': node_id, 'version': version},
         org_id=org_id,
     )
-    return conn.build_response(request, body={'artifact': entry, 'orgId': org_id})
+    body: Dict[str, Any] = {'artifact': entry, 'orgId': org_id}
+    if args.get('deployTo'):
+        # One-step publish+bind, the same convenience the pipe rail offers —
+        # and what the CLI already sends alongside kind='node'. Binding runs
+        # through the shared helper, so nothing is reachable here that the
+        # deploy verb would have refused.
+        try:
+            _, audience = await _bind(
+                conn, account, org_id, node_id, int(entry['version']), _deploy_target_of(str(args['deployTo']))
+            )
+        except ValueError as exc:
+            # The version stands: it published fine, only the pointer failed,
+            # and a caller can bind it afterwards without publishing again.
+            return conn.build_error(request, f'{node_id} v{entry["version"]} published, but not bound: {exc}')
+        body['audience'] = audience
+    return conn.build_response(request, body=body)
 
 
 # =============================================================================
@@ -306,6 +321,44 @@ def _assert_may_expose(conn: Any, node_id: str, audience: Dict[str, Any]) -> Non
         )
 
 
+def _deploy_target_of(raw: str) -> str:
+    """The wire target behind ``deployTo``: a bare team name or id means a team.
+
+    The CLI has always spelled ``--deploy-to`` as a plain team, so a value
+    with no '@' is read as one; '@'-targets pass through untouched.
+    """
+    return raw if raw.startswith('@') else f'@team/{raw}'
+
+
+async def _bind(
+    conn: Any, account: Any, org_id: str, node_id: str, version: int, target: str
+) -> Tuple[Dict[str, Any], Dict[str, str]]:
+    """Pin one audience to a registry version — the whole of "make it reachable".
+
+    Shared by the ``deploy`` verb and by ``add``'s ``deployTo``, so the one
+    authorization rule covers both doors rather than one door growing a
+    weaker copy of it.
+
+    Raises:
+        ValueError: unusable target, reach the caller may not grant, or a
+                    version that is missing or is not a node artifact.
+    """
+    audience = _resolve_target(conn, target)
+    _assert_may_expose(conn, node_id, audience)
+    entry = await _entry_of(account, org_id, node_id, version)
+    if not entry:
+        raise ValueError(f'{node_id} has no registry version {version}')
+    artifact = await account.deployments_artifact(org_id, node_id, version)
+    if not isinstance(artifact, dict) or artifact.get('kind') != KIND_NODE:
+        raise ValueError(f'Registry version {version} of {node_id} is not a node artifact')
+    # A pure pointer, born enabled — the same publish row shape apps bind.
+    row = await account.publish_set(
+        org_id, KIND_NODE, node_id, audience, version, _snapshot(entry, artifact), _actor_of(conn)
+    )
+    debug(f'[node_deploy] bound {node_id} v{version} to {audience.get("type")}:{audience.get("id")}')
+    return row, audience
+
+
 async def handle_node_deploy(conn: Any, request: Dict[str, Any]) -> Dict[str, Any]:
     """Handle ``rrext_deploy_node`` — node publish control on the registry.
 
@@ -354,24 +407,9 @@ async def handle_node_deploy(conn: Any, request: Dict[str, Any]) -> Dict[str, An
         if not isinstance(version, int):
             return conn.build_error(request, 'version (the registry version number) is required')
         try:
-            audience = _resolve_target(conn, str(args.get('target') or '@me'))
+            row, audience = await _bind(conn, account, org_id, node_id, version, str(args.get('target') or '@me'))
         except ValueError as exc:
             return conn.build_error(request, str(exc))
-        try:
-            _assert_may_expose(conn, node_id, audience)
-        except ValueError as exc:
-            return conn.build_error(request, str(exc))
-        entry = await _entry_of(account, org_id, node_id, version)
-        if not entry:
-            return conn.build_error(request, f'{node_id} has no registry version {version}')
-        artifact = await account.deployments_artifact(org_id, node_id, version)
-        if not isinstance(artifact, dict) or artifact.get('kind') != KIND_NODE:
-            return conn.build_error(request, f'Registry version {version} of {node_id} is not a node artifact')
-        # A pure pointer, born enabled — the same publish row shape apps bind.
-        row = await account.publish_set(
-            org_id, KIND_NODE, node_id, audience, version, _snapshot(entry, artifact), _actor_of(conn)
-        )
-        debug(f'[node_deploy] bound {node_id} v{version} to {audience.get("type")}:{audience.get("id")}')
         return conn.build_response(request, body={'publish': row, 'audience': audience})
 
     if sub == 'where':
