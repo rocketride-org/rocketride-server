@@ -211,6 +211,38 @@ async function mkdirIfNotExists(dirPath) {
 // Copy Operations
 // =============================================================================
 
+// Windows reports a path another process holds open as EBUSY/EPERM/EACCES, and
+// hands the error to whoever touches it second — the holder need not be writing:
+// an editor's language server indexing dist/, a file watcher or an AV pass is
+// enough. A sync that walks thousands of files meets that window eventually, so
+// the operations that cross it retry briefly rather than failing a whole build
+// on one busy millisecond. A path that stays locked still raises its real error.
+const TRANSIENT_LOCK_CODES = new Set(['EBUSY', 'EPERM', 'EACCES']);
+
+/**
+ * Run a filesystem operation, retrying while the path is transiently locked.
+ *
+ * The delay grows per attempt (100, 200, 300, 400 ms), so a genuinely held path
+ * costs one second before it reports. Anything that is not a lock propagates at
+ * once — a missing file must not be retried into a slow failure.
+ *
+ * @template T
+ * @param {() => Promise<T>} op - Operation to attempt
+ * @param {number} [attempts] - Total attempts, including the first
+ * @param {number} [delayMs] - Base delay, multiplied by the attempt number
+ * @returns {Promise<T>} Whatever the operation returns
+ */
+async function retryTransientLock(op, attempts = 5, delayMs = 100) {
+    for (let attempt = 1; ; attempt++) {
+        try {
+            return await op();
+        } catch (err) {
+            if (attempt >= attempts || !TRANSIENT_LOCK_CODES.has(err.code)) throw err;
+            await new Promise((resolve) => setTimeout(resolve, delayMs * attempt));
+        }
+    }
+}
+
 /**
  * Copy a file
  * @param {string} src - Source file path
@@ -219,7 +251,7 @@ async function mkdirIfNotExists(dirPath) {
  * @returns {Promise<void>}
  */
 async function copyFile(src, dest, mode) {
-    return fsp.copyFile(src, dest, mode);
+    return retryTransientLock(() => fsp.copyFile(src, dest, mode));
 }
 
 /**
@@ -230,7 +262,7 @@ async function copyFile(src, dest, mode) {
  */
 async function copyFileEnsure(src, dest) {
     await fsp.mkdir(path.dirname(dest), { recursive: true });
-    return fsp.copyFile(src, dest);
+    return retryTransientLock(() => fsp.copyFile(src, dest));
 }
 
 /**
@@ -278,9 +310,9 @@ async function filesEqual(a, b) {
     // would leak the first handle if the second open rejected (Promise.all
     // rejects at once, orphaning the resolved handle) — a slow FD leak that can
     // build to EMFILE across a large sync.
-    const fhA = await fsp.open(a, 'r');
+    const fhA = await retryTransientLock(() => fsp.open(a, 'r'));
     try {
-        const fhB = await fsp.open(b, 'r');
+        const fhB = await retryTransientLock(() => fsp.open(b, 'r'));
         try {
             const bufA = Buffer.allocUnsafe(CHUNK_SIZE);
             const bufB = Buffer.allocUnsafe(CHUNK_SIZE);
