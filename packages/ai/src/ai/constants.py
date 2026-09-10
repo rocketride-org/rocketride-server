@@ -52,6 +52,7 @@ CONST_MAX_READY_TIME = 5 * 60  # seconds to wait for task to become ready
 CONST_READY_POLL_INTERVAL = 0.250  # seconds between readiness checks
 CONST_SUBPROCESS_BUFFER_LIMIT = 16 * 1024 * 1024  # bytes for subprocess stdin/stdout/stderr buffers (16MB)
 CONST_STATUS_UPDATE_CANCEL_TIMEOUT = 2.0  # seconds to wait for status update task cancellation
+CONST_STATUS_HISTORY_LIMIT = 1000  # max error/warning messages retained per task in memory (was 50; see #1414)
 CONST_DEFAULT_TTL = 15 * 60  # default time-to-live for idle tasks in seconds (15 minutes)
 CONST_TTL_CHECK = 60  # check for tasks to kill every 60 seconds
 

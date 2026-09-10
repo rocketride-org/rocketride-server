@@ -248,6 +248,39 @@ curl -X POST "$WEBHOOK_URL" \
      -d '{"customer": "ACME", "total": 129.90}'
 ```
 
+### Content-Type selects the lane
+
+The `Content-Type` is routing, not decoration: it decides which **lane** the body is
+delivered on. The engine picks the lane that both matches the MIME type and has a component
+reading it; anything unmatched falls through to the raw/tags lane.
+
+| Send | Lane, when a component reads it |
+| --- | --- |
+| `application/json` | `json` |
+| `text/*` | `text` |
+| `image/*`, `video/*`, `audio/*` | `image`, `video`, `audio` |
+| `application/rocketride-question+json` | `questions` |
+| anything else (e.g. `application/pdf`) | raw, delivered on `tags` — what `parse` reads |
+
+**Match the header to the lane your first component reads.** When nothing reads the chosen
+lane the request still succeeds — accepted, counted as completed, answered `200 OK` — and no
+component ever sees the body; only `resultTypes` comes back empty. The mismatch is symmetric,
+so no single header is right for every pipeline: `text/plain` into a `json`-first pipeline
+fails exactly the way `application/json` fails into a `text`-first one.
+
+A body that reaches nobody raises a task warning naming the lane it went to and the lanes the
+pipeline reads:
+
+```text
+Data sent as "application/json" went to the "raw" lane, which no component in this
+pipeline reads, so nothing received it. Lanes this pipeline reads: text.
+Send a Content-Type that maps to one of those instead.
+```
+
+Read it from `get_task_status(token)['warnings']`, or in the source's errors/warnings pane.
+The endpoint panel offers one ready-made example per lane and preselects the lane the running
+pipeline reads.
+
 ### What comes back
 
 The HTTP response is built by the pipeline's `response_*` nodes — each contributes its

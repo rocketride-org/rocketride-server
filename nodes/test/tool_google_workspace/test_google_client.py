@@ -372,3 +372,216 @@ def test_broker_refresh_invalid_expiry_raises_and_keeps_credentials_unchanged(se
         creds.refresh(None)
     # the half-update is the bug: neither token nor expiry may have changed
     assert creds.token == 'stale'
+
+
+def _scripted_request(method, outcomes):
+    """Request double whose execute() pops scripted outcomes in order."""
+    calls = {'count': 0, 'http_seen': []}
+
+    def execute(http=None):
+        calls['http_seen'].append(http)
+        index = min(calls['count'], len(outcomes) - 1)
+        calls['count'] += 1
+        outcome = outcomes[index]
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
+
+    request = types.SimpleNamespace(method=method, http=None, execute=execute)
+    return request, calls
+
+
+def test_execute_retries_transport_faults_for_get(monkeypatch, service):
+    monkeypatch.setattr(google_client._time, 'sleep', lambda seconds: None)
+    fault = OSError('[SSL] record layer failure (_ssl.c:2580)')
+    request, calls = _scripted_request('GET', [fault, fault, {'ok': True}])
+
+    assert google_client.execute(service, request) == {'ok': True}
+    assert calls['count'] == 3
+
+
+def test_execute_gives_up_on_get_after_four_transport_attempts(monkeypatch, service):
+    monkeypatch.setattr(google_client._time, 'sleep', lambda seconds: None)
+    fault = OSError('connection reset by peer')
+    request, calls = _scripted_request('GET', [fault])
+
+    with pytest.raises(ValueError, match='request failed'):
+        google_client.execute(service, request)
+    assert calls['count'] == 4
+
+
+def test_execute_does_not_retry_transport_faults_for_mutations(monkeypatch, service):
+    monkeypatch.setattr(google_client._time, 'sleep', lambda seconds: None)
+    request, calls = _scripted_request('POST', [OSError('connection reset by peer')])
+
+    with pytest.raises(ValueError, match='request failed'):
+        google_client.execute(service, request)
+    assert calls['count'] == 1
+
+
+def test_execute_uses_a_distinct_transport_per_thread(monkeypatch, service):
+    import threading
+
+    class FakeAuthorizedHttp:
+        def __init__(self, credentials, http=None):
+            self.credentials = credentials
+            self.http = http
+
+    fake_google_auth = types.SimpleNamespace(AuthorizedHttp=FakeAuthorizedHttp)
+    fake_httplib2 = types.SimpleNamespace(Http=lambda timeout=None: object())
+    monkeypatch.setitem(sys.modules, 'google_auth_httplib2', fake_google_auth)
+    monkeypatch.setitem(sys.modules, 'httplib2', fake_httplib2)
+    monkeypatch.setattr(google_client, '_thread_transport', threading.local())
+
+    credentials = object()
+    per_thread = {}
+
+    def run(name):
+        seen = []
+        for _ in range(2):
+            request = types.SimpleNamespace(
+                method='GET',
+                http=types.SimpleNamespace(credentials=credentials),
+                execute=lambda http=None: seen.append(http) or {},
+            )
+            google_client.execute(service, request)
+        per_thread[name] = seen
+
+    threads = [threading.Thread(target=run, args=(i,)) for i in range(2)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    first, second = per_thread[0], per_thread[1]
+    assert first[0] is first[1], 'a thread must reuse its own transport'
+    assert second[0] is second[1], 'a thread must reuse its own transport'
+    assert first[0] is not second[0], 'threads must not share a transport'
+    assert isinstance(first[0], FakeAuthorizedHttp)
+
+
+def test_execute_retries_a_long_get_rewritten_to_post(monkeypatch, service):
+    """A GET past MAX_URI_LENGTH is rewritten to POST in place, yet stays a read."""
+    monkeypatch.setattr(google_client._time, 'sleep', lambda seconds: None)
+    fault = OSError('[SSL] record layer failure (_ssl.c:2580)')
+    request, calls = _scripted_request('GET', [fault, fault, {'ok': True}])
+    scripted = request.execute
+
+    def execute(http=None):
+        request.method = 'POST'  # the in-place rewrite, before the network call
+        return scripted(http=http)
+
+    request.execute = execute
+
+    assert google_client.execute(service, request) == {'ok': True}
+    assert calls['count'] == 3
+
+
+def test_execute_treats_a_method_override_header_as_a_read(monkeypatch, service):
+    monkeypatch.setattr(google_client._time, 'sleep', lambda seconds: None)
+    request, calls = _scripted_request('POST', [OSError('connection reset by peer'), {'ok': True}])
+    request.headers = {'X-HTTP-Method-Override': 'GET'}
+
+    assert google_client.execute(service, request) == {'ok': True}
+    assert calls['count'] == 2
+
+
+def test_execute_does_not_retry_status_less_programming_errors(monkeypatch, service):
+    monkeypatch.setattr(google_client._time, 'sleep', lambda seconds: None)
+    request, calls = _scripted_request('GET', [ValueError('bad field name')])
+
+    with pytest.raises(ValueError, match='request failed'):
+        google_client.execute(service, request)
+    assert calls['count'] == 1, 'only transport faults earn a retry'
+
+
+def test_request_http_evicts_and_closes_beyond_the_cache_bound(monkeypatch):
+    import threading
+
+    closed = []
+
+    class FakeHttp:
+        def __init__(self, timeout=None):
+            self.timeout = timeout
+
+        def close(self):
+            closed.append(self)
+
+    class FakeAuthorizedHttp:
+        def __init__(self, credentials, http=None):
+            self.credentials = credentials
+            self.http = http
+
+    monkeypatch.setitem(sys.modules, 'google_auth_httplib2', types.SimpleNamespace(AuthorizedHttp=FakeAuthorizedHttp))
+    monkeypatch.setitem(sys.modules, 'httplib2', types.SimpleNamespace(Http=FakeHttp))
+    monkeypatch.setattr(google_client, '_thread_transport', threading.local())
+
+    def transport_for(creds):
+        return google_client._request_http(types.SimpleNamespace(http=types.SimpleNamespace(credentials=creds)))
+
+    bound = google_client._TRANSPORT_CACHE_MAX
+    credentials = [object() for _ in range(bound)]  # held, so ids stay distinct
+    for creds in credentials:
+        transport_for(creds)
+    assert len(google_client._thread_transport.by_creds) == bound
+    assert closed == []
+
+    # Touch the oldest so recency, not insertion order, decides what goes: a
+    # plain FIFO cache would evict credentials[0] here and pass a weaker test.
+    reused = transport_for(credentials[0])
+    overflow = object()
+    transport_for(overflow)
+
+    cache = google_client._thread_transport.by_creds
+    assert len(cache) == bound, 'the per-thread cache must stay bounded'
+    assert len(closed) == 1, 'the evicted transport must have its sockets closed'
+    assert id(credentials[1]) not in cache, 'the least recently used entry goes first'
+    assert cache[id(credentials[0])] is reused, 'a re-touched entry must survive'
+    assert id(overflow) in cache
+
+
+def test_transport_error_types_picks_up_optional_dependencies_lazily(monkeypatch, service):
+    """Resolved on first failure, so a late-imported httplib2 still counts."""
+    monkeypatch.setattr(google_client._time, 'sleep', lambda seconds: None)
+
+    class FakeHttpLib2Error(Exception):
+        """Neither an OSError nor an HTTPException, exactly like the real one."""
+
+    monkeypatch.setitem(sys.modules, 'httplib2', types.SimpleNamespace(HttpLib2Error=FakeHttpLib2Error))
+    google_client._transport_error_types.cache_clear()
+    try:
+        assert FakeHttpLib2Error in google_client._transport_error_types()
+        request, calls = _scripted_request('GET', [FakeHttpLib2Error('connection lost'), {'ok': True}])
+        assert google_client.execute(service, request) == {'ok': True}
+        assert calls['count'] == 2, 'an httplib2 transport fault earns a retry'
+    finally:
+        google_client._transport_error_types.cache_clear()
+
+
+def test_request_http_preserves_the_service_transport_timeout(monkeypatch):
+    """A rebuilt transport must not fall back to httplib2's indefinite default."""
+    import threading
+
+    class FakeHttp:
+        def __init__(self, timeout=None):
+            self.timeout = timeout
+
+    class FakeAuthorizedHttp:
+        def __init__(self, credentials, http=None):
+            self.credentials = credentials
+            self.http = http
+
+    monkeypatch.setitem(sys.modules, 'google_auth_httplib2', types.SimpleNamespace(AuthorizedHttp=FakeAuthorizedHttp))
+    monkeypatch.setitem(sys.modules, 'httplib2', types.SimpleNamespace(Http=FakeHttp))
+    monkeypatch.setattr(google_client, '_thread_transport', threading.local())
+
+    def rebuilt(inner_timeout):
+        shared = types.SimpleNamespace(credentials=object(), http=FakeHttp(timeout=inner_timeout))
+        return google_client._request_http(types.SimpleNamespace(http=shared))
+
+    # googleapiclient's build_http() sets 60s by default; a global socket timeout
+    # overrides it. Either way the rebuilt transport must carry it over.
+    assert rebuilt(60).http.timeout == 60
+    assert rebuilt(12.5).http.timeout == 12.5
+    # No inner transport to read from: fall back rather than block forever.
+    assert rebuilt(None).http.timeout == google_client._DEFAULT_HTTP_TIMEOUT_SEC

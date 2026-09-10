@@ -39,8 +39,11 @@ This file owns everything that guards credentials and requests:
 - scope diagnostics (:func:`token_scope_report`) shared by ``validateConfig``,
   ``check_connection``, and ``build_service`` so the three checks cannot drift;
 - request execution with exponential backoff on 429/5xx and on rate-limit
-  403s (parsed from the structured error body), while permission 403s and
-  other errors fail fast with an agent-readable message.
+  403s (parsed from the structured error body), plus the same backoff for
+  status-less transport faults on reads only, all on a per-thread transport
+  (httplib2 is not thread safe under parallel agent tool calls); permission
+  403s, non-transport errors, and lost mutations fail fast with an
+  agent-readable message.
 
 Per-service subpackages keep only their tool functions and response cleaners,
 and bind these functions via ``functools.partial`` (see e.g. ``sheets/client.py``).
@@ -52,8 +55,12 @@ import base64
 import binascii
 import json
 import os
+import threading
 import time as _time
+from collections import OrderedDict
 from dataclasses import dataclass, field
+from functools import lru_cache
+from http.client import HTTPException as _HTTPException
 from typing import Any
 from urllib.parse import urlparse
 
@@ -452,21 +459,163 @@ def build_service(svc: GoogleService, auth_type: str, cfg: dict, scopes: list[st
     return build(svc.api, svc.version, credentials=creds, cache_discovery=False)
 
 
+_thread_transport = threading.local()
+
+# Worker threads are pooled and outlive the credentials they serve, so the
+# per-thread cache is bounded rather than open ended: an unbounded map would pin
+# an AuthorizedHttp — and the sockets it holds — for every credential the thread
+# had ever seen. Weak keys would not bound it either, because the cached
+# AuthorizedHttp keeps a strong reference to its own credentials, so a weakly
+# held key can never be collected while its entry is stored.
+_TRANSPORT_CACHE_MAX = 8
+
+# googleapiclient's build_http() gives the service transport a timeout (its own
+# DEFAULT_HTTP_TIMEOUT_SEC, or the global socket timeout when one is set). A bare
+# httplib2.Http() defaults to timeout=None, so rebuilding the transport without
+# carrying that over would let a hung connection block its worker thread forever
+# — and a read that never returns never raises, so the retry below never fires.
+_DEFAULT_HTTP_TIMEOUT_SEC = 60
+
+
+def _close_transport(http: Any) -> None:
+    """Release the sockets an evicted transport still holds, best effort."""
+    inner = getattr(http, 'http', None)
+    close = getattr(inner, 'close', None)
+    if close is None:
+        return
+    try:
+        close()
+    except Exception:  # noqa: BLE001 - eviction must never fail a live request
+        pass
+
+
+def _request_http(request: Any):
+    """Per-thread transport for a request built on a shared service handle.
+
+    googleapiclient services carry one httplib2 transport and every request
+    built from a service inherits it. httplib2 is not thread safe: concurrent
+    ``execute()`` calls on the same handle can interleave on one TLS
+    connection, which surfaces as ``[SSL] record layer failure`` when an agent
+    executor runs a wave of tool calls in parallel threads. Rebuild the
+    authorized transport once per thread so parallel calls never share a
+    connection. Returns None (keep the request's own transport) when there is
+    nothing to rebuild from.
+
+    The rebuilt transport inherits the service transport's timeout, so it cannot
+    silently fall back to httplib2's indefinite default.
+
+    Entries are keyed by ``id(creds)``, which is safe precisely because the
+    cached transport keeps that credential object alive: no stored key can be
+    recycled onto a different credential. Past ``_TRANSPORT_CACHE_MAX`` the
+    least recently used entry is dropped and its connections closed.
+    """
+    shared = getattr(request, 'http', None)
+    creds = getattr(shared, 'credentials', None)
+    if creds is None:
+        return None
+    timeout = getattr(getattr(shared, 'http', None), 'timeout', None) or _DEFAULT_HTTP_TIMEOUT_SEC
+    try:
+        import google_auth_httplib2
+        import httplib2
+    except ImportError:
+        return None
+    cache = getattr(_thread_transport, 'by_creds', None)
+    if cache is None:
+        cache = OrderedDict()
+        _thread_transport.by_creds = cache
+    key = id(creds)
+    http = cache.get(key)
+    if http is not None:
+        cache.move_to_end(key)
+        return http
+    http = google_auth_httplib2.AuthorizedHttp(creds, http=httplib2.Http(timeout=timeout))
+    cache[key] = http
+    while len(cache) > _TRANSPORT_CACHE_MAX:
+        _evicted_key, evicted = cache.popitem(last=False)
+        _close_transport(evicted)
+    return http
+
+
+@lru_cache(maxsize=1)
+def _transport_error_types() -> tuple[type[BaseException], ...]:
+    """Exception types meaning the request never produced a usable response.
+
+    ``OSError`` covers connection resets, timeouts and ``ssl.SSLError``;
+    ``HTTPException`` covers truncated or blank replies. httplib2 and
+    google-auth wrap some faults in types that derive from neither, so include
+    those when the optional dependencies are importable.
+
+    Resolved on first failure rather than at import, so a module imported before
+    its optional dependencies are in place still picks them up; caching keeps it
+    to one resolution per process. Tests reset it with ``cache_clear()``.
+    """
+    types: list[type[BaseException]] = [OSError, _HTTPException]
+    try:
+        import httplib2
+
+        types.append(httplib2.HttpLib2Error)
+    except ImportError:
+        pass
+    try:
+        from google.auth.exceptions import TransportError
+
+        types.append(TransportError)
+    except ImportError:
+        pass
+    return tuple(types)
+
+
+def _is_read_request(request: Any, original_method: str | None) -> bool:
+    """Whether a lost response can be replayed without repeating a side effect.
+
+    ``HttpRequest.execute()`` rewrites ``method`` from GET to POST in place when
+    the URI passes googleapiclient's 2048-character limit, moving the query
+    string into the body under an ``x-http-method-override: GET`` header.
+    Reading ``request.method`` after a failed attempt would therefore misread
+    long reads — Sheets ``values.batchGet`` over many ranges, long Drive/Gmail
+    ``q`` searches — as mutations and deny them their retry. Classifying from
+    the method captured before the first attempt is what avoids that; the
+    override header is a fallback for a request that arrives already executed,
+    whose ``method`` has therefore already been rewritten.
+    """
+    if original_method == 'GET':
+        return True
+    headers = getattr(request, 'headers', None) or {}
+    items = getattr(headers, 'items', None)
+    if items is None:
+        return False
+    return any(str(name).lower() == 'x-http-method-override' and value == 'GET' for name, value in items())
+
+
 def execute(svc: GoogleService, request: Any, *, binary: bool = False) -> Any:
     """Run an API request with exponential backoff on 429/5xx and rate-limit 403s.
+
+    Transport faults carrying no HTTP status (connection reset, TLS fault,
+    timeout) are retried with the same backoff for reads only. A mutation whose
+    response was lost may still have landed on Google's side, so it fails fast
+    and leaves the re-check to the caller rather than risking a duplicated side
+    effect. Errors that are not transport faults — a programming error raised
+    anywhere under the call — fail on the first attempt rather than sleeping
+    through four. Requests run on a per-thread transport (see ``_request_http``).
 
     ``binary=True`` returns the raw response (bytes from get_media/export_media);
     otherwise the JSON dict (or {} when the API returns no body). With 4 attempts
     the sleeps are 1s, 2s, 4s — worst case ~7s before the final raise.
     """
     base_delay = 1.0
+    http = _request_http(request)
+    # Captured up front: the first execute() may rewrite method in place.
+    is_read = _is_read_request(request, getattr(request, 'method', None))
     for attempt in range(4):
         try:
-            result = request.execute()
+            result = request.execute(http=http) if http is not None else request.execute()
             return result if binary else (result or {})
         except Exception as exc:  # googleapiclient.errors.HttpError and transport errors
             status = getattr(getattr(exc, 'resp', None), 'status', None)
             if status and (int(status) in _RETRY_STATUSES or _is_rate_limit_403(exc)) and attempt < 3:
+                _time.sleep(base_delay * (2**attempt))
+                continue
+            if status is None and attempt < 3 and is_read and isinstance(exc, _transport_error_types()):
                 _time.sleep(base_delay * (2**attempt))
                 continue
             detail = getattr(exc, 'reason', None) or str(exc)

@@ -135,6 +135,21 @@ class TestCrewAIToolBackfill:
         handoff = _Task('sub-request', agent=delegate)
         assert handoff.tools == ['deal_search']
 
+    def test_a_wired_manager_tool_reaches_the_resolved_executor_set(self):
+        """The manager's own `tool` channel must actually land on the tools the
+        engine resolves for it -- not just on manager_agent.tools in isolation.
+
+        A wired channel tool (e.g. a dedup/lookup check) has to survive the same
+        `task.tools or agent_to_use.tools` resolution the isolation tests above
+        pin, or it is connectable but never actually usable.
+        """
+        delegate = _Agent('Deal Desk', ['deal_search'])
+        manager = _Agent('Manager', ['dedup_lookup'])  # manager's own `tool` channel, wired
+        task = _Task('work the deal', agent=delegate)
+        task.tools = []  # what manager.py does
+
+        assert _resolve_executor_tools(task, manager) == ['dedup_lookup']
+
 
 # ---------------------------------------------------------------------------
 # Our side of the contract
@@ -158,11 +173,22 @@ class TestManagerSourceClearsTaskTools:
         assert 'check_tools' in _MANAGER_SRC
         assert '_get_agent_to_use' in _MANAGER_SRC
 
-    def test_manager_agent_is_still_built_without_tools(self):
-        """Belt and braces -- the manager must not be handed a toolset directly either."""
+    def test_manager_agent_carries_only_its_own_channel_tools(self):
+        """The manager MAY hold tools now, but only from its own `tool` channel.
+
+        `context.tools` here is the manager node's own control-plane channel
+        (wired via the `tool` invoke port), never a delegate's. Delegate tools
+        still only reach a Task through `check_tools`, which `task_obj.tools = []`
+        (asserted by `test_task_tools_are_cleared` above) continues to block.
+        """
         start = _MANAGER_SRC.index('manager_agent = Agent(')
         block = _MANAGER_SRC[start : _MANAGER_SRC.index(')', _MANAGER_SRC.index('max_iter', start))]
-        assert 'tools=' not in block
+        assert 'tools=manager_tools' in block
+        # Bound to the exact assignment (not a bare 'context.tools.list' substring
+        # search, which would also match sub_context.tools.list -- the delegates'
+        # own channel a few lines up) so the test fails if manager_tools is ever
+        # rebound to the wrong source.
+        assert 'manager_tools = self._build_crew_tools(context, context.tools.list)' in _MANAGER_SRC
 
 
 @pytest.mark.parametrize('needle', ['crewai/task.py', 'crews/utils.py', 'agent_tools'])
