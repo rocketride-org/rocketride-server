@@ -322,10 +322,23 @@ function ensureDependencyWiring(appFolder: string, workspaceRoot: string): boole
 	if (!fs.existsSync(pkgJsonPath)) return false;
 	const pkg = JSON.parse(fs.readFileSync(pkgJsonPath, 'utf8'));
 
-	// step: complete a manifest that never declared the platform deps
+	// An author may declare a platform dep in any section (a type-only
+	// consumer reasonably uses devDependencies) — completion and the
+	// resolution check both honor the author's chosen section, so a dep
+	// declared anywhere is never duplicated into dependencies.
+	const DEP_SECTIONS = ['dependencies', 'devDependencies', 'optionalDependencies', 'peerDependencies'] as const;
+	const declaredSpec = (name: string): string | undefined => {
+		for (const section of DEP_SECTIONS) {
+			const spec = (pkg[section] as Record<string, string> | undefined)?.[name];
+			if (spec !== undefined) return spec;
+		}
+		return undefined;
+	};
+
+	// step: complete a manifest that declares the dep in NO section
 	let manifestChanged = false;
 	for (const dep of PLATFORM_DEPS) {
-		if (pkg.dependencies?.[dep.name] !== undefined) continue;
+		if (declaredSpec(dep.name) !== undefined) continue;
 		const spec = `file:../../${dep.vendored.join('/')}`;
 		pkg.dependencies = { ...(pkg.dependencies ?? {}), [dep.name]: spec };
 		manifestChanged = true;
@@ -339,7 +352,7 @@ function ensureDependencyWiring(appFolder: string, workspaceRoot: string): boole
 	const overridden = readWorkspaceOverrideNames(workspaceRoot);
 	const needed = PLATFORM_DEPS.filter((dep) =>
 		!overridden.has(dep.name)
-		&& !specResolvesToVendored(String(pkg.dependencies[dep.name]), appFolder, workspaceRoot, dep.vendored));
+		&& !specResolvesToVendored(String(declaredSpec(dep.name)), appFolder, workspaceRoot, dep.vendored));
 	if (needed.length === 0) return manifestChanged;
 	ensureWorkspaceOverrides(workspaceRoot, needed);
 	return true;
