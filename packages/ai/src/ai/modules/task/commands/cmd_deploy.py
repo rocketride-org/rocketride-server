@@ -297,15 +297,21 @@ class DeployCommands(_DeployBase):
 
         Kind dispatch: ``kind='pipe'`` (default — v0 clients send none) takes
         the pipeline-dict path below; ``kind='app'`` routes to the app branch
-        (zip transport, unpacked at receipt) in ``ai.account.app_deploy``.
+        (zip transport, unpacked at receipt) in ``ai.account.app_deploy``;
+        ``kind='node'`` to the node branch in ``ai.account.node_deploy``, which
+        carries the same zip transport.
         """
         kind = str(args.get('kind') or 'pipe')
         if kind == 'app':
             from ai.account.app_deploy import handle_app_add
 
             return await handle_app_add(self, request)
+        if kind == 'node':
+            from ai.account.node_deploy import handle_node_add
+
+            return await handle_node_add(self, request)
         if kind != 'pipe':
-            raise ValueError(f"Unknown deploy kind: {kind!r} (use 'pipe' or 'app')")
+            raise ValueError(f"Unknown deploy kind: {kind!r} (use 'pipe', 'app' or 'node')")
         return await self._deploy_add_pipe(request, args)
 
     async def _deploy_add_pipe(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
