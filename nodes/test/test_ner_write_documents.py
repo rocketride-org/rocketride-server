@@ -1,129 +1,217 @@
+# =============================================================================
+# MIT License
+# Copyright (c) 2026 Aparavi Software AG
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+# =============================================================================
+"""
+Regression tests for the NER node's writeDocuments enrichment (issue #2064).
+
+These exercise the real Doc and DocMetadata rather than stand-ins, because the bug
+being guarded against is specific to DocMetadata being a pydantic model: subscript
+assignment raises TypeError, so entity fields have to be written as attributes.
+"""
+
+import importlib.util
 import os
 import sys
-from unittest.mock import MagicMock, patch
+import types
+from unittest.mock import MagicMock
 
 import pytest
 
 # Derive paths relative to this file to avoid hardcoded paths
 TEST_DIR = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.dirname(os.path.dirname(TEST_DIR))
-SRC_PATH = os.path.join(REPO_ROOT, "nodes", "src")
-AI_PATH = os.path.join(REPO_ROOT, "packages", "ai", "src")
-CLIENT_PATH = os.path.join(REPO_ROOT, "packages", "client-python", "src")
-ENGINE_PATH = os.path.join(REPO_ROOT, "packages", "server", "engine-lib", "rocketlib-python", "lib")
+SRC_PATH = os.path.join(REPO_ROOT, 'nodes', 'src')
+AI_PATH = os.path.join(REPO_ROOT, 'packages', 'ai', 'src')
+CLIENT_PATH = os.path.join(REPO_ROOT, 'packages', 'client-python', 'src')
+ENGINE_PATH = os.path.join(REPO_ROOT, 'packages', 'server', 'engine-lib', 'rocketlib-python', 'lib')
 
-# Add necessary paths to sys.path
 for path in [SRC_PATH, AI_PATH, CLIENT_PATH, ENGINE_PATH]:
     if path not in sys.path:
         sys.path.insert(0, path)
 
-# Save original sys.modules to prevent leaks
-_ORIGINAL_MODULES = sys.modules.copy()
 
-@pytest.fixture(autouse=True)
-def restore_sys_modules():
-    """Fixture to restore sys.modules after each test."""
-    yield
-    # We don't want to clear EVERYTHING because it might break pytest's own imports,
-    # but we should remove the mocks we added.
-    for mod in ["rocketlib", "engLib", "depends"]:
-        if mod in sys.modules:
-            del sys.modules[mod]
+class _PreventDefaultRaised(Exception):
+    """Stand-in for the APERR(Ec.PreventDefault) that the real preventDefault() raises."""
 
-def setup_mocks():
-    """Mock external dependencies before importing production classes."""
-    sys.modules["rocketlib"] = MagicMock()
-    sys.modules["engLib"] = MagicMock()
-    sys.modules["depends"] = MagicMock()
-    # Mock IInstanceBase so IInstance can inherit from it
-    class MockIInstanceBase:
-        def __init__(self):
-            self.instance = MagicMock()
-    sys.modules["rocketlib"].IInstanceBase = MockIInstanceBase
 
-_CORE_STUBS = ("rocketlib", "engLib", "depends")
-_saved_core = {_name: sys.modules.get(_name) for _name in _CORE_STUBS}
-setup_mocks()
-try:
-    from nodes.ner.IInstance import IInstance
-finally:
-    for _name, _mod in _saved_core.items():
-        if _mod is None:
-            sys.modules.pop(_name, None)
-        else:
-            sys.modules[_name] = _mod
-from ai.common.schema import Doc, DocMetadata
+class _FakeIInstanceBase:
+    """
+    Stand-in for rocketlib.IInstanceBase.
+
+    Mirrors the two pieces of engine context DocMetadata(pInstance) reads —
+    instance.currentObject and IEndpoint.endpoint.jobConfig — and raises from
+    preventDefault() the way the real implementation does.
+    """
+
+    def __init__(self):
+        self.instance = MagicMock()
+        self.instance.currentObject = types.SimpleNamespace(
+            objectId='obj-1', path='/src/doc.txt', permissionId=7, componentId='sig-1'
+        )
+        self.IEndpoint = types.SimpleNamespace(endpoint=types.SimpleNamespace(jobConfig={'nodeId': 'node-1'}))
+
+    def preventDefault(self):
+        """Raise, as the real implementation does."""
+        raise _PreventDefaultRaised()
+
+
+_CORE_STUBS = ('rocketlib', 'engLib', 'depends')
+_NER_DIR = os.path.join(SRC_PATH, 'nodes', 'ner')
+
+
+def _load_ner_iinstance():
+    """
+    Load the NER IInstance from source with the engine-side modules stubbed.
+
+    Loading by file path rather than by package name keeps this independent of whether
+    'nodes' resolves to nodes/ or nodes/src/nodes during a full-suite run. The node's own
+    IGlobal is stubbed so no model or vendor SDK is imported, but ai.common.schema is left
+    real: these tests assert against the actual Doc and DocMetadata.
+
+    sys.modules is restored exactly, because _sys_modules_guard.py fails the whole session
+    if a stub is left behind.
+    """
+    saved_core = {name: sys.modules.get(name) for name in _CORE_STUBS}
+    saved_pkg = {k: v for k, v in sys.modules.items() if k == 'ner' or k.startswith('ner.')}
+    for name in _CORE_STUBS:
+        sys.modules[name] = MagicMock()
+    sys.modules['rocketlib'].IInstanceBase = _FakeIInstanceBase
+    try:
+        pkg_spec = importlib.util.spec_from_file_location(
+            'ner', os.path.join(_NER_DIR, '__init__.py'), submodule_search_locations=[_NER_DIR]
+        )
+        # Registered but not executed: the relative imports only need the package to exist.
+        sys.modules['ner'] = importlib.util.module_from_spec(pkg_spec)
+
+        iglobal_stub = types.ModuleType('ner.IGlobal')
+        iglobal_stub.IGlobal = type('FakeIGlobal', (), {})
+        sys.modules['ner.IGlobal'] = iglobal_stub
+
+        spec = importlib.util.spec_from_file_location('ner.IInstance', os.path.join(_NER_DIR, 'IInstance.py'))
+        mod = importlib.util.module_from_spec(spec)
+        sys.modules['ner.IInstance'] = mod
+        spec.loader.exec_module(mod)
+        return mod.IInstance
+    finally:
+        for mod_name in [k for k in sys.modules if k == 'ner' or k.startswith('ner.')]:
+            sys.modules.pop(mod_name, None)
+        sys.modules.update(saved_pkg)
+        for name, mod in saved_core.items():
+            if mod is None:
+                sys.modules.pop(name, None)
+            else:
+                sys.modules[name] = mod
+
+
+IInstance = _load_ner_iinstance()
+
+from ai.common.schema import Doc, DocMetadata  # noqa: E402
+
+
+def _run_write_documents(instance, docs):
+    """Invoke writeDocuments, absorbing the preventDefault() the node raises at the end."""
+    with pytest.raises(_PreventDefaultRaised):
+        instance.writeDocuments(docs)
+
 
 class TestNerWriteDocuments:
-    """Regression tests for NER node's writeDocuments method."""
+    """Regression tests for the NER node's writeDocuments method."""
+
+    @staticmethod
+    def _instance(entities):
+        """Build a node instance whose recognizer returns the given entities."""
+        instance = IInstance()
+        instance.IGlobal = MagicMock()
+        instance.IGlobal.recognizer.store_in_metadata = True
+        instance.IGlobal.recognizer.extract_entities.return_value = entities
+        return instance
+
+    @staticmethod
+    def _enriched(instance):
+        """Return the single document the node forwarded downstream."""
+        enriched_docs = instance.instance.writeDocuments.call_args[0][0]
+        assert len(enriched_docs) == 1
+        return enriched_docs[0]
 
     def test_write_documents_enrichment(self):
-        """
-        Verify that entities are correctly added to document metadata.
-        
-        This test ensures that the NER extraction results are correctly mapped to
-        document metadata attributes and that a deep copy is performed to preserve
-        the original document state.
-        """
-        instance = IInstance()
-        instance.IGlobal = MagicMock()
-        instance.IGlobal.recognizer.store_in_metadata = True
-        
-        # Mock entity extraction
-        instance.IGlobal.recognizer.extract_entities.return_value = [
-            {"entity_group": "PER", "word": "Alice"},
-            {"entity_group": "PER", "word": "Bob"},
-            {"entity_group": "ORG", "word": "OpenAI"},
-        ]
+        """Entities land on the copy's metadata as attributes, grouped and deduplicated."""
+        instance = self._instance(
+            [
+                {'entity_group': 'PER', 'word': 'Alice'},
+                {'entity_group': 'PER', 'word': 'Bob'},
+                {'entity_group': 'ORG', 'word': 'OpenAI'},
+            ]
+        )
+        doc = Doc(
+            page_content='Alice and Bob work at OpenAI.',
+            metadata=DocMetadata(objectId='test_obj', chunkId=1),
+        )
 
-        # Create a real Doc with real DocMetadata
-        metadata = DocMetadata(objectId="test_obj", chunkId=1)
-        doc = Doc(page_content="Alice and Bob work at OpenAI.", metadata=metadata)
+        _run_write_documents(instance, [doc])
 
-        # Call the production method
-        with patch.object(doc, "model_copy", wraps=doc.model_copy) as model_copy:
-            instance.writeDocuments([doc])
-        model_copy.assert_called_once_with(deep=True)
+        enriched = self._enriched(instance)
+        assert enriched.metadata.entities_per == ['Alice', 'Bob']
+        assert enriched.metadata.entities_org == ['OpenAI']
+        assert enriched.metadata.entities_count == 3
+        # Metadata the document already carried is preserved, not replaced.
+        assert enriched.metadata.objectId == 'test_obj'
+        assert enriched.metadata.chunkId == 1
 
-        # Verify the enriched document passed to the next instance
-        call_args = instance.instance.writeDocuments.call_args
-        assert call_args is not None
-        enriched_docs = call_args[0][0]
-        assert len(enriched_docs) == 1
-        enriched_doc = enriched_docs[0]
+    def test_write_documents_does_not_mutate_the_original(self):
+        """The deep copy leaves the caller's document and its metadata untouched."""
+        instance = self._instance([{'entity_group': 'PER', 'word': 'Alice'}])
+        doc = Doc(page_content='Alice.', metadata=DocMetadata(objectId='test_obj', chunkId=1))
 
-        # Check metadata attributes
-        assert getattr(enriched_doc.metadata, "entities_per") == ["Alice", "Bob"]
-        assert getattr(enriched_doc.metadata, "entities_org") == ["OpenAI"]
-        assert enriched_doc.metadata.entities_count == 3
+        _run_write_documents(instance, [doc])
 
-        # Verify deep copy
-        assert not hasattr(doc.metadata, "entities_per")
-        assert enriched_doc.metadata is not doc.metadata
+        enriched = self._enriched(instance)
+        assert enriched is not doc
+        assert enriched.metadata is not doc.metadata
+        assert not hasattr(doc.metadata, 'entities_per')
+        assert not hasattr(doc.metadata, 'entities_count')
 
     def test_write_documents_initializes_missing_metadata(self):
-        """
-        Verify that documents with missing metadata are correctly initialized.
-        
-        This test ensures that if a document has no metadata, a new DocMetadata
-        object is created and initialized with default values before enrichment.
-        """
-        instance = IInstance()
-        instance.IGlobal = MagicMock()
-        instance.IGlobal.recognizer.store_in_metadata = True
-        instance.IGlobal.recognizer.extract_entities.return_value = []
+        """A document without metadata gets identity from the object being processed."""
+        instance = self._instance([])
+        doc = Doc(page_content='No entities here.', metadata=None)
 
-        # Document with None metadata
-        doc = Doc(page_content="No entities here.", metadata=None)
+        _run_write_documents(instance, [doc])
 
-        instance.writeDocuments([doc])
+        enriched = self._enriched(instance)
+        assert isinstance(enriched.metadata, DocMetadata)
+        # Inherited from instance.currentObject rather than a hardcoded placeholder.
+        assert enriched.metadata.objectId == 'obj-1'
+        assert enriched.metadata.parent == '/src/doc.txt'
+        assert enriched.metadata.permissionId == 7
+        assert enriched.metadata.nodeId == 'node-1'
+        assert enriched.metadata.chunkId == 0
 
-        call_args = instance.instance.writeDocuments.call_args
-        assert call_args is not None
-        enriched_doc_passed = call_args[0][0][0]
-        assert enriched_doc_passed.metadata is not None
-        assert isinstance(enriched_doc_passed.metadata, DocMetadata)
-        assert enriched_doc_passed.metadata.objectId == "unknown"
-        assert enriched_doc_passed.metadata.chunkId == 0
+    def test_entity_fields_survive_serialization(self):
+        """Entity fields written via setattr still appear in the serialized metadata."""
+        instance = self._instance([{'entity_group': 'PER', 'word': 'Alice'}])
+        doc = Doc(page_content='Alice.', metadata=DocMetadata(objectId='test_obj', chunkId=1))
 
+        _run_write_documents(instance, [doc])
 
+        serialized = self._enriched(instance).metadata.toDict()
+        assert serialized['entities_per'] == ['Alice']
+        assert serialized['entities_count'] == 1

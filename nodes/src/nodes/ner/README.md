@@ -51,6 +51,10 @@ The threshold is a number from `0.0` to `1.0` and defaults to `0.9` for most pre
 
 This is on by default and affects the `documents` lane. When enabled, the node copies each document and stores deduplicated, sorted entity words under `entities_<type>` keys plus `entities_count`. Turn it off when the lane should preserve document metadata unchanged; recognition still runs, but the extracted entity list is not written to that document's metadata.
 
+These values are written onto the document's `DocMetadata` as attributes, so in-process consumers read them as `doc.metadata.entities_per` rather than by subscript. They are extra fields on the model, so they still appear in the serialized metadata returned by `toDict()`.
+
+A document that arrives without metadata is given a `DocMetadata` built from the object being processed, inheriting its `objectId`, `nodeId`, `parent`, `permissionId`, and `signature` rather than a placeholder identity.
+
 ## Requirements
 
 This node declares GPU capability. It initializes its recognizer once at pipeline start and uses RocketRide's Transformers pipeline, which uses the model server when it is available and otherwise falls back to local execution. The model is not loaded while the node is opened in configuration mode.
@@ -63,7 +67,7 @@ Each recognized item is formatted with `entity_group`, `word`, `score`, `start`,
 
 ### Text and document behavior
 
-On the `text` lane, the node collects recognized entities in instance state but writes only the original text downstream. On the `documents` lane, it processes each document's `page_content` separately and uses `model_copy()` before changing metadata, so the original document object is not mutated.
+On the `text` lane, the node collects recognized entities in instance state but writes only the original text downstream. On the `documents` lane, it processes each document's `page_content` separately and uses `model_copy(deep=True)` before changing metadata, so neither the original document nor the metadata it carries is mutated.
 
 ## Upstream docs
 
