@@ -96,7 +96,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 	 * a slower earlier run must not overwrite fresher state.
 	 */
 	private rescanSeq = 0;
-	private sidebarMode: 'pipelines' | 'apps' | 'nodes' = 'pipelines';
+	private sidebarMode: 'pipelines' | 'apps' | 'nodes' = 'apps';
 
 	private logger = getLogger();
 
