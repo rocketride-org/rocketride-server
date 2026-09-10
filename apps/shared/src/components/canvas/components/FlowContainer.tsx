@@ -35,7 +35,7 @@
 import { ReactElement, ReactNode } from 'react';
 import { ReactFlowProvider } from '@xyflow/react';
 
-import { IProject, IValidatePipelinePayload, IValidateResponse, ITaskStatus } from '../types';
+import { IProject, IValidatePipelinePayload, IValidateResponse, ITaskStatus, IVoiceBuilderAdapter } from '../types';
 
 import { FlowProvider } from '../context/FlowProvider';
 
@@ -145,6 +145,8 @@ export interface IFlowContainerProps {
 	onSave?: () => void;
 	onExport?: () => void;
 
+	/** Host-provided Voice Builder bridge. */
+	voiceBuilder?: IVoiceBuilderAdapter;
 
 	/** Available ROCKETRIDE_* environment variable key names for autocomplete in config fields. */
 	envKeys?: string[];
@@ -163,7 +165,7 @@ export interface IFlowContainerProps {
  * Uses `key` on the outer Box to force a clean re-mount when the project
  * ID changes, ensuring no stale graph state leaks between projects.
  */
-export default function FlowContainer({ project, oauth2RootUrl, oauthReturnUrl, onOpenExternal, pendingOAuthTokens, clearPendingOAuthTokens, isReadonly, taskStatuses, componentPipeCounts, totalPipes, servicesJson, servicesJsonError, getNodeSchema, inventory, inventoryConnectorTitleMap, handleValidatePipeline, onContentChanged, onViewportChange, onUndo, onRedo, onOpenLink, googlePickerDeveloperKey, googlePickerClientId, onRunPipeline, onStopPipeline, onOpenStatus, serverHost, isConnected, isSubscribed, initialViewport, isDirty, isNew, onSave, onExport, envKeys, children }: IFlowContainerProps): ReactElement {
+export default function FlowContainer({ project, oauth2RootUrl, oauthReturnUrl, onOpenExternal, pendingOAuthTokens, clearPendingOAuthTokens, isReadonly, taskStatuses, componentPipeCounts, totalPipes, servicesJson, servicesJsonError, getNodeSchema, inventory, inventoryConnectorTitleMap, handleValidatePipeline, onContentChanged, onViewportChange, onUndo, onRedo, onOpenLink, googlePickerDeveloperKey, googlePickerClientId, onRunPipeline, onStopPipeline, onOpenStatus, serverHost, isConnected, isSubscribed, initialViewport, isDirty, isNew, onSave, onExport, voiceBuilder, envKeys, children }: IFlowContainerProps): ReactElement {
 	return (
 		<ReactFlowProvider>
 			{/* Re-key on project ID to force clean re-mount between projects */}
@@ -204,6 +206,7 @@ export default function FlowContainer({ project, oauth2RootUrl, oauthReturnUrl, 
 					isNew={isNew}
 					onSave={onSave}
 					onExport={onExport}
+					voiceBuilder={voiceBuilder}
 					envKeys={envKeys}
 				>
 					{children}

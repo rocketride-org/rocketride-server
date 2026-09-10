@@ -155,6 +155,13 @@ const DEFAULT_SETTINGS: SettingsData = {
 	taskArguments: '',
 	pipelineDebugOutput: false,
 	envVars: {},
+	voiceBuilder: {
+		enabled: false,
+		llmProvider: '',
+		llmProfile: '',
+		hasLlmApiKey: false,
+		llmApiKey: '',
+	},
 	autoAgentIntegration: true,
 	integrationCopilot: false,
 	integrationClaudeCode: false,

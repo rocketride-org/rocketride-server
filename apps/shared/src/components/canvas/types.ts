@@ -34,7 +34,7 @@
  *   - Feature flags (IFlowFeatures)
  */
 
-import type { PipelineInputConnection, INodeConfig, IControlConnection, IPosition, IDimensions } from 'shell';
+import type { PipelineInputConnection, INodeConfig, IControlConnection, IPosition, IDimensions, IProject } from 'shell';
 
 // Re-export all general types so flow consumers can import from one place
 export type { IProject, IProjectComponent, IComponentUI, IControlConnection, IInputConnection, IPosition, IDimensions, IService, IServiceCatalog, INodeConfig, IValidateResponse, IComponentValidatePayload, IValidatePipelinePayload, IServiceSchema, IToolchainExport, IToolchainState, IForm, IFormData, ITaskStatus, IFlowData } from 'shell';
@@ -43,6 +43,23 @@ export { IServiceCapabilities, ITaskState, DEFAULT_TOOLCHAIN_STATE } from 'shell
 
 /** Pipeline schema version. Must match the server's IServices::VERSION (engine-lib). */
 export const PIPELINE_SCHEMA_VERSION = 1;
+
+export interface IVoiceBuilderStatus {
+	enabled: boolean;
+	errors: string[];
+	model?: string;
+}
+
+export interface IVoiceBuilderProcessResult {
+	transcript: string;
+	project: IProject;
+	summary?: string;
+}
+
+export interface IVoiceBuilderAdapter {
+	status: IVoiceBuilderStatus;
+	processRecording: (audioBase64: string, mimeType: string | undefined, currentProject: IProject) => Promise<IVoiceBuilderProcessResult>;
+}
 
 // ============================================================================
 // Node Type Discriminator

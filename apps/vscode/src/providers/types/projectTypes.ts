@@ -25,7 +25,7 @@ import type { LogSessionHostToWebview, LogSessionWebviewToHost } from './logType
 /** All messages the extension host can send to the ProjectWebview. */
 export type ProjectHostToWebview =
 	| ShellHostToWebview
-	| { type: 'project:load'; project: any; viewState: ViewState; prefs: Record<string, unknown>; services: Record<string, any>; icons?: Record<string, string>; isConnected: boolean; isSubscribed?: boolean; statuses?: Record<string, TaskStatus>; serverHost?: string; oauthReturnUrl?: string; isReadonly?: boolean; envKeys?: string[] }
+	| { type: 'project:load'; project: any; viewState: ViewState; prefs: Record<string, unknown>; services: Record<string, any>; icons?: Record<string, string>; isConnected: boolean; isSubscribed?: boolean; statuses?: Record<string, TaskStatus>; serverHost?: string; oauthReturnUrl?: string; isReadonly?: boolean; voiceStatus?: { enabled: boolean; errors: string[]; model?: string }; envKeys?: string[] }
 	| { type: 'project:oauthTokens'; tokens: string; state: string }
 	| { type: 'project:update'; project: any }
 	| { type: 'project:services'; services: Record<string, any>; icons?: Record<string, string> }
@@ -35,6 +35,8 @@ export type ProjectHostToWebview =
 	| { type: 'project:initialState'; state: ViewState }
 	| { type: 'project:initialPrefs'; prefs: Record<string, unknown> }
 	| { type: 'project:envKeysUpdate'; envKeys: string[] }
+	// Voice Builder reply (host-side transcription + planner round trip).
+	| { type: 'voice:processResponse'; requestId: number; transcript?: string; project?: any; summary?: string; error?: string }
 	// Subscription gate + embedded checkout flow (the Subscribe overlay).
 	| { type: 'checkout:required' }
 	| { type: 'checkout:subscriptionUpdate'; isSubscribed: boolean }
@@ -60,6 +62,8 @@ export type ProjectWebviewToHost =
 	| { type: 'status:pipelineAction'; action: 'run' | 'stop' | 'restart'; source?: string }
 	| { type: 'status:missingEnvVars'; keys: string[] }
 	| { type: 'trace:clear' }
+	// Voice Builder request (audio captured in the webview, processed on the host).
+	| { type: 'voice:process'; requestId: number; audioBase64: string; mimeType?: string; currentProject: any; services: Record<string, any> }
 	// Embedded checkout requests (the Subscribe overlay).
 	| CheckoutRequestWebviewToHost
 	// Deploy lifecycle requests from the DEPLOY page (see deployTypes.ts).

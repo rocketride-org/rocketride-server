@@ -337,6 +337,13 @@ export class SettingsProvider {
 			pipelineTraceLevel: config.pipelineTraceLevel,
 			taskArguments: config.taskArguments,
 			pipelineDebugOutput: config.pipelineDebugOutput,
+			voiceBuilder: {
+				enabled: config.voiceBuilder.enabled,
+				llmProvider: config.voiceBuilder.llmProvider,
+				llmProfile: config.voiceBuilder.llmProfile,
+				hasLlmApiKey: !!config.voiceBuilder.llmApiKey,
+				llmApiKey: '',
+			},
 
 			// Integration settings
 			autoAgentIntegration: workspaceConfig.get('integrations.autoAgentIntegration', true),

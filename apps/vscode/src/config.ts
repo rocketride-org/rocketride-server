@@ -85,6 +85,9 @@ export interface ConfigManagerInfo {
 
 	/** Enable full debug output for pipeline tasks (--trace=debugOut via `.use` args). */
 	pipelineDebugOutput: boolean;
+
+	/** Voice Builder settings and provider credentials. */
+	voiceBuilder: VoiceBuilderConfig;
 }
 
 /** Per-group settings sent from the Settings UI on save. */
@@ -113,6 +116,7 @@ export interface SettingsSnapshot {
 	pipelineTraceLevel: 'none' | 'metadata' | 'summary' | 'full';
 	taskArguments: string;
 	pipelineDebugOutput: boolean;
+	voiceBuilder: VoiceBuilderSnapshot;
 	autoAgentIntegration: boolean;
 	integrationCopilot: boolean;
 	integrationClaudeCode: boolean;
@@ -120,6 +124,17 @@ export interface SettingsSnapshot {
 	integrationWindsurf: boolean;
 	integrationClaudeMd: boolean;
 	integrationAgentsMd: boolean;
+}
+
+export interface VoiceBuilderConfig {
+	enabled: boolean;
+	llmProvider: string;
+	llmProfile: string;
+	llmApiKey: string;
+}
+
+export interface VoiceBuilderSnapshot extends VoiceBuilderConfig {
+	hasLlmApiKey?: boolean;
 }
 
 /**
@@ -145,6 +160,13 @@ export class ConfigManager {
 		local: { engineVersion: 'latest' },
 	};
 
+	private static readonly DEFAULT_VOICE_BUILDER: VoiceBuilderConfig = {
+		enabled: false,
+		llmProvider: '',
+		llmProfile: '',
+		llmApiKey: '',
+	};
+
 	// Cached configuration
 	private config: ConfigManagerInfo = {
 		development: { ...ConfigManager.DEFAULT_GROUP, connectionMode: 'local' },
@@ -155,6 +177,7 @@ export class ConfigManager {
 		pipelineTraceLevel: 'full',
 		taskArguments: '',
 		pipelineDebugOutput: false,
+		voiceBuilder: { ...ConfigManager.DEFAULT_VOICE_BUILDER },
 	};
 
 	private constructor() {}
@@ -190,7 +213,7 @@ export class ConfigManager {
 		this.disposables.push(
 			context.secrets.onDidChange(async (event) => {
 				if (this.isBatchApplying) return;
-				if (event.key === 'rocketride.development.apiKey' || event.key === 'rocketride.deployment.apiKey') {
+				if (event.key === 'rocketride.development.apiKey' || event.key === 'rocketride.deployment.apiKey' || event.key === 'rocketride.voiceBuilder.llmApiKey') {
 					await this.refreshConfig();
 				}
 			})
@@ -259,6 +282,17 @@ export class ConfigManager {
 			pipelineTraceLevel: config.get('pipelineTraceLevel', 'full'),
 			taskArguments: config.get('taskArguments', ''),
 			pipelineDebugOutput: config.get('pipelineDebugOutput', false),
+			voiceBuilder: await this.refreshVoiceBuilderConfig(),
+		};
+	}
+
+	private async refreshVoiceBuilderConfig(): Promise<VoiceBuilderConfig> {
+		const vc = vscode.workspace.getConfiguration(`${this.configSection}.voiceBuilder`);
+		return {
+			enabled: vc.get<boolean>('enabled', ConfigManager.DEFAULT_VOICE_BUILDER.enabled),
+			llmProvider: vc.get<string>('llmProvider', ConfigManager.DEFAULT_VOICE_BUILDER.llmProvider),
+			llmProfile: vc.get<string>('llmProfile', ConfigManager.DEFAULT_VOICE_BUILDER.llmProfile),
+			llmApiKey: await this.getSecretFromStorage('rocketride.voiceBuilder.llmApiKey'),
 		};
 	}
 
@@ -266,17 +300,20 @@ export class ConfigManager {
 	 * Gets the API key from secure storage for the given group.
 	 */
 	private async getApiKeyFromStorage(group: ConnectionGroup): Promise<string> {
+		return this.getSecretFromStorage(`rocketride.${group}.apiKey`);
+	}
+
+	private async getSecretFromStorage(key: string): Promise<string> {
 		if (this.isDisposing) return '';
 		if (!this.context) {
 			console.warn('ConfigManager not initialized with context - cannot access secure storage');
 			return '';
 		}
 		try {
-			const key = `rocketride.${group}.apiKey`;
 			return (await this.context.secrets.get(key)) || '';
 		} catch (error: unknown) {
 			if (error instanceof Error && error.name === 'Canceled') return '';
-			console.error(`Failed to retrieve ${group} API key from secure storage:`, error);
+			console.error(`Failed to retrieve ${key} from secure storage:`, error);
 			return '';
 		}
 	}
@@ -295,6 +332,7 @@ export class ConfigManager {
 			pipelineTraceLevel: this.config.pipelineTraceLevel,
 			taskArguments: this.config.taskArguments,
 			pipelineDebugOutput: this.config.pipelineDebugOutput,
+			voiceBuilder: { ...this.config.voiceBuilder },
 		};
 	}
 
@@ -418,26 +456,35 @@ export class ConfigManager {
 	 * Stores the API key in secure storage for the given group.
 	 */
 	public async setApiKey(group: ConnectionGroup, apiKey: string): Promise<void> {
+		await this.setSecret(`rocketride.${group}.apiKey`, apiKey);
+		if (this.config) {
+			this.config[group].apiKey = apiKey.trim();
+		}
+	}
+
+	public async setVoiceBuilderSecret(key: 'llmApiKey', apiKey: string): Promise<void> {
+		await this.setSecret(`rocketride.voiceBuilder.${key}`, apiKey);
+		if (this.config) {
+			this.config.voiceBuilder[key] = apiKey.trim();
+		}
+	}
+
+	private async setSecret(key: string, value: string): Promise<void> {
 		if (this.isDisposing) return;
 		if (!this.context) {
 			throw new Error('ConfigManager not initialized with context - cannot access secure storage');
 		}
 
-		const key = `rocketride.${group}.apiKey`;
 		try {
-			if (apiKey.trim()) {
-				await this.context.secrets.store(key, apiKey.trim());
+			if (value.trim()) {
+				await this.context.secrets.store(key, value.trim());
 			} else {
 				await this.context.secrets.delete(key);
 			}
-			// Update cache immediately
-			if (this.config) {
-				this.config[group].apiKey = apiKey.trim();
-			}
 		} catch (error: unknown) {
 			if (error instanceof Error && error.name === 'Canceled') return;
-			console.error(`Failed to store ${group} API key in secure storage:`, error);
-			throw new Error(`Failed to store ${group} API key securely`);
+			console.error(`Failed to store ${key} in secure storage:`, error);
+			throw new Error(`Failed to store secret securely`);
 		}
 	}
 
@@ -511,6 +558,11 @@ export class ConfigManager {
 			await wc.update('taskArguments', s.taskArguments, vscode.ConfigurationTarget.Global);
 			await wc.update('pipelineDebugOutput', s.pipelineDebugOutput, vscode.ConfigurationTarget.Global);
 
+			// --- Voice Builder settings ---
+			await wc.update('voiceBuilder.enabled', s.voiceBuilder.enabled, vscode.ConfigurationTarget.Global);
+			await wc.update('voiceBuilder.llmProvider', s.voiceBuilder.llmProvider, vscode.ConfigurationTarget.Global);
+			await wc.update('voiceBuilder.llmProfile', s.voiceBuilder.llmProfile, vscode.ConfigurationTarget.Global);
+
 			// --- Integration settings ---
 			await wc.update('integrations.autoAgentIntegration', s.autoAgentIntegration, vscode.ConfigurationTarget.Global);
 			await wc.update('integrations.copilot', s.integrationCopilot, vscode.ConfigurationTarget.Global);
@@ -523,6 +575,9 @@ export class ConfigManager {
 			// --- Secure storage (per-group API keys) ---
 			await this.setApiKey('development', s.development.apiKey);
 			await this.setApiKey('deployment', s.deployment.apiKey);
+			if (s.voiceBuilder.llmApiKey.trim() || s.voiceBuilder.hasLlmApiKey === false) {
+				await this.setVoiceBuilderSecret('llmApiKey', s.voiceBuilder.llmApiKey);
+			}
 
 			// --- Single cache refresh from final state ---
 			await this.refreshConfig();
