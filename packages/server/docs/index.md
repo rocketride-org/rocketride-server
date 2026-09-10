@@ -156,6 +156,51 @@ commands:
 The pipeline JSON sent over the socket is identical to the JSON you author
 visually or by hand, the protocol just transports it.
 
+## MIME type selects the lane
+
+Every write carries a MIME type — the `mimeType` argument of `rrext_process` /
+`open`, which the HTTP `/webhook/{project_id}/{source}` route fills in from the
+request's `Content-Type` header. That MIME type is **routing, not metadata**: it
+picks which lane the body is delivered on.
+
+The choice is made against the pipeline's live wiring, not a fixed table. A
+branch is taken only when the MIME type matches **and** some component actually
+reads that lane; anything unmatched falls through to the raw/tags lane.
+
+| MIME type | Lane, when a component reads it |
+| --- | --- |
+| `application/json` | `json` |
+| `text/*` | `text` |
+| `image/*`, `video/*`, `audio/*` | `image`, `video`, `audio` |
+| `application/rocketride-question+json` | `questions` |
+| `application/rocketlib-tag` | `tags` |
+| anything else, or no reader above | raw, delivered on `tags` |
+
+The prefix `lane/<name>` bypasses detection and targets a lane directly.
+
+### When nothing reads the chosen lane
+
+The write still succeeds. The object is accepted, counted as completed and
+answered `200 OK`; only `resultTypes` comes back empty, because no component
+received the body. Nothing about the response, the HTTP log line or the task
+counters distinguishes this from a successful run.
+
+Because that outcome is indistinguishable from success, the engine emits a task
+**warning** naming the lane the data went to and the lanes the pipeline reads.
+It is a warning rather than an error: a source may legitimately offer several
+lanes while a pipeline wires up one, so an unread lane is not by itself a fault
+— but *this object reaching nobody* is never what the sender intended, and the
+warning is the only signal that separates the two.
+
+Read the warnings from `get_task_status(token)['warnings']`, or subscribe to
+`apaevt_status_warning` (see [Observability](/protocols/websocket/observability)).
+
+Note that the mismatch is symmetric: `text/plain` into a pipeline whose first
+component reads `json` fails exactly the way `application/json` fails into a
+`text`-first one. There is no single header that is correct for every pipeline,
+which is why the endpoint panel offers one example per lane and preselects the
+one the running pipeline reads.
+
 ## Keepalive & timeouts
 
 The connection is long-lived: a task stays open while it streams. The SDK
