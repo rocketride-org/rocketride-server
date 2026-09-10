@@ -17,18 +17,16 @@
 Exposes one command to the DAP dispatcher:
 
   - ``rrext_deploy_node`` — node publish control on the deployments registry
-                            (``versions`` / ``deploy`` / ``where``)
+                            (``versions`` / ``deploy`` / ``where`` /
+                            ``disable`` / ``remove``)
 
 Publishing a version is NOT here: it arrives on the generic rail as
 ``rrext_deploy add`` with ``kind='node'``, which carries the zip.
 """
 
-from typing import TYPE_CHECKING, Any, Dict
+from typing import Any, Dict
 
 from ai.common.dap import DAPConn
-
-if TYPE_CHECKING:
-    pass
 
 
 # =============================================================================
