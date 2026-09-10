@@ -27,6 +27,7 @@ import type { AppManifestEntry } from './components/workspace/types';
 import { buildShellConfig } from './createShellConfig';
 import { registerAndMapApps } from './util/appLoader';
 import { installDevHooks } from './util/devMode';
+import { configureGravityPixel } from './util/gravityPixel';
 
 // =============================================================================
 // BOOTSTRAP
@@ -59,6 +60,9 @@ async function main() {
 		// Stripe publishable key comes from the server (not baked at build
 		// time) so one bundle works against test- and live-keyed servers.
 		stripePublishableKey = info.stripePublishableKey ?? '';
+		// Gravity ad pixel: the advertiser ID is per environment (absent on
+		// staging/OSS), and the script loads only after marketing consent.
+		configureGravityPixel(info.gravityAdvertiserId);
 		// The server says where live traffic goes (already resolved by the
 		// SDK — 'origin' became the probed address). Same as the page origin
 		// on single-host deployments; a direct API host on split ones, so

@@ -6,6 +6,15 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="description" content="RocketRide" />
     <link rel="icon" href="/shell/favicon.svg" type="image/svg+xml" />
+    <!-- Gravity ad-pixel QUEUE SHIM only: defines window.gravity as a call
+         queue so no early gravity(...) call is lost. It makes no request and
+         names no advertiser (the bundle stays identical across environments).
+         src/util/gravityPixel.ts loads the CDN script and queues init only
+         when the server probe advertises an advertiser ID AND the visitor
+         has granted marketing consent. The CDN host is deliberately NOT
+         named here: this comment ships in the HTML, and prerender captures
+         are checked for that host. -->
+    <script>(function(w,n){w['GravityPixelObject']=n;w[n]=w[n]||function(){(w[n].q=w[n].q||[]).push(arguments)};w[n].l=1*new Date()})(window,'gravity');</script>
     <script>(function(){try{var h=localStorage.getItem('rr:home:theme'),t=localStorage.getItem('rr:theme');var d=h==='dark'||(h!=='light'&&!!t&&t!=='rocketride-light'&&t!=='light');if(d){document.documentElement.style.setProperty('--rr-bg-default','#080808');document.documentElement.style.background='#080808';}}catch(e){}})();</script>
   </head>
   <body>
