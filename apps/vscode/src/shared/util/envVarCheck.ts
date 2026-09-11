@@ -10,17 +10,16 @@
  * references in a pipeline, then compares against the server's known env keys.
  * If any are missing, opens the Variables page with the missing keys pre-filled
  * so the user can set values before re-running.
+ *
+ * The decision itself lives in `envVarDecision.ts`, which imports neither
+ * `vscode` nor the logger so it can be asserted directly. This module is the
+ * side effects.
  */
 
 import * as vscode from 'vscode';
 import type { RocketRideClient } from 'rocketride';
-
-/** Extract all unique ROCKETRIDE_* variable names referenced in a pipeline. */
-function extractPipelineEnvVars(pipeline: Record<string, unknown>): string[] {
-	const str = JSON.stringify(pipeline);
-	const matches = str.matchAll(/\$\{(ROCKETRIDE_[^}]+)\}/g);
-	return [...new Set([...matches].map((m) => m[1]))];
-}
+import { decideEnvVars, extractPipelineEnvVars } from './envVarDecision';
+import { getLogger } from './output';
 
 /**
  * Opens the Variables page and pre-fills the missing keys as empty entries.
@@ -40,21 +39,37 @@ async function openWithMissingKeys(missingKeys: string[]): Promise<void> {
  * Used by the sidebar run path which doesn't go through the webview.
  */
 export async function checkMissingEnvVars(client: RocketRideClient, pipeline: Record<string, unknown>): Promise<string[]> {
-	const referencedVars = extractPipelineEnvVars(pipeline);
-	if (referencedVars.length === 0) return [];
+	const referenced = extractPipelineEnvVars(pipeline);
+	// Nothing to verify — skip the round-trip entirely, as before.
+	if (referenced.length === 0) return [];
 
-	let knownKeys: string[];
+	let keys: string[] | Error;
 	try {
-		knownKeys = await client.account.getEnvironmentKeys();
-	} catch {
+		keys = await client.account.getEnvironmentKeys();
+	} catch (error: unknown) {
+		keys = error instanceof Error ? error : new Error(String(error));
+	}
+
+	const decision = decideEnvVars(referenced, keys);
+
+	if (decision.kind === 'unverified') {
+		// Permissive on purpose — a transient failure should not block a run that
+		// would have been fine. What changed is that it is no longer SILENT: this
+		// used to return an empty list, which the caller cannot tell apart from
+		// "all variables defined", so the gate vanished without a word.
+		getLogger().error(
+			`envVarCheck: could not read environment keys (${decision.reason}); running without the pre-flight check`
+		);
+		vscode.window.showWarningMessage(
+			`Could not verify environment variables (${decision.reason}). Running without the pre-flight check — an undefined variable will reach the pipeline as a literal \${ROCKETRIDE_*} placeholder.`
+		);
 		return [];
 	}
 
-	const missing = referencedVars.filter((v) => !knownKeys.includes(v));
-	if (missing.length === 0) return [];
+	if (decision.kind === 'ok') return [];
 
-	await openWithMissingKeys(missing);
-	return missing;
+	await openWithMissingKeys(decision.missingKeys);
+	return decision.missingKeys;
 }
 
 /**
