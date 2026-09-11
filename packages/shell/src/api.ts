@@ -437,6 +437,14 @@ export const shellApi = {
 	get SidebarCollapsedGate() { return SidebarCollapsedGate; },
 	get useSidebarCollapsed() { return useSidebarCollapsed; },
 	get SidebarFooter() { return SidebarFooter; },
+	// The two chat parts an app builds its own thread from. Members, not just
+	// top-level exports: `shell:freeze`'s drift detector reads shellApi members
+	// and exported TYPES, so a plain `export { MessageBubble }` is invisible to
+	// it — the check reports "no actionable change", no version ever declares
+	// them, and the per-version floors have nothing to hold. Being named in a
+	// frozen bundle is not the same as being held; being a member is.
+	get MessageBubble() { return MessageBubble; },
+	get TypingIndicator() { return TypingIndicator; },
 	get DataGrid() { return DataGrid; },
 	get CardDataGrid() { return CardDataGrid; },
 	get FilterStrip() { return FilterStrip; },
