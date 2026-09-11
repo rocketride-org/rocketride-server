@@ -39,6 +39,7 @@ agent / `expectJson` path never requests it; see "Extended thinking" below.
 | `model`            | string (custom profile only) | Anthropic model ID, used only when `profile` is `custom`                                             |
 | `modelTotalTokens` | number (custom profile only) | Total context tokens for the custom profile; must be greater than 0                                  |
 | `extendedThinking` | boolean, `false`             | Request extended thinking for this node. Ignored unless the model is reasoning-capable               |
+| `workspaceId`      | string, empty                | Anthropic workspace the key acts in. Only for identity-linked keys; see Authentication below         |
 
 The model ID and token limits for named profiles are fixed by the profile. Only the
 `custom` profile exposes `model` and `modelTotalTokens` directly.
@@ -95,6 +96,13 @@ startup: it must be non-empty and start with `sk-ant` (covers both standard
 `sk-ant-...` and newer `sk-ant-api03-...` formats). If the key fails this check,
 the node raises `Invalid Anthropic API key format, please check your API key.`
 The key is read at construction time and not stored by the node.
+
+An identity-linked API key carries no workspace of its own, and Anthropic
+refuses it with `anthropic-workspace-id is required when authenticating with an
+identity-linked API key`. Set `workspaceId` for such a key and the node sends it
+as the `anthropic-workspace-id` header. Leave it empty for a workspace-scoped
+key, which rejects a workspace id it does not expect. An unresolved `${...}`
+reference is treated as empty.
 
 ---
 

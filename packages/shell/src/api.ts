@@ -137,7 +137,8 @@ import SettingsProvider from './providers/SettingsProvider';
 // itself renders are part of the frozen contract. Apps needing other icons take
 // them from the shared library (the full set); every name
 // added here is frozen forever, so the surface grows only on demonstrated need.
-import { BxPlus, BxEditAlt, BxTrash, BxDesktop, BxGridAlt, BxCog, BxListUl, BxStop, BxPlay, BxHome, BxNote, BxComponent, BxUser, BxRocket, BxLockOpen, BxPurchaseTag, BxChevronRight, BxFolderOpen } from './components/BoxIcon';
+import { BxPlus, BxEditAlt, BxTrash, BxDesktop, BxGridAlt, BxCog, BxListUl, BxStop, BxPlay, BxHome, BxNote, BxComponent, BxUser, BxRocket, BxLockOpen, BxPurchaseTag, BxChevronRight, BxFolderOpen, BxDownload, BxRefresh } from './components/BoxIcon';
+export type { IconProps, IconComponent } from './components/BoxIcon';
 
 // =============================================================================
 // TYPE RE-EXPORTS — standalone types apps import from 'shell'
@@ -258,6 +259,8 @@ import { createActionsColumn, autoFormatter, badgeEl, buttonEl, avatarEl, monoEl
 import { createMessageGridPersistence, GRID_CONFIG_GET, GRID_CONFIG_SET, GRID_CONFIG_CLEAR } from './components/data-grid/gridConfigChannel';
 import { ChatView } from './components/chat/ChatView';
 import { MessageList } from './components/chat/components/MessageList';
+import { MessageBubble } from './components/chat/components/MessageBubble';
+import { TypingIndicator } from './components/chat/components/TypingIndicator';
 import { MarkdownRenderer } from './components/chat/components/MarkdownRenderer';
 import { useChatMessages } from './components/chat/hooks/useChatMessages';
 import { ConnectionCard, ConnectionCardAdd } from './components/connection-card/ConnectionCard';
@@ -292,7 +295,7 @@ export {
 	GRID_CONFIG_CLEAR,
 	useDebouncedValue, useAnnouncements, formatBytes, formatDate,
 	formatDuration, formatDateValue,
-	ChatView, MessageList, MarkdownRenderer, useChatMessages,
+	ChatView, MessageList, MessageBubble, TypingIndicator, MarkdownRenderer, useChatMessages,
 	ConnectionCard, ConnectionCardAdd, ConnectionManagerView,
 	commonStyles,
 	applyTheme, isInVSCode, OAUTH_ROOT_URL,
@@ -434,6 +437,14 @@ export const shellApi = {
 	get SidebarCollapsedGate() { return SidebarCollapsedGate; },
 	get useSidebarCollapsed() { return useSidebarCollapsed; },
 	get SidebarFooter() { return SidebarFooter; },
+	// The two chat parts an app builds its own thread from. Members, not just
+	// top-level exports: `shell:freeze`'s drift detector reads shellApi members
+	// and exported TYPES, so a plain `export { MessageBubble }` is invisible to
+	// it — the check reports "no actionable change", no version ever declares
+	// them, and the per-version floors have nothing to hold. Being named in a
+	// frozen bundle is not the same as being held; being a member is.
+	get MessageBubble() { return MessageBubble; },
+	get TypingIndicator() { return TypingIndicator; },
 	get DataGrid() { return DataGrid; },
 	get CardDataGrid() { return CardDataGrid; },
 	get FilterStrip() { return FilterStrip; },
@@ -511,6 +522,8 @@ export const shellApi = {
 	get BxPurchaseTag() { return BxPurchaseTag; },
 	get BxChevronRight() { return BxChevronRight; },
 	get BxFolderOpen() { return BxFolderOpen; },
+	get BxDownload() { return BxDownload; },
+	get BxRefresh() { return BxRefresh; },
 	get AppLayout() { return AppLayout; },
 	// Desktop version selector — session override read + apply/clear
 	get getAppVersionOverride() { return getAppVersionOverride; },
@@ -555,7 +568,8 @@ export {
 	// Icons
 	BxPlus, BxEditAlt, BxTrash, BxDesktop, BxGridAlt, BxCog, BxListUl,
 	BxStop, BxPlay, BxHome, BxNote, BxComponent, BxUser, BxRocket,
-	BxLockOpen, BxPurchaseTag, BxChevronRight, BxFolderOpen,
+	BxLockOpen, BxPurchaseTag, BxChevronRight, BxFolderOpen, BxDownload,
+	BxRefresh,
 	// The one app-root layout
 	AppLayout,
 	// Desktop version selector — session override read + apply/clear
