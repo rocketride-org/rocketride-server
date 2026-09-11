@@ -349,10 +349,21 @@ export function FlowProjectProvider({ children, project: currentProject, isReado
 	}, []);
 
 	// Type-narrow the raw servicesJson into our IServiceCatalog, folding in
-	// fetched full definitions. A full definition extends its summary, so it
-	// simply replaces the summary entry — the config panel, the red-gear
-	// validation, and add-node defaults all see the schema transparently.
-	const servicesJson = useMemo(() => ({ ...(rawServicesJson ?? {}), ...fullServices }) as IServiceCatalog, [rawServicesJson, fullServices]);
+	// fetched full definitions. A full definition is merged over its summary
+	// entry per provider rather than replacing it: the server deliberately
+	// strips summary-only display fields (notably `icon`, whose id is only
+	// meaningful within the bulk response's icon table) from the full view,
+	// so replacing wholesale would blank the node header icon. The config
+	// panel, the red-gear validation, and add-node defaults still see the
+	// schema transparently.
+	const servicesJson = useMemo(() => {
+		const raw = (rawServicesJson ?? {}) as Record<string, Record<string, unknown>>;
+		const merged: Record<string, unknown> = { ...raw };
+		for (const [provider, definition] of Object.entries(fullServices)) {
+			merged[provider] = { ...(raw[provider] ?? {}), ...definition };
+		}
+		return merged as IServiceCatalog;
+	}, [rawServicesJson, fullServices]);
 
 	// --- Context value (memoized to prevent consumer re-renders on unchanged props) ---
 
