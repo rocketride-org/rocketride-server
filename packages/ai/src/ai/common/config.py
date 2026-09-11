@@ -4,6 +4,7 @@ import os
 import difflib
 from typing import Dict, Any
 from rocketlib import getServiceDefinition, IJson, warning
+from ai.common.env_resolve import resolve_env_placeholders
 
 
 # Fields the catalogue keeps about a profile, which a pipeline never sets. Kept out
@@ -307,14 +308,31 @@ class Config:
 
         config = merge(userConfig, defaultConfig)
 
-        # Output the computed configuration. Array/object values arrive from
-        # the engine as IJson, not list/dict (see #1839 defect 2), so a node
-        # that does isinstance(value, list) on its own declared field falls
-        # through to its default and silently ignores what was configured.
-        # IJson.toDict recursively normalizes to native list/dict and is a
-        # no-op on values that are already native, so this is safe to apply
-        # unconditionally rather than pushing the conversion onto every node.
-        return IJson.toDict(config)
+        # Normalize before resolving. Array/object values arrive from the
+        # engine as IJson, not list/dict (see #1839 defect 2), so a node that
+        # does isinstance(value, list) on its own declared field falls through
+        # to its default and silently ignores what was configured. IJson.toDict
+        # recursively normalizes to native list/dict and is a no-op on values
+        # that are already native, so this is safe to apply unconditionally
+        # rather than pushing the conversion onto every node.
+        config = IJson.toDict(config)
+
+        # Resolve any ${ROCKETRIDE_*} placeholders (e.g. an apikey field set
+        # via the env-var autocomplete) that reached this layer still
+        # unresolved, so callers never send a literal placeholder to a
+        # provider SDK. Backstop for callers (e.g. the engine's live
+        # validateConfig probe) that don't pre-resolve the pipeline.
+        #
+        # Must run AFTER IJson.toDict: resolve_env_placeholders round-trips
+        # through json.dumps, and a raw IJson value reaches it as an
+        # unserializable type ("Object of type IJson is not JSON
+        # serializable"). toDict yields plain dict/list/scalars, so the
+        # round-trip is safe here.
+        rocketrideEnv = {k: v for k, v in os.environ.items() if k.startswith('ROCKETRIDE_')}
+        config = resolve_env_placeholders(config, rocketrideEnv)
+
+        # Output the computed configuration
+        return config
 
     @staticmethod
     def getProviderConfig(providerConfig: Dict[str, any]):
