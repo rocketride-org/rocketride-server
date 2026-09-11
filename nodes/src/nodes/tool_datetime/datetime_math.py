@@ -42,7 +42,9 @@ from __future__ import annotations
 
 import calendar
 import logging
+import math
 from datetime import datetime, timedelta, timezone
+from functools import lru_cache
 from typing import Any, Optional
 
 try:  # pragma: no cover - exercised by whichever branch the platform takes
@@ -75,9 +77,17 @@ WEEKDAYS = ('monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 
 BOUNDARY_UNITS = ('day', 'week', 'month', 'quarter', 'year')
 
 
+@lru_cache(maxsize=1)
 def _tzdb_missing() -> bool:
     """
     Whether the IANA database is absent, rather than the name being wrong.
+
+    CACHED, because the answer cannot change inside a process and finding it
+    walks the whole database. Without the cache the common case paid for it
+    every time: `_tzdb_reported` latches only on the branch where the database
+    is MISSING, so with a database present an agent guessing `PST` or
+    `America/San_Francisco` re-listed some 600 zones on every bad lookup — and,
+    every answer being silently UTC, it had no reason to stop guessing.
 
     ``zoneinfo`` ships no data of its own — it reads the system database, or the
     ``tzdata`` wheel this node declares in its requirements. With neither, every
@@ -160,10 +170,18 @@ def render(epoch: float, zone: Optional[str] = None) -> dict[str, Any]:
         The rendering, including the zone actually used and the UTC form.
     """
     tz, name = resolve_zone(zone)
-    local = datetime.fromtimestamp(float(epoch), tz)
-    utc = datetime.fromtimestamp(float(epoch), timezone.utc)
+    # ONE INSTANT, not two. The rendered fields and the `epoch` that comes back
+    # beside them must describe the same moment: rendering from the float while
+    # returning `int(epoch)` answered 1.9 as "epoch 1" next to a time of 00:00:01
+    # — a caller storing the epoch and a caller reading the date would disagree.
+    # Floored (not truncated) so a pre-1970 instant moves backwards in time like
+    # every other, and floored ONCE here because whole seconds are the node's
+    # unit: nothing it renders is finer than a minute.
+    whole = math.floor(float(epoch))
+    local = datetime.fromtimestamp(whole, tz)
+    utc = datetime.fromtimestamp(whole, timezone.utc)
     return {
-        'epoch': int(epoch),
+        'epoch': whole,
         'iso': local.isoformat(),
         'date': local.strftime('%Y-%m-%d'),
         'time': local.strftime('%H:%M'),
@@ -176,11 +194,17 @@ def render(epoch: float, zone: Optional[str] = None) -> dict[str, Any]:
 
 
 def _clamped(year: int, month: int, day: int) -> tuple[int, int, int]:
-    """The same day of a different month, or that month's last day."""
-    while month > 12:
-        year, month = year + 1, month - 12
-    while month < 1:
-        year, month = year - 1, month + 12
+    """
+    The same day of a different month, or that month's last day.
+
+    Normalised with `divmod` rather than a loop per year: `shift` multiplies a
+    year amount by 12 before it arrives here, so a hallucinated `10**9 years`
+    would otherwise step twelve billion times with nothing on screen. The bound
+    in `IInstance.shift` refuses such a number at the boundary; this makes the
+    arithmetic itself constant-time either way.
+    """
+    carry, zero_based = divmod(month - 1, 12)
+    year, month = year + carry, zero_based + 1
     return year, month, min(day, calendar.monthrange(year, month)[1])
 
 
@@ -210,7 +234,12 @@ def _anchored(local: datetime, tz: Any, zone: Optional[str]) -> dict[str, Any]:
     """
     wall = local.replace(tzinfo=None)
     answer = render(wall.replace(tzinfo=tz).timestamp(), zone)
-    answer['adjusted'] = answer['time'] != wall.strftime('%H:%M')
+    # DATE AND TIME, because a transition can skip a whole calendar day and
+    # leave the clock reading untouched: Samoa crossed the date line at the end
+    # of 2011, so 2011-12-30 never happened in Pacific/Apia and midnight on it
+    # resolves to midnight on the 31st. Comparing only HH:MM called that
+    # unadjusted — the one answer this node exists to stop giving.
+    answer['adjusted'] = (answer['date'], answer['time']) != (wall.strftime('%Y-%m-%d'), wall.strftime('%H:%M'))
     return answer
 
 
@@ -451,14 +480,20 @@ def at(date: str, time: str, zone: Optional[str] = None) -> dict[str, Any]:
             bad zone is, so this one refuses rather than guessing.
     """
     text = f'{str(date).strip()} {str(time).strip()}'
+    # Which shape matched is remembered: seconds the caller sent belong in
+    # `requested`, which is what they compare our answer against. Dropping them
+    # made an echo of "09:30:45" read back as "09:30" and look like a change we
+    # had made.
+    with_seconds = False
     for shape in ('%Y-%m-%d %H:%M', '%Y-%m-%d %H:%M:%S'):
         try:
             naive = datetime.strptime(text, shape)
+            with_seconds = shape.endswith('%S')
             break
         except ValueError:
             continue
     else:
-        raise ValueError(f'Expected date as YYYY-MM-DD and time as HH:MM, got "{text}"')
+        raise ValueError(f'Expected date as YYYY-MM-DD and time as HH:MM or HH:MM:SS, got "{text}"')
 
     tz, _ = resolve_zone(zone)
     earlier = naive.replace(tzinfo=tz)
@@ -467,8 +502,12 @@ def at(date: str, time: str, zone: Optional[str] = None) -> dict[str, Any]:
     answer = render(earlier.timestamp(), zone)
     # A gap does not round-trip: ask for 02:30 and the instant reads back 03:30.
     # A fold does round-trip, and is told apart by the two offsets disagreeing.
-    answer['requested'] = f'{naive.strftime("%Y-%m-%d")} {naive.strftime("%H:%M")}'
-    answer['adjusted'] = answer['time'] != naive.strftime('%H:%M')
+    answer['requested'] = f'{naive.strftime("%Y-%m-%d")} {naive.strftime("%H:%M:%S" if with_seconds else "%H:%M")}'
+    # DATE AND TIME BOTH — see `_anchored`: a transition that skips a whole day
+    # leaves the clock reading alone, so comparing only HH:MM missed it. Minute
+    # precision on purpose: `render` states no seconds, and seconds the caller
+    # sent are not a difference we introduced.
+    answer['adjusted'] = (answer['date'], answer['time']) != (naive.strftime('%Y-%m-%d'), naive.strftime('%H:%M'))
     answer['ambiguous'] = not answer['adjusted'] and earlier.utcoffset() != later.utcoffset()
     return answer
 

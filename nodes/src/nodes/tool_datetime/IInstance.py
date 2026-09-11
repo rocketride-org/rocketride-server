@@ -44,8 +44,7 @@ an injected anchor tends not to reach.
 
 from __future__ import annotations
 
-from typing import Any
-
+from ai.common.utils import require_bool, require_dict, require_int, require_str
 from rocketlib import IInstanceBase, tool_function
 
 from . import datetime_math as dtm
@@ -130,12 +129,6 @@ class IInstance(IInstanceBase):
         return str(args.get(key) or '').strip() or self.IGlobal.default_zone
 
     @staticmethod
-    def _args(args: Any) -> dict:
-        if not isinstance(args, dict):
-            raise ValueError('Tool input must be a JSON object')
-        return args
-
-    @staticmethod
     def _epoch(args: dict, key: str = 'epoch') -> float:
         value = args.get(key)
         if isinstance(value, bool) or not isinstance(value, (int, float)):
@@ -153,7 +146,7 @@ class IInstance(IInstanceBase):
     )
     def now(self, args):
         """The current instant."""
-        args = self._args(args or {})
+        args = require_dict(args or {}, tool_name='datetime.now')
         return dtm.now(self._zone(args))
 
     @tool_function(
@@ -192,8 +185,12 @@ class IInstance(IInstanceBase):
     )
     def at(self, args):
         """The instant a wall-clock date and time name in one zone."""
-        args = self._args(args)
-        return dtm.at(str(args.get('date') or ''), str(args.get('time') or ''), self._zone(args))
+        args = require_dict(args, tool_name='datetime.at')
+        return dtm.at(
+            require_str(args, 'date', tool_name='datetime.at'),
+            require_str(args, 'time', tool_name='datetime.at'),
+            self._zone(args),
+        )
 
     @tool_function(
         input_schema={
@@ -228,11 +225,16 @@ class IInstance(IInstanceBase):
     )
     def shift(self, args):
         """An instant moved by a whole number of units."""
-        args = self._args(args)
-        amount = args.get('amount')
-        if isinstance(amount, bool) or not isinstance(amount, int):
-            raise ValueError('"amount" is required and must be a whole number')
-        return dtm.shift(self._epoch(args), amount, str(args.get('unit') or ''), self._zone(args))
+        args = require_dict(args, tool_name='datetime.shift')
+        # BOUNDED, and not only for tidiness: `shift` multiplies a year amount
+        # by 12 before the calendar arithmetic sees it, so an unbounded
+        # hallucinated number is a denial of service with a plausible-looking
+        # argument. ~120k units is a century of months either way, past any real
+        # CRM date, and `require_int` names the range in the error so the agent
+        # can retry inside it.
+        amount = require_int(args, 'amount', lo=-120_000, hi=120_000, tool_name='datetime.shift')
+        unit = require_str(args, 'unit', tool_name='datetime.shift')
+        return dtm.shift(self._epoch(args), amount, unit, self._zone(args))
 
     @tool_function(
         input_schema={
@@ -265,12 +267,17 @@ class IInstance(IInstanceBase):
     )
     def next_weekday(self, args):
         """The next occurrence of a named weekday."""
-        args = self._args(args)
+        args = require_dict(args, tool_name='datetime.next_weekday')
+        # `input_schema` describes the tool to the model; it validates nothing
+        # on the way in, so `"false"` would reach `bool()` and come back True —
+        # "next Tuesday" answered as today. Optional, so the default is set
+        # before the strict check reads it.
+        args.setdefault('allow_today', False)
         return dtm.next_weekday(
             self._epoch(args),
-            str(args.get('weekday') or ''),
+            require_str(args, 'weekday', tool_name='datetime.next_weekday'),
             self._zone(args),
-            bool(args.get('allow_today')),
+            require_bool(args, 'allow_today', tool_name='datetime.next_weekday'),
         )
 
     @tool_function(
@@ -305,11 +312,11 @@ class IInstance(IInstanceBase):
     )
     def boundary(self, args):
         """The first or last instant of a period."""
-        args = self._args(args)
+        args = require_dict(args, tool_name='datetime.boundary')
         return dtm.boundary(
             self._epoch(args),
-            str(args.get('unit') or ''),
-            str(args.get('edge') or ''),
+            require_str(args, 'unit', tool_name='datetime.boundary'),
+            require_str(args, 'edge', tool_name='datetime.boundary'),
             self._zone(args),
         )
 
@@ -345,11 +352,11 @@ class IInstance(IInstanceBase):
     )
     def difference(self, args):
         """How far apart two instants are."""
-        args = self._args(args)
+        args = require_dict(args, tool_name='datetime.difference')
         return dtm.difference(
             self._epoch(args, 'start'),
             self._epoch(args, 'end'),
-            str(args.get('unit') or ''),
+            require_str(args, 'unit', tool_name='datetime.difference'),
             self._zone(args),
         )
 
@@ -368,5 +375,5 @@ class IInstance(IInstanceBase):
     )
     def render(self, args):
         """One instant, in every shape a caller might need."""
-        args = self._args(args)
+        args = require_dict(args, tool_name='datetime.render')
         return dtm.render(self._epoch(args), self._zone(args))

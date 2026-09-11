@@ -56,6 +56,20 @@ _spec.loader.exec_module(dtm)
 LA = 'America/Los_Angeles'
 
 
+@pytest.fixture(autouse=True)
+def _fresh_tzdb_probe():
+    """
+    No test inherits another's database probe.
+
+    `_tzdb_missing` is cached for the life of the process — that is the point of
+    it — so a test that patches `available_timezones` would otherwise read
+    whatever the previous test settled.
+    """
+    dtm._tzdb_missing.cache_clear()
+    yield
+    dtm._tzdb_missing.cache_clear()
+
+
 def _raising_zoneinfo(name):
     """`ZoneInfo` with no database behind it: every name is a lookup failure."""
     raise KeyError(f'No time zone found with key {name}')
@@ -329,6 +343,27 @@ def test_a_mistyped_zone_is_not_blamed_on_the_database(monkeypatch, caplog):
     assert caplog.text == ''
 
 
+def test_the_database_is_probed_once_however_many_zones_are_mistyped(monkeypatch):
+    """
+    The probe is cached, because the answer cannot change inside a process.
+
+    It walks the whole database — some 600 zones — and `_tzdb_reported` latches
+    only on the branch where the database is MISSING. So with a database
+    present, an agent guessing `PST` and then `America/San_Francisco` paid for
+    the full listing twice, and every answer being silently UTC gave it no
+    reason to stop guessing.
+    """
+    listings = []
+    monkeypatch.setattr(dtm, 'available_timezones', lambda: listings.append(1) or {'UTC'})
+    monkeypatch.setattr(dtm, 'ZoneInfo', _raising_zoneinfo)
+    monkeypatch.setattr(dtm, '_tzdb_reported', False)
+
+    dtm.render(at(2026, 9, 3), 'Mars/Olympus')
+    dtm.render(at(2026, 9, 3), 'America/San_Francisco')
+
+    assert len(listings) == 1
+
+
 def test_every_answer_names_the_zone_it_used():
     assert dtm.render(at(2026, 9, 3), LA)['timezone'] == LA
     assert dtm.shift(at(2026, 9, 3), 1, 'day', LA)['timezone'] == LA
@@ -475,3 +510,82 @@ def test_a_date_that_is_not_a_date_is_refused():
     for date, time in (('9 sept 2026', '12:30'), ('2026-09-09', 'half twelve'), ('', ''), ('2026-13-40', '12:30')):
         with pytest.raises(ValueError):
             dtm.at(date, time, LA)
+
+
+def test_a_transition_that_skips_a_whole_day_is_adjusted():
+    """
+    THE CASE THAT COMPARING ONLY `HH:MM` MISSED.
+
+    Samoa crossed the date line at the end of 2011: 2011-12-30 never happened in
+    Pacific/Apia. Midnight on it resolves to midnight on the 31st — same clock
+    reading, a different day — so a comparison of the time alone called that
+    unadjusted and handed back an instant a day out with nothing to say so.
+    """
+    booked = dtm.at('2011-12-30', '00:00', 'Pacific/Apia')
+
+    assert booked['date'] == '2011-12-31'
+    assert booked['time'] == '00:00'
+    assert booked['adjusted'] is True
+
+
+def test_a_calendar_step_onto_a_skipped_day_is_adjusted():
+    """The same hole on the `_anchored` path that `shift` and `boundary` share."""
+    day_before = dtm.at('2011-12-29', '00:00', 'Pacific/Apia')['epoch']
+
+    stepped = dtm.shift(day_before, 1, 'day', 'Pacific/Apia')
+
+    assert stepped['date'] == '2011-12-31'
+    assert stepped['adjusted'] is True
+
+
+def test_a_fractional_epoch_describes_one_instant():
+    """
+    The returned `epoch` and the fields beside it must name the same moment.
+
+    Rendering from the float while returning `int(epoch)` answered 1.9 as
+    "epoch 1" next to a time built from 1.9 — a caller storing the number and a
+    caller reading the date would disagree about which second it was.
+    """
+    fractional = dtm.render(1.9, LA)
+
+    assert fractional['epoch'] == 1
+    assert fractional == dtm.render(1, LA)
+
+
+def test_a_negative_fractional_epoch_floors_rather_than_truncating():
+    """Truncation moves a pre-1970 instant FORWARD; every other instant floors."""
+    assert dtm.render(-0.5, LA)['epoch'] == -1
+    assert dtm.render(-0.5, LA) == dtm.render(-1, LA)
+
+
+def test_seconds_the_caller_sent_survive_into_requested():
+    """
+    `requested` is what a caller compares our answer against, so it echoes what
+    they sent. Dropping the seconds made "09:30:45" read back as "09:30" and
+    look like a change we had made.
+    """
+    assert dtm.at('2026-09-09', '09:30:45', LA)['requested'] == '2026-09-09 09:30:45'
+    # A caller who sent no seconds is answered with none.
+    assert dtm.at('2026-09-09', '09:30', LA)['requested'] == '2026-09-09 09:30'
+
+
+def test_the_shape_error_names_both_accepted_times():
+    with pytest.raises(ValueError, match='HH:MM:SS'):
+        dtm.at('2026-09-09', 'half twelve', LA)
+
+
+def test_a_large_calendar_offset_is_exact_and_does_not_loop():
+    """
+    `_clamped` normalises with `divmod`, not a step per year.
+
+    `shift` multiplies a year amount by 12 before the calendar sees it, so the
+    loop this replaces ran once per year of a hallucinated offset. The bound in
+    `IInstance.shift` refuses the absurd ones at the boundary; this keeps the
+    arithmetic itself constant-time, and exact in both directions.
+    """
+    assert dtm.shift(at(2026, 1, 31), 1200, 'month')['date'] == '2126-01-31'
+    # Backwards only as far as the epoch allows: Windows cannot render a
+    # pre-1970 instant at all, so 600 months is the honest edge to assert here.
+    assert dtm.shift(at(2026, 1, 31), -600, 'month')['date'] == '1976-01-31'
+    # The clamp still applies at the far end: February of a non-leap year.
+    assert dtm.shift(at(2026, 1, 31), 1201, 'month')['date'] == '2126-02-28'
