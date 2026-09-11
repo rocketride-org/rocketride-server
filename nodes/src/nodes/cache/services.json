@@ -1,0 +1,166 @@
+{
+	//
+	// Required:
+	//		The displayable name of this node
+	//
+	"title": "Semantic Cache",
+	//
+	// Required:
+	//		The protocol is the endpoint protocol
+	//
+	"protocol": "cache://",
+	//
+	// Required:
+	//		Class type of the node - what it does
+	//
+	"classType": ["memory"],
+	//
+	// Required:
+	//		Capabilities are flags that change the behavior of the underlying engine
+	//
+	"capabilities": ["experimental"],
+	//
+	// Optional:
+	//		Register is either filter, endpoint or ignored if not specified
+	//
+	"register": "filter",
+	//
+	// Optional:
+	//		The node is the actual physical node to instantiate
+	//
+	"node": "python",
+	//
+	// Optional:
+	//		The path is the executable/script code
+	//
+	"path": "nodes.cache",
+	//
+	// Required:
+	//		The prefix map when added/removed when convertting URLs <=> paths
+	//
+	"prefix": "cache",
+	//
+	// Optional:
+	//		Description of this driver
+	//
+	"description": [
+		"A semantic response cache that sits in front of an LLM. Each incoming question is ",
+		"embedded with a local sentence-transformer model and compared against previously seen ",
+		"questions; when a sufficiently similar question is found, its stored answer is returned ",
+		"immediately and the LLM call is skipped, cutting cost and latency. Misses flow through to ",
+		"the LLM and the resulting answer is stored for next time. The cache is in-memory and lives ",
+		"for the duration of the pipe. Wire it on both the questions and answers lanes, around an LLM: ",
+		"... -> cache -> llm -> cache -> response."
+	],
+	//
+	// Optional:
+	//	  The icon to display in the UI for this node
+	//
+	"icon": "cache.svg",
+	"documentation": "https://docs.rocketride.org",
+	//
+	//	Optional:
+	//		As a pipe component, define what this pipe component takes and produces
+	//
+	"lanes": {
+		"questions": ["answers", "questions"],
+		"answers": ["answers"]
+	},
+	"input": [
+		{
+			"lane": "questions",
+			"description": "Questions are embedded and looked up in the cache",
+			"output": [
+				{
+					"lane": "answers",
+					"description": "Cached answer returned on a hit (LLM is skipped)"
+				},
+				{
+					"lane": "questions",
+					"description": "Question forwarded to the LLM on a miss"
+				}
+			]
+		},
+		{
+			"lane": "answers",
+			"description": "Answers from the LLM are stored in the cache before forwarding",
+			"output": [
+				{
+					"lane": "answers",
+					"description": "Answer passed through after being cached"
+				}
+			]
+		}
+	],
+	//
+	//	Optional:
+	//		Profile section are configuration options used by the driver itself
+	//
+	"preconfig": {
+		"default": "balanced",
+		"profiles": {
+			"balanced": {
+				"title": "Balanced - good hit rate with low false matches",
+				"model": "sentence-transformers/all-MiniLM-L6-v2",
+				"threshold": 0.92,
+				"max_entries": 1000,
+				"ttl_seconds": 0
+			},
+			"strict": {
+				"title": "Strict   - only near-identical questions hit",
+				"model": "sentence-transformers/all-MiniLM-L6-v2",
+				"threshold": 0.97,
+				"max_entries": 1000,
+				"ttl_seconds": 0
+			},
+			"lenient": {
+				"title": "Lenient  - aggressive matching, higher hit rate",
+				"model": "sentence-transformers/all-MiniLM-L6-v2",
+				"threshold": 0.85,
+				"max_entries": 1000,
+				"ttl_seconds": 0
+			}
+		}
+	},
+	//
+	// Optional:
+	//		Local fields definitions
+	//
+	"fields": {
+		"model": {
+			"type": "string",
+			"title": "Embedding model",
+			"description": "SentenceTransformers model used to embed questions for similarity matching",
+			"default": "sentence-transformers/all-MiniLM-L6-v2"
+		},
+		"threshold": {
+			"type": "number",
+			"title": "Similarity threshold",
+			"description": "Minimum cosine similarity (0.0-1.0) for a cache hit. Higher = stricter matching",
+			"default": 0.92
+		},
+		"max_entries": {
+			"type": "number",
+			"title": "Max entries",
+			"description": "Maximum cached entries before least-recently-used eviction (0 = unbounded)",
+			"default": 1000
+		},
+		"ttl_seconds": {
+			"type": "number",
+			"title": "TTL (seconds)",
+			"description": "How long a cached answer stays valid before expiring (0 = never expire)",
+			"default": 0
+		}
+	},
+	//
+	// Required:
+	//		Defines the fields (shape) of the service
+	//
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Semantic Cache",
+			"properties": ["model", "threshold", "max_entries", "ttl_seconds"]
+		}
+	]
+}
