@@ -1,0 +1,3 @@
+# Optional: jsonschema (for run-level policy enforcement)
+# Optional: crewai (for lifecycle hook registration)
+# Core logic uses stdlib only (fnmatch, time, dataclasses, logging)

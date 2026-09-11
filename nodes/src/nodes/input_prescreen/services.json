@@ -1,0 +1,174 @@
+{
+	"title": "Input Pre-Screen",
+	"protocol": "input_prescreen://",
+	"classType": ["guard"],
+	"capabilities": ["experimental"],
+	"register": "filter",
+	"node": "python",
+	"path": "nodes.input_prescreen",
+	"prefix": "input_prescreen",
+	"description": [
+		"A static input pre-screen filter that mitigates LLM01 (Prompt Injection) from the OWASP LLM Top 10. ",
+		"Scans incoming questions and context against heuristic regex rules detecting instruction overrides, ",
+		"delimiter injection, encoding evasion, and jailbreak patterns. Wraps untrusted content in cryptographic ",
+		"nonce fences so downstream LLM nodes treat it strictly as data.</br>",
+		"</br>",
+		"<b>Policy modes</b>: block (reject injections), warn (log and continue), log (silent). ",
+		"All checks are pure stdlib — no external dependencies, no model calls, no network latency."
+	],
+	"icon": "util-guard.svg",
+	"lanes": {
+		"questions": ["questions"],
+		"documents": ["documents"]
+	},
+	"test": {
+		"profiles": ["strict"],
+		"cases": [
+			{
+				"questions": {
+					"questions": [
+						{
+							"text": "What is the weather today?"
+						}
+					]
+				},
+				"expect": {
+					"questions": {
+						"notEmpty": true
+					}
+				}
+			}
+		]
+	},
+	"preconfig": {
+		"default": "strict",
+		"profiles": {
+			"strict": {
+				"title": "Strict: Block injections, enable nonce fencing",
+				"block_ignore_instructions": true,
+				"enable_nonce_fencing": true,
+				"nonce_length": 16,
+				"policy_mode": "block",
+				"custom_rules": [],
+				"max_input_length": 0
+			},
+			"moderate": {
+				"title": "Moderate: Warn on injections, enable nonce fencing",
+				"block_ignore_instructions": true,
+				"enable_nonce_fencing": true,
+				"nonce_length": 16,
+				"policy_mode": "warn",
+				"custom_rules": [],
+				"max_input_length": 0
+			},
+			"custom": {
+				"title": "Custom: Configure individually",
+				"block_ignore_instructions": true,
+				"enable_nonce_fencing": true,
+				"nonce_length": 16,
+				"policy_mode": "warn",
+				"custom_rules": [],
+				"max_input_length": 0
+			}
+		}
+	},
+	"fields": {
+		"block_ignore_instructions": {
+			"type": "boolean",
+			"title": "Block instruction overrides",
+			"description": "Scan input for prompt injection heuristics (instruction overrides, jailbreaks, delimiter injection)",
+			"default": true
+		},
+		"enable_nonce_fencing": {
+			"type": "boolean",
+			"title": "Enable nonce fencing",
+			"description": "Wrap untrusted content in cryptographic nonce fences for downstream LLM isolation",
+			"default": true
+		},
+		"nonce_length": {
+			"type": "number",
+			"title": "Nonce length (bytes)",
+			"description": "Length of the cryptographic nonce in bytes (min 16, max 128)",
+			"default": 16,
+			"minimum": 16,
+			"maximum": 128
+		},
+		"policy_mode": {
+			"type": "string",
+			"title": "Policy mode",
+			"description": "How to handle detected injections: block (reject), warn (log + continue), log (silent)",
+			"default": "block",
+			"enum": [
+				["block", "Block: Reject on injection"],
+				["warn", "Warn: Log and continue"],
+				["log", "Log: Silent logging only"]
+			]
+		},
+		"custom_rules": {
+			"type": "array",
+			"title": "Custom rules",
+			"description": "Additional regex heuristic rules (each: id, pattern, category, severity, description)",
+			"items": {
+				"type": "object"
+			}
+		},
+		"max_input_length": {
+			"type": "number",
+			"title": "Max input length (chars)",
+			"description": "Maximum character count for input text (0 = no limit)",
+			"default": 0
+		},
+		"input_prescreen.custom": {
+			"object": "custom",
+			"properties": [
+				"block_ignore_instructions",
+				"enable_nonce_fencing",
+				"nonce_length",
+				"policy_mode",
+				"custom_rules",
+				"max_input_length"
+			]
+		},
+		"input_prescreen.strict": {
+			"object": "strict",
+			"properties": [
+				"policy_mode"
+			]
+		},
+		"input_prescreen.moderate": {
+			"object": "moderate",
+			"properties": [
+				"policy_mode",
+				"nonce_length"
+			]
+		},
+		"input_prescreen.profile": {
+			"title": "Profile",
+			"description": "Input pre-screen profile",
+			"type": "string",
+			"default": "strict",
+			"enum": ["*>preconfig.profiles.*.title"],
+			"conditional": [
+				{
+					"value": "strict",
+					"properties": ["input_prescreen.strict"]
+				},
+				{
+					"value": "moderate",
+					"properties": ["input_prescreen.moderate"]
+				},
+				{
+					"value": "custom",
+					"properties": ["input_prescreen.custom"]
+				}
+			]
+		}
+	},
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Input Pre-Screen",
+			"properties": ["input_prescreen.profile"]
+		}
+	]
+}

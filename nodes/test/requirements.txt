@@ -1,4 +1,6 @@
 # Test dependencies for nodes/test
+hypothesis
+jsonschema
 pytest
 pytest-asyncio
 pytest-timeout
