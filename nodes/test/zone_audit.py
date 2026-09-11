@@ -48,8 +48,17 @@ Keyed on the DESCRIPTION rather than the field name, deliberately. Pipedrive's
 `add_time` names no time in its key but carries one; `expected_close_date` looks
 like a date field and correctly needs no zone. Only the text says which is which.
 
+THE ONE WAY OUT, and it is the easy one: a description that carries a time but
+names no FORMAT is never inspected. "In the same form as startDate" is clear to a
+reader and invisible here. So a time-bearing field names its format in its own
+description, even when a sibling already spells it out — that is what keeps a
+later edit to it inside the guard. Widening the trigger instead (on "timestamp",
+or on the field name) would flag epoch fields and calendar dates, where no zone
+can be wrong, and teach people to append "UTC" to get past it.
+
 Pure stdlib and no engine imports, so it is safe to import from test modules that
-install their own stub modules before importing the node under test.
+install their own stub modules before importing the node under test — as
+``from test.zone_audit import audit_time_fields``.
 """
 
 from __future__ import annotations
@@ -80,15 +89,25 @@ def audit_time_fields(instance_class: Any, allowed: Iterable[str] = ()) -> list[
     Args:
         instance_class: The node's ``IInstance`` class. Every attribute carrying
             a ``__tool_meta__`` is treated as a published tool.
-        allowed: Parameter names exempt by deliberate decision — a duration is
-            a length rather than an instant, and converting one corrupts it.
-            Kept as an explicit list so an exemption is a choice somebody made
-            and can be read back, rather than a hole in the matcher.
+        allowed: ``tool.parameter`` pairs exempt by deliberate decision — a
+            duration is a length rather than an instant, and converting one
+            corrupts it. Kept as an explicit list so an exemption is a choice
+            somebody made and can be read back, rather than a hole in the
+            matcher. Scoped to one tool's parameter, never a bare name: a bare
+            name would silently exempt every same-named parameter any tool in
+            the node ever grows, including one that does carry a time of day.
 
     Returns:
         ``tool.parameter`` for each offender, sorted. Empty is the passing case.
+
+    Raises:
+        ValueError: An exemption names no published ``tool.parameter``. A
+            renamed tool or a removed field would otherwise leave an exemption
+            behind that exempts nothing — or, once a new field takes the name,
+            the wrong thing.
     """
     exempt = set(allowed)
+    seen = set()
     offenders = []
 
     for name in dir(instance_class):
@@ -103,13 +122,19 @@ def audit_time_fields(instance_class: Any, allowed: Iterable[str] = ()) -> list[
             continue
 
         for field, spec in properties.items():
-            if field in exempt or not isinstance(spec, dict):
+            key = f'{name}.{field}'
+            seen.add(key)
+            if key in exempt or not isinstance(spec, dict):
                 continue
             description = str(spec.get('description') or '')
             if not any(token in description for token in CARRIES_A_TIME):
                 continue
             if any(token in description for token in NAMES_A_ZONE):
                 continue
-            offenders.append(f'{name}.{field}')
+            offenders.append(key)
+
+    stale = exempt - seen
+    if stale:
+        raise ValueError(f'exemptions name no published tool.parameter: {sorted(stale)}')
 
     return sorted(offenders)

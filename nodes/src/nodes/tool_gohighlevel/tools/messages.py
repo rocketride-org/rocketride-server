@@ -342,7 +342,13 @@ class MessagesMixin(GoHighLevelToolsBase):
                 'for UTC, or a numeric offset. Without one the timestamp is read in whichever timezone '
                 'GoHighLevel assumes, so the range silently starts somewhere else.'
             ),
-            endDate=STR('Latest message to include, in the same form as startDate.'),
+            # The format is repeated, not referenced: "the same form as startDate"
+            # names no format, so zone_audit would skip the field instead of
+            # checking it, and a later edit here could drop the zone unnoticed.
+            endDate=STR(
+                'Latest message to include, in the same form as startDate: an ISO 8601 timestamp '
+                'carrying its zone, either a trailing Z for UTC or a numeric offset.'
+            ),
             sortBy=ENUM('Field to sort on. Defaults to createdAt.', ('createdAt', 'updatedAt')),
             sortOrder=ENUM('Sort direction. Defaults to desc.', ('asc', 'desc')),
         ),
