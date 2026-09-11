@@ -222,22 +222,27 @@ const TRANSIENT_LOCK_CODES = new Set(['EBUSY', 'EPERM', 'EACCES']);
 /**
  * Run a filesystem operation, retrying while the path is transiently locked.
  *
- * The delay grows per attempt (100, 200, 300, 400 ms), so a genuinely held path
- * costs one second before it reports. Anything that is not a lock propagates at
- * once — a missing file must not be retried into a slow failure.
+ * The delay grows per attempt (delayMs, x2, x3, ...), so on the defaults a
+ * genuinely held path costs one second before it reports. Anything that is not a
+ * lock propagates at once — a missing file must not be retried into a slow failure.
+ *
+ * Callers whose operation has its own notion of "transient" pass their own set:
+ * a directory swap also treats ENOTEMPTY as retryable, which is meaningless here.
  *
  * @template T
- * @param {() => Promise<T>} op - Operation to attempt
- * @param {number} [attempts] - Total attempts, including the first
- * @param {number} [delayMs] - Base delay, multiplied by the attempt number
+ * @param {() => Promise<T> | T} op - Operation to attempt
+ * @param {object} [options] - Retry tuning
+ * @param {number} [options.attempts] - Total attempts, including the first
+ * @param {number} [options.delayMs] - Base delay, multiplied by the attempt number
+ * @param {Set<string>} [options.codes] - Error codes treated as transient
  * @returns {Promise<T>} Whatever the operation returns
  */
-async function retryTransientLock(op, attempts = 5, delayMs = 100) {
+async function retryTransientLock(op, { attempts = 5, delayMs = 100, codes = TRANSIENT_LOCK_CODES } = {}) {
     for (let attempt = 1; ; attempt++) {
         try {
             return await op();
         } catch (err) {
-            if (attempt >= attempts || !TRANSIENT_LOCK_CODES.has(err.code)) throw err;
+            if (attempt >= attempts || !codes.has(err.code)) throw err;
             await new Promise((resolve) => setTimeout(resolve, delayMs * attempt));
         }
     }
@@ -786,6 +791,7 @@ module.exports = {
     // Copying
     copyFile,
     copyFileEnsure,
+    retryTransientLock,
     copyDir,
     copyDirEnsure,
 
