@@ -33,8 +33,8 @@ different host or port to reach a remote or self-hosted engine.
 Before authenticating, a client may open a public connection and send
 `rrext_public_probe`. The response body carries `version`, `capabilities`,
 `platform`, the public `apps` list, `stripePublishableKey` (when billing is
-configured), `gravityAdvertiserId` (the Gravity ad-pixel advertiser UUID, when
-`RR_GRAVITY_ADVERTISER_ID` is set; any non-UUID value is withheld), and `endpoints` — the server's public addresses:
+configured), `attributionProvider` (the ad-attribution provider NAME, e.g.
+`gravity`, when `RR_GRAVITY_API_KEY` is set — never the key itself), and `endpoints` — the server's public addresses:
 
 ```json
 { "endpoints": { "api": "origin", "ui": "origin" } }
