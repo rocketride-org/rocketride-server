@@ -54,3 +54,15 @@ def test_nemotron_provider_uses_nvidia_openai_compatible_endpoint(monkeypatch):
         {'id': 'nvidia/nemotron-3-super-120b-a12b'},
         {'id': 'nvidia/nemotron-3.5-lightning-30b-a3b'},
     ]
+
+
+def test_litellm_bare_id_gets_the_nvidia_prefix():
+    """LiteLLM stores Nemotron models bare; services.json stores them vendor-prefixed."""
+    from providers.nemotron import NemotronProvider
+
+    provider = NemotronProvider({})
+
+    assert provider.litellm_to_native_model_id('nemotron-3-super-120b-a12b') == 'nvidia/nemotron-3-super-120b-a12b'
+    assert (
+        provider.litellm_to_native_model_id('nvidia/nemotron-3-super-120b-a12b') == 'nvidia/nemotron-3-super-120b-a12b'
+    )
