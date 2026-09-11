@@ -211,13 +211,17 @@ async function mkdirIfNotExists(dirPath) {
 // Copy Operations
 // =============================================================================
 
-// Windows reports a path another process holds open as EBUSY/EPERM/EACCES, and
-// hands the error to whoever touches it second — the holder need not be writing:
-// an editor's language server indexing dist/, a file watcher or an AV pass is
+// Windows reports a path another process holds open as EBUSY or EPERM, and hands
+// the error to whoever touches it second — the holder need not be writing: an
+// editor's language server indexing dist/, a file watcher or an AV pass is
 // enough. A sync that walks thousands of files meets that window eventually, so
 // the operations that cross it retry briefly rather than failing a whole build
 // on one busy millisecond. A path that stays locked still raises its real error.
-const TRANSIENT_LOCK_CODES = new Set(['EBUSY', 'EPERM', 'EACCES']);
+//
+// EACCES is deliberately not here: an exclusively held file reports EBUSY, while
+// on Unix EACCES is a permission denial that must surface at once instead of after
+// a second of retries. clean.js and vendor-shell.js classify a lock the same way.
+const TRANSIENT_LOCK_CODES = new Set(['EBUSY', 'EPERM']);
 
 /**
  * Run a filesystem operation, retrying while the path is transiently locked.

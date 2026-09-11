@@ -192,6 +192,18 @@ test('retryTransientLock: a non-lock error propagates on the first attempt', asy
     assert.equal(calls(), 1);
 });
 
+test('retryTransientLock: EACCES is a permission denial, not a lock', async () => {
+    const { op, calls } = failingOp(['EACCES']);
+
+    await assert.rejects(
+        () => retryTransientLock(op, { delayMs: 1 }),
+        (err) => err.code === 'EACCES'
+    );
+    // A held file reports EBUSY; on Unix EACCES means the caller may never open it,
+    // so retrying only delays a failure that is already final.
+    assert.equal(calls(), 1);
+});
+
 test('retryTransientLock: a path held past the last attempt raises its real error', async () => {
     const { op, calls } = failingOp(['EBUSY', 'EBUSY', 'EBUSY', 'EBUSY']);
 
