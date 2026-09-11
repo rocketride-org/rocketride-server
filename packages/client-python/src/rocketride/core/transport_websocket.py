@@ -55,8 +55,11 @@ Usage (Internal):
 
 import json
 import asyncio
+import inspect
+import urllib.parse
 from typing import Dict, Any, Union, Optional
 from .constants import CONST_DEFAULT_SERVICE, CONST_SOCKET_TIMEOUT, CONST_WS_PING_INTERVAL, CONST_WS_PING_TIMEOUT
+from .._connection_discovery import is_loopback_host
 
 # Optional dependency handling for websockets library
 try:
@@ -64,6 +67,31 @@ try:
     import websockets.exceptions
 except ImportError:
     websockets = None
+
+
+def _detect_proxy_kwarg_support() -> bool:
+    """True if the installed `websockets.connect()` accepts `proxy=`.
+
+    `proxy=None` (explicitly disable proxy auto-detection) was added well
+    after this package's `websockets>=11.0.0` floor -- check for it at import
+    time rather than assume every installed version has it, so an
+    older-but-still-supported install degrades to prior behavior (proxy env
+    vars apply) instead of a `TypeError` on every connect.
+
+    `inspect.signature()` can itself raise (`ValueError`/`TypeError`) for a
+    callable it can't introspect; this module is imported by
+    `rocketride.core`, so an uncaught exception here would break importing
+    the whole SDK over what should only ever gate one optional kwarg.
+    """
+    if not websockets:
+        return False
+    try:
+        return 'proxy' in inspect.signature(websockets.connect).parameters
+    except (ValueError, TypeError):
+        return False
+
+
+_WEBSOCKETS_SUPPORTS_PROXY_KWARG = _detect_proxy_kwarg_support()
 
 # Optional dependency handling for FastAPI
 try:
@@ -374,16 +402,27 @@ class TransportWebSocket(TransportBase):
             # Convert ms to seconds for websockets library, or use default
             effective_open_timeout = timeout / 1000.0 if timeout is not None else CONST_SOCKET_TIMEOUT
 
+            connect_kwargs: Dict[str, Any] = {
+                'ping_interval': CONST_WS_PING_INTERVAL,
+                'ping_timeout': CONST_WS_PING_TIMEOUT,
+                'close_timeout': CONST_SOCKET_TIMEOUT,
+                'open_timeout': effective_open_timeout,
+                'max_size': 250 * 1024 * 1024,  # 250MB max message size
+                'compression': None,
+            }
+            # `websockets.connect()` honors HTTP_PROXY/HTTPS_PROXY/WS_PROXY by
+            # default (`proxy=True`) and only skips a proxy that NO_PROXY
+            # already excludes -- an env-configured proxy without a matching
+            # NO_PROXY entry would otherwise still see (and could terminate
+            # and impersonate) a loopback connection, and whatever credential
+            # rides the first DAP message over it. A URI naming a loopback
+            # host is never meant to leave this machine, discovered or not,
+            # so disable proxying outright rather than rely on NO_PROXY.
+            if _WEBSOCKETS_SUPPORTS_PROXY_KWARG and is_loopback_host(urllib.parse.urlparse(self._uri).hostname or ''):
+                connect_kwargs['proxy'] = None
+
             # Connect without auth on upgrade; first DAP message must be auth
-            self._websocket = await websockets.connect(
-                self._uri,
-                ping_interval=CONST_WS_PING_INTERVAL,
-                ping_timeout=CONST_WS_PING_TIMEOUT,
-                close_timeout=CONST_SOCKET_TIMEOUT,
-                open_timeout=effective_open_timeout,
-                max_size=250 * 1024 * 1024,  # 250MB max message size
-                compression=None,
-            )
+            self._websocket = await websockets.connect(self._uri, **connect_kwargs)
 
             self._connected = True
             self._draining = False

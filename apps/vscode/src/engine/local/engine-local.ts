@@ -28,6 +28,7 @@ import { EngineBackend, type StatusEmitter, type EngineInfo, type EngineBackendS
 import type { ConnectionMode } from '../../config';
 import { getUserConfigDir } from '../config/config-migration';
 import { EngineInstaller } from '../shared/engine-installer';
+import { connectionDiscoveryPath, parseConnectionDiscovery, serializeConnectionDiscovery, withDiscoveryLock } from './connectionDiscovery';
 import type { ConnectionGroupConfig } from '../../config';
 import { getLogger } from '../../shared/util/output';
 import { icons } from '../../shared/util/icons';
@@ -163,7 +164,7 @@ export class EngineLocal extends EngineBackend {
 		this.emitStatus({
 			phase: 'ready',
 			message: 'Local engine ready',
-			uri: `http://localhost:${this.actualPort}`,
+			uri: `http://127.0.0.1:${this.actualPort}`,
 			version: installed?.tag,
 		});
 	}
@@ -193,7 +194,7 @@ export class EngineLocal extends EngineBackend {
 			this.emitStatus({
 				phase: 'ready',
 				message: 'Local engine ready',
-				uri: `http://localhost:${this.actualPort}`,
+				uri: `http://127.0.0.1:${this.actualPort}`,
 				version: installed?.tag,
 			});
 		} else {
@@ -320,6 +321,7 @@ export class EngineLocal extends EngineBackend {
 
 			child.on('exit', (code, signal) => {
 				this.removePidFile(myPidFile);
+				if (child.pid) this.removeConnectionDiscovery(child.pid);
 
 				if (!processReady && !processErrored) {
 					// Exited during startup — treat as error
@@ -350,6 +352,7 @@ export class EngineLocal extends EngineBackend {
 						this.actualPort = parseInt(match[1], 10);
 						processReady = true;
 							this.logger.output(`${icons.success} Engine ready (port ${this.actualPort})`);
+						if (child.pid) this.writeConnectionDiscovery(child.pid);
 						resolve();
 					}
 				}
@@ -424,6 +427,78 @@ export class EngineLocal extends EngineBackend {
 		if (expectedPath && this.pidFilePath !== expectedPath) return;
 		try { fs.unlinkSync(this.pidFilePath); } catch { /* already gone */ }
 		this.pidFilePath = undefined;
+	}
+
+	/**
+	 * Writes the connection discovery file so any process on the machine can
+	 * find this engine's resolved URI (see connectionDiscovery.ts). Best-effort
+	 * and non-fatal: a write failure here must never break an otherwise-
+	 * successful engine start.
+	 *
+	 * No credential lives in this file (see #1851 review: an earlier version
+	 * carried a hardcoded `apiKey`, which was removed -- a credential-shaped
+	 * field that never actually varies just invites a reader to trust it as
+	 * one). `mode: 0o600` is defence-in-depth so only this OS user can read
+	 * it, since it still influences which host a reader's *real* credential
+	 * gets sent to (see `isLoopbackDiscoveryUri` in connectionDiscovery.ts for
+	 * why a reader must independently constrain the host, not trust this file
+	 * blindly). `mode` is a POSIX permission bit and a no-op on Windows.
+	 *
+	 * Runs under `withDiscoveryLock` (see its doc comment) so this can't
+	 * interleave with another window's `removeConnectionDiscovery`.
+	 *
+	 * `127.0.0.1`, not `localhost` -- same reasoning as the `--host` flag
+	 * above: the engine only binds that literal address, and a resolver that
+	 * prefers `::1` for `localhost` would have a reader try, and fail
+	 * against, a socket nothing is listening on.
+	 */
+	private writeConnectionDiscovery(pid: number): void {
+		if (this.actualPort === undefined) return;
+		const filePath = connectionDiscoveryPath(this.installer.dir);
+		withDiscoveryLock(filePath, () => {
+			try {
+				fs.writeFileSync(
+					filePath,
+					serializeConnectionDiscovery({
+						uri: `http://127.0.0.1:${this.actualPort}`,
+						pid,
+						updatedAt: new Date().toISOString(),
+					}),
+					{ mode: 0o600 },
+				);
+				// `mode` above only applies when writeFileSync actually creates the
+				// file; an install upgrading from a version that wrote it 0644 would
+				// otherwise keep truncating-and-rewriting that same looser mode
+				// forever. chmod unconditionally, best-effort.
+				fs.chmodSync(filePath, 0o600);
+			} catch {
+				/* best-effort */
+			}
+		});
+	}
+
+	/** Removes the connection discovery file, but only if it's still this
+	 * process's own entry -- an already-running second local engine (a
+	 * different VS Code window) may have overwritten it with its own, and
+	 * this process stopping must not clobber that live entry.
+	 *
+	 * The read-check-unlink here and the write in `writeConnectionDiscovery`
+	 * both run under `withDiscoveryLock`, so a second window's write can no
+	 * longer land in the gap between this function's read and its unlink --
+	 * without the lock, that gap is exactly wide enough for this process to
+	 * read the file before the second window overwrites it, then delete the
+	 * second window's now-current entry out from under it.
+	 */
+	private removeConnectionDiscovery(pid: number): void {
+		const filePath = connectionDiscoveryPath(this.installer.dir);
+		withDiscoveryLock(filePath, () => {
+			try {
+				const info = parseConnectionDiscovery(fs.readFileSync(filePath, 'utf8'));
+				if (info && info.pid === pid) fs.unlinkSync(filePath);
+			} catch {
+				/* already gone, or never written (e.g. exited before becoming ready) */
+			}
+		});
 	}
 
 	// =========================================================================

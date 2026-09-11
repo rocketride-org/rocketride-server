@@ -106,7 +106,7 @@ RocketRideClient(
 
 | Argument              | Type                      | Required | Description                                                                                                                                          |
 | --------------------- | ------------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `uri`                 | `str`                     | Yes\*    | Server URI. \*Can be empty if `ROCKETRIDE_URI` is set in env/`.env`.                                                                                 |
+| `uri`                 | `str`                     | Yes\*    | Server URI. \*Can be empty -- see resolution order below.                                                                                            |
 | `auth`                | `str`                     | Yes\*    | API key. \*Can be empty if `ROCKETRIDE_APIKEY` is set.                                                                                               |
 | `env`                 | `dict`                    | No       | Override env; if omitted, `.env` is loaded. Use when passing config in code instead of env files.                                                    |
 | `module`              | `str`                     | No       | Client name for logging.                                                                                                                             |
@@ -120,7 +120,9 @@ RocketRideClient(
 | `on_protocol_message` | callable `(message: str)` | No       | Optional; for logging raw DAP messages. Helpful when debugging protocol issues.                                                                      |
 | `on_debug_message`    | callable `(message: str)` | No       | Optional; for debug output.                                                                                                                          |
 
-Raises `ValueError` if both `uri` and `ROCKETRIDE_URI` are empty or if `auth` is missing and not in env.
+**`uri` resolution order**, when the `uri` argument is empty: (1) `ROCKETRIDE_URI` from the environment/`.env`, if the key is *present* -- even set to `''`, which reaches step (4) below and raises, matching the behavior of an explicitly-empty `uri` argument; (2) otherwise, a locally-running engine's connection discovery file (written by the VS Code extension's local engine backend when `ROCKETRIDE_URI` is genuinely unset) -- only trusted when it names a loopback host (`localhost`/`127.0.0.1`/`::1`) and its recorded process is still alive; (3) otherwise, the default cloud service. `auth` resolves independently: the `auth` argument, then `ROCKETRIDE_APIKEY` -- discovery never supplies a credential.
+
+Raises `ValueError` if the resolved `uri` (from any of the above) is empty or malformed, or if `auth` is missing and not in env.
 
 **Example - client with persist and callbacks:**
 
