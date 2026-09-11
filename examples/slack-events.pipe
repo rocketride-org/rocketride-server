@@ -1,0 +1,77 @@
+{
+  "components": [
+    {
+      "id": "slack_1",
+      "provider": "slack",
+      "config": {
+        "parameters": {
+          "dedupTtlSeconds": 600,
+          "queueCapacity": 1000,
+          "signingSecret": ""
+        },
+        "type": "slack",
+        "hideForm": true,
+        "mode": "Source"
+      },
+      "ui": {
+        "position": {
+          "x": 20,
+          "y": 200
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      }
+    },
+    {
+      "id": "response_text_1",
+      "provider": "response_text",
+      "config": {
+        "laneName": "slack_messages"
+      },
+      "ui": {
+        "position": {
+          "x": 280,
+          "y": 120
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      },
+      "input": [
+        {
+          "lane": "text",
+          "from": "slack_1"
+        }
+      ]
+    },
+    {
+      "id": "response_json_1",
+      "provider": "response_json",
+      "config": {
+        "laneName": "slack_reactions"
+      },
+      "ui": {
+        "position": {
+          "x": 280,
+          "y": 280
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      },
+      "input": [
+        {
+          "lane": "json",
+          "from": "slack_1"
+        }
+      ]
+    }
+  ],
+  "project_id": "32e2808e-9557-4080-8b23-a0e9818f8cf4",
+  "version": 1,
+  "isLocked": false,
+  "snapToGrid": true,
+  "snapGridSize": [
+    10,
+    10
+  ],
+  "docRevision": 8
+}
