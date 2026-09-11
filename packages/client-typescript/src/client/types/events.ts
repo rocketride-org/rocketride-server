@@ -238,7 +238,7 @@ export type TaskEvent = TaskEventRunning | TaskEventBegin | TaskEventEnd | TaskE
  * - ALL: Comprehensive monitoring
  */
 export interface TaskEventFlow {
-	/** Pipe index within the pipeline. */
+	/** Reusable pipe slot, not an event or trace identifier. Use the begin event's body.logSeq as trace identity within the task's log stream. */
 	id: number;
 
 	/** Operation type. */

@@ -428,6 +428,11 @@ class TestSeededReads:
         assert len(windows) == 3, 'seed must contain three requests'
         slot7 = [w for w in windows if w[1][0]['body'].get('id') == 7]
         assert len(slot7) == 2, 'slot 7 must be recycled'
+        assert slot7[0][0] != slot7[1][0], 'recycled slots must have distinct trace identities'
+        # This slot value is not a begin seq, so it cannot resolve a trace.
+        assert 7 not in {begin_seq for begin_seq, _ in windows}
+        with pytest.raises(KeyError):
+            await session.get_trace(7)
         assert any(e.get('event') == 'apaevt_sse' for _, w in windows for e in w), 'seed must narrate'
         for begin_seq, expected in windows:
             detail = await session.get_trace(begin_seq)

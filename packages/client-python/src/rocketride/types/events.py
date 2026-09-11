@@ -275,7 +275,9 @@ class TASK_EVENT_FLOW(TypedDict, total=False):
     a specific pipe within the pipeline.
     """
 
-    id: int  # REQUIRED - Pipe index within the pipeline
+    # Reusable pipe slot, not an event or trace identifier.
+    # Use the begin event's body.logSeq as trace identity within the task's log stream.
+    id: int  # REQUIRED
     op: str  # REQUIRED - Operation type: 'begin', 'enter', 'leave', 'end'
     pipes: List[str]  # REQUIRED - Component names in the current pipe's execution path
     trace: dict  # REQUIRED - Trace data: lane, input/output data, result, error

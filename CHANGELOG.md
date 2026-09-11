@@ -67,6 +67,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - media stream descriptors + end-to-end source provenance (#1525)
 
 ### Fixed
+- **docs**: clarify that flow event `body.id` is a reusable pipe slot and trace identity comes from the begin event's `body.logSeq` (#2103)
 - **agent**: optional require_tool_call runtime fabrication guard (#1490)
 - **ai**: install test deps via depends() so engine constraints apply (#1466) (#1471)
 - **ai**: migrate GPU import guard to find_spec/exec_module (Python 3.12+) (#1460)
