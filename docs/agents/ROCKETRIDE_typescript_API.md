@@ -258,7 +258,7 @@ With `persist: true`, a dropped connection reconnects automatically and replays 
 
 ##### `RocketRideClient.getServerInfo(uri: string, timeout?: number): Promise<ServerInfoResult>`
 
-Probe a server for its capabilities **without authenticating**. Opens a temporary public connection and returns `{ version, capabilities, platform?, apps?, stripePublishableKey?, gravityAdvertiserId?, endpoints }`. The `endpoints` block is always resolved to absolute URLs (`api` = where clients open the WebSocket, `ui` = the environment's public web address) — never branch on presence.
+Probe a server for its capabilities **without authenticating**. Opens a temporary public connection and returns `{ version, capabilities, platform?, apps?, stripePublishableKey?, attributionProvider?, endpoints }`. The `endpoints` block is always resolved to absolute URLs (`api` = where clients open the WebSocket, `ui` = the environment's public web address) — never branch on presence.
 
 ```typescript
 const info = await RocketRideClient.getServerInfo('localhost:5565');
@@ -880,7 +880,7 @@ if (latest.buildStatus !== 'ok') {
 
 Typed wrapper for profile, organization, API keys, members, teams, and environment secrets.
 
-**Profile:** `getProfile(): Promise<ConnectResult>` (includes `memberships` and `defaultOrgId`, which the auth handshake omits) · `updateProfile(fields)` · `setDevTeam(teamId)` (the team dev-mode runs bill to and whose environment layer applies) · `setDefaultOrg(orgId)` (switches the active org; the server resets the default team and refreshes all your connections) · `setAttribution(provider, data)` (records the ad-attribution blob, e.g. Gravity's `getCAPIData()`, that server-side conversion events carry; send only after marketing consent, and `null` on withdrawal to delete it) · `deleteAccount()`
+**Profile:** `getProfile(): Promise<ConnectResult>` (includes `memberships` and `defaultOrgId`, which the auth handshake omits) · `updateProfile(fields)` · `setDevTeam(teamId)` (the team dev-mode runs bill to and whose environment layer applies) · `setDefaultOrg(orgId)` (switches the active org; the server resets the default team and refreshes all your connections) · `setAttribution(provider, data)` (records the ad-click reference that server-side conversion events carry; send only after marketing consent, and `null` on withdrawal to delete it) · `deleteAccount()`
 
 **Organization:** `getOrg(orgId?): Promise<OrgDetail>` (id, name, plan, memberCount, teamCount) · `updateOrgName(orgId, name)`
 

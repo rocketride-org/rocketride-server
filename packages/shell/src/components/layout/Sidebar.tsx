@@ -35,7 +35,7 @@ import {
 	BxCog, BxLock, BxPalette, BxUser, BxExport, BxGridAlt, BxDockLeft, BxHome, BxShow,
 } from '../BoxIcon';
 import { ConnectionManager } from '../../connection/connection';
-import { PRIVACY_CHOICES_EVENT, isGravityPixelConfigured } from '../../util/gravityPixel';
+import { PRIVACY_CHOICES_EVENT, isAttributionConfigured } from '../../util/adAttribution';
 import { getHomeAppId } from '../../constants';
 import type { IconComponent } from '../BoxIcon';
 import { useWorkspace } from '../workspace/WorkspaceContext';
@@ -410,8 +410,8 @@ const Sidebar: React.FC<SidebarProps> = ({ themeConfig: _themeConfig, account, h
 			},
 		];
 
-		// Reopens the ad-pixel consent banner — only where a pixel runs.
-		if (isGravityPixelConfigured()) {
+		// Reopens the ad-attribution consent banner — only where it runs.
+		if (isAttributionConfigured()) {
 			items.push({ id: 'privacy-choices', label: 'Privacy choices', icon: BxShow, onClick: () => window.dispatchEvent(new Event(PRIVACY_CHOICES_EVENT)) });
 		}
 

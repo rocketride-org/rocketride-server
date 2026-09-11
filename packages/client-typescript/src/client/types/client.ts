@@ -562,13 +562,15 @@ export interface ServerInfoResult {
 	stripePublishableKey?: string;
 
 	/**
-	 * Gravity ad-pixel advertiser ID (a UUID) configured on this server.
+	 * Ad-attribution provider this server reports conversions to (`'gravity'`).
 	 *
-	 * Per environment, like the Stripe key: the browser shell initialises the
-	 * Gravity pixel only when the server it was served from advertises one,
-	 * so staging never fires the production pixel. Absent when unset.
+	 * The NAME only — never a credential. Present when the server holds the
+	 * provider's API key, which is what lets the browser shell capture
+	 * ad-click parameters and ask for marketing consent; absent everywhere
+	 * else (staging, OSS), where the shell does nothing. No third-party ad
+	 * script is ever loaded: conversions are reported server-side.
 	 */
-	gravityAdvertiserId?: string;
+	attributionProvider?: string;
 
 	/**
 	 * The server's public addresses, RESOLVED to absolute URLs.

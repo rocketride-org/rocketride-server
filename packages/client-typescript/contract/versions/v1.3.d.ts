@@ -24,7 +24,7 @@
 // FROZEN rocketride SDK contract — floor v1.3 — never edit by hand
 // =============================================================================
 // Floor key:     1.3 (MAJOR.MINOR of packages/client-typescript/package.json)
-// Source commit: bb766ae30de2189936b47704a59339dd6c7f9a53
+// Source commit: 534c477f60ce6b0a97c7afbca7473dcfa98d22c3
 // Generator:     dts-bundle-generator@9.5.1
 // Produced by:   ./builder client-typescript:freeze
 //
@@ -1927,13 +1927,15 @@ export interface ServerInfoResult {
      */
     stripePublishableKey?: string;
     /**
-     * Gravity ad-pixel advertiser ID (a UUID) configured on this server.
+     * Ad-attribution provider this server reports conversions to (`'gravity'`).
      *
-     * Per environment, like the Stripe key: the browser shell initialises the
-     * Gravity pixel only when the server it was served from advertises one,
-     * so staging never fires the production pixel. Absent when unset.
+     * The NAME only — never a credential. Present when the server holds the
+     * provider's API key, which is what lets the browser shell capture
+     * ad-click parameters and ask for marketing consent; absent everywhere
+     * else (staging, OSS), where the shell does nothing. No third-party ad
+     * script is ever loaded: conversions are reported server-side.
      */
-    gravityAdvertiserId?: string;
+    attributionProvider?: string;
     /**
      * The server's public addresses, RESOLVED to absolute URLs.
      *
@@ -3407,14 +3409,17 @@ declare class AccountApi {
      * Records (or clears) the user's ad-attribution context for a provider.
      *
      * Sent by the browser shell only after the user has granted marketing
-     * consent: `data` is the provider's opaque attribution blob (for Gravity,
-     * the result of `window.gravityPixel.getCAPIData()`), which the server
-     * attaches to server-side conversion events. Pass `null` when consent is
-     * withdrawn — the server deletes the stored context and stops reporting
-     * conversions for this user.
+     * consent: `data` is the ad-click reference the shell read from the
+     * landing URL (for Gravity, `grclid` and its siblings), which the server
+     * attaches to server-side conversion events. It may be empty — the stored
+     * record is itself the consent that permits reporting. Pass `null` when
+     * consent is withdrawn: the server deletes the stored context and stops
+     * reporting conversions for this user.
+     *
+     * No ad pixel is involved, and nothing is read from the device.
      *
      * @param provider - Attribution provider id (currently `'gravity'`).
-     * @param data - The provider's attribution blob, or `null` to clear it.
+     * @param data - The ad-click reference, or `null` to clear it.
      */
     setAttribution(provider: string, data: Record<string, unknown> | null): Promise<void>;
     /**

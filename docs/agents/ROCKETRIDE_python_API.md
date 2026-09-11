@@ -299,7 +299,7 @@ With `persist=True`, a dropped connection reconnects automatically using LINEAR 
 
 #### `staticmethod async RocketRideClient.get_server_info(uri: str, timeout: float = None) -> ServerInfoResult`
 
-Probe a server for its capabilities without authenticating. Returns a dict with `version`, `capabilities` (e.g. `['oss']` or `['saas']`), `platform`, `apps` (public apps), optionally `stripePublishableKey` and `gravityAdvertiserId`, and `endpoints` (`{'api': ..., 'ui': ...}` always resolved to absolute URLs).
+Probe a server for its capabilities without authenticating. Returns a dict with `version`, `capabilities` (e.g. `['oss']` or `['saas']`), `platform`, `apps` (public apps), optionally `stripePublishableKey` and `attributionProvider`, and `endpoints` (`{'api': ..., 'ui': ...}` always resolved to absolute URLs).
 
 ```python
 info = await RocketRideClient.get_server_info('localhost:5565')

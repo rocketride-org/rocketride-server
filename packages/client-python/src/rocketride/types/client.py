@@ -382,9 +382,9 @@ class ServerInfoResult(TypedDict, total=False):
             on this server, so clients initialise Stripe Elements with the key
             matching the server's Stripe account (test vs live) instead of a
             build-time value. Absent on servers without billing (OSS).
-        gravityAdvertiserId (str): Gravity ad-pixel advertiser ID (a UUID)
-            configured on this server. Per environment, like the Stripe key,
-            so staging never fires the production pixel. Absent when unset.
+        attributionProvider (str): Ad-attribution provider this server reports
+            conversions to (``'gravity'``) — the NAME only, never a credential.
+            Present when the provider's API key is configured; absent otherwise.
         endpoints (ServerEndpoints): The server's public addresses, RESOLVED
             to absolute URLs by :meth:`RocketRideClient.get_server_info` —
             the server's ``'origin'`` sentinel ("the address you probed me
@@ -398,7 +398,7 @@ class ServerInfoResult(TypedDict, total=False):
     platform: str
     apps: list[AppManifestEntry]
     stripePublishableKey: str
-    gravityAdvertiserId: str
+    attributionProvider: str
     endpoints: 'ServerEndpoints'
 
 

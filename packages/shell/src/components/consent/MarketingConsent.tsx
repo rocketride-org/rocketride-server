@@ -4,22 +4,23 @@
 // =============================================================================
 
 /**
- * MarketingConsent — the consent banner for the Gravity ad pixel, plus the
- * attribution relay that feeds server-side conversion events.
+ * MarketingConsent — the marketing-consent banner and the attribution relay
+ * behind server-side conversion reporting.
  *
- * Renders nothing unless this environment runs the pixel (the server probe
- * advertised a Gravity advertiser ID) — staging and OSS never show it.
+ * Renders nothing unless this environment runs ad attribution (the probe named
+ * a provider) — staging and OSS never show it, nor do automated browsers or
+ * visitors sending Global Privacy Control (see util/adAttribution.ts).
  *
  * - Banner: shown while the decision is 'unset' (default deny), or when a
  *   "Privacy choices" control reopens it (the Sidebar menu, or the
  *   `rr:privacy-choices` window event remotes dispatch). Allow and Reject are
  *   styled identically — rejecting must be as easy as accepting.
- * - Relay: once consent is granted AND the user is signed in, the pixel's
- *   getCAPIData() blob is sent to the server (account.setAttribution) so
- *   purchase/signup conversions can be attributed server-side.
- * - Reject: clears the server copy (signed in), and reloads if the pixel
- *   already ran on this page — a loaded third-party script cannot be
- *   unloaded any other way.
+ * - Relay: once consent is granted AND the user is signed in, the captured
+ *   ad-click reference goes to the server (account.setAttribution), which
+ *   reports conversions itself. An empty reference still relays: it records
+ *   the consent that lets the server match a conversion by hashed email.
+ * - Reject: clears the server copy, which stops all conversion reporting for
+ *   this user. Nothing needs unloading — no third-party script ever ran.
  */
 
 import React, { useCallback, useEffect, useRef, useState, useSyncExternalStore, type CSSProperties } from 'react';
@@ -27,7 +28,7 @@ import { useAuthUser } from '../../hooks/useAuthUser';
 import { useClient } from '../../hooks/useClient';
 import { Button } from '../button/Button';
 import { getMarketingConsent, setMarketingConsent, subscribeMarketingConsent } from '../../util/marketingConsent';
-import { PRIVACY_CHOICES_EVENT, getGravityCAPIData, hasGravityPixelStarted, isGravityPixelConfigured, whenGravityPixelReady } from '../../util/gravityPixel';
+import { PRIVACY_CHOICES_EVENT, getAttributionProvider, getClickParams, isAttributionConfigured } from '../../util/adAttribution';
 
 // =============================================================================
 // STYLES
@@ -77,7 +78,7 @@ export const MarketingConsent: React.FC = () => {
 	const consent = useSyncExternalStore(subscribeMarketingConsent, getMarketingConsent, getMarketingConsent);
 	const identity = useAuthUser();
 	const client = useClient();
-	const configured = isGravityPixelConfigured();
+	const configured = isAttributionConfigured();
 	const [reopened, setReopened] = useState(false);
 	// The user whose attribution this page already relayed — once per page
 	// per user, re-sent after a sign-in as someone else.
@@ -91,27 +92,24 @@ export const MarketingConsent: React.FC = () => {
 		return () => window.removeEventListener(PRIVACY_CHOICES_EVENT, open);
 	}, [configured]);
 
-	// Relay the pixel's attribution blob once consent and sign-in both hold.
+	// Relay the ad-click reference once consent and sign-in both hold. An
+	// empty reference is still relayed: the stored row is what permits
+	// server-side reporting at all, and a conversion with no click can still
+	// match the ad that was seen (hashed email, server side).
 	const userId = identity?.userId ?? null;
 	useEffect(() => {
-		if (!configured || consent !== 'granted' || !client || !userId) return;
+		const provider = getAttributionProvider();
+		if (!configured || !provider || consent !== 'granted' || !client || !userId) return;
 		if (relayedFor.current === userId) return;
-		let cancelled = false;
 		void (async () => {
-			if (!(await whenGravityPixelReady()) || cancelled) return;
-			const data = getGravityCAPIData();
-			if (!data) return;
 			try {
-				await client.account.setAttribution('gravity', data);
+				await client.account.setAttribution(provider, getClickParams());
 				relayedFor.current = userId;
 			} catch (err) {
 				// Attribution is best-effort; never surface it to the user.
 				console.warn('[MarketingConsent] attribution relay failed:', err);
 			}
 		})();
-		return () => {
-			cancelled = true;
-		};
 	}, [configured, consent, client, userId]);
 
 	const allow = useCallback(() => {
@@ -120,18 +118,19 @@ export const MarketingConsent: React.FC = () => {
 	}, []);
 
 	const reject = useCallback(async () => {
-		const pixelRan = hasGravityPixelStarted();
 		setReopened(false);
 		setMarketingConsent('denied');
 		relayedFor.current = null;
-		if (client && userId) {
+		const provider = getAttributionProvider();
+		if (client && userId && provider) {
 			try {
-				await client.account.setAttribution('gravity', null);
+				// Deletes the stored context — the server stops reporting
+				// conversions for this user from here on.
+				await client.account.setAttribution(provider, null);
 			} catch (err) {
 				console.warn('[MarketingConsent] clearing attribution failed:', err);
 			}
 		}
-		if (pixelRan) window.location.reload();
 	}, [client, userId]);
 
 	if (!configured || (consent !== 'unset' && !reopened)) return null;
@@ -139,7 +138,11 @@ export const MarketingConsent: React.FC = () => {
 	return (
 		<div role="region" aria-label="Privacy choices" style={styles.banner}>
 			<div style={styles.title}>Advertising measurement</div>
-			<div style={styles.body}>We&apos;d like to use Gravity&apos;s advertising pixel to measure which ads bring people to RocketRide. It sets identifiers in your browser and stays off unless you allow it. You can change this any time under Privacy choices.</div>
+			<div style={styles.body}>
+				Allow RocketRide to tell our advertising partner which ad brought you here, and to share a hashed (irreversible) copy of your email address, so we can
+				measure which ads work. No cookies or tracking scripts are used, and nothing is shared unless you allow it. You can change this any time under Privacy
+				choices.
+			</div>
 			<div style={styles.actions}>
 				<Button variant="secondary" small onClick={() => void reject()}>
 					Reject
