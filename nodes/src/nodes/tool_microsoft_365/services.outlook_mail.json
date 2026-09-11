@@ -8,7 +8,7 @@
 	"path": "nodes.tool_microsoft_365.outlook_mail",
 	"prefix": "outlook_mail",
 	"icon": "outlook_mail.svg",
-	"documentation": "https://docs.rocketride.org",
+	"documentation": "https://docs.rocketride.org/nodes/tool_microsoft_365/outlook_mail",
 	"description": ["Exposes Microsoft Outlook Mail operations as agent tools.", "List, search, and read messages, send mail and replies/forwards, manage drafts, move/organize messages and folders, manage attachments, and mark read state, on the acting user's mailbox via the Microsoft Graph mail API.", "Sending requires the send or modify tier; drafts, moves, and other mutations require the modify tier; permanent delete is additionally gated behind an explicit config flag. Authenticates via an Entra app (client credentials) or user OAuth."],
 	"tile": ["Outlook Mail (${parameters.outlook_mail.access})"],
 	"lanes": {},

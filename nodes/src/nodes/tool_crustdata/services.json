@@ -47,6 +47,7 @@
 	//		The icon to display in the UI for this node.
 	//
 	"icon": "crustdata.svg",
+	"documentation": "https://docs.rocketride.org/nodes/tool_crustdata",
 	//
 	// Optional:
 	//		Description of this node shown in the pipeline builder.

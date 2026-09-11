@@ -8,7 +8,7 @@
 	"path": "nodes.db_hotdata",
 	"prefix": "hotdata",
 	"icon": "hotdata.svg",
-	"documentation": "https://docs.rocketride.org",
+	"documentation": "https://docs.rocketride.org/nodes/db_hotdata",
 	"description": [
 		"Creates one ephemeral Hotdata database for each pipeline run, or attaches to an existing one so agents in separate runs can share it.",
 		"Lets agents inspect its live schema and execute read-only SQL; a database this node created is destroyed at teardown, an attached one is left in place."

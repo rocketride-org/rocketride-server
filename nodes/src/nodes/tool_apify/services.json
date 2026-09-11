@@ -8,7 +8,7 @@
 	"path": "nodes.tool_apify",
 	"prefix": "apify",
 	"icon": "apify.svg",
-	"documentation": "https://docs.rocketride.org",
+	"documentation": "https://docs.rocketride.org/nodes/tool_apify",
 	"description": ["Exposes Apify Actors as agent tools.", "Provides run_actor (run an Actor and return its dataset) and get_dataset_items."],
 	"tile": [],
 	"lanes": {},

@@ -44,7 +44,7 @@
 	//		The icon to display in the UI for this node
 	//
 	"icon": "mem0.svg",
-	"documentation": "https://docs.mem0.ai",
+	"documentation": "https://docs.rocketride.org/nodes/tool_mem0",
 	//
 	// Optional:
 	//		Description of this node shown in the pipeline builder

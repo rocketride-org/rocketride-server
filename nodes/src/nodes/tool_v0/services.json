@@ -57,6 +57,7 @@
 	//		The icon to display in the UI for this node
 	//
 	"icon": "vercel.svg",
+	"documentation": "https://docs.rocketride.org/nodes/tool_v0",
 	//
 	// Optional:
 	//		Description of this driver

@@ -53,6 +53,7 @@
 	//	  The icon is the icon to display in the UI for this node
 	//
 	"icon": "telegram.svg",
+	"documentation": "https://docs.rocketride.org/nodes/telegram",
 	//
 	// Optional:
 	//	 The tile is the displayable name of this node

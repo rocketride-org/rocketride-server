@@ -25,6 +25,7 @@
 	//		Description to of this driver
 	//
 	"description": ["An internal infrastructure component that runs on the remote host, receiving and executing pipeline workloads forwarded by a connected client node."],
+	"documentation": "https://docs.rocketride.org/nodes/remote",
 	//
 	// Optional:
 	//		Register is either filter, endpoint or ignored if not specified. If the
