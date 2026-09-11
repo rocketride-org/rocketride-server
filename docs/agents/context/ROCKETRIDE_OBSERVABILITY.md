@@ -87,7 +87,7 @@ Variables the server reads:
 
 - `ROCKETRIDE_APIKEY`: server-side API key (also expected client-side).
 - `ROCKETRIDE_URI`: default URI used by the SDK if not passed in code.
-- `ROCKETRIDE_CORS_ORIGINS`: comma-separated CORS allow-list.
+- `RR_CORS_ORIGINS`: comma-separated CORS allow-list.
 
 ---
 
@@ -166,7 +166,9 @@ Valid values:
 | `TASK`      | 32  | Lifecycle: `running`, `begin`, `end`, `restart`                                   |
 | `SSE`       | 64  | Custom node-to-UI messages emitted by nodes via `monitorSSE()`                    |
 | `DASHBOARD` | 128 | Server-level events (connections, monitor changes)                                |
-| `ALL`       | 255 | Everything above                                                                  |
+| `BILLING`   | 256 | Billing ledger events (credits/debits), org-scoped                                |
+| `DEPLOY`    | 512 | Deployment-change invalidations (pointer, state, schedule, run mutations), org-scoped |
+| `ALL`       | 1023 | Everything above                                                                 |
 
 You may also send the bitmask as an integer (`"types": 36` = SUMMARY|TASK).
 
@@ -289,7 +291,7 @@ subscription time.
   // Rates (instantaneous)
   rateCount: number, rateSize: number,
 
-  // History (last 50 each)
+  // History (last 1000 each)
   errors:   string[],
   warnings: string[],
   notes:    (string | object)[],
@@ -593,7 +595,7 @@ your backfill and crash-recovery source.
   (per-connection monotonic) plus your own ingest timestamp.
 - `apaevt_flow` `trace` is a free-form dict; schema varies by node and trace
   level. Store as JSONB, do not flatten.
-- `errors` and `warnings` arrays in `TASK_STATUS` are capped at 50 entries
+- `errors` and `warnings` arrays in `TASK_STATUS` are capped at 1000 entries
   each: you must persist them as they appear or you'll lose older ones on
   long runs.
 - Monitor subscriptions are per-connection, not durable server-side. Reconnect

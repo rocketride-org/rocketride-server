@@ -26,17 +26,17 @@ The node uses the required LLM connection to translate natural-language question
 
 ## As a tool
 
-The server-name prefix defaults to `falkordb`. It registers its FalkorDB-specific tools plus the inherited graph-tool surface.
+The registered tool names are the bare method names below (an agent catalog namespaces them by the pipeline component id, not by the services.json `prefix`). It registers its FalkorDB-specific tools plus the inherited graph-tool surface.
 
 | Function | Description |
 |---|---|
-| `falkordb.get_data` | Requires a non-empty `question`; optional `limit` is clamped to the graph row cap. Returns sanitized rows, generated query, applied limit, and truncation state; generation/execution failure returns `error`, `valid: false`, and no rows. |
-| `falkordb.get_schema` | Takes no meaningful arguments and returns reflected `labels`, node properties, and relationships. |
-| `falkordb.get_query` | Requires a non-empty `question`, with optional `limit`; returns validated read-only Cypher and `valid: true`, or an `error`/off-topic `answer` with `valid: false`. |
-| `falkordb.execute` | Requires raw `query` and runs it without LLM translation; it raises an error unless `allow_execute` is enabled, and fails when the result exceeds the execute row cap. |
-| `falkordb.dialect` | Takes no meaningful arguments and returns `{dialect: "falkordb"}`. |
-| `falkordb.query` | Requires non-empty `cypher`; accepts optional object `params` and optional `graph`. Returns columns, serialized rows, count, and truncation state; Redis failures return `error` with empty rows. |
-| `falkordb.list_graphs` | Takes no arguments and returns graph names, or `error` with an empty graph list on a Redis failure. |
+| `get_data` | Requires a non-empty `question`; optional `limit` is clamped to the graph row cap. Returns sanitized rows, generated query, applied limit, and truncation state; generation/execution failure returns `error`, `valid: false`, and no rows. |
+| `get_schema` | Takes no meaningful arguments and returns reflected `labels`, node properties, and relationships. |
+| `get_query` | Requires a non-empty `question`, with optional `limit`; returns validated read-only Cypher and `valid: true`, or an `error`/off-topic `answer` with `valid: false`. |
+| `execute` | Requires raw `query` and runs it without LLM translation; it raises an error unless `allow_execute` is enabled, and fails when the result exceeds the execute row cap. |
+| `dialect` | Takes no meaningful arguments and returns `{dialect: "falkordb"}`. |
+| `query` | Requires non-empty `cypher`; accepts optional object `params` and optional `graph`. Returns columns, serialized rows, count, and truncation state; Redis failures return `error` with empty rows. |
+| `list_graphs` | Takes no arguments and returns graph names, or `error` with an empty graph list on a Redis failure. |
 
 ## Profiles
 

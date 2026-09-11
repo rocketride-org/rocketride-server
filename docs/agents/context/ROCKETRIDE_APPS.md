@@ -990,7 +990,7 @@ try {
 **2. The task itself.** `getTaskStatus(token)` is the ground truth for a
 pipeline that died *between* requests: `completed` flips true once the run
 is over, `exitCode !== 0` (with `exitMessage`) means it did not end well,
-`errors` carries the most recent error lines (capped at 50), and
+`errors` carries the most recent error lines (capped at 1000), and
 `serviceUp: false` on a pipeline that should be waiting for requests means
 it cannot serve.
 

@@ -26,13 +26,13 @@ The node reflects collections, named graphs, and ArangoSearch views, then uses i
 
 ## As a tool
 
-The server-name prefix defaults to `arango`; the registered functions are `arango.get_data`, `arango.get_schema`, and `arango.get_aql`.
+The registered tool names are the bare method names `get_data`, `get_schema`, and `get_aql`; an agent catalog namespaces them by the pipeline component id, not by the services.json `prefix`.
 
 | Function | Description |
 |---|---|
-| `arango.get_data` | Requires a non-empty `question`; optional `limit` is clamped. Returns rows, executed AQL, and the applied row limit, or an `error` with empty rows. |
-| `arango.get_schema` | Accepts an optional `collection` filter and returns the database, collections, graphs, and views. An unknown collection returns `error`. |
-| `arango.get_aql` | Requires a non-empty `question`; returns a validated read-only AQL query and `valid: true`, or `error`/`answer` with `valid: false`. |
+| `get_data` | Requires a non-empty `question`; optional `limit` is clamped. Returns rows, executed AQL, and the applied row limit, or an `error` with empty rows. |
+| `get_schema` | Accepts an optional `collection` filter and returns the database, collections, graphs, and views. An unknown collection returns `error`. |
+| `get_aql` | Requires a non-empty `question`; returns a validated read-only AQL query and `valid: true`, or `error`/`answer` with `valid: false`. |
 
 ## Configuration
 

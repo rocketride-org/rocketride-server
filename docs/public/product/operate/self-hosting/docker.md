@@ -79,9 +79,9 @@ endpoint, so `docker ps` shows real health:
 curl http://localhost:5565/version
 ```
 
-(Use `/version`, not `/ping` — `/version` is the engine's only public health
-endpoint. `/ping` sits behind the auth gate and returns 401 to a bare curl
-even when no API key is configured.)
+(Use `/version`, not `/ping`: the engine entrypoint starts its web server
+without the standard endpoints, so `/ping` is never registered and returns
+404. `/version` is always registered and public.)
 
 Upgrading is pull-and-replace; state lives in the volume:
 

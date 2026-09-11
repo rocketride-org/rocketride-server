@@ -152,12 +152,13 @@ For remote or containerized deployments the server can run over HTTP/SSE instead
 
 ```bash
 pip install 'rocketride-mcp[sse]'
-rocketride-mcp-sse --host 0.0.0.0 --port 8080
+MCP_API_KEY=your-secret-token rocketride-mcp-sse --host 0.0.0.0 --port 8080
 ```
 
-Defaults are `localhost:8080`. Set `MCP_API_KEY` to require `Authorization: Bearer` on
-every route; without it the server logs a warning and runs unauthenticated. `/health` is
-always open for monitoring.
+Defaults are `localhost:8080`. `MCP_API_KEY` requires `Authorization: Bearer` on every
+route. It is optional only for a loopback bind (the server logs a warning and runs
+unauthenticated); any non-loopback host such as `0.0.0.0` refuses to start without it.
+`/health` is always open for monitoring.
 
 ---
 

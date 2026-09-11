@@ -61,6 +61,10 @@ per-source execution settings for deploy runs (trace level, debug output).
 | `errored` | A scheduled dispatch failed — on permissions, or on an unusable artifact (missing or sha256-tampered) — and the scheduler stopped retrying. |
 | `removed` | Soft delete (`deploy.remove`): hidden from listings, history and artifacts survive; re-deploying revives it. |
 
+## Permissions
+
+Mutations require `task.control` on the TARGET team. Reads follow the visibility model: an org admin sees every team and every personal space; a user sees their own personal space and the teams they are a member of.
+
 ## App publish ladder
 
 Typed wrappers over `rrext_deploy_app` — the publish ladder for RocketRide apps.
@@ -80,9 +84,13 @@ App ids are partitioned by the caller org's **developer id**: every app is
 ids inside its own namespace (the platform holds `rocketride`). Deploying or
 publishing an app requires the org to have claimed a developer id.
 
+`deploy.add` and `deploy.add_app` live on `client.deploy`; every other verb
+below is a method on the client itself (`client.list_deployments(...)`,
+`client.publish_app(...)`), not on `client.deploy`.
+
 | Method | Description |
 | --- | --- |
-| `deploy.add` | The ONE rail door (on the `client.deploy` namespace): deploy any kind of object as the next immutable registry version. `kind='pipe'` (default) takes a `pipeline` dict; `kind='app'` takes ONE `data` zip of the built bundle — retained and unpacked at receipt, born deployment-state `private`. The app id must be inside your developer namespace. |
+| `deploy.add` | The ONE rail door (on the `client.deploy` namespace): deploy any kind of object as the next immutable registry version. `kind='pipe'` (default) takes a `pipeline` dict; `kind='app'` takes ONE `data` zip of the app's SOURCE (the server performs the build; client-produced binaries are never trusted), retained and unpacked at receipt, born deployment-state `private`. The app id must be inside your developer namespace. |
 | `deploy.add_app` | Pack an app folder's source and deploy it as the next registry version — the one call behind the App Builder's Deploy button and CI scripts. Packs by the App Builder rules (workspace-rooted zip, `appManifest.include`, hierarchical gitignore + the hard node_modules/dist/.git baseline, symlink containment, 50MB zipped / 512MB uncompressed caps); `on_progress` narrates one line per step. Deploying activates nothing — bind an audience with `publish_app` afterwards. |
 | `deploy.verify_app` | The no-side-effect precheck for `add_app` — purely local, no server call: manifest shape and id grammar, declared icon/README assets, `appManifest.include` entries, and a pack dry run against the size caps. Server-side concerns (the build, store review) are out of scope. |
 | `list_deployments` | The version rail, newest first — the developer org sees its FULL rail (published or not), other callers only their visible versions. Each entry carries its deployment `state`, its `buildStatus` ('ok' = servable), and the `rungs` naming the audiences bound to it. |

@@ -28,7 +28,7 @@ the row, route the fix.
 ## Reading the trace
 - Per-node traces are on by default (`pipelineTraceLevel` server default `"summary"`; pass `"full"`
   for more detail). `"none"` still yields chapters/console logs, but the traces come back empty.
-- Status fields that tell the story: `state`, `exitCode`, `exitMessage`, `errors[]` (capped at 50),
+- Status fields that tell the story: `state`, `exitCode`, `exitMessage`, `errors[]` (capped at 1000),
   `failedCount`, `completedCount`. The `apaevt_flow` events show `op` (begin/enter/leave/end) per
   pipe with `trace.lane` / `trace.error`.
 - Correlate by `projectId` + `source` (begin/end events carry no token).

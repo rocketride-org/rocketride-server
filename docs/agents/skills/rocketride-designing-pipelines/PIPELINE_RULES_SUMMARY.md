@@ -8,7 +8,7 @@ engine (`validate()`); this is the design-time checklist.
 
 ## What a pipeline is
 A directed **acyclic** graph of components joined by **typed lanes**, saved as a `.pipe` JSON file.
-Exactly one **source**; data flows to a terminal. A connection is valid only when an **output lane
+One resolvable **source** (rule 1 below); data flows to a terminal. A connection is valid only when an **output lane
 name** of the source node matches an **input lane name** of the target node.
 
 ## Lane types
@@ -39,12 +39,17 @@ If two nodes' lanes don't line up, insert the converter that bridges them. `imag
 straight to `questions` — go `image → accessibility_describe → text → question → questions`.
 
 ## Structural rules
-1. **One source.** Exactly one `source`-classType node (chat / webhook / dropper / filesys /
-   telegram). Source nodes have no `input` array.
+1. **A resolvable source.** A run starts at one `source`-classType node (chat / webhook / dropper /
+   filesys / telegram). The engine resolves it in order: the `source` option passed at launch,
+   else the top-level `source` field, else the single component with `config.mode: "Source"`.
+   Several Source-mode components are fine when `source` names the one that starts the run; with
+   no `source` named they are ambiguous and the run is refused, and with nothing to imply the run
+   is refused too. Source nodes have no `input` array.
 2. **Acyclic.** No loops anywhere in the data flow.
 3. **No orphans.** Every non-source node must be reachable from the source.
-4. **Inputs required.** Every non-source node needs an `input: [{lane, from}]` (one entry per
-   incoming edge; multiple entries = a merge / fan-in).
+4. **Inputs.** A node fed through the data plane declares `input: [{lane, from}]` (one entry per
+   incoming edge; multiple entries = a merge / fan-in). Nodes with no lanes (e.g. `memory_internal`,
+   `"lanes": {}`) take no `input`; they are attached through `control` instead (see below).
 5. **Lane compatibility.** Output lane type of one node must match the input lane type of the next.
 6. **Embedding before store.** Vector stores cannot accept data without embedding vectors; use the
    **same** embedding model for ingestion and query.

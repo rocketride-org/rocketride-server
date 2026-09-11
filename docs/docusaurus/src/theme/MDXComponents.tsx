@@ -1,11 +1,14 @@
 import React, { type ReactNode } from 'react';
 import MDXComponents from '@theme-original/MDXComponents';
+import Link from '@docusaurus/Link';
 import clsx from 'clsx';
 
 /**
  * Linked guide card (Dify-style: accent icon tile, title, blurb). Styling
  * lives on the `.rr-side-card` family in custom.css, shared with the raw-HTML
- * cards on older pages, so both author styles render identically.
+ * cards on older pages, so both author styles render identically. Rendered
+ * through Docusaurus `Link` so internal hrefs are seen by the broken-link
+ * checker (a raw `<a>` is never collected).
  *
  * @param props.href - Destination route or external URL.
  * @param props.title - Card heading.
@@ -15,13 +18,13 @@ import clsx from 'clsx';
  */
 export function Card({ href, title, icon, children }: { href: string; title: string; icon?: ReactNode; children?: ReactNode }): ReactNode {
 	return (
-		<a className="rr-side-card" href={href}>
+		<Link className="rr-side-card" to={href}>
 			<span className="rr-side-card__head">
 				{icon && <span className="rr-card-icon">{icon}</span>}
 				<span className="rr-side-card__title">{title}</span>
 			</span>
 			<span className="rr-side-card__body">{children}</span>
-		</a>
+		</Link>
 	);
 }
 

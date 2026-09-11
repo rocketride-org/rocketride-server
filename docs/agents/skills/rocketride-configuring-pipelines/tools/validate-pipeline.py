@@ -79,7 +79,7 @@ def staleness_note():
     if not os.path.isfile(cand):
         return (
             'node index has no freshness stamp — run '
-            '../rocketride-building-pipelines/tools/generate-index.py against a live '
+            '../../rocketride-building-pipelines/tools/generate-index.py against a live '
             'engine to stamp + refresh it. Proceeding with the bundled snapshot.'
         )
     try:
@@ -91,13 +91,13 @@ def staleness_note():
         if age > STALE_DAYS:
             return (
                 f'node index snapshot is {age} days old ({meta.get("node_count")} nodes) — '
-                f'run ../rocketride-building-pipelines/tools/generate-index.py against a '
+                f'run ../../rocketride-building-pipelines/tools/generate-index.py against a '
                 f'live engine before trusting node selection. Proceeding with the bundled snapshot.'
             )
     except Exception:
         return (
             'node index freshness stamp unreadable — consider re-running '
-            '../rocketride-building-pipelines/tools/generate-index.py. '
+            '../../rocketride-building-pipelines/tools/generate-index.py. '
             'Proceeding with the bundled snapshot.'
         )
     return None
@@ -153,7 +153,7 @@ def load_catalog(start):
                     {
                         'code': 'CACHE_CORRUPT',
                         'retriable': False,
-                        'fallback': 'lane checks will be skipped; regenerate the index with ../rocketride-building-pipelines/tools/generate-index.py',
+                        'fallback': 'lane checks will be skipped; regenerate the index with ../../rocketride-building-pipelines/tools/generate-index.py',
                     }
                 )
                 + '\n'
@@ -174,6 +174,18 @@ def in_lanes(entry):
 
 def is_source(entry):
     return 'source' in (entry.get('classType') or [])
+
+
+# config key names (case-insensitive, underscores ignored) whose literal values are secrets
+SECRET_KEYS = {'apikey', 'password', 'secret', 'secretkey', 'clientsecret', 'token', 'usertoken'}
+
+
+def is_secret_key(flat_key):
+    """True when the leaf of a flattened config key names a credential (e.g. `custom.apiKey`,
+    `parameters.client_secret`).
+    """
+    leaf = flat_key.rsplit('.', 1)[-1].lower().replace('_', '')
+    return leaf in SECRET_KEYS or leaf.endswith('apikey')
 
 
 def static_validate(path):
@@ -252,13 +264,27 @@ def static_validate(path):
                     errors.append(f'lane {lane!r}: {cid!r} does not accept it (edge {frm}->{cid})')
         # 9. secrets via env substitution (any ${VAR}); flag hardcoded literals only
         for k, v in flatten(c.get('config') or {}):
-            if 'apikey' in k.lower() and isinstance(v, str) and v and not v.startswith('${'):
+            if is_secret_key(k) and isinstance(v, str) and v and not v.startswith('${'):
                 errors.append(f'{cid!r} config {k}: hardcoded secret — use ${{ENV_VAR}} substitution')
-    # one source
-    if len(sources) == 0:
-        errors.append('no source component found (need exactly one)')
-    elif len(sources) > 1:
-        errors.append(f'more than one source component: {sources}')
+    # source resolution, mirroring the task server: the `source` passed at launch wins, then
+    # the top-level `source` field, else exactly one component with config.mode == "Source"
+    # is implied (packages/ai/src/ai/modules/task/pipeline.py resolve_implied_source). Several
+    # Source-mode components are fine when the source is named; unnamed they are ambiguous.
+    if not sources:
+        errors.append('no source component found')
+    mode_sources = [c.get('id') for c in comps if (c.get('config') or {}).get('mode') == 'Source']
+    if 'source' not in obj and sources:
+        if not mode_sources:
+            warnings.append(
+                'no top-level `source` and no component with config.mode "Source": the engine '
+                'cannot imply a source, so the run must name one at launch'
+            )
+        elif len(mode_sources) > 1:
+            warnings.append(
+                f'multiple components declare config.mode "Source" ({mode_sources}) and no '
+                'top-level `source` names one: the engine refuses to imply a source, so set '
+                '`source` or name it at launch'
+            )
     # 8. orphans + cycles
     for c in comps:
         cid = c.get('id')

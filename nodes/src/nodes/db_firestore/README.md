@@ -18,7 +18,7 @@ Configuration names a default collection, so an agent can be pointed at one coll
 
 ## As a tool
 
-The tool-server name prefix is `firestore`, producing these registered functions.
+The registered tool names are the bare method names below; an agent catalog namespaces them by the pipeline component id, not by the services.json `prefix`.
 
 | Function | Description |
 | --- | --- |

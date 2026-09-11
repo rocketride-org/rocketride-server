@@ -37,8 +37,13 @@ reference is generated from the schema source and published at
 ```json
 {
   "components": [
-    { "id": "in", "provider": "webhook", "config": {} },
-    { "id": "out", "provider": "response", "input": [{ "lane": "questions", "from": "in" }] }
+    { "id": "in", "provider": "webhook", "config": { "mode": "Source" } },
+    {
+      "id": "out",
+      "provider": "response",
+      "config": { "lanes": [{ "laneId": "questions", "laneName": "questions" }] },
+      "input": [{ "lane": "questions", "from": "in" }]
+    }
   ]
 }
 ```

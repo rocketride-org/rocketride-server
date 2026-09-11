@@ -158,11 +158,52 @@ def resolve(arg, links):
     return best[0] if len(best) == 1 else [('AMBIGUOUS', None)] + [(t, p) for s, t, p in scored[:6]]
 
 
+# Site path prefix -> source dir in a monorepo checkout (mirrors the mounts in
+# docs/docusaurus/scripts/lib/gather.js). '' is the product spine (docs/public/product).
+REPO_MOUNTS = (
+    ('/nodes', 'nodes/src/nodes'),
+    ('/clients/typescript', 'docs/public/typescript'),
+    ('/clients/python', 'docs/public/python'),
+    ('/clients/vscode', 'docs/docusaurus/apps/vscode'),
+    ('/connect/mcp/stdio', 'docs/public/mcp/stdio'),
+    ('/connect/mcp/http', 'docs/public/mcp/http'),
+    ('', 'docs/public/product'),
+)
+
+
+def repo_source(path):
+    """The in-repo source file of a site page when this script runs inside the monorepo
+    (docs/agents/skills/<skill>/tools/), else None. Node pages resolve to the node README
+    (`/nodes/<name>[/<variant>].md` -> `nodes/src/nodes/<name>[/<variant>]/README.md`).
+    """
+    root = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), *(['..'] * 5)))
+    stem = path[:-3] if path.endswith('.md') else path
+    for prefix, d in REPO_MOUNTS:
+        if not (stem == prefix or stem.startswith(prefix + '/')):
+            continue
+        base = os.path.join(root, d, stem[len(prefix) :].strip('/')).rstrip('/')
+        if prefix == '/nodes':
+            cands = [os.path.join(base, 'README.md')]
+        else:
+            cands = [base + '.md', base + '.mdx'] + [
+                os.path.join(base, f) for f in ('index.md', 'index.mdx', 'README.md')
+            ]
+        for c in cands:
+            if os.path.isfile(c):
+                return c
+        return None
+    return None
+
+
 def offline_fallback(path, docs_dir):
     """Map a doc path to the bundled file the agent should read instead, in order:
-    (1) the refreshed verbatim page under pages/, (2) a node's bundled schema,
-    (3) a legacy condensed snapshot.
+    (0) the page's own source file in a monorepo checkout, (1) the refreshed verbatim
+    page under pages/, (2) a node's bundled schema, (3) a legacy condensed snapshot.
     """
+    # 0. monorepo checkout: the source file the site page is built from
+    src = repo_source(path)
+    if src:
+        return src
     if not docs_dir:
         return None
     # 1. refreshed bundled page (fresh snapshot, structure preserved)
@@ -175,11 +216,12 @@ def offline_fallback(path, docs_dir):
         schema = os.path.normpath(os.path.join(docs_dir, '..', 'schema', node + '.json'))
         if os.path.isfile(schema):
             return schema
-    # 3. legacy condensed snapshots
+    # 3. legacy condensed snapshots (keys are site path shapes from ROCKETRIDE_DOC_MAP.md)
     table = {
-        '/develop/python': 'ROCKETRIDE_python_API.md',
-        '/develop/typescript': 'ROCKETRIDE_typescript_API.md',
-        '/develop': 'ROCKETRIDE_python_API.md',
+        '/clients/python': 'ROCKETRIDE_python_API.md',
+        '/clients/typescript': 'ROCKETRIDE_typescript_API.md',
+        '/clients': 'ROCKETRIDE_README.md',
+        '/nodes/': 'ROCKETRIDE_COMPONENT_REFERENCE.md',
         'best-practices': 'ROCKETRIDE_PIPELINES.md',
         'error-handling': 'ROCKETRIDE_PIPELINES.md',
         'observability': 'ROCKETRIDE_OBSERVABILITY.md',

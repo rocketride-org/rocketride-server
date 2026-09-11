@@ -54,7 +54,7 @@ Save this as `extract.pipe`:
       "provider": "llm_openai",
       "config": {
         "profile": "openai-4o-mini",
-        "apikey": "${OPENAI_API_KEY}"
+        "apikey": "${ROCKETRIDE_OPENAI_API_KEY}"
       },
       "control": [
         { "classType": "llm", "from": "extract_1" }

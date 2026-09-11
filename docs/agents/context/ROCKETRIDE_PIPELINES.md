@@ -398,7 +398,7 @@ LLM/tool/memory node declares which component invokes it — `from` points at th
 | `agent_rocketride` | required (exactly 1) | **required (exactly 1)** | optional | — |
 | `agent_crewai`, `agent_langchain`, `agent_llamaindex` | required (min 1) | not supported | optional | — |
 | `agent_deepagent` | required (min 1) | not supported | optional | `deepagent` (optional) |
-| `agent_crewai_manager` | required (min 1) | not supported | **none** | `crewai` (min 1 required) |
+| `agent_crewai_manager` | required (min 1) | not supported | optional (min 0) | `crewai` (min 1 required) |
 | `agent_deepagent_subagent`, `agent_crewai_subagent` | required (min 1) | not supported | optional | — (they ARE sub-agents) |
 
 Only `agent_rocketride` takes a `memory` connection (exactly one `memory_internal`). Do not

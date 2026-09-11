@@ -7,8 +7,8 @@ The app API — `AppManifest`, `AppDescriptor`, shell props, screen zones, hooks
 `connectionManager`, the documents system, the virtual file system,
 `DocExplorer`/`DocTabs`, cross-app component loading, and theming — is the same
 in both setups and is documented once, publicly, at
-[Shell Apps](https://docs.rocketride.org/develop/apps)
-(source: `docs/public/product/develop/apps.md`). Only the project setup differs,
+[Shell API](https://docs.rocketride.org/guides/apps)
+(source: `docs/public/product/guides/apps/index.md`). Only the project setup differs,
 and that difference is what this page covers.
 
 ## Standalone vs monorepo

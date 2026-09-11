@@ -26,13 +26,14 @@ per-node schemas**. If a node you expect is missing from it, check `list_integra
 2. **Explore archetypes exhaustively.** Group the index by `classType` and walk every archetype
    that could plausibly contribute. Don't stop at the first match. The archetypes:
    `source` (chat/webhook/dropper/filesys/telegram) · `data`/parse (parse/llamaparse/reducto/
-   landingai_ade) · `text` (extract_data/ner/anonymize_text/dictionary/prompt/summarization) ·
+   landing_ai_parse/landing_ai_extract) · `text` (extract_data/ner/anonymize_text/dictionary/prompt/summarization) ·
    `preprocessor` · `image` · `audio` · `video` · `embedding` · `llm` (14 providers) · `store`
    (vector DBs) · `database` (db_*) · `agent` · `tool` (tool_*) · `memory` · `rerank` · `search` ·
    `guard` · `infrastructure`/`target`/`response_*` (terminals).
    For each relevant archetype, list the candidate nodes you see in the index.
 3. **Select**, citing each: `Found in index: <name> · classType=[…] · lanes={…}`. A pipeline needs
-   exactly one **source** and a **terminal** (`response_*` for a reply; a store / `db_*` for
+   a resolvable **source** (one Source-mode node, or several with `source` naming the one that
+   starts the run, in the file or at launch) and a **terminal** (`response_*` for a reply; a store / `db_*` for
    ingestion). Pull the right converters from the lane cheat-sheet in
    `../rocketride-building-pipelines/pipeline-patterns.md`.
 4. **Gate A** — end with the count line and the gate:
@@ -55,10 +56,12 @@ Only after Gate A is approved.
    its lane type: `chat_1 → embedding_1 (lane: questions)`. The output lane of `from` must be a
    real output of that node and a valid input of the target. If types don't match, insert a
    converter (cheat-sheet) — don't force it.
-   - `<Bad>`: `pdf_source_1 → store_1 (lane: text)` — wiring a raw document straight into a vector
-     store. It passes the eye test but fails validation: a store ingests **embeddings**, not text.
-   - `<Good>`: `pdf_source_1 → embedding_1 (lane: text)` then `embedding_1 → store_1 (lane: embeddings)`.
-3. **Apply the structural rules** (`PIPELINE_RULES_SUMMARY.md`): exactly one source; acyclic (no
+   - `<Bad>`: `parse_1 → store_1 (lane: text)`, wiring parsed text straight into a vector store.
+     It passes the eye test but fails validation: a store ingests `documents` that already carry
+     embedding vectors, and `text` is not one of its lanes.
+   - `<Good>`: `parse_1 → preprocessor_langchain_1 (lane: text)`, then
+     `preprocessor_langchain_1 → embedding_1 (lane: documents)`, then `embedding_1 → store_1 (lane: documents)`.
+3. **Apply the structural rules** (`PIPELINE_RULES_SUMMARY.md`): a resolvable source (rule 1); acyclic (no
    loops); no orphans (every node reachable from the source); embedding **before** any store;
    agents wire their `llm`/`tool`/`memory` via the **control plane** (the controlled node carries
    `control: [{classType, from: <agent>}]`, the agent does not) and must meet each `invoke`
@@ -76,7 +79,7 @@ Hand the approved selection + topology to `rocketride-configuring-pipelines`.
 |---|---|
 | "I'll list the obvious nodes and move on" | Exhaustive archetype walk first — the right node is often one you'd skip. Count line proves coverage. |
 | "The index shows the lanes, I don't need the schema to wire" | Index lanes are a summary; fetch the schema for exact signatures before wiring. |
-| "Two sources is fine" | Exactly one source per pipeline. |
+| "Two Source-mode nodes, no `source` named" | Ambiguous: the engine refuses to imply a source. Keep one Source-mode node, or name the one that starts the run (top-level `source`, or the `source` option at launch). |
 | "I'll point the store straight at the questions" | Embedding is required before any store; same model for ingest + query. |
 | "The agent node lists its tools in its own config" | No — the tool/llm/memory carries `control: [{from: <agent>}]`. Agent has no control array. |
 | "Close enough on the lane type" | Lane mismatch = pipeline error. Insert a converter or pick compatible nodes. |

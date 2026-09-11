@@ -16,11 +16,10 @@ installing either package puts `rocketride` on your path.
 > [MCP server](/connect/mcp/stdio) exposes the same pipeline operations as tools for
 > Claude, Cursor, and other MCP clients.
 
-> **Python vs TypeScript CLI:** Both packages ship a `rocketride` command. The
-> core commands (`start`, `upload`, `status`, `stop`, `validate`, `store`) are
-> available in both, but flag names differ in a few places and the Python CLI
-> includes two additional commands (`events`, `list`) not present in
-> TypeScript. Differences are called out inline below.
+> **Python vs TypeScript CLI:** Both packages ship a `rocketride` command with
+> the same commands and flag names. Output is plain, line-oriented text;
+> continuous live monitoring is deliberately not part of the CLI (the
+> platform's monitor apps own that job).
 
 ## Install
 
@@ -62,27 +61,21 @@ connection is encrypted.
 
 | Command  | What it does                                                               |
 | -------- | -------------------------------------------------------------------------- |
-| `start`  | Start a new pipeline from a `.pipe` file and stream its events.            |
+| `start`  | Start a new pipeline from a `.pipe` file and print its task token.         |
 | `upload` | Send files through a pipeline (by `--pipeline` or an existing task token). |
-| `status` | Monitor a running task's status continuously.                              |
 | `stop`   | Stop a running task.                                                       |
 | `validate` | Validate `.pipe` files against the engine without executing them.        |
-| `events` | Stream all raw events from a running task. Python CLI only.                |
-| `list`   | List all active tasks. Python CLI only.                                    |
+| `list`   | List all active tasks.                                                     |
 | `store`  | File-store operations: `dir`, `type`, `write`, `rm`, `mkdir`, `stat`.     |
 
 ### start
 
-Use `start` when you want to run a pipeline and watch its event stream live.
-The command loads the pipeline, starts the engine task, and prints structured
-events as they arrive — node status, lane data, errors, and completion.
+Use `start` to run a pipeline. The command loads the pipeline, starts the
+engine task, prints the task token, and exits; the task keeps running on the
+engine.
 
 ```bash
-# TypeScript CLI: pipeline path is a named flag
 rocketride start --pipeline ./rag.pipe
-
-# Python CLI: pipeline path is a positional argument
-rocketride start ./rag.pipe
 
 # Start with extra worker threads (useful for CPU-bound nodes)
 rocketride start --pipeline ./rag.pipe --threads 8
@@ -92,9 +85,9 @@ Key flags:
 
 | Flag | Description |
 | --- | --- |
-| `--pipeline <path>` (TypeScript) / `<path>` positional (Python) | Path to the `.pipe` JSON file. |
+| `--pipeline <path>` | Path to the `.pipe` JSON file. |
 | `--threads <n>` | Number of worker threads. Default 4. |
-| `--token <token>` | Supply a custom task token for the new run (the server generates one if not provided). A pipeline file is still required — to follow a task that is already running, use `status` or `events`. |
+| `--token <token>` | Supply a custom task token for the new run (the server generates one if not provided). A pipeline file is still required; to find tasks that are already running, use `list`. |
 
 ### upload
 
@@ -103,13 +96,9 @@ command starts a new pipeline task (or reuses one via `--token`), uploads each
 file, and streams results back.
 
 ```bash
-# TypeScript CLI: uses --pipeline
 rocketride upload --pipeline ./extract.pipe ./invoice.pdf
 
-# Python CLI: uses --pipeline_path (underscore)
-rocketride upload --pipeline_path ./extract.pipe ./invoice.pdf
-
-# Upload multiple files concurrently (TypeScript CLI)
+# Upload multiple files concurrently
 rocketride upload --pipeline ./extract.pipe ./docs/*.pdf --max-concurrent 4
 
 # Feed files into an already-running task
@@ -120,22 +109,9 @@ Key flags:
 
 | Flag | Description |
 | --- | --- |
-| `--pipeline <path>` (TypeScript) / `--pipeline_path <path>` (Python) | Path to the `.pipe` file. Required unless `--token` is given. |
+| `--pipeline <path>` | Path to the `.pipe` file. Required unless `--token` is given. |
 | `--token <token>` | Send files to an existing task instead of starting a new one. |
 | `--max-concurrent <n>` | Maximum number of files to upload in parallel. Default 5. TypeScript CLI only. |
-
-### status
-
-Use `status` to watch a running task in real time — useful for long-running
-ingestion jobs or pipelines processing many files.
-
-```bash
-# Watch task progress
-rocketride status --token <task-token>
-```
-
-The command prints node status events, timing, and any errors as they arrive.
-Press `Ctrl+C` to stop watching (the task continues running).
 
 ### stop
 
@@ -146,8 +122,9 @@ which cleanly shuts down the pipeline run.
 rocketride stop --token <task-token>
 ```
 
-The token is printed by `start` and `upload` at the beginning of the run, and
-by `status`. Save it if you need to stop a long-running pipeline later.
+The token is printed by `start` at the beginning of the run, and `list` shows
+the token of every active task. Save it if you need to stop a long-running
+pipeline later.
 
 ### validate
 
@@ -192,32 +169,6 @@ server validation verdict).
 > starts an engine container and runs `rocketride validate` on your
 > repository's `.pipe` files.
 
-### events
-
-Use `events` to stream all raw events from a running task to your terminal or a
-log file — useful when debugging pipeline internals or monitoring detailed node
-output beyond what `status` shows.
-
-```bash
-# Stream all events
-rocketride events --token <task-token>
-
-# Filter to specific event types
-rocketride events --token <task-token> DETAIL,SUMMARY
-
-# Stream all events and write them to a log file
-rocketride events --token <task-token> ALL --log ./debug.log
-```
-
-Key flags:
-
-| Flag | Description |
-| --- | --- |
-| `[event_types]` | Optional positional. Comma-separated list: `DETAIL`, `SUMMARY`, `OUTPUT`, `ALL`. Defaults to all event types. |
-| `--log <file>` | Write all events to a file in addition to stdout. |
-
-> Available in the Python CLI only.
-
 ### list
 
 Use `list` to display all active tasks for your account — handy when you have
@@ -233,8 +184,6 @@ Key flags:
 | Flag | Description |
 | --- | --- |
 | `--json` | Output results as JSON instead of human-readable text. |
-
-> Available in the Python CLI only.
 
 ### store
 

@@ -829,7 +829,8 @@ Cron can only express **when a run starts** — there is no cron syntax for "run
 ```typescript
 // Prerequisite: the pipe is deployed to the team
 const { artifact } = await client.deploy.add({ pipeline: { ...pipeline, name: 'Nightly ingest' }, comment: 'v2' });
-await client.deploy.deploy('proj-123', artifact.version!, 'team-prod');
+if (artifact?.version === undefined) throw new Error('add() returned no artifact version');
+await client.deploy.deploy('proj-123', artifact.version, 'team-prod');
 
 // Mon/Wed/Fri at 08:00 → cron '0 8 * * 1,3,5'
 // Stop by 15:00 → ttl = 7 hours = 7 * 3600 = 25200 seconds
@@ -1085,7 +1086,7 @@ interface TASK_STATUS {
 	state: number;             // TASK_STATE value
 	startTime: number;         // Unix seconds (endTime alongside)
 	status: string;            // current status message
-	errors: string[];          // recent error history (max 50); warnings likewise
+	errors: string[];          // recent error history (max 1000); warnings likewise
 	totalCount: number;        // items to process (completedCount / failedCount alongside)
 	rateCount: number;         // items/second (instantaneous)
 	serviceUp: boolean;        // ready to process requests
