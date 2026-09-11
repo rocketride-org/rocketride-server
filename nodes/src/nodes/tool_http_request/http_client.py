@@ -57,8 +57,8 @@ ResolvedAddress = tuple[int, int, int, tuple]
 _NAT64_WELL_KNOWN_NETWORK = ipaddress.IPv6Network('64:ff9b::/96')
 _NAT64_LOCAL_USE_NETWORK = ipaddress.IPv6Network('64:ff9b:1::/48')
 _MINIMUM_SAFE_IPADDRESS_PATCH = {
-    (3, 10): 14,
-    (3, 11): 9,
+    (3, 10): 15,
+    (3, 11): 10,
     (3, 12): 4,
 }
 
@@ -89,7 +89,7 @@ def _has_safe_ipaddress_runtime(version_info) -> bool:
 if not _has_safe_ipaddress_runtime(sys.version_info):
     raise RuntimeError(
         'tool_http_request requires a Python security patch level with corrected IP address classification: '
-        'Python >=3.10.14, >=3.11.9, >=3.12.4, or >=3.13'
+        'Python >=3.10.15, >=3.11.10, >=3.12.4, or >=3.13'
     )
 
 
@@ -202,27 +202,23 @@ def execute_request(
     Raises ``requests.RequestException`` on transport-level failures.
     """
     start = time.monotonic()
-    resolved_url = _canonicalize_url(_resolve_path_params(url, path_params))
+    resolved_url = _build_final_url(url, path_params=path_params, query_params=query_params, auth=auth)
     validated_addresses = _validate_public_url(resolved_url)
 
     req_headers = dict(headers or {})
     req_auth = None
-    extra_params: Dict[str, str] = {}
 
-    _apply_auth(auth, req_headers, extra_params, req_auth_out := [None])
+    _apply_auth(auth, req_headers, req_auth_out := [None])
     req_auth = req_auth_out[0]
 
     if any(name.lower() == 'host' for name in req_headers):
         raise ValueError('The Host header is derived from the validated URL and cannot be overridden')
 
-    merged_params = dict(query_params or {})
-    merged_params.update(extra_params)
-
     req_kwargs: Dict[str, Any] = {
         'method': method.upper(),
         'url': resolved_url,
         'headers': req_headers,
-        'params': merged_params or None,
+        'params': None,
         'auth': req_auth,
         # Redirect targets have not passed the URL whitelist or network-address
         # checks. Return 3xx responses to the caller instead of following them.
@@ -236,7 +232,13 @@ def execute_request(
     else:
         req_kwargs['timeout'] = DEFAULT_TIMEOUT_SECONDS
 
-    resp = _request_with_validated_addresses(req_kwargs, validated_addresses)
+    transport_error = None
+    try:
+        resp = _request_with_validated_addresses(req_kwargs, validated_addresses)
+    except requests.RequestException as error:
+        transport_error = _sanitize_transport_error(error)
+    if transport_error is not None:
+        raise transport_error
     elapsed_ms = round((time.monotonic() - start) * 1000)
 
     return _build_response(resp, elapsed_ms)
@@ -259,9 +261,18 @@ def _request_with_validated_addresses(req_kwargs: Dict[str, Any], addresses: tup
         return session.request(**req_kwargs)
 
 
+def _sanitize_transport_error(error: requests.RequestException) -> requests.RequestException:
+    """Return a same-type transport error without request URL state."""
+    try:
+        return type(error)('HTTP request failed')
+    except TypeError:
+        return requests.RequestException('HTTP request failed')
+
+
 def _validate_public_url(url: str) -> tuple[ResolvedAddress, ...]:
     """Reject malformed URLs and destinations outside the public Internet."""
     parsed = urlsplit(url)
+    _reject_url_userinfo(parsed)
     if parsed.scheme.lower() not in {'http', 'https'}:
         raise ValueError('URL scheme must be http or https')
     if not parsed.hostname:
@@ -346,7 +357,9 @@ def _canonicalize_url(url: str) -> str:
     """Return the stable URL form Requests will put on the wire."""
     # Fragments are client-side only and HTTPAdapter removes them from the
     # request target, so they must not influence whitelist matching.
-    prepared_url = urlsplit(url)._replace(fragment='').geturl()
+    parsed = urlsplit(url)
+    _reject_url_userinfo(parsed)
+    prepared_url = parsed._replace(fragment='').geturl()
     for _attempt in range(3):
         if _url_has_dot_segments(prepared_url):
             raise ValueError('URL path must not contain dot segments')
@@ -355,6 +368,12 @@ def _canonicalize_url(url: str) -> str:
             return normalized_url
         prepared_url = normalized_url
     raise ValueError('URL normalization did not stabilize')
+
+
+def _reject_url_userinfo(parsed) -> None:
+    """Reject URL credentials so they cannot alter the validated destination."""
+    if parsed.username is not None:
+        raise ValueError('URL must not include userinfo')
 
 
 def _resolve_path_params(url: str, path_params: Optional[Dict[str, str]]) -> str:
@@ -376,13 +395,45 @@ def _resolve_path_params(url: str, path_params: Optional[Dict[str, str]]) -> str
     return parsed._replace(path=resolved_path).geturl()
 
 
+def _build_final_url(
+    url: str,
+    *,
+    path_params: Optional[Dict[str, str]] = None,
+    query_params: Optional[Dict[str, str]] = None,
+    auth: Optional[Dict[str, Any]] = None,
+) -> str:
+    """Return the canonical URL after every URL-affecting request option."""
+    resolved_url = _canonicalize_url(_resolve_path_params(url, path_params))
+    merged_params = dict(query_params or {})
+    merged_params.update(_api_key_query_params(auth))
+    if not merged_params:
+        return resolved_url
+    prepared_url = requests.Request('GET', resolved_url, params=merged_params).prepare().url
+    return _canonicalize_url(prepared_url)
+
+
+def _api_key_query_params(auth: Optional[Dict[str, Any]]) -> Dict[str, str]:
+    """Extract query-based API-key auth for final URL construction."""
+    if not isinstance(auth, dict):
+        return {}
+    auth_type = auth.get('type') or 'none'
+    if not isinstance(auth_type, str) or auth_type.strip().lower() != 'api_key':
+        return {}
+    api_key = auth.get('api_key') or {}
+    if not isinstance(api_key, dict):
+        return {}
+    add_to = api_key.get('add_to') or 'header'
+    if not isinstance(add_to, str) or add_to.strip().lower() != 'query_param':
+        return {}
+    return {api_key.get('key', ''): api_key.get('value', '')}
+
+
 def _apply_auth(
     auth: Optional[Dict[str, Any]],
     headers: Dict[str, str],
-    extra_params: Dict[str, str],
     req_auth_out: list,
 ) -> None:
-    """Mutate *headers* / *extra_params* / *req_auth_out* based on auth config."""
+    """Mutate *headers* / *req_auth_out* based on auth config."""
     if not auth:
         return
     auth_type = (auth.get('type') or 'none').strip().lower()
@@ -406,9 +457,7 @@ def _apply_auth(
         key = api_key.get('key', '')
         value = api_key.get('value', '')
         add_to = (api_key.get('add_to') or 'header').strip().lower()
-        if add_to == 'query_param':
-            extra_params[key] = value
-        else:
+        if add_to != 'query_param':
             headers[key] = value
 
 

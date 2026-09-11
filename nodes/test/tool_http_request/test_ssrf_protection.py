@@ -49,10 +49,10 @@ def test_requests_exposes_secure_adapter_hook():
 @pytest.mark.parametrize(
     'version_info,expected',
     [
-        ((3, 10, 13), False),
-        ((3, 10, 14), True),
-        ((3, 11, 8), False),
-        ((3, 11, 9), True),
+        ((3, 10, 14), False),
+        ((3, 10, 15), True),
+        ((3, 11, 9), False),
+        ((3, 11, 10), True),
         ((3, 12, 3), False),
         ((3, 12, 4), True),
         ((3, 13, 0), True),
@@ -107,19 +107,19 @@ def test_validate_public_url_rejects_mixed_public_and_private_dns(monkeypatch):
 
 
 @pytest.mark.parametrize(
-    'url',
+    'url,error',
     [
-        'http://2130706433/',
-        'http://0x7f000001/',
-        'http://public.example@127.0.0.1/',
-        'http://[::ffff:127.0.0.1]/',
+        ('http://2130706433/', 'non-public network address'),
+        ('http://0x7f000001/', 'non-public network address'),
+        ('http://public.example@127.0.0.1/', 'userinfo'),
+        ('http://[::ffff:127.0.0.1]/', 'non-public network address'),
     ],
 )
-def test_validate_public_url_rejects_disguised_loopback_hosts(monkeypatch, url):
+def test_validate_public_url_rejects_disguised_loopback_hosts(monkeypatch, url, error):
     """Numeric and user-info URL forms cannot hide a loopback destination."""
     _mock_dns(monkeypatch, '127.0.0.1')
 
-    with pytest.raises(ValueError, match='non-public network address'):
+    with pytest.raises(ValueError, match=error):
         http_client._validate_public_url(url)
 
 
@@ -392,6 +392,27 @@ def test_execute_request_blocks_private_destination_before_network(monkeypatch):
 
 
 @pytest.mark.parametrize(
+    'url',
+    [
+        'https://username@service.example/data',
+        'https://username:password@service.example/data',
+        'https://@service.example/data',
+    ],
+)
+def test_execute_request_rejects_userinfo_before_dns_or_transport(monkeypatch, url):
+    """Credentials in a URL cannot alter the validated request destination."""
+    resolver = _mock_dns(monkeypatch, '93.184.216.34')
+    request = Mock(return_value=Mock(status_code=200, reason='OK', headers={'Content-Type': 'text/plain'}, text='ok'))
+    monkeypatch.setattr(http_client, '_request_with_validated_addresses', request)
+
+    with pytest.raises(ValueError, match='userinfo'):
+        http_client.execute_request(url=url, method='GET')
+
+    resolver.assert_not_called()
+    request.assert_not_called()
+
+
+@pytest.mark.parametrize(
     'headers,auth',
     [
         ({'Host': 'internal.example'}, None),
@@ -481,7 +502,78 @@ def test_execute_request_query_value_cannot_change_destination(monkeypatch):
     )
 
     assert resolver.call_args.args[0] == 'service.example'
-    assert request.call_args.args[0]['params'] == {'target': 'http://127.0.0.1/admin'}
+    assert request.call_args.args[0]['url'] == 'https://service.example/fetch?target=http%3A%2F%2F127.0.0.1%2Fadmin'
+    assert request.call_args.args[0]['params'] is None
+
+
+@pytest.mark.parametrize(
+    ('query_params', 'auth', 'expected_url'),
+    [
+        (
+            {'extra': '2'},
+            None,
+            'https://service.example/path?fixed=1&extra=2',
+        ),
+        (
+            None,
+            {
+                'type': 'api_key',
+                'api_key': {'key': 'api_key', 'value': 'secret', 'add_to': 'query_param'},
+            },
+            'https://service.example/path?fixed=1&api_key=secret',
+        ),
+    ],
+)
+def test_execute_request_passes_final_query_url_to_transport(monkeypatch, query_params, auth, expected_url):
+    """The transport receives the one canonical URL that guardrails check."""
+    _mock_dns(monkeypatch, '93.184.216.34')
+    response = Mock(status_code=200, reason='OK', headers={'Content-Type': 'text/plain'}, text='ok')
+    request = Mock(return_value=response)
+    monkeypatch.setattr(http_client, '_request_with_validated_addresses', request)
+
+    http_client.execute_request(
+        url='https://service.example/path?fixed=1',
+        method='GET',
+        query_params=query_params,
+        auth=auth,
+    )
+
+    assert request.call_args.args[0]['url'] == expected_url
+    assert request.call_args.args[0]['params'] is None
+
+
+def test_execute_request_redacts_query_api_key_from_transport_error(monkeypatch):
+    """Transport failures cannot retain query API-key URL state."""
+    _mock_dns(monkeypatch, '93.184.216.34')
+    secret = 'supersecret'
+    final_url = f'https://service.example/path?api_key={secret}'
+    prepared_request = http_client.requests.Request('GET', final_url).prepare()
+    response = http_client.requests.Response()
+    response.request = prepared_request
+    transport_error = http_client.requests.ConnectionError(
+        f'Max retries exceeded with url: /path?api_key={secret}',
+        request=prepared_request,
+        response=response,
+    )
+    request = Mock(side_effect=transport_error)
+    monkeypatch.setattr(http_client, '_request_with_validated_addresses', request)
+
+    with pytest.raises(http_client.requests.ConnectionError) as exc_info:
+        http_client.execute_request(
+            url='https://service.example/path',
+            method='GET',
+            auth={
+                'type': 'api_key',
+                'api_key': {'key': 'api_key', 'value': secret, 'add_to': 'query_param'},
+            },
+        )
+
+    error = exc_info.value
+    assert secret not in str(error)
+    assert getattr(error, 'request', None) is None
+    assert getattr(error, 'response', None) is None
+    assert error.__cause__ is None
+    assert error.__context__ is None
 
 
 def test_execute_request_preserves_existing_request_options(monkeypatch):

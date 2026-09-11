@@ -63,6 +63,11 @@ class IGlobal(IGlobalBase):
 
         cfg = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
         self.enabled_methods, self.url_patterns = self._build_guardrails(cfg)
+        if self.url_patterns:
+            warning(
+                'URL whitelist patterns now require a supported, explicit authority boundary; '
+                'review existing patterns before making requests'
+            )
         self.rate_limiter = self._build_rate_limiter(cfg)
 
     @staticmethod
@@ -94,7 +99,7 @@ class IGlobal(IGlobalBase):
                 raise ValueError(f'urlWhitelist entry {index + 1} whitelistPattern must be a string')
             pat_str = raw_pattern.strip()
             if not pat_str:
-                raise ValueError(f'urlWhitelist entry {index + 1} must contain a non-empty whitelistPattern')
+                continue
             try:
                 patterns.append(re.compile(pat_str))
             except re.error as e:

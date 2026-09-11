@@ -49,19 +49,63 @@ Four security guardrails are enforced before every request:
 
 The node ships one profile, **Default**, which sets `serverName` to `http`.
 
-Whitelist patterns are checked against the final URL after path parameters are resolved.
-An empty `urlWhitelist` (`[]`) allows all public URLs and emits a warning. Empty entries
-such as `[{"whitelistPattern": ""}]`, and invalid or malformed patterns, fail configuration
-validation instead of silently removing the intended restriction. Regex matching starts
-at the beginning of the URL; add `$` when the entire URL must match.
+Whitelist regexes are applied with Python `pattern.match()` to the final canonical URL after
+path parameters, regular query parameters, and query-based API-key auth are applied. The
+configured regex is never rewritten, so normal Python regex syntax retains its usual meaning.
+A nonmatch is denied.
+
+After a successful match, a fail-closed source recognizer proves the regex's authority policy.
+It accepts an optional `^` or `\A`, a literal `http://` or `https://`, then one of:
+
+- an exact DNS, IPv4, or escaped-bracket IPv6 host written with literal characters and escaped
+  dots, optionally followed by an exact numeric port, a decimal port language such as
+  `:[0-9]+` or `:[0-9]{3,4}`, or the optional form `(?::[0-9]+)?`; or
+- the whole-authority form `[^/]` with a nonempty `+` or brace bound, such as `[^/]+` or
+  `[^/]{1,20}`.
+
+The authority policy must be followed immediately by a proven boundary: a consuming `/` or
+`\?`, the narrow boundary forms `(?=/|$)` or `(?:/|$)` (and their query variants), or a terminal
+`$`, `\Z`, or `\z` on Python versions that support it. Arbitrary Python regex syntax may follow
+a proven consuming path or query delimiter; top-level alternatives remain unsupported because
+they can hide a different authority policy. A `$` authority boundary is unsupported with
+`re.MULTILINE` because it would no longer prove the end of the authority; that flag remains
+available to regex syntax after a consuming delimiter.
+
+Any other authority syntax fails closed at request time even if Python's regex engine matches
+the URL. This includes wildcard, character-class, lookaround, possessive, subdomain-language,
+or alternation syntax before the boundary. For example, use
+`^https://api\.example\.com(?::[0-9]+)?(?:/|$)` for an exact host with an optional numeric port,
+or `^https://[^/]+(?:/|$)` for a deliberately broad authority. A scheme-only prefix such as
+`^https://` is denied. Use an empty whitelist for the documented allow-all-public mode.
+
+The configuration author is trusted; request URLs are attacker-controlled. The restricted
+grammar prevents an accidental hostname or port prefix from being interpreted across URL
+authority fields. It is not intended to defend against an administrator who deliberately
+configures a broad policy.
+
+An empty `urlWhitelist` (`[]`), or a list containing only blank or whitespace-only UI
+placeholder rows, means no whitelist patterns and therefore allows all public destinations;
+non-public destinations remain blocked. Blank rows mixed with valid patterns are ignored.
+Invalid non-empty regexes, non-string values, and malformed entries fail configuration
+validation.
+
+### Compatibility and whitelist migration
+
+Whitelist matching previously used search-anywhere semantics and accepted unrestricted regex
+syntax in the authority. It now starts at the beginning of the canonical URL and accepts only
+the authority grammar above; configuring a whitelist emits a startup migration warning.
+Patterns written for a raw, noncanonical URL or with unsupported authority constructs now fail
+closed. Migrate them to the canonical form, preferably anchor them with `^` or `\A`, and express
+host/port intent with one of the supported exact or whole-authority forms.
 
 The node connects directly to the validated destination and does not use environment
 proxies or implicit `.netrc` credentials. `REQUESTS_CA_BUNDLE` and `CURL_CA_BUNDLE`
 remain supported for custom HTTPS certificate authorities. A caller-supplied `Host`
 header is rejected because it could route an allowlisted URL to a different virtual host.
-The network classifier requires Python `3.10.14+`, `3.11.9+`, `3.12.4+`, or `3.13+`
-and the transport requires the Requests and urllib3 connection hooks used for
-validated-address pinning.
+URLs containing userinfo or credentials are rejected, including an empty userinfo delimiter
+before `@`. The network classifier requires Python `3.10.15+`, `3.11.10+`, `3.12.4+`, or
+`3.13+`. The transport verifies the required `requests` and `urllib3` connection capabilities
+at startup; behavior tests cover the supported dependency combinations.
 
 Keep an outbound firewall or equivalent egress policy around the engine as a second
 boundary. RFC 6052 permits operator-chosen NAT64 prefixes that cannot be identified from
@@ -193,8 +237,8 @@ non-zero value is clamped to a minimum of `1`.
 | `http_request.rateLimitPerMinute` | `number` | **Max requests per minute**<br/>Maximum number of HTTP requests allowed per minute. Provides a broader throttle beyond the per-second limit. | `100` |
 | `http_request.rateLimitPerSecond` | `number` | **Max requests per second**<br/>Maximum number of HTTP requests allowed per second. Uses a token-bucket algorithm for smooth enforcement. | `10` |
 | `http_request.serverName` | `string` | **Server name**<br/>Namespace prefix for the tool: <serverName>.http_request | `"http"` |
-| `http_request.urlWhitelist` | `array` | **URL Whitelist**<br/>Regex patterns for allowed public URLs. A request URL must match at least one pattern. If empty, all public URLs are allowed; non-public network destinations remain blocked. |  |
-| `http_request.whitelistPattern` | `string` | **URL Pattern (regex)** | `""` |
+| `http_request.urlWhitelist` | `array` | **URL Whitelist**<br/>Python regex patterns applied with match() to the final canonical URL after path substitution, regular query parameters, and query-based API-key auth. A request-time source recognizer accepts only exact literal/escaped hosts with supported numeric-port forms, or a deliberate [^/] whole-authority form, followed by an explicit authority boundary. Unsupported or ambiguous authority syntax fails closed even when the regex matches. [] or only blank placeholder rows allows all public destinations; non-public destinations remain blocked. Blank rows mixed with valid patterns are ignored; invalid non-empty regexes, non-string values, and malformed entries fail closed. |  |
+| `http_request.whitelistPattern` | `string` | **URL Pattern (regex)**<br/>Applied with Python regex match() to the final canonical URL after path substitution, regular query parameters, and query-based API-key auth. After matching, a fail-closed source grammar requires a literal HTTP(S) scheme; an exact literal/escaped DNS, IPv4, or bracketed-IPv6 host with an optional exact or [0-9]-based port policy, or a whole-authority [^/] policy; and an explicit path, query, or end boundary. Unsupported or ambiguous authority regex syntax is denied at request time. Example: ^https://api\.example\.com(?::[0-9]+)?(?:/\|$). Scheme-only prefixes are denied; use an empty whitelist to allow all public destinations. Blank placeholder rows are ignored. | `""` |
 
 ## Source
 
