@@ -202,6 +202,27 @@ def test_a_sentinel_after_leading_prose_still_opens_its_own_line(dp):
     assert msg.content == 'Here it is.'
 
 
+def test_an_answer_keeps_the_whitespace_that_means_something(dp):
+    """
+    DELIVERED AS WRITTEN, which is the whole promise of the sentinel. Four
+    leading spaces are what make the line a markdown code block; stripping them
+    turned an answer about code into a paragraph. Only the one separator between
+    the marker and the answer comes off.
+    """
+    msg = dp._parse_tool_call_envelope(dp.FINAL_SENTINEL + '\n    indented = "code"')
+
+    assert msg.content == '    indented = "code"'
+
+
+def test_the_separator_after_the_sentinel_is_removed(dp):
+    """One newline, or one same-line space — never more."""
+    assert dp._parse_tool_call_envelope(dp.FINAL_SENTINEL + ' Here it is.').content == 'Here it is.'
+    assert dp._parse_tool_call_envelope(dp.FINAL_SENTINEL + '\nHere it is.').content == 'Here it is.'
+    assert dp._parse_tool_call_envelope(dp.FINAL_SENTINEL + '\r\nHere it is.').content == 'Here it is.'
+    # A blank first line is the answer's own, so it stays.
+    assert dp._parse_tool_call_envelope(dp.FINAL_SENTINEL + '\n\nHere it is.').content == '\nHere it is.'
+
+
 def test_an_empty_sentinel_answer_is_not_an_answer(dp):
     """
     A model that writes the marker and stops has said nothing. Returning it
@@ -264,6 +285,25 @@ def test_unescaping_handles_the_escapes_that_were_right(dp):
     body = 'a\\nb\\tc\\"d\\\\e\\u00e9'
 
     assert dp._unescape_json_string_body(body) == 'a\nb\tc"d\\eé'
+
+
+def test_unescaping_joins_a_surrogate_pair_into_one_character(dp):
+    """
+    JSON HAS NO OTHER WAY TO WRITE AN EMOJI: an astral character is spelled as
+    two escapes, and decoded apart they are two lone surrogates — not characters,
+    and `str.encode` refuses them, so the salvaged answer would raise on its way
+    out rather than read as what somebody typed.
+    """
+    assert dp._unescape_json_string_body('\\uD83D\\uDE00') == '😀'
+    # Still one character, with prose either side, and it survives an encode.
+    recovered = dp._unescape_json_string_body('all done \\uD83D\\uDE00 — shipping')
+    assert recovered == 'all done 😀 — shipping'
+    assert recovered.encode('utf-8').decode('utf-8') == recovered
+
+
+def test_unescaping_leaves_a_lone_high_surrogate_alone(dp):
+    """Only a real pair is joined; a half-written escape keeps the old behaviour."""
+    assert dp._unescape_json_string_body('\\uD83Dx') == chr(0xD83D) + 'x'
 
 
 def test_unescaping_passes_through_what_it_does_not_recognise(dp):
@@ -341,11 +381,13 @@ def llm_answering(dp, monkeypatch):
     monkeypatch.setattr(sys.modules['langchain_core.messages'], 'HumanMessage', FakeAIMessage, raising=False)
 
     def build(raw):
+        """`raw` is one answer repeated, or a list answered in order (the last repeats)."""
+        replies = raw if isinstance(raw, list) else [raw]
         prompts = []
 
         def call_llm(context, prompt, **kwargs):
             prompts.append(prompt)
-            return raw
+            return replies[min(len(prompts) - 1, len(replies) - 1)]
 
         return dp._build_deepagent_llm(types.SimpleNamespace(call_llm=call_llm), None), prompts
 
@@ -376,6 +418,59 @@ def test_prose_that_skipped_the_sentinel_is_still_the_answer(llm_answering):
 
     assert result.generations[0].message.content == 'I could not find that organization.'
     assert len(prompts) == 3
+
+
+def test_a_broken_tool_call_is_told_to_repair_the_tool_call(dp):
+    """
+    THE HINT MUST NOT TALK THE MODEL OUT OF THE WORK.
+
+    A malformed `tool_call` is a job that has not been done. Answering `FINAL>>>`
+    instead would hand back a sentence about a record nobody wrote, so the nudge
+    for a broken CALL asks for the call again, and only a broken ANSWER is
+    pointed at the sentinel.
+    """
+    hint = dp._parse_failure_hint('{"type":"tool_call","name":"crm.create","args":{"name":"a "quoted" org"}}')
+
+    assert 'tool call' in hint
+    assert 'do not answer in prose' in hint.lower()
+    assert dp.FINAL_SENTINEL not in hint
+
+
+def test_a_broken_final_envelope_is_still_pointed_at_the_sentinel(dp):
+    hint = dp._parse_failure_hint(BROKEN)
+
+    assert dp.FINAL_SENTINEL in hint
+
+
+def test_prose_that_never_reached_json_is_pointed_at_the_sentinel(dp):
+    hint = dp._parse_failure_hint('I think the answer is "42", probably.')
+
+    assert dp.FINAL_SENTINEL in hint
+
+
+def test_the_second_attempt_can_follow_the_first_hint(dp, llm_answering):
+    """
+    THE RETRY LOOP HAS TO BE ABLE TO RECOVER, not just to fail tidily.
+
+    The model answers with a broken tool call, reads the hint, and sends the
+    same call repaired. The turn then ends in the tool call it was always meant
+    to be — in two LLM calls, not three.
+    """
+    broken = '{"type":"tool_call","name":"crm.note_create","args":{"content":"a "quoted" note"}}'
+    repaired = '{"type":"tool_call","name":"crm.note_create","args":{"content":"a \\"quoted\\" note"}}'
+    model, prompts = llm_answering([broken, repaired])
+
+    result = model._generate([])
+
+    message = result.generations[0].message
+    assert message.tool_calls[0]['name'] == 'crm.note_create'
+    assert message.tool_calls[0]['args']['content'] == 'a "quoted" note'
+    assert len(prompts) == 2
+    # The second prompt is the first plus the hint, and the hint asked for the
+    # CALL again rather than pointing at the sentinel.
+    hint = prompts[1][len(prompts[0]) :]
+    assert 'do not answer in prose' in hint.lower()
+    assert dp.FINAL_SENTINEL not in hint
 
 
 def test_an_envelope_is_recognised_inside_a_markdown_fence(dp):

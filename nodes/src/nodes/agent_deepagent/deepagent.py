@@ -543,11 +543,29 @@ def _unescape_json_string_body(body: str) -> str:
             i += 2
         elif nxt == 'u' and i + 6 <= n:
             try:
-                out.append(chr(int(body[i + 2 : i + 6], 16)))
-                i += 6
+                code = int(body[i + 2 : i + 6], 16)
             except ValueError:
                 out.append(ch)
                 i += 1
+                continue
+            # A SURROGATE PAIR IS ONE CHARACTER, spelled as two escapes. JSON has
+            # no other way to write an astral character, so every emoji arrives
+            # as `😀`. Decoded apart they are two lone surrogates,
+            # which are not characters at all: `str.encode` refuses them, so the
+            # salvaged answer would raise on its way out instead of reading as
+            # the emoji somebody typed.
+            low_start = i + 6
+            if 0xD800 <= code <= 0xDBFF and body[low_start : low_start + 2] == '\\u' and low_start + 6 <= n:
+                try:
+                    low = int(body[low_start + 2 : low_start + 6], 16)
+                except ValueError:
+                    low = -1
+                if 0xDC00 <= low <= 0xDFFF:
+                    out.append(chr(0x10000 + ((code - 0xD800) << 10) + (low - 0xDC00)))
+                    i = low_start + 6
+                    continue
+            out.append(chr(code))
+            i += 6
         else:
             # Not an escape we know. A lone backslash is far likelier to be part
             # of the prose than a mistake worth deleting.
@@ -597,6 +615,30 @@ def _salvage_final_content(raw: str) -> Optional[str]:
 #: The opening of a JSON envelope, optionally inside a markdown fence.
 _ENVELOPE_OPEN = re.compile(r'^\s*(?:```[A-Za-z]*\s*)?\{')
 
+#: A `"type"` the model was reaching for, in an envelope too broken to parse.
+#: Matched textually on purpose — if it parsed, nothing here would run.
+_ATTEMPTED_TYPE = re.compile(r'"type"\s*:\s*"(tool_calls?|final)"')
+
+
+def _after_sentinel(rest: str) -> str:
+    """
+    The answer, with only the sentinel's separator removed.
+
+    Args:
+        rest: Everything after the ``FINAL>>>`` marker.
+
+    Returns:
+        The answer as the model wrote it, minus one separator — a single newline
+        (the model started the answer on the next line) or a single same-line
+        space. Any further whitespace is the answer's own: leading spaces open a
+        code block, and a blank first line is a deliberate gap.
+    """
+    if rest.startswith('\r\n'):
+        return rest[2:]
+    if rest[:1] in ('\n', ' ', '\t'):
+        return rest[1:]
+    return rest
+
 
 def _looks_like_envelope(raw: str) -> bool:
     """
@@ -625,6 +667,13 @@ def _parse_failure_hint(raw: str) -> str:
     position and quoting the text around it is the difference between a retry
     that can work and one that cannot.
 
+    WHAT TO DO NEXT DEPENDS ON WHAT WAS ATTEMPTED. A broken ANSWER should come
+    back as `FINAL>>>` plus prose, where nothing can break again. A broken TOOL
+    CALL must come back as a repaired tool call: telling the model to answer in
+    prose instead would trade work the crew intended to do — a record written, a
+    booking made — for a sentence about it, which is the failure this protocol
+    exists to avoid.
+
     Args:
         raw: The output that failed to parse.
 
@@ -634,6 +683,13 @@ def _parse_failure_hint(raw: str) -> str:
     text = (raw or '').strip()
     if not text:
         return 'Your last output was empty.'
+    attempted = _ATTEMPTED_TYPE.search(text)
+    wanted_a_tool_call = bool(attempted) and attempted.group(1) != 'final'
+    remedy = (
+        'Send the SAME tool call again as one valid JSON object — repair the JSON, do not answer in prose.'
+        if wanted_a_tool_call
+        else f'Do not retype it as JSON — send the answer as {FINAL_SENTINEL} followed by plain text.'
+    )
     try:
         json.loads(text)
     except json.JSONDecodeError as err:
@@ -642,7 +698,7 @@ def _parse_failure_hint(raw: str) -> str:
         return (
             f'Your last output was not valid JSON: {err.msg}, at character {pos}. '
             f'It broke here: ...{excerpt}... '
-            f'Do not retype it as JSON — send the answer as {FINAL_SENTINEL} followed by plain text.'
+            f'{remedy}'
         )
     except Exception:  # noqa: BLE001 — any parse failure gets the same advice
         return 'Your last output could not be parsed.'
@@ -729,11 +785,17 @@ def _parse_tool_call_envelope(raw: str) -> Any:
     if isinstance(raw, str):
         marker = re.search(rf'(?m)^[ 	]*{re.escape(FINAL_SENTINEL)}', raw)
         if marker:
-            answer = safe_str(raw[marker.end() :]).strip()
+            # DELIVERED AS WRITTEN, which the prompt promises and the README
+            # repeats — so only the SEPARATOR comes off, never the answer's own
+            # whitespace. One newline, or one space on the same line, is what
+            # divides the marker from what follows; `strip()` here also ate the
+            # four spaces that make `FINAL>>>\n    code` a markdown code block,
+            # turning an answer about code into a paragraph.
+            answer = safe_str(_after_sentinel(raw[marker.end() :]))
             # A sentinel with nothing after it is not an answer. Returning it
             # would hand `_generate` an empty success and end the turn silently;
             # None sends the model back through the retry loop instead.
-            if answer:
+            if answer.strip():
                 return AIMessage(content=answer)
 
     obj = _extract_first_json_object(raw)

@@ -24,7 +24,7 @@
 from rocketlib import IInstanceBase
 from .IGlobal import IGlobal
 from ai.common.schema import Question
-from rocketlib import debug, Entry
+from rocketlib import debug, error, Entry
 
 
 class IInstance(IInstanceBase):
@@ -142,7 +142,13 @@ class IInstance(IInstanceBase):
             # one. A half-built question is worse than none: downstream an agent
             # answers whatever is emitted, and an answer to a question the
             # person did not ask is recorded as what they wanted.
-            debug(f'Error in prompt node: {e}')
+            #
+            # AT ERROR LEVEL, because a turn was dropped: the person asked
+            # something and nothing downstream will answer it, which looks from
+            # the outside like the pipeline ignoring them. The exception TYPE is
+            # named — a bare message reads the same for a missing config key as
+            # for a broken collaborator.
+            error(f'prompt node dropped a turn: {type(e).__name__}: {e}')
         finally:
             # Belt and braces with `open`: the next turn starts clean even if this
             # one raised on its way out, and even if the node is driven to close

@@ -76,6 +76,14 @@ class FakeQuestion:
 # ---------------------------------------------------------------------------
 
 
+#: Error-level lines the node logged, newest last.
+#:
+#: The stub below appends here, and the node binds that function at import
+#: (`from rocketlib import ... error`), so the list stays live after the stub
+#: modules are restored. A test that cares clears it first.
+LOGGED_ERRORS: list[str] = []
+
+
 def _load_iinstance_class():
     saved = {}
     stubs = {
@@ -103,6 +111,7 @@ def _load_iinstance_class():
     stubs['rocketlib'].IGlobalBase = FakeIGlobalBase
     stubs['rocketlib'].Entry = FakeEntry
     stubs['rocketlib'].debug = lambda *a, **kw: None
+    stubs['rocketlib'].error = lambda message, *a, **kw: LOGGED_ERRORS.append(str(message))
     stubs['rocketlib'].OPEN_MODE = types.SimpleNamespace(CONFIG='config')
     stubs['ai.common.schema'].Question = FakeQuestion
     stubs['ai.common.config'].Config = types.SimpleNamespace(getNodeConfig=lambda *a: {})
@@ -287,10 +296,10 @@ def test_a_silent_turn_after_an_emitted_one_is_not_recorded_as_output(build):
     assert len(captured.questions) == 1
 
 
-def test_documents_and_questions_lanes_also_count_as_input(build):
+def test_the_documents_lane_also_counts_as_input(build):
     """
     Silence is about receiving nothing, not about receiving no *text*. A turn that
-    arrived as a document or a question is a turn.
+    arrived as a document is a turn.
     """
     inst, captured = build()
 
@@ -300,6 +309,23 @@ def test_documents_and_questions_lanes_also_count_as_input(build):
 
     assert len(captured.questions) == 1
     assert captured.questions[0].documents == [['a document']]
+    assert inst.has_output is True
+
+
+def test_the_questions_lane_also_counts_as_input(build):
+    """The third lane `_received_input` reads, and the one a chat turn arrives on."""
+    inst, captured = build()
+
+    question = FakeQuestion()
+    question.addQuestion('what is on the card?')
+
+    inst.open(None)
+    inst.writeQuestions(question)
+    inst.closing()
+
+    assert len(captured.questions) == 1
+    assert [q.text for q in captured.questions[0].questions] == ['what is on the card?']
+    assert inst.has_output is True
 
 
 def test_a_failed_turn_does_not_leak_into_the_next(build):
@@ -311,12 +337,19 @@ def test_a_failed_turn_does_not_leak_into_the_next(build):
     inst, captured = build()
 
     inst.IGlobal = types.SimpleNamespace(config=None)  # config.get(...) raises
+    LOGGED_ERRORS.clear()
 
     inst.open(None)
     inst.writeText('the turn that failed')
     inst.closing()
 
     assert captured.questions == []
+    # Not recorded as output — a turn that emitted nothing did not emit.
+    assert inst.has_output is False
+    # And not silent: a dropped turn looks from the outside like the pipeline
+    # ignoring the person, so it leaves an error-level line naming the cause.
+    assert len(LOGGED_ERRORS) == 1
+    assert 'AttributeError' in LOGGED_ERRORS[0]
 
     inst.IGlobal = types.SimpleNamespace(config={'instructions': _INSTRUCTIONS})
     _turn(inst, 'the turn after')

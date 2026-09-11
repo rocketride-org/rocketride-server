@@ -138,7 +138,7 @@ class Chat(ChatBase):
         and use a unified interface for both Developer API and Vertex AI.
         """
 
-    def getTokens(self, value: str) -> int:
+    def getTokens(self, value: str | None) -> int:
         """
         Estimate the number of tokens in a given text string.
 
@@ -147,7 +147,10 @@ class Chat(ChatBase):
         built-in tokenizer if available.
 
         Args:
-            value (str): The text string to estimate tokens for
+            value (str | None): The text string to estimate tokens for. None is
+                accepted and counts as nothing: `.text` is None for a response
+                that carried no text parts, and token accounting must not be
+                the place that discovers it.
 
         Returns:
             int: Estimated number of tokens
