@@ -39,13 +39,9 @@ than returning it to the caller.
 
 ## Observability-driven debugging
 
-Use the `status` CLI command or the WebSocket event stream to watch a pipeline
-run in real time. Error events pinpoint the failing node, which is usually
-enough to diagnose configuration issues:
-
-```bash
-rocketride status --token <task-token>
-```
+Use the WebSocket event stream to watch a pipeline run in real time. Error
+events pinpoint the failing node, which is usually enough to diagnose
+configuration issues.
 
 ## Related
 

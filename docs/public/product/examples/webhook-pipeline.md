@@ -26,7 +26,7 @@ Save this as `chat.pipe`:
       "provider": "llm_openai",
       "config": {
         "profile": "openai-4o-mini",
-        "apikey": "${OPENAI_API_KEY}"
+        "apikey": "${ROCKETRIDE_OPENAI_API_KEY}"
       },
       "input": [
         { "lane": "questions", "from": "source_1" }

@@ -7,9 +7,9 @@ Four folders, split by **audience**: `public/` is for people outside the repo,
 ## `public/` — humans outside the repo
 
 - **`product/`** — the site spine, and the only folder here whose paths are public
-  URLs verbatim: `quickstart/`, `evaluate/`, `concepts/`, `examples/`,
-  `integrations/`, `develop/`, `operate/`, `reference/`, `ide-extensions/`, plus
-  `protocols/websocket/` (the WebSocket (5565) engine wire protocol, for people
+  URLs verbatim: `quickstart/`, `concepts/`, `guides/`, `examples/`,
+  `clients/`, `connect/`, `operate/`, `reference/`, `support/`, plus
+  `connect/websocket/` (the WebSocket (5565) engine wire protocol, for people
   building their own client).
 - **`typescript/`, `python/`, `mcp/`** — the per-SDK guides, each mounted into
   the docs site. Each folder also holds a `README.md` (the package distribution

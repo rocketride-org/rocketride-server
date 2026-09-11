@@ -56,7 +56,7 @@ Save this as `rag.pipe`:
       "provider": "embedding_openai",
       "config": {
         "profile": "text-embedding-3-small",
-        "apikey": "${OPENAI_API_KEY}"
+        "apikey": "${ROCKETRIDE_OPENAI_API_KEY}"
       },
       "input": [
         { "lane": "documents", "from": "prep_1" },
@@ -84,7 +84,7 @@ Save this as `rag.pipe`:
       "provider": "llm_openai",
       "config": {
         "profile": "openai-4o",
-        "apikey": "${OPENAI_API_KEY}"
+        "apikey": "${ROCKETRIDE_OPENAI_API_KEY}"
       },
       "input": [
         { "lane": "questions", "from": "store_1" }

@@ -9,7 +9,7 @@
  */
 const path = require('path');
 const { readdir } = require('node:fs/promises');
-const { execCommand, exists, mkdir, rm, setState, parallel, runPytest, PROJECT_ROOT, BUILD_ROOT, DIST_ROOT } = require('../../../scripts/lib');
+const { execCommand, exists, mkdir, rm, setState, parallel, runPytest, isWindows, PROJECT_ROOT, BUILD_ROOT, DIST_ROOT } = require('../../../scripts/lib');
 
 // Light, in-tree reference generators that deposit before gather collects them.
 // Heavier emitters (Python SDKs, engine) refresh via their own :build under
@@ -17,6 +17,9 @@ const { execCommand, exists, mkdir, rm, setState, parallel, runPytest, PROJECT_R
 const DOC_GENERATORS = ['nodes:docs-generate', 'client-typescript:docs-generate'];
 
 const DOCS_DIR = path.join(__dirname, '..');
+// Engine (built by server:build; execCommand resolves extension on Windows).
+// Its Python carries pytest; the ambient python3 on PATH may not.
+const ENGINE = path.join(DIST_ROOT, 'server', 'engine');
 // Spine pages now live in the top-level docs/ tree (docs consolidation).
 const CONTENT_STATIC_DIR = path.join(PROJECT_ROOT, 'docs', 'public', 'product');
 const STATIC_DIR = path.join(DOCS_DIR, 'static');
@@ -162,9 +165,21 @@ function makeValidateAction() {
 			// 3. the validator's own regression tests — the only per-PR gate on
 			// scripts/validate-node-readme.py itself; nodes:test also runs this
 			// file, but nothing in .github/workflows invokes nodes:test.
+			// Run them under the engine's Python like every other pytest task:
+			// a bare `python3` is whatever the runner has on PATH, and the
+			// Windows CI interpreter ships without pytest. docs:validate also
+			// runs where no engine is built (docs-schemas.yml, a clean
+			// checkout), so skip there instead of failing on ENOENT; the full
+			// build jobs still exercise the tests. nodes:test keeps hard-failing
+			// on a missing engine, which is why this guard is local.
+			const testsFile = path.join(PROJECT_ROOT, 'tests', 'test_validate_node_readme.py');
+			if (!(await exists(ENGINE + (isWindows() ? '.exe' : '')))) {
+				task.output = `pytest: engine not built at ${ENGINE}, skipping ${path.relative(PROJECT_ROOT, testsFile)} (run server:build to include it)`;
+				return;
+			}
 			await runPytest({
-				engine: 'python3',
-				testsDir: path.join(PROJECT_ROOT, 'tests', 'test_validate_node_readme.py'),
+				engine: ENGINE,
+				testsDir: testsFile,
 				execOpts: { task, cwd: PROJECT_ROOT },
 			});
 		},

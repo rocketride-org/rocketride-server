@@ -68,7 +68,7 @@ Two special question types are handled on the `questions` lane:
 
 ## As a tool
 
-When connected to an agent, the node exposes three functions (named under the configured server prefix, default `postgres`):
+When connected to an agent, the node exposes three functions. The registered tool names are the bare method names below; the services.json `prefix` is a URL/path prefix and never appears in a tool name. An agent catalog namespaces each tool by the pipeline component id (for example `<component-id>.get_data`).
 
 | Tool         | Description                                                                                                       |
 | ------------ | ----------------------------------------------------------------------------------------------------------------- |
@@ -153,7 +153,7 @@ Rows arriving on the `answers` lane are inserted into the configured `table`:
 
 ### Supabase preset
 
-`services.supabase.json` registers the same node as Supabase (`db_supabase://`, prefix `supabase`). The connection is encrypted over TLS. Operational notes:
+`services.supabase.json` registers the same node as Supabase (`db_supabase://`); its tools carry the same bare names. The connection is encrypted over TLS. Operational notes:
 
 - **Use the Supavisor pooler** from the Supabase dashboard (Connect button): `aws-0-<region>.pooler.supabase.com:6543` (transaction) or `:5432` (session). It works over IPv4.
 - The **direct connection** (`db.<project-ref>.supabase.co:5432`) is IPv6-only and will fail to resolve on networks without IPv6.

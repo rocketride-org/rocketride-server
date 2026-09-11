@@ -15,7 +15,7 @@ Validate both layers with:
 python3 scripts/validate-client-docs.py
 ```
 
-The MCP readme (`docs/public/mcp/README.md`) is a different product surface and is
+The MCP readme (`docs/public/mcp/stdio/README.md`) is a different product surface and is
 **not** covered by this schema.
 
 ## README section order

@@ -5,7 +5,7 @@
      stages assets/, so a relative image link here would 404 on the
      published page. Keep this one banner absolute. -->
 <p align="center">
-  <img src="https://raw.githubusercontent.com/rocketride-org/rocketride-server/main/docs/public/mcp/stdio/assets/banner-mcp.png" alt="RocketRide MCP Server" width="900" />
+  <img src="https://raw.githubusercontent.com/rocketride-org/rocketride-server/develop/docs/public/mcp/stdio/assets/banner-mcp.png" alt="RocketRide MCP Server" width="900" />
 </p>
 
 <p align="center">

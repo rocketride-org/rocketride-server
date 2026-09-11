@@ -154,6 +154,8 @@ Returns mirror the Python table: `add` → `PublishResult`; `deploy`, `get`,
 ### App publish ladder
 
 See [Deployments](/clients/typescript/deploy#app-publish-ladder) for the model.
+Only `deploy.add` and `deploy.addApp` live on `client.deploy`; the unprefixed
+verbs below are methods on the client itself (`client.publishApp(...)`).
 
 | Method | Signature | Description |
 | ------ | --------- | ----------- |

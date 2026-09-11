@@ -143,12 +143,16 @@ Lanes are typed data channels that connect components. A connection is valid ONL
 | `tags`      | Metadata         | File metadata and raw file info from sources       |
 | `text`      | Plain text       | Extracted or generated text content                |
 | `table`     | Structured data  | Tables from documents or databases                 |
+| `json`      | JSON objects     | Structured JSON records (webhook bodies, extracted data, JSON responses) |
+| `words`     | Word tokens      | Word-level output (engine lane; no catalog node emits it today) |
 | `documents` | Document objects | Chunked/processed documents with embeddings        |
 | `questions` | Question objects | Questions to be answered (trigger LLMs and search) |
 | `answers`   | Answer objects   | Answers from LLMs or vector stores                 |
 | `image`     | Image data       | Images extracted from documents                    |
 | `audio`     | Audio streams    | Audio content                                      |
 | `video`     | Video streams    | Video content                                      |
+| `classifications` | Classification results | Per-object classification labels (engine lane) |
+| `classificationContext` | Classification context | Classification policy/rules context (engine lane) |
 
 **Source components** use `_source` as the internal lane name in the catalog. You do not reference `_source` in pipeline files; source components automatically produce their output lanes.
 
@@ -312,7 +316,7 @@ This applies to agents, but also to non-agent components like `summarization`, `
 | -------------------------- | -------------------- | ------------------------ | ------------- | -------------------------------------- |
 | `agent_rocketride`         | Required (exactly 1) | **Required (exactly 1)** | Optional      | -                                      |
 | `agent_crewai`             | Required (min 1)     | Not supported            | Optional      | -                                      |
-| `agent_crewai_manager`     | Required (min 1)     | Not supported            | Not supported | Required (min 1, classType `crewai`)   |
+| `agent_crewai_manager`     | Required (min 1)     | Not supported            | Optional      | Required (min 1, classType `crewai`)   |
 | `agent_crewai_subagent`    | Required (min 1)     | Not supported            | Optional      | -                                      |
 | `agent_deepagent`          | Required (min 1)     | Not supported            | Optional      | Optional (min 0, classType `deepagent`) |
 | `agent_deepagent_subagent` | Required (min 1)     | Not supported            | Optional      | -                                      |
@@ -323,7 +327,7 @@ Only `agent_rocketride` supports a `memory_internal` control connection. No othe
 
 Framework-specific notes:
 
-- `agent_crewai_manager` has **no tool port**: tools attach to its sub-agents instead. Each `agent_crewai_subagent` joins the crew by declaring `control: [{ "classType": "crewai", "from": "<manager_id>" }]`, and at least one sub-agent is required.
+- `agent_crewai_manager` takes an **optional `tool` port** (min 0) for cross-cutting tools the manager itself calls; task tools normally attach to its sub-agents instead. Each `agent_crewai_subagent` joins the crew by declaring `control: [{ "classType": "crewai", "from": "<manager_id>" }]`, and at least one sub-agent is required.
 - `agent_deepagent` can optionally delegate to `agent_deepagent_subagent` nodes, which declare `control: [{ "classType": "deepagent", "from": "<agent_id>" }]`.
 - The sub-agent nodes (`agent_crewai_subagent`, `agent_deepagent_subagent`) have no data lanes: they live entirely on the control plane, with their own required LLM and optional tools declaring `control` entries that point at the sub-agent.
 

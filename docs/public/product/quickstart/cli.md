@@ -30,21 +30,21 @@ See [Choose How to Run RocketRide](/operate) for engine setup.
 
 ## 2. Start a pipeline
 
-Pass a `.pipe` file and watch events stream back live:
+Pass a `.pipe` file. The command starts the task, prints its token, and exits;
+the pipeline keeps running on the engine:
 
 ```bash
-# TypeScript CLI
 rocketride start --pipeline ./my-pipeline.pipe
-
-# Python CLI
-rocketride start ./my-pipeline.pipe
 ```
 
-The CLI prints a **task token** at the start of the run — copy it, you'll use it
+The CLI prints a **task token** when the run starts. Copy it, you'll use it
 in the next steps.
 
 ```
-task token: ey...
+Starting pipeline from ./my-pipeline.pipe...
+Pipeline started.
+Token: ey...
+Stop it with: rocketride stop --token ey...
 ```
 
 ## 3. Upload files through a pipeline
@@ -53,11 +53,7 @@ Use `upload` to push one or more files through an extraction or processing
 pipeline:
 
 ```bash
-# TypeScript CLI
 rocketride upload --pipeline ./extract.pipe ./document.pdf
-
-# Python CLI
-rocketride upload --pipeline_path ./extract.pipe ./document.pdf
 ```
 
 Or feed files into a task that's already running by passing its token:
@@ -66,15 +62,16 @@ Or feed files into a task that's already running by passing its token:
 rocketride upload --token <task-token> ./report-q1.pdf ./report-q2.pdf
 ```
 
-## 4. Monitor progress
+## 4. Check what is running
 
-Use the token from step 2 to watch a long-running task in real time:
+List the active tasks to confirm yours is still up and to find its token again:
 
 ```bash
-rocketride status --token <task-token>
+rocketride list
 ```
 
-Press `Ctrl+C` to stop watching — the task keeps running.
+The CLI does not stream events; live monitoring belongs to the platform's
+monitor apps.
 
 ## 5. Stop a task
 

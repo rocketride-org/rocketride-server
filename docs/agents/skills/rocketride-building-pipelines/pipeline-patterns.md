@@ -7,8 +7,9 @@ A quick map of the shapes most requests reduce to. Match the request to a patter
 matching worked example in `rocketride-designing-pipelines/examples/`. These are starting points —
 always verify node names + lanes against the live index and schemas.
 
-A pipeline is a directed **acyclic** graph of nodes joined by **typed lanes**. Exactly one
-**source** node; data flows source → … → a terminal (`response_*` for replies, a store/`db_*`
+A pipeline is a directed **acyclic** graph of nodes joined by **typed lanes**. One resolvable
+**source** node (named by `source`, or the single node with `config.mode: "Source"`); data flows
+source → … → a terminal (`response_*` for replies, a store/`db_*`
 for ingestion). Lanes are typed channels — the output lane of one node must match an input lane
 of the next, or you insert a converter.
 

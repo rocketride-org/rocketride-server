@@ -165,6 +165,7 @@ Automated node tests are declared in `services.json`:
 | `model` | `string` | **Model**<br/>OpenAI model |  |
 | `modelTotalTokens` | `number` | **Tokens**<br/>Total Tokens |  |
 | `openai.profile` | `string` | **Model**<br/>LLM model | `"openai-5-2"` |
+| `temperature` | `number` | **Temperature**<br/>Sampling temperature for non-reasoning models: 0 is generally more deterministic, higher values increase variety. Ignored for reasoning models (o1, o3, GPT-5 reasoning variants, ...), which OpenAI's Responses API controls separately. | `0` |
 
 ## Dependencies
 

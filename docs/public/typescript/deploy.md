@@ -63,6 +63,10 @@ the scheduler uses — returning `{ token, version }`, and
 | `errored` | A scheduled dispatch failed — on permissions, or on an unusable artifact (missing or sha256-tampered) — and the scheduler stopped retrying. |
 | `removed` | Soft delete (`deploy.remove`): hidden from listings, history and artifacts survive; re-deploying revives it. |
 
+## Permissions
+
+Mutations require `task.control` on the TARGET team. Reads follow the visibility model: an org admin sees every team and every personal space; a user sees their own personal space and the teams they are a member of.
+
 ## App publish ladder
 
 Typed wrappers over `rrext_deploy_app` — the publish ladder for RocketRide apps.
@@ -83,6 +87,10 @@ App ids are partitioned by the caller org's **developer id**: every app is
 `<developerId>.<name>` (globally unique), so an org can only deploy/publish
 ids inside its own namespace — the platform holds `rocketride`. Deploying or
 publishing an app requires the org to have claimed a developer id.
+
+`deploy.add` and `deploy.addApp` live on `client.deploy`; every other verb
+below is a method on the client itself (`client.listDeployments(...)`,
+`client.publishApp(...)`), not on `client.deploy`.
 
 | Method | Description |
 | --- | --- |

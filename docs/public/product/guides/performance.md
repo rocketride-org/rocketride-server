@@ -46,13 +46,8 @@ memory usage per run. The defaults suit most workloads.
 
 ## Profiling a pipeline
 
-The engine emits per-node timing in its WebSocket event stream. Use the CLI to
-watch live timings during a run:
-
-```bash
-rocketride status --token <task-token>
-```
-
+The engine emits per-node timing in its WebSocket event stream. The CLI does
+not stream it; subscribe from an SDK client or the platform's monitor apps.
 The [WebSocket Events](/connect/websocket/observability) page documents the
 event schema. To find bottlenecks, look for the node with the longest gap
 between its `start` and `complete` events — that is usually the LLM call or the

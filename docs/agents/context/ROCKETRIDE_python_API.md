@@ -869,10 +869,11 @@ If you omit `ttl`, each scheduled run executes until the pipeline finishes on it
 
 The app methods are the **automation layer under the App Builder UI** — everything the UI does to move an app from source to store, scriptable. The flow: pack and upload source (`deploy.add_app`), watch the build (`list_deployments`, `build_log`), bind versions to audiences (`publish_app`), and go through store review (`submit_app`, `withdraw_app`, `reply_app`).
 
-**Scaffolding:** creating a new app is currently a TypeScript/CLI surface —
-use `rocketride app create <slug>` (or the App Builder wizard); a Python
-`create_app` mirror is planned. Everything below (pack, deploy, publish,
-review) has full Python parity.
+**Scaffolding:** `await client.deploy.create_app(slug, template='Blank', display_name=..., ...)`
+scaffolds a new app under `./apps/<slug>`, the same templates as
+`rocketride app create <slug>` and the App Builder wizard (mirrors the TypeScript
+`deploy.createApp`). Everything below (pack, deploy, publish, review) has full
+Python parity.
 
 **Packing and uploading:** `deploy.add_app` packs an app folder exactly as
 the App Builder does — workspace-rooted zip layout, `appManifest.include`
@@ -916,10 +917,10 @@ The zip contains the app's SOURCE (the server owns the build and never trusts cl
 rail = await client.list_deployments('acme.reports')
 latest = rail[0]
 if latest['buildStatus'] != 'ok':
-    print((await client.build_log('acme.reports', latest['version']))['log'])
+    print((await client.build_log('acme.reports', latest['registryVersion']))['log'])
 else:
-    await client.publish_app('acme.reports', latest['version'], '@team/qa')
-    await client.submit_app('acme.reports', latest['version'])
+    await client.publish_app('acme.reports', latest['registryVersion'], '@team/qa')
+    await client.submit_app('acme.reports', latest['registryVersion'])
 ```
 
 ## 11. Account & Billing

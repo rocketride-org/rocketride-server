@@ -9,7 +9,9 @@ Every task writes a **run log**: one continuous JSONL event stream per task
 identity (`project_id` + `source`, plus the scope: a `team_id` addresses that
 team's DEPLOY continuum — [deploy runs](/clients/python/deploy) log into the
 team's tree, readable by any teammate with monitor rights — while omitting it
-addresses your own dev stream; there is no run-kind argument). Individual runs are
+addresses your own stream, where the optional `run_kind` picks between your dev
+stream (the default) and your personal deploy stream: `'deploy'` without a
+`team_id` is the only way to address that continuum). Individual runs are
 **chapters** (tracks) inside the stream — there are no per-run log files. The log
 survives disconnects and server restarts, powers replay of past runs through the
 same panels that render live monitoring, and is retained on a ring (last ~1 GB)
@@ -58,8 +60,8 @@ session.close_event_stream()  # dispose
 `get_traces(n)` errors when `n > 50` — the session exposes all in-flight traces
 plus a sliding window of the 50 most recently closed; any older trace is still
 reachable by seeking to a position inside its lifetime. `get_trace(trace_id)`
-resolves a trace by its begin event's continuum seq (pass the chapter's
-`beginSeq` value) — the permanent identity (slot
+resolves a trace by its begin event's continuum seq (pass the trace's own
+`beginSeq` from its `get_traces` summary, not the chapter's) — the permanent identity (slot
 ids recycle; `beginSeq` never does). Hosts that own a live subscription feed
 arriving events to the session via `ingest_live(event)`; while pinned, arrival
 paces delivery.

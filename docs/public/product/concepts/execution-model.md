@@ -25,8 +25,8 @@ This reads: _take the `questions` lane produced by `qdrant_1` as my input._
 ### Lane types
 
 Lanes are typed, and the type must match across a connection. This is the
-canonical lane table; it is not exhaustive — individual nodes can define
-additional lanes (see each node's entry in [Nodes](/nodes)):
+complete lane table: lanes are a closed set fixed by the engine, and a node
+only chooses which of them it accepts (see each node's entry in [Nodes](/nodes)):
 
 | Lane        | Carries                          | Accepted by                                              |
 | ----------- | -------------------------------- | -------------------------------------------------------- |
@@ -38,6 +38,11 @@ additional lanes (see each node's entry in [Nodes](/nodes)):
 | `image`     | Image content                    | Vision nodes                                             |
 | `audio`     | Audio streams                    | Audio nodes                                              |
 | `video`     | Video streams                    | Video nodes                                              |
+| `table`     | Structured / tabular data        | Extractors, table-aware preprocessors                    |
+| `json`      | JSON payloads                    | `response` target                                        |
+| `words`     | Word-level tokens                | Engine-defined; no catalog node consumes it today        |
+| `classifications` | Classification results     | Engine-defined; no catalog node consumes it today        |
+| `classificationContext` | Context for a classification pass | Engine-defined; no catalog node consumes it today |
 
 ### Lane flow rules
 

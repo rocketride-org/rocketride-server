@@ -515,6 +515,20 @@ const redirects: RedirectItem[] = [
 		to: '/guides/apps',
 		from: ['/guides/apps/reference'],
 	},
+	// Bare old URLs whose new prefix has no index route (createRedirects below only
+	// fires for paths that exist), or whose content moved to unpublished docs/development/.
+	{
+		to: '/connect/mcp/http',
+		from: ['/protocols/mcp'],
+	},
+	{
+		to: '/guides/apps/app-builder',
+		from: ['/ide-extensions/vscode/appdev'],
+	},
+	{
+		to: '/clients/vscode',
+		from: ['/ide-extensions/vscode/webview-protocol'],
+	},
 ];
 
 // Mounted subtrees renamed by the IA restructure: for every page under a new

@@ -135,7 +135,6 @@ For a destructive migration, use a new OpenSearch collection name and ingest the
 | `elasticsearch.index` | `string` | **Index Name / Collection Name**<br/>Enter the name of the Elasticsearch index | `"rocketride"` |
 | `elasticsearch.index_label` | `object` | **Index Mode** |  |
 | `elasticsearch.matchOperator` | `string` | **Match Operator**<br/>Controls how multiple query terms are matched: 'or' (default) matches documents containing ANY of the query terms, 'and' matches documents containing ALL of the query terms, 'exact' requires the exact phrase to appear in order (phrase matching). | `"or"` |
-| `elasticsearch.mode` | `boolean` | **Store Mode**<br/>Toggle between index (text search) and vector store (semantic search). | `true` |
 | `elasticsearch.profile` | `string` | **Deployment Type**<br/>Connect to... | `"self-managed"` |
 | `elasticsearch.provider` | `string` |  | const: `"elasticsearch"` |
 | `elasticsearch.search` | `boolean` | **Customize Indexing Search Behavior**<br/>Customize the search behavior of the index. This option does not affect the ingestion and creation of the index. You can switch between behaviors when searching between pipeline runs. | `false` |
@@ -143,6 +142,7 @@ For a destructive migration, use a new OpenSearch collection name and ingest the
 | `elasticsearch.search.highlight` | `boolean` | **Return contextual snippets**<br/>Use the unified highlighter to return snippets around matches. | `false` |
 | `elasticsearch.search.highlight.fragment_size` | `number` | **Snippet size (characters)**<br/>Maximum characters in the returned highlight snippet (context window) per hit. | `250` |
 | `elasticsearch.store_enabled` | `boolean` | **Store**<br/>Enable document storage | `true` |
+| `elasticsearch.store_mode` | `boolean` | **Store Mode**<br/>Toggle between index (text search) and vector store (semantic search). | `true` |
 | `elasticsearch.type` | `string` | **Type**<br/>Elasticsearch operation type | `"vector_database"` |
 | `elasticsearch.vstore_label` | `object` | **Vector Store Mode** |  |
 | `vector.cloud.host` |  | Enter the Elastic Cloud host URL e.g. <your-deployment-id>.es.<region>.cloud.es.io |  |

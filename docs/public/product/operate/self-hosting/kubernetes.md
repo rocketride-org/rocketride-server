@@ -45,7 +45,7 @@ The chart deploys the same published engine image the
 | --- | --- |
 | `engine.image.repository` / `engine.image.tag` | Engine image; pin a version tag in production |
 | `engine.env` | Plain environment for the pods (goes into a ConfigMap) — log level, worker threads, and any non-secret engine settings |
-| `engine.secrets` | Provider credentials (`OPENAI_API_KEY`, …) — rendered into a Kubernetes Secret and referenced from node config as `${VAR}` |
+| `engine.secrets` | Provider credentials (`ROCKETRIDE_OPENAI_API_KEY`, …) — rendered into a Kubernetes Secret and referenced from node config as `${VAR}`. Names must start with `ROCKETRIDE_`: the engine resolves only that prefix and replaces any other `${VAR}` reference with the literal `<REDACTED>` |
 | `engine.existingSecret` (+ `existingSecretChecksum`) | Use a secret you manage instead of chart-created; bump the checksum on rotation to force a rollout |
 | `engine.resources` | Requests/limits (defaults: 250m/512Mi requested, 2 CPU/2Gi limit) |
 | `engine.autoscaling` | Built-in HPA (off by default; CPU/memory targets) |
@@ -83,10 +83,10 @@ covers co-location and sizing.
 ## Health probes
 
 The chart's default readiness/liveness/startup probes call `/ping` on 5565.
-The engine's only public HTTP endpoint, however, is `/version` — `/ping` sits
-behind the auth gate and returns 401 to the kubelet's unauthenticated probes
-even when no API key is configured, which recycles healthy pods. Point all
-three probes at the public version endpoint:
+The engine entrypoint, however, starts its web server without the standard
+endpoints, so `/ping` is never registered and returns 404 to the kubelet's
+probes, which recycles healthy pods. `/version` is always registered and
+public. Point all three probes at the version endpoint:
 
 ```yaml
 engine:

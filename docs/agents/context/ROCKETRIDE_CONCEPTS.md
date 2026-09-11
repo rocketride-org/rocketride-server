@@ -108,7 +108,7 @@ future). Learn it once:
   `@public` (the store). There is no org-wide rung. Internal rungs serve
   immediately; the public rung adds a **review ladder**.
 - **Review state vs build status — two independent axes.** Review state is
-  the human ladder: private → submitted → approved or rejected, with a
+  the human ladder: `private` → `submit` → `ready` (approved) or `rejected`, with a
   two-way message thread between developer and reviewer. Build status is the
   machine axis: queued → building → ok or failed. An approved version with a
   failed build still cannot serve; a green build in review still waits for a
@@ -139,7 +139,7 @@ an app package can never be scheduled) can run on a schedule:
 | deploy | version an artifact into the server registry | publish |
 | publish | bind a deployed version to a rung | deploy |
 | registry version | server-assigned integer (v1, v2 …) | your package semver |
-| review state | private / submitted / approved / rejected | build status |
+| review state | private / submit / ready / rejected | build status |
 | build status | queued / building / ok / failed | review state |
 | rung | `@me`, `@team/<name>`, `@public` | orgs (no org rung exists) |
 | pipeline component | a node in a `.pipe` (`provider`) | UI component |

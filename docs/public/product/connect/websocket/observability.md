@@ -157,7 +157,7 @@ map.
   `*Size` fields, `wordsCount` / `wordsSize`.
 - **Rates:** `rateCount`, `rateSize` (instantaneous).
 - **History:** `errors`, `warnings`, `notes`; `errors` and `warnings` are
-  **capped at the last 50 entries**, so persist them as they arrive or older
+  **capped at the last 1000 entries**, so persist them as they arrive or older
   ones are lost on long runs.
 - **Termination:** `exitCode`, `exitMessage`.
 - **Pipeline flow:** `pipeflow.{totalPipes, byPipe}`, where `byPipe` maps each pipe
