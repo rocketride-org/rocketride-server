@@ -6,7 +6,7 @@ Use RocketRide when building AI pipelines, document processing, RAG systems, or 
 
 ## Documentation
 
-Full docs: `.rocketride/docs/`
+Full docs: `docs/agents/context/`
 
 **Read the relevant doc(s) before generating any RocketRide code.**
 
@@ -25,8 +25,8 @@ Full docs: `.rocketride/docs/`
 
 ## Before Writing ANY RocketRide Code
 
-1. Read `.rocketride/docs/ROCKETRIDE_README.md` for mandatory setup requirements
+1. Read `docs/agents/context/ROCKETRIDE_README.md` for mandatory setup requirements
 2. Read the relevant API doc (Python or TypeScript) for your language
-3. Read `.rocketride/docs/ROCKETRIDE_PIPELINES.md` + `.rocketride/docs/ROCKETRIDE_COMPONENT_REFERENCE.md`
-4. For apps, read `.rocketride/docs/ROCKETRIDE_APPS.md`
+3. Read `docs/agents/context/ROCKETRIDE_PIPELINES.md` + `docs/agents/context/ROCKETRIDE_COMPONENT_REFERENCE.md`
+4. For apps, read `docs/agents/context/ROCKETRIDE_APPS.md`
 <!-- ROCKETRIDE:END -->

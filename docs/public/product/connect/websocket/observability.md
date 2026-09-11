@@ -19,9 +19,9 @@ of this for you (`getTaskStatus()`, `onEvent`, `setEvents()` / `add_monitor`), s
 you rarely touch the wire directly. This page documents the protocol surface so you
 can debug it, build a dashboard, or write your own ingester.
 
-<!-- Maintainers: docs/agents/ROCKETRIDE_OBSERVABILITY.md restates this same wire
+<!-- Maintainers: docs/agents/context/ROCKETRIDE_OBSERVABILITY.md restates this same wire
      protocol (rrext_monitor, the bitmask table, the apaevt_* schemas) because it
-     is exported to .rocketride/docs/ for offline use by AI assistants and cannot
+     is bundled into .rocketride/docs/ for offline use by AI assistants and cannot
      be reduced to a link. Change the protocol and both files must move together. -->
 
 ## Subscribing: `rrext_monitor`

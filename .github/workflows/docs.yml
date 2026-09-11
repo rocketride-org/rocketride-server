@@ -9,7 +9,7 @@ on:
     branches: [develop]
     paths:
       - 'docs/**'
-      - 'packages/docs/**'
+      - 'docs/docusaurus/**'
       - 'nodes/src/nodes/**/README.md'
       - 'packages/*/docs/**'
       - 'apps/*/docs/**'

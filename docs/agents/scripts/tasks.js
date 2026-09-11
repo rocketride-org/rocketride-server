@@ -25,23 +25,23 @@
  * Client Docs Module
  *
  * Owns the agent documentation bundle: `client-docs:agent` packs
- * docs/agents/ROCKETRIDE_*.md and docs/agents/stubs/* into docs.zip and stages
+ * docs/agents/context/*.md (the ROCKETRIDE_* docs) and docs/agents/context/stubs/* into docs.zip and stages
  * it into static/clients/docs beside the engine, where GET /client/docs
  * serves it. Every client build (client-typescript, client-python,
  * client-mcp) and the vscode build list the task as a step, so the
  * served bundle always matches the tree the clients were built from —
  * never a copy frozen into a client package.
  *
- * Distinct from the `docs` module (packages/docs), which owns the
+ * Distinct from the `docs` module (docs/docusaurus), which owns the
  * documentation SITE; this module owns the agent-facing bundle.
  */
 const path = require('path');
 const { glob } = require('glob');
-const { exists, mkdir, rm, setState, getState, copyFile, removeDirs, syncDir, formatSyncStats, writeJson, createArchive, contentHash, PROJECT_ROOT, BUILD_ROOT, DIST_ROOT } = require('../../scripts/lib');
+const { exists, mkdir, rm, setState, getState, copyFile, removeDirs, syncDir, formatSyncStats, writeJson, createArchive, contentHash, PROJECT_ROOT, BUILD_ROOT, DIST_ROOT } = require('../../../scripts/lib');
 
 // Sources: the agent docs and the per-agent stubs
-const AGENT_DOCS_DIR = path.join(PROJECT_ROOT, 'docs', 'agents');
-const AGENT_STUBS_DIR = path.join(PROJECT_ROOT, 'docs', 'agents', 'stubs');
+const AGENT_DOCS_DIR = path.join(PROJECT_ROOT, 'docs', 'agents', 'context');
+const AGENT_STUBS_DIR = path.join(PROJECT_ROOT, 'docs', 'agents', 'context', 'stubs');
 // Staging + output
 const AGENT_BUILD_DIR = path.join(BUILD_ROOT, 'agent-docs');
 const AGENT_STATIC_DIR = path.join(DIST_ROOT, 'server', 'static', 'clients', 'docs');
@@ -51,7 +51,7 @@ const AGENT_BUNDLE_HASH_KEY = 'clientDocs.agentBundle';
 /**
  * client-docs:agent — stage the agent documentation bundle (docs.zip).
  *
- * Contents: docs/agents/ROCKETRIDE_*.md at the bundle root, docs/agents/stubs/*
+ * Contents: docs/agents/context/*.md (the ROCKETRIDE_* docs) at the bundle root, docs/agents/context/stubs/*
  * under stubs/, plus manifest.json carrying the content hash consumers
  * (the CLI's `rocketride init`, the VS Code extension) use as their
  * change stamp when installing into a workspace's .rocketride/docs.

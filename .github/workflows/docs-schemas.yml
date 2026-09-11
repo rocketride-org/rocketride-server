@@ -14,7 +14,7 @@ on:
     # GitHub Actions YAML has no anchors — keep this list identical to push's.
     paths:
       - 'docs/**'
-      - 'packages/docs/**'
+      - 'docs/docusaurus/**'
       - 'nodes/src/nodes/**/README.md'
       - 'nodes/src/nodes/**/services*.json'
       - 'scripts/validate-node-readme.py'
@@ -26,7 +26,7 @@ on:
     branches: [develop]
     paths:
       - 'docs/**'
-      - 'packages/docs/**'
+      - 'docs/docusaurus/**'
       - 'nodes/src/nodes/**/README.md'
       - 'nodes/src/nodes/**/services*.json'
       - 'scripts/validate-node-readme.py'

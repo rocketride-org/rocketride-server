@@ -11,7 +11,7 @@
 		"name": "File Explorer",
 		"description": "Browse, view, and edit files stored on the RocketRide server",
 		"icon": "./src/icon.svg",
-		"readme": "../../docs/modules/explorer-ui/README.md",
+		"readme": "./README.md",
 		"categories": [
 			"tools"
 		],

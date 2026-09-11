@@ -34,8 +34,6 @@ const { execCommand, removeDirs, removeDirAndParents, removeMatching, PROJECT_RO
 const APP_ROOT = path.join(__dirname, '..');
 const SRC_DIR = path.join(APP_ROOT, 'src');
 const SHARED_UI_SRC = path.join(PROJECT_ROOT, 'shared', 'src');
-const DOCS_DIR = path.join(PROJECT_ROOT, 'docs');
-const README_SRC = path.join(DOCS_DIR, 'public', 'vscode', 'README.md');
 const README_DEST = path.join(APP_ROOT, 'README.md');
 
 // State keys for source fingerprints (webview bundles shared via Canvas)
@@ -242,9 +240,10 @@ function makeStageFilesAction() {
 				await copyFile(onpremSvg, path.join(BUILD_DIR, 'onprem.svg'));
 			}
 			await copyFile(path.join(PROJECT_ROOT, 'LICENSE'), path.join(BUILD_DIR, 'LICENSE'));
-			if (await exists(README_DEST)) {
-				await copyFile(README_DEST, path.join(BUILD_DIR, 'README.md'));
+			if (!(await exists(README_DEST))) {
+				throw new Error(`README.md missing at ${README_DEST} — the marketplace README is tracked source in apps/vscode/`);
 			}
+			await copyFile(README_DEST, path.join(BUILD_DIR, 'README.md'));
 
 			// A stale docs/ staging from a pre-/client/docs build must not
 			// ride into future packs — agent docs are served by the engine
@@ -287,21 +286,6 @@ function makePackageVsixAction() {
 	};
 }
 
-function makeCopyReadmeAction() {
-	return {
-		run: async (ctx, task) => {
-			// The marketplace README is authored in the monorepo's docs/;
-			// standalone repos carry the app README directly, so nothing to sync.
-			if (!(await exists(README_SRC))) {
-				task.output = 'docs/public/vscode/README.md not present - keeping the app README';
-				return;
-			}
-			await copyFile(README_SRC, README_DEST);
-			task.output = 'Copied README from docs/';
-		},
-	};
-}
-
 function makeCleanStagingAction() {
 	return {
 		run: async (ctx, task) => {
@@ -323,7 +307,6 @@ module.exports = {
 
 	actions: [
 		// Internal actions
-		{ name: 'vscode:copy-readme', action: makeCopyReadmeAction },
 		{ name: 'vscode:build-webview', action: makeBuildWebviewAction },
 		{ name: 'vscode:compile-typescript', action: makeCompileTypescriptAction },
 		{ name: 'vscode:bundle-extension', action: makeBundleExtensionAction },
@@ -351,7 +334,7 @@ module.exports = {
 				// Builds gate on drift CHECKS only (silent unless they fail);
 				// unit tests (shared:test) run under test targets, never as
 				// build steps — a normal build must not stream test output.
-				steps: ['shell:build', 'client-docs:agent', 'shared:check-gallery-tokens', 'vscode:copy-readme', 'vscode:build-webview', 'vscode:compile-typescript', 'vscode:bundle-extension', 'vscode:stage-files', 'vscode:package-vsix'],
+				steps: ['shell:build', 'client-docs:agent', 'shared:check-gallery-tokens', 'vscode:build-webview', 'vscode:compile-typescript', 'vscode:bundle-extension', 'vscode:stage-files', 'vscode:package-vsix'],
 			}),
 		},
 		{

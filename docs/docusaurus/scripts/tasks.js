@@ -2,7 +2,7 @@
  * Docs Build Module
  *
  * Co-located documentation site. Discovered by the build orchestrator at
- * packages/docs/scripts/tasks.js; exposes `docs:build` (gather -> index ->
+ * docs/docusaurus/scripts/tasks.js; exposes `docs:build` (gather -> index ->
  * compile), `docs:dev`, `docs:serve`, `docs:test`, and `docs:clean`. Bare
  * `builder build` includes docs:build via global-command expansion because it
  * carries a description.
@@ -91,11 +91,11 @@ function makeDevStartAction(options = {}) {
 
 /**
  * Preview the built static site from SITE_OUT. `docusaurus serve` defaults to
- * packages/docs/build, but the pipeline emits to SITE_OUT (dist/docs), so point
+ * docs/docusaurus/build, but the pipeline emits to SITE_OUT (dist/docs), so point
  * --dir there. Fails fast with an actionable message when nothing is built yet.
  *
  * The `serve` script in package.json mirrors this with a path relative to
- * packages/docs (`../../dist/docs`), which resolves to the same repo-root
+ * docs/docusaurus (`../../dist/docs`), which resolves to the same repo-root
  * dist/docs as the absolute SITE_OUT here.
  */
 function makeServeAction() {

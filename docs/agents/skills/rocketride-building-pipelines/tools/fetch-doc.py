@@ -59,9 +59,10 @@ LINK_RE = re.compile(r'\-\s*\[(.+?)\]\((/[^)]+\.md)\)')
 
 
 def find_doc_map():
-    """Locate ROCKETRIDE_DOC_MAP.md: the skill dir first (its canonical home — the docs
-    exporter owns .rocketride/docs/ and deletes files it didn't export), then the legacy
-    .rocketride/docs/ locations relative to this script, else walk up from cwd.
+    """Locate ROCKETRIDE_DOC_MAP.md: the skill dir first (its canonical home — the
+    client-docs bundle installed by the extension / `rocketride init` owns
+    .rocketride/docs/), then the legacy .rocketride/docs/ locations relative to this
+    script, else walk up from cwd.
     """
     here = os.path.dirname(os.path.abspath(__file__))
     for cand in (

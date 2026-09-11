@@ -31,7 +31,7 @@ const DOCS_GLOB = '{nodes,packages,apps}/**/docs/**/*.{md,mdx}';
 const DOCS_ROOT_MOUNTS = [
 	{ source: 'docs/public/typescript', mount: 'clients/typescript' },
 	{ source: 'docs/public/python', mount: 'clients/python' },
-	{ source: 'docs/public/vscode', mount: 'clients/vscode' },
+	{ source: 'docs/docusaurus/apps/vscode', mount: 'clients/vscode' },
 	{ source: 'docs/public/mcp/stdio', mount: 'connect/mcp/stdio' },
 	{ source: 'docs/public/mcp/http', mount: 'connect/mcp/http' },
 ];
@@ -41,7 +41,7 @@ const DOCS_ROOT_MOUNTS = [
 // directory may legitimately be *named* docs (tool_google_workspace's Google
 // Docs variant), which would otherwise match DOCS_GLOB and abort the build as
 // unmounted.
-const IGNORE = ['**/node_modules/**', '**/build/**', '**/dist/**', 'packages/docs/**', 'nodes/src/nodes/**', 'nodes/test/**'];
+const IGNORE = ['**/node_modules/**', '**/build/**', '**/dist/**', 'nodes/src/nodes/**', 'nodes/test/**'];
 
 const PLACEHOLDER_NOTE = '> **Placeholder.** Generated stub for the documentation spine. Real content lands in a later phase.';
 
@@ -615,16 +615,17 @@ async function gather({ projectRoot, contentStaticDir, contentDir, staticDir, mo
 	//    README.md at a mount root that has no index.md/mdx sibling IS the
 	//    mount's page (it may simultaneously be an export source; docs:export
 	//    just copies the file).
-	//    The sweep covers all of docs/public/, so any new .md there without a
-	//    covering mount aborts the build. docs/development/ is never swept — it
-	//    is unpublished contributor documentation, with no exceptions. Exclusions:
-	//    docs/public/product/ is the shell-authored spine (staged in pass 1, not a
-	//    mount), and docs/public/n8n/ holds only the exported README. Non-markdown
-	//    files (per-client assets/, docs/public/assets/) are never swept — the
-	//    globs match .md/.mdx only, so images need no mount coverage.
+	//    The sweep covers all of docs/public/ and docs/docusaurus/apps/, so any
+	//    new .md there without a covering mount aborts the build.
+	//    docs/development/ is never swept — it is unpublished contributor
+	//    documentation, with no exceptions. Exclusions: docs/public/product/ is
+	//    the shell-authored spine (staged in pass 1, not a mount), and
+	//    docs/public/n8n/ holds only the exported README. Non-markdown files
+	//    (per-client assets/, docs/public/assets/) are never swept — the globs
+	//    match .md/.mdx only, so images need no mount coverage.
 	const contributors = discoverContributors().concat(DOCS_ROOT_MOUNTS.map((m) => ({ sourceDir: path.join(projectRoot, m.source), mount: m.mount, module: 'docs' })));
 	const packageDocsFiles = await glob(DOCS_GLOB, { cwd: projectRoot, nodir: true, ignore: IGNORE });
-	const rootDocsFiles = await glob(['docs/public/**/*.{md,mdx}'], { cwd: projectRoot, nodir: true, ignore: ['**/README.md', 'docs/public/product/**'] });
+	const rootDocsFiles = await glob(['docs/public/**/*.{md,mdx}', 'docs/docusaurus/apps/**/*.{md,mdx}'], { cwd: projectRoot, nodir: true, ignore: ['**/README.md', 'docs/public/product/**'] });
 	// The mount-root README exception described above: gather <source>/README.md
 	// as the mount's page when the mount root carries no index.md/mdx.
 	for (const m of DOCS_ROOT_MOUNTS) {
@@ -714,7 +715,7 @@ async function ensurePlaceholders({ contentDir, staticDir, routes, manifest }) {
 
 /**
  * Fail the build when the staged manifest carries a placeholder page nobody
- * asked for. Called by the docs:gather action (packages/docs/scripts/tasks.js)
+ * asked for. Called by the docs:gather action (docs/docusaurus/scripts/tasks.js)
  * rather than by gather() itself, so gather stays callable against a partial
  * tree (tests, tooling) while every real build is gated.
  * @param {Array<object>} manifest - manifest entries produced by gather().
@@ -726,7 +727,7 @@ function assertNoUnexpectedPlaceholders(manifest, allowed = EXPECTED_PLACEHOLDER
 	const permitted = new Set([...allowed, ...STRUCTURAL_PLACEHOLDERS]);
 	const offenders = (manifest || []).filter((e) => e && e.placeholder && !permitted.has(e.id)).map((e) => e.id);
 	if (!offenders.length) return;
-	throw new Error([`docs:gather: ${offenders.length} page(s) would publish as an empty "coming soon" placeholder:`, ...offenders.map((id) => `  /${id}`), 'A doc id IS the public URL, so this almost always means a spine id and a file path are out of sync:', 'a page was moved or renamed without updating its id in packages/docs/scripts/lib/spine.js, or a spine', 'id was changed without moving the file under docs/. Fix whichever is wrong so the two match.', 'If a stub page really is intended, add its id to EXPECTED_PLACEHOLDERS in packages/docs/scripts/lib/gather.js.'].join('\n'));
+	throw new Error([`docs:gather: ${offenders.length} page(s) would publish as an empty "coming soon" placeholder:`, ...offenders.map((id) => `  /${id}`), 'A doc id IS the public URL, so this almost always means a spine id and a file path are out of sync:', 'a page was moved or renamed without updating its id in docs/docusaurus/scripts/lib/spine.js, or a spine', 'id was changed without moving the file under docs/. Fix whichever is wrong so the two match.', 'If a stub page really is intended, add its id to EXPECTED_PLACEHOLDERS in docs/docusaurus/scripts/lib/gather.js.'].join('\n'));
 }
 
 module.exports = { gather, docIdFor, pageDescription, stampLastUpdate, assertNoUnexpectedPlaceholders, EXPECTED_PLACEHOLDERS };

@@ -22,7 +22,7 @@ const NODES_DIR = 'nodes';
 // IA restructure phase 3 (claude/tasks/docs-ia-restructure/plan.md):
 // journey-ordered sections whose ids now match their section prefixes — the
 // docs/public/product/ folder tree, the doc ids, and the public URLs are one
-// namespace again. Old routes 301 via packages/docs/redirects.ts.
+// namespace again. Old routes 301 via docs/docusaurus/redirects.ts.
 const SPINE = [
 	{ id: 'index', label: 'Home' },
 	{

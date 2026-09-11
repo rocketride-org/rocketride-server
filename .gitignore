@@ -221,7 +221,6 @@ version.json
 
 # Package READMEs (copied from docs/ by build; packaging requires them here)
 packages/chat-widget/README.md
-apps/vscode/README.md
 
 downloads/jdk-17.zip
 downloads/jre-17.zip

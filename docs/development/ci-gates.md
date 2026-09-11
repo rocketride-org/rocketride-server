@@ -20,7 +20,7 @@ One job is deliberately **outside** `ci-ok` and cannot block a merge:
 
 The doc-schema and docs-site-build checks are not in `ci.yml` at all: they live
 in `.github/workflows/docs-schemas.yml`, which triggers on PRs into `develop`
-(and pushes to it) that touch doc-related paths — `docs/**`, `packages/docs/**`,
+(and pushes to it) that touch doc-related paths — `docs/**`, `docs/docusaurus/**`,
 node READMEs and `services*.json`, the validators, and the lockfile.
 
 CodeQL is GitHub's "Default setup" (repo Settings → Code security), not a job in
