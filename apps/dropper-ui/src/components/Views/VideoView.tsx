@@ -7,6 +7,7 @@
 import React from 'react';
 import { Video } from 'lucide-react';
 import { ContentBlock, ProcessedResults } from '../../types/dropper.types';
+import { WhepPlayer } from '../WhepPlayer';
 
 /**
  * Props for the VideoView component.
@@ -44,9 +45,13 @@ export const VideoView: React.FC<VideoViewProps> = ({ video, compareMode, setRef
 
 	const renderPlayers = (content: string, label: string) => (
 		<div className="media-grid">
-			{content.split('|||').map((url: string, i: number) => (
-				<video key={i} src={url} controls className="processed-video" aria-label={`${label} ${i + 1}`} />
-			))}
+			{content.split('|||').map((url: string, i: number) =>
+				url.startsWith('whep:') ? (
+					<WhepPlayer key={i} url={url.slice(5)} kind="video" className="processed-video" label={`${label} ${i + 1}`} />
+				) : (
+					<video key={i} src={url} controls className="processed-video" aria-label={`${label} ${i + 1}`} />
+				)
+			)}
 		</div>
 	);
 

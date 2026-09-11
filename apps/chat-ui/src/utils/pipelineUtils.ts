@@ -44,6 +44,59 @@ export interface TextResult {
 	key: string;
 }
 
+/** A media artifact (image/video/audio) produced by the pipeline. */
+export interface MediaResult {
+	/** Logical FileStore path (resolved to a URL client-side via fsGetUrl). */
+	path?: string;
+	/** Pre-resolved data URI, used when the pipeline fell back to base64. */
+	url?: string;
+	mime: string;
+	name: string;
+	key: string;
+}
+
+/**
+ * Extracts media artifacts (image/video/audio) from a pipeline result.
+ *
+ * The response node emits, per media, either `{ mime_type, path }` (persisted to
+ * the FileStore) or `{ mime_type, image|video|audio: <base64> }` (fallback).
+ */
+export const extractMediaFromResult = (result: PIPELINE_RESULT): MediaResult[] => {
+	const media: MediaResult[] = [];
+	if (!result.result_types) return media;
+
+	for (const [fieldName, fieldType] of Object.entries(result.result_types)) {
+		// Accept plural lane names too (images/audios/videos), normalising to the singular kind —
+		// the dropper parser already does, and a plural lane would otherwise be dropped silently.
+		const kind =
+			fieldType === 'images'
+				? 'image'
+				: fieldType === 'audios'
+					? 'audio'
+					: fieldType === 'videos'
+						? 'video'
+						: fieldType;
+		if (kind !== 'image' && kind !== 'video' && kind !== 'audio') continue;
+
+		const fieldData = result[fieldName];
+		const items = Array.isArray(fieldData) ? fieldData : [fieldData];
+		for (const item of items) {
+			if (!item || typeof item !== 'object') continue;
+			const mime = typeof item.mime_type === 'string' ? item.mime_type : '';
+			if (typeof item.path === 'string' && item.path) {
+				media.push({ path: item.path, mime, name: item.path.split('/').pop() || fieldName, key: fieldName });
+			} else {
+				const b64 = item.image || item.video || item.audio || item[kind];
+				if (typeof b64 === 'string' && b64) {
+					media.push({ url: `data:${mime};base64,${b64}`, mime, name: fieldName, key: fieldName });
+				}
+			}
+		}
+	}
+
+	return media;
+};
+
 export const extractTextFromResult = (result: PIPELINE_RESULT): TextResult[] => {
 	const textResponses: TextResult[] = [];
 

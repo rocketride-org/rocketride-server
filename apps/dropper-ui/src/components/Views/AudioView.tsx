@@ -7,6 +7,7 @@
 import React from 'react';
 import { Music } from 'lucide-react';
 import { ContentBlock, ProcessedResults } from '../../types/dropper.types';
+import { WhepPlayer } from '../WhepPlayer';
 
 /**
  * Props for the AudioView component.
@@ -44,9 +45,13 @@ export const AudioView: React.FC<AudioViewProps> = ({ audio, compareMode, setRef
 
 	const renderPlayers = (content: string, label: string) => (
 		<div className="media-grid">
-			{content.split('|||').map((url: string, i: number) => (
-				<audio key={i} src={url} controls className="processed-audio" aria-label={`${label} ${i + 1}`} />
-			))}
+			{content.split('|||').map((url: string, i: number) =>
+				url.startsWith('whep:') ? (
+					<WhepPlayer key={i} url={url.slice(5)} kind="audio" className="processed-audio" label={`${label} ${i + 1}`} />
+				) : (
+					<audio key={i} src={url} controls className="processed-audio" aria-label={`${label} ${i + 1}`} />
+				)
+			)}
 		</div>
 	);
 
