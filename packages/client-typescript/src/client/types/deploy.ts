@@ -146,6 +146,11 @@ export interface PublishResult {
 	artifact?: DeployArtifact;
 	/** Present only when `deployTo` was given (one-step add+deploy; pipes only). */
 	deployment?: Deployment;
+	/** The audience a node was bound to, when `deployTo` accompanied a node
+	    deploy. Absent means the version published and is inert. */
+	audience?: { type: string; id: string; name?: string };
+	/** The org the registry write landed in. */
+	orgId?: string;
 }
 
 /** The standard list-API request arguments (page/search/filter/sort). */

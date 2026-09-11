@@ -217,6 +217,8 @@ command.
 
 - [Observability](/protocols/websocket/observability): monitoring events and
   metrics over this socket.
+- [Deploying nodes](/protocols/websocket/node-deploy): publishing a custom node
+  and pinning who can reach it.
 - [MCP](/protocols/mcp): pipelines-as-tools for AI assistants, transported over
   this socket.
 - [TypeScript SDK](/develop/typescript) · [Python SDK](/develop/python): the

@@ -483,6 +483,100 @@ export function readIncludeEntries(appFolder: string, workspaceRoot: string, onP
  * @throws Error on a missing folder, an invalid include entry, or a
  *   breached size cap.
  */
+/**
+ * The files a node directory carries that never belong in a bundle.
+ *
+ * Python leaves these behind on every run and they are machine-specific, so
+ * shipping them wastes bytes at best and confuses an import at worst. The
+ * app baseline does not cover them because no app produces them.
+ */
+const PYTHON_ARTEFACTS = /(^|\/)(__pycache__\/|\.pytest_cache\/)|\.py[co]$/;
+
+/**
+ * A packed node directory, ready for `deploy.add({ kind: 'node', data })`.
+ */
+export interface PackedNode {
+	/** The zip bytes. */
+	data: Uint8Array;
+	/** The node's id, read from its own manifest. */
+	nodeId: string;
+	/** Number of files packed. */
+	fileCount: number;
+	/** Size of the zip itself. */
+	zippedBytes: number;
+}
+
+/**
+ * Packs a node directory into the bundle the server expects.
+ *
+ * A node is self-contained, so unlike an app there is no workspace to root
+ * against and no include list: **the node folder itself is the zip root**,
+ * which puts `services.json` at the top where the server reads identity from.
+ * What comes out is the directory exactly as the author has it, so the same
+ * tree can be restored on another machine and its manifest's own `path`
+ * resolves unchanged.
+ *
+ * Filtering is the app rules plus Python's own leavings.
+ *
+ * @param nodeRoot - Absolute or cwd-relative path to the node directory.
+ * @param onProgress - Optional narration of each step.
+ * @returns The zip bytes and what went into them.
+ * @throws If the folder has no `services.json`, is empty, or exceeds the
+ *         upload cap.
+ */
+export function packNodeSource(nodeRoot: string, onProgress?: PackProgress): PackedNode {
+	const nodeAbs = path.resolve(nodeRoot);
+	const manifestPath = path.join(nodeAbs, 'services.json');
+	if (!fs.existsSync(manifestPath)) {
+		throw new Error(`No services.json in "${nodeRoot}" — a node directory is identified by its own manifest.`);
+	}
+
+	// The node folder IS the root, so zip paths come out relative to it.
+	const files = collectPackedFiles(nodeAbs, ['']).filter((file) => !PYTHON_ARTEFACTS.test(file.zipPath));
+	if (files.length === 0) {
+		throw new Error(`Nothing to pack under "${nodeRoot}" — is the folder fully ignored?`);
+	}
+	// On disk is not enough: a .gitignore can exclude the manifest, and a
+	// bundle without one is refused by the server for a reason nobody would
+	// connect back to an ignore rule.
+	if (!files.some((file) => file.zipPath === 'services.json')) {
+		throw new Error(`services.json is excluded by an ignore rule in "${nodeRoot}" — the bundle would carry no manifest.`);
+	}
+	// Preflight the uncompressed total. The zip cap below only catches what
+	// compresses badly; a large, highly compressible node would sail past it
+	// while costing the memory anyway.
+	const sourceBytes = files.reduce((total, file) => total + fs.statSync(file.absPath).size, 0);
+	if (sourceBytes > MAX_PACK_BYTES) {
+		onProgress?.(`pack ABORTED — source exceeds ${Math.floor(MAX_PACK_BYTES / (1024 * 1024))} MB`);
+		throw new Error(`Pack exceeds ${Math.floor(MAX_PACK_BYTES / (1024 * 1024))}MB uncompressed — add ignores.`);
+	}
+
+	// Identity is read here only to report it back; the server reads the same
+	// file out of the zip and that copy is the one that decides.
+	let nodeId = '';
+	try {
+		const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8')) as { protocol?: string; id?: string };
+		nodeId = String(manifest.protocol || manifest.id || '').replace('://', '');
+	} catch (err) {
+		throw new Error(`services.json in "${nodeRoot}" is not valid JSON: ${err instanceof Error ? err.message : String(err)}`);
+	}
+	onProgress?.(`packing ${files.length} files from ${nodeId || nodeRoot}`);
+
+	const zip = new AdmZip();
+	for (const file of files) {
+		const bytes = fs.readFileSync(file.absPath);
+		zip.addFile(file.zipPath, bytes);
+		onProgress?.(`+ ${file.zipPath} (${bytes.byteLength} bytes)`);
+	}
+	const buffer = zip.toBuffer();
+	if (buffer.byteLength > MAX_ZIP_BYTES) {
+		throw new Error(`Zip exceeds ${Math.floor(MAX_ZIP_BYTES / (1024 * 1024))}MB — the server refuses larger uploads.`);
+	}
+	onProgress?.(`pack complete — ${files.length} files, ${buffer.byteLength} bytes zipped`);
+
+	return { data: new Uint8Array(buffer), nodeId, fileCount: files.length, zippedBytes: buffer.byteLength };
+}
+
 export function packAppSource(workspaceRoot: string, appRoot: string, onProgress?: PackProgress): PackedApp {
 	const { wsAbs, appAbs, appRootRel } = resolveAppRoot(workspaceRoot, appRoot);
 
@@ -874,4 +968,4 @@ function resolveAppRoot(workspaceRoot: string, appRoot: string): { wsAbs: string
 // Arm the client's registry so bundled hosts (which cannot dynamically
 // resolve package specifiers at runtime) get the packer through their own
 // static import of this module.
-registerAppPack({ MAX_PACK_BYTES, MAX_ZIP_BYTES, collectPackedFiles, readIncludeEntries, packAppSource, verifyAppSource, createAppWorkspace } as AppPackModule);
+registerAppPack({ MAX_PACK_BYTES, MAX_ZIP_BYTES, collectPackedFiles, readIncludeEntries, packAppSource, packNodeSource, verifyAppSource, createAppWorkspace } as AppPackModule);

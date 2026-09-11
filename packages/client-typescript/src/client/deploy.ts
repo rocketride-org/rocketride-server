@@ -365,6 +365,113 @@ export class DeployApi {
 	}
 
 	/**
+	 * Packs a node directory and deploys it as the next registry version.
+	 *
+	 * The node counterpart of {@link addApp}, and the call a UI makes when
+	 * someone presses Deploy on a node. Packing rules live in
+	 * `rocketride/app-pack` and nowhere else: the node folder is the zip root,
+	 * so `services.json` lands at the top where the server reads identity
+	 * from, and the tree comes back out on another machine exactly as the
+	 * author had it.
+	 *
+	 * The id is decided by the manifest inside the zip, never by the caller.
+	 *
+	 * @param nodeRoot - Path to the node directory.
+	 * @param options.comment - "What changed" note kept in the registry.
+	 * @param options.deployTo - Team to point at the new version in the same
+	 *   call; publishing alone leaves the version inert.
+	 * @param options.metadata - Optional metadata blob.
+	 * @param options.onProgress - Narrates each pack step.
+	 * @returns The new registry entry, plus the audience when `deployTo` was given.
+	 */
+	async addNode(nodeRoot: string, options: { comment?: string; deployTo?: string; metadata?: Record<string, unknown>; onProgress?: (line: string) => void } = {}): Promise<PublishResult> {
+		const pack = await this.loadAppPack();
+		const packed = pack.packNodeSource(nodeRoot, options.onProgress);
+		return this.add({
+			kind: 'node',
+			data: packed.data,
+			...(options.metadata !== undefined && { metadata: options.metadata }),
+			...(options.comment !== undefined && { comment: options.comment }),
+			...(options.deployTo !== undefined && { deployTo: options.deployTo }),
+		});
+	}
+
+	/**
+	 * A published node's version rail, newest first.
+	 *
+	 * Uploading a node version is not here — it arrives on the generic rail as
+	 * `add({ kind: 'node' })`, which carries the zip. These are the verbs that
+	 * control one afterwards, the same split apps use.
+	 *
+	 * @param nodeId - The node's id, which is its protocol without the '://'.
+	 * @returns One row per registry version, with the node's own version and
+	 *          who published it.
+	 */
+	async nodeVersions(nodeId: string): Promise<{ versions: Record<string, unknown>[] }> {
+		return this.client.call<{ versions: Record<string, unknown>[] }>('rrext_deploy_node', {
+			subcommand: 'versions',
+			nodeId,
+		});
+	}
+
+	/**
+	 * Points an audience at one registry version of a node.
+	 *
+	 * A published version is inert until something is pinned to it. First
+	 * release, update and rollback are all this one call — rolling back is
+	 * pinning the older number again.
+	 *
+	 * @param nodeId - The node's id.
+	 * @param version - The REGISTRY version number, not the node's own semver:
+	 *                  two versions can carry the same semver.
+	 * @param target - '@me' (default), '@team/<name-or-id>' or '@public'.
+	 * @returns The binding that now serves, and the audience it serves.
+	 */
+	async nodeDeploy(nodeId: string, version: number, target = '@me'): Promise<Record<string, unknown>> {
+		return this.client.call<Record<string, unknown>>('rrext_deploy_node', {
+			subcommand: 'deploy',
+			nodeId,
+			version,
+			target,
+		});
+	}
+
+	/**
+	 * Which audiences hold which version of a node.
+	 *
+	 * @param nodeId - The node's id.
+	 * @returns One row per live binding.
+	 */
+	async nodeWhere(nodeId: string): Promise<{ pins: Record<string, unknown>[] }> {
+		return this.client.call<{ pins: Record<string, unknown>[] }>('rrext_deploy_node', {
+			subcommand: 'where',
+			nodeId,
+		});
+	}
+
+	/**
+	 * Stops serving a node binding, or takes it out of the listing.
+	 *
+	 * Neither touches the version: published versions are immutable and stay
+	 * on the registry, which is what keeps a later rollback possible.
+	 * `disable` is reversible — bind again and it is back.
+	 *
+	 * @param nodeId - The node's id.
+	 * @param target - The audience to withdraw from, or '@all' for every one
+	 *                 it currently has. '@all' checks permission on all of
+	 *                 them before touching any, so it withdraws all or none.
+	 * @param mode - 'disable' (reversible) or 'remove' (out of the listing).
+	 * @returns The withdrawn binding, or all of them for '@all'.
+	 */
+	async nodeWithdraw(nodeId: string, target = '@me', mode: 'disable' | 'remove' = 'disable'): Promise<Record<string, unknown>> {
+		return this.client.call<Record<string, unknown>>('rrext_deploy_node', {
+			subcommand: mode,
+			nodeId,
+			target,
+		});
+	}
+
+	/**
 	 * The immutable audit trail of a project, newest first, as the standard
 	 * list envelope.
 	 *

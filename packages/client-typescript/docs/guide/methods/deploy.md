@@ -53,6 +53,33 @@ their logs land in the team's run-log continuum, readable by teammates via
 | `deploy.artifact(projectId, version)` | One immutable version's pipeline JSON, sha256-verified server-side |
 | `deploy.preview(schedule, count?)` | THE single cron evaluator: validity + next occurrences |
 
+### Nodes
+
+A custom node is distributed the same way, over the same registry. Publishing takes a **folder** — packing rules live in `rocketride/app-pack`, so a UI, the CLI and CI produce identical bundles — and a published version is **inert** until an audience is pinned to it.
+
+| Method | Description |
+| --- | --- |
+| `deploy.addNode(nodeRoot, options?)` | Pack a node folder and deploy it as the next registry version (`options.deployTo` also pins a team in one step) |
+| `deploy.nodeVersions(nodeId)` | The node's version rail, newest first |
+| `deploy.nodeDeploy(nodeId, version, target?)` | Point an audience at a registry version — first release, update and rollback alike |
+| `deploy.nodeWhere(nodeId)` | Which audience holds which version |
+| `deploy.nodeWithdraw(nodeId, target?, mode?)` | Stop serving a binding (`'disable'`, reversible) or take it out of the listing (`'remove'`); `target: '@all'` withdraws every one |
+
+`target` is `'@me'` (default), `'@team/<name-or-id>'` or `'@public'`. Withdrawal acts on the **binding**, never on the version: published versions are immutable and stay on the registry, which is what keeps rollback possible.
+
+```typescript
+const { artifact } = await client.deploy.addNode('local_nodes/ticket_feed', { comment: 'first cut' });
+await client.deploy.nodeDeploy('ticket_feed', artifact.version!, '@team/Platform');
+await client.deploy.nodeWhere('ticket_feed');
+await client.deploy.nodeWithdraw('ticket_feed', '@all', 'remove');
+```
+
+```python
+entry = await client.deploy_node('ticket_feed', 3, '@team/Platform')
+pins = await client.where_node('ticket_feed')
+await client.remove_node('ticket_feed', '@all')
+```
+
 ### Python (async)
 
 ```python
