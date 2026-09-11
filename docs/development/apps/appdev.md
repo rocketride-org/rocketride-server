@@ -28,6 +28,21 @@ open workspace folders. It is not merged with the server `list_mine` catalog.
 Discovery is driven by `.rrapp`/`package.json` file events and by
 workspace-folder changes; there is no rescan on connect.
 
+## Platform dependency wiring (manifests are author-owned)
+
+App manifests carry the portable platform specs —
+`"shell": "file:../../.rocketride/shell/shell.tgz"` and
+`"rocketride": "file:../../.rocketride/client/rocketride.tgz"` — correct
+wherever an app sits at `<workspace>/apps/<app>`. The extension never
+rewrites them: a spec is completed only when the dependency is missing
+outright. In layouts where the spec does not reach the workspace's vendored
+tarballs (for example an app lifted to its repo root), the extension
+instead adds workspace-root-relative `overrides:` entries to
+`pnpm-workspace.yaml` (`shell: 'file:.rocketride/shell/shell.tgz'`, plus
+the `rocketride` twin) — logged loudly, since the yaml is user-owned. A
+workspace that already overrides `shell`/`rocketride` (the platform
+monorepos pin `workspace:*`) is left untouched.
+
 ## Live preview overlay & dev servers
 
 A local dev build is previewed by registering a per-user `moduleId → entry URL`

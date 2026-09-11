@@ -99,7 +99,7 @@
 				"rocketride.development.cloudUrl": {
 					"type": "string",
 					"default": "https://api.rocketride.ai",
-					"description": "Cloud mode: the server this connection targets when 'Use Custom Server' is enabled (e.g. https://staging.rocketride.ai, http://localhost:5565)",
+					"description": "Cloud mode: the server this connection targets when 'Use Custom Server' is enabled (e.g. https://cloud.rocketride.ai, http://localhost:5565). Custom servers must use https; http is allowed only for localhost development targets.",
 					"format": "uri"
 				},
 				"rocketride.development.local.engineVersion": {
@@ -137,7 +137,7 @@
 				"rocketride.deployment.cloudUrl": {
 					"type": "string",
 					"default": "https://api.rocketride.ai",
-					"description": "Cloud mode: the server this connection targets when 'Use Custom Server' is enabled (e.g. https://staging.rocketride.ai)",
+					"description": "Cloud mode: the server this connection targets when 'Use Custom Server' is enabled (e.g. https://staging.rocketride.ai, http://localhost:5565). Custom servers must use https; http is allowed only for localhost development targets.",
 					"format": "uri"
 				},
 				"rocketride.deployment.local.engineVersion": {

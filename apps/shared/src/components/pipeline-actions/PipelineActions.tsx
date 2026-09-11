@@ -59,6 +59,12 @@ export interface IEndpointInfo {
 	'token-text'?: string;
 	/** The actual private token value. */
 	'token-key'?: string;
+	/**
+	 * Data lanes some component downstream of this source reads, as reported by
+	 * the running pipeline. Drives which Content-Type the endpoint panel
+	 * preselects. Absent on older engines or when the wiring could not be read.
+	 */
+	lanes?: string[];
 }
 
 export interface IPipelineActionsProps {

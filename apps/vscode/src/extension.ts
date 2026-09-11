@@ -31,6 +31,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { getLogger } from './shared/util/output';
 import { icons } from './shared/util/icons';
+import { createCatalogueReporter } from './shared/util/catalogueDiagnostic';
 
 // import { registerDebugger } from './debugger/adapter'; // Disabled: debugger removed from package.json
 import { ConnectionManager, disconnectCloudConnections } from './connection/connection';
@@ -663,8 +664,22 @@ function setupConnectionEventHandlers(): void {
 		});
 	});
 
-	// Sync service catalog + schemas to .rocketride/ when services are fetched
+	// Sync service catalog + schemas to .rocketride/ when services are fetched.
+	//
+	// The ONE place a catalogue problem is reported: this listener sees every
+	// update exactly once, however many editors are open. See
+	// catalogueDiagnostic for what is said and what is deliberately not.
+	const reportCatalogue = createCatalogueReporter();
 	connectionManager?.on('shell:servicesUpdated', (payload: { services: Record<string, unknown>; servicesError?: string }) => {
+		const diagnostic = reportCatalogue(payload);
+		if (diagnostic?.level === 'error') {
+			getLogger().error(diagnostic.message);
+		} else if (diagnostic) {
+			getLogger().output(`${icons.warning} ${diagnostic.message}`);
+		}
+
+		// Not syncing is right — an empty catalogue must not overwrite a good
+		// one on disk.
 		if (payload.servicesError || !payload.services || Object.keys(payload.services).length === 0) {
 			return;
 		}

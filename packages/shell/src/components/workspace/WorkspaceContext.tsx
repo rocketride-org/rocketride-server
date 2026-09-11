@@ -36,7 +36,7 @@ import type { IGridConfigGetDetail, IGridConfigSetDetail, IGridConfigClearDetail
 import type { DataGridLayout } from '../data-grid/persistence';
 import { ConnectionManager } from '../../connection/connection';
 import { HOME_APP_ID, HELLO_APP_ID } from '../../constants';
-import { resetRemote, setDescriptorInvalidator, isDevPreviewPage, previewLockedAppId, waitForDevRemote, isDevRemote } from '../../util/appLoader';
+import { resetRemote, setDescriptorInvalidator, isDevPreviewPage, previewLockedAppId, waitForDevRemote, isDevRemote, fallbackSkippedRemote } from '../../util/appLoader';
 import { getAppVersionOverride, clearAppVersionOverride } from '../../util/versionOverride';
 import { SHELL_API_VERSION } from '../../apiver';
 
@@ -394,12 +394,20 @@ export const WorkspaceProvider: React.FC<IWorkspaceProviderProps> = ({ apps, wor
 			if (isDevPreviewPage() && previewLockedAppId() === appId) {
 				console.log(`[WorkspaceContext] holding "${appId}" until its dev remote registers`);
 				const DEV_REMOTE_TIMEOUT = 300000;
-				await Promise.race([
-					waitForDevRemote(appId),
-					new Promise<never>((_, reject) =>
-						setTimeout(() => reject(new Error(`Dev remote for "${appId}" did not register within ${DEV_REMOTE_TIMEOUT / 1000}s — is the app's dev server running?`)), DEV_REMOTE_TIMEOUT),
-					),
-				]);
+				try {
+					await Promise.race([
+						waitForDevRemote(appId),
+						new Promise<never>((_, reject) =>
+							setTimeout(() => reject(new Error(`Dev remote for "${appId}" did not register within ${DEV_REMOTE_TIMEOUT / 1000}s — is the app's dev server running?`)), DEV_REMOTE_TIMEOUT),
+						),
+					]);
+				} catch (waitErr) {
+					// Self-heal: the boot skipped this app's manifest registration
+					// expecting the injection. If a published bundle exists, register
+					// it and load THAT instead of stranding the app — a stale build
+					// on screen beats a dead preview. Rethrow only with no fallback.
+					if (!fallbackSkippedRemote(appId)) throw waitErr;
+				}
 			}
 			// Load with timeout to avoid indefinite hangs on unreachable remotes
 			const APP_LOAD_TIMEOUT = 15000;

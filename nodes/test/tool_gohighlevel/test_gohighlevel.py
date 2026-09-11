@@ -32,7 +32,10 @@ from unittest.mock import Mock, patch
 import pytest
 import requests
 
+from test.zone_audit import audit_time_fields
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'src' / 'nodes'))
+
 
 _STUB_MODULE_NAMES = ('rocketlib', 'ai', 'ai.common', 'ai.common.config', 'ai.common.utils')
 
@@ -1739,3 +1742,20 @@ class TestIGlobalGroupWarnings:
             logged = self._logged(warning_mock)
             assert 'unknown tool group' in logged
             assert 'fail to start' in logged
+
+
+# ---------------------------------------------------------------------------
+# Every field that carries a time of day names its zone
+# ---------------------------------------------------------------------------
+# The rule, the bug behind it and the audit's own tests live with the helper:
+# nodes/test/zone_audit.py and nodes/test/test_zone_audit.py. What is this
+# node's own is the verdict and its exemptions.
+
+
+class TestEveryTimeFieldNamesItsZone:
+    #: Nothing to exempt: no GoHighLevel parameter carries a time of day
+    #: without naming its zone.
+    ALLOWED = ()
+
+    def test_no_published_parameter_describes_a_time_without_saying_which_zone(self):
+        assert audit_time_fields(IInstance, self.ALLOWED) == []

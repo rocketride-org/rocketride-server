@@ -1175,3 +1175,197 @@ def test_cap_trace_payload_leaves_unserializable_payloads_alone():
     """Unserializable payloads pass through — the transport owns that error."""
     payload = {'bad': object()}
     assert cap_trace_payload(payload) is payload
+
+
+# ---------------------------------------------------------------------------
+# on_event: idle-timer reset
+# ---------------------------------------------------------------------------
+
+
+def _event_task(run_kind='dev'):
+    """A Task wired far enough to run on_event, with the handlers stubbed."""
+    from unittest.mock import AsyncMock
+
+    t = _task()
+    t._run_kind = run_kind
+    t._idle_time = 600
+    t._status_trace = []
+    # The trace branch walks the per-pipe execution stack before anything else.
+    t._status.pipeflow = SimpleNamespace(byPipe={})
+    t._update_status = MagicMock()
+    t._forward_task_event = AsyncMock()
+    t._send_status_update = AsyncMock()
+    return t
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    'event_type',
+    [
+        'apaevt_status_counts',
+        'apaevt_status_object',
+        'apaevt_status_message',
+        'apaevt_status_metrics',
+        'apaevt_sse',
+        'apaevt_trace',
+    ],
+)
+async def test_on_event_engine_event_resets_idle_timer_for_a_dev_task(event_type):
+    """Pipeline work is activity: a dev task mid-turn is not idle."""
+    t = _event_task()
+
+    await Task.on_event(t, {'event': event_type, 'body': {}})
+
+    assert t._idle_time == 0
+
+
+@pytest.mark.asyncio
+async def test_on_event_stdout_does_not_reset_idle_timer():
+    """Raw node output must not count as idle-timer activity."""
+    t = _event_task()
+
+    await Task.on_event(t, {'event': 'output', 'body': {'output': 'still here'}})
+
+    assert t._idle_time == 600
+
+
+@pytest.mark.asyncio
+async def test_on_event_debugger_passthrough_does_not_reset_idle_timer():
+    """Debugger traffic is not pipeline work and its cadence is not ours to reason about."""
+    t = _event_task()
+
+    await Task.on_event(t, {'event': 'stopped', 'body': {}})
+
+    assert t._idle_time == 600
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('event_type', ['apaevt_status_counts', 'apaevt_sse', 'apaevt_trace'])
+async def test_on_event_never_resets_idle_timer_for_a_deploy_run(event_type):
+    """A deploy run's ttl is a wall-clock window, not an idle timeout."""
+    t = _event_task(run_kind='deploy')
+
+    await Task.on_event(t, {'event': event_type, 'body': {}})
+
+    assert t._idle_time == 600
+
+
+@pytest.mark.asyncio
+async def test_on_event_exit_reads_the_key_the_emitters_write():
+    """A clean exit must record code 0, not the fallback."""
+    t = _event_task()
+    t._status.exitCode = None
+    t._status.exitMessage = ''
+    t._status.state = 0
+    t._is_restarting = False
+    t._update_completion_status = MagicMock()
+    t._close_run_log = MagicMock()
+
+    await Task.on_event(t, {'event': 'apaevt_exit', 'body': {'exitCode': 0, 'message': 'COMPLETED'}})
+
+    assert t._status.exitCode == 0
+    assert t._status.exitMessage == 'COMPLETED'
+
+
+@pytest.mark.asyncio
+async def test_on_event_exit_still_defaults_when_no_code_is_sent():
+    """A malformed exit with no code keeps the pessimistic default."""
+    t = _event_task()
+    t._status.exitCode = None
+    t._status.exitMessage = ''
+    t._status.state = 0
+    t._is_restarting = False
+    t._update_completion_status = MagicMock()
+    t._close_run_log = MagicMock()
+
+    await Task.on_event(t, {'event': 'apaevt_exit', 'body': {'message': 'Malformed exit message'}})
+
+    assert t._status.exitCode == 1
+
+
+# ---------------------------------------------------------------------------
+# on_event / apaevt_trace — the trace level that means "no traces"
+# ---------------------------------------------------------------------------
+
+
+def _trace_task(level):
+    """A task ready to take one apaevt_trace, with the fan-out captured."""
+    from unittest.mock import AsyncMock
+
+    from rocketride import TASK_STATUS
+
+    t = _task(status=TASK_STATUS())
+    t._last_event_time = 0.0
+    t._status_updated = False
+    t._pipelineTraceLevel = level
+    t.build_event = MagicMock(
+        side_effect=lambda name, body=None, event_time=None: {
+            'event': name,
+            'body': dict(body or {}, eventTime=event_time),
+        }
+    )
+    t._accumulate_analytics = MagicMock()
+    t._forward_task_event = AsyncMock()
+    return t
+
+
+_TRACE_MESSAGE = {
+    'event': 'apaevt_trace',
+    'body': {
+        'op': 'enter',
+        'id': 0,
+        'pipe_id': 'parse',
+        'total_pipes': 1,
+        'trace': {'text': 'hello'},
+        'eventTime': 1_000.0,
+    },
+}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('level', ['metadata', 'summary', 'full'])
+async def test_a_real_trace_level_still_derives_a_flow_event(level):
+    """The levels that ask for tracing keep every part of the fan-out."""
+    t = _trace_task(level)
+
+    await Task.on_event(t, dict(_TRACE_MESSAGE))
+
+    t._forward_task_event.assert_awaited_once()
+    t._accumulate_analytics.assert_called_once()
+    assert t.build_event.call_args.kwargs['body']['trace'] == {'text': 'hello'}
+
+
+@pytest.mark.asyncio
+async def test_the_none_level_emits_no_flow_at_all():
+    """
+    `'none'` IS A LEVEL, NOT AN ABSENCE — and a non-empty string is truthy.
+    Read as "tracing on with the payload suppressed", every enter/leave was
+    still derived, seq-stamped, broadcast and written to the run log: a flow
+    event carrying `trace: {}`, roughly 379 bytes of envelope for no signal,
+    one pair per component per request. A settings stream kept deliberately out
+    of the Runs timeline had accumulated 325 MB that way.
+
+    Nothing else about the event changes: the pipe stack is still tracked and
+    the status is still marked for update.
+    """
+    t = _trace_task('none')
+
+    await Task.on_event(t, dict(_TRACE_MESSAGE))
+
+    t._forward_task_event.assert_not_awaited()
+    t._accumulate_analytics.assert_not_called()
+    t.build_event.assert_not_called()
+    # The parts that are NOT gated on the trace level.
+    assert t._status_updated is True
+    assert t._status.pipeflow.totalPipes == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('level', ['', None])
+async def test_an_absent_trace_level_still_emits_nothing(level):
+    """The original behaviour, unchanged: no level means no flow."""
+    t = _trace_task(level)
+
+    await Task.on_event(t, dict(_TRACE_MESSAGE))
+
+    t._forward_task_event.assert_not_awaited()

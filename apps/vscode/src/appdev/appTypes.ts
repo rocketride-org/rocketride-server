@@ -8,17 +8,21 @@
  *
  * The connected server serves its platform as an installable npm package at
  * /client/shell. This module downloads it to the canonical
- * `<workspace>/.rocketride/shell/shell.tgz`, wires each app's package.json
- * dependency onto that tarball, and runs `pnpm install` at the workspace
- * root so every app links the new package. Types, tokens, and (for static
- * consumers) compiled code all flow through ordinary npm resolution — a
- * tarball dependency is a first-class package whose own dependencies pnpm
- * actually installs.
+ * `<workspace>/.rocketride/shell/shell.tgz` and runs `pnpm install` at the
+ * workspace root so every app links the new package. Types, tokens, and
+ * (for static consumers) compiled code all flow through ordinary npm
+ * resolution — a tarball dependency is a first-class package whose own
+ * dependencies pnpm actually installs.
  *
  * Called at scaffold (new apps) and on every App Builder open (refresh —
- * apps track the platform of the CONNECTED server). Nothing is ever written
- * inside an app folder: the tarball lives under `<workspace>/.rocketride/`,
- * and each app carries just the file: dependency pointing at it.
+ * apps track the platform of the CONNECTED server). App manifests are
+ * AUTHOR-OWNED: they carry the portable two-level specs
+ * (`file:../../.rocketride/...`, correct wherever an app sits at
+ * `<workspace>/apps/<app>`) and are completed only when a dependency is
+ * missing outright. Layouts where that spec does not reach the vendored
+ * tarballs are wired through the TOOL-OWNED pnpm-workspace.yaml instead —
+ * a workspace-root-relative override, so app depth never matters (see
+ * ensureDependencyWiring).
  */
 
 import * as fs from 'fs';
@@ -39,8 +43,9 @@ export type ShellVendorResult =
 		ok: true;
 		/** Absolute path of the vendored shell tarball. */
 		tgzPath: string;
-		/** True when THIS pass rewrote the app's dependency spec — callers
-		 * must invalidate any memoised install so the new spec links. */
+		/** True when THIS pass changed dependency wiring — completed a
+		 * manifest or added a workspace override — callers must invalidate
+		 * any memoised install so the new resolution links. */
 		rewired?: boolean;
 	}
 	| { ok: false; reason: string };
@@ -135,15 +140,16 @@ export function refreshVendoredPlatform(context: vscode.ExtensionContext): Promi
 /**
  * Ensures the platform package is installed for an app.
  *
- * Wires the app's package.json dependency onto the workspace's canonical
- * .rocketride/shell/shell.tgz, then ensures the workspace's shared vendor
- * pass has run (see ensureShell — one download + install per session,
- * shared by all consumers).
+ * Ensures the app's platform dependencies RESOLVE — via the manifest's own
+ * portable spec or a workspace-yaml override, never by rewriting app files
+ * (see ensureDependencyWiring) — then ensures the workspace's shared
+ * vendor pass has run (see ensureShell — one download + install per
+ * session, shared by all consumers).
  *
- * The dependency is written FIRST and unconditionally: the file: spec is
- * the well-known workspace location, valid before the package has ever
- * been downloaded, so an offline scaffold still produces the correct
- * package.json and simply links on the next connected open.
+ * Wiring runs FIRST, before any download: specs and overrides name the
+ * well-known workspace location, valid before the package has ever been
+ * downloaded, so an offline scaffold still wires correctly and simply
+ * links on the next connected open.
  *
  * Non-fatal by design: an unreachable server, a missing package, or an
  * unwritable folder logs and returns a reasoned failure — platform
@@ -158,9 +164,10 @@ export async function vendorAppTypes(context: vscode.ExtensionContext, appFolder
 	const logger = getLogger();
 	const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
 	if (!workspaceRoot) return { ok: false, reason: 'No workspace folder is open — the platform package lives under the workspace root.' };
-	// Wiring failures FAIL the pass: an app whose workspace file or shell
-	// dependency could not be written will not link the platform package, so
-	// pretending success would only defer the error to a confusing place.
+	// Wiring failures FAIL the pass: an app whose workspace file or
+	// dependency wiring could not be written will not link the platform
+	// package, so pretending success would only defer the error to a
+	// confusing place.
 	try {
 		ensureWorkspaceFile(workspaceRoot);
 	} catch (err) {
@@ -170,8 +177,7 @@ export async function vendorAppTypes(context: vscode.ExtensionContext, appFolder
 	}
 	let rewired = false;
 	try {
-		rewired = ensureShellDependency(appFolder, path.join(workspaceRoot, '.rocketride', 'shell', 'shell.tgz'));
-		rewired = ensureClientDependency(appFolder, path.join(workspaceRoot, '.rocketride', 'client', 'rocketride.tgz')) || rewired;
+		rewired = ensureDependencyWiring(appFolder, workspaceRoot);
 	} catch (err) {
 		const reason = `Could not wire the platform dependencies into ${appFolder}: ${err instanceof Error ? err.message : String(err)}`;
 		logger.output(`[appdev] ${reason}`);
@@ -264,66 +270,191 @@ function ensureWorkspaceFile(workspaceRoot: string): void {
 }
 
 // =============================================================================
-// SHELL PACKAGE (shell.tgz)
+// DEPENDENCY WIRING
 // =============================================================================
 
 /**
- * Ensures the app's package.json depends on the workspace shell tarball.
- *
- * The dependency targets `file:<rel>/.rocketride/shell/shell.tgz` — a
- * tarball is a first-class package to pnpm: it extracts into the store and
- * installs the shell's own declared dependencies with real linkage.
- * Existing correct specs are left untouched so repeated App Builder opens
- * never rewrite the file.
- *
- * The target file need not exist yet — the spec is the platform's
- * well-known workspace location, and pnpm links it once it appears.
- *
- * @param appFolder - The app's root folder (owns the package.json).
- * @param pkgTgz - Absolute path of the shell package tarball.
- * @returns True when a new spec was written; false when already correct (or
- *          the app has no package.json).
- */
-function ensureShellDependency(appFolder: string, pkgTgz: string): boolean {
-	return ensureTgzDependency(appFolder, 'shell', pkgTgz);
-}
-
-/**
- * Ensures the app's package.json depends on the workspace's vendored
- * CLIENT tarball (`file:<rel>/.rocketride/client/rocketride.tgz`). The
+ * The platform packages every app links, with their canonical vendored
+ * locations under the workspace root. The manifest form is the PORTABLE
+ * two-level spec — apps live at `<workspace>/apps/<app>`, so it is correct
+ * in a user workspace, the build sandbox, and a lifted-out repo alike; the
  * npm registry's `rocketride` can lag the connected server badly (no app
- * surface at all), so apps pin the server-matched package the same way
+ * surface at all), so apps pin the server-matched tarball the same way
  * they pin the shell.
- *
- * @param appFolder - The app's root folder (owns the package.json).
- * @param pkgTgz - Absolute path of the client package tarball.
- * @returns True when a new spec was written; false when already correct.
  */
-function ensureClientDependency(appFolder: string, pkgTgz: string): boolean {
-	return ensureTgzDependency(appFolder, 'rocketride', pkgTgz);
-}
+const PLATFORM_DEPS = [
+	{ name: 'shell', vendored: ['.rocketride', 'shell', 'shell.tgz'] },
+	{ name: 'rocketride', vendored: ['.rocketride', 'client', 'rocketride.tgz'] },
+] as const;
 
 /**
- * Shared rewiring for tarball-pinned dependencies: writes
- * `dependencies[depName] = file:<app-relative posix path>` only when
- * missing or different, so repeated App Builder opens never rewrite the
- * file. The target need not exist yet — the spec is the platform's
- * well-known workspace location, and pnpm links it once it appears.
+ * Ensures an app's platform dependencies resolve — WITHOUT rewriting the
+ * app's files. Manifests are author-owned after scaffold; the workspace
+ * yaml is the tool-owned wiring surface. Per dependency:
+ *
+ *   1. Missing from the manifest entirely — write the canonical portable
+ *      spec (`file:../../.rocketride/...`). An override cannot help here:
+ *      pnpm installs nothing it was never asked for. The scaffold template
+ *      already renders the spec, so in practice only hand-authored
+ *      manifests take this branch (the ONLY app-file write this module
+ *      ever makes).
+ *   2. Covered by a workspace-yaml override (any value — the platform
+ *      monorepos pin `workspace:*`) — nothing to do; the override
+ *      supersedes the spec at resolution.
+ *   3. Present but resolving somewhere other than the workspace's vendored
+ *      tarball (an app lifted to its repo ROOT still carrying `../../`, a
+ *      spec from a different layout) — add a workspace-root-relative
+ *      override (`file:.rocketride/...`). Override file: specs resolve
+ *      from the workspace root, so app depth is irrelevant and no layout
+ *      ever needs the manifest corrected.
+ *
+ * The tarballs need not exist yet — wiring compares PATHS against the
+ * platform's well-known location, and pnpm links once they are vendored.
+ *
+ * @param appFolder - The app's root folder (owns the package.json).
+ * @param workspaceRoot - The workspace folder owning .rocketride/ and the yaml.
+ * @returns True when wiring changed (manifest completed or override
+ *          written) — callers must invalidate any memoised install.
  */
-function ensureTgzDependency(appFolder: string, depName: string, pkgTgz: string): boolean {
+function ensureDependencyWiring(appFolder: string, workspaceRoot: string): boolean {
 	const logger = getLogger();
 	const pkgJsonPath = path.join(appFolder, 'package.json');
 	if (!fs.existsSync(pkgJsonPath)) return false;
-	// step: compute the app-relative file: spec with posix separators
-	const rel = path.relative(appFolder, pkgTgz).split(path.sep).join('/');
-	const spec = `file:${rel}`;
-	// step: rewrite only when missing or different
 	const pkg = JSON.parse(fs.readFileSync(pkgJsonPath, 'utf8'));
-	if (pkg.dependencies?.[depName] === spec) return false;
-	pkg.dependencies = { ...(pkg.dependencies ?? {}), [depName]: spec };
-	fs.writeFileSync(pkgJsonPath, `${JSON.stringify(pkg, null, 2)}\n`);
-	logger.output(`[appdev] package.json: "${depName}": "${spec}"`);
+
+	// An author may declare a platform dep in any section (a type-only
+	// consumer reasonably uses devDependencies) — completion and the
+	// resolution check both honor the author's chosen section, so a dep
+	// declared anywhere is never duplicated into dependencies.
+	const DEP_SECTIONS = ['dependencies', 'devDependencies', 'optionalDependencies', 'peerDependencies'] as const;
+	const declaredSpec = (name: string): string | undefined => {
+		for (const section of DEP_SECTIONS) {
+			const spec = (pkg[section] as Record<string, string> | undefined)?.[name];
+			if (spec !== undefined) return spec;
+		}
+		return undefined;
+	};
+
+	// step: complete a manifest that declares the dep in NO section
+	let manifestChanged = false;
+	for (const dep of PLATFORM_DEPS) {
+		if (declaredSpec(dep.name) !== undefined) continue;
+		const spec = `file:../../${dep.vendored.join('/')}`;
+		pkg.dependencies = { ...(pkg.dependencies ?? {}), [dep.name]: spec };
+		manifestChanged = true;
+		logger.output(`[appdev] package.json: added missing "${dep.name}": "${spec}"`);
+	}
+	if (manifestChanged) fs.writeFileSync(pkgJsonPath, `${JSON.stringify(pkg, null, 2)}\n`);
+
+	// step: deps not superseded by an existing override must resolve to the
+	// vendored tarball; those that do not get the override added instead of
+	// a manifest rewrite
+	const overridden = readWorkspaceOverrideNames(workspaceRoot);
+	const needed = PLATFORM_DEPS.filter((dep) =>
+		!overridden.has(dep.name)
+		&& !specResolvesToVendored(String(declaredSpec(dep.name)), appFolder, workspaceRoot, dep.vendored));
+	if (needed.length === 0) return manifestChanged;
+	ensureWorkspaceOverrides(workspaceRoot, needed);
 	return true;
+}
+
+/**
+ * True when a manifest spec already resolves to the workspace's vendored
+ * tarball, so plain pnpm resolution needs no help. Only file: specs can —
+ * anything else (`workspace:*`, a semver range) resolves elsewhere by
+ * construction. Comparison is by path, case-insensitive on Windows; the
+ * tarball itself need not exist yet.
+ *
+ * @param spec - The manifest's dependency spec.
+ * @param appFolder - Folder the spec resolves relative to.
+ * @param workspaceRoot - The workspace folder owning .rocketride/.
+ * @param vendored - Canonical tarball path segments under the root.
+ * @returns True when the spec names the canonical vendored tarball.
+ */
+function specResolvesToVendored(spec: string, appFolder: string, workspaceRoot: string, vendored: readonly string[]): boolean {
+	if (!spec.startsWith('file:')) return false;
+	const norm = (p: string): string => (process.platform === 'win32' ? path.resolve(p).toLowerCase() : path.resolve(p));
+	return norm(path.resolve(appFolder, spec.slice('file:'.length))) === norm(path.join(workspaceRoot, ...vendored));
+}
+
+/**
+ * The dependency names already overridden in the workspace yaml.
+ *
+ * Line-level scan (the extension deliberately carries no YAML dependency):
+ * entries are read from the top-level `overrides:` block — the indented
+ * `name: value` lines under it — plus a best-effort pass over the inline
+ * `overrides: {...}` form, so an already-covered dependency never triggers
+ * a write that ensureWorkspaceOverrides would then refuse.
+ *
+ * @param workspaceRoot - The workspace folder owning pnpm-workspace.yaml.
+ * @returns The overridden dependency names (empty when no yaml exists).
+ */
+function readWorkspaceOverrideNames(workspaceRoot: string): Set<string> {
+	const names = new Set<string>();
+	const yamlPath = path.join(workspaceRoot, 'pnpm-workspace.yaml');
+	if (!fs.existsSync(yamlPath)) return names;
+	// step: normalize line endings for reading (the yamls are CRLF on
+	// Windows checkouts; this copy is never written back)
+	const text = fs.readFileSync(yamlPath, 'utf8').replace(/\r\n/g, '\n');
+	// step: block form — indented entries until the next top-level key
+	const block = /^overrides:[ \t]*(?:#[^\n]*)?\n((?:[ \t]+[^\n]*\n?)*)/m.exec(text);
+	if (block) {
+		for (const line of block[1].split('\n')) {
+			const entry = /^[ \t]+['"]?([@\w./-]+)['"]?[ \t]*:/.exec(line);
+			if (entry) names.add(entry[1]);
+		}
+	}
+	// step: inline form — names only, values are irrelevant to coverage
+	const inline = /^overrides:[ \t]*\{([^}]*)\}/m.exec(text);
+	if (inline) {
+		for (const part of inline[1].split(',')) {
+			const entry = /^\s*['"]?([@\w./-]+)['"]?\s*:/.exec(part);
+			if (entry) names.add(entry[1]);
+		}
+	}
+	return names;
+}
+
+/**
+ * Adds workspace-root-relative overrides for the given platform deps to
+ * pnpm-workspace.yaml — the tool-owned wiring surface (app files are never
+ * edited; see ensureDependencyWiring).
+ *
+ * Same conservative line-level editing as ensureWorkspaceFile: entries are
+ * inserted under an existing `overrides:` block matching its indentation; a
+ * missing block is appended whole; an inline `overrides: {...}` value
+ * cannot take inserted entries — refused loudly rather than corrupting the
+ * user-owned file. Every write is logged (the file is user-owned).
+ *
+ * @param workspaceRoot - The workspace folder owning pnpm-workspace.yaml.
+ * @param deps - The platform deps needing an override.
+ */
+function ensureWorkspaceOverrides(workspaceRoot: string, deps: ReadonlyArray<(typeof PLATFORM_DEPS)[number]>): void {
+	const logger = getLogger();
+	const yamlPath = path.join(workspaceRoot, 'pnpm-workspace.yaml');
+	// ensureWorkspaceFile runs earlier in every vendor pass, so the yaml
+	// exists; tolerate its absence anyway (deleted mid-session)
+	let text = fs.existsSync(yamlPath) ? fs.readFileSync(yamlPath, 'utf8') : '';
+	// step: honor the file's own line endings — the yaml is user-owned, and
+	// a mixed-endings write would churn its whole diff
+	const eol = text.includes('\r\n') ? '\r\n' : '\n';
+	const entries = deps.map((dep) => `${dep.name}: 'file:${dep.vendored.join('/')}'`);
+	// step: an inline overrides value cannot be amended line-wise — refuse
+	// (\r counts as \s, so a CRLF bare block head never false-positives)
+	if (/^overrides:[ \t]*[^\s#]/m.test(text)) {
+		throw new Error(`${yamlPath} declares overrides as an inline value — add ${entries.join(', ')} manually`);
+	}
+	if (/^overrides:[ \t]*(?:#[^\n]*)?\r?$/m.test(text)) {
+		// step: insert under the existing block, matching its entry indentation
+		const indent = /^overrides:[^\n]*\n([ \t]+)/m.exec(text)?.[1] ?? '  ';
+		const insert = entries.map((e) => `${indent}${e}${eol}`).join('');
+		text = text.replace(/^overrides:[^\n]*\n?/m, (m) => `${m.endsWith('\n') ? m : `${m}${eol}`}${insert}`);
+	} else {
+		// step: no block — append one
+		text += `${text === '' || text.endsWith('\n') ? '' : eol}overrides:${eol}${entries.map((e) => `  ${e}${eol}`).join('')}`;
+	}
+	fs.writeFileSync(yamlPath, text);
+	logger.output(`[appdev] ${yamlPath}: added overrides ${entries.join(', ')} (user-owned file; app manifests keep their portable file: specs untouched)`);
 }
 
 /**

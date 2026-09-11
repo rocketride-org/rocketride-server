@@ -41,7 +41,13 @@
 import React from 'react';
 import * as ReactDom from 'react-dom';
 import { ConnectionManager } from '../connection/connection';
+import { isDevHooksEnabled, isEmbeddedDevShell } from './devGate';
 import { registerLocalApp, unregisterLocalApp, invalidateAppDescriptor, registerDevRemote } from './appLoader';
+
+// The gate lives in devGate.ts (a leaf module — the ConnectionManager needs
+// it too, and this module imports the ConnectionManager); re-exported here so
+// dev-mode consumers keep one import site.
+export { isDevHooksEnabled };
 
 // =============================================================================
 // TYPES
@@ -69,38 +75,6 @@ declare global {
 		/** Dev hooks API — present only when dev hooks are enabled. */
 		__rrShellDev?: RrShellDevApi;
 	}
-}
-
-// =============================================================================
-// DEV GATE
-// =============================================================================
-
-// Computed once on first read, never re-read (the gate must not flip while
-// the shell runs — a mid-session change would strand half-installed hooks).
-let gateResult: boolean | undefined;
-
-/**
- * Whether dev hooks are enabled for this shell session.
- *
- * True when this is a development build (NODE_ENV !== 'production') OR the
- * page URL carries `rrdev=1`. Read once at first call and cached.
- *
- * @returns True when dev hooks should be installed.
- */
-export function isDevHooksEnabled(): boolean {
-	if (gateResult === undefined) {
-		let urlFlag = false;
-		try {
-			urlFlag = new URLSearchParams(window.location.search).get('rrdev') === '1';
-			// The OAuth redirect URI is the bare origin, so `rrdev=1` does not
-			// survive the round trip — index.html's flavor picker persists the
-			// choice per tab ('rr:dev'), and the gate honors the same flag so
-			// the flavor and the hooks can never disagree.
-			if (!urlFlag) urlFlag = sessionStorage.getItem('rr:dev') === '1';
-		} catch { /* no window/location (tests) — build-mode gate only */ }
-		gateResult = process.env.NODE_ENV !== 'production' || urlFlag;
-	}
-	return gateResult;
 }
 
 // =============================================================================
@@ -151,8 +125,8 @@ function settleBootAnswer(token: string | null): boolean {
  * @returns The embedder-supplied token, or null.
  */
 export function waitForEmbeddedSession(timeoutMs: number): Promise<string | null> {
-	// Not framed, hooks off, or hooks not installed — nothing will answer.
-	if (!isDevHooksEnabled() || window.self === window.top || !bootAnswerPromise) {
+	// Not an embedded dev preview, or hooks not installed — nothing will answer.
+	if (!isEmbeddedDevShell() || !bootAnswerPromise) {
 		return Promise.resolve(null);
 	}
 	return new Promise((resolve) => {

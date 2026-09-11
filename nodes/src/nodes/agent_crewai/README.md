@@ -36,6 +36,7 @@ task and the Manager plus Subagents for explicit division of work.
 | Connection | Required | Description |
 | --- | --- | --- |
 | `llm` | yes | LLM used by the manager agent. |
+| `tool` | no | Cross-cutting tools available to the manager itself through control-plane invocation. |
 | `crewai` | yes | Connected CrewAI Subagent nodes to describe and delegate to. |
 
 ### CrewAI Subagent
@@ -209,7 +210,8 @@ object containing `error` and `type`.
 | `backstory` | `string` | **Manager Backstory**<br/>Background context for the manager's persona. Maps to CrewAI Agent(backstory=...). |  |
 | `goal` | `string` | **Manager Goal**<br/>What the manager is trying to achieve. Maps to CrewAI Agent(goal=...). |  |
 | `instructions` | `array` | **Instructions**<br/>Additional instructions to guide the manager's delegation strategy. |  |
-| `require_tool_call` | `boolean` | **Require tool call**<br/>Require the agent to invoke at least one tool before answering. When on, a run that answers without calling any tool fails with a guard error. Use for determinism-critical pipelines where an ungrounded or narrated answer must never be delivered. Off by default. | `false` |
+| `planning` | `boolean` | **Crew Planning**<br/>Run CrewAI's planner before the crew executes, adding a step-by-step plan to each task. Off by default: the planner requires the LLM to return JSON matching CrewAI's plan schema, and a model that answers in prose instead fails the whole run with <b>Failed to get the Planning output</b>. It also costs one extra LLM call per kickoff. Enable only with a model that reliably emits well-formed JSON. | `false` |
+| `require_tool_call` | `boolean` | **Require tool call**<br/>Require at least one tool call (including calls delegated to sub-agents) before answering. When on, a run that answers without any tool invocation fails with a guard error. Use for determinism-critical pipelines where an ungrounded or narrated answer must never be delivered. Off by default. | `false` |
 
 ### CrewAI Subagent (`services.subagent.json`)
 
@@ -227,7 +229,7 @@ object containing `error` and `type`.
 
 ## Dependencies
 
-- `crewai` `>=1.14.1`
+- `crewai` `>=1.14.1,<2`
 
 ## Source
 

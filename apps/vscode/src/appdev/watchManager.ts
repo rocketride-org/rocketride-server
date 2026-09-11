@@ -347,10 +347,10 @@ export class WatchManager {
 		// package.json watcher: a dependency edit invalidates the shared
 		// install and restarts THIS session (other apps' dev servers survive
 		// a root install — pnpm only rewrites the changed project's links).
-		// The install/restart loop DOES write package.json (the App Builder
-		// open path rewires the shell spec via ensureShellDependency), but it
-		// terminates: the rewrite early-returns once the spec is correct, so
-		// the watcher fires at most one extra cycle. Disposed in stop() so
+		// The install/restart loop can write package.json once (the App
+		// Builder open path completes MISSING platform deps via
+		// ensureDependencyWiring), but it terminates: wiring never rewrites
+		// a present spec, so the watcher fires at most one extra cycle. Disposed in stop() so
 		// watcher lifetime tracks the session. Known edge: an edit landing
 		// while the install is mid-flight is swallowed by the starting guard —
 		// accepted (the debounce makes it rare, and the preview Reload button
@@ -848,8 +848,14 @@ export class WatchManager {
 			}
 		}
 
-		// Build results: rsbuild prints "built in 1.24 s" / "build failed"
-		if (/built in\s+[\d.]+/i.test(text)) {
+		// Build results: rsbuild prints "built in 1.24 s" / "build failed".
+		// Lines tagged "[browser]" are dev.browserLogs relays of the PAGE's
+		// runtime errors, dressed in rsbuild's own "error   ..." format — app
+		// traffic, not compiler state. Classify from untagged lines only: an
+		// app-side error must never flip the panel to "build failed" (nothing
+		// failed to compile, so the Console would carry no explanation).
+		const compilerText = lines.filter((line) => !/^\s*\w+\s+\[browser\]/.test(line)).join('\n');
+		if (/built in\s+[\d.]+/i.test(compilerText)) {
 			const durationMs = session.buildStart ? Date.now() - session.buildStart : undefined;
 			session.buildStart = undefined;
 			this.notify(session.app.id, { state: 'ok', durationMs, target: session.devOrigin?.replace(/^https?:\/\//, '') });
@@ -859,11 +865,11 @@ export class WatchManager {
 			this.notifyDevEntry(session);
 			void this.registerOverlay(session);
 			this.scheduleReload(session);
-		} else if (/build failed|error {3}/i.test(text)) {
+		} else if (/build failed|error {3}/i.test(compilerText)) {
 			session.buildStart = undefined;
 			this.appScreen.notifyError(session.app.id, 'rsbuild build failed — see the Console pane for compiler output', 'rsbuild');
 			this.notify(session.app.id, { state: 'error', target: session.devOrigin?.replace(/^https?:\/\//, ''), reason: 'The app failed to compile — the Console pane carries the compiler output.' });
-		} else if (/building|compiling/i.test(text) && session.buildStart === undefined) {
+		} else if (/building|compiling/i.test(compilerText) && session.buildStart === undefined) {
 			session.buildStart = Date.now();
 			this.notify(session.app.id, { state: 'building', target: session.devOrigin?.replace(/^https?:\/\//, '') });
 		}

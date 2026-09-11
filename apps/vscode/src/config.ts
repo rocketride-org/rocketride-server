@@ -123,6 +123,31 @@ export interface SettingsSnapshot {
 }
 
 /**
+ * Whether a cloud server URL uses transport the extension may send
+ * credentials over.
+ *
+ * Sign-in ends with the API key traveling in the connection's auth request,
+ * so a cleartext scheme exposes it to the network path (CWE-319). https/wss
+ * are always acceptable; http/ws only when the host is loopback — the
+ * documented local-development case (http://localhost:5565).
+ *
+ * @param url - The cloud server URL as configured or supplied by a caller.
+ * @returns True when credentials may be sent to this target.
+ */
+export function isSecureCloudTarget(url: string): boolean {
+	try {
+		const parsed = new URL(RocketRideClient.normalizeUri(url));
+		if (parsed.protocol === 'https:' || parsed.protocol === 'wss:') {
+			return true;
+		}
+		const host = parsed.hostname;
+		return host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '[::1]' || host.endsWith('.localhost');
+	} catch {
+		return false;
+	}
+}
+
+/**
  * Configuration manager class providing centralized access to RocketRide settings
  */
 export class ConfigManager {
@@ -394,6 +419,9 @@ export class ConfigManager {
 			} else {
 				try {
 					new URL(RocketRideClient.normalizeUri(gc.hostUrl));
+					if (!isSecureCloudTarget(gc.hostUrl)) {
+						errors.push(`${label}: Cloud URL must use https — http is allowed only for localhost development targets`);
+					}
 				} catch {
 					errors.push(`${label}: Cloud URL must be a valid URL (e.g., https://api.rocketride.ai)`);
 				}
