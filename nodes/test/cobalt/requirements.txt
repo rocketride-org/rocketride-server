@@ -1,0 +1,15 @@
+# Test dependencies for nodes/test/cobalt.
+#
+# basalt-ai-cobalt is NOT declared here. These tests exercise the evaluator the
+# eval_cobalt node ships, so they must install the version that node asks for --
+# a second specifier here could only ever drift away from it. Pulling the node's
+# own file in with -r keeps one editable specifier for the pair: bump
+# eval_cobalt/requirements.txt and this follows.
+#
+# The two node files (dataset_cobalt, eval_cobalt) stay separate on purpose:
+# depends() resolves requirements.txt relative to the importing node's own
+# directory and no-ops when it is absent, so a node that does not declare its
+# driver does not get one. `lock-node-deps.yml` compiles every
+# nodes/src/nodes/**/requirements.txt into nodes/src/nodes/constraints.lock and
+# fails the PR if those two ever resolve to incompatible versions.
+-r ../../src/nodes/eval_cobalt/requirements.txt
