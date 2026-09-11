@@ -118,7 +118,7 @@ def load_services(node_dir: Path):
         raise FileNotFoundError(node_dir / 'services.json')
     entries = []
     for f in files:
-        d = json.loads(strip_jsonc(f.read_text()))
+        d = json.loads(strip_jsonc(f.read_text(encoding='utf-8')))
         for e in d if isinstance(d, list) else [d]:
             if isinstance(e, dict) and e.get('protocol'):
                 entries.append(e)
@@ -500,7 +500,7 @@ def validate(node_dir: Path):
     readme = node_dir / 'README.md'
     if not readme.exists():
         return name, [('FAIL', 'README exists', 'no README.md')]
-    full = readme.read_text()
+    full = readme.read_text(encoding='utf-8')
 
     # -- split hand-written / generated regions --
     if GEN_START in full:

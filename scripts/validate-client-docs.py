@@ -125,7 +125,7 @@ def main():
         if not path.exists():
             print(f'FAIL: {path} does not exist')
             sys.exit(1)
-        readmes[lang] = path.read_text()
+        readmes[lang] = path.read_text(encoding='utf-8')
 
     for lang, text in readmes.items():
         heads = re.findall(r'^## (.+?)\s*$', text, re.M)
@@ -162,7 +162,7 @@ def main():
     refs = {}
     for lang, d in dirs.items():
         path = d / 'reference.md'
-        refs[lang] = path.read_text() if path.exists() else ''
+        refs[lang] = path.read_text(encoding='utf-8') if path.exists() else ''
     py = harvest(refs['python'])
     ts = harvest(refs['typescript'])
     for key in sorted(set(py) - set(ts)):
