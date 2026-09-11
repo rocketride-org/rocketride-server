@@ -100,11 +100,13 @@ def _trim_to_sentences(text: str, max_sentences: int) -> str:
 
     Args:
         text: Full decoded caption.
-        max_sentences: Sentence budget.
+        max_sentences: Sentence budget; 0 or None means no limit.
 
     Returns:
         The caption truncated at the boundary (unchanged if fewer sentences).
     """
+    if not max_sentences:
+        return text
     for i, match in enumerate(_SENTENCE_TRIM_RE.finditer(text), 1):
         if i >= max_sentences:
             return text[: match.end()]
@@ -131,9 +133,14 @@ def _sentence_stop_criteria(tokenizer: Any, prompt_len: int, max_sentences: int)
 
     class _SentenceStop(StoppingCriteria):
         def __call__(self, input_ids, scores, **kwargs):
-            text = tokenizer.decode(input_ids[0, prompt_len:], skip_special_tokens=True)
-            done = _sentence_count(text) >= max_sentences
-            return torch.full((input_ids.shape[0],), done, device=input_ids.device, dtype=torch.bool)
+            # One verdict per batch row (transformers >= 4.39 expects a
+            # (batch,) bool tensor); rows that reach the budget stop while
+            # the rest keep decoding.
+            done = [
+                _sentence_count(tokenizer.decode(row[prompt_len:], skip_special_tokens=True)) >= max_sentences
+                for row in input_ids
+            ]
+            return torch.tensor(done, device=input_ids.device, dtype=torch.bool)
 
     return StoppingCriteriaList([_SentenceStop()])
 
@@ -408,7 +415,7 @@ class CaptionerLoader(BaseLoader):
             if dtype is not None and 'pixel_values' in inputs:
                 inputs['pixel_values'] = inputs['pixel_values'].to(dtype)
             gen_kwargs: Dict[str, Any] = {}
-            if max_sentences is not None:
+            if max_sentences:  # 0/None = no sentence limit
                 tokenizer = getattr(processor, 'tokenizer', processor)
                 gen_kwargs['stopping_criteria'] = _sentence_stop_criteria(
                     tokenizer, inputs['input_ids'].shape[1], max_sentences
@@ -427,7 +434,7 @@ class CaptionerLoader(BaseLoader):
             # Decode only the newly generated tokens (strip the prompt echo).
             new_tokens = generated_ids[:, inputs['input_ids'].shape[1] :]
             text = processor.batch_decode(new_tokens, skip_special_tokens=True)[0].strip()
-            if max_sentences is not None:
+            if max_sentences:
                 # The criterion usually halts exactly on the Nth terminator; a
                 # boundary confirmed by a merged terminator+whitespace token can
                 # leave the first word of sentence N+1 dangling — trim it.
@@ -482,7 +489,7 @@ class Captioner:
         self.model_name = model_name
         self.prompt = prompt or DEFAULT_PROMPT
         self.max_new_tokens = max_new_tokens or DEFAULT_MAX_NEW_TOKENS
-        self.max_sentences = max_sentences
+        self.max_sentences = max_sentences or None  # 0 = no limit, same as None
         self._revision = revision
 
         server_addr = get_model_server_address()
@@ -546,15 +553,21 @@ class Captioner:
 
         if self._proxy_mode:
             # The model server enforces its own per-request timeout/retry.
+            # Server floor: prompt and max_new_tokens have been part of the
+            # caption inference contract since the loader first shipped, so
+            # every model server that can load a caption model accepts them
+            # and they are always sent. max_sentences was added later; there
+            # is no version handshake on ModelClient to gate on, so it is only
+            # sent when set (non-zero): servers predating the field would
+            # reject an unknown kwarg, and omitting it keeps the off-path
+            # byte-identical.
             args = {
                 'data': raw if raw is not None else image_to_bytes(image),
                 'output_fields': ['caption'],
                 'prompt': prompt,
                 'max_new_tokens': max_new_tokens,
             }
-            # Only sent when set: servers predating the field would reject an
-            # unknown kwarg, and omitting it keeps the off-path byte-identical.
-            if max_sentences is not None:
+            if max_sentences:
                 args['max_sentences'] = max_sentences
             result = self._client.send_command('rrext_ms_inference', args)
             items = result.get('result', [])

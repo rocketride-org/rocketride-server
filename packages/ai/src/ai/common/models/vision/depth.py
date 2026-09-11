@@ -335,7 +335,12 @@ class DepthEstimator:
                 from PIL import Image
 
                 size = Image.open(io.BytesIO(image)).size  # header-only read
-        except Exception:
+        except (OSError, ValueError, AttributeError) as exc:
+            # OSError: undecodable/truncated bytes (PIL.UnidentifiedImageError
+            # is an OSError); ValueError: PIL rejects the buffer; AttributeError:
+            # a `.size` property that raises. The map is still returned at the
+            # model grid, so say so rather than silently skipping the restore.
+            logger.warning(f'Depth: could not read input size, skipping resolution restore: {exc}')
             size = None
         if size is not None and depth.shape != (size[1], size[0]):
             from ai.common.image.dense_resize import restore_dense_output

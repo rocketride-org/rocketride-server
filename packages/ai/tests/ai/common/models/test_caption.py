@@ -256,3 +256,217 @@ def test_facade_proxy_downscales_large_image(monkeypatch):
 
     sent = Image.open(io.BytesIO(captured['args']['data']))
     assert max(sent.size) <= capmod.INFER_MAX_EDGE
+
+
+def test_sentence_helpers_edge_cases():
+    count, trim = capmod._sentence_count, capmod._trim_to_sentences
+
+    # Uppercase-preceded abbreviation periods ('J.R.') never count; the guard is
+    # deliberately lowercase-blind, so a lowercase abbreviation like 'Dr.' does
+    # count as a boundary (documented limitation: prefers over-stop to a
+    # decimal firing mid-number).
+    assert count('J.R. Smith arrives.') == 1
+    assert count('Dr. Smith arrives.') == 2
+
+    # Runs of terminators are one boundary each.
+    assert count('Wow!!! Great.') == 2
+    assert count('Really?!') == 1
+    assert trim('Wow!!! Great.', 1) == 'Wow!!!'
+
+    # Ellipses are a single boundary, mid-text and at end-of-text.
+    assert count('It fades... Then dark.') == 2
+    assert count('It fades...') == 1
+    assert trim('It fades... Then dark.', 1) == 'It fades...'
+
+    # Closing quote after the terminator stays with its sentence.
+    assert count('He said "go." Then left.') == 2
+    assert trim('He said "go." Then left.', 1) == 'He said "go."'
+
+    # max_sentences=1 keeps exactly the first sentence.
+    assert trim('One. Two. Three.', 1) == 'One.'
+    # 0 / None mean no limit.
+    assert trim('One. Two. Three.', 0) == 'One. Two. Three.'
+    assert trim('One. Two. Three.', None) == 'One. Two. Three.'
+    assert trim('', 1) == ''
+
+
+def test_facade_proxy_treats_zero_max_sentences_as_off(monkeypatch):
+    captured = {'caption': 'ok'}
+    monkeypatch.setattr(capmod, 'get_model_server_address', lambda: 'localhost:5590')
+    monkeypatch.setattr(capmod, 'ModelClient', _fake_client_factory(captured))
+
+    cap = Captioner(max_sentences=0)
+    assert cap.max_sentences is None
+    cap.caption(Image.new('RGB', (8, 8)))
+    assert 'max_sentences' not in captured['args']
+
+    cap2 = Captioner(max_sentences=3)
+    cap2.caption(Image.new('RGB', (8, 8)), max_sentences=0)  # per-call 0 switches the limit off
+    assert 'max_sentences' not in captured['args']
+    # max_new_tokens is always on the wire (server floor: part of the contract since day one).
+    assert captured['args']['max_new_tokens'] == capmod.DEFAULT_MAX_NEW_TOKENS
+
+
+def _fake_stopping_transformers():
+    mod = types.ModuleType('transformers')
+
+    class StoppingCriteria:
+        pass
+
+    mod.StoppingCriteria = StoppingCriteria
+    mod.StoppingCriteriaList = list
+    return mod
+
+
+class _FakeTokenizer:
+    """Decodes ids through a fixed vocab so the criterion sees real text."""
+
+    VOCAB = {0: '<pad>', 1: 'A', 2: ' cat', 3: '.', 4: ' sits', 5: ' Then', 6: ' it', 7: ' runs'}
+
+    def decode(self, ids, skip_special_tokens=False):
+        return ''.join(self.VOCAB[int(i)] for i in ids if not (skip_special_tokens and int(i) == 0))
+
+
+def test_sentence_stop_criteria_is_per_row(monkeypatch):
+    from ai.common.torch import torch
+
+    monkeypatch.setitem(sys.modules, 'transformers', _fake_stopping_transformers())
+    prompt_len = 2
+    criteria = capmod._sentence_stop_criteria(_FakeTokenizer(), prompt_len, max_sentences=1)
+    (stop,) = criteria
+
+    # Row 0: 'A cat.' (done); row 1: 'A cat sits' (not yet).
+    batch = torch.tensor([[0, 0, 1, 2, 3], [0, 0, 1, 2, 4]])
+    verdict = stop(batch, None)
+    assert verdict.dtype == torch.bool and tuple(verdict.shape) == (2,)
+    assert verdict.tolist() == [True, False]
+
+    # Batch-1 behaviour unchanged: a (1,) tensor.
+    single = stop(torch.tensor([[0, 0, 1, 2, 4]]), None)
+    assert single.tolist() == [False]
+    assert stop(torch.tensor([[0, 0, 1, 2, 3]]), None).tolist() == [True]
+
+    # Budget of two: one sentence is not enough, two is.
+    two = capmod._sentence_stop_criteria(_FakeTokenizer(), prompt_len, max_sentences=2)[0]
+    assert two(torch.tensor([[0, 0, 1, 2, 3, 5, 6, 7, 3], [0, 0, 1, 2, 3, 5, 6, 7, 0]]), None).tolist() == [True, False]
+
+
+def _fake_inference_bundle(captured):
+    from ai.common.torch import torch
+
+    class _Inputs(dict):
+        def to(self, device):
+            return self
+
+    class FakeProcessor:
+        def apply_chat_template(self, messages, add_generation_prompt=True, tokenize=False):
+            return 'PROMPT'
+
+        def __call__(self, text=None, images=None, return_tensors=None):
+            return _Inputs(input_ids=torch.zeros((1, 2), dtype=torch.long))
+
+        def batch_decode(self, ids, skip_special_tokens=True):
+            return ['One here. Two here. Three']
+
+    class FakeModel:
+        def generate(self, **kwargs):
+            captured['generate'] = kwargs
+            return torch.zeros((1, 6), dtype=torch.long)
+
+    return {'model': FakeModel(), 'processor': FakeProcessor(), 'device': 'cpu', 'dtype': None}
+
+
+@pytest.mark.parametrize('max_sentences', [0, None])
+def test_inference_zero_or_none_max_sentences_means_no_limit(monkeypatch, max_sentences):
+    monkeypatch.setitem(sys.modules, 'transformers', _fake_stopping_transformers())
+    captured = {}
+    bundle = _fake_inference_bundle(captured)
+
+    out = CaptionerLoader.inference(bundle, {'images': ['img']}, max_sentences=max_sentences)
+    assert 'stopping_criteria' not in captured['generate']
+    assert out == ['One here. Two here. Three']  # untrimmed
+
+
+def test_inference_max_sentences_installs_criterion_and_trims(monkeypatch):
+    monkeypatch.setitem(sys.modules, 'transformers', _fake_stopping_transformers())
+    captured = {}
+    bundle = _fake_inference_bundle(captured)
+
+    out = CaptionerLoader.inference(bundle, {'images': ['img']}, max_sentences=2)
+    assert len(captured['generate']['stopping_criteria']) == 1
+    assert out == ['One here. Two here.']
+
+
+class _FakeImageProcessor:
+    merge_size = 2
+
+
+class _FakeQwenProcessor:
+    image_token = '<img>'
+    image_processor = _FakeImageProcessor()
+
+    def replace_image_token(self, image_inputs, image_idx):
+        raise AssertionError('stock replace_image_token must be re-bound')
+
+
+def test_apply_qwen3_vl_fixes_replace_image_token_casts_tensor_count_to_int():
+    from ai.common.torch import torch
+
+    processor = _FakeQwenProcessor()
+    capmod._apply_qwen3_vl_fixes(model=object(), processor=processor, dtype=torch.float32)
+
+    # grid (t=1, h=4, w=4) -> 16 patches // merge_size**2 (4) = 4 image tokens;
+    # the count arrives as a 0-dim tensor and must become a Python int (str * tensor aborts).
+    grid = torch.tensor([[1, 4, 4], [1, 8, 4]])
+    assert processor.replace_image_token({'image_grid_thw': grid}, 0) == '<img>' * 4
+    assert processor.replace_image_token({'image_grid_thw': grid}, 1) == '<img>' * 8
+
+
+def test_apply_qwen3_vl_fixes_leaves_other_processors_alone():
+    from ai.common.torch import torch
+
+    class Plain:
+        pass
+
+    processor = Plain()
+    capmod._apply_qwen3_vl_fixes(model=object(), processor=processor, dtype=torch.bfloat16)
+    assert not hasattr(processor, 'replace_image_token')
+
+
+def _fake_qwen_model(captured):
+    from ai.common.torch import torch
+
+    class PatchEmbed:
+        def __init__(self):
+            self.floated = False
+
+        def float(self):
+            self.floated = True
+            return self
+
+        def forward(self, hidden_states):
+            captured['in_dtype'] = hidden_states.dtype
+            return hidden_states * 2
+
+    visual = types.SimpleNamespace(patch_embed=PatchEmbed())
+    return types.SimpleNamespace(model=types.SimpleNamespace(visual=visual)), torch
+
+
+def test_apply_qwen3_vl_fixes_patch_embed_runs_fp32_only_for_bf16():
+    captured = {}
+    model, torch = _fake_qwen_model(captured)
+    capmod._apply_qwen3_vl_fixes(model=model, processor=object(), dtype=torch.bfloat16)
+
+    pe = model.model.visual.patch_embed
+    assert pe.floated is True
+    out = pe.forward(torch.ones(2, dtype=torch.bfloat16))
+    assert captured['in_dtype'] == torch.float32  # conv ran in fp32...
+    assert out.dtype == torch.bfloat16  # ...and the result is cast back
+
+    # fp32 models are untouched.
+    captured = {}
+    model, torch = _fake_qwen_model(captured)
+    capmod._apply_qwen3_vl_fixes(model=model, processor=object(), dtype=torch.float32)
+    pe = model.model.visual.patch_embed
+    assert pe.floated is False
+    assert pe.forward(torch.ones(2, dtype=torch.float32)).dtype == torch.float32

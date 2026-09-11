@@ -41,6 +41,7 @@ Segmentation loader + facade (vision family).
 import io
 import logging
 import os
+import re
 import time
 from typing import Any, Dict, List, Optional, Tuple, Union
 
@@ -61,6 +62,10 @@ DEFAULT_MODE = 'instance'
 MODES = frozenset(MODE_DEFAULTS)
 # Modes that require a non-empty text prompt (open-vocabulary concept segmentation).
 PROMPT_MODES = frozenset({'sam3'})
+# Concept-list separator (the detect node convention): a period surrounded by
+# whitespace, or a leading/trailing period. Periods inside a concept ('U.S.
+# flag', '1.5 ton truck') are not separators.
+_CONCEPT_SEP_RE = re.compile(r'\s+\.\s+|^\s*\.\s+|\s*\.\s*$')
 DEFAULT_THRESHOLD = 0.3
 DEFAULT_MAX_EDGE = 1024
 
@@ -94,20 +99,6 @@ def _bbox_from_mask(binary_mask) -> Dict[str, float]:
         'x2': float(xs.max() + 1),
         'y2': float(ys.max() + 1),
     }
-
-
-def _outputs_to_cpu(outputs: Any) -> Any:
-    """Return model outputs with every tensor moved to host (CPU) memory.
-
-    transformers post-processing converts the tensors it is handed via
-    ``.numpy()`` internally, which raises ``TypeError: can't convert cuda:N
-    device type tensor to numpy`` for CUDA tensors — an uncaught c10 error
-    that kills the whole model-server process on GPU boxes (same failure mode
-    detection.py hardened against). Copying to host first is negligible next
-    to model compute and independent of the transformers version.
-    """
-    moved = {k: v.detach().cpu() if hasattr(v, 'cpu') else v for k, v in outputs.items()}
-    return type(outputs)(**moved)
 
 
 class Mask2FormerInstanceLoader:
@@ -357,12 +348,16 @@ class Sam3ConceptLoader:
     ) -> List[Dict[str, Any]]:
         """Run concept segmentation for a text prompt.
 
-        SAM 3 answers ONE noun phrase per query, but the detect node's prompt
-        convention is a ' . '-separated concept list ("grass . tree . stairs").
-        The list fans out to one query per concept — batched into a single
-        forward over shared image features, since the vision encoder is
-        independent of the text query — and each instance keeps the concept it
-        matched as its label.
+        SAM 3 answers ONE noun phrase per query, but the prompt field accepts a
+        ' . '-separated concept list ("grass . tree . stairs",
+        optionally ending in ' .'). Only a period surrounded by whitespace (or a
+        leading/trailing one) separates concepts, so periods inside a phrase
+        ('U.S. flag', '1.5 ton truck') survive. Entries are stripped, empties
+        dropped and duplicates removed (first occurrence wins). The list fans
+        out to one query per concept — batched into a single forward over
+        shared image features, since the vision encoder is independent of the
+        text query — and each instance keeps the concept it matched as its
+        label.
 
         Args:
             image: PIL image.
@@ -376,8 +371,8 @@ class Sam3ConceptLoader:
         if image is None:
             raise ValueError('Image must not be None')
 
-        concepts = [c.strip() for c in (prompt or '').split('.')]
-        concepts = [c for c in concepts if c]
+        concepts = [c.strip() for c in _CONCEPT_SEP_RE.split(prompt or '')]
+        concepts = list(dict.fromkeys(c for c in concepts if c))
         if not concepts:
             return []
 

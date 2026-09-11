@@ -2,6 +2,8 @@
 the sam3 fakes run the real filtering math on small torch tensors).
 """
 
+import pytest
+
 import ai.common.models.vision.segmentation as segmod
 from ai.common.models.vision.segmentation import SegmenterLoader, Segmenter, Sam3ConceptLoader
 
@@ -282,3 +284,43 @@ def test_facade_sam3_prompt_is_per_request_not_identity(monkeypatch):
     # Per-call override wins over the constructor default.
     seg.segment(Image.new('RGB', (8, 8)), prompt='red kayak')
     assert captured['args']['prompt'] == 'red kayak'
+
+
+@pytest.mark.parametrize(
+    'prompt, expected',
+    [
+        ('cat . dog', ['cat', 'dog']),
+        ('cat . dog .', ['cat', 'dog']),  # optional trailing ' .'
+        ('cat.', ['cat']),  # trailing period without a space is still a terminator
+        ('. cat', ['cat']),  # leading separator
+        ('U.S. flag . car', ['U.S. flag', 'car']),  # periods inside a concept survive
+        ('1.5 ton truck . bike', ['1.5 ton truck', 'bike']),
+        ('tree . tree', ['tree']),  # duplicates collapse to the first occurrence
+        ('dog . cat . dog', ['dog', 'cat']),
+        ('cat', ['cat']),  # single concept: no split at all
+        ('', []),
+        (None, []),
+        (' . . ', []),
+    ],
+)
+def test_sam3_concept_split(monkeypatch, prompt, expected):
+    """' . ' is the concept separator; a bare '.' inside a phrase is not."""
+    import numpy as np
+    from PIL import Image
+
+    monkeypatch.setattr(segmod, '_encode_rle', lambda m: {'size': list(np.asarray(m).shape), 'counts': 'stub'})
+
+    n = max(len(expected), 1)
+    solid = np.full((4, 4), 10.0).tolist()
+    outputs = _sam3_outputs(scores=[[0.9]] * n, mask_logits=[[solid]] * n, boxes=[[[0, 0, 1, 1]]] * n)
+    captured = {}
+    backend = _make_sam3_backend(outputs, captured)
+
+    out = backend.segment(Image.new('RGB', (4, 4)), prompt=prompt)
+
+    if expected:
+        assert captured['calls'] == [expected]  # one batched processor call, in first-seen order
+        assert [inst['label'] for inst in out] == expected
+    else:
+        assert out == []
+        assert 'calls' not in captured  # nothing to query: no inference
