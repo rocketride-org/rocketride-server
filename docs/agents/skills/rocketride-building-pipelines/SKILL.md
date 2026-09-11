@@ -71,7 +71,8 @@ never `llms-full.txt`.
 
 **Deep docs (when you need to learn, not just select/configure).** The full RocketRide docs map
 is bundled at `ROCKETRIDE_DOC_MAP.md` (in this skill's directory — a ~2K-token index of ~156
-pages; it can't live in `.rocketride/docs/`, which the docs exporter owns and clobbers). When you
+pages; it can't live in `.rocketride/docs/`, which the client-docs bundle installer owns and
+replaces on reinstall). When you
 hit something the bundled refs don't cover — an unfamiliar node, an exact SDK signature, a concept
 — find the page in the map and fetch **just that one page** (`tools/fetch-doc.py "<topic>"`, live-
 first with an offline fallback). **NEVER fetch `llms-full.txt`** (~257K tokens — it will blow the
@@ -155,4 +156,4 @@ FIRST. That on-disk line is what makes a gate survive a context reset.**
 - `pipeline-patterns.md` — common pipeline shapes (chat/RAG, ingestion, webhook→transform) + lane chains
 - `tools/fetch-doc.py` — fetch ONE doc page on demand (resolves from the doc-map; refuses the monolith)
 - `ROCKETRIDE_DOC_MAP.md` — the bundled docs map (llms.txt); the deep-knowledge index (lives here
-  because the docs exporter owns `.rocketride/docs/` and deletes files it didn't export)
+  because the client-docs bundle installer owns `.rocketride/docs/` and replaces on reinstall)

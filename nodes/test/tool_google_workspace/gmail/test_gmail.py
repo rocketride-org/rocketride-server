@@ -569,6 +569,31 @@ def test_thread_modify_requires_labels():
 # ---------------------------------------------------------------------------
 
 
+def test_check_connection_probes_gmail_api():
+    """check_connection makes a live users().getProfile call, not just a local scope check."""
+    inst = make_inst()
+    out = inst.check_connection({})
+    assert out['connection_ok'] is True
+    assert inst.IGlobal.service.call_for('getProfile') == {'userId': 'me'}
+
+
+def test_check_connection_reports_probe_failure():
+    """A disabled Gmail API (accessNotConfigured) must flip connection_ok, not be swallowed."""
+    err = _HttpErr(403, 'Forbidden', content=b'{"error": {"errors": [{"reason": "accessNotConfigured"}]}}')
+    inst = make_inst(results={'getProfile': err})
+    out = inst.check_connection({})
+    assert out['connection_ok'] is False
+    assert out['errorReason'] == 'accessNotConfigured'
+
+
+class _HttpErr(Exception):
+    def __init__(self, status, reason, content=b''):
+        super().__init__(reason)
+        self.resp = types.SimpleNamespace(status=status)
+        self.reason = reason
+        self.content = content
+
+
 def _inst_with_token(access_tier: str, token: dict | None) -> 'IInstance.IInstance':
     """Return an IInstance whose IGlobal.glb simulates a persisted user token."""
     inst = make_inst(access_tier)

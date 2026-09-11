@@ -40,14 +40,14 @@ Default: **Gemini 3.1 Pro** (`gemini-3_1-pro-preview`).
 | Google: Gemini 3.5 Flash Lite | `models/gemini-3.5-flash-lite` | 1,048,576 | 65,536 |
 
 <details>
-<summary><strong>View 22 more models</strong></summary>
+<summary><strong>View 35 more models</strong></summary>
 
 | Profile | Model | Context tokens | Output tokens |
 | ------- | ----- | -------------- | ------------- |
 | `custom` | _(user-specified)_ | editable | editable |
-| Gemini 3.1 Flash Image Preview | `models/gemini-3.1-flash-image-preview` | 131,072 | 65,536 |
+| Gemini 3.1 Flash Image Preview | `models/gemini-3.1-flash-image-preview` | 131,072 | 58,982 |
 | Gemini 3.1 Flash Lite | `models/gemini-3.1-flash-lite-preview` | 1,048,576 | 65,536 |
-| Gemini 3 Flash Preview | `models/gemini-3-flash-preview` | 1,048,576 | 65,535 |
+| Gemini 3 Flash Preview | `models/gemini-3-flash-preview` | 1,048,576 | 65,536 |
 | Gemini 3 Pro Image Preview | `models/gemini-3-pro-image-preview` | 65,536 | 32,768 |
 | Gemini 2.5 Pro | `models/gemini-2.5-pro` | 1,048,576 | 65,536 |
 | Gemini 2.5 Flash | `models/gemini-2.5-flash` | 1,048,576 | 65,535 |
@@ -65,7 +65,20 @@ Default: **Gemini 3.1 Pro** (`gemini-3_1-pro-preview`).
 | Google Gemini Pro Latest | `models/gemini-pro-latest` | 1,048,576 | 65,536 |
 | Google: Nano Banana 2 (Gemini 3.1 Flash Image) | `models/gemini-3.1-flash-image` | 131,072 | 32,768 |
 | Google: Gemini 3.1 Flash Lite | `models/gemini-3.1-flash-lite` | 1,048,576 | 65,536 |
-| Google: Nano Banana 2 Lite (Gemini 3.1 Flash Lite Image) | `models/gemini-3.1-flash-lite-image` | 65,536 | 66,000 |
+| Google: Nano Banana 2 Lite (Gemini 3.1 Flash Lite Image) | `models/gemini-3.1-flash-lite-image` | 65,536 | 58,982 |
+| `models-gemini-2-5-flash-batch` | `models/gemini-2.5-flash:batch` | 1,048,576 | 65,535 |
+| `models-gemini-2-5-flash-lite-batch` | `models/gemini-2.5-flash-lite:batch` | 1,048,576 | 65,535 |
+| `models-gemini-2-5-pro-batch` | `models/gemini-2.5-pro:batch` | 1,048,576 | 65,536 |
+| `models-gemini-3-1-flash-lite-batch` | `models/gemini-3.1-flash-lite:batch` | 1,048,576 | 65,536 |
+| `models-gemini-3-1-pro-preview-batch` | `models/gemini-3.1-pro-preview:batch` | 1,048,576 | 65,536 |
+| `models-gemini-3-5-flash-batch` | `models/gemini-3.5-flash:batch` | 1,048,576 | 65,536 |
+| `models-gemini-3-5-flash-lite-batch` | `models/gemini-3.5-flash-lite:batch` | 1,048,576 | 65,536 |
+| `models-gemini-3-6-flash-batch` | `models/gemini-3.6-flash:batch` | 1,048,576 | 65,536 |
+| `models-gemini-3-7-flash` | `models/gemini-3.7-flash` | 1,048,576 | 65,536 |
+| `models-gemini-3-7-flash-batch` | `models/gemini-3.7-flash:batch` | 1,048,576 | 65,536 |
+| `models-gemini-3-8-flash` | `models/gemini-3.8-flash` | 1,048,576 | 65,536 |
+| `models-gemini-3-8-flash-batch` | `models/gemini-3.8-flash:batch` | 1,048,576 | 65,536 |
+| `models-gemini-3-flash-preview-batch` | `models/gemini-3-flash-preview:batch` | 1,048,576 | 65,536 |
 
 </details>
 

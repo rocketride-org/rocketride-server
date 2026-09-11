@@ -1,7 +1,7 @@
 # RocketRide TypeScript SDK
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/rocketride-org/rocketride-server/main/docs/public/typescript/assets/banner-typescript.png" alt="RocketRide TypeScript SDK" width="900">
+  <img src="./assets/banner-typescript.png" alt="RocketRide TypeScript SDK" width="900">
 </p>
 
 <p align="center">

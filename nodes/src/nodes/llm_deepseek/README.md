@@ -32,16 +32,16 @@ Default: **Cloud Reasoner** (`cloud-reasoner`).
 | ------- | ----- | -------------- | ------------- |
 | Cloud Reasoner **(default)** | `deepseek-reasoner` | 128,000 | 4,096 |
 | DeepSeek: DeepSeek V4 Pro | `deepseek-v4-pro` | 1,048,576 | 384,000 |
-| DeepSeek: DeepSeek V4 Flash | `deepseek-v4-flash` | 1,048,576 | 393,216 |
+| DeepSeek: DeepSeek V4 Flash | `deepseek-v4-flash` | 1,048,576 | 384,000 |
 | DeepSeek: DeepSeek V3.2 | `deepseek-v3.2` | 163,840 | 65,536 |
 | DeepSeek: DeepSeek V3.2 Exp | `deepseek-v3.2-exp` | 163,840 | 65,536 |
 
 <details>
-<summary><strong>View 19 more models</strong></summary>
+<summary><strong>View 25 more models</strong></summary>
 
 | Profile | Model | Context tokens | Output tokens |
 | ------- | ----- | -------------- | ------------- |
-| Cloud Chat | `deepseek-chat` | 163,840 | 16,000 |
+| Cloud Chat | `deepseek-chat` | 163,840 | 16,384 |
 | DeepSeek R1 1.5B (`deepseek-r1-1_5b`) | `deepseek-r1:1.5b` | 128,000 | 4,096 |
 | DeepSeek R1 7B (`deepseek-r1-7b`) | `deepseek-r1:7b` | 128,000 | 4,096 |
 | DeepSeek R1 8B (`deepseek-r1-8b`) | `deepseek-r1:8b` | 128,000 | 4,096 |
@@ -50,16 +50,22 @@ Default: **Cloud Reasoner** (`cloud-reasoner`).
 | DeepSeek R1 70B (`deepseek-r1-70b`) | `deepseek-r1:70b` | 128,000 | 4,096 |
 | DeepSeek R1 671B (`deepseek-r1-671b`) | `deepseek-r1:671b` | 128,000 | 4,096 |
 | DeepSeek V3 (`deepseek-v3`) | `deepseek-v3` | 128,000 | 4,096 |
-| DeepSeek: DeepSeek V3 0324 | `deepseek-chat-v3-0324` | 163,840 | 65,536 |
-| DeepSeek: DeepSeek V3.1 | `deepseek-chat-v3.1` | 163,840 | 32,768 |
-| DeepSeek: R1 | `deepseek-r1` | 163,840 | 16,000 |
+| DeepSeek: DeepSeek V3 0324 | `deepseek-chat-v3-0324` | 163,840 | 147,456 |
+| DeepSeek: DeepSeek V3.1 | `deepseek-chat-v3.1` | 163,840 | 144,900 |
+| DeepSeek: R1 | `deepseek-r1` | 64,000 | 16,000 |
 | DeepSeek: R1 0528 | `deepseek-r1-0528` | 163,840 | 32,768 |
-| DeepSeek: R1 Distill Llama 70B | `deepseek-r1-distill-llama-70b` | 8,192 | 8,192 |
+| DeepSeek: R1 Distill Llama 70B | `deepseek-r1-distill-llama-70b` | 8,192 | 7,372 |
 | DeepSeek: R1 Distill Qwen 32B | `deepseek-r1-distill-qwen-32b` | 32,768 | 32,768 |
 | TNG: DeepSeek R1T2 Chimera | `deepseek-r1t2-chimera` | 163,840 | 163,840 |
 | Nex AGI: DeepSeek V3.1 Nex N1 | `deepseek-v3.1-nex-n1` | 131,072 | 163,840 |
 | DeepSeek: DeepSeek V3.1 Terminus | `deepseek-v3.1-terminus` | 163,840 | 32,768 |
 | DeepSeek: DeepSeek V3.2 Speciale | `deepseek-v3.2-speciale` | 163,840 | 163,840 |
+| `deepseek-v4-flash-0731` | `deepseek-v4-flash-0731` | 1,310,720 | 131,072 |
+| `deepseek-v4-flash-0731-batch` | `deepseek-v4-flash-0731:batch` | 1,048,576 | 943,718 |
+| `deepseek-v4-flash-latest` | `deepseek-v4-flash-latest` | 1,310,720 | 393,216 |
+| `deepseek-v4-flash-vision-exp` | `deepseek-v4-flash-vision-exp` | 1,048,576 | 384,000 |
+| `deepseek-v4-pro-0813` | `deepseek-v4-pro-0813` | 1,048,576 | 384,000 |
+| `deepseek-v4-pro-0813-batch` | `deepseek-v4-pro-0813:batch` | 1,048,576 | 943,718 |
 
 </details>
 

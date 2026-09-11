@@ -219,9 +219,6 @@ user.json
 # Build version info (generated)
 version.json
 
-# Package READMEs (copied from docs/ by build; packaging requires them here)
-apps/vscode/README.md
-
 downloads/jdk-17.zip
 downloads/jre-17.zip
 downloads/jdk-17.tar.gz

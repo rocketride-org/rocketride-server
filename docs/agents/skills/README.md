@@ -34,7 +34,8 @@ worked examples, and offline shims under `tools/`. The bundled
 `LAYER1_NODE_INDEX.json` (167 nodes, corpus-reconciled) regenerates from a live engine via
 `rocketride-building-pipelines`' ladder — the engine remains the authority.
 
-Not exported: `docs:export` copies only the `.md` files sitting directly in
-`docs/agents/` to `.rocketride/docs/`, so this subdirectory is excluded, as
-`stubs/` is. Wire up an export path here when there is a consumer to export
-these to (e.g. the VS Code extension installing them as agent skills).
+Not part of the `/client/docs` bundle: `client-docs:agent` packs only
+`docs/agents/context/ROCKETRIDE_*.md` and `docs/agents/context/stubs/*` into
+`docs.zip`, so this subdirectory is excluded. Wire up a bundle path here when
+there is a consumer to ship these to (e.g. the VS Code extension installing
+them as agent skills).

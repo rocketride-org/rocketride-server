@@ -25,6 +25,13 @@
 			"auth_header": "Authorization",
 			"auth_prefix": "Bearer",
 			"smoke_test": "chat",
+			// This provider caps completions well below the context window and rejects a
+			// larger max_tokens with "This model supports at most N completion tokens".
+			// So modelOutputTokens equal to modelTotalTokens is a broken value here: token
+			// candidates carrying it are discarded, and native profiles still holding it
+			// fail the sync. Leave unset for providers with no separate completion limit
+			// (Mistral, xAI) — there the two values are legitimately equal.
+			"output_limit_below_context": true,
 			// model_filter controls which models from the API are considered.
 			// include_prefixes: if non-empty, model must start with one of these.
 			// exclude_patterns: substring match anywhere in model ID.
@@ -47,6 +54,14 @@
 			// Override token limits when the provider API and litellm are unreliable.
 			// Comment out to let litellm drive — restore when litellm has wrong values.
 			"token_limit_overrides": {
+				// The chat-latest family had its window hand-filled with its output limit
+				// (16384 in both fields). 16384 is the correct output; the window is
+				// 128000 per models.dev and litellm. Pinned so a source that reports no
+				// context window for these cannot let the wrong value back in.
+				"gpt-5-chat-latest": 128000,
+				"gpt-5.1-chat-latest": 128000,
+				"gpt-5.2-chat-latest": 128000,
+				"gpt-5.3-chat-latest": 128000,
 				// "gpt-3.5-turbo": 16385,
 				// "gpt-3.5-turbo-16k": 16385,
 				// "gpt-3.5-turbo-1106": 16385,
@@ -122,6 +137,9 @@
 				"anthropic-version": "2023-06-01"
 			},
 			"smoke_test": "chat",
+			// Anthropic caps completions below the window, and litellm reports the window
+			// as max_output_tokens here (see the WARNING further down). See llm_openai.
+			"output_limit_below_context": true,
 			"model_filter": {
 				"include_prefixes": ["claude-"],
 				"exclude_prefixes": [],
@@ -509,6 +527,54 @@
 				"ernie-4.5-turbo-32k": 32768,
 				"ernie-5.0-thinking-preview": 128000
 			}
+		},
+		// ----------------------------------------------------------------------
+		// Zhipu AI GLM — GLM text chat models through the OpenAI-compatible
+		// Z.ai API (api.z.ai). The include filter keeps only the glm-* family;
+		// vision (4V/4.5V), embedding, rerank, audio, and reward variants are
+		// excluded (they belong in dedicated nodes).
+		// ----------------------------------------------------------------------
+		"llm_glm": {
+			"handler": "cloud",
+			"env_var": "ROCKETRIDE_GLM_KEY",
+			"module": "glm",
+			"models_endpoint": "https://api.z.ai/api/paas/v4/models",
+			"auth_header": "Authorization",
+			"auth_prefix": "Bearer",
+			"smoke_test": "chat",
+			"model_filter": {
+				"include_prefixes": ["glm-"],
+				"exclude_prefixes": [],
+				// <digit>v catches every vision generation (4v, 4.1v, 4.5v, ...) —
+				// substring matching has no regex, so the set is enumerated.
+				"exclude_patterns": ["0v", "1v", "2v", "3v", "4v", "5v", "6v", "7v", "8v", "9v", "vision", "embed", "rerank", "audio", "asr", "tts", "voice", "speech", "realtime", "image", "video", "ocr", "reward", "charglm", "emohaa"]
+			},
+			// Protect the seeded cloud set so the keyless OpenRouter fallback can
+			// never wrongly retire it.
+			"protected_profiles": [
+				["custom", "2126-04-09"],
+				["glm-5-2", "2027-02-01"],
+				["glm-5-1", "2027-02-01"],
+				["glm-5", "2027-02-01"],
+				["glm-5-turbo", "2027-02-01"],
+				["glm-4-7", "2027-02-01"],
+				["glm-4-6", "2027-02-01"],
+				["glm-4-5", "2027-02-01"],
+				["glm-4-5-air", "2027-02-01"]
+			],
+			// Z.ai's /models endpoint omits context_window; lock the seeded models
+			// at their docs.z.ai model-card values (200K unless noted).
+			"default_context_window": 204800,
+			"token_limit_overrides": {
+				"glm-5.2": 1000000,
+				"glm-5.1": 204800,
+				"glm-5": 204800,
+				"glm-5-turbo": 204800,
+				"glm-4.7": 204800,
+				"glm-4.6": 204800,
+				"glm-4.5": 131072,
+				"glm-4.5-air": 131072
+			}
 		}
 	},
 	// --------------------------------------------------------------------------
@@ -552,6 +618,7 @@
 		"minimax-": "MiniMax ",
 		"kimi-": "Kimi ",
 		"moonshot-": "Moonshot ",
+		"glm-": "GLM-",
 		"text-embedding-": "Text Embedding ",
 		"o1": "o1",
 		"o3": "o3",
@@ -613,7 +680,18 @@
 			// // Baidu Qianfan
 			"ernie-4.5-turbo-128k": 4096,
 			"ernie-4.5-turbo-32k": 4096,
-			"ernie-5.0-thinking-preview": 8192
+			"ernie-5.0-thinking-preview": 8192,
+			// Zhipu AI GLM — hybrid-reasoning models; Z.ai's /models publishes no
+			// output limit, so pin a budget large enough that thinking + answer
+			// are not truncated.
+			"glm-5.2": 32768,
+			"glm-5.1": 32768,
+			"glm-5": 32768,
+			"glm-5-turbo": 32768,
+			"glm-4.7": 32768,
+			"glm-4.6": 32768,
+			"glm-4.5": 32768,
+			"glm-4.5-air": 32768
 		}
 	},
 	// --------------------------------------------------------------------------

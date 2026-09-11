@@ -34,7 +34,7 @@ supports `await using` (`Symbol.asyncDispose`).
 
 | Method | Signature | Returns | Description |
 | --- | --- | --- | --- |
-| `use` | `use(options?: { token?: string; filepath?: string; pipeline?: PipelineConfig; source?: string; threads?: number; useExisting?: boolean; args?: string[]; ttl?: number; pipelineTraceLevel?: 'none' \| 'metadata' \| 'summary' \| 'full'; name?: string; env?: Record<string, string> }): Promise<Record<string, any> & { token: string }>` | `Promise<{ token, ... }>` | Starts a pipeline. Pass either `pipeline` (object, used as-is — do not wrap it) or `filepath` (Node only). `pipelineTraceLevel` sets run-log trace verbosity, `name` a task display name, `env` per-run variable overrides. Returns at least `token`. |
+| `use` | `use(options?: { token?: string; filepath?: string; pipeline?: PipelineConfig; source?: string; threads?: number; useExisting?: boolean; args?: string[]; ttl?: number; pipelineTraceLevel?: 'none' \| 'metadata' \| 'summary' \| 'full'; name?: string; env?: Record<string, string> }): Promise<Record<string, any> & { token: string }>` | `Promise<{ token, ... }>` | Starts a pipeline. Pass either `pipeline` (object, used as-is — do not wrap it) or `filepath` (Node only). `pipelineTraceLevel` sets run-log trace verbosity, `name` a task display name, `env` per-run variable overrides. Returns at least `token`, plus `reused: true` when `useExisting` handed back an already-running instance instead of starting this pipeline. |
 | `validate` | `validate(options: { pipeline: PipelineConfig \| Record<string, unknown>; source?: string }): Promise<ValidationResult>` | `Promise<ValidationResult>` | Validates a pipeline configuration without starting it; returns errors and warnings. |
 | `terminate` | `terminate(token: string): Promise<void>` | - | Stops the pipeline for that token and frees server resources. |
 | `getTaskStatus` | `getTaskStatus(token: string, options?: { timeout?: number \| false }): Promise<TASK_STATUS>` | `Promise<TASK_STATUS>` | Current task status (`completedCount`, `totalCount`, `completed`, `state`, `exitCode`, …). Per-call `timeout` defaults to 15000 ms; pass `false` to disable. |
@@ -126,7 +126,9 @@ See [Deployments](/clients/typescript/deploy) for the model.
 
 | Method | Description |
 | --- | --- |
-| `deploy.publish(pipeline, options?)` | Snapshot the pipeline (a `PipelineConfig` with a required `name`) as the next registry version (`options.deployTo` also deploys it in one step). |
+| `deploy.add({kind?, pipeline?, data?, metadata?, comment?, deployTo?})` | The ONE rail door: deploy any kind of object as the next immutable registry version. `kind:'pipe'` (default) takes a `pipeline` dict; `kind:'app'` takes ONE `data` zip of the app's SOURCE — the server performs the build (client-produced binaries are never trusted); the zip is retained and unpacked at receipt, born deployment-state `private`. The app id must be inside your developer namespace. |
+| `deploy.addApp(appRoot, { workspaceRoot?, comment?, metadata?, onProgress? }): Promise<PublishResult>` | Pack an app folder's source and deploy it as the next registry version — the one call behind the App Builder's Deploy button and CI scripts. Packs by the App Builder rules (workspace-rooted zip, `appManifest.include`, hierarchical gitignore + the hard node_modules/dist/.git baseline, symlink containment, 50MB zipped / 512MB uncompressed caps); `onProgress` receives one line per step. Deploying activates nothing — bind an audience with `publishApp` afterwards. |
+| `deploy.verifyApp(appRoot, { workspaceRoot? }): Promise<AppVerifyReport>` | The no-side-effect precheck for `addApp` — purely local, no server call: manifest shape and id grammar, declared icon/README assets, `appManifest.include` entries, and a pack dry run against the size caps. Server-side concerns (the build, store review) are out of scope. |
 | `deploy.deploy(projectId, version, teamId)` | Point a team at a version — promotion and rollback alike. |
 | `deploy.list(params?)` | Deployments visible to you, standard `{ rows, total, page, pageSize }` envelope. |
 | `deploy.get(projectId, teamId)` | One team's deployment, registry-joined. |
@@ -143,7 +145,7 @@ See [Deployments](/clients/typescript/deploy) for the model.
 | `deploy.artifact(projectId, version)` | One immutable version's pipeline JSON, sha256-verified server-side. |
 | `deploy.preview(schedule, count?)` | THE single cron evaluator: validity + next occurrences. |
 
-Returns mirror the Python table: `publish` → `PublishResult`; `deploy`, `get`,
+Returns mirror the Python table: `add` → `PublishResult`; `deploy`, `get`,
 `disable`, `enable`, `remove`, `setSchedule`, `pauseSchedule`, `resumeSchedule`,
 `setSourceConfig` → `Deployment`; `list`/`versions`/`history` →
 `DeployListEnvelope<T>`; `run` → `{ token, version }`; `artifact` →
@@ -151,12 +153,57 @@ Returns mirror the Python table: `publish` → `PublishResult`; `deploy`, `get`,
 
 ### App publish ladder
 
-| Method | Signature |
-| --- | --- |
-| `appPublish` | `appPublish({ appId, version, bundle, message?, moduleId?, name? }): Promise<{ registryVersion, appVersion, sha256, publishedAt, author, message }>` |
-| `appVersions` | `appVersions(appId): Promise<Array<{ registryVersion, appVersion, sha256, publishedAt, author, message, rungs }>>` |
-| `appDeploy` | `appDeploy(appId, registryVersion, target): Promise<{ deployment, rung }>` |
-| `appWhere` | `appWhere(appId): Promise<Array<{ rung, handle, version, appVersion, state, deployedAt? }>>` |
+See [Deployments](/clients/typescript/deploy#app-publish-ladder) for the model.
+
+| Method | Signature | Description |
+| ------ | --------- | ----------- |
+| `deploy.add` | `deploy.add({kind?, pipeline?, data?, metadata?, comment?, deployTo?}): Promise<PublishResult>` | The ONE rail door: deploy any kind of object as the next immutable registry version. `kind:'pipe'` (default) takes a `pipeline` dict; `kind:'app'` takes ONE `data` zip of the app's SOURCE — the server performs the build (client-produced binaries are never trusted); the zip is retained and unpacked at receipt, born deployment-state `private`. The app id must be inside your developer namespace. |
+| `deploy.addApp` | `deploy.addApp(appRoot, { workspaceRoot?, comment?, metadata?, onProgress? }): Promise<PublishResult>` | Pack an app folder's source and deploy it as the next registry version — the one call behind the App Builder's Deploy button and CI scripts. Packs by the App Builder rules (workspace-rooted zip, `appManifest.include`, hierarchical gitignore + the hard node_modules/dist/.git baseline, symlink containment, 50MB zipped / 512MB uncompressed caps); `onProgress` receives one line per step. Deploying activates nothing — bind an audience with `publishApp` afterwards. |
+| `deploy.verifyApp` | `deploy.verifyApp(appRoot, { workspaceRoot? }): Promise<AppVerifyReport>` | The no-side-effect precheck for `addApp` — purely local, no server call: manifest shape and id grammar, declared icon/README assets, `appManifest.include` entries, and a pack dry run against the size caps. Server-side concerns (the build, store review) are out of scope. |
+| `listDeployments` | `listDeployments(appId): Promise<RailEntry[]>` | The version rail, newest first — the developer org sees its FULL rail (published or not), other callers only their visible versions. Each entry carries its deployment `state`, its `buildStatus` ('ok' = servable), and the `rungs` naming the audiences bound to it. |
+| `submitApp` | `submitApp(appId, registryVersion): Promise<{artifact}>` | Submit a deployed version for store review — flips the deployment `private` → `submit` (it enters the admin queue). Developer-org + namespace gated. |
+| `withdrawApp` | `withdrawApp(appId, registryVersion): Promise<{artifact}>` | Withdraw a pending review — the developer's own cancel: flips the deployment `submit` → `private` (leaves the admin queue, back to draft; history records `withdrawn`). Only a version in `submit` withdraws. Developer-org + namespace gated. |
+| `replyApp` | `replyApp(appId, message, registryVersion?): Promise<{replied, appId}>` | Append a developer message to the app's review thread — the developer half of the reviewer conversation. Rides `deployment_history` as a `reply` row (side `'developer'`), the same stream `deploy.history()` reads. Developer-org + namespace gated. |
+| `buildLog` | `buildLog(appId, registryVersion): Promise<{appId, version, log}>` | One version's durable server build log — the full phase-by-phase output the build worker stores beside the version's artifacts (no error text rides the rail rows). Long logs serve their tail; `''` = no log. Developer-org gated. |
+| `publishApp` | `publishApp(appId, registryVersion, target): Promise<{publish}>` | Bind a deployment to '@me', '@team/<name>', or '@public' ('@user' = legacy input alias). The binding is a pure pointer born 'enabled'. `@public` requires the deployment be `ready` (approved); `@me`/`@team` accept any non-`failed` deployment. Pinning ANOTHER org's public app to '@me'/'@team' is the version selector and is allowed; publishing your own app requires the id to be in your namespace. |
+| `whereApp` | `whereApp(appId): Promise<Pin[]>` | The reverse index: `{rung, handle, version, appVersion, state, deployedAt}` per audience — `state` is the bound DEPLOYMENT's review state. |
+
+Serving needs no verb: a version's bundle loads from the stable
+`/apps/<appId>/v<N>/remoteEntry.js` URL constructed from its registry
+version number, with entitlement enforced by the serve route on every
+request (registry ints ONLY — semver is display).
+
+### App marketplace + developer verbs
+
+Two raw DAP commands carry this surface (call via
+`client.call('<command>', { subcommand, ... })`):
+
+- **`rrext_deploy_app`** — the developer-account + review verbs (claiming a
+  developerId is a deploy PREREQUISITE, not a marketplace action): the
+  `developer_*` family, `submit`, and `register_dev`.
+- **`rrext_app`** — the pure marketplace: browse (`list`/`get`/`list_mine`),
+  install (`desktop_add`/`desktop_remove`), admin review (`admin_*`), and
+  pricing (`pricing_*`).
+
+Grouped families (the `developer_*`/`submit`/`register_dev` rows are on
+`rrext_deploy_app`; the rest on `rrext_app`):
+
+| Subcommand family | Subcommands | Guard | Purpose |
+| ----------------- | ----------- | ----- | ------- |
+| developer_* | `developer_register` · `developer_stripe` · `developer_dashboard` · `developer_status` | org.admin (register) | Claim the org's developer id slug + Stripe Connect onboarding. |
+| submit | `submit` · `withdraw` · `reply` | developer org + namespace | Submit a deployed version for review (flips the DEPLOYMENT `private` → `submit`), cancel a pending review, or append a developer message to the review thread (sugar over `submitApp`/`withdrawApp`/`replyApp`). |
+| register_dev | `register_dev` | self | Per-user live dev overlay (App Builder hot-reload); OSS-capable. |
+| catalog | `list` · `get` · `list_mine` · `desktop_add` · `desktop_remove` | authenticated | Browse reachable apps, the developer's own rail view, and desktop membership. |
+| admin_* | `admin_queue` · `admin_approve` · `admin_reject` · `admin_reply` · `admin_reseed` | sys.admin | Store review over the DEPLOYMENTS: the queue is deployments in `submit`; `admin_approve(appId, version)` flips it `ready`, `admin_reject(appId, version)` flips it `rejected`. |
+| pricing_* | `pricing_list` · `pricing_create` · `pricing_delete` | developer org (owns the app_products row) | Manage Stripe price tiers for a monetized app. |
+
+**Review model.** The review state lives on the DEPLOYMENT (`deployment_artifacts.state`).
+`@me`/`@team` bindings need no approval — they serve any non-`failed`
+deployment at once. Going public is a three-step flow: `submit` (deployment →
+`submit`, enters the admin queue) → `admin_approve` (→ `ready`) → `publishApp
+@public` (point the public binding at the now-`ready` version). A reject flips
+the deployment `rejected`; the developer fixes and deploys a NEW version. The
+store serves only public bindings whose deployment is `ready`.
 
 ### Run logs (`client.log`)
 

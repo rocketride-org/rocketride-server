@@ -38,28 +38,28 @@ Default: **Mistral Large 3** (`mistral-large`).
 
 | Profile | Model | Context | Output |
 | ------- | ----- | ------- | ------ |
-| `mistral-large` **(default)** | `mistral-large-2512` | 262,144 | 262,144 |
+| `mistral-large` **(default)** | `mistral-large-2512` | 262,144 | 209,715 |
 | `mistral-medium-2604` | `mistral-medium-2604` | 16,384 | 4,096 |
-| `mistral-small-2603` | `mistral-small-2603` | 262,144 | 4,096 |
+| `mistral-small-2603` | `mistral-small-2603` | 262,144 | 209,715 |
 
 <details>
-<summary><strong>View 40 more models</strong></summary>
+<summary><strong>View 41 more models</strong></summary>
 
 | Profile | Model | Context | Output |
 | ------- | ----- | ------- | ------ |
 | `custom` | _(user-specified)_ | 32,768 | editable |
 | `mistral-medium` | `mistral-medium-2508` | 131,072 | 4,096 |
 | `mistral-small` | `mistral-small-2506` | 131,072 | 4,096 |
-| `codestral` | `codestral-2508` | 256,000 | 256,000 |
+| `codestral` | `codestral-2508` | 256,000 | 204,800 |
 | `magistral-medium` | `magistral-medium-2509` | 40,000 | 40,000 |
 | `magistral-small` | `magistral-small-2509` | 40,960 | 4,096 |
 | `devstral-medium` | `devstral-medium-2507` | 128,000 | 128,000 |
 | `devstral-small` | `devstral-small-2507` | 128,000 | 128,000 |
-| `ministral-14b` | `ministral-14b-2512` | 262,144 | 4,096 |
-| `ministral-8b` | `ministral-8b-2512` | 262,144 | 262,144 |
-| `ministral-3b` | `ministral-3b-2512` | 131,072 | 4,096 |
+| `ministral-14b` | `ministral-14b-2512` | 262,144 | 209,715 |
+| `ministral-8b` | `ministral-8b-2512` | 262,144 | 209,715 |
+| `ministral-3b` | `ministral-3b-2512` | 131,072 | 104,857 |
 | `codestral-latest` | `codestral-latest` | 8,191 | 8,191 |
-| `devstral-2512` | `devstral-2512` | 262,144 | 256,000 |
+| `devstral-2512` | `devstral-2512` | 262,144 | 209,715 |
 | `devstral-latest` | `devstral-latest` | 256,000 | 256,000 |
 | `devstral-medium-latest` | `devstral-medium-latest` | 256,000 | 256,000 |
 | `magistral-medium-latest` | `magistral-medium-latest` | 40,000 | 40,000 |
@@ -70,8 +70,8 @@ Default: **Mistral Large 3** (`mistral-large`).
 | `mistral-large-2411` | `mistral-large-2411` | 131,072 | 128,000 |
 | `mistral-large-latest` | `mistral-large-latest` | 32,000 | 4,096 |
 | `mistral-medium-2505` | `mistral-medium-2505` | 8,191 | 8,191 |
-| `mistral-medium-3` | `mistral-medium-3` | 131,072 | 8,191 |
-| `mistral-medium-3-5` | `mistral-medium-3-5` | 262,144 | 262,144 |
+| `mistral-medium-3` | `mistral-medium-3` | 131,072 | 104,857 |
+| `mistral-medium-3-5` | `mistral-medium-3-5` | 262,144 | 209,715 |
 | `mistral-medium-c21211-r0-75` | `mistral-medium-c21211-r0-75` | 16,384 | 4,096 |
 | `mistral-medium-latest` | `mistral-medium-latest` | 131,072 | 131,072 |
 | `mistral-small-latest` | `mistral-small-latest` | 131,072 | 131,072 |
@@ -80,13 +80,14 @@ Default: **Mistral Large 3** (`mistral-large`).
 | `mistral-vibe-cli-fast` | `mistral-vibe-cli-fast` | 16,384 | 4,096 |
 | `mistral-vibe-cli-latest` | `mistral-vibe-cli-latest` | 16,384 | 4,096 |
 | `mistral-vibe-cli-with-tools` | `mistral-vibe-cli-with-tools` | 16,384 | 4,096 |
-| `mistral-large-2407` | `mistral-large-2407` | 131,072 | 4,096 |
-| `mistral-medium-3-1` | `mistral-medium-3.1` | 131,072 | 4,096 |
+| `mistral-large-2407` | `mistral-large-2407` | 131,072 | 104,857 |
+| `mistral-medium-3-1` | `mistral-medium-3.1` | 131,072 | 104,857 |
 | `mistral-nemo` | `mistral-nemo` | 131,072 | 16,384 |
-| `mistral-saba` | `mistral-saba` | 32,768 | 4,096 |
+| `mistral-saba` | `mistral-saba` | 32,768 | 26,214 |
 | `mistral-small-24b-instruct-2501` | `mistral-small-24b-instruct-2501` | 32,768 | 16,384 |
-| `mistral-small-3-1-24b-instruct` | `mistral-small-3.1-24b-instruct` | 128,000 | 128,000 |
-| `mistral-small-3-2-24b-instruct` | `mistral-small-3.2-24b-instruct` | 256,000 | 4,096 |
+| `mistral-small-3-1-24b-instruct` | `mistral-small-3.1-24b-instruct` | 128,000 | 102,400 |
+| `mistral-small-3-2-24b-instruct` | `mistral-small-3.2-24b-instruct` | 131,072 | 16,384 |
+| `mistral-medium-3-5-batch` | `mistral-medium-3-5:batch` | 32,768 | 26,214 |
 
 </details>
 

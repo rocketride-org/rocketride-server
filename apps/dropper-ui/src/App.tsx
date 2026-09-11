@@ -54,15 +54,12 @@ const App: React.FC = () => {
 
 	useEffect(() => {
 		const urlParams = new URLSearchParams(window.location.search);
-		let uri = '';
 		let token = '';
 
-		if (API_CONFIG.devMode && API_CONFIG.ROCKETRIDE_URI) {
-			uri = API_CONFIG.ROCKETRIDE_URI;
-		}
-		if (!uri) {
-			uri = window.location.origin;
-		}
+		// The server is always wherever this page was served from — no
+		// address is baked into the bundle. In dev the dev server proxies
+		// the engine, so origin holds there too.
+		const uri = window.location.origin;
 
 		// URL param always wins — it carries the freshly-minted pk for the
 		// current task and must not be shadowed by a stale sessionStorage value
@@ -77,9 +74,7 @@ const App: React.FC = () => {
 			token = API_CONFIG.ROCKETRIDE_APIKEY;
 		}
 
-		if (!uri) {
-			throw new Error('Failed to start RocketRide client: No uri found');
-		}
+		// A token is the one thing that cannot be derived — fail loudly.
 		if (!token) {
 			throw new Error('Failed to start RocketRide client: No token found');
 		}

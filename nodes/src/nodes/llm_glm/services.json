@@ -1,0 +1,371 @@
+{
+	//
+	// Required:
+	//		The displayable name of this node
+	//
+	"title": "GLM (Z.ai)",
+	//
+	// Required:
+	//		The protocol is the endpoint protocol
+	//
+	"protocol": "llm_glm://",
+	//
+	// Required:
+	//		Class type of the node - what it does
+	//
+	"classType": ["llm"],
+	//
+	// Required:
+	//		Capabilities are flags that change the behavior of the underlying
+	//		engine
+	//
+	"capabilities": ["invoke"],
+	//
+	// Optional:
+	//		Register is either filter, endpoint or ignored if not specified. If the
+	//		type is specified, a factory is registered of that given type
+	//
+	"register": "filter",
+	//
+	// Optional:
+	//		The node is the actual physical node to instantiate - if
+	//		not specified, the protocol will be used
+	//
+	"node": "python",
+	//
+	// Optional:
+	//		The path is the executable/script code - it is node dependent
+	// 		and is optional for most node
+	//
+	"path": "nodes.llm_glm",
+	//
+	// Required:
+	//		The prefix map when added/removed when convertting URLs <=> paths
+	//
+	"prefix": "llm",
+	//
+	// Optional:
+	//		Description to of this driver
+	//
+	"description": ["A component that connects to Zhipu AI's GLM large language models for ", "advanced natural language processing. The GLM-5 generation are hybrid-reasoning ", "MoE models with configurable thinking modes, strong agentic and coding ", "performance, and up to a 1M-token context window: GLM-5.2 for frontier ", "long-context reasoning, GLM-5 Turbo for a fast cost-effective tier, and the ", "open-weight GLM-4.5 Air for efficient self-hosted workloads. Models are served ", "through the OpenAI-compatible Z.ai cloud API (api.z.ai); self-hosted vLLM or ", "SGLang deployments connect through the Custom Model profile."],
+	//
+	// Optional:
+	//	  The icon is the icon to display in the UI for this node
+	//
+	"icon": "glm.svg",
+	"documentation": "https://docs.rocketride.org",
+	//
+	//
+	//  Optional:
+	//      Rendering hints to the UI which indicate which fields of
+	//      the configuration should be used to display information
+	//
+	"tile": ["Model: ${parameters.llm_glm.profile}"],
+	//
+	//	Optional:
+	//		As a pipe component, define what this pipe component takes
+	//		and what it produces
+	//
+	"lanes": {
+		"questions": ["answers"]
+	},
+	//
+	//	Optional:
+	//		Profile section are configuration optoins used by the driver
+	//		itself
+	//
+	"preconfig": {
+		// Define the values that will be merged into any profile configuration
+		// specified, unless the profile is 'absolute'
+		"default": "glm-5-2",
+		// Defines profiles used with the "profile": key
+		"profiles": {
+			"custom": {
+				"title": "Custom Model",
+				"model": "",
+				"modelTotalTokens": 131072,
+				"modelOutputTokens": 8192,
+				"serverbase": "https://api.z.ai/api/paas/v4",
+				"apikey": ""
+			},
+			"glm-5-2": {
+				"title": "GLM-5.2",
+				"model": "glm-5.2",
+				"modelSource": "provider",
+				"modelTotalTokens": 1000000, // manual - docs.z.ai model card (1M)
+				"modelOutputTokens": 32768, // manual
+				"serverbase": "https://api.z.ai/api/paas/v4",
+				"apikey": "",
+				"capabilities": {
+					"reasoning": true
+				}
+			},
+			"glm-5-1": {
+				"title": "GLM-5.1",
+				"model": "glm-5.1",
+				"modelSource": "provider",
+				"modelTotalTokens": 204800, // manual - docs.z.ai model card (200K)
+				"modelOutputTokens": 32768, // manual
+				"serverbase": "https://api.z.ai/api/paas/v4",
+				"apikey": "",
+				"capabilities": {
+					"reasoning": true
+				}
+			},
+			"glm-5": {
+				"title": "GLM-5",
+				"model": "glm-5",
+				"modelSource": "provider",
+				"modelTotalTokens": 204800, // manual - docs.z.ai model card (200K)
+				"modelOutputTokens": 32768, // manual
+				"serverbase": "https://api.z.ai/api/paas/v4",
+				"apikey": "",
+				"capabilities": {
+					"reasoning": true
+				}
+			},
+			"glm-5-turbo": {
+				"title": "GLM-5 Turbo",
+				"model": "glm-5-turbo",
+				"modelSource": "provider",
+				"modelTotalTokens": 204800, // manual - docs.z.ai model card (200K)
+				"modelOutputTokens": 32768, // manual
+				"serverbase": "https://api.z.ai/api/paas/v4",
+				"apikey": "",
+				"capabilities": {
+					"reasoning": true
+				}
+			},
+			"glm-4-7": {
+				"title": "GLM-4.7",
+				"model": "glm-4.7",
+				"modelSource": "provider",
+				"modelTotalTokens": 204800, // manual - docs.z.ai model card (200K)
+				"modelOutputTokens": 32768, // manual
+				"serverbase": "https://api.z.ai/api/paas/v4",
+				"apikey": "",
+				"capabilities": {
+					"reasoning": true
+				}
+			},
+			"glm-4-6": {
+				"title": "GLM-4.6",
+				"model": "glm-4.6",
+				"modelSource": "provider",
+				"modelTotalTokens": 204800, // manual - docs.z.ai model card (200K)
+				"modelOutputTokens": 32768, // manual
+				"serverbase": "https://api.z.ai/api/paas/v4",
+				"apikey": "",
+				"capabilities": {
+					"reasoning": true
+				}
+			},
+			"glm-4-5": {
+				"title": "GLM-4.5",
+				"model": "glm-4.5",
+				"modelSource": "provider",
+				"modelTotalTokens": 131072, // manual - docs.z.ai model card (128K)
+				"modelOutputTokens": 32768, // manual
+				"serverbase": "https://api.z.ai/api/paas/v4",
+				"apikey": "",
+				"capabilities": {
+					"reasoning": true
+				}
+			},
+			"glm-4-5-air": {
+				"title": "GLM-4.5 Air",
+				"model": "glm-4.5-air",
+				"modelSource": "provider",
+				"modelTotalTokens": 131072, // manual - docs.z.ai model card (128K)
+				"modelOutputTokens": 32768, // manual
+				"serverbase": "https://api.z.ai/api/paas/v4",
+				"apikey": "",
+				"capabilities": {
+					"reasoning": true
+				}
+			}
+		}
+	},
+	//
+	// Optional:
+	//		Local fields definitions - these define fields only for the
+	//		current service. You may specify them here, or directly
+	//		in the shape
+	//
+	"fields": {
+		"model": {
+			"type": "string",
+			"title": "Model",
+			"description": "Zhipu AI GLM model"
+		},
+		"modelTotalTokens": {
+			"type": "number",
+			"title": "Tokens",
+			"description": "Total Tokens"
+		},
+		"glm.serverbase": {
+			"type": "string",
+			"title": "Server base URL",
+			"description": "OpenAI-compatible base URL for the GLM endpoint (e.g. https://api.z.ai/api/paas/v4 for the Z.ai cloud API, http://localhost:8000/v1 for a self-hosted vLLM / SGLang server).",
+			"default": "https://api.z.ai/api/paas/v4"
+		},
+		"glm.custom": {
+			"object": "custom",
+			"properties": [
+				"model",
+				"modelTotalTokens",
+				"glm.serverbase",
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
+		},
+		"glm.glm-5-2": {
+			"object": "glm-5-2",
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
+		},
+		"glm.glm-5-1": {
+			"object": "glm-5-1",
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
+		},
+		"glm.glm-5": {
+			"object": "glm-5",
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
+		},
+		"glm.glm-5-turbo": {
+			"object": "glm-5-turbo",
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
+		},
+		"glm.glm-4-7": {
+			"object": "glm-4-7",
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
+		},
+		"glm.glm-4-6": {
+			"object": "glm-4-6",
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
+		},
+		"glm.glm-4-5": {
+			"object": "glm-4-5",
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
+		},
+		"glm.glm-4-5-air": {
+			"object": "glm-4-5-air",
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
+		},
+		"glm.profile": {
+			"title": "Model",
+			"description": "Zhipu AI GLM LLM model",
+			"type": "string",
+			"default": "glm-5-2",
+			"enum": [
+				"*>preconfig.profiles.*.title"
+			],
+			"conditional": [
+				{
+					"value": "custom",
+					"properties": [
+						"glm.custom"
+					]
+				},
+				{
+					"value": "glm-5-2",
+					"properties": [
+						"glm.glm-5-2"
+					]
+				},
+				{
+					"value": "glm-5-1",
+					"properties": [
+						"glm.glm-5-1"
+					]
+				},
+				{
+					"value": "glm-5",
+					"properties": [
+						"glm.glm-5"
+					]
+				},
+				{
+					"value": "glm-5-turbo",
+					"properties": [
+						"glm.glm-5-turbo"
+					]
+				},
+				{
+					"value": "glm-4-7",
+					"properties": [
+						"glm.glm-4-7"
+					]
+				},
+				{
+					"value": "glm-4-6",
+					"properties": [
+						"glm.glm-4-6"
+					]
+				},
+				{
+					"value": "glm-4-5",
+					"properties": [
+						"glm.glm-4-5"
+					]
+				},
+				{
+					"value": "glm-4-5-air",
+					"properties": [
+						"glm.glm-4-5-air"
+					]
+				}
+			]
+		}
+	},
+	//
+	// Required:
+	//		Defines the fields (shape) of the service. Either source or target
+	//		map be specified, or both, but at least one is required
+	//
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "GLM (Z.ai)",
+			"properties": ["glm.profile"]
+		}
+	],
+	"test": {
+		"profiles": ["glm-5-2"],
+		"outputs": ["answers"],
+		"cases": [
+			{
+				"name": "LLM returns mock response",
+				"text": "What is 2+2?",
+				"expect": {
+					"answers": {
+						"contains": "Mock LLM response"
+					}
+				}
+			}
+		]
+	}
+}

@@ -25,11 +25,11 @@ Default: **Kimi K2.6** (`kimi-k2-6`).
 | Profile | Model | Context tokens | Output tokens |
 | ------- | ----- | -------------- | ------------- |
 | Kimi K2.6 **(default)** | `kimi-k2.6` | 262,144 | 16,384 |
-| MoonshotAI: Kimi K3 | `kimi-k3` | 1,048,576 | 4,096 |
-| MoonshotAI: Kimi K2.7 Code | `kimi-k2.7-code` | 262,144 | 262,144 |
+| MoonshotAI: Kimi K3 | `kimi-k3` | 1,048,576 | 943,718 |
+| MoonshotAI: Kimi K2.7 Code | `kimi-k2.7-code` | 262,144 | 235,929 |
 
 <details>
-<summary><strong>View 8 more models</strong></summary>
+<summary><strong>View 9 more models</strong></summary>
 
 | Profile | Model | Context tokens | Output tokens |
 | ------- | ----- | -------------- | ------------- |
@@ -40,7 +40,8 @@ Default: **Kimi K2.6** (`kimi-k2-6`).
 | MoonshotAI: Kimi K2 0711 | `kimi-k2` | 131,072 | 100,352 |
 | MoonshotAI: Kimi K2 0905 | `kimi-k2-0905` | 262,144 | 100,352 |
 | MoonshotAI: Kimi K2 Thinking | `kimi-k2-thinking` | 262,144 | 100,352 |
-| MoonshotAI Kimi Latest | `kimi-latest` | 1,048,576 | 131,072 |
+| MoonshotAI Kimi Latest | `kimi-latest` | 1,048,576 | 943,718 |
+| `kimi-k3-batch` | `kimi-k3:batch` | 1,048,576 | 943,718 |
 
 </details>
 

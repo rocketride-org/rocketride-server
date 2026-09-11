@@ -36,14 +36,16 @@ The configured tool-server name defaults to `weaviate`.
 
 `search` requires a bound embedding provider for semantic similarity search. The three functions return a failure object when their required input or an embedding cannot be obtained.
 
+`search` accepts an optional `filter` object honoring only `objectId`, `nodeId` and `parent`; any other key is rejected. `upsert` accepts an optional `metadata` object storing `nodeId`, `parent` and `chunkId`, defaulting to `"vectordb_tool"`, `"/"` and `0` respectively.
+
 ## Profiles
 
-Default: **Weaviate cloud server** (`cloud`).
+Default: **Your own Weaviate server** (`local`).
 
 | Profile | Default host | Default port |
 | --- | --- | --- |
-| Weaviate cloud server **(default)** | Empty | `443` |
-| Your own Weaviate server | `localhost` | `8080` |
+| Your own Weaviate server **(default)** | `localhost` | `8080` |
+| Weaviate cloud server | Empty | `443` |
 
 ## Configuration
 

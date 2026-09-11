@@ -36,6 +36,7 @@ import { RemoteManager } from './remote-manager';
 import { ApiKeyAuthProvider } from '../auth/ApiKeyAuthProvider';
 import { CloudAuthProvider } from '../auth/CloudAuthProvider';
 import { CONNECT_TIMEOUT_MS, LS_TOKEN } from '../constants';
+import { resetDevGateForTests } from '../util/devGate';
 
 type EmittedEvent = { event: string; payload: unknown };
 
@@ -100,7 +101,7 @@ const authenticatedResult: ConnectResult = {
 	phoneNumber: '',
 	phoneNumberVerified: false,
 	locale: 'en-US',
-	defaultTeam: '',
+	devTeam: '',
 	organization: null,
 	apps: [],
 	capabilities: [],
@@ -216,7 +217,132 @@ test('handleStoredTokenFailure preserves credentials for retryable server failur
 	});
 });
 
-test('clearToken removes current and legacy stored tokens', () => {
+test('handleStoredTokenFailure downgrades a network latch to session expiry when a same-origin probe answers', async () => {
+	const originalFetch = Object.getOwnPropertyDescriptor(globalThis, 'fetch');
+	let probed: string | undefined;
+	Object.defineProperty(globalThis, 'fetch', {
+		configurable: true,
+		value: async (input: unknown) => {
+			probed = String(input);
+			return { ok: true, json: async () => ({ status: 'OK', data: { version: '3.3.0' } }) };
+		},
+	});
+
+	try {
+		const { manager } = createTestManager();
+
+		const shouldClearToken = manager.handleStoredTokenFailure(new ConnectionFailure('Failed to fetch', 'network'));
+
+		// The network failure latches synchronously so recovery UI can render it.
+		assert.equal(shouldClearToken, false);
+		assert.equal(manager.connectionStatus.lastFailure?.kind, 'network');
+
+		// The same-origin probe answering proves the server is reachable, so the
+		// latched failure downgrades to session expiry instead of a false outage.
+		await new Promise((resolve) => setImmediate(resolve));
+		assert.equal(probed, '/version');
+		assert.equal(manager.connectionStatus.state, ConnectionState.AUTH_FAILED);
+		assert.deepEqual(manager.connectionStatus.lastFailure, {
+			kind: 'auth',
+			lastError: 'Your session has expired — please sign in again.',
+			errorKind: 'session',
+		});
+	} finally {
+		if (originalFetch) Object.defineProperty(globalThis, 'fetch', originalFetch);
+		else delete (globalThis as { fetch?: typeof fetch }).fetch;
+	}
+});
+
+test('handleStoredTokenFailure keeps the network latch when the same-origin probe fails too', async () => {
+	const originalFetch = Object.getOwnPropertyDescriptor(globalThis, 'fetch');
+	Object.defineProperty(globalThis, 'fetch', {
+		configurable: true,
+		value: async () => {
+			throw new TypeError('Failed to fetch');
+		},
+	});
+
+	try {
+		const { manager } = createTestManager();
+
+		manager.handleStoredTokenFailure(new ConnectionFailure('Failed to fetch', 'network'));
+		await new Promise((resolve) => setImmediate(resolve));
+
+		// Both requests dead: genuinely unreachable, the network banner stands.
+		assert.equal(manager.connectionStatus.state, ConnectionState.FAILED);
+		assert.equal(manager.connectionStatus.lastFailure?.kind, 'network');
+	} finally {
+		if (originalFetch) Object.defineProperty(globalThis, 'fetch', originalFetch);
+		else delete (globalThis as { fetch?: typeof fetch }).fetch;
+	}
+});
+
+test('handleStoredTokenFailure does not let a stale probe downgrade a newer network failure in the same generation', async () => {
+	const originalFetch = Object.getOwnPropertyDescriptor(globalThis, 'fetch');
+	let calls = 0;
+	Object.defineProperty(globalThis, 'fetch', {
+		configurable: true,
+		value: async () => {
+			calls += 1;
+			// The first (older) failure's probe finds the server reachable; the
+			// second (newer) failure's probe finds it genuinely down.
+			if (calls === 1) return { ok: true, json: async () => ({ status: 'OK', data: { version: '3.3.0' } }) };
+			throw new TypeError('Failed to fetch');
+		},
+	});
+
+	try {
+		const { manager } = createTestManager();
+
+		// Two network failures latch back to back in the same generation, each
+		// firing its own probe. The older probe resolves ok, but by the time it
+		// does a newer network failure is latched — keying the downgrade on the
+		// exact latched object (not just kind === 'network') is what stops the
+		// older probe from clobbering the newer failure into a false session
+		// expiry.
+		manager.handleStoredTokenFailure(new ConnectionFailure('Failed to fetch', 'network'));
+		manager.handleStoredTokenFailure(new ConnectionFailure('Failed to fetch', 'network'));
+
+		await new Promise((resolve) => setImmediate(resolve));
+		await new Promise((resolve) => setImmediate(resolve));
+
+		// The newer failure's own probe failed, so the network banner stands.
+		assert.equal(calls, 2);
+		assert.equal(manager.connectionStatus.state, ConnectionState.FAILED);
+		assert.equal(manager.connectionStatus.lastFailure?.kind, 'network');
+	} finally {
+		if (originalFetch) Object.defineProperty(globalThis, 'fetch', originalFetch);
+		else delete (globalThis as { fetch?: typeof fetch }).fetch;
+	}
+});
+
+test('handleStoredTokenFailure keeps the network latch when the probe answers 200 but not the /version contract', async () => {
+	const originalFetch = Object.getOwnPropertyDescriptor(globalThis, 'fetch');
+	Object.defineProperty(globalThis, 'fetch', {
+		configurable: true,
+		// A page origin that merely returns 200 for /version without the server's
+		// own contract — e.g. a cross-origin serverUri whose real backend is down,
+		// while the page host answers /version with something unrelated.
+		value: async () => ({ ok: true, json: async () => ({ hello: 'not rocketride' }) }),
+	});
+
+	try {
+		const { manager } = createTestManager();
+
+		manager.handleStoredTokenFailure(new ConnectionFailure('Failed to fetch', 'network'));
+		await new Promise((resolve) => setImmediate(resolve));
+
+		// The probe did not prove the backend is reachable, so the network banner
+		// stands rather than being downgraded to a false session expiry.
+		assert.equal(manager.connectionStatus.state, ConnectionState.FAILED);
+		assert.equal(manager.connectionStatus.lastFailure?.kind, 'network');
+	} finally {
+		if (originalFetch) Object.defineProperty(globalThis, 'fetch', originalFetch);
+		else delete (globalThis as { fetch?: typeof fetch }).fetch;
+	}
+});
+
+test('clearToken removes the stored token from localStorage only', () => {
 	const removedLocalKeys: string[] = [];
 	const removedSessionKeys: string[] = [];
 	const originalLocalStorage = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
@@ -233,7 +359,8 @@ test('clearToken removes current and legacy stored tokens', () => {
 	try {
 		createTestManager().manager.clearToken();
 		assert.deepEqual(removedLocalKeys, ['rr:user_token']);
-		assert.deepEqual(removedSessionKeys, ['rr:user_token']);
+		// The legacy sessionStorage slot is gone — clearing must not touch it.
+		assert.deepEqual(removedSessionKeys, []);
 	} finally {
 		if (originalLocalStorage) Object.defineProperty(globalThis, 'localStorage', originalLocalStorage);
 		else delete (globalThis as { localStorage?: Storage }).localStorage;
@@ -242,7 +369,7 @@ test('clearToken removes current and legacy stored tokens', () => {
 	}
 });
 
-test('auth providers sign out by removing current and legacy stored tokens', async () => {
+test('auth providers sign out by removing the stored token from localStorage only', async () => {
 	const originalLocalStorage = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
 	const originalSessionStorage = Object.getOwnPropertyDescriptor(globalThis, 'sessionStorage');
 
@@ -262,13 +389,169 @@ test('auth providers sign out by removing current and legacy stored tokens', asy
 			await provider.signOut();
 
 			assert.deepEqual(removedLocalKeys, [LS_TOKEN]);
-			assert.deepEqual(removedSessionKeys, [LS_TOKEN]);
+			// The legacy sessionStorage slot is gone — sign-out must not touch it.
+			assert.deepEqual(removedSessionKeys, []);
 		}
 	} finally {
 		if (originalLocalStorage) Object.defineProperty(globalThis, 'localStorage', originalLocalStorage);
 		else delete (globalThis as { localStorage?: Storage }).localStorage;
 		if (originalSessionStorage) Object.defineProperty(globalThis, 'sessionStorage', originalSessionStorage);
 		else delete (globalThis as { sessionStorage?: Storage }).sessionStorage;
+	}
+});
+
+test('token methods use frame-local memory in embedded dev shells', () => {
+	const originalWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
+	const originalLocalStorage = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+	const originalSessionStorage = Object.getOwnPropertyDescriptor(globalThis, 'sessionStorage');
+	const originalFetch = Object.getOwnPropertyDescriptor(globalThis, 'fetch');
+	const localTouches: string[] = [];
+	const sessionTouches: string[] = [];
+	const fetchCalls: string[] = [];
+
+	// A framed window (self !== top) carrying rrdev=1 marks this shell as an
+	// embedded dev preview — its token must live in frame-local memory
+	// (sessionStorage is shared between same-origin sibling iframes in one
+	// top-level browsing context, so it cannot isolate panels either). The
+	// gate cache is reset so it recomputes from this staged environment (the
+	// test runner builds with NODE_ENV=production, so the URL flag is the
+	// live path).
+	Object.defineProperty(globalThis, 'window', {
+		configurable: true,
+		value: { self: {}, top: {}, location: { search: '?rrdev=1' } },
+	});
+	resetDevGateForTests();
+	Object.defineProperty(globalThis, 'localStorage', {
+		configurable: true,
+		value: {
+			setItem: (key: string) => localTouches.push(`set:${key}`),
+			getItem: (key: string) => { localTouches.push(`get:${key}`); return null; },
+			removeItem: (key: string) => localTouches.push(`remove:${key}`),
+		},
+	});
+	Object.defineProperty(globalThis, 'sessionStorage', {
+		configurable: true,
+		value: {
+			setItem: (key: string) => sessionTouches.push(`set:${key}`),
+			getItem: (key: string) => { sessionTouches.push(`get:${key}`); return null; },
+			removeItem: (key: string) => sessionTouches.push(`remove:${key}`),
+		},
+	});
+	Object.defineProperty(globalThis, 'fetch', {
+		configurable: true,
+		value: (url: string) => { fetchCalls.push(url); return Promise.resolve({}); },
+	});
+
+	try {
+		const { manager } = createTestManager();
+		// The helper stubs saveToken to a recorder; this test exercises the
+		// real storage path, so restore the prototype method.
+		manager.saveToken = ConnectionManager.prototype.saveToken;
+		manager.saveToken('rr_panel-token');
+		assert.equal(manager.loadToken(), 'rr_panel-token');
+		manager.clearToken();
+		assert.equal(manager.loadToken(), '');
+		// Neither shared slot was touched: a preview can neither leak its
+		// token into an origin-wide store nor clear another context's
+		// session through one.
+		assert.deepEqual(localTouches, []);
+		assert.deepEqual(sessionTouches, []);
+		// And the HOST-WIDE /apps cookie was never primed: the cookie jar is
+		// shared by every same-origin frame, so a panel's injected session
+		// must not replace the embedding user's bundle credentials.
+		assert.deepEqual(fetchCalls, []);
+	} finally {
+		resetDevGateForTests();
+		if (originalWindow) Object.defineProperty(globalThis, 'window', originalWindow);
+		else delete (globalThis as { window?: Window }).window;
+		if (originalLocalStorage) Object.defineProperty(globalThis, 'localStorage', originalLocalStorage);
+		else delete (globalThis as { localStorage?: Storage }).localStorage;
+		if (originalSessionStorage) Object.defineProperty(globalThis, 'sessionStorage', originalSessionStorage);
+		else delete (globalThis as { sessionStorage?: Storage }).sessionStorage;
+		if (originalFetch) Object.defineProperty(globalThis, 'fetch', originalFetch);
+		else delete (globalThis as { fetch?: typeof fetch }).fetch;
+	}
+});
+
+test('saveToken primes the /apps cookie for real tabs', () => {
+	const originalLocalStorage = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+	const originalFetch = Object.getOwnPropertyDescriptor(globalThis, 'fetch');
+	const stored = new Map<string, string>();
+	const fetchCalls: string[] = [];
+
+	// No window global at all — not framed, so this is the real-tab path:
+	// the token lands in localStorage and the /apps cookie prime fires.
+	Object.defineProperty(globalThis, 'localStorage', {
+		configurable: true,
+		value: {
+			setItem: (key: string, value: string) => stored.set(key, value),
+			getItem: (key: string) => stored.get(key) ?? null,
+			removeItem: (key: string) => stored.delete(key),
+		},
+	});
+	Object.defineProperty(globalThis, 'fetch', {
+		configurable: true,
+		value: (url: string) => { fetchCalls.push(url); return Promise.resolve({}); },
+	});
+
+	try {
+		const { manager } = createTestManager();
+		manager.saveToken = ConnectionManager.prototype.saveToken;
+		manager.saveToken('rr_tab-token');
+		assert.equal(stored.get(LS_TOKEN), 'rr_tab-token');
+		assert.deepEqual(fetchCalls, ['/apps/session']);
+	} finally {
+		if (originalLocalStorage) Object.defineProperty(globalThis, 'localStorage', originalLocalStorage);
+		else delete (globalThis as { localStorage?: Storage }).localStorage;
+		if (originalFetch) Object.defineProperty(globalThis, 'fetch', originalFetch);
+		else delete (globalThis as { fetch?: typeof fetch }).fetch;
+	}
+});
+
+test('initialize ignores cross-context token churn in embedded dev shells', () => {
+	const originalWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
+	const originalAttach = RocketRideClient.prototype.attach;
+	const listeners = new Map<string, (event: StorageEvent) => void>();
+	const localStorage = {} as Storage;
+	let tokenCleared = false;
+	let reloaded = false;
+
+	// Framed + rrdev=1 → embedded dev preview: the embedder is the sole
+	// session authority, so the same removal event that signs out a real tab
+	// (see the localStorage-removals test below) must neither clear nor
+	// reload here. The gate cache is reset to recompute from this staging.
+	Object.defineProperty(globalThis, 'window', {
+		configurable: true,
+		value: {
+			self: {},
+			top: {},
+			location: { origin: 'https://shell.example.test', search: '?rrdev=1', reload: () => { reloaded = true; } },
+			localStorage,
+			addEventListener: (type: string, listener: (event: StorageEvent) => void) => listeners.set(type, listener),
+		},
+	});
+	resetDevGateForTests();
+	RocketRideClient.prototype.attach = async () => {};
+
+	try {
+		const { manager } = createTestManager();
+		manager.clearToken = () => { tokenCleared = true; };
+		manager.initialize();
+
+		listeners.get('storage')!({
+			key: LS_TOKEN,
+			oldValue: 'old-token',
+			newValue: null,
+			storageArea: localStorage,
+		} as StorageEvent);
+
+		assert.equal(tokenCleared, false);
+		assert.equal(reloaded, false);
+	} finally {
+		resetDevGateForTests();
+		RocketRideClient.prototype.attach = originalAttach;
+		if (originalWindow) Object.defineProperty(globalThis, 'window', originalWindow);
+		else delete (globalThis as { window?: Window }).window;
 	}
 });
 

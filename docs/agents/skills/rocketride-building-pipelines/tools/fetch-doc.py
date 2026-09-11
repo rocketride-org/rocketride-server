@@ -59,9 +59,10 @@ LINK_RE = re.compile(r'\-\s*\[(.+?)\]\((/[^)]+\.md)\)')
 
 
 def find_doc_map():
-    """Locate ROCKETRIDE_DOC_MAP.md: the skill dir first (its canonical home — the docs
-    exporter owns .rocketride/docs/ and deletes files it didn't export), then the legacy
-    .rocketride/docs/ locations relative to this script, else walk up from cwd.
+    """Locate ROCKETRIDE_DOC_MAP.md: the skill dir first (its canonical home — the
+    client-docs bundle installed by the extension / `rocketride init` owns
+    .rocketride/docs/), then the legacy .rocketride/docs/ locations relative to this
+    script, else walk up from cwd.
     """
     here = os.path.dirname(os.path.abspath(__file__))
     for cand in (
@@ -179,13 +180,13 @@ def offline_fallback(path, docs_dir):
         '/develop/python': 'ROCKETRIDE_python_API.md',
         '/develop/typescript': 'ROCKETRIDE_typescript_API.md',
         '/develop': 'ROCKETRIDE_python_API.md',
-        'best-practices': 'ROCKETRIDE_COMMON_MISTAKES.md',
-        'error-handling': 'ROCKETRIDE_COMMON_MISTAKES.md',
+        'best-practices': 'ROCKETRIDE_PIPELINES.md',
+        'error-handling': 'ROCKETRIDE_PIPELINES.md',
         'observability': 'ROCKETRIDE_OBSERVABILITY.md',
-        '/concepts': 'ROCKETRIDE_PIPELINE_RULES.md',
-        'pipeline-reference': 'ROCKETRIDE_PIPELINE_RULES.md',
-        '/quickstart': 'ROCKETRIDE_QUICKSTART.md',
-        '/examples': 'ROCKETRIDE_QUICKSTART.md',
+        '/concepts': 'ROCKETRIDE_PIPELINES.md',
+        'pipeline-reference': 'ROCKETRIDE_PIPELINES.md',
+        '/quickstart': 'ROCKETRIDE_README.md',
+        '/examples': 'ROCKETRIDE_README.md',
     }
     for key, fname in table.items():
         if key in path:

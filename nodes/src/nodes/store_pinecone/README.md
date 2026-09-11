@@ -36,6 +36,8 @@ The configured tool-server name defaults to `pinecone`.
 
 `search` requires a bound embedding provider for semantic similarity search. The three functions return a failure object when their required input or an embedding cannot be obtained.
 
+`search` accepts an optional `filter` object honoring only `objectId`, `nodeId` and `parent`; any other key is rejected. `upsert` accepts an optional `metadata` object storing `nodeId`, `parent` and `chunkId`, defaulting to `"vectordb_tool"`, `"/"` and `0` respectively.
+
 ## Profiles
 
 Default: **Pinecone Serverless Dense Index** (`serverless-dense`).

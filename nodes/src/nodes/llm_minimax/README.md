@@ -29,7 +29,7 @@ Default: **MiniMax M2** (`minimax-m2`).
 | `minimax-m2-7-local` | `MiniMaxAI/MiniMax-M2.7` | 204,800 | 8,192 |
 
 <details>
-<summary><strong>View 10 more models</strong></summary>
+<summary><strong>View 13 more models</strong></summary>
 
 | Profile | Model | Context | Output |
 | ------- | ----- | ------- | ------ |
@@ -40,9 +40,12 @@ Default: **MiniMax M2** (`minimax-m2`).
 | `minimax-m2-5-highspeed` | `MiniMax-M2.5-highspeed` | 204,800 | 65,536 |
 | `minimax-m2-local` | `MiniMaxAI/MiniMax-M2` | 204,800 | 8,192 |
 | `minimax-m2-5-local` | `MiniMaxAI/MiniMax-M2.5` | 204,800 | 8,192 |
-| `minimax-01` | `minimax-01` | 1,000,192 | 1,000,192 |
+| `minimax-01` | `minimax-01` | 1,000,192 | 900,172 |
 | `minimax-m1` | `minimax-m1` | 1,000,000 | 40,000 |
 | `minimax-m2-her` | `minimax-m2-her` | 65,536 | 2,048 |
+| `minimax-m2-7-free` | `minimax-m2.7:free` | 196,608 | 176,947 |
+| `minimax-m3-batch` | `minimax-m3:batch` | 524,288 | 471,859 |
+| `minimax-m3-free` | `minimax-m3:free` | 1,048,576 | 943,718 |
 
 </details>
 

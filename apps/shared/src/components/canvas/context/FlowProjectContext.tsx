@@ -175,6 +175,7 @@ export interface IFlowProjectContext {
 
 	/** Whether the host is connected to the server. Controls run/stop button availability. */
 	isConnected?: boolean;
+	cloudConnectionConfigured?: boolean;
 
 	/** Whether the user has an active subscription. When false, run buttons show a lock icon. */
 	isSubscribed?: boolean;
@@ -190,6 +191,7 @@ export interface IFlowProjectContext {
 
 	/** Called when the user requests a save from within the canvas. */
 	onSave?: () => void;
+	onOpenCloudSetup?: () => void;
 	onExport?: () => void;
 
 	/** Available ROCKETRIDE_* environment variable key names for autocomplete in config fields. */
@@ -255,6 +257,7 @@ export interface IFlowProjectProviderProps {
 	onOpenStatus?: (source: string) => void;
 	serverHost?: string;
 	isConnected?: boolean;
+	cloudConnectionConfigured?: boolean;
 	isSubscribed?: boolean;
 	initialViewport?: { x: number; y: number; zoom: number };
 	/** Whether the document has unsaved changes. Controls the save button's active state. */
@@ -263,6 +266,7 @@ export interface IFlowProjectProviderProps {
 	isNew?: boolean;
 	/** Called when the user triggers save from the canvas toolbar. */
 	onSave?: () => void;
+	onOpenCloudSetup?: () => void;
 	onExport?: () => void;
 
 	/** Available ROCKETRIDE_* environment variable key names for autocomplete in config fields. */
@@ -280,7 +284,7 @@ export interface IFlowProjectProviderProps {
  * The host application passes props that are tunneled through this context
  * so deeply nested components can access them without prop drilling.
  */
-export function FlowProjectProvider({ children, project: currentProject, isReadonly = false, taskStatuses, componentPipeCounts, totalPipes, servicesJson: rawServicesJson, servicesJsonError, getNodeSchema, inventory, inventoryConnectorTitleMap, handleValidatePipeline, onContentChanged, onViewportChange, onUndo, onRedo, oauth2RootUrl, oauthReturnUrl, onOpenExternal, pendingOAuthTokens, clearPendingOAuthTokens, onOpenLink, googlePickerDeveloperKey, googlePickerClientId, onRunPipeline, onStopPipeline, onOpenStatus, serverHost, isConnected, isSubscribed, initialViewport, isDirty, isNew, onSave, onExport, envKeys }: IFlowProjectProviderProps): ReactElement {
+export function FlowProjectProvider({ children, project: currentProject, isReadonly = false, taskStatuses, componentPipeCounts, totalPipes, servicesJson: rawServicesJson, servicesJsonError, getNodeSchema, inventory, inventoryConnectorTitleMap, handleValidatePipeline, onContentChanged, onViewportChange, onUndo, onRedo, oauth2RootUrl, oauthReturnUrl, onOpenExternal, pendingOAuthTokens, clearPendingOAuthTokens, onOpenLink, googlePickerDeveloperKey, googlePickerClientId, onRunPipeline, onStopPipeline, onOpenStatus, serverHost, isConnected, cloudConnectionConfigured, isSubscribed, initialViewport, isDirty, isNew, onSave, onOpenCloudSetup, onExport, envKeys }: IFlowProjectProviderProps): ReactElement {
 	// --- Toolchain state ---------------------------------------------------
 
 	const [toolchainState, setToolchainState] = useState<IToolchainState>(DEFAULT_TOOLCHAIN_STATE);
@@ -389,11 +393,13 @@ export function FlowProjectProvider({ children, project: currentProject, isReado
 		onOpenStatus,
 		serverHost,
 		isConnected,
+		cloudConnectionConfigured,
 		isSubscribed,
 		initialViewport,
 		isDirty,
 		isNew,
 		onSave,
+		onOpenCloudSetup,
 		onExport,
 		envKeys,
 	}), [
@@ -404,7 +410,7 @@ export function FlowProjectProvider({ children, project: currentProject, isReado
 		oauth2RootUrl, oauthReturnUrl, onOpenExternal, pendingOAuthTokens, clearPendingOAuthTokens,
 		onOpenLink, googlePickerDeveloperKey, googlePickerClientId,
 		onRunPipeline, onStopPipeline, onOpenStatus, serverHost, isConnected,
-		isSubscribed, initialViewport, isDirty, isNew, onSave, onExport, envKeys,
+		cloudConnectionConfigured, isSubscribed, initialViewport, isDirty, isNew, onSave, onOpenCloudSetup, onExport, envKeys,
 	]);
 
 	return <FlowProjectContext.Provider value={value}>{children}</FlowProjectContext.Provider>;

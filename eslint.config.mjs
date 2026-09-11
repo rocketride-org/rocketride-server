@@ -100,6 +100,23 @@ export default tseslint.config(
 		},
 	},
 
+	// CommonJS files — Node dialect wherever they live: require(), process,
+	// timers. The dev-server guard ships as a real .cjs beside the extension
+	// bundle (spawned as a file, it cannot live inside it), outside every
+	// scripts/ tree the block above matches.
+	{
+		files: ['**/*.cjs'],
+		languageOptions: {
+			sourceType: 'commonjs',
+			globals: {
+				...globals.node,
+			},
+		},
+		rules: {
+			'@typescript-eslint/no-require-imports': 'off',
+		},
+	},
+
 	// Test files
 	{
 		files: ['**/*.test.{ts,tsx,js,jsx}', '**/*.spec.{ts,tsx,js,jsx}', '**/test/**/*'],

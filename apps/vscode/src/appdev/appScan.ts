@@ -4,15 +4,17 @@
 // =============================================================================
 
 /**
- * Workspace app scanner — finds app projects bound by their appManifest.
+ * Workspace app scanner — finds app working copies by their `.rrapp` marker.
  *
- * An app in MY APPS is bound to a workspace folder by the `appManifest` block
- * in its package.json (binding key: appManifest.id — "bind, don't sync": the
- * file system is the single source of truth; this scanner only READS).
+ * Discovery is `.rrapp`-driven: every `<folder>/<name>.rrapp` marker names a
+ * candidate folder, and the package.json NEXT TO the marker must verify the
+ * folder as one of our apps via its `appManifest` block (binding key:
+ * appManifest.id — "bind, don't sync": the file system is the single source
+ * of truth; this scanner only READS). Folders without a marker are never
+ * listed, no matter what their package.json declares.
  *
- * Scan surface: each workspace root itself, one level beneath it, and the
- * monorepo convention `apps/<name>/` two levels down. Results are cached by
- * the caller (SidebarProvider re-scans on package.json file events).
+ * Results are cached by the caller (SidebarProvider re-scans on `.rrapp`
+ * and package.json file events).
  */
 
 import * as vscode from 'vscode';
@@ -45,7 +47,8 @@ export interface ScannedApp {
 
 /**
  * Reads one candidate folder's package.json and returns its ScannedApp when
- * it carries an appManifest block with an id.
+ * it carries an appManifest block with an id — the check that verifies a
+ * marker's folder really is one of our apps.
  *
  * @param folder - Absolute folder URI to probe.
  * @returns The scanned app, or null when this folder is not an app project.
@@ -91,45 +94,51 @@ async function probeFolder(folder: vscode.Uri): Promise<ScannedApp | null> {
 }
 
 /**
- * Lists the subdirectories of a folder, tolerating missing folders.
+ * Path depth of a URI (segment count) — orders markers shallowest-first.
  *
- * @param folder - Absolute folder URI.
- * @returns Subdirectory URIs (empty on error).
+ * @param uri - The URI to measure.
+ * @returns Number of path segments.
  */
-async function subdirs(folder: vscode.Uri): Promise<vscode.Uri[]> {
-	try {
-		const entries = await vscode.workspace.fs.readDirectory(folder);
-		return entries.filter(([, kind]) => kind === vscode.FileType.Directory).map(([name]) => vscode.Uri.joinPath(folder, name));
-	} catch {
-		return [];
-	}
+function segmentCount(uri: vscode.Uri): number {
+	return uri.path.split('/').length;
 }
 
 /**
- * Scans every workspace folder for app projects.
+ * Scans every workspace folder for app working copies.
  *
- * Coverage per root: the root itself, its direct subdirectories, and the
- * `apps/<name>/` monorepo convention. Deduplicated by app id (first hit
- * wins — the shallower binding is the canonical one).
+ * Discovery key is the `.rrapp` marker file: each marker's folder is a
+ * candidate, and its adjacent package.json must verify the folder as one of
+ * our apps (an appManifest block with an id). Deduplicated by app id, with
+ * the shallowest marker winning (the least nested working copy is the
+ * canonical binding). The server catalog is never consulted.
  *
  * @returns All bound app projects in the workspace.
  */
 export async function scanWorkspaceApps(): Promise<ScannedApp[]> {
-	const found = new Map<string, ScannedApp>();
-	for (const root of vscode.workspace.workspaceFolders ?? []) {
-		// Candidate set: root, root/*, root/apps/*
-		const candidates: vscode.Uri[] = [root.uri];
-		const level1 = await subdirs(root.uri);
-		candidates.push(...level1);
-		const appsDir = level1.find((u) => u.path.endsWith('/apps'));
-		if (appsDir) candidates.push(...(await subdirs(appsDir)));
+	// Every `.rrapp` marker is a candidate; node_modules never holds a binding
+	const markers = await vscode.workspace.findFiles('**/*.rrapp', '**/node_modules/**');
 
-		// Probed concurrently; Promise.all preserves candidate order, so
-		// first-binding-per-app-id-wins is unchanged.
-		const probed = await Promise.all(candidates.map((candidate) => probeFolder(candidate)));
-		for (const app of probed) {
-			if (app && !found.has(app.id)) found.set(app.id, app);
+	// Shallowest first: findFiles order is not guaranteed, and the dedup
+	// below keeps the FIRST hit per app id
+	markers.sort((a, b) => segmentCount(a) - segmentCount(b) || a.fsPath.localeCompare(b.fsPath));
+
+	// One probe per marker folder (a folder holding several markers probes once)
+	const folders: vscode.Uri[] = [];
+	const seenFolders = new Set<string>();
+	for (const marker of markers) {
+		const folder = vscode.Uri.joinPath(marker, '..');
+		if (!seenFolders.has(folder.fsPath)) {
+			seenFolders.add(folder.fsPath);
+			folders.push(folder);
 		}
+	}
+
+	// Probed concurrently; Promise.all preserves candidate order, so
+	// first-binding-per-app-id-wins is deterministic
+	const probed = await Promise.all(folders.map((folder) => probeFolder(folder)));
+	const found = new Map<string, ScannedApp>();
+	for (const app of probed) {
+		if (app && !found.has(app.id)) found.set(app.id, app);
 	}
 	return [...found.values()];
 }
@@ -144,6 +153,13 @@ export async function scanWorkspaceApps(): Promise<ScannedApp[]> {
  * message, so anything above this falls back to the generic glyph.
  */
 const MAX_ICON_BYTES = 256 * 1024;
+
+/**
+ * Size ceiling for README-inlined images. Screenshots and GIFs are
+ * legitimately far larger than icons, so the README preview gets its own
+ * budget; anything above it keeps its original (broken) reference.
+ */
+export const MAX_README_IMAGE_BYTES = 10 * 1024 * 1024;
 
 /** Media type per icon file extension the app store accepts. */
 const ICON_MEDIA_TYPES: Record<string, string> = {
@@ -161,9 +177,11 @@ const ICON_MEDIA_TYPES: Record<string, string> = {
  * widening localResourceRoots to workspace folders just to serve one image.
  *
  * @param iconPath - Absolute icon file path from {@link ScannedApp.icon}.
+ * @param maxBytes - Size ceiling for the conversion; larger files return
+ *                   undefined. Defaults to the icon budget.
  * @returns The data: URI, or undefined when absent/unreadable/unknown type.
  */
-export async function appIconDataUri(iconPath: string | undefined): Promise<string | undefined> {
+export async function appIconDataUri(iconPath: string | undefined, maxBytes: number = MAX_ICON_BYTES): Promise<string | undefined> {
 	if (!iconPath) return undefined;
 	try {
 		// Media type from the extension; unknown types get the generic glyph.
@@ -175,7 +193,7 @@ export async function appIconDataUri(iconPath: string | undefined): Promise<stri
 		// file, and only this size gate keeps the data: URI bounded.
 		const uri = vscode.Uri.file(iconPath);
 		const stat = await vscode.workspace.fs.stat(uri);
-		if (stat.size > MAX_ICON_BYTES) return undefined;
+		if (stat.size > maxBytes) return undefined;
 
 		// Read + base64-encode the file (bounded by the gate above).
 		const bytes = await vscode.workspace.fs.readFile(uri);

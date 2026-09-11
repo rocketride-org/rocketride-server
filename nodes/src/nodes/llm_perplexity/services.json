@@ -9,7 +9,7 @@
 	"prefix": "llm",
 	"description": ["A component that connects to Perplexity AI's Sonar models for advanced natural language ", "processing with real-time web search capabilities. It supports tasks such as research, ", "question answering, and chat-based interactions with access to current web information. ", "Configurable with API keys and multiple model options including reasoning and deep research ", "models for comprehensive, fact-based responses."],
 	"icon": "perplexity.svg",
-	"documentation": "https://docs.rocketride.org",
+	"documentation": "https://docs.rocketride.org/nodes/llm_perplexity",
 	"tile": ["Model: ${parameters.llm_perplexity.profile}"],
 	"lanes": {
 		"questions": ["answers"]
@@ -30,7 +30,7 @@
 				"model": "sonar",
 				"modelSource": "manual",
 				"modelTotalTokens": 127072, // openrouter
-				"modelOutputTokens": 4096, // default
+				"modelOutputTokens": 114364, // openrouter
 				"apikey": ""
 			},
 			"sonar-reasoning-pro": {
@@ -38,7 +38,7 @@
 				"model": "sonar-reasoning-pro",
 				"modelSource": "manual",
 				"modelTotalTokens": 128000, // openrouter
-				"modelOutputTokens": 4096, // default
+				"modelOutputTokens": 115200, // openrouter
 				"apikey": "",
 				"capabilities": {
 					"reasoning": true
@@ -57,7 +57,7 @@
 				"model": "sonar-deep-research",
 				"modelSource": "manual",
 				"modelTotalTokens": 128000, // openrouter
-				"modelOutputTokens": 4096, // default
+				"modelOutputTokens": 115200, // openrouter
 				"apikey": "",
 				"capabilities": {
 					"reasoning": true

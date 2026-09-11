@@ -2,6 +2,10 @@
 
 # RocketRide MCP Server
 
+<!-- This README is both a docs:export source and, unlike the other package
+     READMEs, the site page itself for /connect/mcp/stdio, and gather never
+     stages assets/, so a relative image link here would 404 on the
+     published page. Keep this one banner absolute. -->
 <p align="center">
   <img src="https://raw.githubusercontent.com/rocketride-org/rocketride-server/main/docs/public/mcp/stdio/assets/banner-mcp.png" alt="RocketRide MCP Server" width="900" />
 </p>
@@ -72,7 +76,7 @@ Running pipelines are discovered automatically - start a pipeline in VS Code or 
 It lets you build, debug, and deploy production AI workflows without leaving your IDE --
 using a visual drag-and-drop canvas or code-first with TypeScript and Python SDKs.
 
-- **50+ ready-to-use nodes** - 13 LLM providers, 8 vector databases, OCR, NER, PII anonymization, and more
+- **100+ ready-to-use nodes** - 15+ LLM providers, 9 vector databases, OCR, NER, PII anonymization, and more
 - **High-performance C++ engine** - production-grade speed and reliability
 - **Deploy anywhere** - locally, on-premises, or self-hosted with Docker
 - **MIT licensed** - fully open-source, OSI-compliant

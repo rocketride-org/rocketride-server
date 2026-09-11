@@ -226,6 +226,14 @@ export interface AppManifestEntry {
 	 */
 	configuration?: AppConfiguration;
 	/**
+	 * Resolved app version (semver) for the desktop tile version chip —
+	 * a built-in's package version, a marketplace app's active version, or
+	 * a deployed pin's appVersion. Absent when the server sent none.
+	 */
+	version?: string;
+	/** True when the entry is a dev-overlay override (live watch build). */
+	dev?: boolean;
+	/**
 	 * When false, the app can run without authentication (e.g. home/landing page).
 	 * Defaults to true — most apps require the user to be logged in.
 	 */
@@ -403,6 +411,13 @@ export interface ShellConfig {
 	apps: AppManifestEntry[];
 	/** Server capability tags: ['oss'] for open-source, ['saas'] for cloud. */
 	capabilities?: string[];
+	/**
+	 * The server's resolved API address from the pre-auth probe
+	 * (endpoints.api). Empty/absent = window.location.origin. Differs from
+	 * the page origin only on split deployments where the probe redirects
+	 * live traffic off the serving host (e.g. CDN-served UI, direct API).
+	 */
+	serverUri?: string;
 	/** All RR_* runtime config — passed through to remote apps via useShellApiConfig(). */
 	apiConfig: ShellApiConfig;
 	/** Branding shown on the loading screen before any app is mounted. */

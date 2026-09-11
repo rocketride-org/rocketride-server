@@ -34,7 +34,9 @@ Enable **anonymize all** when every classified match should become a fixed three
 
 ## Authentication
 
-Credentials are optional. For a protected SMB share, set both username and password; the username must contain a domain-like prefix and the password may be at most 127 characters. For a guest-accessible share, leave both blank.
+Credentials are optional. For a protected SMB share, set both username and password; the username must contain a domain-like prefix and the password may be at most 127 characters. For a guest-accessible share, leave both blank. Credentials are registered against the configured server only, so two endpoints pointing at different servers never overwrite each other's credentials.
+
+Configuration validation probes the target, and treats the two failure kinds differently. A rejected or expired credential, a share the account may not enter, or a share name that does not exist fails validation, because each is a configuration mistake to fix. A target that is merely unreachable — no route, refused connection, timeout, dropped transport — is reported as a warning and does not reject the configuration: validation also runs on the Platform host, which often has no network path to the customer's share, and a transient failure such as the share being locked by another process is treated the same way. The store path itself is exempt, since it is created on first write; only the share it lives under has to be reachable and permitted.
 
 ## Limitations
 

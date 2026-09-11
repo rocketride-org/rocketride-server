@@ -18,7 +18,7 @@
 		"(GPU delegate is Linux-only and not enabled here)."
 	],
 	"icon": "face-detection.svg",
-	"documentation": "https://docs.rocketride.org",
+	"documentation": "https://docs.rocketride.org/nodes/face_detection",
 	"tile": [
 		"Model: ${parameters.face_detection.profile}",
 		"Threshold: ${parameters.face_detection.threshold}"

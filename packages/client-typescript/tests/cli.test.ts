@@ -53,7 +53,7 @@ const TEST_CONFIG = {
 };
 
 // The CLI as it is published: the compiled entry point named by package.json bin
-const CLI_PATH = path.join(__dirname, '..', 'dist', 'cli', 'cli', 'rocketride.js');
+const CLI_PATH = path.join(__dirname, '..', 'dist', 'cli', 'packages', 'client-typescript', 'src', 'cli', 'rocketride.js');
 
 // Commander reads these as option defaults, so the ambient configuration of
 // whoever runs the suite must not reach the subprocess

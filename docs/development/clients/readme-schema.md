@@ -41,8 +41,10 @@ Content rules:
   Configuration page — not the constructor reference.
 - `## Documentation` is a link map into the site pages.
 - Package-facing constraints: these files become the npm/PyPI landing pages —
-  no repo-relative links (use absolute URLs), and image references must use
-  absolute `raw.githubusercontent.com` URLs.
+  no repo-relative *page* links (use absolute URLs). Image references are
+  written relative (`./assets/x.png`) so the source previews on any branch;
+  `docs:export` rewrites them to `raw.githubusercontent.com/.../main/...` in
+  the package copy.
 
 ## Site page set
 

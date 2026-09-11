@@ -18,7 +18,7 @@ Read the doc for your task before writing code. Paths are repo-relative.
 
 | Task | Read |
 |---|---|
-| Use RocketRide / write integration code | `docs/agents/ROCKETRIDE_QUICKSTART.md` first, then the other `ROCKETRIDE_*` files there |
+| Use RocketRide / write integration code | `docs/agents/context/ROCKETRIDE_README.md` first, then the other `ROCKETRIDE_*` files there |
 | Build or edit a node | `docs/development/nodes/readme-schema.md` (README contract), `docs/development/nodes/services-schema.md` (services.json contract), `docs/development/nodes/index.md` (catalog) |
 | Test a node | `docs/development/nodes/testing.md` |
 | Client (SDK) docs | `docs/development/clients/readme-schema.md`; sources in `docs/public/<name>/` |
@@ -40,6 +40,7 @@ python -m ruff check <path>      # Python lint (format: ruff format)
 npx tsc --noEmit                 # TypeScript type-check
 
 # Documentation checks
+./builder docs:validate                              # node README + client-doc schemas (also inside docs:test)
 python3 scripts/validate-node-readme.py <node-dir>   # one node (--all nodes/src/nodes for every node)
 python3 scripts/validate-client-docs.py              # client docs parity
 node scripts/build.js docs:check                     # export drift gate (CI-enforced)
@@ -54,7 +55,7 @@ node scripts/build.js docs:check                     # export drift gate (CI-enf
 - **TypeScript**: tabs, single quotes, semicolons.
 - **VS Code extension only**: wrap errors with `Callout.call()` (no raw
   try/catch), throw `AppError` (never plain `Error`), log via `logger.*`
-  (never `console.log`). Docs-site theme components (`packages/docs`) are
+  (never `console.log`). Docs-site theme components (`docs/docusaurus`) are
   exempt by design.
 
 ## Documentation rules
@@ -73,12 +74,12 @@ update the corresponding doc in the SAME change:
 - WebSocket (5565) / engine protocol surface → `docs/public/product/protocols/websocket/`.
 - `.pipe` schema (`packages/client-typescript/src/client/types/pipeline.ts`) →
   reference regenerates to `/reference/pipeline-reference` (generated — do not edit).
-- VS Code extension surface → `docs/public/vscode/`.
+- VS Code extension surface → site pages in `docs/docusaurus/apps/vscode/`; marketplace README in `apps/vscode/README.md`.
 - Contributor docs (setup, builder, engine internals, node authoring, hooks) →
   `docs/development/`.
 - Third-party integration guides → `docs/public/product/integrations/`.
-- Agent-facing docs (`ROCKETRIDE_*`) → `docs/agents/` (exported to
-  `.rocketride/docs/` — a local, gitignored artifact — by `./builder docs:export`).
+- Agent-facing docs (`ROCKETRIDE_*`) → `docs/agents/context/` (packed into the
+  `/client/docs` bundle by `./builder client-docs:agent`; see `docs/agents/README.md`).
 
 **Nodes are the exception**: node docs stay co-located at
 `nodes/src/nodes/<name>/README.md`, following
@@ -88,11 +89,13 @@ update the corresponding doc in the SAME change:
 `python3 scripts/validate-node-readme.py <node-dir>`.
 
 **Package READMEs are generated committed copies**: edit
-`docs/public/<name>/README.md` (typescript, python, mcp, n8n), then run
-`./builder docs:export`; never edit `packages/client-*/README.md` or
-`packages/n8n-nodes/README.md` directly. CI runs `./builder docs:check` to
-catch drift. The VS Code marketplace readme source is
-`docs/public/vscode/README.md` (copied at package time).
+`docs/public/<name>/README.md` (typescript, python, mcp, n8n, chat-widget),
+then run `./builder docs:export`; never edit `packages/client-*/README.md`,
+`packages/n8n-nodes/README.md`, or `packages/chat-widget/README.md` directly.
+CI runs `./builder docs:check` to
+catch drift. The VS Code marketplace readme is `apps/vscode/README.md`,
+owned by the extension alongside its `assets/`; the VSIX build stages it
+with its image links rewritten to absolute URLs.
 
 Prose-only edits and internal refactors that do not change a public contract
 do not require doc updates. Treat the doc as part of the change, not a

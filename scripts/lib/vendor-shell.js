@@ -49,6 +49,7 @@
 const fs = require('fs');
 const path = require('path');
 const { execSync } = require('child_process');
+const { retryTransientLock } = require('./fs');
 
 // =============================================================================
 // WORKSPACE SCAN
@@ -121,25 +122,27 @@ function resolveHost(cliShell) {
 	return (cliShell || getenv().ROCKETRIDE_URI || 'http://localhost:5565').replace(/\/$/, '');
 }
 
+// A directory swap adds ENOTEMPTY to the usual lock codes: the destination can
+// still hold entries an indexer is walking, which clears the same way a lock does.
+const RENAME_LOCK_CODES = new Set(['EPERM', 'EBUSY', 'ENOTEMPTY']);
+
 /**
  * Renames with a few retries: on Windows a freshly-written directory can be
  * transiently locked (antivirus/indexer scanning the new files), failing
  * the swap with EPERM/EBUSY even though nothing holds it moments later.
  *
+ * Backs off 200 ms per attempt, twice the default, because a directory swap
+ * waits on a whole tree being released rather than one file handle.
+ *
  * @param {string} from - Source path.
  * @param {string} to - Destination path.
+ * @returns {Promise<void>}
  */
 async function renameWithRetry(from, to) {
-	for (let attempt = 1; ; attempt++) {
-		try {
-			fs.renameSync(from, to);
-			return;
-		} catch (err) {
-			const transient = err.code === 'EPERM' || err.code === 'EBUSY' || err.code === 'ENOTEMPTY';
-			if (attempt >= 5 || !transient) throw err;
-			await new Promise((resolve) => setTimeout(resolve, attempt * 200));
-		}
-	}
+	await retryTransientLock(() => fs.renameSync(from, to), {
+		delayMs: 200,
+		codes: RENAME_LOCK_CODES,
+	});
 }
 
 /**

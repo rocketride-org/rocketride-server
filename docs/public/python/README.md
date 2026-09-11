@@ -1,7 +1,7 @@
 # RocketRide Python SDK
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/rocketride-org/rocketride-server/main/docs/public/python/assets/banner-python.png" alt="RocketRide Python SDK" width="900">
+  <img src="./assets/banner-python.png" alt="RocketRide Python SDK" width="900">
 </p>
 
 <p align="center">

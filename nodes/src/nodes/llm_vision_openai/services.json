@@ -9,7 +9,7 @@
 	"prefix": "image_vision_openai",
 	"description": ["A component that connects to OpenAI's vision-capable models for image analysis, ", "OCR, visual understanding, and scene description. Supports GPT-4.1 and GPT-4o model families ", "with multimodal capabilities. Features robust error handling, automatic image processing, ", "and flexible prompt configuration for a wide range of vision use cases."],
 	"icon": "openai.svg",
-	"documentation": "https://docs.rocketride.org",
+	"documentation": "https://docs.rocketride.org/nodes/llm_vision_openai",
 	"tile": ["Model: ${parameters.image_vision_openai.profile}"],
 	"lanes": {
 		"image": ["text"],

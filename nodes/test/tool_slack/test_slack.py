@@ -490,6 +490,84 @@ class TestChannelHistory:
         result = client.channel_history(channel='C-1')
         assert result[0]['thread_ts'] == '12345.0001'
 
+    def test_subtype_included_so_system_events_can_be_filtered(self):
+        """A channel_join is otherwise byte-for-byte the shape of a message.
+
+        It carries a ts, a user, and a text of "<@U-A> has joined the channel",
+        so without the subtype a consumer cannot tell it from someone actually
+        saying something -- and cannot recover the distinction either, since
+        the field is discarded before the caller sees anything.
+        """
+        client, web = _make_token_client()
+        web.conversations_history.return_value = _history_page(
+            [
+                {'ts': '12345.0002', 'user': 'U-A', 'text': 'a real message'},
+                {'ts': '12345.0001', 'user': 'U-A', 'text': '<@U-A> has joined the channel', 'subtype': 'channel_join'},
+            ]
+        )
+        result = client.channel_history(channel='C-1')
+        assert result[1]['subtype'] == 'channel_join'
+        assert 'subtype' not in result[0]
+
+    def test_bot_id_included_so_an_agent_can_skip_its_own_posts(self):
+        """Bot messages often carry no user at all, so `user` cannot filter them.
+
+        `check_connection` already returns the caller's own bot_id, so this is
+        the other half of a comparison the node could not previously make.
+        """
+        client, web = _make_token_client()
+        web.conversations_history.return_value = _history_page(
+            [{'ts': '12345.0003', 'text': 'posted by the bot', 'bot_id': 'B-123', 'subtype': 'bot_message'}]
+        )
+        result = client.channel_history(channel='C-1')
+        assert result[0]['bot_id'] == 'B-123'
+        assert result[0]['subtype'] == 'bot_message'
+
+    def test_bot_id_survives_without_a_bot_message_subtype(self):
+        """The common bot post carries no `bot_message` subtype to filter on.
+
+        `chat.postMessage` under an app's own bot identity yields a history
+        entry with a user AND a bot_id and no subtype, so an agent filtering on
+        `subtype == 'bot_message'` would miss exactly the posts it just made.
+        """
+        client, web = _make_token_client()
+        web.conversations_history.return_value = _history_page(
+            [{'ts': '12345.0004', 'user': 'U-BOT', 'text': 'posted by the app', 'bot_id': 'B-123'}]
+        )
+        result = client.channel_history(channel='C-1')
+        assert result[0]['bot_id'] == 'B-123'
+        assert 'subtype' not in result[0]
+
+    def test_a_file_share_subtype_is_not_system_noise(self):
+        """A user uploading a file with a comment carries a subtype too.
+
+        Pins the contract the docstrings promise: subtype is a classifier, not
+        a noise flag, so this real message reaches the caller with its text
+        intact and is only distinguishable from a channel_join by which
+        subtype it carries.
+        """
+        client, web = _make_token_client()
+        web.conversations_history.return_value = _history_page(
+            [{'ts': '12345.0005', 'user': 'U-A', 'text': 'here is the report', 'subtype': 'file_share'}]
+        )
+        result = client.channel_history(channel='C-1')
+        assert result[0]['subtype'] == 'file_share'
+        assert result[0]['text'] == 'here is the report'
+
+    def test_ordinary_messages_are_unchanged(self):
+        """The two new fields are additive; nothing else about the shape moves.
+
+        Guards the compatibility claim: a plain user message still comes back
+        with exactly the keys it always had, and unrelated Slack fields are
+        still dropped by the allowlist.
+        """
+        client, web = _make_token_client()
+        web.conversations_history.return_value = _history_page(
+            [{'ts': '12345.0002', 'user': 'U-A', 'text': 'hello', 'team': 'noise', 'blocks': ['noise']}]
+        )
+        result = client.channel_history(channel='C-1')
+        assert result == [{'ts': '12345.0002', 'user': 'U-A', 'text': 'hello'}]
+
     def test_oldest_and_latest_passthrough(self):
         client, web = _make_token_client()
         web.conversations_history.return_value = _history_page([])

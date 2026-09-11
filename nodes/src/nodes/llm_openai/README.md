@@ -25,7 +25,7 @@ Default: **GPT-5.2** (`openai-5-2`).
 | `gpt-5-5` | `gpt-5.5` | 1,050,000 | 128,000 |
 
 <details>
-<summary><strong>View 44 more models</strong></summary>
+<summary><strong>View 80 more models</strong></summary>
 
 | Profile | Model | Context | Output |
 | ------- | ----- | ------- | ------ |
@@ -47,10 +47,10 @@ Default: **GPT-5.2** (`openai-5-2`).
 | `gpt-4-1-mini` | `gpt-4.1-mini` | 1,047,576 | 32,768 |
 | `gpt-4-1-nano` | `gpt-4.1-nano` | 1,047,576 | 32,768 |
 | `gpt-4-turbo` | `gpt-4-turbo` | 128,000 | 4,096 |
-| `gpt-5-1-chat-latest` | `gpt-5.1-chat-latest` | 16,384 | 16,384 |
-| `gpt-5-2-chat-latest` | `gpt-5.2-chat-latest` | 16,384 | 16,384 |
-| `gpt-5-3-chat-latest` | `gpt-5.3-chat-latest` | 16,384 | 16,384 |
-| `gpt-5-chat-latest` | `gpt-5-chat-latest` | 16,384 | 16,384 |
+| `gpt-5-1-chat-latest` | `gpt-5.1-chat-latest` | 128,000 | 16,384 |
+| `gpt-5-2-chat-latest` | `gpt-5.2-chat-latest` | 128,000 | 16,384 |
+| `gpt-5-3-chat-latest` | `gpt-5.3-chat-latest` | 128,000 | 16,384 |
+| `gpt-5-chat-latest` | `gpt-5-chat-latest` | 128,000 | 16,384 |
 | `o1` | `o1` | 200,000 | 100,000 |
 | `o3` | `o3` | 200,000 | 100,000 |
 | `o3-mini` | `o3-mini` | 200,000 | 100,000 |
@@ -65,14 +65,50 @@ Default: **GPT-5.2** (`openai-5-2`).
 | `gpt-chat-latest` | `gpt-chat-latest` | 400,000 | 128,000 |
 | `gpt-latest` | `gpt-latest` | 1,050,000 | 128,000 |
 | `gpt-mini-latest` | `gpt-mini-latest` | 400,000 | 128,000 |
-| `gpt-oss-120b` | `gpt-oss-120b` | 131,072 | 131,072 |
+| `gpt-oss-120b` | `gpt-oss-120b` | 131,072 | 117,964 |
 | `gpt-oss-120b-free` **(deprecated)** | `gpt-oss-120b:free` | 131,072 | 131,072 |
-| `gpt-oss-20b` | `gpt-oss-20b` | 131,072 | 131,072 |
+| `gpt-oss-20b` | `gpt-oss-20b` | 131,072 | 117,964 |
 | `gpt-oss-20b-free` | `gpt-oss-20b:free` | 131,072 | 32,768 |
 | `gpt-oss-safeguard-20b` | `gpt-oss-safeguard-20b` | 131,072 | 65,536 |
 | `o3-mini-high` | `o3-mini-high` | 200,000 | 100,000 |
 | `o3-pro` | `o3-pro` | 200,000 | 100,000 |
 | `o4-mini-high` | `o4-mini-high` | 200,000 | 100,000 |
+| `gpt-3-5-turbo-batch` | `gpt-3.5-turbo:batch` | 16,385 | 4,096 |
+| `gpt-4-1-batch` | `gpt-4.1:batch` | 1,047,576 | 32,768 |
+| `gpt-4-1-mini-batch` | `gpt-4.1-mini:batch` | 1,047,576 | 32,768 |
+| `gpt-4-1-nano-batch` | `gpt-4.1-nano:batch` | 1,047,576 | 32,768 |
+| `gpt-4-turbo-batch` | `gpt-4-turbo:batch` | 128,000 | 4,096 |
+| `gpt-4o-batch` | `gpt-4o:batch` | 128,000 | 16,384 |
+| `gpt-4o-mini-batch` | `gpt-4o-mini:batch` | 128,000 | 16,384 |
+| `gpt-5-1-batch` | `gpt-5.1:batch` | 400,000 | 128,000 |
+| `gpt-5-2-batch` | `gpt-5.2:batch` | 400,000 | 128,000 |
+| `gpt-5-2-chat` | `gpt-5.2-chat` | 128,000 | 32,000 |
+| `gpt-5-2-pro-batch` | `gpt-5.2-pro:batch` | 400,000 | 128,000 |
+| `gpt-5-4-batch` | `gpt-5.4:batch` | 1,050,000 | 128,000 |
+| `gpt-5-4-mini-batch` | `gpt-5.4-mini:batch` | 400,000 | 128,000 |
+| `gpt-5-4-nano-batch` | `gpt-5.4-nano:batch` | 400,000 | 128,000 |
+| `gpt-5-4-pro-batch` | `gpt-5.4-pro:batch` | 1,050,000 | 128,000 |
+| `gpt-5-5-batch` | `gpt-5.5:batch` | 1,050,000 | 128,000 |
+| `gpt-5-5-pro-batch` | `gpt-5.5-pro:batch` | 1,050,000 | 128,000 |
+| `gpt-5-6-luna-batch` | `gpt-5.6-luna:batch` | 1,050,000 | 128,000 |
+| `gpt-5-6-luna-pro-batch` | `gpt-5.6-luna-pro:batch` | 1,050,000 | 128,000 |
+| `gpt-5-6-sol-batch` | `gpt-5.6-sol:batch` | 1,050,000 | 128,000 |
+| `gpt-5-6-sol-pro-batch` | `gpt-5.6-sol-pro:batch` | 1,050,000 | 128,000 |
+| `gpt-5-6-terra-batch` | `gpt-5.6-terra:batch` | 1,050,000 | 128,000 |
+| `gpt-5-6-terra-pro-batch` | `gpt-5.6-terra-pro:batch` | 1,050,000 | 128,000 |
+| `gpt-5-batch` | `gpt-5:batch` | 400,000 | 128,000 |
+| `gpt-5-mini-batch` | `gpt-5-mini:batch` | 400,000 | 128,000 |
+| `gpt-5-nano-batch` | `gpt-5-nano:batch` | 400,000 | 128,000 |
+| `gpt-5-pro-batch` | `gpt-5-pro:batch` | 400,000 | 128,000 |
+| `gpt-6-astra` | `gpt-6-astra` | 1,050,000 | 128,000 |
+| `gpt-6-astra-batch` | `gpt-6-astra:batch` | 1,050,000 | 128,000 |
+| `gpt-6-astra-pro` | `gpt-6-astra-pro` | 1,050,000 | 128,000 |
+| `gpt-6-astra-pro-batch` | `gpt-6-astra-pro:batch` | 1,050,000 | 128,000 |
+| `gpt-oss-120b-batch` | `gpt-oss-120b:batch` | 131,072 | 117,964 |
+| `gpt-oss-20b-batch` | `gpt-oss-20b:batch` | 131,072 | 117,964 |
+| `o3-batch` | `o3:batch` | 200,000 | 100,000 |
+| `o3-mini-batch` | `o3-mini:batch` | 200,000 | 100,000 |
+| `o4-mini-batch` | `o4-mini:batch` | 200,000 | 100,000 |
 
 </details>
 
@@ -98,7 +134,10 @@ For models whose configuration carries `capabilities.reasoning`, the node builds
 `openai` client alongside the LangChain one and streams answers via the Responses API
 with `reasoning: {summary: 'auto'}`. Reasoning-summary deltas are forwarded over the
 `thinking` SSE lane while the answer streams normally. Non-reasoning models use plain
-LangChain streaming with `temperature: 0` and the profile's output limit.
+LangChain streaming with the profile's output limit. `temperature` is configurable on
+every profile (range `0`-`2`, default `0`, which is generally more deterministic than
+higher values, though OpenAI does not guarantee identical output for identical input);
+reasoning models ignore it, because OpenAI's Responses API controls sampling separately.
 
 ### Validation and errors
 

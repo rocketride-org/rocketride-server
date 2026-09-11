@@ -20,7 +20,7 @@ One job is deliberately **outside** `ci-ok` and cannot block a merge:
 
 The doc-schema and docs-site-build checks are not in `ci.yml` at all: they live
 in `.github/workflows/docs-schemas.yml`, which triggers on PRs into `develop`
-(and pushes to it) that touch doc-related paths — `docs/**`, `packages/docs/**`,
+(and pushes to it) that touch doc-related paths — `docs/**`, `docs/docusaurus/**`,
 node READMEs and `services*.json`, the validators, and the lockfile.
 
 CodeQL is GitHub's "Default setup" (repo Settings → Code security), not a job in
@@ -153,27 +153,33 @@ helm template rocketride deploy/helm/rocketride \
   | kubeconform -strict -summary -kubernetes-version 1.29.0
 ```
 
-### Doc schemas — the `schemas` job in `docs-schemas.yml` (doc-path PRs)
+### Doc schemas — `docs:validate` (inside `docs:test`; CI runs it via the `Docs site build` job)
 
 ```bash
-python3 scripts/validate-node-readme.py <node-dir> ...   # the nodes your PR touched
-python3 scripts/validate-client-docs.py
+./builder docs:validate
 ```
 
-Two deterministic checkers: node READMEs against
-[the node README schema](nodes/readme-schema.md), and client-doc parity against
-[the client README schema](clients/readme-schema.md). The job validates only
-the nodes the PR touched and is **blocking** — being scoped to the diff is what
-lets it be a hard gate immediately. Its final step sweeps the whole corpus with
-`--all` under `continue-on-error: true`, so the corpus-wide count stays
-informational while the last stragglers are migrated; once it reaches zero,
-`--all` graduates into the gate and the sweep retires.
+Two deterministic checkers, run as a builder task rather than a bespoke CI
+job: node READMEs against [the node README schema](nodes/readme-schema.md),
+and client-doc parity against
+[the client README schema](clients/readme-schema.md). The task validates the
+nodes changed relative to the merge base with `develop` (blocking), checks
+client-doc parity (blocking), and validates the whole node corpus (`--all`,
+blocking). `docs:test` runs it first, so `./builder test` and the
+`Docs site build` CI job both carry it. CodeRabbit reviews the *accuracy* of a
+node README; this task owns its *structure*.
 
 Check a single node while you work:
 
 ```bash
 python3 scripts/validate-node-readme.py nodes/src/nodes/<node>
 ```
+
+The validator's own unit tests (`tests/test_validate_node_readme.py`) run inside
+`docs:validate` on every PR, alongside the two schema checks above.
+`./builder nodes:test` also runs this same file as part of the node contract
+suite; that invocation stays in place, but `docs:validate` is what gates it on
+every doc-path PR.
 
 ---
 
@@ -204,8 +210,7 @@ ruff check && ruff format --check
 node scripts/build.js docs:check
 node scripts/build.js docs:test && node scripts/build.js docs:build   # if you touched docs
 ./builder build && ./builder test --sequential                        # if you touched code
-python3 scripts/validate-node-readme.py --all nodes/src/nodes         # corpus sweep (informational)
-python3 scripts/validate-client-docs.py
+node scripts/build.js docs:validate                                # node README + client-doc schemas
 ```
 
 ---

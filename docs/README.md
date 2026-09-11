@@ -1,6 +1,7 @@
 # docs/
 
-The three folders split by **audience**: `public/` is for people outside the repo,
+Four folders, split by **audience**: `public/` is for people outside the repo,
+`docusaurus/` is the docs site itself plus the pages that only exist for it,
 `development/` is for contributors, `agents/` is for AI assistants.
 
 ## `public/` — humans outside the repo
@@ -10,14 +11,32 @@ The three folders split by **audience**: `public/` is for people outside the rep
   `integrations/`, `develop/`, `operate/`, `reference/`, `ide-extensions/`, plus
   `protocols/websocket/` (the WebSocket (5565) engine wire protocol, for people
   building their own client).
-- **`typescript/`, `python/`, `vscode/`, `mcp/`** — the per-surface guides, each
-  mounted into the docs site. Each folder also holds a `README.md` (the package
-  distribution readme — see Rules) and an `assets/` folder for its own images;
-  `mcp/` is the exception — it splits into `http/` and `stdio/`, and its readme
-  source lives at `mcp/stdio/README.md`.
+- **`typescript/`, `python/`, `mcp/`** — the per-SDK guides, each mounted into
+  the docs site. Each folder also holds a `README.md` (the package distribution
+  readme — see Rules) and an `assets/` folder for its own images; `mcp/` splits
+  into `http/` and `stdio/`, and its readme source lives at `mcp/stdio/README.md`.
 - **`n8n/`** — `README.md` only; the export source for `packages/n8n-nodes/`.
   Nothing here is published to the site.
+- **`chat-widget/`** — `README.md` only; the export source for
+  `packages/chat-widget/README.md`. Nothing here is published to the site.
 - **`assets/`** — images shared by more than one section.
+
+## `docusaurus/` — the site, and site-only app pages
+
+The Docusaurus project (`docusaurus.config.ts`, `sidebars.ts`, `src/`, `static/`,
+`scripts/tasks.js` exposing `docs:build`, `docs:check`, `docs:test` (runs
+`docs:validate` — the node README + client-doc schema validators, blocking —
+then `docs:unit`, the docs helper unit tests), `docs:export`). It holds no
+product content — `docs:gather` assembles the site
+from `public/`, from the co-located node docs, and from the one content folder
+below:
+
+- **`apps/`** — pages about shipped apps that only the site renders, one folder
+  per app: `vscode/` (mounted at `/clients/vscode`), and `app-builder/` when its
+  user docs land. An app's *README* is not here: it lives with the app
+  (`apps/vscode/README.md`, `apps/<app>/README.md`), next to its `assets/`. Not
+  to be confused with `development/apps/`, which is about building apps inside
+  the monorepo.
 
 ## `development/` — contributors
 
@@ -43,19 +62,20 @@ The two documentation contracts (`nodes/readme-schema.md`,
 which name the schema paths in their output.
 
 **Nothing here is published, with no exceptions.** `docs:gather` only sweeps
-`public/`, so a page whose audience is outside the repo belongs in `public/` —
-move it there rather than mounting out of `development/`.
+`public/` and `docusaurus/apps/`, so a page whose audience is outside the repo
+belongs in one of those — move it there rather than mounting out of
+`development/`.
 
 ## `agents/` — AI assistants
 
-- The eight `ROCKETRIDE_*` assistant-facing integration docs, exported to
-  `.rocketride/docs/` (a local, gitignored artifact) by `./builder docs:export`.
-- **`stubs/`** — assistant-stub templates (`AGENTS.md`, `CLAUDE.md`,
-  Cursor/Windsurf rules files, etc.), packaged into the VS Code extension.
-- **`skills/`** — reserved for agent skills; empty until the first one ships.
+- **`context/`** — the eleven `ROCKETRIDE_*` assistant-facing docs plus `stubs/`
+  (the per-assistant pointer files). Installed verbatim into a workspace's
+  `.rocketride/docs/` by the VS Code extension and `rocketride init`, via the
+  `docs.zip` bundle that `client-docs:agent` (`agents/scripts/tasks.js`) stages
+  for the engine's `GET /client/docs`. Everything in `context/` ships.
+- **`skills/`** — hand-curated pipeline-building skills. Not in the bundle.
 
-The export copies top-level `.md` files only, so `stubs/` and `skills/` are
-deliberately excluded from it.
+See `agents/README.md`.
 
 ## Rules
 
@@ -67,10 +87,17 @@ deliberately excluded from it.
 - A `README.md` in a `public/` section is that package's README export source —
   after editing it, run `./builder docs:export` to regenerate the committed
   package `README.md`. Never hand-edit the package `README.md` directly. This
-  covers `typescript`, `python`, `mcp`, and `n8n`; `public/vscode/README.md` is
-  the marketplace readme, copied into the VSIX at package time rather than
-  exported.
+  covers `typescript`, `python`, `mcp`, `n8n`, and `chat-widget`. App READMEs (the VS Code
+  marketplace readme, store listings) are not exported: each app owns its
+  `README.md` and `assets/` in its own folder under `apps/`.
 - `README.md` files are never site pages — the site mounts skip them.
+- Image links are relative everywhere (`./assets/x.png` beside the file), so any
+  branch previews on GitHub. The two copy steps that publish a README outside
+  GitHub — `docs:export` for the package READMEs and the VSIX stage step for
+  `apps/vscode/README.md` — rewrite them to raw-GitHub URLs on `main` via
+  `absolutizeImageLinks` in `scripts/lib`. No other README copy is rewritten;
+  the site build's rewrite of node-README `example.png`/`example.pipe`
+  references (gather.js) is a separate, site-only step.
 - CI runs `./builder docs:check` to catch export drift.
 
 Root GitHub files (`README.md`, `CONTRIBUTING.md`, `AGENTS.md`, `.cursorrules`, ...)

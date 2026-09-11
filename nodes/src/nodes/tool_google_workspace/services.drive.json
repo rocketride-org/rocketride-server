@@ -8,7 +8,7 @@
 	"path": "nodes.tool_google_workspace.drive",
 	"prefix": "drive",
 	"icon": "drive.svg",
-	"documentation": "https://docs.rocketride.org",
+	"documentation": "https://docs.rocketride.org/nodes/tool_google_workspace/drive",
 	"description": ["Exposes Google Drive operations as agent tools.", "List and search files, read metadata, download binary files and export native Docs/Sheets/Slides, create/update/copy/move files and folders, manage permissions (sharing), trash and untrash, and track changes. Supports My Drive and shared drives.", "Public and external-domain sharing, and permanent delete, are gated behind explicit config flags. Authenticates via a Google service account or user OAuth."],
 	"tile": ["Google Drive (${parameters.drive.access})"],
 	"lanes": {},

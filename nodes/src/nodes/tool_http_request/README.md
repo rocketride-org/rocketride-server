@@ -1,8 +1,8 @@
 # tool_http_request
 
-A RocketRide tool node that lets an AI agent make guarded HTTP requests to API endpoints.
+A RocketRide tool node that lets an AI agent make guarded HTTP requests to public API endpoints.
 
-+## About HTTP
+## About HTTP
 
 HTTP is the request-and-response protocol used by web APIs. An HTTP request names a URL,
 method, headers, credentials, and optional body, while a response carries status, headers,
@@ -11,9 +11,9 @@ and content.
 ## What it does
 
 This node provides one controlled HTTP client for an agent and has no pipeline lanes. Pick
-it when the agent must call an API endpoint directly; use a product-specific tool when that
-service already has a dedicated node and richer operations. Method switches, URL patterns,
-and rate limits are enforced before every request.
+it when the agent must call a public API endpoint directly; use a product-specific tool when
+that service already has a dedicated node and richer operations. Method switches, URL
+patterns, the network boundary, and rate limits are enforced before every request.
 
 ## As a tool
 
@@ -49,11 +49,16 @@ access to a URL where mutation is possible.
 
 ### URL Whitelist
 
-An empty whitelist allows every URL. Non-empty patterns use `re.search`, so anchor them
-when the endpoint scope must be exact—for example, `^https://api.example.com/`. Invalid
-patterns are skipped with a warning; a lone invalid pattern therefore leaves no effective
-restriction. The whitelist is checked before path parameters are expanded, and replacements
-are percent-encoded to remain a single URL path segment.
+An empty whitelist allows every public URL; non-public network destinations remain blocked
+either way. Non-empty patterns are matched against the request URL, so anchor them when the
+endpoint scope must be exact, for example `^https://api.example.com/`. Path-parameter
+replacements are percent-encoded to remain a single URL path segment.
+
+### Network boundary
+
+Private, loopback, link-local, and multicast destination addresses are blocked. Redirects
+are returned to the agent as 3xx responses and are not followed automatically. There is no
+private-network override: localhost and internal endpoints are intentionally unsupported.
 
 ### Rate limits
 
@@ -94,12 +99,17 @@ structured response containing status, headers, body text, parsed JSON, and timi
 Uses the **requests** library to execute calls. The node has no lanes; it is attached to
 an agent purely as a tool.
 
-Three security guardrails are enforced before every request, all configured on the node:
+Four security guardrails are enforced before every request:
 
 - **Allowed methods**: per-method toggles. `GET`, `POST`, `PUT`, `PATCH`, `DELETE` are
   enabled by default; `HEAD` and `OPTIONS` are disabled by default.
 - **URL whitelist**: regex patterns the request URL must match. **Empty by default,
-  which allows all URLs** (config validation emits a warning when the whitelist is empty).
+  which allows all public URLs** (config validation emits a warning when the whitelist is
+  empty).
+- **Network boundary**: private, loopback, link-local, and multicast destination addresses
+  are blocked. Redirects are returned to the agent as 3xx responses and are not followed
+  automatically. There is no private-network override: localhost and internal endpoints are
+  intentionally unsupported.
 - **Rate limiting**: token-bucket limits per second and per minute, plus a concurrency
   cap. On by default (10/s, 100/min, 5 concurrent).
 
@@ -119,7 +129,7 @@ Three security guardrails are enforced before every request, all configured on t
 | `allowHEAD` | boolean | Default false.  |
 | `allowOPTIONS` | boolean | Default false.  |
 | `whitelistPattern` | string | Default empty.  |
-| `urlWhitelist` | array | Regex patterns for allowed URLs. A request URL must match at least one pattern. If empty, all URLs are allowed. |
+| `urlWhitelist` | array | Regex patterns for allowed public URLs. A request URL must match at least one pattern. If empty, all public URLs are allowed; non-public network destinations remain blocked. |
 | `rateLimitPerSecond` | number | Default 10. Maximum number of HTTP requests allowed per second. Uses a token-bucket algorithm for smooth enforcement. |
 | `rateLimitPerMinute` | number | Default 100. Maximum number of HTTP requests allowed per minute. Provides a broader throttle beyond the per-second limit. |
 | `maxConcurrentRequests` | number | Default 5. Maximum number of HTTP requests that can be in-flight simultaneously. |
@@ -127,9 +137,9 @@ Three security guardrails are enforced before every request, all configured on t
 
 The node ships one profile, **Default**, which sets `serverName` to `http`.
 
-Invalid whitelist regexes are skipped with a warning rather than failing the pipeline,
-so a typo in a pattern silently widens (or, if it was the only pattern, removes) the
-restriction, check the logs after editing the whitelist.
+An invalid non-empty whitelist regex now fails configuration validation rather than being
+skipped, so a typo can no longer silently widen the restriction. Blank or whitespace-only
+placeholder rows are ignored; a whitelist made only of them allows all public destinations.
 
 ---
 
@@ -258,8 +268,8 @@ non-zero value is clamped to a minimum of `1`.
 | `http_request.rateLimitPerMinute` | `number` | **Max requests per minute**<br/>Maximum number of HTTP requests allowed per minute. Provides a broader throttle beyond the per-second limit. | `100` |
 | `http_request.rateLimitPerSecond` | `number` | **Max requests per second**<br/>Maximum number of HTTP requests allowed per second. Uses a token-bucket algorithm for smooth enforcement. | `10` |
 | `http_request.serverName` | `string` | **Server name**<br/>Namespace prefix for the tool: <serverName>.http_request | `"http"` |
-| `http_request.urlWhitelist` | `array` | **URL Whitelist**<br/>Regex patterns for allowed URLs. A request URL must match at least one pattern. If empty, all URLs are allowed. |  |
-| `http_request.whitelistPattern` | `string` | **URL Pattern (regex)** | `""` |
+| `http_request.urlWhitelist` | `array` | **URL Whitelist**<br/>Python regex patterns applied with match() to the final canonical URL after path substitution, regular query parameters, and query-based API-key auth. A request-time source recognizer accepts only exact literal/escaped hosts with supported numeric-port forms, or a deliberate [^/] whole-authority form, followed by an explicit authority boundary. Unsupported or ambiguous authority syntax fails closed even when the regex matches. [] or only blank placeholder rows allows all public destinations; non-public destinations remain blocked. Blank rows mixed with valid patterns are ignored; invalid non-empty regexes, non-string values, and malformed entries fail closed. |  |
+| `http_request.whitelistPattern` | `string` | **URL Pattern (regex)**<br/>Applied with Python regex match() to the final canonical URL after path substitution, regular query parameters, and query-based API-key auth. After matching, a fail-closed source grammar requires a literal HTTP(S) scheme; an exact literal/escaped DNS, IPv4, or bracketed-IPv6 host with an optional exact or [0-9]-based port policy, or a whole-authority [^/] policy; and an explicit path, query, or end boundary. Unsupported or ambiguous authority regex syntax is denied at request time. Example: ^https://api\.example\.com(?::[0-9]+)?(?:/\|$). Scheme-only prefixes are denied; use an empty whitelist to allow all public destinations. Blank placeholder rows are ignored. | `""` |
 
 ## Source
 

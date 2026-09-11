@@ -43,6 +43,7 @@ import { DeploymentRecordPanel, TeamDeploymentRecordPanel } from 'shared/compone
 import type { DeployHistoryRow, DeployScheduleRow, DeployVersionCard, DeploymentInfo } from 'shared/components/deploy-panel';
 import { foldDeployRunState } from 'shared/modules/sidebar/taskFold';
 import { isTeamLiveEvent } from 'shared/modules/project';
+import { registerServiceIcons } from 'shared/components/canvas/util/Icon';
 import type { TaskEventMessage } from 'shared/modules/project';
 import type { Deployment, DeployHistoryEntry, DeployArtifact } from 'shell';
 import { useDeployments } from '../hooks/useDeployments';
@@ -77,8 +78,13 @@ interface IDeploymentProviderProps {
  * adapters) and re-fetches after each mutation so the header/state chips
  * always reflect the server's truth, not an optimistic guess.
  */
-const DeploymentProvider: React.FC<IDeploymentProviderProps> = ({ teamId, sourceId, projectId, onClose, onOpenSource }) => {
+const DeploymentProvider: React.FC<IDeploymentProviderProps> = ({ teamId: rawTeamId, sourceId, projectId, onClose, onOpenSource }) => {
 	const { client, isConnected } = useShellConnection();
+	// Personal rows arrive with their raw 'user~{uid}' owner key — the server
+	// only accepts '@me' for the caller's own space, so translate ONCE here
+	// and every fetch/action/monitor below addresses it correctly.
+	const ownUid = client?.getAccountInfo?.()?.userId ?? '';
+	const teamId = ownUid && rawTeamId === `user~${ownUid}` ? '@me' : rawTeamId;
 	const { teams, teamName, refresh: refreshDeployments } = useDeployments();
 
 	// --- Server state ---------------------------------------------------------
@@ -191,8 +197,12 @@ const DeploymentProvider: React.FC<IDeploymentProviderProps> = ({ teamId, source
 		client.addMonitor({ token: '*' }, ['deploy']).catch((err) => console.error('[DeploymentProvider] deploy monitor failed:', err));
 
 		const unsub = ConnectionManager.getInstance().on('shell:event', ({ event }: { event: any }) => {
+			// Event bodies carry the RAW owner key: the server resolves '@me' to
+			// 'user~{uid}' and stamps that on every downstream record and event,
+			// so match on rawTeamId, not the '@me' alias used to ADDRESS the
+			// server (a personal record's runs/feed would never match otherwise).
 			if (event?.event === 'apaevt_task' && event.body) {
-				const folded = foldDeployRunState(event.body, runningSourcesRef.current, teamId, projectId);
+				const folded = foldDeployRunState(event.body, runningSourcesRef.current, rawTeamId, projectId);
 				if (folded) {
 					runningSourcesRef.current = folded;
 					setRunningSources(folded);
@@ -201,11 +211,11 @@ const DeploymentProvider: React.FC<IDeploymentProviderProps> = ({ teamId, source
 				const b = event.body as { projectId?: string; teamId?: string; action?: string };
 				// Publishes are org-wide (version picker); everything else is
 				// this team's record.
-				if (b.projectId === projectId && (b.teamId === teamId || b.action === 'publish')) void fetchAll();
+				if (b.projectId === projectId && (b.teamId === rawTeamId || b.action === 'publish')) void fetchAll();
 			}
 
 			// The record's live feed: this team's stamped deploy-run events.
-			if (isTeamLiveEvent(event, projectId, teamId)) {
+			if (isTeamLiveEvent(event, projectId, rawTeamId)) {
 				setLiveEvents((prev) => {
 					const next = [...prev, event as TaskEventMessage];
 					return next.length > LIVE_EVENTS_MAX ? next.slice(next.length - LIVE_EVENTS_KEEP) : next;
@@ -218,7 +228,7 @@ const DeploymentProvider: React.FC<IDeploymentProviderProps> = ({ teamId, source
 			client.removeMonitor({ projectId, source: '*', teamId }, ['task']).catch(() => {});
 			client.removeMonitor({ token: '*' }, ['deploy']).catch(() => {});
 		};
-	}, [client, isConnected, projectId, teamId, fetchAll]);
+	}, [client, isConnected, projectId, teamId, rawTeamId, fetchAll]);
 
 	// Clear stale live state on reconnect (the resubscribe re-seeds it).
 	useEffect(() => {
@@ -238,13 +248,16 @@ const DeploymentProvider: React.FC<IDeploymentProviderProps> = ({ teamId, source
 		const manager = ConnectionManager.getInstance();
 		const cached = manager.getCachedServices();
 		if (!cached.servicesError && Object.keys(cached.services).length > 0) {
-			registerServiceIcons({ services: cached.services, icons: cached.icons ?? {} });
+			// The shell's summary cache types service entries loosely
+			// (Record<string, unknown>); the registry reads only the `icon`
+			// id off each entry, so the hand-off narrows to that shape.
+			registerServiceIcons({ services: cached.services as Record<string, { icon?: string }>, icons: cached.icons ?? {} });
 			setServicesJson(cached.services);
 		}
 		return manager.on('shell:servicesUpdated', ({ services, icons, servicesError }) => {
 			// A failed refresh keeps the last good catalog on the canvas.
 			if (servicesError) return;
-			registerServiceIcons({ services, icons: icons ?? {} });
+			registerServiceIcons({ services: services as Record<string, { icon?: string }>, icons: icons ?? {} });
 			setServicesJson(services);
 		});
 	}, [isConnected]);
@@ -332,7 +345,10 @@ const DeploymentProvider: React.FC<IDeploymentProviderProps> = ({ teamId, source
 				// openEventStream returns before connect).
 				return {
 					seek: async () => {},
-					getStatus: async () => null,
+					// Explicit return type: the stand-in feeds openSession's inferred
+					// return union, and an unannotated null here makes TS flag the
+					// whole chain as implicitly-any (TS7023).
+					getStatus: async (): Promise<null> => null,
 					play: async () => {},
 					getTrace: async () => ({ events: [] }),
 					pause: () => {},

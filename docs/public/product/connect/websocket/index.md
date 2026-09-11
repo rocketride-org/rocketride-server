@@ -29,6 +29,24 @@ send so you can debug, trace, or build your own client.
 The default port is applied only when the URI omits one, point the client at a
 different host or port to reach a remote or self-hosted engine.
 
+### Pre-auth probe (`rrext_public_probe`)
+
+Before authenticating, a client may open a public connection and send
+`rrext_public_probe`. The response body carries `version`, `capabilities`,
+`platform`, the public `apps` list, `stripePublishableKey` (when billing is
+configured), and `endpoints` — the server's public addresses:
+
+```json
+{ "endpoints": { "api": "origin", "ui": "origin" } }
+```
+
+Each value is an absolute URL or the literal `origin`, meaning "the address
+you probed me at" (the SDKs substitute it client-side before returning, so
+callers always see absolute URLs). The server reads `RR_BACKEND_ORIGIN` /
+`RR_FRONTEND_ORIGIN` for the two values; unset means `origin`, correct for
+any single-host deployment. They differ only on split deployments — e.g. a
+CDN-served UI whose live traffic should connect directly to the API host.
+
 ## Message format
 
 The engine protocol is a DAP-style (Debug Adapter Protocol) message exchange.
@@ -158,6 +176,51 @@ commands:
 
 The pipeline JSON sent over the socket is identical to the JSON you author
 visually or by hand, the protocol just transports it.
+
+## MIME type selects the lane
+
+Every write carries a MIME type — the `mimeType` argument of `rrext_process` /
+`open`, which the HTTP `/webhook/{project_id}/{source}` route fills in from the
+request's `Content-Type` header. That MIME type is **routing, not metadata**: it
+picks which lane the body is delivered on.
+
+The choice is made against the pipeline's live wiring, not a fixed table. A
+branch is taken only when the MIME type matches **and** some component actually
+reads that lane; anything unmatched falls through to the raw/tags lane.
+
+| MIME type | Lane, when a component reads it |
+| --- | --- |
+| `application/json` | `json` |
+| `text/*` | `text` |
+| `image/*`, `video/*`, `audio/*` | `image`, `video`, `audio` |
+| `application/rocketride-question+json` | `questions` |
+| `application/rocketlib-tag` | `tags` |
+| anything else, or no reader above | raw, delivered on `tags` |
+
+The prefix `lane/<name>` bypasses detection and targets a lane directly.
+
+### When nothing reads the chosen lane
+
+The write still succeeds. The object is accepted, counted as completed and
+answered `200 OK`; only `resultTypes` comes back empty, because no component
+received the body. Nothing about the response, the HTTP log line or the task
+counters distinguishes this from a successful run.
+
+Because that outcome is indistinguishable from success, the engine emits a task
+**warning** naming the lane the data went to and the lanes the pipeline reads.
+It is a warning rather than an error: a source may legitimately offer several
+lanes while a pipeline wires up one, so an unread lane is not by itself a fault
+— but *this object reaching nobody* is never what the sender intended, and the
+warning is the only signal that separates the two.
+
+Read the warnings from `get_task_status(token)['warnings']`, or subscribe to
+`apaevt_status_warning` (see [Observability](/connect/websocket/observability)).
+
+Note that the mismatch is symmetric: `text/plain` into a pipeline whose first
+component reads `json` fails exactly the way `application/json` fails into a
+`text`-first one. There is no single header that is correct for every pipeline,
+which is why the endpoint panel offers one example per lane and preselects the
+one the running pipeline reads.
 
 ## Keepalive & timeouts
 

@@ -97,7 +97,7 @@ dependencies first: `libc++1`, `libc++abi1`, `libgomp1` (Debian/Ubuntu), `libcxx
 libcxxabi libgomp` (Fedora/RHEL), or `libc++ libgomp` (Alpine).
 
 Operators who are not building from source download a release archive instead; that
-path is documented on the public [Self-hosting](../public/product/operate/self-hosting.md)
+path is documented on the public [Self-hosting](../public/product/operate/self-hosting/index.md)
 page.
 
 ### Full stack with Docker
@@ -121,7 +121,7 @@ docker compose up engine     # engine + its required PostgreSQL
 2. Install the generated `.vsix` from `dist/vscode/` in VS Code
 3. Click the RocketRide icon in the sidebar and connect to your running server
 
-For VS Code extension development details, see [VS Code extension docs](../public/vscode/index.md).
+For VS Code extension development details, see [VS Code extension docs](../docusaurus/apps/vscode/index.md).
 
 ## Testing
 
@@ -193,5 +193,5 @@ is unpublished — it never reaches docs.rocketride.org.
 
 ### Elsewhere
 
-- [VS Code Extension](../public/vscode/index.md) -- extension development
+- [VS Code Extension](../docusaurus/apps/vscode/index.md) -- extension development
 - [Contributing Guide](../../CONTRIBUTING.md) -- contribution workflow and code style

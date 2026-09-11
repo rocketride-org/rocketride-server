@@ -23,6 +23,16 @@ The server-name prefix is `slack`, producing these registered functions.
 
 `message_post` requires `text`; `channel` is required in bot-token mode and can be an ID or a name. `thread_ts` replies in a thread. `channels_list` accepts `limit`; `channel_history` accepts required `channel`, plus `limit`, `oldest`, and `latest`. Errors are raised as Slack-specific failures: invalid credentials, missing OAuth scope, rate limiting, bad requests, and server failures. In webhook mode the three inspection functions reject the call because they require a bot token.
 
+`channel_history` returns `ts`, `user` and `text` per message, `thread_ts` for threaded
+messages, `subtype` whenever Slack classifies the entry, and `bot_id` whenever a bot
+posted it. Treat `subtype` as a classifier rather than a noise flag: `file_share`,
+`thread_broadcast` and `me_message` are ordinary user messages, while `channel_join`,
+`channel_leave`, `channel_topic`, `tombstone`, `pinned_item` and `reminder_add` are
+system entries. That system list is open-ended, so drop entries by naming the subtypes
+you do not want rather than by presence. To skip your own posts, compare `bot_id`
+against the one `check_connection` reports — not the `bot_message` subtype, since an app
+posting under its own bot identity produces a `bot_id` and no subtype at all.
+
 ## Configuration
 
 Configure exactly one credential mode. A configured value wins over the corresponding environment fallback; configuring both token and webhook URL, or neither, prevents startup.

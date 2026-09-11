@@ -108,6 +108,7 @@ Some MCP tools take no arguments (their input schema is empty). Strict reasoning
 ## Upstream docs
 
 - [Model Context Protocol specification](https://modelcontextprotocol.io/)
+- [Butterbase documentation](https://docs.butterbase.ai)
 
 ---
 

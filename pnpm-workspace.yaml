@@ -26,10 +26,11 @@ packages:
   - 'packages/shell'
 
   # Client libraries
+  - 'packages/chat-widget'
   - 'packages/client-typescript'
 
   # Documentation site
-  - 'packages/docs'
+  - 'docs/docusaurus'
 
   # MCP Apps widgets (vite workspace embedded in the ai MCP module)
   - 'packages/ai/src/ai/modules/mcp/apps'
@@ -42,12 +43,16 @@ packages:
 
 # Workspace-wide dependency overrides — the SINGLE source of overrides (never
 # add a pnpm.overrides section to package.json: it silently supersedes this
-# whole block). shell resolves IN-TREE to the workspace package: app manifests
-# keep the portable "file:../../.rocketride/shell/shell.tgz" spec (exactly
-# right when an app is lifted into its own repo, where the tgz is downloaded
-# and vendored), and this override supersedes it inside the monorepo — a
-# workspace link carries no tarball integrity pin, so fresh clones and
-# frozen-lockfile CI install without the gitignored artifact existing.
+# whole block). shell and rocketride resolve IN-TREE to their workspace
+# packages: app manifests keep the portable file: specs
+# ("file:../../.rocketride/shell/shell.tgz",
+# "file:../../.rocketride/client/rocketride.tgz" — two levels up to the
+# workspace root, exactly right wherever an app sits at
+# <workspace>/apps/<app>, including its own repo after lift-out, where the
+# tgz is downloaded and vendored),
+# and these overrides supersede them inside the monorepo — a workspace link
+# carries no tarball integrity pin, so fresh clones and frozen-lockfile CI
+# install without the gitignored artifacts existing.
 # Enforcement is unchanged: the exports map (the barrel and the theme
 # stylesheet) governs linked packages the same as installed ones.
 # The rest are security floors that still BIND: floors the natural resolution
@@ -56,32 +61,75 @@ packages:
 # downgrades for Docusaurus-era parents.
 overrides:
   shell: 'workspace:*'
+  rocketride: 'workspace:*'
   '@remix-run/router': '>=1.23.3 <2'
   adm-zip: '>=0.6.0 <1'
   body-parser: '>=1.20.6 <2'
   brace-expansion: '>=5.0.7 <6'
-  # minimatch 3.x (eslint's config-array, glob@7) does a CJS default-import of
-  # brace-expansion; v5's commonjs build exports named {expand} only, so the
-  # global floor crashes every minimatch@3 consumer ("expand is not a
-  # function"). Scope those parents to the v1 line — 1.1.12 carries the same
-  # ReDoS fix the floor exists for.
-  'minimatch@3>brace-expansion': '>=1.1.12 <2'
+  # browserslist: DoS via untrusted browserslist-stats.json (GHSA-73wf-gq98-2v4g)
+  # and unbounded cache growth (GHSA-c83g-rgw3-j3cx). Transitive-only, so
+  # Dependabot can't open a PR for it.
+  browserslist: '>=4.28.7 <5'
+  # Colord: slow rejection of oversized malformed color strings
+  # (GHSA-2wm5-q62r-hmrv, 2.9.4).
+  colord: '>=2.9.4 <3'
+  # minimatch@3 (glob@7, older eslint) does a CJS default-import of
+  # brace-expansion; v5's commonjs build exports named {expand} only, so
+  # a v5 global crashes minimatch@3 consumers ("expand is not a function").
+  # Similarly, minimatch@9 declares ^2.0.2 and cannot semantically accept
+  # v5. Scope each parent to the major it actually asked for; 1.1.18 and
+  # 2.1.4 carry the same fixes the global floor exists for.
+  'minimatch@3>brace-expansion': '>=1.1.18 <2'
+  'minimatch@9>brace-expansion': '>=2.1.4 <3'
   'diff@7': '>=8.0.3 <9'
   dompurify: '>=3.4.13 <3.5.0'
-  fast-uri: '>=3.1.5 <4'
+  # fast-uri host-confusion / SSRF set (GHSA-jqff-g426-hqxp, GHSA-f65p-4m7j-42xc,
+  # GHSA-fph4-wmhf-6fwf, GHSA-5jgf-p345-68v8). Fixed in 3.1.6; floor to 3.1.7 to
+  # match the resolved version and keep future resolution off 3.1.6.
+  fast-uri: '>=3.1.7 <4'
+  # fflate infinite loop on malformed ZIP64 (GHSA-px8p-9vwx-vf98); stay on 0.4.x.
+  fflate: '>=0.4.9 <0.5'
   glob: '>=11.1.0'
+  # Hono: toSSG() incomplete fix for path-write-outside-root (GHSA-gqvv-2mrq-wpjv),
+  # unbounded dot-notation nesting in parseBody() causing memory exhaustion
+  # (GHSA-g6gw-c38x-mqfc), query parser reads parameters after URL fragment causing
+  # cache-key confusion (GHSA-crvj-82cr-hjcx). All fixed in 4.13.5.
+  hono: '>=4.13.5 <5'
   immutable: '>=5.1.8 <6'
-  joi: '>=18.2.1 <19'
-  js-yaml: '>=4.3.1 <5'
+  # joi: __proto__ prototype pollution in custom messages (GHSA-6w3j-5fw6-r9vr,
+  # 18.2.5) and rename() to a template target writing to the validated object
+  # prototype (GHSA-gg4h-3hg2-grpc, 18.2.4). Floor 18.2.5 covers both.
+  joi: '>=18.2.5 <19'
+  # js-yaml: maxTotalMergeKeys does not bound CPU on empty merge sources
+  # (GHSA-2883-xcg3-v3hh, 4.3.2).
+  js-yaml: '>=4.3.2 <5'
   lodash: '>=4.18.1 <5'
+  nanoid: '>=3.3.17'
+  postcss: '>=8.5.23'
+  # postcss-selector-parser: DoS via uncontrolled AST recursion
+  # (GHSA-w9m9-85wc-3x92). 6.x and 7.x both resolve in the tree, so floor
+  # each major line to its patched release.
+  'postcss-selector-parser@6': '>=6.1.3 <7'
+  'postcss-selector-parser@7': '>=7.1.3 <8'
   prismjs: '>=1.30.0 <2'
+  # qs DoS via isBuffer + array-limit bypass (GHSA-4mjr-xmp4-gh2g,
+  # GHSA-x5fp-wj9c-mxmx); single 6.x instance, floor to the 6.16.0 fix.
+  qs: '>=6.16.0 <7'
   '@docusaurus/core>react-router': '5.3.4'
   'react-router-config>react-router': '5.3.4'
   'react-router-dom@5>react-router': '5.3.4'
   serialize-javascript: '>=7.0.5 <8'
   shell-quote: '>=1.9.0 <2'
+  # SVGO: removeScripts leaves executable links through namespace and control
+  # characters (GHSA-w27v-7q3p-w38r, high), and incompletely sanitizes executable
+  # HTML in SVG foreignObject (GHSA-4vpr-x523-8j87, medium). Both fixed in 3.3.5.
+  svgo: '>=3.3.5 <4'
   undici: '>=7.29.0 <8'
   uuid: '>=11.1.1 <12'
+  # Vitest and its @vitest/mocker: Path Traversal / Arbitrary File Read via
+  # Redirect Mock (GHSA-82fw-gwwq-j7x9, 4.1.11).
+  vitest: '>=4.1.11 <5'
+  '@vitest/mocker': '>=4.1.11 <5'
   webpack-dev-server: '>=5.2.6 <6'
   ws: '>=8.21.0 <9'
 

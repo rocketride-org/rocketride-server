@@ -39,7 +39,7 @@ AccountCommands: thin DAP router for all ``rrext_account_*`` commands.
 Exposes six command groups to the DAP dispatcher; each is a one-liner
 delegating to ``account.handle_account(conn, request)``:
 
-  - ``rrext_account_me``      — user profile (get, update, set_default_team)
+  - ``rrext_account_me``      — user profile (get, update, set_dev_team)
   - ``rrext_account_keys``    — API keys (list, create, revoke)
   - ``rrext_account_org``     — organisation (get, update)
   - ``rrext_account_members`` — org members (list, invite, update, remove)

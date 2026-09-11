@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import uuid
 from typing import Any, Callable, Dict, List, Optional
 
@@ -118,11 +119,21 @@ def _build_deepagent_llm(agent_base: AgentBase, context: AgentContext) -> Any:
                 if msg is not None:
                     return ChatResult(generations=[ChatGeneration(message=msg)])
                 if attempt < 2:
-                    prompt = (
-                        prompt
-                        + '\n\nsystem: Your last output was invalid. Output ONLY a single JSON object per the schema.'
-                    )
+                    # Say WHAT was wrong. The model cannot see the character that
+                    # broke its output, so a bare "invalid" buys three identical
+                    # answers at full token cost and no chance of a different one.
+                    prompt = prompt + '\n\nsystem: ' + _parse_failure_hint(raw)
 
+            # Out of attempts. Anything readable beats handing over the protocol.
+            salvaged = _salvage_final_content(raw)
+            if salvaged:
+                return ChatResult(generations=[ChatGeneration(message=AIMessage(content=salvaged))])
+            # A broken TOOL CALL is not readable — it is work that never ran, and
+            # delivering it as the answer would end the turn claiming otherwise.
+            # Fail the run instead. Prose that merely skipped the sentinel is
+            # still an answer, and still goes through.
+            if _looks_like_envelope(raw):
+                raise ValueError(f'No valid tool call or final answer after 3 attempts. {_parse_failure_hint(raw)}')
             return ChatResult(generations=[ChatGeneration(message=AIMessage(content=raw))])
 
         async def _agenerate(self, messages: Any, stop: Any = None, run_manager: Any = None, **kwargs: Any) -> Any:
@@ -482,6 +493,217 @@ class DeepAgentDriver(AgentBase):
 # DRIVER-PRIVATE HELPERS (shared with the LangChain driver pattern)
 # ────────────────────────────────────────────────────────────────────────────────
 
+#: How a final answer is announced, in place of a JSON envelope.
+#:
+#: A tool call is structured data and JSON is the right shape for it. A final
+#: answer is PROSE — tables, links, quoted names — and asking a model to escape
+#: arbitrary markdown into a JSON string value is asking it to get every inner
+#: double quote right for the length of a whole answer. One miss invalidates the
+#: envelope, and what the person then reads is the envelope itself.
+#:
+#: The sentinel removes the requirement rather than restating it: after this
+#: marker every remaining byte is the answer, verbatim, and there is nothing
+#: left to escape. The JSON form is still PARSED (models trained on the old
+#: prompt still emit it, and stored transcripts contain it) — it is simply no
+#: longer what we ask for.
+FINAL_SENTINEL = 'FINAL>>>'
+
+#: The opening of a `final` envelope, up to the first byte of its content. Used
+#: to salvage an answer out of a JSON envelope that does not parse.
+_FINAL_ENVELOPE_OPEN = re.compile(r'^\s*\{\s*"type"\s*:\s*"final"\s*,\s*"content"\s*:\s*"', re.S)
+
+
+def _unescape_json_string_body(body: str) -> str:
+    """
+    Undo JSON string escaping, tolerating the escapes that broke the envelope.
+
+    ``json.loads`` is all-or-nothing: one unescaped quote and the whole answer is
+    lost. This walks the body instead, translating the escapes it recognises and
+    passing anything else through as itself — which is the right answer for the
+    stray quote that brought us here.
+
+    Args:
+        body: The raw bytes between a JSON string's opening and closing quotes.
+
+    Returns:
+        The unescaped text.
+    """
+    simple = {'n': '\n', 't': '\t', 'r': '\r', 'b': '\b', 'f': '\f', '"': '"', '\\': '\\', '/': '/'}
+    out: List[str] = []
+    i, n = 0, len(body)
+    while i < n:
+        ch = body[i]
+        if ch != '\\' or i + 1 >= n:
+            out.append(ch)
+            i += 1
+            continue
+        nxt = body[i + 1]
+        if nxt in simple:
+            out.append(simple[nxt])
+            i += 2
+        elif nxt == 'u' and i + 6 <= n:
+            try:
+                code = int(body[i + 2 : i + 6], 16)
+            except ValueError:
+                out.append(ch)
+                i += 1
+                continue
+            # A SURROGATE PAIR IS ONE CHARACTER, spelled as two escapes. JSON has
+            # no other way to write an astral character, so every emoji arrives
+            # as `😀`. Decoded apart they are two lone surrogates,
+            # which are not characters at all: `str.encode` refuses them, so the
+            # salvaged answer would raise on its way out instead of reading as
+            # the emoji somebody typed.
+            low_start = i + 6
+            if 0xD800 <= code <= 0xDBFF and body[low_start : low_start + 2] == '\\u' and low_start + 6 <= n:
+                try:
+                    low = int(body[low_start + 2 : low_start + 6], 16)
+                except ValueError:
+                    low = -1
+                if 0xDC00 <= low <= 0xDFFF:
+                    out.append(chr(0x10000 + ((code - 0xD800) << 10) + (low - 0xDC00)))
+                    i = low_start + 6
+                    continue
+            out.append(chr(code))
+            i += 6
+        else:
+            # Not an escape we know. A lone backslash is far likelier to be part
+            # of the prose than a mistake worth deleting.
+            out.append(ch)
+            i += 1
+    return ''.join(out)
+
+
+def _salvage_final_content(raw: str) -> Optional[str]:
+    """
+    The answer out of a `final` envelope that does not parse as JSON.
+
+    A GARBLED ANSWER BEATS A JSON DUMP. When the envelope is unmistakably a final
+    answer — it opens with the literal `{"type":"final","content":"` — then the
+    remainder is the answer the person was meant to read, and the only thing
+    standing between them and it is an escape the model got wrong somewhere in
+    the middle. Recovering it imperfectly is strictly better than printing the
+    protocol at them.
+
+    Deliberately narrow: only an explicit `"type":"final"` is salvaged. A
+    malformed TOOL call must never be rescued into an answer — that would turn
+    work the crew intended to do into a sentence claiming it was done.
+
+    Args:
+        raw: The model's unparsed output.
+
+    Returns:
+        The recovered content, or None when this is not a final envelope.
+    """
+    if not isinstance(raw, str):
+        return None
+    opening = _FINAL_ENVELOPE_OPEN.match(raw)
+    if not opening:
+        return None
+
+    body = raw[opening.end() :].rstrip()
+    # Cut at the envelope's own closing `"}`. Searched from the right because the
+    # content may legitimately contain that pair inside a code fence.
+    closed = body.rfind('"}')
+    if closed >= 0:
+        body = body[:closed]
+    elif body.endswith('"'):
+        body = body[:-1]
+    return _unescape_json_string_body(body)
+
+
+#: The opening of a JSON envelope, optionally inside a markdown fence.
+_ENVELOPE_OPEN = re.compile(r'^\s*(?:```[A-Za-z]*\s*)?\{')
+
+#: A `"type"` the model was reaching for, in an envelope too broken to parse.
+#: Matched textually on purpose — if it parsed, nothing here would run.
+_ATTEMPTED_TYPE = re.compile(r'"type"\s*:\s*"(tool_calls?|final)"')
+
+
+def _after_sentinel(rest: str) -> str:
+    """
+    The answer, with only the sentinel's separator removed.
+
+    Args:
+        rest: Everything after the ``FINAL>>>`` marker.
+
+    Returns:
+        The answer as the model wrote it, minus one separator — a single newline
+        (the model started the answer on the next line) or a single same-line
+        space. Any further whitespace is the answer's own: leading spaces open a
+        code block, and a blank first line is a deliberate gap.
+    """
+    if rest.startswith('\r\n'):
+        return rest[2:]
+    if rest[:1] in ('\n', ' ', '\t'):
+        return rest[1:]
+    return rest
+
+
+def _looks_like_envelope(raw: str) -> bool:
+    """
+    Whether an unparsed output was an attempt at the JSON protocol.
+
+    Separates the two things a retry loop can run out on: a protocol object
+    that never parsed (a broken tool call — must not reach the person), and
+    prose from a model that ignored the sentinel (still an answer).
+
+    Args:
+        raw: The model's unparsed output.
+
+    Returns:
+        True when the output opens like a JSON object.
+    """
+    return isinstance(raw, str) and bool(_ENVELOPE_OPEN.match(raw))
+
+
+def _parse_failure_hint(raw: str) -> str:
+    """
+    What to tell the model about the output it just failed to produce.
+
+    "Your last output was invalid" is true and useless: the model cannot see
+    which character broke it, so it rewrites the same answer and makes the same
+    mistake — three times, at full token cost, before anyone gives up. Naming the
+    position and quoting the text around it is the difference between a retry
+    that can work and one that cannot.
+
+    WHAT TO DO NEXT DEPENDS ON WHAT WAS ATTEMPTED. A broken ANSWER should come
+    back as `FINAL>>>` plus prose, where nothing can break again. A broken TOOL
+    CALL must come back as a repaired tool call: telling the model to answer in
+    prose instead would trade work the crew intended to do — a record written, a
+    booking made — for a sentence about it, which is the failure this protocol
+    exists to avoid.
+
+    Args:
+        raw: The output that failed to parse.
+
+    Returns:
+        A one-line diagnostic to append to the next prompt.
+    """
+    text = (raw or '').strip()
+    if not text:
+        return 'Your last output was empty.'
+    attempted = _ATTEMPTED_TYPE.search(text)
+    wanted_a_tool_call = bool(attempted) and attempted.group(1) != 'final'
+    remedy = (
+        'Send the SAME tool call again as one valid JSON object — repair the JSON, do not answer in prose.'
+        if wanted_a_tool_call
+        else f'Do not retype it as JSON — send the answer as {FINAL_SENTINEL} followed by plain text.'
+    )
+    try:
+        json.loads(text)
+    except json.JSONDecodeError as err:
+        pos = max(0, err.pos)
+        excerpt = text[max(0, pos - 60) : pos + 20].replace('\n', ' ')
+        return (
+            f'Your last output was not valid JSON: {err.msg}, at character {pos}. '
+            f'It broke here: ...{excerpt}... '
+            f'{remedy}'
+        )
+    except Exception:  # noqa: BLE001 — any parse failure gets the same advice
+        return 'Your last output could not be parsed.'
+    return 'Your last output parsed, but was not one of the allowed shapes.'
+
 
 def _tool_call_protocol_prompt(bound_tools: List[Dict[str, Any]]) -> str:
     """
@@ -494,24 +716,33 @@ def _tool_call_protocol_prompt(bound_tools: List[Dict[str, Any]]) -> str:
     Supports three response shapes:
       - Single tool call: ``{"type":"tool_call","name":"...","args":{...}}``
       - Parallel tool calls: ``{"type":"tool_calls","calls":[{"name":"...","args":{...}}, ...]}``
-      - Final answer: ``{"type":"final","content":"..."}``
+      - Final answer: ``FINAL>>>`` followed by the answer as plain text.
 
     The parallel form lets the orchestrator fan out independent steps in one turn — the
     async LangGraph runtime dispatches them concurrently via ``asyncio.gather``.
+
+    JSON FOR CALLS, PLAIN TEXT FOR ANSWERS. A tool call is structured — names and
+    arguments, where JSON earns its keep. An answer is prose, and the JSON form asked
+    the model to escape a whole markdown table into a string value. It only had to miss
+    one inner quote for the envelope to stop parsing, and the person then read the
+    envelope instead of the answer. ``{"type":"final",...}`` is still accepted by the
+    parser for anything that emits it; it is no longer what we ask for.
     """
     tools_json = json.dumps(bound_tools, ensure_ascii=False)
     return '\n'.join(
         [
-            'system: You MUST respond with exactly one JSON object and nothing else.',
+            'system: To CALL A TOOL, respond with exactly one JSON object and nothing else.',
             'system: Allowed schemas:',
             'system: Single tool call:',
             'system: {"type":"tool_call","name":"server.tool","args":{...}}',
             'system: Parallel tool calls (use when steps are independent — runs concurrently):',
             'system: {"type":"tool_calls","calls":[{"name":"server.tool","args":{...}}, {"name":"server.tool2","args":{...}}]}',
-            'system: Final answer:',
-            'system: {"type":"final","content":"..."}',
             'system: Prefer "tool_calls" with multiple entries when steps are independent — this dispatches them in parallel and is much faster than issuing them one at a time across turns.',
             'system: Never wrap JSON in markdown. Never include extra keys unless required.',
+            f'system: To ANSWER THE PERSON, do NOT use JSON. Write {FINAL_SENTINEL} and then your answer.',
+            f'system: Everything after {FINAL_SENTINEL} is delivered exactly as written, so use ordinary '
+            'markdown — tables, links, quotes — and escape nothing.',
+            f'system: Final answer: {FINAL_SENTINEL}Here is what I found: ...',
             f'system: Available tools (name + description + args schema): {tools_json}',
         ]
     ).strip()
@@ -524,15 +755,55 @@ def _parse_tool_call_envelope(raw: str) -> Any:
     LLM emits trailing prose, markdown fences, or a second JSON object right
     after the first one closes (a common failure mode — duplicate call or
     hallucinated ``final`` stacked onto a ``tool_call``).
-    """
-    obj = _extract_first_json_object(raw)
-    if not isinstance(obj, dict):
-        return None
 
+    Three ways in, in the order they are trusted: the ``FINAL>>>`` sentinel, which
+    cannot be malformed because there is nothing in it to escape; a JSON envelope;
+    and last, an unparseable JSON envelope that still says plainly it is a final
+    answer, whose content is recovered rather than printed at the person.
+
+    The sentinel is matched at the START OF A LINE only. Protocol text travels
+    — a delegation carrying instructions, a note quoting the format, a
+    transcript replayed into a prompt — and an unanchored match would read a
+    tool call that merely mentions ``FINAL>>>`` as a final answer, dropping the
+    call.
+    """
     try:
         from langchain_core.messages import AIMessage
     except Exception:
         return None
+
+    # The sentinel, before any JSON is attempted: everything after it is the
+    # answer, including a `{` that would otherwise look like an envelope.
+    #
+    # ANCHORED TO A LINE, because an unanchored match lets the literal text
+    # inside a tool call swallow the call. A note whose body says "reply with
+    # FINAL>>> when the booking is confirmed" is a well-formed
+    # `{"type":"tool_call"}` envelope, and finding the sentinel anywhere in it
+    # turns the work the crew meant to do into a fragment of JSON printed at the
+    # person. The prompt asks for the sentinel at the start of what the model
+    # writes; one buried mid-line in a single-line envelope is quoted text.
+    if isinstance(raw, str):
+        marker = re.search(rf'(?m)^[ 	]*{re.escape(FINAL_SENTINEL)}', raw)
+        if marker:
+            # DELIVERED AS WRITTEN, which the prompt promises and the README
+            # repeats — so only the SEPARATOR comes off, never the answer's own
+            # whitespace. One newline, or one space on the same line, is what
+            # divides the marker from what follows; `strip()` here also ate the
+            # four spaces that make `FINAL>>>\n    code` a markdown code block,
+            # turning an answer about code into a paragraph.
+            answer = safe_str(_after_sentinel(raw[marker.end() :]))
+            # A sentinel with nothing after it is not an answer. Returning it
+            # would hand `_generate` an empty success and end the turn silently;
+            # None sends the model back through the retry loop instead.
+            if answer.strip():
+                return AIMessage(content=answer)
+
+    obj = _extract_first_json_object(raw)
+    if not isinstance(obj, dict):
+        # Nothing parsed. If it was visibly a final answer, the content is still
+        # in there and worth rescuing — see `_salvage_final_content`.
+        salvaged = _salvage_final_content(raw)
+        return AIMessage(content=salvaged) if salvaged else None
 
     msg_type = obj.get('type')
     if msg_type == 'final':

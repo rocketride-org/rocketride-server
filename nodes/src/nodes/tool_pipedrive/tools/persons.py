@@ -47,6 +47,7 @@ from ._base import (
     PAGING,
     PAGING_V2,
     STR,
+    UTC_TIME_DESC,
     PipedriveToolsBase,
     args_of,
     body_from,
@@ -88,7 +89,7 @@ _PERSON_WRITE_PROPS = {
     'marketing_status': ENUM(
         'Consent status for marketing emails.', ['no_consent', 'unsubscribed', 'subscribed', 'archived']
     ),
-    'add_time': STR('Creation timestamp, YYYY-MM-DD HH:MM:SS. Use to backdate an imported record.'),
+    'add_time': STR(f'Creation timestamp, YYYY-MM-DD HH:MM:SS. Use to backdate an imported record. {UTC_TIME_DESC}'),
     'extra': EXTRA(),
 }
 

@@ -9,7 +9,7 @@
 	"prefix": "depth_estimate",
 	"description": ["Monocular depth estimation using Depth Anything V2 Small (Apache-2.0). ", "Outputs a colorized depth map (red = near, blue = far); depth statistics (min, max, mean) are emitted as JSON on the text lane.", "Pair with the Object Detection node to get rough distance to detected objects. ", "Runs on CPU, Apple Silicon (MPS), and CUDA."],
 	"icon": "depth-estimate.svg",
-	"documentation": "https://docs.rocketride.org",
+	"documentation": "https://docs.rocketride.org/nodes/depth_estimate",
 	"tile": ["Model: ${parameters.depth_estimate.profile}"],
 	"lanes": {
 		"image": ["text", "image"]

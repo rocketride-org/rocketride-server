@@ -6,11 +6,12 @@
   "license": "MIT",
   "appManifest": {
     "id": "rocketride.aparavi",
+    "projectId": "f448d405-a1bc-4490-9eb3-598663ea2473",
     "publisher": "Aparavi Software AG",
     "name": "Aparavi AQL",
     "description": "Chat with your Aparavi data using natural language",
-    "readme": "./src/README.md",
-    "icon": "./src/icon.svg",
+    "readme": "./README.md",
+    "icon": "./icon.svg",
     "categories": [
       "tools"
     ],
@@ -43,7 +44,10 @@
     }
   },
   "scripts": {
-    "build": "rsbuild build"
+    "build": "rsbuild build",
+    "build:prod": "rsbuild build --env-mode production",
+    "dev": "rsbuild dev",
+    "typecheck": "tsc --noEmit"
   },
   "browserslist": [
     "chrome >= 81",
