@@ -13,6 +13,7 @@ Full docs: `.rocketride/docs/`
 | File                              | Read when...                                                        |
 | --------------------------------- | ------------------------------------------------------------------- |
 | ROCKETRIDE_README.md              | Starting ANY RocketRide work: the platform map, setup, task router  |
+| ROCKETRIDE_CLI.md                 | The `rocketride` command: validate, run, store, deploy, app verbs; when to prefer it over SDK code |
 | ROCKETRIDE_CONCEPTS.md            | Early, always: workspace, connection, deploy/publish lifecycle, how apps and pipelines fit together |
 | ROCKETRIDE_PIPELINES.md           | Writing or editing a `.pipe`: format, lanes, profiles, patterns, pitfalls |
 | ROCKETRIDE_COMPONENT_REFERENCE.md | Choosing/configuring pipeline components via the catalog + schemas  |

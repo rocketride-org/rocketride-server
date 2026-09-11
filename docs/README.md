@@ -68,7 +68,7 @@ belongs in one of those — move it there rather than mounting out of
 
 ## `agents/` — AI assistants
 
-- **`context/`** — the ten `ROCKETRIDE_*` assistant-facing docs plus `stubs/`
+- **`context/`** — the eleven `ROCKETRIDE_*` assistant-facing docs plus `stubs/`
   (the per-assistant pointer files). Installed verbatim into a workspace's
   `.rocketride/docs/` by the VS Code extension and `rocketride init`, via the
   `docs.zip` bundle that `client-docs:agent` (`agents/scripts/tasks.js`) stages

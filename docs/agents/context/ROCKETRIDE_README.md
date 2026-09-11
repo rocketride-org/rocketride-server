@@ -41,6 +41,7 @@ pipeline, streams its output, and ships through the built-in store.
 | Wire an app to a pipeline | ROCKETRIDE_APPS.md §Embedding pipelines |
 | Connect the outside world (MCP, n8n, webhooks, Telegram, CI) | ROCKETRIDE_INTEGRATIONS.md |
 | Deploy, publish, or schedule anything | ROCKETRIDE_CONCEPTS.md §Artifact lifecycle → API doc §Deploy |
+| Validate, run, deploy, or scaffold from a terminal or CI | ROCKETRIDE_CLI.md |
 | Store or fetch files, templates, recorded runs | API doc §Cloud file store / §Templates & run logs |
 | Consume runtime events, build monitoring | ROCKETRIDE_OBSERVABILITY.md |
 | Debug a failing pipeline or app | the Pitfalls sections of ROCKETRIDE_PIPELINES.md / ROCKETRIDE_APPS.md |
@@ -75,15 +76,28 @@ they share the same section skeleton, so any `§` reference works in both.
    all enforce this); commit a `.env.example` with empty values instead.
 3. **Pipelines use the `.pipe` extension** and are JSON — see
    ROCKETRIDE_PIPELINES.md before writing one.
-4. **Write a check script** (`check.py` / `check.ts`) that connects, validates
-   the project's pipeline, and reports clearly — it is the fastest way to prove
-   the project is healthy after any change. Keep such scripts IN the
+4. **Validate before anything else**: `rocketride validate <file>.pipe` checks
+   a pipeline against the connected server without running it, and is the
+   fastest way to prove the project is healthy after any change. Write a
+   check script (`check.py` / `check.ts`) only for what the CLI cannot do —
+   reading run logs and traces, or checks that belong inside app code. Keep such scripts IN the
    workspace and run them from its root — Node resolves the installed
    `rocketride` package from the workspace's `node_modules`, so a script
    run from a temp directory outside it cannot import the client. Shell
    working directories persist between commands in most agent harnesses:
    `cd` explicitly (or use absolute paths) rather than assuming each
    command starts fresh at the root.
+
+## Working from the command line
+
+You have a shell. Prefer the `rocketride` command for every one-shot
+lifecycle operation — validate, run, upload, store, deploy, publish,
+schedule, scaffold — and write SDK code only for what it cannot do (today:
+reading run logs and traces). It is installed with the SDK, reads the
+workspace `.env`, works against a local engine with no network, and every
+verb takes `--json`. ROCKETRIDE_CLI.md has the full loop as commands and
+the verb reference; if your harness has an MCP client configured, the same
+build loop is also available as tools — see the end of that file.
 
 ## The one rule
 

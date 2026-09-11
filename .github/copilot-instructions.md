@@ -13,6 +13,7 @@ Full docs: `docs/agents/context/`
 | File                              | Read when...                                                      |
 | --------------------------------- | ----------------------------------------------------------------- |
 | ROCKETRIDE_README.md              | Starting any RocketRide work: platform map, setup, task router     |
+| ROCKETRIDE_CLI.md                 | The `rocketride` command: validate, run, store, deploy, app verbs; when to prefer it over SDK code |
 | ROCKETRIDE_CONCEPTS.md            | Workspace, connection, deploy/publish lifecycle                    |
 | ROCKETRIDE_PIPELINES.md           | Defining pipelines: `.pipe` format, lanes, patterns, pitfalls     |
 | ROCKETRIDE_COMPONENT_REFERENCE.md | Choosing/configuring components: all providers and config fields |

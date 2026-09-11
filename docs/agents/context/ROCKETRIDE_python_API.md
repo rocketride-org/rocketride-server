@@ -1045,103 +1045,12 @@ except Exception:
 
 ## 14. CLI
 
-The package installs a `rocketride` command-line tool. The TypeScript
-client installs the IDENTICAL command — same verbs, same flags, same
-output — so recipes port between languages unchanged.
-
-```bash
-pip install rocketride
-rocketride --help
-```
-
-**Common flags** (every command): `--uri` (default: `ROCKETRIDE_URI` env
-or `http://localhost:5565`), `--apikey` (default: `ROCKETRIDE_APIKEY`
-env), and `--json [FILE]` — the command's entire result as one JSON value
-on stdout (or written to `FILE`), built for scripts and agents; failures
-become an `{"error": {"message", "hint"}}` envelope with a non-zero exit.
-The CLI loads the workspace `.env`. Deploy verbs (`deploy *`,
-`app deploy`) use the `ROCKETRIDE_DEPLOY_*` pair instead and refuse to
-run without it.
-
-### `rocketride init` / `rocketride login`
-
-`init` provisions the workspace end-to-end: signs in (see `login`), syncs
-the services catalog + schemas, vendors `shell.tgz` and `rocketride.tgz`
-into `.rocketride/`, installs the agent docs bundle and the CLAUDE.md
-stub, and ensures `.gitignore` covers `.rocketride/` and `.env`.
-Idempotent — re-run any time to refresh against the connected server.
-
-`login [--deploy] [--apikey KEY]` (re)authenticates and saves credentials
-to `.env` (and makes `.env` git-ignored in the same step). OSS servers
-take an API key; saas servers open the browser to sign in and mint a
-durable personal API key. Run it whenever a command reports rejected
-credentials. `--deploy` targets the `ROCKETRIDE_DEPLOY_*` pair.
-
-### Task commands
-
-```bash
-rocketride list                                            # one-shot list of your active tasks
-rocketride start --pipeline ./my-pipeline.pipe             # start; prints the task token and exits
-rocketride upload files/*.csv --pipeline ./pipeline.pipe   # start + upload + terminate
-rocketride upload files/*.csv --token TASK_TOKEN           # upload into an already-running task
-rocketride stop --token TASK_TOKEN                         # terminate a task
-```
-
-- `start` options: `--pipeline FILE` (or `ROCKETRIDE_PIPELINE`; required), `--token TOKEN` (or `ROCKETRIDE_TOKEN`), `--threads N` (default 4), `--args ...`
-- `upload` options: `--pipeline FILE` or `--token TOKEN` (one required), `--threads N` (default 4), `--max-concurrent N` (default 5), `--args ...`
-
-There is no live-monitor command: continuous monitoring belongs to the
-platform's event monitor and server monitor apps — the CLI is one-shot,
-line-oriented output by design.
-
-### `rocketride app <create|verify|deploy>`
-
-The app lifecycle verbs, identical to the TypeScript CLI: `app create
-<slug>` scaffolds under `./apps/<slug>` with the App Builder wizard's
-templates (SDK equivalent: `client.deploy.create_app`); `app verify
-<folder>` is the no-connection precheck (exit 0 when ready); `app deploy
-<folder>` packs the source and deploys it as the next registry version on
-the DEPLOYMENT target. Deploying activates nothing — publish a rung to
-serve it.
-
-### `rocketride deploy <verb>`
-
-Deployment-target verbs, following the platform vocabulary — **deploy** =
-version to the server's registry, **publish** = bind a rung to a version:
-
-```bash
-rocketride deploy add pipelines/ingest.pipe --comment "v2 parse"    # next registry version (--kind pipe|node)
-rocketride deploy publish PROJECT_ID 3 --team TEAM_ID               # point the team at version 3
-rocketride deploy list|get|versions|history PROJECT_ID              # inspect (all support --json)
-rocketride deploy run PROJECT_ID SOURCE_ID --team TEAM_ID           # trigger a run now
-rocketride deploy schedule set PROJECT_ID SOURCE_ID "0 9 * * 1-5" --team TEAM_ID --ttl 32400
-rocketride deploy schedule pause|resume PROJECT_ID SOURCE_ID --team TEAM_ID
-rocketride deploy schedule preview "0 9 * * 1-5"                    # validate a cron + next firings
-rocketride deploy log APP_ID VERSION                                # read an app version's build log
-rocketride deploy enable|disable|remove PROJECT_ID --team TEAM_ID
-```
-
-Every verb fronts a `client.deploy.*` SDK method — prefer the API in
-application code; the CLI is the one-shot form for terminals, CI, and
-quick lifecycle operations.
-
-### `rocketride store <subcommand>`
-
-File-store operations against your account store:
-
-| Subcommand | Usage | Description |
-| ---------- | ----- | ----------- |
-| `dir` | `rocketride store dir [path]` | List directory contents (default: root) |
-| `type` | `rocketride store type <path>` | Display file contents |
-| `write` | `rocketride store write <path> --file LOCAL` or `--content TEXT` | Write a file from a local file or inline text (exactly one of the two) |
-| `rm` | `rocketride store rm <path>` | Delete a file |
-| `mkdir` | `rocketride store mkdir <path>` | Create a directory |
-| `stat` | `rocketride store stat <path>` | File/directory metadata |
-
-```bash
-rocketride store write configs/settings.json --content '{"threshold": 0.8}' --apikey YOUR_KEY
-rocketride store type configs/settings.json --apikey YOUR_KEY
-```
+The package installs a `rocketride` command-line tool (`pip install
+rocketride`, then `rocketride --help`). The TypeScript client installs the
+IDENTICAL command — same verbs, same flags, same output. The full reference
+(workspace, validate, task, store, app, and deploy verbs, the `--json`
+contract, and when to prefer it over SDK code) is ROCKETRIDE_CLI.md; every
+deploy and app verb there fronts a `client.deploy.*` method from §Deploy.
 
 ## 15. Data Types & MIME
 
