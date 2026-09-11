@@ -5,7 +5,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { mergeProjectPreferences, updateProjectPreference } from './projectPreferences';
+import { mergeProjectPreferences, updateProjectPreference, writeProjectPreference } from './projectPreferences';
 
 test('a one-key ProjectView preference write emits a patch that preserves newer host values', () => {
 	const staleEditorPrefs = { panelWidth: 280, showGrid: true };
@@ -37,4 +37,30 @@ test('parent preferences retain a local panel-width patch when a remote patch fo
 		panelWidth: 420,
 		cloudCanvasPromptDismissed: true,
 	});
+});
+
+test('a replayed preference state updater sends one host patch', () => {
+	const scheduledUpdaters: Array<(prefs: Record<string, unknown>) => Record<string, unknown>> = [];
+	const hostPatches: Record<string, unknown>[] = [];
+	const callOrder: string[] = [];
+
+	writeProjectPreference(
+		(updater) => {
+			callOrder.push('schedule-local-update');
+			scheduledUpdaters.push(updater);
+		},
+		(patch) => {
+			callOrder.push('notify-host');
+			hostPatches.push(patch);
+		},
+		'showGrid',
+		false,
+	);
+
+	assert.equal(scheduledUpdaters.length, 1);
+	assert.deepEqual(callOrder, ['schedule-local-update', 'notify-host']);
+	const updater = scheduledUpdaters[0];
+	assert.deepEqual(updater({ panelWidth: 280, showGrid: true }), { panelWidth: 280, showGrid: false });
+	assert.deepEqual(updater({ panelWidth: 280, showGrid: true }), { panelWidth: 280, showGrid: false });
+	assert.deepEqual(hostPatches, [{ showGrid: false }], 'a retryable state updater must not replay the host side effect');
 });

@@ -47,7 +47,7 @@ import type { TaskEventMessage, TaskEventSession, TaskTimeline } from './hooks/u
 import { createLiveEventStore, type LiveEventStore } from './hooks/liveEventSession';
 import type { ProjectViewMode, ViewState, TaskStatus, TraceEvent } from './types';
 import { TASK_STATE } from './types';
-import { updateProjectPreference } from './projectPreferences';
+import { writeProjectPreference } from './projectPreferences';
 
 const CLOUD_CANVAS_PROMPT_DISMISSED_KEY = 'cloudCanvasPromptDismissed';
 
@@ -412,12 +412,7 @@ const ProjectView: React.FC<IProjectViewProps> = ({ project, documentTitle, serv
 	const prefsApi = useMemo<IPrefsApi>(
 		() => ({
 			getPref: (key) => prefsRef.current?.[key],
-			setPref: (key, value) =>
-				setPrefs((prev) => {
-					const { localPrefs, hostPatch } = updateProjectPreference(prev, key, value);
-					onPrefsChangeRef.current?.(hostPatch);
-					return localPrefs;
-				}),
+			setPref: (key, value) => writeProjectPreference(setPrefs, onPrefsChangeRef.current, key, value),
 		}),
 		[]
 	);
