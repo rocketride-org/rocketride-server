@@ -467,10 +467,21 @@ const Sidebar: React.FC<SidebarProps> = ({ themeConfig: _themeConfig, account, h
 		setCollapsed(next);
 	}, [activeAppId, isCompact]);
 
+	// Read through a ref, and keyed on the APP rather than on `prefer`.
+	//
+	// `prefer` changes identity with `isCompact`, so depending on it re-ran this
+	// on every breakpoint crossing and re-applied the app's preference over a
+	// rail the person had opened by hand: declare `sidebar: 'collapsed'`, expand
+	// it, narrow the window under 1024 and widen it again, and the rail shut
+	// itself. That contradicts both invariants above — the person's own toggle
+	// wins inside an app, and crossing back restores the rail they had.
+	const preferRef = useRef(prefer);
+	preferRef.current = prefer;
 	useEffect(() => {
 		if (!wanted) return;
-		prefer(wanted === 'collapsed');
-	}, [wanted, prefer]);
+		preferRef.current(wanted === 'collapsed');
+		// eslint-disable-next-line react-hooks/exhaustive-deps -- see above: keyed on the app, not on `prefer`
+	}, [wanted, activeAppId]);
 
 	// The same preference, asked for directly.
 	//
