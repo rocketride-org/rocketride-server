@@ -294,7 +294,7 @@ async def test_on_execute_skips_plan_check_without_pipeline():
 
 @pytest.mark.asyncio
 async def test_on_launch_starts_task_with_resolved_org():
-    """on_launch resolves org_id from defaultTeam and delegates to start_task."""
+    """on_launch resolves org_id from devTeam and delegates to start_task."""
     server = MagicMock()
     server.start_task = AsyncMock(return_value={'id': 'task-99', 'token': 'tk_99'})
     conn = _make_conn(account_info=_account_info(), server=server)
@@ -323,6 +323,25 @@ async def test_on_launch_replies_via_send_response_and_returns_none():
 
 
 @pytest.mark.asyncio
+async def test_on_launch_refuses_without_a_dev_team():
+    """An empty devTeam denies the launch outright.
+
+    Billing must never guess which team a run is charged to, so the refusal
+    lands before the permission check and before any task is started — nothing
+    downstream may ever observe an empty team.
+    """
+    server = MagicMock()
+    server.start_task = AsyncMock()
+    conn = _make_conn(account_info=_account_info(dev_team=''), server=server)
+
+    with pytest.raises(PermissionError, match='No development team'):
+        await TaskCommands.on_launch(conn, {'arguments': {}})
+
+    conn.verify_team_permission.assert_not_called()
+    server.start_task.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_on_launch_rejects_unpermitted_dev_team():
     """Lacking the launch permission on the development team denies the launch
     before any task is started.
@@ -344,7 +363,7 @@ async def test_on_launch_rejects_client_team_override():
     """
     server = MagicMock()
     server.start_task = AsyncMock()
-    conn = _make_conn(account_info=_account_info(default_team='team-1'), server=server)
+    conn = _make_conn(account_info=_account_info(dev_team='team-1'), server=server)
     with pytest.raises(PermissionError, match='development team'):
         await TaskCommands.on_launch(conn, {'arguments': {'teamId': 'team-foreign'}})
     server.start_task.assert_not_called()
@@ -355,7 +374,7 @@ async def test_on_launch_checks_task_debug_on_dev_team():
     """on_launch verifies task.debug against the development team."""
     server = MagicMock()
     server.start_task = AsyncMock(return_value={'id': 'task-1', 'token': 'tk_1'})
-    conn = _make_conn(account_info=_account_info(default_team='team-1'), server=server)
+    conn = _make_conn(account_info=_account_info(dev_team='team-1'), server=server)
     await TaskCommands.on_launch(conn, {'arguments': {}})
     conn.verify_team_permission.assert_called_once_with('team-1', 'task.debug')
 

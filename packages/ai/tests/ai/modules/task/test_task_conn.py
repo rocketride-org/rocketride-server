@@ -659,7 +659,10 @@ def test_rrext_handlers_still_dispatch_by_name():
     reached it. Assert the real handlers all still resolve, so the guard's
     removal is provably not a loss of admin surface.
     """
+    # A floor, not a census: the exact count moves with unrelated work (the
+    # app handlers were consolidated 6-into-1 upstream), so pin only that the
+    # surface is still wholesale present.
     handlers = [n for n in dir(TaskConn) if n.startswith('on_rrext_')]
-    assert len(handlers) >= 36, f'rrext surface shrank to {len(handlers)}'
+    assert len(handlers) >= 30, f'rrext surface shrank to {len(handlers)}'
     for name in ('on_rrext_dashboard', 'on_rrext_deploy', 'on_rrext_store', 'on_rrext_account_me'):
         assert callable(getattr(TaskConn, name, None)), f'{name} no longer dispatches'

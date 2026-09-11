@@ -253,7 +253,10 @@ class TaskCommands(DAPConn):
             # silently ignored so the caller is never surprised by which team
             # the run was billed/authorized under.
             args = request.get('arguments') or {}
-            team_id = self._account_info.defaultTeam
+            team_id = self._account_info.devTeam
+            # Billing must never guess: no dev team = no dev run.
+            if not team_id:
+                raise PermissionError('No development team is set — pick one in your profile before running pipelines')
             requested_team = args.get('teamId')
             if requested_team and requested_team != team_id:
                 raise PermissionError('Tasks run in your assigned development team; change it in your profile')
