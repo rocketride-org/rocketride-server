@@ -89,6 +89,7 @@ class PublicCommands(DAPConn):
         design) when the server has one configured, so browser and
         extension clients receive the key matching THIS server's Stripe
         account instead of a value baked into their bundles at build time.
+        The ad-attribution provider name travels the same way.
 
         Args:
             request: Raw DAP request dict.
@@ -125,6 +126,14 @@ class PublicCommands(DAPConn):
             info['stripePublishableKey'] = stripe_pk
         elif stripe_pk:
             debug('[public] RR_STRIPE_PUBLISHABLE_KEY is not a pk_ publishable key — omitting it from the public probe')
+        # Ad-attribution provider — the NAME only, never a credential. A
+        # server holding a Gravity Conversions API key can report conversions,
+        # so the shell captures ad-click params and asks for marketing
+        # consent; everywhere else (staging, OSS) the field is absent and the
+        # shell does nothing. No ad script is ever loaded: attribution is
+        # first-party capture plus server-side events.
+        if os.environ.get('RR_GRAVITY_API_KEY', '').strip():
+            info['attributionProvider'] = 'gravity'
         return self.build_response(request, body=info)
 
     # ── rrext_public_catalog ────────────────────────────────────────────────

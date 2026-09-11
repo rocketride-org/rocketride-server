@@ -121,6 +121,46 @@ async def test_on_rrext_public_probe_omits_stripe_key_when_unset(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_on_rrext_public_probe_advertises_attribution_when_capi_is_configured(monkeypatch):
+    """
+    A server holding a Gravity Conversions API key can actually report
+    conversions, so it tells the shell to capture ad-click params and ask for
+    marketing consent. The KEY ITSELF is a server secret and never travels.
+    """
+    monkeypatch.setattr(cmd_public, 'getVersion', lambda: '9.9.9')
+    monkeypatch.setenv('RR_GRAVITY_API_KEY', 'grv_live_secret_value')
+
+    account = SimpleNamespace(capabilities=[], get_public_apps=AsyncMock(return_value=[]))
+    server = MagicMock()
+    server._server = SimpleNamespace(account=account)
+
+    conn = _make_conn(server=server)
+    result = await PublicCommands.on_rrext_public_probe(conn, {'command': 'rrext_public_probe'})
+
+    assert result['body']['attributionProvider'] == 'gravity'
+    assert 'grv_live_secret_value' not in str(result['body'])
+
+
+@pytest.mark.asyncio
+async def test_on_rrext_public_probe_omits_attribution_when_unset(monkeypatch):
+    """
+    Without a CAPI key (staging, OSS, local) nothing is advertised: the shell
+    then captures nothing and shows no consent banner.
+    """
+    monkeypatch.setattr(cmd_public, 'getVersion', lambda: '9.9.9')
+    monkeypatch.delenv('RR_GRAVITY_API_KEY', raising=False)
+
+    account = SimpleNamespace(capabilities=[], get_public_apps=AsyncMock(return_value=[]))
+    server = MagicMock()
+    server._server = SimpleNamespace(account=account)
+
+    conn = _make_conn(server=server)
+    result = await PublicCommands.on_rrext_public_probe(conn, {'command': 'rrext_public_probe'})
+
+    assert 'attributionProvider' not in result['body']
+
+
+@pytest.mark.asyncio
 async def test_on_rrext_public_probe_endpoints_default_to_origin(monkeypatch):
     """
     The endpoints block is ALWAYS present with BOTH keys — clients never

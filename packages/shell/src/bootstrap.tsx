@@ -27,6 +27,7 @@ import type { AppManifestEntry } from './components/workspace/types';
 import { buildShellConfig } from './createShellConfig';
 import { registerAndMapApps } from './util/appLoader';
 import { installDevHooks } from './util/devMode';
+import { captureClickParams, configureAttribution } from './util/adAttribution';
 
 // =============================================================================
 // BOOTSTRAP
@@ -47,6 +48,12 @@ async function main() {
 	// dev split-host loop keeps this true via the dev server's proxy.
 	const serverUri = window.location.origin;
 
+	// Read the ad-click reference out of the URL into memory FIRST: the OAuth
+	// callback strips the query string once auth resolves, and an in-app
+	// navigation can drop it sooner. Nothing is stored on the device, and
+	// nothing leaves the browser without marketing consent.
+	captureClickParams();
+
 	// Probe the server for capabilities and public apps (no auth required)
 	let capabilities: string[] = [];
 	let apps: AppManifestEntry[] = [];
@@ -59,6 +66,10 @@ async function main() {
 		// Stripe publishable key comes from the server (not baked at build
 		// time) so one bundle works against test- and live-keyed servers.
 		stripePublishableKey = info.stripePublishableKey ?? '';
+		// Ad attribution: cookieless and first-party. The provider name is
+		// per environment (absent on staging/OSS); no third-party script is
+		// ever loaded, and nothing is relayed without marketing consent.
+		configureAttribution(info.attributionProvider);
 		// The server says where live traffic goes (already resolved by the
 		// SDK — 'origin' became the probed address). Same as the page origin
 		// on single-host deployments; a direct API host on split ones, so

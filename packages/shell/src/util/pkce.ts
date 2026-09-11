@@ -163,6 +163,11 @@ export function clearStoredVerifier(): void {
  * @param challenge     - PKCE code_challenge (from generatePkce)
  * @param _register     - Historical sign-up intent flag; both flows now land on
  *                        the login page (with its Register link), see below
+ * @param state         - Optional opaque value echoed back on the callback. The
+ *                        shell carries the ad-click reference here so it
+ *                        survives the redirect without touching device storage
+ *                        (see util/adAttribution.ts). CSRF protection comes
+ *                        from PKCE, not from this value.
  * @returns The fully formed authorization URL string ready for browser navigation.
  */
 export function buildAuthUrl(
@@ -171,6 +176,7 @@ export function buildAuthUrl(
     redirectUri: string,
     challenge: string,
     _register = false,
+    state?: string | null,
 ): string {
     // Assemble the standard OAuth 2.0 authorization request parameters.
     // The scope includes openid and profile for basic identity, email and phone
@@ -192,6 +198,9 @@ export function buildAuthUrl(
     // ("could not sign up at this time"), so the register flag no longer maps
     // to it. The parameter is kept so callers' intent stays visible at call sites.
     params.set('prompt', 'login');
+
+    // Opaque round-trip value (ad-click reference); omitted when there is none.
+    if (state) params.set('state', state);
 
     // Strip any trailing slash from the base URL before appending the path
     // to avoid a double-slash in the resulting URL.

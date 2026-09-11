@@ -41,6 +41,8 @@ import type { IAuthProvider } from '../types/connection';
 import { generatePkce, buildAuthUrl, getStoredVerifier, clearStoredVerifier } from '../util/pkce';
 import { LS_TOKEN, SS_PENDING_APP_ID } from '../constants';
 import { tokenStore } from '../util/devGate';
+import { encodeAttributionState } from '../util/adAttribution';
+import { getMarketingConsent } from '../util/marketingConsent';
 
 // =============================================================================
 // CLASS
@@ -124,13 +126,17 @@ export class CloudAuthProvider implements IAuthProvider {
 		// Generate PKCE challenge (stores verifier in sessionStorage automatically)
 		const { challenge } = await generatePkce();
 
-		// Build the authorization URL
+		// Build the authorization URL. The ad-click reference (when the visitor
+		// arrived from an ad and has not refused) rides the `state` parameter,
+		// which comes back verbatim on the callback — so it survives the
+		// redirect without any cookie or storage entry.
 		const url = buildAuthUrl(
 			this.zitadelUrl,
 			this.clientId,
 			window.location.origin,
 			challenge,
 			register,
+			getMarketingConsent() === 'denied' ? null : encodeAttributionState(),
 		);
 
 		// assign() (not replace()) so the landing page stays in history — the

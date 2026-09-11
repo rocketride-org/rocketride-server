@@ -47,6 +47,7 @@ import { WorkspaceProvider } from '../workspace/WorkspaceContext';
 import type { ShellConfig } from '../workspace/types';
 import { ShellLayout } from './ShellLayout';
 import { CheckoutFlow } from './CheckoutFlow';
+import { MarketingConsent } from '../consent/MarketingConsent';
 import { ApiKeyLogin } from './ApiKeyLogin';
 import LoadingScreen from './LoadingScreen';
 import { SS_PENDING_APP_ID, getHomeAppId } from '../../constants';
@@ -832,6 +833,9 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 
 			{/* Checkout overlay — renders outside the shell layout */}
 			<CheckoutFlow stripeKey={stripeKey} orgId={orgId} />
+
+			{/* Ad-pixel consent banner + attribution relay (no-op unless configured) */}
+			<MarketingConsent />
 		</ShellIdentityContext.Provider>
 	);
 };

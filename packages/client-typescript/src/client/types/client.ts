@@ -562,6 +562,17 @@ export interface ServerInfoResult {
 	stripePublishableKey?: string;
 
 	/**
+	 * Ad-attribution provider this server reports conversions to (`'gravity'`).
+	 *
+	 * The NAME only — never a credential. Present when the server holds the
+	 * provider's API key, which is what lets the browser shell capture
+	 * ad-click parameters and ask for marketing consent; absent everywhere
+	 * else (staging, OSS), where the shell does nothing. No third-party ad
+	 * script is ever loaded: conversions are reported server-side.
+	 */
+	attributionProvider?: string;
+
+	/**
 	 * The server's public addresses, RESOLVED to absolute URLs.
 	 *
 	 * `getServerInfo` substitutes the server's `'origin'` sentinel ("the
