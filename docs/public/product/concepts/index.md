@@ -46,6 +46,8 @@ You start and feed pipelines through one of two protocols:
 - **Visually**: the VS Code [extension](/clients/vscode) opens `.pipe` files on a
   canvas; wire nodes by connecting lanes and press Run.
 - **In code**: author or run the same pipeline from your application with the SDKs.
+- **As an app**: wrap a pipeline in a UI that runs inside the RocketRide
+  shell and deploy it to your team. See [Apps](/concepts/apps).
 
 ## Putting it together
 

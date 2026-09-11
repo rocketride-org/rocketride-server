@@ -46,6 +46,7 @@ const SPINE = [
 			{ id: 'concepts/nodes', label: 'Nodes' },
 			{ id: 'concepts/agents-tools-skills', label: 'Agents & Tools' },
 			{ id: 'concepts/execution-model', label: 'Execution Model' },
+			{ id: 'concepts/apps', label: 'Apps' },
 		],
 	},
 	{
@@ -67,10 +68,10 @@ const SPINE = [
 			// Placeholder until the content pass (plan phase 2).
 			{ id: 'guides/observability', label: 'Observability' },
 			{
-				label: 'Shell Apps',
+				label: 'Apps',
 				items: [
-					{ id: 'guides/apps', label: 'Guide' },
-					{ id: 'guides/apps/reference', label: 'Reference' },
+					{ id: 'guides/apps/app-builder', label: 'App Builder' },
+					{ id: 'guides/apps', label: 'Shell API' },
 				],
 			},
 		],

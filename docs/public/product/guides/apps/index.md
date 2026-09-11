@@ -1,5 +1,5 @@
 ---
-title: Shell Apps
+title: Shell API
 ---
 
 # Building Shell-UI Applications
@@ -25,7 +25,6 @@ A complete guide for developers building micro-frontend applications for the Roc
 13. [Cross-App Component Loading](#cross-app-component-loading)
 14. [Theming](#theming)
 15. [Build Configuration](#build-configuration)
-16. [Reference: Complete API Surface](/guides/apps/reference)
 
 ---
 
@@ -906,6 +905,4 @@ Key points:
 
 ---
 
-The complete export list — every type, hook, function, class, and component in
-`'rocketride/app-sdk'` — lives on the
-[Shell Apps API reference](/guides/apps/reference).
+For the App Builder loop, see [App Builder](/guides/apps/app-builder).

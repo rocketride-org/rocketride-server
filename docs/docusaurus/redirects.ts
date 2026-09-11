@@ -511,6 +511,10 @@ const redirects: RedirectItem[] = [
 		to: '/connect/cli',
 		from: ['/reference/cli'],
 	},
+	{
+		to: '/guides/apps',
+		from: ['/guides/apps/reference'],
+	},
 ];
 
 // Mounted subtrees renamed by the IA restructure: for every page under a new
