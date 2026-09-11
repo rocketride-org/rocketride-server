@@ -66,7 +66,12 @@ def _scoped_stubs() -> Iterator[None]:
 
 
 with _scoped_stubs():
-    from tool_github.github_client import call, GitHubAPIError
+    from tool_github.github_client import (
+        call,
+        GitHubAPIError,
+        load_app_private_key,
+        mint_installation_token,
+    )
     from tool_github.IInstance import IInstance
 
 
@@ -210,3 +215,122 @@ def test_rate_limit_excessive_wait_fails_fast(mock_request, mock_sleep, mock_tim
     assert 'retry after 3600s' in exc_info.value.message  # reset hint tells caller when to retry
     assert mock_request.call_count == 1  # Failed fast on first attempt
     assert mock_sleep.call_count == 0  # No sleep
+
+
+# ---------------------------------------------------------------------------
+# GitHub App installation-token auth
+# ---------------------------------------------------------------------------
+
+
+def _generate_test_private_key_pem() -> str:
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric import rsa
+
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    return key.private_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PrivateFormat.PKCS8,
+        encryption_algorithm=serialization.NoEncryption(),
+    ).decode('utf-8')
+
+
+_TEST_PRIVATE_KEY_PEM = _generate_test_private_key_pem()
+
+
+def _generate_test_ec_private_key_pem() -> str:
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric import ec
+
+    key = ec.generate_private_key(ec.SECP256R1())
+    return key.private_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PrivateFormat.PKCS8,
+        encryption_algorithm=serialization.NoEncryption(),
+    ).decode('utf-8')
+
+
+_TEST_EC_PRIVATE_KEY_PEM = _generate_test_ec_private_key_pem()
+
+
+def _decode_jwt_parts(jwt_token: str):
+    import base64
+    import json
+
+    header_b64, payload_b64, _signature_b64 = jwt_token.split('.')
+
+    def _pad(s: str) -> bytes:
+        return base64.urlsafe_b64decode(s + '=' * (-len(s) % 4))
+
+    return json.loads(_pad(header_b64)), json.loads(_pad(payload_b64))
+
+
+def test_load_app_private_key_valid():
+    key = load_app_private_key(_TEST_PRIVATE_KEY_PEM)
+    assert key is not None
+
+
+def test_load_app_private_key_invalid():
+    with pytest.raises(ValueError, match='invalid GitHub App private key'):
+        load_app_private_key('not a real pem')
+
+
+def test_load_app_private_key_rejects_non_rsa():
+    with pytest.raises(ValueError, match='must be an RSA key'):
+        load_app_private_key(_TEST_EC_PRIVATE_KEY_PEM)
+
+
+@patch('tool_github.github_client.requests.request')
+def test_mint_installation_token_success(mock_request):
+    resp = Mock(spec=requests.Response)
+    resp.ok = True
+    resp.status_code = 201
+    resp.json.return_value = {'token': 'ghs_abc123', 'expires_at': '2026-08-24T12:00:00Z'}
+
+    mock_request.return_value = resp
+
+    token, expiry = mint_installation_token('12345', _TEST_PRIVATE_KEY_PEM, '67890')
+
+    assert token == 'ghs_abc123'
+    assert expiry > 0
+
+    # Verify the mint call hit the right endpoint with a signed JWT bearer.
+    args, kwargs = mock_request.call_args
+    assert args[0] == 'POST'
+    assert args[1] == 'https://api.github.com/app/installations/67890/access_tokens'
+    auth_header = kwargs['headers']['Authorization']
+    assert auth_header.startswith('Bearer ')
+    jwt_token = auth_header.split(' ', 1)[1]
+    header, payload = _decode_jwt_parts(jwt_token)
+    assert header['alg'] == 'RS256'
+    assert payload['iss'] == '12345'
+    assert payload['exp'] - payload['iat'] <= 630  # 570s TTL + 60s backdated iat
+
+
+@patch('tool_github.github_client.requests.request')
+def test_mint_installation_token_401(mock_request):
+    resp = Mock(spec=requests.Response)
+    resp.ok = False
+    resp.status_code = 401
+    resp.headers = {}
+    resp.json.return_value = {'message': 'Bad credentials'}
+    resp.text = 'Bad credentials'
+
+    mock_request.return_value = resp
+
+    with pytest.raises(GitHubAPIError) as exc_info:
+        mint_installation_token('12345', _TEST_PRIVATE_KEY_PEM, '67890')
+
+    assert exc_info.value.status_code == 401
+
+
+@patch('tool_github.github_client.requests.request')
+def test_mint_installation_token_missing_fields(mock_request):
+    resp = Mock(spec=requests.Response)
+    resp.ok = True
+    resp.status_code = 201
+    resp.json.return_value = {'token': 'ghs_abc123'}  # missing expires_at
+
+    mock_request.return_value = resp
+
+    with pytest.raises(GitHubAPIError, match='missing token/expires_at'):
+        mint_installation_token('12345', _TEST_PRIVATE_KEY_PEM, '67890')
