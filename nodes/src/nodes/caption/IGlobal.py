@@ -44,16 +44,17 @@ class IGlobal(IGlobalBase):
 
         from ai.common.models.vision.caption import Captioner, DEFAULT_MODEL
 
-        config = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
         conn = self.glb.connConfig
+        # UI field values arrive prefixed under connConfig['parameters']; see
+        # Config.resolve_node_param / Config.resolve_node_config for the full story.
+        params = conn.get('parameters')
+        config = Config.resolve_node_config(self.glb.logicalType, conn, 'caption')
 
-        model_name = (config.get('model') or '').strip()
+        raw_model = Config.resolve_node_param(conn, config, 'caption', 'model')
+        model_name = (raw_model or '').strip()
         if not model_name:
             warning(f'caption: no model configured, using default {DEFAULT_MODEL}')
             model_name = DEFAULT_MODEL
-        # UI field values arrive prefixed under connConfig['parameters']; see
-        # Config.resolve_node_param for the full story.
-        params = conn.get('parameters')
         ui_prompt = params.get('caption.prompt') if params is not None else None
         self.prompt = (
             str(
@@ -82,6 +83,9 @@ class IGlobal(IGlobalBase):
             warning(f'caption: invalid max_sentences {raw_max_sentences!r}, using default {DEFAULT_MAX_SENTENCES}')
             max_sentences = DEFAULT_MAX_SENTENCES
         revision = (config.get('revision') or '').strip() or None
+        # A custom model override must not inherit the profile's pinned revision.
+        if raw_model and config.get('model') and model_name != str(config.get('model')).strip():
+            revision = None
 
         # Profile-provided GPU allocation size (4B profiles set ~10-11 GB; the
         # loader falls back to its small-model default when absent).

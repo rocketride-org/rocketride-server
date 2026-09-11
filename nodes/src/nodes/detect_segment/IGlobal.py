@@ -50,17 +50,17 @@ class IGlobal(IGlobalBase):
             DEFAULT_MAX_EDGE,
         )
 
-        config = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
         conn = self.glb.connConfig
+        # UI field values arrive prefixed under connConfig['parameters']; see
+        # Config.resolve_node_param / Config.resolve_node_config for the full story.
+        params = conn.get('parameters')
+        config = Config.resolve_node_config(self.glb.logicalType, conn, 'detect_segment')
 
-        mode = str(config.get('mode', DEFAULT_MODE)).lower().strip()
+        mode = str(Config.resolve_node_param(conn, config, 'detect_segment', 'mode', DEFAULT_MODE)).lower().strip()
         if mode not in MODES:
             warning(f'detect_segment: unknown mode "{mode}", falling back to {DEFAULT_MODE}.')
             mode = DEFAULT_MODE
 
-        # UI field values arrive prefixed under connConfig['parameters']; see
-        # Config.resolve_node_param for the full story.
-        params = conn.get('parameters')
         ui_prompt = params.get('detect_segment.prompt') if params is not None else None
         prompt = str(
             ui_prompt or conn.get('detect_segment.prompt') or conn.get('prompt') or config.get('prompt') or ''
@@ -71,7 +71,8 @@ class IGlobal(IGlobalBase):
                 'Set a concept prompt in the UI (e.g. "yellow school bus") and restart the pipeline.'
             )
 
-        model_name = (config.get('model') or '').strip() or None
+        raw_model = Config.resolve_node_param(conn, config, 'detect_segment', 'model')
+        model_name = (raw_model or '').strip() or None
         # Resolve threshold with None-checks so a valid 0.0 is not dropped.
         raw_threshold = Config.resolve_node_param(conn, config, 'detect_segment', 'threshold', DEFAULT_THRESHOLD)
         try:
@@ -89,6 +90,9 @@ class IGlobal(IGlobalBase):
         max_edge = min(4096, max(256, max_edge))
 
         revision = (config.get('revision') or '').strip() or None
+        # A custom model override must not inherit the profile's pinned revision.
+        if model_name and config.get('model') and model_name != str(config.get('model')).strip():
+            revision = None
 
         self.segmenter = Segmenter(
             mode=mode,
