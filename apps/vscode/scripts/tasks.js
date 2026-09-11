@@ -28,7 +28,7 @@
  */
 const path = require('path');
 const { glob } = require('glob');
-const { execCommand, removeDirs, removeDirAndParents, removeMatching, PROJECT_ROOT, BUILD_ROOT, DIST_ROOT, hasSourceChanged, saveSourceHash, setState, exists, copyFile, mkdir, rm, readFile, writeFile, syncDir, formatSyncStats, stat } = require('../../../scripts/lib');
+const { execCommand, removeDirs, removeDirAndParents, removeMatching, PROJECT_ROOT, BUILD_ROOT, DIST_ROOT, hasSourceChanged, saveSourceHash, setState, exists, copyFile, mkdir, rm, readFile, writeFile, writeFileEnsure, syncDir, formatSyncStats, stat, absolutizeImageLinks } = require('../../../scripts/lib');
 
 // Paths
 const APP_ROOT = path.join(__dirname, '..');
@@ -243,7 +243,8 @@ function makeStageFilesAction() {
 			if (!(await exists(README_DEST))) {
 				throw new Error(`README.md missing at ${README_DEST} — the marketplace README is tracked source in apps/vscode/`);
 			}
-			await copyFile(README_DEST, path.join(BUILD_DIR, 'README.md'));
+			// Relative image links become raw-GitHub URLs on main: the marketplace renders the README with no repo behind it.
+			await writeFileEnsure(path.join(BUILD_DIR, 'README.md'), absolutizeImageLinks(await readFile(README_DEST, 'utf8'), 'apps/vscode'));
 
 			// A stale docs/ staging from a pre-/client/docs build must not
 			// ride into future packs — agent docs are served by the engine

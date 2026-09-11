@@ -17,9 +17,8 @@ Four folders, split by **audience**: `public/` is for people outside the repo,
   into `http/` and `stdio/`, and its readme source lives at `mcp/stdio/README.md`.
 - **`n8n/`** — `README.md` only; the export source for `packages/n8n-nodes/`.
   Nothing here is published to the site.
-- **`chat-widget/`** — `README.md` only; the source of
-  `packages/chat-widget/README.md`, which the chat-widget build copies into
-  place (the copy is gitignored). Nothing here is published to the site.
+- **`chat-widget/`** — `README.md` only; the export source for
+  `packages/chat-widget/README.md`. Nothing here is published to the site.
 - **`assets/`** — images shared by more than one section.
 
 ## `docusaurus/` — the site, and site-only app pages
@@ -86,10 +85,17 @@ See `agents/README.md`.
 - A `README.md` in a `public/` section is that package's README export source —
   after editing it, run `./builder docs:export` to regenerate the committed
   package `README.md`. Never hand-edit the package `README.md` directly. This
-  covers `typescript`, `python`, `mcp`, and `n8n`. App READMEs (the VS Code
+  covers `typescript`, `python`, `mcp`, `n8n`, and `chat-widget`. App READMEs (the VS Code
   marketplace readme, store listings) are not exported: each app owns its
   `README.md` and `assets/` in its own folder under `apps/`.
 - `README.md` files are never site pages — the site mounts skip them.
+- Image links are relative everywhere (`./assets/x.png` beside the file), so any
+  branch previews on GitHub. The two copy steps that publish a README outside
+  GitHub — `docs:export` for the package READMEs and the VSIX stage step for
+  `apps/vscode/README.md` — rewrite them to raw-GitHub URLs on `main` via
+  `absolutizeImageLinks` in `scripts/lib`. No other README copy is rewritten;
+  the site build's rewrite of node-README `example.png`/`example.pipe`
+  references (gather.js) is a separate, site-only step.
 - CI runs `./builder docs:check` to catch export drift.
 
 Root GitHub files (`README.md`, `CONTRIBUTING.md`, `AGENTS.md`, `.cursorrules`, ...)

@@ -88,9 +88,10 @@ update the corresponding doc in the SAME change:
 `python3 scripts/validate-node-readme.py <node-dir>`.
 
 **Package READMEs are generated committed copies**: edit
-`docs/public/<name>/README.md` (typescript, python, mcp, n8n), then run
-`./builder docs:export`; never edit `packages/client-*/README.md` or
-`packages/n8n-nodes/README.md` directly. CI runs `./builder docs:check` to
+`docs/public/<name>/README.md` (typescript, python, mcp, n8n, chat-widget),
+then run `./builder docs:export`; never edit `packages/client-*/README.md`,
+`packages/n8n-nodes/README.md`, or `packages/chat-widget/README.md` directly.
+CI runs `./builder docs:check` to
 catch drift. The VS Code marketplace readme is `apps/vscode/README.md`,
 owned by the extension alongside its `assets/`; the VSIX build stages it
 as-is.

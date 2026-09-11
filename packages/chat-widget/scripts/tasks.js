@@ -31,18 +31,11 @@
  *   test  - Run unit tests (jsdom; no engine server required)
  */
 const path = require('path');
-const { execCommand, removeDirs, copyFile, PROJECT_ROOT } = require('../../../scripts/lib');
+const { execCommand, removeDirs } = require('../../../scripts/lib');
 
 const PACKAGE_DIR = path.join(__dirname, '..');
 const LOCAL_DIST = path.join(PACKAGE_DIR, 'dist');
 const COVERAGE_DIR = path.join(PACKAGE_DIR, 'coverage');
-
-// Canonical README lives in docs/; npm pack runs against the package root, so
-// the README has to be copied here (npm cannot include files from outside the
-// package). Same convention as client-typescript/client-python/client-mcp/
-// vscode: the copy is gitignored, so the two files cannot drift.
-const README_SRC = path.join(PROJECT_ROOT, 'docs', 'public', 'chat-widget', 'README.md');
-const README_DEST = path.join(PACKAGE_DIR, 'README.md');
 
 // ============================================================================
 // Action Factories
@@ -52,15 +45,6 @@ function makeBundleAction() {
 	return {
 		run: async (ctx, task) => {
 			await execCommand('node', ['esbuild.js', '--production'], { task, cwd: PACKAGE_DIR });
-		},
-	};
-}
-
-function makeCopyReadmeAction() {
-	return {
-		run: async (ctx, task) => {
-			await copyFile(README_SRC, README_DEST);
-			task.output = 'Copied README from docs/';
 		},
 	};
 }
@@ -91,7 +75,6 @@ module.exports = {
 
 	actions: [
 		// Internal actions
-		{ name: 'chat-widget:copy-readme', action: makeCopyReadmeAction },
 		{ name: 'chat-widget:bundle', action: makeBundleAction },
 		{ name: 'chat-widget:generate-types', action: makeGenerateTypesAction },
 		{ name: 'chat-widget:run-jest', action: makeRunJestAction },
@@ -103,7 +86,7 @@ module.exports = {
 				description: 'Build chat-widget',
 				// The declaration emit resolves the 'rocketride' package types from
 				// client-typescript/dist/types, so generate those first.
-				steps: ['chat-widget:copy-readme', 'client-typescript:generate-types', 'chat-widget:bundle', 'chat-widget:generate-types'],
+				steps: ['client-typescript:generate-types', 'chat-widget:bundle', 'chat-widget:generate-types'],
 			}),
 		},
 		{
