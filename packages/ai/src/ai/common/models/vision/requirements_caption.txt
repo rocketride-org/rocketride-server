@@ -8,5 +8,5 @@
 # - Qwen/Qwen3-VL-4B-Instruct (Qwen3VLForConditionalGeneration): native since
 #   transformers 4.57.0 — older versions fail with "unrecognized architecture qwen3_vl".
 # - microsoft/Mage-VL: loads via trust_remote_code (revision-pinned); its model
-#   card requires transformers>=5.7 — satisfied by the shared transformers==5.7.0
-#   pin in requirements_vision.txt.
+#   card requires transformers>=5.7 — satisfied by the shared transformers pin
+#   in requirements_vision.txt (see the pin note there).
