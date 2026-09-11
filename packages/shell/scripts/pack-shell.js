@@ -176,7 +176,9 @@ async function packShell(options = {}) {
 	// bundleDependencies entry in the manifest below makes npm pack carry
 	// this directory inside the tgz.
 	const sdkRoot = path.join(REPO_ROOT, 'packages', 'client-typescript');
-	if (!fs.existsSync(path.join(sdkRoot, 'dist', 'types', 'index.d.ts'))) throw new Error('pack-shell: packages/client-typescript/dist is missing — run ./builder client-typescript:build first');
+	// The SDK's types entry (package.json "types") — the barrel lives under
+	// dist/types/client/, not at the dist/types root.
+	if (!fs.existsSync(path.join(sdkRoot, 'dist', 'types', 'client', 'index.d.ts'))) throw new Error('pack-shell: packages/client-typescript/dist is missing — run ./builder client-typescript:build first');
 	const sdkPkg = JSON.parse(fs.readFileSync(path.join(sdkRoot, 'package.json'), 'utf8'));
 	vendorSdkInto(sdkRoot, path.join(STAGE_DIR, 'node_modules', 'rocketride'));
 

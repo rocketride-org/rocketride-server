@@ -4,108 +4,126 @@
 // =============================================================================
 
 /**
- * Publish flow — snapshot an immutable app version from VSCode.
+ * Deploy flow — copy an immutable app version to the server from VSCode.
  *
- * Publish ALWAYS uses the real rsbuild build (decision D5 — browser-linked
- * dev output is never uploaded): a one-shot `rsbuild build` in the app
- * folder, then the built remoteEntry.js is pushed to the org registry via
- * the SDK's appPublish. Publishing never activates anything — the Deploy
- * view pins rungs.
- *
- * v1 transport bound: one binary frame = the remoteEntry.js (template-scale
- * apps). Multi-file bundles ride the zip upload when it lands (M5).
+ * The zip carries the app's SOURCE (the SERVER owns the build, so the
+ * store never has to trust client-produced binaries, and deploy runs NO
+ * local build of any kind), laid out WORKSPACE-RELATIVE: the app folder
+ * packs at its real position (deploy metadata names it as `appRoot`),
+ * and `appManifest.include` entries — workspace-relative files or dirs
+ * the build needs beyond the app folder (a shared source dir, a local
+ * lib) — pack at theirs. Because the zip mirrors the workspace tree,
+ * relative references between the packed roots resolve after the server
+ * unpacks, with nothing rewritten. Filtering follows the workspace's
+ * .gitignore plus a hardcoded baseline (see rocketride/app-pack — the
+ * canonical pack rules, shared with deploy.addApp). The zip rides
+ * the generic `rrext_deploy add` rail door; the server retains it and
+ * unpacks at receipt; deploying never activates anything — the Deploy
+ * view publishes rungs.
  */
 
-import * as vscode from 'vscode';
 import * as path from 'path';
-import { promises as fs } from 'fs';
-import { spawn } from 'child_process';
+import * as vscode from 'vscode';
+// Side-effect import: arms the SDK's app-pack registry so deploy.addApp()
+// finds the Node-only packer inside the bundled extension (a runtime
+// package-specifier import cannot resolve from a bundle).
+import 'rocketride/app-pack';
 import { ConnectionManager } from '../connection/connection';
 import { scanWorkspaceApps } from './appScan';
-import { resolveRsbuildInvocation } from './watchManager';
+import { ensureProjectId, readAppListing } from './appMarker';
+import type { AppListing } from './appMarker';
 import { getLogger } from '../shared/util/output';
-
-// =============================================================================
-// CONSTANTS
-// =============================================================================
-
-/** Upper bound for the one-shot publish build (template-scale apps build in
- * seconds — ten minutes only ever means a wedged process). */
-const BUILD_TIMEOUT_MS = 10 * 60 * 1000;
 
 // =============================================================================
 // PUBLISH
 // =============================================================================
 
 /**
- * Builds the app and publishes the bundle as an immutable version.
+ * Packs the app's source (workspace-rooted, includes honored) and deploys
+ * it as an immutable version.
  *
  * @param appId - The app to publish (appManifest.id).
  * @param message - Commit-style "what changed" note for the version card.
  * @returns The new version-rail entry.
  */
-export async function publishApp(appId: string, message: string): Promise<Record<string, unknown>> {
+export async function deployApp(appId: string, message: string): Promise<Record<string, unknown>> {
 	const logger = getLogger();
+	logger.output(`[appdev:pack] deploy ${appId} — pre-pack checks:`);
 	const apps = await scanWorkspaceApps();
 	const app = apps.find((a) => a.id === appId);
-	if (!app) throw new Error(`App "${appId}" has no bound folder in this workspace.`);
+	if (!app) {
+		logger.output(`[appdev:pack]   check bound folder — FAILED: no bound folder for ${appId}`);
+		throw new Error(`App "${appId}" has no bound folder in this workspace.`);
+	}
+	logger.output(`[appdev:pack]   check bound folder — OK (${app.folder})`);
 
 	const client = ConnectionManager.getInstance().getClient();
 	if (!client || !ConnectionManager.getInstance().isConnected()) {
+		logger.output('[appdev:pack]   check server connection — FAILED: not connected');
 		throw new Error('Not connected — publishing needs a live server connection.');
 	}
+	logger.output('[appdev:pack]   check server connection — OK');
 
-	// ── The canonical build (decision D5) ────────────────────────────────
-	logger.output(`[appdev] publish build: ${appId}`);
-	const invocation = resolveRsbuildInvocation(app.folder);
-	await new Promise<void>((resolve, reject) => {
-		const proc = spawn(invocation.cmd, [...invocation.args, 'build'], {
-			cwd: app.folder,
-			shell: invocation.shell,
-			env: { ...process.env, NO_COLOR: '1' },
-		});
-		let tail = '';
-		proc.stdout?.on('data', (c: Buffer) => { tail = (tail + c.toString('utf8')).slice(-2000); });
-		proc.stderr?.on('data', (c: Buffer) => { tail = (tail + c.toString('utf8')).slice(-2000); });
-		// Settle exactly once — close, spawn-error, and the timeout race here.
-		let settled = false;
-		const finish = (err?: Error): void => {
-			if (settled) return;
-			settled = true;
-			clearTimeout(timer);
-			if (err) reject(err); else resolve();
-		};
-		// A hung build would otherwise leave the panel's publish RPC pending
-		// forever.
-		const timer = setTimeout(() => {
-			try { proc.kill('SIGKILL'); } catch { /* already gone */ }
-			finish(new Error(`rsbuild build timed out after ${BUILD_TIMEOUT_MS / 60000} minutes: ${tail.slice(-400)}`));
-		}, BUILD_TIMEOUT_MS);
-		// 'close' (not 'exit') so the stdio tail is complete when a failure
-		// names its cause.
-		proc.on('close', (code) => (code === 0 ? finish() : finish(new Error(`rsbuild build failed (${code}): ${tail.slice(-400)}`))));
-		proc.on('error', (err) => finish(err));
+	// ── Workspace anchoring: the zip is rooted at the app's workspace ────
+	// folder, so include entries and the app pack at their real positions.
+	const wsFolder = vscode.workspace.getWorkspaceFolder(vscode.Uri.file(app.folder));
+	if (!wsFolder) {
+		logger.output('[appdev:pack]   check workspace anchoring — FAILED: app folder outside every workspace folder');
+		throw new Error(`App folder "${app.folder}" is not inside an open workspace folder.`);
+	}
+	const workspaceRoot = wsFolder.uri.fsPath;
+	const appRoot = path.relative(workspaceRoot, app.folder).replace(/\\/g, '/');
+	if (appRoot.startsWith('..')) {
+		logger.output(`[appdev:pack]   check appRoot — FAILED: "${appRoot}" escapes the workspace`);
+		throw new Error(`App folder "${app.folder}" escapes its workspace folder.`);
+	}
+	logger.output(`[appdev:pack]   check workspace anchoring — OK (root ${workspaceRoot})`);
+	logger.output(`[appdev:pack]   check appRoot — OK (${appRoot || '(workspace root — legacy layout)'})`);
+
+	// ── Include layout rule: appRoot === '' is the app-folder-as-workspace
+	// case — there is no surrounding workspace to include from. Checked
+	// here (not left to the packer) so the failure names the VS Code
+	// workspace situation precisely.
+	if (appRoot === '') {
+		// readAppListing owns the read, the parse, and the include
+		// normalization — re-implementing them here would be a second copy
+		// to keep in step with the manifest shape.
+		let listing: AppListing;
+		try {
+			listing = await readAppListing(app.folder);
+		} catch (err) {
+			throw new Error(`Could not read the app's package.json: ${err instanceof Error ? err.message : String(err)}`);
+		}
+		if ((listing.include?.length ?? 0) > 0) {
+			logger.output('[appdev:pack]   check include layout — FAILED: include declared but the workspace folder IS the app folder');
+			throw new Error('appManifest.include needs the app inside a larger workspace — the workspace folder IS the app folder here.');
+		}
+	}
+
+	// ── Working-copy provenance: the appManifest projectId ───────────────
+	// Ensured BEFORE packing so a first-time deploy's freshly stamped
+	// package.json is inside the zip, not just on disk.
+	const projectId = await ensureProjectId(app.folder);
+	logger.output(`[appdev:pack]   check projectId — OK (${projectId})`);
+
+	// ── Verify + pack + send: the ONE SDK call (deploy = copy code to the
+	// server). Packing rules — workspace-rooted layout, include entries,
+	// gitignore + baseline filtering, both size caps — are the SDK's
+	// canonical implementation; every step narrates into the output
+	// channel through onProgress.
+	const body = await client.deploy.addApp(appRoot || '.', {
+		workspaceRoot,
+		comment: message,
+		metadata: { projectId },
+		onProgress: (line) => logger.output(`[appdev:pack] ${line}`),
 	});
-
-	// ── Read the built entry ─────────────────────────────────────────────
-	const bundlePath = path.join(app.folder, 'dist', 'remoteEntry.js');
-	const bundle = new Uint8Array(await fs.readFile(bundlePath));
-
-	// ── Registry publish (never activates) ───────────────────────────────
-	const entry = await client.appPublish({
-		appId,
-		version: app.version || '0.0.0',
-		bundle,
-		message,
-		moduleId: app.moduleId,
-		name: app.name,
-	});
-	if (!entry) throw new Error(`Publish returned no version entry for ${appId}.`);
-	// The registry's answer is the truth about what was published — report
-	// the SAME version in the log and the toast (the manifest's app.version
-	// is only the fallback).
-	const publishedVersion = entry.appVersion ?? app.version;
-	logger.output(`[appdev] published ${appId} v${publishedVersion} (registry v${entry.registryVersion})`);
-	vscode.window.showInformationMessage(`Published ${app.name} v${publishedVersion} — pin a rung from the Deploy view to make it live.`);
-	return entry as Record<string, unknown>;
+	const entry = (body as Record<string, unknown>)?.artifact as Record<string, unknown> | undefined;
+	if (!entry) throw new Error(`Deploy returned no artifact entry for ${appId}.`);
+	// The registry's answer is the truth about what was deployed — report
+	// the SAME version in the log (the manifest's app.version is only the
+	// fallback). No toast: the deploy runs FROM the App Builder, whose
+	// Deploy rail and dashboard already show the new version live.
+	const deployedVersion = (entry.appVersion as string) ?? app.version;
+	logger.output(`[appdev] deployed ${appId} v${deployedVersion} (registry v${entry.registryVersion})`);
+	return entry;
 }

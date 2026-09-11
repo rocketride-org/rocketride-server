@@ -24,7 +24,7 @@
 // FROZEN rocketride SDK contract — floor v1.3 — never edit by hand
 // =============================================================================
 // Floor key:     1.3 (MAJOR.MINOR of packages/client-typescript/package.json)
-// Source commit: 2c198c3a464142e067635cb3d78d85ed67c951fa
+// Source commit: a8a0457d95ea28eda0a0411b3b8ee10345c71466
 // Generator:     dts-bundle-generator@9.5.1
 // Produced by:   ./builder client-typescript:freeze
 //
@@ -68,6 +68,21 @@ import { Options, Sequelize } from 'sequelize';
  */
 export declare class DAPException extends Error {
     readonly dapResult: Record<string, unknown>;
+    /**
+     * Machine-readable error code sent by the server, when the failure has one.
+     *
+     * Task failures carry one (`TASK_NOT_REGISTERED`, `TASK_AMBIGUOUS`,
+     * `TASK_COMPLETED`, `TASK_STOPPED`); classify on it rather than on the
+     * message text, which is written for people and may be reworded.
+     */
+    readonly code?: string;
+    /**
+     * Troubleshooting text the SDK attached for a developer, when there is any.
+     *
+     * Kept out of `message` so an application can show the message to an end
+     * user without the developer checklist.
+     */
+    readonly hint?: string;
     constructor(dapResult: Record<string, unknown>);
 }
 /**
@@ -1199,17 +1214,44 @@ export interface DeployHistoryEntry {
     /** Unix timestamp (seconds). */
     at?: number;
     /** `pause`/`resume` appear only on rows written before the
-        enable/disable vocabulary (the trail is immutable). */
+        enable/disable vocabulary (the trail is immutable). NOTE: app rails
+        additionally carry the review vocabulary (`request`/`approved`/
+        `rejected`/`withdrawn`/`failed`) and the human `reply` row at runtime —
+        the union names the pipe-rail actions only and stays as the frozen
+        v1.3 floor wrote it (widening a returned union would break floor
+        assignability); compare raw strings for the app-rail extras. */
     action?: "publish" | "deploy" | "rollback" | "enable" | "disable" | "pause" | "resume" | "errored" | "remove";
     /** `''` on org-wide rows (publish); the team id on pointer changes. */
     teamId?: string;
     version?: number;
     actor?: DeployActor;
+    /** Row payload — self-describing by contract (rows render without a
+        second lookup). `reply` rows carry the review-thread message and its
+        side. App audience rows (publish binds, removed/disabled/enabled)
+        carry the audience WITH its server-dereferenced display facts
+        (`name`, `handle`), plus `previousVersion` when a publish repointed
+        an existing binding. A `publish` row without an audience is the
+        registry write (the DEPLOY) and rides the deploy `comment`; review
+        transitions carry both endpoints (`from`/`to`). */
+    data?: {
+        side?: "admin" | "developer";
+        message?: string;
+        audience?: {
+            type?: string;
+            id?: string;
+            name?: string;
+            handle?: string;
+        };
+        previousVersion?: number;
+        comment?: string;
+        from?: string;
+        to?: string;
+    } | null;
 }
-/** Body of `deploy.publish()`. */
+/** Body of `deploy.add()` — the generic rail door. */
 export interface PublishResult {
     artifact?: DeployArtifact;
-    /** Present only when `deployTo` was given (one-step publish+deploy). */
+    /** Present only when `deployTo` was given (one-step add+deploy; pipes only). */
     deployment?: Deployment;
 }
 /** The standard list-API request arguments (page/search/filter/sort). */
@@ -1272,14 +1314,16 @@ export interface SchedulePreview {
  * A task's run log is ONE continuous JSONL event stream per identity;
  * individual runs are chapters (tracks) inside it. Streams are addressed by
  * the plain identity pair (`projectId` + `source`) plus the SCOPE — never by
- * token. THE SCOPE IS THE KIND: `teamId` present addresses that team's
- * DEPLOY continuum (deploy runs execute as the team and log into its tree —
- * teammates with monitor rights can watch/replay); absent addresses the
- * caller's own DEV stream. There is no run-kind wire argument.
+ * token. `teamId` present addresses that team's DEPLOY continuum (deploy
+ * runs execute as the team and log into its tree — teammates with monitor
+ * rights can watch/replay). Absent, the optional `runKind` selects the
+ * caller's OWN continuum: the dev stream (default) or the caller's PERSONAL
+ * (@me) deploy stream — deploy-kind but user-owned, the one case
+ * teamId-presence cannot express.
  */
 /**
- * The two run kinds. Not part of stream addressing (the scope decides) —
- * still stamped on event bodies for client-side filtering.
+ * The two run kinds. Stamped on event bodies for client-side filtering,
+ * and usable as the teamless-scope selector on LogStreamRef (the @me case).
  */
 export type LogRunKind = "dev" | "deploy";
 /** Identity addressing one run-log stream. */
@@ -1288,9 +1332,15 @@ export interface LogStreamRef {
     source: string;
     /**
      * A team id addresses that team's deploy continuum; omitted = the
-     * caller's own dev stream.
+     * caller's own stream (see runKind).
      */
     teamId?: string;
+    /**
+     * Teamless-scope selector: omitted/'dev' = the caller's dev stream;
+     * 'deploy' = the caller's personal (@me) deploy stream. Ignored when
+     * teamId is set (a team scope is always the deploy continuum).
+     */
+    runKind?: LogRunKind;
 }
 /** One chapter (track) — a run inside the continuum. */
 export interface LogChapter {
@@ -1723,10 +1773,12 @@ export interface ConnectResult {
     /** BCP-47 locale tag (e.g. "en-US") representing the user's preferred locale */
     locale: string;
     /**
-     * ID of the team that should be used by default for operations that do not
-     * explicitly specify a team context.
+     * ID of the user's development team. It carries NO authorization meaning:
+     * it is the billing and environment-layer context for dev runs and for
+     * `@me` publishes. Team-scoped operations always name their team
+     * explicitly — there is no default-team fallback.
      */
-    defaultTeam: string;
+    devTeam: string;
     /**
      * The organisation the authenticated user belongs to, with its own
      * permission set and nested team memberships.  Null when the user
@@ -1794,8 +1846,15 @@ export interface AppManifestEntry {
     categories?: string[];
     /** App-specific setting definitions. */
     settings?: unknown[];
-    /** URL to the app's Module Federation remote entry file. */
-    entry: string;
+    /**
+     * URL to the app's Module Federation remote entry file — present ONLY
+     * for dev-overlay entries (a localhost dev server is not constructible
+     * from a number). Published versions carry `registryVersion` instead and
+     * clients construct `/apps/<appId>/v<N>/remoteEntry.js` themselves.
+     */
+    entry?: string;
+    /** Registry version number the entry resolves to (the scope-walk winner). */
+    registryVersion?: number;
     /** App version string (semver). */
     version?: string;
     /** Visibility scope: "public", "org", "team", or "user". */
@@ -1842,8 +1901,8 @@ export interface StripePriceEntry {
  * Server metadata returned by the pre-auth info probe.
  *
  * Obtained via {@link RocketRideClient.getServerInfo} which sends an
- * `auth` request with `infoOnly: true`. The server responds without
- * requiring credentials.
+ * `rrext_public_probe` command on a public connection. The server
+ * responds without requiring credentials.
  */
 export interface ServerInfoResult {
     /** Server engine version string. */
@@ -1859,6 +1918,31 @@ export interface ServerInfoResult {
      * public apps (e.g. landing page) before login.
      */
     apps?: AppManifestEntry[];
+    /**
+     * Stripe publishable key (`pk_*`) configured on this server.
+     *
+     * Lets clients initialise Stripe Elements with the key matching the
+     * server's Stripe account (test vs live) instead of a build-time value.
+     * Absent on servers without billing (OSS).
+     */
+    stripePublishableKey?: string;
+    /**
+     * The server's public addresses, RESOLVED to absolute URLs.
+     *
+     * `getServerInfo` substitutes the server's `'origin'` sentinel ("the
+     * address you probed me at") with the probed URI before returning, and
+     * manufactures the block when probing a pre-endpoints server — so
+     * consumers ALWAYS receive both keys as absolute URLs and never branch
+     * on presence. `api` is where clients open the WebSocket; `ui` is the
+     * environment's public web address (browser links, OAuth returns).
+     * They differ only on split deployments (e.g. CDN-served UI).
+     */
+    endpoints: {
+        /** Absolute URL clients connect the DAP WebSocket to. */
+        api: string;
+        /** Absolute URL of the environment's web UI. */
+        ui: string;
+    };
 }
 /**
  * MIT License
@@ -3296,11 +3380,11 @@ declare class AccountApi {
      */
     updateProfile(fields: ProfileUpdate): Promise<void>;
     /**
-     * Sets the user's preferred default team.
+     * Sets the user's DEV team — the team dev-mode runs bill to and whose environment layer applies.
      *
      * @param teamId - The team ID to set as default.
      */
-    setDefaultTeam(teamId: string): Promise<void>;
+    setDevTeam(teamId: string): Promise<void>;
     /**
      * Switches the user's active organization.
      *
@@ -3897,33 +3981,167 @@ export declare class DatabaseApi {
         sequelizeOptions?: import("sequelize").Options;
     }): import("sequelize").Sequelize;
 }
+/** One verification check's outcome. */
+export interface AppVerifyCheck {
+    /** Stable check id (e.g. 'manifest', 'id', 'include', 'pack-size'). */
+    id: string;
+    /** Whether the check passed. */
+    ok: boolean;
+    /** Human-readable outcome, actionable on failure. */
+    note: string;
+}
+/** The result of {@link verifyAppSource}. */
+export interface AppVerifyReport {
+    /** True when every check passed. */
+    ok: boolean;
+    /** Every check that ran, in order. */
+    checks: AppVerifyCheck[];
+    /** Files the pack would carry (0 when selection failed). */
+    fileCount: number;
+    /** Uncompressed bytes the pack would carry. */
+    uncompressedBytes: number;
+}
+/** The result of {@link createAppWorkspace}. */
+export interface CreatedApp {
+    /** The full app id (`<developerId>.<slug>`). */
+    appId: string;
+    /** Workspace-relative POSIX path of the created folder. */
+    folder: string;
+    /** Project-relative paths of the files written. */
+    files: string[];
+    /** Which server-matched packages were vendored this pass. */
+    vendored: {
+        shell: boolean;
+        client: boolean;
+    };
+    /** Whether the workspace `pnpm install` ran and succeeded. */
+    installed: boolean;
+}
 declare class DeployApi {
     /** @param client - The parent RocketRideClient that owns this namespace. */
     constructor(client: RocketRideClient);
     /**
-     * Publishes a pipeline as the next immutable registry version.
+     * Deploys an object to the server as the next immutable registry version.
      *
-     * The artifact is sha256-locked: what was published is provably what
-     * runs. Publishing alone puts nothing live — point a team at the version
-     * with {@link deploy} (or pass `deployTo` to do both in one step, the
-     * small-team convenience).
+     * The ONE generic rail door for every kind — DEPLOY in the settled
+     * vocabulary means "copy code to the server"; binding it to an audience
+     * is the separate publish step ({@link deploy} for pipe teams; the app
+     * publish verbs for apps). The artifact is sha256-locked: what was
+     * deployed is provably what runs.
      *
-     * @param pipeline - The full pipeline definition to snapshot. `name` is
-     *   REQUIRED here (narrowed at compile time, enforced by the server):
-     *   artifacts are immutable and pipelineName renders on every deploy
-     *   surface — a nameless publish would show as a project GUID forever.
-     * @param options - Optional publish options.
+     * Kind dispatch:
+     * - `kind: 'pipe'` (default) — pass `pipeline` (the full definition;
+     *   `name` REQUIRED: it renders on every deploy surface forever).
+     * - `kind: 'app'` — pass `data` (ONE zip of the app's SOURCE — the server
+     *   owns the build and never trusts client-produced binaries). Two
+     *   layouts: package.json + src at the zip root (legacy), or
+     *   workspace-relative with `metadata.appRoot` naming the app folder so
+     *   `appManifest.include` extras ride at their real workspace paths. The
+     *   server retains the zip and unpacks it at receipt; the app deployment
+     *   is born state 'private' (internally publishable — an @me/@team binding
+     *   may serve it; the developer submits it for review to reach the public
+     *   store).
+     *
+     * @param options.kind - 'pipe' (default) | 'app'.
+     * @param options.pipeline - The pipeline definition (kind 'pipe').
+     * @param options.data - The source zip bytes (kind 'app').
+     * @param options.metadata - Optional metadata blob (e.g. projectId
+     *   provenance, appRoot for workspace-relative app zips).
      * @param options.comment - "What changed" note kept in the registry.
      * @param options.deployTo - Team id to deploy the new version to
-     *   immediately (one-step publish+deploy).
+     *   immediately (one-step add+deploy; pipes only).
      * @returns The artifact entry, plus the deployment when `deployTo` was given.
      */
-    publish(pipeline: PipelineConfig & {
-        name: string;
-    }, options?: {
+    add(options: {
+        kind?: "pipe" | "app" | "node";
+        pipeline?: PipelineConfig & {
+            name: string;
+        };
+        data?: Uint8Array;
+        metadata?: Record<string, unknown>;
         comment?: string;
         deployTo?: string;
     }): Promise<PublishResult>;
+    /**
+     * Packs an app folder's source and deploys it as the next immutable
+     * registry version — the ONE call behind the App Builder's Deploy
+     * button, the CLI's `app deploy`, and CI scripts (Node.js only).
+     *
+     * Verify → pack → send: the pack applies the canonical rules
+     * (workspace-rooted zip layout, `appManifest.include` honored,
+     * hierarchical gitignore filtering with the hard baseline
+     * node_modules/dist/.git, symlink containment, 50MB zipped / 512MB
+     * uncompressed caps) and every step can narrate through `onProgress`.
+     * Deploying never activates anything — bind an audience with
+     * `publishApp` afterwards. Run `verifyApp` first for a no-side-effect
+     * precheck of the same rules.
+     *
+     * @param appRoot - The app folder: absolute, or relative to
+     *   `options.workspaceRoot`.
+     * @param options.workspaceRoot - The workspace the zip is rooted at and
+     *   that `appManifest.include` entries resolve against
+     *   (default: `process.cwd()`).
+     * @param options.comment - "What changed" note kept in the registry.
+     * @param options.metadata - Extra metadata merged over the packed
+     *   defaults (e.g. projectId provenance); `appRoot` is always set from
+     *   the pack.
+     * @param options.onProgress - Receives one line per pack step (include
+     *   checks, per-file adds, totals) for hosts that surface progress.
+     * @returns The artifact entry for the new version.
+     */
+    addApp(appRoot: string, options?: {
+        workspaceRoot?: string;
+        comment?: string;
+        metadata?: Record<string, unknown>;
+        onProgress?: (line: string) => void;
+    }): Promise<PublishResult>;
+    /**
+     * Scaffolds a new app in the workspace — the programmatic twin of the
+     * App Builder's New App wizard, rendering the identical templates
+     * (Node.js only). Writes `./apps/<slug>`, ensures the pnpm workspace
+     * file and ignore hygiene, vendors the connected server's shell +
+     * client packages, and runs the workspace install. Scaffolding only —
+     * nothing is deployed; the normal lifecycle (edit → `verifyApp` →
+     * `addApp` → `publishApp`) follows.
+     *
+     * @param slug - The app-name slug (lowercase; digits/-/_ after the
+     *   first character). The id becomes `<developerId>.<slug>`.
+     * @param options - Template, display name, developer id (default
+     *   'local'), frame options, install toggle, `onProgress`, and
+     *   `workspaceRoot` (default `process.cwd()`). The server base URL for
+     *   vendoring defaults to this client's own connection.
+     * @returns The created app's identity and a report of what ran.
+     */
+    createApp(slug: string, options?: {
+        workspaceRoot?: string;
+        template?: "Blank" | "Dashboard";
+        displayName?: string;
+        developerId?: string;
+        sidebar?: boolean;
+        statusFooter?: boolean;
+        docTabs?: boolean;
+        install?: boolean;
+        serverBaseUrl?: string;
+        onProgress?: (line: string) => void;
+    }): Promise<CreatedApp>;
+    /**
+     * Pre-checks everything `addApp` needs, WITHOUT deploying (Node.js
+     * only, purely local — no server call). Verifies the manifest shape and
+     * id grammar, declared icon/README assets, `appManifest.include`
+     * entries, and a pack dry run against the size caps. Server-side
+     * concerns (the build, store review) are out of scope — the Package
+     * tab's readiness and the review ladder cover those.
+     *
+     * @param appRoot - The app folder: absolute, or relative to
+     *   `options.workspaceRoot`.
+     * @param options.workspaceRoot - The workspace the pack would be rooted
+     *   at (default: `process.cwd()`).
+     * @returns The structured report — `ok` plus every check with an
+     *   actionable note.
+     */
+    verifyApp(appRoot: string, options?: {
+        workspaceRoot?: string;
+    }): Promise<AppVerifyReport>;
     /**
      * Points a team at a published version.
      *
@@ -3941,8 +4159,9 @@ declare class DeployApi {
      * Deployments visible to the caller, as the standard list envelope.
      *
      * @param params - Optional team scope + list-API params.
-     * @param params.teamId - Restrict to one team; omitted = every team the
-     *   caller can monitor.
+     * @param params.teamId - Restrict to one team; omitted = the visibility
+     *   model: the caller's member teams plus their own personal space, and
+     *   the whole org for an org admin.
      * @returns `{rows, total, page, pageSize}` of {@link Deployment} rows.
      */
     list(params?: DeployListParams & {
@@ -4397,9 +4616,13 @@ export declare class DataPipe {
  * - `{ projectId, source }` — monitors the CALLER's own dev run of the
  *   project/source (the server binds the connection's user identity).
  * - `{ teamId, projectId, source }` — monitors the team's DEPLOYED run.
+ * - `{ runKind: 'deploy', projectId, source }` — monitors the CALLER's own
+ *   PERSONAL (@me) deploy run: deploy-kind but user-owned, the one case
+ *   teamId-presence cannot express.
  *
- * The scope IS the kind: teamId present addresses the deploy continuum,
- * absent addresses your dev run — there is no run-kind argument.
+ * teamId present always addresses the team's deploy continuum (runKind is
+ * ignored there); absent, the optional runKind selects between your dev
+ * run (default) and your personal deploy run.
  */
 export type MonitorKey = {
     token: string;
@@ -4408,6 +4631,7 @@ export type MonitorKey = {
     projectId: string;
     source: string;
     pipeId?: number;
+    runKind?: "dev" | "deploy";
 };
 export declare class RocketRideClient extends DAPClient {
     /** Maps pipe_id → SSE callback for pipe-scoped real-time event dispatch. */
@@ -4489,6 +4713,21 @@ export declare class RocketRideClient extends DAPClient {
      * ```
      */
     static getServerInfo(uri: string, timeout?: number): Promise<ServerInfoResult>;
+    /**
+     * Resolve a probe's `endpoints` block against the URI that was probed.
+     *
+     * The wire value for each key is an absolute URL or the literal
+     * `'origin'` — the server's way of saying "wherever you reached me"
+     * (a server behind a proxy cannot know its public name). Absent keys
+     * and a missing block (pre-endpoints servers) mean `'origin'` too, so
+     * the ONE conditional in the whole scheme lives here and callers get a
+     * complete `{ api, ui }` of absolute URLs unconditionally.
+     *
+     * @param endpoints - The raw `endpoints` value from the probe body, if any.
+     * @param probedUri - The URI `getServerInfo` attached to.
+     * @returns Both keys resolved to absolute URLs.
+     */
+    static resolveEndpoints(endpoints: Partial<ServerInfoResult["endpoints"]> | undefined, probedUri: string): ServerInfoResult["endpoints"];
     /**
      * Attach to a RocketRide server (open WebSocket, no auth).
      *
@@ -4624,10 +4863,13 @@ export declare class RocketRideClient extends DAPClient {
      *   pipeline: { components: [...], project_id: '123' },
      *   source: 'webhook_1'
      * });
-     * if (result.errors?.length) {
+     * if (result.errors.length) {
      *   console.log('Validation errors:', result.errors);
      * }
      * ```
+     *
+     * `errors` and `warnings` are ALWAYS arrays — a clean pipeline returns
+     * them empty, never absent.
      */
     validate(options: {
         pipeline: PipelineConfig | Record<string, unknown>;
@@ -4697,6 +4939,17 @@ export declare class RocketRideClient extends DAPClient {
      * Terminate a running pipeline.
      */
     terminate(token: string): Promise<void>;
+    /**
+     * List the caller's active tasks.
+     *
+     * Returns the tasks visible to the authenticated user (running and
+     * recently completed pipeline executions), as reported by the server.
+     * Each row includes the task token plus display fields such as name,
+     * state, and timing; the exact field set is server-defined.
+     *
+     * Mirrors the Python SDK's `get_tasks`.
+     */
+    getTasks(): Promise<Array<Record<string, unknown>>>;
     /**
      * Restart a running pipeline with a new configuration.
      *
@@ -4801,7 +5054,7 @@ export declare class RocketRideClient extends DAPClient {
         file: File;
         objinfo?: Record<string, unknown>;
         mimetype?: string;
-    }>, token: string): Promise<UPLOAD_RESULT[]>;
+    }>, token: string, maxConcurrent?: number): Promise<UPLOAD_RESULT[]>;
     /**
      * Ask a question to RocketRide's AI and get an intelligent response.
      */
@@ -5115,69 +5368,135 @@ export declare class RocketRideClient extends DAPClient {
         error?: string;
     }>>;
     /**
-     * Publish an immutable app version to the org registry.
+     * List an app's deployed versions, newest first (the version rail).
      *
-     * Publishing never activates anything — pin a rung with {@link appDeploy}
-     * to make the version live somewhere.
-     *
-     * @param options.appId - App id (appManifest.id, e.g. 'acme.brandy')
-     * @param options.version - Semver label (e.g. '0.5.0')
-     * @param options.bundle - The built remoteEntry.js bytes (single-file v1)
-     * @param options.message - Commit-style "what changed" note (version card)
-     * @param options.moduleId - MF container name (derived when omitted)
-     * @param options.name - Display name (defaults to appId)
-     * @returns The version-rail entry (registryVersion, appVersion, sha256, ...)
-     */
-    appPublish(options: {
-        appId: string;
-        version: string;
-        bundle: Uint8Array;
-        message?: string;
-        moduleId?: string;
-        name?: string;
-    }): Promise<{
-        registryVersion: number;
-        appVersion: string;
-        sha256: string;
-        publishedAt: number;
-        author: string;
-        message: string;
-    }>;
-    /**
-     * List an app's published versions, newest first (the version rail).
+     * Answered by role: the developer org sees its FULL rail (published or
+     * not); other callers see only the versions serving on rows visible to
+     * them. Each entry carries its deployment `state`, its build lifecycle
+     * (`buildStatus` — 'ok' = servable bytes exist — plus the `buildPhase`
+     * it reached and `buildEndedAt`), and the `rungs` naming the audiences
+     * serving it. No error text rides the rail: build detail is served on
+     * demand by the build-log verb.
      *
      * @param appId - App id
-     * @returns Rail entries; each carries `rungs` naming the rungs pinned to it
+     * @returns Rail entries, newest first
      */
-    appVersions(appId: string): Promise<Array<{
+    listDeployments(appId: string): Promise<Array<{
         registryVersion: number;
         appVersion: string;
         sha256: string;
         publishedAt: number;
         author: string;
         message: string;
+        state: string;
+        buildStatus: string;
+        buildPhase: string;
+        buildEndedAt?: number | null;
         rungs: string[];
     }>>;
     /**
-     * Pin a rung to a published version — deploy, promote, and rollback are
-     * all this one verb ("repoint, never rebuild").
+     * Submit a deployed version for store review — flips the DEPLOYMENT's own
+     * state 'private' -> 'submit' (it enters the sys.admin review queue). The
+     * review state lives on the deployment, not a binding. Developer-org and
+     * developer-namespace gated.
      *
      * @param appId - App id
      * @param registryVersion - Registry version number from the rail
-     * @param target - '@user', '@team/<name-or-id>', or '@org'
-     * @returns The updated deployment record and the rung word
+     * @returns The refreshed rail entry ({registryVersion, state, ...})
      */
-    appDeploy(appId: string, registryVersion: number, target: string): Promise<{
-        deployment: Record<string, unknown>;
-        rung: string;
+    submitApp(appId: string, registryVersion: number): Promise<{
+        artifact: Record<string, unknown>;
     }>;
     /**
-     * The reverse index: which rungs run which version of an app.
+     * Withdraw a pending review — the developer's own cancel: flips the
+     * DEPLOYMENT 'submit' -> 'private' (leaves the admin queue, back to
+     * draft; history records 'withdrawn'). Only a version in 'submit'
+     * withdraws. Developer-org and developer-namespace gated, like submit.
+     *
+     * @param appId - App id
+     * @param registryVersion - Registry version number from the rail
+     * @returns The refreshed rail entry ({registryVersion, state, ...})
+     */
+    withdrawApp(appId: string, registryVersion: number): Promise<{
+        artifact: Record<string, unknown>;
+    }>;
+    /**
+     * Append a developer message to the app's review thread — the developer
+     * half of the reviewer conversation. The message rides the app's
+     * deployment history as a 'reply' row (side 'developer'), the same
+     * stream `deploy.history()` reads and the store reviewer writes to.
+     * Developer-org and developer-namespace gated, like submit.
+     *
+     * @param appId - App id
+     * @param message - The message text (server caps the length)
+     * @param registryVersion - Optional registry version the message refers to
+     * @returns `{replied: true, appId}`
+     */
+    replyApp(appId: string, message: string, registryVersion?: number): Promise<{
+        replied: boolean;
+        appId: string;
+    }>;
+    /**
+     * Read one version's durable server build log — the full phase-by-phase
+     * output the build worker writes beside the version's artifacts (no
+     * error text rides the rail rows or the DB). Long logs serve their tail;
+     * '' means no log exists for the version. Developer-org gated.
+     *
+     * @param appId - App id
+     * @param registryVersion - Registry version number from the rail
+     * @returns `{appId, version, log}`
+     */
+    buildLog(appId: string, registryVersion: number): Promise<{
+        appId: string;
+        version: number;
+        log: string;
+    }>;
+    /**
+     * Bind a deployment to an audience — first publish, update, promote, and
+     * rollback are all this one verb ("repoint, never rebuild"). The binding
+     * is a pure pointer; '@public' requires the deployment be 'ready'
+     * (approved), '@me'/'@team' accept any non-'failed' deployment.
+     *
+     * @param appId - App id
+     * @param registryVersion - Registry version number from the rail
+     * @param target - '@me', '@team/<name-or-id>', or '@public' ('@user' = legacy alias)
+     * @returns The binding row ({audience, version, state, artifactState, ...})
+     */
+    publishApp(appId: string, registryVersion: number, target: string): Promise<{
+        publish: Record<string, unknown>;
+    }>;
+    /**
+     * Remove an audience binding — the app stops serving to that audience.
+     * SOFT: the registry versions and the audit history survive; publishing
+     * to the audience again revives it.
+     *
+     * @param appId - App id
+     * @param target - '@me', '@team/<name-or-id>', or '@public' ('@user' = legacy alias)
+     * @returns The final binding row (state 'removed')
+     */
+    removeAppPublish(appId: string, target: string): Promise<{
+        publish: Record<string, unknown>;
+    }>;
+    /**
+     * Disable an audience binding — serving stops, but the row STAYS in the
+     * where-live listing marked disabled (a visible off switch), unlike
+     * remove which hides it. Publishing any version to the rung re-enables
+     * the binding.
+     *
+     * @param appId - App id
+     * @param target - '@me', '@team/<name-or-id>', or '@public' ('@user' = legacy alias)
+     * @returns The binding row (state 'disabled')
+     */
+    disableAppPublish(appId: string, target: string): Promise<{
+        publish: Record<string, unknown>;
+    }>;
+    /**
+     * The reverse index: which audiences serve which version of an app.
      *
      * @param appId - App id
      * @returns Pin rows ({rung, handle, version, appVersion, state, deployedAt})
      */
-    appWhere(appId: string): Promise<Array<{
+    whereApp(appId: string): Promise<Array<{
         rung: string;
         handle: string;
         version: number;
@@ -5378,13 +5697,13 @@ export declare class RocketRideClient extends DAPClient {
     /**
      * Lazily-initialised deploy API namespace (teams-as-environments).
      *
-     * Publish immutable pipeline versions to the org registry, point teams
-     * at them (promotion and rollback alike), schedule sources, and read
-     * the audit history.
+     * Deploy immutable versions of any kind onto the org registry (the one
+     * rail door), point teams at them (promotion and rollback alike),
+     * schedule sources, and read the audit history.
      *
      * @example
      * ```typescript
-     * const { artifact } = await client.deploy.publish(pipeline, { comment: 'v2' });
+     * const { artifact } = await client.deploy.add({ pipeline, comment: 'v2' });
      * await client.deploy.deploy('proj-1', artifact.version!, 'team-staging');
      * ```
      */

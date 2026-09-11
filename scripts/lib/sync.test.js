@@ -19,7 +19,7 @@ const os = require('node:os');
 const path = require('node:path');
 const fs = require('node:fs');
 
-const { filesEqual } = require('./fs');
+const { filesEqual, retryTransientLock } = require('./fs');
 const { syncFile, syncDir } = require('./sync');
 
 /**
@@ -146,4 +146,87 @@ test('syncDir: same-size changed file with older mtime is updated; identical fil
     assert.equal(stats.updated, 1);
     assert.equal(stats.unchanged, 1);
     assert.equal(fs.readFileSync(path.join(dest, 'changed.js'), 'utf8'), 'v=<BBBB>');
+});
+
+// --- retryTransientLock ----------------------------------------------------
+
+/**
+ * Build a fake operation that throws the given codes in order, then succeeds.
+ * @param {string[]} codes - Error codes to throw, one per early attempt
+ * @returns {{op: () => Promise<string>, calls: () => number}} Operation and its call count
+ */
+function failingOp(codes) {
+    let n = 0;
+    return {
+        op: async () => {
+            if (n < codes.length) {
+                const err = new Error(codes[n]);
+                err.code = codes[n];
+                n++;
+                throw err;
+            }
+            n++;
+            return 'ok';
+        },
+        calls: () => n,
+    };
+}
+
+test('retryTransientLock: a lock that clears is retried and the value returned', async () => {
+    const { op, calls } = failingOp(['EBUSY', 'EPERM']);
+
+    const got = await retryTransientLock(op, { delayMs: 1 });
+
+    assert.equal(got, 'ok');
+    assert.equal(calls(), 3); // two failures, then the success
+});
+
+test('retryTransientLock: a non-lock error propagates on the first attempt', async () => {
+    const { op, calls } = failingOp(['ENOENT', 'ENOENT', 'ENOENT']);
+
+    await assert.rejects(
+        () => retryTransientLock(op, { delayMs: 1 }),
+        (err) => err.code === 'ENOENT'
+    );
+    // A missing file must not be retried into a slow failure.
+    assert.equal(calls(), 1);
+});
+
+test('retryTransientLock: EACCES is a permission denial, not a lock', async () => {
+    const { op, calls } = failingOp(['EACCES']);
+
+    await assert.rejects(
+        () => retryTransientLock(op, { delayMs: 1 }),
+        (err) => err.code === 'EACCES'
+    );
+    // A held file reports EBUSY; on Unix EACCES means the caller may never open it,
+    // so retrying only delays a failure that is already final.
+    assert.equal(calls(), 1);
+});
+
+test('retryTransientLock: a path held past the last attempt raises its real error', async () => {
+    const { op, calls } = failingOp(['EBUSY', 'EBUSY', 'EBUSY', 'EBUSY']);
+
+    await assert.rejects(
+        () => retryTransientLock(op, { attempts: 3, delayMs: 1 }),
+        (err) => err.code === 'EBUSY'
+    );
+    // Gives up rather than swallowing it — a permanent lock still stops the build.
+    assert.equal(calls(), 3);
+});
+
+test('retryTransientLock: the transient set is per caller', async () => {
+    const plain = failingOp(['ENOTEMPTY']);
+    await assert.rejects(
+        () => retryTransientLock(plain.op, { delayMs: 1 }),
+        (err) => err.code === 'ENOTEMPTY'
+    );
+    assert.equal(plain.calls(), 1);
+
+    // The directory swap in vendor-shell.js opts ENOTEMPTY in.
+    const swap = failingOp(['ENOTEMPTY']);
+    const got = await retryTransientLock(swap.op, { delayMs: 1, codes: new Set(['ENOTEMPTY']) });
+
+    assert.equal(got, 'ok');
+    assert.equal(swap.calls(), 2);
 });

@@ -13,7 +13,7 @@
 import React, { ReactElement, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { IEndpointInfo } from './PipelineActions';
-import { appendAuthQueryParam, buildIntegrationExamples, type IntegrationTabId } from './endpointIntegrationExamples';
+import { appendAuthQueryParam, buildIntegrationExamples, defaultWebhookPayloadId, getWebhookPayload, WEBHOOK_PAYLOADS, type IntegrationTabId, type WebhookPayloadId } from './endpointIntegrationExamples';
 import { commonStyles } from 'shell';
 
 // =============================================================================
@@ -272,9 +272,20 @@ export default function EndpointInfoModal({ endpointInfo, isOpen, onClose, onOpe
 	const [isTokenVisible, setIsTokenVisible] = useState(false);
 	const [copyFeedback, setCopyFeedback] = useState<string | null>(null);
 	const [activeTab, setActiveTab] = useState<IntegrationTabId>('curl');
+	// The picked payload is an OVERRIDE, not the value itself: the modal stays
+	// mounted between openings, so seeding state from the lanes would freeze the
+	// first pipeline's answer. Deriving on each render keeps the preselection
+	// honest, while a click still wins until the endpoint changes.
+	const [payloadOverride, setPayloadOverride] = useState<WebhookPayloadId | null>(null);
 
 	const onCloseRef = React.useRef(onClose);
 	onCloseRef.current = onClose;
+
+	// Drop a manual pick when the panel is showing a different endpoint.
+	const endpointKey = endpointInfo?.['url-link'] ?? null;
+	React.useEffect(() => {
+		setPayloadOverride(null);
+	}, [endpointKey]);
 
 	if (!endpointInfo || !isOpen) return null;
 
@@ -285,7 +296,11 @@ export default function EndpointInfoModal({ endpointInfo, isOpen, onClose, onOpe
 	const isLocalEndpoint = /localhost|127\.0\.0\.1|0\.0\.0\.0/i.test(endpointUrl);
 	const isWebhookEndpoint = /web[\s-]?hook/i.test(endpointUrl) || /web[\s-]?hook/i.test(processed['url-text'] ?? '');
 
-	const examples = buildIntegrationExamples({ endpointUrl, authKey, isWebhook: isWebhookEndpoint });
+	const connectedLanes = endpointInfo.lanes;
+	const payloadId = payloadOverride ?? defaultWebhookPayloadId(connectedLanes);
+	const examples = buildIntegrationExamples({ endpointUrl, authKey, isWebhook: isWebhookEndpoint, payloadId });
+	const payload = getWebhookPayload(payloadId);
+	const readsChosenLane = connectedLanes?.includes(payload.lane) ?? true;
 
 	const handleCopy = (text: string, label: string) => {
 		navigator.clipboard
@@ -409,7 +424,29 @@ export default function EndpointInfoModal({ endpointInfo, isOpen, onClose, onOpe
 					{/* Integration examples */}
 					<div style={styles.testBox}>
 						<div style={styles.testTitle}>Integration examples</div>
-						<div style={styles.envHint}>{isWebhookEndpoint ? 'Webhook: POST JSON with Bearer auth, or use the URL with ?auth= if supported.' : 'Chat / UI: prefer opening the URL with auth in a browser or embedded webview.'}</div>
+						<div style={styles.envHint}>{isWebhookEndpoint ? 'Webhook: POST with Bearer auth, or use the URL with ?auth= if supported.' : 'Chat / UI: prefer opening the URL with auth in a browser or embedded webview.'}</div>
+						{isWebhookEndpoint && (
+							<>
+								<div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginBottom: 4 }}>
+									{WEBHOOK_PAYLOADS.map((option) => (
+										<button key={option.id} style={commonStyles.toggleButton(payloadId === option.id)} onClick={() => setPayloadOverride(option.id)}>
+											{option.label}
+										</button>
+									))}
+								</div>
+								<div style={styles.envHint}>
+									Sends <code>{payload.contentType}</code>, which the engine delivers on the <strong>{payload.lane}</strong> lane.
+									{connectedLanes?.length ? (
+										<>
+											{' '}
+											This pipeline reads <strong>{connectedLanes.join(', ')}</strong>.{!readsChosenLane && <> Nothing reads the {payload.lane} lane, so this body is answered 200 OK but reaches no component.</>}
+										</>
+									) : (
+										<> Pick the lane your first component reads — a body sent on a lane nothing reads is answered 200 OK but reaches no component.</>
+									)}
+								</div>
+							</>
+						)}
 						<div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginBottom: 8 }}>
 							{INTEGRATION_TABS.map((tab) => (
 								<button key={tab.id} style={commonStyles.toggleButton(activeTab === tab.id)} onClick={() => setActiveTab(tab.id as IntegrationTabId)}>

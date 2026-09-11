@@ -77,35 +77,44 @@ def test_resolve_monitor_label_unrecognised_key():
     assert MiscCommands._resolve_monitor_label('foo', {}, {}) == 'Task monitor'
 
 
+# Keys carry the owner_key layout p.{runKind}.{owner}.{project}.{source}
+# (the leading runKind segment separates a user's dev run from their @me
+# deploy). The label resolver reads project from segment 2 and source from
+# segment 3 — NOT 1/2 as the pre-runKind layout did.
 def test_resolve_monitor_label_project_wildcard():
-    """An owner-scoped 'p.<owner>.<id>.*' key uses the project label + '.*'."""
+    """A 'p.<runKind>.<owner>.<id>.*' key uses the project label + '.*'."""
     project_names = {'proj-1': 'my-project'}
-    assert MiscCommands._resolve_monitor_label('p.user-1.proj-1.*', project_names, {}) == 'my-project.*'
+    assert MiscCommands._resolve_monitor_label('p.dev.user-1.proj-1.*', project_names, {}) == 'my-project.*'
 
 
 def test_resolve_monitor_label_project_only():
-    """A 'p.<owner>.<id>' key (no source) yields '<project>.*'."""
+    """A 'p.<runKind>.<owner>.<id>' key (no source) yields '<project>.*'."""
     project_names = {'proj-1': 'my-project'}
-    assert MiscCommands._resolve_monitor_label('p.user-1.proj-1', project_names, {}) == 'my-project.*'
+    assert MiscCommands._resolve_monitor_label('p.dev.user-1.proj-1', project_names, {}) == 'my-project.*'
 
 
 def test_resolve_monitor_label_with_source():
-    """A 'p.<owner>.<id>.<source>' key uses the project and source friendly names."""
+    """A 'p.<runKind>.<owner>.<id>.<source>' key uses project + source friendly names."""
     project_names = {'proj-1': 'my-project'}
     source_names = {'proj-1.src-1': 'reader'}
-    result = MiscCommands._resolve_monitor_label('p.user-1.proj-1.src-1', project_names, source_names)
+    result = MiscCommands._resolve_monitor_label('p.deploy.user-1.proj-1.src-1', project_names, source_names)
     assert result == 'my-project.reader'
 
 
-def test_resolve_monitor_label_with_pipe_suffix():
-    """A 5-part 'p.<owner>.<id>.<source>.<pipe>' key appends a 'pipe<n>' suffix."""
-    result = MiscCommands._resolve_monitor_label('p.user-1.proj-1.src-1.42', {}, {})
-    assert result == 'proj-1.src-1.pipe42'
+def test_resolve_monitor_label_reads_project_not_owner_segment():
+    """Regression: the owner segment must NOT be read as the project. A key
+    whose owner id would resolve to a friendly name if mis-indexed proves the
+    resolver reads segment 2 (project), not segment 1 (owner).
+    """
+    # If the resolver wrongly read segment 1 (owner 'user-1') as the project,
+    # it would emit 'owner-label'; reading segment 2 (proj-1) emits my-project.
+    project_names = {'proj-1': 'my-project', 'user-1': 'owner-label'}
+    assert MiscCommands._resolve_monitor_label('p.dev.user-1.proj-1.*', project_names, {}) == 'my-project.*'
 
 
 def test_resolve_monitor_label_truncates_project_id_when_no_friendly_name():
     """Unknown project ids are truncated to 8 characters."""
-    result = MiscCommands._resolve_monitor_label('p.user-1.proj-very-long-id-here.*', {}, {})
+    result = MiscCommands._resolve_monitor_label('p.dev.user-1.proj-very-long-id-here.*', {}, {})
     assert result.startswith('proj-ver')
 
 
@@ -119,7 +128,7 @@ def test_build_monitors_list_resolves_keys_and_flag_names():
     from rocketride import EVENT_TYPE
 
     monitors = {
-        'p.user-1.proj-1.src-1': EVENT_TYPE.SUMMARY,
+        'p.deploy.user-1.proj-1.src-1': EVENT_TYPE.SUMMARY,
         '*': EVENT_TYPE.SUMMARY,
     }
     project_names = {'proj-1': 'my-project'}
@@ -213,8 +222,10 @@ async def test_on_rrext_validate_uses_explicit_source(monkeypatch):
     }
     result = await MiscCommands.on_rrext_validate(conn, request)
 
-    assert captured['payload']['source'] == 'explicit-source'
-    assert captured['payload']['version'] == 1  # default
+    # The resolved source and the default version both ride inside
+    # payload['pipeline'] — the same envelope pipe_Validate builds.
+    assert captured['payload']['pipeline']['source'] == 'explicit-source'
+    assert captured['payload']['pipeline']['version'] == 1  # default
     assert result == {'type': 'response', 'body': {'ok': True}}
 
 
@@ -231,7 +242,7 @@ async def test_on_rrext_validate_falls_back_to_pipeline_source(monkeypatch):
     conn = _make_conn()
     request = {'arguments': {'pipeline': {'source': 'pipeline-source', 'components': []}}}
     await MiscCommands.on_rrext_validate(conn, request)
-    assert captured['source'] == 'pipeline-source'
+    assert captured['pipeline']['source'] == 'pipeline-source'
 
 
 @pytest.mark.asyncio
@@ -247,7 +258,7 @@ async def test_on_rrext_validate_falls_back_to_implied_source(monkeypatch):
 
     conn = _make_conn()
     await MiscCommands.on_rrext_validate(conn, {'arguments': {'pipeline': {}}})
-    assert captured.get('source') == 'implied'
+    assert captured['pipeline'].get('source') == 'implied'
 
 
 @pytest.mark.asyncio
@@ -263,7 +274,60 @@ async def test_on_rrext_validate_no_source_anywhere_omits_field(monkeypatch):
 
     conn = _make_conn()
     await MiscCommands.on_rrext_validate(conn, {'arguments': {'pipeline': {'components': []}}})
-    assert 'source' not in captured
+    # The wrapped payload's inner config is where a source would land — the
+    # top level never carries one, so assert on the inner shape.
+    assert 'source' not in captured['pipeline']
+
+
+@pytest.mark.asyncio
+async def test_on_rrext_validate_wraps_config_in_pipeline_envelope(monkeypatch):
+    """The C++ payload is {'pipeline': <config>} — the same envelope pipe_Validate
+    (modules/pipe) builds. Regression test: passing the config flat makes
+    validatePipeline reject every pipeline with "'pipeline' is missing or invalid".
+    """
+    captured = {}
+    monkeypatch.setattr(cmd_misc, 'resolve_implied_source', lambda p: None)
+    monkeypatch.setattr(
+        cmd_misc,
+        'validatePipeline',
+        lambda payload: captured.update(payload) or {'ok': True},
+    )
+
+    conn = _make_conn()
+    config = {'components': [{'id': 'webhook_1'}], 'project_id': 'p1'}
+    await MiscCommands.on_rrext_validate(conn, {'arguments': {'pipeline': config}})
+
+    assert set(captured.keys()) == {'pipeline'}
+    assert captured['pipeline']['components'] == [{'id': 'webhook_1'}]
+    assert captured['pipeline']['project_id'] == 'p1'
+    assert captured['pipeline']['version'] == 1
+
+
+@pytest.mark.asyncio
+async def test_on_rrext_validate_does_not_double_wrap_enveloped_config(monkeypatch):
+    """An already-enveloped config is wrapped exactly once.
+
+    The MCP ``validate_pipeline`` tool (modules/mcp/tools/introspection.py, #2082)
+    pre-wraps the config client-side as a workaround for the missing envelope.
+    Double-wrapping it would make every MCP validation fail with
+    "'pipeline.components' must be an array".
+    """
+    captured = {}
+    monkeypatch.setattr(cmd_misc, 'resolve_implied_source', lambda p: None)
+    monkeypatch.setattr(
+        cmd_misc,
+        'validatePipeline',
+        lambda payload: captured.update(payload) or {'ok': True},
+    )
+
+    conn = _make_conn()
+    enveloped = {'pipeline': {'components': [{'id': 'webhook_1'}], 'version': 1}}
+    await MiscCommands.on_rrext_validate(conn, {'arguments': {'pipeline': enveloped}})
+
+    assert set(captured.keys()) == {'pipeline'}
+    assert 'pipeline' not in captured['pipeline']
+    assert captured['pipeline']['components'] == [{'id': 'webhook_1'}]
+    assert captured['pipeline']['version'] == 1
 
 
 @pytest.mark.asyncio

@@ -452,7 +452,10 @@ class RocketRideClient(
 
         Returns:
             A :class:`~rocketride.types.ServerInfoResult` dict with ``version``,
-            ``capabilities``, ``platform``, and ``apps`` keys.
+            ``capabilities``, ``platform``, and ``apps`` keys, plus
+            ``stripePublishableKey`` when the server has billing configured.
+            ``endpoints`` is always present with both keys resolved to
+            absolute URLs (see :meth:`resolve_endpoints`).
 
         Raises:
             RuntimeError: If the server is unreachable or does not support probes.
@@ -477,6 +480,42 @@ class RocketRideClient(
             if client.did_fail(response):
                 raise RuntimeError(response.get('message', 'Server info request failed'))
 
-            return response.get('body', {})
+            # `or {}` (not a default) — a present-but-None body must also
+            # normalize, exactly like call() and the TS SDK's `?? {}`.
+            body = response.get('body') or {}
+            # Resolve the endpoints HERE, where the probed URI is known, so
+            # consumers always receive absolute URLs and never branch on
+            # presence — a pre-endpoints server or an 'origin' sentinel both
+            # resolve to the address this probe was made to.
+            body['endpoints'] = RocketRideClient.resolve_endpoints(body.get('endpoints'), uri)
+            return body
         finally:
             await client.disconnect()
+
+    @staticmethod
+    def resolve_endpoints(endpoints: 'dict | None', probed_uri: str) -> 'dict':
+        """
+        Resolve a probe's ``endpoints`` block against the URI that was probed.
+
+        The wire value for each key is an absolute URL or the literal
+        ``'origin'`` — the server's way of saying "wherever you reached me"
+        (a server behind a proxy cannot know its public name). Absent keys
+        and a missing block (pre-endpoints servers) mean ``'origin'`` too,
+        so the ONE conditional in the whole scheme lives here and callers
+        get a complete ``{api, ui}`` of absolute URLs unconditionally.
+
+        Args:
+            endpoints: The raw ``endpoints`` value from the probe body, if any.
+            probed_uri: The URI :meth:`get_server_info` connected to.
+
+        Returns:
+            Dict with ``api`` and ``ui`` resolved to absolute URLs.
+        """
+        origin = RocketRideClient.normalize_uri(probed_uri)
+        raw = endpoints or {}
+
+        def _resolve(value: 'str | None') -> str:
+            # Step: absent or the 'origin' sentinel -> the probed address.
+            return origin if not value or value == 'origin' else value
+
+        return {'api': _resolve(raw.get('api')), 'ui': _resolve(raw.get('ui'))}

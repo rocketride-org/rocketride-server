@@ -25,12 +25,17 @@ Per-user dev overlay — the live-manifest mechanism for app development.
 
 A developer's inner loop points THEIR shell at a locally built (or cloud
 dev-built) app bundle by registering a ``moduleId -> entry URL`` override
-via ``rrext_app_submission.register_dev``. The overlay is:
+via ``rrext_deploy_app.register_dev`` (the OSS dispatch routes register_dev
+only under the ``rrext_deploy_app`` command). The overlay is:
 
 - **Per user.** Entries registered by one user are applied only to that
   user's app manifest and pushed only to that user's connections —
   multi-tenant safe on SaaS. The OSS local engine has a single implicit
   user (``'local'``), so its overlay is effectively engine-wide.
+- **Per connection.** Each registering connection owns its own entry per
+  module, so several editors (VS Code + Cursor, two windows) can dev-serve
+  the same app concurrently without clobbering each other's registration.
+  Shells route by the editor's session nonce, or take the newest entry.
 - **Ephemeral.** Entries are dropped when the registering connection
   disconnects, and in any case expire ``_IDLE_TTL_SECONDS`` after their
   last registration (the watch manager re-registers on every rebuild, so
@@ -41,15 +46,15 @@ account package so the OSS engine supports local app development without
 SaaS. Consumers:
 
 - SaaS ``account_service.get_authentication_result`` and the OSS
-  ``_read_apps_json`` apply ``apply_overlay()`` to the app list they
-  assemble.
+  assembly paths (``_assemble_apps`` / ``get_public_apps``) apply
+  ``apply_overlay()`` to the app list they assemble.
 - ``TaskServer._dapbase_on_disconnected`` calls ``drop_connection()``.
 - ``cmd_app`` (OSS base) and the SaaS ``app_handler`` both route the
   ``register_dev`` subcommand to ``handle_register_dev()``.
 """
 
 import time
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from rocketlib import debug
 
@@ -61,13 +66,20 @@ from rocketlib import debug
 # the registering connection is still open (the dev session went stale).
 _IDLE_TTL_SECONDS = 30 * 60
 
-# The overlay itself: {user_id: {module_id: entry}}. Each entry carries:
+# The overlay itself: {user_id: {module_id: {connection_id: entry}}}. One
+# entry PER REGISTERING CONNECTION, not per module: two editors (VS Code +
+# Cursor, or two windows) each dev-serving the same app hold independent
+# registrations that expire independently — the singleton model made them
+# clobber each other's URL on every rebuild, and connected shells looped
+# chasing the flip-flopping registration. Each entry carries:
 #   module_id     — MF container name the override applies to
 #   url           — dev remoteEntry.js URL the shell should load instead
 #   app_id        — app id (falls back to module_id when not supplied)
 #   connection_id — the registering connection (for disconnect expiry)
+#   session       — the registering editor's session nonce (preview routing)
+#   registered_at — wall-clock stamp; newest entry is the default pick
 #   expires_at    — monotonic-ish wall-clock expiry (idle cap)
-_overlay: Dict[str, Dict[str, Dict[str, Any]]] = {}
+_overlay: Dict[str, Dict[str, Dict[Any, Dict[str, Any]]]] = {}
 
 
 # =============================================================================
@@ -75,9 +87,20 @@ _overlay: Dict[str, Dict[str, Dict[str, Any]]] = {}
 # =============================================================================
 
 
-def register(user_id: str, connection_id: Any, module_id: str, url: str, app_id: str) -> None:
+def register(
+    user_id: str,
+    connection_id: Any,
+    module_id: str,
+    url: str,
+    app_id: str,
+    session: str = '',
+    meta: Optional[Dict[str, str]] = None,
+) -> None:
     """
-    Insert or refresh a dev overlay entry for one user.
+    Insert or refresh THIS connection's dev overlay entry for one module.
+
+    Sibling connections' entries for the same module are untouched — each
+    editor owns exactly one entry per module and can only ever write its own.
 
     Args:
         user_id:       Owner of the overlay bucket.
@@ -85,43 +108,69 @@ def register(user_id: str, connection_id: Any, module_id: str, url: str, app_id:
         module_id:     MF container name to override.
         url:           Dev remoteEntry.js URL.
         app_id:        App id the module belongs to.
+        session:       The registering editor's session nonce ('' when the
+                       client predates session routing).
+        meta:          Display basics from the app's local manifest
+                       ('name'/'description'/'appVersion'/'icon' data URI) —
+                       consumed by the SYNTHETIC tile of a never-published
+                       app so it renders like a store tile; a matched
+                       published app keeps its manifest values.
     """
-    bucket = _overlay.setdefault(user_id, {})
-    bucket[module_id] = {
+    module_bucket = _overlay.setdefault(user_id, {}).setdefault(module_id, {})
+    module_bucket[connection_id] = {
         'module_id': module_id,
         'url': url,
         'app_id': app_id,
         'connection_id': connection_id,
+        'session': session,
+        'meta': dict(meta) if meta else {},
+        'registered_at': time.time(),
         'expires_at': time.time() + _IDLE_TTL_SECONDS,
     }
-    debug(f'[dev_overlay] registered {module_id} -> {url} for user {user_id}')
+    debug(f'[dev_overlay] registered {module_id} -> {url} for user {user_id} (conn {connection_id})')
 
 
-def unregister(user_id: str, module_id: str) -> bool:
+def unregister(user_id: str, module_id: str, connection_id: Any = None) -> bool:
     """
-    Remove one overlay entry for a user.
+    Remove overlay entries for one module of one user.
+
+    With ``connection_id``, only THAT connection's entry goes — one editor
+    unregistering must never tear down a sibling editor's live registration.
+    Without it, every connection's entry for the module is removed.
 
     Args:
-        user_id:   Owner of the overlay bucket.
-        module_id: MF container name to remove.
+        user_id:       Owner of the overlay bucket.
+        module_id:     MF container name to remove.
+        connection_id: Restrict removal to this connection's entry.
 
     Returns:
-        True when an entry was actually removed.
+        True when at least one entry was actually removed.
     """
     bucket = _overlay.get(user_id)
     if not bucket:
         return False
-    removed = bucket.pop(module_id, None) is not None
-    if removed and not bucket:
+    module_bucket = bucket.get(module_id)
+    if not module_bucket:
+        return False
+    if connection_id is None:
+        removed = bool(module_bucket)
+        bucket.pop(module_id, None)
+    else:
+        removed = module_bucket.pop(connection_id, None) is not None
+        if not module_bucket:
+            bucket.pop(module_id, None)
+    if not bucket:
         _overlay.pop(user_id, None)
     if removed:
-        debug(f'[dev_overlay] unregistered {module_id} for user {user_id}')
+        debug(f'[dev_overlay] unregistered {module_id} for user {user_id} (conn {connection_id})')
     return removed
 
 
 def entries_for(user_id: str) -> List[Dict[str, Any]]:
     """
     Return the live overlay entries for a user, pruning expired ones.
+
+    Multiple entries may share a module_id (one per registering connection).
 
     Args:
         user_id: Owner of the overlay bucket.
@@ -134,21 +183,28 @@ def entries_for(user_id: str) -> List[Dict[str, Any]]:
         return []
     # Lazy idle-cap pruning: drop entries whose last registration is stale
     now = time.time()
-    stale = [mid for mid, e in bucket.items() if e.get('expires_at', 0) <= now]
-    for mid in stale:
-        bucket.pop(mid, None)
-        debug(f'[dev_overlay] expired {mid} for user {user_id} (idle cap)')
+    out: List[Dict[str, Any]] = []
+    for mid in list(bucket.keys()):
+        module_bucket = bucket[mid]
+        for conn_id in list(module_bucket.keys()):
+            if module_bucket[conn_id].get('expires_at', 0) <= now:
+                module_bucket.pop(conn_id, None)
+                debug(f'[dev_overlay] expired {mid} for user {user_id} (idle cap, conn {conn_id})')
+        if not module_bucket:
+            bucket.pop(mid, None)
+        else:
+            out.extend(module_bucket.values())
     if not bucket:
         _overlay.pop(user_id, None)
-        return []
-    return list(bucket.values())
+    return out
 
 
 def drop_connection(user_id: str, connection_id: Any) -> bool:
     """
     Drop all overlay entries a specific connection registered — called from
     the server's disconnect cleanup so a closed dev session cannot leave a
-    stale bundle in the user's manifest.
+    stale bundle in the user's manifest. Sibling connections' entries for
+    the same modules survive.
 
     Args:
         user_id:       Owner of the overlay bucket.
@@ -160,13 +216,17 @@ def drop_connection(user_id: str, connection_id: Any) -> bool:
     bucket = _overlay.get(user_id)
     if not bucket:
         return False
-    doomed = [mid for mid, e in bucket.items() if e.get('connection_id') == connection_id]
-    for mid in doomed:
-        bucket.pop(mid, None)
-        debug(f'[dev_overlay] dropped {mid} for user {user_id} (connection closed)')
+    dropped = False
+    for mid in list(bucket.keys()):
+        module_bucket = bucket[mid]
+        if module_bucket.pop(connection_id, None) is not None:
+            dropped = True
+            debug(f'[dev_overlay] dropped {mid} for user {user_id} (connection closed)')
+        if not module_bucket:
+            bucket.pop(mid, None)
     if not bucket:
         _overlay.pop(user_id, None)
-    return bool(doomed)
+    return dropped
 
 
 # =============================================================================
@@ -174,14 +234,41 @@ def drop_connection(user_id: str, connection_id: Any) -> bool:
 # =============================================================================
 
 
+def drop_user(user_id: str) -> bool:
+    """
+    Drop EVERY overlay entry for a user, regardless of registering connection.
+
+    Called on an org switch: the bucket is keyed by ``user_id`` with no org
+    stamp, so a reconnect alone will not clear it and ``apply_overlay`` would
+    keep re-applying the previous org's dev bundles onto the new org's manifest
+    on every rebuild. Emptying the bucket is the only reliable clear.
+
+    Args:
+        user_id: Owner of the overlay bucket.
+
+    Returns:
+        True when the bucket held at least one entry (callers push a refresh).
+    """
+    bucket = _overlay.pop(user_id, None)
+    if bucket:
+        debug(f'[dev_overlay] dropped all {len(bucket)} entries for user {user_id} (org switch)')
+    return bool(bucket)
+
+
 def apply_overlay(user_id: str, apps: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """
     Apply a user's overlay to an assembled app list.
 
-    Entries matching an existing app (by moduleId) replace that app's
-    ``entry`` URL and flag it ``dev: True``. Entries with no matching app
+    Modules matching an existing app (by moduleId) replace that app's
+    ``entry`` URL and flag it ``dev: True``; modules with no matching app
     append a minimal synthetic manifest entry so a brand-new app under
     development is loadable before it is ever published.
+
+    A module may carry SEVERAL live registrations (one per editor session).
+    Every one rides along as ``devEntries`` — newest first — so shells can
+    route a preview to the editor that launched it (session nonce match);
+    ``entry`` carries the newest registration as the default for shells
+    with no session affinity.
 
     Args:
         user_id: Whose overlay to apply.
@@ -194,30 +281,51 @@ def apply_overlay(user_id: str, apps: List[Dict[str, Any]]) -> List[Dict[str, An
     if not entries:
         return apps
 
-    by_module = {e['module_id']: e for e in entries}
+    # Group per module, newest registration first
+    by_module: Dict[str, List[Dict[str, Any]]] = {}
+    for e in entries:
+        by_module.setdefault(e['module_id'], []).append(e)
+    for group in by_module.values():
+        group.sort(key=lambda e: e.get('registered_at', 0), reverse=True)
+
+    def wire_entries(group: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Client-facing devEntries rows (camelCase, newest first)."""
+        return [
+            {'url': e['url'], 'session': e.get('session', ''), 'registeredAt': e.get('registered_at', 0)} for e in group
+        ]
+
     matched: set = set()
 
-    # Replace entry URLs on matching apps
+    # Replace entry URLs on matching apps (newest registration is the default)
     out: List[Dict[str, Any]] = []
     for app in apps:
-        entry = by_module.get(app.get('moduleId'))
-        if entry:
-            app = {**app, 'entry': entry['url'], 'dev': True}
-            matched.add(entry['module_id'])
+        group = by_module.get(app.get('moduleId'))
+        if group:
+            app = {**app, 'entry': group[0]['url'], 'dev': True, 'devEntries': wire_entries(group)}
+            matched.add(group[0]['module_id'])
         out.append(app)
 
-    # Append synthetic entries for overlay modules with no published app
-    for module_id, entry in by_module.items():
+    # Append synthetic entries for overlay modules with no published app.
+    # The registering editor supplies the app's local manifest basics
+    # (register_dev meta) so the tile renders like a store tile — name,
+    # description, icon, semver — instead of a bare id; the fallbacks
+    # serve registrations from clients that predate the meta fields.
+    for module_id, group in by_module.items():
         if module_id in matched:
             continue
+        newest = group[0]
+        meta = newest.get('meta') or {}
         out.append(
             {
-                'id': entry['app_id'],
+                'id': newest['app_id'],
                 'moduleId': module_id,
-                'name': entry['app_id'],
-                'description': 'Local development app',
-                'entry': entry['url'],
+                'name': meta.get('name') or newest['app_id'],
+                'description': meta.get('description') or 'Local development app',
+                'icon': meta.get('icon') or '',
+                'version': meta.get('appVersion') or '',
+                'entry': newest['url'],
                 'dev': True,
+                'devEntries': wire_entries(group),
                 'authenticated': False,
                 'public': False,
                 'appStatus': 'dev',
@@ -271,13 +379,17 @@ async def push_refresh(server: Any, user_id: str, source: str) -> None:
             info = getattr(conn, '_account_info', None)
             if apps is None or not info or info.userId != user_id:
                 continue
+            # Skip task-scoped connections (see push_account_update): never push
+            # a full-user rebuild onto a pk_/tk_ socket.
+            if (getattr(info, 'auth', '') or '').startswith(('pk_', 'tk_')):
+                continue
             try:
                 # Mirror the OSS authenticate() decoration: everything is
                 # free and on the desktop on a local engine.
                 info.apps = [
                     {**a, 'appStatus': a.get('appStatus', 'free'), 'onDesktop': True} for a in apps if a.get('id')
                 ]
-                await conn.send_event('apaext_account', body=info.to_connect_result())
+                await conn.send_event('apaext_account', body=info.to_push_result())
             except Exception as exc:
                 debug(f'[dev_overlay] OSS account push failed: {exc}')
 
@@ -293,8 +405,28 @@ async def push_refresh(server: Any, user_id: str, source: str) -> None:
 
 
 # =============================================================================
-# DAP HANDLER — rrext_app_submission.register_dev
+# DAP HANDLER — rrext_deploy_app.register_dev
 # =============================================================================
+
+# Display-metadata caps. Oversize or malformed values are DROPPED, never
+# fatal — the metadata is cosmetic (the synthetic tile's face) and a stale
+# or hand-rolled client must still be able to register its dev server.
+_META_TEXT_CAPS = {'name': 200, 'description': 2000, 'appVersion': 100}
+# 256 KiB icon file, base64-inflated (4/3) plus the data: header.
+_META_ICON_MAX_CHARS = 400_000
+
+
+def _sanitize_meta(args: Dict[str, Any]) -> Dict[str, str]:
+    """The registration's display metadata — capped, typed, best-effort."""
+    meta: Dict[str, str] = {}
+    for key, cap in _META_TEXT_CAPS.items():
+        value = args.get(key)
+        if isinstance(value, str) and value.strip() and len(value) <= cap:
+            meta[key] = value.strip()
+    icon = args.get('icon')
+    if isinstance(icon, str) and icon.startswith('data:image/') and len(icon) <= _META_ICON_MAX_CHARS:
+        meta['icon'] = icon
+    return meta
 
 
 async def handle_register_dev(conn: Any, request: Dict[str, Any]) -> Dict[str, Any]:
@@ -307,10 +439,18 @@ async def handle_register_dev(conn: Any, request: Dict[str, Any]) -> Dict[str, A
     local app development works without SaaS.
 
     Args (DAP ``arguments``):
-        moduleId:   MF container name to override (required).
-        url:        Dev remoteEntry.js URL (required unless unregistering).
-        appId:      Owning app id (defaults to moduleId).
-        unregister: True to remove the override instead.
+        moduleId:    MF container name to override (required).
+        url:         Dev remoteEntry.js URL (required unless unregistering).
+        appId:       Owning app id (defaults to moduleId).
+        session:     The editor's session nonce (routes previews launched
+                     from that editor to ITS registration; optional).
+        name:        Display name from the app's local manifest (optional).
+        description: Manifest description (optional).
+        appVersion:  Manifest semver for the tile's version line (optional).
+        icon:        Manifest icon as a data:image/ URI, ≤ 400k chars
+                     (optional). All four feed the SYNTHETIC tile of a
+                     never-published app; invalid values are dropped.
+        unregister:  True to remove THIS connection's override instead.
 
     Returns:
         DAP response with ``{registered}`` or ``{unregistered}``.
@@ -329,7 +469,9 @@ async def handle_register_dev(conn: Any, request: Dict[str, Any]) -> Dict[str, A
 
     # ── Unregister ───────────────────────────────────────────────────────
     if args.get('unregister', False):
-        removed = unregister(user_id, module_id)
+        # Connection-scoped: one editor closing its panel must never tear
+        # down a sibling editor's live registration for the same module.
+        removed = unregister(user_id, module_id, conn.get_connection_id())
         if removed:
             await push_refresh(conn._server, user_id, source='dev-overlay')
         return conn.build_response(request, body={'unregistered': module_id})
@@ -341,6 +483,14 @@ async def handle_register_dev(conn: Any, request: Dict[str, Any]) -> Dict[str, A
     if not (url.startswith('http://') or url.startswith('https://') or url.startswith('/')):
         return conn.build_error(request, 'url must be http(s) or server-relative')
 
-    register(user_id, conn.get_connection_id(), module_id, url, args.get('appId', module_id))
+    register(
+        user_id,
+        conn.get_connection_id(),
+        module_id,
+        url,
+        args.get('appId', module_id),
+        session=str(args.get('session', '') or ''),
+        meta=_sanitize_meta(args),
+    )
     await push_refresh(conn._server, user_id, source='dev-overlay')
     return conn.build_response(request, body={'registered': module_id})

@@ -75,26 +75,23 @@ export interface UnknownTask {
 // APP BUILDER SIDEBAR (MY APPS)
 // =============================================================================
 
-/** One MY APPS row in the App Builder sidebar mode. */
+/**
+ * One MY APPS row in the App Builder sidebar mode. Every row is a
+ * `.rrapp`-bound working copy found on disk — the list carries no server
+ * lifecycle state.
+ */
 export interface AppListItem {
 	/** App id (the appManifest.id binding key, e.g. 'acme.brandy'). */
 	id: string;
 	/** Display name. */
 	name: string;
 	/**
-	 * Lifecycle badge state: 'local' = bound folder with no server record,
-	 * 'dev' = live dev-overlay entry, then the marketplace lifecycle
-	 * ('pending' renders as "in review"; 'live' = approved with an active
-	 * public version).
-	 */
-	status: 'local' | 'dev' | 'draft' | 'pending' | 'approved' | 'rejected' | 'live';
-	/**
 	 * Icon URL for the row, already resolved by the host to something the
 	 * view can load directly (a data: URI in the VSCode webview; a served
 	 * URL on web hosts). Rows without one render the generic app glyph.
 	 */
 	iconUrl?: string;
-	/** Bound workspace folder (VSCode hosts; absent for server-only rows). */
+	/** Bound workspace folder. */
 	folder?: string;
 }
 
@@ -104,7 +101,9 @@ export interface AppListItem {
  * pre-App-Builder hosts) render exactly as before.
  */
 export interface AppBuilderSidebar {
-	/** Merged MY APPS list (workspace scan ∪ server list_mine, by id). */
+	/** MY APPS list built from the workspace scan ALONE — one row per
+	 *  `.rrapp`-bound working copy on disk. The server catalog is deliberately
+	 *  not merged in: the sidebar lists what you can open and edit locally. */
 	apps: AppListItem[];
 	/** The app whose App Builder screen is open/focused, if any. */
 	activeAppId?: string;

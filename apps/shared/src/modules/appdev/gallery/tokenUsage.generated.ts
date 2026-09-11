@@ -165,7 +165,7 @@ export const GALLERY_TOKEN_USAGE: Record<string, IGalleryTokenUsage> = {
 		commonStyles: {},
 	},
 	'sidebar-footer': {
-		direct: ['--rr-bg-scrollbar-thumb', '--rr-bg-surface-alt', '--rr-brand', '--rr-color-success', '--rr-text-primary', '--rr-text-secondary'],
+		direct: ['--rr-bg-scrollbar-thumb', '--rr-bg-surface-alt', '--rr-brand', '--rr-color-error', '--rr-color-success', '--rr-text-primary', '--rr-text-secondary'],
 		commonStyles: {
 			divider: ['--rr-border'],
 			popupMenu: ['--rr-bg-paper', '--rr-border', '--rr-shadow-widget'],

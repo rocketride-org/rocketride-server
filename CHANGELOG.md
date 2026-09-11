@@ -17,9 +17,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **ai**: every subprocess exposes /task/data via a shared web server (#912)
 - **analytics**: shared, transport-agnostic telemetry core (loose report + app) (#1523)
 - **anonymize**: configurable entity types + token redaction style (#1447)
+- **chat-widget**: embeddable, brandable chat widget — web component + script-tag bubble (#1586)
 - **ci**: migrate Discord notifier workflows to forum channels (tags + auto-archive) (#1510)
 - **ci**: on-demand + monthly multi-OS compile/test matrix (#1537)
 - **ci**: keep Discord forum tags live (re-apply on state/label change via bot) (#1722)
+- **cli**: rocketride validate subcommand (Python + TS) + validate-pipes composite action (#1573)
 - **database**: Sequelize ORM over pipes + server-side DB transactions (#1467)
 - **deploy-2**: teams-as-environments deploy, owner-scoped task identity, push-driven surfaces (#1764)
 - **events-ui**: real-time DAP event monitor micro-frontend (#1484)
@@ -65,6 +67,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - media stream descriptors + end-to-end source provenance (#1525)
 
 ### Fixed
+- **nodes**: harden HTTP Request SSRF guardrails for URL credentials and hostname-safe whitelist boundaries; regexes now match canonical URL starts and fail closed on unsupported or ambiguous authority syntax, so unrestricted authority and search-style patterns may require migration (#2060)
 - **agent**: optional require_tool_call runtime fabrication guard (#1490)
 - **ai**: install test deps via depends() so engine constraints apply (#1466) (#1471)
 - **ai**: migrate GPU import guard to find_spec/exec_module (Python 3.12+) (#1460)

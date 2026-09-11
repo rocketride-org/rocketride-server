@@ -1,8 +1,8 @@
 <!-- ROCKETRIDE:BEGIN -->
 
-# RocketRide: AI Pipeline Builder
+# RocketRide: AI Pipeline & App Platform
 
-Use RocketRide when building AI pipelines, document processing, RAG systems, or data integration.
+Use RocketRide when building AI pipelines (document processing, RAG, agents, data integration) or when building apps on the RocketRide platform (React UIs on the platform shell, often embedding pipelines).
 
 ## Documentation
 
@@ -10,21 +10,26 @@ Full docs: `.rocketride/docs/`
 
 **Read the relevant doc(s) before generating any RocketRide code.**
 
-| File                              | Read when...                                                      |
-| --------------------------------- | ----------------------------------------------------------------- |
-| ROCKETRIDE_README.md              | Starting any RocketRide work: overview + mandatory setup steps   |
-| ROCKETRIDE_QUICKSTART.md          | Writing first pipeline: complete working examples (Python & TS)  |
-| ROCKETRIDE_PIPELINE_RULES.md      | Defining pipelines: structure, lane wiring, config rules         |
-| ROCKETRIDE_COMPONENT_REFERENCE.md | Choosing/configuring components: all providers and config fields |
-| ROCKETRIDE_COMMON_MISTAKES.md     | Before finalizing: known pitfalls to avoid                       |
-| ROCKETRIDE_python_API.md          | Python SDK: client methods, types, patterns                      |
-| ROCKETRIDE_typescript_API.md      | TypeScript SDK: client methods, types, patterns                  |
-| ROCKETRIDE_OBSERVABILITY.md       | Consuming runtime logs, lifecycle events, and pipeline traces     |
+| File                              | Read when...                                                        |
+| --------------------------------- | ------------------------------------------------------------------- |
+| ROCKETRIDE_README.md              | Starting ANY RocketRide work: the platform map, setup, task router  |
+| ROCKETRIDE_CONCEPTS.md            | Early, always: workspace, connection, deploy/publish lifecycle, how apps and pipelines fit together |
+| ROCKETRIDE_PIPELINES.md           | Writing or editing a `.pipe`: format, lanes, profiles, patterns, pitfalls |
+| ROCKETRIDE_COMPONENT_REFERENCE.md | Choosing/configuring pipeline components via the catalog + schemas  |
+| ROCKETRIDE_APPS.md                | Building or modifying an app: App Builder, shell UI, manifest, deploy/publish |
+| ROCKETRIDE_UI_COMPONENTS.md       | Using a specific UI component in an app: props, wiring, snippets    |
+| ROCKETRIDE_INTEGRATIONS.md        | MCP tools, n8n, external webhooks, Telegram, mid-pipeline HTTP, CI  |
+| ROCKETRIDE_python_API.md          | Python SDK: client methods, deploy & schedules, file store, events  |
+| ROCKETRIDE_typescript_API.md      | TypeScript SDK: client methods, app-sdk, deploy & schedules, events |
+| ROCKETRIDE_OBSERVABILITY.md       | Consuming runtime events and logs, building monitoring              |
 
-## Before Writing ANY RocketRide Code
+## Before writing ANY RocketRide code
 
-1. Read `.rocketride/docs/ROCKETRIDE_README.md` for mandatory setup requirements
-2. Read the relevant API doc (Python or TypeScript) for your language
-3. Read `.rocketride/docs/ROCKETRIDE_PIPELINE_RULES.md` + `.rocketride/docs/ROCKETRIDE_COMPONENT_REFERENCE.md`
-4. Read `.rocketride/docs/ROCKETRIDE_COMMON_MISTAKES.md` before finalizing
+1. Read `.rocketride/docs/ROCKETRIDE_README.md` and follow its task router for the job at hand
+2. Building a pipeline: ROCKETRIDE_CONCEPTS.md + ROCKETRIDE_PIPELINES.md + ROCKETRIDE_COMPONENT_REFERENCE.md
+3. Building an app: ROCKETRIDE_CONCEPTS.md + ROCKETRIDE_APPS.md + ROCKETRIDE_UI_COMPONENTS.md
+4. Driving either from code: NEVER invent anything — verify `client.*` method names and signatures against your language's API doc (`ROCKETRIDE_python_API.md` / `ROCKETRIDE_typescript_API.md`), and pipeline component names and config fields against `.rocketride/services-catalog.json` and `.rocketride/schema/`
+5. Two connections may exist in `.env`: `ROCKETRIDE_URI`/`ROCKETRIDE_APIKEY` (development - run/validate/iterate) and `ROCKETRIDE_DEPLOY_URI`/`ROCKETRIDE_DEPLOY_APIKEY` (deployment target - deploy/publish/schedule). Never run lifecycle verbs against the dev pair; if the DEPLOY pair is absent, no deploy target is configured - ask the user.
+6. NEW apps are created ONLY through the scaffold - agents call `client.deploy.createApp(slug, ...)` (install the client first from the workspace's own `.rocketride/client/rocketride.tgz` - the scaffold vendors it from the connected server, so it is present once the workspace has been opened against one; with no server URL known the scaffold skips vendoring and the tarball lands on the next connected open - NEVER from the npm registry); humans use the App Builder's New App wizard. Never hand-create app files, and prefer the API over the CLI for everything.
+
 <!-- ROCKETRIDE:END -->

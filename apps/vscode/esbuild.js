@@ -30,7 +30,10 @@ const production = process.argv.includes('--production');
 const outfile = path.join(process.env.ROCKETRIDE_BUILD_ROOT ?? '../../build', 'vscode/rocketride.js');
 
 const env = getenv();
-requireKeys(env, ['ROCKETRIDE_URI', 'RR_ZITADEL_URL', 'RR_ZITADEL_VSCODE_CLIENT_ID'], 'vscode');
+// No server address is baked: the cloud target is the rocketride.*.cloudUrl
+// SETTING (package.json default + user opt-in). Only the environment-
+// invariant Zitadel pair is injected (one tenant serves every environment).
+requireKeys(env, ['RR_ZITADEL_URL', 'RR_ZITADEL_VSCODE_CLIENT_ID'], 'vscode');
 
 esbuild
 	.build({
@@ -58,8 +61,6 @@ esbuild
 		define: {
 			// Disable AMD detection
 			define: 'undefined',
-			// Server URI default (workspace .env overrides at runtime)
-			'process.env.ROCKETRIDE_URI': JSON.stringify(env.ROCKETRIDE_URI || ''),
 			// Zitadel OIDC config (.config defaults, .env overrides)
 			'process.env.RR_ZITADEL_URL': JSON.stringify(env.RR_ZITADEL_URL || ''),
 			'process.env.RR_ZITADEL_VSCODE_CLIENT_ID': JSON.stringify(env.RR_ZITADEL_VSCODE_CLIENT_ID || ''),

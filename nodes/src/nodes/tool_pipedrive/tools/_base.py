@@ -49,6 +49,35 @@ EXTRA_DESC = (
     'request body after the typed parameters.'
 )
 
+#: Appended to the description of every field that carries a TIME OF DAY.
+#:
+#: WHY EVERY SUCH FIELD SAYS THIS. Pipedrive takes and returns these in UTC and
+#: displays them in each viewer's own timezone. The API validates none of them,
+#: so a local wall-clock time sent here is not rejected — it is stored, and it
+#: reads as a real time from then on. A meeting asked for at 12:30 in California
+#: and written as "12:30" came back to the person who asked for it as 05:30.
+#:
+#: The hour also moves the DATE. 20:00 Pacific on a Wednesday is 03:00 UTC on the
+#: Thursday, so a converted time and an unconverted date is a booking on the
+#: wrong day — take both from the same rendering or neither.
+#:
+#: A pure DATE with no time (`expected_close_date`, a goal's period) names no
+#: instant and needs none of this. A DURATION is a length, not a time of day, and
+#: converting one is a corruption rather than a correction.
+#:
+#: `tool_gohighlevel` already states its own zones this way
+#: (`appointments._APPOINTMENT_TIMEZONE_DESC`, `contact_tasks._DUE_DATE_DESC`) —
+#: which is the convention, and which Pipedrive was the one node not following.
+#: The two CRMs want different formats, so the shared rule is that a node names
+#: the zone of its own time fields, not that any one zone is right.
+UTC_TIME_DESC = (
+    'Pipedrive reads and returns this in UTC, and shows it to each viewer in their own '
+    'timezone - so send the UTC value, not the local wall-clock one, and convert it back '
+    'before reporting it to a person. The datetime tool returns utc_date and utc_time '
+    'beside date and time for exactly this: write those, and never shift an hour yourself. '
+    'Converting can move the date as well as the time; take both from the same rendering.'
+)
+
 
 # ---------------------------------------------------------------------------
 # Schema builders
