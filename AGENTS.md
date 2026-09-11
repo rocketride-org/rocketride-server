@@ -40,6 +40,7 @@ python -m ruff check <path>      # Python lint (format: ruff format)
 npx tsc --noEmit                 # TypeScript type-check
 
 # Documentation checks
+./builder docs:validate                              # node README + client-doc schemas (also inside docs:test)
 python3 scripts/validate-node-readme.py <node-dir>   # one node (--all nodes/src/nodes for every node)
 python3 scripts/validate-client-docs.py              # client docs parity
 node scripts/build.js docs:check                     # export drift gate (CI-enforced)

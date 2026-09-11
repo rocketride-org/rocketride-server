@@ -34,51 +34,23 @@ resolution.
 A scan that yields no photos is **forwarded unchanged** rather than dropped, so nothing
 silently disappears from a pipeline.
 
-## Output names
+## Profiles
 
-Crops are named `<scan>.crop<N>.jpg`, numbered in reading order: top row left to right, then
-the next row down. The numbering is dense — a photo that was detected but could not be cropped
-leaves no gap in the filenames, because a gap reads as lost data. Use the `cropped` flag in the
-text record to find those instead.
+Default: **Album page - photos mounted together** (`album`).
 
-The counter runs per *object*, not per stream, so a source that hands the node several images
-in one object (a multi-page document, or an upstream fan-out) still gets unique names.
-
-## The detection record
-
-The `text` lane carries one JSON document per scan:
-
-```json
-{
-  "decoded": true,
-  "count": 3,
-  "regions": [
-    {
-      "cx": 337.0, "cy": 428.0, "w": 398.0, "h": 520.0, "angle": 0.0,
-      "area_pct": 10.78, "ratio_error": 2.0, "cropped": true, "name": "1.crop0.jpg"
-    }
-  ]
-}
-```
-
-`decoded` is what separates *"this is not an image I can read"* from *"I read it and found
-nothing"* — both otherwise report zero regions, and telling them apart is the difference
-between an auditable run over a folder of scans and a pile of silent zeros. `ratio_error` is
-how far the photo sits from the nearest standard print size, in percent; it is reported for
-diagnosis and never used to reject a photo.
-
-## Configuring it
-
-Start and usually finish with **Scan type**. There is deliberately no white / dark / album
-background setting — the node infers the background from the scan, so the presets describe
-what you *scanned* instead, and change the things that genuinely differ between those cases:
-
-| Scan type | Sets | Because |
+| Profile | Sets | Because |
 | --- | --- | --- |
-| **Album page** (default) | `maxDepth 4`, `texture 4.0`, `minRelative 0.40` | Mounted photos often touch, so separating them is worth the cost |
-| **Loose prints on the scanner bed** | `maxDepth 0`, `minRelative 0.20` | Separately laid prints never touch — the search for joins is pure waste — and their sizes vary more |
-| **Textured or patterned page** | `texture 9.0` | Stops page grain being read as photo content |
-| **Maximum detail (slower)** | `detectSize 4500`, `maxDepth 6` | Tighter edges, more separation attempts |
+| `album` **(default)** | `maxDepth 4`, `texture 4.0`, `minRelative 0.40` | Mounted photos often touch, so separating them is worth the cost |
+| `loose` | `maxDepth 0`, `minRelative 0.20` | Separately laid prints never touch — the search for joins is pure waste — and their sizes vary more |
+| `textured` | `texture 9.0` | Stops page grain being read as photo content |
+| `detail` | `detectSize 4500`, `maxDepth 6` | Tighter edges, more separation attempts |
+
+## Configuration
+
+Start and usually finish with **Scan type** — see `## Profiles` above for what each one sets
+and why. There is deliberately no white / dark / album background setting: the node infers the
+background from the scan, so the presets describe what you *scanned* instead, and change the
+things that genuinely differ between those cases.
 
 A scan type shows only **Straighten photos** and **JPEG quality**; everything else it decides
 for you. To go further, each one carries its own **Show advanced settings** switch, which opens
@@ -144,7 +116,42 @@ Two fields are real levers and one only looks like one:
 - **`skew`** is *not* a performance setting. Lowering it narrows the angular search without
   buying back any time, because the number of angles tried never drops below five.
 
-## Limitations
+## Notes
+
+### Output names
+
+Crops are named `<scan>.crop<N>.jpg`, numbered in reading order: top row left to right, then
+the next row down. The numbering is dense — a photo that was detected but could not be cropped
+leaves no gap in the filenames, because a gap reads as lost data. Use the `cropped` flag in the
+text record to find those instead.
+
+The counter runs per *object*, not per stream, so a source that hands the node several images
+in one object (a multi-page document, or an upstream fan-out) still gets unique names.
+
+### The detection record
+
+The `text` lane carries one JSON document per scan:
+
+```json
+{
+  "decoded": true,
+  "count": 3,
+  "regions": [
+    {
+      "cx": 337.0, "cy": 428.0, "w": 398.0, "h": 520.0, "angle": 0.0,
+      "area_pct": 10.78, "ratio_error": 2.0, "cropped": true, "name": "1.crop0.jpg"
+    }
+  ]
+}
+```
+
+`decoded` is what separates *"this is not an image I can read"* from *"I read it and found
+nothing"* — both otherwise report zero regions, and telling them apart is the difference
+between an auditable run over a folder of scans and a pile of silent zeros. `ratio_error` is
+how far the photo sits from the nearest standard print size, in percent; it is reported for
+diagnosis and never used to reject a photo.
+
+### Limitations
 
 - **Memory.** Decoding a 143 MP scan costs roughly 430 MB, plus about 105 MB per crop while it
   is being encoded. Like every other buffering node here, this one has no input size cap.
@@ -154,7 +161,7 @@ Two fields are real levers and one only looks like one:
 - **Edge accuracy** is bounded by `detectSize`: at the default, one pixel of detection error is
   about five pixels on a 14000 px-tall scan.
 
-## Provenance
+### Provenance
 
 The detection algorithm, the seam search and the JPEG quality matching were developed by the
 author in personal forks of two open-source scan croppers, and are contributed here by their

@@ -28,7 +28,9 @@ Everything here lives in `docs/docusaurus/`:
 ./builder docs:build     # gather -> release-notes -> index -> compile  (the whole site)
 ./builder docs:dev       # gather-dev (symlinks) + docusaurus start, live reload
 ./builder docs:serve     # preview the built site from dist/docs
-./builder docs:test      # unit tests for the docs helpers
+./builder docs:test      # docs:validate + docs:unit
+./builder docs:validate  # node README + client-doc schema validators (blocking)
+./builder docs:unit      # unit tests for the docs helpers
 ./builder docs:export    # refresh the generated package README copies under packages/
 ./builder docs:check     # same computation, read-only: fail if a copy has drifted
 ./builder docs:clean     # drop the content tree, dist/docs, .docusaurus, and the gather hash

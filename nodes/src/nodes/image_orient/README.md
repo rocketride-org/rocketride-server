@@ -24,33 +24,7 @@ costs it nothing in quality.
 | `image` | `image` | The photo, upright if the node was sure, unchanged if it was not |
 | `image` | `text` | JSON decision record — what it chose, how sure it was, and why it declined |
 
-## The decision record
-
-```json
-{"decoded": true, "rotation": 270, "confident": true,
- "scores": {"0": 0.011, "90": 0.004, "180": 0.0, "270": 0.194},
- "faces": 2, "ratio": 17.6, "reason": null}
-```
-
-`rotation` is **the correction applied, in degrees clockwise** — not the rotation the photo was
-found in. A picture that arrived turned 90° clockwise is corrected with `"rotation": 270`.
-
-`0` means the image was left as it was, and `confident` separates the two ways that happens:
-`true` is "measured, and it was already upright", `false` is "not sure". `reason` names the doubt:
-
-| `reason` | Means |
-| --- | --- |
-| `no_faces` | Nothing that scored as a face at any orientation |
-| `few_faces` | Fewer faces backed the winner than **Faces needed to decide** |
-| `thin_margin` | No orientation led the others by enough. Two orientations disagreeing looks like this too |
-| `mixed_signals` | The two readings of the detections pointed different ways — the rotation holding the most face was not the one the detector was most certain about |
-| `unencodable_format` | Analysed, but not JPEG or PNG, so the node declines to re-save it |
-| `no_model` | The face model could not be loaded; nothing was analysed |
-
-`decoded: false` is different again — the bytes were not a readable image. That needs a different
-fix from "read it and left it alone", which is why they are not merged.
-
-## Configuring it
+## Configuration
 
 | Setting | Default | What it does |
 | --- | --- | --- |
@@ -108,7 +82,35 @@ because they are single-face pictures.
 | Faces in group shots are missed | Raise **Detection size**; cost grows with the square, so 1600 is ~4× the work of 800 |
 | Nothing is ever rotated, every record says `no_model` | The model could not be downloaded. Check network access from the engine host |
 
-## Limitations
+## Notes
+
+### The decision record
+
+```json
+{"decoded": true, "rotation": 270, "confident": true,
+ "scores": {"0": 0.011, "90": 0.004, "180": 0.0, "270": 0.194},
+ "faces": 2, "ratio": 17.6, "reason": null}
+```
+
+`rotation` is **the correction applied, in degrees clockwise** — not the rotation the photo was
+found in. A picture that arrived turned 90° clockwise is corrected with `"rotation": 270`.
+
+`0` means the image was left as it was, and `confident` separates the two ways that happens:
+`true` is "measured, and it was already upright", `false` is "not sure". `reason` names the doubt:
+
+| `reason` | Means |
+| --- | --- |
+| `no_faces` | Nothing that scored as a face at any orientation |
+| `few_faces` | Fewer faces backed the winner than **Faces needed to decide** |
+| `thin_margin` | No orientation led the others by enough. Two orientations disagreeing looks like this too |
+| `mixed_signals` | The two readings of the detections pointed different ways — the rotation holding the most face was not the one the detector was most certain about |
+| `unencodable_format` | Analysed, but not JPEG or PNG, so the node declines to re-save it |
+| `no_model` | The face model could not be loaded; nothing was analysed |
+
+`decoded: false` is different again — the bytes were not a readable image. That needs a different
+fix from "read it and left it alone", which is why they are not merged.
+
+### Limitations
 
 - **It needs faces.** Landscapes, documents and photographs of the backs of people's heads give it
   nothing to work with, and it will abstain on them. That is the honest boundary of the approach,

@@ -25,227 +25,7 @@ agent.
 
 ---
 
-## Configuration
-
-| Field | Type | Description |
-|---|---|---|
-| `privateIntegrationToken` | string | Default empty. Sub-account Private Integration Token (Settings -> Private Integrations), sent as `Authorization: Bearer`. Observed tokens start with `pit-`. Stored encrypted. |
-| `locationId` | string | Default empty. The sub-account this node operates on, from Settings -> Business Profile. Required: the token is opaque, so the location cannot be derived from it. |
-| `readOnly` | boolean | Default false. When enabled, every create, update and delete tool is hidden from the agent, and `request` accepts only GET. |
-| `toolGroups` | array | Default empty, which publishes the recommended set of 71 tools. Name groups to change that, or use `["all"]` for all 101. |
-| `allowRawRequest` | boolean | Default true. Publishes the generic `request` tool. |
-
-### Tool groups
-
-Full coverage here is 101 tools across 18 groups. That is more than an LLM can choose
-between reliably, so the node publishes only the groups named in **Tool groups**. Leaving
-the field empty publishes the default set: **71 tools** across `appointments`,
-`calendars`, `contact_notes`, `contact_tasks`, `contacts`, `conversations`,
-`custom_fields`, `messages`, `opportunities`, `pipelines` and `users`, which is everything
-an agent needs to run lead nurture and appointment booking end to end. `users` is in the
-default set despite being administrative: it is three read-only tools, and it is the only
-way to resolve the user ids that `assignedTo`, `followers` and `assignedUserId` need.
-`message_sending` is deliberately not: reading messages is default, but originating one
-from an unattended pipeline cannot be recalled, so sending is an explicit opt-in.
-
-Available groups:
-
-`appointment_notes`, `appointments`, `businesses`, `calendar_groups`, `calendars`,
-`contact_notes`, `contact_tasks`, `contacts`, `conversations`, `custom_fields`,
-`custom_values`, `location_tags`, `locations`, `message_sending`, `messages`,
-`opportunities`, `pipelines`, `users`.
-
-A tool in a group that is not published is invisible to the agent and refused if invoked
-anyway. Group names are matched case-insensitively. A name this node does not implement is
-reported as a warning in the editor; at runtime it is dropped from the selection with a
-warning in the job log, and a `toolGroups` value that names *only* unknown groups stops
-the pipeline at startup. Falling back to the defaults there would publish more tools than
-the misspelled config asked for.
-
-### Pagination
-
-Every list tool returns the same envelope: `{items, count, total, next, has_more}`. Ask
-for another page only while `has_more` is true, and pass `next` back as the parameter the
-tool's description names. `next` is null when there is no next page. `total` is null on
-most endpoints, and null there means unknown rather than zero.
-
-**18 list tools always report `total: null`, by design rather than by defect.** Their
-endpoints send no record count at all, so there is nothing to report and the node does not
-synthesise one. Measured by running the live suite against a real sub-account, not inferred
-from the specs:
-
-`appointment_list`, `appointment_notes_list`, `blocked_slot_list`, `business_list`,
-`calendar_group_list`, `calendar_list`, `contact_appointments_list`,
-`contact_list_by_business`, `contact_notes_list`, `contact_tasks_list`,
-`custom_field_list`, `custom_value_list`, `location_tags_list`, `location_tasks_search`,
-`lost_reason_list`, `message_list`, `pipeline_list`, `user_list_by_location`.
-
-Do not treat a null `total` from any of them as an empty result or as a bug: page with
-`has_more` instead. The tools that do report a count are `contact_list`, `contact_search`,
-`conversation_search`, `message_export`, `opportunity_search`,
-`opportunity_search_advanced` and `user_search`. Two additional tools,
-`contact_list_by_business` and `lost_reason_list`, read a count field their endpoints
-document, but no observed live response ever carried it, which is why they stay in the
-null list above.
-
-GoHighLevel does not have one pagination style. The contacts list pages on a
-`startAfter` plus `startAfterId` pair, the searches page on an opaque `searchAfter` value,
-and several endpoints page on a `skip` offset. GoHighLevel also carries its cursors on the
-records rather than on the response root, so the last page has one too. The node compares
-the page size it received against the size it asked for instead of trusting cursor
-presence, which is what keeps `has_more` from claiming a page that does not exist.
-
-Maximum page size is per endpoint, not global: `appointment_notes_list` caps at 20,
-`message_export` at 500, and the rest at 100, which is the node's own ceiling on the
-endpoints where GoHighLevel publishes no maximum. Sending a larger value is a hard 400
-rather than a silent clamp, so the node clamps before the request goes out.
-
-### Custom fields
-
-Read and write use opposite shapes, and GoHighLevel rejects the wrong one. Reads return
-custom fields as one object keyed by field id (`{"<field id>": <value>}`). Creates and
-updates take an array (`[{"id": "<field id>", "field_value": <value>}]`). A record from a
-get tool cannot be passed back to an update unchanged. Use `custom_field_list` (group
-`custom_fields`) to discover field ids.
-
-Several write tools, including the contact, opportunity and custom field creates and
-updates, accept an `extra` object. It is merged into the request body after the typed
-parameters, so it reaches any API field this node does not model explicitly:
-
-```json
-{ "firstName": "Ada", "extra": { "someUndocumentedField": "value" } }
-```
-
-`tags` cannot be smuggled through `extra` on an update or an upsert. GoHighLevel replaces
-the whole tag array rather than adding to it, so sending it there would delete the tags you
-did not list; use `contact_tags_add` and `contact_tags_remove` instead. `contact_create`
-takes `tags` as a normal parameter, since a contact being created has none to lose.
-
-### Tags have a sub-account-level side effect
-
-`contact_tags_add` is not only a per-contact write. Adding a tag name that does not exist
-yet **defines that tag on the whole sub-account**, where it shows up in `location_tags_list`
-and in the GoHighLevel UI from then on. `contact_tags_remove` takes the tag off the contact
-and leaves the definition behind. Only `location_tags_delete` (group `location_tags`, opt
-in) removes a definition.
-
-This matters for anything that loops. An agent that tags a few thousand contacts with
-generated names, then removes the tags again, leaves a few thousand tag definitions on the
-sub-account, and nothing in the contacts group can clean them up. Reuse the names
-`location_tags_list` already reports, or publish `location_tags` alongside `contacts` so
-whatever creates definitions can also remove them. Confirmed live against a real sub-account,
-not read out of the spec: the specs describe neither half of this.
-
----
-
-## Authentication
-
-The node accepts exactly one credential: a **sub-account Private Integration Token**.
-Create it under Settings -> Private Integrations, pick the scopes, and copy the token when
-it is shown. There is no way to read it again afterwards.
-
-Three consequences are worth knowing before you deploy this node.
-
-**One credential reaches exactly one sub-account.** A location token authenticates that
-location and nothing else. There is no fan-out: minting per-location tokens from an agency
-credential runs through `POST /oauth/locationToken`, which is OAuth-only and refuses a
-Private Integration Token. N sub-accounts need N node instances, each with its own token
-and its own `locationId`. Agency-scoped endpoints answer `403 Forbidden resource` to a
-sub-account token, and no configuration change grants access.
-
-**Rotation is a silent cliff.** Rotating with "expire later" keeps the old token working
-for exactly 7 days and then stops it, with nothing in the API signalling the deadline
-beforehand. Rotating with "expire now" breaks it immediately. A 401 raised by this node
-carries that explanation rather than a bare "unauthorized", because a rotation about a week
-earlier is the most likely cause.
-
-**Editing scopes does not mint a new token.** The existing token keeps working, so nothing
-looks broken, but calls that need a scope you removed start failing while the credential
-still authenticates. GoHighLevel answers those with `401 The token is not authorized for
-this scope`, which the node passes through with a note that scopes are edited on the
-Private Integration itself.
-
-### A 401 is not always a credential problem
-
-Four error shapes are worth naming, because all four look like auth failures and none of
-them is one.
-
-- A missing or mismatched `locationId` returns `403 The token does not have access to this
-  location`, which blames the token for a missing parameter.
-- A mis-cased path returns 401 rather than 404.
-- A missing required parameter can return 401 too. `GET /users/search` called bare answers
-  `401 E01 - Unauthorized request`, and the same call answers 422 naming the parameter once
-  a `locationId` is supplied. The status depends on what else you sent, not on the token.
-- The gateway in front of the API answers 401 for its own failures. One was captured live
-  carrying the body text `Command timed out`, which is a timeout rather than anything to do
-  with the credential.
-
-The node rewrites all four into messages that name the real cause, and its 401 fall-through
-claims a credential problem only when the body actually complains about one or carries no
-message at all. A timeout is reported as a timeout and is worth retrying; nothing there
-should send anyone to rotate a working token.
-
-### Errors carry more than a message
-
-Some GoHighLevel errors name the record that caused them, and the id is the way out of the
-error. `conversation_create` for a contact that already has a conversation answers HTTP 400
-with `{"message": "Conversation already exists", "canonicalCode":
-"CONVERSATIONS_CONVERSATION_ALREADY_EXISTS", "conversationId": "..."}`, and that is the
-common case rather than an edge one: creating a contact through the API creates its
-conversation too. The node carries every id the body names, plus `canonicalCode` and
-`traceId`, into the raised message and onto the exception, so the agent can use the existing
-conversation instead of stopping at "already exists".
-
-### Why there is no OAuth option
-
-GoHighLevel's OAuth access tokens last about 24 hours, and its refresh tokens are
-single-use: the moment you spend one, the old refresh token is dead and a new one comes
-back in the response. A node's only credential store is static config, which it cannot
-write to, so the new refresh token would be thrown away. The pipeline would work for
-roughly a day, refresh once successfully, work for another day, then present an
-invalidated refresh token and die. That failure is delayed, silent, and unrecoverable
-without a browser consent flow, and pasting the original refresh token back in does not
-fix it. Supporting OAuth needs a durable secret store the node can write to on every
-refresh, with a lock so concurrent runs cannot race. Until that exists, the Private
-Integration Token is the only credential in this API that static config is the correct
-store for.
-
-The legacy v1 API key is not accepted either. v1 reached end of support on 31 December
-2025, new keys can no longer be generated, and a v1 key will never authenticate against
-`services.leadconnectorhq.com`.
-
-## Rate limits
-
-Measured against a sub-account Private Integration Token, not assumed from the docs: **25
-requests per 10 seconds** and **10,000 per day**. The 100 per 10 seconds published for
-marketplace apps does not apply here. Every response carries `x-ratelimit-max`,
-`x-ratelimit-remaining`, `x-ratelimit-interval-milliseconds`, `x-ratelimit-limit-daily`,
-`x-ratelimit-daily-remaining` and `x-ratelimit-daily-reset`.
-
-GoHighLevel sends no `Retry-After`, not even on the 429 itself, so the client computes its
-own wait: one burst window (`x-ratelimit-interval-milliseconds`, 10000 on every observed
-response), up to three attempts. If the wait would exceed the 30-second request timeout
-the call fails immediately with the wait time in the message rather than blocking the
-pipeline. `x-ratelimit-daily-reset` is deliberately never used as a sleep: it is a
-duration in milliseconds, about 24 hours, and treating it as a timestamp would produce a
-sleep of roughly 55 years. Exhausting the daily budget is a circuit break rather than
-something to retry, so the node reports it and stops.
-
-## Read-only mode
-
-With **Read-only mode** enabled, every tool that creates, updates or deletes is dropped
-from the published set: the agent does not see it in `tool.query`, and invoking it anyway
-is refused. The `request` tool stays published, because it is still a working read tool,
-but accepts only GET.
-
-Hiding rather than refusing is a deliberate departure from `tool_pipedrive`, which
-publishes its write tools in read-only mode and blocks them at invoke time. An agent
-cannot tell in advance that a published tool is blocked, so it spends a turn finding out,
-and roughly 40 tools it can only ever fail on are 40 tools' worth of wasted context.
-
----
-
-## Available tools
+## As a tool
 
 Tools are published as `gohighlevel.<tool>`. The **Writes** column marks the tools that
 read-only mode hides.
@@ -466,7 +246,221 @@ casing of the path are both load-bearing, since GoHighLevel answers a mis-cased 
 
 ---
 
-## Running the tests
+## Configuration
+
+### Tool groups
+
+Full coverage here is 101 tools across 18 groups. That is more than an LLM can choose
+between reliably, so the node publishes only the groups named in **Tool groups**. Leaving
+the field empty publishes the default set: **71 tools** across `appointments`,
+`calendars`, `contact_notes`, `contact_tasks`, `contacts`, `conversations`,
+`custom_fields`, `messages`, `opportunities`, `pipelines` and `users`, which is everything
+an agent needs to run lead nurture and appointment booking end to end. `users` is in the
+default set despite being administrative: it is three read-only tools, and it is the only
+way to resolve the user ids that `assignedTo`, `followers` and `assignedUserId` need.
+`message_sending` is deliberately not: reading messages is default, but originating one
+from an unattended pipeline cannot be recalled, so sending is an explicit opt-in.
+
+Available groups:
+
+`appointment_notes`, `appointments`, `businesses`, `calendar_groups`, `calendars`,
+`contact_notes`, `contact_tasks`, `contacts`, `conversations`, `custom_fields`,
+`custom_values`, `location_tags`, `locations`, `message_sending`, `messages`,
+`opportunities`, `pipelines`, `users`.
+
+A tool in a group that is not published is invisible to the agent and refused if invoked
+anyway. Group names are matched case-insensitively. A name this node does not implement is
+reported as a warning in the editor; at runtime it is dropped from the selection with a
+warning in the job log, and a `toolGroups` value that names *only* unknown groups stops
+the pipeline at startup. Falling back to the defaults there would publish more tools than
+the misspelled config asked for.
+
+### Pagination
+
+Every list tool returns the same envelope: `{items, count, total, next, has_more}`. Ask
+for another page only while `has_more` is true, and pass `next` back as the parameter the
+tool's description names. `next` is null when there is no next page. `total` is null on
+most endpoints, and null there means unknown rather than zero.
+
+**18 list tools always report `total: null`, by design rather than by defect.** Their
+endpoints send no record count at all, so there is nothing to report and the node does not
+synthesise one. Measured by running the live suite against a real sub-account, not inferred
+from the specs:
+
+`appointment_list`, `appointment_notes_list`, `blocked_slot_list`, `business_list`,
+`calendar_group_list`, `calendar_list`, `contact_appointments_list`,
+`contact_list_by_business`, `contact_notes_list`, `contact_tasks_list`,
+`custom_field_list`, `custom_value_list`, `location_tags_list`, `location_tasks_search`,
+`lost_reason_list`, `message_list`, `pipeline_list`, `user_list_by_location`.
+
+Do not treat a null `total` from any of them as an empty result or as a bug: page with
+`has_more` instead. The tools that do report a count are `contact_list`, `contact_search`,
+`conversation_search`, `message_export`, `opportunity_search`,
+`opportunity_search_advanced` and `user_search`. Two additional tools,
+`contact_list_by_business` and `lost_reason_list`, read a count field their endpoints
+document, but no observed live response ever carried it, which is why they stay in the
+null list above.
+
+GoHighLevel does not have one pagination style. The contacts list pages on a
+`startAfter` plus `startAfterId` pair, the searches page on an opaque `searchAfter` value,
+and several endpoints page on a `skip` offset. GoHighLevel also carries its cursors on the
+records rather than on the response root, so the last page has one too. The node compares
+the page size it received against the size it asked for instead of trusting cursor
+presence, which is what keeps `has_more` from claiming a page that does not exist.
+
+Maximum page size is per endpoint, not global: `appointment_notes_list` caps at 20,
+`message_export` at 500, and the rest at 100, which is the node's own ceiling on the
+endpoints where GoHighLevel publishes no maximum. Sending a larger value is a hard 400
+rather than a silent clamp, so the node clamps before the request goes out.
+
+### Custom fields
+
+Read and write use opposite shapes, and GoHighLevel rejects the wrong one. Reads return
+custom fields as one object keyed by field id (`{"<field id>": <value>}`). Creates and
+updates take an array (`[{"id": "<field id>", "field_value": <value>}]`). A record from a
+get tool cannot be passed back to an update unchanged. Use `custom_field_list` (group
+`custom_fields`) to discover field ids.
+
+Several write tools, including the contact, opportunity and custom field creates and
+updates, accept an `extra` object. It is merged into the request body after the typed
+parameters, so it reaches any API field this node does not model explicitly:
+
+```json
+{ "firstName": "Ada", "extra": { "someUndocumentedField": "value" } }
+```
+
+`tags` cannot be smuggled through `extra` on an update or an upsert. GoHighLevel replaces
+the whole tag array rather than adding to it, so sending it there would delete the tags you
+did not list; use `contact_tags_add` and `contact_tags_remove` instead. `contact_create`
+takes `tags` as a normal parameter, since a contact being created has none to lose.
+
+### Tags have a sub-account-level side effect
+
+`contact_tags_add` is not only a per-contact write. Adding a tag name that does not exist
+yet **defines that tag on the whole sub-account**, where it shows up in `location_tags_list`
+and in the GoHighLevel UI from then on. `contact_tags_remove` takes the tag off the contact
+and leaves the definition behind. Only `location_tags_delete` (group `location_tags`, opt
+in) removes a definition.
+
+This matters for anything that loops. An agent that tags a few thousand contacts with
+generated names, then removes the tags again, leaves a few thousand tag definitions on the
+sub-account, and nothing in the contacts group can clean them up. Reuse the names
+`location_tags_list` already reports, or publish `location_tags` alongside `contacts` so
+whatever creates definitions can also remove them. Confirmed live against a real sub-account,
+not read out of the spec: the specs describe neither half of this.
+
+---
+
+## Authentication
+
+The node accepts exactly one credential: a **sub-account Private Integration Token**.
+Create it under Settings -> Private Integrations, pick the scopes, and copy the token when
+it is shown. There is no way to read it again afterwards.
+
+Three consequences are worth knowing before you deploy this node.
+
+**One credential reaches exactly one sub-account.** A location token authenticates that
+location and nothing else. There is no fan-out: minting per-location tokens from an agency
+credential runs through `POST /oauth/locationToken`, which is OAuth-only and refuses a
+Private Integration Token. N sub-accounts need N node instances, each with its own token
+and its own `locationId`. Agency-scoped endpoints answer `403 Forbidden resource` to a
+sub-account token, and no configuration change grants access.
+
+**Rotation is a silent cliff.** Rotating with "expire later" keeps the old token working
+for exactly 7 days and then stops it, with nothing in the API signalling the deadline
+beforehand. Rotating with "expire now" breaks it immediately. A 401 raised by this node
+carries that explanation rather than a bare "unauthorized", because a rotation about a week
+earlier is the most likely cause.
+
+**Editing scopes does not mint a new token.** The existing token keeps working, so nothing
+looks broken, but calls that need a scope you removed start failing while the credential
+still authenticates. GoHighLevel answers those with `401 The token is not authorized for
+this scope`, which the node passes through with a note that scopes are edited on the
+Private Integration itself.
+
+### A 401 is not always a credential problem
+
+Four error shapes are worth naming, because all four look like auth failures and none of
+them is one.
+
+- A missing or mismatched `locationId` returns `403 The token does not have access to this
+  location`, which blames the token for a missing parameter.
+- A mis-cased path returns 401 rather than 404.
+- A missing required parameter can return 401 too. `GET /users/search` called bare answers
+  `401 E01 - Unauthorized request`, and the same call answers 422 naming the parameter once
+  a `locationId` is supplied. The status depends on what else you sent, not on the token.
+- The gateway in front of the API answers 401 for its own failures. One was captured live
+  carrying the body text `Command timed out`, which is a timeout rather than anything to do
+  with the credential.
+
+The node rewrites all four into messages that name the real cause, and its 401 fall-through
+claims a credential problem only when the body actually complains about one or carries no
+message at all. A timeout is reported as a timeout and is worth retrying; nothing there
+should send anyone to rotate a working token.
+
+### Errors carry more than a message
+
+Some GoHighLevel errors name the record that caused them, and the id is the way out of the
+error. `conversation_create` for a contact that already has a conversation answers HTTP 400
+with `{"message": "Conversation already exists", "canonicalCode":
+"CONVERSATIONS_CONVERSATION_ALREADY_EXISTS", "conversationId": "..."}`, and that is the
+common case rather than an edge one: creating a contact through the API creates its
+conversation too. The node carries every id the body names, plus `canonicalCode` and
+`traceId`, into the raised message and onto the exception, so the agent can use the existing
+conversation instead of stopping at "already exists".
+
+### Why there is no OAuth option
+
+GoHighLevel's OAuth access tokens last about 24 hours, and its refresh tokens are
+single-use: the moment you spend one, the old refresh token is dead and a new one comes
+back in the response. A node's only credential store is static config, which it cannot
+write to, so the new refresh token would be thrown away. The pipeline would work for
+roughly a day, refresh once successfully, work for another day, then present an
+invalidated refresh token and die. That failure is delayed, silent, and unrecoverable
+without a browser consent flow, and pasting the original refresh token back in does not
+fix it. Supporting OAuth needs a durable secret store the node can write to on every
+refresh, with a lock so concurrent runs cannot race. Until that exists, the Private
+Integration Token is the only credential in this API that static config is the correct
+store for.
+
+The legacy v1 API key is not accepted either. v1 reached end of support on 31 December
+2025, new keys can no longer be generated, and a v1 key will never authenticate against
+`services.leadconnectorhq.com`.
+
+---
+
+## Notes
+
+### Rate limits
+
+Measured against a sub-account Private Integration Token, not assumed from the docs: **25
+requests per 10 seconds** and **10,000 per day**. The 100 per 10 seconds published for
+marketplace apps does not apply here. Every response carries `x-ratelimit-max`,
+`x-ratelimit-remaining`, `x-ratelimit-interval-milliseconds`, `x-ratelimit-limit-daily`,
+`x-ratelimit-daily-remaining` and `x-ratelimit-daily-reset`.
+
+GoHighLevel sends no `Retry-After`, not even on the 429 itself, so the client computes its
+own wait: one burst window (`x-ratelimit-interval-milliseconds`, 10000 on every observed
+response), up to three attempts. If the wait would exceed the 30-second request timeout
+the call fails immediately with the wait time in the message rather than blocking the
+pipeline. `x-ratelimit-daily-reset` is deliberately never used as a sleep: it is a
+duration in milliseconds, about 24 hours, and treating it as a timestamp would produce a
+sleep of roughly 55 years. Exhausting the daily budget is a circuit break rather than
+something to retry, so the node reports it and stops.
+
+### Read-only mode
+
+With **Read-only mode** enabled, every tool that creates, updates or deletes is dropped
+from the published set: the agent does not see it in `tool.query`, and invoking it anyway
+is refused. The `request` tool stays published, because it is still a working read tool,
+but accepts only GET.
+
+Hiding rather than refusing is a deliberate departure from `tool_pipedrive`, which
+publishes its write tools in read-only mode and blocks them at invoke time. An agent
+cannot tell in advance that a published tool is blocked, so it spends a turn finding out,
+and roughly 40 tools it can only ever fail on are 40 tools' worth of wasted context.
+
+### Running the tests
 
 ```bash
 # Stubbed suite: no credentials, no network

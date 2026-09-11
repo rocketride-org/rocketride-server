@@ -381,6 +381,8 @@ are shared fragments and are ignored):
 - warns when a field with objective complexity signals (a `textarea`
   widget or a large enum) lacks a `###` subsection under `## Configuration`
 
+Run it for one node with `python3 scripts/validate-node-readme.py nodes/src/nodes/<node>`; `./builder docs:validate` (part of `docs:test`) validates the whole corpus (blocking).
+
 The validator checks structure, not truth. Whether the prose accurately
 describes the code is a review concern (CodeRabbit on the PR, plus the
 release documentation pass).

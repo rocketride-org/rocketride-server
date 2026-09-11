@@ -223,6 +223,14 @@ function makeRunPytestAction(options = {}) {
                 extraArgs,
                 execOpts: { task, cwd: PACKAGE_DIR, env: testEnv },
             });
+
+            // The node README schema validator's own tests live at the repo
+            // root; they are part of the node contract, so they run here.
+            await runPytest({
+                engine: ENGINE,
+                testsDir: path.join(PROJECT_ROOT, 'tests', 'test_validate_node_readme.py'),
+                execOpts: { task, cwd: PROJECT_ROOT, env: testEnv },
+            });
         }
     };
 }

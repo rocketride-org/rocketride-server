@@ -141,6 +141,26 @@ function makeTestAction() {
 	};
 }
 
+/**
+ * docs:validate — the deterministic documentation checks, run as a builder
+ * task so `docs:test` (and therefore `./builder test`) carries them; CI does
+ * not own them. Two phases:
+ *   1. client-doc parity — blocking
+ *   2. the whole node corpus (--all) — blocking
+ */
+function makeValidateAction() {
+	return {
+		description: 'Validate documentation schemas',
+		run: async (ctx, task) => {
+			// 1. client-doc parity — blocking
+			await execCommand('python3', ['scripts/validate-client-docs.py'], { task, cwd: PROJECT_ROOT });
+
+			// 2. the whole node corpus — blocking now that it is clean
+			await execCommand('python3', ['scripts/validate-node-readme.py', '--all', 'nodes/src/nodes'], { task, cwd: PROJECT_ROOT });
+		},
+	};
+}
+
 function makeExportAction() {
 	return {
 		description: 'Export docs-owned files to their package destinations',
@@ -229,10 +249,15 @@ module.exports = {
 			name: 'docs:serve',
 			action: makeServeAction,
 		},
+		{ name: 'docs:validate', action: makeValidateAction },
 		{
 			name: 'docs:test',
-			action: makeTestAction,
+			action: () => ({
+				description: 'Test docs helpers',
+				steps: ['docs:validate', 'docs:unit'],
+			}),
 		},
+		{ name: 'docs:unit', action: makeTestAction },
 		{
 			name: 'docs:export',
 			action: makeExportAction,
