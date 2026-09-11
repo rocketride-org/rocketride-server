@@ -154,13 +154,22 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content }) =
 						<table style={S.table}>{children}</table>
 					</div>
 				),
-				th: ({ children }: any) => <th style={{ padding: '6px 10px', borderBottom: '1px solid var(--rr-border)', textAlign: 'left', fontWeight: 600, fontSize: '0.92em', color: 'var(--rr-text-secondary)' }}>{children}</th>,
-				td: ({ children }: any) => <td style={{ padding: '6px 10px', borderBottom: '1px solid var(--rr-border)', fontSize: '0.92em' }}>{children}</td>,
+				// No `fontSize` on the cells: `S.table` already carries the 0.92em,
+				// and declaring it again here multiplied the two (13px host -> 11px
+				// cells, where the intent was 12px).
+				th: ({ children }: any) => <th style={{ padding: '6px 10px', borderBottom: '1px solid var(--rr-border)', textAlign: 'left', fontWeight: 600, color: 'var(--rr-text-secondary)' }}>{children}</th>,
+				td: ({ children }: any) => <td style={{ padding: '6px 10px', borderBottom: '1px solid var(--rr-border)' }}>{children}</td>,
 				// A picture in an answer is bounded by the bubble it is in. Without
 				// this a wide image widens its container instead of fitting it, which
 				// on a phone pushes the whole transcript sideways.
-				img: ({ src, alt }: any) => (
-					<img src={src} alt={alt ?? ''} style={{ maxWidth: '100%', height: 'auto' }} />
+				//
+				// `title`, `width` and `height` are forwarded rather than dropped:
+				// SANITIZE_SCHEMA allows width and height on an img precisely so a
+				// document can state a picture's aspect, and the style below keeps
+				// them honest — the width becomes an upper bound, and `height: auto`
+				// overrides a stated height rather than stretching the image.
+				img: ({ src, alt, title, width, height }: any) => (
+					<img src={src} alt={alt ?? ''} title={title} width={width} height={height} style={{ maxWidth: '100%', height: 'auto' }} />
 				),
 				a: ({ href, children }: any) => {
 					// Only allow safe URL schemes — reject javascript:, data:, vbscript: etc.

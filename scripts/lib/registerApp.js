@@ -41,6 +41,7 @@
 
 'use strict';
 
+const crypto = require('node:crypto');
 const fs   = require('node:fs');
 const path = require('node:path');
 const { BUILD_ROOT, DIST_ROOT, setState } = require('./index');
@@ -51,6 +52,27 @@ const APPS_BASE       = process.env.APPS_BASE_URL ?? 'apps';
 
 // Single source of truth for the shell contract version (freeze auto-writes it).
 const APIVER_TS = path.join(__dirname, '..', '..', 'packages', 'shell', 'src', 'apiver.ts');
+
+/**
+ * Cache-busting stamp for an app's dev entry URL: the first 8 hex of the
+ * SHA-256 of the bundle it points at.
+ *
+ * Read from `build/apps/<appId>/remoteEntry.js`, which the bundle step has
+ * written by the time registration runs. A bundle that is not there yet (an
+ * icon-only or manifest-only registration, or a first run where the build
+ * failed) stamps `0`: the URL stays stable rather than inventing a value that
+ * would change on the next call.
+ *
+ * @param {string} buildDir - The app's build output directory.
+ * @returns {string} The stamp.
+ */
+function entryStamp(buildDir) {
+	try {
+		return crypto.createHash('sha256').update(fs.readFileSync(path.join(buildDir, 'remoteEntry.js'))).digest('hex').slice(0, 8);
+	} catch {
+		return '0';
+	}
+}
 
 // Memoized across calls: apiver.ts is process-global and does not change during
 // a build run, so it is read and parsed once (including a memoized null). This
@@ -340,10 +362,17 @@ function registerApp(appRoot) {
 				// evening: four rounds of "the change is not showing" against code
 				// that was already correct on disk.
 				//
-				// Registration runs once per build, so the stamp changes exactly when
-				// the bytes do. The versioned SaaS path (`/apps/<id>/v<N>/…`) needs no
-				// such thing — its URL already carries the version.
-				entry:         `/${APPS_BASE}/${servedName}/remoteEntry.js?b=${Date.now().toString(36)}`,
+				// The stamp is the BYTES, not the clock. Registration runs once per
+				// build, but the bundle step ahead of it does not: `makeBundleAction`
+				// returns early when nothing changed, so a clock stamp would move on
+				// every build of anything, re-fetching remotes nobody rebuilt — and
+				// would make `dist/server/static/apps.json` differ between two builds
+				// of the same commit. A content hash changes exactly when the bytes do
+				// and keeps the release archive reproducible.
+				//
+				// The versioned SaaS path (`/apps/<id>/v<N>/…`) needs none of this —
+				// its URL already carries the version.
+				entry:         `/${APPS_BASE}/${servedName}/remoteEntry.js?b=${entryStamp(buildDir)}`,
 				// Shell contract version this app was built against (for prune analysis).
 				...(shellApiVersion !== null ? { shellApiVersion } : {}),
 				// App monetization mode
