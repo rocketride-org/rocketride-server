@@ -40,6 +40,7 @@ import contextlib
 import io
 import logging
 import os
+import threading
 import time
 from typing import Any, Dict, List, NamedTuple, Optional, Tuple
 
@@ -80,11 +81,37 @@ def _to_detection(label: str, score: float, x1: float, y1: float, x2: float, y2:
     }
 
 
-def _parse_prompt(prompt: str) -> List[str]:
-    """Split a detection prompt on commas/periods into a clean class list."""
+def _parse_prompt(prompt: Optional[str]) -> List[str]:
+    """Split a detection prompt on commas/periods into a clean class list.
+
+    None/empty/whitespace-only prompts yield []; empty segments from doubled or
+    trailing separators ("cat, dog." / "cat . dog .") are dropped.
+    """
     if not prompt:
         return []
-    return [c.strip() for c in prompt.replace('.', ',').split(',') if c.strip()]
+    return [c.strip() for c in str(prompt).replace('.', ',').split(',') if c.strip()]
+
+
+# Guards the mutate/load/restore window of _untie_mm_gdino_bbox_heads. The model
+# server loads models on concurrent threads, and ``_tied_weights_keys`` is
+# process-wide class state: without the lock an overlapping load would either
+# see half-stripped ties or restore a stale (already-stripped) mapping.
+_MM_GDINO_TIE_LOCK = threading.Lock()
+
+
+def _strip_bbox_ties(ties: Any) -> Any:
+    """Return ``ties`` without its bbox_embed entries, preserving the container type.
+
+    transformers has shipped ``_tied_weights_keys`` both as a list of key
+    patterns (<= 4.x) and as a ``{target: source}`` dict (5.x); either is
+    filtered on the key. Returns None for anything else (absent/unknown shape)
+    so the caller can skip the untie entirely.
+    """
+    if isinstance(ties, dict):
+        return {k: v for k, v in ties.items() if 'bbox_embed' not in k}
+    if isinstance(ties, (list, tuple)):
+        return type(ties)(k for k in ties if 'bbox_embed' not in str(k))
+    return None
 
 
 @contextlib.contextmanager
@@ -106,14 +133,33 @@ def _untie_mm_gdino_bbox_heads(model_cls: Any):
     the tie declarations to populate layers 1..5, so leaving the ties stripped
     would silently give it uninitialized box heads on a later load. The original
     mapping is restored on exit (also on error). No-op when upstream has already
-    dropped the bbox ties (no 'bbox_embed' entries).
+    dropped the bbox ties (no 'bbox_embed' entries) or the attribute is absent.
+
+    Thread-safe: the whole scope runs under ``_MM_GDINO_TIE_LOCK`` so concurrent
+    loads on the model server serialize on the class mutation. Whatever was
+    there — a list, a dict, an inherited value, or nothing at all — is restored
+    exactly: an attribute the class inherited (not in its own ``__dict__``) is
+    deleted again rather than pinned as a shadowing copy.
     """
-    original = model_cls._tied_weights_keys
-    model_cls._tied_weights_keys = {k: v for k, v in original.items() if 'bbox_embed' not in k}
-    try:
-        yield
-    finally:
-        model_cls._tied_weights_keys = original
+    if _strip_bbox_ties(getattr(model_cls, '_tied_weights_keys', None)) is None:
+        yield  # absent or unrecognised shape: nothing to untie
+        return
+
+    with _MM_GDINO_TIE_LOCK:
+        own = '_tied_weights_keys' in vars(model_cls)
+        original = getattr(model_cls, '_tied_weights_keys', None)
+        stripped = _strip_bbox_ties(original)
+        if stripped is None:  # raced with a concurrent restore to an unknown shape
+            yield
+            return
+        model_cls._tied_weights_keys = stripped
+        try:
+            yield
+        finally:
+            if own:
+                model_cls._tied_weights_keys = original
+            else:
+                del model_cls._tied_weights_keys
 
 
 def _outputs_to_cpu(outputs: Any) -> Any:

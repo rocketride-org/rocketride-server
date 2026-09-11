@@ -2,10 +2,15 @@
 
 import contextlib
 import sys
+import threading
 import types
 
 import pytest
-from PIL import Image
+
+try:
+    from PIL import Image
+except ImportError:  # the engine's embedded python ships without Pillow
+    Image = None
 
 import ai.common.models.vision.detection as detmod
 from ai.common.models.vision.detection import DetectorLoader, Detector
@@ -130,6 +135,101 @@ def test_untie_mm_gdino_bbox_heads_noop_without_bbox_ties():
     assert FakeModelCls._tied_weights_keys == only_class
 
 
+@pytest.mark.parametrize(
+    'prompt, expected',
+    [
+        (None, []),
+        ('', []),
+        ('   ', []),
+        ('cat', ['cat']),
+        ('cat, dog', ['cat', 'dog']),
+        ('cat . dog .', ['cat', 'dog']),  # Grounding DINO style: '.' separators, trailing '.'
+        ('cat,,dog,', ['cat', 'dog']),
+        ('cat. dog. ', ['cat', 'dog']),
+    ],
+)
+def test_parse_prompt_handles_empty_and_trailing_separators(prompt, expected):
+    assert detmod._parse_prompt(prompt) == expected
+
+
+def test_untie_mm_gdino_bbox_heads_handles_list_form():
+    """Older transformers (<= 4.x) declare _tied_weights_keys as a list of patterns."""
+    original = ['bbox_embed.(?![0])\\d+', 'class_embed.(?![0])\\d+', 'model.decoder.bbox_embed']
+
+    class FakeModelCls:
+        _tied_weights_keys = list(original)
+
+    with detmod._untie_mm_gdino_bbox_heads(FakeModelCls):
+        assert FakeModelCls._tied_weights_keys == ['class_embed.(?![0])\\d+']
+    assert FakeModelCls._tied_weights_keys == original
+
+
+def test_untie_mm_gdino_bbox_heads_noop_when_absent():
+    class FakeModelCls:
+        pass
+
+    with detmod._untie_mm_gdino_bbox_heads(FakeModelCls):
+        assert not hasattr(FakeModelCls, '_tied_weights_keys')
+    assert not hasattr(FakeModelCls, '_tied_weights_keys')
+
+
+def test_untie_mm_gdino_bbox_heads_restores_inherited_attribute():
+    """An inherited declaration is stripped on the subclass only and the shadow removed on exit."""
+    original = {'bbox_embed.(?![0])\\d+': 'bbox_embed.0', 'model.decoder.class_embed': 'class_embed'}
+
+    class Base:
+        _tied_weights_keys = dict(original)
+
+    class Sub(Base):
+        pass
+
+    with detmod._untie_mm_gdino_bbox_heads(Sub):
+        assert Sub._tied_weights_keys == {'model.decoder.class_embed': 'class_embed'}
+        assert Base._tied_weights_keys == original  # base class untouched
+    assert '_tied_weights_keys' not in vars(Sub)  # absence restored, not pinned as a copy
+    assert Sub._tied_weights_keys == original
+
+
+def test_untie_mm_gdino_bbox_heads_serializes_concurrent_loads():
+    """Two threads loading the same class: the second waits for the first's restore,
+    so it never captures the stripped mapping as its 'original'.
+    """
+    original = {'bbox_embed.(?![0])\\d+': 'bbox_embed.0', 'model.decoder.class_embed': 'class_embed'}
+
+    class FakeModelCls:
+        _tied_weights_keys = dict(original)
+
+    a_inside = threading.Event()
+    a_release = threading.Event()
+    b_inside = threading.Event()
+    seen = {}
+
+    def load_a():
+        with detmod._untie_mm_gdino_bbox_heads(FakeModelCls):
+            a_inside.set()
+            a_release.wait(5)
+
+    def load_b():
+        with detmod._untie_mm_gdino_bbox_heads(FakeModelCls):
+            seen['b_saw_stripped'] = 'bbox_embed' not in ''.join(FakeModelCls._tied_weights_keys)
+            b_inside.set()
+
+    ta = threading.Thread(target=load_a)
+    tb = threading.Thread(target=load_b)
+    ta.start()
+    assert a_inside.wait(5)
+    tb.start()
+    assert not b_inside.wait(0.2)  # B is blocked while A holds the untie scope
+    assert detmod._MM_GDINO_TIE_LOCK.locked()
+    a_release.set()
+    ta.join(5)
+    assert b_inside.wait(5)
+    tb.join(5)
+
+    assert seen['b_saw_stripped'] is True
+    assert FakeModelCls._tied_weights_keys == original
+
+
 def _fake_client_factory(captured):
     class FakeClient:
         def __init__(self, addr):
@@ -165,6 +265,7 @@ def test_facade_load_once_ignores_threshold_and_prompt(monkeypatch):
     assert opts.get('backend') == 'rfdetr'
 
 
+@pytest.mark.skipif(Image is None, reason='Pillow not installed')
 def test_facade_proxy_sends_prompt_threshold_and_decodes(monkeypatch):
     dets = [
         {'label': 'cat', 'score': 0.9, 'box': {'x1': 0, 'y1': 0, 'x2': 1, 'y2': 1}, 'centroid': {'x': 0.5, 'y': 0.5}}
@@ -189,6 +290,7 @@ def test_facade_proxy_sends_prompt_threshold_and_decodes(monkeypatch):
     assert captured.get('disconnected') is True
 
 
+@pytest.mark.skipif(Image is None, reason='Pillow not installed')
 def test_facade_proxy_rescales_boxes_to_original(monkeypatch):
     """Large image is downscaled for inference; returned boxes map back to original coords."""
     dets = [
@@ -291,6 +393,7 @@ def test_outputs_to_cpu_moves_all_tensors():
     assert out.logits.device == 'cuda:1'  # original untouched
 
 
+@pytest.mark.skipif(Image is None, reason='Pillow not installed')
 def test_mmgdino_postprocess_receives_host_tensors(monkeypatch):
     """detect() must hand transformers CPU tensors and plain (h, w) sizes even
     when the model runs on CUDA — the fake processor replicates transformers'
