@@ -74,9 +74,16 @@ export default function OptionInfoIcon({ description, descriptionId }: OptionInf
 		event.stopPropagation();
 	};
 
+	// Parsed ONCE, and used for both renderings. The hidden node is the only
+	// copy a screen reader ever reads, so leaving it as raw text meant a
+	// description carrying `<code>` or `<br>` was announced with its tag names
+	// spoken aloud — the markup a sighted user never sees, read out to the one
+	// user who cannot see the tooltip it was written for.
+	const richDescription = sanitizeAndParseHtmlToReact(description);
+
 	return (
 		<Box component="span" sx={{ display: 'inline-flex', alignItems: 'center', ml: 'auto', pl: 1 }}>
-			<Tooltip title={sanitizeAndParseHtmlToReact(description)} placement="right">
+			<Tooltip title={richDescription} placement="right">
 				<Box component="span" onMouseDown={suppressOptionActivation} onClick={suppressOptionActivation} sx={{ display: 'inline-flex', alignItems: 'center', cursor: 'default' }}>
 					<InfoIcon aria-hidden="true" sx={{ color: 'text.secondary', fontSize: 16 }} />
 				</Box>
@@ -85,7 +92,7 @@ export default function OptionInfoIcon({ description, descriptionId }: OptionInf
 			    option's aria-describedby. Clipped rather than display:none, which
 			    would take it out of the accessibility tree along with the pixels. */}
 			<Box component="span" id={descriptionId} sx={{ position: 'absolute', width: 1, height: 1, p: 0, m: -1, overflow: 'hidden', clip: 'rect(0 0 0 0)', whiteSpace: 'nowrap', border: 0 }}>
-				{description}
+				{richDescription}
 			</Box>
 		</Box>
 	);

@@ -53,6 +53,23 @@ test('option help mirrors its text into the node the option describes itself wit
 	assert.match(markup, new RegExp(DESCRIPTION));
 });
 
+test('the hidden node carries what the tooltip carries, not the raw source text', () => {
+	// The hidden node is the ONLY copy assistive technology reads — the tooltip
+	// is pointer-only and aria-hidden. Rendered as raw text, a description
+	// carrying `<code>` or `<br>` was announced with its tag names spoken: the
+	// markup a sighted user never sees, read aloud to the one user who cannot
+	// see the tooltip it was written for.
+	//
+	// Asserted as ONE value feeding both renderings rather than by rendering
+	// markup: `sanitizeAndParseHtmlToReact` sanitizes with dompurify, which
+	// needs a real DOM, and this suite runs in plain node with none.
+	const icon = OptionInfoIcon({ description: DESCRIPTION, descriptionId: DESCRIPTION_ID }) as ReactElement<Record<string, unknown>>;
+	const [tooltip, hidden] = Children.toArray(icon.props.children) as ReactElement<Record<string, unknown>>[];
+
+	assert.equal(hidden.props.id, DESCRIPTION_ID);
+	assert.strictEqual(hidden.props.children, tooltip.props.title);
+});
+
 test('reading option help does not toggle the option it sits on', () => {
 	const icon = OptionInfoIcon({ description: DESCRIPTION, descriptionId: DESCRIPTION_ID }) as ReactElement<Record<string, unknown>>;
 	const tooltip = Children.toArray(icon.props.children)[0] as ReactElement<Record<string, unknown>>;
