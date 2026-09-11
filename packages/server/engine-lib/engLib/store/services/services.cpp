@@ -786,14 +786,42 @@ ErrorOr<IServices::ServiceSchema> IServices::getField(
             // Determines if enum names are specified
             const auto hasEnumNames = fieldInfo.isMember("enumNames");
 
-            // Declare our enum values and names arrays
+            // Declare our enum values, names and descriptions arrays
             json::Value enumValues(json::arrayValue);
             json::Value enumNames(json::arrayValue);
+            json::Value enumDescriptions(json::arrayValue);
+
+            // Whether any option actually carries help text
+            bool hasEnumDescriptions = false;
 
             // Grab our input arrays
             const auto &inputValues = fieldInfo["enum"];
             const auto &inputNames =
                 hasEnumNames ? fieldInfo["enumNames"] : json::nullValue;
+
+            // An option with no help text still needs a slot, so the three
+            // arrays stay index aligned
+            const json::Value noDescription;
+
+            // Every option must land in all three arrays at the same index -
+            // the config panel looks a name and a description up by the
+            // option's position, so appending through here is what keeps them
+            // from drifting apart
+            const auto appendOption = [&](const json::Value &value,
+                                          const json::Value &name,
+                                          const json::Value &description) {
+                enumValues.append(value);
+                enumNames.append(name);
+
+                // Only a non-empty string counts as help text
+                if (description.isString() && !description.asString().empty()) {
+                    enumDescriptions.append(description);
+                    hasEnumDescriptions = true;
+                    return;
+                }
+
+                enumDescriptions.append("");
+            };
 
             // For each item
             for (json::Value::ArrayIndex index = 0; index < inputValues.size();
@@ -801,14 +829,14 @@ ErrorOr<IServices::ServiceSchema> IServices::getField(
                 // Get our item
                 const auto &item = inputValues.get(index, json::nullValue);
 
-                // If it is one or two strings, use the first as the value
-                // and the second (if specified) as the name
+                // If it is one, two or three strings, use the first as the
+                // value, the second (if specified) as the name, and the third
+                // (if specified) as the per-option help text the config panel
+                // shows on that option
                 if (item.isArray()) {
-                    enumValues.append(item[0]);
-                    if (item.size() > 1)
-                        enumNames.append(item[1]);
-                    else
-                        enumNames.append(item[0]);
+                    appendOption(item[0],
+                                 item.size() > 1 ? item[1] : item[0],
+                                 item.size() > 2 ? item[2] : noDescription);
                     continue;
                 }
 
@@ -817,14 +845,11 @@ ErrorOr<IServices::ServiceSchema> IServices::getField(
 
                 // If it is a normal item, just append it and continue
                 if (!itemText.startsWith("*>")) {
-                    // Append the value
-                    enumValues.append(itemText);
-
                     // If we have names, add it, otherwise, just use the value
-                    if (hasEnumNames)
-                        enumNames.append(inputNames.get(index, itemText));
-                    else
-                        enumNames.append(itemText);
+                    appendOption(itemText,
+                                 hasEnumNames ? inputNames.get(index, itemText)
+                                              : json::Value(itemText),
+                                 noDescription);
                     continue;
                 }
 
@@ -847,11 +872,10 @@ ErrorOr<IServices::ServiceSchema> IServices::getField(
 
                 // Now, enumerate them
                 for (auto &itemValue : obj.getMemberNames()) {
-                    enumValues.append(itemValue);
-                    if (hasTitle)
-                        enumNames.append(obj[itemValue][title]);
-                    else
-                        enumNames.append(itemValue);
+                    appendOption(itemValue,
+                                 hasTitle ? obj[itemValue][title]
+                                          : json::Value(itemValue),
+                                 noDescription);
                 }
             }
 
@@ -884,6 +908,11 @@ ErrorOr<IServices::ServiceSchema> IServices::getField(
 
             // Add the enum names
             info.ui["ui:enumNames"] = enumNames;
+
+            // Only emit the descriptions when a service actually authored some,
+            // so every other service's ui schema stays byte identical
+            if (hasEnumDescriptions)
+                info.ui["ui:enumDescriptions"] = enumDescriptions;
 
             // Remove it from the field info - it is obsolete here
             fieldInfo.removeMember("enumNames");
@@ -945,6 +974,17 @@ ErrorOr<IServices::ServiceSchema> IServices::getField(
             // Get the field info (or subfields, etc)
             auto subfield = getField(context, "items", items);
             if (!subfield) return subfield.ccode();
+
+            // react-jsonschema-form resolves a scalar array's option list
+            // against the *array's* ui schema, not the items' one, and
+            // traverseUI only walks children - an item parked in arrayItem
+            // never contributes any ui. Without this the option labels were
+            // dropped on the floor and the dropdown fell back to rendering the
+            // raw enum values. Lift the option metadata onto the array itself;
+            // anything the array declares for itself still wins.
+            for (const auto *key : {"ui:enumNames", "ui:enumDescriptions"})
+                if (subfield->ui.isMember(key) && !info.ui.isMember(key))
+                    info.ui[key] = subfield->ui[key];
 
             // Get the single field
             info.arrayItem.push_back(_mv(subfield));

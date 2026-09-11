@@ -39,7 +39,7 @@
 		"pipedrive.companyDomain": {
 			"type": "string",
 			"title": "Company Domain",
-			"description": "Your Pipedrive company domain, i.e. the \"acme\" in https://acme.pipedrive.com. When set, requests go to https://{domain}.pipedrive.com/api/v1; otherwise https://api.pipedrive.com/api/v1 is used.",
+			"description": "Just the subdomain: the <b>acme</b> in <code>https://acme.pipedrive.com</code>, not the whole URL. Requests then go to <code>https://acme.pipedrive.com/api/v1</code>. <br><br>Leave it blank to use the shared <code>https://api.pipedrive.com/api/v1</code> host. An API token belongs to one company, so a domain from a different account fails as a 401 or 404 on every tool rather than as an obvious configuration error.",
 			"default": "",
 			"optional": true
 		},
@@ -56,37 +56,37 @@
 		"pipedrive.toolGroups": {
 			"type": "array",
 			"title": "Tool groups",
-			"description": "Which groups of Pipedrive tools this node publishes to the agent. The full API is 255 tools, which is more than an LLM can choose between reliably, so only the selected groups are exposed. Pick one or more from the list; tool counts are shown per group, and selections totalling more than 120 log a warning but still run. Selecting <b>All groups</b> publishes everything and skips that warning.",
+			"description": "Which groups of Pipedrive tools this node publishes to the agent. A group is one resource area of the CRM; every tool belongs to exactly one, and a group you do not select is invisible to the agent. <br><br>The full v1 surface is 255 tools, which is well past the point where an LLM picks the right one reliably, and every published tool spends context on every turn. So pick the smallest set that covers the job rather than everything that might one day be useful. Each option shows its tool count; hover an option to see what it covers. <br><br>Selections totalling more than 120 tools log a warning and still run. <b>All groups</b> publishes everything and skips that warning.",
 			"uniqueItems": true,
 			"items": {
 				"type": "string",
 				"enum": [
-					["deals", "Deals (27)"],
-					["persons", "Persons (18)"],
-					["organizations", "Organizations (18)"],
-					["activities", "Activities (13)"],
-					["pipelines", "Pipelines (8)"],
-					["stages", "Stages (7)"],
-					["notes", "Notes (11)"],
-					["search", "Search (4)"],
-					["call_logs", "Call logs (5)"],
-					["fields", "Custom fields (6)"],
-					["files", "Files (8)"],
-					["filters", "Filters (7)"],
-					["goals", "Goals (5)"],
-					["leads", "Leads (12)"],
-					["mailbox", "Mailbox (6)"],
-					["misc", "Misc: currencies, channels, meetings (8)"],
-					["org_relationships", "Organization relationships (5)"],
-					["permission_sets", "Permission sets (3)"],
-					["products", "Products (16)"],
-					["projects", "Projects (22)"],
-					["roles", "Roles (13)"],
-					["subscriptions", "Subscriptions (9)"],
-					["teams", "Teams (8)"],
-					["users", "Users (12)"],
-					["webhooks", "Webhooks (3)"],
-					["all", "All groups (255) - skips the size warning"]
+					["deals", "Deals (27)", "Deal records and everything hanging off them: products, participants, followers, files and the change log. Includes <code>deal_list</code>, <code>deal_create</code>, <code>deal_search</code> and the <code>deal_summary</code> and <code>deal_timeline</code> roll-ups."],
+					["persons", "Persons (18)", "Contacts: create, update, merge and search people, plus the deals, activities and files attached to them. Includes <code>person_list</code>, <code>person_search</code> and <code>person_merge</code>."],
+					["organizations", "Organizations (18)", "Companies: create, update, merge and search organizations, plus their people, deals, activities and files. Includes <code>organization_list</code>, <code>organization_search</code> and <code>organization_persons_list</code>."],
+					["activities", "Activities (13)", "Calls, meetings and tasks, together with the account's custom activity types and fields. Includes <code>activity_list</code>, <code>activity_create</code> and <code>activity_mark_done</code>."],
+					["pipelines", "Pipelines (8)", "Pipelines and their reporting. Start here to discover the account's pipeline and stage layout. Includes <code>pipeline_list</code>, <code>pipeline_deals_list</code> and <code>pipeline_conversion_stats</code>."],
+					["stages", "Stages (7)", "The stages inside a pipeline and the deals sitting in each one. Includes <code>stage_list</code>, <code>stage_deals_list</code> and <code>stage_create</code>."],
+					["notes", "Notes (11)", "Notes attached to deals, people, organizations, leads or projects, and the comment threads on them. Includes <code>note_list</code>, <code>note_create</code> and <code>note_comment_create</code>."],
+					["search", "Search (4)", "Cross-record search for when you do not know which record type holds the answer, plus incremental sync. Includes <code>item_search</code>, <code>lookup</code>, <code>item_search_by_field</code> and <code>recents_list</code>."],
+					["call_logs", "Call logs (5)", "Phone call logs and their audio recordings. Includes <code>call_log_list</code>, <code>call_log_create</code> and <code>call_log_recording_add</code>."],
+					["fields", "Custom fields (6)", "Custom field definitions on deals, people, organizations and products. Read this to resolve the 40-character keys custom fields are written with. Includes <code>field_list</code>, <code>field_get</code> and <code>field_create</code>."],
+					["files", "Files (8)", "Files attached to records, including linked Google Drive documents. Includes <code>file_list</code>, <code>file_create</code>, <code>file_download</code> and <code>file_link_remote</code>."],
+					["filters", "Filters (7)", "Saved filters, so an agent can reuse a view the user already built in the Pipedrive UI. Includes <code>filter_list</code>, <code>filter_helpers_get</code> and <code>filter_create</code>."],
+					["goals", "Goals (5)", "Sales goals and how far along they are. Includes <code>goal_find</code>, <code>goal_results_get</code> and <code>goal_create</code>."],
+					["leads", "Leads (12)", "The Leads Inbox: leads, their labels and their sources. Includes <code>lead_list</code>, <code>lead_create</code>, <code>lead_search</code> and <code>lead_label_list</code>."],
+					["mailbox", "Mailbox (6)", "Mail threads and messages synced into Pipedrive, and linking a thread to a deal or lead. Includes <code>mail_thread_list</code>, <code>mail_thread_messages_list</code> and <code>mail_message_get</code>."],
+					["misc", "Misc: currencies, channels, meetings (8)", "Account-level odds and ends: currencies, messaging channels, video-meeting links and billing add-ons. Includes <code>currency_list</code>, <code>channel_create</code> and <code>meeting_link_create</code>."],
+					["org_relationships", "Organization relationships (5)", "Parent and child links between organizations. Includes <code>org_relationship_list</code>, <code>org_relationship_create</code> and <code>org_relationship_update</code>."],
+					["permission_sets", "Permission sets (3)", "Read-only view of the account's permission sets and who is assigned to them. Includes <code>permission_set_list</code> and <code>permission_set_assignments_list</code>."],
+					["products", "Products (16)", "The product catalogue, its variations and prices, and the deals each product is attached to. Includes <code>product_list</code>, <code>product_search</code> and <code>product_variation_list</code>."],
+					["projects", "Projects (22)", "Projects and the boards, phases, tasks and plans they are made of. Includes <code>project_list</code>, <code>project_create</code>, <code>project_task_list</code> and <code>project_phase_list</code>."],
+					["roles", "Roles (13)", "Role administration: create roles, assign users, and control which pipelines and records each role can see. Includes <code>role_list</code>, <code>role_assignment_add</code> and <code>role_pipelines_set</code>."],
+					["subscriptions", "Subscriptions (9)", "Recurring and installment revenue subscriptions attached to deals, and their payment schedules. Includes <code>subscription_find_by_deal</code>, <code>subscription_recurring_create</code> and <code>subscription_payments_list</code>."],
+					["teams", "Teams (8)", "Teams and their membership. Includes <code>team_list</code>, <code>team_user_add</code> and <code>team_list_for_user</code>."],
+					["users", "Users (12)", "User accounts, their permissions, settings and connected third-party accounts. Use it to resolve a name to the user_id that owner filters need. Includes <code>user_list</code>, <code>user_me</code> and <code>user_find</code>."],
+					["webhooks", "Webhooks (3)", "Webhook subscriptions registered by this API token. Includes <code>webhook_list</code>, <code>webhook_create</code> and <code>webhook_delete</code>."],
+					["all", "All groups (255) - skips the size warning", "Publishes every group, all 255 tools including the raw request escape hatch, and skips the 120-tool warning. Meant for scripted callers: an LLM-driven agent picks badly from a list this long."]
 				]
 			},
 			"default": ["deals", "persons", "organizations", "activities", "pipelines", "stages", "notes", "search"]
@@ -106,7 +106,12 @@
 		{
 			"section": "Pipe",
 			"title": "Pipedrive",
-			"properties": ["type", "pipedrive.apiToken", "pipedrive.companyDomain", "pipedrive.readOnly", "pipedrive.toolGroups", "pipedrive.allowRawRequest"]
+			"properties": ["type", "pipedrive.apiToken", "pipedrive.companyDomain", "pipedrive.readOnly", "pipedrive.toolGroups", "pipedrive.allowRawRequest"],
+			"ui": {
+				"ui:options": {
+					"compactDescriptions": true
+				}
+			}
 		}
 	]
 }
