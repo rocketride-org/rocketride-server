@@ -137,6 +137,7 @@ class IGlobal(IGlobalBase):
         - If a numeric HTTP status/code is available, prefix it as "Error <status>:".
         - Then include provider error type and message when present.
         - If no structured fields are available, return the fallback message as-is.
+        - If only the status is known, the fallback text is appended after it.
         - Whitespace is normalized to a single line; content is not truncated.
         """
         parts: list[str] = []
@@ -149,4 +150,6 @@ class IGlobal(IGlobalBase):
                 parts.append('-')
             parts.append(str(emsg))
         message = ' '.join(parts) if parts else fallback
+        if status is not None and not etype and not emsg and fallback:
+            message = f'{message} {fallback}'
         return re.sub(r'\s+', ' ', message).strip()

@@ -89,7 +89,7 @@ def _load_openrouter_cache() -> None:
 # quantizations, Qwen hybrid-thinking DashScope aliases, and explicit `-thinking` snapshots).
 _REASONING_FAMILIES = (
     'deepseek-r1',
-    'nemotron',  # all current Nemotron chat models are hybrid reasoning models
+    'nemotron-3',  # the Nemotron 3 line is hybrid reasoning; the llama-*-nemotron instruct models are not
     'qwen3',
     'qwq',
     'magistral',
