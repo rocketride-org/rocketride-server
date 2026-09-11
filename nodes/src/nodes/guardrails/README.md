@@ -35,6 +35,7 @@ Question text is assembled from both the question objects and any attached conte
 | `enable_content_safety` | boolean | Default true. Detect harmful or unsafe content in output |
 | `enable_pii_detection` | boolean | Default true. Detect personal identifiable information (emails, phones, SSNs, credit cards) in output |
 | `enable_hallucination_check` | boolean | Default false. Verify that output claims are grounded in source documents |
+| `require_grounding` | boolean | Default false. After the `documents` lane was dispatched and returned nothing, treat an answer as a violation when it states a figure the question did not name. Strict enables it |
 | `max_input_length` | number | Default 0. Maximum character count for input text (0 = no limit) |
 | `max_tokens_estimate` | number | Default 0. Maximum estimated token count for input text (0 = no limit) |
 | `expected_format` | string | Default empty. Validate that output matches this format (empty = no check) |
@@ -51,7 +52,7 @@ Three built-in profiles control which fields are exposed in the UI and set sensi
 | Profile            | Behaviour                                                                                                   |
 |--------------------|-------------------------------------------------------------------------------------------------------------|
 | Basic *(default)*  | Prompt injection + PII detection, `warn` mode. Only `policy_mode` is configurable in the UI.               |
-| Strict             | All checks enabled, `block` on violation, `max_input_length` 50000, `max_tokens_estimate` 4096. Exposes `policy_mode`, `max_tokens_estimate`, and `expected_format`. |
+| Strict             | All checks enabled plus `require_grounding`, `block` on violation, `max_input_length` 50000, `max_tokens_estimate` 4096. Exposes `policy_mode`, `require_grounding`, `max_tokens_estimate`, and `expected_format`. Requires the `documents` lane to be wired to have any effect. |
 | Custom             | All checks enabled, `warn` mode. Every field is configurable individually.                                  |
 
 ---
@@ -70,7 +71,7 @@ Run on the `questions` lane before the question is forwarded:
 
 Run on the `answers` lane before the answer is forwarded:
 
-- **Hallucination** (rule `hallucination`, high severity): sentence-level grounding check. Each output sentence is evaluated for keyword overlap (3+ character non-stop words) against the combined source documents; sentences with less than 30% coverage are flagged. The check is skipped when no documents have been received on the `documents` lane.
+- **Hallucination** (rule `hallucination`, high severity): sentence-level grounding check. Each output sentence is evaluated for keyword overlap (3+ character non-stop words) against the combined source documents; sentences with less than 30% coverage are flagged, and that scoring runs only while `enable_hallucination_check` is on. When no documents have been received the check is skipped, unless `require_grounding` is set **and** the `documents` lane was actually dispatched. A pipeline with no `documents` lane never retrieves, so its answers are not treated as ungrounded. After a miss an answer fails only when it states a figure the question did not name, so greetings, acknowledgements and refusals pass however they are worded. Whether a figure is quoted from the question or asserted by the model is decided against the question text, which the node records only when the `questions` lane is wired; without it an explicitly worded refusal is still allowed through. The figure test sees digits only: a spelled-out amount, a non-numeric claim, or a bare magnitude with no currency symbol all pass. Naming an entity is not treated as a claim, because a mention is not an assertion: ordinary replies name things constantly ("I'll check the Salesforce data", "the Help Center may cover it"), so flagging them would drop the same ordinary turns a fixed phrase list did. Strict enables `require_grounding`; Basic and Custom do not.
 - **Content safety** (rule `content_safety`, critical severity): regex patterns across three categories: self-harm, violence (weapon and explosive construction), and illegal activity (hacking, theft, counterfeiting).
 - **PII leak** (rule `pii_leak`, high severity): pattern matches for `email`, `phone_us`, `ssn`, `credit_card`, and `ip_address`.
 - **Format compliance** (rule `format_compliance`, medium severity): only runs when `expected_format` is set. `json` must parse cleanly; `markdown` requires at least one markdown element (heading, bold, code, list marker); `bullet_list` and `numbered_list` require at least half the non-empty lines to be list items.
@@ -109,6 +110,7 @@ Blocking happens silently from the pipeline's point of view: downstream nodes si
 | `max_input_length` | `number` | **Max input length (chars)**<br/>Maximum character count for input text (0 = no limit) | `0` |
 | `max_tokens_estimate` | `number` | **Max tokens (estimate)**<br/>Maximum estimated token count for input text (0 = no limit) | `0` |
 | `policy_mode` | `string` | **Policy mode**<br/>How to handle violations: block (reject), warn (log + continue), log (silent) | `"warn"` |
+| `require_grounding` | `boolean` | **Require grounding**<br/>After a retrieval miss, treat an answer stating a figure the question did not name as a violation. Without this the hallucination check passes when retrieval returned nothing, which is when a model is most likely to answer from memory. | `false` |
 
 ## Source
 
