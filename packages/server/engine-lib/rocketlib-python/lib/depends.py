@@ -50,7 +50,7 @@ else:
     import fcntl
 
 # engLib is built into engine.exe, always available
-from engLib import debug, monitorStatus, error
+from engLib import debug, monitorStatus, error, warning
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -714,20 +714,63 @@ def _save_hash(hash_file: str, hash_value: str):
         f.write(hash_value)
 
 
-# Requirements files carrying this marker are never installed in any lane
-# (see tools/contract_checks: fundamental incompatibilities like surya/trocr's
-# opencv pin). Their pins must not constrain the resolve for everything else.
+# Requirements files carrying this marker as a comment are never installed in
+# any lane (see tools/contract_checks: fundamental incompatibilities like
+# surya/trocr's opencv pin). Their pins must not constrain the resolve for
+# everything else. Deliberately a duplicate of ``_DISABLE_MARKER`` in
+# tools/contract_checks/src/contract_checks/engine_env.py rather than an import:
+# depends.py runs inside engine.exe with no dev-tool packages on sys.path, and
+# the dev tool must not import engine-only modules (engLib). Keep them in sync.
 _NEVER_INSTALL_MARKER = 'contract-check: disable'
 
 
+def _is_never_install_marker_line(line: str) -> bool:
+    """True when ``line`` carries the never-install marker inside a comment.
+
+    Recognises the same forms as tools/contract_checks: a comment line
+    (``# contract-check: disable  reason: ...``) or a trailing comment
+    (``pkg  # note  # contract-check: disable``). Text before the first ``#``
+    is a requirement spec and is never matched, so a stray mention in a spec
+    cannot disable a file.
+    """
+    hash_idx = line.find('#')
+    return hash_idx != -1 and _NEVER_INSTALL_MARKER in line[hash_idx:]
+
+
+def _requirement_specs(lines: list[str]) -> list[str]:
+    """Return the requirement specs in ``lines`` (blank/comment lines and trailing comments removed)."""
+    specs = []
+    for raw in lines:
+        spec = raw.split('#', 1)[0].strip()
+        if spec:
+            specs.append(spec)
+    return specs
+
+
 def _combine_requirements(file_paths: list[str], output_path: str):
-    """Concatenate all requirement files into one, skipping never-installed ones."""
+    """Concatenate all requirement files into one, skipping never-installed ones.
+
+    The marker is file-scoped, matching tools/contract_checks: one marker comment
+    disables the whole file. Every other pin the file declares is dropped from
+    the constraint set with it (e.g. requirements_trocr.txt also pins
+    transformers and Pillow), so those are reported through ``warning`` instead
+    of vanishing silently — a pin that must hold belongs in a file that is not
+    disabled. A spec sharing the marker's line (trailing-comment form) is the
+    offender itself and is not reported.
+    """
     with open(output_path, 'w', encoding='utf-8') as out:
         for path in file_paths:
             with open(path, 'r', encoding='utf-8') as inp:
                 content = inp.read()
-            if _NEVER_INSTALL_MARKER in content:
+            lines = content.splitlines()
+            if any(_is_never_install_marker_line(line) for line in lines):
                 out.write(f'# Source: {path} (excluded from constraints: {_NEVER_INSTALL_MARKER})\n')
+                dropped = _requirement_specs([line for line in lines if not _is_never_install_marker_line(line)])
+                if dropped:
+                    warning(
+                        f'{path}: excluded from constraints ({_NEVER_INSTALL_MARKER}); '
+                        f'its other pins are not enforced: {", ".join(dropped)}'
+                    )
                 continue
             out.write(f'# Source: {path}\n')
             out.write(content)

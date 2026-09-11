@@ -169,6 +169,9 @@ def version_matches(spec: str, version: str) -> bool:
 
 
 _SKIP_INSTALL_MARKER = 'contract-check: skip-install'
+# Deliberately duplicated in packages/server/engine-lib/rocketlib-python/lib/depends.py
+# (_NEVER_INSTALL_MARKER): that module runs inside engine.exe and this tool must not
+# import engine-only modules, so neither side can import the other. Keep in sync.
 _DISABLE_MARKER = 'contract-check: disable'
 
 
