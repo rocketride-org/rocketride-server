@@ -126,6 +126,7 @@ emits a JSON reference for each file it writes.
 | Field | Type | Description |
 |---|---|---|
 | `targetDir` | string | Default `output/`. Base directory (relative to the account file store root) that lane-written files are placed under. |
+| `onConflict` | string | Default `unique`. What to do when the target path is already taken: `unique` writes under `_1`, `_2`, …; `overwrite` replaces the existing file (destructive — see the warning below); `skip` leaves it alone. |
 | `emitUrl` | boolean | Default false. Also include a time-limited signed download URL in the emitted JSON reference. |
 | `urlExpiresIn` | integer | Default 3600 (max 3600). TTL in seconds for the signed URL when `emitUrl` is on. |
 | `whitelistPattern` | string | Default empty. |
@@ -135,10 +136,24 @@ emits a JSON reference for each file it writes.
 
 - **Where it writes:** `targetDir` (default `output/`) + the object's original name stem,
   with the lane's extension rule applied — e.g. `output/report.txt` (nameless inputs fall
-  back to the object id). If that name is already taken the sink appends `_1`, `_2`, …,
-  and gives up with an error after `MAX_COLLISION_SUFFIX` (100) attempts rather than
-  probing indefinitely. When one object emits several documents they also carry an index
+  back to the object id). When one object emits several documents they also carry an index
   (`report_0.txt`, `report_1.txt`, …).
+- **When the file already exists**, `onConflict` decides between three behaviours. With
+  `unique` (the default) the sink appends `_1`, `_2`, …, giving up with an error after
+  `MAX_COLLISION_SUFFIX` (100) attempts rather than probing indefinitely. With `skip` it
+  leaves the existing file alone, logs a warning, and emits no reference for it. With
+  `overwrite` it replaces the file — and skips the existence probe entirely, which also
+  saves a store round-trip per stream.
+  **`overwrite` can lose data.** Filenames derive from the source object's *basename*, so
+  two inputs at `a/1.jpg` and `b/1.jpg` both resolve to the same target in a flat
+  `targetDir` and the second silently replaces the first. `unique` stays the default for
+  exactly that reason.
+  A streamed write that is cut off part-way never leaves a partial file behind. Under
+  `unique` and `skip` the sink deletes what it wrote. Under `overwrite` the stream goes to
+  a `.part-<objectId>` sibling and only replaces the target once it is complete, so an
+  interrupted run leaves the existing file exactly as it was.
+  `skip` compares against an existing **file**. A directory sharing the name is not a file
+  to preserve and does not by itself cause a skip.
   Every candidate is whitelist-checked *before* it is probed, so a path the whitelist
   would reject never reveals whether files exist in the store.
 - **How the extension is chosen:** each lane owns its own rule, keyed to what the lane

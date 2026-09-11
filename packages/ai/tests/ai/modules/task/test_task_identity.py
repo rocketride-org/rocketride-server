@@ -134,6 +134,38 @@ def test_same_owner_triple_collides_deterministically():
     assert a == b
 
 
+def test_me_deploy_digest_differs_from_dev_for_the_same_user():
+    """A user-owned deploy (@me) shares the owner FIELD with the same user's
+    dev run, so it alone adds run_kind to the digest — the same pipeline can
+    run as dev AND as a personal deploy concurrently without colliding in the
+    token registry.
+    """
+    dev = _digest(kind='task', owner_field='userId', owner_id='user-1')
+    me_deploy = AccountBase.generate_token(
+        None,
+        content={
+            'kind': 'task',
+            'userId': 'user-1',
+            'run_kind': 'deploy',
+            'project_id': 'proj-1',
+            'source': 'src-1',
+        },
+        prefix='',
+    )
+    assert dev != me_deploy
+
+
+def test_dev_and_team_deploy_digests_are_unchanged_by_the_me_extension():
+    """Dev and @team digests contain NO run_kind key — byte-identical to every
+    token ever minted, so persisted pk_ share links keep resolving.
+    """
+    # These reproduce the exact historical content shapes.
+    dev = _digest(kind='public', owner_field='userId', owner_id='user-1')
+    team = _digest(kind='public', owner_field='teamId', owner_id='team-1')
+    assert dev == _digest(kind='public', owner_field='userId', owner_id='user-1')
+    assert team == _digest(kind='public', owner_field='teamId', owner_id='team-1')
+
+
 def test_task_and_public_digests_differ():
     """tk_ and pk_ must differ in DIGEST, not just prefix — the 'kind'
     discriminator inside the hashed content guarantees it.
@@ -154,10 +186,26 @@ def test_owner_id_is_user_for_dev_and_team_for_deploy():
     assert _control(run_kind='deploy').owner_id == 'team-1'
 
 
+def test_owner_kind_overrides_the_run_kind_default():
+    """owner_kind is the authority when stamped: a user-owned deploy (@me)
+    resolves to its USER even though run_kind is 'deploy' — the billing
+    teamId never becomes the visibility owner of a personal run.
+    """
+    me_deploy = _control(run_kind='deploy')
+    me_deploy.owner_kind = 'user'
+    assert me_deploy.owner_id == 'user-1'
+
+
 def test_owner_key_grammar():
-    """The monitor key is p.{owner}.{project}.{source} — always owner-scoped."""
-    assert owner_key('user-1', 'proj-1', 'src-1') == 'p.user-1.proj-1.src-1'
-    assert owner_key('team-1', 'proj-1', 'src-1') == 'p.team-1.proj-1.src-1'
+    """The monitor key is p.{runKind}.{owner}.{project}.{source} — the runKind
+    segment separates a user's dev run from that SAME user's @me deploy of the
+    same pipeline (both user-owned, so owner alone would alias them).
+    """
+    assert owner_key('dev', 'user-1', 'proj-1', 'src-1') == 'p.dev.user-1.proj-1.src-1'
+    assert owner_key('deploy', 'team-1', 'proj-1', 'src-1') == 'p.deploy.team-1.proj-1.src-1'
+    # The @me case: same owner as dev, distinct key via the segment.
+    assert owner_key('deploy', 'user-1', 'proj-1', 'src-1') == 'p.deploy.user-1.proj-1.src-1'
+    assert owner_key('deploy', 'user-1', 'proj-1', 'src-1') != owner_key('dev', 'user-1', 'proj-1', 'src-1')
 
 
 # ---------------------------------------------------------------------------
@@ -214,3 +262,35 @@ def test_legacy_unscoped_scan_refuses_to_guess_between_runs():
     server = _server(_control(run_kind='dev'), _control(run_kind='deploy'))
     with pytest.raises(RuntimeError, match='specify a scope'):
         TaskServer.get_task_control_by_project(server, 'proj-1', 'src-1', None)
+
+
+# ---------------------------------------------------------------------------
+# Owner-match access (B3/B4) — a user-owned run follows its owner's identity,
+# so it survives an org switch (its team becomes foreign) yet stays reachable.
+# ---------------------------------------------------------------------------
+
+
+def test_owner_reaches_own_dev_run_when_its_team_is_foreign():
+    """After an org switch the caller's active team differs from the run's team,
+    but the owner still resolves their own dev run by identity — no permission
+    on the (now foreign) run team is required.
+    """
+    mine = _control(run_kind='dev', user_id='user-1', team_id='old-team')
+    server = _server(mine)
+    # Caller is now in a different team and holds NO grant on 'old-team'.
+    caller = _account(user_id='user-1', team_id='new-team')
+    found = TaskServer.get_task_control_by_project(server, 'proj-1', 'src-1', caller, require='task.control')
+    assert found is mine
+
+
+def test_owner_match_does_not_apply_to_a_team_deploy_run():
+    """A team deploy run (owner_id == teamId) never matches the caller's userId,
+    so a non-member is still denied — the owner short-circuit is user-only.
+    """
+    deploy = _control(run_kind='deploy', team_id='team-x')
+    server = _server(deploy)
+    caller = _account(user_id='user-1', team_id='team-y')  # not a member of team-x
+    with pytest.raises(PermissionError):
+        TaskServer.get_task_control_by_project(
+            server, 'proj-1', 'src-1', caller, require='task.monitor', team_id='team-x'
+        )

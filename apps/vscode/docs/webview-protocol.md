@@ -21,11 +21,10 @@ delete preference keys. `cloudCanvasPromptDismissed` is stored in global state
 while the remaining preferences stay workspace-scoped; `project:load` sends the
 two combined as one bag.
 
-Webviews send their whole preference bag, so the host persists only the keys
-whose values actually changed. `project:initialPrefs` then carries just the
-changed global-scoped keys to the other open editors — workspace preferences
-such as layout and navigation mode are per-editor view state and are not
-propagated.
+Webviews send one-key preference patches, so the host merges each patch with
+the stored preferences. `project:initialPrefs` then carries just the changed
+global-scoped keys to the other open editors — workspace preferences such as
+layout and navigation mode are per-editor view state and are not propagated.
 
 ## Settings Command
 

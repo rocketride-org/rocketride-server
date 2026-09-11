@@ -1,0 +1,124 @@
+{
+	//
+	// Required:
+	//		The displayable name of this node
+	//
+	"title": "Crustdata",
+	//
+	// Required:
+	//		The protocol is the endpoint protocol
+	//
+	"protocol": "tool_crustdata://",
+	//
+	// Required:
+	//		Class type of the node - what it does
+	//
+	"classType": ["tool"],
+	//
+	// Required:
+	//		Capabilities are flags that change the behavior of the underlying engine.
+	//		"experimental" marks this node as not yet production-ready — the request
+	//		and response shapes here are read from Crustdata's versioned API reference,
+	//		but no live account has exercised it end-to-end (see issue #2129).
+	//
+	"capabilities": ["invoke", "experimental"],
+	//
+	// Optional:
+	//		Register is either filter, endpoint or ignored if not specified.
+	//
+	"register": "filter",
+	//
+	// Optional:
+	//		The node is the actual physical node to instantiate.
+	//
+	"node": "python",
+	//
+	// Optional:
+	//		The path is the executable/script code.
+	//
+	"path": "nodes.tool_crustdata",
+	//
+	// Required:
+	//		The prefix map when converting URLs <=> paths.
+	//
+	"prefix": "crustdata",
+	//
+	// Optional:
+	//		The icon to display in the UI for this node.
+	//
+	"icon": "crustdata.svg",
+	//
+	// Optional:
+	//		Description of this node shown in the pipeline builder.
+	//
+	"description": ["Exposes Crustdata's B2B company and people search as agent tools.", "Searches Crustdata's indexed company and people data by filter criteria (industry, headcount, funding, current company, title, and more) and returns structured records."],
+	"tile": [],
+	"lanes": {},
+	//
+	// Optional:
+	//		Profile section - configuration options used by the driver itself.
+	//		The default profile is applied when the node is first added to a pipeline.
+	//
+	"preconfig": {
+		"default": "default",
+		"profiles": {
+			"default": {
+				"title": "Crustdata",
+				"apikey": "",
+				"defaultLimit": 10
+			}
+		}
+	},
+	//
+	// Optional:
+	//		Local field definitions. These define the config fields exposed in the UI.
+	//		"secure: true" fields are encrypted at rest and masked in the UI.
+	//
+	"fields": {
+		"tool_crustdata.apikey": {
+			"type": "string",
+			"title": "API Key",
+			"description": "Crustdata API key (from https://crustdata.com)",
+			"default": "",
+			"secure": true,
+			"ui": {
+				"ui:widget": "ApiKeyWidget"
+			}
+		},
+		"tool_crustdata.defaultLimit": {
+			"type": "integer",
+			"title": "Default Result Limit",
+			"description": "Default maximum number of results per search (1-1000)",
+			"default": 10,
+			"minimum": 1,
+			"maximum": 1000
+		}
+	},
+	//
+	//	Test configuration for automated node testing.
+	//	"apikey" is intentionally set to a placeholder, config validation is
+	//	tested here, not live API calls (no verified account to test against —
+	//	see issue #2129).
+	//
+	"test": {
+		"profiles": ["default"],
+		"outputs": [],
+		"cases": [
+			{
+				"name": "Config validation with placeholder key",
+				"text": "test query"
+			}
+		]
+	},
+	//
+	// Required:
+	//		Defines the fields (shape) shown in the pipeline builder side panel.
+	//
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Crustdata",
+			"properties": ["type", "tool_crustdata.apikey", "tool_crustdata.defaultLimit"]
+		}
+	]
+}

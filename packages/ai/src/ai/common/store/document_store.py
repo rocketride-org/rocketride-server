@@ -35,11 +35,18 @@ class DocumentStoreBase(ABC):
         """
 
     @abstractmethod
-    def _createCollection() -> bool:
+    def _createCollection() -> bool | None:
         """
         Create the collection.
 
-        This the abstract method that the driver must implement
+        This the abstract method that the driver must implement. Implementations
+        must either raise on failure or explicitly return False; the caller
+        (createCollection) treats a return value of exactly False as failure and
+        aborts before indexing any documents.
+
+        The return is annotated bool | None because None is a legitimate success
+        value here: store_weaviate, store_postgres and rocketride_vector create
+        the collection and return nothing. Only an explicit False means failure.
         """
 
     @abstractmethod
@@ -515,7 +522,14 @@ class DocumentStoreBase(ABC):
             doc.embedding = [0] * vectorSize  # List of zeros for validation purposes
 
             # Create the actual collection with the specified vector size
-            self._createCollection(vectorSize)
+            created = self._createCollection(vectorSize)
+
+            # Some drivers signal failure by returning False instead of raising;
+            # honor that instead of silently indexing into a collection that was
+            # never created (do not treat None as failure - a few drivers return
+            # nothing on success).
+            if created is False:
+                raise Exception(f'{type(self).__name__} failed to create the vector collection')
 
             # Add the "bogus" document to the collection
             self.addChunks([doc], checkCollection=False)
@@ -760,8 +774,25 @@ class VectorStoreToolMixin:
                 },
                 'filter': {
                     'type': 'object',
-                    'description': 'Optional metadata filter. Keys are metadata field names, values are the required values. Example: {"nodeId": "my-node", "parent": "/docs"}',
-                    'additionalProperties': True,
+                    'description': 'Optional metadata filter. Only objectId, nodeId and parent are supported; unrecognized keys are rejected. Example: {"nodeId": "my-node", "parent": "/docs"}',
+                    'properties': {
+                        'objectId': {
+                            'description': 'Match documents with this object ID. A string or an array of strings.',
+                            'anyOf': [
+                                {'type': 'string'},
+                                {'type': 'array', 'items': {'type': 'string'}},
+                            ],
+                        },
+                        'nodeId': {
+                            'type': 'string',
+                            'description': 'Match documents written by this node ID.',
+                        },
+                        'parent': {
+                            'type': 'string',
+                            'description': 'Match documents under this parent path.',
+                        },
+                    },
+                    'additionalProperties': False,
                 },
             },
         },
@@ -899,8 +930,22 @@ class VectorStoreToolMixin:
                             },
                             'metadata': {
                                 'type': 'object',
-                                'description': 'Optional metadata key-value pairs to store with the document.',
-                                'additionalProperties': True,
+                                'description': 'Optional metadata. Only nodeId, parent and chunkId are stored; unrecognized keys are rejected.',
+                                'properties': {
+                                    'nodeId': {
+                                        'type': 'string',
+                                        'description': 'Writing node ID recorded on the document (default: "vectordb_tool").',
+                                    },
+                                    'parent': {
+                                        'type': 'string',
+                                        'description': 'Parent path recorded on the document (default: "/").',
+                                    },
+                                    'chunkId': {
+                                        'type': 'integer',
+                                        'description': 'Chunk index recorded on the document (default: 0).',
+                                    },
+                                },
+                                'additionalProperties': False,
                             },
                             'embedding': {
                                 'type': 'array',

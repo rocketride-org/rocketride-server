@@ -40,6 +40,7 @@
 import type { IAuthProvider } from '../types/connection';
 import { generatePkce, buildAuthUrl, getStoredVerifier, clearStoredVerifier } from '../util/pkce';
 import { LS_TOKEN, SS_PENDING_APP_ID } from '../constants';
+import { tokenStore } from '../util/devGate';
 
 // =============================================================================
 // CLASS
@@ -164,8 +165,11 @@ export class CloudAuthProvider implements IAuthProvider {
 			return null;
 		}
 
-		// Strip the ?code= from the URL so refreshes don't re-exchange
-		window.history.replaceState({}, '', window.location.pathname);
+		// Strip the ?code= from the URL so refreshes don't re-exchange. Carry the
+		// existing history state forward — passing {} wipes whatever the app
+		// stored on this entry (e.g. the home-ui nav snapshot), so a later Back
+		// would restore an entry with no state at all.
+		window.history.replaceState({ ...(window.history.state ?? {}) }, '', window.location.pathname);
 
 		return {
 			code,
@@ -185,7 +189,7 @@ export class CloudAuthProvider implements IAuthProvider {
 	 */
 	public async storeToken(token: string): Promise<void> {
 		try {
-			localStorage.setItem(LS_TOKEN, token);
+			tokenStore().setItem(LS_TOKEN, token);
 		} catch (e) {
 			console.error('[CloudAuthProvider] Failed to store token:', e);
 		}
@@ -198,7 +202,7 @@ export class CloudAuthProvider implements IAuthProvider {
 	 */
 	public async getToken(): Promise<string | null> {
 		try {
-			const token = localStorage.getItem(LS_TOKEN);
+			const token = tokenStore().getItem(LS_TOKEN);
 			return token || null;
 		} catch {
 			return null;
@@ -222,14 +226,9 @@ export class CloudAuthProvider implements IAuthProvider {
 	 */
 	public async signOut(): Promise<void> {
 		try {
-			localStorage.removeItem(LS_TOKEN);
+			tokenStore().removeItem(LS_TOKEN);
 		} catch (e) {
 			console.error('[CloudAuthProvider] Failed to clear token:', e);
-		}
-		try {
-			sessionStorage.removeItem(LS_TOKEN);
-		} catch (e) {
-			console.error('[CloudAuthProvider] Failed to clear legacy session token:', e);
 		}
 	}
 }

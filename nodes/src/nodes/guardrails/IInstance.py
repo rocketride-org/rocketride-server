@@ -50,7 +50,7 @@ class IInstance(IInstanceBase):
         """
         engine = self.IGlobal.engine
         if engine is None:
-            self.instance.writeQuestions(question)
+            self._forward_question(question)
             return
 
         # Collect question text for evaluation
@@ -64,7 +64,7 @@ class IInstance(IInstanceBase):
 
         if not full_text.strip():
             # Nothing to check, forward as-is
-            self.instance.writeQuestions(question)
+            self._forward_question(question)
             return
 
         # Run input guardrails
@@ -81,7 +81,21 @@ class IInstance(IInstanceBase):
                 warning(f'Guardrails input warning: {violation["rule"]} \u2014 {violation["details"]}')
 
         # Forward the question downstream
+        self._forward_question(question)
+
+    def _forward_question(self, question: Question):
+        """Forward a question downstream exactly once.
+
+        `preventDefault()` raises immediately (it's implemented as `raise
+        APERR(Ec.PreventDefault, ...)`), so it must come AFTER the explicit
+        forward, not before -- otherwise the forward call below would never
+        run at all. It must still be called, though: the engine always
+        re-runs its own default forward after a Python override returns
+        successfully unless preventDefault() was raised during the call, so
+        skipping it here would deliver this question a second time.
+        """
         self.instance.writeQuestions(question)
+        self.preventDefault()
 
     def writeAnswers(self, answer: Answer):
         """Run output guardrails on the answer before forwarding.
@@ -95,7 +109,7 @@ class IInstance(IInstanceBase):
         """
         engine = self.IGlobal.engine
         if engine is None:
-            self.instance.writeAnswers(answer)
+            self._forward_answer(answer)
             return
 
         # Extract answer text
@@ -103,7 +117,7 @@ class IInstance(IInstanceBase):
 
         if not text.strip():
             # Nothing to check, forward as-is
-            self.instance.writeAnswers(answer)
+            self._forward_answer(answer)
             return
 
         # Build context for output checks
@@ -125,7 +139,14 @@ class IInstance(IInstanceBase):
                 warning(f'Guardrails output warning: {violation["rule"]} \u2014 {violation["details"]}')
 
         # Forward the answer downstream
+        self._forward_answer(answer)
+
+    def _forward_answer(self, answer: Answer):
+        """Forward an answer downstream exactly once. See `_forward_question`
+        for why `preventDefault()` must come after the forward, not before.
+        """
         self.instance.writeAnswers(answer)
+        self.preventDefault()
 
     def writeDocuments(self, documents):
         """Collect source documents for hallucination checks.
@@ -146,8 +167,11 @@ class IInstance(IInstanceBase):
             if content and str(content).strip():
                 self.source_documents.append(str(content))
 
-        # Forward documents downstream
+        # Forward documents downstream. See `_forward_question` for why
+        # preventDefault() must come after the forward, not before -- it
+        # still has to be called, or the engine double-delivers these too.
         self.instance.writeDocuments(documents)
+        self.preventDefault()
 
     def close(self):
         """Reset state on close."""

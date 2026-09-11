@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<!--
+	MIT License
+
+	Copyright (c) 2026 Aparavi Software AG
+
+	Permission is hereby granted, free of charge, to any person obtaining a copy
+	of this software and associated documentation files (the "Software"), to deal
+	in the Software without restriction, including without limitation the rights
+	to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+	copies of the Software, and to permit persons to whom the Software is
+	furnished to do so, subject to the following conditions:
+
+	The above copyright notice and this permission notice shall be included in all
+	copies or substantial portions of the Software.
+
+	THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+	IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+	FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+	AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+	LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+	OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+	SOFTWARE.
+-->
+<!--
+	RocketRide Chat Widget — demo page.
+
+	This page references the BUILT bundle at ../dist/rocketride-chat.js.
+	To build and serve it locally:
+
+		1. From the repository root, install and build the widget bundle:
+		       pnpm install
+		       pnpm --filter rocketride-chat-widget build
+
+		2. Serve the package folder with any static file server, e.g.:
+		       npx serve packages/chat-widget
+		   then open  http://localhost:3000/demo/
+		   (or: python3 -m http.server 8080 -d packages/chat-widget
+		    then open  http://localhost:8080/demo/)
+
+		3. Start a RocketRide pipeline that has a chat source node, open the
+		   link it publishes ({host}/chat?auth={public_auth}) and copy the
+		   PUBLIC auth key into the fields below (or edit the attributes in
+		   this file).
+
+	SECURITY: only ever use the pipeline's PUBLIC authorization key here (the
+	"Public Authorization Key" the chat node publishes). NEVER put the
+	RocketRide engine API key or any private token into a web page — anyone
+	who can open the page can read it. All auth values in this file are
+	obvious placeholders.
+-->
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<meta name="color-scheme" content="light dark">
+	<title>RocketRide Chat Widget — Demo</title>
+	<style>
+		:root {
+			--accent: #5f2167;
+			--bg: #f7f5f8;
+			--fg: #1c1522;
+			--card: #ffffff;
+			--border: rgba(0, 0, 0, 0.12);
+		}
+		@media (prefers-color-scheme: dark) {
+			:root {
+				--bg: #17121b;
+				--fg: #f0eaf3;
+				--card: #221a28;
+				--border: rgba(255, 255, 255, 0.14);
+			}
+		}
+		* { box-sizing: border-box; }
+		body {
+			margin: 0;
+			padding: 32px 20px 120px;
+			font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+			background: var(--bg);
+			color: var(--fg);
+			line-height: 1.5;
+		}
+		main { max-width: 880px; margin: 0 auto; }
+		h1 { font-size: 1.6rem; }
+		h1 span { color: var(--accent); }
+		h2 { font-size: 1.15rem; margin-top: 2.2rem; }
+		p.lead { max-width: 62ch; }
+		.note {
+			border: 1px solid var(--border);
+			border-left: 4px solid var(--accent);
+			background: var(--card);
+			border-radius: 8px;
+			padding: 12px 16px;
+			font-size: 0.92rem;
+		}
+		.controls {
+			display: flex;
+			flex-wrap: wrap;
+			gap: 16px;
+			align-items: end;
+			background: var(--card);
+			border: 1px solid var(--border);
+			border-radius: 12px;
+			padding: 16px;
+			margin: 16px 0;
+		}
+		.controls label {
+			display: flex;
+			flex-direction: column;
+			gap: 4px;
+			font-size: 0.8rem;
+			font-weight: 600;
+		}
+		.controls input, .controls select {
+			font: inherit;
+			font-weight: 400;
+			padding: 6px 8px;
+			border: 1px solid var(--border);
+			border-radius: 6px;
+			background: var(--bg);
+			color: var(--fg);
+			min-width: 160px;
+		}
+		.controls input[type="color"] { min-width: 56px; height: 36px; padding: 2px; }
+		#inline-frame {
+			height: 560px;
+			max-width: 480px;
+			border: 1px solid var(--border);
+			border-radius: 16px;
+			overflow: hidden;
+			background: var(--card);
+		}
+		rocketride-chat { display: block; width: 100%; height: 100%; }
+		code {
+			background: color-mix(in srgb, var(--accent) 10%, transparent);
+			padding: 1px 5px;
+			border-radius: 4px;
+			font-size: 0.9em;
+		}
+	</style>
+</head>
+<body>
+	<main>
+		<h1><span>RocketRide</span> Chat Widget demo</h1>
+		<p class="lead">
+			One bundle, two consumption modes: place the <code>&lt;rocketride-chat&gt;</code>
+			web component inline anywhere on the page, or add a single script tag with
+			<code>data-*</code> attributes to get the floating launcher bubble — it is
+			already active in the corner of this page.
+		</p>
+		<p class="note">
+			<strong>Auth:</strong> the widget authenticates with the pipeline's
+			<em>public</em> authorization key — the <code>{public_auth}</code> value from the
+			chat node's published <code>{host}/chat?auth={public_auth}</code> link.
+			Never use the engine API key or any private token in a web page.
+			The values below are placeholders; paste your own public key.
+		</p>
+
+		<h2>1 — Inline web component</h2>
+		<div class="controls" aria-label="Inline widget theming controls">
+			<label>Engine URL
+				<input id="ctl-engine" type="text" value="http://localhost:5565" autocomplete="off">
+			</label>
+			<label>Public auth key
+				<input id="ctl-auth" type="text" value="YOUR-PUBLIC-AUTH-KEY-HERE" autocomplete="off">
+			</label>
+			<label>Title
+				<input id="ctl-title" type="text" value="RocketRide Assistant">
+			</label>
+			<label>Accent
+				<input id="ctl-accent" type="color" value="#5f2167">
+			</label>
+			<label>Theme
+				<select id="ctl-theme">
+					<option value="auto" selected>auto</option>
+					<option value="light">light</option>
+					<option value="dark">dark</option>
+				</select>
+			</label>
+		</div>
+		<div id="inline-frame">
+			<rocketride-chat
+				engine-url="http://localhost:5565"
+				auth="YOUR-PUBLIC-AUTH-KEY-HERE"
+				title="RocketRide Assistant"
+				accent="#5f2167"
+				theme="auto"
+				welcome="Hi! I'm the inline demo widget. Ask me anything."
+				placeholder="Type a message...">
+			</rocketride-chat>
+		</div>
+
+		<h2>2 — Script-tag launcher bubble</h2>
+		<p>
+			The bubble in the corner of this page comes from the script tag at the
+			bottom of this file — no other markup required. Its configuration
+			(<code>data-engine-url</code>, <code>data-auth</code>, <code>data-title</code>,
+			<code>data-accent</code>, <code>data-position</code>, <code>data-welcome</code>,
+			<code>data-placeholder</code>, <code>data-theme</code>) is fixed at load time;
+			edit the attributes in this file and reload to change it.
+			Click the launcher to open the panel, press <kbd>Escape</kbd> to close it.
+		</p>
+	</main>
+
+	<script>
+		// Theming controls for the inline widget: plain attribute updates —
+		// the web component reacts to attribute changes.
+		(function () {
+			var chat = document.querySelector('#inline-frame rocketride-chat');
+			function bind(id, attr) {
+				document.getElementById(id).addEventListener('input', function (event) {
+					chat.setAttribute(attr, event.target.value);
+				});
+			}
+			bind('ctl-engine', 'engine-url');
+			bind('ctl-auth', 'auth');
+			bind('ctl-title', 'title');
+			bind('ctl-accent', 'accent');
+			bind('ctl-theme', 'theme');
+		})();
+	</script>
+
+	<!--
+		The BUILT bundle (see build instructions at the top of this file).
+		This single tag:
+		  - defines the <rocketride-chat> element used inline above, and
+		  - mounts the launcher bubble, because it carries data-engine-url.
+		data-auth is an obvious placeholder — use your pipeline's PUBLIC key.
+	-->
+	<script src="../dist/rocketride-chat.js"
+		data-engine-url="http://localhost:5565"
+		data-auth="YOUR-PUBLIC-AUTH-KEY-HERE"
+		data-title="RocketRide Assistant"
+		data-accent="#5f2167"
+		data-position="bottom-right"
+		data-welcome="Hi! I'm the bubble demo widget."
+		data-placeholder="Type a message..."
+		data-theme="auto"
+		defer></script>
+</body>
+</html>

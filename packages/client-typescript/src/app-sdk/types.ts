@@ -67,7 +67,7 @@ export interface ConnectResult {
 	/** Organizations the user belongs to. */
 	organizations?: { id: string; name: string }[];
 	/** Apps on the user's desktop — full manifest entries with appStatus + onDesktop. */
-	apps?: { id: string; moduleId: string; name: string; entry: string; appStatus?: string; onDesktop?: boolean; [key: string]: unknown }[];
+	apps?: { id: string; moduleId: string; name: string; entry?: string; registryVersion?: number; appStatus?: string; onDesktop?: boolean; [key: string]: unknown }[];
 	/** Open-ended additional fields. */
 	[key: string]: unknown;
 }
@@ -183,6 +183,24 @@ export interface AppManifestEntry {
 	categories?: string[];
 	/** The app's settings contribution (VSCode contributes.configuration shape). */
 	configuration?: AppConfiguration;
+	/**
+	 * Resolved app version (semver) for the desktop tile version chip —
+	 * a built-in's package version, a marketplace app's active version, or
+	 * a deployed pin's appVersion. Absent when the server sent none.
+	 */
+	version?: string;
+	/** Registry version number the entry resolves to (the scope-walk winner). */
+	registryVersion?: number;
+	/** True when the entry is a dev-overlay override (live watch build). */
+	dev?: boolean;
+	/**
+	 * Every live dev-server registration for this app — one per editor
+	 * session, newest first; `entry` already carries the newest. Pages
+	 * launched from a specific editor carry that editor's session nonce
+	 * and prefer its registration, so several editors can dev-serve the
+	 * same app concurrently.
+	 */
+	devEntries?: Array<{ url: string; session?: string; registeredAt?: number }>;
 	/** When false, the app runs without authentication. Default: true. */
 	authenticated?: boolean;
 	/** When false, the status bar is hidden for this app. Default: true. */

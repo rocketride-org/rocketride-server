@@ -15,6 +15,9 @@ Public surface:
 - ``decode_data_url`` — decode an uploaded ``data-url`` value to (bytes, mime).
 - ``guess_filename`` — derive a typed ``upload.<ext>`` filename from a buffer
   via the optional ``filetype`` package (lazy; node-provided dependency).
+- ``source_quality``, ``matched_quality`` — recover the quality a JPEG was written at,
+  and choose one to re-encode at. Standard library only, so nodes whose tests run without
+  cv2 or Pillow can still reach it.
 - ``pick_torch_device``, ``pick_torch_dtype``, ``resolve_pipeline_device`` —
   select a Torch device/dtype for local-inference nodes.
 - ``post_with_retry`` / ``get_with_retry`` — HTTP POST/GET with retry/backoff.
@@ -35,7 +38,14 @@ from .content_blocks import flatten_content_blocks
 from .file_utils import decode_data_url, guess_filename
 from .cuda_utils import pick_torch_device, pick_torch_dtype, resolve_pipeline_device
 from .http_retry import get_with_retry, post_with_retry
-from .image_utils import colorize_depth, decode_ndarray, encode_ndarray, image_to_bytes
+from .image_utils import (
+    colorize_depth,
+    decode_ndarray,
+    encode_ndarray,
+    image_to_bytes,
+    matched_quality,
+    source_quality,
+)
 from .string_utils import safe_str
 from .tool_args import (
     int_arg,
@@ -65,6 +75,7 @@ __all__ = [
     'encode_ndarray',
     'image_to_bytes',
     'langchain_messages_to_transcript',
+    'matched_quality',
     'normalize_bound_tools',
     'normalize_tool_input',
     'post_with_retry',
@@ -82,6 +93,7 @@ __all__ = [
     'require_str_list',
     'resolve_pipeline_device',
     'safe_str',
+    'source_quality',
     'validate_public_url',
     'validate_tool_input_schema',
 ]

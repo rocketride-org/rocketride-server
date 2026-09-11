@@ -1,0 +1,65 @@
+{
+	"title": "Firestore",
+	"protocol": "db_firestore://",
+	"classType": ["database", "tool"],
+	"capabilities": ["noremote", "invoke"],
+	"register": "filter",
+	"node": "python",
+	"path": "nodes.db_firestore",
+	"prefix": "firestore",
+	"description": ["A processing component that connects to Google Cloud Firestore (Native mode)."],
+	"icon": "db_firestore.svg",
+	"documentation": "https://docs.rocketride.org",
+	"invoke": {},
+	"lanes": {},
+	"preconfig": {
+		"default": "default",
+		"profiles": {
+			"default": {
+				"database": "(default)"
+			}
+		}
+	},
+	"fields": {
+		"firestore.database": {
+			"type": "string",
+			"title": "Database ID",
+			"default": "(default)",
+			"description": "The Firestore database ID. Usually '(default)'."
+		},
+		"firestore.collection": {
+			"type": "string",
+			"title": "Collection",
+			"description": "The Firestore collection to query or insert into."
+		},
+		"firestore.default": {
+			"object": "default",
+			"properties": [
+				"gcp.authType",
+				"gcp.serviceAccountKey",
+				"gcp.projectId",
+				"firestore.database",
+				"firestore.collection"
+			]
+		},
+		"firestore.profile": {
+			"hidden": true,
+			"type": "string",
+			"default": "default",
+			"enum": [["default", "Default"]],
+			"conditional": [
+				{
+					"value": "default",
+					"properties": ["firestore.default"]
+				}
+			]
+		}
+	},
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Firestore",
+			"properties": ["firestore.profile"]
+		}
+	]
+}

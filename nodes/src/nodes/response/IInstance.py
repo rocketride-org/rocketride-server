@@ -218,8 +218,13 @@ class IInstance(IInstanceBase):
         All three multimedia lanes behave identically: accumulate the stream across
         BEGIN/WRITE/END and emit a single entry ``{mime_type, <lane>, metadata}`` where
         ``<lane>`` is the base64 payload (key ``'image'``/``'audio'``/``'video'``) and
-        ``metadata`` is the stream descriptor parsed from the BEGIN payload (present only
-        when one arrived). Per-lane buffers keep concurrent streams isolated.
+        ``metadata`` is the stream descriptor parsed from that stream's own BEGIN payload
+        (present only when one arrived).
+
+        State is per lane, which separates image from audio from video. Several streams on
+        one lane within a single object — a producer fanning one scan out into several
+        images — arrive already separated: ``IInstanceBase`` delivers each stream's END
+        before the next BEGIN, so every one of them reaches :meth:`_emit_media` in turn.
 
         Args:
             lane (str): The media lane — ``'image'``, ``'audio'`` or ``'video'``.
@@ -236,20 +241,32 @@ class IInstance(IInstanceBase):
             self._media_buffers[lane] += data
 
         elif action == AVI_ACTION.END:
-            key = self._getkey(lane)
+            # An empty stream has nothing to return, and the file sink creates no file for
+            # one either, so it produces no entry rather than a blank one.
+            if not self._media_buffers.get(lane):
+                return
+            self._emit_media(lane, mimeType)
 
-            if key not in self.instance.currentObject.response:
-                self.instance.currentObject.response[key] = []
+    def _emit_media(self, lane: str, mimeType: str) -> None:
+        """Append one completed stream to the response, labelled with its own descriptor.
 
-            payload = base64.b64encode(self._media_buffers.get(lane, bytearray())).decode('utf-8')
-            self._media_buffers[lane] = bytearray()
+        Args:
+            lane (str): The media lane — ``'image'``, ``'audio'`` or ``'video'``.
+            mimeType (str): The media MIME type.
+        """
+        key = self._getkey(lane)
+        if key not in self.instance.currentObject.response:
+            self.instance.currentObject.response[key] = []
 
-            # source_media_detail() strips the identity/security backlink from the response.
-            entry = {'mime_type': mimeType, lane: payload}
-            detail = source_media_detail(self._media_descriptors.get(lane))
-            if detail:
-                entry['metadata'] = detail
-            self.instance.currentObject.response[key].append(entry)
+        payload = base64.b64encode(self._media_buffers.get(lane, bytearray())).decode('utf-8')
+        self._media_buffers[lane] = bytearray()
+
+        # source_media_detail() strips the identity/security backlink from the response.
+        entry = {'mime_type': mimeType, lane: payload}
+        detail = source_media_detail(self._media_descriptors.get(lane))
+        if detail:
+            entry['metadata'] = detail
+        self.instance.currentObject.response[key].append(entry)
 
     def writeAudio(self, aviAction: int, mimeType: str, data: bytes):
         self._write_media('audio', aviAction, mimeType, data)

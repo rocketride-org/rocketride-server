@@ -37,7 +37,7 @@ using a visual drag-and-drop canvas or code-first with TypeScript and Python SDK
 
 You build your `.pipe` - and you run it against the fastest AI runtime available.
 
-- **50+ ready-to-use nodes** - 13 LLM providers, 8 vector databases, OCR, NER, PII anonymization, and more
+- **100+ ready-to-use nodes** - 15+ LLM providers, 9 vector databases, OCR, NER, PII anonymization, and more
 - **High-performance C++ engine** - production-grade speed and reliability
 - **Deploy anywhere** - locally, on-premises, or self-hosted with Docker
 - **MIT licensed** - fully open-source, OSI-compliant

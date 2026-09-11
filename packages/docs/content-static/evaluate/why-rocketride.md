@@ -30,7 +30,7 @@ production.
 
 ## Batteries included, nothing locked in
 
-- **50+ ready-to-use [nodes](/nodes)**: 13+ LLM providers, 8 vector databases, OCR, NER, PII
+- **100+ ready-to-use [nodes](/nodes)**: 15+ LLM providers, 9 vector databases, OCR, NER, PII
   anonymization, transcription, web tools, and more.
 - **Swap providers freely**: change an LLM or vector store by editing config, not code.
 - **Observability built in**: trace call trees, token usage, and memory as pipelines run.

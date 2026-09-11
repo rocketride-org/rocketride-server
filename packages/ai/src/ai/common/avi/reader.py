@@ -40,6 +40,9 @@ class AVIReader(ABC):
         self._write_chunk_size = 16 * 1024  # adjust for optimal performance
         self._read_chunk_size = 16 * 1024  # adjust for optimal performance
 
+        # Decoded bytes delivered to onData() so far; also reset per stream in start()
+        self._bytes_read = 0
+
     def __del__(self):
         """
         Cleanup resources when the object is deleted.
@@ -93,6 +96,10 @@ class AVIReader(ABC):
                 # fail with the same root cause.
                 if self._error is None:
                     self._error = e
+
+            # Count AFTER the callback: while onData() runs, the counter (and so
+            # getTimestamp()) still reads the stream position of this chunk's start
+            self._bytes_read += len(data)
 
         # Signal callback we are done
         self.onData(None)
@@ -304,6 +311,9 @@ class AVIReader(ABC):
         # Done is set when ffmpeg terminates
         self._done = False
         self._exit_code = 0
+
+        # New stream - restart the decoded-output byte count
+        self._bytes_read = 0
 
         # Capture errors from the background _data_process thread so they
         # can be re-raised on the pipe thread when stop() is called

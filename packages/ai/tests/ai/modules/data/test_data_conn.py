@@ -40,9 +40,15 @@ def _make_conn():
 
 
 def _make_pipe_with_listeners(listeners):
-    """Build a fake IServiceFilterPipe whose getListeners() returns the supplied set."""
+    """Build a fake IServiceFilterPipe whose getListeners() returns the supplied set.
+
+    ``hasListener`` answers from the same set, the way the engine's Binder does —
+    a bare MagicMock would return a truthy mock for every lane and hide exactly
+    the "nobody reads this" case these tests exist to pin.
+    """
     pipe = MagicMock()
     pipe.getListeners = MagicMock(return_value=set(listeners))
+    pipe.hasListener = MagicMock(side_effect=lambda lane: lane in set(listeners))
     return pipe
 
 
@@ -141,6 +147,98 @@ def test_determine_lane_unknown_mime_goes_to_raw():
     conn = _make_conn()
     pipe = _make_pipe_with_listeners(['text', 'image'])  # listeners don't matter here
     assert conn._determine_lane('application/x-unknown', pipe) == 'raw'
+
+
+# ---------------------------------------------------------------------------
+# _warn_on_unconsumed_lane
+# ---------------------------------------------------------------------------
+
+
+def test_warn_on_unconsumed_lane_stays_quiet_when_the_lane_is_read(monkeypatch):
+    """A lane with a consumer produces no warning."""
+    warnings = []
+    monkeypatch.setattr('ai.modules.data.data_conn.warning', warnings.append)
+
+    conn = _make_conn()
+    pipe = _make_pipe_with_listeners(['text'])
+    conn._warn_on_unconsumed_lane('text/plain', 'text', pipe)
+
+    assert warnings == []
+
+
+def test_warn_on_unconsumed_lane_warns_when_nothing_reads_it(monkeypatch):
+    """JSON sent to a text-only pipeline warns, naming the MIME and the read lanes."""
+    warnings = []
+    monkeypatch.setattr('ai.modules.data.data_conn.warning', warnings.append)
+
+    conn = _make_conn()
+    pipe = _make_pipe_with_listeners(['text'])
+    conn._warn_on_unconsumed_lane('application/json', 'raw', pipe)
+
+    assert len(warnings) == 1
+    message = warnings[0]
+    assert 'application/json' in message
+    assert 'text' in message
+
+
+def test_warn_on_unconsumed_lane_resolves_raw_through_the_tags_method(monkeypatch):
+    """The 'raw' lane is checked against 'tags' — a tags consumer silences it.
+
+    ``writeTagData`` dispatches on the binder's ``tags`` method, so a pipeline
+    whose first node reads ``tags`` does receive raw-routed data and must not
+    be warned about.
+    """
+    warnings = []
+    monkeypatch.setattr('ai.modules.data.data_conn.warning', warnings.append)
+
+    conn = _make_conn()
+    pipe = _make_pipe_with_listeners(['tags'])
+    conn._warn_on_unconsumed_lane('application/json', 'raw', pipe)
+
+    assert warnings == []
+
+
+def test_warn_on_unconsumed_lane_reports_no_read_lanes_as_none(monkeypatch):
+    """With nothing wired downstream the message says so rather than printing an empty list."""
+    warnings = []
+    monkeypatch.setattr('ai.modules.data.data_conn.warning', warnings.append)
+
+    conn = _make_conn()
+    pipe = _make_pipe_with_listeners([])
+    conn._warn_on_unconsumed_lane('application/json', 'raw', pipe)
+
+    assert len(warnings) == 1
+    assert 'none' in warnings[0]
+
+
+def test_warn_on_unconsumed_lane_omits_lifecycle_methods_from_the_suggestion(monkeypatch):
+    """open/closing/close are bound on every component and must not be offered as lanes."""
+    warnings = []
+    monkeypatch.setattr('ai.modules.data.data_conn.warning', warnings.append)
+
+    conn = _make_conn()
+    pipe = _make_pipe_with_listeners(['open', 'closing', 'close', 'text'])
+    conn._warn_on_unconsumed_lane('application/json', 'raw', pipe)
+
+    assert len(warnings) == 1
+    message = warnings[0]
+    assert 'reads: text.' in message
+    for lifecycle in ('open', 'closing', 'close'):
+        assert f'{lifecycle},' not in message
+
+
+def test_warn_on_unconsumed_lane_is_symmetric_for_text_on_a_json_pipeline(monkeypatch):
+    """The mismatch is not JSON-specific: text into a json-only pipeline warns too."""
+    warnings = []
+    monkeypatch.setattr('ai.modules.data.data_conn.warning', warnings.append)
+
+    conn = _make_conn()
+    pipe = _make_pipe_with_listeners(['json'])
+    conn._warn_on_unconsumed_lane('text/plain', 'raw', pipe)
+
+    assert len(warnings) == 1
+    assert 'text/plain' in warnings[0]
+    assert 'json' in warnings[0]
 
 
 # ---------------------------------------------------------------------------

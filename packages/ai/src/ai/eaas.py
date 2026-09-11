@@ -154,6 +154,7 @@ async def run(config: Dict[str, Any] = None) -> None:
     server.use('task')
     server.use('task_http')
     server.use('shell')
+    server.use('mcp')
 
     # Uniform entry point — OSS is a no-op; SaaS registers all HTTP routes
     # (Zitadel callback, Stripe webhook, Stripe Connect, Marketplace) and
@@ -170,7 +171,11 @@ def main():
     """Run the EaaS server."""
     try:
         asyncio.run(run())
-    except (KeyboardInterrupt, SystemExit):
+    except KeyboardInterrupt:
+        # Ctrl-C is a clean stop (exit 0). A SystemExit — e.g. the stale-schema
+        # exit raised by verify_database — is deliberately NOT caught: it carries
+        # the intended exit code (1) to the caller and, being SystemExit, prints
+        # no traceback at the top level.
         pass
 
 

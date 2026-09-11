@@ -32,7 +32,9 @@
 		"pipeline"
 	],
 	"scripts": {
-		"prepare": "lefthook install --force"
+		"prepare": "lefthook install --force",
+		"check:action-pins": "node scripts/verify-action-pins.mjs",
+		"test:action-pins": "node --test scripts/verify-action-pins.test.mjs"
 	},
 	"packageManager": "pnpm@10.33.0",
 	"engines": {
@@ -45,7 +47,7 @@
 		"@types/node": "^20.19.41",
 		"@types/react": "~18.3.31",
 		"@types/react-dom": "~18.3.7",
-		"adm-zip": "^0.5.17",
+		"adm-zip": "^0.6.0",
 		"concurrently": "^8.2.2",
 		"dotenv": "^16.4.5",
 		"eslint": "^9.39.4",
@@ -62,7 +64,7 @@
 		"npm-run-all": "^4.1.5",
 		"prettier": "^3.8.3",
 		"rimraf": "^5.0.5",
-		"tar": "^7.5.15",
+		"tar": "^7.5.21",
 		"typescript": "^5.3.3",
 		"typescript-eslint": "^8.60.0"
 	}

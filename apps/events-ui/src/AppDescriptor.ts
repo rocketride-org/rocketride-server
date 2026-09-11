@@ -24,6 +24,12 @@
 // EVENTS-UI — APP DESCRIPTOR
 // =============================================================================
 
+// HMR anchor: keeps the shared jsx runtime referenced even when the app's
+// root component fails to compile — an error build otherwise orphans it, the
+// hot runtime tombstones its factory, and every later fix-apply dies
+// silently (the frozen-preview bug).
+import 'react/jsx-dev-runtime';
+
 import React from 'react';
 import type { AppDescriptor } from 'shell';
 import { RocketRideMark } from 'shell';

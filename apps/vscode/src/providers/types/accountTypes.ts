@@ -25,7 +25,7 @@ export type AccountHostToWebview =
 	| { type: 'account:init'; isConnected: boolean; profile: ConnectResult | null; org: OrgDetail | null; members: MemberRecord[]; teams: TeamRecord[]; keys: ApiKeyRecord[] }
 	| { type: 'account:profile'; profile: ConnectResult | null }
 	// The cached identity (client.getAccountInfo()) — posted beside
-	// account:profile whenever the default team/org changes.
+	// account:profile whenever the dev team/org changes.
 	| { type: 'account:authUser'; authUser: ConnectResult | null }
 	| { type: 'account:keys'; keys: ApiKeyRecord[] }
 	| { type: 'account:org'; org: OrgDetail | null }
@@ -50,7 +50,7 @@ export type AccountWebviewToHost =
 	| ShellWebviewToHost
 	| CheckoutRequestWebviewToHost
 	| { type: 'account:saveProfile'; fields: ProfileUpdate }
-	| { type: 'account:setDefaultTeam'; teamId: string }
+	| { type: 'account:setDevTeam'; teamId: string }
 	| { type: 'account:setDefaultOrg'; orgId: string }
 	| { type: 'account:logout' }
 	| { type: 'account:deleteAccount' }

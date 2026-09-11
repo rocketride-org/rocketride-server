@@ -33,6 +33,17 @@
 			"description": "Base directory (relative to the account file store root) that lane-written files are placed under.",
 			"default": "output/"
 		},
+		"filesystem.onConflict": {
+			"type": "string",
+			"title": "When the file already exists",
+			"description": "What the sink does when the target path is already taken. 'Replace' is destructive in a way that is easy to miss: names come from the source object's BASENAME, so two inputs from different folders that share a filename resolve to the same target and the second silently replaces the first. Leave it on 'Write under a new name' unless you are deliberately re-running into the same directory.",
+			"default": "unique",
+			"enum": [
+				["unique", "Write under a new name (file_1, file_2, ...)"],
+				["overwrite", "Replace the existing file"],
+				["skip", "Leave the existing file alone"]
+			]
+		},
 		"filesystem.emitUrl": {
 			"type": "boolean",
 			"title": "Emit download URL",
@@ -72,7 +83,7 @@
 		{
 			"section": "Pipe",
 			"title": "File Store",
-			"properties": ["type", "filesystem.targetDir", "filesystem.emitUrl", "filesystem.urlExpiresIn", "filesystem.pathWhitelist"]
+			"properties": ["type", "filesystem.targetDir", "filesystem.onConflict", "filesystem.emitUrl", "filesystem.urlExpiresIn", "filesystem.pathWhitelist"]
 		}
 	]
 }

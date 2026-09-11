@@ -1,0 +1,3 @@
+# Authoritative Overlay Dependencies
+# `requests` is imported by connectors/sec.py. The engine base environment already
+# ships it (same as aparavi_aql); do not add a pip pin here.

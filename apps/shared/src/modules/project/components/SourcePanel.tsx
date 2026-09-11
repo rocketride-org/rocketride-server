@@ -79,8 +79,7 @@ export interface ISourcePanelProps {
 	liveTaskStatus?: TaskStatus;
 	/** Component id → display name for the trace viewer. */
 	componentNames: Map<string, string>;
-	/** Connection / gating flags, forwarded to the panes. */
-	isConnected: boolean;
+	/** Gating flags, forwarded to the panes. */
 	isSubscribed?: boolean;
 	isReadonly?: boolean;
 	serverHost?: string;
@@ -221,7 +220,7 @@ function formatTime(time: number | null | undefined): string {
 /**
  * The self-contained per-source monitoring + replay section.
  */
-export const SourcePanel: React.FC<ISourcePanelProps> = ({ source, runKind, projectId, liveEvents, openSession, fetchTimeline, liveTaskStatus, componentNames, isConnected, isSubscribed, isReadonly, serverHost, onPipelineAction, onOpenLink }) => {
+export const SourcePanel: React.FC<ISourcePanelProps> = ({ source, runKind, projectId, liveEvents, openSession, fetchTimeline, liveTaskStatus, componentNames, isSubscribed, isReadonly, serverHost, onPipelineAction, onOpenLink }) => {
 	// --- Section-local view state --------------------------------------------
 	const [pill, setPill] = useState<SourcePill>('status');
 	const [timeline, setTimeline] = useState<TaskTimeline | null>(null);

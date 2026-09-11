@@ -208,12 +208,17 @@ class DebugCommands(DAPConn):
                 raise RuntimeError('Debugger already active on this session')
 
             # Debug runs are development runs: they ALWAYS execute under the
-            # user's profile-assigned development team. Clients do not choose
+            # user's profile-assigned dev team. Clients do not choose
             # a team at launch; a stray teamId is rejected rather than
             # silently ignored so the caller is never surprised by which team
             # the run was billed/authorized under.
             args = request.get('arguments') or {}
-            team_id = self._account_info.defaultTeam
+            team_id = self._account_info.devTeam
+            # Billing must never guess: no dev team = no debug run.
+            if not team_id:
+                raise PermissionError(
+                    'No development team is set — pick one in your profile before debugging pipelines'
+                )
             requested_team = args.get('teamId')
             if requested_team and requested_team != team_id:
                 raise PermissionError('Debug tasks run in your assigned development team; change it in your profile')

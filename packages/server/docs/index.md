@@ -28,6 +28,24 @@ send so you can debug, trace, or build your own client.
 The default port is applied only when the URI omits one, point the client at a
 different host or port to reach a remote or self-hosted engine.
 
+### Pre-auth probe (`rrext_public_probe`)
+
+Before authenticating, a client may open a public connection and send
+`rrext_public_probe`. The response body carries `version`, `capabilities`,
+`platform`, the public `apps` list, `stripePublishableKey` (when billing is
+configured), and `endpoints` — the server's public addresses:
+
+```json
+{ "endpoints": { "api": "origin", "ui": "origin" } }
+```
+
+Each value is an absolute URL or the literal `origin`, meaning "the address
+you probed me at" (the SDKs substitute it client-side before returning, so
+callers always see absolute URLs). The server reads `RR_BACKEND_ORIGIN` /
+`RR_FRONTEND_ORIGIN` for the two values; unset means `origin`, correct for
+any single-host deployment. They differ only on split deployments — e.g. a
+CDN-served UI whose live traffic should connect directly to the API host.
+
 ## Message format
 
 The engine protocol is a DAP-style (Debug Adapter Protocol) message exchange.
@@ -68,7 +86,8 @@ whether the command worked; a successful response carries a `body`.
 ```
 
 On failure, `success` is `false` and the frame carries a `message` plus a
-`trace` (`file`, `lineno`) instead of a body:
+`trace` (`file`, `lineno`) instead of a body. A failure the engine can name
+also carries a machine-readable `code`:
 
 ```json
 {
@@ -77,10 +96,31 @@ On failure, `success` is `false` and the frame carries a `message` plus a
 	"request_seq": 1,
 	"command": "rrext_process",
 	"success": false,
-	"message": "Pipeline is not running",
-	"trace": { "file": "process.cpp", "lineno": 214 }
+	"message": "Your pipeline is not running",
+	"code": "TASK_NOT_REGISTERED",
+	"trace": { "file": "task_server.py", "lineno": 722 }
 }
 ```
+
+`message` is written for a person and may be reworded or translated; `code` is
+the contract. Classify a failure on `code` and never on the message text.
+Absent `code`, the failure has no named class — treat it as unclassified rather
+than inferring one from the prose.
+
+| `code` | Meaning |
+| --- | --- |
+| `TASK_NOT_REGISTERED` | The token, public key or project/source names no live task: never started, terminated, replaced by another client, or the engine restarted (the task registry is in-memory and rebuilt at boot, so every previously issued token is invalid after a restart). |
+| `TASK_AMBIGUOUS` | An unscoped lookup matched several running tasks; retry with a scope. |
+| `TASK_COMPLETED` | The task finished before the request could be served. |
+| `TASK_STOPPED` | The task was stopped or cancelled before the request. |
+
+These codes ride command replies. A task key rejected while the connection is
+still being established — on the HTTP request or the WebSocket upgrade — is
+answered by the web layer with a generic `400 Bad request` carrying neither a
+message nor a code, deliberately, so that a rejected credential reveals nothing
+about why it was rejected. A client therefore cannot tell an invalidated task
+key from any other bad credential at connect time; the codes above appear only
+once a command is in flight.
 
 ### Events
 
@@ -115,6 +155,51 @@ commands:
 
 The pipeline JSON sent over the socket is identical to the JSON you author
 visually or by hand, the protocol just transports it.
+
+## MIME type selects the lane
+
+Every write carries a MIME type — the `mimeType` argument of `rrext_process` /
+`open`, which the HTTP `/webhook/{project_id}/{source}` route fills in from the
+request's `Content-Type` header. That MIME type is **routing, not metadata**: it
+picks which lane the body is delivered on.
+
+The choice is made against the pipeline's live wiring, not a fixed table. A
+branch is taken only when the MIME type matches **and** some component actually
+reads that lane; anything unmatched falls through to the raw/tags lane.
+
+| MIME type | Lane, when a component reads it |
+| --- | --- |
+| `application/json` | `json` |
+| `text/*` | `text` |
+| `image/*`, `video/*`, `audio/*` | `image`, `video`, `audio` |
+| `application/rocketride-question+json` | `questions` |
+| `application/rocketlib-tag` | `tags` |
+| anything else, or no reader above | raw, delivered on `tags` |
+
+The prefix `lane/<name>` bypasses detection and targets a lane directly.
+
+### When nothing reads the chosen lane
+
+The write still succeeds. The object is accepted, counted as completed and
+answered `200 OK`; only `resultTypes` comes back empty, because no component
+received the body. Nothing about the response, the HTTP log line or the task
+counters distinguishes this from a successful run.
+
+Because that outcome is indistinguishable from success, the engine emits a task
+**warning** naming the lane the data went to and the lanes the pipeline reads.
+It is a warning rather than an error: a source may legitimately offer several
+lanes while a pipeline wires up one, so an unread lane is not by itself a fault
+— but *this object reaching nobody* is never what the sender intended, and the
+warning is the only signal that separates the two.
+
+Read the warnings from `get_task_status(token)['warnings']`, or subscribe to
+`apaevt_status_warning` (see [Observability](/protocols/websocket/observability)).
+
+Note that the mismatch is symmetric: `text/plain` into a pipeline whose first
+component reads `json` fails exactly the way `application/json` fails into a
+`text`-first one. There is no single header that is correct for every pipeline,
+which is why the endpoint panel offers one example per lane and preselects the
+one the running pipeline reads.
 
 ## Keepalive & timeouts
 

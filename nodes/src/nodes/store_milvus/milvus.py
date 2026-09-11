@@ -143,7 +143,7 @@ class Store(DocumentStoreBase):
 
     def _createCollection(self, vectorSize: int) -> bool:
         """
-        Create a collection, doesn't return anything.
+        Create a collection, returning True on success and raising on failure.
         """
         # no collection present so far -> Let's build by starting with the parameters for the schema
 
@@ -186,11 +186,8 @@ class Store(DocumentStoreBase):
         # this method is called from the base class createCollection() which already
         # holds collectionLock. Using doesCollectionExist() would cause a deadlock.
         if not self._doesCollectionExist():
-            try:
-                self.client.create_collection(collection_name=self.collection, schema=schema, index_params=index_params)
-            except Exception:
-                return True
-        return False
+            self.client.create_collection(collection_name=self.collection, schema=schema, index_params=index_params)
+        return True
 
     def _convertFilter(self, docFilter: DocFilter) -> str:
         """
