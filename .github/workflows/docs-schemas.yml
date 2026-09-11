@@ -15,22 +15,22 @@ on:
     # GitHub Actions YAML has no anchors — keep this list identical to push's.
     paths:
       - 'docs/**'
-      - 'docs/docusaurus/**'
       - 'nodes/src/nodes/**/README.md'
       - 'nodes/src/nodes/**/services*.json'
       - 'scripts/validate-node-readme.py'
       - 'scripts/validate-client-docs.py'
+      - 'tests/test_validate_node_readme.py'
       - 'pnpm-lock.yaml'
       - '.github/workflows/docs-schemas.yml'
   push:
     branches: [develop]
     paths:
       - 'docs/**'
-      - 'docs/docusaurus/**'
       - 'nodes/src/nodes/**/README.md'
       - 'nodes/src/nodes/**/services*.json'
       - 'scripts/validate-node-readme.py'
       - 'scripts/validate-client-docs.py'
+      - 'tests/test_validate_node_readme.py'
       - 'pnpm-lock.yaml'
       - '.github/workflows/docs-schemas.yml'
 
@@ -66,6 +66,8 @@ jobs:
           node-version: 20
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - name: Install validator test dependencies
+        run: python3 -m pip install --disable-pip-version-check pytest==8.4.1
       - name: Docs unit tests
         run: node scripts/build.js docs:test
       - name: Build docs site

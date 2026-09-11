@@ -13,15 +13,15 @@ Full docs: `docs/agents/context/`
 | File                              | Read when...                                                      |
 | --------------------------------- | ----------------------------------------------------------------- |
 | ROCKETRIDE_README.md              | Starting any RocketRide work: platform map, setup, task router     |
-| ROCKETRIDE_CLI.md                 | The `rocketride` command: validate, run, store, deploy, app verbs; when to prefer it over SDK code |
+| ROCKETRIDE_CLI.md                 | The `rocketride` command: validate, start/upload runs, store, deploy, app verbs; when to prefer it over SDK code |
 | ROCKETRIDE_CONCEPTS.md            | Workspace, connection, deploy/publish lifecycle                    |
 | ROCKETRIDE_PIPELINES.md           | Defining pipelines: `.pipe` format, lanes, patterns, pitfalls     |
 | ROCKETRIDE_COMPONENT_REFERENCE.md | Choosing/configuring components: all providers and config fields |
 | ROCKETRIDE_APPS.md                | Building RocketRide apps (App Builder, deploy, publish)           |
 | ROCKETRIDE_UI_COMPONENTS.md       | Shell UI components for apps                                       |
+| ROCKETRIDE_INTEGRATIONS.md        | MCP, n8n, webhooks, Telegram, CI                                   |
 | ROCKETRIDE_python_API.md          | Python SDK: client methods, types, patterns                      |
 | ROCKETRIDE_typescript_API.md      | TypeScript SDK: client methods, types, patterns                  |
-| ROCKETRIDE_INTEGRATIONS.md        | MCP, n8n, webhooks, Telegram, CI                                   |
 | ROCKETRIDE_OBSERVABILITY.md       | Consuming runtime logs, lifecycle events, and pipeline traces     |
 
 ## Before Writing ANY RocketRide Code

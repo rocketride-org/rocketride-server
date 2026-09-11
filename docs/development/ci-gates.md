@@ -176,10 +176,10 @@ python3 scripts/validate-node-readme.py nodes/src/nodes/<node>
 ```
 
 The validator's own unit tests (`tests/test_validate_node_readme.py`) run inside
-`./builder nodes:test`, which CI exercises in `os-matrix.yml` rather than on
-every PR. That is deliberate: the validator itself runs on every doc-path PR via
-`docs:validate` and prints a result per node, so a regression in its logic shows
-up as a visible pass/fail shift on the same PR.
+`docs:validate` on every PR, alongside the two schema checks above.
+`./builder nodes:test` also runs this same file as part of the node contract
+suite; that invocation stays in place, but `docs:validate` is what gates it on
+every doc-path PR.
 
 ---
 

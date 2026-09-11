@@ -2,6 +2,10 @@
 
 # RocketRide MCP Server
 
+<!-- This README is both a docs:export source and, unlike the other package
+     READMEs, the site page itself for /connect/mcp/stdio, and gather never
+     stages assets/, so a relative image link here would 404 on the
+     published page. Keep this one banner absolute. -->
 <p align="center">
   <img src="https://raw.githubusercontent.com/rocketride-org/rocketride-server/main/docs/public/mcp/stdio/assets/banner-mcp.png" alt="RocketRide MCP Server" width="900" />
 </p>

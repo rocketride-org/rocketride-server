@@ -129,21 +129,6 @@ Two direct-URL forms to avoid, both verified broken:
   without a recognizable archive filename ("neither 'setup.py' nor
   'pyproject.toml' found"). The `/latest` route is for curl/scripting
   only; pip installs use the concrete wheel filename.
-```bash
-# Download and install Python client (use "latest" as filename for newest version)
-curl -o rocketride-latest.whl http://localhost:5565/client/python/latest
-pip install rocketride-latest.whl
-
-# Download and install TypeScript client
-curl -O http://localhost:5565/client/typescript
-npm install rocketride-*.tgz
-
-# Download and install VSCode extension
-curl -O http://localhost:5565/client/vscode
-code --install-extension rocketride-*.vsix
-```
-
-These endpoints are public (no authentication required) and automatically serve the latest version. Returns 404 with a JSON error if packages are not found.
 
 ---
 

@@ -104,4 +104,4 @@ request (registry ints ONLY — semver is display).
 
 Full signatures: [API reference](/clients/typescript/reference#app-publish-ladder).
 
-See the [Shell Apps guide](/guides/apps) for the app model itself.
+See the [Shell API guide](/guides/apps) for the app model itself.

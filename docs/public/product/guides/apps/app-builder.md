@@ -26,7 +26,8 @@ the same loop runs from a terminal or CI.
   workspace root.
 - A developer id for your organization. Every app id is
   `<developerId>.<name>`. Your organization claims its developer id once,
-  on the Deploy tab (letters and underscores only), and can then deploy
+  on the Deploy tab (lowercase letters and underscores, starting with a
+  letter), and can then deploy
   only apps inside that namespace. Until the prefix of your app's id
   matches, the Deploy tab is read-only with a banner; the fix is to rename
   the id in `package.json`. Design and Package always work.
@@ -112,10 +113,11 @@ A deploy packs the app folder plus any folders listed under
 rocketride app deploy ./apps/reports --comment "first version"
 ```
 
-`rocketride app create` and `rocketride app deploy` need a deployment
-target (`ROCKETRIDE_DEPLOY_URI` and `ROCKETRIDE_DEPLOY_APIKEY`) and refuse
-to run without one; `rocketride app verify` does not. Publishing happens on
-the Deploy tab.
+`rocketride app deploy` needs a deployment target (`ROCKETRIDE_DEPLOY_URI`
+and `ROCKETRIDE_DEPLOY_APIKEY`) and refuses to run without one; `app
+create` uses the development connection (`ROCKETRIDE_URI`) to vendor
+platform packages, and `app verify` needs no connection. Publishing
+happens on the Deploy tab.
 
 ## Adding a pipeline to your app
 

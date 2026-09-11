@@ -9,7 +9,7 @@
  */
 const path = require('path');
 const { readdir } = require('node:fs/promises');
-const { execCommand, exists, mkdir, rm, setState, parallel, PROJECT_ROOT, BUILD_ROOT, DIST_ROOT } = require('../../../scripts/lib');
+const { execCommand, exists, mkdir, rm, setState, parallel, runPytest, PROJECT_ROOT, BUILD_ROOT, DIST_ROOT } = require('../../../scripts/lib');
 
 // Light, in-tree reference generators that deposit before gather collects them.
 // Heavier emitters (Python SDKs, engine) refresh via their own :build under
@@ -144,9 +144,10 @@ function makeTestAction() {
 /**
  * docs:validate — the deterministic documentation checks, run as a builder
  * task so `docs:test` (and therefore `./builder test`) carries them; CI does
- * not own them. Two phases:
+ * not own them. Three phases:
  *   1. client-doc parity — blocking
  *   2. the whole node corpus (--all) — blocking
+ *   3. the node README schema validator's own unit tests — blocking
  */
 function makeValidateAction() {
 	return {
@@ -157,6 +158,15 @@ function makeValidateAction() {
 
 			// 2. the whole node corpus — blocking now that it is clean
 			await execCommand('python3', ['scripts/validate-node-readme.py', '--all', 'nodes/src/nodes'], { task, cwd: PROJECT_ROOT });
+
+			// 3. the validator's own regression tests — the only per-PR gate on
+			// scripts/validate-node-readme.py itself; nodes:test also runs this
+			// file, but nothing in .github/workflows invokes nodes:test.
+			await runPytest({
+				engine: 'python3',
+				testsDir: path.join(PROJECT_ROOT, 'tests', 'test_validate_node_readme.py'),
+				execOpts: { task, cwd: PROJECT_ROOT },
+			});
 		},
 	};
 }

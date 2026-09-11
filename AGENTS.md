@@ -95,7 +95,7 @@ then run `./builder docs:export`; never edit `packages/client-*/README.md`,
 CI runs `./builder docs:check` to
 catch drift. The VS Code marketplace readme is `apps/vscode/README.md`,
 owned by the extension alongside its `assets/`; the VSIX build stages it
-as-is.
+with its image links rewritten to absolute URLs.
 
 Prose-only edits and internal refactors that do not change a public contract
 do not require doc updates. Treat the doc as part of the change, not a

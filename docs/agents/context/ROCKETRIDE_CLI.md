@@ -29,7 +29,7 @@ a non-zero exit. Deploy verbs (`deploy *`, `app deploy`) use the
 | Validate a pipeline | `rocketride validate path/to/pipeline.pipe` (globs allowed) |
 | Run a pipeline | `rocketride start --pipeline file.pipe` prints the task token; `rocketride upload files/* --pipeline file.pipe` starts, uploads, and terminates in one go |
 | See what is running, stop it | `rocketride list`, `rocketride stop --token TOKEN` |
-| Read run logs and traces | No CLI verb — use the SDK (`client.log`, API doc §Run logs) or ROCKETRIDE_OBSERVABILITY.md |
+| Read run logs and traces | No CLI verb — use the SDK (`client.log`, API doc §Templates & Run Logs) or ROCKETRIDE_OBSERVABILITY.md |
 | Files in the account store | `rocketride store dir|type|write|rm|mkdir|stat` |
 | Deploy, publish, schedule | `rocketride deploy …` (deployment target) |
 | Apps | `rocketride app create|verify|deploy` (deployment target) |
@@ -101,14 +101,16 @@ All store subcommands take the common `--uri`/`--apikey` options.
 
 ## App commands (`rocketride app ...`)
 
-App lifecycle verbs are **deployment-target** operations: they default to
-the `ROCKETRIDE_DEPLOY_URI` / `ROCKETRIDE_DEPLOY_APIKEY` pair and refuse
-to run when no deployment target is configured — they never fall back to
-the development connection.
+`app deploy` is a **deployment-target** verb: it defaults to the
+`ROCKETRIDE_DEPLOY_URI` / `ROCKETRIDE_DEPLOY_APIKEY` pair and refuses to
+run when no deployment target is configured. `app create` reads the
+development connection (`ROCKETRIDE_URI`) for vendoring; `app verify`
+needs no connection.
 
 - `rocketride app create <slug> [--template Blank|Dashboard] [--name <text>]
   [--developer <id>] [--sidebar] [--no-status-footer] [--doc-tabs]
-  [--no-install]` — scaffold a new app under `./apps/<slug>` with the same
+  [--workspace <dir>] [--no-install]` — scaffold a new app under
+  `./apps/<slug>` with the same
   templates as the App Builder wizard, vendoring the platform packages
   from the development server (`ROCKETRIDE_URI`). SDK equivalent:
   `client.deploy.createApp(slug, options)` / `client.deploy.create_app`.
@@ -137,11 +139,12 @@ platform vocabulary — **deploy** = version to the server's registry,
 **publish** = bind a rung to a version:
 
 ```bash
-rocketride deploy add pipelines/ingest.pipe --comment "v2 parse"    # next registry version (--kind pipe|node)
+rocketride deploy add pipelines/ingest.pipe --comment "v2 parse" [--deploy-to <teamId>]   # next registry version (--kind pipe|node; --deploy-to also points a team at it in the same call)
 rocketride deploy publish <projectId> 3 --team <teamId>             # point the team at version 3
 rocketride deploy list                                              # deployments overview
 rocketride deploy get <projectId> --team <teamId>                   # one deployment's state + schedules
 rocketride deploy versions <projectId>                              # registry versions
+rocketride deploy artifact <projectId> <version>                    # fetch one registry version's artifact JSON
 rocketride deploy history <projectId>                               # deploy/publish audit trail
 rocketride deploy run <projectId> <sourceId> --team <teamId>        # trigger a run now
 rocketride deploy schedule set <projectId> <sourceId> "0 9 * * 1-5" --team <teamId> --ttl 32400

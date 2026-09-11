@@ -15,9 +15,9 @@ extension surface around it.
 
 - **RocketRide: New App** in the command palette (or **New App** in the
   sidebar's app list) scaffolds an app into `apps/` and opens the builder.
-- Switch the RocketRide sidebar to apps mode: **MY APPS** lists the apps in
-  your workspace merged with the ones your connected server knows about.
-  Clicking a row opens its App Builder.
+- Switch the RocketRide sidebar to apps mode: **MY APPS** lists the
+  `.rrapp`-bound apps found in your open workspace folders. Clicking a row
+  opens its App Builder.
 - Opening an app's `<name>.rrapp` file opens the builder for that app.
 
 ## Settings

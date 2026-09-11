@@ -38,23 +38,23 @@ Base URL: `https://docs.rocketride.org`  ·  Pinned: 2026 (refresh with `tools/g
 
 ## Evaluate
 
-- [Security](/evaluate/security.md)
-- [Understanding RocketRide](/evaluate/understanding.md)
-- [Use Cases](/evaluate/use-cases.md)
-- [Why RocketRide](/evaluate/why-rocketride.md)
+- [Security](/support/security-policy.md)
+- [Understanding RocketRide](/concepts.md)
+- [Use Cases](/quickstart/ide-walkthrough.md)
+- [Why RocketRide](/index.md)
 
 ## Concepts
 
-- [Advanced Agents](/concepts/advanced-agents.md)
+- [Advanced Agents](/guides/advanced-agents.md)
 - [Agents & Tools](/concepts/agents-tools-skills.md)
-- [Best Practices](/concepts/best-practices.md)
-- [Error Handling](/concepts/error-handling.md)
+- [Best Practices](/guides/best-practices.md)
+- [Error Handling](/guides/error-handling.md)
 - [Execution Model](/concepts/execution-model.md)
 - [Nodes](/concepts/nodes.md)
-- [Performance](/concepts/performance.md)
+- [Performance](/guides/performance.md)
 - [Pipelines](/concepts/pipelines.md)
 - [Runtime & Engine](/concepts/runtime-engine.md)
-- [Security Model](/concepts/security-model.md)
+- [Security Model](/operate/security.md)
 
 ## Examples
 
@@ -64,13 +64,13 @@ Base URL: `https://docs.rocketride.org`  ·  Pinned: 2026 (refresh with `tools/g
 
 ## Protocols
 
-- [MCP Server](/protocols/mcp.md)
-- [WebSocket](/protocols/websocket.md)
-- [Observability](/protocols/websocket/observability.md)
+- [MCP Server](/connect/mcp/stdio.md)
+- [WebSocket](/connect/websocket.md)
+- [Observability](/connect/websocket/observability.md)
 
 ## Nodes
 
-- [Overview](/nodes.md)
+- [Overview](/nodes)
 - [Accessibility Describe](/nodes/accessibility_describe.md)
 - [CrewAI Agent](/nodes/agent_crewai.md)
 - [CrewAI Agent](/nodes/agent_crewai/crewai_agent.md)
@@ -85,13 +85,13 @@ Base URL: `https://docs.rocketride.org`  ·  Pinned: 2026 (refresh with `tools/g
 - [Anomaly Detector](/nodes/anomaly_detector.md)
 - [Anonymize](/nodes/anonymize.md)
 - [Aparavi AQL](/nodes/aparavi_aql.md)
-- [Astra DB](/nodes/astra_db.md)
-- [MongoDB Atlas](/nodes/atlas.md)
+- [Astra DB](/nodes/store_astra.md)
+- [MongoDB Atlas](/nodes/store_atlas.md)
 - [Player](/nodes/audio_player.md)
 - [Transcribe](/nodes/audio_transcribe.md)
 - [Text To Speech](/nodes/audio_tts.md)
 - [Parse/Process/Embed](/nodes/autopipe.md)
-- [Chroma](/nodes/chroma.md)
+- [Chroma](/nodes/store_chroma.md)
 - [Core](/nodes/core.md)
 - [Fingerprinter](/nodes/core/hash.md)
 - [Parser](/nodes/core/parser.md)
@@ -108,9 +108,9 @@ Base URL: `https://docs.rocketride.org`  ·  Pinned: 2026 (refresh with `tools/g
 - [Frame Grabber](/nodes/frame_grabber.md)
 - [Guardrails](/nodes/guardrails.md)
 - [Cleanup](/nodes/image_cleanup.md)
-- [Index Search](/nodes/index_search.md)
-- [Elasticsearch](/nodes/index_search/elasticsearch.md)
-- [OpenSearch](/nodes/index_search/opensearch.md)
+- [Index Search](/nodes/store_elasticsearch.md)
+- [Elasticsearch](/nodes/store_elasticsearch/elasticsearch.md)
+- [OpenSearch](/nodes/store_elasticsearch/opensearch.md)
 - [LlamaParse](/nodes/llamaparse.md)
 - [Anthropic](/nodes/llm_anthropic.md)
 - [Baidu Qianfan](/nodes/llm_baidu_qianfan.md)
@@ -135,15 +135,15 @@ Base URL: `https://docs.rocketride.org`  ·  Pinned: 2026 (refresh with `tools/g
 - [Local Text Output](/nodes/local_text_output.md)
 - [Memory (Internal)](/nodes/memory_internal.md)
 - [Persistent Memory](/nodes/memory_persistent.md)
-- [Milvus](/nodes/milvus.md)
+- [Milvus](/nodes/store_milvus.md)
 - [Named Entity Recognition](/nodes/ner.md)
 - [OCR](/nodes/ocr.md)
-- [Pinecone](/nodes/pinecone.md)
+- [Pinecone](/nodes/store_pinecone.md)
 - [Code](/nodes/preprocessor_code.md)
 - [General Text](/nodes/preprocessor_langchain.md)
 - [LLM](/nodes/preprocessor_llm.md)
 - [Prompt](/nodes/prompt.md)
-- [Qdrant](/nodes/qdrant.md)
+- [Qdrant](/nodes/store_qdrant.md)
 - [Question](/nodes/question.md)
 - [Reducto](/nodes/reducto.md)
 - [Remote Processing](/nodes/remote.md)
@@ -173,9 +173,9 @@ Base URL: `https://docs.rocketride.org`  ·  Pinned: 2026 (refresh with `tools/g
 - [v0 by Vercel](/nodes/tool_v0.md)
 - [xTrace Memory](/nodes/tool_xtrace_memory.md)
 - [TwelveLabs](/nodes/twelvelabs.md)
-- [PostgreSQL (pgvector)](/nodes/vectordb_postgres.md)
+- [PostgreSQL (pgvector)](/nodes/store_postgres.md)
 - [Vectorizer](/nodes/vectorizer.md)
-- [Weaviate](/nodes/weaviate.md)
+- [Weaviate](/nodes/store_weaviate.md)
 - [Webhook](/nodes/webhook.md)
 - [Chat](/nodes/webhook/chat.md)
 - [Drag & Drop](/nodes/webhook/dropper.md)
@@ -183,51 +183,51 @@ Base URL: `https://docs.rocketride.org`  ·  Pinned: 2026 (refresh with `tools/g
 
 ## Integrations
 
-- [Anthropic](/integrations/anthropic.md)
-- [Aparavi AQL](/integrations/aparavi-aql.md)
-- [Firecrawl](/integrations/firecrawl.md)
-- [Neo4j](/integrations/neo4j.md)
-- [PostgreSQL](/integrations/postgres.md)
-- [Qdrant](/integrations/qdrant.md)
+- [Anthropic](/nodes/llm_anthropic.md)
+- [Aparavi AQL](/nodes/aparavi_aql.md)
+- [Firecrawl](/nodes/tool_firecrawl.md)
+- [Neo4j](/nodes/graph_neo4j.md)
+- [PostgreSQL](/nodes/db_postgres.md)
+- [Qdrant](/nodes/store_qdrant.md)
 
 ## Develop
 
-- [Python](/develop/python.md)
-- [TypeScript](/develop/typescript.md)
-- [Deploy](/develop/typescript/methods/deploy.md)
-- [Get Task Status](/develop/typescript/methods/get-task-status.md)
-- [Send / Send Files / Pipe](/develop/typescript/methods/send.md)
-- [Terminate](/develop/typescript/methods/terminate.md)
-- [Use](/develop/typescript/methods/use.md)
-- [Validate](/develop/typescript/methods/validate.md)
+- [Python](/clients/python.md)
+- [TypeScript](/clients/typescript.md)
+- [Deploy](/clients/typescript/pipelines.md)
+- [Get Task Status](/clients/typescript/pipelines.md)
+- [Send / Send Files / Pipe](/clients/typescript/data.md)
+- [Terminate](/clients/typescript/pipelines.md)
+- [Use](/clients/typescript/pipelines.md)
+- [Validate](/clients/typescript/pipelines.md)
 
 ## IDE Extensions
 
-- [IDE Extensions](/ide-extensions/overview.md)
-- [Introduction](/ide-extensions/vscode.md)
-- [Installation](/ide-extensions/vscode/installation.md)
-- [Usage Guide](/ide-extensions/vscode/usage.md)
+- [IDE Extensions](/clients/vscode.md)
+- [Introduction](/clients/vscode.md)
+- [Installation](/clients/vscode/installation.md)
+- [Usage Guide](/clients/vscode/usage.md)
 
 ## Pipeline JSON Reference
 
-- [Pipeline JSON Reference](/pipeline-reference.md)
+- [Pipeline JSON Reference](/reference/pipeline-reference.md)
 
 ## CLI Reference
 
-- [CLI Reference](/cli.md)
+- [CLI Reference](/connect/cli.md)
 
 ## Cloud
 
-- [Cloud](/cloud.md)
+- [Cloud](/operate/cloud.md)
 
 ## Self-hosting
 
-- [Self-hosting](/self-hosting.md)
+- [Self-hosting](/operate/self-hosting.md)
 
 ## Troubleshooting
 
-- [Troubleshooting](/troubleshooting.md)
+- [Troubleshooting](/support/troubleshooting.md)
 
 ## Glossary
 
-- [Glossary](/glossary.md)
+- [Glossary](/reference/glossary.md)

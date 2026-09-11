@@ -33,9 +33,11 @@ function isExternal(target) {
  * identically after it is copied out of the repo (npm, PyPI, the VS Code
  * marketplace). Handles the markdown form `![alt](path)` and the HTML form
  * `<img src="path">`. Non-image links are untouched.
- * Handles `./x` and `x` relative targets; `../x` is joined verbatim
- * (raw.githubusercontent does not normalize), and reference-style images
- * (`![a][ref]`) are not rewritten.
+ * Handles `./x` and `x` relative targets; `../x` is left in the joined
+ * string as-is and relies on client-side URL normalization to resolve
+ * correctly. Not rewritten: reference-style images (`![a][ref]`), titled
+ * markdown images (`![alt](path "title")`), and single-quoted
+ * `<img src='...'>` attributes.
  *
  * @param {string} markdown - The document text.
  * @param {string} sourceDir - Repo-relative directory the document lives in (posix, no trailing slash), e.g. `docs/public/typescript`.

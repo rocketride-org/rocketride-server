@@ -21,7 +21,7 @@ is how that work is shared inside an organization.
 
 ## Apps and pipelines
 
-A pipeline can belong to an app, or stand beside it, the difference decides who runs it and when.
+A pipeline can belong to an app, or stand beside it. The difference decides who runs it and when.
 
 **Bundled with the app.** The `.pipe` file lives in the app folder and ships with the app. The app starts it when it needs it, for example when the user runs a query, and every signed-in user gets their own instance, automatically. A bundled pipeline is never shared between users and cannot run on a schedule.
 

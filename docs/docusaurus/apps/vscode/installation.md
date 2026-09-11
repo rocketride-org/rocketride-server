@@ -59,11 +59,16 @@ its OAuth code against the same effective server.
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| `rocketride.local.engineVersion` | `latest` | Engine version: `latest`, `prerelease`, or a specific tag |
+| `rocketride.development.local.engineVersion` | `latest` | Engine version: `latest`, `prerelease`, or a specific tag |
 
 ### Integrations
 
 | Setting | Default | Description |
 |---------|---------|-------------|
+| `rocketride.integrations.autoAgentIntegration` | `true` | Automatically detect and install RocketRide documentation for coding agents (Copilot, Claude Code, Cursor, Windsurf) on startup |
 | `rocketride.integrations.copilot` | - | Enable GitHub Copilot integration for pipeline development |
+| `rocketride.integrations.claudeCode` | - | Enable Claude Code integration |
 | `rocketride.integrations.cursor` | - | Enable Cursor IDE integration |
+| `rocketride.integrations.windsurf` | - | Enable Windsurf integration |
+| `rocketride.integrations.claudeMd` | - | Install RocketRide instructions to CLAUDE.md at the repo root |
+| `rocketride.integrations.agentsMd` | - | Install RocketRide instructions to AGENTS.md at the repo root |

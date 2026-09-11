@@ -91,8 +91,8 @@ they share the same section skeleton, so any `§` reference works in both.
 ## Working from the command line
 
 You have a shell. Prefer the `rocketride` command for every one-shot
-lifecycle operation — validate, run, upload, store, deploy, publish,
-schedule, scaffold — and write SDK code only for what it cannot do (today:
+lifecycle operation — validate, start and upload runs, store, deploy,
+publish, schedule, scaffold — and write SDK code only for what it cannot do (today:
 reading run logs and traces). It is installed with the SDK, reads the
 workspace `.env`, works against a local engine with no network, and every
 verb takes `--json`. ROCKETRIDE_CLI.md has the full loop as commands and

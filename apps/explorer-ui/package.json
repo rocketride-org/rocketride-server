@@ -10,7 +10,7 @@
 		"publisher": "Aparavi Software AG",
 		"name": "File Explorer",
 		"description": "Browse, view, and edit files stored on the RocketRide server",
-		"icon": "./src/icon.svg",
+		"icon": "./icon.svg",
 		"readme": "./README.md",
 		"categories": [
 			"tools"

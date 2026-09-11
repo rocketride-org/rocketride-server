@@ -97,7 +97,7 @@ dependencies first: `libc++1`, `libc++abi1`, `libgomp1` (Debian/Ubuntu), `libcxx
 libcxxabi libgomp` (Fedora/RHEL), or `libc++ libgomp` (Alpine).
 
 Operators who are not building from source download a release archive instead; that
-path is documented on the public [Self-hosting](../public/product/operate/self-hosting.md)
+path is documented on the public [Self-hosting](../public/product/operate/self-hosting/index.md)
 page.
 
 ### Full stack with Docker

@@ -126,7 +126,7 @@ See [Deployments](/clients/typescript/deploy) for the model.
 
 | Method | Description |
 | --- | --- |
-| `deploy.add({kind?, pipeline?, data?, metadata?, comment?, deployTo?}) | The ONE rail door: deploy any kind of object as the next immutable registry version. `kind:'pipe'` (default) takes a `pipeline` dict; `kind:'app'` takes ONE `data` zip of the app's SOURCE — the server performs the build (client-produced binaries are never trusted); the zip is retained and unpacked at receipt, born deployment-state `private`. The app id must be inside your developer namespace. |
+| `deploy.add({kind?, pipeline?, data?, metadata?, comment?, deployTo?})` | The ONE rail door: deploy any kind of object as the next immutable registry version. `kind:'pipe'` (default) takes a `pipeline` dict; `kind:'app'` takes ONE `data` zip of the app's SOURCE — the server performs the build (client-produced binaries are never trusted); the zip is retained and unpacked at receipt, born deployment-state `private`. The app id must be inside your developer namespace. |
 | `deploy.addApp(appRoot, { workspaceRoot?, comment?, metadata?, onProgress? }): Promise<PublishResult>` | Pack an app folder's source and deploy it as the next registry version — the one call behind the App Builder's Deploy button and CI scripts. Packs by the App Builder rules (workspace-rooted zip, `appManifest.include`, hierarchical gitignore + the hard node_modules/dist/.git baseline, symlink containment, 50MB zipped / 512MB uncompressed caps); `onProgress` receives one line per step. Deploying activates nothing — bind an audience with `publishApp` afterwards. |
 | `deploy.verifyApp(appRoot, { workspaceRoot? }): Promise<AppVerifyReport>` | The no-side-effect precheck for `addApp` — purely local, no server call: manifest shape and id grammar, declared icon/README assets, `appManifest.include` entries, and a pack dry run against the size caps. Server-side concerns (the build, store review) are out of scope. |
 | `deploy.deploy(projectId, version, teamId)` | Point a team at a version — promotion and rollback alike. |
@@ -145,7 +145,7 @@ See [Deployments](/clients/typescript/deploy) for the model.
 | `deploy.artifact(projectId, version)` | One immutable version's pipeline JSON, sha256-verified server-side. |
 | `deploy.preview(schedule, count?)` | THE single cron evaluator: validity + next occurrences. |
 
-Returns mirror the Python table: `publish` → `PublishResult`; `deploy`, `get`,
+Returns mirror the Python table: `add` → `PublishResult`; `deploy`, `get`,
 `disable`, `enable`, `remove`, `setSchedule`, `pauseSchedule`, `resumeSchedule`,
 `setSourceConfig` → `Deployment`; `list`/`versions`/`history` →
 `DeployListEnvelope<T>`; `run` → `{ token, version }`; `artifact` →
