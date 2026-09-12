@@ -677,3 +677,21 @@ export function useWorkspace(): IWorkspaceContext {
 	if (!ctx) throw new Error('useWorkspace must be used within WorkspaceProvider');
 	return ctx;
 }
+
+/**
+ * The workspace, or null where there is none.
+ *
+ * `useWorkspace` throwing is right for the shell's own chrome: inside the shell
+ * a missing provider is a wiring mistake, and failing loudly is how it gets
+ * found. But some components in this package are SHARED with hosts that have no
+ * workspace at all — the VS Code sidebar renders `SidebarFooter` from 'shell'
+ * with no `WorkspaceProvider` in its tree, and the app-gallery previews render
+ * single components standalone. For those, absence is the normal case and not
+ * an error, so they read the context this way and fall back to host-neutral
+ * behaviour.
+ *
+ * @returns The current workspace context value, or null outside a provider.
+ */
+export function useOptionalWorkspace(): IWorkspaceContext | null {
+	return useContext(WorkspaceContext);
+}
