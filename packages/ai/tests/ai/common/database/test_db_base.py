@@ -37,22 +37,28 @@ import sys
 import types
 
 if 'depends' not in sys.modules:
-    mod_dep = types.ModuleType('depends')
-    mod_dep.depends = lambda *a, **kw: None
-    sys.modules['depends'] = mod_dep
+    try:
+        import depends
+    except ModuleNotFoundError:
+        mod_dep = types.ModuleType('depends')
+        mod_dep.depends = lambda *a, **kw: None
+        sys.modules['depends'] = mod_dep
 if 'rocketlib' not in sys.modules:
-    mod_rl = types.ModuleType('rocketlib')
-    mod_rl.debug = lambda *a, **kw: None
-    mod_rl.error = lambda *a, **kw: None
-    mod_rl.warning = lambda *a, **kw: None
-    mod_rl.IGlobalBase = type('IGlobalBase', (), {})
-    mod_rl.IInstanceBase = type('IInstanceBase', (), {})
-    mod_rl.getServiceDefinition = lambda *a, **kw: None
-    mod_rl.tool_function = lambda *a, **kw: (lambda fn: fn)
-    mod_rl.IJson = type('IJson', (), {'toDict': staticmethod(lambda x: x if isinstance(x, dict) else {})})
-    mod_rl.__path__ = []
-    sys.modules['rocketlib'] = mod_rl
-    sys.modules['rocketlib.types'] = types.SimpleNamespace(IInvokeLLM=type('IInvokeLLM', (), {}))
+    try:
+        import rocketlib
+    except ModuleNotFoundError:
+        mod_rl = types.ModuleType('rocketlib')
+        mod_rl.debug = lambda *a, **kw: None
+        mod_rl.error = lambda *a, **kw: None
+        mod_rl.warning = lambda *a, **kw: None
+        mod_rl.IGlobalBase = type('IGlobalBase', (), {})
+        mod_rl.IInstanceBase = type('IInstanceBase', (), {})
+        mod_rl.getServiceDefinition = lambda *a, **kw: None
+        mod_rl.tool_function = lambda *a, **kw: (lambda fn: fn)
+        mod_rl.IJson = type('IJson', (), {'toDict': staticmethod(lambda x: x if isinstance(x, dict) else {})})
+        mod_rl.__path__ = []
+        sys.modules['rocketlib'] = mod_rl
+        sys.modules['rocketlib.types'] = types.SimpleNamespace(IInvokeLLM=type('IInvokeLLM', (), {}))
 
 from ai.common.database.db_global_base import DatabaseGlobalBase
 from ai.common.database.db_instance_base import DatabaseInstanceBase
