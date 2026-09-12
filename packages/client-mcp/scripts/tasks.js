@@ -178,7 +178,7 @@ function makeStartTestServerAction(options = {}) {
             const result = await startServer({
                 script: 'ai/eaas.py',
                 trace: options.trace,
-                basePort: 20000,
+                basePort: 50000,
                 onOutput: (text) => {
                     if (taskComplete) return;
                     const lines = text.trim().split('\n');
