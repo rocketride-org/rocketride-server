@@ -36,15 +36,15 @@ Key Features:
 
 Usage:
     # Send simple text data
-    token = await client.use(filepath="text_processor.json")
-    result = await client.send(token, "Process this text")
+    run = await client.use(filepath="text_processor.json")
+    result = await client.send(run["token"], "Process this text")
 
     # Upload multiple files
     files = ["document1.pdf", "data.csv", "image.png"]
-    results = await client.send_files(files, token)
+    results = await client.send_files(files, run["token"])
 
     # Stream large dataset
-    pipe = await client.pipe(token, mimetype="text/csv")
+    pipe = await client.pipe(run["token"], mime_type="text/csv")
     await pipe.open()
     await pipe.write(csv_chunk1)
     await pipe.write(csv_chunk2)
@@ -124,7 +124,7 @@ class DataMixin(DAPClient):
 
         Example:
             # Stream CSV data in chunks
-            pipe = await client.pipe(token, mimetype="text/csv")
+            pipe = await client.pipe(token, mime_type="text/csv")
             async with pipe:  # Automatically opens and closes
                 for chunk in csv_chunks:
                     await pipe.write(chunk.encode())
@@ -194,7 +194,7 @@ class DataMixin(DAPClient):
                     keeps failing with a transient connect error past the retry.
 
             Example:
-                pipe = await client.pipe(token, mimetype="text/plain")
+                pipe = await client.pipe(token, mime_type="text/plain")
                 await pipe.open()
                 # Now ready to write data
             """
@@ -314,7 +314,7 @@ class DataMixin(DAPClient):
                 PipeException: If the server reports a failure while finalizing the pipe.
 
             Example:
-                pipe = await client.pipe(token, mimetype="text/csv")
+                pipe = await client.pipe(token, mime_type="text/csv")
                 await pipe.open()
                 await pipe.write(csv_data.encode())
                 results = await pipe.close()
@@ -485,15 +485,15 @@ class DataMixin(DAPClient):
 
         Example:
             # Send text data
-            token = await client.use(filepath="text_analyzer.json")
-            result = await client.send(token, "Analyze this text for sentiment")
+            run = await client.use(filepath="text_analyzer.json")
+            result = await client.send(run["token"], "Analyze this text for sentiment")
             print(f"Sentiment: {result['sentiment']}")
 
             # Send JSON data
             import json
             data = {"name": "John", "age": 30}
             result = await client.send(
-                token,
+                run["token"],
                 json.dumps(data),
                 mimetype="application/json"
             )
@@ -501,7 +501,7 @@ class DataMixin(DAPClient):
             # Send binary data
             with open("data.bin", "rb") as f:
                 binary_data = f.read()
-            result = await client.send(token, binary_data, mimetype="application/octet-stream")
+            result = await client.send(run["token"], binary_data, mimetype="application/octet-stream")
         """
         # Convert string to bytes if needed
         if isinstance(data, str):
