@@ -26,6 +26,7 @@
 # ------------------------------------------------------------------------------
 # We now have real requirements, so load them before we start
 # loading our driver
+import json
 import os
 from depends import depends
 
@@ -53,6 +54,40 @@ Note: a 'collection' as we know it is referred to as an index in pinecone
     collection are actually referring to an index. If the pinecone specific 'collection' is used, it will be referred
     to as pinecone_collection
 """
+
+
+def _sanitizeMetadata(metadata: Dict[str, Any]) -> Dict[str, Any]:
+    """Coerce a metadata mapping into what Pinecone accepts.
+
+    Pinecone takes a string, number, boolean or list of strings, and rejects the
+    WHOLE upsert on the first value that is not one of those:
+    "Metadata value must be a string, number, boolean or list of strings, got
+    'null' for field '<name>'". One unset field therefore loses the entire batch
+    of 50 vectors, not the field.
+
+    Two shapes hit this in practice. Several DocMetadata fields are declared
+    non-optional but default to None, so anything left unset is a null. And
+    attach_source() stores a dict under 'source', which extra='allow' lets
+    through -- so every image- or video-derived document (embedding_image,
+    thumbnail, frame_grabber) carries a nested value.
+
+    Nulls are dropped, since omitting the key reads back the same:
+    DocMetadata(**record) restores the declared default. Nested values are
+    JSON-encoded rather than dropped, because they carry provenance worth
+    keeping and a string round-trips.
+    """
+    clean: Dict[str, Any] = {}
+    for key, value in metadata.items():
+        if value is None:
+            continue
+        if isinstance(value, (str, bool, int, float)):
+            clean[key] = value
+        elif isinstance(value, (list, tuple)):
+            # Pinecone allows lists of strings only, so render the elements.
+            clean[key] = [item if isinstance(item, str) else json.dumps(item, default=str) for item in value]
+        else:
+            clean[key] = json.dumps(value, default=str)
+    return clean
 
 
 class Store(DocumentStoreBase):
@@ -437,7 +472,9 @@ class Store(DocumentStoreBase):
                 raise Exception('No embedding in document')
 
             metadata = dict(chunk.metadata)
-            metadata['content'] = chunk.page_content
+            # Never None: the sanitizer below drops null values, and readers index
+            # metadata['content'] directly, so a missing key breaks every later read.
+            metadata['content'] = chunk.page_content or ''
 
             # Bogus document which is not compatible with pinecone because it can't accept all zeroes
             if chunk.metadata.objectId == 'schema':
@@ -447,6 +484,8 @@ class Store(DocumentStoreBase):
                 metadata['permissionId'] = 0
                 metadata['isTable'] = False
                 metadata['tableId'] = 0
+
+            metadata = _sanitizeMetadata(metadata)
 
             # Append the points // create a unique identifier that fits into an int64 id field
             vector_struct = {

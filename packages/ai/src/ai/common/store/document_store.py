@@ -433,7 +433,48 @@ class DocumentStoreBase(ABC):
             # Fetch the document using the filter
             doc = self.get(filter, checkCollection=False)
 
-            # The collection should contain exactly one control document, otherwise it's corrupted
+            # No control document means one of two very different things, and the
+            # difference is whether the collection holds any real documents.
+            if len(doc) == 0:
+                # The question is only whether ANY document is here, so ask for
+                # one: a legacy collection can be large, and loading it to answer
+                # a yes/no would cost the whole thing in memory.
+                #
+                # Both halves are needed. A collection whose documents were all
+                # soft-deleted holds no live rows but is far from unused, and
+                # reading only the live ones would call it empty and adopt it.
+                # There is no control document to exclude here -- that is the
+                # branch we are in -- so any hit is a real document.
+                content = []
+                for isDeleted in (False, True):
+                    probe = DocFilter()
+                    probe.isDeleted = isDeleted
+                    probe.limit = 1
+                    content = self.get(probe, checkCollection=False)
+                    if content:
+                        break
+
+                # Empty: the collection was never finished -- left behind by a build
+                # that could not upsert its control document. Report it as missing so
+                # createCollection writes one, instead of failing forever on a
+                # half-made collection the user would have to delete by hand.
+                if len(content) == 0:
+                    return False
+
+                # Populated: something else owns this collection -- a legacy index, or
+                # one created outside RocketRide. Adopting it would stamp the incoming
+                # model and dimension onto vectors that may have neither, so searches
+                # would silently return nonsense or fail on a dimension mismatch. Say
+                # what is wrong instead of taking it over.
+                # Two of the nine drivers do not carry a `collection` attribute.
+                name = getattr(self, 'collection', None) or 'this collection'
+                raise Exception(
+                    f'{name} holds documents but no control document, so the embedding '
+                    'model and vector size it was built with are unknown. RocketRide will not adopt it: '
+                    'point the node at a different collection, or delete this one if it is not needed.'
+                )
+
+            # More than one is real corruption: there is no safe way to pick.
             if len(doc) != 1:
                 raise Exception(f'Collection does not have control document, found {len(doc)}')
 
@@ -512,6 +553,15 @@ class DocumentStoreBase(ABC):
                 vectorSize=vectorSize,  # Store vector size for future validation
                 modelName=modelName,  # Store embedding model name
                 isDeleted=True,  # Marked as deleted to avoid retrieval in normal searches
+                # Explicitly empty rather than left unset. DocMetadata declares
+                # `signature: str` but defaults it to None, and this document is
+                # not built through defaultMetadata(), which is what normally
+                # fills it in. Backends that reject null metadata values -- Pinecone
+                # among them -- refuse the whole upsert, so the control document
+                # never lands. The collection is created regardless, and every
+                # later open then reports "Collection does not have control
+                # document, found 0" on a collection RocketRide made itself.
+                signature='',
             )
 
             # Create the "bogus" document with empty content and metadata
