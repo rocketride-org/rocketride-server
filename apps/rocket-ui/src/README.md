@@ -95,6 +95,7 @@ _Drop pipelines into any Python or TypeScript app with a few lines of code, no i
      ```bash
      docker pull ghcr.io/rocketride-org/rocketride-engine:latest
      docker create --name rocketride-engine -p 5565:5565 ghcr.io/rocketride-org/rocketride-engine:latest
+     docker start rocketride-engine
      ```
 
    - **Local Deployment** - Download your preferred runtime as a standalone process from the **Deploy** page in the `Connection Manager`.
