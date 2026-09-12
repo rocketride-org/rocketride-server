@@ -36,7 +36,7 @@ destructive clear/reset tool.
 
 ## SDK contract provenance
 
-Pinned to **`laser-sdk==0.1.1`** (PyPI, in `requirements.txt`); the contract below was verified
+Pinned to **`laser-sdk==0.3.0`** (PyPI, in `requirements.txt`); the contract below was verified
 against `0.0.1rc21` and has not been re-checked on 0.1.1. rc20+ speaks only Apache Iggy's VSR
 cluster protocol (the upcoming clustering wire format), so the server must be a
 VSR-enabled build: LaserData Cloud deployments **created on/after 2026-07-31** serve it (older
