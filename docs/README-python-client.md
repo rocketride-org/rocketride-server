@@ -572,6 +572,7 @@ rocketride validate examples/*.pipe          # Validate pipelines without runnin
 rocketride list                              # List all active tasks
 rocketride events ALL --token <token>        # Stream task events
 rocketride store dir /                       # List the root of the file store
+rocketride otel                              # Export pipeline traces + metrics over OpenTelemetry
 ```
 
 The `store` command's sub-commands are `dir`, `type`, `write`, `rm`, `mkdir`, and `stat` — run `rocketride store --help` for details.
@@ -638,6 +639,23 @@ rocketride validate examples/rag-pipeline.pipe --json
 
 To validate `.pipe` files automatically on every pull request, use the ready-made GitHub Action at [`.github/actions/validate-pipes`](https://github.com/rocketride-org/rocketride-server/tree/develop/.github/actions/validate-pipes).
 It starts an engine container and runs `rocketride validate` on your repository's pipeline files.
+
+### OpenTelemetry export (`rocketride otel`)
+
+The `otel` command bridges live pipeline traces and metrics to any OpenTelemetry
+collector over OTLP (Jaeger, Grafana, Datadog, Langfuse, LangSmith, ...). It consumes the
+engine's documented WebSocket monitor protocol — no engine changes — and requires the
+optional extra:
+
+```bash
+pip install 'rocketride[otel]'
+rocketride otel --endpoint http://localhost:4318
+```
+
+Payload content is excluded from spans by default (`--include-content` opts in,
+size-capped). Per-component spans appear for runs started with
+`client.use(..., pipelineTraceLevel='summary')`. Full guide:
+[OpenTelemetry bridge](https://github.com/rocketride-org/rocketride-server/blob/develop/packages/client-python/docs/otel-bridge.md).
 
 ## Configuration
 

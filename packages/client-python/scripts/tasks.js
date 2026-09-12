@@ -35,6 +35,10 @@ const { execCommand, runPytest, syncDir, formatSyncStats, removeDirs, removeMatc
 
 const PACKAGE_DIR = path.join(__dirname, '..');
 const SRC_DIR = path.join(PACKAGE_DIR, 'src', 'rocketride');
+const TESTS_DIR = path.join(PACKAGE_DIR, 'tests');
+// Test-only deps of THIS package (the otel-bridge tests' top-level imports),
+// installed into the engine interpreter by client-python:setup-test-deps.
+const TEST_REQUIREMENTS = path.join(TESTS_DIR, 'requirements.txt');
 const BUILD_DIR = path.join(BUILD_ROOT, 'clients', 'python');
 const DIST_DIR = path.join(DIST_ROOT, 'clients', 'python');
 const SERVER_DIR = path.join(DIST_ROOT, 'server');
@@ -202,6 +206,28 @@ function makeStopTestServerAction() {
 	};
 }
 
+// The otel-bridge tests (tests/test_otel_mapper.py, tests/test_otel_setup.py)
+// import the OpenTelemetry SDK and the OTLP/HTTP exporter at collection time,
+// and CI never pip-installs this package — pytest runs on the engine
+// interpreter against the source checkout, so the package's own [otel] extra
+// never reaches it. Install them here, scoped to this package's test step,
+// rather than in packages/server/build-requirements.txt: that file is installed
+// on every engine build, and the bridge is not an engine dependency.
+//
+// Through depends() rather than a plain pip install, so they resolve under the
+// same merged constraints as the rest of the harness. Idempotent — depends()
+// dry-runs first and skips an already-satisfied install.
+function makeSetupTestDepsAction() {
+	return {
+		description: 'Install client-python test deps via depends',
+		run: async (ctx, task) => {
+			task.output = `Installing client-python test deps (${TEST_REQUIREMENTS})...`;
+			// engine.exe uses an isolated environment - cwd must be dist/server
+			await execCommand(ENGINE, ['-c', 'import sys; from depends import depends; depends(sys.argv[1])', TEST_REQUIREMENTS], { task, cwd: SERVER_DIR });
+		},
+	};
+}
+
 function makeRunPytestAction(options = {}) {
 	return {
 		run: async (ctx, task) => {
@@ -223,7 +249,7 @@ function makeRunPytestAction(options = {}) {
 			};
 
 			// Use absolute paths since cwd is dist/server
-			const testsDir = path.join(PACKAGE_DIR, 'tests');
+			const testsDir = TESTS_DIR;
 			const extraArgs = ['-v', '--rootdir', PACKAGE_DIR];
 			if (options.pytest) {
 				extraArgs.push(...options.pytest);
@@ -260,6 +286,7 @@ module.exports = {
 		{ name: 'client-python:sync', action: makeCopyToServerStaticAction },
 		{ name: 'client-python:start-server', action: makeStartTestServerAction },
 		{ name: 'client-python:stop-server', action: makeStopTestServerAction },
+		{ name: 'client-python:setup-test-deps', action: makeSetupTestDepsAction },
 		{ name: 'client-python:run-pytest', action: makeRunPytestAction },
 
 		// Public actions (have descriptions)
@@ -277,6 +304,11 @@ module.exports = {
 				steps: [
 					'server:build',
 					parallel(['nodes:build', 'ai:build', 'client-python:build'], 'Build dependencies'),
+					// After the builds above, so the node/ai requirement files are in
+					// the dist and depends() resolves against the complete constraint
+					// set. Before the bracket, so a slow first install does not hold
+					// the test server open.
+					'client-python:setup-test-deps',
 					bracket({
 						name: 'py-test-server',
 						setup: makeStartTestServerAction(),

@@ -787,11 +787,29 @@ rocketride stop --token <token>              # Terminate a running task
 rocketride list                              # List all active tasks
 rocketride events ALL --token <token>        # Stream task events
 rocketride store dir /                       # List the root of the file store
+rocketride otel                              # Export pipeline traces + metrics over OpenTelemetry
 ```
 
 The `store` command's sub-commands are `dir`, `type`, `write`, `rm`, `mkdir`, and `stat` — run `rocketride store --help` for details.
 
 All commands accept `--uri` and `--apikey` flags, or read from environment variables.
+
+### OpenTelemetry export (`rocketride otel`)
+
+The `otel` command bridges live pipeline traces and metrics to any OpenTelemetry
+collector over OTLP (Jaeger, Grafana, Datadog, Langfuse, LangSmith, ...). It consumes the
+engine's documented WebSocket monitor protocol — no engine changes — and requires the
+optional extra:
+
+```bash
+pip install 'rocketride[otel]'
+rocketride otel --endpoint http://localhost:4318
+```
+
+Payload content is excluded from spans by default (`--include-content` opts in,
+size-capped). Per-component spans appear for runs started with
+`client.use(..., pipelineTraceLevel='summary')`. Full guide:
+[OpenTelemetry bridge](/develop/python/otel-bridge).
 
 ## Configuration
 
