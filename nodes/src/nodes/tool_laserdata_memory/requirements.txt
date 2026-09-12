@@ -4,5 +4,5 @@
 # local server must be a VSR-enabled build (e.g. laserdata/laser-stack).
 # Pin moved rc21 -> 0.1.1 so it resolves alongside sibling LaserData nodes
 # in the shared constraint compile (#2030). The VSR notes above were
-# verified on rc21 and have not been re-checked on 0.1.1.
-laser-sdk==0.1.1
+# verified on rc21 and have not been re-checked on 0.1.1 / 0.3.0.
+laser-sdk==0.3.0
