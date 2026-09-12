@@ -660,6 +660,9 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
             executed = is_valid_query and bool(sql_query)
             # When the LLM decides it isn't a DB question, `sql_query` holds its prose answer.
             result = self._executeSQLQuery(sql_query) if executed else sql_query
+            if executed and result is None:
+                self._emitError('Query execution failed', lanes)
+                return
 
             self._emit(result, lanes, executed=executed)
 
