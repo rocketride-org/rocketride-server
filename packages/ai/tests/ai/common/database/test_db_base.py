@@ -33,6 +33,33 @@ from sqlalchemy import (
     inspect,
 )
 
+import sys
+import types
+
+if 'depends' not in sys.modules:
+    try:
+        import depends
+    except ModuleNotFoundError:
+        mod_dep = types.ModuleType('depends')
+        mod_dep.depends = lambda *a, **kw: None
+        sys.modules['depends'] = mod_dep
+if 'rocketlib' not in sys.modules:
+    try:
+        import rocketlib
+    except ModuleNotFoundError:
+        mod_rl = types.ModuleType('rocketlib')
+        mod_rl.debug = lambda *a, **kw: None
+        mod_rl.error = lambda *a, **kw: None
+        mod_rl.warning = lambda *a, **kw: None
+        mod_rl.IGlobalBase = type('IGlobalBase', (), {})
+        mod_rl.IInstanceBase = type('IInstanceBase', (), {})
+        mod_rl.getServiceDefinition = lambda *a, **kw: None
+        mod_rl.tool_function = lambda *a, **kw: (lambda fn: fn)
+        mod_rl.IJson = type('IJson', (), {'toDict': staticmethod(lambda x: x if isinstance(x, dict) else {})})
+        mod_rl.__path__ = []
+        sys.modules['rocketlib'] = mod_rl
+        sys.modules['rocketlib.types'] = types.SimpleNamespace(IInvokeLLM=type('IInvokeLLM', (), {}))
+
 from ai.common.database.db_global_base import DatabaseGlobalBase
 from ai.common.database.db_instance_base import DatabaseInstanceBase
 from ai.common.schema import Question
@@ -535,3 +562,44 @@ def test_testable_global_satisfies_abc_contract():
     """The two abstract methods are implemented in the test subclass."""
     # If the ABC wasn't satisfied, instantiating would raise TypeError.
     _TestableGlobal.__new__(_TestableGlobal)
+
+
+class _TestableInstance(DatabaseInstanceBase):
+    """Concrete DatabaseInstanceBase that satisfies abstract methods."""
+
+    def _db_display_name(self) -> str:
+        return 'SQLite'
+
+    def _db_dialect(self) -> str:
+        return 'sqlite'
+
+
+def test_write_questions_emits_error_when_execute_fails():
+    """Regression test (#1925): writeQuestions emits an error when _executeSQLQuery returns None,
+    rather than emitting the literal string 'None'.
+    """
+    inst = _TestableInstance.__new__(_TestableInstance)
+    text_emitted = []
+    answers_emitted = []
+    table_emitted = []
+
+    mock_instance = SimpleNamespace(
+        getListeners=lambda: ['text', 'answers', 'table'],
+        writeText=lambda msg: text_emitted.append(msg),
+        writeAnswers=lambda ans: answers_emitted.append(ans),
+        writeTable=lambda tbl: table_emitted.append(tbl),
+    )
+    inst.instance = mock_instance
+    inst._buildSQLQuery = lambda q: {'query': 'SELECT * FROM users', 'isValid': True}
+    inst._executeSQLQuery = lambda q: None
+
+    q = Question()
+    q.addQuestion('Show all users')
+    inst.writeQuestions(q)
+
+    assert len(text_emitted) == 1
+    assert text_emitted[0] == 'Query execution failed'
+    assert len(answers_emitted) == 1
+    assert answers_emitted[0].getJson() == {'error': 'Query execution failed'}
+    assert len(table_emitted) == 0
+
