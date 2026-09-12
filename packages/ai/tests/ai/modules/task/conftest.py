@@ -55,8 +55,21 @@ def _stub_module(name: str, **attrs) -> None:
 _stub_module('depends', depends=lambda *_args, **_kwargs: None)
 
 # dist/server shared logging/args helpers used by task_engine and friends.
+class _FakeIJson:
+    @staticmethod
+    def toDict(x):
+        return x if isinstance(x, dict) else {}
+
 _stub_module(
     'rocketlib',
     debug=lambda *_args, **_kwargs: None,
+    error=lambda *_args, **_kwargs: None,
+    warning=lambda *_args, **_kwargs: None,
     args=types.SimpleNamespace(),
+    ILoader=type('ILoader', (), {}),
+    IJson=_FakeIJson,
+    getServiceDefinition=lambda *_args, **_kwargs: None,
+    getServiceDefinitions=lambda *_args, **_kwargs: {},
+    validatePipeline=lambda *_args, **_kwargs: {'ok': True},
+    getVersion=lambda *_args, **_kwargs: '3.3.0',
 )

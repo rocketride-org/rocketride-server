@@ -20,6 +20,10 @@ async def pipe_Validate(request: Request, pipeline: Dict[str, Any], source: Opti
         ResultBase: A standardized response indicating success or failure.
     """
     try:
+        if 'component' in pipeline:
+            data = validatePipeline(pipeline)
+            return response(data)
+
         # Resolve source: explicit param > pipeline field > implied from components
         resolved_source = source or pipeline.get('source', None)
         if not resolved_source:

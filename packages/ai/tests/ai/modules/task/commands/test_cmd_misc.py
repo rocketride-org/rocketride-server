@@ -331,6 +331,39 @@ async def test_on_rrext_validate_does_not_double_wrap_enveloped_config(monkeypat
 
 
 @pytest.mark.asyncio
+async def test_on_rrext_validate_does_not_wrap_single_component_payload(monkeypatch):
+    """A {'version', 'component'} payload reaches validatePipeline unwrapped.
+
+    The C++ validatePipeline dispatcher keys off root 'component' to run
+    single-component validation (used by the canvas node config panel).
+    Wrapping it in {'pipeline': ...} hides that key and triggers
+    "'pipeline.components' must be an array" (#2263).
+    """
+    captured = {}
+    monkeypatch.setattr(
+        cmd_misc,
+        'validatePipeline',
+        lambda payload: captured.update(payload) or {'ok': True},
+    )
+
+    conn = _make_conn()
+    single_comp = {
+        'version': 1,
+        'component': {
+            'id': 'llm_openai_1',
+            'provider': 'llm_openai',
+            'config': {'model': 'gpt-4o'},
+        },
+    }
+    await MiscCommands.on_rrext_validate(conn, {'arguments': {'pipeline': single_comp}})
+
+    assert 'component' in captured
+    assert 'pipeline' not in captured
+    assert captured['component']['id'] == 'llm_openai_1'
+    assert captured['version'] == 1
+
+
+@pytest.mark.asyncio
 async def test_on_rrext_validate_propagates_validate_pipeline_errors(monkeypatch):
     """A raise from validatePipeline is logged and re-raised."""
     monkeypatch.setattr(cmd_misc, 'resolve_implied_source', lambda p: 'src')

@@ -263,24 +263,29 @@ class MiscCommands(DAPConn):
             # Resolve ${ROCKETRIDE_*} variables before validation
             pipeline = resolve_pipeline_env(pipeline, merged_env)
 
-            # Resolve source: explicit arg > pipeline field > implied from components
-            source = args.get('source', None) or pipeline.get('source', None)
-            if not source:
-                source = resolve_implied_source(pipeline)
+            if 'component' in pipeline:
+                # Single-component form (node config panel). validatePipelineOrComponent
+                # dispatches on a root-level 'component'; wrapping it hides that key.
+                data = validatePipeline(pipeline)
+            else:
+                # Resolve source: explicit arg > pipeline field > implied from components
+                source = args.get('source', None) or pipeline.get('source', None)
+                if not source:
+                    source = resolve_implied_source(pipeline)
 
-            # Build the C++ payload with resolved source and default version.
-            # The engine's config loader requires the FILE-form root
-            # ({'pipeline': <config>}) — handing it the flat config rejects
-            # every wire-correct client with "'pipeline' is missing or
-            # invalid". Clients send the flat config per the DAP contract
-            # above; the wrap happens HERE.
-            inner = {**pipeline, 'version': pipeline.get('version', 1)}
-            if source:
-                inner['source'] = source
+                # Build the C++ payload with resolved source and default version.
+                # The engine's config loader requires the FILE-form root
+                # ({'pipeline': <config>}) — handing it the flat config rejects
+                # every wire-correct client with "'pipeline' is missing or
+                # invalid". Clients send the flat config per the DAP contract
+                # above; the wrap happens HERE.
+                inner = {**pipeline, 'version': pipeline.get('version', 1)}
+                if source:
+                    inner['source'] = source
 
-            # Same envelope pipe_Validate (modules/pipe) builds — the version
-            # rides INSIDE the wrapped config (see the FILE-form note above).
-            data = validatePipeline({'pipeline': inner})
+                # Same envelope pipe_Validate (modules/pipe) builds — the version
+                # rides INSIDE the wrapped config (see the FILE-form note above).
+                data = validatePipeline({'pipeline': inner})
 
             # Return the results
             return self.build_response(request, body=data)
