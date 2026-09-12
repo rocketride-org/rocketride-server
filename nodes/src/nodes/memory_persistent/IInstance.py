@@ -21,7 +21,11 @@ from .IGlobal import IGlobal
 
 
 class IInstance(IInstanceBase):
-    """Pipeline instance for the memory_persistent node."""
+    """Pipeline instance for the memory_persistent node.
+
+    preventDefault() raises immediately, so no code may follow it — anything
+    added after a preventDefault() call is unreachable at runtime.
+    """
 
     IGlobal: IGlobal
     _current_session_id: str | None = None
@@ -40,6 +44,7 @@ class IInstance(IInstanceBase):
         store = self.IGlobal.store
         if store is None:
             self.instance.writeQuestions(question)
+            self.preventDefault()
             return
 
         # Deep copy to prevent mutation of the original question
@@ -63,6 +68,7 @@ class IInstance(IInstanceBase):
                 self._current_session_id = None
                 debug(f'Ignoring invalid session_id in question metadata: {session_id!r}')
                 self.instance.writeQuestions(question)
+                self.preventDefault()
                 return
 
             # Load all keys from the session
@@ -81,8 +87,11 @@ class IInstance(IInstanceBase):
                     question.metadata['memory_context'] = memory_context
                     debug(f'Attached {len(memory_context)} memory keys to question for session {session_id}')
 
-        # Forward the (possibly enriched) question downstream
+        # Forward the (possibly enriched) question downstream. preventDefault()
+        # suppresses the engine's automatic default forward, which would
+        # otherwise deliver the question a second time (the unenriched original).
         self.instance.writeQuestions(question)
+        self.preventDefault()
 
     def writeAnswers(self, answer: Answer) -> None:
         """Store answer text in session memory for future retrieval, then forward.
@@ -93,6 +102,7 @@ class IInstance(IInstanceBase):
         store = self.IGlobal.store
         if store is None:
             self.instance.writeAnswers(answer)
+            self.preventDefault()
             return
 
         # Deep copy to prevent mutation
@@ -116,6 +126,7 @@ class IInstance(IInstanceBase):
             except ValueError:
                 debug(f'Ignoring invalid session_id in answer metadata: {session_id!r}')
                 self.instance.writeAnswers(answer)
+                self.preventDefault()
                 return
 
             # Store the answer text
@@ -127,5 +138,8 @@ class IInstance(IInstanceBase):
 
             debug(f'Stored answer in session {session_id}')
 
-        # Forward the answer downstream
+        # Forward the answer downstream. preventDefault() suppresses the
+        # engine's automatic default forward, which would otherwise deliver
+        # the answer a second time (a separate deep-copied object).
         self.instance.writeAnswers(answer)
+        self.preventDefault()
