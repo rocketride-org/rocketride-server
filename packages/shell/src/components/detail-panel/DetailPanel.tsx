@@ -30,13 +30,14 @@
  * focus to whatever was focused before, and Escape closes the drawer.
  */
 
-import React, { CSSProperties, ReactNode, useEffect, useRef, useState } from 'react';
+import React, { CSSProperties, ReactNode, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { ViewMenuEntry } from '../../types/viewMenu';
 import { ViewMenuBadge } from '../tab-control/ViewMenuBadge';
 import { CLOSE_GLYPH, trapFocus, acquireOverlayLayer, isTopOverlayLayer, releaseOverlayLayer } from '../modal/Modal';
 import { ConfirmDialog } from '../modal/ConfirmDialog';
 import { BxChevronLeft } from '../BoxIcon';
 import { usePrefs } from '../contexts/PrefsContext';
+import { resolveSize, stackedTopSize } from '../../util/panelSize';
 
 // =============================================================================
 // CONSTANTS
@@ -145,6 +146,11 @@ export interface IDetailPanelProps {
 	 * {@link MIN_WIDTH} (380 — form-safe for record panels). A non-record drawer
 	 * whose content reads fine narrow (a node/catalog palette) can lower it so
 	 * the user can drag it slim. Ignored for `side: 'bottom'`.
+	 *
+	 * ALSO THE ANSWER ON A PHONE. The floor wins over the usable band — a floor
+	 * that yields is not a floor — so on a 390px host the default 380 leaves a
+	 * 10px sliver of context, which is no context at all. A caller that expects
+	 * to be opened on a narrow viewport should lower this there.
 	 */
 	minWidth?: number;
 	/** Tray height in px (side 'bottom' only). Default {@link DEFAULT_HEIGHT}. */
@@ -507,19 +513,42 @@ export function DetailPanel({ open, onClose, avatar, title, subtitle, tabs, acti
 		return { entries, stackedTop };
 	};
 
+	/**
+	 * Bring a candidate size inside the band the live host allows.
+	 *
+	 * Measures; {@link resolveSize} does the arithmetic. In a stack the band
+	 * binds the ROOT (deepest, widest) panel: the top may grow only until
+	 * root = top + 40/level still fits.
+	 *
+	 * @param candidate - The size somebody asked for.
+	 * @returns The clamped size.
+	 */
 	const clampSize = (candidate: number): number => {
 		const host = bottom ? (overlayRef.current?.clientHeight ?? window.innerHeight) : (overlayRef.current?.clientWidth ?? window.innerWidth);
-		// In a stack the clamp binds the ROOT (deepest, widest) panel: the top
-		// may grow only until root = top + 40/level still fits the host band.
 		const { entries, stackedTop } = stackStateNow();
-		const allowance = stackedTop ? STACK_OFFSET * (entries.length - 1) : 0;
-		const max = Math.max(minSize, Math.min(host * MAX_HOST_FRACTION, host - CONTEXT_SLIVER) - allowance);
-		return Math.min(Math.max(candidate, minSize), max);
+		return resolveSize(candidate, {
+			hostSize: host,
+			minSize,
+			maxFraction: MAX_HOST_FRACTION,
+			contextSliver: CONTEXT_SLIVER,
+			stackAllowance: stackedTop ? STACK_OFFSET * (entries.length - 1) : 0,
+		});
 	};
 
-	/** Route a resize: a stacked TOP drag drives the shared stack width (the
-	    whole stack reshapes, slivers constant); a lone panel keeps its own. */
-	const applySize = (next: number): void => {
+	/**
+	 * THE ONE WAY A SIZE IS WRITTEN. Clamps, then routes: a stacked TOP drives
+	 * the shared stack width (the whole stack reshapes, slivers constant); a
+	 * lone panel keeps its own.
+	 *
+	 * Both halves live here because splitting them is what let a reset while
+	 * stacked write an unclamped 600 onto a host with room for 380 — the rule
+	 * was remembered at four call sites and forgotten at two.
+	 *
+	 * @param candidate - The size asked for, clamped or not.
+	 * @returns The size actually written, for callers that persist it.
+	 */
+	const applySize = (candidate: number): number => {
+		const next = clampSize(candidate);
 		const { stackedTop } = stackStateNow();
 		if (stackedTop) {
 			stackSharedSize[contained ? 'contained' : 'viewport'] = next;
@@ -527,6 +556,7 @@ export function DetailPanel({ open, onClose, avatar, title, subtitle, tabs, acti
 		} else {
 			setDragSize(next);
 		}
+		return next;
 	};
 
 	/** Begin a drag: capture the pointer and record the starting geometry. */
@@ -542,7 +572,7 @@ export function DetailPanel({ open, onClose, avatar, title, subtitle, tabs, acti
 	const handleResizeMove = (e: React.PointerEvent<HTMLDivElement>): void => {
 		if (!dragRef.current) return;
 		const position = bottom ? e.clientY : e.clientX;
-		applySize(clampSize(dragRef.current.startSize + (dragRef.current.start - position)));
+		applySize(dragRef.current.startSize + (dragRef.current.start - position));
 	};
 
 	/**
@@ -568,16 +598,15 @@ export function DetailPanel({ open, onClose, avatar, title, subtitle, tabs, acti
 	};
 
 	/** Reset to the default size: a stacked top resets so the ROOT lands on
-	    the default; a lone panel simply drops its dragged size. */
+	    the default; a lone panel returns to the default. Both go through
+	    `applySize`, so both are clamped to what the host actually allows. */
 	const resetSize = (): void => {
 		const { entries, stackedTop } = stackStateNow();
-		if (stackedTop) {
-			stackSharedSize[contained ? 'contained' : 'viewport'] = Math.max(minSize, defaultSize - STACK_OFFSET * (entries.length - 1));
-			notifyStack();
-		} else {
-			setDragSize(null);
+		applySize(stackedTop ? stackedTopSize(defaultSize, minSize, STACK_OFFSET, entries.length) : defaultSize);
+		if (!stackedTop) {
 			// A keyed lone panel remembers the reset — reopen at the default, not
-			// the last dragged size.
+			// the last dragged size. The DEFAULT is stored, not the clamped size:
+			// the next host may be wider, and the open effect clamps what it reads.
 			persistSize(defaultSize);
 		}
 	};
@@ -591,14 +620,10 @@ export function DetailPanel({ open, onClose, avatar, title, subtitle, tabs, acti
 		const shrink = bottom ? 'ArrowDown' : 'ArrowRight';
 		if (e.key === grow) {
 			e.preventDefault();
-			const next = clampSize(current + KEY_RESIZE_STEP);
-			applySize(next);
-			persistSize(next);
+			persistSize(applySize(current + KEY_RESIZE_STEP));
 		} else if (e.key === shrink) {
 			e.preventDefault();
-			const next = clampSize(current - KEY_RESIZE_STEP);
-			applySize(next);
-			persistSize(next);
+			persistSize(applySize(current - KEY_RESIZE_STEP));
 		} else if (e.key === 'Home') {
 			e.preventDefault();
 			resetSize();
@@ -704,7 +729,10 @@ export function DetailPanel({ open, onClose, avatar, title, subtitle, tabs, acti
 		const entries = stackScopes[stackScope];
 		if (!bottom && entries.length > 0) {
 			const below = entries[entries.length - 1];
-			stackSharedSize[stackScope] = Math.max(minSize, below.getSize() - STACK_OFFSET);
+			// Clamped like every other write. It has been safe only because the
+			// covered panel's own size was already clamped — safe by accident is
+			// how the reset path lost its clamp.
+			stackSharedSize[stackScope] = clampSize(Math.max(minSize, below.getSize() - STACK_OFFSET));
 		}
 		const entry: IStackEntry = {
 			isDirty: () => dirtyRef.current,
@@ -802,13 +830,24 @@ export function DetailPanel({ open, onClose, avatar, title, subtitle, tabs, acti
 		};
 	}, [open]);
 
-	// A restored width (from persistence) may exceed the current usable band if
-	// the owning surface shrank between sessions. Clamp it once on open, after
-	// layout — overlayRef and the stack registry are live by the time an effect
-	// runs, so clampSize resolves against the real host size.
-	useEffect(() => {
+	// A width may exceed the current usable band: a restored one because the
+	// owning surface shrank between sessions, and the CALLER'S DEFAULT because
+	// nothing ever measured it. Clamp both on open — overlayRef and the stack
+	// registry are live by the time an effect runs, so clampSize resolves
+	// against the real host size.
+	//
+	// The `prev == null` short-circuit this replaces meant a first open never
+	// clamped at all: a caller asking for 640 on a 390px-wide host rendered a
+	// literal 640px panel with 250px of itself, including its own resize handle,
+	// off the right of the screen. Seeding from `defaultSize` makes the first
+	// open behave exactly like every one after it.
+	//
+	// BEFORE PAINT, so the correction is not a visible flinch: the first render
+	// draws the unclamped size, and a passive effect can land after the browser
+	// has already painted it.
+	useLayoutEffect(() => {
 		if (!open) return;
-		setDragSize((prev) => (prev == null ? null : clampSize(prev)));
+		setDragSize((prev) => clampSize(prev ?? defaultSize));
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [open]);
 
@@ -829,7 +868,9 @@ export function DetailPanel({ open, onClose, avatar, title, subtitle, tabs, acti
 	const isTop = !stacked || depthFromTop === 0;
 	const hasBelow = stackIndex > 0;
 	const parentTitle = hasBelow ? entries[stackIndex - 1].getTitle() : null;
-	const renderSize = stacked ? (stackSharedSize[stackScope] ?? Math.max(minSize, defaultSize - STACK_OFFSET)) + STACK_OFFSET * depthFromTop : (dragSize ?? defaultSize);
+	const renderSize = stacked
+		? (stackSharedSize[stackScope] ?? clampSize(stackedTopSize(defaultSize, minSize, STACK_OFFSET, entries.length))) + STACK_OFFSET * depthFromTop
+		: (dragSize ?? clampSize(defaultSize));
 	// Mirror for the registry (push seeding) and the resize handlers.
 	sizeRef.current = renderSize;
 
