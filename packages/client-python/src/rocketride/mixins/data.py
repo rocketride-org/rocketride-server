@@ -194,7 +194,7 @@ class DataMixin(DAPClient):
                     keeps failing with a transient connect error past the retry.
 
             Example:
-                pipe = await client.pipe(token, mimetype="text/plain")
+                pipe = await client.pipe(token, mime_type="text/plain")
                 await pipe.open()
                 # Now ready to write data
             """
@@ -314,7 +314,7 @@ class DataMixin(DAPClient):
                 PipeException: If the server reports a failure while finalizing the pipe.
 
             Example:
-                pipe = await client.pipe(token, mimetype="text/csv")
+                pipe = await client.pipe(token, mime_type="text/csv")
                 await pipe.open()
                 await pipe.write(csv_data.encode())
                 results = await pipe.close()
