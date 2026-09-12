@@ -1,58 +1,56 @@
 # tool_chartjs
 
-A RocketRide tool node that generates ready-to-render Chart.js v4 chart configurations from raw data, using the pipeline LLM.
+A RocketRide tool node that asks the pipeline LLM to turn structured data into a ready-to-render Chart.js configuration for an agent response.
+
+## About Chart.js
+
+Chart.js is the chart configuration format produced by this node. The node requests a static JSON configuration and returns it in a `chartjs` fenced block for the RocketRide chat UI to render.
 
 ## What it does
 
-Exposes a single `generate_chart` tool to an AI agent. The agent passes raw data (an array of objects or key-value pairs) plus an optional chart type, title, or natural-language description; the node prompts the pipeline LLM to produce a valid [Chart.js v4](https://www.chartjs.org/) configuration and returns it as a ` ```chartjs ` fenced block that the chat UI renders as an interactive chart.
-
-The tool is published as `<serverName>.generate_chart`, `chartjs.generate_chart` with the default config. The agent is instructed to place the returned string verbatim in its answer, without wrapping it in additional fences.
-
-Key safeguards, all enforced in the node:
-
-- **Input truncation**: list data is capped at 200 items and the serialized payload at 20 KB before being sent to the LLM, keeping the prompt manageable.
-- **JSON validation**: the LLM response is parsed; invalid JSON raises an error instead of emitting a broken chart. Any stray markdown fences the LLM adds are stripped before parsing.
-- **Pure static JSON**: the LLM is instructed to emit no JavaScript function callbacks (e.g. `tooltip.callbacks.label`). Values that would normally require callbacks are embedded directly in label strings (e.g. `"Telegraph Voyage — $215.75"`).
-
----
-
-## Configuration
-
-
-| Field | Type | Description |
-|---|---|---|
-| `serverName` | string | Default "chartjs". Namespace prefix for the tool: <serverName>.generate_chart |
-
-
-The node has no lanes.
-
----
+Use this node when an agent needs a chart, graph, or visualization from supplied data rather than a hand-authored configuration. It is an agent tool with a required LLM connection, not a data-flow lane processor. The node validates the LLM's JSON response and wraps it in the rendering fence, so choose it over a generic LLM call when the response must be a Chart.js chart.
 
 ## Connections
 
-| Channel | Required        | Description                                          |
-|---------|-----------------|------------------------------------------------------|
-| `llm`   | yes (min 1)     | LLM used to generate the Chart.js configuration      |
-
-Connect the node to an agent via the `tool` invoke channel. If no LLM node is connected, `generate_chart` raises an error at call time.
-
----
-
-## Available tools
-
-### generate_chart
-
-Generates a Chart.js v4 configuration from data via the pipeline LLM.
-
-
-| Tool | Description |
+| Connection | Required | Description |
 |---|---|---|
-| `generate_chart` | ALWAYS use this tool when the user requests a chart, graph, or visualization. Do NOT generate Chart.js configs manually, call this tool instead. It generates a ready-to-render chart from data. Required: "data" (the raw data to chart). Optional: "chart_type" (bar, line, pie, doughnut, radar, polarArea, scatter, bubble), "title" (chart title), "description" (natural language description of desired chart). Returns a ready-to-render string. Place it verbatim in the answer, do NOT wrap it in additional fences. |
+| `llm` | yes | LLM used to generate Chart.js configurations from data. |
 
+The node uses the first controller registered under the `llm` role. If no LLM is connected, `generate_chart` fails before it can generate a configuration.
 
-**Output:** a ` ```chartjs ` fenced block containing the Chart.js JSON configuration (`type`, `data` with `labels` and `datasets`, and `options` with `responsive` and `maintainAspectRatio` set to true). The agent should place this string verbatim in the answer, the UI renders it as a chart.
+## As a tool
 
----
+The server name defaults to `chartjs`, registering `chartjs.generate_chart`.
+
+| Function | Description |
+|---|---|
+| `chartjs.generate_chart` | Generates a static Chart.js JSON configuration from structured data and returns it as a `chartjs` fenced block. |
+
+### `chartjs.generate_chart`
+
+`data` is required and must be a non-empty object or array. Optional `chart_type` is one of `bar`, `line`, `pie`, `doughnut`, `radar`, `polarArea`, `scatter`, or `bubble`; `title` and `description` must be strings when supplied. The tool returns a string that must be placed verbatim in the answer—do not wrap it in another code fence. Invalid input, a missing LLM, an empty model response, or model output that is not JSON raises an error.
+
+## Configuration
+
+The only setting is the hidden server name. Most pipelines should retain the default.
+
+### Server name
+
+The server name determines the advertised namespace and defaults to `chartjs`. Change it only when multiple Chart.js nodes are attached to the same agent and their function names must be distinct; use the corresponding prefix when calling the tool.
+
+## Notes
+
+### Input shaping
+
+List input is truncated to its first 200 entries before prompting the LLM. The serialized data is also limited to 20,000 characters; oversized serialized input is shortened before it reaches the model. Use summary-sized data when completeness matters, or pre-aggregate a larger export before calling the tool.
+
+### Generated configuration
+
+The internal prompt requires `type`, `data` with `labels` and `datasets`, and `options`, with responsiveness and aspect-ratio preservation enabled. It also prohibits JavaScript callbacks, so the output is static JSON rather than executable chart code.
+
+## Upstream docs
+
+- [Chart.js documentation](https://www.chartjs.org/docs/)
 
 <!-- ROCKETRIDE:GENERATED:PARAMS START -->
 <!-- Generated by nodes:docs-generate. Do not edit by hand. -->

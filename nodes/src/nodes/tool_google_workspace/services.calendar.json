@@ -12,7 +12,7 @@
 	"path": "nodes.tool_google_workspace.calendar",
 	"prefix": "calendar",
 	"icon": "calendar.svg",
-	"documentation": "https://docs.rocketride.org",
+	"documentation": "https://docs.rocketride.org/nodes/tool_google_workspace/calendar",
 	"description": [
 		"Exposes Google Calendar operations as agent tools.",
 		"List, get, create, update, move, and delete events (including recurring-series instances and natural-language quick-add); query free/busy; manage calendars and access-control (ACL) rules.",

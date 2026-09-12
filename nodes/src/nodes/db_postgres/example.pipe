@@ -1,0 +1,153 @@
+{
+  "components": [
+    {
+      "id": "chat_1",
+      "provider": "chat",
+      "name": "Chat",
+      "config": {
+        "hideForm": true,
+        "mode": "Source",
+        "parameters": {},
+        "type": "chat"
+      },
+      "ui": {
+        "position": {
+          "x": 20,
+          "y": 200
+        },
+        "measured": {
+          "width": 150,
+          "height": 66
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      }
+    },
+    {
+      "id": "db_postgres_1",
+      "provider": "db_postgres",
+      "name": "PostgreSQL",
+      "config": {
+        "profile": "default",
+        "default": {
+          "host": "${ROCKETRIDE_POSTGRES_HOST}",
+          "user": "${ROCKETRIDE_POSTGRES_USER}",
+          "password": "${ROCKETRIDE_POSTGRES_PASSWORD}",
+          "database": "${ROCKETRIDE_POSTGRES_DB}",
+          "table": "orders",
+          "db_description": "Application database with customers, orders and order_items tables.",
+          "max_attempts": 5,
+          "allow_execute": false
+        },
+        "parameters": {}
+      },
+      "input": [
+        {
+          "lane": "questions",
+          "from": "chat_1"
+        }
+      ],
+      "ui": {
+        "position": {
+          "x": 240,
+          "y": 200
+        },
+        "measured": {
+          "width": 150,
+          "height": 66
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      }
+    },
+    {
+      "id": "llm_anthropic_1",
+      "provider": "llm_anthropic",
+      "name": "Anthropic",
+      "config": {
+        "profile": "claude-sonnet-4-6",
+        "claude-sonnet-4-6": {
+          "apikey": "${ROCKETRIDE_ANTHROPIC_KEY}"
+        },
+        "parameters": {}
+      },
+      "control": [
+        {
+          "classType": "llm",
+          "from": "db_postgres_1"
+        }
+      ],
+      "ui": {
+        "position": {
+          "x": 130,
+          "y": 380
+        },
+        "measured": {
+          "width": 150,
+          "height": 66
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      }
+    },
+    {
+      "id": "response_answers_1",
+      "provider": "response_answers",
+      "name": "Return Answers",
+      "config": {
+        "laneName": "answers"
+      },
+      "input": [
+        {
+          "lane": "answers",
+          "from": "db_postgres_1"
+        }
+      ],
+      "ui": {
+        "position": {
+          "x": 460,
+          "y": 200
+        },
+        "measured": {
+          "width": 150,
+          "height": 66
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      }
+    },
+    {
+      "id": "response_table_1",
+      "provider": "response_table",
+      "name": "Return Table",
+      "config": {
+        "laneName": "table"
+      },
+      "input": [
+        {
+          "lane": "table",
+          "from": "db_postgres_1"
+        }
+      ],
+      "ui": {
+        "position": {
+          "x": 460,
+          "y": 300
+        },
+        "measured": {
+          "width": 150,
+          "height": 66
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      }
+    }
+  ],
+  "project_id": "ad61d878-1f1e-4187-8628-2478ad980427",
+  "viewport": {
+    "x": 0,
+    "y": 0,
+    "zoom": 1
+  },
+  "version": 1
+}

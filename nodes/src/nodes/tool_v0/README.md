@@ -1,101 +1,37 @@
 # tool_v0
 
-A RocketRide tool node that exposes Vercel's v0 generative UI API to an AI agent.
+A RocketRide tool node that lets an agent generate and iterate on React UI components through Vercel's v0 API. Pick it for a UI-generation conversation with server-side chat continuity, rather than for editing an existing local codebase.
+
+## About v0
+
+v0 is Vercel's generative interface for creating web UI from natural-language instructions. It produces component files and a preview as part of a stateful generation conversation.
 
 ## What it does
 
-Lets an agent generate React + Tailwind CSS UI components from natural-language
-prompts. The agent describes the desired component with `generate_ui` and receives
-production-ready code, the full set of generated files, and a live preview URL. It can
-then iterate with `refine_ui`, sending follow-up instructions to the same v0 chat.
+The node has no data lanes and exposes a creation call plus a follow-up refinement call. A creation returns a chat ID, generated files, primary component code, and a preview URL; a refinement uses that same chat ID so prior context need not be submitted again. It is experimental, and transport, malformed-response, or API errors propagate as tool errors.
 
-Talks to the **v0 Platform API** (`https://api.v0.dev/v1/chats`) over plain HTTPS using
-**requests**, no Vercel SDK is required. Chats are stateful **server-side**: each
-generation returns a `chat_id`, and refinements reuse it, so the agent never has to
-replay prior context.
+## As a tool
 
-Requests use a 120-second timeout (generation can take a while) and are retried via the
-shared `post_with_retry` helper. API and transport failures raise rather than returning
-error payloads, the agent framework converts the exception into a structured error for
-the model. Response bodies are never logged, even on malformed responses.
+The prefix defaults to `v0`.
 
-This node is marked **experimental**: v0 API availability and behavior may change.
+| Function | Description |
+|---|---|
+| `v0.generate_ui` | Generate UI from required natural-language `prompt`. |
+| `v0.refine_ui` | Send required `prompt` and required `chat_id` to refine an earlier generation. |
 
----
+Both functions return `success`, `chat_id`, primary `code`, all `files`, and `demo_url`. Keep the returned chat ID for later refinements. Missing or blank required arguments raise validation errors; an API error, non-JSON response, unexpected payload, or response with no files raises an error instead of returning a success payload.
 
 ## Configuration
 
-
-| Field | Type | Description |
-|---|---|---|
-| `apikey` | string | Default empty. Vercel v0 API key |
-
-
-The node fails at pipeline start if `apikey` is empty, and config validation warns
-about a missing key before that.
-
-This node has no lanes: it is invoke-only and is called exclusively through its agent
-tools.
-
----
-
-## Available tools
-
-### `generate_ui`
-
-Generate a React UI component from a natural-language description.
-
-
-| Tool | Description |
-|---|---|---|
-| `generate_ui` | Generate a React UI component from a natural-language description. Provide a detailed prompt describing the desired UI and receive production-ready React + Tailwind CSS code, a live demo URL, and a chat_id for follow-up refinements via refine_ui. |
-| `refine_ui` | Refine a previously generated UI component by sending follow-up instructions to an existing v0 chat. Requires the chat_id from a prior generate_ui call. The v0 chat is stateful server-side, so prior context need not be replayed. |
-
-
-Returns:
-
-| Output | Description |
-|--------|-------------|
-| `success` | `true` on success |
-| `chat_id` | v0 chat ID, pass to `refine_ui` to iterate |
-| `code` | Primary generated React component code (content of the first generated file) |
-| `files` | All generated files as `{name, content}` objects |
-| `demo_url` | Live preview URL for the generated UI |
-
-### `refine_ui`
-
-Refine a previously generated component by sending follow-up instructions to an
-existing v0 chat.
-
-| Input | Required | Description |
-|-------|----------|-------------|
-| `prompt` | yes | Follow-up instructions describing how to change the component. |
-| `chat_id` | yes | The `chat_id` returned from a previous `generate_ui` or `refine_ui` call. |
-
-Returns the same shape as `generate_ui`. If the v0 follow-up response omits the chat
-id, the tool falls back to the `chat_id` it was given, so the value the agent holds
-always stays valid for further refinements.
-
----
-
-## Error behavior
-
-- An empty `prompt` (or missing `chat_id` for `refine_ui`) raises a validation error
-  before any API call is made.
-- v0 Platform API errors (`{"error": ...}` payloads), non-JSON response bodies, and
-  unexpected payload types raise a `RuntimeError` with a descriptive message.
-- A generation that returns no files raises `v0 returned no files` rather than
-  returning empty code.
-
----
+The only configuration is the API key. The server name comes from the service prefix and does not need routine adjustment.
 
 ## Authentication
 
-Provide a Vercel v0 API key in the `apikey` field. The key is sent as a
-`Authorization: Bearer <apikey>` header on every request and is cleared from memory
-when the pipeline ends.
+Set `apikey` to the Vercel v0 API key used in the Authorization Bearer header. Keep it secret; without it the node cannot call the API.
 
----
+## Upstream docs
+
+- [v0 documentation](https://v0.dev/docs)
 
 <!-- ROCKETRIDE:GENERATED:PARAMS START -->
 <!-- Generated by nodes:docs-generate. Do not edit by hand. -->

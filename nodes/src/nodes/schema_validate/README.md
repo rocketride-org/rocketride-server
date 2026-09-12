@@ -20,7 +20,7 @@ Records that are not fact objects (plain text, bare numbers), and non-dict eleme
 inside a list payload, are **passed through unchanged** — the node never drops a
 record.
 
-## Fact-record convention
+### Fact-record convention
 
 A "fact" is a JSON object. The relevant fields are configurable:
 
@@ -32,7 +32,7 @@ A "fact" is a JSON object. The relevant fields are configurable:
 An answer payload may be a single fact object or a list of fact objects; other shapes
 pass through untouched.
 
-## Checks
+### Checks
 
 | Flag code | Severity | Fires when |
 |---|---|---|
@@ -42,7 +42,7 @@ pass through untouched.
 | `category_metric_mismatch` | **error** | The metric label implies one category but the fact declares another — the headline "cost row stored as revenue" guard. |
 | `ambiguous_metric` | warning | The metric label matches keywords from two or more categories, so the declared category can't be corroborated (suppresses the mismatch check). |
 | `sign_category_mismatch` | configurable (`sign`, default warning) | The amount's sign contradicts its class (an expense/liability with a positive amount, or revenue/asset with a negative amount). Zero never fires. Applies only to the four built-in signed classes (revenue/expense/asset/liability); a custom category has no sign convention and is not sign-checked. |
-| `unknown_category` | warning | `category_field` is present but is not a recognised classification. |
+| `unknown_category` | warning | `category_field` is present but is not a recognized classification. |
 | `missing_provenance` | configurable (`require_provenance`, default error) | The **incoming** fact has no usable `provenance` list — the value is absent, `null`, an **empty list** `[]`, or not a list at all. |
 | `malformed_provenance` | warning | `provenance` is present but is not a list (the original value is preserved, never discarded). |
 
@@ -55,10 +55,10 @@ two or more categories resolves to `ambiguous` (and suppresses the mismatch chec
 guessing, and a label matching none is simply not classified. Because it is heuristic, tune
 `category_metric_map` to your corpus: e.g. a label containing `"tax"` (expense) and `"income"`
 (revenue) is treated as ambiguous, and `"deferred tax asset"` matches the `"tax"` keyword. Declared
-categories are recognised from the built-in aliases **plus** the keys of `category_metric_map`, so a
+categories are recognized from the built-in aliases **plus** the keys of `category_metric_map`, so a
 custom category (e.g. `equity`) added to the map is accepted rather than flagged `unknown_category`.
 
-## Example
+### Example
 
 Input — a cost row wrongly declared as revenue, positive amount, no provenance:
 
@@ -102,7 +102,7 @@ carrying a positive amount.
 A clean fact receives `validation: { "op": "schema_validate", "valid": true, "severity": "ok", "flags": [] }`
 and a provenance entry with `"flag_codes": []` — proof it was checked.
 
-## Provenance handling
+### Provenance handling
 
 The node always appends its own `{ "op": "schema_validate", ... }` entry, never
 rewriting existing entries and preserving order:
@@ -119,32 +119,49 @@ rewriting existing entries and preserving order:
 `missing_provenance` is evaluated against the **incoming** fact, before this node
 appends its own entry, so the guard can actually fire.
 
+## Lanes
+
+| Lane in | Lane out | Description |
+|---|---|---|
+| `answers` | `answers` | Annotates fact dictionaries and re-emits every record. Non-fact payloads retain their content; JSON-lane scalar values are re-emitted as text (`expectJson=False`). |
+
 ## Configuration
 
-### Lanes
+The default profile expects conventional financial field names and applies all
+checks. Change the field names only when upstream facts use a different schema;
+otherwise the defaults keep the validator and its provenance records consistent.
 
-| Lane      | In → Out              | Behaviour                                                                                     |
-|-----------|-----------------------|-----------------------------------------------------------------------------------------------|
-| `answers` | `answers` → `answers` | Annotates fact objects with a `validation` block; all other records pass through unchanged. |
+### Fact field names
 
-### Fields
+`amount_field`, `currency_field`, `metric_field`, and `category_field` select
+the keys read from each fact. The defaults are `amount`, `currency`, `metric`,
+and `category`. Change all relevant names to match an upstream extraction
+schema; changing only one can turn valid facts into missing-field warnings.
+Blank or whitespace-only configured names fall back to their defaults.
 
-| Field                 | Type    | Default      | Description                                                                                       |
-|-----------------------|---------|--------------|---------------------------------------------------------------------------------------------------|
-| `amount_field`        | string  | `amount`     | The fact field holding the numeric amount.                                                        |
-| `currency_field`      | string  | `currency`   | The fact field holding the currency code.                                                         |
-| `metric_field`        | string  | `metric`     | The fact field naming the line item — classifier input for the mismatch check.                    |
-| `category_field`      | string  | `category`   | The fact field holding the declared classification.                                               |
-| `category_metric_map` | object  | built-in map | Map of canonical category → metric keyword substrings. Empty ⇒ the mismatch check is skipped.      |
-| `sign`                | enum    | `warning`    | Severity for `sign_category_mismatch` (`off` / `warning` / `error`).                               |
-| `require_provenance`  | enum    | `error`      | Severity for `missing_provenance` (`off` / `warning` / `error`).                                   |
+### Category → metric keywords
 
-The node runs with these defaults out of the box. Misconfiguration (an invalid
-severity or a malformed map) logs a warning and falls back to the default rather than
-failing the run. A fact that already carries a `validation` key is re-validated and
-that key is overwritten — this node is its sole owner.
+`category_metric_map` maps a canonical category to a list of metric-label
+substrings. Its default map recognizes revenue, expense, asset, and liability.
+Extend it for corpus-specific labels, or use an empty object to skip the
+metric/category mismatch check. A keyword that appears in more than one
+category makes the metric ambiguous and suppresses that mismatch check, so use
+distinct, deliberate keywords. A malformed map logs a warning and retains the
+built-in default.
 
-## Pipeline position
+### Sign and provenance severity
+
+`sign` and `require_provenance` accept `off`, `warning`, or `error`; their
+defaults are `warning` and `error`. Set either to `off` when that check is not
+meaningful for an input source, use `warning` for review queues, and use
+`error` when the check must make the record invalid. Missing or `null` values
+retain their defaults without a warning; any other invalid non-null value logs
+a warning and falls back to the default. A pre-existing `validation` field is
+replaced when the fact is re-validated.
+
+## Notes
+
+### Pipeline position
 
 ```text
 datalab_parse → extract_facts → normalize_facts → currency_convert_explicit → schema_validate → authoritative_overlay → reconcile

@@ -9,7 +9,7 @@
 	"prefix": "background_removal",
 	"description": ["Foreground / background separation using BiRefNet (MIT). Returns an RGBA cutout with a straight (non-premultiplied) alpha channel, so downstream nodes can re-composite over any background without dark fringes. ", "Two profiles are shipped: the default 1K BiRefNet and a higher-resolution 2K variant for fine hair / detailed edges. Runs on CPU, Apple Silicon (MPS), and CUDA."],
 	"icon": "background-removal.svg",
-	"documentation": "https://docs.rocketride.org",
+	"documentation": "https://docs.rocketride.org/nodes/background_removal",
 	"tile": ["Model: ${parameters.background_removal.profile}", "Max edge: ${parameters.background_removal.maxEdge}"],
 	"lanes": {
 		"image": ["text", "image"]
@@ -58,7 +58,7 @@
 		"background_removal.maxEdge": {
 			"type": "number",
 			"title": "Max input edge (px)",
-			"description": "Downscale source so long edge <= this value before inference; alpha is upsampled back to the (capped) source size for compositing. Lower = faster + less VRAM; higher = sharper edges.",
+			"description": "Downscale source so long edge <= this value before inference; alpha is upsampled back to the original source size for compositing. Lower = faster + less VRAM; higher = sharper edges.",
 			"default": 1024,
 			"minimum": 256,
 			"maximum": 4096

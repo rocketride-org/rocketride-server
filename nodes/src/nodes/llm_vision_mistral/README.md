@@ -10,45 +10,55 @@ Uses the official **mistralai** Python SDK with a custom `httpx` client (120 s t
 
 All requests are sent with **temperature 0.0** for deterministic output. Transient failures (timeouts, connection errors, 5xx responses) are retried up to 3 times with exponential backoff. The base delay scales with model size: 2.0 s for `large` models, 1.5 s for `medium`, 1.0 s for all others. API errors are translated into user-friendly messages covering authentication failures, rate limits, quota exhaustion, content-policy violations, and image-processing errors.
 
----
-
-## Configuration
-
-### Lanes
+## Lanes
 
 | Lane in     | Lane out    | Description                                                                    |
 | ----------- | ----------- | ------------------------------------------------------------------------------ |
 | `image`     | `text`      | Analyze a single image, receive text                                           |
 | `documents` | `documents` | Analyze image documents, return text analysis with original metadata preserved |
 
-On the `image` lane, incoming image bytes are buffered across chunks, base64-encoded with the source MIME type, and sent to the model together with the configured analysis prompt. The answer is written downstream as text.
+## Profiles
 
-On the `documents` lane, only documents of type `Image` are processed. Documents with a different type, or an `Image` document with empty content, are skipped with a warning. The document's `page_content` is expected to be base64-encoded PNG (the frame grabber always outputs PNG). Each answer is emitted as a `Text` document that preserves the original metadata (`chunkId`, `time_stamp`, etc.). The original `Image` documents do not flow downstream. If inference fails for a chunk, a warning is logged and processing continues with the next document.
+Default: **Mistral Large 3 - Premier Vision (256k tokens)** (`mistral-large-3`).
 
-### Fields
+| Profile | Model | Context tokens |
+| ------- | ----- | -------------- |
+| `mistral-large-3` **(default)** | `mistral-large-2512` | 256,000 |
+| `mistral-medium-3.1` | `mistral-medium-2508` | 128,000 |
+| `mistral-small-3.2` | `mistral-small-2506` | 128,000 |
+| `ministral-14b-3` | `ministral-14b-2512` | 256,000 |
+| `ministral-8b-3` | `ministral-8b-2512` | 256,000 |
+| `ministral-3b-3` | `ministral-3b-2512` | 256,000 |
 
-| Field | Type | Description |
-|---|---|---|
-| `model` | string | Mistral Vision model |
-| `modelTotalTokens` | number | Maximum context length in tokens |
-| `systemPrompt` | string | Define the model's role and behavior for image analysis |
-| `prompt` | string | Describe what you want to analyze or extract from the image |
-| `profile` | string | Default "mistral-large-3". Select the Mistral vision model to use |
+## Configuration
 
-### Profiles
+Choose a profile for the quality, latency, and context window the task needs, then set
+the API key and prompts. The profile supplies the model identifier and token limit.
 
-| Profile key           | Title                                        | Model                 | Context tokens |
-| --------------------- | -------------------------------------------- | --------------------- | -------------- |
-| `mistral-large-3` _(default)_ | Mistral Large 3 - Premier Vision     | `mistral-large-2512`  | 256,000        |
-| `mistral-medium-3.1`  | Mistral Medium 3.1 - Balanced Vision         | `mistral-medium-2508` | 128,000        |
-| `mistral-small-3.2`   | Mistral Small 3.2 - Fast & Cheap Vision      | `mistral-small-2506`  | 128,000        |
-| `ministral-14b-3`     | Ministral 3 14B - High Performance Vision    | `ministral-14b-2512`  | 256,000        |
-| `ministral-8b-3`      | Ministral 3 8B - Balanced Vision             | `ministral-8b-2512`   | 256,000        |
-| `ministral-3b-3`      | Ministral 3 3B - Efficient Vision            | `ministral-3b-2512`   | 256,000        |
+On the `image` lane, incoming image bytes are buffered across chunks, base64-encoded
+with the source MIME type, and sent to the model with the analysis prompt. The answer
+is written downstream as text.
 
----
+On the `documents` lane, only documents of type `Image` are processed. Other document
+types and images with empty content are skipped with a warning. The document's
+`page_content` is expected to be base64-encoded PNG. Each answer is emitted as a
+`Text` document that preserves the original metadata (`chunkId`, `time_stamp`, and
+other fields). A failed chunk is logged and skipped without stopping the batch.
+Documents the node does not convert — the original `Image` documents, skipped
+types, and failed chunks — do not flow downstream.
 
-## Image input
+### System Instructions and Analysis Prompt
+
+Use **System Instructions** to define the model's role and behavior. Use **Analysis
+Prompt** to describe what to extract or explain from every image.
+
+## Authentication
+
+Provide a Mistral AI API key in the `apikey` field for the selected profile. The node validates the key format at startup: if you supply an OpenAI key (starting with `sk-`) or a Google AI/Gemini key (starting with `AI`), initialization fails immediately with a specific error message pointing to the wrong provider.
+
+## Notes
+
+### Image input
 
 The node accepts images in the following formats:
 
@@ -56,13 +66,9 @@ The node accepts images in the following formats:
 - **Data URI** (`data:image/...` or `data:application/...`): passed as-is.
 - **Local file path**: read from disk, base64-encoded, and sent as a data URI. Files over **10 MB** are rejected. MIME type is inferred from the file extension (`.jpg`/`.jpeg` -> `image/jpeg`, `.png` -> `image/png`, `.gif` -> `image/gif`, `.webp` -> `image/webp`; any unrecognized extension defaults to `image/jpeg`).
 
----
+## Upstream docs
 
-## Authentication
-
-Provide a Mistral AI API key in the `apikey` field for the selected profile. The node validates the key format at startup: if you supply an OpenAI key (starting with `sk-`) or a Google AI/Gemini key (starting with `AI`), initialization fails immediately with a specific error message pointing to the wrong provider.
-
-See the [Mistral vision documentation](https://docs.mistral.ai/capabilities/vision/) for model capabilities and upstream limits.
+- [Mistral vision documentation](https://docs.mistral.ai/capabilities/vision/)
 
 ---
 

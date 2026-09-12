@@ -1,65 +1,45 @@
 # extract_data
 
-A RocketRide filter node that uses an LLM to pull a user-defined set of structured fields out of unstructured text or tables.
+A RocketRide text-processing node that asks a connected LLM to extract configured columns from text, tables, or documents. Choose it when you need a consolidated table-shaped result from several chunks rather than a glossary or fact records with provenance.
 
 ## What it does
 
-Reads incoming text or table chunks and, for each chunk, builds a prompt listing every configured column name, type, and optional default value, then calls the connected LLM (with `expectJson: true`) to extract values. The model is instructed to infer values even when column names don't appear verbatim in the source, and to always return a JSON array (empty if nothing is found). After the first chunk, the running table is passed back as context so subsequent chunks merge into it: duplicates are combined and empty fields are filled in from newer chunks.
-
-Intermediate LLM answers are intercepted by the node (via `preventDefault`) and never passed downstream. Only the final consolidated result is emitted when the object closes. Fields with an empty column name or type are skipped at pipeline start with a warning and excluded from all extraction.
-
-No third-party Python dependencies (requirements.txt is empty).
-
----
+For each input chunk, the node gives the connected LLM the configured column names, types, and default values, then requests a JSON array of rows. It keeps the latest LLM response as the working table, supplies that table as context for later chunks, and asks the LLM to merge duplicates and fill empty fields. It consumes those intermediate answers and emits the final table only when the input object closes: as one JSON answer and/or one JSON document per row. Use `extract_facts` instead when extraction needs source provenance and an optional second validation pass.
 
 ## Connections
 
-| Connection | Required    | Description                      |
-| ---------- | ----------- | -------------------------------- |
-| `llm`      | yes (min 1) | LLM used to extract field values |
+| Connection | Required | Description |
+| --- | --- | --- |
+| `llm` | yes | LLM used to extract configured field values. |
 
----
+## Lanes
+
+| Lane in | Lane out | Description |
+| --- | --- | --- |
+| `table` | `answers` | Emits the final extracted table as one JSON answer. |
+| `table` | `documents` | Emits one JSON document for each row in the final table. |
+| `text` | `answers` | Emits the final extracted table as one JSON answer. |
+| `text` | `documents` | Emits one JSON document for each row in the final table. |
+| `documents` | `answers` | Extracts from incoming documents and emits the final table as one JSON answer. |
+| `documents` | `documents` | Extracts from incoming documents and emits one JSON document for each final row. |
 
 ## Configuration
 
-### Lanes
-
-| Lane in     | Lane out    | Description                                                          |
-| ----------- | ----------- | ------------------------------------------------------------------- |
-| `text`      | `answers`   | Extract fields from text, emit as JSON                              |
-| `text`      | `documents` | Extract fields from text, emit one document per row                 |
-| `table`     | `answers`   | Extract/transform fields from a table, emit as JSON                 |
-| `table`     | `documents` | Extract/transform fields from a table, emit one document per row    |
-| `documents` | `answers`   | Extract fields from a document's content, emit as JSON              |
-| `documents` | `documents` | Extract fields from a document's content, emit one document per row |
-
-The `documents` input lane lets a `documents`-producing node (e.g. a preprocessor or an embeddings node) feed extraction directly, without an intermediate conversion to text.
-
-On close, the `answers` lane (if connected) receives one JSON answer containing the full table. The `documents` lane (if connected) receives one document per extracted row, with the row serialized as JSON in the document content.
+Configure the fields the LLM should look for. The node has one hidden `default` profile, so most configuration consists of the field list rather than choosing among extraction modes.
 
 ### Fields
 
-The node takes a list of fields to extract (`fields`, 1-32 entries). Each entry has:
+Provide between one and 32 fields. Each field has a column name, a type selected from the declared values, and an optional default value; the node passes all three to the LLM as extraction instructions. Use a column name that describes the value you want, even when that exact label is not expected in the source—the prompt explicitly allows the model to infer values from context. A blank column name or type does not stop the pipeline, but the node logs a warning and excludes that field from every extraction.
 
-| Field | Type | Description |
-|---|---|---|
-| `column` | string | Default "column". Name of column |
-| `type` | string | Default "text".  |
-| `defval` | string | Default empty.  |
-| `fields` | array |  |
-| `profile` | string | Default "default".  |
+### Field types and defaults
 
-**Supported types:** `text` (Text), `decimal` (Number), `int` (Integer), `date` (Date), `time` (Time), `datetime` (DateTime), `timestamp` (Timestamp), `binary` (Binary), `json` (JSON), `html` (HTML), `url` (URL), `email` (Email), `phone` (Phone), `ipv4` (IPv4), `ipv6` (IPv6), `uuid` (UUID), `guid` (GUID)
+The type communicates the expected shape to the LLM; use `text` for unstructured values, numeric and date/time types for values that should be recognized in those forms, and specialized types such as `email`, `url`, `phone`, or `json` when the value has that structure. The default value is also prompt context, not a post-processing guarantee: choose it only when it is a sensible fallback for a missing value. If the running table already has rows, the next prompt includes it and asks the LLM to merge duplicates and fill empty fields, so stable column names and compatible defaults make multi-chunk results more reliable.
 
-A single configuration profile exists (`default`); it carries the field list above. The profile selector field (`extract.profile`) is hidden in the UI.
+## Notes
 
----
+### Final output timing
 
-## Behaviour
-
-The LLM infers field values even when the source text does not use the exact column names: it reasons about what each column likely contains based on document context. Multiple chunks are merged progressively, filling in any gaps from earlier chunks, before the final result is emitted. The accumulated table is reset for every new object, so extraction state never leaks between objects in the pipeline.
-
----
+The node calls `preventDefault` for each intermediate LLM answer, so downstream listeners do not receive a partial table after every chunk. It resets its accumulated table at the start of each input object. On close, it writes the full table only to output lanes that have listeners; document output contains JSON-serialized rows with non-table metadata.
 
 <!-- ROCKETRIDE:GENERATED:PARAMS START -->
 <!-- Generated by nodes:docs-generate. Do not edit by hand. -->

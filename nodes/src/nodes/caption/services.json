@@ -9,7 +9,7 @@
 	"prefix": "caption",
 	"description": ["Generates a natural-language caption for an image using Florence-2 Base (MIT). ", "Three caption granularities are exposed: short, detailed, and more detailed. ", "Runs locally on CPU, Apple Silicon (MPS), and CUDA with no API key required. ", "For object detection use Object Detection. For text reading use OCR."],
 	"icon": "caption.svg",
-	"documentation": "https://docs.rocketride.org",
+	"documentation": "https://docs.rocketride.org/nodes/caption",
 	"tile": ["Task: ${parameters.caption.task}"],
 	"lanes": {
 		"image": ["text"]

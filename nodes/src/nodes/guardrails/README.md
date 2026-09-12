@@ -1,10 +1,10 @@
 # guardrails
 
-A RocketRide filter node that screens questions before they reach the LLM and answers before they reach your users.
+A RocketRide filter node that checks questions before they reach an LLM and answers before they reach users. Pick it when a pipeline needs configurable local rule checks at its boundary rather than another generation or retrieval step.
 
 ## What it does
 
-Sits in the pipeline as a guard filter, evaluating questions on the way in and answers on the way out. On the input side it catches prompt injection, enforces topic rules (blocked and allowed keyword lists), and caps input length or estimated token count. On the output side it checks answers for hallucination (keyword grounding against source documents), flags harmful content, detects PII leaks (emails, phones, SSNs, credit cards, IP addresses), and validates the output format.
+Evaluates `questions` before forwarding them, `answers` before forwarding them, and collects `documents` as grounding context for answer checks. Input checks cover prompt-injection patterns, optional topic keywords, and optional size limits; output checks cover configured grounding, content-safety, PII, and format rules. Unlike an LLM moderation or retrieval node, it decides from the text and local configuration, then either forwards or suppresses the original pipeline item.
 
 All checks are pure stdlib and regex: the node has no external dependencies, no model calls, and adds no network latency.
 
@@ -14,9 +14,7 @@ Text that is empty or whitespace-only is forwarded without checks.
 
 ---
 
-## Configuration
-
-### Lanes
+## Lanes
 
 | Lane in     | Lane out    | Description                                                           |
 |-------------|-------------|-----------------------------------------------------------------------|
@@ -26,39 +24,29 @@ Text that is empty or whitespace-only is forwarded without checks.
 
 Question text is assembled from both the question objects and any attached context before evaluation. Collected document content resets per pipeline object.
 
-### Fields
-
-| Field | Type | Description |
-|---|---|---|
-| `policy_mode` | string | Default "warn". How to handle violations: block (reject), warn (log + continue), log (silent) |
-| `enable_prompt_injection` | boolean | Default true. Detect and flag prompt injection attempts in input |
-| `enable_content_safety` | boolean | Default true. Detect harmful or unsafe content in output |
-| `enable_pii_detection` | boolean | Default true. Detect personal identifiable information (emails, phones, SSNs, credit cards) in output |
-| `enable_hallucination_check` | boolean | Default false. Verify that output claims are grounded in source documents |
-| `max_input_length` | number | Default 0. Maximum character count for input text (0 = no limit) |
-| `max_tokens_estimate` | number | Default 0. Maximum estimated token count for input text (0 = no limit) |
-| `expected_format` | string | Default empty. Validate that output matches this format (empty = no check) |
-| `blocked_topics` | array | Keywords for topics that should be rejected |
-| `allowed_topics` | array | If set, input must contain at least one of these keywords |
-| `profile` | string | Default "basic". Guardrails profile |
-
----
-
 ## Profiles
 
-Three built-in profiles control which fields are exposed in the UI and set sensible starting defaults.
+Default: **Basic: Prompt injection + PII detection** (`basic`).
 
-| Profile            | Behaviour                                                                                                   |
-|--------------------|-------------------------------------------------------------------------------------------------------------|
-| Basic *(default)*  | Prompt injection + PII detection, `warn` mode. Only `policy_mode` is configurable in the UI.               |
-| Strict             | All checks enabled, `block` on violation, `max_input_length` 50000, `max_tokens_estimate` 4096. Exposes `policy_mode`, `max_tokens_estimate`, and `expected_format`. |
-| Custom             | All checks enabled, `warn` mode. Every field is configurable individually.                                  |
+Start with `basic` to observe violations without interrupting a pipeline, or
+`strict` when rejected content must not continue. Choose `custom` when the
+checks need to be selected individually.
 
----
+| Profile | Behaviour |
+| --- | --- |
+| `basic` **(default)** | Prompt injection + PII detection, `warn` mode. Only `policy_mode` is configurable in the UI. |
+| `strict` | All checks enabled, `block` on violation, `max_input_length` 50000, `max_tokens_estimate` 4096. Exposes `policy_mode`, `max_tokens_estimate`, and `expected_format`. |
+| `custom` | All checks enabled with no size limit, `warn` mode. Exposes every individual check, limit, topic, format, and policy control. |
 
-## Input checks
+## Configuration
+
+The generated schema is the field reference. Use the checks below to select what to enforce, then choose the policy mode that determines whether an observed violation should stop the pipeline.
+
+### Input checks
 
 Run on the `questions` lane before the question is forwarded:
+
+Enable prompt-injection checking for untrusted questions. Use an allowed-topic list to constrain a focused workflow, or a blocked-topic list for specific unacceptable terms; both are case-insensitive substring checks, not semantic classification. Set one or both size limits when unusually large questions should be stopped before later nodes consume them.
 
 - **Prompt injection** (rule `prompt_injection`, critical severity): regex patterns covering instruction-override attempts ("ignore all previous instructions"), system-prompt extraction, role-play jailbreaks (DAN and similar), delimiter/token injection (`<|system|>`, `[INST]`, etc.), and encoding-evasion commands; plus weighted keyword scoring (keywords such as `jailbreak`, `bypass`, `ignore safety`) that triggers when the combined score reaches 0.7. Topic restriction only runs when `blocked_topics` or `allowed_topics` is non-empty.
 - **Topic restriction** (rule `topic_restriction`): blocked-keyword matches are high severity; failing to match any allowed keyword is medium severity. Matching is case-insensitive substring.
@@ -66,9 +54,11 @@ Run on the `questions` lane before the question is forwarded:
 
 ---
 
-## Output checks
+### Output checks
 
 Run on the `answers` lane before the answer is forwarded:
+
+Enable hallucination checking only when relevant documents arrive on the `documents` lane before the answer. It is a lexical grounding test, so use it to flag potentially unsupported output rather than as a factual verifier. Select an expected format only when a downstream consumer requires that shape; an unrecognized format value is skipped.
 
 - **Hallucination** (rule `hallucination`, high severity): sentence-level grounding check. Each output sentence is evaluated for keyword overlap (3+ character non-stop words) against the combined source documents; sentences with less than 30% coverage are flagged. The check is skipped when no documents have been received on the `documents` lane.
 - **Content safety** (rule `content_safety`, critical severity): regex patterns across three categories: self-harm, violence (weapon and explosive construction), and illegal activity (hacking, theft, counterfeiting).
@@ -77,7 +67,7 @@ Run on the `answers` lane before the answer is forwarded:
 
 ---
 
-## Policy modes
+### Policy modes
 
 When any enabled check fails, `policy_mode` decides the outcome:
 

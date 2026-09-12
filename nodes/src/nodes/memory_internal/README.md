@@ -1,63 +1,64 @@
 # memory_internal
 
-A RocketRide memory node that provides a run-scoped, keyed in-process store exposed to an AI agent as four tool functions.
+A RocketRide in-process memory node for temporary, keyed values within a
+pipeline instance. Pick it for short-lived agent scratch space; use
+`memory_persistent` when state must be retained across sessions.
+
+## About RocketRide
+
+RocketRide hosts this node as a Python pipeline component. The node itself
+implements a small in-process store and has no separately configured service
+or dependency.
 
 ## What it does
 
-Serves as the backing memory store for the RocketRide Wave agent (`agent_rocketride`). The node is only wireable to that agent: connect it via the `memory` invoke channel. It registers with `classType: memory` and tool prefix `memory`, exposing four agent-callable tools: `memory.put`, `memory.get`, `memory.list`, and `memory.clear`.
-
-The store is an intentionally simple in-process Python dictionary with no external dependencies and no persistence. All smart logic (structural summaries, JMESPath extraction, chunked reading) lives in the agent's executor, not in this node.
-
-How the Wave agent uses the store: each wave's tool results are stored here under auto-assigned keys (e.g. `wave-0.r0`). The agent injects structural summaries (field names, array lengths, sample values) into the planning prompt rather than raw data, keeping context lean. `memory.peek` (an executor-provided tool, not part of this node's API) lets the LLM extract specific values on demand via JMESPath; the LLM signals `remove: [...]` to evict keys it no longer needs.
-
-The store is run-scoped: it is created fresh per pipeline instance and cleared on `open`, so every client session starts empty and nothing survives across runs.
-
----
-
-## Available tools
-
-
-
-| Tool | Description |
-|---|---|---|
-| `put` | Store a value (string, number, object, or array) under a key for later retrieval. |
-| `get` | Retrieve the full stored value for a key. Returns null if not found. |
-| `list` | List all keys currently stored in memory. |
-| `clear` | Clear a specific key or all keys. Omit key to clear everything. |
-
-
-
-Keys must be non-empty strings; alphanumeric characters, hyphens, and underscores are recommended. Keys are trimmed of surrounding whitespace before use.
-
-### Tool input/output details
-
-**`memory.put`**
-
-Input: `key` (string, required), `value` (any, required).
-Output: `{ ok: true, key: "<key>" }` on success, or `{ ok: false, error: "..." }` on invalid input.
-
-**`memory.get`**
-
-Input: `key` (string, required).
-Output: `{ ok: true, key: "<key>", value: <stored> }` when found, or `{ ok: false, key: "<key>", value: null }` when not found.
-
-**`memory.list`**
-
-Input: none.
-Output: `{ ok: true, keys: ["<key1>", ...] }` (sorted).
-
-**`memory.clear`**
-
-Input: `key` (string, optional). Omit to clear all keys.
-Output: `{ ok: true, cleared: ["<key1>", ...] }` listing every key that was removed.
-
----
+Creates a new keyed store for each node instance, then clears that store when
+the instance is opened. It has no data lanes: its registered operations store,
+retrieve, list, and clear values for code or an agent using the node. Choose it
+over `memory_persistent` when the desired lifetime is only the current
+instance and an external backend is unnecessary.
 
 ## Configuration
 
-This node has no configurable fields, no lanes, and a single empty `default` profile. Add it to your pipeline and connect it to the `memory` invoke channel of the Wave agent.
+This node has no configuration fields, profiles, or lanes. Add it when its
+run-scoped lifetime is appropriate; stored values are not copied or persisted
+by the node, so do not use it for data that must survive a new instance.
 
----
+## Notes
+
+### Registered operations
+
+The node registers four operations under the `memory` prefix:
+
+| Function | Description |
+| --- | --- |
+| `memory.put` | Store a value under a key. |
+| `memory.get` | Retrieve the value for a key. |
+| `memory.list` | Return all stored keys in sorted order. |
+| `memory.clear` | Remove one key or all keys. |
+
+`memory.put` requires a non-empty string `key` and a `value`; it trims the key
+before storing and returns `{ok: true, key}`. `memory.get` requires a non-empty
+string `key`; a missing key returns `{ok: false, key, value: null}`. The
+no-argument `memory.list` returns `{ok: true, keys}`. `memory.clear` accepts
+an optional string `key`; omitting it, or supplying an empty or whitespace-only
+key, clears every stored key and returns them in `cleared`.
+
+Calls whose argument object is not a dictionary, or whose required key/value
+is invalid or missing, raise a `ValueError` before reaching the store. Clearing
+a specified key that does not exist is successful and returns an empty
+`cleared` list.
+
+### Lifetime
+
+`beginInstance` creates the store and `open` clears it. In particular, opening
+the node starts with an empty store even if the same instance was previously
+used. The implementation uses a Python dictionary only; it does not provide
+cross-instance or cross-process persistence.
+
+## Upstream docs
+
+- [RocketRide documentation](https://docs.rocketride.org)
 
 <!-- ROCKETRIDE:GENERATED:PARAMS START -->
 <!-- Generated by nodes:docs-generate. Do not edit by hand. -->

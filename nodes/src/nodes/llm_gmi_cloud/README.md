@@ -1,13 +1,19 @@
 # llm_gmi_cloud
 
-A RocketRide LLM node that connects GMI Cloud-hosted models to a pipeline through GMI Cloud's OpenAI-compatible API.
+A RocketRide LLM node that connects GMI Cloud-hosted models to a pipeline through
+GMI Cloud's OpenAI-compatible API.
+
+## About GMI Cloud
+
+GMI Cloud is a cloud platform for deploying and serving AI models through managed
+inference endpoints. Its catalog includes open-weight models and access to models
+from multiple providers.
 
 ## What it does
 
-Connects GMI Cloud-hosted models to your pipeline via an OpenAI-compatible API. GMI Cloud
-runs 100+ open-weight and proxied proprietary models on H100/H200 infrastructure. Used
-primarily as an `llm` invoke connection by agents and other nodes that need an LLM. Can
-also be used directly via lanes.
+Connects GMI Cloud-hosted models to a pipeline via an OpenAI-compatible API. Use it
+as an `llm` invoke connection for agents and other nodes that need an LLM, or wire
+it directly through the question and answer lanes.
 
 Built on **langchain-openai's `ChatOpenAI`** client pointed at the GMI Cloud endpoint,
 with `temperature` fixed at `0`. Rate-limit and connection errors are treated as
@@ -20,75 +26,86 @@ endpoints). This is checked both at save time and when the pipeline starts. An A
 required at pipeline start; the shared endpoint `https://api.gmi-serving.com/v1` is used
 when no endpoint URL is configured.
 
----
-
-## Configuration
-
-### Lanes
+## Lanes
 
 | Lane in     | Lane out  | Description                                          |
 | ----------- | --------- | ---------------------------------------------------- |
 | `questions` | `answers` | Send a question directly, receive a generated answer |
 
-### Fields
+## Profiles
 
-| Field | Type | Description |
-|---|---|---|
-| `model` | string | GMI Cloud model identifier. Use org/model-name for open-weight models (e.g. deepseek-ai/DeepSeek-R1, Qwen/Qwen3-32B-FP8) or provider/model-name for proxied models (e.g. openai/gpt-4o, anthropic/claude-sonnet-4.5, google/gemini-3-flash-preview). Full list: https://www.gmicloud.ai/models |
-| `modelTotalTokens` | number | Total Tokens |
-| `serverbase` | string | Your GMI Cloud deployment endpoint URL. Deploy the model at console.gmicloud.ai, then paste the provided endpoint URL here. |
-| `profile` | string | Default "deepseek-v3". GMI Cloud LLM model |
+Default: **DeepSeek V3** (`deepseek-v3`).
 
-The **custom** profile additionally exposes the raw model fields:
+| Profile | Model | Context tokens |
+| ------- | ----- | -------------- |
+| DeepSeek V3 **(default)** | `deepseek-ai/DeepSeek-V3-0324` | 163,840 |
+| Gemini 3.1 Pro | `google/gemini-3.1-pro-preview` | 128,000 |
+| Gemini 3.1 Flash Lite | `google/gemini-3.1-flash-lite-preview` | 128,000 |
+| GPT-5.2 | `openai/gpt-5.2` | 128,000 |
 
-| Field              | Type/Default                                     | Description                                                                                                                                                                                                          |
-| ------------------ | ------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `model`            | string                                           | GMI Cloud model identifier: `org/model-name` for open-weight models (e.g. `deepseek-ai/DeepSeek-R1`) or `provider/model-name` for proxied models (e.g. `openai/gpt-4o`). Full list: https://www.gmicloud.ai/models |
-| `modelTotalTokens` | number, default `16384`                          | Total token (context) limit for the model                                                                                                                                                                              |
-| `serverbase`       | string, default `https://api.gmi-serving.com/v1` | Endpoint URL                                                                                                                                                                                                            |
+<details>
+<summary><strong>View 18 more models</strong></summary>
 
----
+| Profile | Model | Context tokens |
+| ------- | ----- | -------------- |
+| `custom` | _(user-specified)_ | editable |
+| Llama 4 Scout | `meta-llama/Llama-4-Scout-17B-16E-Instruct` | 1,048,576 |
+| Llama 4 Maverick | `meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8` | 1,048,576 |
+| Qwen3 235B | `Qwen/Qwen3-235B-A22B-FP8` | 131,072 |
+| Qwen3 32B | `Qwen/Qwen3-32B-FP8` | 131,072 |
+| Qwen3 30B | `Qwen/Qwen3-30B-A3B` | 131,072 |
+| Qwen3 Coder 480B | `Qwen/Qwen3-Coder-480B-A35B-Instruct-FP8` | 131,072 |
+| DeepSeek V3.2 | `deepseek-ai/DeepSeek-V3.2` | 163,840 |
+| DeepSeek R1 | `deepseek-ai/DeepSeek-R1` | 131,072 |
+| DeepSeek R1 Distill 32B | `deepseek-ai/DeepSeek-R1-Distill-Qwen-32B` | 131,072 |
+| DeepSeek R1 Distill 1.5B | `deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B` | 131,072 |
+| DeepSeek Prover V2 | `deepseek-ai/DeepSeek-Prover-V2-671B` | 131,072 |
+| GPT-5.1 | `openai/gpt-5.1` | 128,000 |
+| GPT-5 | `openai/gpt-5` | 128,000 |
+| GPT-4o | `openai/gpt-4o` | 128,000 |
+| Claude Opus 4.5 | `anthropic/claude-opus-4.5` | 200,000 |
+| Claude Sonnet 4.5 | `anthropic/claude-sonnet-4.5` | 200,000 |
+| Gemini 3 Flash | `google/gemini-3-flash-preview` | 128,000 |
 
-## Model tiers
+</details>
 
-GMI Cloud has three tiers:
+## Configuration
 
-**Shared (always-on)**, available immediately at the shared endpoint, API key only:
+Choose a profile for a shared or deployed model. Named profiles set the model and
+context limit; shared models also use the default endpoint, so most pipelines only
+need an API key.
 
-| Profile                 | Model                                  | Context |
-| ----------------------- | -------------------------------------- | ------- |
-| DeepSeek V3 _(default)_ | `deepseek-ai/DeepSeek-V3-0324`         | 163,840 |
-| DeepSeek V3.2           | `deepseek-ai/DeepSeek-V3.2`            | 163,840 |
-| DeepSeek R1             | `deepseek-ai/DeepSeek-R1`              | 131,072 |
-| DeepSeek Prover V2      | `deepseek-ai/DeepSeek-Prover-V2-671B`  | 131,072 |
-| GPT-5.2                 | `openai/gpt-5.2`                       | 128,000 |
-| GPT-5.1                 | `openai/gpt-5.1`                       | 128,000 |
-| GPT-5                   | `openai/gpt-5`                         | 128,000 |
-| GPT-4o                  | `openai/gpt-4o`                        | 128,000 |
-| Claude Opus 4.5         | `anthropic/claude-opus-4.5`            | 200,000 |
-| Claude Sonnet 4.5       | `anthropic/claude-sonnet-4.5`          | 200,000 |
-| Gemini 3.1 Pro          | `google/gemini-3.1-pro-preview`        | 128,000 |
-| Gemini 3 Flash          | `google/gemini-3-flash-preview`        | 128,000 |
-| Gemini 3.1 Flash Lite   | `google/gemini-3.1-flash-lite-preview` | 128,000 |
+### Endpoint URL
 
-**Deploy-on-demand**: deploy first at [console.gmicloud.ai](https://console.gmicloud.ai), then paste the provided endpoint URL into the **Endpoint URL** field:
+Deploy-on-demand profiles require the endpoint supplied by the GMI Cloud console.
+The URL must use HTTPS and its hostname must be `gmi-serving.com` or a subdomain;
+other hosts are rejected. The shared endpoint defaults to
+`https://api.gmi-serving.com/v1`.
 
-| Profile                  | Model                                               | Context   |
-| ------------------------ | --------------------------------------------------- | --------- |
-| Llama 4 Scout            | `meta-llama/Llama-4-Scout-17B-16E-Instruct`         | 1,048,576 |
-| Llama 4 Maverick         | `meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8` | 1,048,576 |
-| Qwen3 235B               | `Qwen/Qwen3-235B-A22B-FP8`                          | 131,072   |
-| Qwen3 32B                | `Qwen/Qwen3-32B-FP8`                                | 131,072   |
-| Qwen3 30B                | `Qwen/Qwen3-30B-A3B`                                | 131,072   |
-| Qwen3 Coder 480B         | `Qwen/Qwen3-Coder-480B-A35B-Instruct-FP8`           | 131,072   |
-| DeepSeek R1 Distill 32B  | `deepseek-ai/DeepSeek-R1-Distill-Qwen-32B`          | 131,072   |
-| DeepSeek R1 Distill 1.5B | `deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B`         | 131,072   |
+### Custom models
 
-**Custom**: specify any GMI Cloud model ID, token limit, and endpoint URL directly.
+Select `custom` to provide a GMI Cloud model identifier, its context limit, and an
+endpoint URL directly. Open-weight identifiers use `org/model-name`, such as
+`deepseek-ai/DeepSeek-R1`; proxied identifiers use `provider/model-name`, such as
+`openai/gpt-4o`.
 
----
+## Authentication
 
-## Save-time validation
+Provide a GMI Cloud API key in the **API Key** field. That is sufficient for
+shared-tier models. For deploy-on-demand models, deploy the model in the
+[GMI Cloud console](https://console.gmicloud.ai) and also provide the unique
+endpoint URL.
+
+## Notes
+
+### Model tiers
+
+Shared models are available immediately at the shared endpoint with an API key.
+Llama, Qwen, and R1 Distill profiles are deploy-on-demand and require an endpoint
+created in the GMI Cloud console. The custom profile accepts any GMI Cloud model ID,
+token limit, and endpoint URL directly.
+
+### Save-time validation
 
 When the node configuration is saved, it is validated against the live API:
 
@@ -102,17 +119,6 @@ When the node configuration is saved, it is validated against the live API:
   model's existence. An HTTP 429 (rate limit) during the probe means the key was accepted
   and is treated as valid. Other API errors surface as warnings with the HTTP status,
   provider error type, and message.
-
----
-
-## Authentication
-
-Provide your GMI Cloud API key in the **API Key** field. For shared-tier models that is
-all that is required. For deploy-on-demand models (Llama, Qwen, the R1 Distills), deploy
-the model in the [GMI Cloud console](https://console.gmicloud.ai) first, then paste the
-unique endpoint URL it gives you into the **Endpoint URL** field.
-
----
 
 ## Upstream docs
 

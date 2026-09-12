@@ -48,6 +48,7 @@
 	//		Description to of this driver
 	//
 	"description": ["This component combines document parsing, text preprocessing, and embedding generation in a single node.", "It provides an end-to-end solution for converting raw documents into vector representations", "suitable for semantic search and analysis."],
+	"documentation": "https://docs.rocketride.org/nodes/autopipe",
 	//
 	//
 	//	Optional:

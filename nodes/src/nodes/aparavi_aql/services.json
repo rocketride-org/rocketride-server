@@ -61,6 +61,7 @@
 	//	  The icon is the icon to display in the UI for this node
 	//
 	"icon": "aparavi-aql.svg",
+	"documentation": "https://docs.rocketride.org/nodes/aparavi_aql",
 	//
 	// Optional:
 	//		Defines the invoke connections that may/must be connected

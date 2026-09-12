@@ -4,79 +4,65 @@ A RocketRide LLM node that routes pipeline traffic through a locally-hosted Olla
 
 ## What it does
 
-Provides text generation against an Ollama server running on your own hardware. The node acts as an `llm` invoke connection for agents and other nodes that need an LLM, and can also be driven directly via its `questions` / `answers` lane pair. Because all inference happens on-premise, no external API key is required, making it a natural fit for privacy-sensitive or air-gapped deployments.
+Provides text generation against an Ollama server running on your own hardware. The node acts as an `llm` connection for agents and other nodes, and can also be driven directly through its `questions` and `answers` lanes. Because inference stays on-premise and requires no external API key, it fits privacy-sensitive or air-gapped deployments. Internally, it uses **langchain-openai** (`ChatOpenAI`) against Ollama's OpenAI-compatible `/v1` endpoint.
 
-Internally, the node talks to Ollama through its **OpenAI-compatible `/v1` endpoint** using **langchain-openai** (`ChatOpenAI`). `temperature` is configurable (default `0`; reasoning models such as `gpt-oss` auto-use `1.0` when it is left unset), and `reasoning_effort` can be set for reasoning models. If the configured `serverbase` URL does not end in `/v1`, the node appends it automatically, so both `http://localhost:11434` and `http://localhost:11434/v1` are accepted. The OpenAI client requires a non-empty API key field; the node sends the placeholder string `dummy-key`, which Ollama ignores.
-
----
-
-## Configuration
-
-### Lanes
+## Lanes
 
 | Lane in     | Lane out  | Description                                          |
 | ----------- | --------- | ---------------------------------------------------- |
 | `questions` | `answers` | Send a question directly, receive a generated answer |
 
-### Fields
-
-Pick a profile from the dropdown; the profile pre-fills `model`, `serverbase`, and `modelTotalTokens`. All three fields are individually overridable when using the `custom` profile.
-
-| Field | Type | Description |
-|---|---|---|
-| `model` | string | Ollama model |
-| `modelTotalTokens` | number | Total Tokens |
-| `profile` | string | Default "llama3_3". LLM model |
-
----
-
 ## Profiles
 
-**Llama**
+Default: **Llama 3.3** (`llama3_3`).
 
-| Profile               | Model             | Context    |
-| --------------------- | ----------------- | ---------- |
-| Llama 4 Latest        | `llama4:latest`   | 10,000,000 |
-| Llama 3.3 _(default)_ | `llama3.3:latest` | 128,000    |
-| Llama 3.1 405B        | `llama3.1:405b`   | 128,000    |
-| Llama 3.1 70B         | `llama3.1:70b`    | 128,000    |
-| Llama 3.1 8B          | `llama3.1:8b`     | 128,000    |
-| Llama 3.2 3B          | `llama3.2`        | 128,000    |
-| Llama 3.2 1B          | `llama3.2:1b`     | 128,000    |
+| Profile | Model | Context |
+| ------- | ----- | ------- |
+| `llama3_3` **(default)** | `llama3.3:latest` | 128,000 |
+| `llama4-latest` | `llama4:latest` | 10,000,000 |
+| `qwen3-latest` | `qwen3:latest` | 128,000 |
 
-**Qwen**
+<details>
+<summary><strong>View 20 more models</strong></summary>
 
-| Profile       | Model          | Context |
-| ------------- | -------------- | ------- |
-| Qwen 3 Latest | `qwen3:latest` | 128,000 |
-| Qwen 2.5 72B  | `qwen2.5:72b`  | 128,000 |
-| Qwen 2.5 32B  | `qwen2.5:32b`  | 128,000 |
-| Qwen 2.5 14B  | `qwen2.5:14b`  | 128,000 |
-| Qwen 2.5 7B   | `qwen2.5`      | 128,000 |
-| Qwen 2.5 3B   | `qwen2.5:3b`   | 128,000 |
-| Qwen 2.5 1.5B | `qwen2.5:1.5b` | 128,000 |
-| Qwen 2.5 0.5B | `qwen2.5:0.5b` | 128,000 |
+| Profile | Model | Context |
+| ------- | ----- | ------- |
+| `custom` | _(user-specified)_ | 16,385 |
+| `llama3_1-8b` | `llama3.1:8b` | 128,000 |
+| `llama3_1-70b` | `llama3.1:70b` | 128,000 |
+| `llama3_1-405b` | `llama3.1:405b` | 128,000 |
+| `phi4-14b` | `phi4` | 16,000 |
+| `llama3_2-3b` | `llama3.2` | 128,000 |
+| `llama3_2-1b` | `llama3.2:1b` | 128,000 |
+| `mistral-7b` | `mistral` | 32,000 |
+| `qwen2_5-7b` | `qwen2.5` | 128,000 |
+| `qwen2_5-0_5b` | `qwen2.5:0.5b` | 128,000 |
+| `qwen2_5-1_5b` | `qwen2.5:1.5b` | 128,000 |
+| `qwen2_5-3b` | `qwen2.5:3b` | 128,000 |
+| `qwen2_5-14b` | `qwen2.5:14b` | 128,000 |
+| `qwen2_5-32b` | `qwen2.5:32b` | 128,000 |
+| `qwen2_5-72b` | `qwen2.5:72b` | 128,000 |
+| `deepseek-r1-1_5b` | `deepseek-r1:1.5b` | 128,000 |
+| `deepseek-r1-7b` | `deepseek-r1:7b` | 128,000 |
+| `deepseek-r1-14b` | `deepseek-r1:14b` | 128,000 |
+| `deepseek-r1-32b` | `deepseek-r1:32b` | 128,000 |
+| `deepseek-r1-671b` | `deepseek-r1:671b` | 128,000 |
 
-**DeepSeek**
+</details>
 
-| Profile          | Model              | Context |
-| ---------------- | ------------------ | ------- |
-| DeepSeek R1 671B | `deepseek-r1:671b` | 128,000 |
-| DeepSeek R1 32B  | `deepseek-r1:32b`  | 128,000 |
-| DeepSeek R1 14B  | `deepseek-r1:14b`  | 128,000 |
-| DeepSeek R1 7B   | `deepseek-r1:7b`   | 128,000 |
-| DeepSeek R1 1.5B | `deepseek-r1:1.5b` | 128,000 |
+## Configuration
 
-**Other**
+Pick a profile to prefill the Ollama model, context limit, and server URL. Use `custom` to supply another Ollama tag, context token count, and endpoint; its initial context value is 16,385 tokens.
 
-| Profile    | Model     | Context |
-| ---------- | --------- | ------- |
-| Phi 4 14B  | `phi4`    | 16,000  |
-| Mistral 7B | `mistral` | 32,000  |
+### Server base URL
 
-**Custom**: supply any Ollama model tag, context token count, and server URL directly. The default context for a new custom profile is 16,385 tokens until you change it.
+Point the node at the Ollama server, normally `http://localhost:11434`. If the URL does not end in `/v1`, the node appends it automatically, so both `http://localhost:11434` and `http://localhost:11434/v1` work.
 
----
+### Temperature and reasoning effort
+
+Temperature defaults to `0`. When it is left unset for a reasoning model such as `gpt-oss`, the node uses `1.0`; set `reasoning_effort` to `low`, `medium`, or `high` when the selected model supports that control.
+
+The OpenAI client requires a non-empty API key, so the node sends the placeholder `dummy-key`, which Ollama ignores.
 
 ## Upstream docs
 

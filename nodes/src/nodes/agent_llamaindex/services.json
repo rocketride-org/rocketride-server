@@ -50,7 +50,7 @@
 	//		The icon to display in the UI for this node
 	//
 	"icon": "llamaindex.svg",
-	"documentation": "https://docs.rocketride.org",
+	"documentation": "https://docs.rocketride.org/nodes/agent_llamaindex",
 	//
 	// Optional:
 	//		Control-plane channels this agent invokes: an LLM (required) and

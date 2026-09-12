@@ -1,84 +1,55 @@
 # extract_facts
 
-The extraction brain — a RocketRide filter node that reads document context together with a parsed table, extracts a user-defined set of fields, and runs a validator pass that double-checks the values on disagreement before emitting fully-qualified facts with provenance.
+A RocketRide text-processing node that extracts configured records from documents or tables, with optional LLM validation and source provenance. Choose it over `extract_data` when each emitted value needs a traceable source location or a second extraction check.
 
 ## What it does
 
-Accumulates the document and table context for an object across all of its chunks, then runs a two-pass LLM extraction when the object closes:
-
-1. **Extraction pass** — builds a prompt listing every configured field (name, type, optional default) and instructs the connected LLM (with `expectJson: true`) to read the source and emit **one object per logical record** — a single-entity document (e.g. one invoice) yields exactly one object carrying all target fields; a table yields one object per data row. Tables are fenced with `[TABLE <id>]` markers and read row by row. Every record must include a `_provenance` object (`page`, `table_id`, `row`, `col`, `source_text`, `confidence`).
-2. **Validator pass** — a second prompt against the *same* LLM invoke lane. It re-reads the source at the location each fact cites, reconciles disagreements (correcting the value, fixing the cited cell, or dropping unsupported facts), and returns the reconciled list with a `_validation` annotation. If validation is disabled the extraction pass is emitted directly.
-
-Incoming chunks are buffered (via `preventDefault`) and never passed downstream; only the reconciled facts are emitted when the object closes. Fields with an empty name or type are skipped at pipeline start with a warning. Accumulated context is reset for every new object, so state never leaks between objects.
-
-No third-party Python dependencies (requirements.txt is empty).
-
----
+The node buffers document and table context for an input object, then extracts one JSON record per logical record when that object closes. Its prompt includes the configured target fields and requires a `_provenance` object for every record. By default it sends the results through a second LLM prompt that rechecks the cited source, corrects or drops unsupported records, and attaches validation information. It emits the reconciled list as an answer and/or as one document per record. Use `extract_data` when a consolidated table is sufficient and there is no need to preserve per-record provenance or run a validator pass.
 
 ## Connections
 
-| Connection | Required    | Description                                      |
-| ---------- | ----------- | ------------------------------------------------ |
-| `llm`      | yes (min 1) | LLM used for both the extraction and validator passes |
+| Connection | Required | Description |
+| --- | --- | --- |
+| `llm` | yes | LLM used for fact extraction and, when enabled, validation. |
 
----
+## Lanes
+
+| Lane in | Lane out | Description |
+| --- | --- | --- |
+| `table` | `answers` | Emits the reconciled fact list as one JSON answer. |
+| `table` | `documents` | Emits one JSON document for each reconciled fact. |
+| `documents` | `answers` | Extracts from incoming documents and emits the reconciled fact list as one JSON answer. |
+| `documents` | `documents` | Extracts from incoming documents and emits one JSON document for each reconciled fact. |
 
 ## Configuration
 
-### Lanes
-
-| Lane in     | Lane out    | Description                                              |
-| ----------- | ----------- | ------------------------------------------------------- |
-| `table`     | `answers`   | Extract facts from a table, emit as JSON                |
-| `table`     | `documents` | Extract facts from a table, emit one document per fact  |
-| `documents` | `answers`   | Extract facts using document context, emit as JSON      |
-| `documents` | `documents` | Extract facts using document context, one doc per fact  |
-
-On close, the `answers` lane (if connected) receives one JSON answer containing the full list of reconciled records. The `documents` lane (if connected) receives one document per record, with the record serialized as JSON in the document content.
+Configure the target fields, then decide whether the second validation pass and provenance should be included. The node has one hidden `default` profile, so these choices apply directly to its extraction behavior.
 
 ### Fields
 
-The node takes a list of target fields to extract (`fields`, 1-32 entries). Each entry has:
+Provide between one and 32 target fields. Each field has a name, a type selected from the declared values, and an optional default value; the node places these in the LLM prompt. The extractor is instructed to infer a value from context when an exact field label is absent, so use names that express the facts you need rather than merely copying source headers. A field with a blank name or type is skipped at startup with a warning and is not available to the extractor or validator.
 
-| Field    | Type   | Description                                          |
-| -------- | ------ | ---------------------------------------------------- |
-| `column` | string | Default "field". Name of the target fact field      |
-| `type`   | string | Default "text". Expected data type                  |
-| `defval` | string | Default empty. Value used when the fact isn't found |
+### Field types and defaults
 
-**Supported types:** `text` (Text), `decimal` (Number), `int` (Integer), `date` (Date), `time` (Time), `datetime` (DateTime), `timestamp` (Timestamp), `binary` (Binary), `json` (JSON), `html` (HTML), `url` (URL), `email` (Email), `phone` (Phone), `ipv4` (IPv4), `ipv6` (IPv6), `uuid` (UUID), `guid` (GUID)
+The type tells the LLM how to interpret the target value. Use `text` for unconstrained values, numeric and date/time types for values that should be recognized in those forms, and specialized types such as `email`, `url`, `phone`, or `json` when their structure matters. The default value is prompt context, not a post-processing guarantee, so select one only when it is a sensible fallback for a missing fact. Keep types and defaults consistent with the source you expect to validate; the validator checks the extraction result against the same configured fields.
 
-Two toggles control behaviour:
+### Validate
 
-| Toggle                | Default | Description                                                          |
-| --------------------- | ------- | -------------------------------------------------------------------- |
-| `validate`            | `true`  | Run the second validator prompt pass that reconciles disagreements   |
-| `include_provenance`  | `true`  | Attach the `_provenance` block to every emitted fact                 |
+Validation is on by default. With it enabled, the node runs a second prompt on the same LLM connection against the candidate records and source context. The validator can correct a value, repair its cited table location, lower its confidence, or remove a record that the source does not support. Turn it off when the extra prompt cost and latency are not worth the second check; in that mode the first-pass records are emitted without `_validation` annotations. If the validator returns no usable records, the node retains the first-pass candidates instead of discarding them.
 
-A single configuration profile exists (`default`); it carries the field list and toggles above. The profile selector field (`facts.profile`) is hidden in the UI.
+### Include Provenance
 
-### Provenance
+This setting defaults to on. The extraction prompt asks for `page`, `table_id`, `row`, `col`, `source_text`, and `confidence` in `_provenance`; table records use the node's `[TABLE <id>]` fences and document inputs can carry `[Page N]` markers. Turn it off only when downstream consumers do not need source traceability, because the node removes `_provenance` from the final records after validation. It does not disable validation itself.
 
-Each emitted record carries a `_provenance` object alongside the configured fields:
+## Notes
 
-| Provenance key | Description                                                          |
-| -------------- | ------------------------------------------------------------------- |
-| `page`         | Source page the record was read from                                |
-| `table_id`     | Identifier of the source table                                      |
-| `row`          | Source row index of the record within the table                     |
-| `col`          | Column index only when the whole record is a single cell; else null |
-| `source_text`  | Verbatim snippet or row text the record was drawn from              |
-| `confidence`   | Extractor/validator confidence for the reconciled record            |
+### Buffered input and output
 
-Provenance is filled on a **best-effort** basis by the model from the text it is given: any field it cannot determine (for example a `page` when the input has no page markers, or `row`/`col` for a free-text record) is returned as `null`.
+The node consumes incoming content with `preventDefault` and emits derived facts only on close, so downstream lanes never see its original input or partial LLM output. Table input is fenced with sequential table IDs. On the `documents` lane, documents marked `metadata.isTable` are sent to the table buffer; other content is buffered as free text, and a `page` metadata value is preserved in a page marker for the LLM. Document output serializes each fact as JSON; its `isTable` metadata is true when the fact's provenance has a table ID.
 
----
+### Record shape
 
-## Behaviour
-
-The LLM infers field values even when the source does not use the exact field names, reasoning about what each field likely contains from the surrounding context. When a `table` lane feeds the node, the extractor is told to read it row by row and turn each data row into one record so it can cite the originating row in provenance; `documents` lane input routes table documents (`metadata.isTable`) to the table buffer and everything else to the free-text buffer, emitting an inline `[Page N]` marker with each chunk that carries page metadata so the extractor can cite the page in provenance. The validator pass gives the model a second, adversarial look at its own output before anything is emitted, keeping the value it can best justify from the source.
-
----
+The built-in prompts request one object for each logical record, not a separate object for every target field. For table data, the extractor is told to treat the first row as a header and use a zero-based data-row index in provenance. The LLM supplies provenance on a best-effort basis, so it may return `null` for a source location that the provided context cannot establish.
 
 <!-- ROCKETRIDE:GENERATED:PARAMS START -->
 <!-- Generated by nodes:docs-generate. Do not edit by hand. -->

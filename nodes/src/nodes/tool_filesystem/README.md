@@ -1,8 +1,20 @@
 # tool_filesystem
 
-Three RocketRide services, all backed by the account-scoped RocketRide file store
-(the same storage area the client SDK reaches via its `fs_*` methods) and all sharing
-this node's code (`nodes/src/nodes/tool_filesystem/`):
+One node directory providing three RocketRide services — an agent file tool, a pipeline sink, and a pipeline source — all backed by the account-scoped RocketRide file store.
+
+## What it does
+
+All three services operate on RocketRide file storage — the account-scoped store used
+by the platform and its client SDK `fs_*` methods. All paths are plain and relative to
+the task's **storage anchor**, which the task file provides: the owning user's file
+tree (`users/<client_id>/files/`) for development runs, or a task-specific subtree of
+the deployment team's storage (`teams/<teamId>/files/tasks/<projectId>/`) for deployed
+runs. Files written here are visible in the file browser and vice versa, and node
+behavior is identical in both modes. Identity and the anchor are resolved
+automatically from the running task (`rocketlib.getTask()`), never from the
+environment; no account configuration is needed on any of the three services.
+
+Three services share this node's code:
 
 | Service | Protocol | Role |
 |---|---|---|
@@ -10,89 +22,134 @@ this node's code (`nodes/src/nodes/tool_filesystem/`):
 | **File Store** | `filestore://` | pipeline sink — persist lane data to the store |
 | **File Store Source** | `filestore_source://` | pipeline source — stream stored files into a pipeline |
 
-All three variants operate on the account file store — the same storage area the
-client SDK reaches via its `fs_*` methods. All paths are plain and relative to the
-task's **storage anchor**, which the task file provides: the owning user's file tree
-(`users/<client_id>/files/`) for development runs, or a task-specific subtree of the
-deployment team's storage (`teams/<teamId>/files/tasks/<projectId>/`) for deployed
-runs — so files written here are visible in the file browser and vice versa, and node
-behavior is identical in both modes. Identity and the anchor are resolved
-automatically from the running task (`rocketlib.getTask()`), never from the
-environment; no account configuration is needed on any of the three variants.
+Choose **File System** when an agent must read or produce files that should remain
+available in the account file store. Choose **File Store** when a pipeline needs to
+persist lane data there, and **File Store Source** when stored files should feed a
+pipeline — it is a finite source: the task completes once the configured path has been
+fully scanned, not a long-running server.
 
----
+## Lanes
 
-## File System (`tool_filesystem://`) — agent tool
+File Store (`filestore://`), the pipeline sink:
 
-Exposes the account file store to an agent as a set of callable tools. Files written
-by the agent are visible to the client SDK and vice versa. If no task identity is
-available (`rocketlib.getTask()`) or the account store fails to initialise, a warning
-is logged and **all** tool methods are hidden from the agent.
+| Lane in | Lane out | Description |
+| --- | --- | --- |
+| `documents` | `json` | Persist each document's `page_content` (parsed text, always `.txt`); emit one reference per document. |
+| `text` | `json` | Persist as Markdown (`.md`); emit a reference. |
+| `table` | `json` | Persist the table as Markdown (`.md`); emit a reference. |
+| `image` | `json` | Stream chunks to the store, commit on end; emit a reference. |
+| `audio` | `json` | Stream chunks to the store, commit on end; emit a reference. |
+| `video` | `json` | Stream chunks to the store, commit on end; emit a reference. |
+
+File Store Source (`filestore_source://`), the pipeline source:
+
+| Lane in | Lane out | Description |
+| --- | --- | --- |
+| `_source` | `tags` | Read each scanned file in full and send it as a raw object for a downstream parser. |
+
+## As a tool
+
+The File System service exposes the account file store to an agent as a set of
+callable tools, namespaced by the node id (an agent sees `tool_filesystem_1.read_file`).
+If no task identity is available or the account store fails to initialise, a warning is
+logged and **all** tool methods are hidden from the agent.
 
 Every operation is gated by a per-operation allow toggle. Read, write, list, mkdir, and
 stat are **on by default**; **delete is off by default**. Tools whose toggle is disabled
 are hidden from the agent at discovery time (`tool.query`), not just blocked at
-invocation. An optional regex path whitelist further restricts which paths any operation
-may touch.
+invocation, and the allow-flag is re-checked at invocation as defence-in-depth.
 
-### Configuration
+| Tool | Description |
+|---|---|
+| `read_file` | Read a file and return its contents as a decoded string. Required: `path`. Optional: `encoding` (default `utf-8`), `maxBytes` (default 256 KB, max 4 MB). Returns `{path, content, size}`; files larger than `maxBytes` are rejected. |
+| `list_directory` | List the immediate children of a directory. Optional: `path` (defaults to the account root). Returns `{entries: [{name, type, size?, modified?}], count}`. |
+| `stat_file` | Get metadata for a file or directory. Required: `path`. Returns `{exists, type?, size?, modified?}`. |
+| `write_file` | Create or overwrite a file with text content. Required: `path`, `content`. Optional: `encoding` (default `utf-8`). Returns `{path, bytesWritten}`. |
+| `create_directory` | Create a directory; intermediate segments are created as needed. Required: `path`. Returns `{path, created: true}`. |
+| `delete_file` | Delete a file. Only available when `allowDelete` is enabled. Required: `path`. Returns `{path, deleted: true}`. |
 
-| Field | Type | Description |
-|---|---|---|
-| `allowRead` | boolean | Default true. |
-| `allowWrite` | boolean | Default true. |
-| `allowList` | boolean | Default true. |
-| `allowMkdir` | boolean | Default true. |
-| `allowStat` | boolean | Default true. |
-| `allowDelete` | boolean | Default false. Destructive, enable only when the agent is trusted to delete account files. |
-| `whitelistPattern` | string | Default empty. |
-| `pathWhitelist` | array | Regex patterns applied to the relative path of every operation using re.search semantics, a partial match anywhere in the path is enough, so a pattern like 'secret' will also match 'notsecret/file.txt'. Anchor with ^ and $ if you need a full-path match (e.g. '^docs/.*$'). If non-empty, a path must match at least one pattern. If empty, all paths under the task's storage anchor are allowed. |
+## Configuration
 
-### Path whitelist
+### File System (`tool_filesystem://`)
 
-If `pathWhitelist` is non-empty, the relative path of **every** operation must match at
-least one pattern. Patterns use `re.search` semantics, a partial match anywhere in the
-path is enough, so a pattern like `secret` will also match `notsecret/file.txt`. Anchor
-with `^` and `$` if you need a full-path match (e.g. `^docs/.*$`).
+Leave the allow toggles at their defaults unless the pipeline calls for less: disable
+write access for read-only analysis agents, and enable `allowDelete` only when the
+agent is trusted to delete account files.
 
+**Path Whitelist** (`pathWhitelist`): if non-empty, the relative path of **every**
+operation must match at least one pattern. Patterns use `re.search` semantics — a
+partial match anywhere in the path is enough, so a pattern like `secret` also matches
+`notsecret/file.txt`. Anchor with `^` and `$` for a full-path match (e.g. `^docs/.*$`).
 Invalid regexes are skipped with a logged warning. An empty `path` on `list_directory`
 means the account root and bypasses the whitelist check (an empty string can't match a
 non-trivial regex).
 
-### Available tools
+**Read size cap**: `read_file` accepts `maxBytes` (default **256 KB**, hard ceiling
+**4 MB**). Files larger than the cap are **rejected with an error**, not truncated —
+use a smaller `maxBytes` for sampling, or split the file. The cap exists because the
+underlying store defaults to 100 MB per read, which could blow the agent's context
+window or OOM the engine subprocess long before the LLM ever sees the result.
 
-Each tool is namespaced by the node id: e.g. an agent sees `tool_filesystem_1.read_file`.
-Disabled tools are filtered out of discovery, and the allow-flag is re-checked at
-invocation as defence-in-depth.
+### File Store (`filestore://`)
 
-#### Read & inspect
+**Where it writes**: **Target directory** (`targetDir`, default `output/`) + the
+object's original name stem, with the lane's extension rule applied — e.g.
+`output/report.txt` (nameless inputs fall back to the object id). When one object
+emits several documents they also carry an index (`report_0.txt`, `report_1.txt`, …).
+Each lane owns its extension rule, keyed to what the lane actually carries:
+`text`/`table` carry markdown, so they always store `.md`; `documents` carries parsed
+text (`page_content`), so it always stores `.txt` — a parsed `report.pdf` stores as
+`report.txt`, keeping the extension truthful about the bytes; media derive it from the
+stream's mime type, then the source extension, then `.bin`.
 
-| Tool | Description |
-|---|---|
-| `read_file` | Read a file from the account file store and return its contents as a decoded string. Required: "path" (relative path). Optional: "encoding" (default "utf-8"), "maxBytes" (default 256 KB, max 4 MB). Returns: {path, content, size} where size is the byte length before decoding. Files larger than maxBytes are rejected. |
-| `list_directory` | List the immediate children of a directory in the account file store. Optional: "path" (defaults to the account root). Returns: {entries: [{name, type, size?, modified?}], count}. |
-| `stat_file` | Get metadata for a file or directory in the account file store. Required: "path". Returns: {exists, type?, size?, modified?}. |
+**When the file already exists** (`onConflict`, default `unique`): with `unique` the
+sink appends `_1`, `_2`, …, giving up with an error after 100 attempts rather than
+probing indefinitely. With `skip` it leaves the existing file alone, logs a warning,
+and emits no reference for it. With `overwrite` it replaces the file — and skips the
+existence probe entirely, which also saves a store round-trip per stream.
+**`overwrite` can lose data**: filenames derive from the source object's *basename*,
+so two inputs at `a/1.jpg` and `b/1.jpg` both resolve to the same target in a flat
+`targetDir` and the second silently replaces the first — `unique` stays the default
+for exactly that reason. A streamed write that is cut off part-way never leaves a
+partial file behind: under `unique` and `skip` the sink deletes what it wrote; under
+`overwrite` the stream goes to a `.part-<objectId>` sibling and only replaces the
+target once complete, so an interrupted run leaves the existing file exactly as it
+was. `skip` compares against an existing **file** — a directory sharing the name does
+not by itself cause a skip.
 
-#### Write
+**What it emits**: on the `json` lane, one `{path, url?}` object per persisted file —
+`path` is the store-relative path; `url` is a time-limited signed download URL, only
+present when **Emit download URL** (`emitUrl`) is on. Plain JSON, no Doc/chunkId
+metadata. The signed URL is minted server-side via the store's `get_url` (no agent
+`task.store` permission needed); **URL expiry (seconds)** (`urlExpiresIn`, default
+3600, max 3600) sets its TTL.
 
-| Tool               | Description                                                          |
-|--------------------|----------------------------------------------------------------------|
-| `write_file`       | Create or overwrite a file with text content. Required: `path`, `content`. Optional: `encoding` (default `utf-8`). Returns `{path, bytesWritten}`. |
-| `create_directory` | Create a directory; intermediate segments are created as needed. Required: `path`. Returns `{path, created: true}`. |
+**Guards**: the sink honours the account's `allowWrite` setting and the same path
+whitelist as the File System tool's `write_file`. Every candidate path is
+whitelist-checked *before* it is probed, so a path the whitelist would reject never
+reveals whether files exist in the store. Media chunks stream straight to the store,
+so memory stays bounded regardless of file size; the file is created only once the
+first non-empty chunk arrives — an empty stream writes nothing.
 
-#### Delete
+### File Store Source (`filestore_source://`)
 
-| Tool          | Description                                                                |
-|---------------|-----------------------------------------------------------------------------|
-| `delete_file` | Delete a file. Only available when `allowDelete` is enabled. Required: `path`. Returns `{path, deleted: true}`. |
+**Path** (`path`, required): file or folder to process, relative to the account file
+store root. If it resolves to a file, only that file is streamed; a folder streams
+every file directly inside it, and with **Recursive** (`recursive`, default off)
+subfolders are descended too (breadth-first). A `path` that doesn't exist in the store
+fails the task.
 
-#### Read size cap
+The scan reports each file to the engine (name + size), which queues it and calls back
+into the node to render it: the file is read in full and sent downstream as a raw
+object for a parser node to interpret (the parser sniffs the file type from the
+extension in the entry name). Because delivery rides the engine's scan/render
+contract, per-object completed/failed accounting and the task exit code are handled by
+the engine — a successful run ends with exit code 0. A file that cannot be read
+(including one over the store's default 100 MB per-read cap) is **marked failed with a
+warning**; the scan continues with the remaining files, and the failure is reflected
+in the task's failed-object count.
 
-`read_file` accepts `maxBytes` (default **256 KB**, hard ceiling **4 MB**). Files larger
-than the cap are **rejected with an error**, not truncated, use a smaller `maxBytes`
-for sampling, or split the file. The cap exists because the underlying store defaults to
-100 MB per read, which could blow the agent's context window or OOM the engine
-subprocess long before the LLM ever sees the result.
+## Notes
 
 ### Storage location
 
@@ -108,107 +165,7 @@ plus the relative path:
 The anchor comes from the task file the engine wrote at spawn; the node picks up
 the current task automatically, no configuration needed.
 
----
-
-## File Store (`filestore://`) — pipeline sink
-
-A **pipeline sink** that persists incoming lane data to the account file store, then
-emits a JSON reference for each file it writes.
-
-| Lane in | Lane out | Description |
-| --- | --- | --- |
-| `documents` | `json` | Persist each document's `page_content` (parsed text, always `.txt`); emit one reference per document |
-| `text` / `table` | `json` | Persist as `.md`; emit reference |
-| `image` / `audio` / `video` | `json` | Stream chunks to the store, commit on end; emit reference |
-
-### Configuration
-
-| Field | Type | Description |
-|---|---|---|
-| `targetDir` | string | Default `output/`. Base directory (relative to the account file store root) that lane-written files are placed under. |
-| `onConflict` | string | Default `unique`. What to do when the target path is already taken: `unique` writes under `_1`, `_2`, …; `overwrite` replaces the existing file (destructive — see the warning below); `skip` leaves it alone. |
-| `emitUrl` | boolean | Default false. Also include a time-limited signed download URL in the emitted JSON reference. |
-| `urlExpiresIn` | integer | Default 3600 (max 3600). TTL in seconds for the signed URL when `emitUrl` is on. |
-| `whitelistPattern` | string | Default empty. |
-| `pathWhitelist` | array | Regex patterns applied to the relative path of every write using re.search semantics, a partial match anywhere in the path is enough, so a pattern like 'secret' will also match 'notsecret/file.txt'. Anchor with ^ and $ if you need a full-path match (e.g. '^docs/.*$'). If non-empty, a path must match at least one pattern. If empty, all paths under the task's storage anchor are allowed. |
-
-### Behavior
-
-- **Where it writes:** `targetDir` (default `output/`) + the object's original name stem,
-  with the lane's extension rule applied — e.g. `output/report.txt` (nameless inputs fall
-  back to the object id). When one object emits several documents they also carry an index
-  (`report_0.txt`, `report_1.txt`, …).
-- **When the file already exists**, `onConflict` decides between three behaviours. With
-  `unique` (the default) the sink appends `_1`, `_2`, …, giving up with an error after
-  `MAX_COLLISION_SUFFIX` (100) attempts rather than probing indefinitely. With `skip` it
-  leaves the existing file alone, logs a warning, and emits no reference for it. With
-  `overwrite` it replaces the file — and skips the existence probe entirely, which also
-  saves a store round-trip per stream.
-  **`overwrite` can lose data.** Filenames derive from the source object's *basename*, so
-  two inputs at `a/1.jpg` and `b/1.jpg` both resolve to the same target in a flat
-  `targetDir` and the second silently replaces the first. `unique` stays the default for
-  exactly that reason.
-  A streamed write that is cut off part-way never leaves a partial file behind. Under
-  `unique` and `skip` the sink deletes what it wrote. Under `overwrite` the stream goes to
-  a `.part-<objectId>` sibling and only replaces the target once it is complete, so an
-  interrupted run leaves the existing file exactly as it was.
-  `skip` compares against an existing **file**. A directory sharing the name is not a file
-  to preserve and does not by itself cause a skip.
-  Every candidate is whitelist-checked *before* it is probed, so a path the whitelist
-  would reject never reveals whether files exist in the store.
-- **How the extension is chosen:** each lane owns its own rule, keyed to what the lane
-  actually carries. `text`/`table` carry markdown, so they always store `.md`;
-  `documents` carries parsed text (`page_content`), so it always stores `.txt` — a parsed
-  `report.pdf` stores as `report.txt`, keeping the extension truthful about the bytes;
-  media derive it from the stream's mime type, then the source extension, then `.bin`.
-- **Media streaming:** image/audio/video chunks stream straight to the store, so memory
-  stays bounded regardless of file size. The file is created only once the first non-empty
-  chunk arrives — an empty stream writes nothing.
-- **What it emits:** on the `json` lane, one `{path, url?}` object per persisted file —
-  `path` is the store-relative path, `url` is a time-limited signed download URL, only
-  present when **Emit download URL** is on. Plain JSON, no Doc/chunkId metadata.
-- **Guards:** the sink honours the account's `allowWrite` setting and the same path
-  whitelist as the File System tool's `write_file`; the whitelist is checked before
-  anything touches the store.
-
-The signed URL is minted server-side via the store's `get_url` (no agent `task.store`
-permission needed); **URL expiry (seconds)** (default 3600, max 3600) sets its TTL.
-
----
-
-## File Store Source (`filestore_source://`) — pipeline source
-
-A finite **pipeline source** that streams files out of the account file store as raw
-objects for a downstream parser. The task completes once the configured path has been
-fully scanned — this is not a long-running server.
-
-### Configuration
-
-| Field | Type | Description |
-|---|---|---|
-| `path` | string | Required. File or folder to process, relative to the account file store root. A folder processes every file directly inside it. |
-| `recursive` | boolean | Default false. When `path` is a folder, also process all files in its subfolders. |
-
-### Behavior
-
-- **File vs. folder:** if `path` resolves to a file, only that file is streamed. If it
-  resolves to a folder, every file directly inside it is streamed; with `recursive` on,
-  subfolders are descended too (breadth-first). A `path` that doesn't exist in the store
-  fails the task.
-- **Delivery:** the scan reports each file to the engine (name + size), which queues
-  it and calls back into the node to render it: the file is read in full and sent onto
-  the **Data** lane (`tags` internally) as a raw object for a downstream parser node
-  to interpret; the parser
-  sniffs the file type from the extension in the entry name. Because delivery rides the
-  engine's scan/render contract, per-object completed/failed accounting and the task
-  exit code are handled by the engine — a successful run ends with exit code 0.
-- **Read failures:** a file that cannot be read (including one over the store's default
-  100 MB per-read cap) is **marked failed with a warning** — the scan continues with
-  the remaining files, and the failure is reflected in the task's failed-object count.
-
----
-
-## Running the tests
+### Running the tests
 
 ```bash
 pytest nodes/test/tool_filesystem/ -v

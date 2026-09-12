@@ -1,102 +1,44 @@
 # tool_tavily
 
-A RocketRide tool node that exposes [Tavily](https://tavily.com) real-time web search to an AI agent.
+A RocketRide tool node that gives an agent live web-search results from Tavily. Pick it when an agent needs current web pages in a compact search result, rather than a general HTTP request or a static knowledge source.
+
+## About Tavily
+
+Tavily provides search and research APIs intended for AI applications. Its search response combines result URLs, titles, snippets, and relevance information for programmatic use.
 
 ## What it does
 
-Gives an agent live web search. Agents invoke this node via the tool invoke channel; the
-node performs a search against the Tavily API and returns structured results containing
-titles, URLs, content snippets, and relevance scores.
+The node has no data lanes and registers one real-time search function. It sends the configured defaults and any supported per-call overrides to the Tavily search endpoint, then returns structured result records. Use it for retrieval during an agent run; it is experimental, so callers should handle service errors rather than assuming a search always succeeds.
 
-The node has no pipeline input/output lanes (`lanes` is empty): it is consumed
-exclusively by agent runtimes through the `invoke` capability. It is currently marked
-**experimental**.
+## As a tool
 
-Implementation calls `https://api.tavily.com/search` over HTTPS using **requests** with
-automatic retry (`post_with_retry`). Every result URL is validated with
-`validate_public_url` before being returned, results pointing at non-public or unsafe
-URLs are silently dropped. Request failures are returned to the agent as structured
-`{"success": false, "error": ...}` payloads (including the HTTP status when available)
-rather than raised as exceptions.
+The prefix defaults to `tavily`, so the registered function is `tavily.tavily`.
 
-An API key is **required**: the pipeline fails at startup (`beginGlobal` raises) if no
-key is found in the node config or the environment.
+| Function | Description |
+|---|---|
+| `tavily.tavily` | Search the web with a required natural-language `query`. |
 
----
+Optional arguments are `max_results` (1–20), `search_depth` (`basic` or `advanced`), `topic` (`general`, `news`, or `finance`), `time_range` (`day`, `week`, `month`, or `year`), and `include_domains` / `exclude_domains`. A successful response includes `success`, the query, `num_results`, and `results`; a failed request returns `success: false` with an `error` string.
 
 ## Configuration
 
+Set the API key, then use the defaults as a sensible baseline. Call-level arguments override the configured result count, depth, and topic when a specific question needs a different search.
 
-| Field | Type | Description |
-|---|---|---|
-| `apikey` | string | Default empty. Tavily API key (from https://tavily.com) |
-| `maxResults` | integer | Default 5. Maximum number of search results to return (1-20) |
-| `searchDepth` | string | Default "advanced". Tavily search depth |
-| `topic` | string | Default "general". Search topic category |
+### Max Results
 
+The configured count must be 1–20 and defaults to 5. Increase it when the agent must compare multiple sources; keep it small for focused questions so the agent receives less irrelevant context.
 
-The `default` profile ships with `maxResults: 5`, `searchDepth: advanced`,
-`topic: general`, and an empty `apikey`.
+### Search Depth and Topic
 
----
-
-## Available tools
-
-### `tavily`
-
-Search the web in real time. Provide a natural language query to find relevant, current
-web pages.
-
-
-| Tool | Description |
-|---|---|---|
-| `tavily` | Search the web in real time using Tavily. Provide a natural language query to find relevant, current web pages. Returns structured results with title, URL, content snippet, and relevance score. |
-
-
-Per-call values override the node config; invalid values silently fall back to the
-configured defaults. `time_range`, `include_domains`, and `exclude_domains` are omitted
-from the request when absent or invalid.
-
-#### Output
-
-```json
-{
-  "success": true,
-  "query": "...",
-  "num_results": 3,
-  "results": [
-    {
-      "title": "...",
-      "url": "https://...",
-      "content": "...",
-      "score": 0.97,
-      "published_date": "..."
-    }
-  ]
-}
-```
-
-On failure, `success` is `false`, `results` is empty, and `error` describes the problem
-(missing query, HTTP error with status code, non-JSON response, or unexpected payload).
-
----
+`advanced` is the default depth, while `basic` is available for a simpler search. The topic default is `general`; choose `news` or `finance` when that category better matches the request. These settings remain defaults only—per-call values take precedence.
 
 ## Authentication
 
-Provide the Tavily API key either:
+Set `apikey` to a Tavily API key. An empty key prevents the node from performing a search.
 
-- in the node config field **API Key** (`apikey`), or
-- via the environment variable:
+## Upstream docs
 
-```bash
-ROCKETRIDE_TAVILY_KEY=tvly-...
-```
-
-The config field takes precedence; the env var is used only when the field is blank.
-Pipeline env vars must be `ROCKETRIDE_`-prefixed, only those are substituted by the
-engine.
-
----
+- [Tavily API documentation](https://docs.tavily.com/)
 
 <!-- ROCKETRIDE:GENERATED:PARAMS START -->
 <!-- Generated by nodes:docs-generate. Do not edit by hand. -->

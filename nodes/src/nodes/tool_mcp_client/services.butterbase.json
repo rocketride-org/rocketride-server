@@ -45,7 +45,7 @@
 	//		The icon to display in the UI for this node (a URL renders via <img>)
 	//
 	"icon": "butterbase.svg",
-	"documentation": "https://docs.butterbase.ai",
+	"documentation": "https://docs.rocketride.org/nodes/tool_mcp_client",
 	//
 	// Optional:
 	//		Description of this node shown in the pipeline builder

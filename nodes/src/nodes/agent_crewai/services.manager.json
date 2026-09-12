@@ -9,6 +9,7 @@
 	"prefix": "agent",
 	"description": ["Multi-agent manager using CrewAI hierarchical process.", "Fans out to connected CrewAI Subagent nodes, assembles a Crew, and synthesizes their outputs.", "Can be invoked as a tool (`<nodeId>.run_agent`) for nested orchestration."],
 	"icon": "crewai.svg",
+	"documentation": "https://docs.rocketride.org/nodes/agent_crewai/crewai_manager",
 	"invoke": {
 		"llm": {
 			"description": "LLM used by the manager agent",

@@ -44,7 +44,7 @@
 	//		The icon to display in the UI for this node
 	//
 	"icon": "laserdata.svg",
-	"documentation": "https://docs.laserdata.com",
+	"documentation": "https://docs.rocketride.org/nodes/tool_laserdata_memory",
 	//
 	// Optional:
 	//		Description of this node shown in the pipeline builder

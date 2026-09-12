@@ -21,57 +21,44 @@ limit, an unreachable base URL, or any other API error.
 At runtime, rate-limit and connection errors are treated as retryable; authentication
 and other API errors fail immediately with a user-facing message.
 
----
+## Lanes
 
-## Configuration
+| Lane in     | Lane out  | Description                                          |
+| ----------- | --------- | ---------------------------------------------------- |
+| `questions` | `answers` | Send a question directly, receive a generated answer |
 
-### Lanes
+## Profiles
 
-| Lane        | Direction | Description                              |
-|-------------|-----------|------------------------------------------|
-| `questions` | input     | Prompts / questions to send to the model |
-| `answers`   | output    | Model completions                        |
+Default: **ERNIE 4.5 Turbo 128K** (`ernie-4-5-turbo-128k`).
 
-### Fields
-
-The node is configured through a single **Model** profile selector plus the fields that
-profile exposes.
-
-| Field | Type | Description |
-|---|---|---|
-| `model` | string | Baidu Qianfan model name |
-| `modelTotalTokens` | number | Maximum context length in tokens |
-| `modelOutputTokens` | number | Maximum generated tokens |
-| `serverbase` | string | Default "https://qianfan.baidubce.com/v2". Qianfan OpenAI-compatible API endpoint. |
-| `profile` | string | Default "ernie-4-5-turbo-128k". Baidu Qianfan model selection |
-
----
-
-## Model profiles
-
-| Profile                          | Model                        | Context tokens    | Output tokens     |
-|----------------------------------|------------------------------|-------------------|-------------------|
-| ERNIE 4.5 Turbo 128K (default)   | `ernie-4.5-turbo-128k`       | 128,000           | 4,096             |
-| ERNIE 4.5 Turbo 32K              | `ernie-4.5-turbo-32k`        | 32,768            | 4,096             |
-| ERNIE 5.0 Thinking Preview       | `ernie-5.0-thinking-preview` | 128,000           | 8,192             |
-| Custom                           | user-supplied                | 32,768 (editable) | 4,096 (editable)  |
+| Profile | Model | Context tokens | Output tokens |
+| ------- | ----- | -------------- | ------------- |
+| `ernie-4-5-turbo-128k` **(default)** | `ernie-4.5-turbo-128k` | 128,000 | 4,096 |
+| `ernie-4-5-turbo-32k` | `ernie-4.5-turbo-32k` | 32,768 | 4,096 |
+| `ernie-5-0-thinking-preview` | `ernie-5.0-thinking-preview` | 128,000 | 8,192 |
+| `custom` | _(user-specified)_ | 32,768 | 4,096 |
 
 The named profiles pin the model name and token limits; only the API key, base URL, and
 model source are editable. The **Custom** profile additionally exposes `model`,
 `modelTotalTokens`, and `modelOutputTokens` so you can target any model available on
 your Qianfan account.
 
----
+## Configuration
+
+Choose a named profile for a supported ERNIE model or `custom` for another model on
+your account. Named profiles provide the model and token budgets; most pipelines only
+need an API key and the correct regional endpoint.
+
+### Base URL
+
+Use `https://qianfan.baidubce.com/v2` for keys issued in China (the default) or
+`https://api.baiduqianfan.ai/v1` for international keys. The endpoint and key must
+belong to the same Qianfan environment.
 
 ## Authentication
 
 Provide a Qianfan API key in `apikey`: it is required, and the node refuses to start
 without one. The key must have access to the selected model.
-
-Pick the base URL matching where your key was issued:
-
-- **China (default)**: `https://qianfan.baidubce.com/v2`
-- **International**: `https://api.baiduqianfan.ai/v1`
 
 An invalid or unauthorized key is reported as "Baidu Qianfan API key is invalid or
 unauthorized" both at save-time validation and at runtime.

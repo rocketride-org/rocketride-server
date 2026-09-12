@@ -6,25 +6,28 @@ Use RocketRide when building AI pipelines, document processing, RAG systems, or 
 
 ## Documentation
 
-Full docs: `.rocketride/docs/`
+Full docs: `docs/agents/context/`
 
 **Read the relevant doc(s) before generating any RocketRide code.**
 
 | File                              | Read when...                                                      |
 | --------------------------------- | ----------------------------------------------------------------- |
-| ROCKETRIDE_README.md              | Starting any RocketRide work: overview + mandatory setup steps   |
-| ROCKETRIDE_QUICKSTART.md          | Writing first pipeline: complete working examples (Python & TS)  |
-| ROCKETRIDE_PIPELINE_RULES.md      | Defining pipelines: structure, lane wiring, config rules         |
+| ROCKETRIDE_README.md              | Starting any RocketRide work: platform map, setup, task router     |
+| ROCKETRIDE_CLI.md                 | The `rocketride` command: validate, start/upload runs, store, deploy, app verbs; when to prefer it over SDK code |
+| ROCKETRIDE_CONCEPTS.md            | Workspace, connection, deploy/publish lifecycle                    |
+| ROCKETRIDE_PIPELINES.md           | Defining pipelines: `.pipe` format, lanes, patterns, pitfalls     |
 | ROCKETRIDE_COMPONENT_REFERENCE.md | Choosing/configuring components: all providers and config fields |
-| ROCKETRIDE_COMMON_MISTAKES.md     | Before finalizing: known pitfalls to avoid                       |
+| ROCKETRIDE_APPS.md                | Building RocketRide apps (App Builder, deploy, publish)           |
+| ROCKETRIDE_UI_COMPONENTS.md       | Shell UI components for apps                                       |
+| ROCKETRIDE_INTEGRATIONS.md        | MCP, n8n, webhooks, Telegram, CI                                   |
 | ROCKETRIDE_python_API.md          | Python SDK: client methods, types, patterns                      |
 | ROCKETRIDE_typescript_API.md      | TypeScript SDK: client methods, types, patterns                  |
 | ROCKETRIDE_OBSERVABILITY.md       | Consuming runtime logs, lifecycle events, and pipeline traces     |
 
 ## Before Writing ANY RocketRide Code
 
-1. Read `.rocketride/docs/ROCKETRIDE_README.md` for mandatory setup requirements
+1. Read `docs/agents/context/ROCKETRIDE_README.md` for mandatory setup requirements
 2. Read the relevant API doc (Python or TypeScript) for your language
-3. Read `.rocketride/docs/ROCKETRIDE_PIPELINE_RULES.md` + `.rocketride/docs/ROCKETRIDE_COMPONENT_REFERENCE.md`
-4. Read `.rocketride/docs/ROCKETRIDE_COMMON_MISTAKES.md` before finalizing
+3. Read `docs/agents/context/ROCKETRIDE_PIPELINES.md` + `docs/agents/context/ROCKETRIDE_COMPONENT_REFERENCE.md`
+4. For apps, read `docs/agents/context/ROCKETRIDE_APPS.md`
 <!-- ROCKETRIDE:END -->

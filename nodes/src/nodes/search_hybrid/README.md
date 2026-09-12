@@ -1,98 +1,79 @@
-# search_hybrid — "Hybrid Rerank"
+# search_hybrid
 
-A RocketRide filter node that re-ranks the documents already attached to a question by fusing their upstream vector score with a BM25 keyword score via Reciprocal Rank Fusion (RRF).
+A RocketRide filter node that re-orders the documents already attached to a question, fusing each document's upstream vector score with a BM25 keyword score. Pick it when a retrieval step returns roughly the right candidates but ranks them badly.
 
 ## What it does
 
-Takes questions that already carry retrieved documents (from an upstream vector-store search) and re-orders those documents so both semantic relevance and exact keyword overlap influence the final ranking. For each question it tokenizes the document `page_content`, scores every candidate with BM25 against the query, and fuses the BM25 ranking with the vector ranking using RRF. Put it downstream of a retrieval or vector-store node so it can re-rank the documents attached to each question.
+The node reads a question that already carries retrieved documents, scores those same documents with BM25 against the question text, and merges the BM25 ranking with the incoming vector ranking using Reciprocal Rank Fusion (RRF). It emits the re-ordered documents, and can also emit them as a composed answer. Place it downstream of a vector-store search or another node that attaches documents to questions.
 
-BM25 scoring is delegated to the **rank_bm25** `BM25Okapi` implementation, resolved at runtime by `depends()`. The incoming question is **deep-copied** before processing, so shared question objects in fan-out pipelines are never mutated.
+It is a re-ranker, not a retriever: no embedding or index lookup happens here, and the incoming document `score` is reused as the vector signal. A keyword-relevant document the upstream search did not return can therefore never be surfaced — for that, put a store that does dense and sparse retrieval in one query upstream instead. The node is marked experimental.
 
-### This is a post-retrieval re-ranker, not true hybrid retrieval
+## Lanes
 
-The node is called **Hybrid Rerank** rather than "Hybrid Search" because it does **not** perform a vector or embedding lookup of its own. It reuses each document's existing `score` (set by the upstream vector store that already retrieved the candidate set) as the "vector" signal, and BM25 only scores that same already-retrieved candidate set. As a consequence:
+| Lane in | Lane out | Description |
+|---|---|---|
+| `questions` | `documents` | Documents re-ordered by the fused vector + BM25 ranking. |
+| `questions` | `answers` | The top-ranked documents composed into a single answer, each entry showing its rank, its score and the first 500 characters of its content. |
 
-- A keyword-relevant document the vector store did **not** return can never be surfaced here — the node can only re-order what it is given.
-- Recovering a document the vector search missed is the main reason to add BM25 at all, and this node cannot do that. If you need it, put a dedicated dense+sparse retrieval index upstream.
+The query is the text of the question's **first** question entry. A question with no query text, or with no documents attached, is skipped: nothing is emitted on either lane. Each lane is written only when it has a downstream listener and at least one document survived re-ranking, so a question can produce no output object at all — put a pass-through-guaranteeing node after this one if a downstream stage requires a result for every question.
 
-This is a reasonable, dependency-light design for an `experimental` node, but treat it as a re-ranking stage rather than a replacement for a dedicated dense+sparse retrieval index.
+## Profiles
 
-### Documents that arrive without a score
+Default: **Balanced - Equal weight to vector and keyword search** (`balanced`).
 
-`Doc.score` defaults to `None`, so an upstream node that does not score its output hands this node unscored documents. A missing score is treated as **absence of evidence**, which is deliberately not the same as a score of `0.0` ("the store scored this document, and it scored badly"):
+| Profile | Alpha | Top K | RRF k |
+|---|---|---|---|
+| `balanced` **(default)** | 0.5 | 10 | 60 |
+| `semantic` | 0.8 | 10 | 60 |
+| `keyword` | 0.2 | 10 | 60 |
 
-- Documents with no score are left **out of the vector-ranked list** entirely. They are still ranked, via BM25, and still appear in the output — at **every** `alpha`, `1.0` included. Taking no part in one ranking is not the same as being dropped from the result.
-- When **no** document carries a score there is no vector signal to fuse, so the node ranks by BM25 alone — the same behaviour as supplying no vector scores at all — and logs a warning naming the missing signal.
-- When only **some** documents carry a score, the scored ones keep their vector ranking and the unscored ones are ranked on their BM25 evidence alone; a warning reports how many were unscored.
-
-Scoring an unscored document `0.0` instead would place it in the vector list in whatever order it arrived — sorting equal keys preserves input order — and RRF would then fuse that arrival order with weight `alpha` as though it were vector relevance, producing a ranking that looks plausible but is partly just the order the documents came in.
-
-The only document the node does **not** return is one with no evidence in *either* leg: no score **and** no text BM25 can rank (`page_content` empty, or tokenizing to nothing). Nothing is available to order it by. That holds uniformly at every `alpha` — it is a property of having no signal, not of picking a particular ranking mode.
-
----
+The three profiles differ only in `alpha`; they all return ten results and use an RRF constant of 60.
 
 ## Configuration
 
-### Lanes
+Pick the profile whose balance matches the corpus — `balanced` when both signals are worth the same, `semantic` when the questions are paraphrases of the content, `keyword` when they carry names, codes or other exact strings. The profile fills in all three fields, so most pipelines change nothing else. Values are validated when the node loads: an out-of-range alpha is clamped to `[0.0, 1.0]` with a warning, while `top_k` below 1 or a negative `rrf_k` raise an error rather than starting with a configuration that cannot produce sensible results.
 
-| Lane in     | Lane out    | Description                                                             |
-|-------------|-------------|-------------------------------------------------------------------------|
-| `questions` | `documents` | Documents re-ranked by hybrid score (vector + BM25 fused via RRF)       |
-| `questions` | `answers`   | An answer composed from the top-ranked documents                        |
+### Search mode
 
-The query text is taken from the question's **first** question entry. An empty/whitespace-only query, or a question with no attached documents, is **skipped**: the node logs a debug line and emits nothing on either lane (see [Downstream-consumer notes](#downstream-consumer-notes)). Each lane is written only when it has a downstream listener **and** at least one re-ranked document was produced.
+Selects one of the profiles above and, with it, the alpha / top-k / RRF-constant triple shown in the configuration panel. Change the individual values below only when no profile fits.
 
-### Fields
+### Alpha (vector weight)
 
-| Field | Type | Description |
-|---|---|---|
-| `alpha` | number | Default 0.5. Weight for vector scores (0.0 = BM25 only, 1.0 = vector only, 0.5 = balanced) |
-| `top_k` | number | Default 10. Maximum number of results to return after hybrid ranking |
-| `rrf_k` | number | Default 60. RRF constant; higher values reduce the impact of top rankings |
-| `profile` | string | Default "balanced". Selects the balance between vector and keyword search |
+Weights the vector ranking; BM25 gets `1 - alpha`. `0.5` treats both signals equally. Raise it when the incoming vector scores are trustworthy and the questions are semantic; lower it when exact term overlap decides relevance.
 
-Config validation runs at load time: `alpha` outside `[0.0, 1.0]` is clamped and a warning is logged (not silently coerced); `top_k < 1` and `rrf_k < 0` fail fast with a `ValueError` so a misconfigured profile surfaces immediately instead of producing empty slices or runtime errors.
+The endpoints are the limits of the weighting, not a switch to a single-signal mode. A leg weighted `0.0` contributes nothing to its documents' fused scores, so they sort below everything the weighted leg ranked — but they are still returned. `alpha = 1.0` emits the vector ranking followed by the unscored documents in BM25 order, which is exactly what `alpha = 0.99` emits. Alpha changes the order of the results, never which documents come back.
 
-### Profiles
+### Top K results
 
-The **Search mode** dropdown selects a preconfigured profile:
+Caps how many documents are emitted, applied after fusion. The default of `10` suits a retrieval step that already narrowed the candidate set; raise it when a downstream reader can use more context, lower it when the consumer is a prompt with a tight budget. BM25 always scores the full incoming set — `top_k` only truncates the final ranking.
 
-| Profile    | Title                                             | alpha | top_k | rrf_k |
-|------------|---------------------------------------------------|-------|-------|-------|
-| `balanced` | Balanced — equal weight to vector and keyword     | 0.5   | 10    | 60    |
-| `semantic` | Semantic-heavy — emphasize vector similarity      | 0.8   | 10    | 60    |
-| `keyword`  | Keyword-heavy — emphasize BM25 keyword matching   | 0.2   | 10    | 60    |
+### RRF constant (k)
 
-All profiles expose `alpha`, `top_k`, and `rrf_k`.
+The `k` in the RRF term `weight / (k + rank + 1)`. It flattens the curve: at the default `60`, the difference between rank 1 and rank 2 is small, so a document needs to place well in *both* rankings to reach the top. Lower it (single digits) to let a strong first-place finish in one ranking dominate; raise it to spread influence further down both lists. It is not a score threshold and never removes a document.
 
----
+## Notes
 
-## How ranking works
+### How the ranking is built
 
-RRF is rank-based, not score-magnitude based: each document's fused score is `sum(weight_i / (rrf_k + rank_i + 1))` across the vector and BM25 lists, with the vector list weighted by `alpha` and the BM25 list by `1 - alpha`. Documents are deduplicated by id (falling back to text content, then to a unique synthetic id) so the same document appearing in both lists accumulates both contributions.
+Two ranked lists are formed from the same incoming documents: the vector list, sorted by the document scores that arrived, and the BM25 list, scored against the query. Text is tokenized by lowercasing and splitting on non-alphanumeric characters, so BM25 matches whole words, not substrings or stems. RRF then sums `weight / (rrf_k + rank + 1)` per list, weighting vector by `alpha` and BM25 by `1 - alpha`, and sorts by that total. Because RRF is rank-based, the magnitudes of the incoming vector scores do not matter — only the order they impose.
 
-`alpha` is a continuous weight, and its endpoints are the limits of that weight rather than a separate code path:
+### Documents that arrive without a score
 
-| `alpha`        | Ranking method                                                              | Emitted `score` field |
-|----------------|-----------------------------------------------------------------------------|-----------------------|
-| `0.0`          | RRF weighted `[0.0, 1.0]`: the BM25 ranking, then any document BM25 could not rank | the RRF score   |
-| `0.0 < a < 1.0`| Weighted RRF of both lists                                                    | the RRF score       |
-| `1.0`          | RRF weighted `[1.0, 0.0]`: the vector ranking, then any unscored document      | the RRF score       |
+`Doc.score` is unset unless an upstream node fills it in, and a missing score is treated as absence of evidence rather than a score of zero. Such documents are left out of the vector list entirely but still ranked by BM25, and still returned. When no document carries a score there is no vector signal to fuse and the node ranks by BM25 alone; when only some do, the rest are ranked on their BM25 evidence. Either case logs a warning naming the missing signal, once per instance rather than once per question.
 
-A leg weighted `0.0` contributes `0.0` to each of its documents' fused scores. Those documents therefore sort below everything the weighted leg ranked — but they are **still returned**, in that leg's own order. So `alpha = 1.0` emits the vector ranking followed by the unscored documents in BM25 order, which is exactly what `alpha = 0.99` emits; `alpha = 0.0` mirrors it. Weighting a signal to nothing removes its influence on the ordering, never its documents from the result.
+The only document the node does not return is one with no evidence in either leg — no score *and* no text BM25 can rank, such as empty content or content that tokenizes to nothing. That holds at every alpha.
 
-> If either signal produces no ranking at all (`vector_scores=None` or every score missing; or every document tokenizes to empty for BM25, or the query does), there is nothing to fuse and the node returns the other signal's single sorted list, emitting that signal's own score instead of an RRF score. This fallback applies at every `alpha`, endpoints included, and cannot drop a document — the empty list held none.
+### The emitted score is a ranking key, not a similarity
 
----
+Each returned document's `score` is overwritten with the value that ordered it: the RRF score whenever both legs produced a ranking. That is a small rank-derived number (roughly `1 / (rrf_k + rank)`, about 0.016 at `rrf_k = 60`), and a document contributed only by a zero-weighted leg scores exactly `0.0`, meaning "contributed nothing", not "matched badly". Only when one leg produces no ranking at all does the node fall back to returning the other leg's list with its own raw BM25 or vector score. Do not compare these values against a calibrated similarity threshold downstream.
 
-## Downstream-consumer notes
+### Fan-out safety
 
-- **The endpoints are continuous with the blended range.** `alpha == 0.0` and `alpha == 1.0` are the fusion weights at their limits, not a "return one list and discard the other" mode, so `alpha = 0.99` and `alpha = 1.0` agree on both the ordering and the emitted score field. The endpoints do change *which signal orders the result*, so configure them deliberately — but changing `alpha` never changes which documents come back.
-- **The emitted `score` is overwritten with the ranking signal.** Whenever both signals produced a ranking — at every `alpha`, endpoints included — that is the RRF score, a small rank-derived value (roughly `1 / (rrf_k + rank)`, e.g. ~0.016 at `rrf_k = 60`), not the original vector similarity. A document contributed by a `0.0`-weighted leg scores exactly `0.0`, meaning "ranked last, contributed nothing", not "scored badly". Only the single-signal fallback above emits a raw BM25 or vector score. Do not treat the post-node `score` as a calibrated similarity; treat it as a relative ordering key.
-- **Documents are re-ordered, not filtered.** Every document with evidence in either leg comes back, subject only to `top_k`. A document is never dropped for being weighted to zero by `alpha`; the sole exclusion is a document with no score *and* no BM25-rankable text, which no signal can order (see [Documents that arrive without a score](#documents-that-arrive-without-a-score)).
-- **Empty results are dropped, not passed through.** If the query or document list is empty, or re-ranking yields nothing, the node emits on neither lane — downstream nodes receive no object for that question. If a downstream stage requires an always-present result, place a node that guarantees pass-through after it.
+The incoming question and the documents mapped back into the result are deep-copied, so a question fanned out to several branches is not mutated by this node.
 
----
+## Upstream docs
+
+- [rank_bm25](https://github.com/dorianbrown/rank_bm25) — the BM25 implementation this node uses.
 
 <!-- ROCKETRIDE:GENERATED:PARAMS START -->
 <!-- Generated by nodes:docs-generate. Do not edit by hand. -->

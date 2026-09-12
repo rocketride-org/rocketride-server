@@ -1,96 +1,78 @@
 # tool_notion
 
-A RocketRide tool node that gives an AI agent read/write access to a
-[Notion](https://notion.so) workspace: search, read pages and database rows, and
-create or update content.
+A RocketRide tool node that gives an agent read and write access to a Notion workspace: search it, read pages and database rows, and create, update, or append to pages. Pick it when an agent's knowledge or its output lives in Notion rather than in files or a database.
 
-> Experimental: this node is marked `experimental` and may change. The endpoints and
-> request/response shapes here are read directly from Notion's own API reference
-> (`Notion-Version: 2026-03-11`), but no live workspace has exercised it end-to-end.
+## About Notion
+
+Notion is a workspace product that combines documents, wikis, and lightweight databases in one place. Its pages are built from nested blocks, and its databases hold rows that are themselves pages with typed properties. Teams use it for notes, specs, and project tracking.
 
 ## What it does
 
-Notion's 2025-09-03 API version split what older docs call a "database" into two
-concepts: a **database** (the container — title, parent, and a list of data sources)
-and a **data source** (the thing you actually query for rows). This node targets that
-current shape. Most tools that take a `database_id` resolve it to a data source
-automatically — if the database has exactly one, which is the common case — and only
-need an explicit `data_source_id` when there's more than one to disambiguate.
+The node has no data lanes; it exists only as an agent tool server, exposing eight Notion operations. An agent typically searches for a page or database id first, then reads properties or body text, and optionally writes back — creating a sub-page or database row, updating property values, or appending paragraphs. Pick it over a generic HTTP tool when you want Notion's block tree flattened into readable text and its database/data-source split handled for you.
 
-Page content (the body under a page's title) is stored as a tree of blocks, not plain
-text. `notion_get_page_content` walks that tree and flattens it into one line of plain
-text per block, indenting nested blocks (a toggle's contents, a nested bullet) up to a
-configurable depth. Block types with no text of their own (dividers, images, tables,
-...) are silently skipped rather than guessed at.
+Notion's current API splits what older documentation calls a "database" into a **database** (the container: title, parent, and a list of data sources) and a **data source** (the thing whose rows you query). This node targets that shape. Tools that take a `database_id` resolve it to a data source automatically when the database has exactly one, and need an explicit `data_source_id` only when there is more than one.
 
-A new page's title property key must match its parent's schema — a database's title
-column isn't always called "Name" (e.g. it might be "Task"). `notion_create_page`
-looks the real key up from the data source's schema rather than guessing, when the
-parent is a database row and the caller didn't already supply one in `properties`.
+## As a tool
 
-Implemented with the **requests** library, no Notion SDK is used. Read requests time
-out after 30 seconds and are retried up to 3 times with exponential backoff (2 s base
-delay) on connection errors, rate limits (HTTP 429, honoring Notion's `Retry-After`
-header when present), and server errors (5xx). Writes (`notion_create_page`,
-`notion_update_page`, `notion_append_content`) are never retried: Notion has no
-idempotency key for these endpoints, so retrying a mutation whose response was lost to
-a connection error risks creating a duplicate page or duplicate content. Failures are
-returned to the agent as a structured `{"success": false, "error": ...}` result rather
-than raised.
+The server-name prefix is `notion`, producing these registered functions.
 
-`notion_append_content` batches into groups of at most 100 blocks per request and
-rejects (rather than silently truncating) any line over 2000 characters, matching
-Notion's documented request limits.
+| Function | Description |
+|---|---|
+| `notion_search` | Search the workspace by title text across pages and databases the integration has been shared with. Use it to find an id before reading or writing. |
+| `notion_get_database` | Return a database's title and its data sources (id and name). |
+| `notion_query_database` | Query a database's rows with an optional Notion filter and sorts. |
+| `notion_get_page` | Return a page's properties, `url`, and `in_trash` flag — not its body. |
+| `notion_get_page_content` | Return a page's body as flattened plain text. |
+| `notion_create_page` | Create a sub-page under a page, or a new row under a data source, with optional initial body text. |
+| `notion_update_page` | Update a page's property values and/or move it to or from trash. |
+| `notion_append_content` | Append text to the end of a page's or block's body, one paragraph per line. |
 
-The node has no pipeline lanes (`lanes` is `{}`). Only agent runtimes reach it, through
-the `invoke` capability.
+Every function returns `success`, plus its own fields on success (`results`/`has_more`/`next_cursor` for the two listing calls, `text` for page content, `page_id` and `url` for creation, `appended` for the append) and `error` on failure. Notion API failures are returned in that envelope rather than raised.
 
----
+`notion_search` accepts `query`, an optional `filter_type` of `page` or `data_source`, and `page_size`. `notion_query_database` requires `database_id` and accepts `data_source_id`, `filter`, `sorts`, `page_size`, and `start_cursor`; page sizes are clamped to 1–100. `notion_get_page_content` requires `page_id` and accepts `max_depth` (default 4). `notion_create_page` requires `parent_id` and a `parent_type` of `page` or `data_source`, and accepts `title`, `properties`, and `content`. `notion_update_page` requires `page_id` and at least one of `properties` or `in_trash`. `notion_append_content` requires `block_id` and non-empty `text`.
+
+Property values in `filter`, and in the `properties` of the two write calls, use Notion's own typed property-value shape (for example `{"Status": {"select": {"name": "Done"}}}`) and are passed through unchanged.
 
 ## Configuration
 
-| Field | Type | Description |
-|---|---|---|
-| `apikey` | string | Default empty. Notion internal integration secret (from https://www.notion.so/my-integrations) |
+The node has a single field: the integration secret it authenticates with. There is nothing else to tune — everything an agent varies is a tool argument, not configuration.
 
-An integration only sees pages and databases it has been explicitly shared with inside
-Notion — sharing a page also shares everything nested under it.
+### API Key
 
----
-
-## Available tools
-
-| Tool | Description |
-|---|---|
-| `notion_search` | Search the workspace by title text across pages and databases the integration can see. Use this to find a page or database id before reading or writing it. |
-| `notion_get_database` | Get a database's title and its data sources (id + name). |
-| `notion_query_database` | Query a database's rows, with an optional Notion filter/sort object. |
-| `notion_get_page` | Get a page's properties (its database row values, if any) and metadata — not its body content. |
-| `notion_get_page_content` | Get a page's body as flattened plain text. |
-| `notion_create_page` | Create a page, either as a sub-page under another page or as a new row in a database, with optional initial body text. |
-| `notion_update_page` | Update a page's property values and/or move it to/from trash. |
-| `notion_append_content` | Append text to the end of a page's (or block's) body, one paragraph per line. |
-
-All eight return `success` plus tool-specific fields, and `error` on failure — see each
-tool's schema for exact shapes. Property values (in `notion_query_database` filters,
-`notion_create_page`/`notion_update_page` properties) use Notion's own typed property
-value shape (e.g. `{"Status": {"select": {"name": "Done"}}}`); this node passes them
-through as-is rather than reinventing a simplified format.
-
----
+The Notion internal integration secret. It is stored encrypted and masked in the UI. Leave it empty only if you set `NOTION_API_KEY` on the engine host instead; the config field wins when both are present, and startup fails when neither yields a value.
 
 ## Authentication
 
-Drop your Notion internal integration secret into the **API Key** config field. The
-field is encrypted at rest and masked in the UI. Alternatively, set the
-`NOTION_API_KEY` environment variable on the engine host — the config field takes
-precedence when both are set. The key is sent to Notion as `Authorization: Bearer
-<key>`, alongside a required `Notion-Version: 2026-03-11` header on every request.
+Create an internal integration at <https://www.notion.so/my-integrations> and paste its secret into **API Key**, or set `NOTION_API_KEY` on the engine host. The key is sent as an `Authorization: Bearer` header.
 
-Create an integration secret at https://www.notion.so/my-integrations, then share each
-page or database it should access from that page's "..." menu → Connections.
+Access is granted per page, not per scope: an integration sees only the pages and databases explicitly shared with it from a page's connection menu, and sharing a page also shares everything nested beneath it. A search that returns nothing usually means nothing has been shared yet.
 
----
+## Notes
+
+### Experimental
+
+The node is marked `experimental`. Its request and response shapes are read from Notion's own API reference, but no live workspace has exercised it end to end, so the surface may change.
+
+### Reading page content
+
+A page's body is a block tree, not text. `notion_get_page_content` walks that tree and emits one line per block, indenting nested content (a toggle's children, a nested bullet) up to `max_depth` levels. Blocks with no text of their own — dividers, images, tables — contribute nothing rather than being guessed at. Raise `max_depth` for deeply nested pages; the default of 4 covers ordinary documents.
+
+### Titles on new database rows
+
+A database's title property is not always called "Name". When `notion_create_page` is given a `title` for a `data_source` parent and the caller's `properties` does not already name a title field, the node looks the real key up from the data source's schema. Supply the title inside `properties` yourself if you want to bypass that lookup.
+
+### Retries and duplicate writes
+
+Reads time out after 30 seconds and retry up to three times with exponential backoff on connection errors, rate limits (honoring `Retry-After` when it is longer than the computed delay), and 5xx responses. The three write functions are never retried, because Notion offers no idempotency key and a retried mutation could duplicate a page or its content — an agent that sees a connection error on a write should check the target before trying again.
+
+### Request limits
+
+`notion_append_content` sends at most 100 blocks per request, batching longer input. A line over 2000 characters is rejected outright rather than truncated, matching Notion's rich-text limit; shorten the line and retry.
+
+## Upstream docs
+
+- [Notion API reference](https://developers.notion.com/reference/intro)
+- [Notion request limits](https://developers.notion.com/reference/request-limits)
 
 <!-- ROCKETRIDE:GENERATED:PARAMS START -->
 <!-- Generated by nodes:docs-generate. Do not edit by hand. -->

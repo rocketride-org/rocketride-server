@@ -1,0 +1,51 @@
+---
+sidebar_position: 2
+sidebar_label: Overview
+title: Quickstart
+hide_table_of_contents: true
+---
+
+import { LuLayoutDashboard, LuCode, LuTerminal } from 'react-icons/lu';
+
+# Quickstart
+
+Pick the path that matches how you want to build. Each one takes you from zero
+to a running pipeline.
+
+<div className="rr-card-grid">
+
+<a className="rr-side-card" href="/quickstart/ide-walkthrough">
+  <span className="rr-side-card__head"><LuLayoutDashboard className="rr-card-icon" /><span className="rr-side-card__title">Build in your IDE</span></span>
+  <span className="rr-side-card__body">Install the extension, deploy a local runtime, and wire up your first pipeline on the visual canvas.</span>
+</a>
+
+<a className="rr-side-card" href="/quickstart/sdk-integration">
+  <span className="rr-side-card__head"><LuCode className="rr-card-icon" /><span className="rr-side-card__title">Integrate with an SDK</span></span>
+  <span className="rr-side-card__body">Run the <code>.pipe</code> file you built from your own Python or TypeScript application.</span>
+</a>
+
+<a className="rr-side-card" href="/quickstart/cli">
+  <span className="rr-side-card__head"><LuTerminal className="rr-card-icon" /><span className="rr-side-card__title">Run from the CLI</span></span>
+  <span className="rr-side-card__body">Start, feed, and monitor pipelines from a terminal — no code required.</span>
+</a>
+
+</div>
+
+## New to RocketRide?
+
+Start with **[Build in your IDE](/quickstart/ide-walkthrough)**, it installs the extension,
+spins up a local runtime, and walks you through a `Chat → LLM` pipeline you can run in
+minutes. Once you have a pipeline, the
+**[SDK walkthrough](/quickstart/sdk-integration)** shows how to run it from your own
+[Python](/clients/python) or [TypeScript](/clients/typescript) application. Not sure
+where it should run long-term? See
+[Choose How to Run RocketRide](/operate).
+
+## More examples
+
+For a curated, community-maintained list of RocketRide projects, templates, and integration
+examples, see
+[**awesome-rocketride**](https://github.com/rocketride-org/awesome-rocketride): real-world
+pipelines (RAG over your docs, document extraction (OCR/NER), PII anonymization,
+multi-provider LLM routing, and agent workflows), plus starter templates you can clone and
+run.

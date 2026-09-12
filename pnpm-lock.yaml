@@ -1238,7 +1238,7 @@ importers:
         specifier: '>=8.21.0 <9'
         version: 8.21.0
 
-  packages/docs:
+  docs/docusaurus:
     dependencies:
       '@docusaurus/core':
         specifier: 3.8.1

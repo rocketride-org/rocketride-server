@@ -8,7 +8,7 @@
 	"path": "nodes.tool_microsoft_365.onedrive",
 	"prefix": "onedrive",
 	"icon": "onedrive.svg",
-	"documentation": "https://docs.rocketride.org",
+	"documentation": "https://docs.rocketride.org/nodes/tool_microsoft_365/onedrive",
 	"description": ["Exposes Microsoft OneDrive operations as agent tools.", "List and search files and folders, read metadata, download and upload content, create folders, copy/move/rename items, trash and restore, and manage sharing (links and permission grants) on the acting user's OneDrive via the Microsoft Graph drive API.", "Anonymous sharing links, invites to non-individual recipients, and permanent delete, are gated behind explicit config flags. Authenticates via an Entra app (client credentials) or user OAuth."],
 	"tile": ["OneDrive (${parameters.onedrive.access})"],
 	"lanes": {},

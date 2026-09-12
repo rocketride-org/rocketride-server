@@ -1,94 +1,61 @@
 # tool_deepl
 
-Exposes [DeepL](https://www.deepl.com) translation and AI rephrasing as agent tool functions.
+A RocketRide tool node that gives an agent DeepL translation and text-rephrasing functions, with node defaults for common translation requests.
+
+## About DeepL
+
+DeepL is the external translation and rephrasing API this node calls over HTTPS. This node uses its translation endpoint and its Write rephrasing endpoint to process one text value or a batch.
 
 ## What it does
 
-Agents invoke this node through the tool invoke channel. It exposes two tools: `deepl_translate` (translate text into a target language) and `deepl_write` (rewrite text in a chosen style or tone). Both return the full ordered list of results plus a top-level `text` convenience field holding the first result's text.
+Use this node when an agent must translate text or rewrite it in a requested style or tone. It exposes tools only—there are no pipeline lanes—and returns a structured result plus the first result as a convenient `text` field. Pick it over a general LLM transformation when an API translation target, detected source language, or DeepL Write result is required.
 
-Because `lanes` is empty (`{}`), this node has no pipeline input/output lanes: it is consumed exclusively by agent runtimes through the `invoke` capability.
+## As a tool
 
-## Setup
+The registered prefix is `deepl`, so the agent sees `deepl.deepl_translate` and `deepl.deepl_write`.
 
-Set your DeepL API key via the node config field **API Key** or the environment variable:
+| Function | Description |
+|---|---|
+| `deepl.deepl_translate` | Translates text into a target language. |
+| `deepl.deepl_write` | Rephrases text with an optional writing style or tone. |
 
-```bash
-ROCKETRIDE_DEEPL_KEY=...
-```
+### `deepl.deepl_translate`
 
-### Key tiers and host routing
+`text` is required and accepts one non-empty string or a list of at most 50 non-empty strings. `target_lang` uses the call value when present and otherwise falls back to **Default Target Language**; `source_lang` is optional and is sent only when non-blank. Optional `formality`, `model_type`, boolean `preserve_formatting`, and non-blank `context` are added to the request when valid. The result is `success`, `translations`, first-result `text`, and `error`; invalid input or request failures return `success: false` with an empty result list and an error message.
 
-DeepL has two API tiers, and the node routes to the right host automatically based on the key:
+### `deepl.deepl_write`
 
-- **Free** keys end in `:fx` and are routed to `https://api-free.deepl.com`. Note that DeepL has closed new DeepL API Free sign-ups in several regions, so a Free key may not be obtainable for new accounts.
-- **Pro** keys (no `:fx` suffix) are routed to `https://api.deepl.com`. A Pro/Pro-API plan is the reliable way to obtain a working key.
-
-The key is never written to logs or surfaced in any error message.
-
-## Tools
-
-
-| Tool | Description |
-|---|---|---|
-| `deepl_translate` | Translate text into a target language using DeepL. Accepts a single string or a batch of up to 50 strings. Returns each translation with its detected source language, plus a convenience "text" holding the first translation. |
-| `deepl_write` | Rewrite text using DeepL Write. Accepts a single string or a batch of up to 50 strings, and an optional writing_style OR tone (not both). Returns each improvement with its detected source language, plus a convenience "text" holding the first improvement. |
-
-
-### deepl_translate
-
-| Parameter             | Required | Description                                                                                  |
-| --------------------- | -------- | -------------------------------------------------------------------------------------------- |
-| `text`                | yes      | A string, or an array of up to 50 strings, to translate.                                      |
-| `target_lang`         | yes      | Target language. Regional variants allowed (e.g. `EN-US`, `EN-GB`, `PT-BR`, `PT-PT`, `ZH-HANS`, `ZH-HANT`). |
-| `source_lang`         | no       | Source language as a base code only (e.g. `EN`, not `EN-US`). Auto-detected when omitted.     |
-| `formality`           | no       | One of `default`, `more`, `less`, `prefer_more`, `prefer_less`. See the caveat below.         |
-| `model_type`          | no       | One of `latency_optimized`, `quality_optimized`, `prefer_quality_optimized`.                  |
-| `preserve_formatting` | no       | Keep original formatting (punctuation, casing) when set.                                       |
-| `context`             | no       | Additional context that influences translation but is not itself translated.                  |
-
-Returns `translations[]` (each with `text` and `detected_source_language`, the full source-language word), a top-level convenience `text`, and `model_type_used` when a `model_type` was requested.
-
-**Formality caveat:** DeepL only honors `formality` for a subset of target languages (roughly nine, such as German, French, Italian, Spanish, Dutch, Polish, Portuguese, Japanese, and Russian). Requesting it for an unsupported target language makes DeepL return an error, which the node surfaces rather than silently ignoring.
-
-### deepl_write
-
-| Parameter       | Required | Description                                                                                       |
-| --------------- | -------- | ------------------------------------------------------------------------------------------------- |
-| `text`          | yes      | A string, or an array of up to 50 strings, to rewrite.                                             |
-| `target_lang`   | no       | Restricted set (see below). When omitted, DeepL rewrites in the detected language.                 |
-| `writing_style` | no       | One of `simple`, `business`, `academic`, `casual`, `default`, and their `prefer_*` variants.       |
-| `tone`          | no       | One of `enthusiastic`, `friendly`, `confident`, `diplomatic`, `default`, and their `prefer_*` variants. |
-
-`writing_style` and `tone` are **mutually exclusive**, supplying both is rejected before any HTTP call.
-
-**Write language restriction:** `deepl_write` supports a narrower target-language set than translate: `de`, `en-GB`, `en-US`, `es`, `fr`, `it`, `ja`, `ko`, `pt-BR`, `pt-PT`, `zh`. An invalid write target is rejected client-side (no HTTP call) with an error naming the valid set.
-
-Returns `improvements[]` (each with `text`, `target_language`, and `detected_source_language`) plus a top-level convenience `text`.
-
-## Limits
-
-Both tools accept a single string or an array of up to **50 text entries** per call. That 50-entry cap is enforced by this node: a longer array is rejected client-side with an error and no HTTP call is made.
-
-The node does not impose a request byte-size limit. DeepL itself rejects oversized request bodies, and when it does the node surfaces DeepL's own error message. (DeepL also caps total characters by plan, for example the Free tier's 500,000 characters/month, which the node reports as a quota error on HTTP 456.)
+`text` has the same one-string-or-up-to-50-strings rule. Optional `target_lang` is restricted to `de`, `en-GB`, `en-US`, `es`, `fr`, `it`, `ja`, `ko`, `pt-BR`, `pt-PT`, or `zh`. Supply either optional `writing_style` or `tone`, never both; supplying both returns a failure without making an HTTP request. The result is `success`, `improvements`, first-result `text`, and `error`; invalid input or request failures use the same failure shape.
 
 ## Configuration
 
+Set the API key, then configure the values that should be used when a translation call omits them. A valid tool-call argument takes precedence over a configured default.
 
-| Field | Type | Description |
-|---|---|---|
-| `apikey` | string | Default empty. DeepL API key (from https://www.deepl.com/pro-api). A key ending in :fx is a Free-tier key and is routed to api-free.deepl.com automatically. |
-| `targetLang` | string | Default "EN-US". Default target language for translation when the agent does not supply one. Regional variants are allowed (e.g. EN-US, EN-GB, PT-BR, PT-PT, ZH-HANS, ZH-HANT). |
-| `formality` | string | Default "default". Default formality for translation. Only honored by a subset of target languages; DeepL returns an error for unsupported ones, which the node surfaces. |
-| `modelType` | string | Default empty. Translation model to request. Empty lets DeepL choose its default. quality_optimized favors quality, latency_optimized favors speed, prefer_quality_optimized uses quality where available and otherwise falls back. |
+### Default Target Language
 
+This is the fallback target for `deepl_translate` and defaults to `EN-US`. Leave it as the common target for the node's callers, or set it to another target so agents do not need to repeat it. If neither the call nor configuration provides a non-blank target, translation returns an error.
 
-For all three defaults the resolution rule is: the agent argument wins, the config is the fallback, and an empty config means the parameter is omitted from the request.
+### Formality
+
+This is the fallback formality for translation and defaults to `default`. The supported values are `default`, `more`, `less`, `prefer_more`, and `prefer_less`; a valid call value overrides it. Change it when the translated output needs a consistent level of formality, while noting that unsupported target-language combinations are returned by DeepL as errors rather than silently ignored. A cleared or invalid default is omitted from the request when no valid call value is supplied.
+
+### Model Type
+
+This optional translation fallback defaults to empty, which omits it and lets the service choose. Valid values are `latency_optimized`, `quality_optimized`, and `prefer_quality_optimized`; a valid call value takes precedence. Set it only when this node needs a consistent quality or latency preference, and keep it blank when no preference should be sent.
+
+## Authentication
+
+Provide **API Key** or set `ROCKETRIDE_DEEPL_KEY`; a non-blank configuration key takes precedence over the environment variable. The node fails startup if neither is set. Keys ending in `:fx` use the free API host; other keys use the standard API host. The key is sent in the authorization header and is not included in returned request errors.
+
+## Notes
+
+### Request and error handling
+
+Invalid text batches are rejected before an HTTP request. The node sends requests through the shared retrying POST helper and returns a structured failure for request errors or unexpected response bodies. It provides specific safe messages for quota exhaustion, authentication failure, and rate limiting.
 
 ## Upstream docs
 
 - [DeepL API documentation](https://developers.deepl.com/docs)
-
----
 
 <!-- ROCKETRIDE:GENERATED:PARAMS START -->
 <!-- Generated by nodes:docs-generate. Do not edit by hand. -->

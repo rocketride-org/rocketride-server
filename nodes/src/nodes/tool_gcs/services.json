@@ -9,7 +9,7 @@
 	"prefix": "gcs",
 	"description": ["A tool component that interacts with Google Cloud Storage buckets."],
 	"icon": "tool_gcs.svg",
-	"documentation": "https://docs.rocketride.org",
+	"documentation": "https://docs.rocketride.org/nodes/tool_gcs",
 	"invoke": {},
 	"lanes": {},
 	"preconfig": {
