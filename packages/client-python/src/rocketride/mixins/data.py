@@ -44,7 +44,7 @@ Usage:
     results = await client.send_files(files, run["token"])
 
     # Stream large dataset
-    pipe = await client.pipe(run["token"], mimetype="text/csv")
+    pipe = await client.pipe(run["token"], mime_type="text/csv")
     await pipe.open()
     await pipe.write(csv_chunk1)
     await pipe.write(csv_chunk2)
@@ -124,7 +124,7 @@ class DataMixin(DAPClient):
 
         Example:
             # Stream CSV data in chunks
-            pipe = await client.pipe(token, mimetype="text/csv")
+            pipe = await client.pipe(token, mime_type="text/csv")
             async with pipe:  # Automatically opens and closes
                 for chunk in csv_chunks:
                     await pipe.write(chunk.encode())
