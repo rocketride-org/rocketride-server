@@ -122,6 +122,33 @@ async def test_pipe_validate_preserves_explicit_version(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_pipe_validate_does_not_wrap_single_component_payload(monkeypatch):
+    """A {'version', 'component'} payload reaches validatePipeline unwrapped."""
+    captured = {}
+    monkeypatch.setattr(
+        pipe_validate_mod,
+        'validatePipeline',
+        lambda payload: captured.setdefault('payload', payload) or {'ok': True},
+    )
+
+    single_comp = {
+        'version': 1,
+        'component': {
+            'id': 'llm_openai_1',
+            'provider': 'llm_openai',
+            'config': {'model': 'gpt-4o'},
+        },
+    }
+    result = await pipe_validate_mod.pipe_Validate(MagicMock(), single_comp)
+    body = result.body.decode() if hasattr(result, 'body') else str(result)
+    assert 'OK' in body
+    assert 'component' in captured['payload']
+    assert 'pipeline' not in captured['payload']
+    assert captured['payload']['component']['id'] == 'llm_openai_1'
+    assert captured['payload']['version'] == 1
+
+
+@pytest.mark.asyncio
 async def test_pipe_validate_wraps_validate_pipeline_errors(monkeypatch):
     """A validatePipeline RuntimeError comes back as an error envelope."""
 
