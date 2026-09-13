@@ -211,6 +211,7 @@ class GuardrailsEngine:
         self.enable_content_safety = config.get('enable_content_safety', True)
         self.enable_pii_detection = config.get('enable_pii_detection', True)
         self.enable_hallucination_check = config.get('enable_hallucination_check', True)
+        self.require_grounding = config.get('require_grounding', False)
         self.max_input_length = config.get('max_input_length', 0)
         self.max_tokens_estimate = config.get('max_tokens_estimate', 0)
         self.blocked_topics = [t.strip().lower() for t in config.get('blocked_topics', []) if t.strip()]
@@ -362,7 +363,99 @@ class GuardrailsEngine:
     # Output guardrails
     # -------------------------------------------------------------------------
 
-    def check_hallucination(self, output: str, source_documents: Optional[List[str]] = None) -> Dict[str, Any]:
+    # An answer that declines to answer asserts nothing, so there is nothing to ground.
+    # Blocking it would discard the very refusal require_grounding is meant to produce.
+    ABSTENTION_MARKERS = (
+        'do not have',
+        "don't have",
+        'not have the information',
+        'no documents were retrieved',
+        'not provided',
+        'not available',
+        'does not contain',
+        'do not contain',
+        'cannot answer',
+        'unable to answer',
+        'cannot determine',
+        'unable to determine',
+        'no information',
+        'no data',
+        'no relevant documents',
+        'not found',
+        'not specified',
+        'not stated',
+        'not mentioned',
+        'not disclosed',
+        'insufficient information',
+    )
+
+    # A figure carries the claim this check exists to catch. Nothing is grounded in
+    # the empty-retrieval branch, so a stated amount is unsupported however the
+    # sentence around it is hedged.
+    _WHITESPACE = re.compile(r'\s+')
+    # A question writing $94.7B and an answer writing $94.7 billion name the same
+    # amount, so the scale word is folded to its initial before they are compared.
+    _SCALE_WORDS = (('billion', 'b'), ('bn', 'b'), ('million', 'm'), ('thousand', 'k'))
+
+    FIGURE_PATTERN = re.compile(
+        r'[$£€]\s*[\d,.]+\s*(?:billion|million|thousand|bn|b\b|m\b|k\b)?'
+        r'|[\d,.]+\s*%'
+        r'|\d[\d,.]*\s*(?:billion|million|thousand|bn|m\b|k\b)'
+        r'|\d{1,3}(?:,\d{3})+',
+        re.IGNORECASE,
+    )
+
+    @classmethod
+    def _is_abstention(cls, output: str, question_text: str = '') -> bool:
+        """Report whether *output* declines to answer rather than asserting something.
+
+        Args:
+            output: The answer to classify.
+            question_text: The question it answers. A figure quoted back from the
+                question is a reference, so it does not make the answer a claim.
+
+        Returns:
+            True when the answer declines rather than asserts.
+        """
+        body = output.strip().lower().replace('\u2019', "'")
+        # An empty answer asserts nothing either. The node short-circuits blank text
+        # before reaching here, but the engine should not depend on that.
+        if not body:
+            return True
+        if not any(marker in body for marker in cls.ABSTENTION_MARKERS):
+            return False
+        # The node records the question only when the questions lane runs. Without it a
+        # figure cannot be attributed to either side, and applying the test anyway would
+        # drop honest refusals, so the marker alone decides.
+        if not question_text.strip():
+            return True
+        # A marker alone used to be enough, which let "the figure is $94.7B, but the
+        # source is not available" through. Requiring no figure at all then blocked the
+        # commoner case, an answer declining to confirm the figure it was asked about,
+        # so only a figure the question did not mention counts as a claim.
+        # Compare the figures, not their spacing. The pattern keeps a trailing space
+        # when the optional scale suffix is absent and can swallow a sentence-final
+        # period, and an answer may write "12 %" where the question wrote "12%", so a
+        # raw containment test rejects a figure the question did name.
+        asked = cls._normalise(question_text)
+        figures = (cls._normalise(m) for m in cls.FIGURE_PATTERN.findall(body))
+        return not any(f for f in figures if f and f not in asked)
+
+    @classmethod
+    def _normalise(cls, text: str) -> str:
+        """Reduce a figure or a question to the form the comparison is made in."""
+        out = text.lower()
+        for word, initial in cls._SCALE_WORDS:
+            out = out.replace(word, initial)
+        return cls._WHITESPACE.sub('', out).strip('.,')
+
+    def check_hallucination(
+        self,
+        output: str,
+        source_documents: Optional[List[str]] = None,
+        retrieval_ran: bool = True,
+        question_text: str = '',
+    ) -> Dict[str, Any]:
         """Verify that claims in output are grounded in source documents.
 
         Performs a sentence-level grounding check. Each sentence in the output
@@ -370,18 +463,31 @@ class GuardrailsEngine:
 
         Args:
             output: The LLM output text to verify.
-            source_documents: List of source document texts. If empty/None,
-                              the check passes with a warning.
+            source_documents: List of source document texts. If empty/None, the check
+                              passes unless require_grounding is set.
 
         Returns:
             A check result dict.
         """
         if not source_documents:
+            # Nothing retrieved is when a model is most likely to answer from memory,
+            # so skipping here stood the guard down at the one moment it was needed.
+            # Callers that require grounding get a failure instead, but only when a
+            # retrieval actually ran and missed, and only for an answer that asserts
+            # something: a pipeline with no documents lane never retrieves, and an
+            # abstention is the outcome this is meant to produce.
+            if not self.require_grounding or not retrieval_ran or self._is_abstention(output, question_text):
+                return {
+                    'rule': 'hallucination',
+                    'passed': True,
+                    'severity': 'low',
+                    'details': 'No source documents provided; hallucination check skipped',
+                }
             return {
                 'rule': 'hallucination',
-                'passed': True,
-                'severity': 'low',
-                'details': 'No source documents provided; hallucination check skipped',
+                'passed': False,
+                'severity': 'high',
+                'details': 'No source documents provided; the answer cannot be grounded',
             }
 
         # Combine source documents into one text block for matching
@@ -633,9 +739,18 @@ class GuardrailsEngine:
 
         elif mode == 'output':
             # Output guardrails
-            if self.enable_hallucination_check:
+            # require_grounding has to reach the check on its own, or it reads as a
+            # silent no-op wherever the coverage check happens to be off.
+            if self.enable_hallucination_check or self.require_grounding:
                 source_docs = context.get('source_documents', [])
-                results.append(self.check_hallucination(text, source_docs))
+                # Default True so a caller that does not report the lane keeps the
+                # old behaviour for the coverage check.
+                ran = context.get('retrieval_ran', True)
+                results.append(
+                    self.check_hallucination(
+                        text, source_docs, retrieval_ran=ran, question_text=context.get('question_text', '')
+                    )
+                )
 
             if self.enable_content_safety:
                 results.append(self.check_content_safety(text))
