@@ -67,7 +67,12 @@ export default function SpecEditor({ spec, project, capabilities, disabled, onCh
 	useEffect(() => () => onPendingChange(false), [onPendingChange]);
 	const sources = pipelineSources(spec.pipeline);
 	const patch = (change: Partial<EvaluationSpec>): void => onChange({ ...spec, ...change });
-	const patchScorer = (id: string, change: Partial<Scorer>): void => patch({ scorers: spec.scorers.map((item) => (item.id === id ? { ...item, ...change } : item)) });
+	const patchScorer = (id: string, change: Partial<Scorer>): void => {
+		// Changing kind unmounts the judge editor and discards its local draft.
+		// Do not retain a dirty flag for text that can no longer be applied/reset.
+		if (change.kind !== undefined && spec.scorers.some((item) => item.id === id && item.kind !== change.kind)) setPendingJudges((current) => ({ ...current, [id]: false }));
+		patch({ scorers: spec.scorers.map((item) => (item.id === id ? { ...item, ...change } : item)) });
+	};
 	return (
 		<div className="rr-eval-stack">
 			<fieldset className="rr-eval-fields" disabled={disabled}>
