@@ -66,6 +66,7 @@ You build your `.pipe` - and you run it against the fastest AI runtime available
 
 ## Features
 
+- **Managed evaluations** - Durable runs, revisions, baselines and human review via `client.evals` and `rocketride evals` ([guide](/develop/python/evaluations))
 - **Pipeline execution** - Start with `use()`, send data via `send()`, `send_files()`, or `pipe()`
 - **Deployments** - Persist pipelines server-side and run them on a cron schedule via `client.deploy`
 - **Chat** - Conversational AI via `chat()` and `Question`

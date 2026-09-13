@@ -49,6 +49,32 @@ AI Assistant (Claude, Cursor, ...)
 
 Running pipelines are discovered automatically - start a pipeline in VS Code or via the SDK, and it appears as a callable tool in your AI assistant.
 
+## Managed evaluation tools (engine HTTP MCP)
+
+The engine's authenticated `/mcp` endpoint is distinct from the pipeline-discovery
+`rocketride-mcp` bridge described above. On a SaaS server with managed evaluations,
+the engine registry exposes an `evaluations` tool with these operations:
+
+`capabilities`, `list`, `get`, `create`, `revise`, `run`, `runs`, `status`,
+`cancel`, `baseline`, `report`, `review`, and `assist`.
+
+The tool forwards the caller's identity to `/evals/v1` on the same configured
+server. It never substitutes a service credential, accepts an arbitrary URL,
+follows redirects, or retries a write. Check capabilities before proposing runs;
+the OSS-only engine does not implement the managed SaaS storage API.
+
+Supply `expectedRevision` when revising a spec, a stable `idempotencyKey` when
+starting a run, and `expectedReportRevision` for a human review. Repeated cases
+also require the exact trial's `caseResultId`. Approval, baseline selection, and
+running side-effecting pipelines require the user's explicit intent. `assist`
+only proposes a spec for review; it does not save or execute it.
+
+Agents with an independently authorized shell can use the same operations through
+`rocketride evals` in either SDK's CLI. MCP does not grant shell access itself.
+See the [Python evaluation guide](/develop/python/evaluations) and
+[TypeScript evaluation guide](/develop/typescript/evaluations) for CLI gates
+and reports. Missing evidence is not a passing evaluation.
+
 ## What is RocketRide?
 
 [RocketRide](https://rocketride.org) is an open-source, developer-native AI pipeline platform.

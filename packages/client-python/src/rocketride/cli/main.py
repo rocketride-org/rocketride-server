@@ -404,6 +404,9 @@ def setup_parser() -> argparse.ArgumentParser:
     s_preview.add_argument('cron', help='5-field cron expression')
     s_preview.add_argument('--count', type=int, default=5, help='Number of occurrences to show (default: %(default)s)')
 
+    from .commands.evals import register_evals_commands
+
+    register_evals_commands(subparsers, _add_connection_args)
     return parser
 
 
@@ -421,12 +424,15 @@ async def _dispatch(args) -> int:
     from .commands.app import run_app
     from .commands.auth import run_init, run_login
     from .commands.deploy import run_deploy
+    from .commands.evals import run_evals
     from .commands.store import run_store
     from .commands.tasks import run_list, run_start, run_stop, run_upload
     from .commands.validate import run_validate
 
     if args.command == 'init':
         return await run_init(args)
+    if args.command == 'evals':
+        return await run_evals(args)
     if args.command == 'login':
         return await run_login(args)
     if args.command == 'list':

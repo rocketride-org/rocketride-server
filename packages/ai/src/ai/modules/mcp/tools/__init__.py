@@ -10,6 +10,7 @@ and calling its ``register(registry)`` from ``register_all``.
 from ..tooling import ToolRegistry
 from . import capability
 from . import execution
+from . import evaluations
 from . import integrations
 from . import introspection
 from . import logs
@@ -39,4 +40,5 @@ def register_all(registry: ToolRegistry) -> None:
     visibility.register(registry)
     logs.register(registry)
     scaffold.register(registry)
+    evaluations.register(registry)
     integrations.register(registry)

@@ -68,6 +68,7 @@ You build your `.pipe` - and you run it against the fastest AI runtime available
 
 ## Features
 
+- **Managed evaluations** - Durable runs, revisions, baselines and human review via `client.evals` and `rocketride evals` ([guide](/develop/typescript/evaluations))
 - **Pipeline execution** - Start with `use()`, send data via `send()`, `sendFiles()`, or `pipe()`
 - **Chat** - Conversational AI via `chat()` and `Question`
 - **Event streaming** - Real-time events via `onEvent` and `setEvents()`

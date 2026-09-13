@@ -33,6 +33,7 @@ import { AccountApi } from './account.js';
 import { BillingApi } from './billing.js';
 import { DatabaseApi } from './database.js';
 import { DeployApi } from './deploy.js';
+import { EvalsApi } from './evals.js';
 import { LogApi } from './log.js';
 import { AuthenticationException, ConnectionException, DAPException, LoginAttemptCancelledError, type LoginAttemptCancellationReason, PipeException } from './exceptions/index.js';
 
@@ -404,6 +405,8 @@ export class RocketRideClient extends DAPClient {
 
 	/** Lazily-created deploy API namespace. */
 	private _deploy?: DeployApi;
+	private _evals?: EvalsApi;
+	private _evalsUri!: string;
 
 	/** Lazily-created run-log API namespace. */
 	private _log?: LogApi;
@@ -630,6 +633,7 @@ export class RocketRideClient extends DAPClient {
 	 * Update the server URI (internal).
 	 */
 	private _setUri(uri: string): void {
+		this._evalsUri = uri;
 		this._uri = this._getWebsocketUri(uri);
 	}
 
@@ -904,6 +908,7 @@ export class RocketRideClient extends DAPClient {
 	}
 
 	private _startForegroundLogin(credential?: string | { code: string; verifier: string; redirectUri: string }, options?: { uri?: string; timeout?: number }): Promise<ConnectResult> {
+		if (options?.uri) this._evalsUri = options.uri;
 		const endpoint = options?.uri ? this._getWebsocketUri(options.uri) : this._uri;
 		const credentialKey = this._resolveCredential(credential);
 		const current = this._lifecycleOperation;
@@ -1004,6 +1009,7 @@ export class RocketRideClient extends DAPClient {
 	 * @param options - Optional timeout for the WebSocket handshake.
 	 */
 	async attach(uri?: string, options?: { timeout?: number }): Promise<void> {
+		if (uri) this._evalsUri = uri;
 		const endpoint = uri ? this._getWebsocketUri(uri) : this._uri;
 		this._clearReconnectTimer();
 		const current = this._lifecycleOperation;
@@ -3313,6 +3319,11 @@ export class RocketRideClient extends DAPClient {
 			this._deploy = new DeployApi(this);
 		}
 		return this._deploy;
+	}
+
+	/** Managed evaluations via bearer HTTP; no WebSocket connect is needed. */
+	get evals(): EvalsApi {
+		return this._evals ??= new EvalsApi(() => ({ uri: this._evalsUri, auth: this._apikey ?? '' }));
 	}
 
 	/**

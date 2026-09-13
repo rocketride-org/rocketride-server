@@ -11,7 +11,7 @@ like every other module and mounted at:
 /mcp
 ```
 
-This module exposes a static, 29-tool RocketRide authoring/execution surface served
+This module exposes a static, 30-tool RocketRide authoring/execution surface served
 over HTTP from inside the running engine process — no separate process or transport
 bridge required. It supersedes the earlier 2-tool port, which exposed a dynamic
 per-pipeline `{filepath}` tool plus a `RocketRide_Document_Processor` convenience
@@ -104,7 +104,7 @@ on every `CacheableResult` this module returns:
 Config key `mcp_dev_no_auth` (bool, in the module `config` dict passed to `initModule`)
 is the config-driven equivalent of `MCP_DEV_NO_AUTH=1`; either one enables the bypass.
 
-## The 29 tools
+## The 30 tools
 
 Dispatch is registry-based: `tooling.ToolRegistry` holds `{name -> (description,
 inputSchema, handler)}`; `tools/__init__.register_all(registry)` populates one shared
@@ -120,7 +120,7 @@ All tools are static and typed (fixed name + JSON Schema) — there is no dynami
 per-pipeline tool generation and no `filepath`-shaped catch-all tool of the kind the
 legacy 2-tool port used.
 
-The 29 tools are organized into 8 groups (plus 2 resources), matching
+The 30 tools include 8 core groups and managed evaluations (plus 2 resources), matching
 `claude/tasks/http-mcp-tools-port/final-tool-surface.md` minus the Query group
 (see History: the 3 convenience query tools were removed pending their cloud DB
 backend), plus the Run log (DVR) group and `list_integrations` added below.
@@ -240,6 +240,33 @@ an in-band `{ok: False, error_type, message, hint}` result; hard failures
 — `ConnectionError`, `AuthenticationException`, `TimeoutError`) propagate out of the
 handler and surface as a genuine MCP tool error, not a structured result. Structured `{ok: False}` envelopes additionally set `isError=true` on the `CallToolResult` (derived from the in-band `ok` field) so hosts can detect a failed call without parsing the JSON body — the envelope itself still rides `content`/`structuredContent` for the agent to self-correct from.
 
+## Managed evaluations
+
+`evaluations` extends the existing agent surface with the SaaS `/evals/v1` API.
+It requires the authenticated caller's bearer credential; the engine's service
+credential is never substituted. Call `{"operation":"capabilities"}` first:
+an OSS-only engine does not supply the managed evaluation backend.
+
+Read operations are `capabilities`, `list`, `get`, `runs`, `status`, and `report`.
+Write operations are `create`, `revise`, `run`, `cancel`, `baseline`, `review`,
+and `assist`. They use a closed catalog of routes and arguments, not arbitrary
+URLs or HTTP methods. Requests are bounded, do not follow redirects, and do not
+automatically retry writes. For a run retry, keep the original `idempotencyKey`.
+
+```json
+{"operation":"run","evaluationId":"saved-evaluation-id","revision":1,"idempotencyKey":"experiment-2026-09-13-a"}
+```
+
+`assist` returns a proposed EvalSpec from a configured native agent pipeline; it
+does not apply or execute that proposal. Human review and baseline selection are
+explicit decisions. A review names `caseId`, `scorerId`, `status`, `reason`, and
+`expectedReportRevision` inside `review`; use `caseResultId` for one exact trial
+when the case has repetitions. Incomplete/error/abstain evidence is not a pass.
+
+The equivalent managed workflow is available through `rocketride evals` and the
+SDK `client.evals` namespaces. A harness with an authorized shell may compose CLI
+commands; this MCP tool does not add shell access or arbitrary scorer execution.
+
 ## Integrations & credential readiness
 
 A curated catalog (`credentials.json`, sibling to this doc) describes which
@@ -358,7 +385,7 @@ prompt templates from the earlier port were removed along with their tests.
 ## The `EngineClient` seam
 
 `engine.py` defines one `Protocol`, `EngineClient`, with the methods needed
-by the 29-tool surface (task lifecycle, services/validation, store/templates/store
+by the core authoring surface (task lifecycle, services/validation, store/templates/store
 metadata/signed URLs, full deployment lifecycle, `rrext_log` chapters/read/traces/
 trace — see the `Protocol` definition in `engine.py` for exact signatures). All
 tool/resource code depends only on this interface — never on a concrete client — so

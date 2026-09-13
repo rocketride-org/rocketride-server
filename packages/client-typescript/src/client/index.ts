@@ -45,6 +45,8 @@ export * from './constants.js';
 
 // Export the main client and utilities
 export * from './client.js';
+export { EvalsApi, EvalsError, evaluationGateExitCode } from './evals.js';
+export type { EvaluationSpec, ManagedEvaluation, EvaluationRun, EvaluationTrace, EvaluationComparison, EvaluationCapabilities, EvaluationRunOptions, EvaluationReview, EvaluationWaitOptions, EvaluationRunResponse, EvaluationVerdict } from './evals.js';
 
 // Export the database API namespace (DatabaseApi class, DatabaseDialect enum)
 export * from './database.js';
