@@ -2,7 +2,7 @@
 	"title": "Depth Estimation",
 	"protocol": "depth_estimate://",
 	"classType": ["image"],
-	"capabilities": ["gpu", "experimental"],
+	"capabilities": ["gpu"],
 	"register": "filter",
 	"node": "python",
 	"path": "nodes.depth_estimate",

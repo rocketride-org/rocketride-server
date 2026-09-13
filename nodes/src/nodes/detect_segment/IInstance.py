@@ -61,7 +61,8 @@ class IInstance(IInstanceBase):
     Per-frame segmentation for the detect_segment node.
 
     Accepts an image lane (AVI stream). Emits per frame:
-      - text lane: JSON Masks payload (instance list or semantic dict).
+      - text lane: JSON Masks payload (instance list — Mask2Former-instance and
+        SAM 3 concept modes — or semantic dict).
       - image lane: annotated frame (translucent per-instance/class overlay).
     """
 

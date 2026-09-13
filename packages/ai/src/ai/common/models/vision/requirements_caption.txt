@@ -1,5 +1,12 @@
-# contract-check: skip-install  reason: Florence-2 extras (einops/timm) on top of the transformers baseline; PR lane skips, nightly --install-all verifies.
+# contract-check: skip-install  reason: no extras — all caption VLMs run on the shared transformers baseline; PR lane skips, nightly --install-all verifies.
 # Caption-specific extras, installed after the shared requirements_vision.txt base.
-accelerate
-einops
-timm
+# No packages beyond requirements_vision.txt for any caption profile
+# (plain .to(device) load, no accelerate).
+#
+# Version floors on the shared transformers pin (owned by requirements_vision.txt — do NOT pin here):
+# - SmolVLM-500M-Instruct (Idefics3): native since transformers 4.46.
+# - Qwen/Qwen3-VL-4B-Instruct (Qwen3VLForConditionalGeneration): native since
+#   transformers 4.57.0 — older versions fail with "unrecognized architecture qwen3_vl".
+# - microsoft/Mage-VL: loads via trust_remote_code (revision-pinned); its model
+#   card requires transformers>=5.7 — satisfied by the shared transformers pin
+#   in requirements_vision.txt (see the pin note there).

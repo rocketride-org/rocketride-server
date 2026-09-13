@@ -25,18 +25,26 @@ TASK_OUTPUT_FIELDS: Dict[str, List[str]] = {
     'text-classification': ['label', 'score'],
     'token-classification': ['entities'],
     'ner': ['entities'],
-    'question-answering': ['answer', 'score'],
     'fill-mask': ['token', 'score', 'sequence'],
-    'summarization': ['summary_text'],
-    'translation': ['translation_text'],
     'text-generation': ['generated_text'],
-    'text2text-generation': ['generated_text'],
     'automatic-speech-recognition': ['text'],
     'image-classification': ['label', 'score'],
     'object-detection': ['label', 'score', 'box'],
     'image-segmentation': ['label', 'score', 'mask'],
     'zero-shot-classification': ['labels', 'scores'],
     'feature-extraction': ['features'],
+}
+
+# Pipeline tasks removed upstream in transformers v5 (MIGRATION_GUIDE_V5.md:
+# "Text pipelines that should just be LLMs"). There is no drop-in v5
+# equivalent — the documented replacement is a chat model on the
+# 'text-generation' task with a task-specific prompt, which has a different
+# output shape, so we fail loudly instead of silently substituting.
+TASKS_REMOVED_IN_V5: Dict[str, str] = {
+    'question-answering': "prompt a chat model with the question and context via task='text-generation'",
+    'summarization': "prompt a chat model to summarize via task='text-generation'",
+    'translation': "prompt a chat model to translate via task='text-generation'",
+    'text2text-generation': "use task='text-generation' with a chat model",
 }
 
 
@@ -100,6 +108,11 @@ class TransformersLoader(BaseLoader):
         TransformersLoader._ensure_dependencies()
 
         exclude_gpus = exclude_gpus or []
+
+        if task in TASKS_REMOVED_IN_V5:
+            raise ValueError(
+                f'Pipeline task {task!r} was removed in transformers v5; {TASKS_REMOVED_IN_V5[task]} instead.'
+            )
 
         if task:
             # Pipeline - estimate and load directly to GPU (can't do CPU-first)
@@ -244,20 +257,18 @@ class TransformersLoader(BaseLoader):
         from transformers import AutoTokenizer, AutoProcessor
 
         try:
+            # transformers v5 selects the tokenizer backend automatically
+            # (tokenizers / sentencepiece / python), so the v4-era
+            # `use_fast=False` slow-tokenizer retry is gone along with slow
+            # tokenizers themselves.
             return AutoTokenizer.from_pretrained(model_name)
         except Exception as e:
-            # Fast tokenizer conversion fails for SentencePiece/Tiktoken models
-            # (e.g. XLM-RoBERTa) — fall back to slow Python tokenizer
-            debug(f'Fast tokenizer load failed for {model_name}: {e}; trying slow tokenizer')
-            try:
-                return AutoTokenizer.from_pretrained(model_name, use_fast=False)
-            except Exception as e2:
-                debug(f'Slow tokenizer load failed for {model_name}: {e2}; trying AutoProcessor')
+            debug(f'Tokenizer load failed for {model_name}: {e}; trying AutoProcessor')
 
         try:
             return AutoProcessor.from_pretrained(model_name)
-        except Exception as e3:
-            debug(f'No tokenizer or processor could be loaded for {model_name}: {e3}')
+        except Exception as e2:
+            debug(f'No tokenizer or processor could be loaded for {model_name}: {e2}')
             return None
 
     @staticmethod
@@ -407,12 +418,8 @@ class TransformersLoader(BaseLoader):
         task_memory = {
             'text-classification': 0.5,
             'token-classification': 0.5,
-            'question-answering': 0.5,
             'fill-mask': 0.5,
-            'summarization': 2.0,
-            'translation': 2.0,
             'text-generation': 2.0,
-            'text2text-generation': 2.0,
             'automatic-speech-recognition': 2.0,
             'image-classification': 1.0,
             'object-detection': 1.5,

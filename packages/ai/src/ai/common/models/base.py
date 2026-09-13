@@ -261,6 +261,72 @@ def make_device_lock() -> contextlib.AbstractContextManager:
     return contextlib.nullcontext() if is_model_server_enabled() else threading.Lock()
 
 
+# tf32_context bookkeeping. The TF32 flags are process-global, so the active
+# users are reference-counted under a lock: the first entrant snapshots the
+# original flag values, every entrant re-applies the flags from the live counts,
+# and only the last exit restores the snapshot. The lock is held only around the
+# flag flips (never across the forward), so concurrent forwards still overlap.
+_tf32_lock = threading.Lock()
+_tf32_users = {'tf32': 0, 'strict': 0}  # active tf32_context(True) / tf32_context(False) scopes
+_tf32_saved: Optional[Tuple[bool, bool]] = None  # (matmul, cudnn) before the first active user
+
+
+def _tf32_apply(torch: Any) -> None:
+    """Set both TF32 flags from the active-user counts (caller holds ``_tf32_lock``)."""
+    global _tf32_saved
+    if not any(_tf32_users.values()):
+        matmul, cudnn = _tf32_saved
+        _tf32_saved = None
+    else:
+        # Strict fp32 wins while any strict user is active: a ``dtype='float32'``
+        # forward keeps its bit-exact guarantee; an overlapping TF32 forward only
+        # loses its speedup for the overlap.
+        matmul = cudnn = _tf32_users['strict'] == 0
+    torch.backends.cuda.matmul.allow_tf32 = matmul
+    torch.backends.cudnn.allow_tf32 = cudnn
+
+
+@contextlib.contextmanager
+def tf32_context(enabled: bool):
+    """Scope both process-global TF32 flags around a forward, restoring prior values.
+
+    cuDNN (convs) and cuBLAS matmul (attention/linears) are separate flags and both
+    matter for mixed conv/transformer models, so they are set together. TF32 is a
+    hardware no-op before Ampere and off-CUDA, so scoping it is always safe.
+
+    Concurrency: the flags are process-global, and the model server hosts many
+    models in one process and runs their forwards on concurrent threads
+    (``workers_per_model`` worker threads per model, ``streams_per_gpu`` concurrent
+    CUDA streams per GPU — see the model server's ModelWorker/GPUDispatcher).
+    Scopes are therefore reference-counted (see ``_tf32_apply``): nested and
+    concurrent users share one snapshot of the original flag values, which is
+    restored only when the last user exits, so an overlapping exit can never
+    restore stale values. While users overlap, strict fp32 (``enabled=False``)
+    takes precedence over TF32. The lock guards only the flag flips, so forwards
+    on different GPUs/streams still run concurrently. Local engine mode is
+    unaffected — the node-side device lock (``make_device_lock``) serializes
+    in-process forwards there.
+
+    Lives in the models package (not cuda_utils) so the H100 bind-mount dev loop
+    covers it — the mounts only overlay ``ai/common/models``.
+    """
+    from ai.common.torch import torch
+
+    global _tf32_saved
+    key = 'tf32' if enabled else 'strict'
+    with _tf32_lock:
+        if not any(_tf32_users.values()):
+            _tf32_saved = (torch.backends.cuda.matmul.allow_tf32, torch.backends.cudnn.allow_tf32)
+        _tf32_users[key] += 1
+        _tf32_apply(torch)
+    try:
+        yield
+    finally:
+        with _tf32_lock:
+            _tf32_users[key] -= 1
+            _tf32_apply(torch)
+
+
 # =============================================================================
 # MODEL CLIENT
 # =============================================================================

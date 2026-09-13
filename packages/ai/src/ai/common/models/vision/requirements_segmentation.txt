@@ -1,6 +1,8 @@
 # contract-check: skip-install  reason: pycocotools build + Mask2Former weights; PR lane skips, nightly --install-all verifies.
 # Segmentation-specific extras, installed after the shared requirements_vision.txt base.
 # pycocotools: RLE encode (loader) — the node lists it too for client-side decode/restore.
+# SAM 3 (facebook/sam3, Meta SAM License, gated repo) needs nothing beyond the
+# shared transformers>=5 baseline — Sam3Model/Sam3Processor are HF-native.
 accelerate
 pycocotools
 scipy

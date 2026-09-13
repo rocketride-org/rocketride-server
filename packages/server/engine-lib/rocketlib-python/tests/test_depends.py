@@ -91,6 +91,70 @@ class TestCombineRequirements:
         assert text == f'# Source: {a}\npkg-a\n\n# Source: {b}\npkg-b>=1\n\n'
         assert text.index('pkg-a') < text.index('pkg-b')
 
+    def test_marker_comment_excludes_file_and_warns_about_dropped_pins(self, tmp_path, monkeypatch):
+        warnings = []
+        monkeypatch.setattr(depends, 'warning', lambda msg: warnings.append(msg))
+        disabled = _write(
+            tmp_path / 'requirements_trocr.txt',
+            '# contract-check: disable  reason: craft-text-detector pins opencv\n'
+            '# Direct imports only\n\n'
+            'transformers\n'
+            'craft-text-detector  # trailing note\n'
+            'Pillow>=10\n',
+        )
+        kept = _write(tmp_path / 'requirements.txt', 'pkg-b>=1\n')
+        out = tmp_path / 'combined.txt'
+
+        depends._combine_requirements([str(disabled), str(kept)], str(out))
+
+        text = out.read_text(encoding='utf-8')
+        assert text == (
+            f'# Source: {disabled} (excluded from constraints: contract-check: disable)\n# Source: {kept}\npkg-b>=1\n\n'
+        )
+        assert len(warnings) == 1
+        assert str(disabled) in warnings[0]
+        assert warnings[0].endswith('transformers, craft-text-detector, Pillow>=10')
+
+    def test_marker_trailing_comment_excludes_file_and_skips_the_offender(self, tmp_path, monkeypatch):
+        warnings = []
+        monkeypatch.setattr(depends, 'warning', lambda msg: warnings.append(msg))
+        disabled = _write(
+            tmp_path / 'requirements_surya.txt',
+            'numpy\nsurya-ocr  # legacy  # contract-check: disable  reason: opencv pin\n',
+        )
+        out = tmp_path / 'combined.txt'
+
+        depends._combine_requirements([str(disabled)], str(out))
+
+        assert 'surya-ocr' not in out.read_text(encoding='utf-8')
+        assert len(warnings) == 1
+        assert warnings[0].endswith(': numpy')
+
+    def test_marker_only_file_excluded_without_warning(self, tmp_path, monkeypatch):
+        warnings = []
+        monkeypatch.setattr(depends, 'warning', lambda msg: warnings.append(msg))
+        disabled = _write(tmp_path / 'requirements_x.txt', '# contract-check: disable\n# nothing pinned here\n\n')
+        out = tmp_path / 'combined.txt'
+
+        depends._combine_requirements([str(disabled)], str(out))
+
+        assert out.read_text(encoding='utf-8') == (
+            f'# Source: {disabled} (excluded from constraints: contract-check: disable)\n'
+        )
+        assert warnings == []  # no specs dropped: nothing to report
+
+    def test_marker_outside_a_comment_is_not_honoured(self, tmp_path, monkeypatch):
+        warnings = []
+        monkeypatch.setattr(depends, 'warning', lambda msg: warnings.append(msg))
+        a = _write(tmp_path / 'a.txt', 'contract-check: disable\npkg-a\n')
+        out = tmp_path / 'combined.txt'
+
+        depends._combine_requirements([str(a)], str(out))
+
+        text = out.read_text(encoding='utf-8')
+        assert text == f'# Source: {a}\ncontract-check: disable\npkg-a\n\n'
+        assert warnings == []
+
 
 class TestConstraintsArgs:
     def test_empty_when_constraints_missing_or_empty(self, tmp_path):

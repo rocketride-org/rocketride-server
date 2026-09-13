@@ -43,17 +43,21 @@ class IGlobal(IGlobalBase):
             DEFAULT_THRESHOLD,
         )
 
-        config = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
         conn = self.glb.connConfig
+        # UI field values arrive prefixed under connConfig['parameters']; see
+        # Config.resolve_node_param / Config.resolve_node_config for the full story.
+        params = conn.get('parameters')
+        config = Config.resolve_node_config(self.glb.logicalType, conn, 'detect')
 
         backend = str(config.get('engine', DEFAULT_BACKEND)).lower().strip()
         if backend not in BACKENDS:
             warning(f'detect: unknown engine "{backend}", defaulting to {DEFAULT_BACKEND}')
             backend = DEFAULT_BACKEND
 
-        prompt = (config.get('prompt') or conn.get('detect.prompt') or conn.get('prompt') or '').strip()
-        # Check threshold
-        raw_threshold = conn.get('detect.threshold', config.get('threshold', DEFAULT_THRESHOLD))
+        ui_prompt = params.get('detect.prompt') if params is not None else None
+        prompt = str(ui_prompt or conn.get('detect.prompt') or conn.get('prompt') or config.get('prompt') or '').strip()
+        # Resolve threshold with None-checks so a valid 0.0 is not dropped.
+        raw_threshold = Config.resolve_node_param(conn, config, 'detect', 'threshold', DEFAULT_THRESHOLD)
         try:
             threshold = float(raw_threshold)
         except (TypeError, ValueError):
@@ -69,10 +73,21 @@ class IGlobal(IGlobalBase):
                 'Set a prompt in the UI (e.g. "person . car . dog") and restart the pipeline.'
             )
 
+        raw_model = Config.resolve_node_param(conn, config, 'detect', 'model')
+        model_name = (raw_model or '').strip() or None
+
         revision = (config.get('revision') or '').strip() or None
+        # A custom model override must not inherit the profile's pinned revision.
+        if model_name and config.get('model') and model_name != str(config.get('model')).strip():
+            revision = None
 
         self.detector = Detector(
-            backend=backend, device=None, threshold=threshold, prompt=prompt or None, revision=revision
+            backend=backend,
+            model_name=model_name,
+            device=None,
+            threshold=threshold,
+            prompt=prompt or None,
+            revision=revision,
         )
 
         # Local inference must serialize GPU access

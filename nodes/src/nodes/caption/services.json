@@ -1,72 +1,98 @@
 {
-	"title": "Caption",
+	"title": "Describe",
 	"protocol": "caption://",
 	"classType": ["image"],
-	"capabilities": ["gpu", "experimental", "debug"],
+	"capabilities": ["gpu"],
 	"register": "filter",
 	"node": "python",
 	"path": "nodes.caption",
 	"prefix": "caption",
-	"description": ["Generates a natural-language caption for an image using Florence-2 Base (MIT). ", "Three caption granularities are exposed: short, detailed, and more detailed. ", "Runs locally on CPU, Apple Silicon (MPS), and CUDA with no API key required. ", "For object detection use Object Detection. For text reading use OCR."],
+	"description": ["Generates a natural-language description of an image using a local vision-language model. SmolVLM-500M (Apache-2.0, default) is small and fast; Qwen3-VL 4B and Mage-VL 4B (both Apache-2.0) give richer descriptions on GPU. ", "The prompt is steerable: ask for a detailed description, focus on specific aspects, or ask questions about the image. ", "Runs locally with no API key required; the 500M default also runs on CPU and Apple Silicon (MPS). ", "For object detection use Object Detection. For text reading use OCR."],
 	"icon": "caption.svg",
 	"documentation": "https://docs.rocketride.org",
-	"tile": ["Task: ${parameters.caption.task}"],
+	"tile": ["Prompt: ${parameters.caption.prompt}"],
 	"lanes": {
 		"image": ["text"]
 	},
 	"input": [
 		{
 			"lane": "image",
-			"description": "AVI image stream to caption.",
+			"description": "AVI image stream to describe.",
 			"output": [
 				{
 					"lane": "text",
-					"description": "Caption string."
+					"description": "Description string."
 				}
 			]
 		}
 	],
 	"preconfig": {
-		"default": "florence-base",
+		"default": "smolvlm-500m",
 		"profiles": {
-			"florence-base": {
-				"title": "Florence-2 Base",
-				"model": "microsoft/Florence-2-base",
-				"revision": "5ca5edf5bd017b9919c05d08aebef5e4c7ac3bac",
-				"task": "caption"
+			"smolvlm-500m": {
+				"title": "SmolVLM 500M (Apache-2.0)",
+				"model": "HuggingFaceTB/SmolVLM-500M-Instruct",
+				"revision": "a7da5b986cb59b408707209984f360a5f4ad7e47"
+			},
+			"qwen3-vl-4b": {
+				"title": "Qwen3-VL 4B (Apache-2.0)",
+				"model": "Qwen/Qwen3-VL-4B-Instruct",
+				"revision": "ebb281ec70b05090aa6165b016eac8ec08e71b17",
+				"memory_gb": 10.0
+			},
+			"mage-vl-4b": {
+				"title": "Mage-VL 4B (Apache-2.0, remote code)",
+				"model": "microsoft/Mage-VL",
+				"revision": "5c78cab61938e73859b63724d9bf5cb88c477eaa",
+				"memory_gb": 11.0
 			}
 		}
 	},
 	"fields": {
-		"caption.task": {
-			"title": "Granularity",
-			"description": "How detailed the caption should be.",
+		"caption.prompt": {
+			"title": "Prompt",
+			"description": "Steers the description. The default asks for a detailed description; you can also focus it (\"Describe the people in this image\") or ask a question about the image (\"What color is the car?\").",
 			"type": "string",
-			"default": "caption",
-			"enum": ["caption", "detailed_caption", "more_detailed_caption"],
-			"enumNames": ["Short", "Detailed", "More detailed"]
+			"format": "textarea",
+			"default": "Describe this image in detail."
+		},
+		"caption.max_new_tokens": {
+			"title": "Max output tokens",
+			"description": "Hard cap on generated tokens per description. Generation time scales with output length, so this bounds worst-case latency; lower it (e.g. 48) for latency-sensitive pipelines with short prompts.",
+			"type": "integer",
+			"minimum": 1,
+			"maximum": 1024,
+			"default": 256
+		},
+		"caption.max_sentences": {
+			"title": "Max sentences",
+			"description": "Stops generation at a clean sentence boundary once this many sentences have been produced, instead of cutting off mid-sentence at the token cap. Set 0 to disable and rely on max output tokens alone.",
+			"type": "integer",
+			"minimum": 0,
+			"maximum": 16,
+			"default": 0
 		},
 		"caption.profile": {
 			"title": "Model",
 			"type": "string",
-			"default": "florence-base",
+			"default": "smolvlm-500m",
 			"enum": ["*>preconfig.profiles.*.title"]
 		}
 	},
 	"shape": [
 		{
 			"section": "Pipe",
-			"title": "Caption",
-			"properties": ["caption.profile", "caption.task"]
+			"title": "Describe",
+			"properties": ["caption.profile", "caption.prompt", "caption.max_new_tokens", "caption.max_sentences"]
 		}
 	],
 	"test": {
-		"profiles": ["florence-base"],
+		"profiles": ["smolvlm-500m"],
 		"outputs": ["text"],
-		"timeout": 120,
+		"timeout": 180,
 		"cases": [
 			{
-				"name": "Caption image",
+				"name": "Describe image",
 				"image": "images/einstein.jpg",
 				"expect": {
 					"text": { "notEmpty": true }
@@ -74,18 +100,48 @@
 			}
 		]
 	},
-	"fulltest": {
-		"profiles": ["florence-base"],
-		"outputs": ["text"],
-		"timeout": 120,
-		"cases": [
-			{
-				"name": "Caption image",
-				"image": "images/einstein.jpg",
-				"expect": {
-					"text": { "notEmpty": true }
+	"fulltest": [
+		{
+			"profiles": ["smolvlm-500m"],
+			"outputs": ["text"],
+			"timeout": 180,
+			"cases": [
+				{
+					"name": "SmolVLM describes image",
+					"image": "images/einstein.jpg",
+					"expect": {
+						"text": { "notEmpty": true }
+					}
 				}
-			}
-		]
-	}
+			]
+		},
+		{
+			"profiles": ["qwen3-vl-4b"],
+			"outputs": ["text"],
+			"timeout": 600,
+			"cases": [
+				{
+					"name": "Qwen3-VL describes image",
+					"image": "images/einstein.jpg",
+					"expect": {
+						"text": { "notEmpty": true }
+					}
+				}
+			]
+		},
+		{
+			"profiles": ["mage-vl-4b"],
+			"outputs": ["text"],
+			"timeout": 600,
+			"cases": [
+				{
+					"name": "Mage-VL describes image",
+					"image": "images/einstein.jpg",
+					"expect": {
+						"text": { "notEmpty": true }
+					}
+				}
+			]
+		}
+	]
 }

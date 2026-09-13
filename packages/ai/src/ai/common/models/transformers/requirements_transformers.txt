@@ -1,4 +1,12 @@
 # Requirements for Transformers loader
 # Direct imports only
+#
+# transformers pin: MUST stay identical to the shared vision pin in
+# ../vision/requirements_vision.txt — the engine's depends() compiles ALL
+# requirements files into one constraint set, so divergent pins fail the
+# build. Loader migrated to v5 APIs: the question-answering / summarization /
+# translation / text2text-generation pipeline tasks were removed upstream
+# (use text-generation with a chat model), and tokenizer backend selection
+# is now automatic (no use_fast fallback).
 
-transformers==4.53.3
+transformers==5.14.1

@@ -23,16 +23,15 @@
 # =============================================================================
 
 from rocketlib import IInstanceBase, AVI_ACTION, warning
-from ai.common.image import ImageProcessor
 from .IGlobal import IGlobal
 
 
 class IInstance(IInstanceBase):
     """
-    IInstance handles per-frame captioning for the caption node.
+    IInstance handles per-frame image description for the Describe (caption) node.
 
     Accepts image lane (AVI stream). Emits per frame:
-      - text lane: caption string.
+      - text lane: description string.
 
     Inference is delegated to the Captioner facade (ai.common.models.vision.caption),
     which runs on the model server when --modelserver is set, else locally.
@@ -46,14 +45,18 @@ class IInstance(IInstanceBase):
         self._image_data = None
 
     def _emit(self, image):
-        """Caption one image and write the result to the text lane.
+        """Describe one image and write the result to the text lane.
 
         Args:
-            image: Decoded input PIL image for this frame.
+            image: Encoded image bytes for this frame.
         """
         if self.instance.hasListener('text'):
             with self.IGlobal.device_lock:
-                caption_text = self.IGlobal.captioner.caption(image)
+                caption_text = self.IGlobal.captioner.caption(
+                    image,
+                    prompt=self.IGlobal.prompt,
+                    max_new_tokens=self.IGlobal.max_new_tokens,
+                )
             self.instance.writeText(caption_text)
 
     def writeImage(self, action: int, mimeType: str, buffer: bytes):
@@ -73,8 +76,11 @@ class IInstance(IInstanceBase):
             self._image_data += buffer
         elif action == AVI_ACTION.END:
             try:
-                image = ImageProcessor.load_image_from_bytes(self._image_data)
-                self._emit(image)
+                # Hand the encoded bytes straight to the facade: it decodes only
+                # when a downscale is needed and otherwise transports the
+                # original (smaller) encoding; decode errors still land in this
+                # except block either way.
+                self._emit(bytes(self._image_data))
             except Exception as e:
                 warning(f'caption: inference failed, passing empty: {e}')
                 if self.instance.hasListener('text'):
