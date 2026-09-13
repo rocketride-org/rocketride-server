@@ -54,6 +54,11 @@ import { saveProject, displayName as projectDisplayName } from '../utils/project
 import { createProjectVfs } from '../utils/projectVfs';
 import { downloadJson } from '../utils/downloadFile';
 import DeploymentProvider from './DeploymentProvider';
+import { useAuthUser } from 'shell';
+import type { TraceLocator } from '../evaluations/types';
+import EvaluationTraceProvider from './EvaluationTraceProvider';
+
+const EvaluationWorkspace = React.lazy(() => import('../evaluations/EvaluationWorkspace'));
 
 // =============================================================================
 // CONSTANTS
@@ -150,6 +155,9 @@ interface ProjectPageProps {
  */
 const ProjectProvider: React.FC<ProjectPageProps> = ({ uri, pipeline, isDirty, isNew, isReadonly = false, initialViewState, onContentChanged, onViewStateChange: onViewStateChangeProp }) => {
 	const { client, isConnected } = useShellConnection();
+	const authUser = useAuthUser();
+	const hasEvaluations = (authUser?.capabilities ?? []).includes('evaluations');
+	const [evaluationTrace, setEvaluationTrace] = useState<TraceLocator | null>(null);
 	const { prefs, updatePrefs, settings } = useWorkspace();
 
 	// --- Unified settings (effective values incl. manifest defaults) ----------
@@ -903,6 +911,19 @@ const ProjectProvider: React.FC<ProjectPageProps> = ({ uri, pipeline, isDirty, i
 			<PrefsProvider value={prefsApi}>
 				<ProjectView
 					project={pipeline}
+					evaluationContent={
+						!isReadonly && hasEvaluations && client && pipeline ? (
+							<React.Suspense
+								fallback={
+									<div role="status" style={commonStyles.empty}>
+										Loading evaluations…
+									</div>
+								}
+							>
+								<EvaluationWorkspace key={projectId} project={{ ...pipeline }} projectName={projectDisplayName(filename)} client={client} onOpenTrace={setEvaluationTrace} />
+							</React.Suspense>
+						) : undefined
+					}
 					documentTitle={(() => {
 						const docState = getDocs()?.getState();
 						return (docState ? Object.values(docState.editors).find((editor) => editor.documentUri === uri)?.label : undefined) || projectDisplayName(filename);
@@ -937,6 +958,7 @@ const ProjectProvider: React.FC<ProjectPageProps> = ({ uri, pipeline, isDirty, i
 				    PrefsProvider so the drawer's width persistence reaches the
 				    workspace prefs. */}
 				{openDeployment && <DeploymentProvider key={`${openDeployment.teamId}:${openDeployment.sourceId ?? ''}:${projectId}`} teamId={openDeployment.teamId} {...(openDeployment.sourceId ? { sourceId: openDeployment.sourceId } : {})} projectId={projectId} onClose={() => setOpenDeployment(null)} onOpenSource={(sourceId: string) => setOpenDeployment({ teamId: openDeployment.teamId, sourceId })} />}
+				{evaluationTrace && client && <EvaluationTraceProvider client={client} trace={evaluationTrace} onClose={() => setEvaluationTrace(null)} />}
 			</PrefsProvider>
 			{/* Preselect the document's own folder/name (an untitled doc has no
 			    folder, so it opens at root with its "Untitled-N" placeholder). */}

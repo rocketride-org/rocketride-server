@@ -131,6 +131,8 @@ export default defineConfig(({ command }) => {
 					'/task': { target: 'http://localhost:5565', ws: true },
 					'/auth': { target: 'http://localhost:5565' },
 					'/api': { target: 'http://localhost:5565', ws: true },
+					'/evals': { target: 'http://localhost:5565' },
+					'/mcp': { target: 'http://localhost:5565' },
 					'/marketplace': { target: 'http://localhost:5565' },
 					'/sitemap.xml': { target: 'http://localhost:5565' },
 					'/robots.txt': { target: 'http://localhost:5565' },

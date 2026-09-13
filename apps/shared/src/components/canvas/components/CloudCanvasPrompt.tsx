@@ -17,8 +17,7 @@ import { commonStyles } from 'shell';
 // helpers are what DetailPanel uses to keep Escape from crossing between layers, but they
 // are not re-exported from `shell`'s index. Importing them here keeps this prompt on the
 // shared stack without widening shell's public API surface (which the gallery mirrors).
-// @ts-expect-error -- the shell source subpath requires its .tsx suffix.
-import { acquireOverlayLayer, isTopOverlayLayer, releaseOverlayLayer } from 'shell/src/components/modal/Modal.tsx';
+import { acquireOverlayLayer, isTopOverlayLayer, releaseOverlayLayer } from 'shell/src/components/modal/Modal.js';
 
 // =============================================================================
 // RocketRide mark

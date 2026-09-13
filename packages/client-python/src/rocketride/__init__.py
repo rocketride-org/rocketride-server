@@ -73,6 +73,7 @@ except Exception:
     pass
 
 # Import main classes for convenient access
+from .evals import EvalsApi, EvalsError
 from .schema import (
     Answer,
     Question,
@@ -180,6 +181,8 @@ __all__ = [
     'ConnectResult',
     'ServerInfoResult',
     'RocketRideClient',
+    'EvalsApi',
+    'EvalsError',
     'RocketRideClientConfig',
     'RocketRideException',
     'LogEventStream',

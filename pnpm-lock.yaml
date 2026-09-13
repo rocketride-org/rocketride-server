@@ -564,7 +564,7 @@ importers:
         version: 5.0.22
       '@module-federation/rsbuild-plugin':
         specifier: ^2.5.1
-        version: 2.5.1(@rsbuild/core@2.0.11(@module-federation/runtime-tools@2.5.1(node-fetch@2.7.0(encoding@0.1.13)))(core-js@3.48.0))(@rspack/core@2.0.6(@module-federation/runtime-tools@2.5.1(node-fetch@2.7.0(encoding@0.1.13)))(@swc/helpers@0.5.23))(node-fetch@2.7.0(encoding@0.1.13))(typescript@5.9.3)(webpack@5.104.1)
+        version: 2.5.1(@rsbuild/core@2.0.11(@module-federation/runtime-tools@2.5.1(node-fetch@2.7.0(encoding@0.1.13)))(core-js@3.48.0))(@rspack/core@2.0.6(@module-federation/runtime-tools@2.5.1(node-fetch@2.7.0(encoding@0.1.13)))(@swc/helpers@0.5.23))(node-fetch@2.7.0(encoding@0.1.13))(typescript@5.9.3)(webpack@5.104.1(esbuild@0.28.1))
       '@mui/icons-material':
         specifier: ~6.1.5
         version: 6.1.10(@mui/material@6.1.10(@emotion/react@11.13.5(@types/react@18.3.31)(react@18.3.1))(@emotion/styled@11.13.5(@emotion/react@11.13.5(@types/react@18.3.31)(react@18.3.1))(@types/react@18.3.31)(react@18.3.1))(@types/react@18.3.31)(react-dom@18.3.1(react@18.3.1))(react@18.3.1))(@types/react@18.3.31)(react@18.3.1)
@@ -683,6 +683,9 @@ importers:
       '@types/react-syntax-highlighter':
         specifier: ^15.5.13
         version: 15.5.13
+      esbuild:
+        specifier: 0.28.1
+        version: 0.28.1
       prop-types:
         specifier: ^15.8.1
         version: 15.8.1

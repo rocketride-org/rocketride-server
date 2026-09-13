@@ -97,7 +97,7 @@ export interface ViewState {
  * The former per-view modes (status/tokens/flow/trace/errors) became
  * per-source pills inside each page's SourcePanels.
  */
-export type ProjectViewMode = 'design' | 'development' | 'deploy';
+export type ProjectViewMode = 'design' | 'development' | 'deploy' | 'evaluations';
 
 /** Base view props (for ServerView, WelcomeView, etc.). */
 export interface IViewProps {

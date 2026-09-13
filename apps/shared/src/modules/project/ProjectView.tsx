@@ -48,6 +48,7 @@ import { createLiveEventStore, type LiveEventStore } from './hooks/liveEventSess
 import type { ProjectViewMode, ViewState, TaskStatus, TraceEvent } from './types';
 import { TASK_STATE } from './types';
 import { writeProjectPreference } from './projectPreferences';
+import { resolveViewMode, initialViewMode } from './viewMode';
 
 const CLOUD_CANVAS_PROMPT_DISMISSED_KEY = 'cloudCanvasPromptDismissed';
 
@@ -73,6 +74,8 @@ export interface IProjectViewProps {
 	 * page header is a shell-only element and no header renders without it.
 	 */
 	documentTitle?: string;
+	/** Managed evaluations supplied by a capable host; absent in OSS-only hosts. */
+	evaluationContent?: ReactNode;
 	/** Available node service definitions (keyed by provider). */
 	servicesJson: Record<string, any>;
 	/** Whether the host is connected to the RocketRide server. */
@@ -277,7 +280,7 @@ interface SourceInfo {
 // =============================================================================
 
 /** Non-canvas pages that render the document {@link ContentHeader}. */
-type DocSubView = 'development' | 'deploy';
+type DocSubView = 'development' | 'deploy' | 'evaluations';
 
 /**
  * Per-page header subtitles — "{Page} — {short descriptor}".
@@ -285,35 +288,26 @@ type DocSubView = 'development' | 'deploy';
 const DOC_SUBVIEW_SUBTITLES: Record<DocSubView, string> = {
 	development: 'Development — live monitoring and replay of your dev runs.',
 	deploy: 'Deploy — the deployed pipeline: scheduled runs, monitoring, and replay.',
+	evaluations: 'Evaluations — test changes, compare baselines, and inspect the evidence.',
 };
-
-/**
- * Map a persisted view mode from BEFORE the environment-page restructure
- * onto the new strip: the old monitoring modes all lived where the
- * DEVELOPMENT page now is.
- */
-function migrateViewMode(mode: string | undefined): ProjectViewMode {
-	if (mode === 'design' || mode === 'development' || mode === 'deploy') return mode;
-	if (mode === 'status' || mode === 'tokens' || mode === 'flow' || mode === 'trace' || mode === 'errors') {
-		return 'development';
-	}
-	return 'design';
-}
 
 // =============================================================================
 // COMPONENT
 // =============================================================================
 
-const ProjectView: React.FC<IProjectViewProps> = ({ project, documentTitle, servicesJson, isConnected, cloudConnectionConfigured, isSubscribed = true, statusMap, serverHost = '', isDirty = false, isNew = false, initialViewState, initialPrefs, onContentChanged, onValidate, getNodeSchema, onPipelineAction, onViewStateChange, onPrefsChange, onOpenLink, onOpenCloudSetup, oauth2RootUrl = OAUTH_ROOT_URL, oauthReturnUrl, onOpenExternal, pendingOAuthTokens, clearPendingOAuthTokens, onSave, onExport, isReadonly = false, envKeys, onMissingEnvVars, liveLogEvents = [], openEventStream, fetchTimeline, fetchDeployLifecycle, teamDeployments = [], deployTeams = [], onDeployPublish, onDeployVersion, onOpenDeployment, onDeploySetDisabled, onDeployRemove, onDeploySetSchedule, onDeploySetSchedulePaused, onDeployPreviewSchedule, fetchDeployArtifact, onSaveDocument }) => {
+const ProjectView: React.FC<IProjectViewProps> = ({ project, documentTitle, evaluationContent, servicesJson, isConnected, cloudConnectionConfigured, isSubscribed = true, statusMap, serverHost = '', isDirty = false, isNew = false, initialViewState, initialPrefs, onContentChanged, onValidate, getNodeSchema, onPipelineAction, onViewStateChange, onPrefsChange, onOpenLink, onOpenCloudSetup, oauth2RootUrl = OAUTH_ROOT_URL, oauthReturnUrl, onOpenExternal, pendingOAuthTokens, clearPendingOAuthTokens, onSave, onExport, isReadonly = false, envKeys, onMissingEnvVars, liveLogEvents = [], openEventStream, fetchTimeline, fetchDeployLifecycle, teamDeployments = [], deployTeams = [], onDeployPublish, onDeployVersion, onOpenDeployment, onDeploySetDisabled, onDeployRemove, onDeploySetSchedule, onDeploySetSchedulePaused, onDeployPreviewSchedule, fetchDeployArtifact, onSaveDocument }) => {
 	// --- Local view state (initialized from props, managed locally) -----------
 
 	const [viewState, setViewState] = useState<ViewState>(() => ({
 		// Persisted modes from before the environment-page restructure map
 		// onto the new strip (old monitoring modes -> DEVELOPMENT).
-		mode: migrateViewMode(initialViewState?.mode as string | undefined),
+		mode: initialViewMode(initialViewState?.mode, isReadonly),
 		flowViewMode: initialViewState?.flowViewMode ?? 'pipeline',
 		viewport: initialViewState?.viewport,
 	}));
+	// Do not load the managed workspace for every document on opening Design.
+	// Once visited, retain its draft state when switching back to the canvas.
+	const [evaluationsVisited, setEvaluationsVisited] = useState(viewState.mode === 'evaluations');
 
 	const [prefs, setPrefs] = useState<Record<string, unknown>>(() => initialPrefs ?? {});
 	useEffect(() => {
@@ -465,6 +459,7 @@ const ProjectView: React.FC<IProjectViewProps> = ({ project, documentTitle, serv
 
 	const handleModeChange = useCallback(
 		(id: string) => {
+			if (id === 'evaluations') setEvaluationsVisited(true);
 			updateViewState({ mode: id as ProjectViewMode });
 		},
 		[updateViewState]
@@ -540,14 +535,14 @@ const ProjectView: React.FC<IProjectViewProps> = ({ project, documentTitle, serv
 	const totalIssues = totalErrors + totalWarnings;
 	const viewMenu = useMemo<ViewMenu>(
 		() => ({
-			entries: [{ id: 'design', label: isReadonly ? 'Design (Readonly)' : 'Design' }, { id: 'development', label: 'Development', ...(totalIssues > 0 ? { count: totalIssues, severity: 'error' as const } : {}) }, ...(isReadonly ? [] : [{ id: 'deploy', label: 'Deploy' }])],
+			entries: [{ id: 'design', label: isReadonly ? 'Design (Readonly)' : 'Design' }, { id: 'development', label: 'Development', ...(totalIssues > 0 ? { count: totalIssues, severity: 'error' as const } : {}) }, ...(isReadonly ? [] : [{ id: 'deploy', label: 'Deploy' }]), ...(!isReadonly && evaluationContent ? [{ id: 'evaluations', label: 'Evaluations' }] : [])],
 		}),
-		[isReadonly, totalIssues]
+		[isReadonly, totalIssues, evaluationContent]
 	);
 
 	// A persisted mode of 'deploy' cannot land on a readonly tab (its page
 	// does not exist there) — clamp to the Development page.
-	const activeMode: ProjectViewMode = isReadonly && viewState.mode === 'deploy' ? 'development' : viewState.mode;
+	const activeMode = resolveViewMode(viewState.mode, isReadonly, Boolean(evaluationContent));
 
 	// --- Panels (all mounted; inactive panels hidden) --------------------------
 
@@ -674,6 +669,9 @@ const ProjectView: React.FC<IProjectViewProps> = ({ project, documentTitle, serv
 			// The dev environment: one self-contained section per source (its
 			// own pills, panes, and player over the dev continuum).
 			content: renderDocPanel(renderSections('dev')),
+		},
+		evaluations: {
+			content: !isReadonly && evaluationsVisited ? evaluationContent : null,
 		},
 		deploy: {
 			// The deploy LIFECYCLE surface (mockup v5 screen B): version strip,

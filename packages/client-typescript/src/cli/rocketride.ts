@@ -50,7 +50,7 @@
 
 import process from 'node:process';
 
-import { Command } from 'commander';
+import { Command, CommanderError } from 'commander';
 import { loadDotEnv } from './env';
 import { registerAuthCommands } from './commands/auth';
 import { registerTaskCommands } from './commands/tasks';
@@ -58,6 +58,7 @@ import { registerStoreCommands } from './commands/store';
 import { registerValidateCommands } from './commands/validate';
 import { registerAppCommands } from './commands/app';
 import { registerDeployCommands } from './commands/deploy';
+import { registerEvalsCommands } from './commands/evals';
 import { disconnectAll } from './common';
 
 // The workspace .env must be in process.env before the command groups
@@ -107,6 +108,7 @@ function createProgram(): Command {
 	registerStoreCommands(program);
 	registerAppCommands(program);
 	registerDeployCommands(program);
+	registerEvalsCommands(program);
 	return program;
 }
 
@@ -121,8 +123,11 @@ export async function main(): Promise<void> {
 	try {
 		await program.parseAsync(process.argv);
 	} catch (error) {
+		if (process.argv[2] === 'evals' && error instanceof CommanderError) {
+			process.exit(error.exitCode);
+		}
 		console.error(`Error: ${error instanceof Error ? error.message : String(error)}`);
-		process.exit(1);
+		process.exit(process.argv[2] === 'evals' ? 2 : 1);
 	}
 }
 

@@ -48,6 +48,7 @@ from .account import AccountApi
 from .billing import BillingApi
 from .database import DatabaseApi
 from .deploy import DeployApi
+from .evals import EvalsApi
 from .log import LogApi
 from .mixins.connection import ConnectionMixin
 from .mixins.execution import ExecutionMixin
@@ -213,6 +214,7 @@ class RocketRideClient(
         # Convert the HTTP/HTTPS URI (or bare host:port) to a wss:// or ws:// URI.
         # ws_path defaults to '/task/service'; model server clients pass '/models'.
         self._ws_path = kwargs.get('ws_path', '/task/service')
+        self._evals_uri = uri  # Preserve the original endpoint for HTTP validation.
         self._uri = ConnectionMixin._get_websocket_uri(uri, self._ws_path)
         self._apikey = auth
 
@@ -381,6 +383,11 @@ class RocketRideClient(
     def deploy(self) -> DeployApi:
         """Deployment management operations (add, remove, list, status, update)."""
         return DeployApi(self)
+
+    @cached_property
+    def evals(self) -> EvalsApi:
+        """Managed evaluations via bearer HTTP; no WebSocket connect is needed."""
+        return EvalsApi(lambda: (self._evals_uri, self._apikey or ''))
 
     @cached_property
     def log(self) -> LogApi:

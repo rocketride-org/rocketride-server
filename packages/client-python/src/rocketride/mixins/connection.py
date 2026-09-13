@@ -244,11 +244,12 @@ class ConnectionMixin(DAPClient):
         first. If already attached to the same URI, this is a no-op.
         """
         if uri:
+            self._evals_uri = uri
             normalised = self._get_websocket_uri(uri) if hasattr(self, '_get_websocket_uri') else uri
             if normalised != self._uri:
                 if self.is_attached():
                     await self.detach()
-                self._set_uri(normalised)
+                self._set_uri(uri)
         if self.is_attached():
             if self._desired_state == 'detached':
                 self._desired_state = 'attached'
@@ -292,10 +293,11 @@ class ConnectionMixin(DAPClient):
 
         # URI change → detach + re-attach
         if uri:
+            self._evals_uri = uri
             normalised = self._get_websocket_uri(uri) if hasattr(self, '_get_websocket_uri') else uri
             if normalised != self._uri:
                 await self.detach()
-                self._set_uri(normalised)
+                self._set_uri(uri)
                 await self._internal_attach(timeout)
 
         # Ensure attached
@@ -411,6 +413,7 @@ class ConnectionMixin(DAPClient):
 
     def _set_uri(self, uri: str) -> None:
         """Update the server URI (internal)."""
+        self._evals_uri = uri
         self._uri = self._get_websocket_uri(uri)
 
     def _set_auth(self, auth: str) -> None:

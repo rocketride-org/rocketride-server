@@ -1,0 +1,512 @@
+.rr-evaluations {
+	position: relative;
+	display: flex;
+	flex-direction: column;
+	flex: 1;
+	min-width: 0;
+	min-height: 0;
+	height: 100%;
+	color: var(--rr-text-primary);
+	background: var(--rr-bg-default);
+	font-family: var(--rr-font-family);
+	font-size: var(--rr-font-size-body, 13px);
+	line-height: 1.5;
+	container-type: inline-size;
+}
+.rr-evaluations *,
+.rr-evaluations *::before,
+.rr-evaluations *::after {
+	box-sizing: border-box;
+}
+.rr-evaluations [hidden] {
+	display: none !important;
+}
+.rr-eval-scroll {
+	flex: 1;
+	min-height: 0;
+	overflow: auto;
+	overscroll-behavior: contain;
+	padding: 20px 24px 40px;
+}
+.rr-evaluations h2,
+.rr-evaluations h3,
+.rr-evaluations h4,
+.rr-evaluations p {
+	margin: 0;
+}
+.rr-evaluations h2 {
+	font-size: 21px;
+	font-weight: 600;
+}
+.rr-evaluations h3 {
+	font-size: 15px;
+	font-weight: 600;
+}
+.rr-evaluations h4 {
+	font-size: 13px;
+	font-weight: 600;
+	margin-bottom: 8px;
+}
+.rr-evaluations p + p {
+	margin-top: 8px;
+}
+.rr-evaluations a {
+	color: var(--rr-text-link);
+}
+.rr-evaluations summary {
+	cursor: pointer;
+	padding: 6px 0;
+	font-weight: 500;
+	overflow-wrap: anywhere;
+}
+.rr-evaluations details > :not(summary) {
+	margin-top: 10px;
+}
+.rr-evaluations button:focus-visible,
+.rr-evaluations select:focus-visible,
+.rr-evaluations textarea:focus-visible,
+.rr-evaluations input:focus-visible,
+.rr-evaluations summary:focus-visible,
+.rr-evaluations [role='tab']:focus-visible {
+	outline: 2px solid var(--rr-border-focus, var(--rr-brand));
+	outline-offset: 2px;
+}
+.rr-evaluations input[type='number'] {
+	font-variant-numeric: tabular-nums;
+}
+.rr-evaluations input:disabled,
+.rr-evaluations select:disabled,
+.rr-evaluations textarea:disabled {
+	opacity: 0.6;
+	cursor: default;
+}
+.rr-evaluations input[type='checkbox'] {
+	accent-color: var(--rr-brand);
+	width: 16px;
+	height: 16px;
+	flex-shrink: 0;
+}
+.rr-eval-stack,
+.rr-eval-fields {
+	display: flex;
+	flex-direction: column;
+	gap: 16px;
+	min-width: 0;
+}
+.rr-eval-fields {
+	border: 0;
+	padding: 0;
+	margin: 0;
+}
+.rr-eval-header,
+.rr-eval-section-heading,
+.rr-eval-snapshot {
+	display: flex;
+	align-items: flex-start;
+	justify-content: space-between;
+	gap: 16px;
+	flex-wrap: wrap;
+}
+.rr-eval-header {
+	margin-bottom: 20px;
+}
+.rr-eval-header > div,
+.rr-eval-section-heading > div {
+	min-width: 0;
+}
+.rr-eval-header p,
+.rr-eval-section-heading p {
+	margin-top: 4px;
+	color: var(--rr-text-secondary);
+}
+.rr-eval-actions {
+	display: flex;
+	align-items: center;
+	flex-wrap: wrap;
+	gap: 8px;
+}
+.rr-eval-library {
+	display: grid;
+	grid-template-columns: minmax(220px, 1fr) auto;
+	align-items: end;
+	gap: 16px;
+	margin-bottom: 16px;
+}
+.rr-eval-section {
+	padding: 20px;
+	border: 1px solid var(--rr-border);
+	border-radius: 6px;
+	background: var(--rr-bg-paper);
+	min-width: 0;
+}
+.rr-eval-section + .rr-eval-section {
+	margin-top: 16px;
+}
+.rr-eval-section-heading {
+	margin-bottom: 16px;
+}
+.rr-eval-form-grid {
+	display: grid;
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+	gap: 16px;
+}
+.rr-eval-field {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+	min-width: 0;
+}
+.rr-eval-field > label {
+	font-size: 12px;
+	font-weight: 600;
+}
+.rr-eval-textarea {
+	display: block;
+	width: 100%;
+	min-width: 0;
+	padding: 9px 11px;
+	resize: vertical;
+	min-height: 64px;
+	border: 1px solid var(--rr-border-input);
+	border-radius: 4px;
+	background: var(--rr-bg-input);
+	color: var(--rr-text-primary);
+	font: inherit;
+	line-height: 1.5;
+}
+.rr-eval-muted {
+	color: var(--rr-text-secondary);
+	font-size: 12px;
+	overflow-wrap: anywhere;
+}
+.rr-eval-field > .rr-eval-muted {
+	font-size: 11px;
+}
+.rr-eval-notice {
+	border: 1px solid var(--rr-border);
+	border-left: 3px solid var(--rr-color-info);
+	border-radius: 4px;
+	padding: 12px 14px;
+	margin-bottom: 12px;
+	background: var(--rr-bg-surface);
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+}
+.rr-eval-notice-error {
+	border-left-color: var(--rr-color-error);
+}
+.rr-eval-notice ul {
+	margin: 8px 0 0;
+	white-space: normal;
+	padding-left: 20px;
+}
+.rr-eval-help {
+	margin: 10px 0 16px;
+	color: var(--rr-text-secondary);
+	font-size: 12px;
+}
+.rr-eval-help ul {
+	padding-left: 20px;
+}
+.rr-eval-snapshot {
+	margin-top: 18px;
+	padding: 14px;
+	background: var(--rr-bg-surface);
+	border: 1px solid var(--rr-border);
+	border-radius: 4px;
+}
+.rr-eval-scorer {
+	border: 1px solid var(--rr-border);
+	border-radius: 4px;
+	padding: 16px;
+	margin-top: 12px;
+	min-width: 0;
+}
+.rr-eval-scorer > .rr-eval-field,
+.rr-eval-scorer > .rr-eval-fields,
+.rr-eval-scorer > div > .rr-eval-field {
+	margin-top: 12px;
+}
+.rr-eval-count {
+	display: inline-block;
+	margin-left: 4px;
+	padding: 0 7px;
+	border-radius: 12px;
+	background: var(--rr-bg-surface-alt);
+	color: var(--rr-text-secondary);
+	font-size: 11px;
+}
+.rr-eval-checkbox {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	cursor: pointer;
+}
+.rr-eval-empty {
+	padding: 32px 20px;
+	text-align: center;
+	gap: 8px;
+}
+.rr-eval-empty p {
+	max-width: 540px;
+	color: var(--rr-text-secondary);
+}
+.rr-eval-table-wrap {
+	overflow-x: auto;
+	margin-top: 16px;
+	max-width: 100%;
+}
+.rr-eval-table {
+	width: 100%;
+	border-collapse: collapse;
+	text-align: left;
+	font-size: 12px;
+}
+.rr-eval-table th,
+.rr-eval-table td {
+	border-bottom: 1px solid var(--rr-border);
+	padding: 10px 12px;
+	vertical-align: top;
+	overflow-wrap: anywhere;
+}
+.rr-eval-table thead th {
+	background: var(--rr-bg-surface);
+	color: var(--rr-text-secondary);
+	font-weight: 600;
+	white-space: nowrap;
+}
+.rr-eval-table tbody th {
+	font-weight: 500;
+	min-width: 120px;
+}
+.rr-eval-table tbody tr:hover {
+	background: var(--rr-bg-list-hover);
+}
+.rr-eval-table small {
+	display: block;
+	color: var(--rr-text-secondary);
+	font-size: 10px;
+	margin-top: 4px;
+}
+.rr-eval-link {
+	border: 0;
+	padding: 0;
+	background: none;
+	color: var(--rr-text-link);
+	font: inherit;
+	font-weight: 600;
+	text-align: left;
+	cursor: pointer;
+}
+.rr-eval-link:hover {
+	text-decoration: underline;
+}
+.rr-eval-preview {
+	display: -webkit-box;
+	-webkit-line-clamp: 3;
+	-webkit-box-orient: vertical;
+	overflow: hidden;
+	min-width: 100px;
+	max-width: 360px;
+	white-space: pre-wrap;
+}
+.rr-eval-code,
+.rr-eval-code-block {
+	font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+	font-size: 12px;
+}
+.rr-eval-code-block {
+	padding: 12px;
+	border: 1px solid var(--rr-border);
+	border-radius: 4px;
+	background: var(--rr-bg-surface);
+	color: var(--rr-text-primary);
+	max-height: 420px;
+	overflow: auto;
+	overflow-wrap: anywhere;
+	white-space: pre-wrap;
+	tab-size: 2;
+	margin: 8px 0;
+}
+.rr-eval-prewrap {
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+}
+.rr-eval-status {
+	display: inline-flex;
+	align-items: center;
+	padding: 2px 8px;
+	border-radius: 4px;
+	border: 1px solid currentcolor;
+	font-size: 10px;
+	font-weight: 600;
+	line-height: 1.5;
+	text-transform: uppercase;
+	white-space: nowrap;
+	color: var(--rr-text-secondary);
+}
+.rr-eval-status-pass,
+.rr-eval-status-reviewed,
+.rr-eval-status-compatible,
+.rr-eval-status-saved {
+	color: var(--rr-color-success);
+}
+.rr-eval-status-fail,
+.rr-eval-status-error {
+	color: var(--rr-color-error);
+}
+.rr-eval-status-running,
+.rr-eval-status-queued {
+	color: var(--rr-color-info);
+}
+.rr-eval-status-incomplete,
+.rr-eval-status-unreviewed,
+.rr-eval-status-unsaved {
+	color: var(--rr-color-warning);
+}
+.rr-eval-progress {
+	display: flex;
+	justify-content: space-between;
+	flex-wrap: wrap;
+	gap: 8px;
+	color: var(--rr-text-secondary);
+	font-size: 12px;
+}
+.rr-evaluations progress {
+	display: block;
+	width: 100%;
+	height: 6px;
+	margin: 10px 0 18px;
+	border: 0;
+	border-radius: 4px;
+	background: var(--rr-bg-surface-alt);
+	accent-color: var(--rr-brand);
+}
+.rr-evaluations progress::-webkit-progress-bar {
+	background: var(--rr-bg-surface-alt);
+	border-radius: 4px;
+}
+.rr-evaluations progress::-webkit-progress-value {
+	background: var(--rr-brand);
+	border-radius: 4px;
+}
+.rr-evaluations progress::-moz-progress-bar {
+	background: var(--rr-brand);
+	border-radius: 4px;
+}
+.rr-eval-metrics {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
+	gap: 10px;
+	margin-bottom: 14px;
+}
+.rr-eval-metric {
+	padding: 12px;
+	border-radius: 4px;
+	background: var(--rr-bg-surface);
+	border: 1px solid var(--rr-border);
+	min-width: 0;
+}
+.rr-eval-metric span {
+	display: block;
+	text-transform: capitalize;
+	color: var(--rr-text-secondary);
+	font-size: 11px;
+}
+.rr-eval-metric strong {
+	display: block;
+	font-size: 20px;
+	font-weight: 600;
+	font-variant-numeric: tabular-nums;
+	overflow-wrap: anywhere;
+}
+.rr-eval-identities {
+	display: grid;
+	grid-template-columns: max-content minmax(0, 1fr);
+	gap: 8px 16px;
+	font-size: 12px;
+}
+.rr-eval-identities dt {
+	color: var(--rr-text-secondary);
+}
+.rr-eval-identities dd {
+	margin: 0;
+	overflow-wrap: anywhere;
+}
+.rr-eval-chat {
+	display: flex;
+	flex-direction: column;
+	gap: 12px;
+}
+.rr-eval-message {
+	padding: 14px 16px;
+	border: 1px solid var(--rr-border);
+	border-radius: 6px;
+	background: var(--rr-bg-paper);
+	max-width: 90%;
+	min-width: 160px;
+}
+.rr-eval-message-you {
+	align-self: flex-end;
+	background: var(--rr-bg-surface);
+}
+.rr-eval-message p {
+	margin-top: 6px;
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+}
+.rr-eval-message strong {
+	font-size: 11px;
+	color: var(--rr-text-secondary);
+}
+.rr-eval-diff details {
+	border-top: 1px solid var(--rr-border);
+	padding: 8px 0;
+}
+.rr-eval-sr-only {
+	position: absolute;
+	width: 1px;
+	height: 1px;
+	padding: 0;
+	overflow: hidden;
+	clip-path: inset(50%);
+	white-space: nowrap;
+	border: 0;
+}
+@container (max-width: 760px) {
+	.rr-eval-scroll {
+		padding: 16px 12px 28px;
+	}
+	.rr-eval-library,
+	.rr-eval-form-grid {
+		grid-template-columns: minmax(0, 1fr);
+	}
+	.rr-eval-section {
+		padding: 14px;
+	}
+	.rr-eval-header {
+		gap: 12px;
+	}
+	.rr-eval-identities {
+		grid-template-columns: minmax(0, 1fr);
+		gap: 3px;
+	}
+	.rr-eval-identities dd {
+		margin-bottom: 8px;
+	}
+	.rr-eval-message {
+		max-width: 100%;
+	}
+}
+@media (max-width: 600px) {
+	.rr-eval-scroll {
+		padding: 12px 10px 24px;
+	}
+	.rr-eval-library,
+	.rr-eval-form-grid {
+		grid-template-columns: minmax(0, 1fr);
+	}
+	.rr-evaluations > [role='tablist'] {
+		overflow-x: auto;
+	}
+}

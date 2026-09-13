@@ -48,6 +48,8 @@ EXPECTED_TOOL_NAMES = (
     'log_trace',
     # scaffold
     'scaffold_node',
+    # managed evaluations (SaaS capability required)
+    'evaluations',
     # integrations
     'list_integrations',
 )
