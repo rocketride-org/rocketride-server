@@ -30,6 +30,7 @@ Command surface (kept in exact parity with the TypeScript client's CLI):
     list                       List active tasks
     start / stop / upload      Task lifecycle
     validate <files...>        Validate pipeline files (CI-friendly exit codes)
+    diff <old> <new>           Semantic .pipe diff (fully local; no server)
     store dir/type/write/...   File store operations
     app create/deploy/verify   App lifecycle
     deploy add/list/publish/.. Deploy lifecycle (deployment target)
@@ -232,6 +233,62 @@ def setup_parser() -> argparse.ArgumentParser:
     validate_parser.add_argument('files', nargs='+', help='Pipeline .pipe files or glob patterns to validate')
     validate_parser.add_argument('--source', default=None, help='Override source component ID for validation')
 
+    # ── diff ─────────────────────────────────────────────────────────────
+    # This command is intentionally *local only*: it never contacts the engine
+    # or the network, so it does NOT take the shared --uri/--apikey connection
+    # arguments (_add_connection_args) that every other command uses, and its
+    # --json is a plain format flag rather than the shared --json [FILE].
+    diff_parser = subparsers.add_parser(
+        'diff',
+        help='Semantic diff of two .pipe pipeline files (local; no server)',
+        description=(
+            'Compare two RocketRide .pipe pipeline files semantically, surfacing node, '
+            'edge, and config changes while ignoring canvas layout noise (the per-node '
+            '"ui" block and top-level "viewport"). This command runs entirely locally '
+            'and never connects to the engine or network, so it takes no '
+            '--uri/--apikey arguments.'
+        ),
+        epilog=(
+            'Exit codes: 0 = no semantic changes (or --exit-zero); 1 = semantic changes found; '
+            '2 = usage error, or an unreadable/unparseable file or bad git ref.'
+        ),
+    )
+    diff_parser.add_argument(
+        'paths',
+        nargs='*',
+        metavar='FILE',
+        help='Two pipe files to compare (old new), or a single FILE when using --git',
+    )
+    diff_parser.add_argument(
+        '--git',
+        metavar='REF',
+        help='Diff the working-tree FILE against this git ref (via "git show REF:FILE")',
+    )
+    diff_parser.add_argument(
+        '--include-layout',
+        action='store_true',
+        help='Include layout churn (per-node "ui" blocks and top-level "viewport") ignored by default',
+    )
+
+    # --json and --markdown select mutually exclusive output formats.
+    diff_format_group = diff_parser.add_mutually_exclusive_group()
+    diff_format_group.add_argument(
+        '--json',
+        action='store_true',
+        help='Emit the diff as a single JSON document to stdout',
+    )
+    diff_format_group.add_argument(
+        '--markdown',
+        action='store_true',
+        help='Emit the diff as compact, PR-comment-friendly Markdown to stdout',
+    )
+
+    diff_parser.add_argument(
+        '--exit-zero',
+        action='store_true',
+        help='Always exit 0 on a successful run, even when changes are found (non-gating)',
+    )
+
     # ── store ────────────────────────────────────────────────────────────
     store_parser = subparsers.add_parser('store', help='File store operations')
     store_subparsers = store_parser.add_subparsers(dest='store_subcommand', help='Store commands', metavar='COMMAND')
@@ -421,6 +478,7 @@ async def _dispatch(args) -> int:
     from .commands.app import run_app
     from .commands.auth import run_init, run_login
     from .commands.deploy import run_deploy
+    from .commands.diff import run_diff
     from .commands.store import run_store
     from .commands.tasks import run_list, run_start, run_stop, run_upload
     from .commands.validate import run_validate
@@ -439,6 +497,8 @@ async def _dispatch(args) -> int:
         return await run_upload(args)
     if args.command == 'validate':
         return await run_validate(args)
+    if args.command == 'diff':
+        return await run_diff(args)
     if args.command == 'store':
         if not getattr(args, 'store_subcommand', None):
             print('Error: Store subcommand is required (dir, type, write, rm, mkdir, stat)', file=sys.stderr)

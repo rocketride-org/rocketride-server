@@ -787,11 +787,12 @@ rocketride stop --token <token>              # Terminate a running task
 rocketride list                              # List all active tasks
 rocketride events ALL --token <token>        # Stream task events
 rocketride store dir /                       # List the root of the file store
+rocketride diff old.pipe new.pipe            # Semantic diff of two .pipe files (local; no server)
 ```
 
 The `store` command's sub-commands are `dir`, `type`, `write`, `rm`, `mkdir`, and `stat` — run `rocketride store --help` for details.
 
-All commands accept `--uri` and `--apikey` flags, or read from environment variables.
+All commands **except `diff`** accept `--uri` and `--apikey` flags, or read from environment variables. `diff` compares parsed `.pipe` JSON entirely on your machine — it never connects to an engine, so it takes no connection flags. See the [CLI reference](/cli) for its flags and exit codes.
 
 ## Configuration
 

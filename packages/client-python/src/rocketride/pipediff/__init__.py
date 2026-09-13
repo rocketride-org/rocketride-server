@@ -21,40 +21,41 @@
 # SOFTWARE.
 
 """
-CLI command implementations.
+Semantic diff for RocketRide ``.pipe`` pipeline files.
 
-Each module exposes async ``run_*`` entry points dispatched from
-``cli.main``; all of them route their output through the shared
-``Output`` channel so human and ``--json`` modes behave identically.
+``rocketride diff`` surfaces what actually changed between two pipeline
+definitions — added/removed/reconfigured nodes and rewired edges — instead of the
+raw JSON churn dominated by canvas coordinates. This package is the pure,
+network-free implementation behind the CLI subcommand and the PR-comment GitHub
+Action.
 
-Modules:
-    auth: ``login`` and ``init``
-    tasks: ``start``, ``stop``, ``upload``, ``list``
-    store: ``store`` subcommands
-    app: ``app`` subcommands
-    deploy: ``deploy`` subcommands
-    validate: ``validate`` (pipeline files, CI-friendly exit codes)
-    diff: ``diff`` (semantic ``.pipe`` diff, entirely local — no server)
+Public API:
+    Data model:
+        NodeChange, FieldChange, EdgeChange, PipeDiff
+    Engine:
+        load_pipe, diff_pipes, deep_diff_config, PipeDiffError
+    Git resolution:
+        resolve_git_ref
+    Reporters (rendering):
+        render_human, render_json, render_markdown
 """
 
-from .app import run_app
-from .auth import run_init, run_login
-from .deploy import run_deploy
-from .diff import run_diff
-from .store import run_store
-from .tasks import run_list, run_start, run_stop, run_upload
-from .validate import run_validate
+from .engine import PipeDiffError, deep_diff_config, diff_pipes, load_pipe
+from .gitref import resolve_git_ref
+from .model import EdgeChange, FieldChange, NodeChange, PipeDiff
+from .reporters import render_human, render_json, render_markdown
 
 __all__ = [
-    'run_app',
-    'run_deploy',
-    'run_diff',
-    'run_init',
-    'run_list',
-    'run_login',
-    'run_start',
-    'run_stop',
-    'run_store',
-    'run_upload',
-    'run_validate',
+    'NodeChange',
+    'FieldChange',
+    'EdgeChange',
+    'PipeDiff',
+    'PipeDiffError',
+    'load_pipe',
+    'diff_pipes',
+    'deep_diff_config',
+    'resolve_git_ref',
+    'render_human',
+    'render_json',
+    'render_markdown',
 ]
