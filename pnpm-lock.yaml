@@ -1199,6 +1199,9 @@ importers:
       ignore:
         specifier: ^7.0.5
         version: 7.0.5
+      react:
+        specifier: ^18.2.0 || ^19.0.0
+        version: 18.3.1
     devDependencies:
       '@jest/globals':
         specifier: ^30.4.1
@@ -1212,6 +1215,9 @@ importers:
       '@types/node':
         specifier: ^20.19.41
         version: 20.19.41
+      '@types/react':
+        specifier: ^18.3.1
+        version: 18.3.31
       '@types/ws':
         specifier: ^8.18.1
         version: 8.18.1

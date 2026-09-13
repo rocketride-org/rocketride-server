@@ -12,7 +12,7 @@
 		"paths": {
 			"shell": ["./src/trace-viewer/shell-shim.ts"],
 			"shell/src/*": ["../../../../../../../apps/shared/node_modules/shell/src/*"],
-			"rocketride": ["../../../../../../../apps/shared/node_modules/rocketride/dist/types/index.d.ts"],
+			"rocketride": ["../../../../../../../apps/shared/node_modules/rocketride/dist/types/client/index.d.ts"],
 			"@app-shared/*": ["../../../../../../../apps/shared/src/*"]
 		}
 	},

@@ -93,7 +93,16 @@ tarball bundles the SDK's types too, so `import type { ... } from
 resolve to the host's live singletons through Module Federation — nothing
 platform-side is ever compiled into your bundle. (The SDK also publishes
 the same app surface as the `rocketride/app-sdk` subpath for apps built
-outside a RocketRide workspace; inside one, import from `'shell'`.)
+outside a RocketRide workspace; inside one, import from `'shell'`. Its
+types resolve through `package.json`'s `exports` map, so the external
+app's own `tsconfig.json` needs a `moduleResolution` that consults it —
+`"bundler"`, `"node16"`, or `"nodenext"` paired with the matching
+`module` setting; the legacy `"node"` resolver won't find them. Every
+value it exports — hooks, `connectionManager`, `Documents` — is a stub
+that Module Federation replaces with the shell's real implementation at
+runtime; calling one outside the host throws a clear error rather than
+returning `undefined`, so mock the module in tests that exercise this
+code without a host.)
 
 ---
 

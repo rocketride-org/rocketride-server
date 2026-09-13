@@ -66,9 +66,13 @@
 		"ignore": "^7.0.5"
 	},
 	"peerDependencies": {
+		"react": "^18.2.0 || ^19.0.0",
 		"sequelize": "^6.37.8"
 	},
 	"peerDependenciesMeta": {
+		"react": {
+			"optional": true
+		},
 		"sequelize": {
 			"optional": true
 		}
@@ -81,6 +85,7 @@
 		"@types/adm-zip": "^0.5.8",
 		"@types/jest": "^30.0.0",
 		"@types/node": "^20.19.41",
+		"@types/react": "^18.3.1",
 		"@types/ws": "^8.18.1",
 		"jest": "^29.0.0",
 		"jest-jasmine2": "^30.4.2",
