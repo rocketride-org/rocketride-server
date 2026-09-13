@@ -1,0 +1,5 @@
+# The IANA timezone database, which `zoneinfo` needs and does not ship.
+# Absent it EVERY zone name fails to resolve and every answer falls back to
+# UTC - which is the exact wrong-by-an-offset bug this node exists to remove.
+# Present on most Linux images, never on Windows, and not in slim containers.
+tzdata
