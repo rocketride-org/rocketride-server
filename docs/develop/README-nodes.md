@@ -36,13 +36,13 @@ The complete lane-type ontology and who produces / consumes each type:
 | `questions` |     17      |     39      | A query/prompt envelope flowing toward a model     |
 | `answers`   |     36      |      6      | A model/agent response                             |
 | `documents` |     29      |     23      | Chunked/embeddable document records                |
-| `text`      |     23      |     15      | Plain text                                         |
+| `text`      |     24      |     15      | Plain text                                         |
 | `table`     |     10      |      5      | Structured/tabular data                            |
 | `image`     |      6      |     10      | Image payloads                                     |
 | `audio`     |      4      |      3      | Audio payloads                                     |
 | `video`     |      3      |      6      | Video payloads                                     |
 | `tags`      |      3      |      3      | Metadata/markers attached to records               |
-| `_source`   |      0      |      5      | Entry lane of **source** nodes (external triggers) |
+| `_source`   |      0      |      6      | Entry lane of **source** nodes (external triggers) |
 
 A typical RAG flow chains these types end to end:
 `webhook (_source → questions)` → `embedding_openai (questions → questions)` →
@@ -278,6 +278,7 @@ channel; they have no data lanes and **bind to an agent** (see
 | ---------- | ------------------------------------------------- | -------------------------------------------- |
 | `webhook`  | _source → questions / tags / audio, image, text, video … | HTTP intake: chat, dropper, and ADS variants |
 | `telegram` | _source → audio, image, tags, text, video         | Telegram Bot message source                  |
+| `tick`     | _source → text                                    | One-shot timer source for scheduled runs     |
 
 > Filesystem and cloud connector sources (Google Drive, OneDrive, SharePoint,
 > Slack, Confluence, SMB, S3, Azure Blob, GCS, …) are provided by the **`core`**

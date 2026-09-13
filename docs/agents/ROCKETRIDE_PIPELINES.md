@@ -298,6 +298,7 @@ data. The complete set in the current catalog:
 | `filestore_source` | `tags` | Reads from a RocketRide file store |
 | `filesys` | `tags` | Reads from the local file system |
 | `telegram` | `text`, `image`, `audio`, `video`, `tags` | Telegram Bot messages, routed per message type |
+| `tick` | `text` | Fires once at task start (scheduled/timed runs) — no client method; pair with `deploy.setSchedule()` |
 | `tools` | — (nothing) | Transfers no data; exists to **host tool nodes** via invoke |
 
 (`remote` is NOT a source — it is an infrastructure transport for distributed pipelines.)
