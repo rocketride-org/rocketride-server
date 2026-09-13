@@ -209,6 +209,11 @@ calls `close()`.
 | `close` | `async def close(self) -> PIPELINE_RESULT` | `PIPELINE_RESULT` | Closes the pipe and returns the processing result. |
 | `tool` | `async def tool(self, *, tool: str, node_id: str = '', input: dict = None) -> Any` | `Any` | Invokes a pipeline tool function through the pipe. |
 
+`open()` retries once automatically if it hits a transient "Connect call
+failed" while the pipeline's data listener is still starting up (worst case
+adds ~1.75s); a `PipeException` from `open()` means it kept failing past that
+retry budget.
+
 ## Question
 
 From `rocketride.schema`. Build a question for

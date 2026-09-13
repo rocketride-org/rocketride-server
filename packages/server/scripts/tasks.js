@@ -26,6 +26,7 @@
  *
  * Handles downloading pre-built server binaries or compiling from source.
  */
+
 const path = require('path');
 const os = require('os');
 const { glob } = require('glob');
@@ -777,6 +778,10 @@ function makeSetupJreAction() {
 			const result = await copyJavaJre();
 			if (!result.copied) {
 				task.output = result.reason;
+				// A silent no-op here means the engine starts without jvm.dll
+				// and every pipeline task fails; warn loudly so the missing
+				// JRE is diagnosable from the build log.
+				console.warn(`WARNING: JRE not staged into dist — ${result.reason}`);
 			} else {
 				task.output = result.stats ? formatSyncStats(result.stats) : 'Synced JRE';
 			}
@@ -1098,7 +1103,7 @@ function makeBuildCoreAction() {
 			whenNot({
 				name: 'ready',
 				condition: (ctx) => ctx.serverReady,
-				then: [parallel(['server:setup-tools', 'vcpkg:submodule-build', 'java:setup-jdk'], 'Setup build tools'), 'server:configure', 'server:compile-engine', parallel(['server:setup-python', 'server:setup-jre'], 'Setup dependencies'), parallel(['server:setup-runtime-libs', 'server:setup-samba'], 'Setup runtime'), 'tika:submodule-build'],
+				then: [parallel(['server:setup-tools', 'vcpkg:submodule-build', 'java:setup-jdk', 'java:setup-jre'], 'Setup build tools'), 'server:configure', 'server:compile-engine', parallel(['server:setup-python', 'server:setup-jre'], 'Setup dependencies'), parallel(['server:setup-runtime-libs', 'server:setup-samba'], 'Setup runtime'), 'tika:submodule-build'],
 			}),
 		],
 	};
