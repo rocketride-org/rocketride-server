@@ -316,9 +316,28 @@ class TestHallucination:
         behaviour behind it would make the flag do nothing exactly where it is set.
         """
         engine = _make_engine(enable_hallucination_check=False, require_grounding=True)
-        result = engine.evaluate('Some confident claim.', mode='output', context={'source_documents': []})
+        result = engine.evaluate(
+            'The settlement was $12.4 million.',
+            mode='output',
+            context={'source_documents': [], 'question_text': 'What did the board decide?'},
+        )
 
         assert any(v['rule'] == 'hallucination' for v in result['violations'])
+
+    def test_grounding_does_not_re_enable_coverage_the_operator_turned_off(self):
+        """require_grounding covers the empty-retrieval branch, not sentence scoring.
+
+        Both are reachable from the Custom profile, so turning coverage off has to
+        stay off for answers that do have documents behind them.
+        """
+        engine = _make_engine(enable_hallucination_check=False, require_grounding=True)
+        result = engine.evaluate(
+            'The turbine reached full output in November.',
+            mode='output',
+            context={'source_documents': ['An unrelated note about crop rotation.']},
+        )
+
+        assert not any(v['rule'] == 'hallucination' for v in result['violations'])
 
     def test_a_pipeline_with_no_documents_lane_is_not_a_retrieval_miss(self):
         """No documents lane at all is not the same as a search that matched nothing.
@@ -425,25 +444,70 @@ class TestHallucination:
             result = engine.check_hallucination(reply, source_documents=[], retrieval_ran=True, question_text=question)
             assert not result['passed'], reply
 
-    def test_the_common_ways_a_model_declines_are_recognised(self):
-        """A refusal the phrase list misses is a refusal Strict drops.
+    def test_a_refusal_is_kept_however_it_is_worded(self):
+        """The check must not depend on a refusal matching a fixed phrase list.
 
-        Seven of eleven realistic phrasings were missed before, including "no data
-        available" and "not found in the documents", which is the same silent drop
-        the grounding path exists to avoid.
+        A closed list drops the refusals it does not recognise, which is the silent
+        loss the grounding path exists to prevent, so these are worded deliberately
+        outside it as well as inside.
         """
         engine = _make_engine(require_grounding=True)
 
         for reply in (
             'No data available for that period.',
             'That information was not found in the documents.',
-            'I cannot determine that from the provided sources.',
-            'The answer is not specified in the documents.',
-            'That figure is not mentioned anywhere in the sources.',
-            'There is insufficient information to answer.',
-            'No relevant documents were retrieved.',
+            "I'm sorry, I couldn't find that in the knowledge base.",
+            'I was unable to locate any relevant material.',
+            'There are no results for that query.',
+            "Sorry, that isn't something I can confirm.",
+            'That question falls outside what the sources cover.',
+            'Nothing in the material speaks to that.',
         ):
             assert engine.check_hallucination(reply, source_documents=[], retrieval_ran=True)['passed'], reply
+
+    def test_an_ordinary_conversational_turn_is_not_a_grounding_failure(self):
+        """Empty retrieval is routine in a chat, and blocking these ends the chat.
+
+        Strict calls preventDefault with no fallback, so a turn judged ungrounded
+        reaches the user as nothing at all.
+        """
+        engine = _make_engine(require_grounding=True)
+
+        for reply in (
+            'Hello! How can I help you today?',
+            "You're welcome!",
+            'Sure, here is a summary of what we discussed: the plan is on track.',
+            'Could you clarify which contract you mean?',
+            'Understood, I will use the second option.',
+            # Naming something is not asserting anything about it. Treating a
+            # capitalised word as a claim blocks these, which is the same silent
+            # drop as the phrase list, so the signal stays on stated figures.
+            "OK, I'll check the Salesforce data next time.",
+            'I do not have that. The Help Center may cover it.',
+            'Unfortunately that is not in the documents. Try the Overview section instead.',
+        ):
+            result = engine.evaluate(
+                reply,
+                mode='output',
+                context={'source_documents': [], 'retrieval_ran': True, 'question_text': 'thanks for the help'},
+            )
+            assert result['action'] != 'block', reply
+
+    def test_an_answer_figure_shorter_than_the_question_figure_is_still_a_claim(self):
+        """Comparing against the raw question let a prefix read as a quoted figure.
+
+        This is the mirror of the shared-leading-digit case: the fabricated amount is
+        the shorter of the two, so a containment test finds it inside the question.
+        """
+        engine = _make_engine(require_grounding=True)
+
+        for reply, question in (
+            ('The fee was $9, but that is not available.', 'Was Apple net income $94.7B in FY2024?'),
+            ('The fee was $1, but that is not available.', 'Was the fee $1,250?'),
+            ('Growth was 2%, though the sources do not contain it.', 'Did revenue grow 25%?'),
+        ):
+            result = engine.check_hallucination(reply, source_documents=[], retrieval_ran=True, question_text=question)
+            assert not result['passed'], reply
 
     def test_a_wider_phrase_list_does_not_widen_the_hedge(self):
         """A fabrication using one of the added phrases is still judged on its figure."""
@@ -564,7 +628,11 @@ class TestHallucination:
     def test_evaluate_defaults_to_retrieval_having_run(self):
         """A caller that does not report the lane keeps the stricter reading."""
         engine = _make_engine(require_grounding=True)
-        result = engine.evaluate('A confident claim.', mode='output', context={'source_documents': []})
+        result = engine.evaluate(
+            'The rate settled at 4.75%.',
+            mode='output',
+            context={'source_documents': [], 'question_text': 'Who chairs the committee?'},
+        )
 
         assert any(v['rule'] == 'hallucination' for v in result['violations'])
 
@@ -1015,6 +1083,62 @@ class TestIInstanceLifecycle:
         answer = FakeAnswer('The answer is 42.')
         inst.writeAnswers(answer)
         assert len(forwarded) == 1
+
+    def _grounding_node(self, IInstance, EngineClass, **cfg):
+        """A node under Strict with grounding required, wired to recording lanes."""
+        inst = IInstance()
+        settings = {'policy_mode': 'block', 'require_grounding': True}
+        settings.update(cfg)
+        inst.IGlobal = types.SimpleNamespace(engine=EngineClass(settings), config={})
+        inst.forwarded = []
+        inst.prevented = []
+        inst.instance = types.SimpleNamespace(
+            writeAnswers=inst.forwarded.append,
+            writeQuestions=lambda q: None,
+            writeDocuments=lambda d: None,
+        )
+        inst.preventDefault = lambda: inst.prevented.append(True)
+        return inst
+
+    def test_a_retrieval_miss_still_forwards_an_ordinary_answer(self):
+        """The lane path, not just the engine: a miss must not silence the node.
+
+        writeDocuments is what sets retrieval_ran, so this is the only level that
+        shows Strict leaving an ordinary turn alone after a search matched nothing.
+        """
+        IInstance, EngineClass, FakeQuestion, FakeQuestionText, FakeAnswer = self._load_iinstance_class()
+        inst = self._grounding_node(IInstance, EngineClass)
+
+        inst.writeQuestions(FakeQuestion(questions=[FakeQuestionText('thanks, that helps')]))
+        inst.writeDocuments([])
+        inst.writeAnswers(FakeAnswer('You are welcome. Let me know if anything else comes up.'))
+
+        assert len(inst.forwarded) == 1, 'an ordinary answer must survive a retrieval miss'
+
+    def test_a_retrieval_miss_still_blocks_an_invented_figure(self):
+        """The other half of the trade: a figure the question never named is dropped."""
+        IInstance, EngineClass, FakeQuestion, FakeQuestionText, FakeAnswer = self._load_iinstance_class()
+        inst = self._grounding_node(IInstance, EngineClass)
+
+        inst.writeQuestions(FakeQuestion(questions=[FakeQuestionText('What did the board decide?')]))
+        inst.writeDocuments([])
+        # Every lane calls preventDefault after forwarding, so the count before the
+        # answer is the baseline; a block is one more on top of it.
+        before = len(inst.prevented)
+        inst.writeAnswers(FakeAnswer('The board approved a $12.4 million settlement.'))
+
+        assert len(inst.forwarded) == 0
+        assert len(inst.prevented) == before + 1
+
+    def test_a_pipeline_that_never_retrieves_is_left_alone(self):
+        """No documents lane means no retrieval, so grounding has nothing to judge."""
+        IInstance, EngineClass, FakeQuestion, FakeQuestionText, FakeAnswer = self._load_iinstance_class()
+        inst = self._grounding_node(IInstance, EngineClass)
+
+        inst.writeQuestions(FakeQuestion(questions=[FakeQuestionText('What did the board decide?')]))
+        inst.writeAnswers(FakeAnswer('The board approved a $12.4 million settlement.'))
+
+        assert len(inst.forwarded) == 1
 
     def test_write_answers_blocks_pii(self):
         IInstance, EngineClass, _, _, FakeAnswer = self._load_iinstance_class()
