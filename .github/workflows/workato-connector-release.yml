@@ -1,0 +1,31 @@
+name: workato-connector Release
+
+# Pushes the connector to the Workato workspace. Publishing a public version
+# (Community / Partner) is a separate "release version" step; Partner adds code review.
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'workato-connector-v*'
+
+defaults:
+  run:
+    working-directory: packages/workato-connector
+
+jobs:
+  push:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.3'
+          bundler-cache: true
+          working-directory: packages/workato-connector
+      - name: RSpec
+        run: bundle exec rspec
+      - name: Push to Workato
+        env:
+          WORKATO_API_EMAIL: ${{ secrets.WORKATO_API_EMAIL }}
+          WORKATO_API_TOKEN: ${{ secrets.WORKATO_API_TOKEN }}
+        run: bundle exec workato push
