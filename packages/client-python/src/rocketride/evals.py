@@ -37,15 +37,23 @@ def _base_url(uri: str) -> str:
         if not uri or any(c.isspace() or ord(c) < 32 for c in uri) or '\\' in uri:
             raise ValueError
         parsed = urlsplit(uri if '://' in uri else 'http://' + uri)
-        if (parsed.scheme not in ('http', 'https', 'ws', 'wss') or not parsed.hostname
-                or parsed.username is not None or parsed.password is not None
-                or '?' in uri or '#' in uri or parsed.port == 0
-                or parsed.path.rstrip('/') not in ('', '/task/service', '/evals/v1')):
+        if (
+            parsed.scheme not in ('http', 'https', 'ws', 'wss')
+            or not parsed.hostname
+            or parsed.username is not None
+            or parsed.password is not None
+            or '?' in uri
+            or '#' in uri
+            or parsed.port == 0
+            or parsed.path.rstrip('/') not in ('', '/task/service', '/evals/v1')
+        ):
             raise ValueError
         scheme = {'ws': 'http', 'wss': 'https'}.get(parsed.scheme, parsed.scheme)
         return urlunsplit((scheme, parsed.netloc, '/evals/v1', '', ''))
     except ValueError:
-        raise ValueError('Managed evaluations require an HTTP(S) server origin without credentials, query, or fragment') from None
+        raise ValueError(
+            'Managed evaluations require an HTTP(S) server origin without credentials, query, or fragment'
+        ) from None
 
 
 def _positive(value: float, name: str) -> None:
@@ -64,7 +72,9 @@ def _id(value: str) -> str:
     return quote(value, safe='')
 
 
-async def _http_request(method: str, url: str, headers: dict, body: Optional[bytes], timeout: float) -> Tuple[int, bytes]:
+async def _http_request(
+    method: str, url: str, headers: dict, body: Optional[bytes], timeout: float
+) -> Tuple[int, bytes]:
     # http.client does not follow redirects, use environment proxies, or retry.
     # A daemon owns blocking DNS/socket work: a cancelled call must not hold
     # asyncio.run() open through its default executor's shutdown, or submit
@@ -147,7 +157,9 @@ class EvalsApi:
         self._connection = connection
         self.timeout = timeout
 
-    async def _request(self, method: str, path: str, body: Any = None, *, raw: bool = False, timeout: Optional[float] = None) -> Any:
+    async def _request(
+        self, method: str, path: str, body: Any = None, *, raw: bool = False, timeout: Optional[float] = None
+    ) -> Any:
         uri, credential = self._connection()
         url = _base_url(uri) + path
         if not credential or any(c.isspace() or ord(c) < 32 for c in credential):
@@ -167,7 +179,9 @@ class EvalsApi:
         except asyncio.TimeoutError:
             raise EvalsError('Managed evaluation request timed out; no request was retried', code='timeout') from None
         except Exception:
-            raise EvalsError('Managed evaluation request failed; no request was retried', code='transport_error') from None
+            raise EvalsError(
+                'Managed evaluation request failed; no request was retried', code='transport_error'
+            ) from None
         if not 200 <= status < 300:
             message, code = f'Managed evaluation request failed (HTTP {status})', 'http_error'
             try:
@@ -204,9 +218,15 @@ class EvalsApi:
 
     async def revise(self, evaluation_id: str, spec: Dict[str, Any], *, expected_revision: int) -> Dict[str, Any]:
         _revision(expected_revision, 'expected-revision')
-        return await self._request('POST', f'/evaluations/{_id(evaluation_id)}/revisions', {'spec': spec, 'expectedRevision': expected_revision})
+        return await self._request(
+            'POST',
+            f'/evaluations/{_id(evaluation_id)}/revisions',
+            {'spec': spec, 'expectedRevision': expected_revision},
+        )
 
-    async def run(self, evaluation_id: str, *, revision: int, idempotency_key: str, baseline_run_id: Optional[str] = None) -> Dict[str, Any]:
+    async def run(
+        self, evaluation_id: str, *, revision: int, idempotency_key: str, baseline_run_id: Optional[str] = None
+    ) -> Dict[str, Any]:
         _revision(revision)
         _id(idempotency_key)
         body = {'revision': revision, 'idempotencyKey': idempotency_key}
@@ -238,17 +258,32 @@ class EvalsApi:
         """Read the server's comparison against the run's recorded baseline."""
         result = await self.status(run_id)
         if not isinstance(result.get('run'), dict) or not isinstance(result['run'].get('comparison'), dict):
-            raise EvalsError('Run has no server comparison; create a run with baselineRunId', code='comparison_unavailable')
+            raise EvalsError(
+                'Run has no server comparison; create a run with baselineRunId', code='comparison_unavailable'
+            )
         return result
 
-    async def review(self, run_id: str, *, case_id: str, scorer_id: str, status: str, reason: str, expected_report_revision: int, case_result_id: Optional[str] = None) -> Dict[str, Any]:
+    async def review(
+        self,
+        run_id: str,
+        *,
+        case_id: str,
+        scorer_id: str,
+        status: str,
+        reason: str,
+        expected_report_revision: int,
+        case_result_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
         _revision(expected_report_revision, 'expected-report-revision')
         _id(case_id)
         _id(scorer_id)
         if status not in ('pass', 'fail', 'abstain') or not isinstance(reason, str) or not reason.strip():
             raise ValueError('Review needs a pass, fail, or abstain status and a reason')
         body = {
-            'caseId': case_id, 'scorerId': scorer_id, 'status': status, 'reason': reason,
+            'caseId': case_id,
+            'scorerId': scorer_id,
+            'status': status,
+            'reason': reason,
             'expectedReportRevision': expected_report_revision,
         }
         if case_result_id is not None:

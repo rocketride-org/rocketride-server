@@ -16,6 +16,7 @@ import os
 
 from rocketride import RocketRideClient, EvalsError
 
+
 async def main():
     client = RocketRideClient(
         uri=os.environ['ROCKETRIDE_URI'],
@@ -33,9 +34,12 @@ async def main():
         idempotency_key='ci-build-42',  # Persist and reuse for this submission.
     )
     result = await client.evals.wait(
-        result['run']['id'], timeout=300, poll_interval=1,
+        result['run']['id'],
+        timeout=300,
+        poll_interval=1,
     )
     print(result['run']['summary']['gate'])
+
 
 asyncio.run(main())
 ```

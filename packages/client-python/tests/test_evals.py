@@ -11,10 +11,15 @@ from rocketride import RocketRideClient
 
 
 SPEC = {
-    'schemaVersion': 1, 'name': 'Policy', 'projectId': 'p1',
+    'schemaVersion': 1,
+    'name': 'Policy',
+    'projectId': 'p1',
     'pipeline': {'project_id': 'p1', 'components': [{'id': 'chat_1'}]},
-    'source': 'chat_1', 'inputMode': 'chat', 'environment': 'development',
-    'datasetName': 'Reviewed examples', 'repetitions': 2,
+    'source': 'chat_1',
+    'inputMode': 'chat',
+    'environment': 'development',
+    'datasetName': 'Reviewed examples',
+    'repetitions': 2,
     'cases': [{'id': 'c1', 'name': 'Refund', 'input': 'Return?', 'reference': '30 days', 'approved': True}],
     'scorers': [{'id': 's1', 'name': 'Human', 'kind': 'human'}],
     'passCriteria': {'minimumPassRate': 1, 'maxRegressions': 0},
@@ -50,8 +55,10 @@ async def test_public_namespace_uses_http_without_connect(monkeypatch):
     client = client_with(monkeypatch, transport)
     assert await client.evals.capabilities() == {'environments': []}
     assert transport.requests[0][:4] == (
-        'GET', 'https://api.rocketride.ai/evals/v1/capabilities',
-        {'Authorization': 'Bearer test-secret', 'Accept': 'application/json'}, None,
+        'GET',
+        'https://api.rocketride.ai/evals/v1/capabilities',
+        {'Authorization': 'Bearer test-secret', 'Accept': 'application/json'},
+        None,
     )
     assert not client.is_connected()
 
@@ -83,12 +90,27 @@ async def test_routes_writes_guards_and_review_contract(monkeypatch):
     assert calls[7][3] == {}
     assert calls[8][3] == {'runId': 'r1'}
     assert calls[9][1].endswith('/runs/r1/report?format=json')
-    assert calls[10][3] == {'caseId': 'c1', 'scorerId': 's1', 'status': 'pass', 'reason': 'Checked', 'expectedReportRevision': 3}
+    assert calls[10][3] == {
+        'caseId': 'c1',
+        'scorerId': 's1',
+        'status': 'pass',
+        'reason': 'Checked',
+        'expectedReportRevision': 3,
+    }
     assert calls[11][3] == {'instruction': 'Improve wording', 'spec': SPEC}
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('uri', ['ftp://example.com', 'https://u:secret@example.com:443', 'https://api.rocketride.ai/prefix', 'https://api.rocketride.ai/?token=secret', 'https://api.rocketride.ai/#secret'])
+@pytest.mark.parametrize(
+    'uri',
+    [
+        'ftp://example.com',
+        'https://u:secret@example.com:443',
+        'https://api.rocketride.ai/prefix',
+        'https://api.rocketride.ai/?token=secret',
+        'https://api.rocketride.ai/#secret',
+    ],
+)
 async def test_reject_original_endpoint_before_transport(monkeypatch, uri):
     transport = Transport({})
     client = client_with(monkeypatch, transport, uri)
@@ -99,7 +121,11 @@ async def test_reject_original_endpoint_before_transport(monkeypatch, uri):
 
 @pytest.mark.asyncio
 async def test_failures_never_retry_or_disclose_credentials(monkeypatch):
-    for response in [(307, 'test-secret'), (409, {'error': {'code': 'conflict', 'message': 'Stale test-secret'}}), RuntimeError('test-secret')]:
+    for response in [
+        (307, 'test-secret'),
+        (409, {'error': {'code': 'conflict', 'message': 'Stale test-secret'}}),
+        RuntimeError('test-secret'),
+    ]:
         transport = Transport(response)
         api = client_with(monkeypatch, transport).evals
         with pytest.raises(Exception) as caught:
@@ -121,7 +147,12 @@ async def cli(monkeypatch, transport, argv):
 @pytest.mark.parametrize('gate,code', [('pass', 0), ('fail', 1), ('incomplete', 2)])
 async def test_cli_wait_gate_and_idempotency(monkeypatch, capsys, gate, code):
     transport = Transport({'run': {'id': 'r1', 'status': 'queued'}}, {'run': {**RUN, 'summary': {'gate': gate}}})
-    assert await cli(monkeypatch, transport, ['run', 'e1', '--revision', '1', '--idempotency-key', 'ci-42', '--wait', '--json']) == code
+    assert (
+        await cli(
+            monkeypatch, transport, ['run', 'e1', '--revision', '1', '--idempotency-key', 'ci-42', '--wait', '--json']
+        )
+        == code
+    )
     assert json.loads(capsys.readouterr().out)['run']['summary']['gate'] == gate
     assert [call[0] for call in transport.requests] == ['POST', 'GET']
     assert transport.requests[0][3]['idempotencyKey'] == 'ci-42'
@@ -155,23 +186,64 @@ async def test_cli_junit_exclusive_output(monkeypatch, tmp_path, capsys):
 async def test_review_targets_one_repetition(monkeypatch, capsys):
     transport = Transport({'run': RUN}, {'run': RUN})
     api = client_with(monkeypatch, transport).evals
-    await api.review('r1', case_id='c1', case_result_id='trial-row-2', scorer_id='s1', status='pass', reason='Inspected', expected_report_revision=3)
+    await api.review(
+        'r1',
+        case_id='c1',
+        case_result_id='trial-row-2',
+        scorer_id='s1',
+        status='pass',
+        reason='Inspected',
+        expected_report_revision=3,
+    )
     assert transport.requests[0][3]['caseResultId'] == 'trial-row-2'
-    assert await cli(monkeypatch, transport, ['review', 'r1', '--case-id', 'c1', '--case-result-id', 'trial-row-2', '--scorer-id', 's1', '--status', 'fail', '--reason', 'Inspected', '--expected-report-revision', '3', '--json']) == 0
-    assert transport.requests[1][3] == {'caseId': 'c1', 'caseResultId': 'trial-row-2', 'scorerId': 's1', 'status': 'fail', 'reason': 'Inspected', 'expectedReportRevision': 3}
+    assert (
+        await cli(
+            monkeypatch,
+            transport,
+            [
+                'review',
+                'r1',
+                '--case-id',
+                'c1',
+                '--case-result-id',
+                'trial-row-2',
+                '--scorer-id',
+                's1',
+                '--status',
+                'fail',
+                '--reason',
+                'Inspected',
+                '--expected-report-revision',
+                '3',
+                '--json',
+            ],
+        )
+        == 0
+    )
+    assert transport.requests[1][3] == {
+        'caseId': 'c1',
+        'caseResultId': 'trial-row-2',
+        'scorerId': 's1',
+        'status': 'fail',
+        'reason': 'Inspected',
+        'expectedReportRevision': 3,
+    }
     assert json.loads(capsys.readouterr().out)['run'] == RUN
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('command,path,body', [
-    (['capabilities'], '/capabilities', None),
-    (['list', '--project-id', 'p1'], '/evaluations?projectId=p1', None),
-    (['show', 'e1'], '/evaluations/e1', None),
-    (['runs', '--evaluation-id', 'e1'], '/runs?evaluationId=e1', None),
-    (['status', 'r1'], '/runs/r1', None),
-    (['cancel', 'r1'], '/runs/r1/cancel', {}),
-    (['baseline', 'e1', 'r1'], '/evaluations/e1/baseline', {'runId': 'r1'}),
-])
+@pytest.mark.parametrize(
+    'command,path,body',
+    [
+        (['capabilities'], '/capabilities', None),
+        (['list', '--project-id', 'p1'], '/evaluations?projectId=p1', None),
+        (['show', 'e1'], '/evaluations/e1', None),
+        (['runs', '--evaluation-id', 'e1'], '/runs?evaluationId=e1', None),
+        (['status', 'r1'], '/runs/r1', None),
+        (['cancel', 'r1'], '/runs/r1/cancel', {}),
+        (['baseline', 'e1', 'r1'], '/evaluations/e1/baseline', {'runId': 'r1'}),
+    ],
+)
 async def test_cli_read_and_lifecycle_routes(monkeypatch, capsys, command, path, body):
     transport = Transport({'run': RUN})
     assert await cli(monkeypatch, transport, [*command, '--json']) == 0
@@ -186,21 +258,33 @@ async def test_cli_authoring_exact_spec_and_no_implicit_run(monkeypatch, tmp_pat
     spec_file.write_text(json.dumps(SPEC))
     transport = Transport(*[{} for _ in range(5)])
     for command in [
-        ['create', str(spec_file)], ['save', str(spec_file)],
+        ['create', str(spec_file)],
+        ['save', str(spec_file)],
         ['save', str(spec_file), '--id', 'e1', '--expected-revision', '2'],
         ['revision', 'e1', str(spec_file), '--expected-revision', '2'],
         ['assist', str(spec_file), '--instruction', 'Clarify'],
     ]:
         assert await cli(monkeypatch, transport, [*command, '--json']) == 0
         assert json.loads(capsys.readouterr().out) == {}
-    assert [call[3] for call in transport.requests] == [SPEC, SPEC, {'spec': SPEC, 'expectedRevision': 2}, {'spec': SPEC, 'expectedRevision': 2}, {'instruction': 'Clarify', 'spec': SPEC}]
+    assert [call[3] for call in transport.requests] == [
+        SPEC,
+        SPEC,
+        {'spec': SPEC, 'expectedRevision': 2},
+        {'spec': SPEC, 'expectedRevision': 2},
+        {'instruction': 'Clarify', 'spec': SPEC},
+    ]
     assert not any(call[1].endswith('/runs') for call in transport.requests)
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('compatible,gate,code', [(True, 'pass', 0), (True, 'fail', 1), (False, 'pass', 2)])
 async def test_compare_uses_recorded_server_evidence(monkeypatch, capsys, compatible, gate, code):
-    run = {**RUN, 'baselineRunId': 'b1', 'summary': {'gate': gate}, 'comparison': {'compatible': compatible, 'regressions': 2}}
+    run = {
+        **RUN,
+        'baselineRunId': 'b1',
+        'summary': {'gate': gate},
+        'comparison': {'compatible': compatible, 'regressions': 2},
+    }
     transport = Transport({'run': run})
     assert await cli(monkeypatch, transport, ['compare', 'r1', '--json']) == code
     assert json.loads(capsys.readouterr().out) == {'run': run}
@@ -234,7 +318,25 @@ async def test_wait_deadline_bounds_pending_request_and_preserves_run_identity(m
         await asyncio.sleep(10)
 
     started = asyncio.get_running_loop().time()
-    assert await cli(monkeypatch, pending, ['run', 'e1', '--revision', '1', '--idempotency-key', 'stable', '--wait', '--wait-timeout', '0.02', '--json']) == 2
+    assert (
+        await cli(
+            monkeypatch,
+            pending,
+            [
+                'run',
+                'e1',
+                '--revision',
+                '1',
+                '--idempotency-key',
+                'stable',
+                '--wait',
+                '--wait-timeout',
+                '0.02',
+                '--json',
+            ],
+        )
+        == 2
+    )
     assert asyncio.get_running_loop().time() - started < 1
     result = json.loads(capsys.readouterr().out)
     assert result['error']['code'] == 'timeout'
@@ -248,7 +350,14 @@ async def test_wait_deadline_bounds_pending_request_and_preserves_run_identity(m
 async def test_invalid_wait_and_revision_rejected_before_enqueue(monkeypatch, capsys):
     for option, value in [('--wait-timeout', 'nan'), ('--poll-interval', '0'), ('--revision', '0')]:
         transport = Transport({})
-        assert await cli(monkeypatch, transport, ['run', 'e1', '--revision', '1', '--idempotency-key', 'key', option, value, '--json']) == 2
+        assert (
+            await cli(
+                monkeypatch,
+                transport,
+                ['run', 'e1', '--revision', '1', '--idempotency-key', 'key', option, value, '--json'],
+            )
+            == 2
+        )
         assert not transport.requests
         assert 'error' in json.loads(capsys.readouterr().out)
 
@@ -283,7 +392,9 @@ async def test_report_refuses_symlink_and_keeps_full_versioned_json(monkeypatch,
 async def test_sdk_conflict_metadata_and_invalid_response(monkeypatch):
     from rocketride import EvalsError
 
-    api = client_with(monkeypatch, Transport((409, {'error': {'code': 'conflict', 'message': 'Stale'}}), 'not JSON')).evals
+    api = client_with(
+        monkeypatch, Transport((409, {'error': {'code': 'conflict', 'message': 'Stale'}}), 'not JSON')
+    ).evals
     with pytest.raises(EvalsError) as caught:
         await api.revise('e1', SPEC, expected_revision=2)
     assert (caught.value.status, caught.value.code) == (409, 'conflict')
@@ -312,7 +423,14 @@ async def test_json_output_failure_prevents_mutation(monkeypatch, tmp_path, caps
     target = tmp_path / 'existing.json'
     target.write_text('preserve')
     transport = Transport({'run': RUN})
-    assert await cli(monkeypatch, transport, ['run', 'e1', '--revision', '1', '--idempotency-key', 'stable', '--json', str(target)]) == 2
+    assert (
+        await cli(
+            monkeypatch,
+            transport,
+            ['run', 'e1', '--revision', '1', '--idempotency-key', 'stable', '--json', str(target)],
+        )
+        == 2
+    )
     assert not transport.requests
     assert target.read_text() == 'preserve'
 

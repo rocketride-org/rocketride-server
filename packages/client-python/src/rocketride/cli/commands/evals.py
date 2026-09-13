@@ -23,7 +23,12 @@ def register_evals_commands(subparsers, add_connection_args) -> None:
     command('list', 'List managed evaluations').add_argument('--project-id')
     command('show', 'Show an evaluation and its revision history').add_argument('id')
     for verb in ('save', 'create'):
-        parser = command(verb, 'Save a JSON evaluation spec; creates unless --id is supplied' if verb == 'save' else 'Create an evaluation from a JSON spec')
+        parser = command(
+            verb,
+            'Save a JSON evaluation spec; creates unless --id is supplied'
+            if verb == 'save'
+            else 'Create an evaluation from a JSON spec',
+        )
         parser.add_argument('spec', help='Strict JSON evaluation spec file')
         if verb == 'save':
             parser.add_argument('--id')
@@ -37,12 +42,16 @@ def register_evals_commands(subparsers, add_connection_args) -> None:
         parser = command(verb, 'Start a durable run' if verb == 'run' else 'Read a durable run')
         parser.add_argument('id', help='Evaluation ID' if verb == 'run' else 'Run ID')
         parser.add_argument('--wait', action='store_true', help='Wait for a terminal run and return its gate exit code')
-        parser.add_argument('--wait-timeout', type=float, default=300, help='Total wait budget in seconds (default: 300)')
+        parser.add_argument(
+            '--wait-timeout', type=float, default=300, help='Total wait budget in seconds (default: 300)'
+        )
         parser.add_argument('--poll-interval', type=float, default=1, help='Polling interval in seconds (default: 1)')
         parser.add_argument('--gate', action='store_true', help='Return 0 pass, 1 fail, 2 incomplete/error')
         if verb == 'run':
             parser.add_argument('--revision', type=int, required=True)
-            parser.add_argument('--idempotency-key', required=True, help='Stable key to reuse if this exact run request is resumed')
+            parser.add_argument(
+                '--idempotency-key', required=True, help='Stable key to reuse if this exact run request is resumed'
+            )
             parser.add_argument('--baseline-run-id')
     command('cancel', 'Request cancellation of a durable run').add_argument('id')
     parser = command('baseline', 'Select a completed run as the evaluation baseline')
@@ -52,7 +61,9 @@ def register_evals_commands(subparsers, add_connection_args) -> None:
     parser.add_argument('id', help='Run ID')
     parser.add_argument('--format', choices=('json', 'junit'), default='json')
     parser.add_argument('--output', help='New output file; existing files and symlinks are refused')
-    command('compare', 'Show the recorded server baseline comparison and return its gate').add_argument('id', help='Candidate run ID')
+    command('compare', 'Show the recorded server baseline comparison and return its gate').add_argument(
+        'id', help='Candidate run ID'
+    )
     parser = command('assist', 'Propose a spec using the configured assistant; does not save or run')
     parser.add_argument('spec', help='JSON evaluation spec file')
     parser.add_argument('--instruction', required=True)
@@ -87,13 +98,17 @@ def _write_new(path: str, content: str) -> None:
         with os.fdopen(descriptor, 'w', encoding='utf-8', newline='') as stream:
             stream.write(content)
     except OSError:
-        raise ValueError('Cannot write output: use a new file in an existing writable directory (existing files and symlinks are refused)') from None
+        raise ValueError(
+            'Cannot write output: use a new file in an existing writable directory (existing files and symlinks are refused)'
+        ) from None
 
 
 def _check_new_output(path: str) -> None:
     parent = os.path.dirname(os.path.abspath(path))
     if os.path.lexists(path) or not os.path.isdir(parent) or not os.access(parent, os.W_OK):
-        raise ValueError('Cannot write output: use a new file in an existing writable directory (existing files and symlinks are refused)')
+        raise ValueError(
+            'Cannot write output: use a new file in an existing writable directory (existing files and symlinks are refused)'
+        )
 
 
 def _safe_output(value: Any, credential: str) -> Any:
@@ -102,8 +117,25 @@ def _safe_output(value: Any, credential: str) -> Any:
     if isinstance(value, list):
         return [_safe_output(item, credential) for item in value]
     if isinstance(value, dict):
-        secret_keys = {'apikey', 'authorization', 'password', 'secret', 'clientsecret', 'credential', 'auth', 'token', 'accesstoken', 'refreshtoken', 'privatekey'}
-        return {key: '[REDACTED]' if re.sub(r'[^a-z0-9]', '', key.lower()) in secret_keys else _safe_output(item, credential) for key, item in value.items()}
+        secret_keys = {
+            'apikey',
+            'authorization',
+            'password',
+            'secret',
+            'clientsecret',
+            'credential',
+            'auth',
+            'token',
+            'accesstoken',
+            'refreshtoken',
+            'privatekey',
+        }
+        return {
+            key: '[REDACTED]'
+            if re.sub(r'[^a-z0-9]', '', key.lower()) in secret_keys
+            else _safe_output(item, credential)
+            for key, item in value.items()
+        }
     return value
 
 
@@ -123,14 +155,21 @@ async def _execute(args, api: EvalsApi) -> tuple[Any, int]:
         if guard is not None and not evaluation_id:
             raise ValueError('--expected-revision requires --id')
         spec = _read_spec(args.spec)
-        return (await api.revise(evaluation_id, spec, expected_revision=guard) if evaluation_id else await api.create(spec)), 0
+        return (
+            await api.revise(evaluation_id, spec, expected_revision=guard) if evaluation_id else await api.create(spec)
+        ), 0
     if verb == 'runs':
         return await api.runs(evaluation_id=args.evaluation_id), 0
     if verb in ('run', 'status'):
         _positive(args.wait_timeout, 'wait-timeout')
         _positive(args.poll_interval, 'poll-interval')
         if verb == 'run':
-            result = await api.run(args.id, revision=args.revision, idempotency_key=args.idempotency_key, baseline_run_id=args.baseline_run_id)
+            result = await api.run(
+                args.id,
+                revision=args.revision,
+                idempotency_key=args.idempotency_key,
+                baseline_run_id=args.baseline_run_id,
+            )
         elif args.wait:
             result = await api.wait(args.id, timeout=args.wait_timeout, poll_interval=args.poll_interval)
         else:
@@ -142,7 +181,11 @@ async def _execute(args, api: EvalsApi) -> tuple[Any, int]:
             try:
                 result = await api.wait(run['id'], timeout=args.wait_timeout, poll_interval=args.poll_interval)
             except EvalsError as error:
-                return {'error': {'message': str(error), 'code': error.code}, 'run': run, 'idempotencyKey': args.idempotency_key}, 2
+                return {
+                    'error': {'message': str(error), 'code': error.code},
+                    'run': run,
+                    'idempotencyKey': args.idempotency_key,
+                }, 2
         return result, gate_exit_code(result['run']) if args.wait or args.gate else 0
     if verb == 'cancel':
         return await api.cancel(args.id), 0
@@ -161,7 +204,15 @@ async def _execute(args, api: EvalsApi) -> tuple[Any, int]:
     if verb == 'assist':
         return await api.assist(args.instruction, _read_spec(args.spec)), 0
     if verb == 'review':
-        return await api.review(args.id, case_id=args.case_id, case_result_id=args.case_result_id, scorer_id=args.scorer_id, status=args.status, reason=args.reason, expected_report_revision=args.expected_report_revision), 0
+        return await api.review(
+            args.id,
+            case_id=args.case_id,
+            case_result_id=args.case_result_id,
+            scorer_id=args.scorer_id,
+            status=args.status,
+            reason=args.reason,
+            expected_report_revision=args.expected_report_revision,
+        ), 0
     raise ValueError('Unknown managed evaluation command')
 
 
