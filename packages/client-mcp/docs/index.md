@@ -201,10 +201,25 @@ python -m rocketride_mcp
 
 Tools are **discovered from the RocketRide server** (pipelines/tasks available to your account) plus a built-in convenience tool:
 
-- **Server tasks** - Any pipelines or tasks returned by the server for your API key are exposed as MCP tools. Each tool accepts a `filepath` argument and sends that file's contents to the corresponding pipeline.
+- **Server tasks** - Any pipelines or tasks returned by the server for your API key are exposed as MCP tools. Each tool takes the data to process and sends it to the corresponding pipeline.
 - **RocketRide_Document_Processor** - A convenience tool that runs the bundled document-parsing pipeline (`simpleparser.json`) without requiring a pre-started task. Supports multi-modal parsing (text, images, video, tables, audio).
 
-All tools accept a single `filepath` parameter (path to the file to process). File paths support:
+### Tool arguments
+
+Every tool accepts the same arguments. **Provide exactly one of `filepath`, `content`, or `url`** - zero or more than one is rejected with a 400 error.
+
+| Argument   | Required | Description                                                                                                        |
+| ---------- | -------- | ------------------------------------------------------------------------------------------------------------------ |
+| `filepath` | One of   | Path to a local file on the machine running the MCP server                                                         |
+| `content`  | One of   | Inline text, sent to the pipeline as UTF-8 bytes                                                                   |
+| `url`      | One of   | `http://` or `https://` URL; the server downloads the body (max 50 MB) and sends those bytes                       |
+| `filename` | No       | Display name attached to the data. Defaults to the file basename, `content.txt` for `content`, or the URL basename |
+
+`content` and `url` exist because remote MCP clients (Lovable, other cloud
+harnesses, the SSE transport) cannot place files on the server's disk, which
+makes `filepath`-only tools unusable remotely.
+
+File paths support:
 
 - Absolute and relative paths
 - `file://` URIs (automatically decoded)

@@ -86,13 +86,20 @@ run the server directly for debugging: `rocketride-mcp` or `python -m rocketride
 
 ### What a tool call does
 
-Every discovered tool takes exactly one argument: `filepath` (string, required) — the
-path to a local file to process. The server reads the file (absolute or relative paths,
-`file://` URIs, and `~` expansion all work), streams the bytes into the corresponding
-running pipeline, and returns the pipeline's result — human-readable text plus the raw
-result under `structuredContent.result`. The input schema is always this single
-`filepath`; pipelines that expect chat questions or JSON payloads are better reached over
-the webhook interface (§Webhooks) or the SDK.
+Every discovered tool takes exactly one of three data arguments, plus an optional name:
+
+| Argument | Type | Description |
+|---|---|---|
+| `filepath` | string | Path to a local file on the machine running the MCP server. Absolute or relative paths, `file://` URIs, and `~` expansion all work. |
+| `content` | string | Inline text, sent to the pipeline as UTF-8 bytes. The natural choice for remote clients, which cannot place files on the server's disk. |
+| `url` | string | An `http(s)` URL the server downloads (redirects followed, 30 s timeout, 50 MB cap) and forwards to the pipeline. |
+| `filename` | string, optional | Display/routing name attached to the data. Defaults: the file's basename for `filepath`, `content.txt` for `content`, the URL path's basename for `url`. |
+
+Provide exactly one of `filepath`, `content`, or `url` — zero or more than one is
+rejected. The server streams the resulting bytes into the corresponding running
+pipeline and returns the pipeline's result — human-readable text plus the raw result
+under `structuredContent.result`. Pipelines that expect chat questions or structured
+JSON payloads are better reached over the webhook interface (§Webhooks) or the SDK.
 
 One extra built-in tool ships with the server: **`RocketRide_Document_Processor`**, a
 bundled multi-modal document-parsing pipeline started on the fly, so it works even with no
