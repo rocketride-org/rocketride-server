@@ -42,9 +42,23 @@ from .tools import get_tools, format_tools, execute_tool
 _client: RocketRideClient | None = None
 
 
-def _format_result_text(name: str, filepath: str, result: Dict[str, Any]) -> str:
+def _describe_input(arguments: Dict[str, Any]) -> str:
+    """Describe which input a tool call used, without echoing inline content."""
+    filepath = (arguments or {}).get('filepath')
+    content = (arguments or {}).get('content')
+    url = (arguments or {}).get('url')
+    if isinstance(filepath, str) and filepath.strip():
+        return f'filepath: {filepath}'
+    if isinstance(content, str) and content.strip():
+        return f'content: {len(content.encode("utf-8"))} bytes'
+    if isinstance(url, str) and url.strip():
+        return f'url: {url}'
+    return 'no input'
+
+
+def _format_result_text(name: str, source: str, result: Dict[str, Any]) -> str:
     text_lines: List[str] = []
-    text_lines.append(f'Sent data to pipeline: {name} (filepath: {filepath})')
+    text_lines.append(f'Sent data to pipeline: {name} ({source})')
     if isinstance(result, dict):
         texts = result.get('text')
         appended: str | None = None
@@ -72,15 +86,23 @@ async def _dynamic_tools() -> List[Dict[str, Any]]:
 async def _handle_call(tool_name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
     if _client is None:
         raise RuntimeError('Client is not connected')
-    filepath = (arguments or {}).get('filepath')
-    exec_resp = await execute_tool(client=_client, filepath=filepath, name=tool_name)
+    args = arguments or {}
+    exec_resp = await execute_tool(
+        client=_client,
+        name=tool_name,
+        filepath=args.get('filepath'),
+        content=args.get('content'),
+        url=args.get('url'),
+        filename=args.get('filename'),
+    )
     status = exec_resp.get('status', 200)
     is_error = status >= 400
     result_obj = exec_resp.get('result') if not is_error else None
+    source = _describe_input(args)
     if not is_error:
-        text = _format_result_text(tool_name, str(filepath), result_obj or {})
+        text = _format_result_text(tool_name, source, result_obj or {})
     else:
-        text = f'Failed to send data to pipeline: {tool_name} (filepath: {filepath})'
+        text = f'Failed to send data to pipeline: {tool_name} ({source})'
     return {
         'isError': is_error,
         'content': [{'type': 'text', 'text': text}],

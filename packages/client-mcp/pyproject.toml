@@ -13,13 +13,14 @@ authors = [
 ]
 license = "MIT"
 dependencies = [
+  "httpx>=0.27,<1",
   "mcp>=2.0.0,<3",
   "rocketride>=1.0.4",
 ]
 
 [project.urls]
 Homepage = "https://rocketride.ai"
-Repository = "https://github.com/rocketride/rocketride-clients"
+Repository = "https://github.com/rocketride-org/rocketride-server"
 
 [project.scripts]
 rocketride-mcp = "rocketride_mcp.server:main"

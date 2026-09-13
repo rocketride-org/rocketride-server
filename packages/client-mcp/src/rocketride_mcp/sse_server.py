@@ -82,12 +82,30 @@ async def _list_pipelines() -> str:
         await client.disconnect()
 
 
-async def _run_pipeline(name: str, filepath: str) -> str:
-    """Run a RocketRide pipeline on a file."""
+def _as_str(value: object) -> str | None:
+    """Return the value when the client sent a string, else None."""
+    return value if isinstance(value, str) else None
+
+
+async def _run_pipeline(
+    name: str,
+    filepath: str | None = None,
+    content: str | None = None,
+    url: str | None = None,
+    filename: str | None = None,
+) -> str:
+    """Run a RocketRide pipeline on a file, inline content, or a downloaded URL."""
     client = _get_client()
     try:
         await client.connect()
-        result = await execute_tool(client=client, name=name, filepath=filepath)
+        result = await execute_tool(
+            client=client,
+            name=name,
+            filepath=filepath,
+            content=content,
+            url=url,
+            filename=filename,
+        )
         if isinstance(result, dict) and result.get('error'):
             raise RuntimeError(f'{result["error"]} (status {result.get("status", "unknown")})')
         return str(result)
@@ -103,14 +121,44 @@ _TOOLS: list[types.Tool] = [
     ),
     types.Tool(
         name='run_pipeline',
-        description='Run a RocketRide pipeline on a file.',
+        description=(
+            'Run a RocketRide pipeline on a local file, inline content, or a downloaded URL. '
+            'Provide exactly one of filepath, content, or url.'
+        ),
         input_schema={
             'type': 'object',
             'properties': {
                 'name': {'type': 'string', 'description': 'Pipeline name to execute'},
-                'filepath': {'type': 'string', 'description': 'Path to the input file'},
+                'filepath': {
+                    'type': 'string',
+                    'description': (
+                        'Path to a local file on the machine running the MCP server. '
+                        'Provide exactly one of filepath, content, or url.'
+                    ),
+                },
+                'content': {
+                    'type': 'string',
+                    'description': (
+                        'Inline text to process, sent to the pipeline as UTF-8 bytes. '
+                        'Provide exactly one of filepath, content, or url.'
+                    ),
+                },
+                'url': {
+                    'type': 'string',
+                    'description': (
+                        'http(s) URL to download and process (max 50 MB). '
+                        'Provide exactly one of filepath, content, or url.'
+                    ),
+                },
+                'filename': {
+                    'type': 'string',
+                    'description': (
+                        'Optional display name for the data. Defaults to the file basename for filepath, '
+                        '"content.txt" for content, and the URL basename for url.'
+                    ),
+                },
             },
-            'required': ['name', 'filepath'],
+            'required': ['name'],
         },
     ),
 ]
@@ -128,7 +176,13 @@ def create_mcp_server() -> Server:
             if params.name == 'list_pipelines':
                 text = await _list_pipelines()
             elif params.name == 'run_pipeline':
-                text = await _run_pipeline(str(arguments.get('name', '')), str(arguments.get('filepath', '')))
+                text = await _run_pipeline(
+                    str(arguments.get('name', '')),
+                    filepath=_as_str(arguments.get('filepath')),
+                    content=_as_str(arguments.get('content')),
+                    url=_as_str(arguments.get('url')),
+                    filename=_as_str(arguments.get('filename')),
+                )
             else:
                 raise RuntimeError(f'Unknown tool: {params.name}')
         except Exception as exc:
