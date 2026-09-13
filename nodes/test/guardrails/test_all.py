@@ -289,6 +289,292 @@ class TestHallucination:
         result = engine.check_hallucination('OK.', source_documents=['Some document text.'])
         assert result['passed']
 
+    def test_empty_sources_fail_when_grounding_required(self):
+        """Nothing retrieved is the case a model is most likely to answer from memory.
+
+        Passing there stood the guard down at the one moment it was needed.
+        """
+        engine = _make_engine(require_grounding=True)
+        result = engine.check_hallucination('Apple net income was $94.7B.', source_documents=[])
+
+        assert not result['passed']
+        assert result['severity'] == 'high'
+        assert 'cannot be grounded' in result['details']
+
+    def test_grounded_output_unaffected_by_require_grounding(self):
+        """The flag decides the empty case only; it must not change a grounded answer."""
+        sources = ['The capital of France is Paris. It is located in Europe.']
+        output = 'The capital of France is Paris, located in Europe.'
+
+        assert _make_engine(require_grounding=False).check_hallucination(output, sources)['passed']
+        assert _make_engine(require_grounding=True).check_hallucination(output, sources)['passed']
+
+    def test_require_grounding_reaches_the_check_with_coverage_off(self):
+        """The knob dispatches on its own, or it reads as a silent no-op.
+
+        The basic profile ships enable_hallucination_check false, so gating the new
+        behaviour behind it would make the flag do nothing exactly where it is set.
+        """
+        engine = _make_engine(enable_hallucination_check=False, require_grounding=True)
+        result = engine.evaluate('Some confident claim.', mode='output', context={'source_documents': []})
+
+        assert any(v['rule'] == 'hallucination' for v in result['violations'])
+
+    def test_a_pipeline_with_no_documents_lane_is_not_a_retrieval_miss(self):
+        """No documents lane at all is not the same as a search that matched nothing.
+
+        An empty source list alone cannot tell them apart, so failing on it dropped
+        correct answers from every plain chat, summariser or classifier pipeline
+        that had a Strict guardrails node on it.
+        """
+        engine = _make_engine(require_grounding=True)
+        result = engine.check_hallucination('Paris is the capital of France.', source_documents=[], retrieval_ran=False)
+
+        assert result['passed']
+
+    def test_a_retrieval_miss_still_fails(self):
+        """The case this exists for: the lane was dispatched and matched nothing."""
+        engine = _make_engine(require_grounding=True)
+        result = engine.check_hallucination('Apple net income was $94.7B.', source_documents=[], retrieval_ran=True)
+
+        assert not result['passed']
+        assert result['severity'] == 'high'
+
+    def test_an_abstention_is_not_an_ungrounded_answer(self):
+        """An abstention asserts nothing, so there is nothing to ground.
+
+        The prompt node asks the model to decline after a miss; blocking that would
+        discard the refusal this feature exists to produce.
+        """
+        engine = _make_engine(require_grounding=True)
+
+        for reply in (
+            'I do not have the information needed to answer that question.',
+            "I don't have the information to answer that.",
+            'No documents were retrieved, so I cannot answer.',
+        ):
+            result = engine.check_hallucination(reply, source_documents=[], retrieval_ran=True)
+            assert result['passed'], reply
+
+    def test_a_hedged_fabrication_is_not_an_abstention(self):
+        """A marker anywhere used to earn the bypass, so an invented figure rode along.
+
+        Hedging is common model behaviour, so this is the shape that would have
+        reopened the hole this check exists to close. The question is supplied because
+        a figure is judged against it; with no question recorded the marker alone
+        decides, which
+        test_no_question_recorded_falls_back_to_the_marker covers.
+        """
+        engine = _make_engine(require_grounding=True)
+
+        for reply in (
+            'Apple net income was $94.7B, but the source is not available.',
+            'The figure is $94.7 billion. No documents were retrieved.',
+            'Revenue grew 12%, though that is not available in the sources.',
+            'Net income was 41,733 million, but not provided here.',
+        ):
+            result = engine.check_hallucination(
+                reply,
+                source_documents=[],
+                retrieval_ran=True,
+                question_text='What were the results for FY2024?',
+            )
+            assert not result['passed'], reply
+
+    def test_an_abstention_may_quote_the_figure_it_declines_to_confirm(self):
+        """Declining to confirm a figure normally repeats it, which is not a claim.
+
+        A finance chatbot is asked "was net income $94.7B?" all day, and the honest
+        answer echoes the amount. Treating any digit as an assertion blocked exactly
+        the refusal this feature exists to deliver.
+        """
+        engine = _make_engine(require_grounding=True)
+
+        for reply, question in (
+            (
+                'I do not have the information to answer about the $94.7B figure you mentioned.',
+                'Was net income $94.7B?',
+            ),
+            (
+                'The documents do not contain anything about the 12% growth you asked about.',
+                'What drove the 12% growth?',
+            ),
+            ('I do not have data on the 2,000 unit shipment you mentioned.', 'Tell me about the 2,000 unit shipment.'),
+        ):
+            result = engine.check_hallucination(reply, source_documents=[], retrieval_ran=True, question_text=question)
+            assert result['passed'], reply
+
+    def test_a_shared_leading_digit_is_not_the_same_figure(self):
+        """The currency branch has to consume the whole amount, not its first digit.
+
+        Matching a partial figure made the containment test read as "does the question
+        mention any amount that shares a fragment", so a fabricated $94.7B rode through
+        a question quoting $9. The percent branch had the same flaw, comparing 12% as 2%.
+        """
+        engine = _make_engine(require_grounding=True)
+
+        for reply, question in (
+            ('Net income was $94.7B, but the source is not available.', 'Was revenue $9 billion in 2024?'),
+            ('Net income was $94.7B, but the source is not available.', 'Did they spend $9.50 on it?'),
+            ('Profit was $12.3 million, though that is not provided.', 'Was the fee $1?'),
+            ('Revenue grew 12%, though that is not available in the sources.', 'Was growth 2%?'),
+            ('Margin was 45%, but the documents do not contain it.', 'Did margin hit 5%?'),
+            ('Net income was 41,733 million, but not provided here.', 'Was it 733 million?'),
+            ('Net income was 94.7 billion, though not available.', 'Was it 4.7 billion?'),
+        ):
+            result = engine.check_hallucination(reply, source_documents=[], retrieval_ran=True, question_text=question)
+            assert not result['passed'], reply
+
+    def test_the_common_ways_a_model_declines_are_recognised(self):
+        """A refusal the phrase list misses is a refusal Strict drops.
+
+        Seven of eleven realistic phrasings were missed before, including "no data
+        available" and "not found in the documents", which is the same silent drop
+        the grounding path exists to avoid.
+        """
+        engine = _make_engine(require_grounding=True)
+
+        for reply in (
+            'No data available for that period.',
+            'That information was not found in the documents.',
+            'I cannot determine that from the provided sources.',
+            'The answer is not specified in the documents.',
+            'That figure is not mentioned anywhere in the sources.',
+            'There is insufficient information to answer.',
+            'No relevant documents were retrieved.',
+        ):
+            assert engine.check_hallucination(reply, source_documents=[], retrieval_ran=True)['passed'], reply
+
+    def test_a_wider_phrase_list_does_not_widen_the_hedge(self):
+        """A fabrication using one of the added phrases is still judged on its figure."""
+        engine = _make_engine(require_grounding=True)
+
+        for reply in (
+            'Net income was $94.7B, but that is not specified in the documents.',
+            'Revenue grew 12%, though no data supports it.',
+        ):
+            result = engine.check_hallucination(
+                reply, source_documents=[], retrieval_ran=True, question_text='What was the result?'
+            )
+            assert not result['passed'], reply
+
+    def test_a_quoted_figure_is_matched_whatever_punctuation_surrounds_it(self):
+        """The comparison is between figures, not between their spacing.
+
+        The pattern keeps a trailing space when no scale suffix follows and can take a
+        sentence-final period with it, and an answer may write "12 %" where the question
+        wrote "12%". Comparing raw matches rejected a figure the question did name, which
+        drops an honest refusal under Strict.
+        """
+        engine = _make_engine(require_grounding=True)
+
+        for reply, question in (
+            ('That is not available for the $5 charge.', 'Was the fee $5?'),
+            ('I do not have the information about the $5.', 'Was the fee $5?'),
+            ('I do not have the 12 % figure you asked about.', 'What drove the 12% growth?'),
+            ('I cannot answer about the £1,250.50 charge you asked about.', 'Why the £1,250.50 charge?'),
+        ):
+            result = engine.check_hallucination(reply, source_documents=[], retrieval_ran=True, question_text=question)
+            assert result['passed'], reply
+
+    def test_the_same_amount_written_two_ways_is_one_figure(self):
+        """A question writing $94.7B and an answer writing $94.7 billion mean the same.
+
+        Taken from a live reply: asked "Was Apple net income $94.7B in FY2024?", the
+        model declined and repeated the amount in longhand, and the comparison read the
+        two forms as different figures.
+        """
+        engine = _make_engine(require_grounding=True)
+        reply = (
+            "I don't have the specific financial data or supporting documents needed to "
+            "confirm Apple's net income for FY2024. Based on the information available to "
+            "me, I cannot verify whether Apple's net income was $94.7 billion."
+        )
+
+        result = engine.check_hallucination(
+            reply,
+            source_documents=[],
+            retrieval_ran=True,
+            question_text='Was Apple net income $94.7B in FY2024?',
+        )
+
+        assert result['passed']
+
+    def test_folding_the_scale_word_does_not_match_a_different_amount(self):
+        """$9 billion and $94.7B are still different figures once folded."""
+        engine = _make_engine(require_grounding=True)
+
+        result = engine.check_hallucination(
+            'Net income was $94.7 billion, but that is not available.',
+            source_documents=[],
+            retrieval_ran=True,
+            question_text='Was revenue $9 billion in 2024?',
+        )
+
+        assert not result['passed']
+
+    def test_no_question_recorded_falls_back_to_the_marker(self):
+        """Guardrails wired to documents and answers but not questions has no question.
+
+        With nothing to attribute a figure to, applying the test anyway would drop
+        honest refusals again, which is the failure this whole path avoids.
+        """
+        engine = _make_engine(require_grounding=True)
+
+        for reply in (
+            'I do not have the information to answer about the $94.7B figure you mentioned.',
+            'I do not have that figure; the index holds 1,200 documents.',
+        ):
+            assert engine.check_hallucination(reply, source_documents=[], retrieval_ran=True)['passed'], reply
+
+    def test_a_figure_absent_from_the_question_is_still_a_claim(self):
+        """The question makes a quoted figure a reference; an invented one is not in it."""
+        engine = _make_engine(require_grounding=True)
+
+        result = engine.check_hallucination(
+            'Apple net income was $94.7B, but the source is not available.',
+            source_documents=[],
+            retrieval_ran=True,
+            question_text='What was net income for FY2024?',
+        )
+
+        assert not result['passed']
+
+    def test_an_abstention_may_still_echo_the_question(self):
+        """A year or a plain count is not the invented amount being guarded against."""
+        engine = _make_engine(require_grounding=True)
+
+        for reply in (
+            'I do not have data for 2024.',
+            'The 3 documents provided do not contain that figure.',
+        ):
+            assert engine.check_hallucination(reply, source_documents=[], retrieval_ran=True)['passed'], reply
+
+    def test_an_empty_answer_is_not_an_ungrounded_answer(self):
+        """Blank output asserts nothing, so there is nothing to ground.
+
+        IInstance short-circuits blank text before evaluate(), but the engine is
+        public and directly tested, so it should not depend on that.
+        """
+        engine = _make_engine(require_grounding=True)
+
+        for blank in ('', '   ', '\n\t'):
+            assert engine.check_hallucination(blank, source_documents=[], retrieval_ran=True)['passed']
+
+    def test_evaluate_defaults_to_retrieval_having_run(self):
+        """A caller that does not report the lane keeps the stricter reading."""
+        engine = _make_engine(require_grounding=True)
+        result = engine.evaluate('A confident claim.', mode='output', context={'source_documents': []})
+
+        assert any(v['rule'] == 'hallucination' for v in result['violations'])
+
+    def test_coverage_off_and_grounding_off_runs_no_check(self):
+        """Both off is today's behaviour and must stay silent."""
+        engine = _make_engine(enable_hallucination_check=False, require_grounding=False)
+        result = engine.evaluate('Some confident claim.', mode='output', context={'source_documents': []})
+
+        assert not any(v['rule'] == 'hallucination' for v in result['violations'])
+
 
 # ============================================================================
 # Content Safety
@@ -1080,6 +1366,7 @@ class TestConfigWiring:
             'enable_content_safety',
             'enable_pii_detection',
             'enable_hallucination_check',
+            'require_grounding',
             'max_input_length',
             'max_tokens_estimate',
             'blocked_topics',
@@ -1124,6 +1411,7 @@ class TestConfigWiring:
             'enable_content_safety',
             'enable_pii_detection',
             'enable_hallucination_check',
+            'require_grounding',
             'max_input_length',
             'max_tokens_estimate',
             'expected_format',
@@ -1131,6 +1419,17 @@ class TestConfigWiring:
 
         missing = required_knobs - custom_keys
         assert not missing, f'Custom profile is missing knobs: {missing}'
+
+    def test_only_strict_requires_grounding_by_default(self):
+        """Strict already blocks on ungrounded output, so it is where refusal belongs.
+
+        basic is the default profile and must keep answering as it does today.
+        """
+        profiles = self._load_services_json()['preconfig']['profiles']
+
+        assert profiles['strict']['require_grounding'] is True
+        assert profiles['basic']['require_grounding'] is False
+        assert profiles['custom']['require_grounding'] is False, 'the README lists Strict as the only default'
 
     def test_config_roundtrip_creates_valid_engine(self):
         """Simulate Config.getNodeConfig merging a profile and verify the engine can be instantiated."""
