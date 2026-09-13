@@ -9,7 +9,7 @@
 	"prefix": "http",
 	"icon": "http.svg",
 	"documentation": "https://docs.rocketride.org",
-	"description": ["Makes HTTP requests to any API endpoint, like curl for agents.", "The agent provides the full request (method, URL, headers, body, auth).", "The node enforces security guardrails: only whitelisted URLs and enabled HTTP methods are permitted."],
+	"description": ["Makes HTTP requests to public API endpoints, like curl for agents.", "The agent provides the full request (method, URL, headers, body, auth).", "The node blocks non-public network destinations, returns 3xx responses without following them automatically, and enforces URL patterns and enabled HTTP methods."],
 	"tile": ["Tool: ${parameters.http_request.serverName}.http_request"],
 	"lanes": {},
 	"preconfig": {
@@ -97,11 +97,12 @@
 		"http_request.whitelistPattern": {
 			"type": "string",
 			"title": "URL Pattern (regex)",
+			"description": "Applied with Python regex match() to the final canonical URL after path substitution, regular query parameters, and query-based API-key auth. After matching, a fail-closed source grammar requires a literal HTTP(S) scheme; an exact literal/escaped DNS, IPv4, or bracketed-IPv6 host with an optional exact or [0-9]-based port policy, or a whole-authority [^/] policy; and an explicit path, query, or end boundary. Unsupported or ambiguous authority regex syntax is denied at request time. Example: ^https://api\\.example\\.com(?::[0-9]+)?(?:/|$). Scheme-only prefixes are denied; use an empty whitelist to allow all public destinations. Blank placeholder rows are ignored.",
 			"default": ""
 		},
 		"http_request.urlWhitelist": {
 			"title": "URL Whitelist",
-			"description": "Regex patterns for allowed URLs. A request URL must match at least one pattern. If empty, all URLs are allowed.",
+			"description": "Python regex patterns applied with match() to the final canonical URL after path substitution, regular query parameters, and query-based API-key auth. A request-time source recognizer accepts only exact literal/escaped hosts with supported numeric-port forms, or a deliberate [^/] whole-authority form, followed by an explicit authority boundary. Unsupported or ambiguous authority syntax fails closed even when the regex matches. [] or only blank placeholder rows allows all public destinations; non-public destinations remain blocked. Blank rows mixed with valid patterns are ignored; invalid non-empty regexes, non-string values, and malformed entries fail closed.",
 			"type": "array",
 			"optional": true,
 			"minItems": 0,

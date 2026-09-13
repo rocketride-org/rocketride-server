@@ -24,6 +24,12 @@
 // APP DESCRIPTOR — hello-ui MF remote entry point (OSS landing page)
 // =============================================================================
 
+// HMR anchor: keeps the shared jsx runtime referenced even when the app's
+// root component fails to compile — an error build otherwise orphans it, the
+// hot runtime tombstones its factory, and every later fix-apply dies
+// silently (the frozen-preview bug).
+import 'react/jsx-dev-runtime';
+
 import type { AppDescriptor } from 'shell';
 import HomeApp from './HomeApp';
 

@@ -30,9 +30,19 @@ Open VS Code settings (`Ctrl+,` / `Cmd+,`) and search for `rocketride` to config
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| `rocketride.connectionMode` | - | Connection mode: `cloud`, `onprem`, or `local` |
-| `rocketride.hostUrl` | `http://localhost:5565` | RocketRide server URL |
-| `rocketride.deployment.hostUrl` | `https://cloud.rocketride.ai` | Cloud deployment API URL |
+| `rocketride.development.connectionMode` | `local` | Development connection mode: `cloud`, `docker`, `service`, `onprem`, or `local` |
+| `rocketride.development.hostUrl` | - | Host URL for the development connection (onprem/docker/service modes) |
+| `rocketride.development.useCustomServer` | `false` | Cloud mode: connect to `cloudUrl` instead of RocketRide Cloud |
+| `rocketride.development.cloudUrl` | `https://api.rocketride.ai` | Cloud mode: the server targeted when `useCustomServer` is enabled |
+| `rocketride.deployment.connectionMode` | `null` | Deployment connection mode (`null` = share the development connection) |
+| `rocketride.deployment.hostUrl` | - | Host URL for the deployment connection (onprem/docker/service modes) |
+| `rocketride.deployment.useCustomServer` | `false` | Cloud mode: deploy to `cloudUrl` instead of RocketRide Cloud |
+| `rocketride.deployment.cloudUrl` | `https://api.rocketride.ai` | Cloud mode: the server targeted when `useCustomServer` is enabled |
+
+In cloud mode nothing is baked into the extension: unchecked, the connection
+targets the `cloudUrl` setting's default; checked, it targets the address you
+enter (e.g. a staging server or `http://localhost:5565`). Sign-in exchanges
+its OAuth code against the same effective server.
 
 > Credentials are not a settings key. Enter your API key with the **Settings** page command `rocketride.page.settings.setupCredentials` (update or clear it via `rocketride.page.settings.updateApiKey` / `rocketride.page.settings.clearApiKey`). It is held in VS Code SecretStorage, not in `settings.json`.
 

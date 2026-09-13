@@ -12,12 +12,14 @@ is not listed here, it likely does not exist in the server.
 
 RocketRide does **not** expose OpenTelemetry, Jaeger, Prometheus `/metrics`,
 Sentry, webhook registration, audit-log tables, or a queryable history database.
-There is no SQL store of past runs to read from.
+There is no SQL store of past runs to read from — but the server does record
+run streams you can list and replay (see §8).
 
-Everything is delivered live over a single channel: a **WebSocket Debug Adapter
+Everything is delivered over a single channel: a **WebSocket Debug Adapter
 Protocol (DAP) connection** on which the server emits typed events. To capture
-historical data, your service must connect, subscribe, and write the events to
-its own database as they arrive.
+historical data, your service can either connect, subscribe, and write the
+events to its own database as they arrive, or replay the server's own recorded
+run streams after the fact (see §8).
 
 The features that _do_ exist:
 
@@ -30,6 +32,8 @@ The features that _do_ exist:
 | Real-time node→UI custom messages (`monitorSSE`)                          | DAP event `apaevt_sse`                                              | Per pipe           |
 | File upload progress                                                      | DAP event `apaevt_status_upload`                                    | Per upload         |
 | Server/admin dashboard events (connection added/removed, monitor changes) | DAP event `apaevt_dashboard`                                        | Server-wide        |
+| Run-boundary markers in recorded streams (`run-begin`/`run-end`/`restart`) | DAP event `apaevt_log_lifecycle` (recorded streams only, see §5.8) | Per run            |
+| Recorded, replayable run history (chapters, segments, event replay)       | DAP command `rrext_log` / SDK `log` sub-client (see §8)             | Per stream, per run |
 
 ---
 
@@ -224,12 +228,12 @@ default: captures inputs/outputs without per-call noise).
 
 ## 5. Event payload schemas
 
-Authoritative type definitions live at:
+Authoritative type definitions ship inside the installed SDK packages:
 
-- Python: `packages/client-python/src/rocketride/types/events.py`
-- Python: `packages/client-python/src/rocketride/types/task.py`
-- TypeScript: `packages/client-typescript/src/client/types/events.ts`
-- TypeScript: `packages/client-typescript/src/client/types/task.ts`
+- Python: `rocketride.types.events` and `rocketride.types.task` (importable
+  from the `rocketride` package)
+- TypeScript: the event and task types exported by the `rocketride`
+  package's type declarations
 
 ### 5.1 `apaevt_task`: lifecycle (subscribe to `TASK`)
 
@@ -378,6 +382,47 @@ event).
 Connection lifecycle, monitor-change audit events, etc. Useful if you want to
 record _who_ subscribed/unsubscribed to monitors (operator-level audit).
 
+### 5.8 `apaevt_log_lifecycle`: run boundaries in recorded streams
+
+This event does not arrive on a live monitor subscription: the server's
+run-log recorder writes it into the recorded run stream (see §8) as the
+run-boundary marker. You encounter it when replaying or reading recorded
+runs; the live-broadcast equivalents are the `apaevt_task` begin/end events.
+
+`body` is one of:
+
+```ts
+// Run started (doubles as the chapter header for the run)
+{
+  action: "run-begin",
+  schemaVer: number,           // recording schema version
+  projectId: string,
+  source: string,
+  runKind: "dev" | "deploy",
+  trigger: string,             // what started the run ("manual", "scheduled", ...)
+  user: string,                // display identity of the run owner
+  pipelineHash: string,        // hash/version of the pipeline config
+  traceLevel: string | null,   // the run's pipelineTraceLevel
+  orgId: string,
+  teamId: string
+}
+
+// Run ended
+{
+  action: "run-end",
+  outcome: "ok" | "error" | "cancelled",
+  detail: string,              // human-readable exit message
+  reason?: "user" | "ttl"      // why a requested stop happened
+}
+
+// Engine restarted mid-run (the run/chapter continues)
+{ action: "restart" }
+```
+
+Like every recorded event, the body also carries `eventTime` (epoch seconds,
+float) and `logSeq` (the per-stream, strictly monotonic continuum sequence,
+see §8): order by `logSeq`, position by `eventTime`.
+
 ---
 
 ## 6. DAP commands you may need (besides `rrext_monitor`)
@@ -401,15 +446,116 @@ clients exist in this repo and ship to npm/PyPI:
 
 - Python: `pip install rocketride`: `RocketRideClient(uri, auth, on_event=...)`,
   then `await client.add_monitor(key={'token': '*'}, types=['summary','flow','task','output','sse'])`.
-- TypeScript: `@rocketride/client`: same shape.
+- TypeScript: `npm install rocketride` (the package is named `rocketride` on
+  npm too): same shape.
 
 Both let you pass an `on_event` async callback that fires for every inbound
-event message. Source: `packages/client-python/src/rocketride/` and
-`packages/client-typescript/src/client/`.
+event message; the full client references are `ROCKETRIDE_python_API.md`
+and `ROCKETRIDE_typescript_API.md`.
 
 ---
 
-## 8. Recommended ingestion design for the agents database
+## 8. Recorded runs (DVR) as an alternative to live ingestion
+
+The server records each task's events into a per-stream **run log**: an
+append-only continuum of the same typed events described in §5, organized as
+chapters (one per run) over size-sealed segments. If your ingester was offline
+for a window — or you would rather not maintain your own event database at
+all — you can read recorded runs back after the fact instead of (or in
+addition to) ingesting live.
+
+### 8.1 The `log` sub-client
+
+Both SDKs expose it as `client.log` (it rides the `rrext_log` DAP command
+under the hood). TypeScript signatures; Python mirrors them in snake_case:
+
+```ts
+client.log.chapters(stream)                       // the whole timeline in one read
+client.log.read(stream, params?)                  // paged event-range read
+client.log.segment(stream, segmentId, params?)    // raw JSONL chunks of one segment (bulk replay)
+client.log.delete(stream, { beforeTime?, all? })  // destructive retention management
+client.log.openEventStream(stream)                // → LogEventStream, the DVR session (§8.2)
+```
+
+`stream` identifies one continuum:
+
+```ts
+{
+  projectId: string,
+  source: string,
+  teamId?: string,            // a team's deploy continuum
+  runKind?: "dev" | "deploy"  // your own stream: dev (default) or personal deploy
+}
+```
+
+- **`chapters`** returns per-run `beginTime`, `beginSeq`, `endTime` (null
+  while the run is live), `outcome` (`"ok" | "error" | "cancelled"`, null
+  while live), and `traceLevel`, plus segment activity spans and the
+  retention horizon.
+- **`read`** pages events by seq or time range (`fromSeq`/`toSeq`,
+  `fromTime`/`toTime`); a `nextSeq` in the response is your continuation
+  cursor, and `truncatedAtSeq` means the range reached below the retention
+  horizon.
+- **`segment`** hands over one segment's raw JSONL in whole-line-aligned
+  chunks (each chunk parses standalone; repeat with `nextOffset` until
+  `final`).
+
+### 8.2 `LogEventStream`: the DVR session
+
+`openEventStream` returns a position-based replay/monitoring session:
+storage layout (segments, keyframes, deltas) stays invisible. Positions are
+epoch seconds, or `"live"` to pin to now.
+
+```ts
+const dvr = client.log.openEventStream({ projectId, source });
+await dvr.seek(pos);                   // position on the timeline
+await dvr.play(pos, speed, callback);  // timed replay, event by event
+dvr.pause();
+dvr.position();                        // current position (epoch seconds)
+await dvr.getChapters();               // the runs: begin/end/outcome each
+await dvr.getStatus();                 // TASK_STATUS as of the position
+await dvr.getConsole(n);               // last n console lines at the position
+await dvr.getTraces(n);                // last n flow traces at the position
+await dvr.getTrace(traceId);           // one full trace, begin → end
+dvr.ingestLive(msg);                   // feed live monitor events into the tail
+dvr.closeEventStream();
+```
+
+Run boundaries appear in the recorded stream as `apaevt_log_lifecycle`
+events (§5.8). Every recorded event body carries `eventTime` plus `logSeq`,
+the per-stream continuum sequence: strictly monotonic across runs and engine
+restarts, so it is the global ordering key the live socket lacks — use it to
+de-duplicate a backfill against events you already captured live.
+
+### 8.3 Saved log documents (client-side convenience)
+
+Separate from the server-recorded continuum, the client also has simple
+wrappers for storing log documents **you assemble yourself** in your account
+store:
+
+```ts
+await client.saveLog({ projectId, source, contents }); // → filename; contents.body.startTime required
+await client.listLogs({ projectId, source? });         // → [{ name, modified? }], oldest first
+await client.getLog({ projectId, name });              // → the saved payload
+await client.deleteLog({ projectId, name });
+```
+
+(Python: `save_log(project_id, source, contents)`,
+`list_logs(project_id, source=None)`, `get_log(project_id, name)`,
+`delete_log(project_id, name)`.)
+
+Use these to persist a digest your service produced; reading the server's own
+recording is §8.1.
+
+**Retention caveat:** the run log is a window (ring + age retention), not an
+archive: the chapters response carries the horizon, `read` flags
+`truncatedAtSeq` when a range falls below it, and `delete` can advance it.
+For long-term history, copy what you need into your own store — the DVR is
+your backfill and crash-recovery source.
+
+---
+
+## 9. Recommended ingestion design for the agents database
 
 1. Open one long-lived WebSocket to `ws://<rocketride-host>:5565/task/service`.
 2. Send `auth` with the service-account API key.
@@ -437,11 +583,12 @@ event message. Source: `packages/client-python/src/rocketride/` and
 
 ---
 
-## 9. Things to NOT assume
+## 10. Things to NOT assume
 
 - There is no built-in dead-letter queue, if your ingester is offline, you
-  miss events for that window. The next `apaevt_task` `running` snapshot is
-  your only crash-recovery handle.
+  miss live events for that window. The next `apaevt_task` `running` snapshot
+  is your live crash-recovery handle; the recorded run streams (§8) can
+  backfill the missed window.
 - There is no `event_id` / global ordering key. Use the DAP envelope `seq`
   (per-connection monotonic) plus your own ingest timestamp.
 - `apaevt_flow` `trace` is a free-form dict; schema varies by node and trace

@@ -60,6 +60,31 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 from ..core import DAPClient, PipeException
 from ..types import PIPELINE_RESULT, UPLOAD_RESULT
 
+# A just-registered pipeline's per-pipe data listener can occasionally still be
+# binding when `open()` reaches it - observed under heavy concurrent load (e.g. many
+# pipelines opened at once in CI) as a transient "Connect call failed" on the
+# freshly assigned port. That's indistinguishable from a real "pipeline isn't
+# running" failure to the caller, so give it one short extra retry before
+# surfacing it as an error.
+#
+# The engine already retries this exact connect internally (up to 10 attempts,
+# 150ms apart - see task_engine.py's `_connect_data_client`) before it gives up
+# and reports "Connect call failed" back to us, so a single SDK-level attempt
+# already absorbs ~1.5s of engine-side retrying. Each retry here re-runs that
+# whole engine-side loop from scratch, so keep the attempt count low: at
+# `_PIPE_OPEN_RETRY_ATTEMPTS = 2` (one retry), worst case is two ~1.5s engine
+# cycles plus one short backoff, roughly 3.2s, before `open()` raises.
+_PIPE_OPEN_RETRY_ATTEMPTS = 2
+_PIPE_OPEN_RETRY_BACKOFF_SECONDS = 0.25
+
+
+def _is_transient_pipe_open_error(message: str) -> bool:
+    # Deliberately narrower than "any connection-shaped error": a misconfigured
+    # `remote` node surfaces a plain "Connection refused" for a permanent failure
+    # that this retry can't fix (the engine's inner connect loop doesn't run for
+    # it), so only the exact race-condition signature above is retried.
+    return 'Connect call failed' in message
+
 
 class DataMixin(DAPClient):
     """
@@ -154,12 +179,19 @@ class DataMixin(DAPClient):
             Must be called before writing data. The server assigns a unique
             pipe ID and prepares to receive your data.
 
+            If the only problem is a transient "Connect call failed" while the
+            pipeline's data listener is still starting up, this retries once
+            before giving up - worst case that adds ~1.75s (a short backoff,
+            then the engine's own internal connect retry runs again on the
+            retry). Any other failure raises immediately on the first attempt.
+
             Returns:
                 self: The opened pipe instance for method chaining
 
             Raises:
                 RuntimeError: If the pipe is already opened.
-                PipeException: If the server rejects the open request.
+                PipeException: If the server rejects the open request, or if it
+                    keeps failing with a transient connect error past the retry.
 
             Example:
                 pipe = await client.pipe(token, mimetype="text/plain")
@@ -169,25 +201,43 @@ class DataMixin(DAPClient):
             if self._opened:
                 raise RuntimeError('Pipe already opened')
 
-            request = self._client.build_request(
-                'rrext_process',
-                arguments={
-                    'subcommand': 'open',
-                    'object': self._objinfo,
-                    'mimeType': self._mime_type,
-                    'provider': self._provider,
-                },
-                token=self._token,
-            )
+            response = None
+            for attempt in range(1, _PIPE_OPEN_RETRY_ATTEMPTS + 1):
+                request = self._client.build_request(
+                    'rrext_process',
+                    arguments={
+                        'subcommand': 'open',
+                        'object': self._objinfo,
+                        'mimeType': self._mime_type,
+                        'provider': self._provider,
+                    },
+                    token=self._token,
+                )
 
-            response = await self._client.request(request)
+                response = await self._client.request(request)
 
-            if self._client.did_fail(response):
+                if not self._client.did_fail(response):
+                    break
+
+                message = response.get('message')
+                if message is None:
+                    message = ''
+                elif not isinstance(message, str):
+                    # A well-behaved server always sends a string, but don't let a
+                    # malformed one (e.g. a bare int/bool) blow up the `in` check
+                    # below or the PipeException raised past the retry. `or ''`
+                    # here would also turn falsey-but-real values like `0`/`False`
+                    # into an empty message, so check for absence explicitly.
+                    message = str(message)
+                if attempt < _PIPE_OPEN_RETRY_ATTEMPTS and _is_transient_pipe_open_error(message):
+                    await asyncio.sleep(_PIPE_OPEN_RETRY_BACKOFF_SECONDS * attempt)
+                    continue
+
                 # The server's message stays the message: an application may show
                 # it to an end user. The developer checklist rides along as `hint`
                 # (PipeException.hint), and `code` classifies the failure.
                 response = dict(response)
-                response['message'] = response.get('message') or 'Failed to open a data pipe.'
+                response['message'] = message or 'Failed to open a data pipe.'
                 response['hint'] = (
                     'Common causes:\n'
                     "- Pipeline isn't running (wrong token or task terminated)\n"

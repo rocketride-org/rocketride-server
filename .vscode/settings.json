@@ -2,6 +2,10 @@
   "cmake.configureOnOpen": false,
   "cmake.sourceDirectory": "${workspaceFolder}/packages/server",
   "explorer.excludeGitIgnore": true,
+  "files.watcherExclude": {
+    "**/build/**": true,
+    "**/dist/**": true
+  },
   "python.analysis.exclude": [
     "**/.*",
     "**/__pycache__",

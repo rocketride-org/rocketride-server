@@ -22,6 +22,7 @@ import type { IProject, ThemeTokens } from 'shell';
 // barrel is the shell's MF share and must stay canvas-free; this webview
 // bundles the project module directly.
 import { ProjectView, parseServerEvent, isDevLiveEvent, isTeamLiveEvent } from 'shared/modules/project';
+import { mergeProjectPreferences } from 'shared/modules/project/projectPreferences';
 import { registerServiceIcons } from 'shared/components/canvas/util/Icon';
 import { foldProjectDeployRuns } from 'shared/modules/sidebar/taskFold';
 import type { TaskLifecycleEvent } from 'shared/modules/sidebar/taskFold';
@@ -31,6 +32,8 @@ import type { CheckoutPlan, PlanAction } from 'shell';
 import { DeploymentRecordPanel, TeamDeploymentRecordPanel } from 'shared/components/deploy-panel';
 import type { DeploySnapshot } from 'shared/components/deploy-panel';
 import { useMessaging } from '../hooks/useMessaging';
+import { useStripeKey } from '../hooks/useStripeKey';
+import { CheckoutUnavailableNotice } from '../components';
 import type { ProjectHostToWebview, ProjectWebviewToHost } from '../../types/projectTypes';
 import type { DeployTeamRefDTO, TeamDeploymentRowDTO, DeploymentLoadPayload, SchedulePreviewResultDTO } from '../../types/deployTypes';
 
@@ -80,7 +83,11 @@ const ProjectWebview: React.FC = () => {
 	const [subscribed, setSubscribed] = useState(true);
 	const [isReadonly, setIsReadonly] = useState(false);
 	const [showCheckout, setShowCheckout] = useState(false);
+	// Server-supplied Stripe publishable key — matches the connected server's
+	// Stripe account instead of a build-time value.
+	const { key: stripeKey, reason: stripeKeyReason } = useStripeKey();
 	const [envKeys, setEnvKeys] = useState<string[]>([]);
+	const [cloudConnectionConfigured, setCloudConnectionConfigured] = useState(false);
 
 	// Deploy lifecycle: LIVE rows pushed by deploy:data (badges/where-live);
 	// the panel's registry snapshot resolves through pendingLifecycleFetches.
@@ -167,6 +174,7 @@ const ProjectWebview: React.FC = () => {
 				if (msg.isSubscribed !== undefined) setSubscribed(msg.isSubscribed);
 				setIsReadonly(msg.isReadonly ?? false);
 				setStatusMap(msg.statuses ?? {});
+				setCloudConnectionConfigured(msg.cloudConnectionConfigured ?? false);
 				setViewState({
 					mode: vs?.mode ?? 'design',
 					flowViewMode: vs?.flowViewMode ?? 'pipeline',
@@ -279,6 +287,9 @@ const ProjectWebview: React.FC = () => {
 			case 'project:envKeysUpdate':
 				setEnvKeys(msg.envKeys);
 				break;
+			case 'project:cloudConnectionConfigured':
+				setCloudConnectionConfigured(msg.cloudConnectionConfigured);
+				break;
 			case 'shell:connectionChange':
 				if (msg.isConnected) {
 					setStatusMap({});
@@ -290,7 +301,7 @@ const ProjectWebview: React.FC = () => {
 				break;
 			case 'checkout:required':
 				// Host says subscription is required — show inline prompt (handled by ProjectView's Subscribe button)
-				console.log(`[ProjectWebview] checkout:required received, stripeKey=${!!(typeof process !== 'undefined' && (process.env as any).RR_STRIPE_PUBLISHABLE_KEY)}`);
+				console.log('[ProjectWebview] checkout:required received');
 				setShowCheckout(true);
 				break;
 			case 'checkout:subscriptionUpdate':
@@ -428,7 +439,8 @@ const ProjectWebview: React.FC = () => {
 				});
 				break;
 			case 'project:initialPrefs':
-				setPrefs(msg.prefs ?? {});
+				// Merge: the host broadcasts only the keys that changed, not the whole bag.
+				setPrefs((prev) => mergeProjectPreferences(prev, msg.prefs ?? {}));
 				break;
 			case 'project:dirtyState':
 				setIsDirty(msg.isDirty);
@@ -527,6 +539,7 @@ const ProjectWebview: React.FC = () => {
 
 	const handlePrefsChange = useCallback(
 		(updatedPrefs: Record<string, unknown>) => {
+			setPrefs((prev) => mergeProjectPreferences(prev, updatedPrefs));
 			sendMessage({ type: 'project:prefsChange', prefs: updatedPrefs });
 		},
 		[sendMessage]
@@ -549,6 +562,10 @@ const ProjectWebview: React.FC = () => {
 	const clearPendingOAuthTokens = useCallback(() => {
 		setPendingOAuthTokens(undefined);
 	}, []);
+
+	const handleOpenCloudSetup = useCallback(() => {
+		sendMessage({ type: 'project:openCloudSetup' });
+	}, [sendMessage]);
 
 	const handleSave = useCallback(() => {
 		sendMessage({ type: 'project:requestSave' });
@@ -787,14 +804,13 @@ const ProjectWebview: React.FC = () => {
 
 	// --- Render --------------------------------------------------------------
 
-	const stripeKey = process.env.RR_STRIPE_PUBLISHABLE_KEY || '';
-
 	return (
 		<>
 			<ProjectView
 				project={project}
 				servicesJson={servicesJson}
 				isConnected={isConnected}
+				cloudConnectionConfigured={cloudConnectionConfigured}
 				isSubscribed={subscribed}
 				statusMap={statusMap}
 				serverHost={serverHost}
@@ -810,6 +826,7 @@ const ProjectWebview: React.FC = () => {
 				onViewStateChange={handleViewStateChange}
 				onPrefsChange={handlePrefsChange}
 				onOpenLink={handleOpenLink}
+				onOpenCloudSetup={handleOpenCloudSetup}
 				oauthReturnUrl={oauthReturnUrl}
 				onOpenExternal={handleOpenExternal}
 				pendingOAuthTokens={pendingOAuthTokens}
@@ -835,6 +852,10 @@ const ProjectWebview: React.FC = () => {
 							// refresh via deploy:fetch once the mutation resolves.
 							onDeploySetDisabled: async (teamId: string, disabled: boolean) => {
 								await deploymentRequest((requestId) => ({ type: 'deployment:setDisabled', teamId, requestId, disabled }));
+								sendMessageRef.current({ type: 'deploy:fetch', projectId: projectIdRef.current });
+							},
+							onDeployRemove: async (teamId: string) => {
+								await deploymentRequest((requestId) => ({ type: 'deployment:remove', teamId, requestId }));
 								sendMessageRef.current({ type: 'deploy:fetch', projectId: projectIdRef.current });
 							},
 							onDeploySetSchedule: async (teamId: string, sourceId: string, cron: string | null, ttl: number | null) => {
@@ -959,6 +980,7 @@ const ProjectWebview: React.FC = () => {
 				/>
 			)}
 			{showCheckout && stripeKey && <CheckoutModal appName="RocketRide" appDescription="Visual AI pipeline editor — run and deploy pipelines on RocketRide Cloud." stripePublishableKey={stripeKey} onFetchPlans={handleFetchPlans} onCreateCheckout={handleCreateCheckout} onConfirmPending={handleConfirmPending} onSuccess={handleCheckoutSuccess} onClose={() => setShowCheckout(false)} onActionClick={(_plan: CheckoutPlan, action: PlanAction) => sendMessageRef.current({ type: 'project:openLink', url: action.type === 'mailto' ? `mailto:${action.url}${action.subject ? `?subject=${encodeURIComponent(action.subject)}` : ''}` : action.url, browser: true })} />}
+			{showCheckout && !stripeKey && <CheckoutUnavailableNotice reason={stripeKeyReason} onClose={() => setShowCheckout(false)} />}
 		</>
 	);
 };

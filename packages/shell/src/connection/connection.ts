@@ -51,6 +51,7 @@ import { BaseManager } from './base-manager';
 import { RemoteManager } from './remote-manager';
 import { AUTH_REJECTED_MESSAGE, ConnectionFailure } from './errors';
 import { shouldReloadForTokenStorageUpdate } from './tokenStorageUpdate';
+import { isEmbeddedDevShell, tokenStore } from '../util/devGate';
 import { getStoredVerifier, clearStoredVerifier } from '../util/pkce';
 import {
 	LS_TOKEN,
@@ -375,6 +376,12 @@ export class ConnectionManager implements IConnectionManager {
 					this.emit('store:changed', (message.body ?? {}) as ShellConnectionEventMap['store:changed']);
 					return;
 				}
+				// The user's default org changed — a pure notification; each
+				// client decides how to react (the shell reloads).
+				if (message.event === 'apaext_org_changed') {
+					this.emit('shell:orgChanged', (message.body ?? { orgId: '' }) as ShellConnectionEventMap['shell:orgChanged']);
+					return;
+				}
 				// The service catalog changed server-side: re-fetch the summary
 				// cache after a random delay — the push is a broadcast, and the
 				// jitter keeps the whole fleet from refetching in the same
@@ -459,6 +466,14 @@ export class ConnectionManager implements IConnectionManager {
 		// so the button works again without a manual page refresh.
 		if (typeof window !== 'undefined') {
 			window.addEventListener('storage', (event) => {
+				// Embedded dev previews ignore cross-context token churn: the
+				// embedder's rrdev:auth answer is the sole session authority
+				// there (and the token lives per-context, see devGate), so a
+				// change in the shared slot is never actionable. Reacting to it
+				// is how two panels with divergent auth states once reloaded
+				// each other forever — each panel's clear/save cross-fired the
+				// other panel's watcher.
+				if (isEmbeddedDevShell()) return;
 				try {
 					const localStorage = window.localStorage;
 					if (event.key !== LS_TOKEN || event.storageArea !== localStorage) return;
@@ -474,6 +489,7 @@ export class ConnectionManager implements IConnectionManager {
 							lastError: undefined,
 							progressMessage: undefined,
 						});
+						console.warn('[shell] reloading: session token cleared by another same-origin context (storage event)');
 						window.location.reload();
 						return;
 					}
@@ -484,6 +500,7 @@ export class ConnectionManager implements IConnectionManager {
 						currentUserToken: this.accountInfo?.userToken,
 						hasAccountInfo: Boolean(this.accountInfo),
 					})) {
+						console.warn('[shell] reloading: session token replaced by another same-origin context (storage event)');
 						window.location.reload();
 					}
 				} catch {
@@ -1237,35 +1254,55 @@ export class ConnectionManager implements IConnectionManager {
 	// TOKEN STORAGE
 	// =========================================================================
 
-	/** Persist a user token to localStorage. */
+	/** Persist a user token to this shell's token store (see devGate.tokenStore). */
 	public saveToken(token: string): void {
-		try { localStorage.setItem(LS_TOKEN, token); } catch (e) {
+		try { tokenStore().setItem(LS_TOKEN, token); } catch (e) {
 			console.error('[ConnectionManager] Failed to save token:', e);
 		}
+		// An embedded preview must not stamp the HOST-WIDE /apps cookie: the
+		// cookie jar is shared by every same-origin frame, so a panel's
+		// injected dev session would swap the bundle credentials out from
+		// under the embedding user's real session and every sibling panel.
+		// The preview's own dev bundle is served by the dev overlay, not
+		// /apps, so the prime is not needed there either.
+		if (isEmbeddedDevShell()) return;
+		this.primeAppsCookie(token);
 	}
 
-	/** Load token from localStorage. Migrates the old sessionStorage value once. */
+	/**
+	 * Stow the user token in the ``/apps``-scoped cookie so the browser
+	 * attaches it to MF bundle fetches — SaaS gates each bundle by per-app
+	 * permission (see the server's ``/apps/session`` + ``apps_static``).
+	 *
+	 * Same-origin relative POST (the shell is served from the app origin, so
+	 * the cookie lands on the right host), fire-and-forget: the bundle route
+	 * re-validates on every serve, so a lost prime is self-correcting. Harmless
+	 * in OSS — the endpoint mints a cookie the OSS serve path ignores.
+	 *
+	 * @param token - The authenticated user token to cookie.
+	 */
+	private primeAppsCookie(token: string): void {
+		if (!token) return;
+		try {
+			void fetch('/apps/session', {
+				method: 'POST',
+				headers: { Authorization: `Bearer ${token}` },
+				credentials: 'same-origin',
+			}).catch(() => { /* best-effort */ });
+		} catch { /* best-effort — the bundle route re-checks anyway */ }
+	}
+
+	/** Load the persisted token from this shell's token store. */
 	public loadToken(): string {
 		try {
-			const token = localStorage.getItem(LS_TOKEN);
-			if (token !== null) return token;
-
-			const sessionToken = sessionStorage.getItem(LS_TOKEN);
-			if (sessionToken === null) return '';
-
-			localStorage.setItem(LS_TOKEN, sessionToken);
-			sessionStorage.removeItem(LS_TOKEN);
-			return sessionToken;
+			return tokenStore().getItem(LS_TOKEN) ?? '';
 		} catch { return ''; }
 	}
 
-	/** Clear the persisted token. */
+	/** Clear the persisted token from this shell's token store. */
 	public clearToken(): void {
-		try { localStorage.removeItem(LS_TOKEN); } catch (e) {
+		try { tokenStore().removeItem(LS_TOKEN); } catch (e) {
 			console.error('[ConnectionManager] Failed to clear token:', e);
-		}
-		try { sessionStorage.removeItem(LS_TOKEN); } catch (e) {
-			console.error('[ConnectionManager] Failed to clear legacy session token:', e);
 		}
 	}
 

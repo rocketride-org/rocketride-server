@@ -34,14 +34,7 @@ import { BillingApi } from './billing.js';
 import { DatabaseApi } from './database.js';
 import { DeployApi } from './deploy.js';
 import { LogApi } from './log.js';
-import {
-	AuthenticationException,
-	ConnectionException,
-	DAPException,
-	LoginAttemptCancelledError,
-	type LoginAttemptCancellationReason,
-	PipeException,
-} from './exceptions/index.js';
+import { AuthenticationException, ConnectionException, DAPException, LoginAttemptCancelledError, type LoginAttemptCancellationReason, PipeException } from './exceptions/index.js';
 
 // Global counter for generating unique client IDs
 let clientId = 0;
@@ -338,11 +331,15 @@ export class DataPipe {
  * - `{ projectId, source }` — monitors the CALLER's own dev run of the
  *   project/source (the server binds the connection's user identity).
  * - `{ teamId, projectId, source }` — monitors the team's DEPLOYED run.
+ * - `{ runKind: 'deploy', projectId, source }` — monitors the CALLER's own
+ *   PERSONAL (@me) deploy run: deploy-kind but user-owned, the one case
+ *   teamId-presence cannot express.
  *
- * The scope IS the kind: teamId present addresses the deploy continuum,
- * absent addresses your dev run — there is no run-kind argument.
+ * teamId present always addresses the team's deploy continuum (runKind is
+ * ignored there); absent, the optional runKind selects between your dev
+ * run (default) and your personal deploy run.
  */
-export type MonitorKey = { token: string } | { teamId?: string; projectId: string; source: string; pipeId?: number };
+export type MonitorKey = { token: string } | { teamId?: string; projectId: string; source: string; pipeId?: number; runKind?: 'dev' | 'deploy' };
 
 type LifecyclePriority = 'foreground' | 'background';
 
@@ -577,10 +574,39 @@ export class RocketRideClient extends DAPClient {
 				throw new Error(response.message || 'Server info request failed');
 			}
 
-			return (response.body ?? {}) as unknown as ServerInfoResult;
+			const body = (response.body ?? {}) as unknown as ServerInfoResult;
+			// Resolve the endpoints HERE, where the probed URI is known, so
+			// consumers always receive absolute URLs and never branch on
+			// presence — a pre-endpoints server or an 'origin' sentinel both
+			// resolve to the address this probe was made to.
+			body.endpoints = RocketRideClient.resolveEndpoints(body.endpoints, uri);
+			return body;
 		} finally {
 			await client.disconnect();
 		}
+	}
+
+	/**
+	 * Resolve a probe's `endpoints` block against the URI that was probed.
+	 *
+	 * The wire value for each key is an absolute URL or the literal
+	 * `'origin'` — the server's way of saying "wherever you reached me"
+	 * (a server behind a proxy cannot know its public name). Absent keys
+	 * and a missing block (pre-endpoints servers) mean `'origin'` too, so
+	 * the ONE conditional in the whole scheme lives here and callers get a
+	 * complete `{ api, ui }` of absolute URLs unconditionally.
+	 *
+	 * @param endpoints - The raw `endpoints` value from the probe body, if any.
+	 * @param probedUri - The URI `getServerInfo` attached to.
+	 * @returns Both keys resolved to absolute URLs.
+	 */
+	public static resolveEndpoints(
+		endpoints: Partial<ServerInfoResult['endpoints']> | undefined,
+		probedUri: string
+	): ServerInfoResult['endpoints'] {
+		const origin = RocketRideClient.normalizeUri(probedUri);
+		const resolve = (value?: string) => (!value || value === 'origin' ? origin : value);
+		return { api: resolve(endpoints?.api), ui: resolve(endpoints?.ui) };
 	}
 
 	/**
@@ -618,27 +644,26 @@ export class RocketRideClient extends DAPClient {
 	// INTERNAL CONNECTION HELPERS
 	// ============================================================================
 
-	private _resolveCredential(
-		credential?: string | { code: string; verifier: string; redirectUri: string },
-	): string {
+	private _resolveCredential(credential?: string | { code: string; verifier: string; redirectUri: string }): string {
 		if (credential && typeof credential === 'object') {
 			// Keep the established deterministic PKCE wire encoding.
-			return 'cd_' + btoa(JSON.stringify({
-				code: credential.code,
-				verifier: credential.verifier,
-				redirectUri: credential.redirectUri,
-			}));
+			return (
+				'cd_' +
+				btoa(
+					JSON.stringify({
+						code: credential.code,
+						verifier: credential.verifier,
+						redirectUri: credential.redirectUri,
+					})
+				)
+			);
 		}
 		const envKey = this._env['ROCKETRIDE_APIKEY'];
 		const envCredential = typeof envKey === 'string' && envKey.trim() !== '' ? envKey : undefined;
 		return credential ?? envCredential ?? this._apikey ?? '';
 	}
 
-	private _createLifecycleOperation(
-		endpoint: string,
-		credentialKey: string,
-		priority: LifecyclePriority,
-	): LoginLifecycleOperation {
+	private _createLifecycleOperation(endpoint: string, credentialKey: string, priority: LifecyclePriority): LoginLifecycleOperation {
 		let resolve!: (result: ConnectResult) => void;
 		let reject!: (error: unknown) => void;
 		const promise = new Promise<ConnectResult>((resolvePromise, rejectPromise) => {
@@ -662,8 +687,7 @@ export class RocketRideClient extends DAPClient {
 	}
 
 	private _isCurrentOperation(operation: LoginLifecycleOperation): boolean {
-		return this._lifecycleOperation === operation
-			&& this._lifecycleGeneration === operation.generation;
+		return this._lifecycleOperation === operation && this._lifecycleGeneration === operation.generation;
 	}
 
 	private _operationTerminalError(operation: LoginLifecycleOperation, fallback?: unknown): unknown {
@@ -697,20 +721,14 @@ export class RocketRideClient extends DAPClient {
 		operation.reject(error);
 	}
 
-	private _recordCancellation(
-		operation: LoginLifecycleOperation,
-		reason: LoginAttemptCancellationReason,
-	): boolean {
+	private _recordCancellation(operation: LoginLifecycleOperation, reason: LoginAttemptCancellationReason): boolean {
 		if (operation.cancellationReason || operation.unexpectedDisconnectError || operation.settled) return false;
 		operation.cancellationReason = reason;
 		this._rejectLifecycleOperation(operation, new LoginAttemptCancelledError(reason));
 		return true;
 	}
 
-	private _recordUnexpectedDisconnect(
-		operation: LoginLifecycleOperation,
-		reason?: string,
-	): ConnectionException | undefined {
+	private _recordUnexpectedDisconnect(operation: LoginLifecycleOperation, reason?: string): ConnectionException | undefined {
 		if (operation.settled || operation.cancellationReason || operation.unexpectedDisconnectError) {
 			return operation.unexpectedDisconnectError;
 		}
@@ -735,10 +753,7 @@ export class RocketRideClient extends DAPClient {
 		await transport.disconnect();
 	}
 
-	private async _prepareOperationTransport(
-		operation: LoginLifecycleOperation,
-		timeout?: number,
-	): Promise<TransportWebSocket> {
+	private async _prepareOperationTransport(operation: LoginLifecycleOperation, timeout?: number): Promise<TransportWebSocket> {
 		this._assertCurrentOperation(operation);
 		const existing = this._transport;
 		if (existing?.getConnectionInfo() === operation.endpoint) {
@@ -780,21 +795,13 @@ export class RocketRideClient extends DAPClient {
 		this._assertCurrentOperation(operation);
 	}
 
-	private async _publishDisconnected(
-		operation: LoginLifecycleOperation,
-		reason: string,
-		hasError: boolean,
-	): Promise<void> {
+	private async _publishDisconnected(operation: LoginLifecycleOperation, reason: string, hasError: boolean): Promise<void> {
 		if (!this._claimDisconnectedPublication(operation)) return;
 		await this._invokeDisconnected(reason, hasError);
 	}
 
 	private _claimDisconnectedPublication(operation: LoginLifecycleOperation): boolean {
-		if (
-			!this._isCurrentOperation(operation)
-			|| !operation.onConnectedPublished
-			|| operation.onDisconnectedPublished
-		) return false;
+		if (!this._isCurrentOperation(operation) || !operation.onConnectedPublished || operation.onDisconnectedPublished) return false;
 		operation.onDisconnectedPublished = true;
 		return true;
 	}
@@ -809,11 +816,7 @@ export class RocketRideClient extends DAPClient {
 		}
 	}
 
-	private async _runLoginOperation(
-		operation: LoginLifecycleOperation,
-		priorCleanup: Promise<void>,
-		timeout?: number,
-	): Promise<void> {
+	private async _runLoginOperation(operation: LoginLifecycleOperation, priorCleanup: Promise<void>, timeout?: number): Promise<void> {
 		try {
 			await priorCleanup;
 			this._assertCurrentOperation(operation);
@@ -825,10 +828,7 @@ export class RocketRideClient extends DAPClient {
 			if (this._clientDisplayVersion) authArguments.clientVersion = this._clientDisplayVersion;
 
 			operation.authRequestSent = true;
-			const response = await this.request(
-				{ type: 'request', command: 'auth', seq: 0, arguments: authArguments },
-				timeout,
-			);
+			const response = await this.request({ type: 'request', command: 'auth', seq: 0, arguments: authArguments }, timeout);
 			this._assertCurrentOperation(operation);
 			if (response.success !== true) {
 				throw new AuthenticationException(response as unknown as Record<string, unknown>);
@@ -861,35 +861,19 @@ export class RocketRideClient extends DAPClient {
 				}
 			}
 			this._rejectLifecycleOperation(operation, error);
-			if (
-				error instanceof AuthenticationException
-				&& operation.priority === 'background'
-				&& this._isCurrentOperation(operation)
-			) {
+			if (error instanceof AuthenticationException && operation.priority === 'background' && this._isCurrentOperation(operation)) {
 				await this.onConnectError(error);
 			}
 		}
 	}
 
-	private _startLoginOperation(
-		endpoint: string,
-		credentialKey: string,
-		priority: LifecyclePriority,
-		timeout?: number,
-	): LoginLifecycleOperation | undefined {
+	private _startLoginOperation(endpoint: string, credentialKey: string, priority: LifecyclePriority, timeout?: number): LoginLifecycleOperation | undefined {
 		const current = this._lifecycleOperation;
 		if (priority === 'foreground') this._clearReconnectTimer();
 		if (priority === 'background' && current?.priority === 'foreground' && !current.settled) {
 			return undefined;
 		}
-		if (
-			priority === 'foreground'
-			&& current?.priority === 'foreground'
-			&& !current.settled
-			&& !current.cancellationReason
-			&& current.endpoint === endpoint
-			&& current.credentialKey === credentialKey
-		) {
+		if (priority === 'foreground' && current?.priority === 'foreground' && !current.settled && !current.cancellationReason && current.endpoint === endpoint && current.credentialKey === credentialKey) {
 			return current;
 		}
 
@@ -906,18 +890,11 @@ export class RocketRideClient extends DAPClient {
 				this._authenticated = false;
 				this._connectResult = undefined;
 			}
-		} else if (
-			current?.accepted
-			&& (current.endpoint !== endpoint
-				|| (current.credentialKey !== credentialKey && this._apikey !== credentialKey))
-		) {
+		} else if (current?.accepted && (current.endpoint !== endpoint || (current.credentialKey !== credentialKey && this._apikey !== credentialKey))) {
 			// A foreground replacement is controlled ownership transfer. The
 			// previous generation must not publish a stale disconnect after the
 			// replacement has become current.
-			priorCleanup = this._discardTransport(
-				current.transport,
-				'Authenticated connection superseded',
-			);
+			priorCleanup = this._discardTransport(current.transport, 'Authenticated connection superseded');
 			this._authenticated = false;
 			this._connectResult = undefined;
 		}
@@ -926,32 +903,14 @@ export class RocketRideClient extends DAPClient {
 		return operation;
 	}
 
-	private _startForegroundLogin(
-		credential?: string | { code: string; verifier: string; redirectUri: string },
-		options?: { uri?: string; timeout?: number },
-	): Promise<ConnectResult> {
+	private _startForegroundLogin(credential?: string | { code: string; verifier: string; redirectUri: string }, options?: { uri?: string; timeout?: number }): Promise<ConnectResult> {
 		const endpoint = options?.uri ? this._getWebsocketUri(options.uri) : this._uri;
 		const credentialKey = this._resolveCredential(credential);
 		const current = this._lifecycleOperation;
-		if (
-			current?.priority === 'foreground'
-			&& !current.settled
-			&& !current.cancellationReason
-			&& current.endpoint === endpoint
-			&& (
-				current.credentialKey === credentialKey
-				|| (current.accepted && this._apikey === credentialKey)
-			)
-		) {
+		if (current?.priority === 'foreground' && !current.settled && !current.cancellationReason && current.endpoint === endpoint && (current.credentialKey === credentialKey || (current.accepted && this._apikey === credentialKey))) {
 			return current.promise;
 		}
-		if (
-			current?.accepted
-			&& current.settled
-			&& this._authenticated
-			&& current.endpoint === endpoint
-			&& (current.credentialKey === credentialKey || this._apikey === credentialKey)
-		) {
+		if (current?.accepted && current.settled && this._authenticated && current.endpoint === endpoint && (current.credentialKey === credentialKey || this._apikey === credentialKey)) {
 			return Promise.resolve(this._connectResult ?? ({} as ConnectResult));
 		}
 		const operation = this._startLoginOperation(endpoint, credentialKey, 'foreground', options?.timeout);
@@ -991,9 +950,7 @@ export class RocketRideClient extends DAPClient {
 
 			if (this._desiredState === 'authenticated') {
 				const lifecycleOperation = this._lifecycleOperation;
-				const credentialKey = lifecycleOperation && !lifecycleOperation.accepted
-					? lifecycleOperation.credentialKey
-					: this._apikey ?? lifecycleOperation?.credentialKey ?? '';
+				const credentialKey = lifecycleOperation && !lifecycleOperation.accepted ? lifecycleOperation.credentialKey : (this._apikey ?? lifecycleOperation?.credentialKey ?? '');
 				const operation = this._startLoginOperation(this._uri, credentialKey, 'background');
 				if (!operation) return;
 				void operation.promise.then(
@@ -1010,7 +967,7 @@ export class RocketRideClient extends DAPClient {
 						if (!this._isCurrentOperation(operation) || operation.cancellationReason) return;
 						this._currentReconnectDelay = Math.min(this._currentReconnectDelay + 250, 15_000);
 						this._scheduleReconnect(operation.generation);
-					},
+					}
 				);
 				return;
 			}
@@ -1021,18 +978,12 @@ export class RocketRideClient extends DAPClient {
 					if (this._lifecycleGeneration === generation) this._currentReconnectDelay = 250;
 				},
 				async (error: unknown) => {
-					if (
-						this._lifecycleGeneration !== generation
-						|| this._isDetached()
-					) return;
+					if (this._lifecycleGeneration !== generation || this._isDetached()) return;
 					await this.onConnectError(error instanceof Error ? error : new Error(String(error)));
-					if (
-						this._lifecycleGeneration !== generation
-						|| this._isDetached()
-					) return;
+					if (this._lifecycleGeneration !== generation || this._isDetached()) return;
 					this._currentReconnectDelay = Math.min(this._currentReconnectDelay + 250, 15_000);
 					this._scheduleReconnect(generation);
-				},
+				}
 			);
 		}, delay);
 	}
@@ -1056,12 +1007,7 @@ export class RocketRideClient extends DAPClient {
 		const endpoint = uri ? this._getWebsocketUri(uri) : this._uri;
 		this._clearReconnectTimer();
 		const current = this._lifecycleOperation;
-		if (
-			(!current || current.settled)
-			&& this._desiredState !== 'detached'
-			&& this._transport?.getConnectionInfo() === endpoint
-			&& this._transport.isConnected()
-		) {
+		if ((!current || current.settled) && this._desiredState !== 'detached' && this._transport?.getConnectionInfo() === endpoint && this._transport.isConnected()) {
 			this._uri = endpoint;
 			return;
 		}
@@ -1073,12 +1019,8 @@ export class RocketRideClient extends DAPClient {
 		this._authenticated = false;
 		this._connectResult = undefined;
 
-		const discard = current?.transport
-			? this._discardTransport(current.transport, 'Attach superseded login')
-			: Promise.resolve();
-		const notification = shouldNotify
-			? this._invokeDisconnected('Connection replaced by attach', false)
-			: Promise.resolve();
+		const discard = current?.transport ? this._discardTransport(current.transport, 'Attach superseded login') : Promise.resolve();
+		const notification = shouldNotify ? this._invokeDisconnected('Connection replaced by attach', false) : Promise.resolve();
 		await Promise.all([discard, notification]);
 		if (this._lifecycleGeneration !== generation) return;
 		if (this._transport?.getConnectionInfo() === endpoint && this._transport.isConnected()) {
@@ -1106,28 +1048,15 @@ export class RocketRideClient extends DAPClient {
 		this._connectResult = undefined;
 
 		const transport = operation?.transport ?? (this._transport as TransportWebSocket | undefined);
-		if (
-			deauthenticate
-			&& wasAuthenticated
-			&& !inFlight
-			&& transport
-			&& this._transport === transport
-			&& transport.isConnected()
-		) {
+		if (deauthenticate && wasAuthenticated && !inFlight && transport && this._transport === transport && transport.isConnected()) {
 			await this._bestEffortDeauth();
-			if (
-				this._lifecycleGeneration !== ownerGeneration
-				|| this._lifecycleOperation !== operation
-				|| this._desiredState !== 'detached'
-			) return;
+			if (this._lifecycleGeneration !== ownerGeneration || this._lifecycleOperation !== operation || this._desiredState !== 'detached') return;
 		}
 
 		const shouldNotify = Boolean(operation && this._claimDisconnectedPublication(operation));
 		++this._lifecycleGeneration;
 		this._lifecycleOperation = undefined;
-		const notification = shouldNotify
-			? this._invokeDisconnected('Disconnected by request', false)
-			: Promise.resolve();
+		const notification = shouldNotify ? this._invokeDisconnected('Disconnected by request', false) : Promise.resolve();
 		if (transport) await this._discardTransport(transport, 'Detached');
 		await notification;
 	}
@@ -1162,10 +1091,7 @@ export class RocketRideClient extends DAPClient {
 	 * resolution checks the argument, configured environment, and stored client state
 	 * (initialized by `config.auth` and updated after authentication). The transport stays attached.
 	 */
-	async login(
-		credential?: string | { code: string; verifier: string; redirectUri: string },
-		options?: { uri?: string; timeout?: number },
-	): Promise<ConnectResult> {
+	async login(credential?: string | { code: string; verifier: string; redirectUri: string }, options?: { uri?: string; timeout?: number }): Promise<ConnectResult> {
 		return this._startForegroundLogin(credential, options);
 	}
 
@@ -1387,10 +1313,13 @@ export class RocketRideClient extends DAPClient {
 	 *   pipeline: { components: [...], project_id: '123' },
 	 *   source: 'webhook_1'
 	 * });
-	 * if (result.errors?.length) {
+	 * if (result.errors.length) {
 	 *   console.log('Validation errors:', result.errors);
 	 * }
 	 * ```
+	 *
+	 * `errors` and `warnings` are ALWAYS arrays — a clean pipeline returns
+	 * them empty, never absent.
 	 */
 	async validate(options: { pipeline: PipelineConfig | Record<string, unknown>; source?: string }): Promise<ValidationResult> {
 		const { pipeline, source } = options;
@@ -1399,7 +1328,11 @@ export class RocketRideClient extends DAPClient {
 			args.source = source;
 		}
 		try {
-			return await this.call<ValidationResult>('rrext_validate', args);
+			const result = await this.call<ValidationResult>('rrext_validate', args);
+			// The server omits the keys entirely when a pipeline is clean —
+			// normalize so `.errors`/`.warnings` are ALWAYS arrays and callers
+			// never need null guards on a passing validation.
+			return { ...result, errors: result?.errors ?? [], warnings: result?.warnings ?? [] };
 		} catch (err) {
 			throw new Error(`Pipeline validation failed: ${err instanceof Error ? err.message : err}`);
 		}
@@ -1579,6 +1512,21 @@ export class RocketRideClient extends DAPClient {
 	}
 
 	/**
+	 * List the caller's active tasks.
+	 *
+	 * Returns the tasks visible to the authenticated user (running and
+	 * recently completed pipeline executions), as reported by the server.
+	 * Each row includes the task token plus display fields such as name,
+	 * state, and timing; the exact field set is server-defined.
+	 *
+	 * Mirrors the Python SDK's `get_tasks`.
+	 */
+	async getTasks(): Promise<Array<Record<string, unknown>>> {
+		const body = await this.call<{ tasks?: Array<Record<string, unknown>> }>('rrext_get_tasks');
+		return body?.tasks || [];
+	}
+
+	/**
 	 * Restart a running pipeline with a new configuration.
 	 *
 	 * Looks up the existing task by project/source, terminates it, and
@@ -1590,24 +1538,15 @@ export class RocketRideClient extends DAPClient {
 	 * @param options.pipeline - The pipeline configuration to restart with.
 	 * @param options.teamId - Address the team's DEPLOY run; omit for your own dev run.
 	 */
-	async restart(options: {
-		token?: string;
-		projectId: string;
-		source: string;
-		pipeline: Record<string, unknown>;
-		teamId?: string;
-	}): Promise<void> {
+	async restart(options: { token?: string; projectId: string; source: string; pipeline: Record<string, unknown>; teamId?: string }): Promise<void> {
 		try {
-			await this.call(
-				'restart',
-				{
-					token: options.token,
-					projectId: options.projectId,
-					source: options.source,
-					pipeline: options.pipeline,
-					...(options.teamId ? { teamId: options.teamId } : {}),
-				},
-			);
+			await this.call('restart', {
+				token: options.token,
+				projectId: options.projectId,
+				source: options.source,
+				pipeline: options.pipeline,
+				...(options.teamId ? { teamId: options.teamId } : {}),
+			});
 		} catch (err) {
 			const errorMsg = err instanceof Error ? err.message : String(err);
 			this.debugMessage(`Pipeline restart failed: ${errorMsg}`);
@@ -2095,10 +2034,7 @@ export class RocketRideClient extends DAPClient {
 		}
 
 		await super.onDisconnected(reason, hasError);
-		if (
-			this._lifecycleGeneration !== ownerGeneration
-			|| (operation !== undefined && this._lifecycleOperation !== operation)
-		) return;
+		if (this._lifecycleGeneration !== ownerGeneration || (operation !== undefined && this._lifecycleOperation !== operation)) return;
 
 		if (this._desiredState === 'detached') return;
 		if (!this._persist) {
@@ -2108,11 +2044,7 @@ export class RocketRideClient extends DAPClient {
 		// A failed background login is retried by its promise handler only after
 		// onConnectError completes and the backoff advances. Scheduling here as
 		// well would race that callback and duplicate the current delay.
-		if (
-			operation?.priority === 'background'
-			&& !operation.accepted
-			&& operation.unexpectedDisconnectError
-		) return;
+		if (operation?.priority === 'background' && !operation.accepted && operation.unexpectedDisconnectError) return;
 		this._scheduleReconnect();
 	}
 
@@ -2260,10 +2192,13 @@ export class RocketRideClient extends DAPClient {
 			if (key.pipeId !== undefined) {
 				args.pipeId = key.pipeId;
 			}
-			// The scope IS the kind: teamId addresses the team's deploy run,
-			// absent addresses the caller's own dev run.
+			// teamId addresses the team's deploy run. Absent, runKind selects
+			// the caller's own continuum: dev (default) or the personal @me
+			// deploy run.
 			if (key.teamId) {
 				args.teamId = key.teamId;
+			} else if (key.runKind === 'deploy') {
+				args.runKind = key.runKind;
 			}
 			await this.call('rrext_monitor', args);
 		}
@@ -2305,7 +2240,33 @@ export class RocketRideClient extends DAPClient {
 		if ('token' in key) {
 			return `t:${key.token}`;
 		}
-		return `p:${JSON.stringify([key.projectId, key.source, key.pipeId ?? null, key.teamId ?? ''])}`;
+		// Canonicalize runKind to its WIRE semantics before it enters the
+		// registry string, so keys that produce an identical server
+		// subscription collapse to one entry (otherwise they ref-count
+		// separately and the second sync clobbers the first caller's merged
+		// type set).
+		const teamId = key.teamId ?? '';
+		let runKind: string;
+		if (teamId) {
+			// A team scope is ALWAYS the deploy continuum server-side (teamId
+			// wins); runKind is ignored there, so a team key WITH
+			// runKind='deploy' and one WITHOUT must collapse. Clear it.
+			runKind = '';
+		} else {
+			// Teamless: 'dev' is the default continuum and the subscribe path
+			// sends runKind only for 'deploy', so a 'dev' key and a default
+			// (missing) key produce an IDENTICAL subscription and MUST collapse.
+			// Only 'deploy' stays distinct in slot 5; anything else would key a
+			// dead slot no run ever matches — reject rather than silently fork.
+			runKind = key.runKind ?? '';
+			if (runKind === 'dev') runKind = '';
+			if (runKind !== '' && runKind !== 'deploy') {
+				throw new Error(`invalid runKind ${JSON.stringify(runKind)} — expected 'dev' or 'deploy'`);
+			}
+		}
+		// runKind rides LAST so a registry string written before the field
+		// existed still parses (missing element -> '' -> dev).
+		return `p:${JSON.stringify([key.projectId, key.source, key.pipeId ?? null, teamId, runKind])}`;
 	}
 
 	/**
@@ -2317,12 +2278,13 @@ export class RocketRideClient extends DAPClient {
 		}
 		if (keyStr.startsWith('p:')) {
 			try {
-				const [projectId, source, pipeId, teamId] = JSON.parse(keyStr.slice(2)) as [string, string, number | null, string];
+				const [projectId, source, pipeId, teamId, runKind] = JSON.parse(keyStr.slice(2)) as [string, string, number | null, string, string | undefined];
 				return {
 					projectId,
 					source,
 					...(pipeId !== null ? { pipeId } : {}),
 					...(teamId ? { teamId } : {}),
+					...(runKind === 'deploy' ? { runKind } : {}),
 				};
 			} catch {
 				// A malformed registry string has no valid key — skip it.
@@ -2569,9 +2531,7 @@ export class RocketRideClient extends DAPClient {
 			this._onTrace?.(TraceType.Error, redactProtocolMessage(response));
 			throw new Error(response.message ?? 'fs_read failed');
 		}
-		const traceResponse = response.arguments?.data instanceof Uint8Array
-			? { ...response, arguments: { ...response.arguments, data: `<${response.arguments.data.length} bytes>` } }
-			: response;
+		const traceResponse = response.arguments?.data instanceof Uint8Array ? { ...response, arguments: { ...response.arguments, data: `<${response.arguments.data.length} bytes>` } } : response;
 		this._onTrace?.(TraceType.Success, redactProtocolMessage(traceResponse));
 		return ((response as any).arguments?.data as Uint8Array) || new Uint8Array(0);
 	}
@@ -2759,70 +2719,142 @@ export class RocketRideClient extends DAPClient {
 	}
 
 	// ============================================================================
-	// APP PUBLISH LADDER (rrext_app_deploy)
+	// APP PUBLISH LADDER (rrext_deploy_app)
 	// ============================================================================
 
 	/**
-	 * Publish an immutable app version to the org registry.
+	 * List an app's deployed versions, newest first (the version rail).
 	 *
-	 * Publishing never activates anything — pin a rung with {@link appDeploy}
-	 * to make the version live somewhere.
-	 *
-	 * @param options.appId - App id (appManifest.id, e.g. 'acme.brandy')
-	 * @param options.version - Semver label (e.g. '0.5.0')
-	 * @param options.bundle - The built remoteEntry.js bytes (single-file v1)
-	 * @param options.message - Commit-style "what changed" note (version card)
-	 * @param options.moduleId - MF container name (derived when omitted)
-	 * @param options.name - Display name (defaults to appId)
-	 * @returns The version-rail entry (registryVersion, appVersion, sha256, ...)
-	 */
-	async appPublish(options: { appId: string; version: string; bundle: Uint8Array; message?: string; moduleId?: string; name?: string }): Promise<{ registryVersion: number; appVersion: string; sha256: string; publishedAt: number; author: string; message: string }> {
-		const body = await this.call('rrext_app_deploy', {
-			subcommand: 'publish',
-			appId: options.appId,
-			version: options.version,
-			message: options.message ?? '',
-			moduleId: options.moduleId,
-			name: options.name,
-			data: options.bundle,
-		});
-		return (body as any)?.entry ?? {};
-	}
-
-	/**
-	 * List an app's published versions, newest first (the version rail).
+	 * Answered by role: the developer org sees its FULL rail (published or
+	 * not); other callers see only the versions serving on rows visible to
+	 * them. Each entry carries its deployment `state`, its build lifecycle
+	 * (`buildStatus` — 'ok' = servable bytes exist — plus the `buildPhase`
+	 * it reached and `buildEndedAt`), and the `rungs` naming the audiences
+	 * serving it. No error text rides the rail: build detail is served on
+	 * demand by the build-log verb.
 	 *
 	 * @param appId - App id
-	 * @returns Rail entries; each carries `rungs` naming the rungs pinned to it
+	 * @returns Rail entries, newest first
 	 */
-	async appVersions(appId: string): Promise<Array<{ registryVersion: number; appVersion: string; sha256: string; publishedAt: number; author: string; message: string; rungs: string[] }>> {
-		const body = await this.call('rrext_app_deploy', { subcommand: 'versions', appId });
+	async listDeployments(appId: string): Promise<Array<{ registryVersion: number; appVersion: string; sha256: string; publishedAt: number; author: string; message: string; state: string; buildStatus: string; buildPhase: string; buildEndedAt?: number | null; rungs: string[] }>> {
+		const body = await this.call('rrext_deploy_app', { subcommand: 'versions', appId });
 		return (body as any)?.versions ?? [];
 	}
 
 	/**
-	 * Pin a rung to a published version — deploy, promote, and rollback are
-	 * all this one verb ("repoint, never rebuild").
+	 * Submit a deployed version for store review — flips the DEPLOYMENT's own
+	 * state 'private' -> 'submit' (it enters the sys.admin review queue). The
+	 * review state lives on the deployment, not a binding. Developer-org and
+	 * developer-namespace gated.
 	 *
 	 * @param appId - App id
 	 * @param registryVersion - Registry version number from the rail
-	 * @param target - '@user', '@team/<name-or-id>', or '@org'
-	 * @returns The updated deployment record and the rung word
+	 * @returns The refreshed rail entry ({registryVersion, state, ...})
 	 */
-	async appDeploy(appId: string, registryVersion: number, target: string): Promise<{ deployment: Record<string, unknown>; rung: string }> {
-		return (await this.call('rrext_app_deploy', { subcommand: 'deploy', appId, version: registryVersion, target })) as any;
+	async submitApp(appId: string, registryVersion: number): Promise<{ artifact: Record<string, unknown> }> {
+		return (await this.call('rrext_deploy_app', { subcommand: 'submit', appId, version: registryVersion })) as any;
 	}
 
 	/**
-	 * The reverse index: which rungs run which version of an app.
+	 * Withdraw a pending review — the developer's own cancel: flips the
+	 * DEPLOYMENT 'submit' -> 'private' (leaves the admin queue, back to
+	 * draft; history records 'withdrawn'). Only a version in 'submit'
+	 * withdraws. Developer-org and developer-namespace gated, like submit.
+	 *
+	 * @param appId - App id
+	 * @param registryVersion - Registry version number from the rail
+	 * @returns The refreshed rail entry ({registryVersion, state, ...})
+	 */
+	async withdrawApp(appId: string, registryVersion: number): Promise<{ artifact: Record<string, unknown> }> {
+		return (await this.call('rrext_deploy_app', { subcommand: 'withdraw', appId, version: registryVersion })) as any;
+	}
+
+	/**
+	 * Append a developer message to the app's review thread — the developer
+	 * half of the reviewer conversation. The message rides the app's
+	 * deployment history as a 'reply' row (side 'developer'), the same
+	 * stream `deploy.history()` reads and the store reviewer writes to.
+	 * Developer-org and developer-namespace gated, like submit.
+	 *
+	 * @param appId - App id
+	 * @param message - The message text (server caps the length)
+	 * @param registryVersion - Optional registry version the message refers to
+	 * @returns `{replied: true, appId}`
+	 */
+	async replyApp(appId: string, message: string, registryVersion?: number): Promise<{ replied: boolean; appId: string }> {
+		return (await this.call('rrext_deploy_app', { subcommand: 'reply', appId, message, ...(registryVersion !== undefined && { version: registryVersion }) })) as any;
+	}
+
+	/**
+	 * Read one version's durable server build log — the full phase-by-phase
+	 * output the build worker writes beside the version's artifacts (no
+	 * error text rides the rail rows or the DB). Long logs serve their tail;
+	 * '' means no log exists for the version. Developer-org gated.
+	 *
+	 * @param appId - App id
+	 * @param registryVersion - Registry version number from the rail
+	 * @returns `{appId, version, log}`
+	 */
+	async buildLog(appId: string, registryVersion: number): Promise<{ appId: string; version: number; log: string }> {
+		return (await this.call('rrext_deploy_app', { subcommand: 'build_log', appId, version: registryVersion })) as any;
+	}
+
+	/**
+	 * Bind a deployment to an audience — first publish, update, promote, and
+	 * rollback are all this one verb ("repoint, never rebuild"). The binding
+	 * is a pure pointer; '@public' requires the deployment be 'ready'
+	 * (approved), '@me'/'@team' accept any non-'failed' deployment.
+	 *
+	 * @param appId - App id
+	 * @param registryVersion - Registry version number from the rail
+	 * @param target - '@me', '@team/<name-or-id>', or '@public' ('@user' = legacy alias)
+	 * @returns The binding row ({audience, version, state, artifactState, ...})
+	 */
+	async publishApp(appId: string, registryVersion: number, target: string): Promise<{ publish: Record<string, unknown> }> {
+		return (await this.call('rrext_deploy_app', { subcommand: 'publish', appId, version: registryVersion, target })) as any;
+	}
+
+	/**
+	 * Remove an audience binding — the app stops serving to that audience.
+	 * SOFT: the registry versions and the audit history survive; publishing
+	 * to the audience again revives it.
+	 *
+	 * @param appId - App id
+	 * @param target - '@me', '@team/<name-or-id>', or '@public' ('@user' = legacy alias)
+	 * @returns The final binding row (state 'removed')
+	 */
+	async removeAppPublish(appId: string, target: string): Promise<{ publish: Record<string, unknown> }> {
+		return (await this.call('rrext_deploy_app', { subcommand: 'remove', appId, target })) as any;
+	}
+
+	/**
+	 * Disable an audience binding — serving stops, but the row STAYS in the
+	 * where-live listing marked disabled (a visible off switch), unlike
+	 * remove which hides it. Publishing any version to the rung re-enables
+	 * the binding.
+	 *
+	 * @param appId - App id
+	 * @param target - '@me', '@team/<name-or-id>', or '@public' ('@user' = legacy alias)
+	 * @returns The binding row (state 'disabled')
+	 */
+	async disableAppPublish(appId: string, target: string): Promise<{ publish: Record<string, unknown> }> {
+		return (await this.call('rrext_deploy_app', { subcommand: 'disable', appId, target })) as any;
+	}
+
+	/**
+	 * The reverse index: which audiences serve which version of an app.
 	 *
 	 * @param appId - App id
 	 * @returns Pin rows ({rung, handle, version, appVersion, state, deployedAt})
 	 */
-	async appWhere(appId: string): Promise<Array<{ rung: string; handle: string; version: number; appVersion: string; state: string; deployedAt?: number }>> {
-		const body = await this.call('rrext_app_deploy', { subcommand: 'where', appId });
+	async whereApp(appId: string): Promise<Array<{ rung: string; handle: string; version: number; appVersion: string; state: string; deployedAt?: number }>> {
+		const body = await this.call('rrext_deploy_app', { subcommand: 'where', appId });
 		return (body as any)?.pins ?? [];
 	}
+
+	// (appEntry is RETIRED: versions serve from stable constructed URLs —
+	// /apps/<appId>/v<N>/remoteEntry.js — with entitlement enforced per
+	// request by the serve route, so there is nothing to mint.)
 
 	// ============================================================================
 	// CONVENIENCE WRAPPERS (text/JSON over binary, handle open/close internally)
@@ -3079,12 +3111,7 @@ export class RocketRideClient extends DAPClient {
 	 * @param minPct   - Minimum cumtime percentage threshold (default 0.1).
 	 * @returns Object containing the tree root, total_time, and total_calls.
 	 */
-	async cprofileReportTree(
-		target?: string | null,
-		maxDepth?: number,
-		minPct?: number,
-		includeSystem?: boolean,
-	): Promise<CProfileReportTreeResponse> {
+	async cprofileReportTree(target?: string | null, maxDepth?: number, minPct?: number, includeSystem?: boolean): Promise<CProfileReportTreeResponse> {
 		const args: Record<string, unknown> = {};
 		if (target) args.target = target;
 		if (maxDepth !== undefined) args.max_depth = maxDepth;
@@ -3271,13 +3298,13 @@ export class RocketRideClient extends DAPClient {
 	/**
 	 * Lazily-initialised deploy API namespace (teams-as-environments).
 	 *
-	 * Publish immutable pipeline versions to the org registry, point teams
-	 * at them (promotion and rollback alike), schedule sources, and read
-	 * the audit history.
+	 * Deploy immutable versions of any kind onto the org registry (the one
+	 * rail door), point teams at them (promotion and rollback alike),
+	 * schedule sources, and read the audit history.
 	 *
 	 * @example
 	 * ```typescript
-	 * const { artifact } = await client.deploy.publish(pipeline, { comment: 'v2' });
+	 * const { artifact } = await client.deploy.add({ pipeline, comment: 'v2' });
 	 * await client.deploy.deploy('proj-1', artifact.version!, 'team-staging');
 	 * ```
 	 */
@@ -3369,22 +3396,20 @@ export class RocketRideClient extends DAPClient {
 	 * @returns The tool's return value (typically a record/object)
 	 * @throws Error if the server signals failure or no node handles the requested tool
 	 */
-	async tool<T = any>(options: {
-		token: string;
-		tool: string;
-		nodeId?: string;
-		input?: Record<string, unknown>;
-		timeout?: number;
-	}): Promise<T> {
-		const result = await this.call<{ result: T }>('rrext_process', {
-			subcommand: 'tool',
-			tool: options.tool,
-			nodeId: options.nodeId ?? '',
-			input: options.input ?? {},
-		}, {
-			token: options.token,
-			timeout: options.timeout,
-		});
+	async tool<T = any>(options: { token: string; tool: string; nodeId?: string; input?: Record<string, unknown>; timeout?: number }): Promise<T> {
+		const result = await this.call<{ result: T }>(
+			'rrext_process',
+			{
+				subcommand: 'tool',
+				tool: options.tool,
+				nodeId: options.nodeId ?? '',
+				input: options.input ?? {},
+			},
+			{
+				token: options.token,
+				timeout: options.timeout,
+			}
+		);
 		return result.result;
 	}
 }

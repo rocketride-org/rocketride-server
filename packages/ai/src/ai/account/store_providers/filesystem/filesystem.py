@@ -17,6 +17,31 @@ else:
     import fcntl  # type: ignore # Unix-only, not available on Windows
 
 
+def _os_path(path: Path) -> Path:
+    r"""Canonical spelling of a RESOLVED absolute path (Windows: ``\\?\``).
+
+    Windows MAX_PATH (260 chars) fails deep store trees with a misleading
+    ENOENT — deployment content mirrors real workspace depth (org guid +
+    .deployments + app id + version + source/<workspace tree>), which
+    crossed the ceiling on a real deploy. The extended-length prefix lifts
+    the limit to ~32K and is equally valid for SHORT paths, so the store
+    adopts it as the ONE canonical internal spelling: the root is prefixed
+    once at init, every joined child inherits it, and OS calls and path
+    comparisons alike see a single consistent form. Elsewhere: unchanged.
+
+    Only RESOLVED paths may be prefixed — ``\\?\`` disables Win32
+    normalization, so separators and dot segments must already be clean.
+    """
+    if os.name != 'nt':
+        return path
+    text = str(path)
+    if text.startswith('\\\\?\\'):
+        return path
+    if text.startswith('\\\\'):
+        return Path('\\\\?\\UNC\\' + text[2:])
+    return Path('\\\\?\\' + text)
+
+
 class FilesystemStore(IStore):
     """
     Filesystem storage implementation.
@@ -38,7 +63,10 @@ class FilesystemStore(IStore):
         else:
             raise ValueError(f'Invalid filesystem URL: {url}')
 
-        self._root_path = self._root_path.resolve()
+        # The canonical (Windows: \\?\-prefixed) root — every path in this
+        # class derives from it by joining, so the whole store operates in
+        # one spelling with no per-call-site handling.
+        self._root_path = _os_path(self._root_path.resolve())
 
     # =========================================================================
     # Public Methods (IStore Interface Implementation)
@@ -499,14 +527,17 @@ class FilesystemStore(IStore):
         await asyncio.get_event_loop().run_in_executor(None, _unlock)
 
     def _get_full_path(self, path: str) -> Path:
-        """Convert relative path to full filesystem path."""
+        """Convert relative path to full filesystem path (canonical spelling)."""
         path = path.replace('\\', '/')
         full_path = self._root_path / path
 
         # Security check: ensure path is within root
         try:
-            full_path = full_path.resolve()
-            full_path.relative_to(self._root_path.resolve())
+            # resolve() round-trips through Win32 normalization and may drop
+            # the \\?\ prefix — re-canonicalize so the comparison against the
+            # (already canonical, already resolved) root sees one spelling.
+            full_path = _os_path(full_path.resolve())
+            full_path.relative_to(self._root_path)
         except ValueError as exc:
             raise StorageError(f'Path traversal detected: {path}') from exc
 

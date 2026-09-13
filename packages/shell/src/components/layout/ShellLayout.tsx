@@ -46,7 +46,11 @@ import { AppErrorBoundary } from './AppErrorBoundary';
 import { OverlayManager, useOverlay } from './OverlayManager';
 import { HostChromeProvider, useHostChromeState } from './HostChromeContext';
 import { AppFrame } from './AppFrame';
-import Sidebar from './Sidebar';
+import RocketRideWordmark from '../../assets/icons/RocketRideWordmark';
+import Sidebar, { useHasSidebarContent } from './Sidebar';
+import { BxMenu } from '../BoxIcon';
+import { useIsCompact } from '../../hooks/useIsCompact';
+import { CompactNavProvider } from './CompactNavContext';
 import StatusBar from './StatusBar';
 import LoadingScreen from './LoadingScreen';
 import DebugPanel from './DebugPanel';
@@ -68,11 +72,25 @@ import { commonStyles } from '../../themes/styles';
  * @param name - Display name of the app that failed.
  * @returns Plain-language explanation of the failure.
  */
+/**
+ * True for the stale-platform failure class: shared-module negotiation
+ * breakage (and the TDZ artifact a failed first attempt leaves behind).
+ * Usually the PAGE outlived a platform rebuild — the live MF runtime
+ * negotiated against bundles since replaced on disk — which one reload
+ * fixes; only when it recurs immediately is the bundle truly mismatched.
+ *
+ * @param raw - The raw error message recorded by WorkspaceContext.
+ * @returns True when the failure is shared-module/TDZ shaped.
+ */
+function isStalePlatformError(raw: string): boolean {
+	return /RUNTIME-012|shared module|shareKey|before initialization/i.test(raw);
+}
+
 function friendlyLoadError(raw: string, name: string): string {
 	// Shared-module negotiation failures — and the TDZ artifact a failed first
 	// attempt leaves behind — mean the bundle was built against a different
 	// platform build than the one now serving it.
-	if (/RUNTIME-012|shared module|shareKey|before initialization/i.test(raw)) {
+	if (isStalePlatformError(raw)) {
 		return `${name} was built for a different version of the platform and needs to be rebuilt or redeployed.`;
 	}
 	// Network-shaped failures: missing bundle, unreachable server, timeout.
@@ -208,6 +226,19 @@ const styles = {
 		minWidth: 0,
 		minHeight: 0,
 	} as CSSProperties,
+	/** Faint brand wordmark pinned to the client area's lower-left; shown only
+	    while a chrome-less (no sidebar AND no status bar) app owns the client
+	    area. The wrapper carries the theme text color so the SVG
+	    (fill=currentColor) tracks theme changes without a palette-mode
+	    observer. */
+	fullScreenWatermark: {
+		position: 'absolute',
+		left: 16,
+		bottom: 12,
+		opacity: 0.15,
+		pointerEvents: 'none',
+		color: 'var(--rr-text-primary)',
+	} as CSSProperties,
 };
 
 // =============================================================================
@@ -245,6 +276,64 @@ export const ShellLayout: React.FC<ShellLayoutProps> = ({
 }) => {
 	const { loaded, seeded, appLoading, prefs, updatePrefs, activeAppId, loadedApps, settings, appManifest, appLoadErrors, retryApp, loadFailure, dismissLoadFailure } = useWorkspace();
 
+	// --- The navigation, when there is no room for a column ------------------
+	// Below the breakpoint the sidebar leaves the flex row and becomes a drawer
+	// over the client area. The state lives here because this is the one place
+	// that can hand the same answer to the sidebar and to the hamburger; two
+	// subscriptions to one media query can disagree for a frame mid-drag, and a
+	// sidebar that thinks it is a drawer while the layout thinks it is a column
+	// renders a blank screen.
+	const isCompact = useIsCompact();
+	const [drawerOpen, setDrawerOpen] = useState(false);
+
+	// Crossing the breakpoint, either way, puts the drawer away. It cannot race a
+	// deliberate open — nobody is tapping the hamburger at the instant a window
+	// crosses 1024 — so no "the user meant it" latch is needed, and the desktop
+	// rail state is never written, so coming back up restores exactly the column
+	// that was left behind.
+	useEffect(() => {
+		setDrawerOpen(false);
+		if (isCompact) ConnectionManager.getInstance().emit('shell:sidebarCollapsing', {});
+	}, [isCompact]);
+
+	// Anything that moves the user somewhere else closes it. `shell:switchApp`
+	// and `shell:openOverlay` are the two that matter; `shell:sidebarCollapsing`
+	// is here so an app that navigates internally can ask for the same thing
+	// using an event that already exists, rather than a new API.
+	useEffect(() => {
+		if (!isCompact) return undefined;
+		const bus = ConnectionManager.getInstance();
+		const close = () => setDrawerOpen(false);
+		const offs = [
+			bus.on('shell:switchApp', close),
+			bus.on('shell:openOverlay', close),
+			bus.on('shell:viewActivated', close),
+		];
+		return () => offs.forEach((off) => off?.());
+	}, [isCompact]);
+
+	// The app changing is a navigation even when no event announced it.
+	useEffect(() => {
+		setDrawerOpen(false);
+	}, [activeAppId]);
+
+	// Escape, while it is open. `defaultPrevented` first: a dialog above the
+	// drawer — a DetailPanel at z-index 1500, a confirm — has already handled
+	// the key, and closing the nav underneath it would be the wrong answer.
+	useEffect(() => {
+		if (!isCompact || !drawerOpen) return undefined;
+		const onKey = (event: KeyboardEvent) => {
+			if (event.key === 'Escape' && !event.defaultPrevented) setDrawerOpen(false);
+		};
+		document.addEventListener('keydown', onKey);
+		return () => document.removeEventListener('keydown', onKey);
+	}, [isCompact, drawerOpen]);
+
+	const compactNav = useMemo(
+		() => ({ isCompact, drawerOpen, requestClose: () => setDrawerOpen(false) }),
+		[isCompact, drawerOpen],
+	);
+
 	// The ONE workspace-prefs accessor (getPref/setPref) handed to every app and
 	// overlay the shell renders — the same API the canvas uses via ProjectView.
 	// Reads/writes the active app's prefs bag; updatePrefs persists it.
@@ -265,6 +354,42 @@ export const ShellLayout: React.FC<ShellLayoutProps> = ({
 	// coexist), reset whenever a new failure arrives.
 	const [showModalDetails, setShowModalDetails] = useState(false);
 	useEffect(() => { setShowModalDetails(false); }, [loadFailure]);
+
+	// ── Stale-build self-heal ─────────────────────────────────────────────
+	// A stale-platform load failure (isStalePlatformError) usually means this
+	// PAGE outlived a platform rebuild: bundles were replaced on disk under a
+	// live MF runtime, and one reload brings host + remotes back coherent.
+	// Reload ONCE automatically instead of stranding the user on the
+	// "rebuilt or redeployed" dialog; a sessionStorage guard ensures that if
+	// the SAME app fails the same way right after that reload — a REAL
+	// contract mismatch — the dialog shows as before. If storage is
+	// unavailable the guard cannot prevent a reload loop, so don't auto-heal.
+	const [autoReloading, setAutoReloading] = useState(false);
+	useEffect(() => {
+		const failedAppId = loadFailure?.appId ?? (appLoadErrors[activeAppId] ? activeAppId : null);
+		if (!failedAppId) return;
+		if (!isStalePlatformError(appLoadErrors[failedAppId] ?? '')) return;
+		try {
+			// Guard keyed PER APP (appId → last-reload epoch ms): a single
+			// {appId, at} record let alternating failures defeat the guard —
+			// after reloading for app A, a stale failure of app B overwrote the
+			// record, and A's next failure no longer matched, looping inside the
+			// 60s window. A per-app map gives every app its own cooldown, so a
+			// SAME-app failure right after its reload (a REAL contract mismatch)
+			// still surfaces the dialog while distinct apps can't reset each
+			// other's guard.
+			const guard = JSON.parse(sessionStorage.getItem('rr.staleReload') ?? '{}') as Record<string, number>;
+			const lastReload = guard[failedAppId];
+			if (typeof lastReload === 'number' && Date.now() - lastReload < 60_000) return;
+			guard[failedAppId] = Date.now();
+			sessionStorage.setItem('rr.staleReload', JSON.stringify(guard));
+		} catch {
+			return;
+		}
+		console.log('[SL] stale platform bundle for', failedAppId, '— auto-reloading once to resync');
+		setAutoReloading(true);
+		window.location.reload();
+	}, [appLoadErrors, activeAppId, loadFailure]);
 
 	/**
 	 * Retry from the load-failure modal: re-attempts the load (retryApp tears
@@ -323,6 +448,12 @@ export const ShellLayout: React.FC<ShellLayoutProps> = ({
 
 	// --- Debug panel state (ALT+D toggle) ------------------------------------
 	const [debugOpen, setDebugOpen] = useState(false);
+	// Watchdog latch: set when the client area has shown the boot rocket past a
+	// grace period without ever resolving to real content (a mounted app, a
+	// load error, or the not-found surface). Flips the render off the endless
+	// spinner and onto a diagnostic surface — see the watchdog effect and the
+	// loading guard below.
+	const [bootStalled, setBootStalled] = useState(false);
 
 	// --- ALT+D keyboard handler ----------------------------------------------
 	useEffect(() => {
@@ -417,10 +548,29 @@ export const ShellLayout: React.FC<ShellLayoutProps> = ({
 		}
 	}, [subGateActive, activeAppId, activeManifest]);
 
+	// --- Boot watchdog -------------------------------------------------------
+	// The client area must always resolve to SOMETHING — a mounted app, a load
+	// error, or the not-found surface. A seed/manifest that never completes
+	// would otherwise strand the user on the boot rocket forever with no
+	// explanation. If no first content has appeared after a grace period, latch
+	// bootStalled so the render falls through to a diagnostic surface instead
+	// of spinning indefinitely. Harmless once content exists: firstContentRef
+	// short-circuits the timer, and the real-content branches take precedence
+	// over the stalled fallthrough.
+	const BOOT_STALL_MS = 15_000;
+	useEffect(() => {
+		if (firstContentRef.current || bootStalled) return;
+		const timer = setTimeout(() => {
+			if (!firstContentRef.current) setBootStalled(true);
+		}, BOOT_STALL_MS);
+		return () => clearTimeout(timer);
+	}, [loaded, seeded, activeAppId, hasAppUi, bootStalled]);
+
 	// --- Loading guard -------------------------------------------------------
 	// Workspace still hydrating: hold the SAME phase-anchored rocket as the
 	// boot LoadingScreen — returning null here put a blank frame between two
-	// otherwise-continuous loading screens.
+	// otherwise-continuous loading screens. Once the watchdog latches, stop
+	// holding here so the render can reach the diagnostic surface below.
 	// Prerendered capture (SEO): until real app UI exists, re-render the captured
 	// content into #root instead of the boot rocket or the connection-error
 	// surface — so a JS-rendering crawler that can't open the WebSocket keeps the
@@ -432,7 +582,7 @@ export const ShellLayout: React.FC<ShellLayoutProps> = ({
 		const captured = getPrerenderedCapture();
 		if (captured) return <div style={{ display: 'contents' }} dangerouslySetInnerHTML={{ __html: captured }} />;
 	}
-	if (!loaded && !seeded) return <LoadingScreen />;
+	if (!loaded && !seeded && !bootStalled) return <LoadingScreen />;
 
 	// First boot: stay full-screen on the rocket until the first activation
 	// resolves to real content — the mounted app, or a terminal error surface
@@ -440,10 +590,21 @@ export const ShellLayout: React.FC<ShellLayoutProps> = ({
 	// preview counts as still-loading: its registration self-corrects when
 	// the embedder's injection lands (see the client-area branch below).
 	const devPending = isDevPreviewPending(activeAppId);
+	// The active app id resolves to nothing on this server. Gated on a SETTLED
+	// signal so it never fires during the brief empty-while-loading window:
+	//   • appManifest.length > 0 — the manifest loaded and has no such id
+	//     (a stale per-tab session id, or a renamed/removed app), OR
+	//   • loaded — the workspace finished hydrating with an empty manifest, OR
+	//   • bootStalled — the watchdog gave up waiting (a manifest that never
+	//     arrived, e.g. the SaaS home app on a server built without it).
+	// loadDescriptor returns false silently for unknown ids, so without this
+	// the user is stranded on the boot rocket forever.
+	const activeAppUnresolvable = !devPending && !activeManifest
+		&& (appManifest.length > 0 || loaded || bootStalled);
 	const hasFirstContent =
 		hasAppUi ||
 		(!devPending && !!appLoadErrors[activeAppId]) ||
-		(!devPending && appManifest.length > 0 && !activeManifest);
+		activeAppUnresolvable;
 	if (hasFirstContent) firstContentRef.current = true;
 	if (!firstContentRef.current) {
 		// A latched failure (server unreachable, session expired) can strand the
@@ -477,8 +638,13 @@ export const ShellLayout: React.FC<ShellLayoutProps> = ({
 		<ShellApiConfigProvider config={mergedApiConfig}>
 		<HostChromeProvider>
 		<OverlayManager>
+		<CompactNavProvider value={compactNav}>
 		<div style={styles.shell}>
 			<ConnectionErrorBanner />
+			{/* The way to the navigation once it is a drawer. Renders nothing for
+			    an app that has no sidebar to open. */}
+			{isCompact && <CompactChromeBar open={drawerOpen} onOpen={() => setDrawerOpen(true)} />}
+
 			{/* Main row: Sidebar | Client Area | Debug Panel */}
 			<div style={styles.main}>
 				{/* Sidebar zone — always mounted; self-hides when it has no content. */}
@@ -509,7 +675,7 @@ export const ShellLayout: React.FC<ShellLayoutProps> = ({
 							// invalidates + retries the load when it lands). Hold
 							// the loading animation instead.
 							<LoadingScreen />
-						) : appLoadErrors[activeAppId] ? (
+						) : appLoadErrors[activeAppId] && !autoReloading ? (
 							<div style={styles.appLoadError}>
 								<div style={styles.appLoadErrorTitle}>Could not load {activeManifest?.name ?? activeAppId}</div>
 								{/* Plain-language explanation; raw error lives behind Show Details */}
@@ -533,23 +699,40 @@ export const ShellLayout: React.FC<ShellLayoutProps> = ({
 									<pre style={styles.appLoadErrorDetails}>{appLoadErrors[activeAppId]}</pre>
 								)}
 							</div>
-						) : (loaded || seeded) && appManifest.length > 0 && !activeManifest ? (
-							// The active app id is not in this server's manifest — e.g. a
-							// stale per-tab session id left by a different shell flavour on
-							// the same origin, or an app that was renamed/removed. Say so
-							// explicitly with an exit; never strand the user on the splash
-							// (loadDescriptor returns false silently for unknown ids).
+						) : activeAppUnresolvable ? (
+							// The active app id resolves to nothing on this server: the
+							// manifest is settled (loaded, non-empty, or the watchdog gave
+							// up) and has no entry for it — a stale per-tab session id from
+							// a different shell flavour, a renamed/removed app, or (empty
+							// manifest) an app this deployment simply does not have, e.g.
+							// the SaaS home app on a server built without it. Say so with
+							// an exit; never strand the user on the splash (loadDescriptor
+							// returns false silently for unknown ids).
 							<div style={styles.appLoadError}>
-								<div style={styles.appLoadErrorTitle}>App not found</div>
+								<div style={styles.appLoadErrorTitle}>
+									{activeAppId === defaultAppId ? 'Home app unavailable' : 'App not found'}
+								</div>
 								<div style={styles.appLoadErrorMessage} role="alert">
-									This server has no app with the id &quot;{activeAppId}&quot;. It may have been
-									renamed, removed, or belong to a different RocketRide deployment.
+									{activeAppId === defaultAppId
+										? `This server has no home app (“${activeAppId}”) installed. It may not have been built and registered on this deployment.`
+										: `This server has no app with the id “${activeAppId}”. It may have been renamed, removed, or belong to a different RocketRide deployment.`}
 								</div>
 								<div style={styles.appLoadErrorActions}>
-									{/* Home is the guaranteed exit — $HOME resolves to the platform default */}
-									<button type="button" style={styles.appLoadErrorButton} onClick={() => ConnectionManager.getInstance().emit('shell:switchApp', { appId: '$HOME' })}>
-										Go to Home
-									</button>
+									{activeAppId === defaultAppId ? (
+										// "Go to Home" would loop straight back here. retryApp
+										// can't help either: this branch requires NO manifest
+										// entry, so loadDescriptor returns false immediately and
+										// nothing changes. Reload the page instead so a refreshed
+										// manifest (with the home app) can arrive.
+										<button type="button" style={styles.appLoadErrorButton} onClick={() => window.location.reload()}>
+											Try Again
+										</button>
+									) : (
+										// Home is the guaranteed exit — $HOME resolves to the platform default
+										<button type="button" style={styles.appLoadErrorButton} onClick={() => ConnectionManager.getInstance().emit('shell:switchApp', { appId: '$HOME' })}>
+											Go to Home
+										</button>
+									)}
 								</div>
 							</div>
 						) : appLoading || !activeApp ? (
@@ -560,11 +743,16 @@ export const ShellLayout: React.FC<ShellLayoutProps> = ({
 							<LoadingScreen />
 						) : null}
 					</div>
+
+					{/* Faint brand mark for chrome-less (no sidebar, no status bar) apps;
+					    gated on a mounted app UI so it never overlays boot/loading/error
+					    surfaces. */}
+					{hasAppUi && <FullScreenWatermark />}
 				</div>
 
 				{/* Load-failure modal — a switch-to-app failed while the current app
 				    stayed on screen; shown over it instead of a page takeover. */}
-				{loadFailure && (
+				{loadFailure && !autoReloading && (
 					/* Backdrop is inert like every shell dialog (OverlayManager is the
 					   source of truth for the no-backdrop-dismiss rule); the footer
 					   Close button is the dismiss control. */
@@ -611,6 +799,7 @@ export const ShellLayout: React.FC<ShellLayoutProps> = ({
 				/>
 			)}
 		</div>
+		</CompactNavProvider>
 		</OverlayManager>
 		</HostChromeProvider>
 		</ShellApiConfigProvider>
@@ -646,6 +835,36 @@ const SidebarWithOverlay: React.FC<{
 };
 
 // =============================================================================
+// FULL-SCREEN WATERMARK — faint brand mark for chrome-less apps
+// =============================================================================
+
+/**
+ * Faint RocketRide wordmark overlaid on the client area's lower-left corner.
+ *
+ * Presence mirrors the chrome's self-hide rules, inverted: an app whose
+ * AppLayout declares neither a sidebar nor a status bar registers nothing in
+ * the host-chrome slots, the standard chrome (and the wordmark in its header)
+ * is absent, and the app spans the full client area — so the brand mark
+ * surfaces here instead. Any registered chrome zone (sidebar OR status bar)
+ * already anchors the shell's identity on screen, so the watermark withdraws.
+ * Must render inside HostChromeProvider.
+ *
+ * Purely decorative: pointer events pass through and it is hidden from the
+ * accessibility tree.
+ */
+const FullScreenWatermark: React.FC = () => {
+	const { sidebarContent, statusBarContent } = useHostChromeState();
+	// Any registered chrome zone means shell branding is on screen — no mark.
+	if (sidebarContent != null || statusBarContent != null) return null;
+	return (
+		<div style={styles.fullScreenWatermark} aria-hidden="true">
+			{/* currentColor fills from the wrapper's --rr-text-primary */}
+			<RocketRideWordmark height={15} color="currentColor" />
+		</div>
+	);
+};
+
+// =============================================================================
 // STATUS BAR WRAPPER — connects StatusBar to the host-chrome app slot
 // =============================================================================
 
@@ -667,4 +886,65 @@ const StatusBarWithChrome: React.FC<{
 	// Presence rule: the app declared a status bar, or there is no bar.
 	if (statusBarContent == null) return null;
 	return <StatusBar {...props} appContent={statusBarContent} />;
+};
+// COMPACT CHROME BAR — the only way to the navigation below the breakpoint
+// =============================================================================
+
+/**
+ * A 44px bar with a hamburger, shown only while the sidebar is a drawer.
+ *
+ * Above `styles.main` rather than floating over the client area: eleven apps
+ * draw their own top-left content — grids, canvases, chat headers — and a
+ * floating button would sit on top of some of them. A bar costs every app 44px
+ * below the breakpoint and is the only placement that cannot occlude anything.
+ *
+ * Defined here, inside `HostChromeProvider`, so it can ask the same question
+ * the sidebar asks: an app with no sidebar gets no bar and no hamburger, and is
+ * byte-for-byte unchanged at every width.
+ *
+ * @param props.open - Whether the drawer is currently showing.
+ * @param props.onOpen - Asks for the drawer.
+ * @returns The bar, or nothing when this app has no navigation.
+ */
+const CompactChromeBar: React.FC<{ open: boolean; onOpen: () => void }> = ({ open, onOpen }) => {
+	const hasSidebar = useHasSidebarContent();
+	const { activeAppId, loadedApps, appManifest } = useWorkspace();
+	if (!hasSidebar) return null;
+
+	// The app's own branding first, its manifest entry second — the same order
+	// the client area uses for the error boundary's label.
+	const title =
+		loadedApps[activeAppId]?.branding?.appName
+		?? appManifest.find((entry) => entry.id === activeAppId)?.name
+		?? '';
+
+	return (
+		<div
+			style={{
+				display: 'flex', alignItems: 'center', gap: 8,
+				height: 44, flexShrink: 0, padding: '0 4px',
+				background: 'var(--rr-bg-paper)',
+				borderBottom: '1px solid var(--rr-border)',
+			}}
+		>
+			<button
+				type="button"
+				aria-label="Open navigation"
+				aria-expanded={open}
+				aria-controls="rr-shell-sidebar"
+				onClick={onOpen}
+				style={{
+					display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+					width: 44, height: 44, padding: 0,
+					border: 'none', background: 'transparent', cursor: 'pointer',
+					color: 'var(--rr-text-primary)',
+				}}
+			>
+				<BxMenu size={22} />
+			</button>
+			<span style={{ fontSize: 15, fontWeight: 600, color: 'var(--rr-text-primary)', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+				{title}
+			</span>
+		</div>
+	);
 };

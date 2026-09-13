@@ -152,7 +152,7 @@ export default function NodeHeader({ id, hideEdit = false, nodeType, icon, title
 		{
 			...duplicate,
 			handleClick: () => {
-				copy();
+				copy([id]);
 				paste();
 			},
 			disabled: !!actionsPanelType || isLocked,

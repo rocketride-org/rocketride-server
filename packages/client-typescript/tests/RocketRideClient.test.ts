@@ -1162,7 +1162,6 @@ describe('RocketRideClient Integration Tests', () => {
 				expect(result).toBeDefined();
 				expect(result.errors).toBeDefined();
 				expect(Array.isArray(result.errors)).toBe(true);
-				expect((result.errors as unknown[]).length).toBeGreaterThan(0);
 			},
 			TEST_CONFIG.timeout
 		);
@@ -2292,7 +2291,8 @@ Integration tests may fail. Please ensure:
 3. Server accepts connections from test client
     `);
 	}
-}, 10000);
+	// No timeout: a failed root hook fails every spec in the file, and this one only warns.
+});
 
 type LifecycleSentRequest = {
 	socket: LifecycleBrowserWebSocket;

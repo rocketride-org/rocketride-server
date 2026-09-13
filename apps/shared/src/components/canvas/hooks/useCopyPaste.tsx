@@ -29,7 +29,7 @@
  * edges; paste duplicates them with fresh IDs and offset positions.
  */
 
-import { useCallback, useMemo } from 'react';
+import { useCallback } from 'react';
 import { Node, Edge } from '@xyflow/react';
 
 import { useFlow } from './useFlowContext';
@@ -58,24 +58,41 @@ const clipboardRef: { current: { nodes: FlowNode[]; edges: Edge[] } | null } = {
 // =============================================================================
 
 /**
+ * Returns the nodes that should be copied for a copy action.
+ *
+ * A contextual action (such as a node's overflow menu) supplies its node IDs
+ * explicitly so it does not depend on canvas selection. Keyboard copy omits
+ * the argument and retains the normal selection-based behaviour.
+ */
+export function getNodesToCopy(nodes: FlowNode[], nodeIds?: readonly string[]): FlowNode[] {
+	if (nodeIds) {
+		const ids = new Set(nodeIds);
+		return nodes.filter((node) => ids.has(node.id));
+	}
+
+	return nodes.filter((node) => node.selected);
+}
+
+/**
  * Hook that provides a copy handler for the flow canvas.
  *
- * Captures the currently selected nodes and their internal edges into
- * the module-level clipboard.
+ * Captures explicitly targeted nodes, or the current selection when no target
+ * is supplied, and their internal edges into the module-level clipboard.
  *
- * @returns A memoized callback that copies the current selection.
+ * @returns A memoized callback that copies the requested nodes.
  */
 export function useCopy() {
 	const { nodes, edges } = useFlow();
-	const selectedNodes = useMemo(() => nodes.filter((n) => n.selected), [nodes]);
 
-	const copy = useCallback(() => {
-		if (selectedNodes.length === 0) {
+	const copy = useCallback((nodeIds?: readonly string[]) => {
+		const nodesToCopy = getNodesToCopy(nodes, nodeIds);
+
+		if (nodesToCopy.length === 0) {
 			clipboardRef.current = null;
 			return;
 		}
 
-		const selection = [...selectedNodes];
+		const selection = [...nodesToCopy];
 
 		// Build lookup set for fast edge-membership checks
 		const ids = new Set(selection.map((n: FlowNode) => n.id));
@@ -88,7 +105,7 @@ export function useCopy() {
 			nodes: JSON.parse(JSON.stringify(selection)),
 			edges: JSON.parse(JSON.stringify(internalEdges)),
 		};
-	}, [selectedNodes, edges]);
+	}, [nodes, edges]);
 
 	return copy;
 }

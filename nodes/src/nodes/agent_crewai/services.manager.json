@@ -17,6 +17,10 @@
 		"crewai": {
 			"description": "Connected CrewAI Subagent nodes",
 			"min": 1
+		},
+		"tool": {
+			"description": "Cross-cutting tools available to the manager itself (via control-plane invoke)",
+			"min": 0
 		}
 	},
 	"lanes": {

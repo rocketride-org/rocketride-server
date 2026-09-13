@@ -26,6 +26,7 @@
  *
  * Handles downloading pre-built server binaries or compiling from source.
  */
+
 const path = require('path');
 const os = require('os');
 const { glob } = require('glob');
@@ -777,6 +778,10 @@ function makeSetupJreAction() {
 			const result = await copyJavaJre();
 			if (!result.copied) {
 				task.output = result.reason;
+				// A silent no-op here means the engine starts without jvm.dll
+				// and every pipeline task fails; warn loudly so the missing
+				// JRE is diagnosable from the build log.
+				console.warn(`WARNING: JRE not staged into dist — ${result.reason}`);
 			} else {
 				task.output = result.stats ? formatSyncStats(result.stats) : 'Synced JRE';
 			}
@@ -1098,7 +1103,7 @@ function makeBuildCoreAction() {
 			whenNot({
 				name: 'ready',
 				condition: (ctx) => ctx.serverReady,
-				then: [parallel(['server:setup-tools', 'vcpkg:submodule-build', 'java:setup-jdk'], 'Setup build tools'), 'server:configure', 'server:compile-engine', parallel(['server:setup-python', 'server:setup-jre'], 'Setup dependencies'), parallel(['server:setup-runtime-libs', 'server:setup-samba'], 'Setup runtime'), 'tika:submodule-build'],
+				then: [parallel(['server:setup-tools', 'vcpkg:submodule-build', 'java:setup-jdk', 'java:setup-jre'], 'Setup build tools'), 'server:configure', 'server:compile-engine', parallel(['server:setup-python', 'server:setup-jre'], 'Setup dependencies'), parallel(['server:setup-runtime-libs', 'server:setup-samba'], 'Setup runtime'), 'tika:submodule-build'],
 			}),
 		],
 	};
@@ -1120,9 +1125,27 @@ function makeBuildAction() {
 			// The shell platform ships WITH the server (static/shell bundle,
 			// /client/shell tgz, the materialized .rocketride/shell package),
 			// so the server build carries it. The TS SDK builds first —
-			// pack-shell vendors its dist inside the shell package.
+			// pack-shell vendors its dist inside the shell package (and its
+			// build chains client-docs:agent, which stages the /client/docs bundle).
 			'client-typescript:build',
 			'shell:build',
+			// The workspace bootstrap shim also ships with the server
+			// (/client/typescript-init).
+			'client-init:build',
+			// The Python wheel ships with the server too — /client/python is
+			// an OSS route, so a server build that stages the TS package but
+			// not the wheel leaves that route serving nothing.
+			//
+			// Its own client-python:build is NOT usable here: that action
+			// starts with server:build (the wheel is built with the engine's
+			// pip), so calling it would close a cycle. The staging steps run
+			// directly instead — by this point server:setup-pip has run, so
+			// the interpreter the wheel build needs already exists.
+			// sync-source ran above, in the parallel Sync modules group.
+			'client-python:wheel-source',
+			'client-python:copy-readme',
+			'client-python:wheel-build',
+			'client-python:sync',
 		],
 	};
 }

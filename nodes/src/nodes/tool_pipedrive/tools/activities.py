@@ -37,6 +37,7 @@ from ._base import (
     INT,
     PAGING,
     STR,
+    UTC_TIME_DESC,
     PipedriveToolsBase,
     args_of,
     body_from,
@@ -73,9 +74,15 @@ _ACTIVITY_WRITE_PROPS = {
     'type': STR(
         'Activity type key, e.g. "call", "meeting", "task", "deadline", "email", "lunch". See activity_type_list for the keys configured in this account.'
     ),
-    'due_date': STR('Due date, YYYY-MM-DD.'),
-    'due_time': STR('Due time, HH:MM.'),
-    'duration': STR('Duration, HH:MM.'),
+    # `due_date` carries the zone note too, and not only `due_time`: the pair is
+    # one instant, and converting the hour past midnight moves the day with it.
+    # A converted time beside an unconverted date is a booking on the wrong day.
+    'due_date': STR(f'Due date, YYYY-MM-DD. {UTC_TIME_DESC}'),
+    'due_time': STR(f'Due time, HH:MM. {UTC_TIME_DESC}'),
+    'duration': STR(
+        'Duration, HH:MM. A LENGTH, not a time of day - no timezone applies and converting '
+        'it is a corruption. A two-hour meeting is "02:00" wherever it is held.'
+    ),
     'done': INT('0 for not done, 1 for done.'),
     'busy_flag': BOOL('Whether the activity marks the user as busy in the calendar.'),
     'note': STR('Note body (HTML is accepted).'),
@@ -112,8 +119,11 @@ class ActivitiesMixin(PipedriveToolsBase):
             filter_id=INT('Apply a saved filter by id (see filter_list).'),
             type=STR('Comma-separated activity type keys to include, e.g. "call,meeting".'),
             done=INT('0 for pending activities, 1 for completed. Omit for both.'),
-            start_date=STR('Only activities due on or after this date, YYYY-MM-DD.'),
-            end_date=STR('Only activities due on or before this date, YYYY-MM-DD.'),
+            start_date=STR(
+                'Only activities due on or after this date, YYYY-MM-DD. Filters the UTC due_date, '
+                'so a range that means a whole day to a person may need widening by one day at each end.'
+            ),
+            end_date=STR('Only activities due on or before this date, YYYY-MM-DD. Same UTC caveat as start_date.'),
         ),
         description='List activities, optionally filtered by owner, type, completion state or due-date range.',
     )

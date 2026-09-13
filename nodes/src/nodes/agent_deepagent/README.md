@@ -63,15 +63,21 @@ The final system prompt is composed as the base `system_prompt` (or the built-in
 
 ## Tool calling
 
-The host LLM is opaque to the driver, so tool calling uses a JSON envelope protocol: each LLM call is prefixed with a system preamble instructing the model to output exactly one JSON object in one of three shapes:
+The host LLM is opaque to the driver, so tool calling uses a JSON envelope protocol: each LLM call is prefixed with a system preamble. **Tool calls are JSON; an answer to the person is not.**
 
 - Single tool call: `{"type":"tool_call","name":"server.tool","args":{...}}`
 - Parallel tool calls: `{"type":"tool_calls","calls":[{"name":"...","args":{...}}, ...]}`
-- Final answer: `{"type":"final","content":"..."}`
+- Final answer: `FINAL>>>` followed by the answer as plain text
+
+**Why the answer left JSON.** Arguments are structured data, where JSON earns its keep. An answer is prose, and the JSON form asked the model to escape a whole markdown table into a string value — one missed inner quote and the envelope stopped parsing, so the person read the envelope instead of the answer. After `FINAL>>>` there is nothing left to escape, and the text is delivered exactly as written. The `{"type":"final","content":"..."}` shape is still accepted by the parser for any model that emits it; it is no longer what the preamble asks for.
+
+"Exactly as written" is literal: only the separator between the marker and the answer is removed — one newline, or one space on the same line. Whitespace after that belongs to the answer, so `FINAL>>>` followed by an indented line still arrives as a markdown code block.
+
+The sentinel is matched **at the start of a line** and is checked before any JSON is parsed. Before it, because an answer may legitimately open with `{`; anchored, because protocol text travels — a delegation carrying instructions, a note quoting the format, a transcript replayed into a prompt — and an unanchored match would read a tool call that merely mentions `FINAL>>>` as a final answer and drop the call. A sentinel with nothing after it is not an answer, and goes back through the retry loop.
 
 The plural `tool_calls` form dispatches all entries concurrently (LangGraph's async ToolNode fans them out via `asyncio.gather`), which is what unlocks parallel sub-agent delegation in a single turn.
 
-Up to 3 attempts are made when the LLM produces malformed JSON, and a tolerant parser extracts the first balanced JSON object, rescuing responses wrapped in markdown fences, followed by trailing prose, or stacked with a stray second object (a common failure mode: a duplicate call or hallucinated `final` appended after a `tool_call`).
+Up to 3 attempts are made when the LLM produces malformed JSON. Each retry names the character that broke the parse and quotes the text around it, and what it asks for next depends on what was attempted: a broken **answer** is pointed at `FINAL>>>`, where nothing can break again, while a broken **tool call** is asked for the same call repaired — telling the model to answer in prose instead would trade the work for a sentence about it. A tolerant parser extracts the first balanced JSON object, rescuing responses wrapped in markdown fences, followed by trailing prose, or stacked with a stray second object (a common failure mode: a duplicate call or hallucinated `final` appended after a `tool_call`). An unparseable envelope that unmistakably opens as a `final` is salvaged for its content rather than printed at the person; a malformed TOOL call never is, since rescuing one would turn work the crew intended to do into a sentence claiming it was done.
 
 Host tool descriptors are converted to LangChain `BaseTool` instances with typed Pydantic input schemas built from each tool's JSON-Schema `inputSchema`; tool execution and LLM calls are bridged off the event loop via `asyncio.to_thread` so concurrent calls do not serialize.
 

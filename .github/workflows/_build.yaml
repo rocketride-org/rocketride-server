@@ -85,7 +85,7 @@ jobs:
             vcpkg_cmd: ./build/vcpkg/vcpkg
     steps:
       - name: Check out repository
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           ref: ${{ inputs.ref }}
           submodules: recursive
@@ -123,7 +123,7 @@ jobs:
 
       - name: Initialize CodeQL
         if: inputs.codeql && matrix.platform == 'ubuntu'
-        uses: github/codeql-action/init@c4dd10e44af883a891fe31ced449bcb4a6728b9b # v3
+        uses: github/codeql-action/init@6f5948dfacef28e207b48d0905cf90c03365536d # v3
         with:
           languages: cpp
           build-mode: manual
@@ -145,9 +145,10 @@ jobs:
           FULL_VERSION: ${{ inputs.full_version }}
           BUILD_HASH: ${{ inputs.build_hash }}
           BUILD_STAMP: ${{ inputs.build_stamp }}
-          # Production values baked into the VS Code extension at build time.
-          ROCKETRIDE_URI: ${{ vars.ROCKETRIDE_URI }}
-          RR_STRIPE_PUBLISHABLE_KEY: ${{ vars.RR_STRIPE_PUBLISHABLE_KEY }}
+          # No server address is baked into ANY artifact: web bundles
+          # self-target from the page origin, and the VS Code extension's
+          # cloud target is the rocketride.*.cloudUrl setting. (The Stripe
+          # publishable key arrives from the server probe at runtime.)
         run: ${{ matrix.builder_cmd }} build --verbose --autoinstall ${{ matrix.platform == 'ubuntu' && '--system-compiler' || '' }} --version="$FULL_VERSION" --hash="$BUILD_HASH" --stamp="$BUILD_STAMP" ${{ inputs.nodownload && '--nodownload' || '' }}
 
       # MinIO for S3Store integration tests (Linux only). Env vars are exported
@@ -161,9 +162,16 @@ jobs:
           AWS_DEFAULT_REGION: us-east-1
         run: |
           set -euo pipefail
+          # quay.io, not Docker Hub: minio/minio on Hub returns zero tags and
+          # empty repository metadata — the whole repo is gone from there, not just
+          # this tag, and Hub reports a missing tag as "pull access denied", which
+          # makes it read like a permissions problem. Same release, same entrypoint,
+          # pulls anonymously. The comment lives ABOVE the command deliberately: a
+          # `#` line inside a `\` continuation ends the command early and docker
+          # never sees the image argument.
           docker run -d --name minio -p 9000:9000 \
             -e MINIO_ROOT_USER=minioadmin -e MINIO_ROOT_PASSWORD=minioadmin \
-            minio/minio:RELEASE.2025-09-07T16-13-09Z server /data
+            quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z server /data
           for i in $(seq 1 30); do
             if curl -fsS http://localhost:9000/minio/health/live >/dev/null 2>&1; then ready=1; break; fi
             sleep 2
@@ -291,7 +299,7 @@ jobs:
 
       - name: Perform CodeQL Analysis
         if: inputs.codeql && matrix.platform == 'ubuntu'
-        uses: github/codeql-action/analyze@c4dd10e44af883a891fe31ced449bcb4a6728b9b # v3
+        uses: github/codeql-action/analyze@6f5948dfacef28e207b48d0905cf90c03365536d # v3
         with:
           category: /language:cpp
 

@@ -49,13 +49,13 @@ from ai.account.models import resolve_team_permissions
 TEAM = 'team-1'
 
 
-def _account_info(*, teams=None, default_team=TEAM, user_id='user-1'):
+def _account_info(*, teams=None, dev_team=TEAM, user_id='user-1'):
     """AccountInfo-shaped stub with an organization and teams."""
     return SimpleNamespace(
         userId=user_id,
         displayName='Rod C',
         email='rod@example.com',
-        defaultTeam=default_team,
+        devTeam=dev_team,
         organization={
             'id': 'org-1',
             'name': 'Acme',
