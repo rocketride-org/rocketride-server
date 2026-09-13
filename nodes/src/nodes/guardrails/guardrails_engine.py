@@ -24,7 +24,7 @@
 """Guardrails engine for input/output safety checks on AI pipelines."""
 
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set
 
 
 class GuardrailsEngine:
@@ -363,8 +363,9 @@ class GuardrailsEngine:
     # Output guardrails
     # -------------------------------------------------------------------------
 
-    # An answer that declines to answer asserts nothing, so there is nothing to ground.
-    # Blocking it would discard the very refusal require_grounding is meant to produce.
+    # Consulted only when no question was recorded, where a figure cannot be
+    # attributed to either side. The main path tests for a claim instead, so a
+    # refusal worded off this list is not blocked.
     ABSTENTION_MARKERS = (
         'do not have',
         "don't have",
@@ -389,9 +390,9 @@ class GuardrailsEngine:
         'insufficient information',
     )
 
-    # A figure carries the claim this check exists to catch. Nothing is grounded in
-    # the empty-retrieval branch, so a stated amount is unsupported however the
-    # sentence around it is hedged.
+    # A figure the question did not name is the claim this check exists to catch.
+    # Nothing is grounded in the empty-retrieval branch, so a stated amount is
+    # unsupported however the sentence around it is hedged.
     _WHITESPACE = re.compile(r'\s+')
     # A question writing $94.7B and an answer writing $94.7 billion name the same
     # amount, so the scale word is folded to its initial before they are compared.
@@ -406,44 +407,38 @@ class GuardrailsEngine:
     )
 
     @classmethod
-    def _is_abstention(cls, output: str, question_text: str = '') -> bool:
-        """Report whether *output* declines to answer rather than asserting something.
+    def _is_ungrounded_claim(cls, output: str, question_text: str = '') -> bool:
+        """Report whether *output* states a figure *question_text* did not name.
 
         Args:
             output: The answer to classify.
             question_text: The question it answers. A figure quoted back from the
-                question is a reference, so it does not make the answer a claim.
+                question is a reference, not a claim the model invented.
 
         Returns:
-            True when the answer declines rather than asserts.
+            True when the answer asserts a figure the question did not name.
         """
-        body = output.strip().lower().replace('\u2019', "'")
-        # An empty answer asserts nothing either. The node short-circuits blank text
-        # before reaching here, but the engine should not depend on that.
-        if not body:
-            return True
-        if not any(marker in body for marker in cls.ABSTENTION_MARKERS):
+        stated = cls._figures(output)
+        if not stated:
             return False
-        # The node records the question only when the questions lane runs. Without it a
-        # figure cannot be attributed to either side, and applying the test anyway would
-        # drop honest refusals, so the marker alone decides.
         if not question_text.strip():
-            return True
-        # A marker alone used to be enough, which let "the figure is $94.7B, but the
-        # source is not available" through. Requiring no figure at all then blocked the
-        # commoner case, an answer declining to confirm the figure it was asked about,
-        # so only a figure the question did not mention counts as a claim.
-        # Compare the figures, not their spacing. The pattern keeps a trailing space
-        # when the optional scale suffix is absent and can swallow a sentence-final
-        # period, and an answer may write "12 %" where the question wrote "12%", so a
-        # raw containment test rejects a figure the question did name.
-        asked = cls._normalise(question_text)
-        figures = (cls._normalise(m) for m in cls.FIGURE_PATTERN.findall(body))
-        return not any(f for f in figures if f and f not in asked)
+            return not cls._declines(output)
+        return bool(stated - cls._figures(question_text))
+
+    @classmethod
+    def _declines(cls, output: str) -> bool:
+        """Report whether *output* is worded as an explicit refusal."""
+        body = output.strip().lower().replace('\u2019', "'")
+        return any(marker in body for marker in cls.ABSTENTION_MARKERS)
+
+    @classmethod
+    def _figures(cls, text: str) -> Set[str]:
+        """Return the figures in *text*, normalised so one amount has one spelling."""
+        return {f for f in (cls._normalise(m) for m in cls.FIGURE_PATTERN.findall(text)) if f}
 
     @classmethod
     def _normalise(cls, text: str) -> str:
-        """Reduce a figure or a question to the form the comparison is made in."""
+        """Reduce a figure to the form the comparison is made in."""
         out = text.lower()
         for word, initial in cls._SCALE_WORDS:
             out = out.replace(word, initial)
@@ -455,6 +450,7 @@ class GuardrailsEngine:
         source_documents: Optional[List[str]] = None,
         retrieval_ran: bool = True,
         question_text: str = '',
+        score_coverage: bool = True,
     ) -> Dict[str, Any]:
         """Verify that claims in output are grounded in source documents.
 
@@ -465,6 +461,9 @@ class GuardrailsEngine:
             output: The LLM output text to verify.
             source_documents: List of source document texts. If empty/None, the check
                               passes unless require_grounding is set.
+            score_coverage: Whether to run the sentence-level coverage scoring.
+                            False when the operator disabled the coverage check but
+                            still requires grounding.
 
         Returns:
             A check result dict.
@@ -473,10 +472,10 @@ class GuardrailsEngine:
             # Nothing retrieved is when a model is most likely to answer from memory,
             # so skipping here stood the guard down at the one moment it was needed.
             # Callers that require grounding get a failure instead, but only when a
-            # retrieval actually ran and missed, and only for an answer that asserts
-            # something: a pipeline with no documents lane never retrieves, and an
-            # abstention is the outcome this is meant to produce.
-            if not self.require_grounding or not retrieval_ran or self._is_abstention(output, question_text):
+            # retrieval actually ran and missed, and only for an answer that states a
+            # figure the question did not name: a pipeline with no documents lane never
+            # retrieves, and an ordinary conversational turn asserts nothing to ground.
+            if not self.require_grounding or not retrieval_ran or not self._is_ungrounded_claim(output, question_text):
                 return {
                     'rule': 'hallucination',
                     'passed': True,
@@ -488,6 +487,14 @@ class GuardrailsEngine:
                 'passed': False,
                 'severity': 'high',
                 'details': 'No source documents provided; the answer cannot be grounded',
+            }
+
+        if not score_coverage:
+            return {
+                'rule': 'hallucination',
+                'passed': True,
+                'severity': 'low',
+                'details': 'Coverage check disabled',
             }
 
         # Combine source documents into one text block for matching
@@ -748,7 +755,11 @@ class GuardrailsEngine:
                 ran = context.get('retrieval_ran', True)
                 results.append(
                     self.check_hallucination(
-                        text, source_docs, retrieval_ran=ran, question_text=context.get('question_text', '')
+                        text,
+                        source_docs,
+                        retrieval_ran=ran,
+                        question_text=context.get('question_text', ''),
+                        score_coverage=self.enable_hallucination_check,
                     )
                 )
 
