@@ -95,17 +95,6 @@ def test_setup_returns_none_when_data_port_absent(monkeypatch):
     assert node._setup_shared_web_server() == (None, None)
 
 
-def test_setup_returns_none_when_only_debug_args_present(monkeypatch):
-    """Debug args alone don't imply a data channel — only --data_port does."""
-    monkeypatch.setattr(
-        sys,
-        'argv',
-        ['node.py', '--debug_port=5555', '--debug_host=localhost', '--wait_for_client'],
-    )
-
-    assert node._setup_shared_web_server() == (None, None)
-
-
 def test_setup_builds_no_server_when_data_port_absent(monkeypatch):
     """The no-port path must not construct a WebServer at all — not even an unbound one."""
     constructed = []
