@@ -21,6 +21,23 @@ Query:      chat -> embedding -> Qdrant -> prompt -> LLM -> response
 
 ---
 
+### rag-pipeline.eval.json
+
+**Golden-dataset eval spec for `rag-pipeline.pipe`** — regression tests you run with `rocketride eval`.
+
+```text
+rocketride eval rag-pipeline.eval.json
+```
+
+- Exercises the query flow of the RAG pipeline (`"source": "chat_1"` — the pipe has two sources, so the spec pins the chat one)
+- Deterministic assertions (`contains`, `regex`, `min_length`/`max_length`, `latency_max_ms`) plus one `llm_judge` case that checks the pipeline admits when the retrieved context lacks an answer instead of fabricating one
+- Ingest at least one RocketRide-related document through the webhook flow first, then adapt the case inputs and assertions to your own corpus
+- See the [Python client docs](../docs/README-python-client.md#rocketride-eval) for the full spec format and assertion reference
+
+**Required env vars:** same as `rag-pipeline.pipe` (the packaged default LLM judge also uses `ROCKETRIDE_OPENAI_KEY`)
+
+---
+
 ### llm-benchmark.pipe
 
 **Compare three LLM providers side-by-side** using parallel agent fan-out.

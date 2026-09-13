@@ -42,9 +42,11 @@ Key Features:
 Usage:
     files = find_files(["*.txt", "data/", "specific_file.json"])
     valid_files, invalid_files = validate_files(files)
+    specs = expand_file_patterns(["evals/*.eval.json", "smoke.eval.json"])
 
 Components:
     find_files: Discover files from patterns and directories
+    expand_file_patterns: Expand CLI file arguments, keeping unmatched patterns
     validate_files: Validate file accessibility and permissions
 """
 
@@ -109,6 +111,50 @@ def find_files(patterns: List[str]) -> List[str]:
     seen = set()
     unique_files = []
     for file_path in files:
+        if file_path not in seen:
+            seen.add(file_path)
+            unique_files.append(file_path)
+    return unique_files
+
+
+def expand_file_patterns(patterns: List[str]) -> List[str]:
+    """
+    Expand CLI file arguments into a deduplicated, ordered list of paths.
+
+    Literal paths are kept as-is; anything else is treated as a glob pattern
+    (expanded in-CLI so wildcards work the same on shells that do not expand
+    them, e.g. Windows). Patterns that match nothing are kept verbatim so the
+    caller can report them as unreadable files.
+
+    This is the file-argument expander for the per-file reporting commands
+    (``validate``, ``eval``). Unlike :func:`find_files` it returns the paths
+    exactly as the user typed them and never drops an unmatched pattern —
+    both are required to report a missing file under the name that was asked
+    for, and directories are not expanded.
+
+    Args:
+        patterns: File paths and/or glob patterns from the command line
+
+    Returns:
+        List[str]: Expanded file paths, deduplicated, preserving order
+    """
+    expanded: List[str] = []
+    for pattern in patterns:
+        if os.path.isfile(pattern):
+            expanded.append(pattern)
+            continue
+        # Not a literal file — try shell-style glob expansion
+        matches = sorted(path for path in glob.glob(pattern, recursive=True) if os.path.isfile(path))
+        if matches:
+            expanded.extend(matches)
+        else:
+            # Keep the unmatched pattern so the caller can report it per-file
+            expanded.append(pattern)
+
+    # Remove duplicates while preserving order
+    seen = set()
+    unique_files = []
+    for file_path in expanded:
         if file_path not in seen:
             seen.add(file_path)
             unique_files.append(file_path)

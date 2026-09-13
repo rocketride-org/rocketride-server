@@ -21,40 +21,14 @@
 # SOFTWARE.
 
 """
-CLI command implementations.
+Packaged pipeline templates for the RocketRide eval runner.
 
-Each module exposes async ``run_*`` entry points dispatched from
-``cli.main``; all of them route their output through the shared
-``Output`` channel so human and ``--json`` modes behave identically.
+This package exists so its data files (``*.pipe``) ship inside the wheel and
+can be located with :mod:`importlib.resources`. It intentionally contains no
+Python code.
 
-Modules:
-    auth: ``login`` and ``init``
-    tasks: ``start``, ``stop``, ``upload``, ``list``
-    store: ``store`` subcommands
-    app: ``app`` subcommands
-    deploy: ``deploy`` subcommands
-    validate: ``validate`` (pipeline files, CI-friendly exit codes)
-    eval: ``eval`` (golden-dataset eval specs, CI-friendly exit codes)
+Templates:
+    judge-default.pipe: Default LLM-as-judge pipeline used by ``rocketride
+        eval`` for ``llm_judge`` assertions when a spec does not provide its
+        own ``judge_pipeline``.
 """
-
-from .app import run_app
-from .auth import run_init, run_login
-from .deploy import run_deploy
-from .eval import run_eval
-from .store import run_store
-from .tasks import run_list, run_start, run_stop, run_upload
-from .validate import run_validate
-
-__all__ = [
-    'run_app',
-    'run_deploy',
-    'run_eval',
-    'run_init',
-    'run_list',
-    'run_login',
-    'run_start',
-    'run_stop',
-    'run_store',
-    'run_upload',
-    'run_validate',
-]
