@@ -3,7 +3,7 @@ import { Button, ConfirmDialog, TabControl } from 'shell';
 import AssistantPanel from './AssistantPanel';
 import ResultsPanel from './ResultsPanel';
 import SpecEditor from './SpecEditor';
-import { EvaluationApi, EvaluationApiError, downloadArtifact } from './api';
+import { EvaluationApi, EvaluationApiError, downloadArtifact, retryablePollError } from './api';
 import { dateLabel, Notice, SelectField, Status, TextArea } from './controls';
 import { clone, newSpec, parseSpec, pretty, same, validateSpec } from './spec';
 import { isActiveRun, type Capabilities, type CaseResult, type Evaluation, type EvaluationSpec, type EvaluationWorkspaceProps, type Revision, type Run, type HumanReviewStatus } from './types';
@@ -183,18 +183,27 @@ function Workspace({ project, projectName, client, onOpenTrace }: EvaluationWork
 		const controller = new AbortController();
 		let timer: ReturnType<typeof setTimeout>;
 		let delay = 2000;
+		const pendingIds = new Set(activeIds.split(','));
+		const stopped: string[] = [];
 		const poll = async (): Promise<void> => {
-			const results = await Promise.allSettled(activeIds.split(',').map((id) => api.run(id, controller.signal)));
+			const ids = [...pendingIds];
+			const results = await Promise.allSettled(ids.map((id) => api.run(id, controller.signal)));
 			if (controller.signal.aborted) return;
 			const received: Run[] = [];
 			const failures: string[] = [];
-			for (const result of results) {
-				if (result.status === 'fulfilled') received.push(result.value.run);
-				else failures.push(message(result.reason));
+			for (const [index, result] of results.entries()) {
+				if (result.status === 'fulfilled') {
+					received.push(result.value.run);
+					if (!isActiveRun(result.value.run)) pendingIds.delete(ids[index]);
+				} else if (!retryablePollError(result.reason)) {
+					pendingIds.delete(ids[index]);
+					stopped.push(message(result.reason));
+				} else failures.push(message(result.reason));
 			}
 			setRuns((current) => mergeRuns(current, received));
 			delay = failures.length ? Math.min(delay * 2, 30000) : 2000;
-			setPollError(failures.length ? `Live updates failed: ${failures[0]} Retrying in ${delay / 1000}s. Displaying the last server report; execution may still be active.` : '');
+			setPollError([stopped.length ? `Updates stopped for an inaccessible run: ${stopped[0]} Restore access and reload to resume. The last report is unchanged; execution may still be active.` : '', failures.length ? `Live updates failed: ${failures[0]} Retrying in ${delay / 1000}s.` : ''].filter(Boolean).join(' '));
+			if (!pendingIds.size) return;
 			timer = setTimeout(() => {
 				void poll();
 			}, delay);

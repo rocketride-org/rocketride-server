@@ -48,7 +48,7 @@ import { createLiveEventStore, type LiveEventStore } from './hooks/liveEventSess
 import type { ProjectViewMode, ViewState, TaskStatus, TraceEvent } from './types';
 import { TASK_STATE } from './types';
 import { writeProjectPreference } from './projectPreferences';
-import { resolveViewMode } from './viewMode';
+import { resolveViewMode, initialViewMode } from './viewMode';
 
 const CLOUD_CANVAS_PROMPT_DISMISSED_KEY = 'cloudCanvasPromptDismissed';
 
@@ -301,7 +301,7 @@ const ProjectView: React.FC<IProjectViewProps> = ({ project, documentTitle, eval
 	const [viewState, setViewState] = useState<ViewState>(() => ({
 		// Persisted modes from before the environment-page restructure map
 		// onto the new strip (old monitoring modes -> DEVELOPMENT).
-		mode: resolveViewMode(initialViewState?.mode, isReadonly, Boolean(evaluationContent)),
+		mode: initialViewMode(initialViewState?.mode, isReadonly),
 		flowViewMode: initialViewState?.flowViewMode ?? 'pipeline',
 		viewport: initialViewState?.viewport,
 	}));

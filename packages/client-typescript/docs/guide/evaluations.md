@@ -7,6 +7,9 @@ Managed evaluations use `client.evals` and the versioned bearer HTTP API at
 SDKs, CLI, and MCP tools. The managed `rocketride evals` command coexists with
 the separate offline `rocketride eval` workflow.
 
+Remote evaluation origins require HTTPS or WSS. Plain HTTP/WS is supported only
+for literal loopback addresses or `localhost`, not other private-network hosts.
+
 ## TypeScript SDK
 
 ```typescript

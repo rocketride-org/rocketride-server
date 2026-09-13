@@ -63,6 +63,11 @@ server. It never substitutes a service credential, accepts an arbitrary URL,
 follows redirects, or retries a write. Check capabilities before proposing runs;
 the OSS-only engine does not implement the managed SaaS storage API.
 
+Remote engine origins must use HTTPS; plaintext HTTP is allowed only on literal
+loopback addresses or `localhost`. Each evaluation call has a 30-second total
+deadline, including streamed response bodies. A timeout does not prove that a
+write failed: inspect the run and reuse its original idempotency key.
+
 Supply `expectedRevision` when revising a spec, a stable `idempotencyKey` when
 starting a run, and `expectedReportRevision` for a human review. Repeated cases
 also require the exact trial's `caseResultId`. Approval, baseline selection, and

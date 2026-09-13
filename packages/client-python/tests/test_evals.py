@@ -109,6 +109,9 @@ async def test_routes_writes_guards_and_review_contract(monkeypatch):
         'https://api.rocketride.ai/prefix',
         'https://api.rocketride.ai/?token=secret',
         'https://api.rocketride.ai/#secret',
+        'http://remote.example.test',
+        'ws://192.168.1.2:5565',
+        'http://localhost.evil.test',
     ],
 )
 async def test_reject_original_endpoint_before_transport(monkeypatch, uri):
@@ -117,6 +120,88 @@ async def test_reject_original_endpoint_before_transport(monkeypatch, uri):
     with pytest.raises(ValueError):
         await client.evals.capabilities()
     assert not transport.requests
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('uri', ['http://localhost:5565', 'ws://127.0.0.1:5565', 'http://[::1]:5565'])
+async def test_plaintext_loopback_remains_available(monkeypatch, uri):
+    transport = Transport({'environments': []})
+    assert await client_with(monkeypatch, transport, uri).evals.capabilities() == {'environments': []}
+    assert len(transport.requests) == 1
+
+
+@pytest.mark.parametrize('summary', [None, [], 'pass', 1, {'gate': None}])
+def test_malformed_gate_summary_is_incomplete(summary):
+    from rocketride.evals import gate_exit_code
+
+    assert gate_exit_code({**RUN, 'summary': summary}) == 2
+
+
+@pytest.mark.asyncio
+async def test_json_file_is_reserved_before_mutation(monkeypatch, tmp_path, capsys):
+    target = tmp_path / 'result.json'
+
+    async def request(method, url, headers, body, timeout):
+        assert target.exists(), 'The exclusive output must be reserved before submitting a write'
+        return 200, json.dumps({'run': RUN}).encode()
+
+    assert (
+        await cli(
+            monkeypatch, request, ['run', 'e1', '--revision', '1', '--idempotency-key', 'key', '--json', str(target)]
+        )
+        == 0
+    )
+    assert json.loads(target.read_text()) == {'run': RUN}
+
+
+@pytest.mark.asyncio
+async def test_failed_output_reservation_prevents_mutation(monkeypatch, tmp_path, capsys):
+    module = importlib.import_module('rocketride.cli.commands.evals')
+    transport = Transport({'run': RUN})
+
+    def denied(*args, **kwargs):
+        raise PermissionError('denied')
+
+    monkeypatch.setattr(module.os, 'open', denied)
+    assert (
+        await cli(
+            monkeypatch,
+            transport,
+            ['run', 'e1', '--revision', '1', '--idempotency-key', 'key', '--json', str(tmp_path / 'result.json')],
+        )
+        == 2
+    )
+    assert not transport.requests
+
+
+@pytest.mark.asyncio
+async def test_output_close_failure_returns_safe_error(monkeypatch, tmp_path, capsys):
+    module = importlib.import_module('rocketride.cli.commands.evals')
+    transport = Transport({'run': RUN})
+
+    class FailingOutput:
+        def write(self, content):
+            pass
+
+        def flush(self):
+            pass
+
+        def close(self):
+            raise OSError('private filesystem details')
+
+    monkeypatch.setattr(module, '_open_new_output', lambda path: FailingOutput())
+    assert (
+        await cli(
+            monkeypatch,
+            transport,
+            ['run', 'e1', '--revision', '1', '--idempotency-key', 'key', '--json', str(tmp_path / 'result.json')],
+        )
+        == 2
+    )
+    output = capsys.readouterr()
+    assert 'private filesystem details' not in output.out + output.err
+    assert 'may have completed' in output.out + output.err
+    assert len(transport.requests) == 1
 
 
 @pytest.mark.asyncio
@@ -370,7 +455,9 @@ async def test_output_redaction_and_safe_json_file(monkeypatch, tmp_path, capsys
     assert await cli(monkeypatch, transport, ['capabilities', '--json', str(target)]) == 0
     text = target.read_text() + capsys.readouterr().out
     assert not any(secret in text for secret in ['test-secret', 'another-secret', 'embedded-secret'])
-    assert os.stat(target).st_mode & 0o777 == 0o600
+    # Windows inherits directory ACLs; POSIX mode bits are not supported there.
+    if os.name != 'nt':
+        assert os.stat(target).st_mode & 0o777 == 0o600
     assert await cli(monkeypatch, transport, ['capabilities', '--json', str(target)]) == 2
 
 

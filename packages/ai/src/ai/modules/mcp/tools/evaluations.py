@@ -2,6 +2,8 @@
 """Managed SaaS evaluation operations for existing RocketRide agent harnesses."""
 
 import json
+import asyncio
+import ipaddress
 import re
 from urllib.parse import urlsplit, urlunsplit
 
@@ -35,6 +37,7 @@ _OPERATIONS = {
 }
 _ID = re.compile(r'[A-Za-z0-9_-]{1,128}\Z')
 _MAX_RESPONSE_BYTES = 8 * 1024 * 1024
+_REQUEST_TIMEOUT = 30
 
 
 def _request_args(args: dict):
@@ -77,6 +80,18 @@ def _request_args(args: dict):
 
 
 async def _evaluations(client, tasks, args: dict) -> dict:
+    """Bound the whole exchange, including slowly streamed response bodies."""
+    try:
+        return await asyncio.wait_for(_evaluations_impl(client, tasks, args), timeout=_REQUEST_TIMEOUT)
+    except asyncio.TimeoutError:
+        return {
+            'ok': False,
+            'error_type': 'TransportError',
+            'message': 'Evaluation request timed out. A write may have completed; check its status before retrying.',
+        }
+
+
+async def _evaluations_impl(client, tasks, args: dict) -> dict:
     """Forward one bounded request using only the authenticated MCP caller."""
     try:
         method, path, body = _request_args(args)
@@ -91,16 +106,32 @@ async def _evaluations(client, tasks, args: dict) -> dict:
             'message': 'Managed evaluations require an authenticated caller; a service credential is never substituted.',
         }
 
-    origin = urlsplit(client.base_url)
+    try:
+        origin = urlsplit(client.base_url)
+        host = origin.hostname or ''
+        try:
+            loopback = ipaddress.ip_address(host).is_loopback
+        except ValueError:
+            loopback = host.lower() == 'localhost'
+        valid_port = origin.port != 0
+    except ValueError:
+        return {'ok': False, 'error_type': 'ConfigurationError', 'message': 'The engine HTTP origin is invalid.'}
     if (
         origin.scheme not in ('http', 'https')
+        or (origin.scheme == 'http' and not loopback)
+        or not valid_port
+        or not host
         or not origin.netloc
         or origin.username
         or origin.password
         or origin.query
         or origin.fragment
     ):
-        return {'ok': False, 'error_type': 'ConfigurationError', 'message': 'The engine HTTP origin is invalid.'}
+        return {
+            'ok': False,
+            'error_type': 'ConfigurationError',
+            'message': 'Use HTTPS for remote engines; HTTP is allowed only for loopback.',
+        }
     url = urlunsplit((origin.scheme, origin.netloc, '/evals/v1' + path, '', ''))
 
     try:

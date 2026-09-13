@@ -3,9 +3,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const path = require('node:path');
-const { createRequire } = require('node:module');
-// Resolve through the installed build tool so pnpm's isolated layout works.
-const { buildSync } = createRequire(require.resolve('@rsbuild/core'))('esbuild');
+const { buildSync } = require('esbuild');
 
 function load(name) {
 	const built = buildSync({ entryPoints: [path.join(__dirname, name)], bundle: true, platform: 'node', format: 'cjs', write: false, logLevel: 'silent' });
@@ -13,7 +11,7 @@ function load(name) {
 	new Function('module', 'exports', built.outputFiles[0].text)(module, module.exports);
 	return module.exports;
 }
-const { evaluationBaseUrl } = load('api.ts');
+const { evaluationBaseUrl, EvaluationApiError, retryablePollError } = load('api.ts');
 const { newSpec, clone, same, validateSpec, importCases, parseCsv, parseSpec, retainReviews, specChanges, pipelineSources } = load('spec.ts');
 const { traceUnavailableReason, canBeBaseline, isActiveRun } = load('types.ts');
 const { mergeRuns, reviewRequest } = load('state.ts');
@@ -28,6 +26,23 @@ test('managed API derives the HTTP origin and drops websocket path, credentials,
 	assert.equal(evaluationBaseUrl('https://user:password@example.test/engine'), 'https://example.test/evals/v1');
 	assert.throws(() => evaluationBaseUrl('file:///tmp/engine'));
 	assert.throws(() => evaluationBaseUrl(''));
+});
+
+test('managed UI refuses remote plaintext before sending a bearer credential', () => {
+	for (const uri of ['http://remote.example.test', 'ws://192.168.1.2:5565', 'http://localhost.evil.test']) assert.throws(() => evaluationBaseUrl(uri), /HTTPS/);
+	assert.equal(evaluationBaseUrl('http://[::1]:5565'), 'http://[::1]:5565/evals/v1');
+});
+
+test('polling stops on permanent HTTP failures but retries temporary failures', () => {
+	for (const status of [400, 401, 403, 404, 405, 410, 422]) assert.equal(retryablePollError(new EvaluationApiError('Denied', status)), false);
+	for (const status of [408, 429, 500, 502, 503]) assert.equal(retryablePollError(new EvaluationApiError('Temporary', status)), true);
+	assert.equal(retryablePollError(new Error('Network unavailable')), true);
+});
+
+test('import rejects zero as a captured trace sequence', () => {
+	const value = spec();
+	value.cases[0].provenance = { kind: 'trace', trace: { projectId: 'p', source: 's', traceId: 0 } };
+	assert.ok(validateSpec(value).some((message) => message.includes('traceId')));
 });
 
 test('snapshot capture preserves the business graph and selects only actual source IDs', () => {

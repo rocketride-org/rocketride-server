@@ -1,6 +1,14 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { resolveViewMode } from './viewMode';
+import { resolveViewMode, initialViewMode } from './viewMode';
+
+test('remember a saved evaluation page while its host capability loads', () => {
+	const remembered = initialViewMode('evaluations', false);
+	assert.equal(remembered, 'evaluations');
+	assert.equal(resolveViewMode(remembered, false, false), 'design');
+	assert.equal(resolveViewMode(remembered, false, true), 'evaluations');
+	assert.equal(initialViewMode('evaluations', true), 'design');
+});
 
 test('evaluation page restores only when its host supplies the capability', () => {
 	assert.equal(resolveViewMode('evaluations', false, true), 'evaluations');

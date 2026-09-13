@@ -122,9 +122,10 @@ function baseUrl(uri: string): string {
 		const url = new URL(uri.includes('://') ? uri : `http://${uri}`);
 		if (!['http:', 'https:', 'ws:', 'wss:'].includes(url.protocol) || !url.hostname || url.username || url.password || url.port === '0' || !['', '/task/service', '/evals/v1'].includes(url.pathname.replace(/\/+$/, ''))) throw new Error();
 		url.protocol = url.protocol === 'wss:' ? 'https:' : url.protocol === 'ws:' ? 'http:' : url.protocol;
+		if (url.protocol === 'http:' && !/^(localhost|127\.\d+\.\d+\.\d+|\[::1\])$/.test(url.hostname)) throw new Error();
 		return `${url.origin}/evals/v1`;
 	} catch {
-		throw new Error('Managed evaluations require an HTTP(S) server origin without credentials, query, or fragment');
+		throw new Error('Managed evaluations require HTTPS (HTTP only for loopback) without credentials, query, or fragment');
 	}
 }
 

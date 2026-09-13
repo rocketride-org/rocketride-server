@@ -18,7 +18,13 @@ export function evaluationBaseUrl(uri: string): string {
 	if (url.protocol === 'ws:') url.protocol = 'http:';
 	if (url.protocol === 'wss:') url.protocol = 'https:';
 	if (url.protocol !== 'http:' && url.protocol !== 'https:') throw new Error('Evaluations require an HTTP or WebSocket server connection.');
+	if (url.protocol === 'http:' && !/^(localhost|127\.\d+\.\d+\.\d+|\[::1\])$/.test(url.hostname)) throw new Error('Remote evaluations require HTTPS. Plain HTTP is supported only for loopback development.');
 	return `${url.origin}/evals/v1`;
+}
+
+/** Retrying a denied or missing resource cannot restore permission or existence. */
+export function retryablePollError(error: unknown): boolean {
+	return !(error instanceof EvaluationApiError && error.status >= 400 && error.status < 500 && error.status !== 408 && error.status !== 429);
 }
 
 /** Reads the current credential for each request; credentials never enter exported artifacts. */

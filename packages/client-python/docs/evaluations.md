@@ -156,7 +156,9 @@ approves references, selects a baseline, or starts a run.
 or JUnit XML. `--output` writes full evidence to a new file with private
 permissions on POSIX; no parent directories are created. Existing files,
 including symlinks, are refused. `--json=FILE` uses the same exclusive file
-policy and checks the destination before submitting a mutation. Choose distinct
+policy and reserves the destination atomically before submitting a mutation. On
+Windows, files inherit directory access controls; use a private output directory.
+Choose distinct
 new paths for report evidence and JSON command metadata.
 
 Console and JSON command output redact the configured bearer credential and
@@ -172,6 +174,8 @@ ports explicitly, for example `http://localhost:5565`. Other paths, embedded
 credentials, query strings, fragments, and unsupported schemes are rejected
 before HTTP. Redirects are refused and bearer credentials are never forwarded
 to a redirect target. Server/provider transport errors are not echoed verbatim.
+Remote origins require HTTPS or WSS. Plain HTTP/WS is allowed only for literal
+loopback addresses or `localhost`, not other private-network hosts.
 
 ## Spec and execution semantics
 

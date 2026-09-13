@@ -94,8 +94,7 @@ def _read_spec(path: str) -> dict:
 
 def _write_new(path: str, content: str) -> None:
     try:
-        descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-        with os.fdopen(descriptor, 'w', encoding='utf-8', newline='') as stream:
+        with _open_new_output(path) as stream:
             stream.write(content)
     except OSError:
         raise ValueError(
@@ -103,12 +102,19 @@ def _write_new(path: str, content: str) -> None:
         ) from None
 
 
-def _check_new_output(path: str) -> None:
-    parent = os.path.dirname(os.path.abspath(path))
-    if os.path.lexists(path) or not os.path.isdir(parent) or not os.access(parent, os.W_OK):
+def _open_new_output(path: str):
+    """Reserve the output atomically before any remote mutation."""
+    try:
+        descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        try:
+            return os.fdopen(descriptor, 'w', encoding='utf-8', newline='')
+        except BaseException:
+            os.close(descriptor)
+            raise
+    except OSError:
         raise ValueError(
             'Cannot write output: use a new file in an existing writable directory (existing files and symlinks are refused)'
-        )
+        ) from None
 
 
 def _safe_output(value: Any, credential: str) -> Any:
@@ -222,33 +228,49 @@ async def run_evals(args) -> int:
     json_file = args.json if args.json not in (None, '-') else None
     out = Output(None if json_file else args.json)
     credential = args.apikey or ''
+    stream = None
+    write_failed = False
     if json_file:
         try:
-            _check_new_output(json_file)
+            stream = _open_new_output(json_file)
         except ValueError as error:
             out.fail(str(error))
             return 2
     try:
-        api = EvalsApi(lambda: (args.uri, credential), timeout=args.timeout)
-        result, code = await _execute(args, api)
-        result = _safe_output(result, credential)
-        if isinstance(result, str):
-            out.line(result)
-            result = {'format': 'junit', 'report': result}
-        else:
-            out.line(json.dumps(result, indent=2))
-        out.result(result)
-    except Exception as error:
-        message = _redact(str(error), credential)
-        out.fail(message)
-        result = {'error': {'message': message, 'code': error.code if isinstance(error, EvalsError) else 'usage_error'}}
-        out.result(result)
-        code = 2
-    if json_file:
         try:
-            _write_new(json_file, json.dumps(result, indent=2) + '\n')
-        except ValueError as error:
-            out.fail(str(error))
-            return 2
+            api = EvalsApi(lambda: (args.uri, credential), timeout=args.timeout)
+            result, code = await _execute(args, api)
+            result = _safe_output(result, credential)
+            if isinstance(result, str):
+                out.line(result)
+                result = {'format': 'junit', 'report': result}
+            else:
+                out.line(json.dumps(result, indent=2))
+            out.result(result)
+        except Exception as error:
+            message = _redact(str(error), credential)
+            out.fail(message)
+            result = {
+                'error': {'message': message, 'code': error.code if isinstance(error, EvalsError) else 'usage_error'}
+            }
+            out.result(result)
+            code = 2
+        if stream is not None:
+            try:
+                stream.write(json.dumps(result, indent=2) + '\n')
+                stream.flush()
+            except OSError:
+                write_failed = True
+    finally:
+        if stream is not None:
+            try:
+                stream.close()
+            except OSError:
+                write_failed = True
+    if write_failed:
+        out.fail(
+            'Cannot finish writing output; a remote operation may have completed. Check its status before retrying.'
+        )
+        return 2
     out.finish()
     return code

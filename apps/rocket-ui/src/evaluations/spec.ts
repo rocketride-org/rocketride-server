@@ -114,7 +114,7 @@ export function validateSpec(value: unknown): string[] {
 					text(trace.projectId, `${path}.trace.projectId`);
 					text(trace.source, `${path}.trace.source`);
 					if (trace.runKind !== undefined) text(trace.runKind, `${path}.trace.runKind`);
-					if (trace.traceId !== undefined && (!Number.isSafeInteger(trace.traceId) || Number(trace.traceId) < 0)) errors.push(`${path}.trace.traceId must be an actual nonnegative numeric log sequence.`);
+					if (trace.traceId !== undefined && (!Number.isSafeInteger(trace.traceId) || Number(trace.traceId) < 1)) errors.push(`${path}.trace.traceId must be an actual positive numeric log sequence.`);
 					if (trace.chapter !== undefined && (!Number.isSafeInteger(trace.chapter) || Number(trace.chapter) < 0)) errors.push(`${path}.trace.chapter must be a nonnegative integer.`);
 					if (trace.environment !== undefined && trace.environment !== 'development' && trace.environment !== 'staging') errors.push(`${path}.trace.environment must be development or staging.`);
 				}

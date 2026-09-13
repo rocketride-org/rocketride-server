@@ -83,10 +83,16 @@ test('routes, guards, idempotency and exact case-level review body', async () =>
 	expect(JSON.parse(calls[11][1]!.body as string)).toEqual({ instruction: 'Improve wording', spec: SPEC });
 });
 
-test.each(['ftp://example.com', 'https://u:secret@example.com:443', 'https://api.rocketride.ai/prefix', 'https://api.rocketride.ai/?token=secret', 'https://api.rocketride.ai/#secret'])('reject original unsafe endpoint %s', async (uri) => {
+test.each(['ftp://example.com', 'https://u:secret@example.com:443', 'https://api.rocketride.ai/prefix', 'https://api.rocketride.ai/?token=secret', 'https://api.rocketride.ai/#secret', 'http://remote.example.test', 'ws://192.168.1.2:5565', 'http://localhost.evil.test'])('reject original unsafe endpoint %s', async (uri) => {
 	const http = transport({});
 	await expect(api(uri).capabilities()).rejects.toThrow();
 	expect(http).not.toHaveBeenCalled();
+});
+
+test.each(['http://localhost:5565', 'ws://127.0.0.1:5565', 'http://[::1]:5565'])('allow plaintext only for local development: %s', async (uri) => {
+	const http = transport({ environments: [] });
+	expect(await api(uri).capabilities()).toEqual({ environments: [] });
+	expect(http).toHaveBeenCalledTimes(1);
 });
 
 test.each([{ response: [307, 'test-secret'] }, { response: [409, { error: { code: 'conflict', message: 'Stale test-secret' } }] }, { response: new Error('test-secret') }])('no retry or credential disclosure on HTTP failure %#', async ({ response }) => {

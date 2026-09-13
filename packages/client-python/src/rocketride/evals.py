@@ -6,6 +6,7 @@ or redirected; callers retain the idempotency key when resuming a run request.
 
 import asyncio
 import http.client
+import ipaddress
 import json
 import math
 import re
@@ -49,10 +50,17 @@ def _base_url(uri: str) -> str:
         ):
             raise ValueError
         scheme = {'ws': 'http', 'wss': 'https'}.get(parsed.scheme, parsed.scheme)
+        if scheme == 'http':
+            try:
+                loopback = ipaddress.ip_address(parsed.hostname).is_loopback
+            except ValueError:
+                loopback = parsed.hostname.lower() == 'localhost'
+            if not loopback:
+                raise ValueError
         return urlunsplit((scheme, parsed.netloc, '/evals/v1', '', ''))
     except ValueError:
         raise ValueError(
-            'Managed evaluations require an HTTP(S) server origin without credentials, query, or fragment'
+            'Managed evaluations require HTTPS (HTTP only for loopback) without credentials, query, or fragment'
         ) from None
 
 
@@ -317,4 +325,8 @@ def gate_exit_code(run: Dict[str, Any]) -> int:
     """CI gate: 0 pass, 1 fail, 2 incomplete, active, cancelled or error."""
     if run.get('status') != 'completed':
         return 2
-    return {'pass': 0, 'fail': 1}.get(run.get('summary', {}).get('gate'), 2)
+    summary = run.get('summary')
+    if not isinstance(summary, dict):
+        return 2
+    gate = summary.get('gate')
+    return 0 if gate == 'pass' else 1 if gate == 'fail' else 2
