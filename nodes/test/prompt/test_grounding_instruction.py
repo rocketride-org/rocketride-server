@@ -179,6 +179,34 @@ def test_empty_retrieval_gets_an_abstain_instruction(node):
     assert 'Do not answer from memory' in body
 
 
+def test_a_retrieval_miss_beside_another_lane_still_grounds(node):
+    """The store missed, but the text lane carries context the answer can use.
+
+    services.json declares documents, text, table and questions, so keying only
+    off documents told the model to refuse a question its other input answered.
+    """
+    _ask(node)
+    node.writeDocuments([])
+    node.writeText('The launch page states the release is in March.')
+    node.closing()
+
+    body = _grounding_text(node)
+    assert body is not None
+    assert 'Base your answer on the documents' in body
+
+
+def test_a_retrieval_miss_beside_a_table_lane_still_grounds(node):
+    """Same for the table lane, which also reaches the prompt as context."""
+    _ask(node)
+    node.writeDocuments([])
+    node.writeTable('region,revenue\nEMEA,120')
+    node.closing()
+
+    body = _grounding_text(node)
+    assert body is not None
+    assert 'Base your answer on the documents' in body
+
+
 def test_a_retrieval_miss_with_no_other_lane_still_abstains(node):
     """Nothing else can answer it, so the abstain instruction still applies."""
     _ask(node)

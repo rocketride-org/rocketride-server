@@ -148,9 +148,11 @@ class IInstance(IInstanceBase):
                 self.question.addInstruction(instruction_name, instruction)
 
             # Only a pipeline that retrieves gets a grounding rule, so a prompt node
-            # merging branches is left exactly as it was.
+            # merging branches is left exactly as it was. A miss forces an abstention
+            # only when no other lane supplied context that could answer the question.
             if self.retrieval_ran:
-                body = _GROUNDING_INSTRUCTION if self.question.documents else _ABSTAIN_INSTRUCTION
+                grounded = self.question.documents or self.question.context
+                body = _GROUNDING_INSTRUCTION if grounded else _ABSTAIN_INSTRUCTION
                 self.question.addInstruction('Grounding', body)
 
             debug(f'Enhanced question: {self.question.getPrompt()}')
