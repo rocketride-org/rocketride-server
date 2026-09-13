@@ -73,6 +73,7 @@ _PROVIDER_REGISTRY: Dict[str, str] = {
     'llm_kimi': 'providers.kimi:KimiProvider',
     'llm_baidu_qianfan': 'providers.baidu_qianfan:BaiduQianfanProvider',
     'llm_glm': 'providers.glm:GlmProvider',
+    'llm_nemotron': 'providers.nemotron:NemotronProvider',
 }
 
 # Maps provider name → relative path to its services.json from the repo root
@@ -90,6 +91,7 @@ _SERVICES_JSON_PATHS: Dict[str, str] = {
     'llm_kimi': 'nodes/src/nodes/llm_kimi/services.json',
     'llm_baidu_qianfan': 'nodes/src/nodes/llm_baidu_qianfan/services.json',
     'llm_glm': 'nodes/src/nodes/llm_glm/services.json',
+    'llm_nemotron': 'nodes/src/nodes/llm_nemotron/services.json',
 }
 
 # Default extra fields added to every new profile (placeholder for API key)

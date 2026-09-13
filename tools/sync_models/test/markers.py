@@ -63,3 +63,8 @@ requires_glm = pytest.mark.skipif(
     not os.environ.get('ROCKETRIDE_GLM_KEY'),
     reason='ROCKETRIDE_GLM_KEY not set',
 )
+
+requires_nvidia = pytest.mark.skipif(
+    not os.environ.get('ROCKETRIDE_NVIDIA_KEY'),
+    reason='ROCKETRIDE_NVIDIA_KEY not set',
+)
