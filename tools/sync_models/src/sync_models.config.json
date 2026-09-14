@@ -594,7 +594,8 @@
 			"model_filter": {
 				"include_prefixes": ["nvidia/nemotron", "nvidia/llama-3.1-nemotron", "nvidia/llama-3.3-nemotron"],
 				"exclude_prefixes": [],
-				"exclude_patterns": ["vl", "vision", "omni", "safety", "guard", "parse", "ocr", "embed", "rerank", "retriever", "asr", "tts", "speech", "audio", "reward"]
+				// ":free" is an OpenRouter routing alias, not an NVIDIA model ID.
+				"exclude_patterns": ["vl", "vision", "omni", "safety", "guard", "parse", "ocr", "embed", "rerank", "retriever", "asr", "tts", "speech", "audio", "reward", ":free"]
 			},
 			// Protect the seeded cloud set so the keyless OpenRouter fallback can
 			// never wrongly retire it.
