@@ -147,6 +147,7 @@ These files define common fields that are merged into a service definition as re
 | `vector.host` / `vector.port` | string / number | Vector-store server address and port (with `vector.cloud.*` and `vector.local.*` variants, plus `vector.local.grpc_port`). |
 | `vector.collection` | string, default `ROCKETRIDE` | Collection name. |
 | `vector.score` | number 0-1, default `0.7` | Minimum retrieval score, from `0.0` "All results" to `1.0` "Almost identical". |
+| `vector.top_k` | integer or string 1-1000, optional | Chroma only: overrides the caller's retrieval limit (25 on the data lane) in either direction for semantic and keyword search. Unset keeps the caller's limit. |
 | `vector.apikey` | string, secure | API key. |
 | `vectorizer.embedding` | combo `embedding` | Embedding provider selector. |
 | `vectorizer.store` | combo `store` | Vector-store provider selector. |
@@ -244,6 +245,14 @@ The internal Word indexer, ZIP Creation, and null endpoint are protocol-bearing 
 | `aws.region` | `string` | **Region**<br/>This is defined and provided by the service provider. | `""` |
 | `aws.secretKey` | `string` | **Secret key**<br/>This is a key used to access the AWS services. |  |
 
+### `services.common.gcp.json`
+
+| Field | Type | Description | Default |
+|---|---|---|---|
+| `gcp.authType` | `string` | **Authentication Type**<br/>Choose how to authenticate to Google Cloud Platform. | `"adc"` |
+| `gcp.projectId` | `string` | **Project ID**<br/>Optional: Specify the Google Cloud Project ID explicitly. Leave blank to infer from credentials. |  |
+| `gcp.serviceAccountKey` | `string` | **Service Account Key JSON**<br/>Upload the JSON key file for your Google Cloud service account. |  |
+
 ### `services.common.google.json`
 
 | Field | Type | Description | Default |
@@ -302,6 +311,18 @@ The internal Word indexer, ZIP Creation, and null endpoint are protocol-bearing 
 | `llm.cloud.project` | `string` | **Project (Organization)**<br/>LLM project or organization name |  |
 | `llm.local.serverbase` | `string` | **LLM URL**<br/>Base url the model is hosted under. | `"http://localhost:11434/v1"` |
 
+### `services.common.microsoft.json`
+
+| Field | Type | Description | Default |
+|---|---|---|---|
+| `microsoft.authType` | `string` | **Authentication Type** | `"service"` |
+| `microsoft.clientId` | `string` | **Client ID**<br/>Application (client) ID of your Entra app registration. |  |
+| `microsoft.clientSecret` | `string` | **Client Secret**<br/>Client secret of your Entra app registration. The app needs Microsoft Graph application permissions for this service, with admin consent granted. |  |
+| `microsoft.oAuthButton` | `string` | **Login with Microsoft** |  |
+| `microsoft.tenantId` | `string` | **Tenant ID**<br/>Enter your Microsoft Entra ID tenant (directory) ID.<br/><br/>Found in the Azure portal under Microsoft Entra ID > Overview. |  |
+| `microsoft.userPrincipalName` | `string` | **Acting User (UPN)**<br/>User principal name (e-mail) the app acts as. App-only Graph calls target /users/{upn}; this is required for App authentication. |  |
+| `microsoft.userToken` | `string` | **Access Token**<br/>It is a long term token that allows you to get new access tokens to access the Microsoft Graph API. |  |
+
 ### `services.common.remote.json`
 
 | Field | Type | Description | Default |
@@ -328,6 +349,7 @@ The internal Word indexer, ZIP Creation, and null endpoint are protocol-bearing 
 | `vector.local.port` | `number` | **Port**<br/>Enter the port number |  |
 | `vector.port` | `number` | **Port**<br/>Enter the port number |  |
 | `vector.score` | `number` | **Retrieval Score**<br/>Minumum retrieval score | `0.7` |
+| `vector.top_k` | `integer,string` | **Top K**<br/>Chroma only: overrides the caller's retrieval limit in either direction (raising or lowering it) for semantic and keyword search; an integer or integer string from 1 to 1000, and when left unset the caller's own limit applies. |  |
 | `vectorizer.embedding` |  | **Embedding** |  |
 | `vectorizer.store` |  | **Vector Store** |  |
 

@@ -62,20 +62,6 @@ The named profiles provide their declared model values. Use Custom only when the
 
 ---
 
-## Wiring
-
-Reranking sits **between the vector store and the LLM**. The store enriches the question with its `top_k` matches and emits it on the `questions` lane; this node reranks those documents and emits the reordered set on `documents`; the prompt / LLM then builds its context from the reranked `documents`:
-
-```text
-… → embedding → store ──questions──▶ rerank_cohere ──documents──▶ prompt → llm → response
-```
-
-To maximise quality, **retrieve generously and rerank down**: set a higher `top_k` on the store (e.g. `20`) so the reranker has enough candidates to choose from, and a smaller `top_n` here (e.g. `5`) for the final context.
-
-A complete, runnable pipeline is at [`examples/rag-rerank-pipeline.pipe`](../../../../examples/rag-rerank-pipeline.pipe).
-
----
-
 ## Authentication
 
 A Cohere API key is required. Set it in the node's **API Key** field. The node fails to initialize (with a warning) if the key is missing or blank.
@@ -97,6 +83,16 @@ Cohere API errors are mapped to a custom exception hierarchy whose class names l
 | `TooManyRequestsError` | `RerankRateLimitError`      | Yes       |
 | `InternalServerError`  | `RerankServerError`         | Yes       |
 | Any other exception    | `RerankServerError`         | Yes       |
+
+### Wiring with a vector store
+
+Reranking sits between the vector store and the LLM. The store enriches the question with its matches and emits it on the `questions` lane; this node reranks those documents and emits the reordered set on `documents`; the prompt and LLM then build their context from the reranked `documents`:
+
+```text
+… → embedding → store ──questions──▶ rerank_cohere ──documents──▶ prompt → llm → response
+```
+
+To maximise quality, **retrieve generously and rerank down**: give the reranker more candidates than the store would return on its own, then keep a small `top_n` here (for example `5`) for the final context. The store's default candidate pool on the data lane is 25, so the widening must go above that. Only the Chroma store (`store_chroma`) exposes a **Top K** field for this; set it comfortably above the default, for example `50`. A value such as `20` is below the default and narrows retrieval instead of widening it. A complete, runnable pipeline is at [`examples/rag-rerank-pipeline.pipe`](../../../../examples/rag-rerank-pipeline.pipe).
 
 ## Upstream docs
 
