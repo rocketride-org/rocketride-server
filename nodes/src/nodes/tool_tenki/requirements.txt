@@ -1,0 +1,3 @@
+# The distribution is `tenki`, not the legacy `tenki-sandbox`: that package stopped
+# at 0.4.0 and never returns a closeable handle when a create fails its readiness wait.
+tenki>=1.0.6,<2

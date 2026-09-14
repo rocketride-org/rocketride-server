@@ -1,0 +1,144 @@
+{
+	"title": "Tenki Sandbox",
+	"protocol": "tool_tenki://",
+	"classType": ["tool"],
+	"capabilities": ["invoke"],
+	"register": "filter",
+	"node": "python",
+	"path": "nodes.tool_tenki",
+	"prefix": "tenki",
+	"icon": "tenki.svg",
+	"documentation": "https://docs.rocketride.org",
+	"description": ["Gives agents a disposable Tenki Sandbox Linux VM for running code and shell commands, editing files and working with git repositories.", "Every tool call shares one session, created on first use; opt-in tool groups add port exposure, persistent volumes, snapshots and remote access."],
+	"tile": [],
+	"lanes": {},
+	"preconfig": {
+		"default": "default",
+		"profiles": {
+			"default": {
+				"title": "Tenki Sandbox",
+				"apikey": ""
+			}
+		}
+	},
+	"fields": {
+		"tenki.apikey": {
+			"type": "string",
+			"title": "API Key",
+			"description": "Tenki workspace API key (starts with tk_), from the API Keys screen in the Tenki console.",
+			"default": "",
+			"secure": true,
+			"ui": {
+				"ui:widget": "ApiKeyWidget"
+			}
+		},
+		"tenki.base_url": {
+			"type": "string",
+			"title": "API URL",
+			"description": "Tenki Sandbox API endpoint. Leave empty for the default (https://api.tenki.cloud).",
+			"default": "",
+			"optional": true
+		},
+		"tenki.cpu_cores": {
+			"type": "integer",
+			"title": "CPU Cores",
+			"description": "Virtual CPUs for the sandbox VM.",
+			"default": 2,
+			"minimum": 1,
+			"maximum": 16
+		},
+		"tenki.memory_mb": {
+			"type": "integer",
+			"title": "Memory (MB)",
+			"description": "Memory for the sandbox VM, in MB. Tenki requires an even number.",
+			"default": 4096,
+			"minimum": 512,
+			"maximum": 65536
+		},
+		"tenki.disk_size_gb": {
+			"type": "integer",
+			"title": "Disk Size (GB)",
+			"description": "Root disk size, in GB. 5 is Tenki's default; Tenki recommends 20 for agents that clone repositories and install dependencies.",
+			"default": 5,
+			"minimum": 5,
+			"maximum": 100
+		},
+		"tenki.idle_timeout_minutes": {
+			"type": "integer",
+			"title": "Idle Timeout (minutes)",
+			"description": "Tenki pauses the session after this many minutes without activity. A pause keeps memory and files under /home/tenki but clears /tmp; it does not terminate the session.",
+			"default": 5,
+			"minimum": 1,
+			"maximum": 120
+		},
+		"tenki.max_duration_minutes": {
+			"type": "integer",
+			"title": "Max Duration (minutes)",
+			"description": "Upper bound on the session's lifetime, set when it is created: the cost backstop if the pipeline never shuts the session down, for example after an engine crash.",
+			"default": 60,
+			"minimum": 1,
+			"maximum": 1440
+		},
+		"tenki.exec_timeout_secs": {
+			"type": "integer",
+			"title": "Execution Timeout (seconds)",
+			"description": "Max seconds a single run_command/run_code call may take.",
+			"default": 120,
+			"minimum": 1,
+			"maximum": 1200
+		},
+		"tenki.max_output_chars": {
+			"type": "integer",
+			"title": "Max Output (characters)",
+			"description": "Output longer than this is truncated before being returned to the agent.",
+			"default": 50000,
+			"minimum": 1000,
+			"maximum": 1000000
+		},
+		"tenki.image": {
+			"type": "string",
+			"title": "Image",
+			"description": "Registry image to start the sandbox from, such as a template build like myworkspace/my-node-env. Leave empty for Tenki's base image.",
+			"default": "",
+			"optional": true
+		},
+		"tenki.toolGroups": {
+			"type": "array",
+			"title": "Tool groups",
+			"description": "Which groups of Tenki Sandbox tools this node publishes to the agent. This node implements 22 tools across 7 groups, and every extra tool makes the right one harder for an LLM to pick, so only the listed groups are exposed. <b>Leave this empty for the recommended set</b>: execution, filesystem and git (11 tools), enough to run code, edit files and work in a repository. Use <b>all</b> to publish all 22. Naming groups replaces the default set rather than adding to it, and a value that names only unknown groups stops the pipeline at startup rather than widening back to the defaults. The other groups are deliberate opt-ins: <b>ports</b> publishes a sandbox service at a public URL, <b>volumes</b> attaches workspace storage that other sessions share and that outlives this session, <b>snapshots</b> creates billed storage that also outlives it, and <b>remote_access</b> exchanges raw bytes with processes inside the VM instead of returning structured results.",
+			"uniqueItems": true,
+			"items": {
+				"type": "string",
+				"enum": [
+					["execution", "Execution (2, default)"],
+					["filesystem", "Filesystem (5, default)"],
+					["git", "Git (4, default)"],
+					["ports", "Ports (3, opt-in: public URLs)"],
+					["volumes", "Volumes (3, opt-in: shared persistent storage)"],
+					["snapshots", "Snapshots (3, opt-in: billed storage)"],
+					["remote_access", "Remote access (2, opt-in: raw byte streams)"],
+					["all", "All groups (22)"]
+				]
+			},
+			"default": [],
+			"optional": true
+		}
+	},
+	"test": {
+		"profiles": ["default"],
+		"outputs": [],
+		"cases": [
+			{
+				"name": "Tenki Sandbox smoke test (placeholder key)",
+				"text": "test query"
+			}
+		]
+	},
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Tenki Sandbox",
+			"properties": ["type", "tenki.apikey", "tenki.base_url", "tenki.cpu_cores", "tenki.memory_mb", "tenki.disk_size_gb", "tenki.idle_timeout_minutes", "tenki.max_duration_minutes", "tenki.exec_timeout_secs", "tenki.max_output_chars", "tenki.image", "tenki.toolGroups"]
+		}
+	]
+}
