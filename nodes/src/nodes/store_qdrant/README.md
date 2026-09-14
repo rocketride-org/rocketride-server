@@ -2,6 +2,13 @@
 
 A RocketRide vector store node backed by Qdrant, for storing embedded documents and retrieving them by semantic or keyword search.
 
+## About Qdrant
+
+Qdrant is an open-source vector database built for similarity search at scale.
+It stores high-dimensional embeddings and returns the closest matches to a
+query vector, with filtering and payload support, and runs self-hosted or as a
+managed service (Qdrant Cloud).
+
 ## What it does
 
 Stores pre-embedded document chunks in a Qdrant collection and retrieves them by semantic (vector) similarity or full-text keyword search. Works with both self-hosted Qdrant and Qdrant Cloud. The node is also a tool node (`classType: ["store", "tool"]` with the `invoke` capability), so agents in the same pipeline can call its `search`, `upsert`, and `delete` tools directly.
@@ -12,46 +19,51 @@ Documents must be run through an embedding node before reaching this node: the s
 
 The collection is created automatically on first write, including payload indexes on `meta.nodeId`, `meta.objectId`, `meta.parent`, `meta.permissionId`, `meta.isDeleted`, `meta.isTable`, and a full-text index on `content` (word tokenizer, lowercase, token length 2-15). Writing chunk 0 of an object first deletes all existing points with the same `objectId`, so re-ingesting a document replaces it rather than duplicating it. Upserts are batched: a flush happens every 500 points or when the accumulated payload exceeds the payload limit (32 MiB by default).
 
----
+## Example pipelines
 
-## Configuration
+**End-to-end RAG pipeline**
 
-### Lanes
+`webhook → parse → preprocessor_langchain → embedding_transformer → qdrant`
+
+`chat → embedding_transformer → qdrant → prompt → llm_openai → response_answers`
+
+<div align="center">
+
+![The Qdrant node on the canvas storing embedded documents and serving retrieval for a RAG pipeline](example.png)
+
+[![Download example.pipe](https://img.shields.io/badge/example.pipe-Download-41b6e6?style=for-the-badge)](example.pipe)
+
+</div>
+
+Documents are parsed, chunked, embedded, and stored in Qdrant. Chat questions
+use the same embedding and Qdrant retrieval path before the prompt and LLM
+produce an answer.
+
+**Question answering over stored documents**
+
+`webhook → embedding_transformer → store_qdrant → llm_anthropic → response`
+
+The question is embedded, this node enriches it with the most relevant stored
+documents (`questions` → `questions` lane), and the LLM answers from that
+retrieved context.
+
+**Agent with searchable memory**
+
+An agent with this node connected as a tool: it calls `search` for context
+when it decides it needs it, and `upsert`s new facts as it works — a knowledge
+base the agent reads and writes on demand instead of retrieval running on
+every question.
+
+## Lanes
 
 | Lane in     | Lane out    | Description                                                      |
 | ----------- | ----------- | ---------------------------------------------------------------- |
-| `documents` | (none)      | Ingest pre-embedded documents into the collection                |
+| `documents` | —           | Ingest pre-embedded documents into the collection                |
 | `questions` | `documents` | Return matching documents                                        |
 | `questions` | `answers`   | Return matching documents as an answer                           |
 | `questions` | `questions` | Enrich the question with matching documents for downstream nodes |
 
-### Fields
-
-| Field | Type | Description |
-|---|---|---|
-| `serverName` | string | Default "qdrant". Namespace for agent-facing tool names, e.g. 'qdrant' exposes tools as qdrant.search / qdrant.upsert / qdrant.delete. Change this when running multiple Qdrant nodes in the same pipeline so their tool names do not collide. |
-| `profile` | string | Default "cloud". Connect to... |
-| `provider` | string | Default "qdrant".  |
-
-### Profiles
-
-| Profile                         | Default host                   | Default port |
-| ------------------------------- | ------------------------------ | ------------ |
-| Qdrant cloud server _(default)_ | _(your Qdrant Cloud endpoint)_ | `6333`       |
-| Your own Qdrant server          | `localhost`                    | `6333`       |
-
-### Save-time validation
-
-When the configuration is saved, the node validates it with a fast read-only probe (`get_collections`, 10-second timeout):
-
-- The collection name must match `^[A-Za-z0-9._-]{1,255}$`: no `/` or spaces.
-- Port `0` is rejected explicitly.
-- Scheme is inferred when the host has none: `http` for `localhost` or `127.*`, `https` for `*.qdrant.io` hosts or port `443`.
-- Qdrant Cloud with a wrong port does not return an HTTP status: the probe simply times out after 10 seconds and surfaces a timeout warning.
-
----
-
-## Agent tools
+## As a tool
 
 Tools are exposed under the configured `serverName` namespace (default `qdrant`).
 
@@ -79,9 +91,35 @@ Delete documents by ID.
 
 Takes a required `object_ids` string array and removes all points whose `meta.objectId` matches. Returns `{"success": true, "deleted_count": n}`.
 
----
+## Profiles
 
-## Scoring and relevance
+Default: **Qdrant cloud server** (`cloud`).
+
+| Profile                         | Default host                   | Default port |
+| ------------------------------- | ------------------------------ | ------------ |
+| Qdrant cloud server **(default)** | _(your Qdrant Cloud endpoint)_ | `6333`       |
+| Your own Qdrant server          | `localhost`                    | `6333`       |
+
+## Configuration
+
+Choose the host type (cloud or self-hosted), point the node at your Qdrant
+endpoint, and name the collection. Most deployments only ever touch the host,
+API key, and collection fields.
+
+### Tool Server Name
+
+Prefix for the tool names agents see: `qdrant` exposes `qdrant.search`,
+`qdrant.upsert`, `qdrant.delete`. Change it when running multiple Qdrant nodes
+in the same pipeline — give each a distinct name so their tool names do not
+collide and the agent can tell the stores apart.
+
+## Authentication
+
+Self-hosted Qdrant typically needs no credentials: leave `apikey` empty. For Qdrant Cloud, set `host` to your instance endpoint (`<instance>.<region>.qdrant.io`) and provide the cluster API key in `apikey`. The key is passed as the `api_key` argument of the Qdrant client.
+
+## Notes
+
+### Scoring and relevance
 
 Raw Qdrant scores are rescaled to `[0, 1]` before filtering. For `Cosine` similarity the rescaling is `(score + 1) / 2`; for other metrics a sigmoid is applied. Results below a hard floor of `0.20` are always dropped as noise, and the configured retrieval `score` threshold is applied on top of that in the rescaled space (applied by the base store, not passed to Qdrant as `score_threshold`).
 
@@ -89,18 +127,23 @@ The similarity metric defaults to `Cosine`; `Euclid`, `Dot`, and `Manhattan` are
 
 Deletion of source files is handled as a soft delete: chunks are marked `meta.isDeleted: true` and excluded from all searches by default. They are only returned when the filter explicitly asks for deleted documents. A document that reappears is marked active again.
 
----
+### Save-time validation
 
-## Authentication
+When the configuration is saved, the node validates it with a fast read-only probe (`get_collections`, 10-second timeout):
 
-Self-hosted Qdrant typically needs no credentials: leave `apikey` empty. For Qdrant Cloud, set `host` to your instance endpoint (`<instance>.<region>.qdrant.io`) and provide the cluster API key in `apikey`. The key is passed as the `api_key` argument of the Qdrant client.
+- The collection name must match `^[A-Za-z0-9._-]{1,255}$`: no `/` or spaces.
+- Port `0` is rejected explicitly.
+- Scheme is inferred when the host has none: `http` for `localhost` or `127.*`, `https` for `*.qdrant.io` hosts or port `443`.
+- Qdrant Cloud with a wrong port does not return an HTTP status: the probe simply times out after 10 seconds and surfaces a timeout warning.
 
----
-
-## Notes
+### Language support and rehydration
 
 - Qdrant's full-text tokenizer does not support all languages out of the box. Chinese, Japanese, and Korean are not enabled in the default Qdrant build and require building Qdrant from source with the `--features multiling-chinese,multiling-japanese,multiling-korean` flags. This only affects keyword search over the `content` payload; semantic search uses the embeddings you provide and is unaffected.
 - Rendering a full document rehydrates all of its chunks in `chunkId` order, fetching them in batches of up to 32 MiB and joining them, so out-of-order storage is handled transparently.
+
+## Upstream docs
+
+- [Qdrant documentation](https://qdrant.tech/documentation/)
 
 ---
 

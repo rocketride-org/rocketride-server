@@ -1,8 +1,125 @@
 # tool_git
 
-A RocketRide tool node that exposes git repository operations to an AI agent.
+A RocketRide tool node that exposes local Git repository operations to an AI agent.
+
++## About Git
+
+Git is a distributed version-control system for tracking changes in source files. Its
+repositories preserve commit history and support local work as well as remote collaboration.
 
 ## What it does
+
+This node gives an agent repository inspection and modification operations without requiring a
+host `git` executable. Pick it when work must stay within one repository's history and working
+tree; use a GitHub-style service node when the task is primarily hosting-platform operations.
+It has no pipeline lanes.
+
+## As a tool
+
+The tool server prefix is `git` by default. It registers the following functions:
+
+| Function | Description |
+| --- | --- |
+| `git.clone` | Clones a remote repository to a path. |
+| `git.init` | Initializes a repository at a path. |
+| `git.status` | Returns working-tree and branch state. |
+| `git.log` | Returns filtered commit history. |
+| `git.show` | Returns one commit's metadata, patch, and statistics. |
+| `git.diff` | Produces a working-tree, staged, or ref-to-ref diff. |
+| `git.blame` | Returns per-line commit and author information. |
+| `git.file_at` | Returns a file's content at a ref. |
+| `git.write_file` | Creates or overwrites a working-tree text file. |
+| `git.stage` | Stages a non-empty list of paths. |
+| `git.commit` | Commits the staged index. |
+| `git.stash` | Pushes, pops, lists, or drops stash entries. |
+| `git.branch_list` | Lists local and optional remote branches. |
+| `git.branch_create` | Creates a branch, optionally from a ref. |
+| `git.checkout` | Checks out an existing local branch. |
+| `git.branch_delete` | Deletes a branch. |
+| `git.merge` | Merges a branch into the current branch. |
+| `git.fetch` | Fetches a remote without merging. |
+| `git.pull` | Fetches then fast-forwards the current branch. |
+| `git.push` | Pushes the current or requested branch. |
+| `git.grep` | Searches tracked content with a regular expression. |
+| `git.ls_files` | Lists tracked files, with optional prefix and untracked files. |
+
+All calls require an initialized repository and reject unknown arguments. `clone` requires
+`url` and `path` (optional `branch`); `init` requires `path` (optional
+`initial_branch`). `show` requires `ref`; `blame` requires `path`; `file_at`
+requires both `path` and `ref`; `write_file` requires `path` and `content`; and
+`commit` requires `message`. `stash` requires `op` of `push`, `pop`, `list`,
+or `drop`; branch creation, checkout, deletion, and merge require their named branch
+argument. `grep` requires `pattern` and bounds `max_results` to 1–10,000.
+
+Validation, Git, and libgit2 failures return an `{error: message}` result. With
+read-only mode on, every write operation is blocked; `stash` remains callable only for
+`op: list`.
+
+## Configuration
+
+Set the repository location and safety policy before connecting this node to an agent.
+Credentials are only needed when the selected remote requires them.
+
+### Repository Path
+
+A local path is opened in place, so agent writes persist there. A URL is cloned to a
+temporary directory at pipeline start and removed on exit. Leave it blank when the agent
+should call `clone` or `init` itself; configure authentication first if that runtime clone
+needs a private remote.
+
+### Authentication Type
+
+Choose `none` for public repositories, `token` for HTTPS username-and-token credentials,
+or `ssh` for an SSH key. An unrecognized value falls back to `none` with a warning;
+missing credentials for the selected authenticated mode also warn, so correct them before an
+agent starts remote work.
+
+### SSH Private Key
+
+Use a PEM-encoded private key only when **Authentication Type** is `ssh`; provide
+**SSH Key Passphrase** if it is encrypted. The key is written to a temporary `0400` file for
+remote operations and then removed. Use token authentication instead when the provider issues
+a scoped HTTPS token and an SSH key is unnecessary.
+
+### Safe Mode and Read-Only Mode
+
+Read-only mode defaults to on and blocks clone, initialization, writes, staging, commits,
+mutating stash operations, branch changes, merge, fetch, pull, and push. Turn it off only
+when the agent should modify the repository. Safe mode also defaults to on; it blocks force
+push and force branch deletion, but does not block ordinary writes. Keep both defaults for
+analysis-only agents.
+
+## Authentication
+
+For HTTPS, set **Authentication Type** to `token`, then provide **Username** and
+**Token / Password**. For SSH, select `ssh` and provide the PEM private key plus an optional
+passphrase. Secret fields are stored as secure configuration fields.
+
+## Notes
+
+### Write boundaries
+
+`write_file` and `stage` reject traversal and `.git` paths, but a local configured
+repository is otherwise writable once read-only mode is disabled. Use a temporary clone or a
+sandboxed working copy when an agent should not alter the original checkout.
+
+### Merge safety
+
+`merge` first checks whether the requested branch is already incorporated into the current
+branch; that read-only check succeeds even when the repository contains local changes. If the
+merge would change the repository, the index and working tree must be clean — no staged,
+unstaged, or untracked changes — so commit, stash, or remove them before retrying. When a
+merge starts from a clean repository and encounters conflicts, the node aborts it and restores
+the index and working tree to the original `HEAD`; because the clean-worktree check runs
+before the merge begins, conflict cleanup cannot discard pre-existing local work.
+
+## Upstream docs
+
+- [Git documentation](https://git-scm.com/doc)
+
+<!-- Legacy pre-schema prose retained below only while the generated documentation is preserved. -->
+
+### What it does
 
 Gives an agent safe, full-featured access to a git repository. The agent can open an
 existing local repository, clone a remote one, or initialize a fresh one, then work with
@@ -18,7 +135,7 @@ freshly added node can only inspect a repository until you turn read-only mode o
 
 ---
 
-## Configuration
+### Configuration
 
 
 | Field | Type | Description |
@@ -47,7 +164,7 @@ freshly added node can only inspect a repository until you turn read-only mode o
 
 ---
 
-## Available tools
+### Available tools
 
 ### Repository
 
@@ -130,7 +247,7 @@ freshly added node can only inspect a repository until you turn read-only mode o
 
 ---
 
-## Safe mode
+### Safe mode
 
 When `safeMode` is `true` (the default), the following operations raise an error instead of executing:
 
@@ -152,7 +269,7 @@ When pointing the node at a real repository (rather than a remote URL that auto-
 
 ---
 
-## Read-only mode
+### Read-only mode
 
 When `readOnlyMode` is `true` (the default), every mutating tool is blocked at dispatch and returns a JSON error. This is strictly stronger than `safeMode` and is the recommended setting when the agent only needs to inspect a repository.
 
@@ -164,7 +281,7 @@ Set `readOnlyMode: false` in the node config to allow write operations (subject 
 
 ---
 
-## Merge safety
+### Merge safety
 
 `merge` first checks whether the requested branch is already incorporated into the current
 branch. That read-only check succeeds even when the repository contains local changes. If the
@@ -177,7 +294,7 @@ runs before the merge begins, conflict cleanup cannot discard pre-existing local
 
 ---
 
-## Authentication
+### Authentication
 
 ### Token (HTTPS)
 
@@ -194,7 +311,7 @@ and deleted immediately after.
 
 ---
 
-## Running the tests
+### Running the tests
 
 ```bash
 # Unit tests only (no git binary or real repo needed)
@@ -206,6 +323,8 @@ pytest nodes/test/tool_git/test_tools.py -v
 ```
 
 ---
+
+-->
 
 <!-- ROCKETRIDE:GENERATED:PARAMS START -->
 <!-- Generated by nodes:docs-generate. Do not edit by hand. -->

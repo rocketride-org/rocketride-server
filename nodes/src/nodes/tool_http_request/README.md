@@ -1,8 +1,95 @@
 # tool_http_request
 
-A RocketRide tool node that lets an AI agent make HTTP requests to public API endpoints, like curl for agents.
+A RocketRide tool node that lets an AI agent make guarded HTTP requests to public API endpoints.
+
+## About HTTP
+
+HTTP is the request-and-response protocol used by web APIs. An HTTP request names a URL,
+method, headers, credentials, and optional body, while a response carries status, headers,
+and content.
 
 ## What it does
+
+This node provides one controlled HTTP client for an agent and has no pipeline lanes. Pick
+it when the agent must call a public API endpoint directly; use a product-specific tool when
+that service already has a dedicated node and richer operations. Method switches, URL
+patterns, the network boundary, and rate limits are enforced before every request.
+
+## As a tool
+
+The hidden server-name setting defaults to `http`, so the registered function is
+`http.http_request` by default.
+
+| Function | Description |
+| --- | --- |
+| `http.http_request` | Makes one guarded HTTP request and returns its completed response. |
+
+`url` and `method` are required. The method must be one of GET, POST, PUT, PATCH,
+DELETE, HEAD, or OPTIONS and must be enabled in configuration. Optional inputs include
+headers, query parameters, path parameters, timeout, advanced authentication and body
+objects, plus `body_json`, `bearer_token`, and `basic_auth` shortcuts. A completed
+response—including a non-2xx HTTP response—returns `status_code`, `status_text`,
+`headers`, `body`, `json`, `elapsed_ms`, and `content_type`.
+
+Invalid input, disabled methods, whitelist rejection, rate-limit rejection, and transport
+errors raise tool errors. A parsed JSON field is null when the response type is not JSON-like
+or cannot be parsed; the raw text remains in `body`.
+
+## Configuration
+
+Use the default method set for a broad but controlled API agent, then limit endpoints and
+throughput for the services it is allowed to reach. The server name changes the function
+namespace and should be stable once an agent prompt refers to it.
+
+### Allowed methods
+
+GET, POST, PUT, PATCH, and DELETE are enabled by default; HEAD and OPTIONS are disabled.
+Enable only methods that the intended API flow needs, especially before giving an agent
+access to a URL where mutation is possible.
+
+### URL Whitelist
+
+An empty whitelist allows every public URL; non-public network destinations remain blocked
+either way. Non-empty patterns are matched against the request URL, so anchor them when the
+endpoint scope must be exact, for example `^https://api.example.com/`. Path-parameter
+replacements are percent-encoded to remain a single URL path segment.
+
+### Network boundary
+
+Private, loopback, link-local, and multicast destination addresses are blocked. Redirects
+are returned to the agent as 3xx responses and are not followed automatically. There is no
+private-network override: localhost and internal endpoints are intentionally unsupported.
+
+### Rate limits
+
+The defaults are 10 requests per second, 100 per minute, and five concurrent requests.
+The token buckets and concurrency limit reject immediately rather than queue, so an agent
+must retry later after a limit error. Set all three values explicitly to zero to disable
+limiting; otherwise each configured value is clamped to at least one.
+
+## Authentication
+
+This node has no stored service credential: provide credentials per request. The simple
+shortcuts set bearer or Basic authentication when the equivalent advanced object is absent.
+Advanced authentication supports `none`, `basic`, `bearer`, and an API key placed in a
+header or query parameter.
+
+## Notes
+
+### Request bodies and timeout
+
+`body_json` serializes objects and arrays as JSON; a string is used verbatim. The advanced
+body supports raw content, multipart form data, and URL-encoded form data. Timeout defaults
+to 30 seconds, caps positive values at 300 seconds, and treats zero or negative values as
+the default.
+
+## Upstream docs
+
+- [HTTP documentation at MDN](https://developer.mozilla.org/docs/Web/HTTP)
+
+<!-- Legacy pre-schema prose retained below only while the generated documentation is preserved. -->
+
+### What it does
 
 Exposes a single agent-callable tool, `http_request`, registered as
 `<serverName>.http_request` (default: `http.http_request`). The agent provides the full
@@ -17,17 +104,18 @@ Four security guardrails are enforced before every request:
 - **Allowed methods**: per-method toggles. `GET`, `POST`, `PUT`, `PATCH`, `DELETE` are
   enabled by default; `HEAD` and `OPTIONS` are disabled by default.
 - **URL whitelist**: regex patterns the request URL must match. **Empty by default,
-  which allows all public URLs** (config validation emits a warning when the whitelist is empty).
-- **Network boundary**: loopback, private, link-local, shared, reserved, unspecified,
-  and multicast destination addresses are blocked. Redirects are returned to the agent
-  as 3xx responses and are not followed automatically. There is no private-network
-  override: localhost and internal API endpoints are intentionally unsupported.
+  which allows all public URLs** (config validation emits a warning when the whitelist is
+  empty).
+- **Network boundary**: private, loopback, link-local, and multicast destination addresses
+  are blocked. Redirects are returned to the agent as 3xx responses and are not followed
+  automatically. There is no private-network override: localhost and internal endpoints are
+  intentionally unsupported.
 - **Rate limiting**: token-bucket limits per second and per minute, plus a concurrency
   cap. On by default (10/s, 100/min, 5 concurrent).
 
 ---
 
-## Configuration
+### Configuration
 
 
 | Field | Type | Description |
@@ -49,72 +137,13 @@ Four security guardrails are enforced before every request:
 
 The node ships one profile, **Default**, which sets `serverName` to `http`.
 
-Whitelist regexes are applied with Python `pattern.match()` to the final canonical URL after
-path parameters, regular query parameters, and query-based API-key auth are applied. The
-configured regex is never rewritten, so normal Python regex syntax retains its usual meaning.
-A nonmatch is denied.
-
-After a successful match, a fail-closed source recognizer proves the regex's authority policy.
-It accepts an optional `^` or `\A`, a literal `http://` or `https://`, then one of:
-
-- an exact DNS, IPv4, or escaped-bracket IPv6 host written with literal characters and escaped
-  dots, optionally followed by an exact numeric port, a decimal port language such as
-  `:[0-9]+` or `:[0-9]{3,4}`, or the optional form `(?::[0-9]+)?`; or
-- the whole-authority form `[^/]` with a nonempty `+` or brace bound, such as `[^/]+` or
-  `[^/]{1,20}`.
-
-The authority policy must be followed immediately by a proven boundary: a consuming `/` or
-`\?`, the narrow boundary forms `(?=/|$)` or `(?:/|$)` (and their query variants), or a terminal
-`$`, `\Z`, or `\z` on Python versions that support it. Arbitrary Python regex syntax may follow
-a proven consuming path or query delimiter; top-level alternatives remain unsupported because
-they can hide a different authority policy. A `$` authority boundary is unsupported with
-`re.MULTILINE` because it would no longer prove the end of the authority; that flag remains
-available to regex syntax after a consuming delimiter.
-
-Any other authority syntax fails closed at request time even if Python's regex engine matches
-the URL. This includes wildcard, character-class, lookaround, possessive, subdomain-language,
-or alternation syntax before the boundary. For example, use
-`^https://api\.example\.com(?::[0-9]+)?(?:/|$)` for an exact host with an optional numeric port,
-or `^https://[^/]+(?:/|$)` for a deliberately broad authority. A scheme-only prefix such as
-`^https://` is denied. Use an empty whitelist for the documented allow-all-public mode.
-
-The configuration author is trusted; request URLs are attacker-controlled. The restricted
-grammar prevents an accidental hostname or port prefix from being interpreted across URL
-authority fields. It is not intended to defend against an administrator who deliberately
-configures a broad policy.
-
-An empty `urlWhitelist` (`[]`), or a list containing only blank or whitespace-only UI
-placeholder rows, means no whitelist patterns and therefore allows all public destinations;
-non-public destinations remain blocked. Blank rows mixed with valid patterns are ignored.
-Invalid non-empty regexes, non-string values, and malformed entries fail configuration
-validation.
-
-### Compatibility and whitelist migration
-
-Whitelist matching previously used search-anywhere semantics and accepted unrestricted regex
-syntax in the authority. It now starts at the beginning of the canonical URL and accepts only
-the authority grammar above; configuring a whitelist emits a startup migration warning.
-Patterns written for a raw, noncanonical URL or with unsupported authority constructs now fail
-closed. Migrate them to the canonical form, preferably anchor them with `^` or `\A`, and express
-host/port intent with one of the supported exact or whole-authority forms.
-
-The node connects directly to the validated destination and does not use environment
-proxies or implicit `.netrc` credentials. `REQUESTS_CA_BUNDLE` and `CURL_CA_BUNDLE`
-remain supported for custom HTTPS certificate authorities. A caller-supplied `Host`
-header is rejected because it could route an allowlisted URL to a different virtual host.
-URLs containing userinfo or credentials are rejected, including an empty userinfo delimiter
-before `@`. The network classifier requires Python `3.10.15+`, `3.11.10+`, `3.12.4+`, or
-`3.13+`. The transport verifies the required `requests` and `urllib3` connection capabilities
-at startup; behavior tests cover the supported dependency combinations.
-
-Keep an outbound firewall or equivalent egress policy around the engine as a second
-boundary. RFC 6052 permits operator-chosen NAT64 prefixes that cannot be identified from
-an IPv6 address alone; the egress boundary must also block translated access to private
-networks.
+An invalid non-empty whitelist regex now fails configuration validation rather than being
+skipped, so a typo can no longer silently widen the restriction. Blank or whitespace-only
+placeholder rows are ignored; a whitelist made only of them allows all public destinations.
 
 ---
 
-## Available tools
+### Available tools
 
 
 | Tool | Description |
@@ -145,8 +174,8 @@ is only applied when the corresponding advanced field is not also set.
 | Parameter      | Description                                                              |
 |----------------|---------------------------------------------------------------------------|
 | `query_params` | Key-value pairs appended to the URL as the query string                  |
-| `headers`      | Custom request headers. `Host` cannot be overridden.                     |
-| `path_params`  | Replacements for `:name` placeholders in the URL path only (e.g. `{"id": "123"}` replaces `:id`) |
+| `headers`      | Custom request headers                                                   |
+| `path_params`  | Replacements for `:name` placeholders in the URL (e.g. `{"id": "123"}` replaces `:id`) |
 | `timeout`      | Request timeout in seconds. Default `30`, capped at `300`.               |
 | `auth`         | Advanced auth config (see Authentication below). Prefer the shortcuts.   |
 | `body`         | Advanced body config (see Request bodies below). Prefer `body_json`.     |
@@ -167,11 +196,11 @@ is only applied when the corresponding advanced field is not also set.
 
 `json` is populated automatically when the response `Content-Type` contains `json` (or
 `javascript`) and the body parses; otherwise it is `null` and the raw text is in `body`.
-`elapsed_ms` is wall-clock request time, including DNS validation, in milliseconds.
+`elapsed_ms` is wall-clock request time in milliseconds.
 
 ---
 
-## Authentication
+### Authentication
 
 The `auth` object supports `type`: `none`, `basic`, `bearer`, or `api_key`.
 
@@ -186,7 +215,7 @@ expand to the same thing.
 
 ---
 
-## Request bodies
+### Request bodies
 
 The `body` object supports `type`: `none`, `raw`, `form_data`, or `x_www_form_urlencoded`.
 
@@ -201,7 +230,7 @@ serialized and wrapped as raw `application/json` automatically.
 
 ---
 
-## Rate limiting
+### Rate limiting
 
 Three independent limits are enforced per node (shared across all calls):
 
@@ -218,6 +247,8 @@ To disable rate limiting entirely, set **all three** values to `0`. Otherwise ea
 non-zero value is clamped to a minimum of `1`.
 
 ---
+
+-->
 
 <!-- ROCKETRIDE:GENERATED:PARAMS START -->
 <!-- Generated by nodes:docs-generate. Do not edit by hand. -->

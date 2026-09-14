@@ -1,95 +1,55 @@
 # tool_apify
 
-A RocketRide tool node that exposes Apify Actors (web scrapers and automation tasks) to an AI agent.
+A RocketRide tool node for an agent that needs to run an Apify Actor or retrieve a dataset's items, with per-run item, time, and cost bounds.
+
+## About Apify
+
+Apify is the external service this node accesses through its Python client. Its Actor runs can produce a default dataset, and this node can also read a dataset that already exists.
 
 ## What it does
 
-Gives an agent the ability to run Apify Actors and read their results. The agent can
-launch any Actor by ID or name, wait for it to finish, and receive the items it produced,
-or read items from an existing Apify dataset. Useful for agents that need to extract
-structured web data on demand.
+Use this node when an agent needs Actor-produced structured items or an existing Apify dataset. It exposes agent tools only—there are no pipeline lanes—and waits for an Actor run before reading its default dataset. Pick it over a general web or code-execution tool when the work is already packaged as an Apify Actor or dataset.
 
-Uses the official **apify-client** Python SDK. The client is created once at pipeline
-start from the configured API token; an empty token fails the node at startup.
+## As a tool
 
-Every Actor run is bounded by three configurable safety limits: item count (default
-**100**), run timeout (default **120 seconds**), and spend cap (default **$1 USD**).
-This prevents an agent-chosen Actor from hanging the pipeline or overspending.
-Agent-supplied `limit` values are clamped to the configured maximum.
+The registered prefix is `apify`, so the agent sees `apify.run_actor` and `apify.get_dataset_items`.
 
----
+| Function | Description |
+|---|---|
+| `apify.run_actor` | Runs an Actor to completion, then reads items from its default dataset. |
+| `apify.get_dataset_items` | Reads items from an existing dataset. |
+
+### `apify.run_actor`
+
+`actor_id` is required and may be an Actor ID or name. `run_input` is an optional object passed directly to that Actor, so its shape depends on the chosen Actor. `limit` is optional and is clamped to the configured item cap. The result contains `success`, `dataset_id`, `count`, and `items`; a run without a default dataset succeeds with an empty dataset ID and item list. Invalid input raises an error, and client errors from the Actor or dataset request are surfaced as tool failures.
+
+### `apify.get_dataset_items`
+
+`dataset_id` is required; `limit` is optional and uses the same configured cap. The result contains `success`, `count`, and `items`. A missing dataset ID raises an error, and client request failures are surfaced rather than represented as an empty result.
 
 ## Configuration
 
+Set the API token first. The remaining settings are guardrails for agent-selected Actors; start with their defaults and increase them only when a known Actor needs more capacity.
 
-| Field | Type | Description |
-|---|---|---|
-| `apikey` | string | Default empty. Apify API token |
-| `max_items` | integer | Default 100. Upper cap on items returned per call (agent requests are clamped to this). |
-| `run_timeout_secs` | integer | Default 120. Max seconds an Actor run may take before it is stopped. |
-| `max_cost_usd` | number | Default 1. Spend limit per run for pay-per-event Actors. |
+### Max Items
 
+This is the upper bound for items returned by either tool and defaults to 100. A per-call `limit` can reduce the result set but can never exceed this value; invalid or omitted call limits use the cap. Raise it when the agent needs a larger complete result set, and keep it small when sending results into a limited agent context. Invalid or non-positive configuration falls back to 100.
 
-Invalid or missing values for `max_items`, `run_timeout_secs`, and `max_cost_usd` fall
-back to their defaults; integer limits are floored at `1`.
+### Run Timeout (seconds)
 
----
+This setting bounds both the Actor's run timeout and how long the client waits for it, defaulting to 120 seconds. Increase it for an Actor that legitimately takes longer to finish; leave it conservative for agent-chosen work so a stuck run cannot hold the pipeline indefinitely. Invalid or non-positive configuration falls back to 120.
 
-## Available tools
+### Max Cost (USD)
 
-Tools are registered under the `apify` prefix.
-
-### run_actor
-
-Run an Apify Actor to completion and return the items it produced.
-
-
-| Tool | Description |
-|---|---|---|
-| `run_actor` | Run an Apify Actor to completion and return the items it produced. |
-| `get_dataset_items` | Read items from an existing Apify dataset. |
-
-
-Returns `{ success, dataset_id, count, items }` -- the run's default dataset ID and its
-items. If the run produces no dataset, returns `success: true` with an empty `dataset_id`
-and zero items.
-
-### get_dataset_items
-
-Read items from an existing Apify dataset.
-
-| Parameter    | Required | Description                                              |
-|--------------|----------|----------------------------------------------------------|
-| `dataset_id` | yes      | Apify dataset ID to read                                 |
-| `limit`      | no       | Max items to return (default 100, capped by `max_items`) |
-
-Returns `{ success, count, items }`.
-
----
-
-## Safety limits
-
-`run_actor` passes the configured bounds directly to the Apify run:
-
-- **Item cap** -- the effective `limit` (agent request clamped to `max_items`) is sent as
-  the run's `max_items` and also applied when reading the resulting dataset.
-- **Timeout** -- `run_timeout_secs` bounds both the Actor's run time and how long the node
-  waits for the run to finish.
-- **Cost cap** -- `max_cost_usd` is sent as the run's `max_total_charge_usd`, limiting
-  spend on pay-per-event Actors.
-
----
+This value is passed as the per-run total-charge limit for pay-per-event Actors and defaults to 1. Increase it only after establishing the expected cost of the specific Actor; the limit applies to `run_actor`, not dataset reads. A value that cannot be parsed as a decimal falls back to 1.
 
 ## Authentication
 
-Set `apikey` to an Apify API token (stored as a secure field). The token is used to
-construct the `ApifyClient` when the pipeline starts and is required -- configuration
-validation warns, and pipeline startup fails, if it is missing.
+Provide an Apify API token in **API Token**. The node creates its client at pipeline startup and fails to start when the configured token is empty.
 
-See the [Apify documentation](https://docs.apify.com) for obtaining a token and for
-per-Actor input schemas.
+## Upstream docs
 
----
+- [Apify documentation](https://docs.apify.com/)
 
 <!-- ROCKETRIDE:GENERATED:PARAMS START -->
 <!-- Generated by nodes:docs-generate. Do not edit by hand. -->

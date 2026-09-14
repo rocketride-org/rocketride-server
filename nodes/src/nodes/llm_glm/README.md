@@ -1,66 +1,70 @@
-# Zhipu AI GLM LLM Node (`llm_glm`)
+# llm_glm
 
-Connects RocketRide pipelines to Zhipu AI's **GLM** family of open-weight
-hybrid-reasoning models, served through the OpenAI-compatible Z.ai cloud API
-([z.ai](https://z.ai)) or self-hosted with vLLM or SGLang.
+A RocketRide LLM node that connects Zhipu AI's GLM family of open-weight hybrid-reasoning models to a pipeline through the OpenAI-compatible Z.ai cloud API or a self-hosted vLLM or SGLang deployment.
 
-- **Lane:** `questions → answers`
-- **Endpoint (cloud, international):** `https://api.z.ai/api/paas/v4`
-- **Endpoint (cloud, mainland China):** `https://open.bigmodel.cn/api/paas/v4`
+## About Zhipu AI GLM
 
-## Models
+GLM is Zhipu AI's family of open-weight models, served through the OpenAI-compatible Z.ai cloud API ([z.ai](https://z.ai)). The international cloud endpoint is `https://api.z.ai/api/paas/v4` and the mainland China endpoint is `https://open.bigmodel.cn/api/paas/v4`. GLM weights are openly published on Hugging Face under MIT-style licenses (`zai-org/GLM-5.2`, `zai-org/GLM-4.5-Air`, and so on), so the same models can be served locally.
 
-The GLM-4.5 through GLM-5 generations are hybrid-reasoning MoE models with
-thinking and non-thinking modes and strong agentic/coding performance. The
-profile set matches the live Z.ai `/models` catalog (verified 2026-08).
+## What it does
 
-| Profile | Model ID | Context | Notes |
-| --- | --- | --- | --- |
-| GLM-5.2 *(default)* | `glm-5.2` | 1M | Frontier long-context reasoning and coding |
-| GLM-5.1 | `glm-5.1` | 200K | Previous flagship |
-| GLM-5 | `glm-5` | 200K | First GLM-5 generation |
-| GLM-5 Turbo | `glm-5-turbo` | 200K | Fast cost-effective tier |
-| GLM-4.7 | `glm-4.7` | 200K | Enhanced-reasoning 4.x flagship |
-| GLM-4.6 | `glm-4.6` | 200K | Open-weight 4.x flagship |
-| GLM-4.5 | `glm-4.5` | 128K | Open-weight |
-| GLM-4.5 Air | `glm-4.5-air` | 128K | Open-weight, efficient cost/quality balance |
-| Custom Model | (user-defined) | (user-defined) | Any model on an OpenAI-compatible endpoint |
+Provides chat completion using GLM models as an `llm`-class invoke filter. It can be wired directly via lanes or consumed by any agent or node that needs an LLM backend.
 
-The vision variants (GLM-4V / GLM-4.5V), embedding, CogView (image), CogVideoX
-(video), rerank, and audio lines are out of scope for this chat node.
+The GLM-4.5 through GLM-5 generations are hybrid-reasoning MoE models with thinking and non-thinking modes and strong agentic and coding performance. The vision variants (GLM-4V and GLM-4.5V), embedding, CogView (image), CogVideoX (video), rerank, and audio lines are out of scope for this chat node.
 
-## Reasoning output
+## Lanes
 
-GLM-4.5+ models are reasoning models. The Z.ai cloud returns reasoning in a
-separate `reasoning_content` field, and for endpoints that inline
-`<think>...</think>` blocks in `content` the engine's shared LangChain
-adapter strips them and routes the reasoning to the thinking lane — the node
-needs no stripping of its own. Budget generous output tokens for
-reasoning-heavy prompts.
+| Lane in | Lane out | Description |
+| --- | --- | --- |
+| `questions` | `answers` | Send a question directly, receive a generated answer |
 
-## Self-hosting
+## Profiles
 
-GLM weights are openly published on Hugging Face under MIT-style licenses
-(`zai-org/GLM-5.2`, `zai-org/GLM-4.5-Air`, ...). To use a self-hosted vLLM or
-SGLang deployment, select the **Custom Model** profile and point its server
-base URL at your OpenAI-compatible endpoint; the API key may be left empty
-(the node passes a dummy token — local servers accept any).
+Default: **GLM-5.2** (`glm-5-2`). The profile set matches the live Z.ai `/models` catalog (verified 2026-08).
+
+| Profile | Model | Context | Output | Notes |
+| ------- | ----- | ------- | ------ | ----- |
+| GLM-5.2 **(default)** | `glm-5.2` | 1,000,000 | 32,768 | Frontier long-context reasoning and coding |
+| GLM-5.1 | `glm-5.1` | 204,800 | 32,768 | Previous flagship |
+| GLM-5 | `glm-5` | 204,800 | 32,768 | First GLM-5 generation |
+| GLM-5 Turbo | `glm-5-turbo` | 204,800 | 32,768 | Fast cost-effective tier |
+| GLM-4.7 | `glm-4.7` | 204,800 | 32,768 | Enhanced-reasoning 4.x flagship |
+| GLM-4.6 | `glm-4.6` | 204,800 | 32,768 | Open-weight 4.x flagship |
+
+<details>
+<summary><strong>View 3 more models</strong></summary>
+
+| Profile | Model | Context | Output | Notes |
+| ------- | ----- | ------- | ------ | ----- |
+| GLM-4.5 | `glm-4.5` | 131,072 | 32,768 | Open-weight |
+| GLM-4.5 Air | `glm-4.5-air` | 131,072 | 32,768 | Open-weight, efficient cost/quality balance |
+| `custom` | _(user-specified)_ | 131,072 | 8,192 | Any model on an OpenAI-compatible endpoint |
+
+</details>
+
+## Configuration
+
+Choose a model profile. The profile supplies the model identifier and context window, so a cloud pipeline needs no additional model settings. Budget generous output tokens for reasoning-heavy prompts.
+
+To use a self-hosted vLLM or SGLang deployment, select the **Custom Model** profile and point its server base URL at your OpenAI-compatible endpoint. The API key may be left empty there: the node passes a dummy token, and local servers accept any value.
 
 ## Authentication
 
-Cloud profiles require a Z.ai / Zhipu AI API key in `apikey`. The key
-requirement is enforced by base-URL match: if `serverbase` contains `api.z.ai`
-or `bigmodel.cn` and no key is set, the node raises `GLM API key is required
-for cloud profiles.` at startup. Key format is not validated beyond presence.
+Cloud profiles require a Z.ai or Zhipu AI API key in `apikey`. The key requirement is enforced by base-URL match: if `serverbase` contains `api.z.ai` or `bigmodel.cn` and no key is set, the node raises `GLM API key is required for cloud profiles.` at startup. Key format is not validated beyond presence.
 
-## Model sync
+## Notes
 
-Profiles are maintained by the `sync_models` tooling (`llm_glm` provider,
-`ROCKETRIDE_GLM_KEY`). The include filter keeps only the `glm-*` text chat
-models; vision (4V/4.5V), embedding, rerank, audio, and reward variants are
-excluded (they belong in dedicated nodes).
+### Reasoning output
 
----
+GLM-4.5+ models are reasoning models. The Z.ai cloud returns reasoning in a separate `reasoning_content` field, and for endpoints that inline `<think>...</think>` blocks in `content` the engine's shared LangChain adapter strips them and routes the reasoning to the thinking lane, so the node needs no stripping of its own.
+
+### Model sync
+
+Profiles are maintained by the `sync_models` tooling (`llm_glm` provider, `ROCKETRIDE_GLM_KEY`). The include filter keeps only the `glm-*` text chat models; vision (4V and 4.5V), embedding, rerank, audio, and reward variants are excluded, because they belong in dedicated nodes.
+
+## Upstream docs
+
+- [Z.ai API documentation](https://docs.z.ai/api-reference)
 
 <!-- ROCKETRIDE:GENERATED:PARAMS START -->
 <!-- Generated by nodes:docs-generate. Do not edit by hand. -->

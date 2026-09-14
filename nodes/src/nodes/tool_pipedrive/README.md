@@ -1,153 +1,16 @@
 # tool_pipedrive
 
-A RocketRide tool node that exposes the Pipedrive CRM to an AI agent.
+A RocketRide tool node that exposes a selected portion of the Pipedrive CRM to an agent. Pick it for typed CRM work such as deals, contacts, and activities; keep its tool groups narrow so an agent can choose reliably.
+
+## About Pipedrive
+
+Pipedrive is a customer relationship management product centered on sales pipelines, deals, contacts, and activities. Teams use it to organize sales work and report on pipeline progress.
 
 ## What it does
 
-Gives an agent the full Pipedrive REST API v1: deals, persons, organizations,
-activities, pipelines, stages, notes, leads, products, files, users, roles, teams,
-goals, filters, webhooks, subscriptions, mail, call logs and projects — 255 tools in
-all, plus a generic `request` tool for anything Pipedrive adds later. Useful for
-sales automation, lead triage, CRM reporting, and RAG pipelines that read from a CRM.
+The node has no data lanes and publishes Pipedrive REST API functions as agent tools. It can expose the everyday CRM surface by default or additional specialized groups, with a generic API request function as an explicit option. It is preferable to a generic HTTP tool when the agent needs typed Pipedrive operations, response cleanup, pagination conventions, and read-only enforcement.
 
-Uses the **requests** library against `https://api.pipedrive.com/api/v1` (or your
-company domain) with a 30-second timeout, and **tenacity** to retry Pipedrive's
-rate limits. Responses are unwrapped from Pipedrive's `{"success", "data",
-"additional_data"}` envelope and stripped of noise — the wide `*_flat` duplicates,
-picture blobs and raw custom-field hashes are dropped, and custom fields are grouped
-under a `custom_fields` key.
-
-An API token is **required**: the pipeline fails to start without one. Write
-operations are **allowed by default**; enable **read-only mode** to block every
-mutating tool.
-
----
-
-## Configuration
-
-| Field | Type | Description |
-|---|---|---|
-| `apiToken` | string | Default empty. Pipedrive API token (Settings -> Personal preferences -> API), or an OAuth access token. Stored encrypted. |
-| `companyDomain` | string | Default empty. The "acme" in `https://acme.pipedrive.com`. When set, requests go to `https://{domain}.pipedrive.com/api/v1`; otherwise `https://api.pipedrive.com/api/v1`. |
-| `readOnly` | boolean | Default false. When enabled, every create, update and delete tool is blocked and `request` only accepts GET. |
-| `toolGroups` | array | Default `["deals", "persons", "organizations", "activities", "pipelines", "stages", "notes", "search"]`. Which groups of tools to publish, shown as a multi-select dropdown with per-group tool counts. Select **All groups** for everything. |
-| `allowRawRequest` | boolean | Default true. Publishes the generic `request` tool. |
-
-### Tool groups
-
-Full v1 coverage is 255 tools. That is more than an LLM can choose between reliably,
-and more than some providers accept in one request, so the node only publishes the
-groups listed in **Tool groups**. The default eight groups publish 108 tools — the
-everyday CRM surface. Add group names to reach further, or use `all`.
-
-Available groups, with the number of tools each publishes:
-
-`deals` (27), `projects` (22), `organizations` (18), `persons` (18), `products` (16),
-`activities` (13), `roles` (13), `leads` (12), `users` (12), `notes` (11),
-`subscriptions` (9), `files` (8), `misc` (8), `pipelines` (8), `teams` (8),
-`filters` (7), `stages` (7), `fields` (6), `mailbox` (6), `call_logs` (5),
-`goals` (5), `org_relationships` (5), `search` (4), `permission_sets` (3),
-`webhooks` (3).
-
-The config panel renders these as a multi-select dropdown. RJSF picks that widget for
-an array carrying `uniqueItems: true` and an `items.enum`; **All groups** is the last
-option.
-
-A tool in a group that is not published is invisible to the agent and refused if
-invoked anyway.
-
-### Tool-count guard rail
-
-Group sizes are uneven — `deals` is 27 tools, `permission_sets` is 3 — so counting
-groups tells you little. The node counts **published tools** instead and warns when
-a selection exceeds **120**, both in the config panel and at pipeline start:
-
-```
-toolGroups publishes 148 tools, above the recommended 120. Agents pick the wrong
-tool more often at this size, and some providers reject more than 128 tools in one
-request. Drop a group, or use "all" if this is deliberate.
-```
-
-It is a warning, not a block: the tools are still published and the pipeline still
-runs. Silently dropping tools an operator asked for fails later and more
-confusingly than a noisy config panel. `all` is exempt, since it is already an
-explicit opt-in to the full 255-tool surface and suits scripted callers that do not
-route through an LLM.
-
-### Pagination
-
-List tools take `start` (offset, default 0) and `limit` (1-500, default 100), and
-return `{items, count, more_items_in_collection, next_start}`. Pass `next_start` back
-as `start` for the next page. `file_list` is the exception: `/files` documents a
-maximum `limit` of 100, so that tool advertises and clamps to 100. The project tools
-use Pipedrive's cursor pagination instead: pass `cursor` and read `next_cursor`.
-
-### Custom fields
-
-Pipedrive stores custom fields under 40-character hex keys. Use `field_list` (group
-`fields`) to discover them, then write them through the `extra` object that every
-create and update tool accepts:
-
-```json
-{ "title": "New deal", "extra": { "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678": "Gold" } }
-```
-
-`extra` is merged into the request body after the typed parameters, so it also
-reaches any API parameter this node does not model explicitly.
-
-### Times are UTC, in both directions
-
-Every field carrying a time of day — an activity's `due_date` and `due_time`, a
-record's `add_time` — is UTC on the wire. Pipedrive displays those values in each
-viewer's own timezone, and validates none of them, so a local wall-clock time sent
-here is not rejected. It is stored, and from then on it reads as a real time.
-
-A meeting asked for at 12:30 in California and written as `12:30` comes back to the
-person who asked for it as 05:30.
-
-Convert before writing and convert back before reporting. The hour moves the **date**
-as well: 20:00 Pacific on a Wednesday is 03:00 UTC on the Thursday, so a converted
-time beside an unconverted date is a booking on the wrong day — take both from the
-same rendering. The `tool_datetime` node returns `utc_date` and `utc_time` next to
-`date` and `time` for exactly this.
-
-Two things this does **not** apply to. A `duration` is a length, not an instant:
-`02:00` is two hours in every timezone there is, and converting it corrupts it. A
-pure date with no time — `expected_close_date`, a goal's period — names no instant,
-so no zone can be wrong about it.
-
-The `start_date` / `end_date` filters on `activity_list` and `note_list` compare
-against those same UTC values, so a range that means one whole local day may need
-widening by a day at each end.
-
----
-
-## Authentication
-
-Personal API tokens are sent as the `api_token` query parameter; OAuth access tokens
-(JWTs, anything longer than 64 characters, or a value prefixed with `Bearer `) are
-sent as an `Authorization: Bearer` header. Both go in the same **API Token** field.
-
-## Rate limits
-
-Pipedrive uses a daily token budget plus a short burst window, and answers `429` when
-either is exhausted (escalating to `403` if a client keeps hammering). The client
-retries up to three times, honouring `Retry-After` first and then `x-ratelimit-reset`
-— which, unlike GitHub's header of a similar name, is **seconds remaining in the
-window, not an epoch timestamp**. If the required wait is longer than the 30-second
-request timeout the call fails immediately with the wait time in the error message
-rather than blocking the pipeline.
-
-## Read-only mode
-
-With **Read-only mode** enabled, every `*_create`, `*_update`, `*_delete`, `*_add`,
-`*_merge`, `*_set` and bulk-delete tool raises before making a request, and `request`
-accepts only `GET` and `HEAD`. Listing, getting, searching and reporting tools are
-unaffected.
-
----
-
-## Available tools
+## As a tool
 
 Tools are published as `pipedrive.<tool>`.
 
@@ -538,25 +401,92 @@ Tools are published as `pipedrive.<tool>`.
 
 ---
 
-## Running the tests
 
-```bash
-# Unit tests — no credentials, no network
-python -m pytest nodes/test/tool_pipedrive/test_pipedrive.py -v
 
-# Live suite — reads only
-export PIPEDRIVE_API_TOKEN=<sandbox token>
-export PIPEDRIVE_COMPANY_DOMAIN=<yourcompany>   # optional
-python -m pytest nodes/test/tool_pipedrive/test_tools.py -v
+Only the selected Tool groups are registered. All functions return the Pipedrive result after the client unwraps its response envelope; API, authentication, or blocked write failures are returned as errors to the agent.
 
-# Live suite including tests that create and delete records
-export PIPEDRIVE_ALLOW_WRITES=1
-python -m pytest nodes/test/tool_pipedrive/test_tools.py -v
-```
+## Configuration
 
-The live suite writes to a real Pipedrive account. Point it at a sandbox.
+Begin with the default group selection: deals, persons, organizations, activities, pipelines, stages, notes, and search. It publishes the normal CRM surface without asking an LLM to reason across the whole API.
 
----
+### Tool groups
+
+The node has 255 typed functions across its groups. Select only the groups an agent needs; a function in an unselected group is not registered and cannot be invoked. Add specialized groups as the agent's responsibility grows, or select `all` only for a deliberate full-surface integration. The node warns when the selected groups publish more than 120 tools, but still runs; this warning is a signal to narrow the set when the agent begins choosing the wrong function.
+
+### Read-only mode
+
+Read-only is off by default. Turn it on for an inspection, reporting, or retrieval agent: create, update, delete, add, merge, set, and bulk-delete functions are blocked before a request is made, and the generic request function accepts only `GET` and `HEAD`. Leave it off only when the agent has an approved write responsibility.
+
+### Allow raw API requests
+
+The raw request switch is on by default and publishes `pipedrive.request`. Disable it when typed functions are the complete intended contract; leave it enabled when a controlled agent needs a Pipedrive v1 endpoint that is not modeled by a typed function. Raw requests use the same authentication, rate-limit handling, and read-only checks.
+
+### Company Domain
+
+Leave the domain blank to use the shared Pipedrive v1 API host. Set it to the company subdomain when the account requires requests at its own Pipedrive host; enter only the subdomain, not a full URL.
+
+### Pagination and custom fields
+
+List functions generally use `start` (offset) and `limit`; return values include a next offset when another page exists. Project functions use cursor pagination. Pipedrive custom-field keys are discovered with the field functions and can be supplied through an `extra` object on typed create and update calls; that object is merged after typed parameters, so use it only for deliberate API fields.
+
+## Authentication
+
+Set `apiToken` to a Pipedrive API token or OAuth access token. The client sends JWT-style, long, or values formatted as `Bearer <token>` using the Authorization header; it sends other values as the `api_token` query parameter. A missing token prevents startup.
+
+## Notes
+
+### Times are UTC, in both directions
+
+Every field carrying a time of day, an activity's `due_date` and `due_time`, a
+record's `add_time`, is UTC on the wire. Pipedrive displays those values in each
+viewer's own timezone, and validates none of them, so a local wall-clock time sent
+here is not rejected. It is stored, and from then on it reads as a real time.
+
+A meeting asked for at 12:30 in California and written as `12:30` comes back to the
+person who asked for it as 05:30.
+
+Convert before writing and convert back before reporting. The hour moves the **date**
+as well: 20:00 Pacific on a Wednesday is 03:00 UTC on the Thursday, so a converted
+time beside an unconverted date is a booking on the wrong day. Take both from the
+same rendering. The `tool_datetime` node returns `utc_date` and `utc_time` next to
+`date` and `time` for exactly this.
+
+Two things this does **not** apply to. A `duration` is a length, not an instant:
+`02:00` is two hours in every timezone there is, and converting it corrupts it. A
+pure date with no time, `expected_close_date` or a goal's period, names no instant,
+so no zone can be wrong about it.
+
+The `start_date` / `end_date` filters on `activity_list` and `note_list` compare
+against those same UTC values, so a range that means one whole local day may need
+widening by a day at each end.
+
+### Rate limits
+
+The client retries rate-limited responses up to three times, honoring `Retry-After` before the Pipedrive reset header. If the required wait would exceed the request timeout, the call fails with the wait time instead of blocking the pipeline.
+
+## Upstream docs
+
+- [Pipedrive API documentation](https://developers.pipedrive.com/docs/api/v1)
 
 <!-- ROCKETRIDE:GENERATED:PARAMS START -->
+<!-- Generated by nodes:docs-generate. Do not edit by hand. -->
+
+## Schema
+
+| Field | Type | Description | Default |
+|---|---|---|---|
+| `pipedrive.allowRawRequest` | `boolean` | **Allow raw API requests**<br/>Publishes the generic <b>request</b> tool, which can call any Pipedrive v1 endpoint by method and path. It uses the same authentication, rate-limit handling and read-only enforcement as the typed tools. Disable to restrict the agent to the typed tools only. | `true` |
+| `pipedrive.apiToken` | `string` | **API Token**<br/>Pipedrive API token (Settings -> Personal preferences -> API), or an OAuth access token. Tokens starting with a JWT-style prefix are sent as a Bearer header; everything else is sent as the api_token query parameter. | `""` |
+| `pipedrive.companyDomain` | `string` | **Company Domain**<br/>Your Pipedrive company domain, i.e. the "acme" in https://acme.pipedrive.com. When set, requests go to https://{domain}.pipedrive.com/api/v1; otherwise https://api.pipedrive.com/api/v1 is used. | `""` |
+| `pipedrive.readOnly` | `boolean` | **Read-only mode**<br/>When enabled, every create, update and delete tool is blocked, and the generic request tool only accepts GET. Safe for agents that should only inspect the CRM. | `false` |
+| `pipedrive.toolGroups` | `array` | **Tool groups**<br/>Which groups of Pipedrive tools this node publishes to the agent. The full API is 255 tools, which is more than an LLM can choose between reliably, so only the selected groups are exposed. Pick one or more from the list; tool counts are shown per group, and selections totalling more than 120 log a warning but still run. Selecting <b>All groups</b> publishes everything and skips that warning. | `["deals","persons","organizations","activities","pipelines","stages","notes","search"]` |
+
+## Dependencies
+
+- `requests` `>=2.34.2`
+- `tenacity`
+
+## Source
+
+[<svg viewBox="0 0 16 16" width="15" height="15" fill="currentColor" aria-hidden="true" style="vertical-align:-0.15em;margin-right:0.35em"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg> View source](https://github.com/rocketride-org/rocketride-server/tree/develop/nodes/src/nodes/tool_pipedrive)
 <!-- ROCKETRIDE:GENERATED:PARAMS END -->

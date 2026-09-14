@@ -1,86 +1,46 @@
 # tool_python
 
-A RocketRide tool node that lets an AI agent execute Python code in a restricted in-process sandbox.
+A RocketRide tool node that lets an agent run small Python calculations or transformations when a built-in tool is not enough. Pick it for bounded code execution, not for integrations that need filesystem, network, or subprocess access.
+
+## About RestrictedPython
+
+RestrictedPython is a Python library for defining and enforcing a restricted execution environment. This node uses it to compile agent-supplied source with restricted guards and safe builtins.
 
 ## What it does
 
-Gives an agent the ability to run Python scripts directly: for data manipulation, calculations, formatting, and any logic the agent needs to execute rather than describe. The node exposes a single tool, `python.execute`, which takes source code, runs it, and returns captured stdout, error tracebacks, an exit code, and an optional structured result.
+The node exposes one sandboxed execution tool and has no data lanes. It is suited to calculations, data reshaping, text processing, and other code that can run with the allowlisted imports; choose a purpose-built integration when the task needs an external system. The registered tool validates its input before passing it to the sandbox and returns the sandbox result rather than raising for an ordinary script error.
 
-Uses **RestrictedPython**: code is compiled with `compile_restricted`, which injects runtime guards against attribute/item access escapes, and runs against `safe_builtins` with dangerous builtins removed. Imports are gated by an allowlist: only a default set of safe, pure-computation stdlib modules (plus any extras you configure) can be imported; everything else raises `ImportError`. With the default allowlist there is no network, filesystem, or subprocess access.
+## As a tool
 
-Execution is bounded by a timeout (**20 seconds by default**, configurable up to 1200) and output is truncated to 50 KB. The node has no lanes: it is attached to an agent as a tool.
+The server-name prefix defaults to `python`, so the registered function is `python.execute`.
 
----
+| Function | Description |
+|---|---|
+| `python.execute` | Run Python source in the restricted sandbox. |
+
+`code` is required and must be a non-empty string. Use `print()` for visible output and assign a JSON-compatible value to `result` to return it structurally. The response has `stdout`, `stderr`, `exit_code` (0 success, 1 exception, -1 timeout), `timed_out`, and `result`; blocked imports or invalid code are reported through that result.
 
 ## Configuration
 
+Start with the default timeout and no additional modules. The server name is normally only changed to avoid a tool-name collision.
 
-| Field | Type | Description |
-|---|---|---|
-| `serverName` | string | Default "python". Namespace prefix for the tool: <serverName>.execute |
-| `moduleName` | string | Default empty.  |
-| `timeout` | integer | Default 20. Maximum seconds a script may run before it is killed. Useful for long-running operations like network scans. Default is 20s, max is 1200s. |
-| `allowedModules` | array | Modules the agent is allowed to import, in addition to the built-in defaults (math, json, re, collections, datetime, etc.). |
+### Execution timeout (seconds)
 
+The value is clamped to 1–1200 seconds; absent or invalid input uses the sandbox default. Raise it only for a computation that genuinely needs longer, because an agent call remains occupied until the sandbox returns or times out.
 
-The node has a single preconfig profile (`default`), which sets `serverName` to `python`.
+### Additional Allowed Modules
 
-If `timeout` is left unset (or is not a valid integer), the sandbox default of 20 seconds applies.
+Each configured module name is added to the sandbox's import allowlist. Keep this list empty for the narrowest environment; add a module only when the agent needs it and you accept the capabilities that module exposes. The tool description tells the agent the effective allowed-import list, and every other import raises `ImportError`.
 
----
+## Notes
 
-## Available tools
+### Sandbox boundary
 
-### `execute`
+The node uses RestrictedPython's restricted compiler and safe builtins. A tool call requires a JSON object; a missing, blank, or non-string `code` value raises a validation error before execution.
 
-Execute a Python script and return its output. The tool description shown to the agent is generated dynamically and includes the effective timeout and the full list of allowed imports.
+## Upstream docs
 
-
-| Tool | Description |
-|---|---|---|
-| `execute` | Execute Python code in a sandboxed environment. |
-
-
-**Response:**
-
-```json
-{
-	"stdout": "...",
-	"stderr": "...",
-	"exit_code": 0,
-	"timed_out": false,
-	"result": null
-}
-```
-
-- `exit_code` is `0` on success, `1` on exception (or blocked compilation), `-1` on timeout.
-- `stdout` is the captured `print()` output; `stderr` carries the traceback if the script raised.
-- If the script assigns a value to a variable named `result`, it is returned in the `result` field. JSON-compatible values (`str`, `int`, `float`, `bool`, `list`, `dict`, `None`) are returned as-is; anything else is returned as its `repr()`.
-- `stdout` and `stderr` are each truncated to 50 KB, keeping the head and tail with a truncation marker in between.
-- `SystemExit` is handled: `sys.exit()` / `sys.exit(n)` sets the exit code instead of crashing the tool.
-
----
-
-## Sandbox
-
-Code runs in a restricted in-process sandbox built on **RestrictedPython**:
-
-1. **Restricted compilation**: `compile_restricted` transforms the AST to inject runtime guard calls that prevent attribute/item access escapes. Code that violates the compilation policy is rejected with `exit_code: 1`.
-2. **Safe builtins**: RestrictedPython's `safe_builtins` replaces the full `__builtins__`. A curated set of everyday data-work builtins is added back (`dict`, `list`, `set`, `enumerate`, `map`, `filter`, `max`, `min`, `sum`, `print`, `type`, and similar).
-3. **Allowlist-only imports**: a gated `__import__` permits only allowlisted modules (matched on the top-level package name). Everything else raises `ImportError` listing the allowed modules.
-4. **Timeout enforcement**: the script runs in a daemon thread; if it exceeds the timeout the call returns with `timed_out: true` and `exit_code: -1`.
-
-### Default allowed modules
-
-`math`, `cmath`, `decimal`, `fractions`, `statistics`, `random`, `string`, `textwrap`, `re`, `json`, `csv`, `collections`, `itertools`, `functools`, `operator`, `copy`, `dataclasses`, `enum`, `typing`, `datetime`, `time`, `calendar`, `base64`, `hashlib`, `hmac`, `struct`, `difflib`, `pprint`, `bisect`, `heapq`, `array`, `numbers`, `unicodedata`
-
-### Extra allowed modules and auto-install
-
-Modules added via `allowedModules` are merged with the defaults. If an extra allowlisted module is imported but not installed, the node **auto-installs it via pip** (60-second install timeout) and retries the import.
-
-Note that whitelisting extra modules widens the sandbox accordingly, allowing a package like `requests` grants the agent network access through that package. Only the default allowlist guarantees no filesystem, network, or subprocess access.
-
----
+- [RestrictedPython documentation](https://restrictedpython.readthedocs.io/)
 
 <!-- ROCKETRIDE:GENERATED:PARAMS START -->
 <!-- Generated by nodes:docs-generate. Do not edit by hand. -->

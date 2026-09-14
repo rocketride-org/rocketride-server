@@ -1,84 +1,58 @@
 # telegram
 
-A RocketRide source node that connects a Telegram bot to your pipeline, routing incoming messages to typed lanes and returning pipeline answers to the sender.
+A RocketRide source node that connects a Telegram bot to a pipeline; choose it when a bot’s messages and media should initiate pipeline work and receive a reply.
+
+## About Telegram
+
+Telegram is a messaging service with a Bot API. This node uses that API to receive updates, download attached files, and send text replies to the originating chat.
 
 ## What it does
 
-A `source` node (`telegram://`) that authenticates with a bot you create via @BotFather and listens for incoming messages. It handles text and media alike: photos, audio, voice notes, video, and documents are each downloaded (up to Telegram's 20 MB bot file limit) and routed to the matching pipeline lane. The first answer produced by the pipeline is sent back to the originating chat via `sendMessage` automatically.
+Telegram receives text or supported attachments, sends each item to the matching pipeline lane, and returns the first pipeline answer to the sender. Choose it instead of a generic webhook when the input and response should follow Telegram’s bot update and reply flow. It supports polling for outgoing connections to the Bot API and webhook delivery for a publicly reachable callback.
 
-Talks to the Telegram Bot API directly over **aiohttp** with no Telegram SDK dependency. In webhook mode the incoming POST route is registered on the shared FastAPI web server that `ai/node.py` starts for the pipeline subprocess — the node does not create a server of its own.
+## Lanes
 
-Both new and edited messages are processed. Unsupported message types (stickers, locations, polls, and so on) are silently ignored.
-
----
+| Lane in | Lane out | Description |
+| --- | --- | --- |
+| `_source` | `text` | Text messages are written as text. |
+| `_source` | `image` | Photos are downloaded and written as JPEG image data. |
+| `_source` | `audio` | Audio files and voice messages are written as audio data. |
+| `_source` | `video` | Videos are written as video data. |
+| `_source` | `tags` | Documents are written as tagged data for a downstream parser. |
 
 ## Configuration
 
-### Lanes
+Set a bot token, then choose the delivery mode that your deployment can support. Polling is the default and needs no public callback. Webhook mode additionally needs a reachable callback URL.
 
-The node is a pipeline source. Its `_source` lane emits to `text`, `image`, `audio`, `video`, and `tags`. Each Telegram message type maps to one output lane:
+### Connection Mode
 
-| Telegram message | Output lane | Notes |
-|------------------|-------------|-------|
-| Text | `text` | Written as plain text. |
-| Photo | `image` | The largest available photo size is downloaded; MIME type `image/jpeg`. |
-| Audio | `audio` | MIME type from the message, default `audio/mpeg`. |
-| Voice note | `audio` | MIME type from the message, default `audio/ogg`. |
-| Video | `video` | MIME type from the message, default `video/mp4`. |
-| Document (PDF, Word, etc.) | `tags` | Written as tagged stream data; connect a Parser node downstream. |
+`polling` is the default. It clears any previously registered webhook, repeatedly calls Telegram’s update endpoint with a 30-second server timeout and up to 100 updates, and retries after errors; use it where the pipeline process can make outbound requests but cannot expose a public route.
 
-Entry URLs are built as `telegram://<chat_id>/<uuid>` for text messages and `telegram://<chat_id>/<file_id>` for files.
+Choose `webhook` only when Telegram can POST to a public HTTPS URL that reaches this pipeline. The node registers that URL and derives its local POST route from its path (or `/telegram/webhook` when the URL has no path). In webhook mode, incoming requests without the generated secret header are rejected with HTTP 403; malformed request bodies return HTTP 500.
 
-### Fields
+### Webhook URL
 
-| Field | Type | Description |
-|---|---|---|
-| `botToken` | string | Telegram bot token from @BotFather (e.g. 123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11) |
-| `mode` | string | Default "polling". Polling works anywhere without a public URL. Webhook requires a public HTTPS endpoint. |
-| `webhookUrl` | string | Public HTTPS URL Telegram will POST updates to (e.g. https://your-server.com/telegram/webhook). Required for webhook mode. |
-
-The node tile in the UI shows the currently configured mode.
-
-The monitor info panel shows the last 6 characters of the configured bot token so you can verify which bot is connected without exposing the full secret.
-
----
-
-## Connection modes
-
-### Polling
-
-The default. The node long-polls the Telegram `getUpdates` API in a background task using a 30-second server-side timeout and a batch size of up to 100 updates. The offset is advanced after each processed update, so acknowledged messages are never re-delivered. On network or API errors the loop sleeps 5 seconds then retries. Any previously registered webhook is cleared at startup because Telegram refuses `getUpdates` while a webhook is active.
-
-### Webhook
-
-For production deployments with a public HTTPS endpoint. At startup the node registers `telegram.webhookUrl` with Telegram via `setWebhook` along with a freshly generated random secret token. Incoming POSTs are validated against the `X-Telegram-Bot-Api-Secret-Token` header; requests with a wrong or missing secret are rejected with HTTP 403. Each accepted update is handled concurrently as a background task. In-flight handlers are awaited during shutdown, and the webhook is deregistered via `deleteWebhook` when the pipeline stops.
-
-The local POST route is derived from the path portion of `telegram.webhookUrl`, falling back to `/telegram/webhook` if the URL contains no path. Your reverse proxy or tunnel must forward that path to the shared web server's port (the `--data_port` the engine assigns to the pipeline subprocess).
-
----
-
-## Replies
-
-After a message runs through the pipeline, the first answer in the pipeline response is sent back to the originating chat. Replies longer than Telegram's 4096-character limit are truncated with a trailing ellipsis (`...`). If the pipeline produces no answers, nothing is sent. Reply failures are logged via `debug()` and never crash the update handler.
-
----
-
-## Limits & behavior notes
-
-- **20 MB file cap** -- Telegram's Bot API limit for downloads. The node checks the size reported by `getFile` and skips larger files silently.
-- **One answer per message** -- only the first pipeline answer is returned to the chat; additional answers are discarded.
-- **Missing token** -- if `telegram.botToken` is empty the node reports `Telegram Bot: missing bot token` in the monitor and stays idle.
-- **Byte accounting** -- processed message and file sizes are reported to the monitor as completed or failed bytes via `monitorCompleted` / `monitorFailed`.
-
----
+This value is used only in webhook mode. Provide the complete public URL, including the path your reverse proxy or tunnel forwards to the pipeline’s shared web-server port. Leaving it empty makes webhook registration fail; use polling when a public route is unavailable.
 
 ## Authentication
 
-This node requires a Telegram bot token. Create a bot by messaging @BotFather on Telegram and following the `/newbot` flow. Copy the token BotFather provides and paste it into the `telegram.botToken` field.
+Set **Bot Token** to the token for the bot that should receive updates. The node uses it in its Bot API requests and displays only its final six characters in the monitor information. A missing token aborts startup after publishing a missing-token status.
 
-No additional OAuth or API key registration is needed beyond the bot token.
+## Notes
 
----
+### Message handling and replies
+
+Both new and edited messages are considered. Unsupported updates are ignored. Files reported larger than 20 MiB are skipped before download, and download or pipeline failures return no reply while recording failed bytes in the monitor.
+
+Only the first answer in the pipeline response is sent back. Replies longer than 4,096 characters are truncated with an ellipsis; errors from Telegram’s send operation are logged and do not crash the update handler.
+
+### Webhook reachability
+
+Webhook delivery uses the pipeline’s shared web server and requires the process entry point to provide it. The implementation notes that a multi-tenant cloud engine cannot expose an individual pipeline subprocess port to Telegram, so use polling there; the local POST route can still be used by a self-hosted deployment that forwards it publicly.
+
+## Upstream docs
+
+- [Telegram Bot API](https://core.telegram.org/bots/api)
 
 <!-- ROCKETRIDE:GENERATED:PARAMS START -->
 <!-- Generated by nodes:docs-generate. Do not edit by hand. -->

@@ -1,107 +1,156 @@
 # agent_llamaindex
 
-A RocketRide agent node that runs a single-agent ReAct loop using LlamaIndex.
+A RocketRide agent node that answers questions with a LlamaIndex ReAct loop —
+reasoning step by step and calling connected tools until it reaches an answer.
+
+## About LlamaIndex
+
+LlamaIndex is an open-source framework for building LLM applications over your
+own data. It is best known for its retrieval and indexing toolkit and for
+ReAct-style agents, which interleave reasoning with tool use so a model can
+gather what it needs before answering.
 
 ## What it does
 
-Receives a question on the `questions` lane, reasons step by step (selecting and
-invoking tools as needed), and emits the final answer on the `answers` lane.
+Takes a question on the `questions` lane, reasons about it step by step, calls
+whatever tools are connected to it, and emits the final answer on the `answers`
+lane. Because the reasoning loop is plain text (the model writes
+`Thought / Action / Action Input`), it works with **any** LLM that can follow
+the format — native function-calling support is not required, which makes it a
+good fit for local or smaller models. It can also be invoked as a tool by a
+parent agent, so it works as a specialist inside a larger agent hierarchy.
 
-Uses **llama-index-core** for the ReAct scaffolding (`ReActChatFormatter`,
-`ReActOutputParser`), but drives the loop by hand: the agent's LLM invocation channel
-returns plain text synchronously, so each turn the node formats the ReAct prompt, calls
-the host LLM with the stop word `Observation:`, and parses the model's
-`Thought / Action / Action Input` (or final `Answer`) output. Tool execution happens
-through the host's control-plane `call_tool`, not inside LlamaIndex. Connected tools are
-wrapped as metadata-only `FunctionTool`s whose descriptions carry the tool's input JSON
-schema.
+## Example pipelines
 
-Because the loop is text-based, it works with any LLM that can follow the ReAct format;
-no native function-calling support is required. The agent still reaches multimodal
-capabilities (OCR, transcription, image embedding, etc.) by invoking those as tools.
+**Answer questions using an HTTP tool**
 
-The loop runs up to 10 iterations. If no final `Answer` is produced within the budget,
-the node returns `"Agent stopped after reaching the maximum number of reasoning steps."`.
-If the model's output cannot be parsed as a ReAct step it is treated as a direct answer
-(a leading `Thought:` is stripped so loop scaffolding does not leak to the user). A tool
-call that raises is not fatal: the error is fed back to the model as the observation
-(`{tool, error, type}`).
+`chat → agent_llamaindex → response_answers`
 
-Progress is streamed over the `thinking` SSE lane ("Starting LlamaIndex agent...",
-"Calling <tool>..."), and every tool step (`action`, `action_input`, `observation`) is
-recorded in the returned reasoning stack.
+<div align="center">
 
-The node registers with `classType: ["agent", "tool"]`. It runs standalone on the
-questions lane and can also be invoked as a tool by parent agents (see "Using as a tool").
+![The agent_llamaindex node on the canvas with an LLM and an HTTP Request tool connected](example.png)
 
----
+[![Download example.pipe](https://img.shields.io/badge/example.pipe-Download-41b6e6?style=for-the-badge)](example.pipe)
+
+</div>
+
+`llm_anthropic` is wired to the `llm` channel and `tool_http_request` to
+`tool`. A question arrives on chat, the agent decides when to call the API,
+reads the response, and returns a grounded answer.
+
+**Research agent over your own documents**
+
+`chat → agent_llamaindex → response_answers`
+
+Swap the HTTP tool for `store_qdrant`: the agent searches the vector store on
+demand rather than every question being forced through retrieval, then answers
+from what it found.
+
+**Specialist inside a larger agent**
+
+An `agent_rocketride` node with this node connected on its `tool` channel. Fill
+in **Agent description** so the parent knows when to delegate; it calls
+`<nodeId>.run_agent` and gets the sub-agent's answer back.
+
+## Connections
+
+| Connection | Required | Description                                             |
+| ---------- | -------- | ------------------------------------------------------- |
+| `llm`      | yes      | LLM the agent reasons with                              |
+| `tool`     | no       | Tools available to the agent during its reasoning loop  |
+
+Without tools the node still works — it becomes a single-shot question
+answerer. Tools are what make the ReAct loop worth using.
+
+## Lanes
+
+| Lane in     | Lane out  | Description                                      |
+| ----------- | --------- | ------------------------------------------------ |
+| `questions` | `answers` | Send a question, receive the agent's final answer |
+
+## As a tool
+
+When connected to a parent agent, the node exposes one function:
+
+| Function             | Description                                        |
+| -------------------- | -------------------------------------------------- |
+| `<nodeId>.run_agent` | Run this agent on a query and return its answer    |
+
+Input is `{query: string, context?: object}` — `query` must be a non-empty
+string. The optional `context` object reaches the sub-agent as a context entry
+of type `RocketRide.agent.tool_context.v1`. Output is `{content, meta, stack}`,
+where `stack` is the list of reasoning steps taken. When invoked as a tool the
+answer returns to the caller instead of going out on the `answers` lane.
+
+The configured **Agent description** is prepended to this function's
+description, so it is what a parent agent reads when choosing between
+sub-agents.
 
 ## Configuration
 
-### Lanes
+The default profile needs nothing set — connect an LLM and the node runs. The
+three fields shape *how* it behaves: what a parent agent is told about it, what
+guidance its prompt carries, and whether ungrounded answers are allowed.
 
-| Lane        | Direction | Description                        |
-|-------------|-----------|------------------------------------|
-| `questions` | in        | Questions for the agent to answer  |
-| `answers`   | out       | The agent's final answer           |
+### Agent description
 
-### Fields
+Only matters when this node is connected to a parent agent as a tool. The
+parent reads **this text alone** when deciding whether to delegate — it cannot
+see the instructions, the tools, or the LLM. Write it specific and
+action-oriented: "Searches internal documentation and answers with citations"
+gets picked; "helper agent" never does. Leave it blank if nothing calls this
+agent as a tool.
 
-A single `default` profile with two fields:
+### Instructions
 
-| Field | Type | Description |
-|---|---|---|
-| `agent_description` | string | Default empty. What does this agent do? Describe its purpose and capabilities, this helps parent agents select and invoke it correctly. |
-| `instructions` | array | Additional instructions to guide the agent. |
-| `profile` | string | Default "default".  |
+Each line is appended to the built-in ReAct prompt, which already handles the
+reasoning scaffolding. Use it for domain rules and tone ("prefer primary
+sources", "answer in the user's language") — not for restating how to use
+tools, which the loop already covers. Adding a great deal here works against
+smaller models, whose instruction-following degrades as the prompt grows.
 
----
+### Require tool call
 
-## Invoke channels
+Off by default. When on, a run that produces an answer without invoking at
+least one tool fails with a `RocketRide.agent.guard.v1` error instead of
+returning the text.
 
-Control-plane channels the agent uses during its reasoning loop:
+This guards against a real failure mode: weaker planning models sometimes
+**narrate** a tool chain in prose — describing searches they never ran — and
+produce a plausible but ungrounded answer. Turn it on for
+determinism-critical pipelines where an ungrounded answer must never be
+delivered. Note that it counts real tool invocations only; internal local reads
+do not satisfy it. Leave it off for agents that can legitimately answer from
+the model's own knowledge.
 
-| Channel | Required    | Description                                             |
-|---------|-------------|---------------------------------------------------------|
-| `llm`   | yes (min 1) | LLM the agent thinks with                               |
-| `tool`  | no (min 0)  | Tools available to the agent (via control-plane invoke) |
+## Notes
 
----
+### The reasoning loop
 
-## Using as a tool
+The node uses **llama-index-core** for the ReAct scaffolding
+(`ReActChatFormatter`, `ReActOutputParser`) but drives the loop itself: each
+turn it formats the ReAct prompt, calls the host LLM with `Observation:` as a
+stop word, and parses the model's `Thought / Action / Action Input` or final
+`Answer`. Tool execution goes through the host's control-plane `call_tool`, not
+through LlamaIndex — connected tools are wrapped as metadata-only
+`FunctionTool`s whose descriptions carry each tool's input JSON schema.
 
-The node exposes itself as `<nodeId>.run_agent`, so parent agents can delegate to it in
-hierarchical pipelines. The configured `agent_description` is prepended to the tool
-description to help the parent pick the right sub-agent.
+The loop runs up to **10 iterations**. If no final answer arrives within that
+budget the node returns `"Agent stopped after reaching the maximum number of
+reasoning steps."` Output that can't be parsed as a ReAct step is treated as a
+direct answer (a leading `Thought:` is stripped so scaffolding doesn't leak to
+the reader). A tool call that raises isn't fatal — the error is fed back to the
+model as the observation (`{tool, error, type}`) so it can recover.
 
-| Direction | Shape                                                       |
-|-----------|-------------------------------------------------------------|
-| Input     | `{query: string, context?: object}` (`query` must be a non-empty string) |
-| Output    | `{content, meta, stack}`                                    |
+### Progress and traceability
 
-An optional `context` object is passed to the sub-agent as a context entry of type
-`RocketRide.agent.tool_context.v1`. When invoked as a tool the answer is returned to the
-caller instead of being emitted on the `answers` lane.
-
----
+Progress streams over the `thinking` SSE lane ("Starting LlamaIndex agent...",
+"Calling &lt;tool&gt;..."), and every tool step (`action`, `action_input`,
+`observation`) is recorded in the returned reasoning stack.
 
 ## Upstream docs
 
 - [LlamaIndex agents](https://docs.llamaindex.ai/en/stable/understanding/agent/)
-
----
-
-## Fabrication guard
-
-Smaller or weaker planning models occasionally **narrate** a multi-step tool chain in
-prose instead of actually calling the tools, producing a plausible-looking but ungrounded
-answer. The optional **Require tool call** (`require_tool_call`) config field guards against
-this: when enabled, any run that produces an answer without invoking at least one tool fails
-with a `RocketRide.agent.guard.v1` error instead of delivering the ungrounded text. It is off by
-default; enable it for determinism-critical pipelines. The guard counts real tool invocations
-only — internal/local reads (for example the wave agent’s `memory.peek`) do not satisfy it.
-
----
 
 <!-- ROCKETRIDE:GENERATED:PARAMS START -->
 <!-- Generated by nodes:docs-generate. Do not edit by hand. -->

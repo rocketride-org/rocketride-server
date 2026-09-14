@@ -9,7 +9,7 @@
 	"prefix": "firestore",
 	"description": ["A processing component that connects to Google Cloud Firestore (Native mode)."],
 	"icon": "db_firestore.svg",
-	"documentation": "https://docs.rocketride.org",
+	"documentation": "https://docs.rocketride.org/nodes/db_firestore",
 	"invoke": {},
 	"lanes": {},
 	"preconfig": {

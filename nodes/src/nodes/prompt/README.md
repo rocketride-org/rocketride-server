@@ -10,13 +10,11 @@ Each input lane maps to a different section of the rendered prompt. Inputs are c
 
 If no `instructions` are configured, the default profile supplies a single instruction: `"Please provide a detailed and helpful response to the following question:"`. If an error occurs during the merge, the node logs the error and the enriched question is not emitted.
 
-The node registers as a `filter` with class type `text` and runs as a pure Python transformation (no external service or model is called).
+Use Prompt instead of Question when a downstream LLM needs a question together
+with instructions or accumulated context. Use Question when text only needs to
+be converted into a question without assembling a prompt.
 
----
-
-## Configuration
-
-### Lanes
+## Lanes
 
 | Lane in     | Lane out    | Description                                                                       |
 | ----------- | ----------- | --------------------------------------------------------------------------------- |
@@ -25,17 +23,30 @@ The node registers as a `filter` with class type `text` and runs as a pure Pytho
 | `table`     | (none)      | Added to the `### Context:` section of the prompt                                 |
 | `questions` | `questions` | Collects question inputs; emits the fully assembled question when the node closes |
 
-### Fields
+## Configuration
 
-| Field | Type | Description |
-|---|---|---|
-| `instructions` | array | Multiple instructions to add to questions before sending to LLM |
+The default profile supplies one detailed-response instruction. Most pipelines
+only need to change the setting when their downstream model needs a different
+role, format, or response constraint.
+
+### Instructions
 
 Each instruction is added with the name `User Instruction`; when multiple instructions are configured they are numbered (`User Instruction 1`, `User Instruction 2`, and so on). A single string value is also accepted and treated as a one-element list.
 
----
+Use a short, specific instruction when the retrieved context already states
+the task. Add separate instructions when their order matters; they are added in
+their configured order before the collected context and question.
 
-## Rendered prompt structure
+## Requirements
+
+The node is marked GPU-capable in its metadata, but its implementation only
+assembles a `Question` object and does not load or call a model itself. Any
+hardware requirement comes from the downstream LLM or agent that consumes the
+result.
+
+## Notes
+
+### Rendered prompt structure
 
 When the question is consumed by an LLM or agent, it is rendered in this order:
 
@@ -55,7 +66,7 @@ When the question is consumed by an LLM or agent, it is rendered in this order:
 
 ---
 
-## Typical use
+### Typical use
 
 The most common use is passing retrieved documents or extracted text alongside a question into an agent or LLM, giving it context it would not otherwise have.
 
