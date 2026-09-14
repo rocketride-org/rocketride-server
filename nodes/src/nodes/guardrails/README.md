@@ -99,6 +99,7 @@ Blocking happens silently from the pipeline's point of view: downstream nodes si
 | `max_input_length` | `number` | **Max input length (chars)**<br/>Maximum character count for input text (0 = no limit) | `0` |
 | `max_tokens_estimate` | `number` | **Max tokens (estimate)**<br/>Maximum estimated token count for input text (0 = no limit) | `0` |
 | `policy_mode` | `string` | **Policy mode**<br/>How to handle violations: block (reject), warn (log + continue), log (silent) | `"warn"` |
+| `require_grounding` | `boolean` | **Require grounding**<br/>After a retrieval returns nothing, treat an answer as a violation when it states a figure, unless the answer declines to give one. Greetings, acknowledgements and refusals are unaffected, and a non-numeric claim is not checked. Needs the documents lane wired to have any effect. | `false` |
 
 ## Source
 
