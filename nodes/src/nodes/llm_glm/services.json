@@ -92,8 +92,8 @@
 				"title": "GLM-5.2",
 				"model": "glm-5.2",
 				"modelSource": "provider",
-				"modelTotalTokens": 1000000, // manual - docs.z.ai model card (1M)
-				"modelOutputTokens": 32768, // manual
+				"modelTotalTokens": 1000000, // sync_models.config.json
+				"modelOutputTokens": 32768, // sync_models.config.json
 				"serverbase": "https://api.z.ai/api/paas/v4",
 				"apikey": "",
 				"capabilities": {
@@ -104,8 +104,8 @@
 				"title": "GLM-5.1",
 				"model": "glm-5.1",
 				"modelSource": "provider",
-				"modelTotalTokens": 204800, // manual - docs.z.ai model card (200K)
-				"modelOutputTokens": 32768, // manual
+				"modelTotalTokens": 204800, // sync_models.config.json
+				"modelOutputTokens": 32768, // sync_models.config.json
 				"serverbase": "https://api.z.ai/api/paas/v4",
 				"apikey": "",
 				"capabilities": {
@@ -116,8 +116,8 @@
 				"title": "GLM-5",
 				"model": "glm-5",
 				"modelSource": "provider",
-				"modelTotalTokens": 204800, // manual - docs.z.ai model card (200K)
-				"modelOutputTokens": 32768, // manual
+				"modelTotalTokens": 204800, // sync_models.config.json
+				"modelOutputTokens": 32768, // sync_models.config.json
 				"serverbase": "https://api.z.ai/api/paas/v4",
 				"apikey": "",
 				"capabilities": {
@@ -128,8 +128,8 @@
 				"title": "GLM-5 Turbo",
 				"model": "glm-5-turbo",
 				"modelSource": "provider",
-				"modelTotalTokens": 204800, // manual - docs.z.ai model card (200K)
-				"modelOutputTokens": 32768, // manual
+				"modelTotalTokens": 204800, // sync_models.config.json
+				"modelOutputTokens": 32768, // sync_models.config.json
 				"serverbase": "https://api.z.ai/api/paas/v4",
 				"apikey": "",
 				"capabilities": {
@@ -140,8 +140,8 @@
 				"title": "GLM-4.7",
 				"model": "glm-4.7",
 				"modelSource": "provider",
-				"modelTotalTokens": 204800, // manual - docs.z.ai model card (200K)
-				"modelOutputTokens": 32768, // manual
+				"modelTotalTokens": 204800, // sync_models.config.json
+				"modelOutputTokens": 32768, // sync_models.config.json
 				"serverbase": "https://api.z.ai/api/paas/v4",
 				"apikey": "",
 				"capabilities": {
@@ -152,8 +152,8 @@
 				"title": "GLM-4.6",
 				"model": "glm-4.6",
 				"modelSource": "provider",
-				"modelTotalTokens": 204800, // manual - docs.z.ai model card (200K)
-				"modelOutputTokens": 32768, // manual
+				"modelTotalTokens": 204800, // sync_models.config.json
+				"modelOutputTokens": 32768, // sync_models.config.json
 				"serverbase": "https://api.z.ai/api/paas/v4",
 				"apikey": "",
 				"capabilities": {
@@ -164,8 +164,8 @@
 				"title": "GLM-4.5",
 				"model": "glm-4.5",
 				"modelSource": "provider",
-				"modelTotalTokens": 131072, // manual - docs.z.ai model card (128K)
-				"modelOutputTokens": 32768, // manual
+				"modelTotalTokens": 131072, // sync_models.config.json
+				"modelOutputTokens": 32768, // sync_models.config.json
 				"serverbase": "https://api.z.ai/api/paas/v4",
 				"apikey": "",
 				"capabilities": {
@@ -176,13 +176,90 @@
 				"title": "GLM-4.5 Air",
 				"model": "glm-4.5-air",
 				"modelSource": "provider",
-				"modelTotalTokens": 131072, // manual - docs.z.ai model card (128K)
-				"modelOutputTokens": 32768, // manual
+				"modelTotalTokens": 131072, // sync_models.config.json
+				"modelOutputTokens": 32768, // sync_models.config.json
 				"serverbase": "https://api.z.ai/api/paas/v4",
 				"apikey": "",
 				"capabilities": {
 					"reasoning": true
 				}
+			},
+			"glm-4-7-flash": {
+				"title": "Z.ai: GLM 4.7 Flash",
+				"model": "glm-4.7-flash",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 200000, // openrouter
+				"modelOutputTokens": 117964, // openrouter
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"glm-5-2-batch": {
+				"title": "Z.ai: GLM 5.2 (batch)",
+				"model": "glm-5.2:batch",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 1048576, // openrouter
+				"modelOutputTokens": 943718, // openrouter
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"glm-5-3": {
+				"title": "Z.ai: GLM 5.3",
+				"model": "glm-5.3",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 1310720, // openrouter
+				"modelOutputTokens": 943717, // openrouter
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"glm-5-3-batch": {
+				"title": "Z.ai: GLM 5.3 (batch)",
+				"model": "glm-5.3:batch",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 1048576, // openrouter
+				"modelOutputTokens": 943718, // openrouter
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"glm-5-3-flash-batch": {
+				"title": "Z.ai: GLM 5.3 Flash (batch)",
+				"model": "glm-5.3-flash:batch",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 1048576, // openrouter
+				"modelOutputTokens": 943718, // openrouter
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"glm-flash-latest": {
+				"title": "Z.ai: GLM Flash Latest",
+				"model": "glm-flash-latest",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 1310720, // openrouter
+				"modelOutputTokens": 131072, // openrouter
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"glm-latest": {
+				"title": "Z.ai: GLM Latest",
+				"model": "glm-latest",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 1310720, // openrouter
+				"modelOutputTokens": 943718, // openrouter
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
 			}
 		}
 	},
@@ -337,7 +414,98 @@
 					"properties": [
 						"glm.glm-4-5-air"
 					]
+				},
+				{
+					"value": "glm-4-7-flash",
+					"properties": [
+						"glm.glm-4-7-flash"
+					]
+				},
+				{
+					"value": "glm-5-2-batch",
+					"properties": [
+						"glm.glm-5-2-batch"
+					]
+				},
+				{
+					"value": "glm-5-3",
+					"properties": [
+						"glm.glm-5-3"
+					]
+				},
+				{
+					"value": "glm-5-3-batch",
+					"properties": [
+						"glm.glm-5-3-batch"
+					]
+				},
+				{
+					"value": "glm-5-3-flash-batch",
+					"properties": [
+						"glm.glm-5-3-flash-batch"
+					]
+				},
+				{
+					"value": "glm-flash-latest",
+					"properties": [
+						"glm.glm-flash-latest"
+					]
+				},
+				{
+					"value": "glm-latest",
+					"properties": [
+						"glm.glm-latest"
+					]
 				}
+			]
+		},
+		"glm.glm-4-7-flash": {
+			"object": "glm-4-7-flash",
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
+		},
+		"glm.glm-5-2-batch": {
+			"object": "glm-5-2-batch",
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
+		},
+		"glm.glm-5-3": {
+			"object": "glm-5-3",
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
+		},
+		"glm.glm-5-3-batch": {
+			"object": "glm-5-3-batch",
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
+		},
+		"glm.glm-5-3-flash-batch": {
+			"object": "glm-5-3-flash-batch",
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
+		},
+		"glm.glm-flash-latest": {
+			"object": "glm-flash-latest",
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
+		},
+		"glm.glm-latest": {
+			"object": "glm-latest",
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
 			]
 		}
 	},
