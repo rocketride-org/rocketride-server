@@ -32,7 +32,7 @@
 // =============================================================================
 
 import { ConnectionManager } from 'shell';
-import type { AgentSessionRecord } from './agentTypes';
+import type { AgentProvidersResponse, AgentSessionRecord } from './agentTypes';
 
 /** rocket-agent base: same-origin in SaaS; OSS dev override baked in via rsbuild define. */
 export function agentBase(): string {
@@ -86,11 +86,13 @@ export const agentApi = {
 	list: (signal?: AbortSignal) => call<AgentSessionRecord[]>('GET', '/agent/sessions', undefined, undefined, signal),
 	create: (opts: { pipePath?: string; title?: string }, signal?: AbortSignal) => call<AgentSessionRecord & { url: string }>('POST', '/agent/sessions', opts, undefined, signal),
 	resume: (id: string, signal?: AbortSignal) => call<AgentSessionRecord & { url: string }>('POST', `/agent/sessions/${id}/resume`, undefined, undefined, signal),
+	/** Re-spawn a live session's opencode with freshly-resolved inference settings (applies a mid-session model/key change); transcript preserved. */
+	restart: (id: string, signal?: AbortSignal) => call<AgentSessionRecord & { url: string }>('POST', `/agent/sessions/${id}/restart`, undefined, undefined, signal),
 	archive: (id: string, signal?: AbortSignal) => call<void>('DELETE', `/agent/sessions/${id}`, undefined, undefined, signal),
 	/** Hard-delete: removes the transcript + workspace and drops the record (NOT resumable). `archive` keeps it resumable. */
 	remove: (id: string, signal?: AbortSignal) => call<void>('DELETE', `/agent/sessions/${id}?purge=true`, undefined, undefined, signal),
 	rename: (id: string, title: string, signal?: AbortSignal) => call<AgentSessionRecord>('PATCH', `/agent/sessions/${id}`, { title }, undefined, signal),
-	health: (id: string, signal?: AbortSignal) => call<{ status: string; opencode: boolean; engine?: 'real' | 'stub' }>('GET', `/agent/sessions/${id}/health`, undefined, undefined, signal),
+	health: (id: string, signal?: AbortSignal) => call<{ status: string; opencode: boolean; engine?: 'real' | 'stub'; model?: string }>('GET', `/agent/sessions/${id}/health`, undefined, undefined, signal),
 	save: (id: string, signal?: AbortSignal) => call<{ pipes: string[] }>('POST', `/agent/sessions/${id}/save`, undefined, undefined, signal), // D2
 	/** Records the answer to a pending present_gate ask (owner-checked); emits `gate.answered` on the events stream. The gate itself is consumed one-shot by the server on the next prompt, not here. */
 	answerGate: (id: string, gateId: string, option: string, signal?: AbortSignal) => call<void>('POST', `/agent/sessions/${id}/gate`, { id: gateId, option }, undefined, signal),
@@ -100,6 +102,8 @@ export const agentApi = {
 	oc: <T>(id: string, method: string, suffix: string, body?: unknown, signal?: AbortSignal, headers?: Record<string, string>) => call<T>(method, `/agent/sessions/${id}/opencode${suffix}`, body, undefined, signal, headers),
 	/** Visibility: the opencode agents this session loaded — if rr-builder is absent, seeding failed. */
 	listAgents: (id: string, signal?: AbortSignal) => call<Array<{ name: string; mode?: string }>>('GET', `/agent/sessions/${id}/opencode/agent`, undefined, undefined, signal),
+	/** The inference providers the agent supports (Task 4) — feeds the settings panel's key/model pickers. */
+	getProviders: (signal?: AbortSignal) => call<AgentProvidersResponse>('GET', '/agent/providers', undefined, undefined, signal),
 };
 
 /**

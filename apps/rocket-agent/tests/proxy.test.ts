@@ -35,7 +35,7 @@ import { createApp, EnvKeyResolver } from '../src/index';
 import { MemorySessionIndex } from '../src/sessionIndex';
 import { SessionManager, SessionManagerDeps } from '../src/session';
 import { reconcileOnBoot, sweep } from '../src/reaper';
-import type { Identity, IdentityResolver, LiveSession, ProviderKeys, SessionRecord } from '../src/types';
+import type { Identity, IdentityResolver, InferenceSettings, LiveSession, SessionRecord } from '../src/types';
 import { initGit } from '../src/workspace';
 
 class FakeIdentityResolver implements IdentityResolver {
@@ -55,7 +55,7 @@ class FakeIdentityResolver implements IdentityResolver {
 class CountingSessionManager extends SessionManager {
 	spawnCount = 0;
 
-	protected async attach(record: SessionRecord, _providerKeys: ProviderKeys, credential: string, sessionRoot: string): Promise<LiveSession> {
+	protected async attach(record: SessionRecord, _settings: InferenceSettings, credential: string, sessionRoot: string): Promise<LiveSession> {
 		this.spawnCount++;
 		await new Promise((r) => setTimeout(r, 50)); // widen the race window
 		const live: LiveSession = {
@@ -85,7 +85,7 @@ class CountingSessionManager extends SessionManager {
  * deterministically without a real opencode server or LLM turn.
  */
 class FileWatchSessionManager extends SessionManager {
-	protected async attach(record: SessionRecord, _providerKeys: ProviderKeys, credential: string, sessionRoot: string): Promise<LiveSession> {
+	protected async attach(record: SessionRecord, _settings: InferenceSettings, credential: string, sessionRoot: string): Promise<LiveSession> {
 		const workspaceDir = path.join(sessionRoot, 'workspace');
 		await fsp.mkdir(workspaceDir, { recursive: true });
 		await fsp.writeFile(path.join(workspaceDir, 'AGENTS.md'), '# fake session\n', 'utf8');

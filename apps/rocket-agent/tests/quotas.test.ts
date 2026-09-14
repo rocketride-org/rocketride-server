@@ -43,7 +43,7 @@ import { createApp, EnvKeyResolver } from '../src/index';
 import { sweep } from '../src/reaper';
 import { MemorySessionIndex } from '../src/sessionIndex';
 import { SessionManager, SessionManagerDeps } from '../src/session';
-import { HttpError, Identity, IdentityResolver, LiveSession, ProviderKeys, SessionRecord } from '../src/types';
+import { HttpError, Identity, IdentityResolver, InferenceSettings, LiveSession, SessionRecord } from '../src/types';
 import { workspaceSize } from '../src/workspace';
 
 /**
@@ -55,7 +55,7 @@ import { workspaceSize } from '../src/workspace';
  * quota that stopped biting would fail these tests, not just a mock's canned response.
  */
 class FakeAttachSessionManager extends SessionManager {
-	protected async attach(record: SessionRecord, _providerKeys: ProviderKeys, credential: string, sessionRoot: string): Promise<LiveSession> {
+	protected async attach(record: SessionRecord, _settings: InferenceSettings, credential: string, sessionRoot: string): Promise<LiveSession> {
 		const live: LiveSession = {
 			record,
 			proc: { kill: () => true } as unknown as ChildProcess,

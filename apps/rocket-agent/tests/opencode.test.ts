@@ -27,7 +27,8 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { loadConfig } from '../src/config';
-import { authHeader, buildChildEnv, buildConfigContent } from '../src/opencode';
+import { authHeader, buildChildEnv, buildConfigContent, generateProviderConfig } from '../src/opencode';
+import type { ProviderDef } from '../src/providers';
 
 const BASE = { RR_MCP_UPSTREAM: 'http://localhost:8080/mcp' };
 const cfg = loadConfig({ ...BASE });
@@ -37,8 +38,46 @@ const spawnOpts = {
 	workspaceDir: '/tmp/s1/workspace',
 	sessionHome: '/tmp/s1/home',
 	mcpProxyUrl: 'http://127.0.0.1:8790/internal/mcp/s1/secret',
-	providerKeys: { anthropic: 'sk-ant-test' },
+	inference: { keys: { anthropic: 'sk-ant-test' } },
 };
+
+describe('generateProviderConfig', () => {
+	test('native provider -> apiKey only; model set; enabled', () => {
+		const g = generateProviderConfig({ keys: { openai: 'sk-o' }, model: 'openai/gpt-5.6-luna' });
+		expect(g.provider.openai).toEqual({ options: { apiKey: '{env:AGENT_KEY_OPENAI}' } });
+		expect(g.enabled).toContain('openai');
+		expect(g.childEnv.AGENT_KEY_OPENAI).toBe('sk-o');
+		expect(g.model).toBe('openai/gpt-5.6-luna');
+	});
+
+	test('openai-compatible provider -> npm + baseURL + explicit models entry', () => {
+		const fixtureDefs: ProviderDef[] = [
+			{ id: 'oc', rrNode: 'llm_oc', label: 'OC Compat', keyVar: 'ROCKETRIDE_OC_KEY', mode: 'openai-compatible', baseURL: 'https://oc.example.com/v1' },
+		];
+		const g = generateProviderConfig({ keys: { oc: 'sk-oc' }, model: 'oc/some-model-9' }, fixtureDefs);
+		expect(g.provider.oc).toEqual({
+			npm: '@ai-sdk/openai-compatible',
+			name: 'OC Compat',
+			options: { baseURL: 'https://oc.example.com/v1', apiKey: '{env:AGENT_KEY_OC}' },
+			models: { 'some-model-9': { name: 'some-model-9' } },
+		});
+		expect(g.enabled).toContain('oc');
+		expect(g.childEnv.AGENT_KEY_OC).toBe('sk-oc');
+		expect(g.model).toBe('oc/some-model-9');
+	});
+
+	test('unknown provider id in keys is skipped (no registry entry)', () => {
+		const g = generateProviderConfig({ keys: { mystery: 'sk-x' } }, []);
+		expect(g.provider).toEqual({});
+		expect(g.enabled).toEqual([]);
+		expect(g.childEnv).toEqual({});
+	});
+
+	test('a model naming a provider that was never enabled is dropped', () => {
+		const g = generateProviderConfig({ keys: { openai: 'sk-o' }, model: 'anthropic/claude-x' });
+		expect(g.model).toBeUndefined();
+	});
+});
 
 describe('buildConfigContent', () => {
 	test('round-trips the locked config and keeps the deny wall', () => {
@@ -75,6 +114,40 @@ describe('buildConfigContent', () => {
 		const bad = tamperedConfigPath(mutate);
 		expect(() => buildConfigContent(bad)).toThrow(expected);
 	});
+
+	// Task 7: prove the openai-compatible branch end-to-end through buildConfigContent, not just
+	// generateProviderConfig in isolation (already unit-tested above under `generateProviderConfig`).
+	// v1 ships only native providers (openai/anthropic/deepseek — see providers.ts), so this drives
+	// the branch via the `providerDefs` test-only seam rather than adding an unverified provider to
+	// the shipped registry.
+	describe('openai-compatible generation, end-to-end (Task 7)', () => {
+		const fixtureDefs: ProviderDef[] = [
+			{ id: 'oc', rrNode: 'llm_oc', label: 'OC Compat', keyVar: 'ROCKETRIDE_OC_KEY', mode: 'openai-compatible', baseURL: 'https://api.example.com/v1' },
+		];
+		const inference = { keys: { oc: 'sk-oc-test' }, model: 'oc/some-model-9' };
+
+		test('buildConfigContent emits the full openai-compatible provider block, model, and enabled_providers', () => {
+			const content = JSON.parse(buildConfigContent(cfg.lockedConfigPath, { inference, providerDefs: fixtureDefs }));
+			expect(content.provider.oc).toEqual({
+				npm: '@ai-sdk/openai-compatible',
+				name: 'OC Compat',
+				options: { baseURL: 'https://api.example.com/v1', apiKey: '{env:AGENT_KEY_OC}' },
+				models: { 'some-model-9': { name: 'some-model-9' } },
+			});
+			expect(content.model).toBe('oc/some-model-9');
+			expect(content.enabled_providers).toEqual(['oc']);
+			// The security asserts ran against the untouched locked file first — the deny wall
+			// survives generation on the openai-compatible path exactly as it does on native.
+			expect(content.permission.bash).toBe('deny');
+			expect(content.permission.edit).toEqual({ '**': 'deny', '*.pipe': 'allow', '**/*.pipe': 'allow' });
+			expect(content.autoupdate).toBe(false);
+		});
+
+		test('security asserts still run FIRST on a loosened config, even on the openai-compatible path', () => {
+			const bad = tamperedConfigPath((c) => { c.permission.bash = 'allow'; });
+			expect(() => buildConfigContent(bad, { inference, providerDefs: fixtureDefs })).toThrow(/deny bash/);
+		});
+	});
 });
 
 describe('buildChildEnv', () => {
@@ -99,8 +172,14 @@ describe('buildChildEnv', () => {
 		expect(env.OPENCODE_CONFIG_CONTENT).toContain('"bash": "deny"');
 		expect(env.OPENCODE_SERVER_PASSWORD).toBe('pw123');
 		expect(env.RR_MCP_PROXY_URL).toBe(spawnOpts.mcpProxyUrl);
-		expect(env.AGENT_ANTHROPIC_KEY).toBe('sk-ant-test');
-		expect(env.AGENT_OPENAI_KEY).toBeUndefined();
+		expect(env.AGENT_KEY_ANTHROPIC).toBe('sk-ant-test');
+		expect(env.AGENT_KEY_OPENAI).toBeUndefined();
+	});
+
+	test('generates the provider block from the resolved inference settings', () => {
+		const content = JSON.parse(env.OPENCODE_CONFIG_CONTENT);
+		expect(content.provider).toEqual({ anthropic: { options: { apiKey: '{env:AGENT_KEY_ANTHROPIC}' } } });
+		expect(content.enabled_providers).toEqual(['anthropic']);
 	});
 
 	test('does not leak the parent environment', () => {
@@ -132,7 +211,7 @@ test('authHeader is opencode:<password> basic auth', () => {
 // Phase 5, Task 5.1b (VERIFY V1): the eval-only providerBaseUrlOverride hook.
 describe('buildConfigContent providerBaseUrlOverride (Phase 5, Task 5.1b)', () => {
 	test('merges provider.<id>.options.baseURL additively, alongside the existing apiKey placeholder', () => {
-		const content = JSON.parse(buildConfigContent(cfg.lockedConfigPath, { anthropic: 'http://127.0.0.1:4096/v1' }));
+		const content = JSON.parse(buildConfigContent(cfg.lockedConfigPath, { providerBaseUrlOverride: { anthropic: 'http://127.0.0.1:4096/v1' } }));
 		expect(content.provider.anthropic.options.baseURL).toBe('http://127.0.0.1:4096/v1');
 		expect(content.provider.anthropic.options.apiKey).toBe('{env:AGENT_ANTHROPIC_KEY}');
 		// openai is untouched — only the supplied provider ids are merged.
@@ -149,7 +228,17 @@ describe('buildConfigContent providerBaseUrlOverride (Phase 5, Task 5.1b)', () =
 		const loose = JSON.parse(fs.readFileSync(cfg.lockedConfigPath, 'utf8'));
 		loose.permission.bash = 'allow';
 		fs.writeFileSync(bad, JSON.stringify(loose));
-		expect(() => buildConfigContent(bad, { anthropic: 'http://127.0.0.1:4096/v1' })).toThrow(/deny bash/);
+		expect(() => buildConfigContent(bad, { providerBaseUrlOverride: { anthropic: 'http://127.0.0.1:4096/v1' } })).toThrow(/deny bash/);
+	});
+
+	test('applies AFTER a generated provider block, overriding the generated baseURL', () => {
+		const content = JSON.parse(buildConfigContent(cfg.lockedConfigPath, {
+			inference: { keys: { anthropic: 'sk-ant-eval' } },
+			providerBaseUrlOverride: { anthropic: 'http://127.0.0.1:4096/v1' },
+		}));
+		expect(content.provider.anthropic.options.apiKey).toBe('{env:AGENT_KEY_ANTHROPIC}');
+		expect(content.provider.anthropic.options.baseURL).toBe('http://127.0.0.1:4096/v1');
+		expect(content.enabled_providers).toEqual(['anthropic']);
 	});
 });
 
@@ -172,7 +261,7 @@ describe('spawnOpencodeServer failure cleanup', () => {
 					workspaceDir: path.join(dir, 'workspace'),
 					sessionHome: path.join(dir, 'home'),
 					mcpProxyUrl: 'http://127.0.0.1:9/internal/mcp/spawnfail/x',
-					providerKeys: { anthropic: 'sk-ant-dummy' },
+					inference: { keys: { anthropic: 'sk-ant-dummy' } },
 				}),
 			).rejects.toThrow(/exited during startup/);
 			expect(killSpy).toHaveBeenCalledWith('SIGTERM');
@@ -193,7 +282,7 @@ IT('spawnOpencodeServer (integration, needs OPENCODE_BIN)', () => {
 			workspaceDir: path.join(dir, 'workspace'),
 			sessionHome: path.join(dir, 'home'),
 			mcpProxyUrl: 'http://127.0.0.1:9/internal/mcp/it1/x',
-			providerKeys: { anthropic: 'sk-ant-dummy' },
+			inference: { keys: { anthropic: 'sk-ant-dummy' } },
 		});
 		try {
 			const unauth = await fetch(`${handle.baseUrl}/global/health`);

@@ -26,11 +26,11 @@ import { EventEmitter } from 'node:events';
 import { loadConfig } from '../src/config';
 import { MemorySessionIndex } from '../src/index';
 import { SessionManager, SessionManagerDeps } from '../src/session';
-import { HttpError, Identity, KeyResolver, LiveSession, ProviderKeys, SessionRecord } from '../src/types';
+import { HttpError, Identity, InferenceSettings, KeyResolver, LiveSession, SessionRecord } from '../src/types';
 
 class FakeKeyResolver implements KeyResolver {
-	async resolve(): Promise<ProviderKeys> {
-		return { anthropic: 'sk-ant-fake' };
+	async resolve(): Promise<InferenceSettings> {
+		return { keys: { anthropic: 'sk-ant-fake' } };
 	}
 }
 
@@ -48,7 +48,7 @@ class FakeSessionManager extends SessionManager {
 		super(deps);
 	}
 
-	protected async attach(record: SessionRecord, _providerKeys: ProviderKeys, credential: string, sessionRoot: string): Promise<LiveSession> {
+	protected async attach(record: SessionRecord, _settings: InferenceSettings, credential: string, sessionRoot: string): Promise<LiveSession> {
 		await new Promise((resolve) => setTimeout(resolve, this.spawnDelayMs));
 		if (this.shouldFail()) throw new Error('fake spawn failure');
 		return {
@@ -123,7 +123,7 @@ describe('SessionManager.create() session-cap concurrency', () => {
  * child) from the already-covered "attach() itself throws" case above. */
 class KillTrackingSessionManager extends SessionManager {
 	readonly killSpy = jest.fn();
-	protected async attach(record: SessionRecord, _providerKeys: ProviderKeys, credential: string, sessionRoot: string): Promise<LiveSession> {
+	protected async attach(record: SessionRecord, _settings: InferenceSettings, credential: string, sessionRoot: string): Promise<LiveSession> {
 		const live: LiveSession = {
 			record,
 			proc: { kill: this.killSpy } as unknown as LiveSession['proc'],
@@ -202,6 +202,52 @@ describe('SessionManager.create() / resume() clean up a SUCCESSFUL attach() on a
 
 		expect(manager.killSpy).toHaveBeenCalledWith('SIGTERM');
 		expect(manager.listLive()).toHaveLength(0);
+	});
+});
+
+describe('SessionManager.restart() — mid-session re-spawn with freshly-resolved settings', () => {
+	test('kills the live child and re-spawns with the re-resolved model, preserving the session', async () => {
+		const index = new MemorySessionIndex();
+		// Model changes on each resolve() so we can prove restart() RE-resolves settings (not a no-op).
+		let resolves = 0;
+		const keys: KeyResolver = { resolve: async (): Promise<InferenceSettings> => ({ keys: { openai: 'sk' }, model: `openai/model-${++resolves}` }) };
+		const attachedModels: (string | undefined)[] = [];
+		const kills: jest.Mock[] = [];
+
+		class RestartTrackingManager extends SessionManager {
+			protected async attach(record: SessionRecord, settings: InferenceSettings, credential: string, sessionRoot: string): Promise<LiveSession> {
+				attachedModels.push(settings.model);
+				const kill = jest.fn();
+				kills.push(kill);
+				const live: LiveSession = {
+					record, proc: { kill } as unknown as LiveSession['proc'], port: 0, password: 'fake', baseUrl: 'http://127.0.0.1:0',
+					mcpSecret: 'fake', latestToken: credential, workspaceDir: sessionRoot, sessionHome: sessionRoot,
+					events: new EventEmitter(), openStreams: 0, turn: {}, model: settings.model,
+				};
+				// Register into the private live map (same reach-through as KillTrackingSessionManager) so
+				// restart()'s killAndEvict + resume see this session, matching the real attach().
+				(this as unknown as { live: Map<string, LiveSession> }).live.set(record.sessionId, live);
+				return live;
+			}
+		}
+
+		const manager = new RestartTrackingManager({
+			cfg: loadConfig({ RR_MCP_UPSTREAM: 'http://localhost:8080/mcp', RR_MAX_SESSIONS_PER_TENANT: '2' }),
+			keys, index,
+			storeFactory: async () => ({ fsReadString: async () => '', fsWriteString: async () => undefined, close: async () => undefined }),
+		});
+
+		const rec = await manager.create({ identity, credential: 'cred' });
+		expect(attachedModels).toEqual(['openai/model-1']);
+		expect(manager.getLive(rec.sessionId)?.model).toBe('openai/model-1');
+
+		const restarted = await manager.restart(rec.sessionId, identity, 'cred');
+
+		expect(restarted.sessionId).toBe(rec.sessionId); // same session
+		expect(kills[0]).toHaveBeenCalledWith('SIGTERM'); // the original child was killed
+		expect(attachedModels).toEqual(['openai/model-1', 'openai/model-2']); // settings re-resolved -> new model
+		expect(manager.getLive(rec.sessionId)?.model).toBe('openai/model-2'); // live session now runs the new model
+		expect(manager.listLive()).toHaveLength(1); // exactly one live child, not an orphan pair
 	});
 });
 

@@ -23,7 +23,8 @@
  */
 
 import { createDecipheriv, createHmac, timingSafeEqual } from 'node:crypto';
-import type { KeyResolver, ProviderKeys } from './types';
+import { providerByKeyVar } from './providers';
+import type { InferenceSettings, KeyResolver, ProviderKeyMap } from './types';
 
 /**
  * Fernet decrypt (spec: version 0x80 | ts(8) | iv(16) | ciphertext | hmac(32);
@@ -56,15 +57,70 @@ export function fernetDecrypt(token: string, key: string): Buffer {
 export class SaasVaultKeyResolver implements KeyResolver {
 	constructor(private vaultUrl: string, private encryptionKey: string) {}
 
-	async resolve(credential: string): Promise<ProviderKeys> {
+	async resolve(credential: string): Promise<InferenceSettings> {
 		const res = await fetch(`${this.vaultUrl}/agent/keys/blob`, {
 			headers: { authorization: `Bearer ${credential}` },
 		});
-		if (res.status === 404) return {};
+		if (res.status === 404) return { keys: {} };
 		if (!res.ok) throw new Error(`vault blob fetch failed: ${res.status}`);
 		const body = (await res.json()) as { encrypted: string | null };
-		if (!body.encrypted) return {};
+		if (!body.encrypted) return { keys: {} };
 		const blob = JSON.parse(fernetDecrypt(body.encrypted, this.encryptionKey).toString('utf8')) as Record<string, string>;
-		return { anthropic: blob.AGENT_ANTHROPIC_KEY, openai: blob.AGENT_OPENAI_KEY };
+		const keys: ProviderKeyMap = {};
+		if (blob.AGENT_ANTHROPIC_KEY) keys.anthropic = blob.AGENT_ANTHROPIC_KEY;
+		if (blob.AGENT_OPENAI_KEY) keys.openai = blob.AGENT_OPENAI_KEY;
+		return { keys };
+	}
+}
+
+/** User-variable name that carries the chosen `<opencodeProviderId>/<modelId>` model string. */
+export const MODEL_VAR = 'ROCKETRIDE_AGENT_MODEL';
+
+/**
+ * OSS/local + SaaS-common resolver: reads the user's RocketRide user-scope variables
+ * (`ROCKETRIDE_*_KEY` + `ROCKETRIDE_AGENT_MODEL`) via an injected `storeFactory` that opens
+ * a user-authed store client. Never throws — OSS/local dev has no `rrext_account_me`, so a
+ * missing `account`/`getEnv` (or any other failure) resolves to `{ keys: {} }` instead of
+ * breaking the caller.
+ */
+export class UserVarKeyResolver implements KeyResolver {
+	constructor(private storeFactory: (credential: string) => Promise<any>) {}
+
+	async resolve(credential: string): Promise<InferenceSettings> {
+		let env: Record<string, string> = {};
+		let store: any;
+		try {
+			store = await this.storeFactory(credential);
+			env = (await store.account?.getEnv?.('user')) ?? {};
+		} catch {
+			return { keys: {} };
+		} finally {
+			await store?.close?.().catch(() => undefined);
+		}
+		const keys: ProviderKeyMap = {};
+		for (const [k, v] of Object.entries(env)) {
+			const def = providerByKeyVar(k);
+			if (def && typeof v === 'string' && v) keys[def.id] = v;
+		}
+		const model = typeof env[MODEL_VAR] === 'string' ? env[MODEL_VAR] : undefined;
+		return { keys, model };
+	}
+}
+
+/**
+ * Composes `UserVarKeyResolver` (primary) over `EnvKeyResolver` (fallback): user-configured
+ * variables win per-provider; env fills any provider the user hasn't set a key for. Model
+ * prefers the user's choice, falling back to the env default. Never throws — both underlying
+ * resolvers already degrade to `{ keys: {} }` on failure.
+ */
+export class FallbackKeyResolver implements KeyResolver {
+	constructor(private primary: KeyResolver, private fallback: KeyResolver) {}
+
+	async resolve(credential: string): Promise<InferenceSettings> {
+		const [user, env] = await Promise.all([this.primary.resolve(credential), this.fallback.resolve(credential)]);
+		return {
+			keys: { ...env.keys, ...user.keys },
+			model: user.model ?? env.model,
+		};
 	}
 }

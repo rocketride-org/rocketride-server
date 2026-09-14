@@ -47,7 +47,7 @@ import { authHeader } from '../../src/opencode';
 import { isToolCallRequest, isToolCallResponseOk, parseJsonRpcRequest } from '../../src/proxy';
 import { SessionManager } from '../../src/session';
 import { MemorySessionIndex } from '../../src/sessionIndex';
-import type { Identity, KeyResolver, LiveSession, ProviderKeys, StoreFs } from '../../src/types';
+import type { Identity, InferenceSettings, KeyResolver, LiveSession, StoreFs } from '../../src/types';
 import { BRIEFS } from './briefs';
 import { startReplayModelServer } from './replay-model';
 import { scorePipe, scoreSuite } from './score';
@@ -393,7 +393,7 @@ export async function runBrief(brief: EvalBrief, opts: RunnerOpts): Promise<Brie
 	// provider.anthropic.options.baseURL AFTER the deny-wall/fail-closed checks already passed.
 	if (modelServer) cfg.providerBaseUrlOverride = { anthropic: `${modelServer.url}/v1` };
 
-	const keys: KeyResolver = { resolve: async (): Promise<ProviderKeys> => ({ anthropic: anthropicKey }) };
+	const keys: KeyResolver = { resolve: async (): Promise<InferenceSettings> => ({ keys: { anthropic: anthropicKey } }) };
 	const index = new MemorySessionIndex();
 	const manager = new SessionManager({
 		cfg,

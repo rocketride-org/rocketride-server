@@ -29,9 +29,11 @@ import { RocketRideClient } from 'rocketride';
 import { Auditor, NdjsonSink, SaasSink, digestArgs, extractPipePaths } from './audit';
 import { EngineIdentityResolver } from './auth';
 import { AgentConfig, loadConfig } from './config';
-import { SaasVaultKeyResolver } from './keys';
+import { FallbackKeyResolver, SaasVaultKeyResolver, UserVarKeyResolver } from './keys';
 import { log } from './log';
 import { authHeader } from './opencode';
+import { PROVIDERS } from './providers';
+import { getNativeModelCatalog, type CatalogModel } from './catalog';
 import {
 	forward, isToolCallRequest, JsonRpcRequestFrame, OPENCODE_TO_MCP_HEADERS, PANEL_TO_OPENCODE_HEADERS,
 	parseJsonRpcRequest, readRequestBody, redactApiKeys, sanitizeMcpToolSchemas,
@@ -40,7 +42,7 @@ import { reconcileOnBoot, startReaper } from './reaper';
 import { MemorySessionIndex, RedisSessionIndex } from './sessionIndex';
 import { SessionManager } from './session';
 import { appendSyntheticToolsToListSse, handleSyntheticToolCall, isSyntheticToolCall, SyntheticCtx } from './synthetics';
-import { HttpError, Identity, IdentityResolver, KeyResolver, ProviderKeys, SessionIndex, SessionRecord, StoreFs } from './types';
+import { HttpError, Identity, IdentityResolver, InferenceSettings, KeyResolver, ProviderKeyMap, SessionIndex, SessionRecord, StoreFs } from './types';
 import { buildTurnSystemAndConsume, injectSystemIntoPromptBody } from './turnContext';
 import { commitTurn, listTurns, phaseBody } from './workspace';
 
@@ -64,6 +66,24 @@ export async function openStore(uri: string, credential: string): Promise<StoreF
 	};
 }
 
+/**
+ * `UserVarKeyResolver`'s `storeFactory`: a real `RocketRideClient` authenticated with the
+ * session's own credential, exposing just `account.getEnv` + `close` (the store adapter
+ * shape `UserVarKeyResolver` expects — see keys.ts). Mirrors `openStore` above, but returns
+ * the account API surface instead of the fs surface, since key resolution never needs fs.
+ */
+async function openAccountStore(uri: string, credential: string) {
+	const client = new RocketRideClient({ uri, module: 'rocket-agent', env: {} });
+	await client.login(credential);
+	return {
+		account: client.account,
+		close: async () => {
+			await client.logout().catch(() => undefined);
+			await client.disconnect();
+		},
+	};
+}
+
 /** OSS default: no multi-user identity — everything belongs to `local`. Task 3.3 adds EngineIdentityResolver. */
 export class StaticIdentityResolver implements IdentityResolver {
 	async resolve(): Promise<Identity> {
@@ -74,8 +94,11 @@ export class StaticIdentityResolver implements IdentityResolver {
 /** OSS default: inference keys from rocket-agent's own env. Task 3.3 adds SaasVaultKeyResolver. */
 export class EnvKeyResolver implements KeyResolver {
 	constructor(private env: NodeJS.ProcessEnv = process.env) {}
-	async resolve(): Promise<ProviderKeys> {
-		return { anthropic: this.env.AGENT_ANTHROPIC_KEY, openai: this.env.AGENT_OPENAI_KEY };
+	async resolve(): Promise<InferenceSettings> {
+		const keys: ProviderKeyMap = {};
+		if (this.env.AGENT_ANTHROPIC_KEY) keys.anthropic = this.env.AGENT_ANTHROPIC_KEY;
+		if (this.env.AGENT_OPENAI_KEY) keys.openai = this.env.AGENT_OPENAI_KEY;
+		return { keys, model: this.env.AGENT_MODEL };
 	}
 }
 
@@ -86,6 +109,12 @@ export interface AppDeps {
 	identity: IdentityResolver;
 	/** Task 5.2a: emits `mcp.tool` / `agent.prompt` / `agent.permission` audit records. Defaults to an `NdjsonSink` under `cfg.dataDir` — every existing caller that doesn't pass one keeps working unchanged. */
 	auditor?: Auditor;
+	/**
+	 * Native providers' model catalog for `GET /agent/providers` (opencode provider id -> models).
+	 * Defaults to `getNativeModelCatalog(cfg)`, which spawns a throwaway opencode to read its
+	 * built-in list. Injectable so tests supply a deterministic stub instead of a real spawn.
+	 */
+	nativeCatalog?: () => Promise<Record<string, CatalogModel[]>>;
 }
 
 /** Parses a possibly-empty request body buffer as JSON; undefined on empty/invalid input. Used only to build the audit `argsDigest` — never to change forwarding behavior. */
@@ -187,6 +216,28 @@ export function createApp(deps: AppDeps): express.Express {
 		} catch (err) { next(err); }
 	});
 
+	// Task 4 (Phase 5 revision): lets the panel render the bring-your-own-key/model picker —
+	// each supported provider (Task 1's PROVIDERS registry) plus its selectable models.
+	// Model source depends on `mode`: `native` providers' models come from opencode's own
+	// built-in catalog (catalog.ts — cached, offline); `openai-compatible` providers opencode
+	// can't enumerate carry a curated `models` list in the registry. Deliberately strips
+	// `baseURL` (the compat upstream URL) and every secret — only the picker's needs are sent.
+	api.get('/providers', async (_req: Request & { identity?: Identity }, res, next) => {
+		try {
+			const nativeModels = await (deps.nativeCatalog ?? (() => getNativeModelCatalog(deps.cfg)))();
+			res.json({
+				providers: PROVIDERS.map(({ id, rrNode, label, keyVar, mode, models }) => ({
+					id,
+					rrNode,
+					label,
+					keyVar,
+					mode,
+					models: mode === 'native' ? (nativeModels[id] ?? []) : (models ?? []),
+				})),
+			});
+		} catch (err) { next(err); }
+	});
+
 	// 3.5: owner-scoped listing for the panel's session picker (Phase 4A consumes this).
 	api.get('/sessions', async (req: Request & { identity?: Identity }, res, next) => {
 		try {
@@ -221,6 +272,16 @@ export function createApp(deps: AppDeps): express.Express {
 		} catch (err) { next(err); }
 	});
 
+	// Restart a live session so it re-spawns opencode with freshly-resolved inference settings —
+	// the panel calls this when the user changes the model mid-session (resume alone no-ops on a
+	// live session). Transcript is preserved; same owner-scoping/429/412 as resume.
+	api.post('/sessions/:id/restart', async (req: Request & { identity?: Identity; credential?: string }, res, next) => {
+		try {
+			const record = await deps.manager.restart(req.params.id, req.identity!, req.credential!);
+			res.json({ ...publicRecord(record), url: `/agent/sessions/${record.sessionId}/opencode` });
+		} catch (err) { next(err); }
+	});
+
 	api.get('/sessions/:id/health', async (req: Request & { identity?: Identity }, res, next) => {
 		try {
 			const record = await deps.index.get(req.params.id);
@@ -237,7 +298,10 @@ export function createApp(deps: AppDeps): express.Express {
 			// `/mcp`; the dev stub is a bare loopback URL. Lets the panel show "real" vs "stub" at a glance
 			// (opencode's tool-list endpoints only expose built-ins, not the MCP tools, so this is the
 			// authoritative signal). No URL is leaked — just the derived label.
-			res.json({ status: record.status, opencode: opencodeOk, engine: deps.cfg.mcpUpstream.includes('/mcp') ? 'real' : 'stub' });
+			// `model` is the `<provider>/<model>` string the live opencode child was spawned with
+			// (undefined when not live, or when the locked config pinned the default). The panel
+			// compares it to the user's currently-chosen model to offer a resume-to-apply on a change.
+			res.json({ status: record.status, opencode: opencodeOk, engine: deps.cfg.mcpUpstream.includes('/mcp') ? 'real' : 'stub', model: live?.model });
 		} catch (err) { next(err); }
 	});
 
@@ -575,7 +639,18 @@ if (require.main === module) {
 		// OSS users who point ROCKETRIDE_URI at a real engine can opt into EngineIdentityResolver
 		// later; v1 keeps OSS single-user (StaticIdentityResolver / EnvKeyResolver).
 		const identity = cfg.mode === 'saas' ? new EngineIdentityResolver(cfg.rocketrideUri) : new StaticIdentityResolver();
-		const keys = cfg.mode === 'saas' ? new SaasVaultKeyResolver(cfg.vaultUrl!, cfg.encryptionKey!) : new EnvKeyResolver();
+		// OSS default: the user's own ROCKETRIDE_*_KEY/ROCKETRIDE_AGENT_MODEL user-variables win;
+		// rocket-agent's own env fills any provider the user hasn't configured (no user-variable
+		// support in plain OSS/local dev — e.g. no `rrext_account_me` — degrades to env-only).
+		const keys = cfg.mode === 'saas'
+			? new FallbackKeyResolver(
+				new UserVarKeyResolver((credential) => openAccountStore(cfg.rocketrideUri, credential)),
+				new SaasVaultKeyResolver(cfg.vaultUrl!, cfg.encryptionKey!),
+			)
+			: new FallbackKeyResolver(
+				new UserVarKeyResolver((credential) => openAccountStore(cfg.rocketrideUri, credential)),
+				new EnvKeyResolver(),
+			);
 		// Task 5.2a: one Auditor, shared between SessionManager (lifecycle records) and
 		// createApp's routes (mcp.tool / agent.prompt / agent.permission) — a single sink
 		// instance per process, not two independently-opened NdjsonSink file handles racing

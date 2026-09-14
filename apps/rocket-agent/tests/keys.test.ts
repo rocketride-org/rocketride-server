@@ -24,7 +24,8 @@
 
 import { createCipheriv, createHmac, randomBytes } from 'node:crypto';
 import { EnvKeyResolver } from '../src/index';
-import { fernetDecrypt, SaasVaultKeyResolver } from '../src/keys';
+import { FallbackKeyResolver, fernetDecrypt, SaasVaultKeyResolver, UserVarKeyResolver } from '../src/keys';
+import type { InferenceSettings, KeyResolver } from '../src/types';
 import * as http from 'node:http';
 
 /** Spec-faithful Fernet encrypt for tests (v0x80, ts, iv, AES-128-CBC, HMAC-SHA256). */
@@ -69,8 +70,8 @@ describe('fernetDecrypt', () => {
 
 describe('resolvers', () => {
 	test('EnvKeyResolver reads AGENT_* from env', async () => {
-		const keys = await new EnvKeyResolver({ AGENT_OPENAI_KEY: 'sk-o' } as NodeJS.ProcessEnv).resolve();
-		expect(keys).toEqual({ anthropic: undefined, openai: 'sk-o' });
+		const settings = await new EnvKeyResolver({ AGENT_OPENAI_KEY: 'sk-o' } as NodeJS.ProcessEnv).resolve();
+		expect(settings).toEqual({ keys: { openai: 'sk-o' }, model: undefined });
 	});
 
 	test('SaasVaultKeyResolver fetches blob with the user token and decrypts locally', async () => {
@@ -85,11 +86,57 @@ describe('resolvers', () => {
 		const port = (srv.address() as { port: number }).port;
 		try {
 			const resolver = new SaasVaultKeyResolver(`http://127.0.0.1:${port}`, KEY);
-			const keys = await resolver.resolve('zitadel-token-1');
+			const settings = await resolver.resolve('zitadel-token-1');
 			expect(seenAuth).toBe('Bearer zitadel-token-1');
-			expect(keys.anthropic).toBe('sk-vault');
+			expect(settings.keys.anthropic).toBe('sk-vault');
 		} finally {
 			srv.close();
 		}
+	});
+
+	describe('UserVarKeyResolver', () => {
+		const fakeEnv = { ROCKETRIDE_OPENAI_KEY: 'sk-o', ROCKETRIDE_DEEPSEEK_KEY: 'sk-d', ROCKETRIDE_AGENT_MODEL: 'openai/gpt-5.6-luna', UNRELATED: 'x' };
+		const storeFactory = async () => ({ account: { getEnv: async () => fakeEnv } } as any);
+
+		test('maps ROCKETRIDE_*_KEY -> provider id and reads the model', async () => {
+			const r = await new UserVarKeyResolver(storeFactory).resolve('cred');
+			expect(r.keys).toEqual({ openai: 'sk-o', deepseek: 'sk-d' });
+			expect(r.model).toBe('openai/gpt-5.6-luna');
+		});
+
+		test('falls back to empty (no throw) when the store lacks account/get_env', async () => {
+			const r = await new UserVarKeyResolver(async () => ({} as any)).resolve('cred');
+			expect(r).toEqual({ keys: {} });
+		});
+	});
+
+	// Finding 1 regression: SaaS mode wires keys = FallbackKeyResolver(UserVarKeyResolver, SaasVaultKeyResolver)
+	// (src/index.ts) so the gear-settings user-variables (all providers incl. deepseek, plus the
+	// model) resolve FIRST, with the vault blob only filling a provider the user hasn't set in
+	// user-variables. Exercise that exact composition here with a stub standing in for the vault
+	// HTTP call (already covered by the 'SaasVaultKeyResolver fetches blob...' test above).
+	describe('FallbackKeyResolver (SaaS composition: user-variables primary, vault fallback)', () => {
+		const fakeEnv = { ROCKETRIDE_DEEPSEEK_KEY: 'sk-d', ROCKETRIDE_AGENT_MODEL: 'deepseek/deepseek-chat' };
+		const storeFactory = async () => ({ account: { getEnv: async () => fakeEnv } } as any);
+		const vaultStub: KeyResolver = { resolve: async (): Promise<InferenceSettings> => ({ keys: { openai: 'sk-vault' } }) };
+
+		test('resolves deepseek key + model from user-variables, and fills the gap from the vault fallback', async () => {
+			const saasKeys = new FallbackKeyResolver(new UserVarKeyResolver(storeFactory), vaultStub);
+			const settings = await saasKeys.resolve('cred');
+			expect(settings.keys.deepseek).toBe('sk-d');
+			expect(settings.model).toBe('deepseek/deepseek-chat');
+			// openai was never set in user-variables -> the vault fallback fills that gap.
+			expect(settings.keys.openai).toBe('sk-vault');
+		});
+
+		test('user-variables win over the vault fallback for a provider set in both', async () => {
+			const overlapEnv = { ROCKETRIDE_OPENAI_KEY: 'sk-uservar' };
+			const saasKeys = new FallbackKeyResolver(
+				new UserVarKeyResolver(async () => ({ account: { getEnv: async () => overlapEnv } } as any)),
+				vaultStub,
+			);
+			const settings = await saasKeys.resolve('cred');
+			expect(settings.keys.openai).toBe('sk-uservar');
+		});
 	});
 });

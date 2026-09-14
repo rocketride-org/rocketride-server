@@ -29,14 +29,24 @@ import * as net from 'node:net';
 import * as path from 'node:path';
 import type { AgentConfig } from './config';
 import { log } from './log';
-import type { ProviderKeys } from './types';
+import { PROVIDERS, type ProviderDef } from './providers';
+import type { InferenceSettings } from './types';
 
 export interface SpawnOpts {
 	sessionId: string;
 	workspaceDir: string;
 	sessionHome: string;
 	mcpProxyUrl: string;
-	providerKeys: ProviderKeys;
+	inference: InferenceSettings;
+	/**
+	 * Verbatim `OPENCODE_CONFIG_CONTENT` to use INSTEAD of building one from the locked config +
+	 * `inference`. Used ONLY by the model-catalog spawn (catalog.ts), which runs no agent turn
+	 * (it reads `/provider` and dies) and must NOT carry the locked config's
+	 * `enabled_providers` restriction — that restriction empties `/provider`'s `all` list.
+	 * Never set for a real session spawn, which always goes through the security-asserted
+	 * `buildConfigContent`.
+	 */
+	configContentOverride?: string;
 }
 
 export interface OpencodeHandle {
@@ -59,6 +69,51 @@ export interface OpencodeHandle {
 //    `*.pipe` covers root files, `**/*.pipe` covers nested ones; everything else falls to `**` deny.
 const REQUIRED_EDIT_WALL: Record<string, string> = { '**': 'deny', '*.pipe': 'allow', '**/*.pipe': 'allow' };
 
+/**
+ * Generate the opencode `provider`/`enabled_providers` config block, the child-process env
+ * carrying the resolved keys, and the (validated) `model` string — all derived from the
+ * user-chosen `InferenceSettings` returned by a `KeyResolver` (Task 2). Replaces the old
+ * hardcoded two-provider (anthropic/openai) wiring in `buildConfigContent`/`buildChildEnv`.
+ *
+ * Each provider's key never travels through the JSON config itself — only an
+ * `{env:AGENT_KEY_<ID>}` placeholder does — the real value is injected into `childEnv` and
+ * opencode resolves the placeholder from its own process env at runtime (same pattern the
+ * locked config already used for `AGENT_ANTHROPIC_KEY`/`AGENT_OPENAI_KEY`, generalized to
+ * any provider in the registry).
+ *
+ * `defs` defaults to the shipped registry but is a parameter so the `openai-compatible`
+ * branch (no shipped provider currently uses it) is unit-testable with a fixture def.
+ */
+export function generateProviderConfig(
+	s: InferenceSettings,
+	defs: ProviderDef[] = PROVIDERS,
+): { provider: Record<string, unknown>; enabled: string[]; childEnv: Record<string, string>; model?: string } {
+	const provider: Record<string, unknown> = {};
+	const enabled: string[] = [];
+	const childEnv: Record<string, string> = {};
+	for (const [id, key] of Object.entries(s.keys)) {
+		const def = defs.find((d) => d.id === id);
+		if (!def) continue;
+		const envName = `AGENT_KEY_${id.toUpperCase()}`;
+		childEnv[envName] = key;
+		if (def.mode === 'openai-compatible') {
+			const modelId = s.model && s.model.startsWith(`${id}/`) ? s.model.slice(id.length + 1) : undefined;
+			provider[id] = {
+				npm: '@ai-sdk/openai-compatible',
+				name: def.label,
+				options: { baseURL: def.baseURL, apiKey: `{env:${envName}}` },
+				models: modelId ? { [modelId]: { name: modelId } } : {},
+			};
+		} else {
+			provider[id] = { options: { apiKey: `{env:${envName}}` } };
+		}
+		enabled.push(id);
+	}
+	// Only honor a model whose provider we actually enabled.
+	const model = s.model && enabled.some((id) => s.model!.startsWith(`${id}/`)) ? s.model : undefined;
+	return { provider, enabled, childEnv, model };
+}
+
 function isLockedEditWall(edit: unknown): boolean {
 	if (!edit || typeof edit !== 'object') return false;
 	const keys = Object.keys(edit as Record<string, unknown>);
@@ -73,7 +128,15 @@ function isLockedEditWall(edit: unknown): boolean {
 /**
  * Read + validate the locked config. Fails closed if the file was loosened.
  *
- * `providerBaseUrlOverride` (Phase 5, Task 5.1b — VERIFY V1) is an ADDITIVE eval-only hook:
+ * `opts.inference` (Task 3), when supplied, is the resolved `InferenceSettings` (Task 2) this
+ * session was started with. Every existing security assert below runs against the UNTOUCHED
+ * parsed file FIRST; only then does `generateProviderConfig` (Task 3) REPLACE the locked
+ * config's static `provider`/`enabled_providers` with the ones generated from the user's own
+ * keys/model, and set `model` when the resolved settings named one. Omitting `opts.inference`
+ * (e.g. a caller that only needs the round-tripped static config) leaves the locked file's
+ * provider block untouched.
+ *
+ * `opts.providerBaseUrlOverride` (Phase 5, Task 5.1b — VERIFY V1) is an ADDITIVE eval-only hook:
  * after every deny-wall/fail-closed check below has already passed against the untouched
  * file on disk, it merges `provider.<id>.options.baseURL` into the parsed config for each
  * entry supplied — confirmed against the pinned opencode release's own docs (Providers >
@@ -83,9 +146,20 @@ function isLockedEditWall(edit: unknown): boolean {
  * passes a `.../v1`-suffixed override. This never loosens a permission, never touches
  * autoupdate/share/snapshot, and never runs when the override is omitted (every real OSS/SaaS
  * deployment) — it only redirects where inference requests are SENT, not what the sandboxed
- * agent is ALLOWED to do.
+ * agent is ALLOWED to do. Applied AFTER the generated provider block, so it still overrides a
+ * generated entry's baseURL (used by the eval runner to redirect a native provider to a
+ * replay/proxy-record model server).
+ *
+ * `opts.providerDefs` is a TEST-ONLY seam mirroring `generateProviderConfig`'s own `defs`
+ * param: it lets a test drive the full locked-config-read -> security-asserts ->
+ * generate-and-merge -> serialize pipeline against a fixture `ProviderDef` (e.g. an
+ * `openai-compatible` entry) without adding an unverified provider to the shipped registry.
+ * Omitted in every real call site, which always generates against the shipped `PROVIDERS`.
  */
-export function buildConfigContent(lockedConfigPath: string, providerBaseUrlOverride?: Record<string, string>): string {
+export function buildConfigContent(
+	lockedConfigPath: string,
+	opts?: { inference?: InferenceSettings; providerBaseUrlOverride?: Record<string, string>; providerDefs?: ProviderDef[] },
+): string {
 	const parsed = JSON.parse(fs.readFileSync(lockedConfigPath, 'utf8'));
 	if (parsed?.permission?.bash !== 'deny') throw new Error('locked config must deny bash');
 	if (parsed?.permission?.external_directory !== 'deny') throw new Error('locked config must deny external_directory');
@@ -102,8 +176,14 @@ export function buildConfigContent(lockedConfigPath: string, providerBaseUrlOver
 	if (parsed?.autoupdate !== false) throw new Error('locked config must disable autoupdate');
 	if (parsed?.share !== 'disabled') throw new Error('locked config must disable share');
 	if (parsed?.snapshot !== false) throw new Error('locked config must disable snapshot');
-	if (providerBaseUrlOverride) {
-		for (const [providerId, baseURL] of Object.entries(providerBaseUrlOverride)) {
+	if (opts?.inference) {
+		const generated = generateProviderConfig(opts.inference, opts.providerDefs);
+		parsed.provider = generated.provider;
+		parsed.enabled_providers = generated.enabled;
+		if (generated.model) parsed.model = generated.model;
+	}
+	if (opts?.providerBaseUrlOverride) {
+		for (const [providerId, baseURL] of Object.entries(opts.providerBaseUrlOverride)) {
 			if (!baseURL) continue;
 			parsed.provider ??= {};
 			parsed.provider[providerId] ??= {};
@@ -114,13 +194,19 @@ export function buildConfigContent(lockedConfigPath: string, providerBaseUrlOver
 }
 
 export function buildChildEnv(cfg: AgentConfig, opts: SpawnOpts, password: string): Record<string, string> {
+	const generated = generateProviderConfig(opts.inference);
 	const env: Record<string, string> = {
 		PATH: process.env.PATH ?? '',
 		HOME: opts.sessionHome,
 		XDG_DATA_HOME: path.join(opts.sessionHome, 'data'),
 		XDG_CONFIG_HOME: path.join(opts.sessionHome, 'config'),
 		XDG_CACHE_HOME: path.join(opts.sessionHome, 'cache'),
-		OPENCODE_CONFIG_CONTENT: buildConfigContent(cfg.lockedConfigPath, cfg.providerBaseUrlOverride),
+		// The catalog spawn supplies its own minimal config (no enabled_providers restriction);
+		// every real session spawn builds the security-asserted config from the locked file.
+		OPENCODE_CONFIG_CONTENT: opts.configContentOverride ?? buildConfigContent(cfg.lockedConfigPath, {
+			inference: opts.inference,
+			providerBaseUrlOverride: cfg.providerBaseUrlOverride,
+		}),
 		OPENCODE_SERVER_PASSWORD: password,
 		OPENCODE_DISABLE_AUTOUPDATE: '1',
 		OPENCODE_DISABLE_MODELS_FETCH: '1',
@@ -128,9 +214,8 @@ export function buildChildEnv(cfg: AgentConfig, opts: SpawnOpts, password: strin
 		OPENCODE_DISABLE_LSP_DOWNLOAD: '1',
 		OPENCODE_DISABLE_CLAUDE_CODE: '1',
 		RR_MCP_PROXY_URL: opts.mcpProxyUrl,
+		...generated.childEnv,
 	};
-	if (opts.providerKeys.anthropic) env.AGENT_ANTHROPIC_KEY = opts.providerKeys.anthropic;
-	if (opts.providerKeys.openai) env.AGENT_OPENAI_KEY = opts.providerKeys.openai;
 	return env;
 }
 

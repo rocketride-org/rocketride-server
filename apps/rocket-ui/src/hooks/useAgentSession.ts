@@ -73,6 +73,8 @@ export interface UseAgentSessionResult {
 	spend: SpendState;
 	/** Loaded agent + tool inventory for the header status line; null until fetched (or if the fetch fails). */
 	agentInfo: AgentInfo | null;
+	/** The `<provider>/<model>` string the live opencode child is running (from /health); undefined until attached. Compare with the chosen model to detect a mid-session change. */
+	runningModel: string | undefined;
 	pendingPermission: OcPermissionAsk | null;
 	/** The pending present_gate ask, if any — mirrors pendingPermission's plumbing. */
 	pendingGate: OcGateAsk | null;
@@ -81,6 +83,8 @@ export interface UseAgentSessionResult {
 	send: (text: string) => void;
 	/** Abort the in-flight opencode turn (the Stop button) — halts a hung/runaway generation. */
 	stop: () => Promise<void>;
+	/** Re-spawn the session's opencode with freshly-resolved settings (applies a mid-session model change); transcript preserved, streams reopen. */
+	restart: () => Promise<void>;
 	answerPermission: (id: string, response: 'once' | 'always' | 'reject') => Promise<void>;
 	answerGate: (id: string, option: string) => Promise<void>;
 	save: () => Promise<string[]>;
@@ -112,6 +116,11 @@ export function useAgentSession(sessionId: string | null, onFileChange?: (file: 
 	const [pendingGate, setPendingGate] = useState<OcGateAsk | null>(null);
 	const [savedPipes, setSavedPipes] = useState<string[]>([]);
 	const [agentInfo, setAgentInfo] = useState<AgentInfo | null>(null);
+	// The `<provider>/<model>` string the LIVE opencode child is running (from /health). Compared
+	// against the user's currently-chosen model so the view can offer a restart-to-apply on a change.
+	const [runningModel, setRunningModel] = useState<string | undefined>(undefined);
+	// Bumped by restart() to force the attach effect to re-run (re-hydrate + reopen streams against the new child).
+	const [attachTick, setAttachTick] = useState(0);
 	const oidRef = useRef<string | null>(null);
 	const nextId = useRef(1);
 	const byOcId = useRef(new Map<string, number>()); // OpenCode part id -> ChatMessage id
@@ -190,9 +199,14 @@ export function useAgentSession(sessionId: string | null, onFileChange?: (file: 
 		};
 		void (async () => {
 			try {
-				const health = await agentApi.health(sessionId, ac.signal);
-				if (health.status === 'archived' || !health.opencode) await agentApi.resume(sessionId, ac.signal);
+				let health = await agentApi.health(sessionId, ac.signal);
+				if (health.status === 'archived' || !health.opencode) {
+					await agentApi.resume(sessionId, ac.signal);
+					// Re-fetch so `runningModel` reflects the freshly-spawned child, not the pre-resume (archived, model-less) state.
+					health = await agentApi.health(sessionId, ac.signal);
+				}
 				safeSet(() => setStatus(health.status === 'archived' ? 'active' : health.status));
+				safeSet(() => setRunningModel(health.model));
 				const inner = await agentApi.oc<Array<{ id: string }>>(sessionId, 'GET', '/session', undefined, ac.signal);
 				const oid = inner[0]?.id ?? (await agentApi.oc<{ id: string }>(sessionId, 'POST', '/session', {}, ac.signal)).id;
 				oidRef.current = oid;
@@ -282,7 +296,7 @@ export function useAgentSession(sessionId: string | null, onFileChange?: (file: 
 			}
 		})();
 		return () => ac.abort();
-	}, [sessionId, applyPart, onFileChange]);
+	}, [sessionId, applyPart, onFileChange, attachTick]);
 
 	const send = useCallback(
 		(text: string) => {
@@ -346,7 +360,16 @@ export function useAgentSession(sessionId: string | null, onFileChange?: (file: 
 		return (await agentApi.save(sessionId)).pipes;
 	}, [sessionId]);
 
-	return { messages, isTyping, connected, status, spend, agentInfo, pendingPermission, pendingGate, savedPipes, send, stop, answerPermission, answerGate, save };
+	// Re-spawn the session's opencode with freshly-resolved settings (e.g. a new model), then
+	// re-run the attach effect so the transcript rehydrates and the streams reopen against the
+	// new child. Throws on failure so the caller can surface it; leaves the old view in place.
+	const restart = useCallback(async () => {
+		if (!sessionId) return;
+		await agentApi.restart(sessionId);
+		setAttachTick((t) => t + 1);
+	}, [sessionId]);
+
+	return { messages, isTyping, connected, status, spend, agentInfo, runningModel, pendingPermission, pendingGate, savedPipes, send, stop, restart, answerPermission, answerGate, save };
 }
 
 function addTokens(a: OcTokens, b?: OcTokens): OcTokens {

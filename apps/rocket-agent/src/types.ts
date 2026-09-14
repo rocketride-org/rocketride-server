@@ -58,6 +58,7 @@ export interface LiveSession {
 	events: EventEmitter;      // rocket-agent's own panel events (auth.expired, snapshot, saved…)
 	openStreams: number;       // in-flight proxied/panel streams — reaper skips idle-archival while > 0
 	turn: TurnState;           // per-turn volatile state, injected via the prompt `system` field (never the static prompt)
+	model?: string;            // the `<provider>/<model>` string this opencode child was spawned with; lets the panel detect a mid-session model change and offer a resume-to-apply
 }
 
 /** Per-turn volatile state for the canvas agent (injected via the prompt `system` field, never the static prompt). */
@@ -75,13 +76,17 @@ export interface IdentityResolver {
 	resolve(credential: string): Promise<Identity>;
 }
 
-export interface ProviderKeys {
-	anthropic?: string;
-	openai?: string;
+/** opencode provider id -> API key. */
+export type ProviderKeyMap = Record<string, string>;
+
+/** What a KeyResolver returns: the provider keys the user configured + their chosen model. */
+export interface InferenceSettings {
+	keys: ProviderKeyMap;
+	model?: string;
 }
 
 export interface KeyResolver {
-	resolve(credential: string): Promise<ProviderKeys>;
+	resolve(credential: string): Promise<InferenceSettings>;
 }
 
 /** Subset of RocketRideClient used for project-store IO (fsReadString/fsWriteString at client.ts:2826/2850). */

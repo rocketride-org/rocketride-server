@@ -109,3 +109,37 @@ export interface OcEvent {
 	type: string;
 	properties?: Record<string, unknown>;
 }
+
+// =============================================================================
+// INFERENCE SETTINGS — bring-your-own-key/model (Phase 5, Task 5)
+// =============================================================================
+
+/**
+ * One inference provider the agent can be pointed at — the UI-facing mirror
+ * of rocket-agent's `ProviderDef` (apps/rocket-agent/src/providers.ts),
+ * as returned by `GET /agent/providers`. Never carries `baseURL` or any
+ * secret — the route strips both before responding.
+ */
+export interface AgentProvider {
+	/** opencode provider id, e.g. 'openai'; the left half of the `<id>/<modelId>` model string. */
+	id: string;
+	/** RocketRide catalog node this provider's model list comes from, e.g. 'llm_openai'. */
+	rrNode: string;
+	/** Display label, e.g. 'OpenAI'. */
+	label: string;
+	/** User-variable name a key is stored under, e.g. 'ROCKETRIDE_OPENAI_KEY'. */
+	keyVar: string;
+	mode: 'native' | 'openai-compatible';
+	/**
+	 * Selectable models for this provider. For `native` providers these come from opencode's
+	 * built-in catalog (server-side, offline); for `openai-compatible` providers they're the
+	 * registry's curated list. `id` is the provider-native model id — the picker builds the
+	 * `<provider id>/<model id>` string opencode expects.
+	 */
+	models: Array<{ id: string; title: string }>;
+}
+
+/** Response body of `GET /agent/providers`. */
+export interface AgentProvidersResponse {
+	providers: AgentProvider[];
+}

@@ -31,7 +31,7 @@ import { Auditor, NdjsonSink, digestArgs } from './audit';
 import type { AgentConfig } from './config';
 import { log } from './log';
 import { authHeader, spawnOpencodeServer } from './opencode';
-import { HttpError, Identity, KeyResolver, LiveSession, ProviderKeys, SessionIndex, SessionRecord, StoreFs } from './types';
+import { HttpError, Identity, InferenceSettings, KeyResolver, LiveSession, SessionIndex, SessionRecord, StoreFs } from './types';
 import { changedPipePaths, commitTurn, formatComponentCatalog, initGit, isPipePath, PROJECT_DIR, revertTo, saveBack, saveBackOne, seedWorkspace } from './workspace';
 
 /**
@@ -170,9 +170,9 @@ export class SessionManager {
 		});
 
 		try {
-			const providerKeys = await keys.resolve(opts.credential);
-			if (!providerKeys.anthropic && !providerKeys.openai) {
-				throw new HttpError(412, 'no inference key configured — add an Anthropic or OpenAI API key');
+			const settings = await keys.resolve(opts.credential);
+			if (Object.keys(settings.keys).length === 0) {
+				throw new HttpError(412, 'no inference key configured — add one in agent settings');
 			}
 			const sessionRoot = this.sessionRoot(record.sessionId);
 			const workspaceDir = path.join(sessionRoot, 'workspace');
@@ -206,7 +206,7 @@ export class SessionManager {
 				log.error(`[session ${record.sessionId}] component catalog seed failed (agent will fall back to describe_component):`, err);
 			});
 			await initGit(workspaceDir);
-			const live = await this.attach(record, providerKeys, opts.credential, sessionRoot);
+			const live = await this.attach(record, settings, opts.credential, sessionRoot);
 			this.watchFileEdits(live);
 			record.status = 'active';
 			await index.put(record);
@@ -242,7 +242,7 @@ export class SessionManager {
 	}
 
 	/** Spawn (or re-spawn on resume) the session's opencode server. */
-	protected async attach(record: SessionRecord, providerKeys: ProviderKeys, credential: string, sessionRoot: string): Promise<LiveSession> {
+	protected async attach(record: SessionRecord, settings: InferenceSettings, credential: string, sessionRoot: string): Promise<LiveSession> {
 		const { cfg } = this.deps;
 		const mcpSecret = randomBytes(16).toString('hex');
 		const workspaceDir = path.join(sessionRoot, 'workspace');
@@ -252,7 +252,7 @@ export class SessionManager {
 			workspaceDir,
 			sessionHome,
 			mcpProxyUrl: `http://127.0.0.1:${cfg.port}/internal/mcp/${record.sessionId}/${mcpSecret}`,
-			providerKeys,
+			inference: settings,
 		});
 		const live: LiveSession = {
 			record,
@@ -264,6 +264,7 @@ export class SessionManager {
 			events: new EventEmitter(),
 			openStreams: 0,
 			turn: {},
+			model: settings.model,
 		};
 		this.live.set(record.sessionId, live);
 		return live;
@@ -546,9 +547,9 @@ export class SessionManager {
 		if ((await this.deps.index.countActive(record.tenantId)) >= this.deps.cfg.maxSessionsPerTenant) {
 			throw new HttpError(429, `tenant session limit reached (${this.deps.cfg.maxSessionsPerTenant})`);
 		}
-		const providerKeys = await this.deps.keys.resolve(credential);
-		if (!providerKeys.anthropic && !providerKeys.openai) throw new HttpError(412, 'no inference key configured');
-		const live = await this.attach(record, providerKeys, credential, this.sessionRoot(id));
+		const settings = await this.deps.keys.resolve(credential);
+		if (Object.keys(settings.keys).length === 0) throw new HttpError(412, 'no inference key configured — add one in agent settings');
+		const live = await this.attach(record, settings, credential, this.sessionRoot(id));
 		this.watchFileEdits(live);
 		record.status = 'active';
 		record.lastActivity = Date.now();
@@ -566,6 +567,19 @@ export class SessionManager {
 			kind: 'lifecycle', action: 'session.resume', argsDigest: digestArgs({}), status: 'ok',
 		});
 		return record;
+	}
+
+	/**
+	 * Restart a live session so it re-spawns opencode with freshly-resolved inference settings —
+	 * used when the user changes the model (or a key) mid-session and wants it applied without
+	 * losing the conversation. Kills the current child (transcript persists on disk in the
+	 * session home) so {@link resume}'s already-live no-op is bypassed, then resumes: the new
+	 * child rehydrates the same transcript and runs on the new model. A no-op-safe kill means
+	 * this also works on a session that has already been reaped (it just resumes).
+	 */
+	async restart(id: string, identity: Identity, credential: string): Promise<SessionRecord> {
+		this.killAndEvict(id);
+		return this.resume(id, identity, credential);
 	}
 
 	/** Test-only: register a LiveSession against a fake opencode URL without spawning a binary. */

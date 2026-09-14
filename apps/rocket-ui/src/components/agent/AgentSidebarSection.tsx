@@ -1,11 +1,12 @@
 // Copyright (c) 2026 Aparavi Software AG. MIT License.
 import React, { useCallback, useEffect, useState } from 'react';
 import type { CSSProperties } from 'react';
-import { commonStyles, BxPlus, BxDotsHorizontal } from 'shell';
+import { commonStyles, BxPlus, BxDotsHorizontal, BxCog } from 'shell';
 import { getDocs } from '../../docs';
 import { agentApi } from '../../services/agentApi';
 import { useSessionList } from '../../hooks/useSessionList';
 import type { AgentSessionRecord, SessionStatus } from '../../services/agentTypes';
+import { AgentSettings } from './AgentSettings';
 
 // =============================================================================
 // STYLES — mirrors SidebarView's Ad-hoc section (SidebarView.tsx ~L276-309)
@@ -116,6 +117,7 @@ export function AgentSidebarSection(): React.JSX.Element {
 	const { sessions, refresh } = useSessionList();
 	const [hoveredRow, setHoveredRow] = useState<string | null>(null);
 	const [openMenuFor, setOpenMenuFor] = useState<string | null>(null);
+	const [settingsOpen, setSettingsOpen] = useState(false);
 
 	// pipesTouched/status can change after a save-back (D2) elsewhere in the app.
 	useEffect(() => {
@@ -168,6 +170,17 @@ export function AgentSidebarSection(): React.JSX.Element {
 	return (
 		<div style={{ padding: '2px 6px' }}>
 			{/* "New session" — the panel's top action, mirroring the Pipelines panel's "+ New pipeline". */}
+			{/* Settings entry sits at the top of the panel's action rows — above New session —
+			    rather than buried in the chat header's top-right, so it's the first thing seen. */}
+			<div
+				style={{ ...S.row, ...(hoveredRow === 'agent-settings' ? { background: HOVER_BG } : {}) }}
+				onMouseEnter={() => setHoveredRow('agent-settings')}
+				onMouseLeave={() => setHoveredRow(null)}
+				onClick={() => setSettingsOpen(true)}
+			>
+				<BxCog size={14} />
+				<span style={S.rowName}>Agent inference settings</span>
+			</div>
 			<div style={{ ...S.row, ...(hoveredRow === 'agent-new' ? { background: HOVER_BG } : {}) }} onMouseEnter={() => setHoveredRow('agent-new')} onMouseLeave={() => setHoveredRow(null)} onClick={handleNewSession}>
 				<BxPlus size={14} />
 				<span style={S.rowName}>New session</span>
@@ -217,6 +230,7 @@ export function AgentSidebarSection(): React.JSX.Element {
 					</div>
 				);
 			})}
+			{settingsOpen && <AgentSettings onClose={() => setSettingsOpen(false)} />}
 		</div>
 	);
 }

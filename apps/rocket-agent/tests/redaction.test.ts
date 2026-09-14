@@ -57,7 +57,7 @@ import { log, redactSecrets, SENSITIVE_KEY_RE } from '../src/log';
 import { buildChildEnv, SpawnOpts } from '../src/opencode';
 import { MemorySessionIndex } from '../src/sessionIndex';
 import { SessionManager, SessionManagerDeps } from '../src/session';
-import type { Identity, IdentityResolver, KeyResolver, LiveSession, ProviderKeys, SessionRecord } from '../src/types';
+import type { Identity, IdentityResolver, InferenceSettings, KeyResolver, LiveSession, SessionRecord } from '../src/types';
 import { initGit } from '../src/workspace';
 
 /** A realistic-looking (but fake) Anthropic key — the one substring every assertion below hunts for. */
@@ -213,12 +213,12 @@ describe('log wrapper', () => {
 			workspaceDir: '/tmp/s1/workspace',
 			sessionHome: '/tmp/s1/home',
 			mcpProxyUrl: 'http://127.0.0.1:8790/internal/mcp/s1/secret',
-			providerKeys: { anthropic: FAKE_KEY },
+			inference: { keys: { anthropic: FAKE_KEY } },
 		};
 		const env = buildChildEnv(cfg, spawnOpts, 'pw123');
 		// Sanity check FIRST: prove this test isn't vacuous — the raw env really does carry
 		// the key in plaintext before we assert the logger scrubs it.
-		expect(env.AGENT_ANTHROPIC_KEY).toBe(FAKE_KEY);
+		expect(env.AGENT_KEY_ANTHROPIC).toBe(FAKE_KEY);
 
 		log.error('[opencode-proxy s1] simulated accidental raw env log', env);
 		const out = allOutput();
@@ -266,17 +266,17 @@ class FakeIdentityResolver implements IdentityResolver {
 	}
 }
 
-/** Resolves every credential to a ProviderKeys carrying the planted FAKE_KEY — mirrors SaasVaultKeyResolver's shape without touching the real vault/fernet code. */
+/** Resolves every credential to an InferenceSettings carrying the planted FAKE_KEY — mirrors SaasVaultKeyResolver's shape without touching the real vault/fernet code. */
 class FakeKeyResolver implements KeyResolver {
-	async resolve(): Promise<ProviderKeys> {
-		return { anthropic: FAKE_KEY };
+	async resolve(): Promise<InferenceSettings> {
+		return { keys: { anthropic: FAKE_KEY } };
 	}
 }
 
 /**
  * `attach()` override (same extension point Phase 3/5.1's tests use — see
  * `CountingSessionManager`/`FileWatchSessionManager` in tests/proxy.test.ts) that ALSO calls
- * the real `buildChildEnv()` with the real resolved `providerKeys` — exercising the exact
+ * the real `buildChildEnv()` with the real resolved keys — exercising the exact
  * env-build step a real spawn would use — before registering a `LiveSession` pointed at a
  * fake opencode HTTP server instead of actually spawning a binary. `envsBuilt` lets the test
  * prove the key really did flow through this path (non-vacuous) without ever handing it to a
@@ -289,7 +289,7 @@ class ObservingSessionManager extends SessionManager {
 		super(deps);
 	}
 
-	protected async attach(record: SessionRecord, providerKeys: ProviderKeys, credential: string, sessionRoot: string): Promise<LiveSession> {
+	protected async attach(record: SessionRecord, settings: InferenceSettings, credential: string, sessionRoot: string): Promise<LiveSession> {
 		const workspaceDir = path.join(sessionRoot, 'workspace');
 		const sessionHome = path.join(sessionRoot, 'home');
 		await fsp.mkdir(workspaceDir, { recursive: true });
@@ -300,7 +300,7 @@ class ObservingSessionManager extends SessionManager {
 			workspaceDir,
 			sessionHome,
 			mcpProxyUrl: `http://127.0.0.1:0/internal/mcp/${record.sessionId}/fake-mcp-secret`,
-			providerKeys,
+			inference: settings,
 		}, 'fake-password');
 		this.envsBuilt.push(env);
 		const live: LiveSession = {
@@ -404,7 +404,7 @@ describe('full fake session — every observable surface, one planted key', () =
 
 		// Sanity check FIRST — non-vacuous: buildChildEnv really did see the raw key on this
 		// real create() -> attach() path.
-		expect(manager.envsBuilt.at(-1)?.AGENT_ANTHROPIC_KEY).toBe(FAKE_KEY);
+		expect(manager.envsBuilt.at(-1)?.AGENT_KEY_ANTHROPIC).toBe(FAKE_KEY);
 
 		// Surface: HTTP response body of a normal API call (session listing).
 		const listRes = await fetch(`${base}/agent/sessions`, { headers: { authorization: 'Bearer tok-alice' } });

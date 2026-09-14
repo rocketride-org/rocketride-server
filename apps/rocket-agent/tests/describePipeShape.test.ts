@@ -25,7 +25,7 @@
 import { loadConfig } from '../src/config';
 import { MemorySessionIndex } from '../src/index';
 import { pipeShapeFromJson, SessionManager, SessionManagerDeps } from '../src/session';
-import type { KeyResolver, LiveSession, ProviderKeys, StoreFs } from '../src/types';
+import type { InferenceSettings, KeyResolver, LiveSession, StoreFs } from '../src/types';
 
 const THREE_NODE_PIPE = JSON.stringify({
 	components: [
@@ -37,8 +37,8 @@ const THREE_NODE_PIPE = JSON.stringify({
 });
 
 class FakeKeyResolver implements KeyResolver {
-	async resolve(): Promise<ProviderKeys> {
-		return { anthropic: 'sk-ant-fake' };
+	async resolve(): Promise<InferenceSettings> {
+		return { keys: { anthropic: 'sk-ant-fake' } };
 	}
 }
 
