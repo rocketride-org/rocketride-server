@@ -179,6 +179,64 @@ async def test_list_components_unconfigured_catalog_node_omitted_with_note(monke
     assert result['note'] == '1 integrations need setup - call list_integrations.'
 
 
+# A catalog entry whose only credential is needed on some profiles (the
+# llm_nemotron shape: cloud profiles need the key, self-hosted `custom` does not).
+_PARTIAL_CATALOG_RAW = {
+    'llm_nimlike': {
+        'title': 'NIM-like LLM',
+        'fields': [
+            {
+                'path': 'llm.apikey',
+                'title': 'Cloud API key',
+                'kind': 'secret',
+                'required': True,
+                'required_for_profiles': ['cloud-a'],
+                'suggests': 'ROCKETRIDE_NIMLIKE_KEY',
+            },
+        ],
+    },
+}
+
+
+@pytest.mark.asyncio
+async def test_list_components_partial_catalog_node_listed_with_conditional(monkeypatch):
+    """A node whose only missing variable is profile-conditional is usable on
+    its other profiles right now: list it, saying which profiles still need
+    what, instead of hiding it behind the setup note.
+    """
+    from .conftest import FakeEngineClient
+
+    monkeypatch.setattr(
+        introspection.credentials_mod,
+        'load_catalog',
+        lambda: credentials_mod.catalog_from_dict(_PARTIAL_CATALOG_RAW),
+    )
+    services = _services_with_catalog_node()
+    services['services']['llm_nimlike'] = {
+        'title': 'NIM-like LLM',
+        'protocol': 'llm_nimlike',
+        'classType': ['llm'],
+        'description': 'LLM with a keyless self-hosted profile',
+    }
+    engine = FakeEngineClient(services=services, env_keys=[])  # key not set
+    registry = ToolRegistry()
+    introspection.register(registry)
+
+    result = await registry.handler('list_components')(engine, None, {})
+
+    entry = next(c for c in result['components'] if c['name'] == 'llm_nimlike')
+    assert entry['wiring'] == {}
+    assert entry['conditional'] == [
+        {
+            'variable': 'ROCKETRIDE_NIMLIKE_KEY',
+            'path': 'llm.apikey',
+            'required_for_profiles': ['cloud-a'],
+            'configured': False,
+        }
+    ]
+    assert 'note' not in result
+
+
 @pytest.mark.asyncio
 async def test_list_components_env_read_error_omits_catalog_node_not_zero_config(monkeypatch):
     """CRITICAL: an env-keys read failure must degrade credentialed nodes to
