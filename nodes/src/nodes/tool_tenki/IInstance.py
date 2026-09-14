@@ -76,6 +76,20 @@ _PATH_NOTE = (
 _DEFAULT_LOG_COUNT = 20
 _MAX_LOG_COUNT = 1000
 
+#: How long past the execution timeout a command's result may take to arrive. Tenki stops the command
+#: at the timeout and reports it on the result; only a stalled stream ever reaches this limit.
+_RESULT_GRACE_SECS = 30
+
+_SESSION_EVENT = {
+    'type': 'string',
+    'enum': ['resumed', 'replaced'],
+    'description': (
+        'Present only when the sandbox session had to be recovered during this call. "resumed": it had '
+        'been paused, and memory and /home/tenki survived but /tmp was cleared. "replaced": it had ended, '
+        'so this call ran on a fresh, empty session and earlier files and installed packages are gone.'
+    ),
+}
+
 #: run_code languages: the interpreter to run, and the file extension it expects.
 _LANGUAGES = {
     'python': ('python3', '.py'),
@@ -98,6 +112,7 @@ _EXEC_OUTPUT_SCHEMA = {
         },
         'truncated': {'type': 'boolean', 'description': 'True if stdout or stderr was cut to fit the output cap.'},
         'error': {'type': 'string', 'description': 'Error message if the sandbox call failed.'},
+        'session': _SESSION_EVENT,
     },
 }
 
@@ -108,6 +123,7 @@ _CHANGE_OUTPUT_SCHEMA = {
         'success': {'type': 'boolean'},
         'path': {'type': 'string', 'description': 'Absolute path in the sandbox.'},
         'error': {'type': 'string', 'description': 'Error message if the operation failed.'},
+        'session': _SESSION_EVENT,
     },
 }
 
@@ -164,6 +180,7 @@ _GIT_OUTPUT_SCHEMA = {
         'output': {'type': 'string', 'description': "git's output."},
         'truncated': {'type': 'boolean', 'description': 'True if the output was cut at the output cap.'},
         'error': {'type': 'string', 'description': 'Error message if the git operation failed.'},
+        'session': _SESSION_EVENT,
     },
 }
 
@@ -244,6 +261,37 @@ def _exec_result(result, cap: int) -> dict:
         'timed_out': bool(result.timed_out),
         'truncated': stdout_cut or stderr_cut,
     }
+
+
+def _run_process(session, argv, timeout: int):
+    """Run ``argv`` in ``session`` and return its CommandResult, without ever waiting unboundedly.
+
+    Sandbox.exec waits on the output stream with no local limit, so a stream that stalls (on a
+    half-open connection, say) would hang the tool call for good. Tenki stops the command at
+    ``timeout`` and reports that on the result; the grace period leaves room for the report, so a
+    wait that still runs out means the stream stalled, and it is reported as a timeout. That wait
+    kills the command when it runs out. Waiting for the start does not: the SDK gives up after 30
+    seconds and cancels nothing, so a start that arrived late would still run the command. It is
+    cancelled here instead.
+    """
+    limit = timeout + _RESULT_GRACE_SECS
+    process = session.start(*argv, timeout=timeout)
+    try:
+        process.close_stdin()
+    except TimeoutError as e:
+        process.kill()
+        raise CommandTimeoutError('the sandbox did not start the command in time, so it was cancelled') from e
+    try:
+        return process.wait(timeout=limit)
+    except TimeoutError as e:
+        raise CommandTimeoutError(f'the sandbox reported no result within {limit}s, so the command was stopped') from e
+
+
+def _with_session_event(output: dict, recoveries: list) -> dict:
+    """Tell the agent when its call ran on a resumed or a replaced session (see _SESSION_EVENT)."""
+    if recoveries:
+        output['session'] = recoveries[-1]
+    return output
 
 
 def _exec_error(error: SandboxError) -> dict:
@@ -328,13 +376,15 @@ class IInstance(IInstanceBase):
             # guest's startup files first, and a cd in them would win over exec's cwd.
             command = f'cd {shlex.quote(posixpath.join(_HOME, cwd.strip()))} && {command}'
 
+        recoveries = []
         try:
             result = self.IGlobal.call_with_session(
-                lambda session: session.exec('bash', '-lc', command, timeout=self.IGlobal.exec_timeout_secs)
+                lambda session: _run_process(session, ('bash', '-lc', command), self.IGlobal.exec_timeout_secs),
+                on_recovery=recoveries.append,
             )
         except SandboxError as e:
-            return _exec_error(e)
-        return _exec_result(result, self.IGlobal.max_output_chars)
+            return _with_session_event(_exec_error(e), recoveries)
+        return _with_session_event(_exec_result(result, self.IGlobal.max_output_chars), recoveries)
 
     @tenki_tool(
         group='execution',
@@ -385,9 +435,8 @@ class IInstance(IInstanceBase):
             session.fs.write_text(path, code)
             try:
                 # "$@" hands the interpreter and path to exec as separate arguments, unquoted.
-                return session.exec(
-                    'bash', '-lc', 'exec "$@"', 'bash', interpreter, path, timeout=self.IGlobal.exec_timeout_secs
-                )
+                argv = ('bash', '-lc', 'exec "$@"', 'bash', interpreter, path)
+                return _run_process(session, argv, self.IGlobal.exec_timeout_secs)
             finally:
                 try:
                     session.fs.remove(path)
@@ -396,11 +445,12 @@ class IInstance(IInstanceBase):
                     # here would hide the result (or the real error) of the run itself.
                     pass
 
+        recoveries = []
         try:
-            result = self.IGlobal.call_with_session(run)
+            result = self.IGlobal.call_with_session(run, on_recovery=recoveries.append)
         except SandboxError as e:
-            return _exec_error(e)
-        return _exec_result(result, self.IGlobal.max_output_chars)
+            return _with_session_event(_exec_error(e), recoveries)
+        return _with_session_event(_exec_result(result, self.IGlobal.max_output_chars), recoveries)
 
     # -----------------------------------------------------------------------
     # Group: filesystem
@@ -442,11 +492,12 @@ class IInstance(IInstanceBase):
                 session.fs.mkdir(posixpath.dirname(path))
                 session.fs.write_text(path, content)
 
+        recoveries = []
         try:
-            self.IGlobal.call_with_session(write)
+            self.IGlobal.call_with_session(write, on_recovery=recoveries.append)
         except SandboxError as e:
-            return {'success': False, 'path': path, 'error': _fs_error(e, path)}
-        return {'success': True, 'path': path}
+            return _with_session_event({'success': False, 'path': path, 'error': _fs_error(e, path)}, recoveries)
+        return _with_session_event({'success': True, 'path': path}, recoveries)
 
     @tenki_tool(
         group='filesystem',
@@ -464,6 +515,7 @@ class IInstance(IInstanceBase):
                 'content': {'type': 'string', 'description': 'File content decoded as UTF-8.'},
                 'truncated': {'type': 'boolean', 'description': 'True if the content was cut at the output cap.'},
                 'error': {'type': 'string', 'description': 'Error message if the file could not be read.'},
+                'session': _SESSION_EVENT,
             },
         },
         description=lambda self: (
@@ -497,12 +549,14 @@ class IInstance(IInstanceBase):
                     close()
             return bytes(data[:limit])
 
+        recoveries = []
         try:
-            data = self.IGlobal.call_with_session(read, replace=False)
+            data = self.IGlobal.call_with_session(read, replace=False, on_recovery=recoveries.append)
         except (SandboxError, SessionEndedError) as e:
-            return {'path': path, 'content': '', 'truncated': False, 'error': _fs_error(e, path)}
+            failed = {'path': path, 'content': '', 'truncated': False, 'error': _fs_error(e, path)}
+            return _with_session_event(failed, recoveries)
         content, truncated = _truncate(data.decode('utf-8', errors='replace'), cap)
-        return {'path': path, 'content': content, 'truncated': truncated}
+        return _with_session_event({'path': path, 'content': content, 'truncated': truncated}, recoveries)
 
     @tenki_tool(
         group='filesystem',
@@ -533,6 +587,7 @@ class IInstance(IInstanceBase):
                 },
                 'truncated': {'type': 'boolean', 'description': 'True if the listing was cut at the output cap.'},
                 'error': {'type': 'string', 'description': 'Error message if the directory could not be listed.'},
+                'session': _SESSION_EVENT,
             },
         },
         description=lambda self: (
@@ -546,14 +601,18 @@ class IInstance(IInstanceBase):
         path = _normalize_path(args.get('path') or '.')
         include_hidden = optional_bool(args, 'include_hidden', default=False, tool_name='tenki')
 
+        recoveries = []
         try:
             entries = self.IGlobal.call_with_session(
-                lambda session: session.fs.list(path, include_hidden=include_hidden), replace=False
+                lambda session: session.fs.list(path, include_hidden=include_hidden),
+                replace=False,
+                on_recovery=recoveries.append,
             )
         except (SandboxError, SessionEndedError) as e:
-            return {'path': path, 'entries': [], 'truncated': False, 'error': _fs_error(e, path)}
+            failed = {'path': path, 'entries': [], 'truncated': False, 'error': _fs_error(e, path)}
+            return _with_session_event(failed, recoveries)
         shaped, truncated = _listing(entries, self.IGlobal.max_output_chars)
-        return {'path': path, 'entries': shaped, 'truncated': truncated}
+        return _with_session_event({'path': path, 'entries': shaped, 'truncated': truncated}, recoveries)
 
     @tenki_tool(
         group='filesystem',
@@ -575,11 +634,12 @@ class IInstance(IInstanceBase):
         args = normalize_tool_input(args, tool_name='tenki')
         path = _normalize_path(args.get('path'))
 
+        recoveries = []
         try:
-            self.IGlobal.call_with_session(lambda session: session.fs.mkdir(path))
+            self.IGlobal.call_with_session(lambda session: session.fs.mkdir(path), on_recovery=recoveries.append)
         except SandboxError as e:
-            return {'success': False, 'path': path, 'error': _fs_error(e, path)}
-        return {'success': True, 'path': path}
+            return _with_session_event({'success': False, 'path': path, 'error': _fs_error(e, path)}, recoveries)
+        return _with_session_event({'success': True, 'path': path}, recoveries)
 
     @tenki_tool(
         group='filesystem',
@@ -605,11 +665,14 @@ class IInstance(IInstanceBase):
             # The agent's whole workspace: never a sensible target for one tool call.
             raise ValueError('refusing to delete /home/tenki itself; name a file or directory inside it')
 
+        recoveries = []
         try:
-            self.IGlobal.call_with_session(lambda session: session.fs.remove(path), replace=False)
+            self.IGlobal.call_with_session(
+                lambda session: session.fs.remove(path), replace=False, on_recovery=recoveries.append
+            )
         except (SandboxError, SessionEndedError) as e:
-            return {'success': False, 'path': path, 'error': _fs_error(e, path)}
-        return {'success': True, 'path': path}
+            return _with_session_event({'success': False, 'path': path, 'error': _fs_error(e, path)}, recoveries)
+        return _with_session_event({'success': True, 'path': path}, recoveries)
 
     # -----------------------------------------------------------------------
     # Group: git
@@ -653,7 +716,8 @@ class IInstance(IInstanceBase):
         description=lambda self: (
             "Clone a git repository into the remote Tenki sandbox, returning git's output and the folder "
             'it was cloned into. Private GitHub repositories need a GitHub token configured on this node. '
-            f'{_SESSION_NOTE}'
+            f'The clone must finish within {self.IGlobal.rpc_timeout_secs}s, so use depth for large '
+            f'repositories. {_SESSION_NOTE}'
         ),
     )
     def git_clone(self, args):
@@ -670,13 +734,17 @@ class IInstance(IInstanceBase):
                 raise ValueError('could not derive a folder name from "repo"; pass "directory"')
             directory = _normalize_path(folder)
 
+        recoveries = []
         try:
             output = self.IGlobal.call_with_session(
-                lambda session: session.git.clone(repo, branch=branch, depth=depth, directory=directory)
+                lambda session: session.git.clone(repo, branch=branch, depth=depth, directory=directory),
+                on_recovery=recoveries.append,
             )
         except SandboxError as e:
-            return {'directory': directory, 'output': '', 'truncated': False, 'error': str(e)}
-        return {'directory': directory, **_git_result(output, self.IGlobal.max_output_chars)}
+            failed = {'directory': directory, 'output': '', 'truncated': False, 'error': str(e)}
+            return _with_session_event(failed, recoveries)
+        cloned = {'directory': directory, **_git_result(output, self.IGlobal.max_output_chars)}
+        return _with_session_event(cloned, recoveries)
 
     @tenki_tool(
         group='git',
@@ -705,13 +773,16 @@ class IInstance(IInstanceBase):
         create = optional_bool(args, 'create', default=False, tool_name='tenki')
         directory = _git_directory(args)
 
+        recoveries = []
         try:
             output = self.IGlobal.call_with_session(
-                lambda session: session.git.checkout(ref, create=create, directory=directory), replace=False
+                lambda session: session.git.checkout(ref, create=create, directory=directory),
+                replace=False,
+                on_recovery=recoveries.append,
             )
         except (SandboxError, SessionEndedError) as e:
-            return {'output': '', 'truncated': False, 'error': str(e)}
-        return _git_result(output, self.IGlobal.max_output_chars)
+            return _with_session_event({'output': '', 'truncated': False, 'error': str(e)}, recoveries)
+        return _with_session_event(_git_result(output, self.IGlobal.max_output_chars), recoveries)
 
     @tenki_tool(
         group='git',
@@ -743,13 +814,16 @@ class IInstance(IInstanceBase):
         path = _git_arg(args, 'path')
         directory = _git_directory(args)
 
+        recoveries = []
         try:
             output = self.IGlobal.call_with_session(
-                lambda session: session.git.diff(**revisions, path=path, directory=directory), replace=False
+                lambda session: session.git.diff(**revisions, path=path, directory=directory),
+                replace=False,
+                on_recovery=recoveries.append,
             )
         except (SandboxError, SessionEndedError) as e:
-            return {'output': '', 'truncated': False, 'error': str(e)}
-        return _git_result(output, self.IGlobal.max_output_chars)
+            return _with_session_event({'output': '', 'truncated': False, 'error': str(e)}, recoveries)
+        return _with_session_event(_git_result(output, self.IGlobal.max_output_chars), recoveries)
 
     @tenki_tool(
         group='git',
@@ -786,13 +860,15 @@ class IInstance(IInstanceBase):
         path = _git_arg(args, 'path')
         directory = _git_directory(args)
 
+        recoveries = []
         try:
             output = self.IGlobal.call_with_session(
                 lambda session: session.git.log(
                     max_count=max_count, range=revision_range, path=path, directory=directory
                 ),
                 replace=False,
+                on_recovery=recoveries.append,
             )
         except (SandboxError, SessionEndedError) as e:
-            return {'output': '', 'truncated': False, 'error': str(e)}
-        return _git_result(output, self.IGlobal.max_output_chars)
+            return _with_session_event({'output': '', 'truncated': False, 'error': str(e)}, recoveries)
+        return _with_session_event(_git_result(output, self.IGlobal.max_output_chars), recoveries)

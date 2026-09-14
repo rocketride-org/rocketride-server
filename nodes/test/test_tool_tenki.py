@@ -213,6 +213,7 @@ class _FakeSession:
         dirs=None,
         git_outputs=None,
         fail=None,
+        stalls=None,
     ):
         self.id = session_id
         self.state = state
@@ -221,18 +222,21 @@ class _FakeSession:
         self._close_error = close_error
         self._exec_result = exec_result
         self._exec_error = exec_error
+        self._stalls = stalls
         self.calls = []
+        self.ready_timeouts = []
         self.fs = _FakeFS(self, files=files, dirs=dirs, fail=fail)
         self.git = _FakeGit(self, outputs=git_outputs, fail=fail)
 
-    def exec(self, *argv, cwd=None, env=None, timeout=None, input=None, check=False, privileged=False):
-        kwargs = {'cwd': cwd, 'env': env, 'timeout': timeout, 'input': input, 'check': check, 'privileged': privileged}
-        self.calls.append(('exec', argv, kwargs))
+    def start(self, *argv, cwd=None, env=None, timeout=None, stdin=None, privileged=False):
+        kwargs = {'cwd': cwd, 'env': env, 'timeout': timeout, 'stdin': stdin, 'privileged': privileged}
+        self.calls.append(('start', argv, kwargs))
         if self.state == 'PAUSED':
             raise mod.InvalidStateError('session is paused')
         if self._exec_error is not None:
             raise self._exec_error
-        return self._exec_result if self._exec_result is not None else _CommandResult(argv=list(argv), exit_code=0)
+        result = self._exec_result if self._exec_result is not None else _CommandResult(argv=list(argv), exit_code=0)
+        return _FakeProcess(self, result, stalls=self._stalls)
 
     def refresh(self):
         self.calls.append('refresh')
@@ -247,6 +251,7 @@ class _FakeSession:
 
     def wait_ready(self, timeout=180):
         self.calls.append('wait_ready')
+        self.ready_timeouts.append(timeout)
 
     def close(self):
         self.calls.append('close')
@@ -257,6 +262,34 @@ class _FakeSession:
     def close_if_open(self):
         if self.state not in ('TERMINATING', 'TERMINATED'):
             self.close()
+
+
+class _FakeProcess:
+    """Stand-in for tenki's Process, whose stream can stall before the command starts or before it ends.
+
+    As in the SDK, close_stdin waits for the start and raises TimeoutError when it never comes,
+    without cancelling anything, while a wait that runs out kills the process before it raises.
+    """
+
+    def __init__(self, session, result, *, stalls=None):
+        self._session = session
+        self._result = result
+        self._stalls = stalls
+
+    def close_stdin(self):
+        self._session.calls.append(('close_stdin',))
+        if self._stalls == 'start':
+            raise TimeoutError('timed out waiting for command start')
+
+    def wait(self, timeout=None):
+        self._session.calls.append(('wait', timeout))
+        if self._stalls == 'result':
+            self.kill()
+            raise TimeoutError('timed out waiting for command')
+        return self._result
+
+    def kill(self):
+        self._session.calls.append(('kill',))
 
 
 class _FakeFS:
@@ -435,6 +468,8 @@ class _FakeClient:
         self._create_error = create_error
         self._create_delay = create_delay
         self.create_started = threading.Event()
+        self.closing = threading.Event()
+        self.close_gate = None
         self.create_calls = []
         self.fetched = {}
         self.closed = False
@@ -452,6 +487,9 @@ class _FakeClient:
         return session
 
     def close(self):
+        self.closing.set()
+        if self.close_gate is not None:
+            self.close_gate.wait(timeout=5)
         self.closed = True
 
 
@@ -499,8 +537,8 @@ def _instance(monkeypatch, *sessions, cfg=None):
 
 
 def _execs(session):
-    """The (argv, kwargs) of every exec call made on a fake session."""
-    return [(call[1], call[2]) for call in session.calls if isinstance(call, tuple) and call[0] == 'exec']
+    """The (argv, kwargs) of every process started on a fake session."""
+    return [(call[1], call[2]) for call in session.calls if isinstance(call, tuple) and call[0] == 'start']
 
 
 def _git_calls(session, operation):
@@ -545,7 +583,7 @@ def test_client_gets_the_stripped_key_and_the_public_endpoint_explicitly(monkeyp
     # An empty endpoint would otherwise be resolved from TENKI_API_ENDPOINT / TENKI_API_URL.
     glb, constructed = _make_global(monkeypatch, {'apikey': f'  {_KEY}  ', 'base_url': ''})
     glb.beginGlobal()
-    assert constructed == [{'auth_token': _KEY, 'base_url': 'https://api.tenki.cloud'}]
+    assert constructed == [{'auth_token': _KEY, 'base_url': 'https://api.tenki.cloud', 'timeout': 120}]
 
 
 def test_configured_endpoint_is_used_as_given(monkeypatch, logs):
@@ -641,7 +679,10 @@ def test_create_sends_sizing_a_lifetime_cap_in_seconds_and_no_inbound(monkeypatc
     }
     glb, client = _started(monkeypatch, _FakeSession('sb-1'), cfg=cfg)
     glb.get_session()
-    assert client.create_calls == [
+    [call] = client.create_calls
+    for label in ('name', 'tags', 'metadata'):  # covered by the labelling test
+        call.pop(label)
+    assert [call] == [
         {
             'cpu_cores': 4,
             'memory_mb': 8192,
@@ -900,12 +941,10 @@ def test_unset_tool_groups_mean_execution_filesystem_and_git(raw):
 
 @pytest.mark.parametrize('raw', ['all', ['ALL'], ['*'], 'git, all'])
 def test_all_publishes_every_group(raw):
-    assert groups.normalize_groups(raw) == frozenset(
-        {'execution', 'filesystem', 'git', 'ports', 'volumes', 'snapshots', 'remote_access'}
-    )
+    assert groups.normalize_groups(raw) == frozenset({'execution', 'filesystem', 'git'})
 
 
-@pytest.mark.parametrize(('raw', 'expected'), [(['Ports'], {'ports'}), ('git, volumes', {'git', 'volumes'})])
+@pytest.mark.parametrize(('raw', 'expected'), [(['Git'], {'git'}), ('git, filesystem', {'git', 'filesystem'})])
 def test_named_groups_replace_the_defaults(raw, expected):
     assert groups.normalize_groups(raw) == frozenset(expected)
 
@@ -966,7 +1005,7 @@ def test_default_groups_publish_the_execution_filesystem_and_git_tools(monkeypat
 
 @pytest.mark.parametrize(
     ('group', 'tools'),
-    [('execution', _EXECUTION_TOOLS), ('filesystem', _FILESYSTEM_TOOLS), ('git', _GIT_TOOLS), ('ports', set())],
+    [('execution', _EXECUTION_TOOLS), ('filesystem', _FILESYSTEM_TOOLS), ('git', _GIT_TOOLS)],
 )
 def test_each_group_publishes_exactly_its_own_tools(monkeypatch, logs, group, tools):
     # tool.invoke looks tool names up in the same collection, so this also refuses the others.
@@ -1027,7 +1066,7 @@ def test_run_command_runs_bash_as_a_login_shell_with_the_configured_timeout(monk
     assert _execs(session) == [
         (
             ('bash', '-lc', 'ls -la'),
-            {'cwd': None, 'env': None, 'timeout': 45, 'input': None, 'check': False, 'privileged': False},
+            {'cwd': None, 'env': None, 'timeout': 45, 'stdin': None, 'privileged': False},
         )
     ]
 
@@ -1133,12 +1172,12 @@ def test_run_code_writes_the_code_to_a_file_then_runs_the_interpreter_on_it(
     inst, _ = _instance(monkeypatch, session, cfg={'exec_timeout_secs': 45})
     args = {'code': code} if language is None else {'code': code, 'language': language}
     assert inst.run_code(args)['exit_code'] == 0
-    written, executed, removed = session.calls
+    written, executed, removed = [call for call in session.calls if call[0] in ('write_text', 'start', 'remove')]
     path = written[1]
     assert written == ('write_text', path)
     assert path.startswith('/home/tenki/') and path.endswith(extension)
     assert session.fs.written[path] == code
-    assert executed[0] == 'exec'
+    assert executed[0] == 'start'
     assert executed[1][-2:] == (interpreter, path)
     assert executed[2]['timeout'] == 45
     assert removed[:2] == ('remove', path)
@@ -1739,3 +1778,143 @@ def test_inspecting_a_repository_in_an_ended_session_does_not_start_a_new_one(mo
     inst, client = _instance(monkeypatch, dead, _FakeSession('sb-fresh'))
     assert getattr(inst, tool)(args)['error']
     assert len(client.create_calls) == 1
+
+
+# ---------------------------------------------------------------------------
+# Hardening: bounded calls, recovery the agent can see, findable sessions
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(('exec_timeout', 'deadline'), [(45, 60), (300, 300)])
+def test_every_control_plane_call_gets_a_deadline(monkeypatch, logs, exec_timeout, deadline):
+    # Create, refresh, resume and close run under the session lock. Without a deadline, one
+    # half-open connection hangs them, and endGlobal behind them, while the VM keeps billing.
+    # Git operations use the same deadline, so it is never below the execution timeout.
+    glb, constructed = _make_global(monkeypatch, {'apikey': _KEY, 'exec_timeout_secs': exec_timeout})
+    glb.beginGlobal()
+    assert constructed[0]['timeout'] == deadline
+
+
+@pytest.mark.parametrize(('tool', 'args'), [('run_command', {'command': 'sleep 999'}), ('run_code', {'code': 'x'})])
+def test_a_stalled_command_stream_is_cut_off_and_reported_as_a_timeout(monkeypatch, logs, tool, args):
+    # Sandbox.exec waits on the output stream with no local limit, so a stream that stalls would
+    # hang the tool call forever. The local limit leaves room for Tenki's own timeout report first.
+    session = _FakeSession('sb-1', stalls='result')
+    inst, _ = _instance(monkeypatch, session, cfg={'exec_timeout_secs': 45})
+    result = getattr(inst, tool)(args)
+    assert result['timed_out'] is True
+    assert result['exit_code'] == -1
+    [(_, waited)] = [call for call in session.calls if call[0] == 'wait']
+    assert 45 < waited <= 105
+    assert f'no result within {waited}s' in result['error']
+
+
+@pytest.mark.parametrize(('tool', 'args'), [('run_command', {'command': 'make test'}), ('run_code', {'code': 'x'})])
+def test_a_command_that_never_starts_is_cancelled_and_reported_as_a_timeout(monkeypatch, logs, tool, args):
+    # The SDK stops waiting for the start after 30 seconds but cancels nothing, so a start that
+    # arrived late would run a command the agent had already been told timed out.
+    session = _FakeSession('sb-1', stalls='start')
+    inst, _ = _instance(monkeypatch, session, cfg={'exec_timeout_secs': 45})
+    result = getattr(inst, tool)(args)
+    assert result['timed_out'] is True
+    assert result['exit_code'] == -1
+    assert 'did not start' in result['error']
+    assert ('kill',) in session.calls
+
+
+def test_recovery_waits_a_bounded_time_for_a_resumed_session(monkeypatch, logs):
+    paused = _FakeSession('sb-1', state='PAUSED')
+    glb, _ = _started(monkeypatch, paused)
+    glb.call_with_session(
+        lambda session: _raise(mod.InvalidStateError('session is paused')) if session.state == 'PAUSED' else 'done'
+    )
+    assert paused.ready_timeouts
+    assert all(timeout is not None and 0 < timeout <= 600 for timeout in paused.ready_timeouts)
+
+
+def test_a_tool_call_racing_shutdown_cannot_create_a_session(monkeypatch, logs):
+    # endGlobal closes the session and then the client. A call arriving in between must not create
+    # a session that nothing would ever close.
+    glb, client = _started(monkeypatch, _FakeSession('sb-1'), _FakeSession('sb-2'))
+    glb.get_session()
+    client.close_gate = threading.Event()
+    ender = threading.Thread(target=glb.endGlobal)
+    ender.start()
+    try:
+        assert client.closing.wait(timeout=5)
+        with pytest.raises(RuntimeError):
+            glb.get_session()
+    finally:
+        client.close_gate.set()
+        ender.join()
+    assert len(client.create_calls) == 1
+
+
+def test_a_call_that_ran_on_a_resumed_session_says_so(monkeypatch, logs):
+    inst, _ = _instance(monkeypatch, _FakeSession('sb-1', state='PAUSED'))
+    assert inst.run_command({'command': 'ls'})['session'] == 'resumed'
+
+
+@pytest.mark.parametrize(
+    ('tool', 'args', 'operation'),
+    [
+        ('run_command', {'command': 'ls'}, 'start'),
+        ('run_code', {'code': 'print(1)'}, 'write_text'),
+        ('write_file', {'path': 'a.txt', 'content': 'x'}, 'write_text'),
+        ('make_directory', {'path': 'data'}, 'mkdir'),
+        ('git_clone', {'repo': _REPO}, 'clone'),
+    ],
+)
+def test_a_call_that_ran_on_a_fresh_session_says_so(monkeypatch, logs, tool, args, operation):
+    # Earlier files and installed packages are gone; a silent retry would let the agent assume otherwise.
+    ended = mod.SessionTerminatedError('session_terminated')
+    dead = _FakeSession('sb-dead', state='TERMINATED', exec_error=ended, fail={operation: ended})
+    inst, _ = _instance(monkeypatch, dead, _FakeSession('sb-fresh'))
+    assert getattr(inst, tool)(args)['session'] == 'replaced'
+
+
+def test_a_recovery_done_by_a_concurrent_call_is_reported_too(monkeypatch, logs):
+    session = _FakeSession('sb-1')
+    glb, _ = _started(monkeypatch, session)
+    reported, attempts = [], []
+
+    def call(current):
+        attempts.append(current.id)
+        if len(attempts) == 1:
+            # Another call resumed the paused session while this one was failing against it.
+            glb.last_recovery = 'resumed'
+            glb.session_epoch += 1
+            raise mod.InvalidStateError('session is paused')
+        return 'done'
+
+    assert glb.call_with_session(call, on_recovery=reported.append) == 'done'
+    assert reported == ['resumed']
+
+
+def test_replacing_an_ended_session_is_logged_for_the_operator(monkeypatch, logs):
+    # A replacement costs a new VM and drops the old one's state, so it must show up in the job log.
+    dead = _FakeSession('sb-dead', state='TERMINATED')
+    glb, _ = _started(monkeypatch, dead, _FakeSession('sb-fresh'))
+    glb.call_with_session(
+        lambda session: _raise(mod.SessionTerminatedError('session_terminated')) if session is dead else 'ok'
+    )
+    assert any('sb-dead' in message for message in logs)
+
+
+def test_sessions_are_labelled_so_an_orphan_can_be_found(monkeypatch, logs):
+    # A VM left behind by a crashed engine has to be recognisable in Tenki's console and listable by tag.
+    glb, client = _started(monkeypatch, _FakeSession('sb-1'), _FakeSession('sb-2'))
+    glb.get_session()
+    glb.session = None
+    glb.get_session()
+    first, second = client.create_calls
+    assert first['tags'] == ['rocketride']
+    assert first['metadata'] == {'created_by': 'rocketride', 'node': 'tool_tenki'}
+    assert first['name'].startswith('rocketride-tool-tenki-')
+    assert first['name'] != second['name']
+
+
+def test_groups_without_tools_are_no_longer_offered():
+    # Selecting one used to validate and then publish nothing at all.
+    with pytest.raises(ValueError):
+        groups.normalize_groups(['ports'])

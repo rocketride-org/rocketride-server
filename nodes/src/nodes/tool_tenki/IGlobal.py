@@ -43,11 +43,16 @@ Three things differ from tool_daytona and shape this file:
 * Recovery follows the session's actual state, not the exception alone: a
   paused session is resumed (its memory and files survive), a terminated one
   is replaced, and anything else is surfaced.
+
+Tenancy: the session belongs to the pipeline, not to a user. Every caller of a
+running pipeline (every conversation of a team-deployed one, for example)
+shares it, with its files, installed packages and GitHub token.
 """
 
 from __future__ import annotations
 
 import threading
+import uuid
 from contextlib import nullcontext
 
 from ai.common.config import Config
@@ -64,6 +69,14 @@ from tenki import (
 )
 
 from .tool_groups import DEFAULT_GROUPS, normalize_groups, unknown_groups
+
+# The deadline for every control-plane call: create, refresh, resume, close, and git operations.
+# Git clones share it, so it never drops below the execution timeout, and the floor keeps a small
+# execution timeout from starving session creation.
+_MIN_RPC_TIMEOUT_SECS = 60
+
+# How long recovery waits for a resumed session to run again: the SDK's own readiness budget.
+_READY_WAIT_SECS = 180
 
 # Given an empty endpoint the SDK resolves one from TENKI_API_ENDPOINT / TENKI_API_URL,
 # so the public default is passed explicitly rather than left to the host's environment.
@@ -113,6 +126,12 @@ class IGlobal(IGlobalBase):
     # deepagent's asyncio.gather fan-out), and an unsynchronized check-then-act would
     # create two billed sessions and orphan one, or resume one session several times.
     _session_lock: threading.Lock | None = None
+    # How the most recent recovery went, 'resumed' or 'replaced'. A call that retries after a
+    # concurrent call did the recovering reports this, since it did not see the recovery itself.
+    last_recovery: str = ''
+    # Set as endGlobal starts. No session may be created after that: nothing would close it.
+    _ending: bool = False
+    rpc_timeout_secs: int = 120
     image: str = ''
     github_token: str = ''
     cpu_cores: int = 2
@@ -129,6 +148,7 @@ class IGlobal(IGlobalBase):
             return
 
         self._session_lock = threading.Lock()
+        self._ending = False
 
         cfg = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
         apikey = str((cfg.get('apikey') or '')).strip()
@@ -166,13 +186,20 @@ class IGlobal(IGlobalBase):
         self.exec_timeout_secs = _int_or(cfg.get('exec_timeout_secs'), 120, lo=1, hi=1200)
         self.max_output_chars = _int_or(cfg.get('max_output_chars'), 50000, lo=1000, hi=1000000)
 
-        self.client = Client(auth_token=apikey, base_url=base_url)
+        self.rpc_timeout_secs = max(self.exec_timeout_secs, _MIN_RPC_TIMEOUT_SECS)
+        # Without a deadline, a half-open connection would hang create, refresh, resume and close,
+        # all of which run under the session lock, and endGlobal behind them while the VM bills.
+        self.client = Client(auth_token=apikey, base_url=base_url, timeout=self.rpc_timeout_secs)
 
     def get_session(self) -> Sandbox:
         """Return the shared session, creating it on first use."""
         session = self.session
         if session is None:
             with self._session_lock:
+                if self._ending:
+                    raise RuntimeError(
+                        'tool_tenki: the pipeline is shutting down, so no new sandbox session is created'
+                    )
                 if self.session is None:
                     self.session = self._create_session()
                     debug(f'tool_tenki: created session {getattr(self.session, "id", "?")}')
@@ -193,6 +220,11 @@ class IGlobal(IGlobalBase):
             # Inbound exposure can only be set at create time, and no tool this node
             # publishes uses it, so sessions are created closed to inbound traffic.
             'allow_inbound': False,
+            # So that a session a crashed engine left behind can be recognised in Tenki's console
+            # and listed by tag. The suffix keeps names distinct in case the service requires it.
+            'name': f'rocketride-tool-tenki-{uuid.uuid4().hex[:8]}',
+            'tags': ['rocketride'],
+            'metadata': {'created_by': 'rocketride', 'node': 'tool_tenki'},
         }
         if self.image:
             create_kwargs['image'] = self.image
@@ -229,7 +261,7 @@ class IGlobal(IGlobalBase):
         except Exception as e:
             warning(f'tool_tenki: could not close the sandbox a failed create left running: {e}')
 
-    def call_with_session(self, call, *, replace: bool = True):
+    def call_with_session(self, call, *, replace: bool = True, on_recovery=None):
         """Return ``call(session)``, recovering the session once if it stopped being usable.
 
         A lifecycle error only prompts a look at the session's state (see
@@ -239,20 +271,28 @@ class IGlobal(IGlobalBase):
         ``replace=False`` is for calls that only look at existing state (reading, listing or
         deleting files). If the session turns out to have ended, a fresh, empty one could not
         serve them, so ``SessionEndedError`` is raised instead of creating a session for nothing.
+
+        ``on_recovery``, if given, is called with 'resumed' or 'replaced' before the retry, so the tool
+        can tell the agent that its call ran on a resumed session, or on a fresh and empty one.
         """
         epoch = self.session_epoch
         session = self.get_session()
         try:
             return call(session)
         except _LIFECYCLE_ERRORS:
-            if not self.recover_session(session, epoch, replace=replace):
+            recovery = self.recover_session(session, epoch, replace=replace)
+            if not recovery:
                 raise
+        if on_recovery is not None:
+            on_recovery(recovery)
         return call(self.get_session())
 
-    def recover_session(self, session: Sandbox, epoch: int, *, replace: bool = True) -> bool:
-        """Bring a session that failed a call back to a usable state; return whether to retry.
+    def recover_session(self, session: Sandbox, epoch: int, *, replace: bool = True) -> str | None:
+        """Bring a session that failed a call back to a usable state.
 
-        Decided by the session's real state, because the error that led here is only a hint:
+        Returns how it was recovered, 'resumed' or 'replaced', when the call should be retried, and
+        None when the failure had another cause. Decided by the session's real state, because the
+        error that led here is only a hint:
 
         * Already recovered by a concurrent call (a different session or epoch): retry.
         * Unknown to the service, or in a gone state: forget it (closing it first unless the
@@ -270,7 +310,7 @@ class IGlobal(IGlobalBase):
                 # would create a fresh session, which a caller passing replace=False cannot use.
                 if self.session is None and not replace:
                     raise SessionEndedError()
-                return True
+                return self.last_recovery or None
             try:
                 state = session.refresh().state
             except SessionNotFoundError:
@@ -283,17 +323,22 @@ class IGlobal(IGlobalBase):
                         warning(f'tool_tenki: could not close session {session.id}: {e}')
                 self.session = None
                 self.session_epoch += 1
-                debug(f'tool_tenki: session {session.id} is {state or "gone"}; the next call creates a new one')
+                self.last_recovery = 'replaced'
+                # A warning rather than debug output: the next call pays for a new VM and starts empty.
+                warning(
+                    f'tool_tenki: session {session.id} is {state or "gone"}; the next call starts a new, empty session'
+                )
                 if not replace:
                     raise SessionEndedError()
-                return True
+                return 'replaced'
             if state == 'PAUSED':
                 session.resume()
-                session.wait_ready()
+                session.wait_ready(timeout=_READY_WAIT_SECS)
                 self.session_epoch += 1
+                self.last_recovery = 'resumed'
                 debug(f'tool_tenki: resumed paused session {session.id}')
-                return True
-            return False
+                return 'resumed'
+            return None
 
     def validateConfig(self) -> None:
         try:
@@ -314,6 +359,8 @@ class IGlobal(IGlobalBase):
             warning(str(e))
 
     def endGlobal(self) -> None:
+        # First, so that no tool call can create a session after the close below.
+        self._ending = True
         # Load-bearing for Tenki: a session left open keeps billing until its idle timeout
         # pauses it, then holds storage until max_duration ends it. Taking the lock lets a
         # create still in flight finish first, so the session it produces is closed too.

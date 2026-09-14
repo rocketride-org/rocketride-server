@@ -26,12 +26,11 @@
 """
 Tool grouping for the Tenki Sandbox node.
 
-The node's full surface is 22 tools, more than an LLM chooses between reliably, and
-several of them reach past the disposable VM: public URLs, workspace storage, billed
-snapshots and raw sockets. Every tool is therefore tagged with a group, and the node
-only publishes the groups named in the ``tenki.toolGroups`` config field. The filter
-lives in ``IInstance._collect_tool_methods()``, so a tool that is not published is
-invisible to ``tool.query`` and rejected by ``tool.invoke`` alike.
+Every tool is tagged with a group, and the node publishes only the groups named in the
+``tenki.toolGroups`` config field, or all of them when the field is left empty, so an
+operator can narrow what an agent may do (git and file tools without command execution,
+for example). The filter lives in ``IInstance._collect_tool_methods()``, so a tool that
+is not published is invisible to ``tool.query`` and rejected by ``tool.invoke`` alike.
 
 This module is the single source of truth for the group names. ``services.json`` lists
 them for the editor but does not repeat the default set: its ``toolGroups`` default is
@@ -45,15 +44,12 @@ from typing import Callable
 from rocketlib import tool_function
 
 #: Every group this node implements.
-ALL_GROUPS = frozenset({'execution', 'filesystem', 'git', 'ports', 'volumes', 'snapshots', 'remote_access'})
+ALL_GROUPS = frozenset({'execution', 'filesystem', 'git'})
 
-#: Published when the operator has not chosen otherwise: running code and commands,
-#: editing files and working in a repository, all confined to the session's own VM. The
-#: other groups are deliberate opt-ins. ``ports`` publishes a service at a public URL,
-#: ``volumes`` attaches workspace storage that other sessions share and that outlives this
-#: one, ``snapshots`` creates billed storage that also outlives it, and ``remote_access``
-#: exchanges raw bytes with processes inside the VM instead of returning structured results.
-DEFAULT_GROUPS = frozenset({'execution', 'filesystem', 'git'})
+#: Published when the operator has not chosen otherwise: every group, since each one is confined
+#: to the session's own VM. A future group whose tools reach beyond it (a public URL, storage that
+#: other sessions share) belongs outside this set, as an explicit opt-in.
+DEFAULT_GROUPS = ALL_GROUPS
 
 
 def group_names(raw) -> list[str]:

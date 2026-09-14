@@ -9,7 +9,7 @@
 	"prefix": "tenki",
 	"icon": "tenki.svg",
 	"documentation": "https://docs.rocketride.org",
-	"description": ["Gives agents a disposable Tenki Sandbox Linux VM for running code and shell commands, editing files and working with git repositories.", "Every tool call shares one session, created on first use; opt-in tool groups add port exposure, persistent volumes, snapshots and remote access."],
+	"description": ["Gives agents a disposable Tenki Sandbox Linux VM for running code and shell commands, editing files and working with git repositories.", "One session, created on first use, is shared by every caller of a running pipeline: its files, installed packages and GitHub token are visible to all of them, so use one pipeline per user or trust boundary."],
 	"tile": [],
 	"lanes": {},
 	"preconfig": {
@@ -35,7 +35,7 @@
 		"tenki.github_token": {
 			"type": "string",
 			"title": "GitHub Token",
-			"description": "Optional GitHub token that lets git clone private repositories. Tenki makes it available inside the sandbox as the <code>GH_TOKEN</code> and <code>GIT_TOKEN</code> environment variables, so any command the agent runs can read it: use a fine-grained, read-only token limited to the repositories the agent needs.",
+			"description": "Optional GitHub token that lets git clone private repositories. Tenki makes it available inside the sandbox as the <code>GH_TOKEN</code> and <code>GIT_TOKEN</code> environment variables, so any command the agent runs, and anyone else using the same pipeline, can read it: use a fine-grained, read-only token limited to the repositories the agent needs.",
 			"default": "",
 			"optional": true,
 			"secure": true,
@@ -85,7 +85,7 @@
 		"tenki.max_duration_minutes": {
 			"type": "integer",
 			"title": "Max Duration (minutes)",
-			"description": "Upper bound on the session's lifetime, set when it is created: the cost backstop if the pipeline never shuts the session down, for example after an engine crash.",
+			"description": "Upper bound on each session's lifetime, set when it is created: the cost backstop if the pipeline never shuts the session down, for example after an engine crash. It limits each session, not total spend: once a session ends, the next command or file write starts a new one.",
 			"default": 60,
 			"minimum": 1,
 			"maximum": 1440
@@ -116,19 +116,15 @@
 		"tenki.toolGroups": {
 			"type": "array",
 			"title": "Tool groups",
-			"description": "Which groups of Tenki Sandbox tools this node publishes to the agent. This node implements 22 tools across 7 groups, and every extra tool makes the right one harder for an LLM to pick, so only the listed groups are exposed. <b>Leave this empty for the recommended set</b>: execution, filesystem and git (11 tools), enough to run code, edit files and work in a repository. Use <b>all</b> to publish all 22. Naming groups replaces the default set rather than adding to it, and a value that names only unknown groups stops the pipeline at startup rather than widening back to the defaults. The other groups are deliberate opt-ins: <b>ports</b> publishes a sandbox service at a public URL, <b>volumes</b> attaches workspace storage that other sessions share and that outlives this session, <b>snapshots</b> creates billed storage that also outlives it, and <b>remote_access</b> exchanges raw bytes with processes inside the VM instead of returning structured results.",
+			"description": "Which groups of Tenki Sandbox tools this node publishes to the agent: <b>execution</b> (run commands and code), <b>filesystem</b> (write, read, list and delete files) and <b>git</b> (clone, check out, diff and log). <b>Leave this empty to publish all three</b> (11 tools). Naming groups publishes only those, and a value that names only unknown groups stops the pipeline at startup.",
 			"uniqueItems": true,
 			"items": {
 				"type": "string",
 				"enum": [
-					["execution", "Execution (2, default)"],
-					["filesystem", "Filesystem (5, default)"],
-					["git", "Git (4, default)"],
-					["ports", "Ports (3, opt-in: public URLs)"],
-					["volumes", "Volumes (3, opt-in: shared persistent storage)"],
-					["snapshots", "Snapshots (3, opt-in: billed storage)"],
-					["remote_access", "Remote access (2, opt-in: raw byte streams)"],
-					["all", "All groups (22)"]
+					["execution", "Execution (2)"],
+					["filesystem", "Filesystem (5)"],
+					["git", "Git (4)"],
+					["all", "All groups (11)"]
 				]
 			},
 			"default": [],
