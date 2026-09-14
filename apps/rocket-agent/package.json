@@ -1,0 +1,37 @@
+{
+	"name": "rocket-agent",
+	"version": "0.1.0",
+	"private": true,
+	"description": "RocketRide per-session OpenCode agent service",
+	"license": "MIT",
+	"type": "commonjs",
+	"main": "./dist/index.js",
+	"files": ["dist", "assets", "config"],
+	"scripts": {
+		"build": "node scripts/build-assets.mjs && tsc -p tsconfig.json",
+		"start": "node dist/index.js",
+		"test": "node scripts/build-assets.mjs && jest",
+		"eval:build": "node scripts/build-assets.mjs && tsc -p eval/tsconfig.json",
+		"eval:replay": "npm run eval:build && node dist/eval/run.js --mode replay",
+		"eval:live": "npm run eval:build && node dist/eval/run.js --mode live",
+		"eval:record": "npm run eval:build && node dist/eval/run.js --mode live --record"
+	},
+	"dependencies": {
+		"@opencode-ai/sdk": "1.18.16",
+		"express": "^4.21.2",
+		"ioredis": "^5.4.1",
+		"rocketride": "workspace:*"
+	},
+	"devDependencies": {
+		"@types/express": "^4.17.21",
+		"@types/jest": "^30.0.0",
+		"@types/node": "^20.19.41",
+		"jest": "^29.0.0",
+		"jest-jasmine2": "^30.4.2",
+		"ts-jest": "^29.4.10",
+		"typescript": "^5.0.0"
+	},
+	"engines": {
+		"node": ">=20.11.0"
+	}
+}

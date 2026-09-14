@@ -1,0 +1,14 @@
+services:
+  rocket-agent:
+    build:
+      context: ../..
+      dockerfile: apps/rocket-agent/Dockerfile
+    ports:
+      - "8790:8790"
+    environment:
+      RR_MCP_UPSTREAM: http://host.docker.internal:8080/mcp
+      ROCKETRIDE_URI: http://host.docker.internal:5565
+      AGENT_ANTHROPIC_KEY: ${AGENT_ANTHROPIC_KEY:-}
+      AGENT_OPENAI_KEY: ${AGENT_OPENAI_KEY:-}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"

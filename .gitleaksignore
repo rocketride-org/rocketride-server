@@ -6,3 +6,13 @@
 # Originally added in #509 (Exa search node, April 21); orphaned SHA after develop
 # force-push at end of April resurfaced the finding on this dot release PR.
 fd6b61d56b0671f7a3d24d0314d060a3d0d61b8c:nodes/src/nodes/tool_exa_search/services.json:pipe-file-api-key:138
+
+# False positive: rocket-agent's locked opencode config never holds a real key.
+# `{env:AGENT_ANTHROPIC_KEY}` / `{env:AGENT_OPENAI_KEY}` are opencode's own
+# env-substitution template syntax, resolved by the opencode binary at spawn
+# time from rocket-agent's per-session child env (see src/opencode.ts
+# buildChildEnv) — never a literal secret checked into the repo.
+apps/rocket-agent/config/opencode-locked.json:pipe-file-api-key:8
+apps/rocket-agent/config/opencode-locked.json:pipe-file-api-key:9
+apps/rocket-agent/config/opencode-locked.json:services-json-api-key:8
+apps/rocket-agent/config/opencode-locked.json:services-json-api-key:9

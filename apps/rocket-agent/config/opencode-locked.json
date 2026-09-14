@@ -1,0 +1,31 @@
+{
+	"$schema": "https://opencode.ai/config.json",
+	"autoupdate": false,
+	"share": "disabled",
+	"snapshot": false,
+	"enabled_providers": ["anthropic", "openai"],
+	"provider": {
+		"anthropic": { "options": { "apiKey": "{env:AGENT_ANTHROPIC_KEY}" } },
+		"openai": { "options": { "apiKey": "{env:AGENT_OPENAI_KEY}" } }
+	},
+	"permission": {
+		"edit": { "**": "deny", "*.pipe": "allow", "**/*.pipe": "allow" },
+		"read": "allow",
+		"glob": "allow",
+		"grep": "allow",
+		"list": "allow",
+		"bash": "deny",
+		"webfetch": "deny",
+		"websearch": "deny",
+		"external_directory": "deny",
+		"question": "allow",
+		"todowrite": "allow"
+	},
+	"mcp": {
+		"rocketride": {
+			"type": "remote",
+			"url": "{env:RR_MCP_PROXY_URL}",
+			"enabled": true
+		}
+	}
+}
