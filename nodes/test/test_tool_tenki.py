@@ -211,6 +211,7 @@ class _FakeSession:
         exec_error=None,
         files=None,
         dirs=None,
+        git_outputs=None,
         fail=None,
     ):
         self.id = session_id
@@ -222,6 +223,7 @@ class _FakeSession:
         self._exec_error = exec_error
         self.calls = []
         self.fs = _FakeFS(self, files=files, dirs=dirs, fail=fail)
+        self.git = _FakeGit(self, outputs=git_outputs, fail=fail)
 
     def exec(self, *argv, cwd=None, env=None, timeout=None, input=None, check=False, privileged=False):
         kwargs = {'cwd': cwd, 'env': env, 'timeout': timeout, 'input': input, 'check': check, 'privileged': privileged}
@@ -356,6 +358,35 @@ class _FakeFS:
         self.dirs = {d for d in self.dirs if d != path and not d.startswith(path + '/')}
 
 
+class _FakeGit:
+    """Stand-in for tenki's SandboxGit, with the SDK's signatures; each call returns git's raw output."""
+
+    def __init__(self, session, *, outputs=None, fail=None):
+        self._session = session
+        self._outputs = dict(outputs or {})
+        self._fail = dict(fail or {})
+
+    def _run(self, operation, kwargs):
+        self._session.calls.append((operation, kwargs))
+        if self._session.state == 'PAUSED':
+            raise mod.InvalidStateError('session is paused')
+        if operation in self._fail:
+            raise self._fail[operation]
+        return self._outputs.get(operation, '')
+
+    def clone(self, repo, *, branch=None, depth=None, directory=None):
+        return self._run('clone', {'repo': repo, 'branch': branch, 'depth': depth, 'directory': directory})
+
+    def checkout(self, ref, *, create=False, directory=None):
+        return self._run('checkout', {'ref': ref, 'create': create, 'directory': directory})
+
+    def diff(self, *, range=None, base=None, head=None, path=None, directory=None):
+        return self._run('diff', {'range': range, 'base': base, 'head': head, 'path': path, 'directory': directory})
+
+    def log(self, *, max_count=None, range=None, path=None, directory=None):
+        return self._run('log', {'max_count': max_count, 'range': range, 'path': path, 'directory': directory})
+
+
 @dataclass(frozen=True)
 class _FileInfo:
     """Mirror of tenki.FileInfo. In a directory listing, ``path`` holds the entry's name."""
@@ -470,6 +501,11 @@ def _instance(monkeypatch, *sessions, cfg=None):
 def _execs(session):
     """The (argv, kwargs) of every exec call made on a fake session."""
     return [(call[1], call[2]) for call in session.calls if isinstance(call, tuple) and call[0] == 'exec']
+
+
+def _git_calls(session, operation):
+    """The keyword arguments of every call of one git operation on a fake session."""
+    return [call[1] for call in session.calls if isinstance(call, tuple) and call[0] == operation]
 
 
 def _raise(error):
@@ -920,16 +956,17 @@ def test_validate_config_warns_about_unknown_tool_groups(monkeypatch, logs):
 
 _EXECUTION_TOOLS = {'run_command', 'run_code'}
 _FILESYSTEM_TOOLS = {'write_file', 'read_file', 'list_files', 'make_directory', 'delete_path'}
+_GIT_TOOLS = {'git_clone', 'git_checkout', 'git_diff', 'git_log'}
 
 
-def test_default_groups_publish_the_execution_and_filesystem_tools(monkeypatch, logs):
+def test_default_groups_publish_the_execution_filesystem_and_git_tools(monkeypatch, logs):
     inst, _ = _instance(monkeypatch)
-    assert set(inst._collect_tool_methods()) == _EXECUTION_TOOLS | _FILESYSTEM_TOOLS
+    assert set(inst._collect_tool_methods()) == _EXECUTION_TOOLS | _FILESYSTEM_TOOLS | _GIT_TOOLS
 
 
 @pytest.mark.parametrize(
     ('group', 'tools'),
-    [('execution', _EXECUTION_TOOLS), ('filesystem', _FILESYSTEM_TOOLS), ('git', set())],
+    [('execution', _EXECUTION_TOOLS), ('filesystem', _FILESYSTEM_TOOLS), ('git', _GIT_TOOLS), ('ports', set())],
 )
 def test_each_group_publishes_exactly_its_own_tools(monkeypatch, logs, group, tools):
     # tool.invoke looks tool names up in the same collection, so this also refuses the others.
@@ -1461,4 +1498,244 @@ def test_a_concurrently_dropped_session_is_not_replaced_for_a_call_that_cannot_u
 
     with pytest.raises(mod.SessionEndedError):
         glb.call_with_session(call, replace=False)
+    assert len(client.create_calls) == 1
+
+
+# ---------------------------------------------------------------------------
+# GitHub token: a create-time option, so it is node config rather than a tool argument
+# ---------------------------------------------------------------------------
+
+
+def test_a_configured_github_token_is_given_to_the_session_at_create(monkeypatch, logs):
+    cfg = {'github_token': '  mock-github-token-placeholder-for-tests  '}
+    glb, client = _started(monkeypatch, _FakeSession('sb-1'), cfg=cfg)
+    glb.get_session()
+    assert client.create_calls[0]['github_token'] == 'mock-github-token-placeholder-for-tests'
+
+
+def test_end_global_forgets_the_github_token(monkeypatch, logs):
+    glb, _ = _started(monkeypatch, cfg={'github_token': 'mock-github-token-placeholder-for-tests'})
+    glb.endGlobal()
+    assert glb.github_token == ''
+
+
+# ---------------------------------------------------------------------------
+# git: arguments
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(('value', 'expected'), [(' main ', 'main'), (None, None), ('   ', None)])
+def test_optional_git_arguments_are_stripped_or_absent(value, expected):
+    assert inst_mod._git_arg({'ref': value}, 'ref') == expected
+
+
+@pytest.mark.parametrize('value', ['--upload-pack=touch /home/tenki/x', '-b', 7])
+def test_git_arguments_git_would_read_as_options_or_that_are_not_text_are_refused(value):
+    with pytest.raises(ValueError):
+        inst_mod._git_arg({'ref': value}, 'ref')
+
+
+def test_a_required_git_argument_must_be_present():
+    with pytest.raises(ValueError):
+        inst_mod._git_arg({'repo': '  '}, 'repo', required=True)
+
+
+# ---------------------------------------------------------------------------
+# git_clone
+# ---------------------------------------------------------------------------
+
+_REPO = 'https://github.com/octocat/Hello-World.git'
+
+
+@pytest.mark.parametrize(
+    'args',
+    [
+        {},
+        {'repo': ''},
+        {'repo': 3},
+        {'repo': '--upload-pack=touch /home/tenki/x'},
+        {'repo': _REPO, 'directory': '/tmp/hello'},
+        {'repo': _REPO, 'directory': 9},
+        {'repo': _REPO, 'branch': '-b'},
+        {'repo': _REPO, 'depth': 0},
+        {'repo': _REPO, 'depth': 'shallow'},
+    ],
+)
+def test_git_clone_rejects_invalid_input_without_touching_the_sandbox(monkeypatch, logs, args):
+    inst, client = _instance(monkeypatch, _FakeSession('sb-1'))
+    with pytest.raises(ValueError):
+        inst.git_clone(args)
+    assert client.create_calls == []
+
+
+def test_git_clone_passes_its_arguments_through(monkeypatch, logs):
+    session = _FakeSession('sb-1', git_outputs={'clone': "Cloning into '/home/tenki/src/hello'...\n"})
+    inst, _ = _instance(monkeypatch, session)
+    result = inst.git_clone({'repo': _REPO, 'branch': 'main', 'depth': 1, 'directory': 'src/hello'})
+    assert result == {
+        'directory': '/home/tenki/src/hello',
+        'output': "Cloning into '/home/tenki/src/hello'...\n",
+        'truncated': False,
+    }
+    assert _git_calls(session, 'clone') == [
+        {'repo': _REPO, 'branch': 'main', 'depth': 1, 'directory': '/home/tenki/src/hello'}
+    ]
+
+
+@pytest.mark.parametrize(
+    'repo',
+    [
+        'https://github.com/octocat/Hello-World.git',
+        'https://github.com/octocat/Hello-World',
+        'https://github.com/octocat/Hello-World/',
+        'git@github.com:octocat/Hello-World.git',
+        'git@example.com:Hello-World.git',
+    ],
+)
+def test_git_clone_defaults_to_a_folder_named_after_the_repository(monkeypatch, logs, repo):
+    # git's own default, made explicit so the result can tell the agent where the repository went.
+    session = _FakeSession('sb-1')
+    inst, _ = _instance(monkeypatch, session)
+    assert inst.git_clone({'repo': repo})['directory'] == '/home/tenki/Hello-World'
+    assert _git_calls(session, 'clone')[0]['directory'] == '/home/tenki/Hello-World'
+
+
+def test_git_clone_asks_for_a_directory_when_the_repository_names_no_folder(monkeypatch, logs):
+    inst, client = _instance(monkeypatch, _FakeSession('sb-1'))
+    with pytest.raises(ValueError, match='"directory"'):
+        inst.git_clone({'repo': 'https://example.com/.git'})
+    assert client.create_calls == []
+
+
+def test_git_clone_returns_git_failures_to_the_agent(monkeypatch, logs):
+    failure = inst_mod.SandboxError(
+        'git clone failed (exit_code=128); check the repository, ref and access token: Repository not found'
+    )
+    inst, _ = _instance(monkeypatch, _FakeSession('sb-1', fail={'clone': failure}))
+    result = inst.git_clone({'repo': _REPO})
+    assert result['output'] == ''
+    assert 'Repository not found' in result['error']
+
+
+def test_git_clone_on_an_ended_session_clones_into_a_fresh_one(monkeypatch, logs):
+    dead = _FakeSession('sb-dead', state='TERMINATED', fail={'clone': mod.SessionTerminatedError('session_terminated')})
+    fresh = _FakeSession('sb-fresh', git_outputs={'clone': 'cloned'})
+    inst, client = _instance(monkeypatch, dead, fresh)
+    assert inst.git_clone({'repo': _REPO})['output'] == 'cloned'
+    assert len(client.create_calls) == 2
+
+
+# ---------------------------------------------------------------------------
+# git_checkout / git_diff / git_log
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    'args',
+    [{}, {'ref': ''}, {'ref': '-b'}, {'ref': 'main', 'create': 'yes'}, {'ref': 'main', 'directory': '../elsewhere'}],
+)
+def test_git_checkout_rejects_invalid_input_without_touching_the_sandbox(monkeypatch, logs, args):
+    inst, client = _instance(monkeypatch, _FakeSession('sb-1'))
+    with pytest.raises(ValueError):
+        inst.git_checkout(args)
+    assert client.create_calls == []
+
+
+@pytest.mark.parametrize(
+    ('args', 'passed'),
+    [
+        ({'ref': 'main'}, {'ref': 'main', 'create': False, 'directory': None}),
+        (
+            {'ref': 'fix/login', 'create': True, 'directory': 'Hello-World'},
+            {'ref': 'fix/login', 'create': True, 'directory': '/home/tenki/Hello-World'},
+        ),
+    ],
+)
+def test_git_checkout_passes_its_arguments_through(monkeypatch, logs, args, passed):
+    session = _FakeSession('sb-1', git_outputs={'checkout': "Switched to branch 'main'\n"})
+    inst, _ = _instance(monkeypatch, session)
+    assert inst.git_checkout(args) == {'output': "Switched to branch 'main'\n", 'truncated': False}
+    assert _git_calls(session, 'checkout') == [passed]
+
+
+@pytest.mark.parametrize(
+    'args',
+    [
+        {'range': '-p'},
+        {'range': 'main..fix', 'base': 'main'},
+        {'range': 'main..fix', 'head': 'fix'},
+        {'path': 5},
+        {'directory': '/etc'},
+    ],
+)
+def test_git_diff_rejects_invalid_input_without_touching_the_sandbox(monkeypatch, logs, args):
+    inst, client = _instance(monkeypatch, _FakeSession('sb-1'))
+    with pytest.raises(ValueError):
+        inst.git_diff(args)
+    assert client.create_calls == []
+
+
+@pytest.mark.parametrize(
+    ('args', 'passed'),
+    [
+        ({}, {'range': None, 'base': None, 'head': None, 'path': None, 'directory': None}),
+        (
+            {'range': 'main..fix', 'path': 'src/app.py', 'directory': 'repo'},
+            {'range': 'main..fix', 'base': None, 'head': None, 'path': 'src/app.py', 'directory': '/home/tenki/repo'},
+        ),
+        (
+            {'base': 'main', 'head': 'fix'},
+            {'range': None, 'base': 'main', 'head': 'fix', 'path': None, 'directory': None},
+        ),
+    ],
+)
+def test_git_diff_passes_its_arguments_through(monkeypatch, logs, args, passed):
+    # path is a pathspec inside the repository, so it is passed as given rather than resolved.
+    session = _FakeSession('sb-1')
+    inst, _ = _instance(monkeypatch, session)
+    inst.git_diff(args)
+    assert _git_calls(session, 'diff') == [passed]
+
+
+def test_git_diff_output_is_truncated_at_the_cap(monkeypatch, logs):
+    session = _FakeSession('sb-1', git_outputs={'diff': '+' * 5000})
+    inst, _ = _instance(monkeypatch, session, cfg={'max_output_chars': 1000})
+    assert inst.git_diff({}) == {'output': '+' * 1000, 'truncated': True}
+
+
+@pytest.mark.parametrize('args', [{'max_count': 0}, {'max_count': 1001}, {'max_count': 'ten'}, {'range': '--all'}])
+def test_git_log_rejects_invalid_input_without_touching_the_sandbox(monkeypatch, logs, args):
+    inst, client = _instance(monkeypatch, _FakeSession('sb-1'))
+    with pytest.raises(ValueError):
+        inst.git_log(args)
+    assert client.create_calls == []
+
+
+def test_git_log_is_bounded_even_when_no_count_is_given(monkeypatch, logs):
+    # The whole log comes back in one response, so an unbounded one of a large repository would
+    # land in memory in full before it could be truncated.
+    session = _FakeSession('sb-1')
+    inst, _ = _instance(monkeypatch, session)
+    inst.git_log({})
+    [passed] = _git_calls(session, 'log')
+    assert isinstance(passed['max_count'], int) and 0 < passed['max_count'] <= 100
+
+
+def test_git_log_passes_its_arguments_through(monkeypatch, logs):
+    session = _FakeSession('sb-1', git_outputs={'log': 'commit abc123\n'})
+    inst, _ = _instance(monkeypatch, session)
+    args = {'max_count': 5, 'range': 'main..fix', 'path': 'README.md', 'directory': 'repo'}
+    assert inst.git_log(args) == {'output': 'commit abc123\n', 'truncated': False}
+    assert _git_calls(session, 'log') == [
+        {'max_count': 5, 'range': 'main..fix', 'path': 'README.md', 'directory': '/home/tenki/repo'}
+    ]
+
+
+@pytest.mark.parametrize(('tool', 'args'), [('git_checkout', {'ref': 'main'}), ('git_diff', {}), ('git_log', {})])
+def test_inspecting_a_repository_in_an_ended_session_does_not_start_a_new_one(monkeypatch, logs, tool, args):
+    # The repository went with the session, so a fresh, empty one could only fail to find it.
+    ended = mod.SessionTerminatedError('session_terminated')
+    dead = _FakeSession('sb-dead', state='TERMINATED', fail={'checkout': ended, 'diff': ended, 'log': ended})
+    inst, client = _instance(monkeypatch, dead, _FakeSession('sb-fresh'))
+    assert getattr(inst, tool)(args)['error']
     assert len(client.create_calls) == 1

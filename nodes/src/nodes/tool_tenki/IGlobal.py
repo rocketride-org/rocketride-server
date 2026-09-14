@@ -114,6 +114,7 @@ class IGlobal(IGlobalBase):
     # create two billed sessions and orphan one, or resume one session several times.
     _session_lock: threading.Lock | None = None
     image: str = ''
+    github_token: str = ''
     cpu_cores: int = 2
     memory_mb: int = 4096
     disk_size_gb: int = 5
@@ -152,6 +153,7 @@ class IGlobal(IGlobalBase):
 
         base_url = str((cfg.get('base_url') or '')).strip() or _DEFAULT_BASE_URL
         self.image = str((cfg.get('image') or '')).strip()
+        self.github_token = str((cfg.get('github_token') or '')).strip()
         self.cpu_cores = _int_or(cfg.get('cpu_cores'), 2, lo=1, hi=16)
         # Tenki rejects odd memory sizes (they must align to 2 MiB). Rounding down stays in
         # range because both bounds are even.
@@ -194,6 +196,11 @@ class IGlobal(IGlobalBase):
         }
         if self.image:
             create_kwargs['image'] = self.image
+        if self.github_token:
+            # Lets git clone private repositories. Tenki hands it to the VM as the GH_TOKEN and
+            # GIT_TOKEN environment variables, where any command the agent runs can read it; the
+            # config field warns about exactly that.
+            create_kwargs['github_token'] = self.github_token
         try:
             return self.client.create(**create_kwargs)
         except (WaitReadyFailedError, TemplateRuntimeFailedError) as e:
@@ -325,3 +332,4 @@ class IGlobal(IGlobalBase):
                 warning(f'tool_tenki: client close failed: {e}')
             finally:
                 self.client = None
+        self.github_token = ''

@@ -32,6 +32,17 @@
 				"ui:widget": "ApiKeyWidget"
 			}
 		},
+		"tenki.github_token": {
+			"type": "string",
+			"title": "GitHub Token",
+			"description": "Optional GitHub token that lets git clone private repositories. Tenki makes it available inside the sandbox as the <code>GH_TOKEN</code> and <code>GIT_TOKEN</code> environment variables, so any command the agent runs can read it: use a fine-grained, read-only token limited to the repositories the agent needs.",
+			"default": "",
+			"optional": true,
+			"secure": true,
+			"ui": {
+				"ui:widget": "ApiKeyWidget"
+			}
+		},
 		"tenki.base_url": {
 			"type": "string",
 			"title": "API URL",
@@ -138,7 +149,7 @@
 		{
 			"section": "Pipe",
 			"title": "Tenki Sandbox",
-			"properties": ["type", "tenki.apikey", "tenki.base_url", "tenki.cpu_cores", "tenki.memory_mb", "tenki.disk_size_gb", "tenki.idle_timeout_minutes", "tenki.max_duration_minutes", "tenki.exec_timeout_secs", "tenki.max_output_chars", "tenki.image", "tenki.toolGroups"]
+			"properties": ["type", "tenki.apikey", "tenki.github_token", "tenki.base_url", "tenki.cpu_cores", "tenki.memory_mb", "tenki.disk_size_gb", "tenki.idle_timeout_minutes", "tenki.max_duration_minutes", "tenki.exec_timeout_secs", "tenki.max_output_chars", "tenki.image", "tenki.toolGroups"]
 		}
 	]
 }

@@ -44,7 +44,7 @@ from typing import Callable
 
 from rocketlib import IInstanceBase
 
-from ai.common.utils import normalize_tool_input, optional_bool
+from ai.common.utils import normalize_tool_input, optional_bool, optional_int
 
 from tenki import CommandTimeoutError, PermissionDeniedError, SandboxError
 from tenki import FileNotFoundError as TenkiFileNotFoundError  # also subclasses the builtin it shadows
@@ -69,6 +69,12 @@ _SESSION_NOTE = (
 _PATH_NOTE = (
     'Paths are relative to /home/tenki or absolute under it; anything outside /home/tenki, including /tmp, is rejected.'
 )
+
+#: git_log's commit count when none is given, and the most it accepts. The whole log comes back
+#: in one response, so an unbounded log of a large repository would sit in memory in full before
+#: it could be truncated.
+_DEFAULT_LOG_COUNT = 20
+_MAX_LOG_COUNT = 1000
 
 #: run_code languages: the interpreter to run, and the file extension it expects.
 _LANGUAGES = {
@@ -150,6 +156,66 @@ def _listing(entries, cap: int) -> tuple[list[dict], bool]:
             return shaped, True
         shaped.append(item)
     return shaped, False
+
+
+_GIT_OUTPUT_SCHEMA = {
+    'type': 'object',
+    'properties': {
+        'output': {'type': 'string', 'description': "git's output."},
+        'truncated': {'type': 'boolean', 'description': 'True if the output was cut at the output cap.'},
+        'error': {'type': 'string', 'description': 'Error message if the git operation failed.'},
+    },
+}
+
+_REPO_DIRECTORY = {
+    'type': 'string',
+    'description': (
+        "The repository's folder (the equivalent of git -C), relative to /home/tenki or absolute "
+        'under it. Defaults to /home/tenki.'
+    ),
+}
+
+
+def _git_arg(args: dict, key: str, *, required: bool = False) -> str | None:
+    """Return a stripped git argument from the tool input, or None when optional and not given.
+
+    A value starting with '-' is refused: git would read it as an option rather than as the
+    repository, ref or path it was meant to be, and none of those legitimately starts that way.
+    """
+    value = args.get(key)
+    if value is None or (not required and isinstance(value, str) and not value.strip()):
+        if required:
+            raise ValueError(f'"{key}" is required and must be a non-empty string')
+        return None
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f'"{key}" must be a non-empty string')
+    value = value.strip()
+    if value.startswith('-'):
+        raise ValueError(f'"{key}" must not start with "-", which git would read as an option')
+    return value
+
+
+def _git_directory(args: dict) -> str | None:
+    """The repository folder from the tool input, resolved under /home/tenki, or None if not given."""
+    directory = args.get('directory')
+    if directory is None or (isinstance(directory, str) and not directory.strip()):
+        return None
+    if not isinstance(directory, str):
+        raise ValueError('"directory" must be a string')
+    return _normalize_path(directory)
+
+
+def _clone_folder(repo: str) -> str | None:
+    """The folder name git itself clones ``repo`` into: its last path segment, without ``.git``."""
+    name = repo.rstrip('/').rsplit('/', 1)[-1].rsplit(':', 1)[-1]
+    if name.endswith('.git'):
+        name = name[: -len('.git')]
+    return None if name in ('', '.', '..') else name
+
+
+def _git_result(output, cap: int) -> dict:
+    text, truncated = _truncate(output, cap)
+    return {'output': text, 'truncated': truncated}
 
 
 def _truncate(text: str, cap: int) -> tuple[str, bool]:
@@ -544,3 +610,189 @@ class IInstance(IInstanceBase):
         except (SandboxError, SessionEndedError) as e:
             return {'success': False, 'path': path, 'error': _fs_error(e, path)}
         return {'success': True, 'path': path}
+
+    # -----------------------------------------------------------------------
+    # Group: git
+    #
+    # Tenki's structured git helpers, which return git's raw output. Only git_clone may start a
+    # fresh session: the others work on a repository that an ended session took with it.
+    # -----------------------------------------------------------------------
+
+    @tenki_tool(
+        group='git',
+        input_schema={
+            'type': 'object',
+            'required': ['repo'],
+            'properties': {
+                'repo': {
+                    'type': 'string',
+                    'description': 'Repository URL, e.g. "https://github.com/octocat/Hello-World.git".',
+                },
+                'directory': {
+                    'type': 'string',
+                    'description': (
+                        'Folder to clone into, relative to /home/tenki or absolute under it. Defaults to '
+                        'a folder named after the repository.'
+                    ),
+                },
+                'branch': {'type': 'string', 'description': 'Branch to check out after cloning (optional).'},
+                'depth': {
+                    'type': 'integer',
+                    'minimum': 1,
+                    'description': 'Clone only this many of the most recent commits (optional).',
+                },
+            },
+        },
+        output_schema={
+            'type': 'object',
+            'properties': {
+                'directory': {'type': 'string', 'description': 'Absolute path of the cloned repository.'},
+                **_GIT_OUTPUT_SCHEMA['properties'],
+            },
+        },
+        description=lambda self: (
+            "Clone a git repository into the remote Tenki sandbox, returning git's output and the folder "
+            'it was cloned into. Private GitHub repositories need a GitHub token configured on this node. '
+            f'{_SESSION_NOTE}'
+        ),
+    )
+    def git_clone(self, args):
+        """Clone a git repository into the shared Tenki session."""
+        args = normalize_tool_input(args, tool_name='tenki')
+        repo = _git_arg(args, 'repo', required=True)
+        branch = _git_arg(args, 'branch')
+        depth = optional_int(args, 'depth', lo=1, tool_name='tenki')
+        directory = _git_directory(args)
+        if directory is None:
+            # Chosen here rather than left to git, so the result can say where the repository went.
+            folder = _clone_folder(repo)
+            if folder is None:
+                raise ValueError('could not derive a folder name from "repo"; pass "directory"')
+            directory = _normalize_path(folder)
+
+        try:
+            output = self.IGlobal.call_with_session(
+                lambda session: session.git.clone(repo, branch=branch, depth=depth, directory=directory)
+            )
+        except SandboxError as e:
+            return {'directory': directory, 'output': '', 'truncated': False, 'error': str(e)}
+        return {'directory': directory, **_git_result(output, self.IGlobal.max_output_chars)}
+
+    @tenki_tool(
+        group='git',
+        input_schema={
+            'type': 'object',
+            'required': ['ref'],
+            'properties': {
+                'ref': {'type': 'string', 'description': 'Branch, tag or commit to check out.'},
+                'create': {
+                    'type': 'boolean',
+                    'description': 'Create ref as a new branch (like git checkout -b). Defaults to false.',
+                },
+                'directory': _REPO_DIRECTORY,
+            },
+        },
+        output_schema=_GIT_OUTPUT_SCHEMA,
+        description=lambda self: (
+            'Check out a branch, tag or commit in a git repository in the remote Tenki sandbox, or create '
+            f'a new branch. {_SESSION_NOTE}'
+        ),
+    )
+    def git_checkout(self, args):
+        """Check out a ref in a repository in the shared Tenki session."""
+        args = normalize_tool_input(args, tool_name='tenki')
+        ref = _git_arg(args, 'ref', required=True)
+        create = optional_bool(args, 'create', default=False, tool_name='tenki')
+        directory = _git_directory(args)
+
+        try:
+            output = self.IGlobal.call_with_session(
+                lambda session: session.git.checkout(ref, create=create, directory=directory), replace=False
+            )
+        except (SandboxError, SessionEndedError) as e:
+            return {'output': '', 'truncated': False, 'error': str(e)}
+        return _git_result(output, self.IGlobal.max_output_chars)
+
+    @tenki_tool(
+        group='git',
+        input_schema={
+            'type': 'object',
+            'properties': {
+                'range': {'type': 'string', 'description': 'Revision range to compare, e.g. "main..fix" (optional).'},
+                'base': {'type': 'string', 'description': 'Revision to compare from, instead of a range (optional).'},
+                'head': {'type': 'string', 'description': 'Revision to compare to, instead of a range (optional).'},
+                'path': {
+                    'type': 'string',
+                    'description': 'Limit the diff to this file or folder, relative to the repository (optional).',
+                },
+                'directory': _REPO_DIRECTORY,
+            },
+        },
+        output_schema=_GIT_OUTPUT_SCHEMA,
+        description=lambda self: (
+            'Show a git diff for a repository in the remote Tenki sandbox. Choose the revisions with a '
+            f'range, or with base and head, and narrow it with path. {_SESSION_NOTE}'
+        ),
+    )
+    def git_diff(self, args):
+        """Show a diff for a repository in the shared Tenki session."""
+        args = normalize_tool_input(args, tool_name='tenki')
+        revisions = {key: _git_arg(args, key) for key in ('range', 'base', 'head')}
+        if revisions['range'] and (revisions['base'] or revisions['head']):
+            raise ValueError('pass either "range" or "base" and "head", not both')
+        path = _git_arg(args, 'path')
+        directory = _git_directory(args)
+
+        try:
+            output = self.IGlobal.call_with_session(
+                lambda session: session.git.diff(**revisions, path=path, directory=directory), replace=False
+            )
+        except (SandboxError, SessionEndedError) as e:
+            return {'output': '', 'truncated': False, 'error': str(e)}
+        return _git_result(output, self.IGlobal.max_output_chars)
+
+    @tenki_tool(
+        group='git',
+        input_schema={
+            'type': 'object',
+            'properties': {
+                'max_count': {
+                    'type': 'integer',
+                    'minimum': 1,
+                    'maximum': _MAX_LOG_COUNT,
+                    'description': f'Number of commits to show. Defaults to {_DEFAULT_LOG_COUNT}.',
+                },
+                'range': {'type': 'string', 'description': 'Revision range to show, e.g. "main..fix" (optional).'},
+                'path': {
+                    'type': 'string',
+                    'description': 'Only commits touching this file or folder, relative to the repository (optional).',
+                },
+                'directory': _REPO_DIRECTORY,
+            },
+        },
+        output_schema=_GIT_OUTPUT_SCHEMA,
+        description=lambda self: (
+            'Show the commit log of a git repository in the remote Tenki sandbox, newest first, '
+            f'{_DEFAULT_LOG_COUNT} commits unless max_count says otherwise. {_SESSION_NOTE}'
+        ),
+    )
+    def git_log(self, args):
+        """Show the commit log of a repository in the shared Tenki session."""
+        args = normalize_tool_input(args, tool_name='tenki')
+        max_count = optional_int(
+            args, 'max_count', default=_DEFAULT_LOG_COUNT, lo=1, hi=_MAX_LOG_COUNT, tool_name='tenki'
+        )
+        revision_range = _git_arg(args, 'range')
+        path = _git_arg(args, 'path')
+        directory = _git_directory(args)
+
+        try:
+            output = self.IGlobal.call_with_session(
+                lambda session: session.git.log(
+                    max_count=max_count, range=revision_range, path=path, directory=directory
+                ),
+                replace=False,
+            )
+        except (SandboxError, SessionEndedError) as e:
+            return {'output': '', 'truncated': False, 'error': str(e)}
+        return _git_result(output, self.IGlobal.max_output_chars)
