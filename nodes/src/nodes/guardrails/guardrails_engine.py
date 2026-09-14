@@ -401,6 +401,9 @@ class GuardrailsEngine:
     _NEGATION = re.compile(
         r"\b(?:no|not|none|nothing|never|cannot|can't|couldn't|unable|n't|without|outside|beyond|lacks?|lacking)\b"
     )
+    # An answer that opens by agreeing is affirming the figure, whatever it negates later.
+    _AFFIRMS = re.compile(r"^\W*(?:yes|correct|indeed|true|confirmed|that is right|that's right)\b")
+    _SENTENCE = re.compile(r'(?<=[.!?])\s+|\n+')
     # A question writing $94.7B and an answer writing $94.7 billion name the same
     # amount, so the scale word is folded to its initial before they are compared.
     _SCALE_WORDS = (('billion', 'b'), ('bn', 'b'), ('million', 'm'), ('thousand', 'k'))
@@ -440,13 +443,20 @@ class GuardrailsEngine:
     def _declines(cls, output: str) -> bool:
         """Report whether *output* refuses rather than answers.
 
-        A refusal carries a negation or an inability somewhere in it, which holds
-        for wordings the phrase list never anticipated. The list stays for the few
-        that state a shortfall without negating anything.
+        A refusal negates the figure it declines to state, which holds for wordings
+        the phrase list never anticipated. The negation is looked for in the figure's
+        own sentence, so an affirmation carrying an unrelated "no" is not mistaken
+        for one, and an answer that opens by agreeing is never a refusal. The phrase
+        list stays for the few that state a shortfall without negating anything.
         """
         body = output.strip().lower().replace('\u2019', "'")
-        if cls._NEGATION.search(body):
-            return True
+        if cls._AFFIRMS.match(body):
+            return False
+        # The negation has to sit with the figure. A refusal negates the thing it
+        # declines to state, while an affirmation can carry an unrelated "no".
+        for sentence in cls._SENTENCE.split(body):
+            if cls.FIGURE_PATTERN.search(sentence) and cls._NEGATION.search(sentence):
+                return True
         return any(marker in body for marker in cls.ABSTENTION_MARKERS)
 
     @classmethod
