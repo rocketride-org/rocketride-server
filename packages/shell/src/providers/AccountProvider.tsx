@@ -30,7 +30,10 @@
 import React, { useState, useEffect, useCallback, CSSProperties } from 'react';
 import AccountView from '../modules/account/AccountView';
 import type { IDataGridPageRequest } from '../components/data-grid/DataGrid';
-import type { ConnectResult, AccountSection, ApiKeyRecord, OrgDetail, MemberRecord, TeamRecord, TeamDetail, ProfileUpdate, BillingDetail, CreditBalance, TransactionsResult, UsageRollup } from 'rocketride';
+import type { ConnectResult, ApiKeyRecord, AgentKeyProvider, AgentKeyStatus, OrgDetail, MemberRecord, TeamRecord, TeamDetail, ProfileUpdate, BillingDetail, CreditBalance, TransactionsResult, UsageRollup } from 'rocketride';
+// AccountViewSection comes from the shell's own module (widened locally with
+// 'agent-keys' — pure UI navigation state the SDK never reads), not the SDK.
+import type { AccountViewSection } from '../modules/account/types';
 import { useShellConnection } from '../connection/ConnectionContext';
 import { useAuthUser, useLogout } from '../hooks/useAuthUser';
 import { ConnectionManager } from '../connection/connection';
@@ -66,12 +69,13 @@ const AccountProvider: React.FC = () => {
 	const { appManifest } = useWorkspace();
 
 	// ── Navigation state ────────────────────────────────────────────────────
-	const [section, setSection] = useState<AccountSection>('profile');
+	const [section, setSection] = useState<AccountViewSection>('profile');
 	const [activeTeamId, setActiveTeamId] = useState<string | null>(null);
 
 	// ── Data ────────────────────────────────────────────────────────────────
 	const [profile, setProfile] = useState<ConnectResult | null>(null);
 	const [keys, setKeys] = useState<ApiKeyRecord[]>([]);
+	const [agentKeyStatus, setAgentKeyStatus] = useState<AgentKeyStatus[]>([]);
 	const [org, setOrg] = useState<OrgDetail | null>(null);
 	const [members, setMembers] = useState<MemberRecord[]>([]);
 	const [teams, setTeams] = useState<TeamRecord[]>([]);
@@ -131,6 +135,17 @@ const AccountProvider: React.FC = () => {
 		try {
 			const keys = await client.account.listKeys();
 			setKeys(keys);
+		} catch (e) {
+			setSectionError(errMsg(e));
+		}
+	}, [client]);
+
+	/** Fetches the caller's masked BYO agent inference key status rows (provider + last4 only). */
+	const loadAgentKeyStatus = useCallback(async () => {
+		if (!client) return;
+		try {
+			const keys = await client.account.agentKeyStatus();
+			setAgentKeyStatus(keys);
 		} catch (e) {
 			setSectionError(errMsg(e));
 		}
@@ -297,6 +312,7 @@ const AccountProvider: React.FC = () => {
 		if (!isConnected || !client) return;
 		loadProfile();
 		loadKeys();
+		loadAgentKeyStatus();
 		loadOrg();
 		loadMembers();
 		loadTeams();
@@ -329,7 +345,8 @@ const AccountProvider: React.FC = () => {
 		else if (section === 'api-keys') {
 			loadProfile();
 			loadKeys();
-		} else if (section === 'organization') loadOrg();
+		} else if (section === 'agent-keys') loadAgentKeyStatus();
+		else if (section === 'organization') loadOrg();
 		else if (section === 'members') {
 			loadOrg();
 			loadMembers();
@@ -414,6 +431,31 @@ const AccountProvider: React.FC = () => {
 			await loadKeys();
 		},
 		[client, loadKeys]
+	);
+
+	/**
+	 * Validates and stores a BYO agent inference key for the given provider.
+	 * The raw key exists only on this one call — never cached or logged
+	 * client-side. Rejection (invalid_key / provider_unreachable) propagates
+	 * to the panel, which surfaces the inline error; nothing is stored.
+	 */
+	const handleSetAgentKey = useCallback(
+		async (provider: AgentKeyProvider, key: string) => {
+			if (!client) throw new Error('Not connected');
+			await client.account.setAgentKey(provider, key);
+			await loadAgentKeyStatus();
+		},
+		[client, loadAgentKeyStatus]
+	);
+
+	/** Removes the stored BYO agent inference key for the given provider. */
+	const handleClearAgentKey = useCallback(
+		async (provider: AgentKeyProvider) => {
+			if (!client) return;
+			await client.account.clearAgentKey(provider);
+			await loadAgentKeyStatus();
+		},
+		[client, loadAgentKeyStatus]
 	);
 
 	/** Sends an invitation to a new organization member. */
@@ -548,6 +590,7 @@ const AccountProvider: React.FC = () => {
 				profile={profile}
 				authUser={authUser}
 				keys={keys}
+				agentKeyStatus={agentKeyStatus}
 				org={org}
 				members={members}
 				teams={teams}
@@ -583,6 +626,8 @@ const AccountProvider: React.FC = () => {
 				onSaveOrgName={handleSaveOrgName}
 				onCreateKey={handleCreateKey}
 				onRevokeKey={handleRevokeKey}
+				onSetAgentKey={handleSetAgentKey}
+				onClearAgentKey={handleClearAgentKey}
 				onInviteMember={handleInviteMember}
 				onUpdateMemberRole={handleUpdateMemberRole}
 				onRemoveMember={handleRemoveMember}

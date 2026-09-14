@@ -177,10 +177,31 @@ export interface TeamMemberRecord {
 // =============================================================================
 
 /**
- * Union type for the five navigable sections within AccountView.
+ * Union type for the navigable sections within AccountView.
  * Controls which tab panel is active and which data is fetched.
+ *
+ * Deliberately does NOT include 'agent-keys': that tab is pure shell-side UI
+ * navigation state (nothing in this SDK consumes it), so the shell widens its
+ * own re-export of this type locally instead of forcing an SDK contract bump
+ * for a value the SDK never reads. See packages/shell/src/modules/account/types.ts.
  */
 export type AccountSection = 'profile' | 'billing' | 'api-keys' | 'organization' | 'teams' | 'members';
+
+// =============================================================================
+// AGENT KEYS (OpenCode Canvas Agent — BYO inference keys)
+// =============================================================================
+
+/** Providers a user can bring an inference key for (OpenCode Canvas Agent). */
+export type AgentKeyProvider = 'anthropic' | 'openai';
+
+/** Masked status row — the server never returns more than this. */
+export interface AgentKeyStatus {
+	/** Which inference provider this key belongs to. */
+	provider: AgentKeyProvider;
+
+	/** Last 4 characters of the stored key, for display only. */
+	last4: string;
+}
 
 // =============================================================================
 // PROFILE UPDATE

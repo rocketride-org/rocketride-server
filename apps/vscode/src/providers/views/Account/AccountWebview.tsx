@@ -18,7 +18,7 @@ import React, { useState, useCallback, useRef, useEffect } from 'react';
 
 import { AccountView } from 'shell';
 import { CheckoutModal } from 'shell';
-import type { ApiKeyRecord, OrgDetail, MemberRecord, TeamRecord, TeamDetail, AccountSection, ProfileUpdate } from 'shell';
+import type { ApiKeyRecord, OrgDetail, MemberRecord, TeamRecord, TeamDetail, AccountViewSection, ProfileUpdate } from 'shell';
 import type { CheckoutPlan, PromoRedemption, PromoValidation } from 'shell';
 import type { ConnectResult } from 'shell';
 import { useMessaging } from '../hooks/useMessaging';
@@ -47,7 +47,7 @@ const AccountWebview: React.FC = () => {
 	const [members, setMembers] = useState<MemberRecord[]>([]);
 	const [teams, setTeams] = useState<TeamRecord[]>([]);
 	const [teamDetail, setTeamDetail] = useState<TeamDetail | null>(null);
-	const [section, setSection] = useState<AccountSection>('profile');
+	const [section, setSection] = useState<AccountViewSection>('profile');
 	const [activeTeamId, setActiveTeamId] = useState<string | null>(null);
 
 	// Billing state

@@ -30,6 +30,8 @@ export { ProfilePanel } from './components/ProfilePanel';
 export type { ProfilePanelProps } from './components/ProfilePanel';
 export { ApiKeysPanel } from './components/ApiKeysPanel';
 export type { ApiKeysPanelProps } from './components/ApiKeysPanel';
+export { AgentKeysPanel } from './components/AgentKeysPanel';
+export type { AgentKeysPanelProps } from './components/AgentKeysPanel';
 export { OrganizationPanel } from './components/OrganizationPanel';
 export type { OrganizationPanelProps } from './components/OrganizationPanel';
 export { TeamsPanel } from './components/TeamsPanel';
@@ -51,4 +53,4 @@ export { S, PERMS, PERM_DISPLAY, EXPIRY_OPTS } from './components/shared';
 // TYPES
 // =============================================================================
 
-export type { ConnectResult, ApiKeyRecord, OrgDetail, MemberRecord, TeamRecord, TeamDetail, TeamMemberRecord, AccountSection, ProfileUpdate } from './types';
+export type { ConnectResult, ApiKeyRecord, OrgDetail, MemberRecord, TeamRecord, TeamDetail, TeamMemberRecord, AccountViewSection, ProfileUpdate, AgentKeyProvider, AgentKeyStatus } from './types';

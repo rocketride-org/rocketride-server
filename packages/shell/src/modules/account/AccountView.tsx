@@ -17,7 +17,7 @@
  *  - passing the results down as `IAccountViewProps`
  */
 
-import React, { useMemo, useCallback } from 'react';
+import React, { useMemo, useCallback, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { TabPanel } from '../../components/tab-panel/TabPanel';
 import { TabControl } from '../../components/tab-control/TabControl';
@@ -26,13 +26,14 @@ import type { ITabPanelPanel } from '../../components/tab-panel/TabPanel';
 import type { ViewMenu } from '../../types/viewMenu';
 import type { IDataGridPageRequest } from '../../components/data-grid/DataGrid';
 import { commonStyles } from '../../themes/styles';
-import type { ConnectResult, ApiKeyRecord, OrgDetail, MemberRecord, TeamRecord, TeamDetail, AccountSection, ProfileUpdate } from './types';
+import type { ConnectResult, ApiKeyRecord, OrgDetail, MemberRecord, TeamRecord, TeamDetail, AccountViewSection, ProfileUpdate, AgentKeyProvider, AgentKeyStatus } from './types';
 import type { BillingDetail, CreditBalance, TransactionsResult, UsageRollup } from '../billing/types';
 import type { ActiveTask } from '../billing/components/BillingDashboard';
 import { ProfilePanel } from './components/ProfilePanel';
 // EnvScopeCard removed — env management is now in the standalone Environment page
 import { BillingPanel } from './components/BillingPanel';
 import { ApiKeysPanel } from './components/ApiKeysPanel';
+import { AgentKeysPanel } from './components/AgentKeysPanel';
 import { OrganizationPanel } from './components/OrganizationPanel';
 import { TeamsPanel } from './components/TeamsPanel';
 import { MembersPanel } from './components/MembersPanel';
@@ -117,6 +118,14 @@ export interface IAccountViewProps {
 	authUser: ConnectResult | null;
 	/** List of API key records owned by the current user. */
 	keys: ApiKeyRecord[];
+	/**
+	 * Masked BYO agent inference key status rows (provider + last4 only).
+	 * Optional, paired with `onSetAgentKey` / `onClearAgentKey`: the Agent
+	 * Keys tab is hidden entirely for hosts that don't wire all three (the
+	 * `onDeleteAccount` precedent — additive props stay optional so existing
+	 * hosts keep compiling unchanged).
+	 */
+	agentKeyStatus?: AgentKeyStatus[];
 	/** Organization detail for the current user's org, or null while loading. */
 	org: OrgDetail | null;
 	/** Flat list of all organization members. */
@@ -176,9 +185,9 @@ export interface IAccountViewProps {
 
 	// -- Navigation state ------------------------------------------------------
 	/** The currently active section / tab. */
-	section: AccountSection;
+	section: AccountViewSection;
 	/** Called when the user switches tabs. */
-	onSectionChange: (section: AccountSection) => void;
+	onSectionChange: (section: AccountViewSection) => void;
 	/** ID of the team currently being drilled into, or null for list view. */
 	activeTeamId: string | null;
 	/** Called when the user drills into / backs out of a team. */
@@ -209,6 +218,16 @@ export interface IAccountViewProps {
 	onCreateKey: (params: { name: string; permissions: string[]; expiresAt?: string; teamId?: string }) => Promise<{ key: string }>;
 	/** Revokes an API key by its ID. */
 	onRevokeKey: (keyId: string) => Promise<void>;
+	/**
+	 * Validates and stores a BYO agent inference key for the given provider.
+	 * Optional — see `agentKeyStatus`.
+	 */
+	onSetAgentKey?: (provider: AgentKeyProvider, key: string) => Promise<void>;
+	/**
+	 * Removes the stored BYO agent inference key for the given provider.
+	 * Optional — see `agentKeyStatus`.
+	 */
+	onClearAgentKey?: (provider: AgentKeyProvider) => Promise<void>;
 	/** Sends an invitation to a new organization member. */
 	onInviteMember: (params: { email: string; givenName: string; familyName: string; role: string; teamAssignments?: Array<{ teamId: string; permissions: string[] }> }) => Promise<void>;
 	/** Updates an organization member's role. */
@@ -242,12 +261,16 @@ export interface IAccountViewProps {
 /**
  * AccountView is the pure, host-agnostic root component for account management.
  *
- * It renders five tab panels (Profile, API Keys, Organization, Teams, Members)
- * and owns all modal/form UI state internally. Server operations are delegated
- * to the host via async callback props defined in IAccountViewProps.
+ * It renders five always-on tab panels (Profile, API Keys, Organization,
+ * Teams, Members) plus a sixth, Agent Keys, that only appears when the host
+ * wires `onSetAgentKey` + `onClearAgentKey` (optional, additive props —
+ * hosts that predate the feature keep compiling and simply never see the
+ * tab). Owns all modal/form UI state internally; server operations are
+ * delegated to the host via async callback props defined in
+ * IAccountViewProps.
  */
 const AccountView: React.FC<IAccountViewProps> = (props) => {
-	const { isConnected, sectionError, profile, authUser, keys, org, members, teams, teamDetail, subscriptions, billingLoading, billingError, creditBalance, apps, onCancelSubscription, onOpenPortal, onSubscribe, transactions, usageByUser, usageByTeam, activeTasks, dashboardLoading, onTransactionPage, fetchTransactions, fetchTransactionDistinct, topupPlans, onBuyTopup, allPlans, onPurchaseTopup, onUpgradeSubscription, section, onSectionChange, activeTeamId, onActiveTeamIdChange, onSaveProfile, onSetDefaultTeam, onSetDefaultOrg, onSaveOrgName, onCreateKey, onRevokeKey, onInviteMember, onUpdateMemberRole, onRemoveMember, onResendInvite, onCreateTeam, onDeleteTeam, onAddTeamMember, onEditTeamMemberPerms, onRemoveTeamMember, onLoadTeamDetail } = props;
+	const { isConnected, sectionError, profile, authUser, keys, agentKeyStatus, org, members, teams, teamDetail, subscriptions, billingLoading, billingError, creditBalance, apps, onCancelSubscription, onOpenPortal, onSubscribe, transactions, usageByUser, usageByTeam, activeTasks, dashboardLoading, onTransactionPage, fetchTransactions, fetchTransactionDistinct, topupPlans, onBuyTopup, allPlans, onPurchaseTopup, onUpgradeSubscription, section, onSectionChange, activeTeamId, onActiveTeamIdChange, onSaveProfile, onSetDefaultTeam, onSetDefaultOrg, onSaveOrgName, onCreateKey, onRevokeKey, onSetAgentKey, onClearAgentKey, onInviteMember, onUpdateMemberRole, onRemoveMember, onResendInvite, onCreateTeam, onDeleteTeam, onAddTeamMember, onEditTeamMemberPerms, onRemoveTeamMember, onLoadTeamDetail } = props;
 
 	// =========================================================================
 	// PERMISSION HELPERS
@@ -291,6 +314,46 @@ const AccountView: React.FC<IAccountViewProps> = (props) => {
 	};
 
 	// =========================================================================
+	// AGENT KEYS — busy flag (transient UI state; AgentKeysPanel is pure)
+	// =========================================================================
+
+	// True only when the host wired ALL THREE agent-key props; the tab is
+	// hidden entirely (menu entry + panel omitted below) for hosts that don't
+	// — graceful degradation for external hosts predating this feature.
+	const agentKeysEnabled = onSetAgentKey != null && onClearAgentKey != null;
+
+	/** True while a set/clear agent-key request is in flight. */
+	const [agentKeyBusy, setAgentKeyBusy] = useState(false);
+
+	/** Wraps onSetAgentKey with the busy flag; rejection propagates to the panel row. */
+	const handleSetAgentKey = useCallback(
+		async (provider: AgentKeyProvider, key: string) => {
+			if (!onSetAgentKey) return;
+			setAgentKeyBusy(true);
+			try {
+				await onSetAgentKey(provider, key);
+			} finally {
+				setAgentKeyBusy(false);
+			}
+		},
+		[onSetAgentKey]
+	);
+
+	/** Wraps onClearAgentKey with the busy flag; rejection propagates to the panel row. */
+	const handleClearAgentKey = useCallback(
+		async (provider: AgentKeyProvider) => {
+			if (!onClearAgentKey) return;
+			setAgentKeyBusy(true);
+			try {
+				await onClearAgentKey(provider);
+			} finally {
+				setAgentKeyBusy(false);
+			}
+		},
+		[onClearAgentKey]
+	);
+
+	// =========================================================================
 	// TABS
 	// =========================================================================
 
@@ -299,24 +362,26 @@ const AccountView: React.FC<IAccountViewProps> = (props) => {
 	 * Counts on Billing, API Keys, Teams, and Members show when non-zero.
 	 */
 	const activeKeyCount = keys.filter((k) => k.active).length;
+	const agentKeyCount = agentKeyStatus?.length ?? 0;
 	const viewMenu = useMemo<ViewMenu>(
 		() => ({
 			entries: [
 				{ id: 'profile', label: 'Profile' },
 				{ id: 'billing', label: 'Billing', ...(subscriptions.length > 0 ? { count: subscriptions.length } : {}) },
 				{ id: 'api-keys', label: 'API Keys', ...(activeKeyCount > 0 ? { count: activeKeyCount } : {}) },
+				...(agentKeysEnabled ? [{ id: 'agent-keys', label: 'Agent Keys', ...(agentKeyCount > 0 ? { count: agentKeyCount } : {}) }] : []),
 				{ id: 'organization', label: 'Organization' },
 				{ id: 'teams', label: 'Teams', ...(teams.length > 0 ? { count: teams.length } : {}) },
 				{ id: 'members', label: 'Members', ...(members.length > 0 ? { count: members.length } : {}) },
 			],
 		}),
-		[subscriptions.length, activeKeyCount, teams.length, members.length]
+		[subscriptions.length, activeKeyCount, agentKeysEnabled, agentKeyCount, teams.length, members.length]
 	);
 
 	/** Selecting an entry switches the section and drops any team drill-down. */
 	const handleSelectSection = useCallback(
 		(id: string) => {
-			onSectionChange(id as AccountSection);
+			onSectionChange(id as AccountViewSection);
 			onActiveTeamIdChange(null);
 		},
 		[onSectionChange, onActiveTeamIdChange]
@@ -365,6 +430,24 @@ const AccountView: React.FC<IAccountViewProps> = (props) => {
 					</>
 				),
 			},
+			// Omitted entirely (not just hidden) when the host hasn't wired the
+			// agent-key callbacks — TabPanel never mounts AgentKeysPanel with a
+			// missing handler, and the tab strip above already dropped its entry.
+			...(agentKeysEnabled
+				? {
+						'agent-keys': {
+							content: (
+								<>
+									<ContentHeader title="Agent Keys" subtitle="Bring your own inference key for the OpenCode Canvas Agent." />
+									<div style={commonStyles.tabContent}>
+										{sectionError && <p style={{ color: 'var(--rr-color-error)', fontSize: 13, marginBottom: 12 }}>{sectionError}</p>}
+										<AgentKeysPanel status={agentKeyStatus ?? []} busy={agentKeyBusy} onSetKey={handleSetAgentKey} onClearKey={handleClearAgentKey} />
+									</div>
+								</>
+							),
+						},
+					}
+				: {}),
 			organization: {
 				content: (
 					<>
@@ -399,7 +482,7 @@ const AccountView: React.FC<IAccountViewProps> = (props) => {
 				),
 			},
 		}),
-		[sectionError, profile, authUser, keys, org, teams, teamDetail, activeTeamId, members, isConnected, subscriptions, billingLoading, billingError, creditBalance, transactions, apps, usageByUser, usageByTeam, activeTasks, dashboardLoading, topupPlans, allPlans, fetchTransactions, fetchTransactionDistinct, onSaveProfile, onSetDefaultTeam, onSetDefaultOrg, onSubscribe, onTransactionPage, onBuyTopup, onPurchaseTopup, onUpgradeSubscription, onSaveOrgName, onResendInvite, onActiveTeamIdChange, onLoadTeamDetail, onCreateKey, onRevokeKey, onInviteMember, onUpdateMemberRole, onRemoveMember, onCancelSubscription, onCreateTeam, onDeleteTeam, onAddTeamMember, onEditTeamMemberPerms, onRemoveTeamMember, handlePortal, isOrgAdmin, isActiveTeamAdmin]
+		[sectionError, profile, authUser, keys, agentKeyStatus, agentKeyBusy, agentKeysEnabled, org, teams, teamDetail, activeTeamId, members, isConnected, subscriptions, billingLoading, billingError, creditBalance, transactions, apps, usageByUser, usageByTeam, activeTasks, dashboardLoading, topupPlans, allPlans, fetchTransactions, fetchTransactionDistinct, onSaveProfile, onSetDefaultTeam, onSetDefaultOrg, onSubscribe, onTransactionPage, onBuyTopup, onPurchaseTopup, onUpgradeSubscription, onSaveOrgName, onResendInvite, onActiveTeamIdChange, onLoadTeamDetail, onCreateKey, onRevokeKey, handleSetAgentKey, handleClearAgentKey, onInviteMember, onUpdateMemberRole, onRemoveMember, onCancelSubscription, onCreateTeam, onDeleteTeam, onAddTeamMember, onEditTeamMemberPerms, onRemoveTeamMember, handlePortal, isOrgAdmin, isActiveTeamAdmin]
 	);
 
 	// =========================================================================

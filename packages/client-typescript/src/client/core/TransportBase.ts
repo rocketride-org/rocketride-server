@@ -41,9 +41,29 @@ const SENSITIVE_PROTOCOL_KEYS = new Set([
 ]);
 
 /**
+ * Field names that are only sensitive within a specific DAP command's
+ * request/response envelope. Unlike {@link SENSITIVE_PROTOCOL_KEYS}, these
+ * are not redacted globally — `key` is a legitimate, non-secret field name
+ * on other commands (e.g. `rrext_dashboard`'s `monitors[].key`), so scrubbing
+ * it everywhere would silently mangle unrelated trace output.
+ */
+const COMMAND_SENSITIVE_KEYS: Record<string, ReadonlySet<string>> = {
+	// Raw BYO agent inference key material sent to/echoed by 'set'.
+	rrext_account_agent_keys: new Set(['key']),
+};
+
+/**
  * Produce a logging-only copy with credential-bearing fields removed.
+ *
+ * DAP responses carry the originating `command` (mirrored from the request),
+ * so a command-scoped field like `key` on `rrext_account_agent_keys` is
+ * redacted on both the outbound request and the matching response, without
+ * affecting any other command's same-named field.
  */
 export function redactProtocolMessage<T>(value: T): T {
+	const command = value && typeof value === 'object' ? (value as { command?: unknown }).command : undefined;
+	const commandSensitiveKeys = typeof command === 'string' ? COMMAND_SENSITIVE_KEYS[command] : undefined;
+
 	const ancestors = new Set<object>();
 	const redact = (item: unknown): unknown => {
 		if (!item || typeof item !== 'object' || item instanceof Uint8Array) return item;
@@ -54,7 +74,8 @@ export function redactProtocolMessage<T>(value: T): T {
 				const normalizedKey = key.replace(/[^a-z0-9]/gi, '').toLowerCase();
 				const isSensitive = SENSITIVE_PROTOCOL_KEYS.has(normalizedKey)
 					|| normalizedKey === 'token'
-					|| normalizedKey.endsWith('token');
+					|| normalizedKey.endsWith('token')
+					|| (commandSensitiveKeys?.has(normalizedKey) ?? false);
 				return [key, isSensitive ? '<redacted>' : redact(child)];
 			}),
 		);

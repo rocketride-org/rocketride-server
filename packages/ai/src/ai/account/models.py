@@ -110,6 +110,11 @@ class AccountInfo(BaseModel):
     # Set manually in the database, never via API.
     sysPermissions: list[str] = []
 
+    # MCP tool scopes carried by the authenticating rr_ key. None = the key
+    # predates scopes or is a full key -> unrestricted. Enforced only by the
+    # mcp module's tool dispatch; OSS accounts never set this.
+    mcpScopes: Optional[list[str]] = None
+
     # Credit wallet balance snapshot — dict of resource→balance pairs.
     # Populated from the credit_wallets table for the user's primary org.
     credits: dict = {}

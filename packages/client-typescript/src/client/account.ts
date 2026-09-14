@@ -32,7 +32,7 @@
 
 import type { RocketRideClient } from './client.js';
 import type { ConnectResult } from './types/client.js';
-import type { OrgDetail, ApiKeyRecord, MemberRecord, TeamRecord, TeamDetail, ProfileUpdate, CreateKeyParams, InviteMemberParams, TeamMemberParams } from './types/account.js';
+import type { OrgDetail, ApiKeyRecord, MemberRecord, TeamRecord, TeamDetail, ProfileUpdate, CreateKeyParams, InviteMemberParams, TeamMemberParams, AgentKeyProvider, AgentKeyStatus } from './types/account.js';
 
 // =============================================================================
 // ACCOUNT API CLASS
@@ -156,6 +156,44 @@ export class AccountApi {
 	 */
 	async revokeKey(keyId: string): Promise<void> {
 		await this.client.call('rrext_account_keys', { subcommand: 'revoke', keyId });
+	}
+
+	// =========================================================================
+	// AGENT KEYS (OpenCode Canvas Agent — BYO inference keys)
+	// =========================================================================
+
+	/**
+	 * Lists the caller's BYO agent inference keys — provider + last4 only.
+	 *
+	 * @returns Array of masked key status rows.
+	 */
+	async agentKeyStatus(): Promise<AgentKeyStatus[]> {
+		const body = await this.client.call('rrext_account_agent_keys', { subcommand: 'status' });
+		return body.keys ?? [];
+	}
+
+	/**
+	 * Validates (server-side ping) and stores one BYO inference key.
+	 *
+	 * The raw key exists only on this one request — it is never cached or
+	 * logged client-side, and the server returns only the masked status row.
+	 *
+	 * @param provider - Which inference provider the key belongs to.
+	 * @param key      - The raw inference key to validate and store.
+	 * @returns The masked key status row (provider + last4).
+	 */
+	async setAgentKey(provider: AgentKeyProvider, key: string): Promise<AgentKeyStatus> {
+		const body = await this.client.call('rrext_account_agent_keys', { subcommand: 'set', provider, key });
+		return { provider: body.provider, last4: body.last4 };
+	}
+
+	/**
+	 * Removes a stored BYO inference key.
+	 *
+	 * @param provider - Which inference provider's key to remove.
+	 */
+	async clearAgentKey(provider: AgentKeyProvider): Promise<void> {
+		await this.client.call('rrext_account_agent_keys', { subcommand: 'clear', provider });
 	}
 
 	// =========================================================================
