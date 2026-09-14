@@ -35,6 +35,8 @@ Question text is assembled from both the question objects and any attached conte
 | `enable_content_safety` | boolean | Default true. Detect harmful or unsafe content in output |
 | `enable_pii_detection` | boolean | Default true. Detect personal identifiable information (emails, phones, SSNs, credit cards) in output |
 | `enable_hallucination_check` | boolean | Default false. Verify that output claims are grounded in source documents |
+| `enable_nonce_fencing` | boolean | Default false. Wrap untrusted input in cryptographic nonce delimiters so the LLM treats it as data |
+| `nonce_length` | number | Default 16. Nonce length in bytes (min 16, max 128). Only used when nonce fencing is enabled |
 | `max_input_length` | number | Default 0. Maximum character count for input text (0 = no limit) |
 | `max_tokens_estimate` | number | Default 0. Maximum estimated token count for input text (0 = no limit) |
 | `expected_format` | string | Default empty. Validate that output matches this format (empty = no check) |
@@ -50,9 +52,9 @@ Three built-in profiles control which fields are exposed in the UI and set sensi
 
 | Profile            | Behaviour                                                                                                   |
 |--------------------|-------------------------------------------------------------------------------------------------------------|
-| Basic *(default)*  | Prompt injection + PII detection, `warn` mode. Only `policy_mode` is configurable in the UI.               |
-| Strict             | All checks enabled, `block` on violation, `max_input_length` 50000, `max_tokens_estimate` 4096. Exposes `policy_mode`, `max_tokens_estimate`, and `expected_format`. |
-| Custom             | All checks enabled, `warn` mode. Every field is configurable individually.                                  |
+| Basic *(default)*  | Prompt injection + PII detection, `warn` mode. Nonce fencing off. Only `policy_mode` is configurable in the UI. |
+| Strict             | All checks enabled, nonce fencing on, `block` on violation, `max_input_length` 50000, `max_tokens_estimate` 4096. Exposes `policy_mode`, `enable_nonce_fencing`, `max_tokens_estimate`, and `expected_format`. |
+| Custom             | All checks enabled, nonce fencing off, `warn` mode. Every field is configurable individually.               |
 
 ---
 
@@ -63,6 +65,20 @@ Run on the `questions` lane before the question is forwarded:
 - **Prompt injection** (rule `prompt_injection`, critical severity): regex patterns covering instruction-override attempts ("ignore all previous instructions"), system-prompt extraction, role-play jailbreaks (DAN and similar), delimiter/token injection (`<|system|>`, `[INST]`, etc.), and encoding-evasion commands; plus weighted keyword scoring (keywords such as `jailbreak`, `bypass`, `ignore safety`) that triggers when the combined score reaches 0.7. Topic restriction only runs when `blocked_topics` or `allowed_topics` is non-empty.
 - **Topic restriction** (rule `topic_restriction`): blocked-keyword matches are high severity; failing to match any allowed keyword is medium severity. Matching is case-insensitive substring.
 - **Input length** (rule `input_length`, medium severity): only runs when a limit is set (`max_input_length > 0` or `max_tokens_estimate > 0`). Tokens are estimated as word count times 1.3, so treat `max_tokens_estimate` as a rough budget rather than an exact tokenizer count.
+
+---
+
+## Nonce fencing
+
+When `enable_nonce_fencing` is true, questions that pass the input checks are mutated before forwarding:
+
+1. A cryptographically secure nonce (CSPRNG via `secrets.token_hex`) is generated per execution cycle.
+2. Each question text and context string is wrapped between `<<<UNTRUSTED_DATA_{nonce}>>>` and `<<<END_UNTRUSTED_DATA_{nonce}>>>` markers.
+3. A "Security Directive" instruction is appended to `question.instructions`, telling the downstream LLM to treat everything inside the markers as data-only and to ignore any instructions found within them.
+
+Because the nonce is unpredictable and unique per cycle, an adversarial input cannot forge or guess the markers. This complements the regex-based injection detection: the patterns catch *known* injection shapes, while nonce fencing neutralises *unknown* ones by isolating all user text behind an unguessable boundary.
+
+Nonce collision (the generated nonce appearing inside the content) is handled by regeneration with up to 10 retries. If all retries fail (astronomically unlikely with 128-bit nonces), the question is blocked.
 
 ---
 
