@@ -219,6 +219,7 @@ channel; they have no data lanes and **bind to an agent** (see
 | ---------- | ------------------------------------------------- | -------------------------------------------- |
 | `webhook`  | _source → questions / tags / audio, image, text, video … | HTTP intake: chat, dropper, and ADS variants |
 | `telegram` | _source → audio, image, tags, text, video         | Telegram Bot message source                  |
+| `discord`  | _source → audio, image, tags, text, video         | Discord Bot message source                   |
 
 > Filesystem and cloud connector sources (Google Drive, OneDrive, SharePoint,
 > Slack, Confluence, SMB, S3, Azure Blob, GCS, …) are provided by the **`core`**

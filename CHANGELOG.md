@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`discord` node**: Discord Bot source node (`discord://`) — connects a Discord bot over the Gateway and routes incoming messages (text plus image/audio/video/document attachments) to the `text`/`image`/`audio`/`video`/`tags` lanes, posting the pipeline's first answer back to the originating channel, as a reply, or in a thread. Supports guild/channel allowlists, @mention gating, bot-loop prevention, a typing indicator, an attachment size cap, and 2000-character reply chunking (#1503)
 - **`tool_pipedrive` node**: exposes the Pipedrive CRM REST API v1 to agents — deals, persons, organizations, activities, pipelines, stages, notes, leads, products, fields, files, users, roles, permission sets, teams, goals, filters, webhooks, subscriptions, mail threads, call logs and projects. 256 tools across 24 resource groups, plus a generic `request` tool that reaches any remaining v1 endpoint through the same auth, rate-limit and read-only layer. Because the full surface is larger than an LLM can choose between reliably, `pipedrive.toolGroups` controls which groups are published (default: the eight core CRM groups, 108 tools; `all` publishes everything). Supports personal API tokens and OAuth bearer tokens, company-domain base URLs, offset and cursor pagination, custom fields via an `extra` passthrough, and read-only mode (#1675)
 
 ## [3.3.0] - 2026-06-08
