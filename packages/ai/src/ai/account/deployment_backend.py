@@ -536,8 +536,8 @@ class FileDeploymentBackend:
                     'paused': bool(existing.get('paused', False)),
                     'traceLevel': existing.get('traceLevel'),
                     'debugOut': bool(existing.get('debugOut', False)),
-                    # Run window: None = until the pipeline finishes; seconds =
-                    # fixed window (the dispatch passes it as the task ttl).
+                    # Run window: None = the server's default idle timeout;
+                    # seconds = fixed window (the dispatch passes it as the task ttl).
                     'ttl': ttl,
                     'lastRunAt': existing.get('lastRunAt'),
                 }
