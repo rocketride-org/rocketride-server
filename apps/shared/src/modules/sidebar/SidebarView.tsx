@@ -184,8 +184,15 @@ export const SidebarView: React.FC<ISidebarViewProps> = ({ connection, isSubscri
 	// whenever the mode tabs render at all. A requested mode is only honored
 	// when its tab actually exists — anything else falls back to Pipelines.
 	const hasAppBuilder = Boolean(appBuilder);
-	const tabsVisible = hasAppBuilder || showModeStrip;
-	const mode = (sidebarMode === 'apps' && hasAppBuilder) || (sidebarMode === 'nodes' && tabsVisible) ? sidebarMode : 'pipelines';
+	// The Agent tab exists only when the host wires `agentSlot` (rocket-ui with the agent flag on).
+	const hasAgent = Boolean(agentSlot);
+	const tabsVisible = hasAppBuilder || hasAgent || showModeStrip;
+	const mode =
+		(sidebarMode === 'apps' && hasAppBuilder) ||
+		(sidebarMode === 'nodes' && tabsVisible) ||
+		(sidebarMode === 'agent' && hasAgent)
+			? sidebarMode
+			: 'pipelines';
 	// --- Static nav menus ----------------------------------------------------
 
 	// Monitor sits ABOVE the mode tabs — it is mode-independent chrome shared
@@ -208,6 +215,7 @@ export const SidebarView: React.FC<ISidebarViewProps> = ({ connection, isSubscri
 			{ id: 'pipelines', label: 'Pipelines' },
 			...(hasAppBuilder ? [{ id: 'apps', label: 'Apps' }] : []),
 			{ id: 'nodes', label: 'Nodes' },
+			...(hasAgent ? [{ id: 'agent', label: 'Agent' }] : []),
 		],
 	};
 
@@ -308,10 +316,13 @@ export const SidebarView: React.FC<ISidebarViewProps> = ({ connection, isSubscri
 				</div>
 			)}
 
-			{/* ── Agent sessions (Phase 4) — host slot, absent = zero DOM */}
-			{agentSlot}
 		</div>
 	);
+
+	// Agent tab body: the host-provided sessions panel (rocket-ui's AgentSidebarSection),
+	// rendered as its own mode body — peer to Pipelines/Nodes — instead of trailing the
+	// pipelines panel. Only mounted when the host wires agentSlot (hasAgent).
+	const agentPanel = hasAgent ? <div style={S.panelColumn}>{agentSlot}</div> : null;
 
 	// Apps tab body: + New app nav and the MY APPS list.
 	const appsPanel = appBuilder ? (
@@ -395,7 +406,7 @@ export const SidebarView: React.FC<ISidebarViewProps> = ({ connection, isSubscri
 					menu={modeMenu}
 					activeId={mode}
 					onSelect={(id) => {
-						if (id === 'pipelines' || id === 'apps' || id === 'nodes') onSidebarModeChange?.(id);
+						if (id === 'pipelines' || id === 'apps' || id === 'nodes' || id === 'agent') onSidebarModeChange?.(id);
 					}}
 				/>
 			)}
@@ -403,7 +414,7 @@ export const SidebarView: React.FC<ISidebarViewProps> = ({ connection, isSubscri
 			{/* ── Mode bodies — the stock TabPanel stack keeps all modes
 			    mounted, so Explorer scroll/expand state survives switches */}
 			<div style={S.panelStack}>
-				<TabPanel activeId={mode} panels={{ pipelines: { content: pipelinesPanel }, ...(appsPanel ? { apps: { content: appsPanel } } : {}), nodes: { content: nodesPanel } }} />
+				<TabPanel activeId={mode} panels={{ pipelines: { content: pipelinesPanel }, ...(appsPanel ? { apps: { content: appsPanel } } : {}), nodes: { content: nodesPanel }, ...(agentPanel ? { agent: { content: agentPanel } } : {}) }} />
 			</div>
 
 			{/* ── Footer slot (shared by both modes) ──────────────────── */}

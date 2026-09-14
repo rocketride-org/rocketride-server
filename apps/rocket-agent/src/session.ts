@@ -32,7 +32,54 @@ import type { AgentConfig } from './config';
 import { log } from './log';
 import { authHeader, spawnOpencodeServer } from './opencode';
 import { HttpError, Identity, KeyResolver, LiveSession, ProviderKeys, SessionIndex, SessionRecord, StoreFs } from './types';
-import { commitTurn, formatComponentCatalog, initGit, revertTo, saveBack, seedWorkspace } from './workspace';
+import { changedPipePaths, commitTurn, formatComponentCatalog, initGit, isPipePath, PROJECT_DIR, revertTo, saveBack, saveBackOne, seedWorkspace } from './workspace';
+
+/**
+ * Pure walk from a parsed `.pipe` JSON string to a one-line `source → … → sink` summary — the
+ * shape hint `describePipeShape` reads from the store. Exported (and kept parse-only, no I/O) so
+ * it's unit-testable without a `SessionManager`/fake store. Any missing `components` array,
+ * unreadable JSON, or unresolvable source resolves to `undefined` — this is a nice-to-have hint,
+ * never load-bearing.
+ */
+export function pipeShapeFromJson(pipeText: string): string | undefined {
+	let pipe: unknown;
+	try {
+		pipe = JSON.parse(pipeText);
+	} catch {
+		return undefined;
+	}
+	const comps = (pipe as { components?: Array<Record<string, any>> })?.components;
+	if (!Array.isArray(comps) || comps.length === 0) return undefined;
+	const byId = new Map<string, Record<string, any>>();
+	for (const c of comps) if (typeof c?.id === 'string') byId.set(c.id, c);
+
+	// First downstream component per id, from `input[].from` — same edge the agent draws
+	// when it wires two nodes together.
+	const nextOf = new Map<string, string>();
+	for (const c of comps) {
+		const inputs = Array.isArray(c?.input) ? c.input : [];
+		for (const inp of inputs) {
+			if (typeof inp?.from === 'string' && byId.has(inp.from) && !nextOf.has(inp.from)) {
+				nextOf.set(inp.from, c.id);
+			}
+		}
+	}
+
+	const declaredSource = (pipe as { source?: unknown })?.source;
+	const sourceId = typeof declaredSource === 'string' && byId.has(declaredSource) ? declaredSource : comps[0]?.id;
+	if (typeof sourceId !== 'string') return undefined;
+
+	// Walk the chain from source to sink, guarding against cycles (a malformed pipe
+	// must not hang this on an infinite loop).
+	const order: string[] = [];
+	const seen = new Set<string>();
+	for (let cur: string | undefined = sourceId; cur && byId.has(cur) && !seen.has(cur); cur = nextOf.get(cur)) {
+		seen.add(cur);
+		order.push(cur);
+	}
+	const labels = order.map((id) => byId.get(id)?.provider ?? id);
+	return labels.length ? labels.join(' → ') : undefined;
+}
 
 export interface SessionManagerDeps {
 	cfg: AgentConfig;
@@ -54,6 +101,10 @@ export interface CreateOpts {
 export class SessionManager {
 	private live = new Map<string, LiveSession>();
 	private tenantLocks = new Map<string, Promise<void>>();
+	/** Per-`${sessionId}:${pipe}` debounce for the write-through mirror's canvas-reload panel event —
+	 * collapses a burst of edits to the same pipe (e.g. several `write` tool calls in one turn) into
+	 * ~one `saved` emit instead of one per edit. See `scheduleReload`. */
+	private reloadTimers = new Map<string, NodeJS.Timeout>();
 	private readonly auditor: Auditor;
 
 	constructor(readonly deps: SessionManagerDeps) {
@@ -126,35 +177,28 @@ export class SessionManager {
 			const sessionRoot = this.sessionRoot(record.sessionId);
 			const workspaceDir = path.join(sessionRoot, 'workspace');
 			await fsp.mkdir(workspaceDir, { recursive: true });
-			if (opts.pipePath) {
-				const store = await this.deps.storeFactory(opts.credential);
-				try {
-					await seedWorkspace({
-						workspaceDir,
-						pipePath: opts.pipePath,
-						store,
-						docsDir: cfg.docsDir,
-						assetsDir: cfg.assetsDir,
-					});
-				} finally {
-					await store.close();
-				}
-			} else {
-				// A blank-workspace seed still MUST place AGENTS.md + the rr-builder agent + docs;
-				// never swallow a failure here — an unseeded workspace silently strips the agent's
-				// system prompt and makes `agent: rr-builder` an "agent not found" error downstream.
-				// Log loudly (visibility) but don't abort session creation over docs/prompt seeding.
-				try {
-					await seedWorkspace({
-						workspaceDir,
-						pipePath: '',
-						store: { fsReadString: async () => '', fsWriteString: async () => undefined, close: async () => undefined },
-						docsDir: cfg.docsDir,
-						assetsDir: cfg.assetsDir,
-					});
-				} catch (err) {
-					log.error(`[session ${record.sessionId}] seedWorkspace failed — AGENTS.md/rr-builder agent NOT seeded (assetsDir=${cfg.assetsDir}, docsDir=${cfg.docsDir}):`, err);
-				}
+			// Seed the workspace as a path-preserving MIRROR of the user's project store: the opened
+			// pipe (if any) PLUS every other existing pipeline and folder, so a new session — even a
+			// blank "New session" with no opened pipe — sees the whole cwd, not just one file (and can
+			// author into subfolders that round-trip back). Open the real store when we can; fall back
+			// to a blank stub only if it can't be opened (the agent then starts with just the assets).
+			const BLANK_STORE: StoreFs = { fsReadString: async () => '', fsWriteString: async () => undefined, close: async () => undefined };
+			let store: StoreFs = BLANK_STORE;
+			try {
+				store = await this.deps.storeFactory(opts.credential);
+			} catch (err) {
+				log.error(`[session ${record.sessionId}] store open failed — seeding assets only, no prior pipes:`, err);
+			}
+			try {
+				await seedWorkspace({ workspaceDir, pipePath: opts.pipePath ?? '', store, docsDir: cfg.docsDir, assetsDir: cfg.assetsDir });
+			} catch (err) {
+				// The essential assets (AGENTS.md, the rr-builder agent, docs, skills) failed to seed —
+				// an unseeded workspace strips the agent's system prompt and makes `agent: rr-builder` an
+				// "agent not found" error downstream. Log loudly (visibility) but don't abort session
+				// creation over it (same deliberate choice the prior blank-seed path made).
+				log.error(`[session ${record.sessionId}] seedWorkspace failed — AGENTS.md/rr-builder agent NOT seeded (assetsDir=${cfg.assetsDir}, docsDir=${cfg.docsDir}):`, err);
+			} finally {
+				if (store !== BLANK_STORE) await store.close();
 			}
 			// Seed docs/COMPONENTS.md — the live, greppable provider catalog. Fixes the agent inventing
 			// providers (e.g. `pdf_parser`) because list_components is ~60 KB and gets truncated. Best-effort.
@@ -219,6 +263,7 @@ export class SessionManager {
 			sessionHome,
 			events: new EventEmitter(),
 			openStreams: 0,
+			turn: {},
 		};
 		this.live.set(record.sessionId, live);
 		return live;
@@ -344,13 +389,49 @@ export class SessionManager {
 		void this.deps.index.put(live.record);
 	}
 
-	/** Save all workspace pipes to the project store with the freshest cached token. */
+	/**
+	 * Best-effort backstop for `present_gate`: stop opencode's in-flight generation loop so the
+	 * model can't keep calling tools while a gate is open, even if it ignores the "STOP" text in
+	 * the tool result. The `@opencode-ai/sdk` names the equivalent TUI keybind `session.interrupt`,
+	 * but that's a keybind command, not a REST route — the actual HTTP action (`Session.abort()` in
+	 * the SDK) is `POST /session/{id}/abort`. rocket-agent never tracks the inner opencode session
+	 * id on `LiveSession` — the browser find-or-creates it itself (see `useAgentSession.ts`) — so
+	 * this discovers it the same way the browser does: `GET /session`, take the first session.
+	 * Swallows every failure (bad response, no sessions yet, a dead/restarting child): this is a
+	 * backstop, never the primary mechanism, and must never crash the MCP route that calls it.
+	 */
+	async interrupt(live: LiveSession): Promise<void> {
+		try {
+			const listRes = await fetch(`${live.baseUrl}/session`, { headers: { authorization: authHeader(live.password) } });
+			if (!listRes.ok) return;
+			const sessions = (await listRes.json()) as Array<{ id?: string }>;
+			const oid = sessions[0]?.id;
+			if (!oid) return;
+			await fetch(`${live.baseUrl}/session/${oid}/abort`, { method: 'POST', headers: { authorization: authHeader(live.password) } });
+		} catch {
+			// best-effort — a dead/unreachable child must never crash the gate flow.
+		}
+	}
+
+	/** Normalize an opencode `file.edited` path (absolute, or already workspace-relative) to a
+	 * workspace-relative path with forward slashes — the store path is `.projects/<rel>`, so the
+	 * relative path IS the store location (the mirror preserves subfolders). Returns null if the
+	 * path escapes the workspace root (defensive; opencode only ever edits inside it). */
+	private workspaceRel(workspaceDir: string, file: string): string | null {
+		const abs = path.isAbsolute(file) ? file : path.join(workspaceDir, file);
+		const rel = path.relative(workspaceDir, abs);
+		if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) return null;
+		return rel.split(path.sep).join('/');
+	}
+
+	/** Save the pipes the agent CHANGED this session back to the project store with the freshest
+	 * cached token. Change-scoped (see `changedPipePaths`): a full-tree workspace mirror must not
+	 * rewrite/re-layout every untouched pipe on every idle. */
 	async saveBackNow(live: LiveSession): Promise<string[]> {
 		const store = await this.deps.storeFactory(live.latestToken);
 		try {
-			const seededDir = live.record.pipePath.includes('/')
-				? live.record.pipePath.slice(0, live.record.pipePath.lastIndexOf('/')) : '';
-			const { written, skipped } = await saveBack({ workspaceDir: live.workspaceDir, store, storeDirFor: () => seededDir });
+			const files = await changedPipePaths(live.workspaceDir);
+			const { written, skipped } = await saveBack({ workspaceDir: live.workspaceDir, store, files });
 			for (const storePath of written) {
 				const rel = storePath.replace(/^\.projects\//, '');
 				if (!live.record.pipesTouched.includes(rel)) live.record.pipesTouched.push(rel);
@@ -363,6 +444,43 @@ export class SessionManager {
 			return written;
 		} finally {
 			await store.close();
+		}
+	}
+
+	/**
+	 * One-line `source → … → sink` summary of the pipe at `uri` in the project store — the
+	 * `openDocShape` hint that `turnContext.ts`'s `buildTurnSystem` injects into the per-turn
+	 * `system` block so the agent knows what the user has open. Reuses the same store-read +
+	 * best-effort-miss pattern as `readPipeLayout` in workspace.ts: this is a nice-to-have hint,
+	 * never load-bearing, so any missing store, unreadable/invalid JSON, or unrecognizable shape
+	 * resolves to `undefined` instead of throwing.
+	 *
+	 * `uri` is `x-rr-open-doc` as the panel sends it: a store-relative path with the `.projects/`
+	 * prefix already STRIPPED (same convention `saveBackNow` strips it TO when recording
+	 * `pipesTouched`). Prefix it back on — defensively tolerating a caller that already included
+	 * it — since every store key actually lives under `.projects/` (see `PROJECT_DIR` in
+	 * workspace.ts).
+	 */
+	async describePipeShape(live: LiveSession, uri: string): Promise<string | undefined> {
+		let store: StoreFs;
+		try {
+			store = await this.deps.storeFactory(live.latestToken);
+		} catch {
+			return undefined;
+		}
+		try {
+			const storePath = uri.startsWith(`${PROJECT_DIR}/`) ? uri : `${PROJECT_DIR}/${uri}`;
+			let text: string;
+			try {
+				text = await store.fsReadString(storePath);
+			} catch {
+				return undefined;
+			}
+			return pipeShapeFromJson(text);
+		} catch {
+			return undefined;
+		} finally {
+			await store.close().catch(() => undefined);
 		}
 	}
 
@@ -482,9 +600,61 @@ export class SessionManager {
 			sessionHome: path.join(this.sessionRoot(sessionId), 'home'),
 			events: new EventEmitter(),
 			openStreams: 0,
+			turn: {},
 		});
 		await this.deps.index.put(record);
 		return sessionId;
+	}
+
+	/**
+	 * Debounced panel `saved` emit for the write-through mirror (Task 3): a burst of edits to the
+	 * same pipe (e.g. several `write` tool calls in one agent turn) collapses to ~one canvas repaint
+	 * instead of one per edit. `pipe` is the FULL store path (e.g. `.projects/demo/qa.pipe`) — the
+	 * same shape `saveBackNow` already emits in `saved.pipes`, so the existing panel handler
+	 * (`useAgentSession.ts`, which strips the `.projects/` prefix itself) needs no change.
+	 */
+	private scheduleReload(live: LiveSession, pipe: string): void {
+		const key = `${live.record.sessionId}:${pipe}`;
+		clearTimeout(this.reloadTimers.get(key));
+		const timer = setTimeout(() => {
+			live.events.emit('event', { type: 'saved', pipes: [pipe] });
+			this.reloadTimers.delete(key);
+		}, 400); // repaint ~once per burst, not per keystroke
+		timer.unref();
+		this.reloadTimers.set(key, timer);
+	}
+
+	/**
+	 * Write-through mirror (Task 3): propagate ONE just-edited workspace `.pipe` file to the project
+	 * store immediately, instead of waiting for the idle `saveBack` in `watchFileEdits` below — this
+	 * is what fixes the stale-canvas/position-divergence bug class (the canvas used to only see an
+	 * agent's edits once the whole turn went idle). On success, schedules the debounced `saved` panel
+	 * emit via `scheduleReload`. Never throws: any failure (store open, write) is logged and
+	 * swallowed — `dirty` (set by the caller before this runs) stays true, so the existing idle
+	 * `saveBack` backstop still fires and covers the miss. A file that isn't valid JSON yet (the agent
+	 * mid-write) is likewise not an error — `saveBackOne` reports it as skipped and the backstop
+	 * retries it once the turn settles.
+	 */
+	private async writeThroughOne(live: LiveSession, file: string): Promise<void> {
+		// Preserve the workspace-relative path (incl. subfolders) — the store path is `.projects/<rel>`,
+		// so `examples/test.pipe` round-trips to `.projects/examples/test.pipe`, not a flattened root file.
+		const rel = this.workspaceRel(live.workspaceDir, file);
+		if (!rel || !isPipePath(rel)) return;
+		let store: StoreFs;
+		try {
+			store = await this.deps.storeFactory(live.latestToken);
+		} catch (err) {
+			log.error(`[write-through ${live.record.sessionId}] store open failed for ${rel}:`, err);
+			return;
+		}
+		try {
+			const result = await saveBackOne({ store, workspaceDir: live.workspaceDir, storeRoot: PROJECT_DIR, file: rel });
+			if (result.written) this.scheduleReload(live, `${PROJECT_DIR}/${rel}`);
+		} catch (err) {
+			log.error(`[write-through ${live.record.sessionId}] ${rel}:`, err);
+		} finally {
+			await store.close().catch(() => undefined);
+		}
 	}
 
 	/**
@@ -534,8 +704,13 @@ export class SessionManager {
 								const { payload } = JSON.parse(data) as { payload?: { type: string; properties?: { file?: string } } };
 								if (payload?.type === 'file.edited') {
 									dirty = true;
-									const sha = await commitTurn(live.workspaceDir, `agent edit: ${payload.properties?.file ?? 'unknown'}`);
-									if (sha) live.events.emit('event', { type: 'snapshot', sha, file: payload.properties?.file });
+									const file = payload.properties?.file;
+									const sha = await commitTurn(live.workspaceDir, `agent edit: ${file ?? 'unknown'}`);
+									if (sha) live.events.emit('event', { type: 'snapshot', sha, file });
+									// Write-through (Task 3): mirror this ONE pipe to the store now, instead of waiting
+									// for the idle backstop below — fixes stale-canvas/position-divergence. Never throws
+									// (see writeThroughOne); `dirty` stays true so the idle backstop still covers a miss.
+									if (file) await this.writeThroughOne(live, file);
 								} else if (payload?.type === 'session.idle' && dirty) {
 									// Auto-save: the agent finished a turn that changed files — propagate the workspace
 									// .pipe files to the RocketRide store (filesystem-sync), so new/edited pipelines show

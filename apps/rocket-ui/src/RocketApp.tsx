@@ -152,7 +152,9 @@ const RocketApp: React.FC<ShellAppProps> = (_props) => {
 			},
 		};
 
-		// Create the instance — both App and Sidebar will use it
+		// Create the instance — both App and Sidebar will use it. The Documents model itself listens
+		// for `rocketride:externalFileChanged` and re-reads any open doc an external writer (the
+		// pipeline agent) changed — see Documents constructor — so no wiring is needed here.
 		createDocs(vfs, { appState, updateAppState });
 		setReady(true);
 

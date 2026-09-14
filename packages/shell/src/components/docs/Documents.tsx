@@ -405,6 +405,8 @@ export class Documents {
 	private _editorCounter = 0;
 	private _groupCounter = 1;
 	private _splitCounter = 0;
+	/** Window handler that re-reads an open doc when an external writer changes it. Removed in destroy(). */
+	private _onExternalFileChanged: ((e: Event) => void) | null = null;
 
 	/**
 	 * Creates a new Documents instance.
@@ -438,6 +440,18 @@ export class Documents {
 			this._splitCounter = maxNumericSuffix(collectSplitIds(this._state.rootNode));
 		} else {
 			this._state = makeDefaultState();
+		}
+
+		// React to external VFS writes (e.g. the pipeline agent saving back to the project store):
+		// re-read any OPEN, non-dirty document at that path so the editor reflects the change, the way
+		// a filesystem-backed editor would. Generic by design — any host can dispatch this event with
+		// a `{ path }` detail (the document URI). Listener is torn down in destroy().
+		if (typeof window !== 'undefined') {
+			this._onExternalFileChanged = (e: Event): void => {
+				const path = (e as CustomEvent<{ path?: string }>).detail?.path;
+				if (path) void this._reloadDocument(path);
+			};
+			window.addEventListener('rocketride:externalFileChanged', this._onExternalFileChanged);
 		}
 	}
 
@@ -613,6 +627,41 @@ export class Documents {
 				groups: { ...prev.groups, [targetGroup]: { ...group, editorIds: newEditorIds, activeEditorIndex: newEditorIds.length - 1 } },
 				activeGroupId: targetGroup,
 			};
+		});
+	}
+
+	/**
+	 * Re-reads an already-open document's content from the VFS and replaces it in place.
+	 *
+	 * Fires from {@link _onExternalFileChanged} when an EXTERNAL writer (e.g. the pipeline agent
+	 * saving back to the project store) changes a file the user has open, so the editor reflects
+	 * the new content the way any filesystem-backed editor would. No-op when the document is not
+	 * open (nothing to refresh), has unsaved local edits (`dirty` — never clobber the user's
+	 * in-progress work), or the read fails. Bumps `version` so `useStore` subscribers re-render and
+	 * the canvas re-hydrates; the document stays CLEAN because its content now matches the store.
+	 *
+	 * Private on purpose: it must not widen `Public<Documents>`, which flows into the frozen
+	 * `DocTabsProps.docs` contract — a new required member there is a breaking (contravariant)
+	 * change. The shell owns the trigger internally instead (window `rocketride:externalFileChanged`).
+	 *
+	 * @param uri - The document URI to reload.
+	 */
+	private async _reloadDocument(uri: string): Promise<void> {
+		const existing = this._state.documents[uri];
+		if (!existing || existing.dirty || !this._vfs) return;
+		let content: unknown;
+		try {
+			const raw = await this._vfs.read(uri);
+			if (raw === null || raw === undefined) return;
+			content = raw;
+		} catch {
+			return;
+		}
+		this._update((prev) => {
+			const doc = prev.documents[uri];
+			// Re-check under the updater: the doc may have been closed or edited while the read was in flight.
+			if (!doc || doc.dirty) return prev;
+			return { ...prev, documents: { ...prev.documents, [uri]: { ...doc, content, version: doc.version + 1, isNew: false } } };
 		});
 	}
 
@@ -1169,6 +1218,10 @@ export class Documents {
 		if (this._workspace && this._persistTimer) {
 			clearTimeout(this._persistTimer);
 			this._workspace.updateAppState((prev) => ({ ...prev, [APPSTATE_KEY]: this._state }));
+		}
+		if (this._onExternalFileChanged && typeof window !== 'undefined') {
+			window.removeEventListener('rocketride:externalFileChanged', this._onExternalFileChanged);
+			this._onExternalFileChanged = null;
 		}
 		this._vfs = null;
 		this._workspace = null;

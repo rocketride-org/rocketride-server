@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Aparavi Software AG. MIT License.
 import React, { useCallback, useEffect, useState } from 'react';
 import type { CSSProperties } from 'react';
-import { commonStyles, BxChevronDown, BxChevronRight, BxPlus, BxDotsHorizontal } from 'shell';
+import { commonStyles, BxPlus, BxDotsHorizontal } from 'shell';
 import { getDocs } from '../../docs';
 import { agentApi } from '../../services/agentApi';
 import { useSessionList } from '../../hooks/useSessionList';
@@ -31,7 +31,6 @@ const S = {
 		flex: 1,
 		minWidth: 0,
 	} as CSSProperties,
-	spacer: { flex: 1 } as CSSProperties,
 	menuBtn: {
 		background: 'none',
 		border: 'none',
@@ -106,15 +105,15 @@ function relativeTime(epochMs: number): string {
 // =============================================================================
 
 /**
- * Sidebar section listing the caller's Rocket Agent sessions, mirroring the
- * pipelines panel's Ad-hoc section (chevron header, rows with a status dot,
- * relative time, and an overflow menu). Rendered by SidebarProvider as
- * `agentSlot` — only when `agent.enabled` is on (see P4-V5 in the task brief),
- * so this component itself never needs to gate its own network calls.
+ * The Agent sidebar mode's body: a flat panel listing the caller's Rocket Agent
+ * sessions, laid out like the Pipelines panel — a "New session" action at the top,
+ * then one row per session (status dot, relative time, overflow menu). Rendered by
+ * SidebarProvider as `agentSlot`, which SidebarView surfaces as the "Agent" mode tab
+ * — only when `agent.enabled` is on (see P4-V5 in the task brief), so this component
+ * itself never needs to gate its own network calls.
  */
 export function AgentSidebarSection(): React.JSX.Element {
 	const { sessions, refresh } = useSessionList();
-	const [expanded, setExpanded] = useState(true);
 	const [hoveredRow, setHoveredRow] = useState<string | null>(null);
 	const [openMenuFor, setOpenMenuFor] = useState<string | null>(null);
 
@@ -167,62 +166,57 @@ export function AgentSidebarSection(): React.JSX.Element {
 	);
 
 	return (
-		<div style={{ padding: '2px 6px', flexShrink: 0 }}>
-			<div style={{ ...S.row, marginTop: 4, ...(hoveredRow === 'agent-root' ? { background: HOVER_BG } : {}) }} onMouseEnter={() => setHoveredRow('agent-root')} onMouseLeave={() => setHoveredRow(null)} onClick={() => setExpanded((p) => !p)}>
-				{expanded ? <BxChevronDown size={14} /> : <BxChevronRight size={14} />}
-				<span style={{ ...S.rowName, ...commonStyles.labelUppercase, color: 'var(--rr-text-secondary)' }}>Agent Sessions</span>
-				<span style={S.spacer} />
+		<div style={{ padding: '2px 6px' }}>
+			{/* "New session" — the panel's top action, mirroring the Pipelines panel's "+ New pipeline". */}
+			<div style={{ ...S.row, ...(hoveredRow === 'agent-new' ? { background: HOVER_BG } : {}) }} onMouseEnter={() => setHoveredRow('agent-new')} onMouseLeave={() => setHoveredRow(null)} onClick={handleNewSession}>
+				<BxPlus size={14} />
+				<span style={S.rowName}>New session</span>
 			</div>
-			{expanded && (
-				<>
-					<div style={{ ...S.row, paddingLeft: 28, ...(hoveredRow === 'agent-new' ? { background: HOVER_BG } : {}) }} onMouseEnter={() => setHoveredRow('agent-new')} onMouseLeave={() => setHoveredRow(null)} onClick={handleNewSession}>
-						<BxPlus size={14} />
-						<span style={S.rowName}>New session</span>
-					</div>
-					{sessions.map((sess) => {
-						const rowKey = `agent:${sess.sessionId}`;
-						return (
-							<div
-								key={rowKey}
-								style={{ ...S.row, paddingLeft: 28, ...(hoveredRow === rowKey ? { background: HOVER_BG } : {}) }}
-								onMouseEnter={() => setHoveredRow(rowKey)}
-								onMouseLeave={() => setHoveredRow(null)}
-								onClick={() => handleOpen(sess)}
-								{...(sess.pipesTouched.length > 0 ? { title: sess.pipesTouched.join(', ') } : {})}
-							>
-								<div style={statusDotStyle(sess.status)} />
-								<span style={S.rowName}>{sess.title || 'Agent session'}</span>
-								<span style={{ fontSize: 10, color: 'var(--rr-text-secondary)', marginLeft: 4, flexShrink: 0 }}>{relativeTime(sess.lastActivity)}</span>
-								{hoveredRow === rowKey && (
-									<button
-										style={S.menuBtn}
-										title="More"
-										onClick={(e) => {
-											e.stopPropagation();
-											setOpenMenuFor((p) => (p === rowKey ? null : rowKey));
-										}}
-									>
-										<BxDotsHorizontal size={14} />
-									</button>
-								)}
-								{openMenuFor === rowKey && (
-									<div style={S.menu} onClick={(e) => e.stopPropagation()}>
-										<button style={S.menuItem} onClick={() => handleRename(sess)}>
-											Rename
-										</button>
-										<button style={S.menuItem} onClick={() => handleArchive(sess)}>
-											Archive
-										</button>
-										<button style={{ ...S.menuItem, color: 'var(--rr-color-error)' }} onClick={() => handleDelete(sess)}>
-											Delete
-										</button>
-									</div>
-								)}
-							</div>
-						);
-					})}
-				</>
+			{sessions.length === 0 && (
+				<div style={{ padding: '4px 10px', fontSize: 12, color: 'var(--rr-text-secondary)' }}>No sessions yet — start one with New session.</div>
 			)}
+			{sessions.map((sess) => {
+				const rowKey = `agent:${sess.sessionId}`;
+				return (
+					<div
+						key={rowKey}
+						style={{ ...S.row, ...(hoveredRow === rowKey ? { background: HOVER_BG } : {}) }}
+						onMouseEnter={() => setHoveredRow(rowKey)}
+						onMouseLeave={() => setHoveredRow(null)}
+						onClick={() => handleOpen(sess)}
+						{...(sess.pipesTouched.length > 0 ? { title: sess.pipesTouched.join(', ') } : {})}
+					>
+						<div style={statusDotStyle(sess.status)} />
+						<span style={S.rowName}>{sess.title || 'Agent session'}</span>
+						<span style={{ fontSize: 10, color: 'var(--rr-text-secondary)', marginLeft: 4, flexShrink: 0 }}>{relativeTime(sess.lastActivity)}</span>
+						{hoveredRow === rowKey && (
+							<button
+								style={S.menuBtn}
+								title="More"
+								onClick={(e) => {
+									e.stopPropagation();
+									setOpenMenuFor((p) => (p === rowKey ? null : rowKey));
+								}}
+							>
+								<BxDotsHorizontal size={14} />
+							</button>
+						)}
+						{openMenuFor === rowKey && (
+							<div style={S.menu} onClick={(e) => e.stopPropagation()}>
+								<button style={S.menuItem} onClick={() => handleRename(sess)}>
+									Rename
+								</button>
+								<button style={S.menuItem} onClick={() => handleArchive(sess)}>
+									Archive
+								</button>
+								<button style={{ ...S.menuItem, color: 'var(--rr-color-error)' }} onClick={() => handleDelete(sess)}>
+									Delete
+								</button>
+							</div>
+						)}
+					</div>
+				);
+			})}
 		</div>
 	);
 }

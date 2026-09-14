@@ -91,6 +91,11 @@ export function buildConfigContent(lockedConfigPath: string, providerBaseUrlOver
 	if (parsed?.permission?.external_directory !== 'deny') throw new Error('locked config must deny external_directory');
 	if (parsed?.permission?.webfetch !== 'deny') throw new Error('locked config must deny webfetch');
 	if (parsed?.permission?.websearch !== 'deny') throw new Error('locked config must deny websearch');
+	// `question` is opencode's interactive multiple-choice prompt. With "allow" the tool call proceeds
+	// and BLOCKS waiting for an answer — but this headless proxy has no UI surface to answer it, so the
+	// turn hangs forever. "deny" makes opencode auto-reject the call, and the agent proceeds on its own
+	// (the rr-builder prompt tells it to assume a sensible default rather than ask).
+	if (parsed?.permission?.question !== 'deny') throw new Error('locked config must deny question (no UI to answer an interactive prompt — it hangs the turn)');
 	if (!isLockedEditWall(parsed?.permission?.edit)) {
 		throw new Error('locked config must restrict permission.edit to {"**":"deny","*.pipe":"allow","**/*.pipe":"allow"} (deny-first order is required)');
 	}

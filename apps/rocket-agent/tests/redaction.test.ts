@@ -315,6 +315,7 @@ class ObservingSessionManager extends SessionManager {
 			sessionHome,
 			events: new EventEmitter(),
 			openStreams: 0,
+			turn: {},
 		};
 		(this as unknown as { live: Map<string, LiveSession> }).live.set(record.sessionId, live);
 		return live;

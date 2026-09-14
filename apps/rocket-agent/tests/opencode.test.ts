@@ -48,7 +48,7 @@ describe('buildConfigContent', () => {
 		expect(content.permission.bash).toBe('deny');
 		expect(content.permission.webfetch).toBe('deny');
 		expect(content.permission.external_directory).toBe('deny');
-		expect(content.permission.edit).toEqual({ '**/*.pipe': 'allow', '*': 'deny' });
+		expect(content.permission.edit).toEqual({ '**': 'deny', '*.pipe': 'allow', '**/*.pipe': 'allow' });
 		expect(content.mcp.rocketride.url).toBe('{env:RR_MCP_PROXY_URL}');
 	});
 

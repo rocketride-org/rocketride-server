@@ -57,6 +57,13 @@ export interface LiveSession {
 	sessionHome: string;       // per-session HOME/XDG root (opencode persistence)
 	events: EventEmitter;      // rocket-agent's own panel events (auth.expired, snapshot, saved…)
 	openStreams: number;       // in-flight proxied/panel streams — reaper skips idle-archival while > 0
+	turn: TurnState;           // per-turn volatile state, injected via the prompt `system` field (never the static prompt)
+}
+
+/** Per-turn volatile state for the canvas agent (injected via the prompt `system` field, never the static prompt). */
+export interface TurnState {
+	activePhase?: string;
+	awaitingGate?: { id: string; options: string[] };
 }
 
 export interface Identity {
@@ -96,6 +103,14 @@ export interface StoreFs {
 	 * Optional: stub stores (blank-workspace seed, tests) omit it and the catalog is skipped.
 	 */
 	listServices?(): Promise<Record<string, ServiceSummaryLite>>;
+	/**
+	 * List one directory in the project store (non-recursive). Used by `listStorePipes`
+	 * (workspace.ts) to walk `.projects/` and seed EVERY existing pipeline into a new session's
+	 * workspace, so the agent sees the user's whole cwd — prior pipes and nested folders — not
+	 * just the one that was opened. Optional: stub stores (blank-workspace seed, tests) may omit
+	 * it, in which case only the explicitly-opened pipe is seeded.
+	 */
+	fsListDir?(path: string): Promise<{ entries: Array<{ name: string; type: 'file' | 'dir' }> }>;
 }
 
 export interface SessionIndex {

@@ -40,6 +40,7 @@ export async function readRequestBody(req: Request): Promise<Buffer> {
 }
 
 export interface JsonRpcRequestFrame {
+	id?: string | number | null;
 	method?: string;
 	params?: { name?: string; arguments?: Record<string, unknown> };
 }
@@ -124,26 +125,47 @@ function sanitizeToolSchema(schema: Record<string, unknown>): Record<string, unk
 	return out;
 }
 
+/** Parsed shape shared by every buffered-SSE `tools/list` rewrite below. */
+export interface ToolsListResult {
+	result: { tools: Array<{ name: string; inputSchema?: Record<string, unknown> }> };
+}
+
+function isToolsListResult(obj: unknown): obj is ToolsListResult {
+	return Array.isArray((obj as { result?: { tools?: unknown } })?.result?.tools);
+}
+
 /**
- * Rewrite a buffered MCP `tools/list` SSE response so every tool's inputSchema is OpenAI-compatible
- * (see {@link sanitizeToolSchema}). Each `data: {json}` frame carrying a `result.tools` array is
- * rewritten in place; every other frame passes through untouched, and any JSON parse failure leaves
- * the frame as-is (fails open to the pre-shim behavior). rocket-agent is the BYO-agent gateway, so
- * this is the right layer to make the engine's tools usable by strict OpenAI-family models.
+ * Rewrite each `data: {json}` frame of a buffered SSE response whose parsed body is a
+ * `tools/list` result (per {@link isToolsListResult}) via `mutate` (mutates in place, then the
+ * frame is re-stringified). Every other frame — and any frame that fails to parse — passes
+ * through untouched (fails open). Shared by {@link sanitizeMcpToolSchemas} (OpenAI schema shim)
+ * and Task 4's `appendSyntheticToolsToListSse` (synthetics.ts, registers `present_gate` /
+ * `enter_phase`) — both rewrite the same `tools/list` result frame, so the
+ * parse/match/mutate/restringify mechanics live in exactly one place.
  */
-export function sanitizeMcpToolSchemas(rawSse: string): string {
+export function rewriteToolsListSse(rawSse: string, mutate: (result: ToolsListResult) => void): string {
 	return rawSse.replace(/^(data: )(.+)$/gm, (full, prefix: string, json: string) => {
 		try {
-			const obj = JSON.parse(json) as { result?: { tools?: Array<{ inputSchema?: Record<string, unknown> }> } };
-			const tools = obj?.result?.tools;
-			if (Array.isArray(tools)) {
-				for (const t of tools) if (t && t.inputSchema && typeof t.inputSchema === 'object') t.inputSchema = sanitizeToolSchema(t.inputSchema);
+			const obj: unknown = JSON.parse(json);
+			if (isToolsListResult(obj)) {
+				mutate(obj);
 				return prefix + JSON.stringify(obj);
 			}
 		} catch {
 			/* not the tools/list result frame — leave untouched */
 		}
 		return full;
+	});
+}
+
+/**
+ * Rewrite a buffered MCP `tools/list` SSE response so every tool's inputSchema is OpenAI-compatible
+ * (see {@link sanitizeToolSchema}). rocket-agent is the BYO-agent gateway, so this is the right
+ * layer to make the engine's tools usable by strict OpenAI-family models.
+ */
+export function sanitizeMcpToolSchemas(rawSse: string): string {
+	return rewriteToolsListSse(rawSse, (obj) => {
+		for (const t of obj.result.tools) if (t && t.inputSchema && typeof t.inputSchema === 'object') t.inputSchema = sanitizeToolSchema(t.inputSchema);
 	});
 }
 

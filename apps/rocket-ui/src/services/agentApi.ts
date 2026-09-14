@@ -55,11 +55,14 @@ export class AgentApiError extends Error {
 	}
 }
 
-async function call<T>(method: string, path: string, body?: unknown, rawBody?: string, signal?: AbortSignal): Promise<T> {
+async function call<T>(method: string, path: string, body?: unknown, rawBody?: string, signal?: AbortSignal, headers?: Record<string, string>): Promise<T> {
 	const outBody = rawBody ?? (body !== undefined ? JSON.stringify(body) : undefined);
 	const res = await fetch(`${agentBase()}${path}`, {
 		method,
 		headers: {
+			// Caller headers first, then auth/content-type — so a caller-supplied header can never
+			// override the Bearer token or the JSON content-type. Auth always wins.
+			...headers,
 			authorization: `Bearer ${ConnectionManager.getInstance().loadToken()}`,
 			...(outBody !== undefined ? { 'content-type': 'application/json' } : {}),
 		},
@@ -89,10 +92,12 @@ export const agentApi = {
 	rename: (id: string, title: string, signal?: AbortSignal) => call<AgentSessionRecord>('PATCH', `/agent/sessions/${id}`, { title }, undefined, signal),
 	health: (id: string, signal?: AbortSignal) => call<{ status: string; opencode: boolean; engine?: 'real' | 'stub' }>('GET', `/agent/sessions/${id}/health`, undefined, undefined, signal),
 	save: (id: string, signal?: AbortSignal) => call<{ pipes: string[] }>('POST', `/agent/sessions/${id}/save`, undefined, undefined, signal), // D2
+	/** Records the answer to a pending present_gate ask (owner-checked); emits `gate.answered` on the events stream. The gate itself is consumed one-shot by the server on the next prompt, not here. */
+	answerGate: (id: string, gateId: string, option: string, signal?: AbortSignal) => call<void>('POST', `/agent/sessions/${id}/gate`, { id: gateId, option }, undefined, signal),
 	turns: (id: string, signal?: AbortSignal) => call<Array<{ sha: string; label: string; at: number }>>('GET', `/agent/sessions/${id}/turns`, undefined, undefined, signal), // D3
 	revert: (id: string, sha: string, signal?: AbortSignal) => call<{ sha: string }>('POST', `/agent/sessions/${id}/revert`, { sha }, undefined, signal), // D3
 	writeFile: (id: string, rel: string, content: string, signal?: AbortSignal) => call<{ ok: true; snapshot: string | null }>('PUT', `/agent/sessions/${id}/files/${rel}`, undefined, content, signal),
-	oc: <T>(id: string, method: string, suffix: string, body?: unknown, signal?: AbortSignal) => call<T>(method, `/agent/sessions/${id}/opencode${suffix}`, body, undefined, signal),
+	oc: <T>(id: string, method: string, suffix: string, body?: unknown, signal?: AbortSignal, headers?: Record<string, string>) => call<T>(method, `/agent/sessions/${id}/opencode${suffix}`, body, undefined, signal, headers),
 	/** Visibility: the opencode agents this session loaded — if rr-builder is absent, seeding failed. */
 	listAgents: (id: string, signal?: AbortSignal) => call<Array<{ name: string; mode?: string }>>('GET', `/agent/sessions/${id}/opencode/agent`, undefined, undefined, signal),
 };

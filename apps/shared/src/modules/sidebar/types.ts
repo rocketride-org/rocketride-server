@@ -121,9 +121,10 @@ export interface AppBuilderSidebar {
 /**
  * The sidebar's mode tabs. 'apps' exists only when the host wires the app
  * builder; 'nodes' is the node-builder placeholder shown whenever the mode
- * tabs render.
+ * tabs render; 'agent' exists only when the host wires `agentSlot` (rocket-ui
+ * with the agent flag on) — VS Code omits it and never sees the tab.
  */
-export type SidebarMode = 'pipelines' | 'apps' | 'nodes';
+export type SidebarMode = 'pipelines' | 'apps' | 'nodes' | 'agent';
 
 // =============================================================================
 // CONNECTION STATE
@@ -215,6 +216,8 @@ export interface ISidebarViewProps {
 	onSidebarModeChange?: (mode: SidebarMode) => void;
 
 	// ── Agent (Phase 4) ─────────────────────────────────────────────────────
-	/** Optional Agent sessions section, rendered at the end of the pipelines panel. */
+	/** Optional Agent sessions content. Its PRESENCE adds an "Agent" tab to the mode strip
+	 *  (peer to Pipelines / Nodes) and renders as that tab's body — the host provides the whole
+	 *  panel (e.g. rocket-ui's AgentSidebarSection). Omitted → no Agent tab (VS Code). */
 	agentSlot?: ReactNode;
 }

@@ -18,7 +18,7 @@
 		"webfetch": "deny",
 		"websearch": "deny",
 		"external_directory": "deny",
-		"question": "allow",
+		"question": "deny",
 		"todowrite": "allow"
 	},
 	"mcp": {

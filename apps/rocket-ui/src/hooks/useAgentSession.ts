@@ -34,7 +34,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ChatMessage } from 'shell';
 import { agentApi, readSse } from '../services/agentApi';
-import type { AgentEvent, OcEvent, OcMessage, OcPart, OcPermissionAsk, OcTokens } from '../services/agentTypes';
+import type { AgentEvent, OcEvent, OcGateAsk, OcMessage, OcPart, OcPermissionAsk, OcTokens } from '../services/agentTypes';
 
 /** Running spend for the attached session — real cost when the model reports it, else an estimate. */
 export interface SpendState {
@@ -74,10 +74,15 @@ export interface UseAgentSessionResult {
 	/** Loaded agent + tool inventory for the header status line; null until fetched (or if the fetch fails). */
 	agentInfo: AgentInfo | null;
 	pendingPermission: OcPermissionAsk | null;
+	/** The pending present_gate ask, if any — mirrors pendingPermission's plumbing. */
+	pendingGate: OcGateAsk | null;
 	/** Grows on each 'saved' event — drives the chips. */
 	savedPipes: string[];
 	send: (text: string) => void;
+	/** Abort the in-flight opencode turn (the Stop button) — halts a hung/runaway generation. */
+	stop: () => Promise<void>;
 	answerPermission: (id: string, response: 'once' | 'always' | 'reject') => Promise<void>;
+	answerGate: (id: string, option: string) => Promise<void>;
 	save: () => Promise<string[]>;
 }
 
@@ -91,15 +96,20 @@ function ts(): string {
  *
  * @param sessionId - The rocket-agent session id, or null while unattached.
  * @param onFileChange - Called with the relative path on each OpenCode `file.edited` event.
+ * @param openDocUri - The store-path form of the pipe currently open on the canvas (Layer-2
+ *   grounding); sent as the `x-rr-open-doc` header on every prompt so the server can name it
+ *   in the per-turn `<live-state>` block. Undefined outside a canvas context (the standalone
+ *   `agent:` tab has no open doc).
  * @returns Live transcript + status, plus `send`/`answerPermission`/`save` actions.
  */
-export function useAgentSession(sessionId: string | null, onFileChange?: (file: string) => void): UseAgentSessionResult {
+export function useAgentSession(sessionId: string | null, onFileChange?: (file: string) => void, openDocUri?: string): UseAgentSessionResult {
 	const [messages, setMessages] = useState<ChatMessage[]>([]);
 	const [isTyping, setIsTyping] = useState(false);
 	const [connected, setConnected] = useState(false);
 	const [status, setStatus] = useState('idle');
 	const [spend, setSpend] = useState<SpendState>({ costUsd: 0, tokens: ZERO, estimated: false });
 	const [pendingPermission, setPendingPermission] = useState<OcPermissionAsk | null>(null);
+	const [pendingGate, setPendingGate] = useState<OcGateAsk | null>(null);
 	const [savedPipes, setSavedPipes] = useState<string[]>([]);
 	const [agentInfo, setAgentInfo] = useState<AgentInfo | null>(null);
 	const oidRef = useRef<string | null>(null);
@@ -107,6 +117,11 @@ export function useAgentSession(sessionId: string | null, onFileChange?: (file: 
 	const byOcId = useRef(new Map<string, number>()); // OpenCode part id -> ChatMessage id
 	const msgRole = useRef(new Map<string, string>()); // OpenCode message id -> role (message.part.updated omits it)
 	const pendingEchoes = useRef<number[]>([]); // optimistic user-echo ids awaiting their live SSE part (FIFO, in send order)
+	const openDocRef = useRef<string | undefined>(openDocUri); // latest open-doc URI, read by `send` without re-binding it
+
+	useEffect(() => {
+		openDocRef.current = openDocUri;
+	}, [openDocUri]);
 
 	const upsert = useCallback((ocId: string, patch: Omit<ChatMessage, 'id'>) => {
 		// Allocate the id and record the OpenCode-part->ChatMessage mapping OUTSIDE the
@@ -246,11 +261,13 @@ export function useAgentSession(sessionId: string | null, onFileChange?: (file: 
 					(raw) => {
 						if (ac.signal.aborted) return;
 						const e = raw as AgentEvent;
-						if (e.type === 'saved' && e.pipes) { setSavedPipes((prev) => [...prev, ...e.pipes!.filter((x) => !prev.includes(x))]); for (const p of e.pipes) window.dispatchEvent(new CustomEvent('project:saved', { detail: { projectId: p } })); } /* project:saved refreshes the Pipelines bar for auto-saved pipes — same event the Save button fires */
+						if (e.type === 'saved' && e.pipes) { setSavedPipes((prev) => [...prev, ...e.pipes!.filter((x) => !prev.includes(x))]); for (const p of e.pipes) { window.dispatchEvent(new CustomEvent('project:saved', { detail: { projectId: p } })); /* project:saved refreshes the Pipelines bar — same event the Save button fires */ window.dispatchEvent(new CustomEvent('rocketride:externalFileChanged', { detail: { path: p.replace(/^\.projects\//, '') } })); /* re-read the OPEN canvas doc so agent edits show live; strip the store's `.projects/` prefix to match the document URI */ } }
 						else if (e.type === 'auth.expired') setStatus('paused_auth');
 						else if (e.type === 'auth.refreshed') setStatus('active');
 						else if (e.type === 'workspace_full') setStatus('workspace_full');
 							else if (e.type === 'save.failed' && e.pipes?.length) { const errId = nextId.current++; setMessages((prev) => [...prev, { id: errId, text: `⚠️ Couldn't save "${e.pipes!.join(', ')}" to the project (invalid JSON — fix it and it'll auto-save)`, sender: 'system', timestamp: ts(), isError: true }]); }
+							else if (e.type === 'gate.asked') setPendingGate(e as unknown as OcGateAsk);
+							else if (e.type === 'gate.answered') setPendingGate(null);
 					},
 					ac.signal,
 				).catch(() => undefined);
@@ -276,14 +293,29 @@ export function useAgentSession(sessionId: string | null, onFileChange?: (file: 
 			setMessages((prev) => [...prev, { id: echoId, text, sender: 'user', timestamp: ts() }]);
 			setIsTyping(true);
 			// P4-V6: omit `model` if the locked config pins a default; else send the pinned constant.
-			void agentApi.oc(sessionId, 'POST', `/session/${oidRef.current}/prompt_async`, { agent: RR_AGENT, parts: [{ type: 'text', text }] }).catch((err: Error) => {
-				setIsTyping(false);
-				const errId = nextId.current++;
-				setMessages((prev) => [...prev, { id: errId, text: err.message, sender: 'system', timestamp: ts(), isError: true }]);
-			});
+			// Layer-2 grounding: tell the server which pipe is open on the canvas (`x-rr-open-doc`) so
+			// it can name it in the per-turn `system` block — read from the ref so this callback never
+			// re-binds on every canvas navigation (see the `openDocRef` effect above).
+			void agentApi
+				.oc(sessionId, 'POST', `/session/${oidRef.current}/prompt_async`, { agent: RR_AGENT, parts: [{ type: 'text', text }] }, undefined, openDocRef.current ? { 'x-rr-open-doc': openDocRef.current } : undefined)
+				.catch((err: Error) => {
+					setIsTyping(false);
+					const errId = nextId.current++;
+					setMessages((prev) => [...prev, { id: errId, text: err.message, sender: 'system', timestamp: ts(), isError: true }]);
+				});
 		},
 		[sessionId],
 	);
+
+	const stop = useCallback(async () => {
+		if (!sessionId || !oidRef.current) return;
+		// Optimistically drop the typing indicator, then abort the inner opencode turn via the same
+		// passthrough send/answerPermission use. `/session/{oid}/abort` is the SDK's Session.abort()
+		// (not the `session.interrupt` TUI keybind) — the server exempts it from the workspace-full
+		// block so Stop always works. Swallow errors: a dead/already-idle turn must not surface a scare.
+		setIsTyping(false);
+		await agentApi.oc(sessionId, 'POST', `/session/${oidRef.current}/abort`, {}).catch(() => undefined);
+	}, [sessionId]);
 
 	const answerPermission = useCallback(
 		async (permId: string, response: 'once' | 'always' | 'reject') => {
@@ -294,12 +326,27 @@ export function useAgentSession(sessionId: string | null, onFileChange?: (file: 
 		[sessionId],
 	);
 
+	const answerGate = useCallback(
+		async (gateId: string, option: string) => {
+			if (!sessionId) return;
+			// Close the gate-answer loop. Order matters: (1) optimistically clear the card, (2) POST
+			// /gate so the answer is audited + `gate.answered` emitted, then (3) fire a NEW prompt so
+			// the model actually resumes — its prior turn was aborted by present_gate's interrupt, so
+			// without this the run would never proceed. `awaitingGate` is still set at send() time, so
+			// the server injects the answering context into this turn and consumes it one-shot.
+			setPendingGate(null);
+			await agentApi.answerGate(sessionId, gateId, option);
+			send(`Proceed with gate "${gateId}": ${option}`);
+		},
+		[sessionId, send],
+	);
+
 	const save = useCallback(async () => {
 		if (!sessionId) return [];
 		return (await agentApi.save(sessionId)).pipes;
 	}, [sessionId]);
 
-	return { messages, isTyping, connected, status, spend, agentInfo, pendingPermission, savedPipes, send, answerPermission, save };
+	return { messages, isTyping, connected, status, spend, agentInfo, pendingPermission, pendingGate, savedPipes, send, stop, answerPermission, answerGate, save };
 }
 
 function addTokens(a: OcTokens, b?: OcTokens): OcTokens {

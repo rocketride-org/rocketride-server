@@ -46,10 +46,16 @@ export interface AgentSessionRecord {
 
 /** Event frame from the rocket-agent `/agent/sessions/:id/events` SSE stream. */
 export interface AgentEvent {
-	type: 'snapshot' | 'saved' | 'save.failed' | 'auth.expired' | 'auth.refreshed' | 'workspace_full';
+	type: 'snapshot' | 'saved' | 'save.failed' | 'auth.expired' | 'auth.refreshed' | 'workspace_full' | 'gate.asked' | 'gate.answered';
 	sha?: string;
 	file?: string;
 	pipes?: string[];
+	/** gate.asked/gate.answered: the gate id (see {@link OcGateAsk}). */
+	id?: string;
+	/** gate.asked: the prompt shown to the user. */
+	brief?: string;
+	/** gate.asked: the option labels the user can pick from. */
+	options?: string[];
 }
 
 /**
@@ -90,6 +96,13 @@ export interface OcPermissionAsk {
 	title?: string;
 	type?: string;
 	metadata?: Record<string, unknown>;
+}
+
+/** A pending `present_gate` ask, surfaced via the rocket-agent `gate.asked` panel event. */
+export interface OcGateAsk {
+	id: string;
+	brief: string;
+	options: string[];
 }
 
 export interface OcEvent {

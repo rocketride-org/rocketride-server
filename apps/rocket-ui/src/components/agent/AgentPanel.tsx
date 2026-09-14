@@ -146,13 +146,18 @@ export function AgentPanel({ uri, onClose }: AgentPanelProps): React.JSX.Element
 /** Split so useWorkspaceSync runs with a guaranteed session (hooks stay unconditional). */
 function AgentPanelBody({ sessionId, uri }: { sessionId: string; uri: string }): React.JSX.Element {
 	const sync = useWorkspaceSync(sessionId, uri); // Task 4.4
+	// Layer 2 (open-doc grounding): the canvas document URI is already in store-relative form,
+	// but strip any leading `.projects/` defensively — same transform useAgentSession.ts:249 uses
+	// to go the other way (store path -> document URI) — so the header always matches the store
+	// path form the server compares against.
+	const openDocUri = uri.replace(/^\.projects\//, '');
 	return (
 		<div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
 			<div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, padding: '4px 12px' }}>
 				<button onClick={() => void sync.revert()}>Revert session changes</button>
 				<button onClick={() => getDocs()?.openStaticDocument(`agent:${sessionId}`, pipeTitle(uri))}>Open as tab</button>
 			</div>
-			<AgentSessionView sessionId={sessionId} onFileChange={sync.onFileChange} />
+			<AgentSessionView sessionId={sessionId} onFileChange={sync.onFileChange} openDocUri={openDocUri} />
 		</div>
 	);
 }

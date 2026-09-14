@@ -63,6 +63,7 @@ class FakeSessionManager extends SessionManager {
 			sessionHome: sessionRoot,
 			events: new EventEmitter(),
 			openStreams: 0,
+			turn: {},
 		};
 	}
 }
@@ -135,6 +136,7 @@ class KillTrackingSessionManager extends SessionManager {
 			sessionHome: sessionRoot,
 			events: new EventEmitter(),
 			openStreams: 0,
+			turn: {},
 		};
 		// `live` is private on SessionManager (not protected) — same reach-through cast
 		// proxy.test.ts's CountingSessionManager uses — needed so killAndEvict()'s
@@ -200,5 +202,72 @@ describe('SessionManager.create() / resume() clean up a SUCCESSFUL attach() on a
 
 		expect(manager.killSpy).toHaveBeenCalledWith('SIGTERM');
 		expect(manager.listLive()).toHaveLength(0);
+	});
+});
+
+/** Minimal LiveSession stand-in for interrupt() — only `baseUrl`/`password` are read. */
+function fakeLive(overrides: Partial<LiveSession> = {}): LiveSession {
+	return {
+		record: { sessionId: 's1', ownerId: 'owner-1', tenantId: 'tenant-1', title: 'x', pipePath: '', pipesTouched: [], status: 'active', createdAt: 0, lastActivity: 0 },
+		proc: {} as LiveSession['proc'],
+		port: 0,
+		password: 'pw123',
+		baseUrl: 'http://127.0.0.1:9',
+		mcpSecret: 'fake',
+		latestToken: 'cred',
+		workspaceDir: '/tmp/x',
+		sessionHome: '/tmp/x',
+		events: new EventEmitter(),
+		openStreams: 0,
+		turn: {},
+		...overrides,
+	};
+}
+
+describe('SessionManager.interrupt() — present_gate session.interrupt backstop', () => {
+	const realFetch = global.fetch;
+	afterEach(() => { global.fetch = realFetch; });
+
+	test('discovers the opencode session id via GET /session, then POSTs /session/{id}/abort with the session password', async () => {
+		const calls: Array<{ url: string; init?: RequestInit }> = [];
+		global.fetch = jest.fn(async (url: any, init?: RequestInit) => {
+			calls.push({ url: String(url), init });
+			if (String(url).endsWith('/session')) {
+				return { ok: true, json: async () => [{ id: 'ses_abc123' }] } as Response;
+			}
+			return { ok: true, json: async () => true } as Response;
+		}) as unknown as typeof fetch;
+
+		const manager = new SessionManager({
+			cfg: loadConfig({ RR_MCP_UPSTREAM: 'http://localhost:8080/mcp' }),
+			keys: new FakeKeyResolver(),
+			index: new MemorySessionIndex(),
+			storeFactory: async () => { throw new Error('not used'); },
+		});
+
+		await manager.interrupt(fakeLive());
+
+		expect(calls).toHaveLength(2);
+		expect(calls[0].url).toBe('http://127.0.0.1:9/session');
+		expect((calls[0].init?.headers as any).authorization).toBe('Basic ' + Buffer.from('opencode:pw123').toString('base64'));
+		expect(calls[1].url).toBe('http://127.0.0.1:9/session/ses_abc123/abort');
+		expect(calls[1].init?.method).toBe('POST');
+		expect((calls[1].init?.headers as any).authorization).toBe('Basic ' + Buffer.from('opencode:pw123').toString('base64'));
+	});
+
+	test.each<[string, () => void]>([
+		['the child is dead (fetch rejects)', () => { global.fetch = jest.fn(async () => { throw new Error('ECONNREFUSED'); }) as unknown as typeof fetch; }],
+		['the list call 404s', () => { global.fetch = jest.fn(async () => ({ ok: false, json: async () => [] }) as Response) as unknown as typeof fetch; }],
+		['no session exists yet', () => { global.fetch = jest.fn(async () => ({ ok: true, json: async () => [] }) as Response) as unknown as typeof fetch; }],
+	])('never throws — swallows the error when %s', async (_name, arrange) => {
+		arrange();
+		const manager = new SessionManager({
+			cfg: loadConfig({ RR_MCP_UPSTREAM: 'http://localhost:8080/mcp' }),
+			keys: new FakeKeyResolver(),
+			index: new MemorySessionIndex(),
+			storeFactory: async () => { throw new Error('not used'); },
+		});
+
+		await expect(manager.interrupt(fakeLive())).resolves.toBeUndefined();
 	});
 });

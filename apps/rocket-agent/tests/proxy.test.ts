@@ -70,6 +70,7 @@ class CountingSessionManager extends SessionManager {
 			sessionHome: sessionRoot,
 			events: new EventEmitter(),
 			openStreams: 0,
+			turn: {},
 		};
 		// `live` is private on SessionManager (not protected) — this cast reaches the
 		// real runtime field so the manager's state stays consistent for this test.
@@ -101,6 +102,7 @@ class FileWatchSessionManager extends SessionManager {
 			sessionHome: sessionRoot,
 			events: new EventEmitter(),
 			openStreams: 0,
+			turn: {},
 		};
 		(this as unknown as { live: Map<string, LiveSession> }).live.set(record.sessionId, live);
 		return live;

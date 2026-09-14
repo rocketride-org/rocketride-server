@@ -3,6 +3,7 @@ import React, { useCallback, useState } from 'react';
 import { ChatView, commonStyles } from 'shell';
 import { useAgentSession } from '../../hooks/useAgentSession';
 import { PermissionPrompt } from './PermissionPrompt';
+import { GatePrompt } from './GatePrompt';
 import { SpendMeter } from './SpendMeter';
 import { SavedPipeChip } from './SavedPipeChip';
 
@@ -12,6 +13,8 @@ export interface AgentSessionViewProps {
 	sessionId: string;
 	/** Fires with the workspace-relative path on every agent file edit (Task 4.4 wires canvas sync here). */
 	onFileChange?: (file: string) => void;
+	/** Store-path form of the pipe open on the canvas, when there is one — forwarded to `useAgentSession` so the server can name it in the per-turn `<live-state>` block (Layer 2). */
+	openDocUri?: string;
 }
 
 /** Status labels for non-active/idle states shown next to the save button. */
@@ -26,8 +29,8 @@ const STATUS_LABEL: Record<string, string> = {
  * ({@link AgentPanel}), so every surface stays in lockstep by construction
  * as more are added.
  */
-export function AgentSessionView({ sessionId, onFileChange }: AgentSessionViewProps): React.JSX.Element {
-	const s = useAgentSession(sessionId, onFileChange);
+export function AgentSessionView({ sessionId, onFileChange, openDocUri }: AgentSessionViewProps): React.JSX.Element {
+	const s = useAgentSession(sessionId, onFileChange, openDocUri);
 	const [saveError, setSaveError] = useState<string | null>(null);
 
 	const handleSave = useCallback(async () => {
@@ -77,7 +80,22 @@ export function AgentSessionView({ sessionId, onFileChange }: AgentSessionViewPr
 					placeholder="Describe the pipeline you want, or ask about a running one…"
 					emptyTitle="Rocket Agent"
 					emptyDescription="The agent edits .pipe files in a private workspace and validates them against the engine."
-					leadingInputSlot={s.pendingPermission ? <PermissionPrompt ask={s.pendingPermission} onAnswer={s.answerPermission} /> : undefined}
+					leadingInputSlot={
+						s.isTyping || s.pendingPermission || s.pendingGate ? (
+							<>
+								{/* Stop sits to the LEFT of the composer text box (ChatInputField renders the slot
+								    before the textarea) — halts a hung/runaway turn. Shown only while a turn is
+								    in flight; a pending gate/permission ends the turn, so these rarely coexist. */}
+								{s.isTyping && (
+									<button style={commonStyles.buttonSecondarySmall} onClick={() => void s.stop()} title="Stop the agent's current turn">
+										■ Stop
+									</button>
+								)}
+								{s.pendingPermission && <PermissionPrompt ask={s.pendingPermission} onAnswer={s.answerPermission} />}
+								{s.pendingGate && <GatePrompt ask={s.pendingGate} onAnswer={s.answerGate} />}
+							</>
+						) : undefined
+					}
 				/>
 			</div>
 		</div>

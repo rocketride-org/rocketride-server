@@ -83,13 +83,34 @@ const DEFAULTS: Record<string, string> = {
 	RR_SESSION_RETENTION_DAYS: '30',
 };
 
+/**
+ * Canonicalize an engine MCP endpoint. The engine's streamable-HTTP MCP is a sub-app mounted at
+ * `/mcp`, whose only POST route is `/mcp/`; POST `/mcp` returns 405 (no redirect). Append the
+ * trailing slash when the path ends in `/mcp` so an endpoint written without it still works. The dev
+ * stub upstream (path `/`) and already-slashed values are left unchanged; a non-URL string is
+ * returned as-is (downstream fetch surfaces the error).
+ */
+export function normalizeMcpUpstream(url: string): string {
+	try {
+		const u = new URL(url);
+		if (u.pathname.endsWith('/mcp')) u.pathname += '/';
+		return u.toString();
+	} catch {
+		return url;
+	}
+}
+
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AgentConfig {
 	const get = (k: string): string => env[k] ?? DEFAULTS[k];
 	const mode: 'oss' | 'saas' = env.RR_AGENT_MODE === 'saas' ? 'saas' : 'oss';
-	const mcpUpstream = env.RR_MCP_UPSTREAM;
-	if (!mcpUpstream) {
-		throw new Error('RR_MCP_UPSTREAM is required (engine MCP endpoint, e.g. http://localhost:8080/mcp)');
+	const rawMcpUpstream = env.RR_MCP_UPSTREAM;
+	if (!rawMcpUpstream) {
+		throw new Error('RR_MCP_UPSTREAM is required (engine MCP endpoint, e.g. http://localhost:8080/mcp/)');
 	}
+	// The engine mounts its streamable-HTTP MCP as a sub-app at `/mcp`; the live route is `/mcp/`, and a
+	// POST to `/mcp` (no trailing slash) is rejected 405 rather than redirected — so a value configured
+	// without the slash silently loses EVERY rocketride tool. Canonicalize here. See normalizeMcpUpstream.
+	const mcpUpstream = normalizeMcpUpstream(rawMcpUpstream);
 	if (mode === 'saas') {
 		if (!env.RR_ENCRYPTION_KEY) throw new Error('RR_AGENT_MODE=saas requires RR_ENCRYPTION_KEY');
 		if (!env.RR_VAULT_URL) throw new Error('RR_AGENT_MODE=saas requires RR_VAULT_URL');

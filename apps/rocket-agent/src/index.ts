@@ -33,14 +33,16 @@ import { SaasVaultKeyResolver } from './keys';
 import { log } from './log';
 import { authHeader } from './opencode';
 import {
-	forward, isToolCallRequest, OPENCODE_TO_MCP_HEADERS, PANEL_TO_OPENCODE_HEADERS,
+	forward, isToolCallRequest, JsonRpcRequestFrame, OPENCODE_TO_MCP_HEADERS, PANEL_TO_OPENCODE_HEADERS,
 	parseJsonRpcRequest, readRequestBody, redactApiKeys, sanitizeMcpToolSchemas,
 } from './proxy';
 import { reconcileOnBoot, startReaper } from './reaper';
 import { MemorySessionIndex, RedisSessionIndex } from './sessionIndex';
 import { SessionManager } from './session';
+import { appendSyntheticToolsToListSse, handleSyntheticToolCall, isSyntheticToolCall, SyntheticCtx } from './synthetics';
 import { HttpError, Identity, IdentityResolver, KeyResolver, ProviderKeys, SessionIndex, SessionRecord, StoreFs } from './types';
-import { commitTurn, listTurns } from './workspace';
+import { buildTurnSystemAndConsume, injectSystemIntoPromptBody } from './turnContext';
+import { commitTurn, listTurns, phaseBody } from './workspace';
 
 export { MemorySessionIndex, RedisSessionIndex };
 
@@ -53,6 +55,8 @@ export async function openStore(uri: string, credential: string): Promise<StoreF
 		fsWriteString: (p, text) => client.fsWriteString(p, text),
 		// getServices() returns compact summaries (no config schema) — the exact live provider list.
 		listServices: async () => (await client.getServices()).services,
+		// Non-recursive directory listing — `listStorePipes` walks it to seed the whole `.projects/` tree.
+		fsListDir: async (p) => ({ entries: (await client.fsListDir(p)).entries.map((e) => ({ name: e.name, type: e.type })) }),
 		close: async () => {
 			await client.logout().catch(() => undefined);
 			await client.disconnect();
@@ -124,6 +128,10 @@ function bearer(req: Request): string | null {
  * enough for the cap check to ever clear.
  */
 const WORKSPACE_FULL_BLOCKED_METHODS = new Set(['POST', 'PUT', 'PATCH']);
+/** `POST /session/{oid}/abort` — the Stop button's escape hatch. Never blocked, even at capacity:
+ *  stopping an in-flight turn writes nothing (it's the way to STOP writing), and blocking it would
+ *  strand the user with a runaway turn exactly when the workspace is full. */
+const ABORT_RE = /^\/session\/[^/]+\/abort\/?$/;
 
 export function createApp(deps: AppDeps): express.Express {
 	const app = express();
@@ -278,6 +286,29 @@ export function createApp(deps: AppDeps): express.Express {
 		} catch (err) { next(err); }
 	});
 
+	// Task 5: the user's answer to a `present_gate` gate opened on turn state. RECORDS the answer
+	// and emits `gate.answered` for the panel — but deliberately does NOT clear
+	// `live.turn.awaitingGate`. The prompt proxy owns one-shot consumption: the follow-up prompt
+	// that answerGate() fires (or the user's typed answer) still sees the gate set, so
+	// buildTurnSystem injects the answering context into exactly that one turn before the proxy
+	// clears it (see buildTurnSystemAndConsume in the prompt_async branch below). Clearing it here
+	// would strip that context off the very turn that answers the gate. The session must be LIVE
+	// (this is turn state, not anything persisted) — a session resumed fresh has no gate to answer.
+	api.post('/sessions/:id/gate', async (req: Request & { identity?: Identity }, res, next) => {
+		try {
+			const live = deps.manager.getLive(req.params.id);
+			if (!live || live.record.ownerId !== req.identity!.ownerId) { res.status(404).json({ error: 'no such session' }); return; }
+			const { id, option } = (req.body ?? {}) as { id?: string; option?: string };
+			if (!id || !option) { res.status(400).json({ error: 'id and option are required' }); return; }
+			if (!live.turn.awaitingGate || live.turn.awaitingGate.id !== id) {
+				res.status(409).json({ error: 'no such gate is awaiting an answer' });
+				return;
+			}
+			live.events.emit('event', { type: 'gate.answered', id, option });
+			res.json({ id, option });
+		} catch (err) { next(err); }
+	});
+
 	// Express 4 does not forward async-handler rejections to any error middleware — an
 	// unhandled rejection crashes the WHOLE process, taking every tenant's session down
 	// with it. Every raw route below (no express.json(), does its own auth) wraps its
@@ -299,16 +330,17 @@ export function createApp(deps: AppDeps): express.Express {
 		const live = deps.manager.getLive(req.params.id);
 		if (!live) { res.status(404).json({ error: 'no live session (resume it first)' }); return; }
 		if (live.record.ownerId !== identity.ownerId) { res.status(403).json({ error: 'not your session' }); return; }
+		const suffix = req.originalUrl.slice(`/agent/sessions/${req.params.id}/opencode`.length) || '/';
 		// Important 4 (final-review): pauseForCap() only ever set status + emitted an event —
 		// nothing actually stopped writes, so a session over the 512MB cap could keep growing
 		// the shared PVC unbounded (cross-tenant disk DoS). See WORKSPACE_FULL_BLOCKED_METHODS.
-		if (live.record.status === 'workspace_full' && WORKSPACE_FULL_BLOCKED_METHODS.has(req.method)) {
+		// The Stop button (`.../abort`) is exempt — see ABORT_RE — so a user can always halt a turn.
+		if (live.record.status === 'workspace_full' && WORKSPACE_FULL_BLOCKED_METHODS.has(req.method) && !ABORT_RE.test(suffix)) {
 			res.status(413).json({ error: 'workspace at capacity — free up space before continuing' });
 			return;
 		}
 		deps.manager.touch(live, credential);
 		live.openStreams++;
-		const suffix = req.originalUrl.slice(`/agent/sessions/${req.params.id}/opencode`.length) || '/';
 
 		// Task 5.2a: tap `agent.prompt` (POST .../prompt_async) and `agent.permission` (POST
 		// .../permissions/:id) — the only two opencode calls the audit trail cares about. Both
@@ -323,6 +355,20 @@ export function createApp(deps: AppDeps): express.Express {
 			if (PROMPT_ASYNC_RE.test(suffix)) {
 				auditBody = await readRequestBody(req);
 				auditKind = 'agent.prompt';
+				// Layer 2 (per-turn system injection): tell the agent which pipe the user has open
+				// on the canvas and re-assert any live phase/gate state — via the prompt `system`
+				// field, never the static prompt. `x-rr-open-doc` is read here only — it must never
+				// be added to PANEL_TO_OPENCODE_HEADERS or forwarded to the opencode child.
+				const openDocUri = typeof req.headers['x-rr-open-doc'] === 'string' ? (req.headers['x-rr-open-doc'] as string) : undefined;
+				const openDocShape = openDocUri ? await deps.manager.describePipeShape(live, openDocUri).catch(() => undefined) : undefined;
+				// One-shot gate consumption: buildTurnSystemAndConsume injects any `awaitingGate` into
+				// THIS prompt's system block and then clears it on live.turn, so it is never re-asserted
+				// on later turns. This is the seam that closes the gate-answer loop for BOTH paths — the
+				// typed answer and the follow-up prompt answerGate() fires — since each carries the
+				// awaiting-gate context exactly once. Only ever mutates when a gate was actually open and
+				// this is a real prompt_async (never on unrelated opencode passthrough calls).
+				const system = buildTurnSystemAndConsume({ openDocUri, openDocShape, turn: live.turn ?? {} });
+				auditBody = injectSystemIntoPromptBody(auditBody, system);
 			} else if (PERMISSION_REPLY_RE.test(suffix)) {
 				auditBody = await readRequestBody(req);
 				auditKind = 'agent.permission';
@@ -447,13 +493,14 @@ export function createApp(deps: AppDeps): express.Express {
 		// the HTTP status alone (the same shared parseJsonRpcRequest/isToolCallRequest seam
 		// eval/src/runner.ts's ToolCallRecorder uses for the request side — see proxy.ts).
 		let mcpBody: Buffer | undefined;
+		let frame: JsonRpcRequestFrame | undefined;
 		let toolCall: { name: string; args: Record<string, unknown> | undefined } | undefined;
 		let isToolsList = false;
 		if (req.method !== 'GET' && req.method !== 'HEAD') {
 			mcpBody = await readRequestBody(req);
-			const frame = parseJsonRpcRequest(mcpBody);
+			frame = parseJsonRpcRequest(mcpBody);
 			if (isToolCallRequest(frame)) toolCall = { name: frame.params.name, args: frame.params.arguments };
-			// `tools/list` is the one response we rewrite (OpenAI schema shim) — see sanitizeMcpToolSchemas.
+			// `tools/list` is the one response we rewrite (OpenAI schema shim + synthetic-tool append).
 			if (frame?.method === 'tools/list') isToolsList = true;
 		}
 		const recordToolCall = (status: 'ok' | 'error') => {
@@ -472,9 +519,31 @@ export function createApp(deps: AppDeps): express.Express {
 			});
 		};
 		try {
+			// Synthetic tools (present_gate / enter_phase) live ONLY here — the engine has never
+			// heard of them. Short-circuit before forward(): answer opencode directly over SSE and
+			// never let the call reach the upstream MCP engine.
+			if (isSyntheticToolCall(frame)) {
+				const ctx: SyntheticCtx = {
+					live,
+					emit: (event) => live.events.emit('event', event),
+					setPhase: (name) => { live.turn.activePhase = name; },
+					openGate: (id, options) => { live.turn.awaitingGate = { id, options: options.options }; },
+					// Reads the real skill body seeded into this session's workspace (see seedWorkspace /
+					// phaseBody in workspace.ts). Throws for an unknown phase — handleSyntheticToolCall
+					// catches that and returns an MCP error envelope.
+					phaseBody: (name) => phaseBody(name, path.join(live.workspaceDir, 'skills')),
+				};
+				const { jsonRpc, interrupt } = handleSyntheticToolCall(frame, ctx);
+				res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', connection: 'keep-alive' });
+				res.end(`data: ${JSON.stringify(jsonRpc)}\n\n`);
+				recordToolCall('ok');
+				// present_gate's non-blocking backstop: best-effort, never lets a dead child crash this route.
+				if (interrupt) await deps.manager.interrupt(live);
+				return;
+			}
 			// Stamp the upstream Bearer: a fixed RR_MCP_UPSTREAM_TOKEN (shared/real engine keyed by
 			// one API key) when configured, else the caller's own panel credential (default).
-			const status = await forward(req, res, deps.cfg.mcpUpstream, { authorization: `Bearer ${deps.cfg.mcpUpstreamToken ?? live.latestToken}` }, OPENCODE_TO_MCP_HEADERS, mcpBody, isToolsList ? sanitizeMcpToolSchemas : undefined);
+			const status = await forward(req, res, deps.cfg.mcpUpstream, { authorization: `Bearer ${deps.cfg.mcpUpstreamToken ?? live.latestToken}` }, OPENCODE_TO_MCP_HEADERS, mcpBody, isToolsList ? (raw) => appendSyntheticToolsToListSse(sanitizeMcpToolSchemas(raw)) : undefined);
 			if (status === 401) deps.manager.pauseForAuth(live);
 			recordToolCall(status < 400 ? 'ok' : 'error');
 		} catch (err) {

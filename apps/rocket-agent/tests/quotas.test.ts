@@ -70,6 +70,7 @@ class FakeAttachSessionManager extends SessionManager {
 			sessionHome: path.join(sessionRoot, 'home'),
 			events: new EventEmitter(),
 			openStreams: 0,
+			turn: {},
 		};
 		(this as unknown as { live: Map<string, LiveSession> }).live.set(record.sessionId, live);
 		return live;
