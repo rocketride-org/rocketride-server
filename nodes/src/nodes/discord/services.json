@@ -15,6 +15,7 @@
 		"Supports message content intent, attachment downloading, reply threading, and long-message chunking."
 	],
 	"icon": "discord.svg",
+	"documentation": "https://docs.rocketride.org/nodes/discord",
 	"tile": ["Status: ${parameters.discord.botToken ? 'connected' : 'pending'}"],
 	"lanes": {
 		"_source": ["text", "image", "audio", "video", "tags"]

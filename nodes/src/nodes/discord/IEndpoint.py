@@ -64,9 +64,9 @@ class IEndpoint(IEndpointBase):
     server's event loop.
     """
 
-    target: IEndpointBase | None = None
+    target: Optional[IEndpointBase] = None
     _bot: Optional[commands.Bot] = None
-    _bot_task: asyncio.Task | None = None
+    _bot_task: Optional[asyncio.Task] = None
     _bot_token: str = ''
     # _guild_ids / _channel_ids are populated per-instance in _run(); declared
     # as annotations only to avoid a mutable list shared across instances.
@@ -79,6 +79,14 @@ class IEndpoint(IEndpointBase):
     _max_attachment_bytes: int = 26214400
     _send_responses: bool = True
     _inflight: set
+    _shutdown_event: threading.Event
+    # Set to a human-readable message when the Gateway client terminally fails
+    # (bad token, missing intent, unexpected disconnect); makes _run re-raise so
+    # the engine marks the source failed instead of hanging with a dead bot.
+    _fatal_error: Optional[str] = None
+    # True once _shutdown has begun, so _bot_runner does not mistake an
+    # intentional close for a terminal failure.
+    _closing: bool = False
 
     def _get_discord_config(self) -> Dict[str, Any]:
         """Read the Discord config block from serviceConfig parameters.
@@ -189,17 +197,24 @@ class IEndpoint(IEndpointBase):
         # the long-lived loop that hosts the shared WebServer.
         from ai.node import server_loop
 
+        # Create the shutdown event before _startup runs so the background bot
+        # task can always signal a terminal failure back to this thread (a
+        # failure that fires before the event existed would otherwise hang).
+        self._shutdown_event = threading.Event()
+
         try:
             startup_future = asyncio.run_coroutine_threadsafe(self._startup(), server_loop)
             startup_future.result(timeout=30)
         except Exception as e:
+            # Startup validation failed (e.g. missing token): fail the source
+            # promptly rather than blocking forever with no bot.
             debug(f'Discord _startup raised: {e}')
             raise
 
-        # Block scanObjects() until shutdown. In production the subprocess is
-        # terminated by EaaS, interrupting this wait — mirroring how uvicorn's
-        # server.run() blocked until the same external signal.
-        self._shutdown_event = threading.Event()
+        # Block scanObjects() until shutdown or a terminal Gateway failure. In
+        # production the subprocess is terminated by EaaS, interrupting this
+        # wait — mirroring how uvicorn's server.run() blocked until the same
+        # external signal. _bot_runner sets this event on a terminal failure.
         self._shutdown_event.wait()
 
         try:
@@ -207,6 +222,11 @@ class IEndpoint(IEndpointBase):
             shutdown_future.result(timeout=10)
         except Exception as e:
             debug(f'Discord _shutdown raised: {e}')
+
+        # A terminal Gateway failure (invalid token, missing intent, unexpected
+        # disconnect) surfaces as a failed source instead of a silent no-op.
+        if self._fatal_error is not None:
+            raise RuntimeError(self._fatal_error)
 
     async def _startup(self):
         """Initialize the Discord Gateway client and start it as a background task.
@@ -219,10 +239,14 @@ class IEndpoint(IEndpointBase):
             None
         """
         self._inflight = set()
+        self._fatal_error = None
+        self._closing = False
 
         if not self._bot_token:
+            # Fail fast: a source with no token can never receive messages, so
+            # surface it to the engine instead of idling forever.
             monitorStatus('Discord Bot: missing bot token')
-            return
+            raise RuntimeError('Discord Bot: missing bot token')
 
         intents = discord.Intents.default()
         intents.message_content = True
@@ -249,18 +273,48 @@ class IEndpoint(IEndpointBase):
         monitorStatus('Discord Bot: connecting to Gateway...')
 
     async def _bot_runner(self):
-        """Run the Gateway client, reporting a clear status on failure."""
+        """Run the Gateway client; a terminal failure fails the source promptly.
+
+        On any non-recoverable outcome (invalid token, missing privileged
+        intent, unexpected gateway error, or the connection closing while we are
+        not shutting down) this records a fatal error and unblocks _run so the
+        source reports a failure instead of idling with a dead bot.
+        """
         try:
             await self._bot.start(self._bot_token)
-        except discord.LoginFailure:
-            monitorStatus('Discord Bot: login failed (invalid token)')
-        except discord.PrivilegedIntentsRequired:
-            monitorStatus('Discord Bot: enable Message Content Intent in the Developer Portal')
+            # start() returned without _shutdown cancelling it: the Gateway
+            # closed on its own, so there is no working bot left.
+            if not self._closing:
+                self._fail('Discord Bot: gateway connection closed unexpectedly')
         except asyncio.CancelledError:
-            pass
+            pass  # expected: _shutdown cancelled the task
+        except discord.LoginFailure:
+            self._fail('Discord Bot: login failed (invalid token)')
+        except discord.PrivilegedIntentsRequired:
+            self._fail('Discord Bot: enable the Message Content Intent in the Developer Portal')
         except Exception as e:
             debug(f'Discord _bot_runner: EXCEPTION {e}')
-            monitorStatus(f'Discord Bot: gateway error - {e}')
+            self._fail(f'Discord Bot: gateway error - {e}')
+
+    def _fail(self, message: str):
+        """Record a terminal Gateway failure and unblock _run so it fails.
+
+        Called from _bot_runner on the shared server loop. Records the first
+        error message and sets the thread-safe event _run waits on; _run then
+        tears down and re-raises so the engine marks the source failed.
+
+        Args:
+            message (str): Actionable status describing the failure.
+
+        Returns:
+            None
+        """
+        if self._fatal_error is None:
+            self._fatal_error = message
+        monitorStatus(message)
+        event = getattr(self, '_shutdown_event', None)
+        if event is not None:
+            event.set()
 
     async def _shutdown(self):
         """Gracefully tear down the Gateway client.
@@ -271,6 +325,10 @@ class IEndpoint(IEndpointBase):
         Returns:
             None
         """
+        # Mark shutdown first so _bot_runner treats the imminent close as
+        # intentional rather than a terminal failure.
+        self._closing = True
+
         if self._inflight:
             await asyncio.gather(*self._inflight, return_exceptions=True)
 
@@ -577,13 +635,17 @@ class IEndpoint(IEndpointBase):
         Returns:
             The thread used (for 'thread' mode) so later chunks reuse it, else None.
         """
+        # Suppress all mentions on outbound content: the reply is model-generated
+        # text and must never ping users, roles, @here or @everyone even if it
+        # contains mention syntax.
+        no_mentions = discord.AllowedMentions.none()
         if self._reply_mode == 'reply':
-            await message.reply(chunk, mention_author=False)
+            await message.reply(chunk, mention_author=False, allowed_mentions=no_mentions)
             return None
         if self._reply_mode == 'thread':
             if thread is None:
                 thread = await message.create_thread(name='Pipeline Response')
-            await thread.send(chunk)
+            await thread.send(chunk, allowed_mentions=no_mentions)
             return thread
-        await message.channel.send(chunk)
+        await message.channel.send(chunk, allowed_mentions=no_mentions)
         return None

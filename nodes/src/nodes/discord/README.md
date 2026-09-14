@@ -1,157 +1,92 @@
 # discord
 
-A RocketRide source node that connects a Discord bot to your pipeline, routing incoming messages to typed lanes and returning pipeline answers to the sender.
+A RocketRide source node that connects a Discord bot to your pipeline, routing incoming messages and attachments to typed lanes and posting the pipeline's answer back to Discord.
 
 ## What it does
 
-A `source` node (`discord://`) that authenticates with a bot you create in the Discord Developer Portal and listens for incoming messages via the Discord Gateway. It handles text and media alike: images, audio, video, and documents are each downloaded (up to a configurable size limit) and routed to the matching pipeline lane. The pipeline answer produced is sent back to the originating channel, as a reply, or in a thread—depending on configuration.
+A `source` node (`discord://`) that authenticates with a bot you create in the Discord Developer Portal and listens for messages over the Discord Gateway. Text is routed to the `text` lane; image, audio, video, and document attachments are each downloaded (up to a configurable size limit) and routed to the matching lane by MIME type. The pipeline's first non-empty answer is sent back to the originating channel — as a reply, a channel message, or in a thread — with all mentions suppressed so model output can never ping anyone.
 
-The node uses **discord.py** to maintain a resilient Gateway connection with automatic heartbeating, resume, and reconnect logic. Attachments are downloaded through discord.py's `Attachment.read()` (which uses `aiohttp` under the hood; it is pulled in transitively by discord.py, not a direct dependency).
+The node uses **discord.py** to maintain a resilient Gateway connection with automatic heartbeating, resume, and reconnect. Attachments are downloaded through discord.py's `Attachment.read()` (which uses `aiohttp` transitively; it is not a direct dependency).
 
----
+## Lanes
+
+The node is a pipeline source: its `_source` lane emits one object per message and per attachment, routed by type.
+
+| Lane in | Lane out | Description |
+|---|---|---|
+| `_source` | `text` | Message text, written as plain text. |
+| `_source` | `image` | Image attachments, downloaded and routed with MIME type (e.g. `image/png`). |
+| `_source` | `audio` | Audio attachments, downloaded with MIME type (e.g. `audio/mpeg`). |
+| `_source` | `video` | Video attachments, downloaded with MIME type (e.g. `video/mp4`). |
+| `_source` | `tags` | Documents (PDF, Word, archive, and so on), downloaded as tagged stream data; connect a Parser node downstream. |
+
+Entry URLs are `discord://<channel_id>/<message_id>` for text and `discord://<channel_id>/<attachment_id>` for attachments.
 
 ## Configuration
 
-### Lanes
+See the **Schema** section below for the full field list, types, and defaults. Notes on the fields that shape behavior:
 
-The node is a pipeline source. Its `_source` lane emits to `text`, `image`, `audio`, `video`, and `tags`. Each Discord message type maps to one output lane:
+### replyMode
 
-| Discord message | Output lane | Notes |
-|-----------------|-------------|-------|
-| Text | `text` | Written as plain text. |
-| Image attachment | `image` | Downloaded and routed with MIME type (e.g., `image/png`). |
-| Audio attachment | `audio` | Downloaded with MIME type (e.g., `audio/mpeg`). |
-| Video attachment | `video` | Downloaded with MIME type (e.g., `video/mp4`). |
-| Document (PDF, Word, archive, etc.) | `tags` | Downloaded as tagged stream data; connect a Parser node downstream. |
+How the first answer is posted back: `reply` (a native reply to the message with no author ping — the default), `thread` (a single reused "Pipeline Response" thread on the message), or `channel` (a plain channel message). Answers longer than Discord's 2000-character limit are split on sentence and line boundaries across multiple messages, and all outbound content suppresses user, role, `@here`, and `@everyone` mentions.
 
-Entry URLs are built as `discord://<channel_id>/<message_id>` for text and `discord://<channel_id>/<attachment_id>` for files.
+### requireMention
 
-### Fields
+When `true`, the bot only processes messages in which it is directly @mentioned; `@everyone` and `@here` do not count. Useful in high-traffic channels. When `false` (default) it processes every message that passes the allowlists.
 
-| Field | Type | Default | Description |
-|---|---|---|---|
-| `botToken` | string | (required) | Discord bot token from the Developer Portal (keep secret). |
-| `guildIds` | array[string] | empty | List of server IDs to listen to. Empty = listen to all servers the bot is in. |
-| `channelIds` | array[string] | empty | List of channel IDs to listen to. Empty = listen to all channels. |
-| `ignoreBots` | boolean | true | If true, messages from other bots are ignored to prevent loops. |
-| `requireMention` | boolean | false | If true, the bot only responds when explicitly @mentioned. If false, responds to all messages. |
-| `replyMode` | string | `reply` | How answers post back: `channel` (normal message), `reply` (reply to message), or `thread` (in a thread). |
-| `showTyping` | boolean | true | If true, show a typing indicator while processing the pipeline. |
-| `maxAttachmentBytes` | number | 26214400 | Max attachment size to download (default 25 MB). Larger files are skipped. |
-| `sendResponses` | boolean | true | If true, send pipeline answers back to Discord. If false, only process messages. |
+### guildIds / channelIds
 
-The node tile in the UI shows the connection status (pending or connected).
+Server and channel allowlists. When non-empty, only messages from the listed guild/channel IDs are processed; leave both empty to listen everywhere the bot has access. IDs are matched as strings.
 
-The monitor info panel shows the last 6 characters of the configured bot token so you can verify which bot is connected without exposing the full secret.
+### maxAttachmentBytes
 
----
+Attachments larger than this (default 25 MB) are skipped without being downloaded; the reported size is checked before the file is fetched.
 
-## Connection
+### ignoreBots / sendResponses / showTyping
 
-The node uses the Discord Gateway to receive real-time message events. The gateway connection is maintained by **discord.py** with automatic heartbeating, resume on network hiccups, and exponential backoff on reconnect.
+`ignoreBots` (default `true`) drops messages from other bots to prevent loops; the bot never processes its own messages regardless. `sendResponses` (default `true`), when set to `false`, still ingests every message into the pipeline but posts nothing back. `showTyping` (default `true`) shows a typing indicator while the pipeline runs.
 
-### Prerequisites
-
-**Message Content Intent**: Discord requires the bot to have the **Message Content Intent** enabled in the Developer Portal. Without this intent, the `message.content` field arrives empty. Enable it in `Bot > Intents > Message Content Intent`.
-
-**Permissions**: The bot must have the following permissions in the channels it listens to:
-- **Read Messages / View Channels**
-- **Send Messages**
-- **Read Message History** (for reply context, if needed)
-
-Apply these via the OAuth2 URL generator or by setting them on the role/channel directly.
-
----
-
-## Replies
-
-After a message runs through the pipeline, the first answer in the pipeline response is sent back to Discord. Long answers are automatically chunked at Discord's 2000-character limit using intelligent sentence/line boundaries.
-
-### Reply modes
-
-- **`reply`**: The bot replies directly to the message, with optional mention. Uses Discord's native reply threading.
-- **`thread`**: The bot creates a thread on the original message and posts the answer inside.
-- **`channel`**: The bot posts as a normal channel message.
-
-If the pipeline produces no answers, nothing is sent.
-
-### Limits & behavior
-
-- **2000 character limit**: Discord's per-message limit. Long answers are split into multiple messages.
-- **Multiple attachments per message**: A message may carry up to 10 attachments. Every attachment is downloaded and routed into the pipeline; only the first non-empty pipeline answer (text first, then attachments in order) is sent back as the reply.
-- **Attachment download limit**: Configurable via `maxAttachmentBytes`. Files exceeding this limit are skipped with a debug log entry.
-- **One answer per message** (as sent): Only the first pipeline answer is returned to the channel; additional answers are discarded.
-- **Missing token**: If `botToken` is empty, the node reports `Discord Bot: missing bot token` in the monitor and stays idle.
-- **Bot-loop prevention**: If `ignoreBots` is true (default), messages from other bots are ignored.
-- **Typing indicator**: Shown during pipeline processing if `showTyping` is true. Improves UX for long-running pipelines.
-
----
-
-## Attachments
-
-### Download flow
-
-1. User sends a message with attachments.
-2. The node receives the `MESSAGE_CREATE` event from the Gateway.
-3. For each attachment, the node checks its size against `maxAttachmentBytes`.
-4. If under the limit, the node downloads the file from the Discord CDN via discord.py's `Attachment.read()`.
-5. The file is routed to the appropriate lane (image, audio, video, or tags based on MIME type).
-6. On failure (network, size, or permission), the attachment is skipped with a debug log and `monitorFailed()` call.
-
-### MIME type detection
-
-The node uses Discord's reported `content_type` first (with any parameters such as `; charset=utf-8` stripped), and falls back to guessing from the file extension (e.g., `.pdf` → `application/pdf`) when no content type is reported. Anything unrecognized defaults to `application/octet-stream`.
-
----
-
-## Mentions & gating
-
-### Mention requirement
-
-If `requireMention` is true, the bot only processes messages in which it is explicitly @mentioned. Useful for high-traffic channels where you want to avoid processing every message.
-
-### Guild & channel allowlists
-
-- **`guildIds`**: If non-empty, the node only processes messages in these servers.
-- **`channelIds`**: If non-empty, the node only processes messages in these channels.
-
-Leave both empty to listen to all servers and channels the bot has access to.
-
----
-
-## Limits & reliability
-
-- **Rate-limit handling**: discord.py handles Discord 429 (Too Many Requests) responses internally, honoring `Retry-After` with automatic backoff and retry. The node keeps a defensive extra retry for any `RateLimited` the library surfaces.
-- **No backfill on downtime**: The Gateway is push-based. Messages sent while the node is offline are not redelivered.
-- **No edit/delete handling**: Only `MESSAGE_CREATE` events are processed. Edits and deletes are ignored.
-- **Byte accounting**: Processed message and file sizes are reported to the monitor via `monitorCompleted()` / `monitorFailed()`.
-
----
+The node tile shows connection status (pending or connected), and the monitor panel shows only the last 6 characters of the token so you can confirm which bot is connected without exposing the secret.
 
 ## Authentication
 
 This node requires a Discord bot token. Create a bot in the [Discord Developer Portal](https://discord.com/developers/applications):
 
-1. Go to **Applications** and click **New Application**.
+1. Open **Applications** and click **New Application**.
 2. Name it and click **Create**.
-3. Go to the **Bot** section and click **Add Bot**.
-4. Under **TOKEN**, click **Copy** to get your bot token (keep it secret!).
+3. Go to **Bot** and click **Add Bot**.
+4. Under **TOKEN**, click **Copy** to get the bot token (keep it secret).
 5. Enable **Message Content Intent** under **Privileged Gateway Intents**.
-6. Add the bot to your servers via the OAuth2 URL generator (select `bot` scope + permissions above).
+6. Add the bot to your servers with the OAuth2 URL generator (`bot` scope plus the permissions listed under Notes).
 
-Paste the token into the `discord.botToken` field.
+Paste the token into the `discord.botToken` field. A missing token, an invalid token, or a missing Message Content Intent fails the source with an actionable status rather than idling silently.
 
----
+## Notes
 
-## Error handling
+### Prerequisites
 
-- **Missing token**: Node reports status and stays idle.
-- **Gateway connection failure**: discord.py automatically reconnects with exponential backoff.
-- **Attachment download failure**: Logged via `debug()`, entry is skipped, byte count reported via `monitorFailed()`.
-- **Rate limit**: 429 responses are handled by discord.py internally (honoring `Retry-After` with backoff/retry); a defensive extra retry covers any `RateLimited` the library surfaces.
-- **Pipeline processing error**: Logged via `debug()`, message processing continues for other messages.
+- **Message Content Intent** must be enabled in the Developer Portal (`Bot > Privileged Gateway Intents`); without it `message.content` arrives empty. The node fails fast if the intent is missing.
+- The bot needs **View Channels / Read Messages**, **Send Messages**, and **Read Message History** in the channels it serves. Apply them via the OAuth2 URL generator or per role/channel.
 
----
+### Message handling and replies
+
+- The first non-empty pipeline answer — text first, then attachments in order — is posted back; if the pipeline produces no answer, nothing is sent.
+- A message may carry up to 10 attachments. Every attachment is downloaded and routed into the pipeline (each counted independently); only the first non-empty answer is used for the reply.
+- Long answers are chunked at Discord's 2000-character limit on sentence and line boundaries.
+- Outbound content uses a restrictive allowed-mentions policy, so answer text cannot ping users, roles, `@here`, or `@everyone`.
+
+### Attachments and MIME detection
+
+- Each attachment's reported size is checked against `maxAttachmentBytes` before download; oversized files are skipped with a debug log.
+- Files are routed by MIME type: the node uses Discord's reported `content_type` first (lowercased, with any `; charset=...` parameters stripped) and falls back to the file extension (e.g. `.pdf` maps to `application/pdf`); anything unrecognized defaults to `application/octet-stream` and flows to the `tags` lane.
+
+### Reliability and limits
+
+- **Rate limits**: discord.py handles Discord 429 responses internally (honoring `Retry-After` with backoff); the node keeps a defensive extra retry for any `RateLimited` it surfaces.
+- **Lifecycle**: a terminal Gateway failure (invalid credentials, missing intent, or an unexpected disconnect) fails the source promptly; a successful start runs until the engine shuts the subprocess down.
+- **No backfill**: the Gateway is push-based, so messages sent while the node is offline are not redelivered.
+- **No edit/delete handling**: only `MESSAGE_CREATE` events are processed.
+- **Byte accounting**: processed message and file sizes are reported via `monitorCompleted()` / `monitorFailed()`.
 
 <!-- ROCKETRIDE:GENERATED:PARAMS START -->
 <!-- Generated by nodes:docs-generate. Do not edit by hand. -->
