@@ -21,8 +21,41 @@
 # SOFTWARE.
 # =============================================================================
 
-from ai.common.llm_base import LLMBase
+"""
+Endpoint classification shared by the runtime key guard and save-time validation.
+"""
+
+from urllib.parse import urlsplit
+
+NVIDIA_BASE_URL = 'https://integrate.api.nvidia.com/v1'
+
+# NVIDIA's hosted inference lives under api.nvidia.com: integrate.api.nvidia.com
+# for the OpenAI-compatible surface, ai.api.nvidia.com for some NIM routes.
+_NVIDIA_CLOUD_DOMAIN = 'api.nvidia.com'
 
 
-class IInstance(LLMBase):
-    """Per-instance handler: the shared LLMBase drives the questions lane and the ask invoke."""
+def is_nvidia_cloud_endpoint(serverbase: str | None) -> bool:
+    """Return True when ``serverbase`` points at NVIDIA's hosted API.
+
+    Decides by the parsed hostname, not a substring: a self-hosted NIM whose
+    URL merely mentions ``api.nvidia.com`` in a path or query is not cloud,
+    and ``api.nvidia.com.example`` is not NVIDIA. A bare host without a
+    scheme (``integrate.api.nvidia.com/v1``) still parses.
+
+    Args:
+        serverbase: OpenAI-compatible base URL from the node config
+
+    Returns:
+        bool
+    """
+    if not serverbase:
+        return False
+    value = serverbase.strip()
+    if '//' not in value:
+        value = '//' + value
+    try:
+        host = urlsplit(value).hostname or ''
+    except ValueError:
+        return False
+    host = host.lower().rstrip('.')
+    return host == _NVIDIA_CLOUD_DOMAIN or host.endswith('.' + _NVIDIA_CLOUD_DOMAIN)

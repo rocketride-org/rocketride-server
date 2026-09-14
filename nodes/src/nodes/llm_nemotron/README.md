@@ -37,7 +37,7 @@ To use a self-hosted NIM, vLLM, or SGLang deployment, select the **Custom Model*
 
 ## Authentication
 
-Cloud profiles require an NVIDIA API key (`nvapi-...`, from [build.nvidia.com](https://build.nvidia.com)) in `apikey`. The key requirement is enforced by base-URL match: if `serverbase` contains `api.nvidia.com` and no key is set, the node raises `NVIDIA API key is required for cloud profiles.` at startup. Key format is not validated beyond presence.
+Cloud profiles require an NVIDIA API key (`nvapi-...`, from [build.nvidia.com](https://build.nvidia.com)) in `apikey`. The key requirement is decided by the server base's hostname: if it is `api.nvidia.com` or a subdomain of it (for example `integrate.api.nvidia.com`) and no key is set, the node raises `NVIDIA API key is required for cloud profiles.` at startup. Key format is not validated beyond presence.
 
 ## Notes
 

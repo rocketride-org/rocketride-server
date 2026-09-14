@@ -15,6 +15,30 @@ import types
 from pathlib import Path
 
 
+def _load_node_module(monkeypatch, name: str):
+    """Load ``nodes/src/nodes/llm_nemotron/<name>.py`` as a submodule of a synthetic package.
+
+    The node modules import the shared ``endpoint`` helper relatively, so a
+    bare ``spec_from_file_location`` would fail with "no known parent
+    package". Registering a package whose ``__path__`` is the node directory
+    lets that relative import resolve; every module goes through
+    ``monkeypatch.setitem`` so nothing leaks into ``sys.modules``.
+    """
+    node_dir = Path(__file__).resolve().parents[1] / 'src' / 'nodes' / 'llm_nemotron'
+    pkg_name = 'llm_nemotron_under_test'
+    pkg = types.ModuleType(pkg_name)
+    pkg.__path__ = [str(node_dir)]
+    pkg.__package__ = pkg_name
+    monkeypatch.setitem(sys.modules, pkg_name, pkg)
+    for sub in ('endpoint', name):
+        spec = importlib.util.spec_from_file_location(f'{pkg_name}.{sub}', node_dir / f'{sub}.py')
+        module = importlib.util.module_from_spec(spec)
+        assert spec.loader is not None
+        monkeypatch.setitem(sys.modules, f'{pkg_name}.{sub}', module)
+        spec.loader.exec_module(module)
+    return module
+
+
 def _load_iglobal(monkeypatch, error_factory=None, config_overrides: dict | None = None):
     """Load IGlobal.py from source with stubbed dependencies.
 
@@ -121,11 +145,7 @@ def _load_iglobal(monkeypatch, error_factory=None, config_overrides: dict | None
     monkeypatch.setitem(sys.modules, 'openai', openai_module)
     monkeypatch.setitem(sys.modules, 'depends', depends_module)
 
-    module_path = Path(__file__).resolve().parents[1] / 'src' / 'nodes' / 'llm_nemotron' / 'IGlobal.py'
-    spec = importlib.util.spec_from_file_location('nemotron_iglobal_under_test', module_path)
-    module = importlib.util.module_from_spec(spec)
-    assert spec.loader is not None
-    spec.loader.exec_module(module)
+    module = _load_node_module(monkeypatch, 'IGlobal')
 
     instance = module.IGlobal()
     instance.glb = types.SimpleNamespace(logicalType='llm_nemotron', connConfig={})
@@ -170,6 +190,30 @@ def test_validate_config_skips_probe_for_self_hosted_serverbase(monkeypatch):
 
     assert requests == []
     assert warnings == []
+
+
+def test_validate_config_skips_probe_when_only_the_query_mentions_nvidia(monkeypatch):
+    """Cloud detection is by hostname: a self-hosted URL mentioning api.nvidia.com in its query is not probed."""
+    instance, requests, warnings = _load_iglobal(
+        monkeypatch, config_overrides={'serverbase': 'http://localhost:8000/v1?upstream=api.nvidia.com'}
+    )
+
+    instance.validateConfig()
+
+    assert requests == []
+    assert warnings == []
+
+
+def test_validate_config_probes_other_nvidia_api_subdomains(monkeypatch):
+    """ai.api.nvidia.com is NVIDIA's hosted API too, so it gets the 1-token probe."""
+    instance, requests, warnings = _load_iglobal(
+        monkeypatch, config_overrides={'serverbase': 'https://ai.api.nvidia.com/v1'}
+    )
+
+    instance.validateConfig()
+
+    assert warnings == []
+    assert len(requests) == 1
 
 
 def test_validate_config_skips_probe_when_key_is_absent(monkeypatch):

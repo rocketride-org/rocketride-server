@@ -28,9 +28,10 @@ from rocketlib import IGlobalBase, warning
 from ai.common.config import Config
 from ai.common.chat import ChatBase
 
+from .endpoint import NVIDIA_BASE_URL, is_nvidia_cloud_endpoint
+
 
 VALIDATION_PROMPT = 'Hi'
-NVIDIA_BASE_URL = 'https://integrate.api.nvidia.com/v1'
 
 
 class IGlobal(IGlobalBase):
@@ -63,8 +64,9 @@ class IGlobal(IGlobalBase):
             model = config.get('model')
             serverbase = config.get('serverbase') or NVIDIA_BASE_URL
 
-            # Only validate cloud NVIDIA endpoints; skip self-hosted/offline ones.
-            if 'api.nvidia.com' not in serverbase:
+            # Only validate cloud NVIDIA endpoints (by hostname); skip
+            # self-hosted/offline ones.
+            if not is_nvidia_cloud_endpoint(serverbase):
                 return
 
             # UI handles missing key prompts; skip the probe when the key is absent
@@ -111,6 +113,7 @@ class IGlobal(IGlobalBase):
             warning(str(e))
 
     def beginGlobal(self):
+        """Build the Chat driver for this pipeline run and park it in the endpoint bag."""
         from depends import depends  # type: ignore
 
         # Load the requirements
@@ -129,6 +132,7 @@ class IGlobal(IGlobalBase):
         self._chat = Chat(self.glb.logicalType, config, bag)
 
     def endGlobal(self):
+        """Release the Chat driver when the pipeline run ends."""
         self._chat = None
 
     def _format_error(self, status, etype, emsg, fallback: str) -> str:

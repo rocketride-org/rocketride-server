@@ -30,6 +30,8 @@ from ai.common.chat import ChatBase
 from ai.common.config import Config
 from langchain_openai import ChatOpenAI
 
+from .endpoint import NVIDIA_BASE_URL, is_nvidia_cloud_endpoint
+
 
 class Chat(ChatBase):
     """
@@ -59,15 +61,16 @@ class Chat(ChatBase):
 
         # Get the serverbase url; fall back to the NVIDIA API default so runtime
         # accepts the same "no explicit serverbase" config that validateConfig does
-        serverbase = config.get('serverbase') or 'https://integrate.api.nvidia.com/v1'
+        serverbase = config.get('serverbase') or NVIDIA_BASE_URL
 
-        # API key is only required when calling NVIDIA's cloud API. NVIDIA keys
-        # use the 'nvapi-' prefix but other formats exist, so only presence is
-        # enforced (the llm_baidu_qianfan lesson: don't over-validate key format).
+        # API key is only required when calling NVIDIA's cloud API (decided by
+        # the parsed hostname, see endpoint.py). NVIDIA keys use the 'nvapi-'
+        # prefix but other formats exist, so only presence is enforced (the
+        # llm_baidu_qianfan lesson: don't over-validate key format).
         apikey = config.get('apikey')
         if isinstance(apikey, str):
             apikey = apikey.strip()
-        if 'api.nvidia.com' in serverbase and not apikey:
+        if is_nvidia_cloud_endpoint(serverbase) and not apikey:
             raise ValueError('NVIDIA API key is required for cloud profiles.')
 
         # Self-hosted / custom OpenAI-compatible endpoints (NIM / vLLM / SGLang)
