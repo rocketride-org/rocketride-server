@@ -1,0 +1,122 @@
+name: Rocket Agent eval (live)
+
+# Manual, key-gated GA-gate workflow (Phase 5, Task 5.1c). Runs the eval
+# suite (apps/rocket-agent/eval) in `--mode live` against a REAL Anthropic
+# model + the live engine/mcp/qdrant stack. Never runs automatically — it is
+# workflow_dispatch only, and requires the RR_EVAL_ANTHROPIC_KEY org secret.
+# The keyless replay-mode regression gate that DOES run on every PR lives in
+# .github/workflows/ci.yml's `rocket-agent-eval` job.
+#
+# GA gate: apps/rocket-agent/eval/run.ts sets `report.gate = passRate >= 0.8`
+# across all 18 briefs and already sets `process.exitCode = 1` when
+# `report.gate === false` for `--mode live`. This workflow does not swallow
+# that exit code — a failing gate fails the job.
+#
+# Secret mapping: apps/rocket-agent/eval/src/runner.ts reads the live-mode key
+# from the `AGENT_ANTHROPIC_KEY` env var (not a literally-named
+# `RR_EVAL_ANTHROPIC_KEY` var — that name is the GH secret only). This
+# workflow maps `secrets.RR_EVAL_ANTHROPIC_KEY` onto `AGENT_ANTHROPIC_KEY` for
+# the eval step below. The secret is referenced only via `${{ secrets.* }}`
+# and is never echoed, printed, or written to a log line.
+#
+# KNOWN GAP (found while wiring this workflow — see task-5.1c-report.md):
+# as shipped in Task 5.1b, eval/src/runner.ts's `runBrief()` always answers
+# MCP tool calls from the in-process stub engine (eval/src/stub-engine.ts)
+# unless it's given an explicit `liveMcpUpstream`, and eval/run.ts's CLI never
+# threads one through from a flag or env var — so `--mode live` today
+# validates every generated pipeline against the stub engine, not against the
+# engine/mcp/qdrant containers this workflow brings up. The containers are
+# still started here per this task's brief (and so this workflow is ready the
+# moment that wiring lands); until then they are reachable but not called.
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: rocket-agent-eval-live
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  eval-live:
+    name: Rocket Agent eval (live, GA gate)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - name: Install pinned opencode-ai (matches apps/rocket-agent/Dockerfile ARG OPENCODE_VERSION)
+        run: npm install -g opencode-ai@1.18.16
+
+      - name: Build rocketride (client-typescript) — rocket-agent's `rocketride` dep has no dist committed
+        # See the same-named step in ci.yml's rocket-agent-eval job for the
+        # full explanation: rocket-agent's `rocketride` workspace dep has no
+        # committed dist and no build script of its own.
+        run: node scripts/build.js client-typescript:build
+
+      - name: Start engine + MCP + Qdrant
+        run: |
+          docker compose \
+            -f docker/docker-compose.yml \
+            -f apps/rocket-agent/docker-compose.eval.yml \
+            up -d --build engine mcp qdrant
+
+      - name: Wait for engine + MCP + Qdrant
+        run: |
+          set -eu
+          for target in "http://localhost:5565/ping" "http://localhost:8080/health" "http://localhost:6333/"; do
+            echo "waiting for ${target}"
+            ok=""
+            for i in $(seq 1 60); do
+              if curl -sf "${target}" > /dev/null; then
+                ok=1
+                break
+              fi
+              sleep 5
+            done
+            if [ -z "${ok}" ]; then
+              echo "::error::${target} did not become ready in time"
+              docker compose -f docker/docker-compose.yml -f apps/rocket-agent/docker-compose.eval.yml logs --no-color
+              exit 1
+            fi
+            echo "${target} is up"
+          done
+
+      - name: rocket-agent unit tests
+        run: pnpm --filter rocket-agent test
+
+      - name: Eval live — real model, GA gate (passRate >= 0.8)
+        env:
+          # Never echoed — referenced only via ${{ secrets.* }}. See the
+          # "Secret mapping" note at the top of this file for why the GH
+          # secret name and the env var name differ.
+          AGENT_ANTHROPIC_KEY: ${{ secrets.RR_EVAL_ANTHROPIC_KEY }}
+          RR_MCP_UPSTREAM: http://localhost:8080/mcp
+          ROCKETRIDE_URI: http://localhost:5565
+        run: pnpm --filter rocket-agent eval:live
+
+      - name: Upload eval report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: rocket-agent-eval-live-report
+          path: apps/rocket-agent/eval-report.json
+          if-no-files-found: warn
+
+      - name: Dump compose logs on failure
+        if: failure()
+        run: docker compose -f docker/docker-compose.yml -f apps/rocket-agent/docker-compose.eval.yml logs --no-color
+
+      - name: Tear down
+        if: always()
+        run: docker compose -f docker/docker-compose.yml -f apps/rocket-agent/docker-compose.eval.yml down -v

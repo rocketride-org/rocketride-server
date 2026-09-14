@@ -1,0 +1,11 @@
+{
+  "briefId": "webhook-transform",
+  "transcriptKey": "a05d3d56d3fdbb34b152",
+  "debugSummary": "turn 3: [{\"type\":\"tool_result\",\"tool_use_id\":\"toolu_eval_002\",\"content\":\"{\\\"ok\\\":true,\\\"",
+  "status": 200,
+  "headers": {
+    "content-type": "application/json"
+  },
+  "stream": false,
+  "bodyText": "{\"id\":\"msg_eval_003\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"claude-sonnet-4-5-eval\",\"content\":[{\"type\":\"text\",\"text\":\"Done — the pipeline validates and is ready to run.\"}],\"stop_reason\":\"end_turn\",\"stop_sequence\":null,\"usage\":{\"input_tokens\":100,\"output_tokens\":50}}"
+}

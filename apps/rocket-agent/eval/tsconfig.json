@@ -1,0 +1,9 @@
+{
+	"extends": "../tsconfig.json",
+	"compilerOptions": {
+		"outDir": "../dist",
+		"rootDir": ".."
+	},
+	"include": ["./run.ts", "./src/**/*", "../src/config.ts", "../src/opencode.ts", "../src/session.ts", "../src/sessionIndex.ts", "../src/types.ts", "../src/workspace.ts"],
+	"exclude": ["../node_modules", "../dist", "../tests"]
+}

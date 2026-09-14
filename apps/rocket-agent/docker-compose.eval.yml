@@ -1,0 +1,49 @@
+# ---------------------------------------------------------------------------
+# docker-compose.eval.yml — CI-only overlay for the rocket-agent live eval
+# workflow (Phase 5, Task 5.1c: .github/workflows/rocket-agent-eval-live.yml).
+#
+# Not used by `docker-compose.yml` (Phase 3 Task 3.1's standalone rocket-agent
+# service) or by local dev. Meant to be merged on top of the root engine stack
+# via multiple `-f` flags, run from the repo root:
+#
+#   docker compose -f docker/docker-compose.yml \
+#                   -f apps/rocket-agent/docker-compose.eval.yml \
+#                   up -d --build engine mcp qdrant
+#
+# Adds the two pieces the eval suite needs that ../../docker/docker-compose.yml
+# doesn't ship:
+#
+#   mcp     — the RocketRide MCP SSE server (docker/Dockerfile.mcp). This is
+#             RR_MCP_UPSTREAM's target. The Dockerfile already existed but was
+#             not wired into any compose service before this task.
+#   qdrant  — several RAG eval briefs (apps/rocket-agent/eval/src/briefs.ts)
+#             expect a `qdrant` pipeline component; the base engine stack only
+#             ships pgvector/Milvus/Chroma, not Qdrant.
+#
+# `rocketride-net` is declared by docker/docker-compose.yml — referenced here,
+# not redeclared, since compose merges top-level `networks:` across -f files.
+# ---------------------------------------------------------------------------
+
+services:
+  mcp:
+    build:
+      context: ../..
+      dockerfile: docker/Dockerfile.mcp
+    ports:
+      - '${MCP_PORT:-8080}:8080'
+    environment:
+      ROCKETRIDE_URI: ws://engine:5565
+    depends_on:
+      engine:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - rocketride-net
+
+  qdrant:
+    image: qdrant/qdrant:v1.12.4
+    ports:
+      - '${QDRANT_PORT:-6333}:6333'
+    restart: unless-stopped
+    networks:
+      - rocketride-net

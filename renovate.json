@@ -11,6 +11,11 @@
   "rangeStrategy": "bump",
   "packageRules": [
     {
+      "matchPackageNames": ["opencode-ai", "@opencode-ai/sdk"],
+      "enabled": false,
+      "description": "Pinned exactly (no ^) and bumped deliberately via apps/rocket-agent/docs/opencode-version-bumps.md — never auto-bump."
+    },
+    {
       "matchUpdateTypes": ["major"],
       "groupName": null,
       "automerge": false

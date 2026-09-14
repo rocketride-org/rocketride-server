@@ -1,0 +1,438 @@
+[
+  {
+    "name": "accessibility_describe",
+    "classType": [
+      "image"
+    ],
+    "description": "An accessibility-focused image analysis node that generates scene descriptions \noptimized for blind and visually impaired users.",
+    "lanes": {
+      "image": [
+        "text"
+      ]
+    }
+  },
+  {
+    "name": "agent_crewai",
+    "classType": [
+      "agent",
+      "tool"
+    ],
+    "description": "Standalone single-agent CrewAI node.",
+    "lanes": {
+      "questions": [
+        "answers"
+      ]
+    },
+    "invoke": {
+      "llm": {
+        "description": "LLM used by the agent",
+        "min": 1
+      },
+      "tool": {
+        "description": "Tools available to the agent (via control-plane invoke)",
+        "min": 0
+      }
+    }
+  },
+  {
+    "name": "agent_langchain",
+    "classType": [
+      "agent",
+      "tool"
+    ],
+    "description": "Single-agent execution using LangChain.",
+    "lanes": {
+      "questions": [
+        "answers"
+      ]
+    },
+    "invoke": {
+      "llm": {
+        "description": "LLM used by the agent",
+        "min": 1
+      },
+      "tool": {
+        "description": "Tools available to the agent (via control-plane invoke)",
+        "min": 0
+      }
+    }
+  },
+  {
+    "name": "agent_rocketride",
+    "classType": [
+      "agent",
+      "tool"
+    ],
+    "description": "Wave-planning agent built natively on the RocketRide architecture.",
+    "lanes": {
+      "questions": [
+        "answers"
+      ]
+    },
+    "invoke": {
+      "llm": {
+        "description": "LLM used by the agent for planning and synthesis",
+        "max": 1,
+        "min": 1
+      },
+      "memory": {
+        "description": "Keyed memory for the agent (via control-plane invoke)",
+        "max": 1,
+        "min": 1
+      },
+      "tool": {
+        "description": "Tools available to the agent (via control-plane invoke)",
+        "min": 0
+      }
+    }
+  },
+  {
+    "name": "anonymize_text",
+    "classType": [
+      "text"
+    ],
+    "description": "A filter component that \nidentifies and masks sensitive information in text data.",
+    "lanes": {
+      "text": [
+        "text"
+      ]
+    }
+  },
+  {
+    "name": "audio_transcribe",
+    "classType": [
+      "audio"
+    ],
+    "description": "The Audio transcribe component recieves audio or video and transcribes into text.",
+    "lanes": {
+      "audio": [
+        "text"
+      ],
+      "video": [
+        "text"
+      ]
+    }
+  },
+  {
+    "name": "chat",
+    "classType": [
+      "source"
+    ],
+    "description": "A user interface component that provides a web-based chat experience.",
+    "lanes": {
+      "_source": [
+        "questions"
+      ]
+    }
+  },
+  {
+    "name": "chroma",
+    "classType": [
+      "store",
+      "tool"
+    ],
+    "description": "A vector database component for Chroma, enabling efficient storage and \nretrieval of vector embeddings.",
+    "lanes": {
+      "documents": [],
+      "questions": [
+        "documents",
+        "answers",
+        "questions"
+      ]
+    }
+  },
+  {
+    "name": "db_postgres",
+    "classType": [
+      "database",
+      "tool"
+    ],
+    "description": "A processing component that takes structured table data and inserts it \ninto a PostgreSQL database.",
+    "lanes": {
+      "answers": [],
+      "questions": [
+        "table",
+        "text",
+        "answers"
+      ]
+    },
+    "invoke": {
+      "llm": {
+        "description": "LLM to use to craft SQL queries from question",
+        "min": 1
+      }
+    }
+  },
+  {
+    "name": "dropper",
+    "classType": [
+      "source"
+    ],
+    "description": "A user interface component that provides a web-based dropper experience.",
+    "lanes": {
+      "_source": [
+        "tags"
+      ]
+    }
+  },
+  {
+    "name": "embedding_openai",
+    "classType": [
+      "embedding"
+    ],
+    "description": "A component that transforms text into numerical vector representations using advanced embedding \nmodels.",
+    "lanes": {
+      "documents": [
+        "documents"
+      ],
+      "questions": [
+        "questions"
+      ]
+    }
+  },
+  {
+    "name": "embedding_transformer",
+    "classType": [
+      "embedding"
+    ],
+    "description": "A component that transforms text into numerical vector representations using advanced embedding \nmodels.",
+    "lanes": {
+      "documents": [
+        "documents"
+      ],
+      "questions": [
+        "questions"
+      ]
+    }
+  },
+  {
+    "name": "extract_data",
+    "classType": [
+      "text"
+    ],
+    "description": "A component that processes unstructured or semi-structured text and extracts \nstructured data in a tabular format.",
+    "lanes": {
+      "documents": [
+        "answers",
+        "documents"
+      ],
+      "table": [
+        "answers",
+        "documents"
+      ],
+      "text": [
+        "answers",
+        "documents"
+      ]
+    },
+    "invoke": {
+      "llm": {
+        "description": "LLM to use for data extraction",
+        "min": 1
+      }
+    }
+  },
+  {
+    "name": "frame_grabber",
+    "classType": [
+      "video"
+    ],
+    "description": "A component that extracts frames from video files and outputs them as image data.",
+    "lanes": {
+      "video": [
+        "image",
+        "table",
+        "documents"
+      ]
+    }
+  },
+  {
+    "name": "llm_anthropic",
+    "classType": [
+      "llm"
+    ],
+    "description": "A component that integrates with Anthropic's Claude models for natural \nlanguage understanding and generation.",
+    "lanes": {
+      "questions": [
+        "answers"
+      ]
+    }
+  },
+  {
+    "name": "llm_openai",
+    "classType": [
+      "llm"
+    ],
+    "description": "A component that connects to OpenAI's latest GPT models for advanced natural language \nprocessing.",
+    "lanes": {
+      "questions": [
+        "answers"
+      ]
+    }
+  },
+  {
+    "name": "memory_internal",
+    "classType": [
+      "memory"
+    ],
+    "description": "Run-scoped keyed memory store exposed as agent tools.",
+    "lanes": {}
+  },
+  {
+    "name": "ocr",
+    "classType": [
+      "image"
+    ],
+    "description": "A component that extracts machine-readable text from images and scanned documents \nusing optical character recognition.",
+    "lanes": {
+      "documents": [
+        "text"
+      ],
+      "image": [
+        "text",
+        "table"
+      ]
+    }
+  },
+  {
+    "name": "parse",
+    "classType": [
+      "data"
+    ],
+    "description": "A document parsing component that extracts rich content from a wide variety \nof document types.",
+    "lanes": {
+      "tags": [
+        "text",
+        "table",
+        "image",
+        "video",
+        "audio"
+      ]
+    }
+  },
+  {
+    "name": "preprocessor_langchain",
+    "classType": [
+      "preprocessor"
+    ],
+    "description": "A preprocessing component that segments large bodies of text into intelligently sized \nchunks for downstream processing.",
+    "lanes": {
+      "table": [
+        "documents"
+      ],
+      "text": [
+        "documents"
+      ]
+    }
+  },
+  {
+    "name": "prompt",
+    "classType": [
+      "text"
+    ],
+    "description": "A transformation component that takes multiple inputs and merges them \ninto a single question with a configurable prompt.",
+    "lanes": {
+      "documents": [],
+      "questions": [
+        "questions"
+      ],
+      "table": [],
+      "text": []
+    }
+  },
+  {
+    "name": "qdrant",
+    "classType": [
+      "store",
+      "tool"
+    ],
+    "description": "A vector database component for Qdrant, enabling efficient storage and \nretrieval of vector embeddings.",
+    "lanes": {
+      "documents": [],
+      "questions": [
+        "documents",
+        "answers",
+        "questions"
+      ]
+    }
+  },
+  {
+    "name": "response_answers",
+    "classType": [
+      "infrastructure"
+    ],
+    "description": "A component that returns processed answers back to the requesting client.",
+    "lanes": {
+      "answers": []
+    }
+  },
+  {
+    "name": "response_text",
+    "classType": [
+      "infrastructure"
+    ],
+    "description": "A component that returns processed text back to the requesting client.",
+    "lanes": {
+      "text": []
+    }
+  },
+  {
+    "name": "summarization",
+    "classType": [
+      "text"
+    ],
+    "description": "A processing component that analyzes document content to extract concise \nsummaries, key points, and named entities.",
+    "lanes": {
+      "text": [
+        "text",
+        "documents"
+      ]
+    },
+    "invoke": {
+      "llm": {
+        "description": "LLM to use to summarize the document",
+        "min": 1
+      }
+    }
+  },
+  {
+    "name": "tool_chartjs",
+    "classType": [
+      "tool"
+    ],
+    "description": "Generates Chart.",
+    "lanes": {},
+    "invoke": {
+      "llm": {
+        "description": "LLM used to generate Chart.js configurations from data",
+        "min": 1
+      }
+    }
+  },
+  {
+    "name": "tool_http_request",
+    "classType": [
+      "tool"
+    ],
+    "description": "Makes HTTP requests to any API endpoint, like curl for agents.",
+    "lanes": {}
+  },
+  {
+    "name": "webhook",
+    "classType": [
+      "source"
+    ],
+    "description": "A source component that listens for incoming HTTP requests and accepts \nuploaded documents or data from external systems or processes.",
+    "lanes": {
+      "_source": [
+        "tags",
+        "text",
+        "json",
+        "audio",
+        "video",
+        "image",
+        "questions"
+      ]
+    }
+  }
+]

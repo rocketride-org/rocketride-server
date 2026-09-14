@@ -56,7 +56,8 @@ const SPINE = [
 		items: [
 			{ id: 'protocols/websocket', label: 'WebSocket', mount: true },
 			{ id: 'protocols/websocket/observability', label: 'Observability' },
-			{ id: 'protocols/mcp', label: 'MCP', mount: true }
+			{ id: 'protocols/mcp', label: 'MCP', mount: true },
+			{ id: 'protocols/mcp/cloud', label: 'MCP — Cloud & External Agents' }
 		]
 	},
 	{ label: 'Nodes', autogen: NODES_DIR },
@@ -88,6 +89,7 @@ const SPINE = [
 	{ id: 'pipeline-reference', label: 'Pipeline JSON Reference', mount: true },
 	{ id: 'cli', label: 'CLI Reference' },
 	{ id: 'cloud', label: 'Cloud' },
+	{ id: 'canvas-agent', label: 'Canvas Agent', mount: true },
 	{ id: 'self-hosting', label: 'Self-hosting' },
 	{ id: 'troubleshooting', label: 'Troubleshooting' },
 	{ id: 'glossary', label: 'Glossary' }

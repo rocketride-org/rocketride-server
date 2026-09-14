@@ -1,0 +1,34 @@
+This file is a placeholder (Phase 5, Task 5.1c). It is NOT consumed by any
+code — it exists only to mark that the real regression baseline has not been
+recorded yet, and to point at where it goes when it is.
+
+Populated by Step 2 of the external-gated runbook (org-admin + team Anthropic
+key required — see task-5.1c-report.md for the full command sequence):
+
+  1. An org admin adds the RR_EVAL_ANTHROPIC_KEY secret and runs
+     .github/workflows/rocket-agent-eval-live.yml once (workflow_dispatch),
+     OR a maintainer runs the equivalent locally with a real key.
+  2. `pnpm --filter rocket-agent eval:record` is run locally with a real key
+     to populate apps/rocket-agent/eval/recordings/<brief-id>/*.json for all
+     18 briefs (see eval/recordings/README.md), which are committed so replay
+     mode (the keyless CI gate) exercises the full suite instead of only
+     webhook-transform's 3 pre-existing fixtures.
+  3. The first `eval-report.json` produced by a live run is committed as the
+     replay regression baseline.
+
+IMPORTANT — the actual path apps/rocket-agent/eval/run.ts reads at runtime is
+`eval/replay-baseline.json` (see BASELINE_PATH in run.ts), NOT
+`eval/baseline-report.json` — this placeholder's name matches the task brief's
+wording, but whoever executes Step 2 above should commit the file as
+`apps/rocket-agent/eval/replay-baseline.json` and delete this .PENDING file,
+not create a same-named-but-wrong `baseline-report.json`.
+
+Also note: BASELINE_PATH is resolved via `path.join(__dirname, ...)` against
+the COMPILED output (dist/eval/run.js -> dist/eval/), not the source eval/
+directory. As of Task 5.1b nothing copies a committed eval/replay-baseline.json
+from source into dist/eval/ at build time (scripts/build-assets.mjs only
+copies docs assets). Whoever executes Step 2 should confirm the committed
+baseline actually lands in dist/eval/ after `npm run eval:build` — either by
+adding it to eval/tsconfig.json's `include`/an explicit copy step, or by
+resolving BASELINE_PATH from the source tree instead. This is a pre-existing
+gap in the Task 5.1b runner, not something Task 5.1c changed.

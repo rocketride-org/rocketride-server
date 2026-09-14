@@ -1,0 +1,11 @@
+{
+  "briefId": "webhook-transform",
+  "transcriptKey": "e54805202c66fd3fe62a",
+  "debugSummary": "turn 1: [{\"type\":\"text\",\"text\":\"Build a pipeline that accepts text via webhook, transfor",
+  "status": 200,
+  "headers": {
+    "content-type": "application/json"
+  },
+  "stream": false,
+  "bodyText": "{\"id\":\"msg_eval_001\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"claude-sonnet-4-5-eval\",\"content\":[{\"type\":\"text\",\"text\":\"I'll build a webhook -> transform -> response_text pipeline.\"},{\"type\":\"tool_use\",\"id\":\"toolu_eval_001\",\"name\":\"write\",\"input\":{\"filePath\":\"webhook_transform.pipe\",\"content\":\"{\\n  \\\"components\\\": [\\n    {\\n      \\\"id\\\": \\\"webhook_1\\\",\\n      \\\"provider\\\": \\\"webhook\\\",\\n      \\\"config\\\": {\\n        \\\"hideForm\\\": true,\\n        \\\"mode\\\": \\\"Source\\\",\\n        \\\"parameters\\\": {},\\n        \\\"type\\\": \\\"webhook\\\"\\n      },\\n      \\\"ui\\\": {\\n        \\\"position\\\": {\\n          \\\"x\\\": 0,\\n          \\\"y\\\": 100\\n        }\\n      }\\n    },\\n    {\\n      \\\"id\\\": \\\"transform_1\\\",\\n      \\\"provider\\\": \\\"transform\\\",\\n      \\\"config\\\": {},\\n      \\\"input\\\": [\\n        {\\n          \\\"lane\\\": \\\"tags\\\",\\n          \\\"from\\\": \\\"webhook_1\\\"\\n        }\\n      ],\\n      \\\"ui\\\": {\\n        \\\"position\\\": {\\n          \\\"x\\\": 300,\\n          \\\"y\\\": 100\\n        }\\n      }\\n    },\\n    {\\n      \\\"id\\\": \\\"response_text_1\\\",\\n      \\\"provider\\\": \\\"response_text\\\",\\n      \\\"config\\\": {},\\n      \\\"input\\\": [\\n        {\\n          \\\"lane\\\": \\\"text\\\",\\n          \\\"from\\\": \\\"transform_1\\\"\\n        }\\n      ],\\n      \\\"ui\\\": {\\n        \\\"position\\\": {\\n          \\\"x\\\": 600,\\n          \\\"y\\\": 100\\n        }\\n      }\\n    }\\n  ],\\n  \\\"project_id\\\": \\\"11111111-1111-4111-8111-111111111111\\\",\\n  \\\"viewport\\\": {\\n    \\\"x\\\": 0,\\n    \\\"y\\\": 0,\\n    \\\"zoom\\\": 1\\n  },\\n  \\\"version\\\": 1,\\n  \\\"source\\\": \\\"webhook_1\\\"\\n}\"}}],\"stop_reason\":\"tool_use\",\"stop_sequence\":null,\"usage\":{\"input_tokens\":100,\"output_tokens\":50}}"
+}

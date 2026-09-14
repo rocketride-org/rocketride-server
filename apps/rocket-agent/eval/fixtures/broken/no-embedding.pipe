@@ -1,0 +1,39 @@
+{
+	"components": [
+		{
+			"id": "webhook_1",
+			"provider": "webhook",
+			"config": { "hideForm": true, "mode": "Source", "parameters": {}, "type": "webhook" },
+			"ui": { "position": { "x": 20, "y": 200 }, "measured": { "width": 150, "height": 66 }, "nodeType": "default", "formDataValid": true }
+		},
+		{
+			"id": "parse_1",
+			"provider": "parse",
+			"config": {},
+			"input": [{ "lane": "tags", "from": "webhook_1" }],
+			"ui": { "position": { "x": 240, "y": 200 }, "measured": { "width": 150, "height": 66 }, "nodeType": "default", "formDataValid": true }
+		},
+		{
+			"id": "preprocessor_langchain_1",
+			"provider": "preprocessor_langchain",
+			"config": { "parameters": {} },
+			"input": [{ "lane": "text", "from": "parse_1" }],
+			"ui": { "position": { "x": 460, "y": 200 }, "measured": { "width": 150, "height": 66 }, "nodeType": "default", "formDataValid": true }
+		},
+		{
+			"id": "qdrant_1",
+			"provider": "qdrant",
+			"config": {
+				"profile": "local",
+				"local": { "host": "localhost", "port": 6333, "collection": "kb" },
+				"parameters": {}
+			},
+			"input": [{ "lane": "documents", "from": "preprocessor_langchain_1" }],
+			"ui": { "position": { "x": 680, "y": 200 }, "measured": { "width": 150, "height": 135 }, "nodeType": "default", "formDataValid": true }
+		}
+	],
+	"project_id": "11111111-1111-4111-8111-111111111111",
+	"viewport": { "x": 0, "y": 0, "zoom": 1 },
+	"version": 1,
+	"source": "webhook_1"
+}
